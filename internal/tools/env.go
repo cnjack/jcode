@@ -37,6 +37,13 @@ func (e *Env) SetSSH(executor *SSHExecutor, remotePwd string) {
 	e.platform = executor.Platform()
 }
 
+// ResetToLocal restores this Env to use the local executor.
+func (e *Env) ResetToLocal(pwd, platform string) {
+	e.Exec = NewLocalExecutor(platform)
+	e.pwd = pwd
+	e.platform = platform
+}
+
 // Pwd returns the current working directory.
 func (e *Env) Pwd() string { return e.pwd }
 

@@ -48,10 +48,19 @@ var DefaultProviders = []ProviderProfile{
 }
 
 type providerItem struct {
-	profile ProviderProfile
+	profile    ProviderProfile
+	configured bool // this exact provider has an API key in config
 }
 func (i providerItem) Title() string       { return i.profile.Name }
-func (i providerItem) Description() string { return "" }
+func (i providerItem) Description() string {
+	if i.configured {
+		return "✓ Configured · " + i.profile.BaseURL
+	}
+	if i.profile.BaseURL != "" {
+		return i.profile.BaseURL
+	}
+	return i.profile.ID
+}
 func (i providerItem) FilterValue() string { return i.profile.Name + " " + i.profile.ID }
 
 type modelListItem struct {
@@ -96,9 +105,23 @@ func NewSetupModel() SetupModel {
 		state: StateProvider,
 	}
 
+	// Build a set of configured providers
+	configuredProviders := make(map[string]bool)
+	if cfg, err := config.LoadConfig(); err == nil && cfg != nil {
+		for _, dp := range DefaultProviders {
+			if pCfg, ok := cfg.Models[dp.ID]; ok && pCfg.APIKey != "" {
+				configuredProviders[dp.ID] = true
+			}
+		}
+	}
+
 	pItems := make([]list.Item, len(DefaultProviders))
 	for i, p := range DefaultProviders {
-		pItems[i] = providerItem{profile: p}
+		item := providerItem{profile: p}
+		if configuredProviders[p.ID] {
+			item.configured = true
+		}
+		pItems[i] = item
 	}
 	del := list.NewDefaultDelegate()
 	del.SetSpacing(0)
@@ -178,7 +201,7 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.customModelIn.Focus()
 					} else {
 						m.selectedModel = name
-						m.advanceAfterModel()
+						return m.advanceAfterModel()
 					}
 					return m, nil
 				}
@@ -195,7 +218,7 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				val := strings.TrimSpace(m.customModelIn.Value())
 				if val != "" {
 					m.selectedModel = val
-					m.advanceAfterModel()
+					return m.advanceAfterModel()
 				}
 			} else if msg.String() == "esc" {
 				m.state = StateModel
@@ -213,7 +236,7 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if val != "" {
 					m.finalURL = val
-					m.advanceAfterURL()
+					return m.advanceAfterURL()
 				}
 			} else if msg.String() == "esc" {
 				if m.selectedModel == "Custom..." {
@@ -263,28 +286,46 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *SetupModel) advanceAfterModel() {
+func (m SetupModel) advanceAfterModel() (tea.Model, tea.Cmd) {
 	if m.selectedProvider.NeedURL || m.selectedProvider.BaseURL == "" {
 		m.state = StateURL
 		if m.selectedProvider.BaseURL != "" {
 			m.urlIn.Placeholder = m.selectedProvider.BaseURL
 		}
 		m.urlIn.Focus()
+		return m, nil
 	} else {
 		m.finalURL = m.selectedProvider.BaseURL
-		m.advanceAfterURL()
+		return m.advanceAfterURL()
 	}
 }
 
-func (m *SetupModel) advanceAfterURL() {
+func (m SetupModel) advanceAfterURL() (tea.Model, tea.Cmd) {
 	if m.selectedProvider.NeedKey {
+		// Check if this exact provider already has an API key in config
+		if existingKey := m.findProviderAPIKey(); existingKey != "" {
+			// Auto-use the existing key, skip the input step
+			m.finalKey = existingKey
+			return m.submit()
+		}
 		m.state = StateAPIKey
 		m.keyIn.Focus()
+		return m, nil
 	} else {
 		// skip key
 		m.finalKey = ""
-		m.submit()
+		return m.submit()
 	}
+}
+
+// findProviderAPIKey checks existing config for an API key for the selected provider.
+func (m SetupModel) findProviderAPIKey() string {
+	if cfg, err := config.LoadConfig(); err == nil && cfg != nil {
+		if pCfg, ok := cfg.Models[m.selectedProvider.ID]; ok && pCfg.APIKey != "" {
+			return pCfg.APIKey
+		}
+	}
+	return ""
 }
 
 func (m SetupModel) submit() (tea.Model, tea.Cmd) {

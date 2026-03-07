@@ -18,12 +18,20 @@ type ProviderConfig struct {
 	Models  []string `json:"models"`
 }
 
+// SSHAlias represents a saved SSH connection alias
+type SSHAlias struct {
+	Name string `json:"name"`
+	Addr string `json:"addr"` // user@host
+	Path string `json:"path,omitempty"` // remote working directory
+}
+
 // Config represents the application configuration
 type Config struct {
 	Models        map[string]*ProviderConfig `json:"models"`
 	Provider      string                     `json:"provider"`
 	Model         string                     `json:"model"`
 	MaxIterations int                        `json:"max_iterations,omitempty"`
+	SSHAliases    []SSHAlias                 `json:"ssh_aliases,omitempty"`
 }
 
 // configFilePath returns the full path to the config file

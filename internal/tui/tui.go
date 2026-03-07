@@ -44,6 +44,14 @@ func GetConfigChannel() <-chan *config.Config {
 	return configCh
 }
 
+// addModelCh is used to notify main goroutine to launch add-model setup wizard.
+var addModelCh = make(chan struct{}, 1)
+
+// GetAddModelChannel returns the channel that receives add-model requests.
+func GetAddModelChannel() <-chan struct{} {
+	return addModelCh
+}
+
 // --- Messages ---
 
 type AgentTextMsg struct{ Text string }
@@ -55,6 +63,9 @@ type ToolResultMsg struct {
 type AgentDoneMsg struct{ Err error }
 type PromptSubmitMsg struct{ Prompt string }
 type UserPromptMsg struct{ Prompt string }
+
+// AddModelMsg signals that the user wants to add a new model via setup wizard
+type AddModelMsg struct{}
 
 // SSHConnectMsg is sent when user initially requests connection
 type SSHConnectMsg struct {
@@ -79,6 +90,16 @@ type SSHStatusMsg struct {
 	Success bool
 	Label   string // e.g. "root@myserver:22"
 	Err     error
+}
+
+// SSHCancelMsg is sent when user cancels the SSH dir picker via Esc.
+type SSHCancelMsg struct{}
+
+// ConfigUpdatedMsg is sent when the provider/model configuration is updated via setup wizard
+type ConfigUpdatedMsg struct {
+	Provider string
+	Model    string
+	Message  string
 }
 
 // --- Model ---
@@ -120,9 +141,26 @@ type Model struct {
 	modelPicker  list.Model
 	pickingModel bool
 
+	// Setting menu
+	settingMenu    list.Model
+	showingSetting bool
+
+	// SSH alias picker
+	sshAliasPicker  list.Model
+	pickingSSHAlias bool
+
+	// SSH alias save prompt: after a /ssh user@host connection, ask to save
+	sshSavePrompt bool   // true when asking user to save alias
+	sshSaveAddr   string // the addr just connected
+	sshSavePath   string // the path just connected
+
 	// History
 	history      []string
 	historyIndex int
+
+	// Active configuration state
+	activeProvider string
+	activeModel    string
 }
 
 // dirItem implements list.Item
@@ -148,6 +186,30 @@ type modelItem struct {
 func (i modelItem) Title() string       { return i.title }
 func (i modelItem) Description() string { return i.desc }
 func (i modelItem) FilterValue() string { return i.title }
+
+// settingItem is used for the /setting menu
+type settingItem struct {
+	title string
+	desc  string
+	key   string // action key
+}
+
+func (i settingItem) Title() string       { return i.title }
+func (i settingItem) Description() string { return i.desc }
+func (i settingItem) FilterValue() string { return i.title }
+
+// sshAliasItem for the SSH alias picker
+type sshAliasItem struct {
+	title string
+	desc  string
+	addr  string
+	path  string
+	isNew bool // "Connect new SSH" option
+}
+
+func (i sshAliasItem) Title() string       { return i.title }
+func (i sshAliasItem) Description() string { return i.desc }
+func (i sshAliasItem) FilterValue() string { return i.title }
 
 func newTextarea() textarea.Model {
 	ta := textarea.New()
@@ -193,18 +255,40 @@ func NewModel(hasPrompt bool) Model {
 	ml.Title = "Select Model"
 	ml.SetShowHelp(false)
 
+	// Setting menu list
+	settingDel := list.NewDefaultDelegate()
+	settingDel.SetSpacing(0)
+	sl := list.New([]list.Item{}, settingDel, 0, 0)
+	sl.Title = "Settings"
+	sl.SetShowHelp(false)
+
+	// SSH alias picker list
+	sshAliasDel := list.NewDefaultDelegate()
+	sshAliasDel.SetSpacing(0)
+	sal := list.New([]list.Item{}, sshAliasDel, 0, 0)
+	sal.Title = "SSH Connections"
+	sal.SetShowHelp(false)
+
 	m := Model{
-		mode:        mode,
-		spinner:     s,
-		thinking:    thinking,
-		mdRenderer:  md,
-		textarea:    newTextarea(),
-		currentText: &strings.Builder{},
-		dirList:     l,
-		modelPicker: ml,
-		history:     loadHistory(),
+		mode:           mode,
+		spinner:        s,
+		thinking:       thinking,
+		mdRenderer:     md,
+		textarea:       newTextarea(),
+		currentText:    &strings.Builder{},
+		dirList:        l,
+		modelPicker:    ml,
+		settingMenu:    sl,
+		sshAliasPicker: sal,
+		history:        loadHistory(),
 	}
 	m.historyIndex = len(m.history)
+	
+	if cfg, err := config.LoadConfig(); err == nil {
+		m.activeProvider = cfg.Provider
+		m.activeModel = cfg.Model
+	}
+
 	return m
 }
 
@@ -247,7 +331,7 @@ func (m Model) Init() tea.Cmd {
 
 // inputActive returns true when the text input should be visible and accepting keys.
 func (m Model) inputActive() bool {
-	return (m.mode == ModeWelcome || (m.mode == ModeAgent && m.agentDone) || m.sshStep > 0) && !m.pickingModel
+	return (m.mode == ModeWelcome || (m.mode == ModeAgent && m.agentDone) || m.sshStep > 0 || m.sshSavePrompt) && !m.pickingModel && !m.showingSetting && !m.pickingSSHAlias
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -256,6 +340,81 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.KeyMsg:
+		// Setting menu handling
+		if m.showingSetting {
+			switch msg.String() {
+			case "enter":
+				selected := m.settingMenu.SelectedItem()
+				if selected != nil {
+					selItem := selected.(settingItem)
+					switch selItem.key {
+					case "switch_model":
+						m.showingSetting = false
+						return m.handleModelInput(cmds)
+					case "add_model":
+						m.showingSetting = false
+						m.textarea.Focus()
+						// Signal to launch the setup TUI
+						cmds = append(cmds, func() tea.Msg {
+							return AddModelMsg{}
+						})
+						return m, tea.Batch(cmds...)
+					case "edit_config":
+						m.showingSetting = false
+						m.textarea.Focus()
+						m.lines = append(m.lines, toolLabelStyle.Render("⚙ Settings:")+" Please edit "+config.ConfigPath())
+						m.refreshViewport()
+						return m, tea.Batch(cmds...)
+					}
+				}
+			case "ctrl+c", "esc":
+				m.showingSetting = false
+				m.textarea.Focus()
+				m.refreshViewport()
+				return m, tea.Batch(cmds...)
+			}
+			var cmd tea.Cmd
+			m.settingMenu, cmd = m.settingMenu.Update(msg)
+			cmds = append(cmds, cmd)
+			return m, tea.Batch(cmds...)
+		}
+
+		// SSH alias picker handling
+		if m.pickingSSHAlias {
+			switch msg.String() {
+			case "enter":
+				selected := m.sshAliasPicker.SelectedItem()
+				if selected != nil {
+					selItem := selected.(sshAliasItem)
+					m.pickingSSHAlias = false
+					m.textarea.Focus()
+					if selItem.isNew {
+						// Start new SSH connection wizard
+						m.sshStep = 1
+						m.lines = append(m.lines, toolLabelStyle.Render("🔗 SSH Setup"))
+						m.textarea.Placeholder = "Enter SSH address (e.g. root@hostname)..."
+						m.refreshViewport()
+						return m, tea.Batch(cmds...)
+					}
+					// Connect using saved alias
+					path := selItem.path
+					if path == "" {
+						path = "?"
+					}
+					return m.startSSHConnect(selItem.addr, path, cmds)
+				}
+			case "ctrl+c", "esc":
+				m.pickingSSHAlias = false
+				m.textarea.Focus()
+				m.refreshViewport()
+				return m, tea.Batch(cmds...)
+			}
+			var cmd tea.Cmd
+			m.sshAliasPicker, cmd = m.sshAliasPicker.Update(msg)
+			cmds = append(cmds, cmd)
+			return m, tea.Batch(cmds...)
+		}
+
 		if m.pickingModel {
 			switch msg.String() {
 			case "enter":
@@ -267,6 +426,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						cfg.Provider = selItem.provider
 						cfg.Model = selItem.model
 						config.SaveConfig(cfg)
+						m.activeProvider = selItem.provider
+						m.activeModel = selItem.model
 						select {
 						case configCh <- cfg:
 						default:
@@ -292,6 +453,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.sshStep == 3 {
 			switch msg.String() {
+			case "tab":
+				// Tab = confirm current directory (Open Folder)
+				return m.startSSHConnect(m.sshAddr, m.sshPath, cmds)
 			case "enter":
 				selected := m.dirList.SelectedItem()
 				if selected != nil {
@@ -313,11 +477,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, tea.Batch(cmds...)
 				}
 			case "ctrl+c", "esc":
-				// Cancel SSH step
+				// Cancel SSH step — notify main to restore local env
 				m.sshStep = 0
 				m.sshPath = ""
 				m.sshAddr = ""
+				m.sshSaveAddr = ""
+				m.sshSavePath = ""
 				m.textarea.Placeholder = "Type your prompt here..."
+				m.lines = append(m.lines, toolLabelStyle.Render("🔗 SSH:")+" Cancelled.")
+				m.refreshViewport()
+				cmds = append(cmds, func() tea.Msg {
+					return SSHCancelMsg{}
+				})
 				return m, tea.Batch(cmds...)
 			}
 
@@ -344,9 +515,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.textarea.Reset()
 
 					if prompt == "/setting" {
-						m.lines = append(m.lines, toolLabelStyle.Render("⚙ Settings: ")+"Please edit "+config.ConfigPath())
-						m.refreshViewport()
-						return m, tea.Batch(cmds...)
+						return m.handleSettingInput(cmds)
 					}
 					if prompt == "/model" {
 						return m.handleModelInput(cmds)
@@ -355,6 +524,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Handle /ssh command
 					if prompt == "/ssh" || strings.HasPrefix(prompt, "/ssh ") {
 						return m.handleSSHInput(prompt, cmds)
+					}
+
+					// Handle SSH save alias prompt
+					if m.sshSavePrompt {
+						return m.handleSSHSaveAlias(prompt, cmds)
 					}
 
 					// Handle SSH setup steps
@@ -440,6 +614,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.Height = vpH
 		}
 		m.dirList.SetSize(msg.Width, vpH)
+		m.settingMenu.SetSize(msg.Width, vpH)
+		m.sshAliasPicker.SetSize(msg.Width, vpH)
 		m.viewport.SetContent(m.renderContent())
 
 	case spinner.TickMsg:
@@ -458,6 +634,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SSHListDirReqMsg:
 		sshCh <- msg
 
+	case SSHCancelMsg:
+		sshCh <- msg
+
+	case ConfigUpdatedMsg:
+		m.activeProvider = msg.Provider
+		m.activeModel = msg.Model
+		if msg.Message != "" {
+			m.lines = append(m.lines, msg.Message)
+			if m.ready {
+				m.viewport.SetContent(m.renderContent())
+				m.viewport.GotoBottom()
+			}
+		}
+
+	case AddModelMsg:
+		select {
+		case addModelCh <- struct{}{}:
+		default:
+		}
+
 	case SSHDirResultsMsg:
 		m.thinking = false
 		if msg.Err != nil {
@@ -468,20 +664,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.sshStep = 3
 			m.sshPath = msg.Path
-			m.dirList.Title = fmt.Sprintf("Dir: %s (Enter to browse, or select '✅ Use this dir')", msg.Path)
+			m.dirList.Title = fmt.Sprintf("Dir: %s", msg.Path)
 			
-			// Build list items
-			items := []list.Item{
-				dirItem{title: "✅ Use this directory (" + msg.Path + ")", desc: "Connect using " + msg.Path, isDirectory: true, isSelectBtn: true},
-			}
-			if msg.Path != "/" && msg.Path != "" {
-				// We don't have perfect path.Dir awareness without 'path' package, but remote side could list '..'
-				// For simplicity, we just add the items returned by main
+			// Build list items: .. first, then subdirs, then ✅ at the bottom
+			var items []list.Item
+			for _, name := range msg.Items {
+				if name == ".." {
+					items = append(items, dirItem{title: "📁 ..", name: "..", desc: "Parent directory", isDirectory: true})
+				}
 			}
 			for _, name := range msg.Items {
+				if name == ".." {
+					continue
+				}
 				fullPath := path.Join(msg.Path, name)
-				items = append(items, dirItem{title: fullPath, name: name, desc: "Folder", isDirectory: true})
+				items = append(items, dirItem{title: "📁 " + fullPath, name: name, desc: "Folder", isDirectory: true})
 			}
+			items = append(items, dirItem{title: "✅ Use this directory (" + msg.Path + ")", desc: "Open folder here", isDirectory: true, isSelectBtn: true})
 			m.dirList.SetItems(items)
 		}
 		m.refreshViewport()
@@ -491,10 +690,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Success {
 			m.lines = append(m.lines, fmt.Sprintf("   %s Connected to %s",
 				toolSuccessStyle.Render("✓"), toolNameStyle.Render(msg.Label)))
+			// If this was a direct /ssh user@host connection, offer to save alias
+			if m.sshSaveAddr != "" {
+				// Update sshSavePath from the actual connected path in label
+				if m.sshSavePath == "" || m.sshSavePath == "?" {
+					// Extract path from label like "user@host (pwd: /path)"
+					if idx := strings.Index(msg.Label, "pwd: "); idx >= 0 {
+						end := strings.Index(msg.Label[idx:], ")")
+						if end > 0 {
+							m.sshSavePath = msg.Label[idx+5 : idx+end]
+						}
+					}
+				}
+				m.sshSavePrompt = true
+				m.lines = append(m.lines, toolLabelStyle.Render("⚙ SSH:")+" Save as alias? Enter alias name (or press Enter/type 'n' to skip)")
+				m.textarea.Placeholder = "Enter alias name (e.g. my-server)..."
+			}
 		} else {
 			m.lines = append(m.lines, fmt.Sprintf("   %s %s",
 				toolErrorStyle.Render("✗ SSH Error:"),
 				toolResultStyle.Render(msg.Err.Error())))
+			m.sshSaveAddr = ""
+			m.sshSavePath = ""
 		}
 		m.agentDone = true
 		m.textarea.Focus()
@@ -595,6 +812,14 @@ func (m Model) calcViewportHeight(withInput bool) int {
 }
 
 func (m Model) View() string {
+	if m.showingSetting {
+		return m.settingMenuView()
+	}
+
+	if m.pickingSSHAlias {
+		return m.sshAliasPickerView()
+	}
+
 	if m.pickingModel {
 		return m.modelPickerView()
 	}
@@ -628,6 +853,68 @@ func (m Model) View() string {
 	}
 
 	return fmt.Sprintf("%s\n%s\n%s\n%s", header, headerLine, m.viewport.View(), footer)
+}
+
+func (m Model) settingMenuView() string {
+	w, h := m.width, m.height
+	if w <= 0 { w = 80 }
+	if h <= 0 { h = 24 }
+
+	modW, modH := w-8, h-4
+	if modW > 120 { modW = 120 }
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorPrimary).
+		Padding(0, 1).
+		Width(modW).
+		Height(modH)
+
+	headerText := fmt.Sprintf(" %s ", toolNameStyle.Render("⚙ Settings"))
+
+	m.settingMenu.SetSize(modW-6, modH-8)
+	m.settingMenu.Title = "Settings (↑/↓ to navigate, Enter to confirm, Esc to cancel)"
+	m.settingMenu.SetShowHelp(false)
+	m.settingMenu.SetShowStatusBar(true)
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		lipgloss.NewStyle().Bold(true).Padding(0, 1).Render(headerText),
+		"",
+		m.settingMenu.View(),
+	)
+
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, boxStyle.Render(content))
+}
+
+func (m Model) sshAliasPickerView() string {
+	w, h := m.width, m.height
+	if w <= 0 { w = 80 }
+	if h <= 0 { h = 24 }
+
+	modW, modH := w-8, h-4
+	if modW > 120 { modW = 120 }
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorPrimary).
+		Padding(0, 1).
+		Width(modW).
+		Height(modH)
+
+	headerText := fmt.Sprintf(" %s ", toolNameStyle.Render("🔗 SSH Connections"))
+
+	m.sshAliasPicker.SetSize(modW-6, modH-8)
+	m.sshAliasPicker.Title = "Select SSH connection (↑/↓ to navigate, Enter to connect, Esc to cancel)"
+	m.sshAliasPicker.SetShowHelp(false)
+	m.sshAliasPicker.SetShowStatusBar(true)
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		lipgloss.NewStyle().Bold(true).Padding(0, 1).Render(headerText),
+		"",
+		m.sshAliasPicker.View(),
+	)
+
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, boxStyle.Render(content))
 }
 
 func (m Model) modelPickerView() string {
@@ -687,7 +974,7 @@ func (m Model) dirPickerView() string {
 		Render(m.sshPath)
 
 	m.dirList.SetSize(modW-6, modH-8)
-	m.dirList.Title = "Select directory (↑/↓ to navigate, Enter to explore or finalize)"
+	m.dirList.Title = "↑/↓ navigate · Enter browse · Tab open folder · Esc cancel"
 	m.dirList.SetShowHelp(false)
 	m.dirList.SetShowStatusBar(true)
 
@@ -702,11 +989,56 @@ func (m Model) dirPickerView() string {
 }
 
 func (m Model) inputAreaView() string {
-	return lipgloss.JoinVertical(lipgloss.Left,
-		divider(m.width),
-		lipgloss.NewStyle().PaddingLeft(1).PaddingRight(2).Render(m.textarea.View()),
-		divider(m.width),
-	)
+	var parts []string
+	parts = append(parts, divider(m.width))
+
+	// Show command hints when input starts with /
+	val := m.textarea.Value()
+	if strings.HasPrefix(val, "/") {
+		hints := m.getCommandHints(val)
+		if hints != "" {
+			hintStyle := lipgloss.NewStyle().PaddingLeft(2).Foreground(colorMuted).Italic(true)
+			parts = append(parts, hintStyle.Render(hints))
+		}
+	}
+
+	parts = append(parts, lipgloss.NewStyle().PaddingLeft(1).PaddingRight(2).Render(m.textarea.View()))
+
+	// Status bar at the bottom showing current provider/model
+	statusTxt := "Model: "
+	if m.activeProvider != "" {
+		statusTxt += m.activeProvider + " / " + m.activeModel
+	} else {
+		statusTxt += "Not configured"
+	}
+	statusStyle := lipgloss.NewStyle().Foreground(colorMuted).PaddingLeft(2).PaddingBottom(1)
+	
+	parts = append(parts, divider(m.width))
+	parts = append(parts, statusStyle.Render(statusTxt))
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+func (m Model) getCommandHints(input string) string {
+	type cmdHint struct {
+		cmd  string
+		desc string
+	}
+	commands := []cmdHint{
+		{"/setting", "Settings menu"},
+		{"/model", "Switch model"},
+		{"/ssh", "SSH connection"},
+	}
+
+	var matches []string
+	for _, c := range commands {
+		if strings.HasPrefix(c.cmd, input) {
+			matches = append(matches, c.cmd+" "+c.desc)
+		}
+	}
+	if len(matches) == 0 {
+		return ""
+	}
+	return "  " + strings.Join(matches, "  │  ")
 }
 
 func (m Model) handleModelInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
@@ -738,17 +1070,50 @@ func (m Model) handleModelInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+// handleSettingInput shows the setting menu.
+func (m Model) handleSettingInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	items := []list.Item{
+		settingItem{title: "🔀 Switch Model", desc: "Switch to a different configured model", key: "switch_model"},
+		settingItem{title: "➕ Add New Model", desc: "Add a new model provider via setup wizard", key: "add_model"},
+		settingItem{title: "📝 Edit Config File", desc: "Manually edit " + config.ConfigPath(), key: "edit_config"},
+	}
+	m.settingMenu.SetItems(items)
+	m.showingSetting = true
+	m.textarea.Blur()
+	return m, tea.Batch(cmds...)
+}
+
 // handleSSHInput parses the /ssh command and begins the guided flow.
 // Formats: /ssh | /ssh user@host | /ssh user@host:/path
 func (m Model) handleSSHInput(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	arg := strings.TrimSpace(strings.TrimPrefix(input, "/ssh"))
 
-	// /ssh with no args → step 1: ask for host
+	// /ssh with no args → show saved aliases or new connection option
 	if arg == "" {
-		m.sshStep = 1
-		m.lines = append(m.lines, toolLabelStyle.Render("🔗 SSH Setup"))
-		m.textarea.Placeholder = "Enter SSH address (e.g. root@hostname)..."
-		m.refreshViewport()
+		cfg, _ := config.LoadConfig()
+		var items []list.Item
+		if cfg != nil && len(cfg.SSHAliases) > 0 {
+			for _, alias := range cfg.SSHAliases {
+				desc := alias.Addr
+				if alias.Path != "" {
+					desc += ":" + alias.Path
+				}
+				items = append(items, sshAliasItem{
+					title: "🔗 " + alias.Name,
+					desc:  desc,
+					addr:  alias.Addr,
+					path:  alias.Path,
+				})
+			}
+		}
+		items = append(items, sshAliasItem{
+			title: "➕ Connect New SSH",
+			desc:  "Enter a new SSH address",
+			isNew: true,
+		})
+		m.sshAliasPicker.SetItems(items)
+		m.pickingSSHAlias = true
+		m.textarea.Blur()
 		return m, tea.Batch(cmds...)
 	}
 
@@ -759,12 +1124,68 @@ func (m Model) handleSSHInput(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd)
 		if strings.HasPrefix(possiblePath, "/") {
 			addr := arg[:colonIdx]
 			path := possiblePath
+			// Remember for save prompt
+			m.sshSaveAddr = addr
+			m.sshSavePath = path
 			return m.startSSHConnect(addr, path, cmds)
 		}
 	}
 
-	// /ssh user@host → ask for path interactively
+	// /ssh user@host → ask for path interactively, remember addr for save
+	m.sshSaveAddr = arg
+	m.sshSavePath = ""
 	return m.startSSHConnect(arg, "?", cmds)
+}
+
+// handleSSHSaveAlias handles the user's response to the alias save prompt.
+func (m Model) handleSSHSaveAlias(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	m.sshSavePrompt = false
+	m.textarea.Placeholder = "Type your prompt here..."
+
+	input = strings.TrimSpace(input)
+	if input == "" || strings.ToLower(input) == "n" || strings.ToLower(input) == "no" {
+		m.lines = append(m.lines, toolLabelStyle.Render("⚙ SSH:")+" Alias not saved.")
+		m.refreshViewport()
+		return m, tea.Batch(cmds...)
+	}
+
+	// Save the alias
+	aliasName := input
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		cfg = &config.Config{
+			Models:        make(map[string]*config.ProviderConfig),
+			MaxIterations: 1000,
+		}
+	}
+
+	// Check for duplicate name and replace
+	found := false
+	for i, a := range cfg.SSHAliases {
+		if a.Name == aliasName {
+			cfg.SSHAliases[i].Addr = m.sshSaveAddr
+			cfg.SSHAliases[i].Path = m.sshSavePath
+			found = true
+			break
+		}
+	}
+	if !found {
+		cfg.SSHAliases = append(cfg.SSHAliases, config.SSHAlias{
+			Name: aliasName,
+			Addr: m.sshSaveAddr,
+			Path: m.sshSavePath,
+		})
+	}
+
+	if err := config.SaveConfig(cfg); err != nil {
+		m.lines = append(m.lines, toolErrorStyle.Render("✗ Failed to save alias: "+err.Error()))
+	} else {
+		m.lines = append(m.lines, toolLabelStyle.Render("⚙ SSH:")+" Saved alias '"+aliasName+"' → "+m.sshSaveAddr)
+	}
+	m.sshSaveAddr = ""
+	m.sshSavePath = ""
+	m.refreshViewport()
+	return m, tea.Batch(cmds...)
 }
 
 // handleSSHStep handles input during the SSH setup wizard.

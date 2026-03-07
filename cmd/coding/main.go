@@ -104,6 +104,7 @@ func main() {
 		promptCh := tui.GetPromptChannel()
 		sshCh := tui.GetSSHChannel()
 		configCh := tui.GetConfigChannel()
+		addModelCh := tui.GetAddModelChannel()
 		for {
 			select {
 			case cfgMsg := <-configCh:
@@ -133,6 +134,46 @@ func main() {
 					handleSSHConnect(ctx, env, msg.Addr, msg.Path, p, &systemPrompt, &ag, chatModel, toolList)
 				case tui.SSHListDirReqMsg:
 					handleSSHListDir(ctx, env, msg.Path, p)
+				case tui.SSHCancelMsg:
+					_ = msg
+					// Restore env to local
+					env.ResetToLocal(pwd, platform)
+					systemPrompt = prompts.GetSystemPrompt(platform, pwd)
+					if newAg, err := agent.NewAgent(ctx, chatModel, toolList, systemPrompt); err == nil {
+						ag = newAg
+					}
+				}
+
+			case <-addModelCh:
+				// Temporarily suspend TUI and run setup wizard
+				p.ReleaseTerminal()
+				ok, setupErr := tui.RunSetupTUI()
+				p.RestoreTerminal()
+				if setupErr != nil {
+					p.Send(tui.AgentDoneMsg{Err: fmt.Errorf("Setup error: %w", setupErr)})
+				} else if ok {
+					// Reload config and rebuild agent
+					newCfg, loadErr := config.LoadConfig()
+					if loadErr == nil {
+						providerCfg := newCfg.Models[newCfg.Provider]
+						if providerCfg != nil {
+							newChatModel, cmErr := internalmodel.NewChatModel(ctx, &internalmodel.ChatModelConfig{
+								Model: newCfg.Model, APIKey: providerCfg.APIKey, BaseURL: providerCfg.BaseURL,
+							})
+							if cmErr == nil {
+								chatModel = newChatModel
+								newAg, agErr := agent.NewAgent(ctx, chatModel, toolList, systemPrompt)
+								if agErr == nil {
+									ag = newAg
+								}
+							}
+						}
+						p.Send(tui.ConfigUpdatedMsg{
+							Provider: newCfg.Provider,
+							Model:    newCfg.Model,
+							Message:  fmt.Sprintf("✅ Added model: %s - %s\n", newCfg.Provider, newCfg.Model),
+						})
+					}
 				}
 			}
 		}
