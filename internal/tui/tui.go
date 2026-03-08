@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/cnjack/coding/internal/config"
+	"github.com/cnjack/coding/internal/session"
 )
 
 const maxToolOutputLen = 500
@@ -52,6 +53,14 @@ func GetAddModelChannel() <-chan struct{} {
 	return addModelCh
 }
 
+// resumeCh is used to pass a selected session UUID from TUI to the main goroutine.
+var resumeCh = make(chan string, 1)
+
+// GetResumeChannel returns the channel that receives session resume requests.
+func GetResumeChannel() <-chan string {
+	return resumeCh
+}
+
 // --- Messages ---
 
 type AgentTextMsg struct{ Text string }
@@ -66,6 +75,31 @@ type UserPromptMsg struct{ Prompt string }
 
 // AddModelMsg signals that the user wants to add a new model via setup wizard
 type AddModelMsg struct{}
+
+// ResumeRequestMsg is sent when the user requests to resume a session by UUID.
+type ResumeRequestMsg struct{ UUID string }
+
+// SessionEntry is a display-ready record from a replayed session.
+type SessionEntry struct {
+	Type    string
+	Content string
+	Name    string
+	Args    string
+	Output  string
+	Error   string
+}
+
+// SessionResumedMsg is sent by the main goroutine to replay a session in the TUI.
+type SessionResumedMsg struct {
+	UUID    string
+	Entries []SessionEntry
+}
+
+// AgentsMdMsg is sent by the main goroutine to notify TUI that agents.md was loaded.
+type AgentsMdMsg struct {
+	Found bool
+	Path  string
+}
 
 // SSHConnectMsg is sent when user initially requests connection
 type SSHConnectMsg struct {
@@ -170,6 +204,16 @@ type Model struct {
 	history      []string
 	historyIndex int
 
+	// Session picker
+	sessionPicker  list.Model
+	pickingSession bool
+
+	// agents.md indicator
+	agentsMdFound bool
+
+	// Current working directory (for session listing)
+	pwd string
+
 	// Active configuration state
 	activeProvider string
 	activeModel    string
@@ -211,6 +255,21 @@ func (i settingItem) Title() string       { return i.title }
 func (i settingItem) Description() string { return i.desc }
 func (i settingItem) FilterValue() string { return i.title }
 
+// sessionListItem implements list.Item for session picking.
+type sessionListItem struct {
+	meta session.SessionMeta
+}
+
+func (i sessionListItem) Title() string {
+	ts := i.meta.StartTime
+	if len(ts) >= 16 {
+		ts = ts[:16]
+	}
+	return fmt.Sprintf("%s  %s / %s", ts, i.meta.Provider, i.meta.Model)
+}
+func (i sessionListItem) Description() string { return i.meta.UUID }
+func (i sessionListItem) FilterValue() string { return i.meta.StartTime + i.meta.UUID }
+
 // sshAliasItem for the SSH alias picker
 type sshAliasItem struct {
 	title string
@@ -237,7 +296,7 @@ func newTextarea() textarea.Model {
 	return ta
 }
 
-func NewModel(hasPrompt bool) Model {
+func NewModel(hasPrompt bool, pwd string) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = spinnerStyle
@@ -282,6 +341,13 @@ func NewModel(hasPrompt bool) Model {
 	sal.Title = "SSH Connections"
 	sal.SetShowHelp(false)
 
+	// Session picker list
+	sessionDel := list.NewDefaultDelegate()
+	sessionDel.SetSpacing(0)
+	sesl := list.New([]list.Item{}, sessionDel, 0, 0)
+	sesl.Title = "Sessions"
+	sesl.SetShowHelp(false)
+
 	m := Model{
 		mode:           mode,
 		spinner:        s,
@@ -294,6 +360,8 @@ func NewModel(hasPrompt bool) Model {
 		modelPicker:    ml,
 		settingMenu:    sl,
 		sshAliasPicker: sal,
+		sessionPicker:  sesl,
+		pwd:            pwd,
 		history:        loadHistory(),
 	}
 	m.historyIndex = len(m.history)
@@ -345,7 +413,7 @@ func (m Model) Init() tea.Cmd {
 
 // inputActive returns true when the text input should be visible and accepting keys.
 func (m Model) inputActive() bool {
-	return (m.mode == ModeWelcome || (m.mode == ModeAgent && m.agentDone) || m.sshStep > 0 || m.sshSavePrompt) && !m.pickingModel && !m.showingSetting && !m.pickingSSHAlias
+	return (m.mode == ModeWelcome || (m.mode == ModeAgent && m.agentDone) || m.sshStep > 0 || m.sshSavePrompt) && !m.pickingModel && !m.showingSetting && !m.pickingSSHAlias && !m.pickingSession
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -354,6 +422,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.KeyMsg:
+		// Session picker handling
+		if m.pickingSession {
+			switch msg.String() {
+			case "enter":
+				selected := m.sessionPicker.SelectedItem()
+				if selected != nil {
+					selItem := selected.(sessionListItem)
+					m.pickingSession = false
+					m.textarea.Focus()
+					m.lines = append(m.lines, toolLabelStyle.Render("📂 Loading session..."))
+					m.thinking = true
+					m.mode = ModeAgent
+					m.agentDone = false
+					uuid := selItem.meta.UUID
+					cmds = append(cmds, m.spinner.Tick)
+					cmds = append(cmds, func() tea.Msg {
+						return ResumeRequestMsg{UUID: uuid}
+					})
+					return m, tea.Batch(cmds...)
+				}
+			case "ctrl+c", "esc":
+				m.pickingSession = false
+				m.textarea.Focus()
+				m.refreshViewport()
+				return m, tea.Batch(cmds...)
+			}
+			var cmd tea.Cmd
+			m.sessionPicker, cmd = m.sessionPicker.Update(msg)
+			cmds = append(cmds, cmd)
+			return m, tea.Batch(cmds...)
+		}
+
 		// Setting menu handling
 		if m.showingSetting {
 			switch msg.String() {
@@ -542,6 +642,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m.handleSSHInput(prompt, cmds)
 					}
 
+					// Handle /resume command
+					if prompt == "/resume" || strings.HasPrefix(prompt, "/resume ") {
+						return m.handleResumeInput(prompt, cmds)
+					}
+
 					// Handle SSH save alias prompt
 					if m.sshSavePrompt {
 						return m.handleSSHSaveAlias(prompt, cmds)
@@ -652,6 +757,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dirList.SetSize(msg.Width, vpH)
 		m.settingMenu.SetSize(msg.Width, vpH)
 		m.sshAliasPicker.SetSize(msg.Width, vpH)
+		m.sessionPicker.SetSize(msg.Width, vpH)
 		m.viewport.SetContent(m.renderContent())
 
 	case spinner.TickMsg:
@@ -693,6 +799,65 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case addModelCh <- struct{}{}:
 		default:
 		}
+
+	case ResumeRequestMsg:
+		select {
+		case resumeCh <- msg.UUID:
+		default:
+		}
+
+	case AgentsMdMsg:
+		m.agentsMdFound = msg.Found
+		m.refreshViewport()
+
+	case SessionResumedMsg:
+		m.thinking = false
+		m.mode = ModeAgent
+		m.agentDone = true
+		m.lines = nil
+		m.currentText.Reset()
+		m.lines = append(m.lines, toolLabelStyle.Render("📂 Session resumed: ")+msg.UUID)
+		m.lines = append(m.lines, "")
+		for _, e := range msg.Entries {
+			switch e.Type {
+			case string(session.EntryUser):
+				m.lines = append(m.lines, fmt.Sprintf("%s %s",
+					userLabelStyle.Render("👤 You:"), e.Content))
+			case string(session.EntryAssistant):
+				if e.Content != "" {
+					rendered := e.Content
+					if m.mdRenderer != nil {
+						if md, err := m.mdRenderer.Render(e.Content); err == nil {
+							rendered = md
+						}
+					}
+					m.lines = append(m.lines, assistantLabelStyle.Render("🤖 Assistant:"))
+					m.lines = append(m.lines, rendered)
+				}
+			case string(session.EntryToolCall):
+				m.lines = append(m.lines, fmt.Sprintf("%s %s %s",
+					toolLabelStyle.Render("🔧 Tool:"),
+					toolNameStyle.Render(e.Name),
+					toolArgsStyle.Render(truncate(e.Args, 100)),
+				))
+			case string(session.EntryToolResult):
+				if e.Error != "" {
+					m.lines = append(m.lines, fmt.Sprintf("   %s %s",
+						toolErrorStyle.Render("✗ Error:"),
+						toolResultStyle.Render(truncate(e.Error, 200))))
+				} else {
+					m.lines = append(m.lines, formatToolResult(e.Name, e.Output, m.width)...)
+				}
+			}
+		}
+		m.lines = append(m.lines, "")
+		m.lines = append(m.lines, divider(m.width-4))
+		if m.ready {
+			m.viewport.Height = m.calcViewportHeight(true)
+			m.viewport.SetContent(m.renderContent())
+			m.viewport.GotoBottom()
+		}
+		m.textarea.Focus()
 
 	case SSHDirResultsMsg:
 		m.thinking = false
@@ -881,6 +1046,10 @@ func (m Model) View() string {
 
 	if m.pickingModel {
 		return m.modelPickerView()
+	}
+
+	if m.pickingSession {
+		return m.sessionPickerView()
 	}
 
 	if m.mode == ModeWelcome {
@@ -1131,6 +1300,7 @@ func (m Model) getCommandHints(input string) string {
 		{"/setting", "Settings menu"},
 		{"/model", "Switch model"},
 		{"/ssh", "SSH connection"},
+		{"/resume", "Resume a previous session"},
 	}
 
 	var matches []string
@@ -1369,6 +1539,9 @@ func (m Model) welcomeView() string {
 		"🔍  I can search through your codebase with grep",
 		"⚡  I can execute shell commands for you",
 	}
+	if m.agentsMdFound {
+		tips = append(tips, "📋  Custom instructions loaded from agents.md")
+	}
 	var tipsBlock strings.Builder
 	for _, tip := range tips {
 		tipsBlock.WriteString(lipgloss.NewStyle().Foreground(colorText).PaddingLeft(4).Render(tip))
@@ -1542,8 +1715,88 @@ func formatEditOutput(output string, termWidth int) []string {
 	return result
 }
 
-func RunTUI(hasPrompt bool) (*tea.Program, Model) {
-	m := NewModel(hasPrompt)
+// handleResumeInput parses the /resume command.
+// /resume           — shows session picker for current project
+// /resume <UUID>    — resumes specific session directly
+func (m Model) handleResumeInput(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	arg := strings.TrimSpace(strings.TrimPrefix(input, "/resume"))
+
+	if arg != "" {
+		// Direct UUID resume
+		m.lines = append(m.lines, toolLabelStyle.Render("📂 Loading session..."))
+		m.thinking = true
+		m.mode = ModeAgent
+		m.agentDone = false
+		uuid := arg
+		cmds = append(cmds, m.spinner.Tick)
+		cmds = append(cmds, func() tea.Msg {
+			return ResumeRequestMsg{UUID: uuid}
+		})
+		return m, tea.Batch(cmds...)
+	}
+
+	// No UUID — show session picker
+	metas, err := session.ListSessions(m.pwd)
+	if err != nil || len(metas) == 0 {
+		msg := "No sessions found for this project."
+		if err != nil {
+			msg = fmt.Sprintf("Error loading sessions: %v", err)
+		}
+		m.lines = append(m.lines, toolLabelStyle.Render("📂 Resume:")+" "+msg)
+		m.refreshViewport()
+		return m, tea.Batch(cmds...)
+	}
+
+	var items []list.Item
+	// Show newest first
+	for i := len(metas) - 1; i >= 0; i-- {
+		items = append(items, sessionListItem{meta: metas[i]})
+	}
+	m.sessionPicker.SetItems(items)
+	m.pickingSession = true
+	m.textarea.Blur()
+	return m, tea.Batch(cmds...)
+}
+
+func (m Model) sessionPickerView() string {
+	w, h := m.width, m.height
+	if w <= 0 {
+		w = 80
+	}
+	if h <= 0 {
+		h = 24
+	}
+
+	modW, modH := w-8, h-4
+	if modW > 120 {
+		modW = 120
+	}
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorPrimary).
+		Padding(0, 1).
+		Width(modW).
+		Height(modH)
+
+	headerText := fmt.Sprintf(" %s ", toolNameStyle.Render("📂 Resume Session"))
+
+	m.sessionPicker.SetSize(modW-6, modH-8)
+	m.sessionPicker.Title = "Select session (↑/↓ navigate · Enter resume · Esc cancel)"
+	m.sessionPicker.SetShowHelp(false)
+	m.sessionPicker.SetShowStatusBar(true)
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		lipgloss.NewStyle().Bold(true).Padding(0, 1).Render(headerText),
+		"",
+		m.sessionPicker.View(),
+	)
+
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, boxStyle.Render(content))
+}
+
+func RunTUI(hasPrompt bool, pwd string) (*tea.Program, Model) {
+	m := NewModel(hasPrompt, pwd)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	return p, m
 }

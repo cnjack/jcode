@@ -21,7 +21,7 @@ type ProviderConfig struct {
 // SSHAlias represents a saved SSH connection alias
 type SSHAlias struct {
 	Name string `json:"name"`
-	Addr string `json:"addr"` // user@host
+	Addr string `json:"addr"`           // user@host
 	Path string `json:"path,omitempty"` // remote working directory
 }
 
@@ -155,4 +155,23 @@ func ConfigPath() string {
 		return filepath.Join("~", configDir, configFile)
 	}
 	return p
+}
+
+// SessionsDir returns the path to the sessions directory (~/.jcoding/sessions).
+func SessionsDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get home directory: %w", err)
+	}
+	return filepath.Join(home, configDir, "sessions"), nil
+}
+
+// SessionsIndexPath returns the path to the sessions index file
+// (~/.jcoding/sessions/session.json).
+func SessionsIndexPath() (string, error) {
+	dir, err := SessionsDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "session.json"), nil
 }

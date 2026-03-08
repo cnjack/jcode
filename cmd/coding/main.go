@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 	sshagent "golang.org/x/crypto/ssh/agent"
@@ -24,23 +25,55 @@ import (
 	"github.com/cnjack/coding/internal/config"
 	internalmodel "github.com/cnjack/coding/internal/model"
 	"github.com/cnjack/coding/internal/prompts"
+	"github.com/cnjack/coding/internal/session"
 	"github.com/cnjack/coding/internal/tools"
 	"github.com/cnjack/coding/internal/tui"
 	util "github.com/cnjack/coding/internal/util"
 )
 
+// Version information — overridable at build time via -ldflags:
+//
+//	go build -ldflags "-X main.Version=v1.2.3 -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X main.GitCommit=$(git rev-parse --short HEAD)"
+var (
+	Version   = "0.1.0"
+	BuildTime = "unknown"
+	GitCommit = "unknown"
+)
+
 func main() {
+	// Handle mcp subcommand before standard flag parsing.
+	if len(os.Args) > 1 && os.Args[1] == "mcp" {
+		handleMCPSubcommand(os.Args[2:])
+		return
+	}
+
 	var prompt string
 	flag.StringVar(&prompt, "prompt", "", "The prompt to send to the coding assistant")
 	flag.StringVar(&prompt, "p", "", "The prompt to send to the coding assistant (shorthand)")
 	var isDoctor bool
 	flag.BoolVar(&isDoctor, "doctor", false, "Run system check to test model and MCP connections")
+	var showVersion bool
+	flag.BoolVar(&showVersion, "version", false, "Show version information")
+	var resumeUUID string
+	flag.StringVar(&resumeUUID, "resume", "", "Resume a previous session by UUID")
+	var listSessions bool
+	flag.BoolVar(&listSessions, "session", false, "List sessions for the current project and exit")
 	flag.Parse()
 	prompt = strings.TrimSpace(prompt)
 	hasPrompt := prompt != ""
 
+	if showVersion {
+		printVersion()
+		return
+	}
+
 	if isDoctor {
 		runDoctorMode()
+		return
+	}
+
+	if listSessions {
+		handleListSessions()
 		return
 	}
 
@@ -118,18 +151,56 @@ func main() {
 		os.Exit(1)
 	}
 
-	p, _ := tui.RunTUI(hasPrompt)
+	// Load a previous session if --resume was requested.
+	var initialHistory []adk.Message
+	var initialResumeUUID string
+	var initialResumeEntries []tui.SessionEntry
+	if resumeUUID != "" {
+		entries, loadErr := session.LoadSession(resumeUUID)
+		if loadErr != nil {
+			fmt.Fprintf(os.Stderr, "Cannot load session: %v\n", loadErr)
+			os.Exit(1)
+		}
+		initialHistory = reconstructHistory(entries)
+		initialResumeUUID = resumeUUID
+		initialResumeEntries = convertToTuiEntries(entries)
+		hasPrompt = false // treat as interactive, not one-shot
+	}
+
+	p, _ := tui.RunTUI(hasPrompt, pwd)
 
 	go func() {
+		// Create a session recorder for this run (best-effort).
+		rec, _ := session.NewRecorder(pwd, cfg.Provider, cfg.Model)
+		defer func() {
+			if rec != nil {
+				rec.Close()
+			}
+		}()
+
 		if len(mcpStatuses) > 0 {
 			p.Send(tui.MCPStatusMsg{Statuses: mcpStatuses})
 		}
-		var history []adk.Message
+
+		// Notify TUI if agents.md is present.
+		if agentsMdPath := prompts.HasAgentsMd(pwd); agentsMdPath != "" {
+			p.Send(tui.AgentsMdMsg{Found: true, Path: agentsMdPath})
+		}
+
+		history := initialHistory
+
+		// Replay a resumed session in the TUI.
+		if initialResumeUUID != "" {
+			p.Send(tui.SessionResumedMsg{UUID: initialResumeUUID, Entries: initialResumeEntries})
+		}
 
 		if hasPrompt {
 			p.Send(tui.UserPromptMsg{Prompt: prompt})
+			if rec != nil {
+				rec.RecordUser(prompt)
+			}
 			history = append(history, schema.UserMessage(prompt))
-			resp := runAgent(ctx, ag, history, p)
+			resp := runAgent(ctx, ag, history, p, rec)
 			if resp != "" {
 				history = append(history, &schema.Message{Role: schema.Assistant, Content: resp})
 			}
@@ -140,6 +211,7 @@ func main() {
 		sshCh := tui.GetSSHChannel()
 		configCh := tui.GetConfigChannel()
 		addModelCh := tui.GetAddModelChannel()
+		resumeCh := tui.GetResumeChannel()
 		for {
 			select {
 			case cfgMsg := <-configCh:
@@ -157,11 +229,23 @@ func main() {
 					}
 				}
 			case userPrompt := <-promptCh:
+				if rec != nil {
+					rec.RecordUser(userPrompt)
+				}
 				history = append(history, schema.UserMessage(userPrompt))
-				resp := runAgent(ctx, ag, history, p)
+				resp := runAgent(ctx, ag, history, p, rec)
 				if resp != "" {
 					history = append(history, &schema.Message{Role: schema.Assistant, Content: resp})
 				}
+
+			case uuid := <-resumeCh:
+				entries, loadErr := session.LoadSession(uuid)
+				if loadErr != nil {
+					p.Send(tui.AgentDoneMsg{Err: fmt.Errorf("load session: %w", loadErr)})
+					break
+				}
+				history = reconstructHistory(entries)
+				p.Send(tui.SessionResumedMsg{UUID: uuid, Entries: convertToTuiEntries(entries)})
 
 			case connMsg := <-sshCh:
 				switch msg := connMsg.(type) {
@@ -193,7 +277,7 @@ func main() {
 						providerCfg := newCfg.Models[newCfg.Provider]
 						if providerCfg != nil {
 							newChatModel, cmErr := internalmodel.NewChatModel(ctx, &internalmodel.ChatModelConfig{
-								Model: newCfg.Model, APIKey: providerCfg.APIKey, BaseURL: providerCfg.BaseURL,
+								Model: newCfg.Model, APIKey: providerCfg.APIKey, BaseURL: newCfg.Models[newCfg.Provider].BaseURL,
 							})
 							if cmErr == nil {
 								chatModel = newChatModel
@@ -360,7 +444,7 @@ func buildSSHAuthMethods() []ssh.AuthMethod {
 	return methods
 }
 
-func runAgent(ctx context.Context, ag *adk.ChatModelAgent, messages []adk.Message, p *tea.Program) string {
+func runAgent(ctx context.Context, ag *adk.ChatModelAgent, messages []adk.Message, p *tea.Program, rec *session.Recorder) string {
 	input := &adk.AgentInput{
 		Messages:        messages,
 		EnableStreaming: true,
@@ -387,15 +471,21 @@ func runAgent(ctx context.Context, ag *adk.ChatModelAgent, messages []adk.Messag
 		if mo.Role == schema.Tool {
 			toolName := mo.ToolName
 			if !mo.IsStreaming && mo.Message != nil {
-				p.Send(tui.ToolResultMsg{Name: toolName, Output: mo.Message.Content})
+				output := mo.Message.Content
+				p.Send(tui.ToolResultMsg{Name: toolName, Output: output})
+				if rec != nil {
+					rec.RecordToolResult(toolName, output, nil)
+				}
 			} else if mo.IsStreaming {
 				var sb strings.Builder
+				var toolErr error
 				for {
 					chunk, err := mo.MessageStream.Recv()
 					if err == io.EOF {
 						break
 					}
 					if err != nil {
+						toolErr = err
 						p.Send(tui.ToolResultMsg{Name: toolName, Err: err})
 						break
 					}
@@ -403,7 +493,14 @@ func runAgent(ctx context.Context, ag *adk.ChatModelAgent, messages []adk.Messag
 						sb.WriteString(chunk.Content)
 					}
 				}
-				p.Send(tui.ToolResultMsg{Name: toolName, Output: sb.String()})
+				if toolErr == nil {
+					p.Send(tui.ToolResultMsg{Name: toolName, Output: sb.String()})
+					if rec != nil {
+						rec.RecordToolResult(toolName, sb.String(), nil)
+					}
+				} else if rec != nil {
+					rec.RecordToolResult(toolName, "", toolErr)
+				}
 			}
 			continue
 		}
@@ -428,6 +525,9 @@ func runAgent(ctx context.Context, ag *adk.ChatModelAgent, messages []adk.Messag
 					for _, tc := range chunk.ToolCalls {
 						if tc.Function.Name != "" {
 							p.Send(tui.ToolCallMsg{Name: tc.Function.Name, Args: tc.Function.Arguments})
+							if rec != nil {
+								rec.RecordToolCall(tc.Function.Name, tc.Function.Arguments)
+							}
 						}
 					}
 				}
@@ -440,6 +540,9 @@ func runAgent(ctx context.Context, ag *adk.ChatModelAgent, messages []adk.Messag
 			if len(mo.Message.ToolCalls) > 0 {
 				for _, tc := range mo.Message.ToolCalls {
 					p.Send(tui.ToolCallMsg{Name: tc.Function.Name, Args: tc.Function.Arguments})
+					if rec != nil {
+						rec.RecordToolCall(tc.Function.Name, tc.Function.Arguments)
+					}
 				}
 			}
 			if mo.Message.Content != "" {
@@ -449,13 +552,23 @@ func runAgent(ctx context.Context, ag *adk.ChatModelAgent, messages []adk.Messag
 		}
 	}
 
+	// Record the complete assistant response.
+	if rec != nil && assistantText.Len() > 0 {
+		rec.RecordAssistant(assistantText.String())
+	}
+
 	p.Send(tui.AgentDoneMsg{})
 	return assistantText.String()
 }
 
 func runDoctorMode() {
-	fmt.Println("🚀 Running system check (Doctor Mode)...")
+	fmt.Printf("🚀 Little Jack — Coding Assistant\n")
+	fmt.Printf("   Version:    %s\n", Version)
+	fmt.Printf("   Build time: %s\n", BuildTime)
+	fmt.Printf("   Git commit: %s\n", GitCommit)
 	fmt.Println("----------------------------------------")
+	fmt.Println("Running system check (Doctor Mode)...")
+	fmt.Println()
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -504,4 +617,166 @@ func runDoctorMode() {
 	}
 
 	fmt.Println("\n✨ Doctor check complete.")
+}
+
+// printVersion prints version information to stdout.
+func printVersion() {
+	fmt.Printf("Little Jack — Coding Assistant\n")
+	fmt.Printf("Version:    %s\n", Version)
+	fmt.Printf("Build time: %s\n", BuildTime)
+	fmt.Printf("Git commit: %s\n", GitCommit)
+}
+
+// handleListSessions prints all sessions for the current project and exits.
+func handleListSessions() {
+	pwd := util.GetWorkDir()
+	metas, err := session.ListSessions(pwd)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading sessions: %v\n", err)
+		os.Exit(1)
+	}
+	if len(metas) == 0 {
+		fmt.Printf("No sessions found for project: %s\n", pwd)
+		return
+	}
+	fmt.Printf("Sessions for %s:\n\n", pwd)
+	for i, m := range metas {
+		fmt.Printf("  [%d] UUID:      %s\n", i+1, m.UUID)
+		fmt.Printf("      Started:   %s\n", m.StartTime)
+		fmt.Printf("      Provider:  %s / %s\n", m.Provider, m.Model)
+		fmt.Println()
+	}
+	fmt.Printf("Resume with: coding --resume <UUID>\n")
+}
+
+// reconstructHistory converts session entries back into LLM history messages.
+// Only user/assistant messages are included; tool calls are omitted because
+// reconstructing the matching tool-call IDs is non-trivial.
+func reconstructHistory(entries []session.Entry) []adk.Message {
+	var msgs []adk.Message
+	for _, e := range entries {
+		switch e.Type {
+		case session.EntryUser:
+			msgs = append(msgs, schema.UserMessage(e.Content))
+		case session.EntryAssistant:
+			if e.Content != "" {
+				msgs = append(msgs, &schema.Message{Role: schema.Assistant, Content: e.Content})
+			}
+		}
+	}
+	return msgs
+}
+
+// convertToTuiEntries converts session.Entry slice to tui.SessionEntry slice.
+func convertToTuiEntries(entries []session.Entry) []tui.SessionEntry {
+	result := make([]tui.SessionEntry, 0, len(entries))
+	for _, e := range entries {
+		if e.Type == session.EntrySessionStart {
+			continue // skip metadata entry
+		}
+		result = append(result, tui.SessionEntry{
+			Type:    string(e.Type),
+			Content: e.Content,
+			Name:    e.Name,
+			Args:    e.Args,
+			Output:  e.Output,
+			Error:   e.Error,
+		})
+	}
+	return result
+}
+
+// handleMCPSubcommand handles the `coding mcp <subcommand>` CLI path.
+func handleMCPSubcommand(args []string) {
+	if len(args) == 0 {
+		fmt.Println("Usage: coding mcp <add|list>")
+		fmt.Println()
+		fmt.Println("  coding mcp add <name> <url>               Add SSE/HTTP MCP server")
+		fmt.Println("  coding mcp add <name> <command> [args...]  Add stdio MCP server")
+		fmt.Println("  coding mcp list                            List configured MCP servers")
+		os.Exit(1)
+	}
+	switch args[0] {
+	case "add":
+		handleMCPAdd(args[1:])
+	case "list":
+		handleMCPList()
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown mcp subcommand: %s\n", args[0])
+		os.Exit(1)
+	}
+}
+
+func handleMCPAdd(args []string) {
+	if len(args) < 2 {
+		fmt.Println("Usage: coding mcp add <name> <url-or-command> [args...]")
+		os.Exit(1)
+	}
+	name := args[0]
+	urlOrCmd := args[1]
+	extraArgs := args[2:]
+
+	srv := &config.MCPServer{}
+	if strings.HasPrefix(urlOrCmd, "http://") || strings.HasPrefix(urlOrCmd, "https://") {
+		srv.URL = urlOrCmd
+		srv.Type = "sse"
+	} else {
+		srv.Command = urlOrCmd
+		srv.Args = extraArgs
+		srv.Type = "stdio"
+	}
+
+	fmt.Printf("Testing MCP server '%s'...\n", name)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	testServers := map[string]*config.MCPServer{name: srv}
+	_, statuses := tools.LoadMCPTools(ctx, testServers)
+
+	if len(statuses) == 0 || statuses[0].Error != nil {
+		errMsg := "unknown error"
+		if len(statuses) > 0 && statuses[0].Error != nil {
+			errMsg = statuses[0].Error.Error()
+		}
+		fmt.Fprintf(os.Stderr, "❌ Connection test failed: %s\n", errMsg)
+		os.Exit(1)
+	}
+
+	fmt.Printf("✅ Connected — %d tool(s) loaded\n", statuses[0].ToolCount)
+
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+	if cfg.MCPServers == nil {
+		cfg.MCPServers = make(map[string]*config.MCPServer)
+	}
+	cfg.MCPServers[name] = srv
+	if err := config.SaveConfig(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to save config: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("✅ MCP server '%s' saved to config\n", name)
+}
+
+func handleMCPList() {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+	if len(cfg.MCPServers) == 0 {
+		fmt.Println("No MCP servers configured.")
+		return
+	}
+	fmt.Println("Configured MCP servers:")
+	fmt.Println()
+	for name, srv := range cfg.MCPServers {
+		if srv.URL != "" {
+			fmt.Printf("  %-20s  url=%s  type=%s\n", name, srv.URL, srv.Type)
+		} else {
+			fmt.Printf("  %-20s  cmd=%s  args=%v  type=%s\n", name, srv.Command, srv.Args, srv.Type)
+		}
+	}
 }
