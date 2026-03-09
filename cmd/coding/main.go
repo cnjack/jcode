@@ -421,10 +421,13 @@ func truncate(s string, l int) string {
 func buildSSHAuthMethods() []ssh.AuthMethod {
 	var methods []ssh.AuthMethod
 
-	// Try SSH agent
+	// Try SSH agent (only if it actually holds keys)
 	if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
 		if conn, err := net.Dial("unix", sock); err == nil {
-			methods = append(methods, ssh.PublicKeysCallback(sshagent.NewClient(conn).Signers))
+			ag := sshagent.NewClient(conn)
+			if keys, err := ag.List(); err == nil && len(keys) > 0 {
+				methods = append(methods, ssh.PublicKeysCallback(ag.Signers))
+			}
 		}
 	}
 
