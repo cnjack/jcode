@@ -146,10 +146,16 @@ func main() {
 		}
 	}
 
+	approvalState := &ToolApprovalState{}
+
+	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore)
+
+	approvalState.SetProgram(p)
+
 	// createAgent is a helper that builds the agent with the current config.
 	// All call sites use this to avoid duplication.
 	createAgent := func() (*adk.ChatModelAgent, error) {
-		return agent.NewAgent(ctx, chatModel, toolList, systemPrompt)
+		return agent.NewAgent(ctx, chatModel, toolList, systemPrompt, approvalState.RequestApproval)
 	}
 
 	ag, err := createAgent()
@@ -173,8 +179,6 @@ func main() {
 		initialResumeEntries = convertToTuiEntries(entries)
 		hasPrompt = false // treat as interactive, not one-shot
 	}
-
-	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore)
 
 	go func() {
 		// Create a session recorder for this run (best-effort).
@@ -213,14 +217,17 @@ func main() {
 			}
 		}
 
-		// Multi-turn loop: listen to both prompt and SSH channels
 		promptCh := tui.GetPromptChannel()
+		pendingPromptCh := tui.GetPendingPromptChannel()
 		sshCh := tui.GetSSHChannel()
 		configCh := tui.GetConfigChannel()
 		addModelCh := tui.GetAddModelChannel()
 		resumeCh := tui.GetResumeChannel()
+		bypassModeCh := tui.GetBypassModeChannel()
 		for {
 			select {
+			case bypassMode := <-bypassModeCh:
+				approvalState.bypassMode = bypassMode
 			case cfgMsg := <-configCh:
 				providerCfg := cfgMsg.Models[cfgMsg.Provider]
 				if providerCfg != nil {
@@ -239,6 +246,17 @@ func main() {
 					rec.RecordUser(userPrompt)
 				}
 				history = append(history, schema.UserMessage(userPrompt))
+				resp := runAgent(ctx, ag, history, p, rec, env.TodoStore)
+				if resp != "" {
+					history = append(history, &schema.Message{Role: schema.Assistant, Content: resp})
+				}
+
+			case pendingPrompt := <-pendingPromptCh:
+				if rec != nil {
+					rec.RecordUser(pendingPrompt)
+				}
+				p.Send(tui.UserPromptMsg{Prompt: pendingPrompt})
+				history = append(history, schema.UserMessage(pendingPrompt))
 				resp := runAgent(ctx, ag, history, p, rec, env.TodoStore)
 				if resp != "" {
 					history = append(history, &schema.Message{Role: schema.Assistant, Content: resp})
@@ -831,5 +849,52 @@ func handleMCPList() {
 		} else {
 			fmt.Printf("  %-20s  cmd=%s  args=%v  type=%s\n", name, srv.Command, srv.Args, srv.Type)
 		}
+	}
+}
+
+type ToolApprovalState struct {
+	p          *tea.Program
+	bypassMode bool
+}
+
+func (s *ToolApprovalState) SetProgram(p *tea.Program) {
+	s.p = p
+}
+
+func (s *ToolApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs string) (bool, error) {
+	if s.bypassMode {
+		return true, nil
+	}
+
+	noApprovalNeeded := map[string]bool{
+		"read":      true,
+		"glob":      true,
+		"grep":      true,
+		"todowrite": true,
+		"todoread":  true,
+		"question":  true,
+		"webfetch":  true,
+	}
+
+	if noApprovalNeeded[toolName] {
+		return true, nil
+	}
+
+	if s.p == nil {
+		return false, fmt.Errorf("TUI program not initialized")
+	}
+
+	respCh := make(chan tui.ToolApprovalResponse, 1)
+	s.p.Send(tui.ToolApprovalRequestMsg{
+		Name: toolName,
+		Args: toolArgs,
+		Resp: respCh,
+	})
+
+	select {
+	case resp := <-respCh:
+		return resp.Approved, nil
+	case <-ctx.Done():
+		return false, ctx.Err()
 	}
 }
