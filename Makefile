@@ -1,6 +1,8 @@
 BIN := coding
 PKG := ./cmd/coding/
 
+export GOFLAGS := -buildvcs=false
+
 .PHONY: build run doctor version install clean
 
 build:
