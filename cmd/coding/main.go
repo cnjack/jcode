@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"strings"
@@ -66,8 +65,9 @@ func main() {
 		return
 	}
 
-	// Disable default log output to prevent background libraries from corrupting TUI
-	log.SetOutput(io.Discard)
+	// Redirect default log output to the app error log so library diagnostics
+	// (e.g. Langfuse upload errors) are visible without corrupting the TUI.
+	log.SetOutput(config.Logger().Writer())
 
 	// Setup wizard if config is missing
 	if config.NeedsSetup() {
@@ -313,6 +313,12 @@ func main() {
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
+		if langfuseTracer != nil {
+			langfuseTracer.Flush()
+		}
 		os.Exit(1)
+	}
+	if langfuseTracer != nil {
+		langfuseTracer.Flush()
 	}
 }

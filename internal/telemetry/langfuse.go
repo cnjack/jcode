@@ -13,6 +13,8 @@ import (
 	"github.com/cnjack/coding/internal/config"
 )
 
+const defaultFlushTimeout = 3 * time.Second
+
 type contextKey string
 
 const traceIDKey contextKey = "langfuse_trace_id"
@@ -26,14 +28,12 @@ type LangfuseTracer struct {
 // Returns nil if required credentials are missing.
 func NewLangfuseTracer(cfg *config.LangfuseConfig) *LangfuseTracer {
 	if cfg == nil || cfg.SecretKey == "" || cfg.PublicKey == "" {
-		config.Logger().Println("[langfuse] tracer disabled: missing credentials")
 		return nil
 	}
 	host := cfg.Host
 	if host == "" {
 		host = "https://cloud.langfuse.com"
 	}
-	config.Logger().Printf("[langfuse] tracer initialized: host=%s publicKey=%s\n", host, cfg.PublicKey)
 	return &LangfuseTracer{
 		client: langfuseacl.NewLangfuse(host, cfg.PublicKey, cfg.SecretKey),
 	}
@@ -49,13 +49,22 @@ func (t *LangfuseTracer) WithNewTrace(ctx context.Context, name string) context.
 		config.Logger().Printf("[langfuse] CreateTrace error: %v\n", err)
 		return ctx
 	}
-	config.Logger().Printf("[langfuse] trace created: id=%s name=%s\n", traceID, name)
 	return context.WithValue(ctx, traceIDKey, traceID)
 }
 
 // Flush ensures all buffered events are sent to Langfuse.
+// It blocks at most defaultFlushTimeout to avoid stalling program exit.
 func (t *LangfuseTracer) Flush() {
-	t.client.Flush()
+	done := make(chan struct{})
+	go func() {
+		t.client.Flush()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(defaultFlushTimeout):
+		config.Logger().Println("[langfuse] flush timed out")
+	}
 }
 
 // AgentMiddleware returns an adk.AgentMiddleware that records model generations
@@ -76,6 +85,7 @@ func (t *LangfuseTracer) AgentMiddleware() adk.AgentMiddleware {
 					TraceID:       traceID,
 					StartTime:     time.Now(),
 				},
+				InMessages: state.Messages,
 			})
 			mu.Lock()
 			pendingGenID = genID
