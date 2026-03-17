@@ -9,6 +9,7 @@ import (
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
+	"github.com/cnjack/coding/internal/config"
 )
 
 type ExecuteInput struct {
@@ -64,7 +65,10 @@ func (et *executeTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 		}
 	}
 
+	config.Logger().Printf("[execute] running (timeout=%dms): %s", timeout, input.Command)
+	start := time.Now()
 	stdout, stderr, err := et.env.Exec.Exec(ctx, input.Command, et.env.pwd, time.Duration(timeout)*time.Millisecond)
+	config.Logger().Printf("[execute] finished in %v, err=%v", time.Since(start), err)
 
 	var result strings.Builder
 	if stdout != "" {

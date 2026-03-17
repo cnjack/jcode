@@ -1,6 +1,8 @@
 package session
 
 import (
+	"encoding/json"
+
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 )
@@ -22,4 +24,29 @@ func ReconstructHistory(entries []Entry) []adk.Message {
 		}
 	}
 	return msgs
+}
+
+// GetLastEnvironment scans the session entries to find the last successful switch_env call,
+// and returns the target environment alias. If none is found, it returns "local".
+func GetLastEnvironment(entries []Entry) string {
+	lastEnv := "local"
+	var lastTarget string
+
+	for _, e := range entries {
+		if e.Type == EntryToolCall && e.Name == "switch_env" {
+			// Extract target from args
+			type args struct {
+				Target string `json:"target"`
+			}
+			var a args
+			if err := json.Unmarshal([]byte(e.Args), &a); err == nil {
+				lastTarget = a.Target
+			}
+		} else if e.Type == EntryToolResult && e.Name == "switch_env" {
+			if e.Error == "" && lastTarget != "" {
+				lastEnv = lastTarget
+			}
+		}
+	}
+	return lastEnv
 }

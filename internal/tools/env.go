@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	appconfig "github.com/cnjack/coding/internal/config"
 )
 
 // Env holds the execution context (local or remote) and is shared by all tools.
@@ -175,10 +176,14 @@ func NewSSHExecutor(addr, user string, authMethods []ssh.AuthMethod) (*SSHExecut
 		addr = addr + ":22"
 	}
 
+	appconfig.Logger().Printf("[ssh] dial tcp %s@%s", user, addr)
+	start := time.Now()
 	client, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
+		appconfig.Logger().Printf("[ssh] dial failed after %v: %v", time.Since(start), err)
 		return nil, fmt.Errorf("ssh dial %s@%s: %w", user, addr, err)
 	}
+	appconfig.Logger().Printf("[ssh] dial success %s@%s in %v", user, addr, time.Since(start))
 
 	// Detect remote platform
 	platform := "linux/amd64"

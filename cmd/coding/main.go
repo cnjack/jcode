@@ -184,6 +184,44 @@ func main() {
 		})
 	}
 
+var sessionResumeWarning string
+	attemptSSHResume := func(target string) string {
+		if target == "local" || target == "" {
+			return ""
+		}
+		var alias *config.SSHAlias
+		for _, a := range cfg.SSHAliases {
+			if a.Name == target {
+				alias = &a
+				break
+			}
+		}
+		if alias == nil {
+			return fmt.Sprintf("[System Note: The session was previously connected to SSH alias '%s', but it no longer exists in config. Environment dropped to 'local'.]", target)
+		}
+
+		authMethods := tools.BuildSSHAuthMethods()
+		
+		user := ""
+		host := alias.Addr
+		if idx := strings.Index(host, "@"); idx > 0 {
+			user = host[:idx]
+			host = host[idx+1:]
+		}
+		
+		sshExec, err := tools.NewSSHExecutor(host, user, authMethods)
+		if err != nil {
+			return fmt.Sprintf("[System Note: The session attempted to reconnect to SSH alias '%s' (%s) but failed: %v. Environment dropped to 'local'.]", target, alias.Addr, err)
+		}
+
+		env.SetSSH(sshExec, env.Pwd())
+		label := sshExec.Label()
+		if env.OnEnvChange != nil {
+			env.OnEnvChange(label, false, nil)
+		}
+		return ""
+	}
+
 	// Load a previous session if --resume was requested.
 	var initialHistory []adk.Message
 	var initialResumeUUID string
@@ -198,6 +236,11 @@ func main() {
 		initialResumeUUID = resumeUUID
 		initialResumeEntries = tui.ConvertSessionEntries(entries)
 		hasPrompt = false // treat as interactive, not one-shot
+		
+		targetEnv := session.GetLastEnvironment(entries)
+		if targetEnv != "local" {
+			sessionResumeWarning = attemptSSHResume(targetEnv)
+		}
 	}
 
 	go func() {
@@ -262,6 +305,10 @@ func main() {
 				}
 
 			case userPrompt := <-promptCh:
+				if sessionResumeWarning != "" {
+					userPrompt = sessionResumeWarning + "\n\n" + userPrompt
+					sessionResumeWarning = ""
+				}
 				if rec != nil {
 					rec.RecordUser(userPrompt)
 				}
@@ -272,10 +319,14 @@ func main() {
 				}
 
 			case pendingPrompt := <-pendingPromptCh:
+				p.Send(tui.UserPromptMsg{Prompt: pendingPrompt})
+				if sessionResumeWarning != "" {
+					pendingPrompt = sessionResumeWarning + "\n\n" + pendingPrompt
+					sessionResumeWarning = ""
+				}
 				if rec != nil {
 					rec.RecordUser(pendingPrompt)
 				}
-				p.Send(tui.UserPromptMsg{Prompt: pendingPrompt})
 				history = append(history, schema.UserMessage(pendingPrompt))
 				resp := runner.Run(ctx, ag, history, p, rec, env.TodoStore, langfuseTracer)
 				if resp != "" {
@@ -291,6 +342,11 @@ func main() {
 				history = session.ReconstructHistory(entries)
 				approvalState.SetSessionApproval(false)
 				p.Send(tui.SessionResumedMsg{UUID: uuid, Entries: tui.ConvertSessionEntries(entries)})
+				
+				targetEnv := session.GetLastEnvironment(entries)
+				if targetEnv != "local" {
+					sessionResumeWarning = attemptSSHResume(targetEnv)
+				}
 
 			case connMsg := <-sshCh:
 				switch msg := connMsg.(type) {
