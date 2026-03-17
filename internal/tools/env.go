@@ -16,10 +16,11 @@ import (
 
 // Env holds the execution context (local or remote) and is shared by all tools.
 type Env struct {
-	Exec      Executor
-	pwd       string
-	platform  string
-	TodoStore *TodoStore
+	Exec        Executor
+	pwd         string
+	platform    string
+	TodoStore   *TodoStore
+	OnEnvChange func(envLabel string, isLocal bool, err error)
 }
 
 // NewEnv creates a local Env.

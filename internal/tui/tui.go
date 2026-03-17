@@ -94,6 +94,8 @@ type Model struct {
 	approvalToolName string
 	approvalToolArgs string
 	approvalRespChan chan ToolApprovalResponse
+
+	envLabel string
 }
 
 // dirItem implements list.Item
@@ -250,6 +252,7 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 		history:        loadHistory(),
 		todoStore:      todoStore,
 		lines:          initialLines,
+		envLabel:       "Local",
 	}
 	m.historyIndex = len(m.history)
 
@@ -741,6 +744,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		sshCh <- msg
 
 	case SSHCancelMsg:
+		m.envLabel = "Local"
 		sshCh <- msg
 
 	case ConfigUpdatedMsg:
@@ -861,6 +865,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SSHStatusMsg:
 		m.thinking = false
 		if msg.Success {
+			m.envLabel = msg.Label
 			m.lines = append(m.lines, fmt.Sprintf("   %s Connected to %s",
 				toolSuccessStyle.Render("✓"), toolNameStyle.Render(msg.Label)))
 			// If this was a direct /ssh user@host connection, offer to save alias
@@ -1062,7 +1067,13 @@ func (m Model) View() string {
 		return m.approvalDialogView()
 	}
 
-	header := titleStyle.Render("🚀 Little Jack — Coding Assistant")
+	headerText := "🚀 Little Jack — Coding Assistant  |  "
+	if m.envLabel == "Local" || m.envLabel == "local" || m.envLabel == "" {
+		headerText += "🖥️  Env: Local"
+	} else {
+		headerText += "🔗 Env: SSH (" + m.envLabel + ")"
+	}
+	header := titleStyle.Render(headerText)
 	headerLine := divider(m.width)
 	headerHeight := lipgloss.Height(header) + lipgloss.Height(headerLine)
 
