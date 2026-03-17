@@ -5,7 +5,7 @@
 A Go-based CLI coding assistant built on the [Eino](https://github.com/cloudwego/eino) framework with a [BubbleTea](https://github.com/charmbracelet/bubbletea) TUI.
 
 - **Binary entry point:** `cmd/coding/`
-- **Config directory:** `~/.jcoding/` (config.json, session files, history, error.log)
+- **Config directory:** `~/.jcoding/` (config.json, session files, history, debug.log)
 - **Module:** `github.com/cnjack/coding`
 - **Build:** `make build` / `make run` / `make install`
 
@@ -48,7 +48,7 @@ config.Logger().Printf("[component] something happened: %v", err)
 ```
 
 - Lazily initialised on first call (thread-safe via `sync.Once`)
-- Writes to `~/.jcoding/error.log` (append, mode 0600)
+- Writes to `~/.jcoding/debug.log` (append, mode 0600)
 - Falls back to stderr if the log file cannot be opened
 - The log file is the single authoritative location for runtime diagnostics — users inspect it to debug issues without any output polluting the TUI
 
@@ -108,7 +108,7 @@ type Executor interface {
 - `telemetry.NewLangfuseTracer(cfg)` — returns `nil` if credentials are absent
 - Wraps the `eino-ext/libs/acl/langfuse` client
 - Records: one `CreateTrace` per `runner.Run` call; `CreateGeneration`/`EndGeneration` around each model call; `CreateSpan`/`EndSpan` per tool call
-- All errors and diagnostic messages go through `config.Logger()` (→ `~/.jcoding/error.log`)
+- All errors and diagnostic messages go through `config.Logger()` (→ `~/.jcoding/debug.log`)
 - Call `tracer.Flush()` at program exit (already done in `cmd/coding/main.go`)
 - Config keys in `~/.jcoding/config.json`:
 
@@ -140,7 +140,7 @@ Entry types: `session_start`, `user`, `assistant`, `tool_call`, `tool_result`
 
 ## Conventions
 
-- **No `fmt.Print*` for diagnostics** — use `config.Logger()` so output goes to `~/.jcoding/error.log`
+- **No `fmt.Print*` for diagnostics** — use `config.Logger()` so output goes to `~/.jcoding/debug.log`
 - **Tool errors are surfaced as string results** (`fmt.Sprintf("Tool execution failed: %v", err)`) — the agent sees them and can react
 - **All file paths in tools are absolute** or resolved relative to `Env.Pwd`
 - **JSON schema for tool params**: use `schema.ParamsOneOf` with `Type`/`Desc`/`Required` fields
@@ -151,7 +151,7 @@ Entry types: `session_start`, `user`, `assistant`, `tool_call`, `tool_result`
 
 ## Debugging
 
-1. Check `~/.jcoding/error.log` for Langfuse init/trace errors and other runtime diagnostics
+1. Check `~/.jcoding/debug.log` for Langfuse init/trace errors and other runtime diagnostics
 2. Run `make doctor` (or `coding --doctor`) to test model + MCP connectivity
 3. Run `coding --session` to list recorded sessions for the current directory
 4. Resume a session: `coding --resume <UUID>`

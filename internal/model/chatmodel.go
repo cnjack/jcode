@@ -10,6 +10,8 @@ import (
 
 	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
+	"github.com/cnjack/coding/internal/config"
+	"time"
 )
 
 // TokenUsage tracks token consumption across all API calls
@@ -99,7 +101,10 @@ func (m *chatModel) WithTools(tools []*schema.ToolInfo) (einomodel.ToolCallingCh
 
 func (m *chatModel) Generate(ctx context.Context, input []*schema.Message, _ ...einomodel.Option) (*schema.Message, error) {
 	req := m.buildRequest(input, false)
+	config.Logger().Printf("[chatmodel] Generate start (model: %s)", m.model)
+	start := time.Now()
 	resp, err := m.client.CreateChatCompletion(ctx, req)
+	config.Logger().Printf("[chatmodel] Generate finished in %v, err: %v", time.Since(start), err)
 	if err != nil {
 		return nil, err
 	}
@@ -119,10 +124,14 @@ func (m *chatModel) Stream(ctx context.Context, input []*schema.Message, _ ...ei
 	req.StreamOptions = &openai.StreamOptions{
 		IncludeUsage: true,
 	}
+	config.Logger().Printf("[chatmodel] Stream start (model: %s)", m.model)
+	start := time.Now()
 	stream, err := m.client.CreateChatCompletionStream(ctx, req)
 	if err != nil {
+		config.Logger().Printf("[chatmodel] Stream failed to start in %v, err: %v", time.Since(start), err)
 		return nil, err
 	}
+	config.Logger().Printf("[chatmodel] Stream started successfully in %v", time.Since(start))
 
 	sr, sw := schema.Pipe[*schema.Message](16)
 	go func() {

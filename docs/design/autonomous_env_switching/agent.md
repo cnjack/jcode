@@ -40,3 +40,13 @@ Note: The TUI displays your current environment to the user. Do not state "I wil
 3. Tool connects and assigns the new `SSHExecutor` to the global `agent.Env`.
 4. Tool emits an event to BubbleTea to update the UI StatusBar.
 5. Model receives the short success return and proceeds with standard `execute` / `read_file` commands on the new environment.
+
+## 5. Session Persistence & Resumes
+
+When a user exits and later resumes a session, the current environment state must be preserved so the agent does not unexpectedly drop back to the `local` environment.
+
+**Design:**
+1. **Replaying State on Resume**: Because the session recorder logs all `EntryToolCall` and `EntryToolResult` events, the engine can scan the loaded history (`session.LoadSession`) for the **last successful `switch_env` tool execution**.
+2. **Auto-Connecting**: If the last known successful environment wasn't `local` (e.g., an SSH alias), the core initialisation flow must extract that alias from the tool arguments and automatically invoke `Env.SetSSH` to re-establish the connection *before* resuming the main loop.
+3. **Fallback handling**: If the SSH server is temporarily unreachable upon resume, the initialisation layer should log a warning, reset the environment to `local`, and inform the agent/user of the fallback.
+4. **UI Synchronisation**: The BubbleTea TUI must query the initialised `Env` at startup so the Status Bar immediately reflects the correct loaded environment.
