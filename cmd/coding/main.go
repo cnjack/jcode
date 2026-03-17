@@ -91,7 +91,7 @@ func main() {
 	ctx := context.Background()
 	pwd := util.GetWorkDir()
 	platform := util.GetSystemInfo()
-	systemPrompt := prompts.GetSystemPrompt(platform, pwd)
+	systemPrompt := prompts.GetSystemPrompt(platform, pwd, "local")
 
 	providerCfg := cfg.Models[cfg.Provider]
 	if providerCfg == nil {
@@ -108,10 +108,12 @@ func main() {
 	}
 
 	env := tools.NewEnv(pwd, platform)
+
 	toolList := []tool.BaseTool{
 		env.NewReadTool(), env.NewEditTool(), env.NewWriteTool(),
 		env.NewExecuteTool(), env.NewGrepTool(),
 		env.NewTodoWriteTool(), env.NewTodoReadTool(),
+		env.NewSwitchEnvTool(),
 	}
 
 	var mcpStatuses []tui.MCPStatusItem
@@ -154,6 +156,32 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating agent: %v\n", err)
 		os.Exit(1)
+	}
+
+	env.OnEnvChange = func(envLabel string, isLocal bool, err error) {
+		if err != nil {
+			p.Send(tui.SSHStatusMsg{
+				Success: false,
+				Err:     err,
+			})
+			return
+		}
+		if isLocal {
+			systemPrompt = prompts.GetSystemPrompt(platform, pwd, "local")
+			if newAg, err := createAgent(); err == nil {
+				ag = newAg
+			}
+			p.Send(tui.SSHCancelMsg{})
+			return
+		}
+		systemPrompt = prompts.GetSystemPrompt(platform, pwd, envLabel)
+		if newAg, err := createAgent(); err == nil {
+			ag = newAg
+		}
+		p.Send(tui.SSHStatusMsg{
+			Success: true,
+			Label:   envLabel,
+		})
 	}
 
 	// Load a previous session if --resume was requested.
@@ -273,7 +301,7 @@ func main() {
 				case tui.SSHCancelMsg:
 					_ = msg
 					env.ResetToLocal(pwd, platform)
-					systemPrompt = prompts.GetSystemPrompt(platform, pwd)
+					systemPrompt = prompts.GetSystemPrompt(platform, pwd, "local")
 					if newAg, err := createAgent(); err == nil {
 						ag = newAg
 					}
