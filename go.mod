@@ -9,6 +9,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/cloudwego/eino v0.7.37
 	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.8
+	github.com/cloudwego/eino-ext/libs/acl/langfuse v0.0.0-20260313050455-88e279b3b32f
 	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/sashabaranov/go-openai v1.32.5
@@ -21,7 +22,7 @@ require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
-	github.com/buger/jsonparser v1.1.1 // indirect
+	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.15.0 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
@@ -35,7 +36,6 @@ require (
 	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.5.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
-	github.com/cloudwego/eino-ext/libs/acl/langfuse v0.0.0-20260313050455-88e279b3b32f // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dlclark/regexp2 v1.11.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
