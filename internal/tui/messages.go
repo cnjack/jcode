@@ -114,16 +114,26 @@ type TokenUpdateMsg struct {
 	ModelContextLimit int // 0 if unknown
 }
 
+// ApprovalMode represents the approval mode state
+type ApprovalMode int
+
+const (
+	ModeManual ApprovalMode = iota // Manual approval mode (default)
+	ModeAuto                       // Auto-approve mode
+)
+
 // ToolApprovalRequestMsg is sent when a tool needs user approval
 type ToolApprovalRequestMsg struct {
-	Name string
-	Args string
-	Resp chan ToolApprovalResponse
+	Name       string
+	Args       string
+	Resp       chan ToolApprovalResponse
+	IsExternal bool // Whether this is an external path access (for read tool)
 }
 
 // ToolApprovalResponse is the user's response to a tool approval request
 type ToolApprovalResponse struct {
 	Approved bool
+	Mode     ApprovalMode // Mode after this response (stay MANUAL or switch to AUTO)
 }
 
 // SSHConnectMsg is sent when user initially requests connection
