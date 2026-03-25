@@ -96,133 +96,17 @@ const (
 
 ---
 
-## 5. Detailed Implementation
+## 5. Key Design Decisions
 
-### 5.1 Message Structures (`internal/tui/messages.go`)
+### 5.1 Approval Dialog
 
-```go
-// ToolApprovalResponse is the user's response to a tool approval request
-type ToolApprovalResponse struct {
-    Approved bool
-    Mode     ApprovalMode // Mode after this response (stay MANUAL or switch to AUTO)
-}
+The approval dialog distinguishes between normal tool calls and external path access with differentiated headers:
+- **Normal tool call**: "⚠️ Tool Approval Required"
+- **External path access**: "⚠️ External Path Access"
 
-// ToolApprovalRequestMsg is sent when a tool needs user approval
-type ToolApprovalRequestMsg struct {
-    Name       string
-    Args       string
-    Resp       chan ToolApprovalResponse
-    IsExternal bool // Whether this is an external path access
-}
+Footer options: `[y] Approve once  [a] Approve all  [n] Reject`
 
-// ApprovalModeChangedMsg notifies mode changes (optional, for broadcast)
-type ApprovalModeChangedMsg struct {
-    Mode ApprovalMode
-}
-```
-
-### 5.2 Approval State Management (`internal/runner/approval.go`)
-
-```go
-type ApprovalState struct {
-    p        *tea.Program
-    mode     ApprovalMode
-    workpath string
-}
-
-func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs string) (bool, error) {
-    // [1] AUTO mode: pass all directly
-    if s.mode == ModeAuto {
-        return true, nil
-    }
-
-    // [2] MANUAL mode: tiered decision
-    if s.isNoApprovalNeeded(toolName) {
-        return true, nil
-    }
-
-    if toolName == "read" {
-        return s.handleReadApproval(toolArgs)
-    }
-
-    if toolName == "execute" && s.isSafeCommand(toolArgs) {
-        return true, nil
-    }
-
-    // [3] Default: request user approval
-    return s.requestUserApproval(ctx, toolName, toolArgs, false)
-}
-
-// Path detection: check if a path is within workpath
-func (s *ApprovalState) isWithinWorkpath(path string) bool {
-    absPath, _ := filepath.Abs(path)
-    absWork, _ := filepath.Abs(s.workpath)
-    rel, err := filepath.Rel(absWork, absPath)
-    if err != nil { return false }
-    return !strings.HasPrefix(rel, "..") && rel != ".."
-}
-```
-
-### 5.3 TUI Interaction Layer (`internal/tui/tui.go`)
-
-#### Model Extension
-```go
-type Model struct {
-    // Approval state machine fields
-    approvalMode       ApprovalMode
-    approvalPending    bool
-    approvalToolName   string
-    approvalToolArgs   string
-    approvalRespChan   chan ToolApprovalResponse
-    approvalIsExternal bool
-}
-```
-
-#### Keyboard Event Handling
-```go
-// Inside approval dialog
-if m.approvalPending {
-    switch msg.String() {
-    case "y", "Y":  // ApproveOnce
-        m.sendApprovalResponse(true, ModeManual)
-    case "a", "A":  // ApproveAll → switch to AUTO
-        m.approvalMode = ModeAuto
-        m.sendApprovalResponse(true, ModeAuto)
-    case "n", "N", "esc":  // Reject
-        m.sendApprovalResponse(false, m.approvalMode)
-    }
-}
-
-// Global shortcut: toggle approval mode
-if msg.String() == "ctrl+a" && !m.approvalPending {
-    m.approvalMode = 1 - m.approvalMode // toggle
-    m.notifyModeChange()
-}
-```
-
-#### Status Bar Indicator
-```go
-if state.AutoApprove {
-    rightParts = append(rightParts, "Approve: " + warningStyle.Render("Auto"))
-} else {
-    rightParts = append(rightParts, "Approve: " + mutedStyle.Render("Ask"))
-}
-```
-
-### 5.4 Approval Dialog View (`internal/tui/pickers.go`)
-
-```go
-func (m Model) approvalDialogView() string {
-    header := "⚠️ Tool Approval Required"
-    if m.approvalIsExternal {
-        header = "⚠️ External Path Access"
-    }
-    footer := "[y] Approve once  [a] Approve all  [n] Reject"
-    return renderDialog(header, m.approvalToolName, m.approvalToolArgs, footer)
-}
-```
-
-### 5.5 Rejection Feedback Mechanism
+### 5.2 Rejection Feedback Mechanism
 
 When the user presses `n` (reject), two things happen:
 
@@ -231,38 +115,22 @@ When the user presses `n` (reject), two things happen:
    ⚠ Rejected: <tool_name> — user denied this operation
    ```
 
-2. **Agent middleware return**: The tool middleware in `internal/agent/agent.go` returns a structured rejection message that includes a reminder telling the LLM not to retry or use alternative approaches:
-   ```
-   Tool execution was rejected by user. IMPORTANT: The user has explicitly denied
-   this operation. Do NOT attempt to perform the same action using alternative tools,
-   different commands, or workarounds. Respect the user's decision and either ask the
-   user how they would like to proceed or move on to a different task.
-   ```
+2. **Agent middleware return**: The tool middleware returns a structured rejection message that includes a reminder telling the LLM not to retry or use alternative approaches to circumvent the user's decision.
 
-### 5.6 Module Synchronization (`cmd/coding/main.go`)
+### 5.3 Module Synchronization
 
-```go
-// Listen for TUI mode changes
-case enabled := <-autoApproveCh:
-    approvalState.SetSessionApproval(enabled)
+- TUI mode changes are propagated to Runner via a unidirectional channel (`autoApproveCh`)
+- Environment switches (e.g., SSH to a new host) trigger `workpath` updates in approval state, so path detection recalculates against the new working directory
 
-// Listen for workpath changes
-env.OnEnvChange = func(envLabel string, isLocal bool, err error) {
-    approvalState.SetWorkpath(newPwd)
-}
-```
+### 5.4 Status Bar Indicator
+
+The status bar always shows the current approval mode:
+- **Manual mode**: `Approve: Ask`
+- **Auto mode**: `Approve: Auto` (rendered with warning style)
 
 ---
 
-## 6. Interface Contracts
-
-### 6.1 Public Channel Definitions
-```go
-var autoApproveCh = make(chan bool, 1)   // true=Auto, false=Manual
-func GetAutoApproveChannel() <-chan bool { return autoApproveCh }
-```
-
-### 6.2 Path Detection Edge Cases
+## 6. Path Detection Edge Cases
 
 | Input Path | Workpath | Result | Notes |
 |-----------|----------|--------|-------|
@@ -291,22 +159,7 @@ func GetAutoApproveChannel() <-chan bool { return autoApproveCh }
 
 ## 8. Test Plan
 
-### 8.1 Unit Tests
-
-```go
-func TestIsWithinWorkpath(t *testing.T) {
-    tests := []struct{
-        workpath, target string
-        expected bool
-    }{
-        {"/proj", "/proj/a.txt", true},
-        {"/proj", "/home/user/.ssh/key", false},
-        {"/proj", "/proj/../other", false},
-    }
-}
-```
-
-### 8.2 Integration Test Scenarios
+### 8.1 Integration Test Scenarios
 
 | Scenario | Steps | Expected Result |
 |----------|-------|-----------------|
@@ -318,7 +171,7 @@ func TestIsWithinWorkpath(t *testing.T) {
 | **Rejection feedback** | Press `n` to reject | TUI shows rejection notice; agent receives reminder not to retry |
 | **Environment switch** | SSH to new workpath, then read file | Path detection recalculates against new `workpath` |
 
-### 8.3 Manual Verification Checklist
+### 8.2 Manual Verification Checklist
 
 - [ ] Status bar indicator matches current mode
 - [ ] Approval dialog options are clear and unambiguous
