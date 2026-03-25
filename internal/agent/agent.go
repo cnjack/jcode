@@ -25,7 +25,10 @@ func NewAgent(ctx context.Context, chatmodel model.ToolCallingChatModel, tools [
 							return &compose.ToolOutput{Result: fmt.Sprintf("Tool approval error: %v", err)}, nil
 						}
 						if !approved {
-							return &compose.ToolOutput{Result: "Tool execution was rejected by user"}, nil
+							return &compose.ToolOutput{Result: "Tool execution was rejected by user. " +
+								"IMPORTANT: The user has explicitly denied this operation. " +
+								"Do NOT attempt to perform the same action using alternative tools, different commands, or workarounds. " +
+								"Respect the user's decision and either ask the user how they would like to proceed or move on to a different task."}, nil
 						}
 					}
 					out, err := next(ctx, input)

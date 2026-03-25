@@ -90,10 +90,12 @@ type Model struct {
 	pendingPrompts []string
 	autoApprove    bool
 
-	approvalPending  bool
-	approvalToolName string
-	approvalToolArgs string
-	approvalRespChan chan ToolApprovalResponse
+	approvalPending    bool
+	approvalToolName   string
+	approvalToolArgs   string
+	approvalRespChan   chan ToolApprovalResponse
+	approvalIsExternal bool // Whether this is an external path access
+	approvalMode       ApprovalMode
 
 	envLabel string
 }
@@ -253,6 +255,7 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 		todoStore:      todoStore,
 		lines:          initialLines,
 		envLabel:       "Local",
+		approvalMode:   ModeManual, // Default to manual approval mode
 	}
 	m.historyIndex = len(m.history)
 
@@ -343,10 +346,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.approvalPending {
 			switch msg.String() {
 			case "y", "Y":
+				// Event: ApproveOnce - approve current only, stay in MANUAL mode
 				m.approvalPending = false
-				m.autoApprove = true
 				if m.approvalRespChan != nil {
-					m.approvalRespChan <- ToolApprovalResponse{Approved: true}
+					m.approvalRespChan <- ToolApprovalResponse{Approved: true, Mode: ModeManual}
+				}
+				m.textarea.Focus()
+				m.refreshViewport()
+				return m, tea.Batch(cmds...)
+			case "a", "A":
+				// Event: ApproveAll - approve current and switch to AUTO mode
+				m.approvalPending = false
+				m.approvalMode = ModeAuto
+				m.autoApprove = true // Keep for backward compatibility
+				if m.approvalRespChan != nil {
+					m.approvalRespChan <- ToolApprovalResponse{Approved: true, Mode: ModeAuto}
 				}
 				select {
 				case autoApproveCh <- true:
@@ -356,10 +370,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refreshViewport()
 				return m, tea.Batch(cmds...)
 			case "n", "N", "esc":
+				// Event: Reject - deny the operation
 				m.approvalPending = false
 				if m.approvalRespChan != nil {
-					m.approvalRespChan <- ToolApprovalResponse{Approved: false}
+					m.approvalRespChan <- ToolApprovalResponse{Approved: false, Mode: m.approvalMode}
 				}
+				// Show rejection notice in chat view
+				m.lines = append(m.lines, fmt.Sprintf("   %s %s — user denied this operation",
+					toolErrorStyle.Render("⚠ Rejected:"),
+					toolNameStyle.Render(m.approvalToolName)))
 				m.textarea.Focus()
 				m.refreshViewport()
 				return m, tea.Batch(cmds...)
@@ -562,10 +581,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "ctrl+c":
 				return m, tea.Quit
-			case "shift+tab":
-				m.autoApprove = !m.autoApprove
+			case "ctrl+a":
+				// Event: ToggleMode - switch between MANUAL and AUTO approval modes
+				if m.approvalMode == ModeManual {
+					m.approvalMode = ModeAuto
+					m.autoApprove = true // Keep for backward compatibility
+				} else {
+					m.approvalMode = ModeManual
+					m.autoApprove = false
+				}
 				select {
-				case autoApproveCh <- m.autoApprove:
+				case autoApproveCh <- (m.approvalMode == ModeAuto):
 				default:
 				}
 				m.refreshViewport()
@@ -982,6 +1008,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.approvalToolName = msg.Name
 		m.approvalToolArgs = msg.Args
 		m.approvalRespChan = msg.Resp
+		m.approvalIsExternal = msg.IsExternal
 		m.textarea.Blur()
 		m.refreshViewport()
 

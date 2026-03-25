@@ -260,12 +260,22 @@ func (m Model) approvalDialogView() string {
 		Padding(1, 2).
 		Width(modW)
 
-	headerText := toolNameStyle.Render("⚠️ Tool Approval Required")
+	// Different header based on whether this is external path access
+	var headerText string
+	if m.approvalIsExternal {
+		headerText = toolNameStyle.Render("⚠️ External Path Access")
+	} else {
+		headerText = toolNameStyle.Render("⚠️ Tool Approval Required")
+	}
 
 	argsDisplay := m.approvalToolArgs
 	if len(argsDisplay) > 200 {
 		argsDisplay = argsDisplay[:200] + "..."
 	}
+
+	// Updated options: [y] once, [a] all, [n] reject
+	optionsText := lipgloss.NewStyle().Foreground(colorMuted).Render(
+		"[y] Approve once  [a] Approve all  [n] Reject")
 
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		lipgloss.NewStyle().Bold(true).Render(headerText),
@@ -275,7 +285,7 @@ func (m Model) approvalDialogView() string {
 		lipgloss.NewStyle().Foreground(colorMuted).Render("Arguments:"),
 		lipgloss.NewStyle().Foreground(colorText).Render(argsDisplay),
 		"",
-		lipgloss.NewStyle().Foreground(colorMuted).Render("[y] Approve  [n] Reject"),
+		optionsText,
 	)
 
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, boxStyle.Render(content))
