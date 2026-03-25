@@ -133,7 +133,7 @@ func main() {
 		}
 	}
 
-	approvalState := &runner.ApprovalState{}
+	approvalState := runner.NewApprovalState(pwd)
 
 	// Setup Langfuse tracer if telemetry is configured.
 	var langfuseTracer *telemetry.LangfuseTracer
@@ -167,6 +167,7 @@ func main() {
 			return
 		}
 		if isLocal {
+			approvalState.SetWorkpath(pwd)
 			systemPrompt = prompts.GetSystemPrompt(platform, pwd, "local")
 			if newAg, err := createAgent(); err == nil {
 				ag = newAg
@@ -174,6 +175,7 @@ func main() {
 			p.Send(tui.SSHCancelMsg{})
 			return
 		}
+		approvalState.SetWorkpath(env.Pwd())
 		systemPrompt = prompts.GetSystemPrompt(platform, pwd, envLabel)
 		if newAg, err := createAgent(); err == nil {
 			ag = newAg
@@ -184,7 +186,7 @@ func main() {
 		})
 	}
 
-var sessionResumeWarning string
+	var sessionResumeWarning string
 	attemptSSHResume := func(target string) string {
 		if target == "local" || target == "" {
 			return ""
@@ -201,14 +203,14 @@ var sessionResumeWarning string
 		}
 
 		authMethods := tools.BuildSSHAuthMethods()
-		
+
 		user := ""
 		host := alias.Addr
 		if idx := strings.Index(host, "@"); idx > 0 {
 			user = host[:idx]
 			host = host[idx+1:]
 		}
-		
+
 		sshExec, err := tools.NewSSHExecutor(host, user, authMethods)
 		if err != nil {
 			return fmt.Sprintf("[System Note: The session attempted to reconnect to SSH alias '%s' (%s) but failed: %v. Environment dropped to 'local'.]", target, alias.Addr, err)
@@ -236,7 +238,7 @@ var sessionResumeWarning string
 		initialResumeUUID = resumeUUID
 		initialResumeEntries = tui.ConvertSessionEntries(entries)
 		hasPrompt = false // treat as interactive, not one-shot
-		
+
 		targetEnv := session.GetLastEnvironment(entries)
 		if targetEnv != "local" {
 			sessionResumeWarning = attemptSSHResume(targetEnv)
@@ -342,7 +344,7 @@ var sessionResumeWarning string
 				history = session.ReconstructHistory(entries)
 				approvalState.SetSessionApproval(false)
 				p.Send(tui.SessionResumedMsg{UUID: uuid, Entries: tui.ConvertSessionEntries(entries)})
-				
+
 				targetEnv := session.GetLastEnvironment(entries)
 				if targetEnv != "local" {
 					sessionResumeWarning = attemptSSHResume(targetEnv)

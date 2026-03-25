@@ -88,7 +88,6 @@ type Model struct {
 	modelContextLimit int
 
 	pendingPrompts []string
-	autoApprove    bool
 
 	approvalPending    bool
 	approvalToolName   string
@@ -358,7 +357,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Event: ApproveAll - approve current and switch to AUTO mode
 				m.approvalPending = false
 				m.approvalMode = ModeAuto
-				m.autoApprove = true // Keep for backward compatibility
 				if m.approvalRespChan != nil {
 					m.approvalRespChan <- ToolApprovalResponse{Approved: true, Mode: ModeAuto}
 				}
@@ -585,10 +583,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Event: ToggleMode - switch between MANUAL and AUTO approval modes
 				if m.approvalMode == ModeManual {
 					m.approvalMode = ModeAuto
-					m.autoApprove = true // Keep for backward compatibility
 				} else {
 					m.approvalMode = ModeManual
-					m.autoApprove = false
 				}
 				select {
 				case autoApproveCh <- (m.approvalMode == ModeAuto):
@@ -808,7 +804,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 
 	case SessionResumedMsg:
-		m.autoApprove = false
+		m.approvalMode = ModeManual
 		m.thinking = false
 		m.mode = ModeAgent
 		m.agentDone = true

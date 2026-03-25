@@ -107,7 +107,7 @@ func (m Model) inputAreaView() string {
 		Width:             m.width,
 		ActiveProvider:    m.activeProvider,
 		ActiveModel:       m.activeModel,
-		AutoApprove:       m.autoApprove,
+		AutoApprove:       m.approvalMode == ModeAuto,
 		TotalTokens:       m.totalTokens,
 		ModelContextLimit: m.modelContextLimit,
 		MCPStatuses:       m.mcpStatuses,
