@@ -181,3 +181,79 @@ type MCPStatusItem struct {
 type MCPStatusMsg struct {
 	Statuses []MCPStatusItem
 }
+
+// BgTaskDoneMsg is sent when a background task completes.
+type BgTaskDoneMsg struct {
+	TaskID  string
+	Command string
+	Status  string
+	Output  string
+}
+
+// SubagentStartMsg is sent when a subagent begins executing.
+type SubagentStartMsg struct {
+	Name string
+	Type string
+}
+
+// SubagentDoneMsg is sent when a subagent finishes.
+type SubagentDoneMsg struct {
+	Name   string
+	Result string
+	Err    error
+}
+
+// CompactRequestMsg is sent when the user requests manual context compaction.
+type CompactRequestMsg struct{}
+
+// CompactDoneMsg is sent when context compaction completes.
+type CompactDoneMsg struct {
+	OldTokens int64
+	NewTokens int64
+	Err       error
+}
+
+// compactCh is used to notify main goroutine to compact context.
+var compactCh = make(chan struct{}, 1)
+
+// GetCompactChannel returns the channel that receives compact requests.
+func GetCompactChannel() <-chan struct{} {
+	return compactCh
+}
+
+// AgentMode represents the agent's operational mode.
+type AgentMode int
+
+const (
+	ModeNormal    AgentMode = iota // Default mode
+	ModePlanning                   // Plan mode — read-only exploration
+	ModeExecuting                  // Executing an approved plan
+)
+
+// PlanApprovalMsg is sent when the agent wants to show a plan for approval.
+type PlanApprovalMsg struct {
+	PlanContent string
+	PlanPath    string
+}
+
+// PlanApprovedMsg is sent when the user approves a plan.
+type PlanApprovedMsg struct{}
+
+// PlanRejectedMsg is sent when the user rejects a plan.
+type PlanRejectedMsg struct {
+	Feedback string
+}
+
+// planResponseCh carries plan approval/rejection from TUI to main goroutine.
+var planResponseCh = make(chan PlanResponse, 1)
+
+// PlanResponse is the user's response to a plan approval.
+type PlanResponse struct {
+	Approved bool
+	Feedback string // non-empty on rejection
+}
+
+// GetPlanResponseChannel returns the channel for plan responses.
+func GetPlanResponseChannel() <-chan PlanResponse {
+	return planResponseCh
+}

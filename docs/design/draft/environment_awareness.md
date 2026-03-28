@@ -1,13 +1,18 @@
 # Environment Awareness
 
+> **Last verified**: 2026-03-28 against codebase at `github.com/cloudwego/eino v0.7.37`
+> **Priority**: P2 — Nice to have
+> **Scope reduction**: Claude Code only injects `git status` (97 tokens) + platform/cwd at session start. We follow suit: git branch + dirty flag + project type. Directory tree is **deferred** (the agent can use `grep`/`read` to explore).
+
 ## 1. Problem Statement
 
-The agent's system prompt currently contains only three pieces of environment context:
+The agent's system prompt currently contains only four pieces of environment context:
 
 ```
 Current work path: /home/user/myproject
 Platform: linux/amd64
 Date: 2026-03-17
+Current Environment: local
 ```
 
 This is enough for the agent to locate files, but it leaves out context that meaningfully changes how it should behave:
@@ -17,6 +22,8 @@ This is enough for the agent to locate files, but it leaves out context that mea
 - **Directory structure**: The agent has no mental map of the project layout. It relies on `grep` and `read` to locate files it should already know about.
 
 These facts are knowable at session start with a few shell commands (< 100ms total) and remain stable for the duration of a session.
+
+**2026 AI Landscape Note**: Rich environment context injection is standard practice across all production coding assistants (Cursor, Windsurf, Claude Code, Copilot). All of them inject git state, project markers, and directory overviews into their system prompts. This design aligns with established patterns.
 
 ## 2. Goals & Non-Goals
 
@@ -35,12 +42,21 @@ These facts are knowable at session start with a few shell commands (< 100ms tot
 
 ### `internal/prompts/system.md`
 
+The system prompt template currently includes:
+
 ```markdown
 Current work path: {{ .Pwd }}
 Platform: {{ .Platform }}
 Date: {{ .Date }}
 Current Environment: {{ .EnvLabel }}
+
+{{if .SSHAliases}}Available target environments for 'switch_env' tool:
+- local
+{{range .SSHAliases}}- {{.Name}} ({{.Addr}})
+{{end}}{{end}}
 ```
+
+The system prompt also includes a `# Rules` section, `# Tools Available` section, and `# Workflow` section. Additionally, `GetSystemPrompt()` appends the content of `AGENTS.md` if present in the working directory.
 
 Template data struct in `internal/prompts/prompts.go`:
 
@@ -54,9 +70,11 @@ struct {
 }
 ```
 
+`GetSystemPrompt` function signature: `func GetSystemPrompt(platform, pwd, envLabel string) string`
+
 ### `internal/util/util.go`
 
-Only `GetWorkDir()` and `GetSystemInfo()` exist. No git or project-type utilities.
+Package `utils` (note: Go package name is `utils`, import path is `internal/util`). Only `GetWorkDir()` and `GetSystemInfo()` exist. No git or project-type utilities.
 
 ## 4. Proposed Design
 
@@ -169,12 +187,21 @@ Project type: {{ .ProjectType }}
 
 ### 4.4 Wiring in `cmd/coding/main.go`
 
+Current `GetSystemPrompt` signature is `func GetSystemPrompt(platform, pwd, envLabel string) string`. Two options for integration:
+
+**Option A — Extend signature** (recommended):
 ```go
-envInfo := util.Collect(pwd)
+envInfo := utils.Collect(pwd)
 systemPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo)
 ```
 
-`GetSystemPrompt` signature extends to accept `*util.EnvInfo` (or the data is inlined into the template struct).
+**Option B — Inline into template data**:
+```go
+envInfo := utils.Collect(pwd)
+// Pass envInfo fields directly to the template struct
+```
+
+Either way, the new fields are populated before agent creation and injected once.
 
 When `env.OnEnvChange` fires (SSH connect/disconnect), `envInfo` is re-used as-is (local git info remains unchanged). Re-collecting for SSH environments is out of scope.
 
@@ -194,10 +221,18 @@ This is a one-time cost at session start, well within acceptable bounds.
 ## 5. Alternatives Considered
 
 ### Run git commands via the `execute` tool during the session
-Rejected. This costs a model iteration and requires approval. Static injection at prompt-render time is free and available before the first message.
+Rejected. This costs a model iteration and requires approval (or safe-prefix check). Static injection at prompt-render time is free and available before the first message.
 
-### Inject directory overview via the `BeforeAgent` middleware hook instead of template
-Possible, but the directory tree is static (depth-2 snapshot of cwd at start). Adding it to a middleware hook provides no benefit over the template and complicates the middleware ordering. Only dynamic data belongs in middleware.
+### Inject directory overview via the `BeforeChatModel` middleware hook instead of template
+Possible, but the directory tree is static (depth-2 snapshot of cwd at start). Adding it to an `AgentMiddleware.BeforeChatModel` hook provides no benefit over the template and complicates the middleware ordering. Only dynamic data belongs in middleware hooks.
+
+## 6. Codebase Verification Notes
+
+- **Confirmed**: `internal/prompts/system.md` template matches the described current state, including `SSHAliases` conditional block.
+- **Confirmed**: `internal/prompts/prompts.go` template data struct matches described fields.
+- **Confirmed**: `internal/util/util.go` (package `utils`) has only `GetWorkDir()` and `GetSystemInfo()`.
+- **Confirmed**: `prompts.GetSystemPrompt()` also appends `AGENTS.md` content via `loadAgentsMd(pwd)` — the new environment sections should be injected before this append.
+- **Note**: The approval logic in `internal/runner/approval.go` auto-approves `git status` and `git log` commands, confirming these are considered safe. But collecting git info at prompt-render time is still preferred (zero model iterations).
 
 ### Include full `git diff --stat` of uncommitted changes
 Rejected. This can be very large (hundreds of lines). The dirty flag is sufficient to inform the agent that changes exist; it can run `git diff --stat` itself if needed.

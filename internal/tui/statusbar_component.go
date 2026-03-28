@@ -16,6 +16,8 @@ type StatusBarState struct {
 	TotalTokens       int64
 	ModelContextLimit int
 	MCPStatuses       []MCPStatusItem
+	Mode              AgentMode
+	BgRunning         int
 }
 
 // StatusBarComponent is a stateless-like component in Bubble Tea.
@@ -29,7 +31,16 @@ func NewStatusBarComponent() *StatusBarComponent {
 
 // View returns the rendered status bar.
 func (s *StatusBarComponent) View(state StatusBarState) string {
-	leftTxt := "  Model: "
+	// Mode indicator (leftmost)
+	var modeStr string
+	switch state.Mode {
+	case ModePlanning:
+		modeStr = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("99")).Render(" Plan")
+	default:
+		modeStr = lipgloss.NewStyle().Bold(true).Foreground(colorSecondary).Render(" Agent")
+	}
+
+	leftTxt := modeStr + "  │  Model: "
 	if state.ActiveProvider != "" {
 		leftTxt += state.ActiveProvider + " / " + state.ActiveModel
 	} else {
@@ -50,6 +61,10 @@ func (s *StatusBarComponent) View(state StatusBarState) string {
 		} else {
 			rightParts = append(rightParts, fmt.Sprintf("Tokens: %d", state.TotalTokens))
 		}
+	}
+
+	if state.BgRunning > 0 {
+		rightParts = append(rightParts, lipgloss.NewStyle().Foreground(colorWarning).Render(fmt.Sprintf("Bg: %d running", state.BgRunning)))
 	}
 
 	if len(state.MCPStatuses) > 0 {

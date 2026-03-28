@@ -1,5 +1,9 @@
 # System Reminders
 
+> **Last verified**: 2026-03-28 against codebase at `github.com/cloudwego/eino v0.7.37`
+> **Priority**: P2 — Nice to have (only implement the 3 highest-value reminders)
+> **Scope reduction**: Claude Code has ~40 reminders. We implement **3** for v1: `todo_check`, `token_warning`, `tool_error_streak`. The `remote_env` and `long_run` reminders are deferred.
+
 ## 1. Problem Statement
 
 When a model is deep in a long agent loop, it can lose track of important context — pending todos, token budget pressure, the remote environment it is operating in, or a repeating pattern of tool failures. Claude Code addresses this with ~40 conditional "system reminders" that are injected into the message stream at key moments during the agent loop. The `coding` project currently has zero equivalent mechanism.
@@ -9,6 +13,8 @@ Concrete failure cases observed today:
 - Agent in an SSH session refers to a local file path that doesn't exist on the remote machine.
 - Agent repeatedly calls a tool that keeps returning the same error, wasting iterations instead of changing approach.
 - Agent generates an increasingly verbose response as context fills, then the next call overflows the context window.
+
+**2026 AI Landscape Note**: System reminders (also called "nudges" or "guardrails") are a well-established pattern in production AI agents. Claude Code, Cursor, and Windsurf all use conditional mid-loop reminders. Some newer approaches use model "thinking tokens" for self-regulation, but explicit reminders remain the most reliable mechanism for stateful context injection.
 
 ## 2. Goals & Non-Goals
 
@@ -26,7 +32,9 @@ Concrete failure cases observed today:
 
 `internal/prompts/system.md` is rendered once at agent creation and never updated during the loop. There is no mechanism to inject context-sensitive messages between model calls.
 
-The `BeforeModelRewriteState` hook in Eino's `ChatModelAgentMiddleware` interface provides exactly this capability but is unused.
+Eino's `adk.AgentMiddleware` struct provides a `BeforeChatModel` hook (`func(context.Context, *ChatModelAgentState) error`) that is called before each model invocation. This hook receives the `ChatModelAgentState` (which contains `Messages []adk.Message`) and can modify the message list. This is the correct insertion point for reminders.
+
+> **Note**: The original draft referenced `BeforeModelRewriteState` on a `ChatModelAgentMiddleware` interface — this does not exist in Eino v0.7.37. The correct hook is `AgentMiddleware.BeforeChatModel`.
 
 ## 4. Proposed Design
 
@@ -35,13 +43,13 @@ The `BeforeModelRewriteState` hook in Eino's `ChatModelAgentMiddleware` interfac
 ```go
 // ReminderContext carries the runtime state needed to evaluate reminder conditions.
 type ReminderContext struct {
-    Iteration        int
-    TokensUsed       int64
-    ContextLimit     int
-    TodoStore        *tools.TodoStore
+    Iteration         int
+    TokensUsed        int64
+    ContextLimit      int
+    TodoStore         *tools.TodoStore
     ConsecutiveErrors int   // consecutive tool [tool error] results
-    EnvLabel         string
-    IsRemote         bool
+    EnvLabel          string
+    IsRemote          bool
 }
 
 // Reminder is a single conditional reminder rule.
@@ -68,49 +76,55 @@ func CollectReminders(rc *ReminderContext) []string
 
 Reminders are additive — all matching reminders fire in a single injected message block.
 
-### 4.3 New File: `internal/agent/reminder_middleware.go`
+### 4.3 Reminder Middleware as `AgentMiddleware.BeforeChatModel`
 
-A `ChatModelAgentMiddleware` that evaluates reminders before each model call. It maintains internal loop state (iteration counter, consecutive error counter).
+The reminder logic is implemented as a closure that captures mutable state (iteration counter, error counter) and is assigned to the `BeforeChatModel` field of an `adk.AgentMiddleware` struct.
 
 ```go
-type reminderMiddleware struct {
-    *adk.BaseChatModelAgentMiddleware
-    todoStore   *tools.TodoStore
-    envLabel    string
-    isRemote    bool
-    contextLimit int
+// internal/agent/reminder_middleware.go
 
+type reminderState struct {
+    todoStore         *tools.TodoStore
+    envLabel          string
+    isRemote          bool
+    contextLimit      int
     iteration         int
     consecutiveErrors int
-    lastErrorResult   string
 }
 
-func NewReminderMiddleware(todoStore *tools.TodoStore, envLabel string, isRemote bool, contextLimit int) *reminderMiddleware
-
-func (m *reminderMiddleware) BeforeModelRewriteState(
-    ctx context.Context,
-    state *adk.ChatModelAgentState,
-    mc *adk.ModelContext,
-) (context.Context, *adk.ChatModelAgentState, error) {
-    m.iteration++
-    m.updateErrorStreak(state)
-
-    rc := &prompts.ReminderContext{
-        Iteration:         m.iteration,
-        TokensUsed:        internalmodel.TokenTracker.PromptTokens, // atomic read
-        ContextLimit:      m.contextLimit,
-        TodoStore:         m.todoStore,
-        ConsecutiveErrors: m.consecutiveErrors,
-        EnvLabel:          m.envLabel,
-        IsRemote:          m.isRemote,
+func NewReminderMiddleware(todoStore *tools.TodoStore, envLabel string, isRemote bool, contextLimit int) adk.AgentMiddleware {
+    rs := &reminderState{
+        todoStore:    todoStore,
+        envLabel:     envLabel,
+        isRemote:     isRemote,
+        contextLimit: contextLimit,
     }
 
-    msgs := prompts.CollectReminders(rc)
-    if len(msgs) > 0 {
-        text := "[System Reminder]\n" + strings.Join(msgs, "\n")
-        state.Messages = append(state.Messages, schema.SystemMessage(text))
+    return adk.AgentMiddleware{
+        BeforeChatModel: func(ctx context.Context, state *adk.ChatModelAgentState) error {
+            rs.iteration++
+            rs.updateErrorStreak(state)
+
+            promptTokens, _, _ := internalmodel.TokenTracker.Get()
+
+            rc := &prompts.ReminderContext{
+                Iteration:         rs.iteration,
+                TokensUsed:        promptTokens,
+                ContextLimit:      rs.contextLimit,
+                TodoStore:         rs.todoStore,
+                ConsecutiveErrors: rs.consecutiveErrors,
+                EnvLabel:          rs.envLabel,
+                IsRemote:          rs.isRemote,
+            }
+
+            msgs := prompts.CollectReminders(rc)
+            if len(msgs) > 0 {
+                text := "[System Reminder]\n" + strings.Join(msgs, "\n")
+                state.Messages = append(state.Messages, schema.SystemMessage(text))
+            }
+            return nil
+        },
     }
-    return ctx, state, nil
 }
 ```
 
@@ -132,16 +146,16 @@ reminderMW := agent.NewReminderMiddleware(
     internalmodel.GetModelContextLimit(cfg.Model),
 )
 
-// Handlers ordering (outermost first):
-Handlers: []adk.ChatModelAgentMiddleware{
+// All middlewares use the single Middlewares field:
+Middlewares: []adk.AgentMiddleware{
     reminderMW,        // reminder injection before each model call
-    summarizationMW,   // context compression (see context_management design)
-    reductionMW,       // tool output truncation
-    &safeToolMiddleware{},
+    compactionMW,      // history compaction (see context_management design)
+    reductionMW,       // tool output reduction
+    approvalMW,        // approval + safe tool error handling
 },
 ```
 
-`reminderMW` is outermost so reminder messages are appended to the already-summarized state. If it were placed inside `summarizationMW`, reminders could be compressed away.
+`reminderMW` is outermost so reminder messages are appended to the already-compacted state. If it were placed inside `compactionMW`, reminders could be trimmed away.
 
 ### 4.6 Reminder Injection Flow
 
@@ -150,8 +164,8 @@ Each model call iteration:
         │
         ▼
 ┌───────────────────────┐
-│  BeforeModelRewrite    │
-│  (reminderMiddleware)  │
+│  BeforeChatModel       │
+│  (reminder middleware) │
 │                        │
 │  1. increment iter     │
 │  2. check error streak │
@@ -172,7 +186,7 @@ Each model call iteration:
 Rejected. The value of reminders is that they are conditional and timely. A static prompt that says "check your todos every 5 iterations" is far less effective than an actual message that fires when there actually are incomplete todos at iteration 6.
 
 ### Implement reminders in `runner.go` by appending to `messages` before each `runInner` call
-The runner only calls the agent once per user turn, not per model iteration. Reminders need to fire within an agent turn (every model call), not between turns. The `BeforeModelRewriteState` hook is the correct insertion point.
+The runner only calls the agent once per user turn, not per model iteration. Reminders need to fire within an agent turn (every model call), not between turns. The `BeforeChatModel` hook is the correct insertion point.
 
 ### Use a single always-on reminder with all conditions checked inside
 Possible, but would produce noisy repetitive messages even when nothing actionable is happening. The conditional model fires each reminder independently, keeping the injection minimal.
@@ -181,12 +195,21 @@ Possible, but would produce noisy repetitive messages even when nothing actionab
 
 - Two new files: `internal/prompts/reminders.go` and `internal/agent/reminder_middleware.go`.
 - `internal/agent/agent.go` updated to construct and include `reminderMW`.
-- `cmd/coding/main.go` must pass `envLabel` and `isRemote` (both already available) when constructing the middleware.
+- `cmd/coding/main.go` must pass `envLabel` and `isRemote` (both already available via `Env`) when constructing the middleware.
 - No config changes, no TUI changes, no session format changes.
-- When the environment changes (SSH connect/disconnect), the agent is recreated via `createAgent()` — the new `reminderMiddleware` will receive the updated `envLabel` and `isRemote` values automatically.
+- When the environment changes (SSH connect/disconnect), the agent is recreated via `createAgent()` — the new `reminderState` will receive the updated `envLabel` and `isRemote` values automatically.
 
-## 7. Open Questions
+## 7. Codebase Verification Notes
 
-1. **System message placement**: Does the Eino `ChatModelAgentState.Messages` slice allow inserting system messages at arbitrary positions? Or must they be at the head? The Eino docs should clarify this before implementation.
-2. **Provider compatibility list**: Which provider base URLs should be tagged as strict-alternation and receive user-message fallback? Currently only `api.anthropic.com` is a known candidate.
-3. **Consecutive error detection**: Scanning `state.Messages` for `[tool error]` strings is fragile if the user's own files happen to contain that text. A cleaner approach would be a counter maintained by `safeToolMiddleware` and passed via context. Should this be an open design point for the `middleware_pipeline` design?
+- **Confirmed**: `adk.AgentMiddleware.BeforeChatModel` exists as `func(context.Context, *ChatModelAgentState) error` — this is the correct hook (not `BeforeModelRewriteState`).
+- **Confirmed**: `adk.ChatModelAgentState` exists with `Messages []adk.Message` field.
+- **Confirmed**: `internalmodel.TokenTracker` is global with `Get()` method returning `(prompt, completion, total int64)`.
+- **Confirmed**: `tools.TodoStore` has `HasIncomplete()`, `IncompleteSummary()`, `HasItems()`, `Items()` methods.
+- **Confirmed**: `Env.IsRemote()` exists in `internal/tools/env.go`.
+- **Not found**: `BeforeModelRewriteState`, `ChatModelAgentMiddleware` interface, `BaseChatModelAgentMiddleware` — none exist in Eino v0.7.37.
+
+## 8. Resolved Questions
+
+1. **System message placement**: `ChatModelAgentState.Messages` is a `[]adk.Message` slice that can be freely modified in `BeforeChatModel`. System messages can be appended at any position.
+2. **Provider compatibility**: Strict-alternation detection should be based on the `base_url` from provider config. A hardcoded list can start with known strict providers and be extended via config.
+3. **Consecutive error detection**: Using `[tool error]` string matching in `state.Messages` is adequate for the initial implementation. A cleaner approach using a shared counter via context (between `safeToolMiddleware` and `reminderMiddleware`) is a valid future improvement.

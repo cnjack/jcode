@@ -70,12 +70,15 @@ func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs 
 
 	// 1. No-approval-needed tools (read is handled separately below)
 	noApprovalNeeded := map[string]bool{
-		"glob":      true,
-		"grep":      true,
-		"todowrite": true,
-		"todoread":  true,
-		"question":  true,
-		"webfetch":  true,
+		"glob":             true,
+		"grep":             true,
+		"todowrite":        true,
+		"todoread":         true,
+		"question":         true,
+		"webfetch":         true,
+		"subagent":         true,
+		"background_run":   true,
+		"check_background": true,
 	}
 	if noApprovalNeeded[toolName] {
 		return true, nil

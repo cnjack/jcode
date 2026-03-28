@@ -2,7 +2,6 @@ package telemetry
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	langfuseacl "github.com/cloudwego/eino-ext/libs/acl/langfuse"
@@ -70,9 +69,6 @@ func (t *LangfuseTracer) Flush() {
 // AgentMiddleware returns an adk.AgentMiddleware that records model generations
 // and tool-call spans to Langfuse, keyed by the traceID stored in the context.
 func (t *LangfuseTracer) AgentMiddleware() adk.AgentMiddleware {
-	var mu sync.Mutex
-	var pendingGenID string
-
 	return adk.AgentMiddleware{
 		BeforeChatModel: func(ctx context.Context, state *adk.ChatModelAgentState) error {
 			traceID, _ := ctx.Value(traceIDKey).(string)
@@ -87,20 +83,19 @@ func (t *LangfuseTracer) AgentMiddleware() adk.AgentMiddleware {
 				},
 				InMessages: state.Messages,
 			})
-			mu.Lock()
-			pendingGenID = genID
-			mu.Unlock()
+			_ = adk.SetRunLocalValue(ctx, "langfuse_gen_id", genID)
 			return nil
 		},
 
 		AfterChatModel: func(ctx context.Context, state *adk.ChatModelAgentState) error {
-			mu.Lock()
-			genID := pendingGenID
-			pendingGenID = ""
-			mu.Unlock()
+			genID := ""
+			if val, found, err := adk.GetRunLocalValue(ctx, "langfuse_gen_id"); err == nil && found {
+				genID, _ = val.(string)
+			}
 			if genID == "" {
 				return nil
 			}
+			_ = adk.DeleteRunLocalValue(ctx, "langfuse_gen_id")
 			// Find the last assistant message to record as output.
 			var outMsg *schema.Message
 			for i := len(state.Messages) - 1; i >= 0; i-- {

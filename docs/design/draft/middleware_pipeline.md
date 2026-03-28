@@ -1,12 +1,16 @@
 # Middleware Pipeline Hardening
 
+> **Last verified**: 2026-03-28 against codebase at `github.com/cloudwego/eino v0.7.37`
+> **Priority**: P1 — High (safe tool error handling + ModelRetryConfig are prerequisites for reliable operation)
+> **Scope reduction**: The middleware ordering and `safeToolMiddleware` extraction are the high-value items. Circuit breaker / generic middleware framework are **not needed** — Eino's `ModelRetryConfig` covers retry, and the ordering is just documentation.
+
 ## 1. Problem Statement
 
 The current agent loop has fragile error handling and no resilience against transient API failures.
 
-The approval middleware in `internal/agent/agent.go` is implemented via `adk.AgentMiddleware.WrapToolCall` using `compose.ToolMiddleware` — a lower-level interface that bypasses Eino's `ChatModelAgentMiddleware` lifecycle hooks. Consequences:
+The approval middleware in `internal/agent/agent.go` is implemented via `adk.AgentMiddleware.WrapToolCall` using `compose.ToolMiddleware` — it wraps `Invokable` only. Consequences:
 
-- Tool errors are caught manually inside the approval wrapper. Streaming tool errors are silently dropped (no `WrapStreamableToolCall`).
+- Tool errors are caught manually inside the approval wrapper and converted to strings. Streaming tool errors are silently dropped (no `Streamable` wrapper).
 - `compose.IsInterruptRerunError` is never checked — interrupt signals meant to propagate to the agent are accidentally swallowed.
 - Model API errors (429 rate-limit, connection reset) terminate the entire agent run with no retry.
 - Multiple middlewares are composed ad hoc; there is no declared ordering contract.
@@ -14,7 +18,7 @@ The approval middleware in `internal/agent/agent.go` is implemented via `adk.Age
 ## 2. Goals & Non-Goals
 
 **Goals**
-- Replace manual tool-error handling with an Eino-native `ChatModelAgentMiddleware` that correctly wraps both invokable and streamable tool calls.
+- Replace manual tool-error handling with proper `compose.ToolMiddleware` wrapping that covers both `Invokable` and `Streamable` tool calls.
 - Add a `ModelRetryConfig` to the `ChatModelAgentConfig` for automatic back-off on retriable API errors.
 - Establish a documented, deterministic middleware composition order.
 
@@ -52,63 +56,76 @@ return adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 ```
 
 Issues:
-1. `WrapStreamableToolCall` is missing — streaming tool errors are not caught.
+1. `Streamable` field of `compose.ToolMiddleware` is not set — streaming tool errors are not caught.
 2. `compose.IsInterruptRerunError(err)` is never consulted — interrupt signals cannot propagate.
 3. `ModelRetryConfig` is absent; any 429 or network blip kills the run.
 
 ## 4. Proposed Design
 
-### 4.1 New file: `internal/agent/middleware.go`
+### 4.1 Safe Tool Error Handling via `compose.ToolMiddleware`
 
-Extract tool-safety concerns into a dedicated `ChatModelAgentMiddleware`:
+Eino v0.7.37's `compose.ToolMiddleware` struct has four fields:
+- `Invokable` — wraps non-streaming tool calls
+- `Streamable` — wraps streaming tool calls
+- `EnhancedInvokable` — wraps enhanced non-streaming tool calls
+- `EnhancedStreamable` — wraps enhanced streaming tool calls
+
+The safe-tool concern should be implemented as a separate `adk.AgentMiddleware` with a `compose.ToolMiddleware` that covers both `Invokable` and `Streamable`:
 
 ```go
-// safeToolMiddleware converts tool errors into agent-readable strings,
-// preserving interrupt errors so they can propagate correctly.
-type safeToolMiddleware struct {
-    *adk.BaseChatModelAgentMiddleware
-}
+// internal/agent/middleware.go
 
-func (m *safeToolMiddleware) WrapInvokableToolCall(
-    _ context.Context,
-    endpoint adk.InvokableToolCallEndpoint,
-    _ *adk.ToolContext,
-) (adk.InvokableToolCallEndpoint, error) {
-    return func(ctx context.Context, args string, opts ...tool.Option) (string, error) {
-        result, err := endpoint(ctx, args, opts...)
-        if err != nil {
-            if _, ok := compose.IsInterruptRerunError(err); ok {
-                return "", err // must propagate
-            }
-            return fmt.Sprintf("[tool error] %v", err), nil
-        }
-        return result, nil
-    }, nil
-}
-
-func (m *safeToolMiddleware) WrapStreamableToolCall(
-    _ context.Context,
-    endpoint adk.StreamableToolCallEndpoint,
-    _ *adk.ToolContext,
-) (adk.StreamableToolCallEndpoint, error) {
-    return func(ctx context.Context, args string, opts ...tool.Option) (*schema.StreamReader[string], error) {
-        sr, err := endpoint(ctx, args, opts...)
-        if err != nil {
-            if _, ok := compose.IsInterruptRerunError(err); ok {
-                return nil, err
-            }
-            return singleChunkReader(fmt.Sprintf("[tool error] %v", err)), nil
-        }
-        return wrapSafeReader(sr), nil
-    }, nil
+// safeToolMiddleware returns an AgentMiddleware that converts tool errors into
+// agent-readable strings, preserving interrupt errors so they can propagate.
+func safeToolMiddleware() adk.AgentMiddleware {
+    return adk.AgentMiddleware{
+        WrapToolCall: compose.ToolMiddleware{
+            Invokable: func(next compose.InvokableToolEndpoint) compose.InvokableToolEndpoint {
+                return func(ctx context.Context, input *compose.ToolInput) (*compose.ToolOutput, error) {
+                    out, err := next(ctx, input)
+                    if err != nil {
+                        if _, ok := compose.IsInterruptRerunError(err); ok {
+                            return nil, err // must propagate
+                        }
+                        return &compose.ToolOutput{
+                            Result: fmt.Sprintf("[tool error] %v", err),
+                        }, nil
+                    }
+                    return out, nil
+                }
+            },
+            Streamable: func(next compose.StreamableToolEndpoint) compose.StreamableToolEndpoint {
+                return func(ctx context.Context, input *compose.ToolInput) (*compose.ToolOutputStream, error) {
+                    sr, err := next(ctx, input)
+                    if err != nil {
+                        if _, ok := compose.IsInterruptRerunError(err); ok {
+                            return nil, err
+                        }
+                        return singleChunkStream(fmt.Sprintf("[tool error] %v", err)), nil
+                    }
+                    return wrapSafeStream(sr), nil
+                }
+            },
+        },
+    }
 }
 ```
 
-The approval middleware is migrated to implement `ChatModelAgentMiddleware` as well, keeping the same approval logic but now using `WrapInvokableToolCall` and `WrapStreamableToolCall`.
+The approval middleware is similarly updated to set both `Invokable` and `Streamable` wrappers with the same approval logic.
 
 ### 4.2 Model Retry Config
 
-Added to `adk.ChatModelAgentConfig`:
+`ModelRetryConfig` exists on `adk.ChatModelAgentConfig` (verified in Eino v0.7.37):
+
+```go
+type ModelRetryConfig struct {
+    MaxRetries  int
+    IsRetryAble func(ctx context.Context, err error) bool
+    BackoffFunc func(ctx context.Context, attempt int) time.Duration
+}
+```
+
+Added to the agent config:
 
 ```go
 ModelRetryConfig: &adk.ModelRetryConfig{
@@ -123,7 +140,7 @@ ModelRetryConfig: &adk.ModelRetryConfig{
 },
 ```
 
-`MaxRetries` defaults to 3. Eino uses exponential back-off internally.
+`MaxRetries` defaults to 3. Eino provides `BackoffFunc` for custom back-off; when nil, it uses its internal default.
 
 ### 4.3 Optional config field
 
@@ -138,13 +155,18 @@ Zero value means use the hardcoded default.
 
 ### 4.4 Middleware Composition Order
 
+All middlewares use the single `Middlewares` field (type `[]adk.AgentMiddleware`) on `ChatModelAgentConfig`:
+
 ```go
 // internal/agent/agent.go — declared order
 Middlewares: []adk.AgentMiddleware{
     langfuseMiddleware,      // outermost: telemetry wraps everything
     approvalMiddleware,      // approval before execution
-    &safeToolMiddleware{},   // innermost: catches errors closest to the tool
+    safeToolMiddleware(),    // innermost: catches errors closest to the tool
 },
+
+// ModelRetryConfig is a separate top-level field, not a middleware:
+ModelRetryConfig: &adk.ModelRetryConfig{...},
 ```
 
 Execution flow for a tool call:
@@ -157,20 +179,32 @@ response ← langfuse ← approval ← safeTool ← actual tool
 
 ## 5. Alternatives Considered
 
-### Keep `compose.ToolMiddleware` and add streaming handling there
-Rejected. Adding `WrapStreamableToolCall` requires moving to `ChatModelAgentMiddleware` anyway. The lower-level `compose.ToolMiddleware` interface does not provide lifecycle hooks like `BeforeModelRewriteState` which other designs depend on.
+### Keep `Invokable`-only wrapper and skip streaming handling
+Rejected. The current code silently drops streaming tool errors. The `Streamable` field of `compose.ToolMiddleware` exists specifically for this purpose.
 
-### Separate approval into a standalone `ChatModelAgentMiddleware`
-Yes, this is part of the proposal. The approval logic itself does not change — only the wrapper interface changes.
+### Use `BeforeChatModel` / `AfterChatModel` for error handling
+Rejected. These hooks fire before/after the model call, not around individual tool calls. Tool-level error wrapping must use `WrapToolCall` with `compose.ToolMiddleware`.
+
+### Separate approval into a standalone `AgentMiddleware`
+Yes, this is part of the proposal. The approval logic itself does not change — only the wrapper is extended to cover `Streamable` tool calls and check `compose.IsInterruptRerunError`.
 
 ## 6. Migration & Compatibility
 
 - `internal/agent/middleware.go` is a new file; no existing files are deleted.
-- `internal/agent/agent.go` is updated to remove the inline `compose.ToolMiddleware` block and reference the new middleware types.
+- `internal/agent/agent.go` is updated to extract the inline `compose.ToolMiddleware` block into `safeToolMiddleware()` and add `ModelRetryConfig`.
 - The `MaxRetries` config field defaults to 0 (meaning use the code default of 3) — no forced migration.
 - Behaviour change: streaming tool errors are now surfaced to the model as `[tool error] ...` strings instead of being silently dropped. This is strictly an improvement.
 
-## 7. Open Questions
+## 7. Codebase Verification Notes
 
-1. Does the current Eino version used in `go.mod` expose `adk.ChatModelAgentMiddleware` as the primary interface, or is `adk.AgentMiddleware` still in use? The migration depends on which interface `NewChatModelAgent` accepts.
-2. Should `MaxRetries` be per-provider or global? Some providers (e.g. expensive ones) may want 0 retries.
+- **Confirmed**: `adk.AgentMiddleware` is a struct with fields `AdditionalInstruction`, `AdditionalTools`, `BeforeChatModel`, `AfterChatModel`, `WrapToolCall`. There is no `ChatModelAgentMiddleware` interface in Eino v0.7.37.
+- **Confirmed**: `compose.ToolMiddleware` has `Invokable`, `Streamable`, `EnhancedInvokable`, `EnhancedStreamable` fields.
+- **Confirmed**: `compose.IsInterruptRerunError(err)` exists in `compose/interrupt.go`.
+- **Confirmed**: `adk.ModelRetryConfig` exists with `MaxRetries`, `IsRetryAble`, `BackoffFunc`.
+- **Confirmed**: Current `agent.go` only sets `Invokable` — `Streamable` is not set.
+- **Confirmed**: `ChatModelAgentConfig.Middlewares` is `[]AgentMiddleware` — there is no separate `Handlers` field.
+
+## 8. Resolved Questions
+
+1. **Eino interface**: The current Eino v0.7.37 uses `adk.AgentMiddleware` struct (not an interface). `ChatModelAgentMiddleware` does not exist as a type — only as a comment reference. All middleware functionality is expressed through `AgentMiddleware` struct fields.
+2. **Per-provider retries**: Deferred. `MaxRetries` is global for now. A per-provider override could be added to `ProviderConfig` in a future iteration.

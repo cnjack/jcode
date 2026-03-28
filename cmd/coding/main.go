@@ -6,9 +6,15 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/adk/filesystem"
+	"github.com/cloudwego/eino/adk/middlewares/reduction"
+	"github.com/cloudwego/eino/adk/middlewares/summarization"
+	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 
@@ -91,7 +97,8 @@ func main() {
 	ctx := context.Background()
 	pwd := util.GetWorkDir()
 	platform := util.GetSystemInfo()
-	systemPrompt := prompts.GetSystemPrompt(platform, pwd, "local")
+	envInfo := util.CollectEnvInfo(pwd)
+	systemPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo)
 
 	providerCfg := cfg.Models[cfg.Provider]
 	if providerCfg == nil {
@@ -108,12 +115,32 @@ func main() {
 	}
 
 	env := tools.NewEnv(pwd, platform)
+	bgManager := tools.NewBackgroundManager(env)
+
+	// tuiProgram holds the TUI program reference, set after RunTUI.
+	// Used by closures that need to send messages to the TUI.
+	var tuiProgram *tea.Program
 
 	toolList := []tool.BaseTool{
 		env.NewReadTool(), env.NewEditTool(), env.NewWriteTool(),
 		env.NewExecuteTool(), env.NewGrepTool(),
 		env.NewTodoWriteTool(), env.NewTodoReadTool(),
 		env.NewSwitchEnvTool(),
+		env.NewBackgroundRunTool(bgManager),
+		env.NewCheckBackgroundTool(bgManager),
+		env.NewSubagentTool(&tools.SubagentDeps{
+			ChatModel: chatModel,
+			Notifier: func(name, agentType string, done bool, result string, err error) {
+				if tuiProgram == nil {
+					return
+				}
+				if !done {
+					tuiProgram.Send(tui.SubagentStartMsg{Name: name, Type: agentType})
+				} else {
+					tuiProgram.Send(tui.SubagentDoneMsg{Name: name, Result: result, Err: err})
+				}
+			},
+		}),
 	}
 
 	var mcpStatuses []tui.MCPStatusItem
@@ -142,6 +169,10 @@ func main() {
 	}
 
 	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore)
+	tuiProgram = p
+	bgManager.SetNotifier(func(taskID, command, status string) {
+		p.Send(tui.BgTaskDoneMsg{TaskID: taskID, Command: command, Status: status})
+	})
 	approvalState.SetProgram(p)
 
 	createAgent := func() (*adk.ChatModelAgent, error) {
@@ -149,7 +180,61 @@ func main() {
 		if langfuseTracer != nil {
 			middlewares = append(middlewares, langfuseTracer.AgentMiddleware())
 		}
-		return agent.NewAgent(ctx, chatModel, toolList, systemPrompt, approvalState.RequestApproval, middlewares...)
+
+		// Build ChatModelAgentMiddleware handlers (new v0.8 interface).
+		// Order: [summarization, reduction, approval+safeTool]
+		// Outermost handler is first; approval is always innermost (added by NewAgent).
+		var handlers []adk.ChatModelAgentMiddleware
+
+		// Summarization middleware: compresses conversation history when tokens
+		// exceed the threshold, preventing context overflow in long sessions.
+		contextLimit := internalmodel.GetModelContextLimit(cfg.Model)
+		if contextLimit <= 0 {
+			contextLimit = 200000 // conservative default
+		}
+		summMw, err := summarization.New(ctx, &summarization.Config{
+			Model: chatModel,
+			Trigger: &summarization.TriggerCondition{
+				ContextTokens: int(float64(contextLimit) * 0.75),
+			},
+			TranscriptFilePath: filepath.Join(config.ConfigDir(), "transcript.txt"),
+		})
+		if err != nil {
+			config.Logger().Printf("[agent] summarization middleware init error: %v", err)
+		} else {
+			handlers = append(handlers, summMw)
+		}
+
+		// ToolReduction middleware: truncates large tool outputs and clears old
+		// tool results when total tokens exceed the threshold.
+		reductionBackend := &localReductionBackend{rootDir: config.ConfigDir()}
+		reductionMw, err := reduction.New(ctx, &reduction.Config{
+			Backend:           reductionBackend,
+			RootDir:           filepath.Join(config.ConfigDir(), "reduction"),
+			MaxLengthForTrunc: 50000,
+			MaxTokensForClear: int64(float64(contextLimit) * 0.60),
+			ReadFileToolName:  "read",
+			ToolConfig: map[string]*reduction.ToolReductionConfig{
+				"read": {SkipClear: true},
+			},
+		})
+		if err != nil {
+			config.Logger().Printf("[agent] reduction middleware init error: %v", err)
+		} else {
+			handlers = append(handlers, reductionMw)
+		}
+
+		// Reminder middleware: injects conditional system reminders
+		// (todo check, token warning, error streak) before each model call.
+		reminderMw := agent.NewReminderMiddleware(agent.ReminderConfig{
+			TodoStore:    env.TodoStore,
+			EnvLabel:     "local",
+			IsRemote:     env.IsRemote(),
+			ContextLimit: contextLimit,
+		})
+		handlers = append(handlers, reminderMw)
+
+		return agent.NewAgent(ctx, chatModel, toolList, systemPrompt, approvalState.RequestApproval, middlewares, handlers)
 	}
 
 	ag, err := createAgent()
@@ -168,7 +253,7 @@ func main() {
 		}
 		if isLocal {
 			approvalState.SetWorkpath(pwd)
-			systemPrompt = prompts.GetSystemPrompt(platform, pwd, "local")
+			systemPrompt = prompts.GetSystemPrompt(platform, pwd, "local", envInfo)
 			if newAg, err := createAgent(); err == nil {
 				ag = newAg
 			}
@@ -176,7 +261,7 @@ func main() {
 			return
 		}
 		approvalState.SetWorkpath(env.Pwd())
-		systemPrompt = prompts.GetSystemPrompt(platform, pwd, envLabel)
+		systemPrompt = prompts.GetSystemPrompt(platform, pwd, envLabel, nil)
 		if newAg, err := createAgent(); err == nil {
 			ag = newAg
 		}
@@ -287,6 +372,7 @@ func main() {
 		addModelCh := tui.GetAddModelChannel()
 		resumeCh := tui.GetResumeChannel()
 		autoApproveCh := tui.GetAutoApproveChannel()
+		compactCh := tui.GetCompactChannel()
 		for {
 			select {
 			case enabled := <-autoApproveCh:
@@ -315,6 +401,7 @@ func main() {
 					rec.RecordUser(userPrompt)
 				}
 				history = append(history, schema.UserMessage(userPrompt))
+				history = drainBgNotifications(bgManager, history)
 				resp := runner.Run(ctx, ag, history, p, rec, env.TodoStore, langfuseTracer)
 				if resp != "" {
 					history = append(history, &schema.Message{Role: schema.Assistant, Content: resp})
@@ -330,6 +417,7 @@ func main() {
 					rec.RecordUser(pendingPrompt)
 				}
 				history = append(history, schema.UserMessage(pendingPrompt))
+				history = drainBgNotifications(bgManager, history)
 				resp := runner.Run(ctx, ag, history, p, rec, env.TodoStore, langfuseTracer)
 				if resp != "" {
 					history = append(history, &schema.Message{Role: schema.Assistant, Content: resp})
@@ -359,11 +447,20 @@ func main() {
 				case tui.SSHCancelMsg:
 					_ = msg
 					env.ResetToLocal(pwd, platform)
-					systemPrompt = prompts.GetSystemPrompt(platform, pwd, "local")
+					systemPrompt = prompts.GetSystemPrompt(platform, pwd, "local", envInfo)
 					if newAg, err := createAgent(); err == nil {
 						ag = newAg
 					}
 				}
+
+			case <-compactCh:
+				_, _, oldTokens := internalmodel.TokenTracker.Get()
+				history = compactHistory(ctx, chatModel, history)
+				_, _, newTokens := internalmodel.TokenTracker.Get()
+				p.Send(tui.CompactDoneMsg{
+					OldTokens: oldTokens,
+					NewTokens: newTokens,
+				})
 
 			case <-addModelCh:
 				p.ReleaseTerminal()
@@ -407,4 +504,94 @@ func main() {
 	if langfuseTracer != nil {
 		langfuseTracer.Flush()
 	}
+}
+
+// localReductionBackend implements reduction.Backend by writing files to a
+// local directory. Used by the ToolReduction middleware to persist truncated
+// tool output so the agent can re-read it via the read tool.
+type localReductionBackend struct {
+	rootDir string
+}
+
+func (b *localReductionBackend) Write(_ context.Context, req *filesystem.WriteRequest) error {
+	fp := req.FilePath
+	if !filepath.IsAbs(fp) {
+		fp = filepath.Join(b.rootDir, fp)
+	}
+	if err := os.MkdirAll(filepath.Dir(fp), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(fp, []byte(req.Content), 0o600)
+}
+
+// compactHistory summarizes the conversation history using the model,
+// replacing all messages with a system summary + the last few messages.
+func compactHistory(ctx context.Context, cm einomodel.BaseChatModel, history []adk.Message) []adk.Message {
+	if len(history) < 4 {
+		return history // too short to compact
+	}
+
+	// Keep last 2 messages (most recent context).
+	keepCount := 2
+	if keepCount > len(history) {
+		keepCount = len(history)
+	}
+	toSummarize := history[:len(history)-keepCount]
+	kept := history[len(history)-keepCount:]
+
+	// Build a summarization prompt from the older messages.
+	var sb strings.Builder
+	sb.WriteString("Summarize this conversation history concisely. Focus on:\n")
+	sb.WriteString("- Key decisions made\n- Files modified and why\n- Current task status\n- Important context needed to continue\n\n")
+	sb.WriteString("Conversation:\n")
+	for _, msg := range toSummarize {
+		if msg == nil {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("[%s]: %s\n", msg.Role, truncateStr(msg.Content, 500)))
+	}
+
+	resp, err := cm.Generate(ctx, []*schema.Message{
+		schema.SystemMessage("You are a conversation summarizer. Produce a concise summary of the conversation history provided. Output only the summary, no preamble."),
+		schema.UserMessage(sb.String()),
+	})
+	if err != nil {
+		config.Logger().Printf("[compact] summarization failed: %v", err)
+		return history // return original on error
+	}
+
+	var compacted []adk.Message
+	compacted = append(compacted, schema.SystemMessage(
+		"[Context Summary — previous conversation was compacted]\n\n"+resp.Content,
+	))
+	compacted = append(compacted, kept...)
+
+	config.Logger().Printf("[compact] %d messages → %d messages", len(history), len(compacted))
+	return compacted
+}
+
+func truncateStr(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
+// drainBgNotifications injects any completed background task results into
+// the conversation history so the agent is aware of them on the next turn.
+func drainBgNotifications(bm *tools.BackgroundManager, history []adk.Message) []adk.Message {
+	notifs := bm.DrainNotifications()
+	if len(notifs) == 0 {
+		return history
+	}
+	var sb strings.Builder
+	sb.WriteString("<background-results>\n")
+	for _, n := range notifs {
+		sb.WriteString(fmt.Sprintf("[%s] %s — %s\n", n.TaskID, n.Status, truncateStr(n.Output, 500)))
+	}
+	sb.WriteString("</background-results>")
+
+	history = append(history, schema.UserMessage(sb.String()))
+	history = append(history, &schema.Message{Role: schema.Assistant, Content: "Noted background results."})
+	return history
 }
