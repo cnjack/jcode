@@ -96,7 +96,9 @@ type Model struct {
 	approvalIsExternal bool // Whether this is an external path access
 	approvalMode       ApprovalMode
 
-	envLabel string
+	envLabel  string
+	agentMode AgentMode
+	bgRunning int // count of running background tasks
 }
 
 // dirItem implements list.Item
@@ -197,6 +199,8 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 			lipgloss.NewStyle().Foreground(colorText).PaddingLeft(2).Render("💡 Describe a task and I'll help you code it"),
 			lipgloss.NewStyle().Foreground(colorText).PaddingLeft(2).Render("📁 I can read, write, and edit files in your project"),
 			lipgloss.NewStyle().Foreground(colorText).PaddingLeft(2).Render("⚡ I can execute shell commands for you"),
+			"",
+			lipgloss.NewStyle().Foreground(colorMuted).PaddingLeft(2).Render("Ctrl+P: toggle Agent/Plan mode  │  Ctrl+A: toggle approval  │  /compact /bg /ssh"),
 			"",
 		}
 	}
@@ -579,6 +583,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "ctrl+c":
 				return m, tea.Quit
+			case "ctrl+p":
+				// Toggle agent mode: Agent <-> Plan
+				if m.agentMode == ModeNormal {
+					m.agentMode = ModePlanning
+				} else {
+					m.agentMode = ModeNormal
+				}
+				m.refreshViewport()
+				return m, tea.Batch(cmds...)
 			case "ctrl+a":
 				// Event: ToggleMode - switch between MANUAL and AUTO approval modes
 				if m.approvalMode == ModeManual {
@@ -620,6 +633,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m.handleResumeInput(prompt, cmds)
 					}
 
+					if strings.HasPrefix(prompt, "/bg") {
+						return m.handleBgInput(cmds)
+					}
+
+					if prompt == "/compact" {
+						return m.handleCompactInput(cmds)
+					}
+
 					if m.sshSavePrompt {
 						return m.handleSSHSaveAlias(prompt, cmds)
 					}
@@ -650,15 +671,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.mode = ModeAgent
 					m.agentDone = false
 					m.thinking = true
+
+					// In Plan mode, wrap the user prompt as a plan subagent call.
+					actualPrompt := prompt
+					modeLabel := "👤 You:"
+					if m.agentMode == ModePlanning {
+						actualPrompt = fmt.Sprintf("Use the subagent tool with agent_type 'plan' to plan: %s", prompt)
+						modeLabel = "📐 Plan:"
+					}
+
 					m.lines = append(m.lines, fmt.Sprintf("%s %s",
-						userLabelStyle.Render("👤 You:"), prompt))
+						userLabelStyle.Render(modeLabel), prompt))
 					if m.ready {
 						m.viewport.Height = m.calcViewportHeight(false)
 						m.viewport.SetContent(m.renderContent())
 						m.viewport.GotoBottom()
 					}
 					cmds = append(cmds, func() tea.Msg {
-						return PromptSubmitMsg{Prompt: prompt}
+						return PromptSubmitMsg{Prompt: actualPrompt}
 					})
 					cmds = append(cmds, m.spinner.Tick)
 				}
@@ -1006,6 +1036,77 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.approvalRespChan = msg.Resp
 		m.approvalIsExternal = msg.IsExternal
 		m.textarea.Blur()
+		m.refreshViewport()
+
+	case SubagentStartMsg:
+		m.thinking = true
+		m.flushText()
+		typeLabel := msg.Type
+		if typeLabel == "" {
+			typeLabel = "explore"
+		}
+		m.pendingTool = "subagent"
+		m.lines = append(m.lines, fmt.Sprintf("  %s %s %s",
+			subagentLabelStyle.Render("🤖 Subagent:"),
+			toolNameStyle.Render(msg.Name),
+			toolArgsStyle.Render("("+typeLabel+")"),
+		))
+		if m.ready {
+			m.viewport.SetContent(m.renderContent())
+			m.viewport.GotoBottom()
+		}
+		cmds = append(cmds, m.spinner.Tick)
+
+	case SubagentDoneMsg:
+		m.pendingTool = ""
+		if msg.Err != nil {
+			m.lines = append(m.lines, fmt.Sprintf("   %s %s",
+				toolErrorStyle.Render("✗ Subagent Error:"),
+				toolResultStyle.Render(truncate(msg.Err.Error(), maxToolOutputLen))))
+		} else {
+			m.lines = append(m.lines, fmt.Sprintf("   %s %s",
+				toolSuccessStyle.Render("✓ Subagent Done:"),
+				toolResultStyle.Render(truncate(msg.Result, maxToolOutputLen))))
+		}
+		if m.ready {
+			m.viewport.SetContent(m.renderContent())
+			m.viewport.GotoBottom()
+		}
+		cmds = append(cmds, m.spinner.Tick)
+
+	case CompactDoneMsg:
+		m.thinking = false
+		if msg.Err != nil {
+			m.lines = append(m.lines, fmt.Sprintf("  %s %s",
+				toolErrorStyle.Render("✗ Compact Error:"),
+				toolResultStyle.Render(msg.Err.Error())))
+		} else {
+			m.lines = append(m.lines, fmt.Sprintf("  %s Tokens: %d → %d",
+				toolSuccessStyle.Render("✓ Context compacted."),
+				msg.OldTokens, msg.NewTokens))
+		}
+		m.lines = append(m.lines, "")
+		m.agentDone = true
+		m.textarea.Focus()
+		m.refreshViewport()
+
+	case BgTaskDoneMsg:
+		if msg.Status == "running" {
+			m.bgRunning++
+		} else {
+			if m.bgRunning > 0 {
+				m.bgRunning--
+			}
+			statusIcon := toolSuccessStyle.Render("✓")
+			if msg.Status == "failed" || msg.Status == "timeout" {
+				statusIcon = toolErrorStyle.Render("✗")
+			}
+			m.lines = append(m.lines, fmt.Sprintf("  %s Background task %s (%s): %s",
+				statusIcon,
+				toolNameStyle.Render(msg.TaskID),
+				msg.Status,
+				toolArgsStyle.Render(truncate(msg.Command, 60))))
+		}
 		m.refreshViewport()
 
 	}

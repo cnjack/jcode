@@ -28,6 +28,10 @@ var (
 			Bold(true).
 			Foreground(colorSecondary)
 
+	subagentLabelStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("99"))
+
 	toolNameStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(colorWarning)

@@ -1,17 +1,23 @@
 # Task Summary & Observability
 
+> **Last verified**: 2026-03-28 against codebase at `github.com/cloudwego/eino v0.7.37`
+> **Priority**: P3 — Low (existing Langfuse + TokenTracker + debug.log already cover most needs)
+> **Scope reduction**: Task summary generation is nice but not critical. The Eino callback handler for debug logging is the only high-value item. Summary generation is **deferred** until context compaction is in place (they share the summarization infrastructure).
+
 ## 1. Problem Statement
 
 Two related gaps make long sessions opaque and hard to resume:
 
 **Gap 1 — No task summary**: When the agent completes a multi-step task (creating files, refactoring, fixing bugs), it just replies "Done." There is no structured record of what was accomplished, what files changed, or what the user should be aware of. When the user runs `coding --resume <uuid>` to continue the session later, they are dumped back into raw conversation history with no quick orientation.
 
-**Gap 2 — Observability is manual and incomplete**: The current Langfuse integration in `internal/telemetry/langfuse.go` manually hooks `BeforeChatModel` / `AfterChatModel` via `adk.AgentMiddleware`. It does not cover:
+**Gap 2 — Observability is manual and incomplete**: The current Langfuse integration in `internal/telemetry/langfuse.go` hooks `BeforeChatModel` / `AfterChatModel` via `adk.AgentMiddleware`. It does not cover:
 - Tool call durations
 - Individual model-call latency by iteration
 - Error events per component
 
-Eino provides a first-class `callbacks.Handler` interface that fires automatically for every component lifecycle event (model calls, tool calls, errors, streaming) without any manual wiring.
+Eino provides a `callbacks.Handler` interface and a `utils/callbacks.HandlerHelper` builder that can register typed handlers for different component lifecycles (model calls, tool calls, errors, streaming) without manual wiring.
+
+**2026 AI Landscape Note**: Task summaries are standard in modern AI coding agents. Claude Code generates structured summaries, Cursor tracks file changes in its sidebar. Observability has also matured — OpenTelemetry-based tracing is increasingly common. The debug-log approach here provides a solid foundation that can be extended to structured tracing later.
 
 ## 2. Goals & Non-Goals
 
@@ -34,12 +40,18 @@ Eino provides a first-class `callbacks.Handler` interface that fires automatical
 
 ```go
 // After the completion guard loop:
-p.Send(tui.TokenUpdateMsg{...})
+promptTokens, completionTokens, totalTokens := internalmodel.GetTokenUsage()
+p.Send(tui.TokenUpdateMsg{
+    PromptTokens:      promptTokens,
+    CompletionTokens:  completionTokens,
+    TotalTokens:       totalTokens,
+    ModelContextLimit: modelContextLimit(),
+})
 p.Send(tui.AgentDoneMsg{})
 return resp
 ```
 
-There is no summary step.
+The completion guard logic re-runs the agent up to 3 times if `todoStore.HasIncomplete()` is true, appending `todoStore.IncompleteSummary()` as a user message. But there is no summary step after completion.
 
 ### Session recording
 
@@ -59,7 +71,20 @@ No summary entry type exists.
 
 ### Observability
 
-`internal/telemetry/langfuse.go` manually intercepts two points: `BeforeChatModel` and `AfterChatModel`. Tool-call timing and errors are not captured.
+`internal/telemetry/langfuse.go` intercepts two points via `adk.AgentMiddleware`: `BeforeChatModel` creates a Langfuse generation span, and `AfterChatModel` ends it. The middleware uses a `sync.Mutex` to track `pendingGenID`. Tool-call timing and errors are not captured.
+
+```go
+func (t *LangfuseTracer) AgentMiddleware() adk.AgentMiddleware {
+    return adk.AgentMiddleware{
+        BeforeChatModel: func(ctx context.Context, state *adk.ChatModelAgentState) error {
+            // Creates a Langfuse generation span
+        },
+        AfterChatModel: func(ctx context.Context, state *adk.ChatModelAgentState) error {
+            // Ends the generation span
+        },
+    }
+}
+```
 
 ## 4. Proposed Design
 
@@ -148,51 +173,82 @@ No other changes to the JSONL schema. Existing `LoadSession` and `ReconstructHis
 
 #### New file: `internal/telemetry/callbacks.go`
 
+Eino v0.7.37 provides `callbacks.Handler` and `callbacks.AppendGlobalHandlers()` for process-global callback registration. The `HandlerHelper` builder is located at `github.com/cloudwego/eino/utils/callbacks` and allows registering typed handlers for specific components.
+
 ```go
 package telemetry
 
 import (
     "context"
     "github.com/cloudwego/eino/callbacks"
+    eutils "github.com/cloudwego/eino/utils/callbacks"
+    "github.com/cloudwego/eino/components/model"
+    "github.com/cloudwego/eino/components/tool"
     "github.com/cnjack/coding/internal/config"
 )
 
 // NewDebugLogHandler returns a callbacks.Handler that writes lifecycle events
 // to the application debug log (~/.jcoding/debug.log).
 func NewDebugLogHandler() callbacks.Handler {
-    return callbacks.NewHandlerHelper().
-        OnStart(func(ctx context.Context, info *callbacks.RunInfo, _ callbacks.CallbackInput) context.Context {
-            if info != nil {
-                config.Logger().Printf("[eino] start %s/%s", info.Component, info.Name)
-            }
-            return ctx
+    return eutils.NewHandlerHelper().
+        ChatModel(&eutils.ModelCallbackHandler{
+            OnStart: func(ctx context.Context, info *callbacks.RunInfo, input *model.CallbackInput) context.Context {
+                if info != nil {
+                    config.Logger().Printf("[eino] model start %s", info.Name)
+                }
+                return ctx
+            },
+            OnEnd: func(ctx context.Context, info *callbacks.RunInfo, output *model.CallbackOutput) context.Context {
+                if info != nil {
+                    config.Logger().Printf("[eino] model end %s", info.Name)
+                }
+                return ctx
+            },
+            OnError: func(ctx context.Context, info *callbacks.RunInfo, err error) context.Context {
+                if info != nil {
+                    config.Logger().Printf("[eino] model error %s: %v", info.Name, err)
+                }
+                return ctx
+            },
         }).
-        OnEnd(func(ctx context.Context, info *callbacks.RunInfo, _ callbacks.CallbackOutput) context.Context {
-            if info != nil {
-                config.Logger().Printf("[eino] end   %s/%s", info.Component, info.Name)
-            }
-            return ctx
-        }).
-        OnError(func(ctx context.Context, info *callbacks.RunInfo, err error) context.Context {
-            if info != nil {
-                config.Logger().Printf("[eino] error %s/%s: %v", info.Component, info.Name, err)
-            }
-            return ctx
+        Tool(&eutils.ToolCallbackHandler{
+            OnStart: func(ctx context.Context, info *callbacks.RunInfo, input *tool.CallbackInput) context.Context {
+                if info != nil {
+                    config.Logger().Printf("[eino] tool start %s", info.Name)
+                }
+                return ctx
+            },
+            OnEnd: func(ctx context.Context, info *callbacks.RunInfo, output *tool.CallbackOutput) context.Context {
+                if info != nil {
+                    config.Logger().Printf("[eino] tool end %s", info.Name)
+                }
+                return ctx
+            },
+            OnError: func(ctx context.Context, info *callbacks.RunInfo, err error) context.Context {
+                if info != nil {
+                    config.Logger().Printf("[eino] tool error %s: %v", info.Name, err)
+                }
+                return ctx
+            },
         }).
         Handler()
 }
 ```
 
+> **API Correction**: The original draft used a generic `OnStart`/`OnEnd`/`OnError` pattern directly on `callbacks.NewHandlerHelper()`. The actual API uses typed handlers (`ModelCallbackHandler`, `ToolCallbackHandler`, etc.) registered via builder methods (`.ChatModel()`, `.Tool()`, etc.). Each handler type has component-specific input/output types.
+
 #### Registration in `cmd/coding/main.go`
 
 ```go
-import "github.com/cloudwego/eino/callbacks"
+import (
+    "github.com/cloudwego/eino/callbacks"
+)
 
 // Near top of main, after logger setup:
 callbacks.AppendGlobalHandlers(telemetry.NewDebugLogHandler())
 ```
 
-`AppendGlobalHandlers` is process-global; it does not need to be called again when the agent is recreated.
+`AppendGlobalHandlers` is process-global and not thread-safe — call it once during initialization. It does not need to be called again when the agent is recreated.
 
 #### Coverage gained
 
@@ -245,7 +301,17 @@ Rejected. Langfuse provides structured span/generation data with timing and toke
 - `cmd/coding/main.go`: one `callbacks.AppendGlobalHandlers` call added.
 - Session JSONL files written before this change are fully compatible: `ReconstructHistory` skips unknown entry types.
 
-## 7. Open Questions
+## 7. Codebase Verification Notes
+
+- **Confirmed**: `runner.Run()` code matches the described current state — completion guard re-runs up to 3× with `todoStore.IncompleteSummary()`, sends `TokenUpdateMsg` and `AgentDoneMsg` at the end.
+- **Confirmed**: Session entry types match: `session_start`, `user`, `assistant`, `tool_call`, `tool_result`. No `session_summary` type exists yet.
+- **Confirmed**: `Langfuse AgentMiddleware()` uses `adk.AgentMiddleware` struct with `BeforeChatModel`/`AfterChatModel` hooks.
+- **Confirmed**: `callbacks.AppendGlobalHandlers()` exists in `github.com/cloudwego/eino/callbacks`.
+- **Confirmed**: `utils/callbacks.NewHandlerHelper()` exists at `github.com/cloudwego/eino/utils/callbacks/template.go` with the builder pattern (`.ChatModel()`, `.Tool()`, `.Handler()`).
+- **Confirmed**: `ModelCallbackHandler` and `ToolCallbackHandler` have `OnStart`, `OnEnd`, `OnEndWithStreamOutput`, `OnError` fields with component-specific types.
+- **Confirmed**: `todoStore.HasItems()`, `todoStore.HasIncomplete()` methods exist for the summary trigger condition.
+
+## 8. Open Questions
 
 1. **Summary on resume**: When `--resume <uuid>` reloads a session that has a `session_summary` entry, should it be displayed as an orientation header? This would require a TUI change (`SessionResumedMsg` could carry a `Summary string` field). Deferred to a follow-up.
 2. **Disabling summary**: Should there be a config flag to disable automatic summary generation? Some users may find it adds unwanted latency at the end of every complex task.

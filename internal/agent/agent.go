@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
@@ -14,32 +13,25 @@ const maxIterations = 1000
 
 type ApprovalFunc func(ctx context.Context, toolName, toolArgs string) (bool, error)
 
-func NewAgent(ctx context.Context, chatmodel model.ToolCallingChatModel, tools []tool.BaseTool, instruction string, approvalFunc ApprovalFunc, middlewares ...adk.AgentMiddleware) (*adk.ChatModelAgent, error) {
-	middlewares = append(middlewares, adk.AgentMiddleware{
-		WrapToolCall: compose.ToolMiddleware{
-			Invokable: func(next compose.InvokableToolEndpoint) compose.InvokableToolEndpoint {
-				return func(ctx context.Context, input *compose.ToolInput) (*compose.ToolOutput, error) {
-					if approvalFunc != nil {
-						approved, err := approvalFunc(ctx, input.Name, input.Arguments)
-						if err != nil {
-							return &compose.ToolOutput{Result: fmt.Sprintf("Tool approval error: %v", err)}, nil
-						}
-						if !approved {
-							return &compose.ToolOutput{Result: "Tool execution was rejected by user. " +
-								"IMPORTANT: The user has explicitly denied this operation. " +
-								"Do NOT attempt to perform the same action using alternative tools, different commands, or workarounds. " +
-								"Respect the user's decision and either ask the user how they would like to proceed or move on to a different task."}, nil
-						}
-					}
-					out, err := next(ctx, input)
-					if err != nil {
-						return &compose.ToolOutput{Result: fmt.Sprintf("Tool execution failed: %v", err)}, nil
-					}
-					return out, nil
-				}
-			},
-		},
-	})
+// NewAgent creates a ChatModelAgent with the following middleware stack
+// (outermost to innermost):
+//
+//	Middlewares (old-style): [langfuse]
+//	Handlers (new-style):   [summarization, reduction, approval+safeTool]
+//
+// ModelRetryConfig is always enabled (3 retries with default exponential backoff).
+func NewAgent(
+	ctx context.Context,
+	chatmodel model.ToolCallingChatModel,
+	tools []tool.BaseTool,
+	instruction string,
+	approvalFunc ApprovalFunc,
+	middlewares []adk.AgentMiddleware,
+	handlers []adk.ChatModelAgentMiddleware,
+) (*adk.ChatModelAgent, error) {
+	// Approval + safe-tool-error middleware is always the innermost handler
+	// so that summarization/reduction see the raw tool output first.
+	handlers = append(handlers, newApprovalMiddleware(approvalFunc))
 
 	return adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:        "coding",
@@ -53,5 +45,9 @@ func NewAgent(ctx context.Context, chatmodel model.ToolCallingChatModel, tools [
 		},
 		MaxIterations: maxIterations,
 		Middlewares:   middlewares,
+		Handlers:      handlers,
+		ModelRetryConfig: &adk.ModelRetryConfig{
+			MaxRetries: 3,
+		},
 	})
 }

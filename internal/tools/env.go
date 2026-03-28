@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/crypto/ssh"
 	appconfig "github.com/cnjack/coding/internal/config"
+	"golang.org/x/crypto/ssh"
 )
 
 // Env holds the execution context (local or remote) and is shared by all tools.
@@ -50,6 +50,17 @@ func (e *Env) ResetToLocal(pwd, platform string) {
 
 // Pwd returns the current working directory.
 func (e *Env) Pwd() string { return e.pwd }
+
+// CloneForSubagent creates a copy of this Env with the same executor and pwd
+// but an isolated TodoStore, suitable for use by a subagent.
+func (e *Env) CloneForSubagent() *Env {
+	return &Env{
+		Exec:      e.Exec,
+		pwd:       e.pwd,
+		platform:  e.platform,
+		TodoStore: NewTodoStore(),
+	}
+}
 
 // IsRemote returns true if operating over SSH.
 func (e *Env) IsRemote() bool {

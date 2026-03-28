@@ -111,6 +111,8 @@ func (m Model) inputAreaView() string {
 		TotalTokens:       m.totalTokens,
 		ModelContextLimit: m.modelContextLimit,
 		MCPStatuses:       m.mcpStatuses,
+		Mode:              m.agentMode,
+		BgRunning:         m.bgRunning,
 	})
 	parts = append(parts, statusLine)
 
@@ -127,6 +129,8 @@ func (m Model) getCommandHints(input string) string {
 		{"/model", "Switch model"},
 		{"/ssh", "SSH connection"},
 		{"/resume", "Resume a previous session"},
+		{"/compact", "Compress conversation context"},
+		{"/bg", "List background tasks"},
 	}
 
 	var matches []string
@@ -151,5 +155,44 @@ func (m Model) handleSettingInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	m.settingMenu.SetItems(items)
 	m.showingSetting = true
 	m.textarea.Blur()
+	return m, tea.Batch(cmds...)
+}
+
+// handleBgInput handles `/bg` command to show background task status.
+func (m Model) handleBgInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	prompt := "Use the check_background tool to list all background tasks and report their status."
+	m.mode = ModeAgent
+	m.agentDone = false
+	m.thinking = true
+	m.lines = append(m.lines, fmt.Sprintf("%s /bg",
+		userLabelStyle.Render("👤 You:")))
+	if m.ready {
+		m.viewport.Height = m.calcViewportHeight(false)
+		m.viewport.SetContent(m.renderContent())
+		m.viewport.GotoBottom()
+	}
+	cmds = append(cmds, func() tea.Msg {
+		return PromptSubmitMsg{Prompt: prompt}
+	})
+	cmds = append(cmds, m.spinner.Tick)
+	return m, tea.Batch(cmds...)
+}
+
+// handleCompactInput handles `/compact` by sending a compact request to the main goroutine.
+func (m Model) handleCompactInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	m.lines = append(m.lines, toolLabelStyle.Render("  ⏳ Compacting context..."))
+	m.thinking = true
+	m.agentDone = false
+	if m.ready {
+		m.viewport.SetContent(m.renderContent())
+		m.viewport.GotoBottom()
+	}
+
+	select {
+	case compactCh <- struct{}{}:
+	default:
+	}
+
+	cmds = append(cmds, m.spinner.Tick)
 	return m, tea.Batch(cmds...)
 }
