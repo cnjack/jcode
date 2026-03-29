@@ -76,7 +76,7 @@ jobs:
           BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           GIT_COMMIT=$(git rev-parse --short HEAD)
           
-          OUTPUT_NAME="coding-${GOOS}-${GOARCH}${{ matrix.suffix }}"
+          OUTPUT_NAME="jcode-${GOOS}-${GOARCH}${{ matrix.suffix }}"
           
           go build -ldflags "-s -w \
             -X main.Version=${VERSION} \
@@ -84,12 +84,12 @@ jobs:
             -X main.GitCommit=${GIT_COMMIT} \
             -extldflags '-static'" \
             -o "dist/${OUTPUT_NAME}" \
-            ./cmd/coding
+            ./cmd/jcode/
 
       - name: Calculate checksum
         run: |
           cd dist
-          for file in coding-*; do
+          for file in jcode-*; do
             sha256sum "$file" > "$file.sha256"
           done
 
@@ -97,7 +97,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/coding-*
+          path: dist/jcode-*
 
   release:
     needs: build
@@ -140,7 +140,7 @@ jobs:
           draft: false
           prerelease: ${{ contains(steps.get_version.outputs.version, 'alpha') || contains(steps.get_version.outputs.version, 'beta') || contains(steps.get_version.outputs.version, 'rc') }}
           files: |
-            dist/coding-*
+            dist/jcode-*
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
