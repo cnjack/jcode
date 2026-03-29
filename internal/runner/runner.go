@@ -77,21 +77,28 @@ func runInner(
 
 	var assistantText strings.Builder
 
+	config.Logger().Printf("[runner] runInner start, messages=%d", len(messages))
 	iterator := ag.Run(ctx, input)
+	eventCount := 0
 	for {
 		event, ok := iterator.Next()
 		if !ok {
+			config.Logger().Printf("[runner] iterator done after %d events", eventCount)
 			break
 		}
+		eventCount++
 		if event.Err != nil {
+			config.Logger().Printf("[runner] event error: %v", event.Err)
 			p.Send(tui.AgentDoneMsg{Err: event.Err})
 			return assistantText.String()
 		}
 		if event.Output == nil || event.Output.MessageOutput == nil {
+			config.Logger().Printf("[runner] event #%d: nil output", eventCount)
 			continue
 		}
 
 		mo := event.Output.MessageOutput
+		config.Logger().Printf("[runner] event #%d: role=%s, streaming=%v, hasMessage=%v", eventCount, mo.Role, mo.IsStreaming, mo.Message != nil)
 
 		if mo.Role == schema.Tool {
 			toolName := mo.ToolName

@@ -327,3 +327,60 @@ func (m Model) sessionPickerView() string {
 
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, boxStyle.Render(content))
 }
+
+// bottomPromptView renders a compact prompt with selectable options for the input area.
+func (m Model) bottomPromptView(title string, options []string, selected int, showTextInput bool, footer string) string {
+	var lines []string
+
+	titleLine := lipgloss.NewStyle().Bold(true).PaddingLeft(1).Foreground(colorPrimary).Render(title)
+	lines = append(lines, titleLine)
+
+	for i, opt := range options {
+		prefix := "  ○ "
+		style := lipgloss.NewStyle().Foreground(colorText)
+		if i == selected {
+			prefix = "  ● "
+			style = style.Bold(true).Foreground(colorPrimary)
+		}
+		lines = append(lines, style.Render(prefix+opt))
+	}
+
+	if showTextInput {
+		lines = append(lines, lipgloss.NewStyle().PaddingLeft(2).Render(
+			strings.TrimRight(m.textarea.View(), "\n")))
+	}
+
+	footerLine := lipgloss.NewStyle().PaddingLeft(1).Foreground(colorMuted).Render(footer)
+	lines = append(lines, footerLine)
+
+	return strings.Join(lines, "\n")
+}
+
+// planReviewPromptView renders the plan review as a bottom prompt with options.
+func (m Model) planReviewPromptView() string {
+	options := []string{"Approve", "Reject with feedback", "Dismiss"}
+	showTextInput := m.planRejectInput
+	footer := "[↑/↓] Navigate  [Enter] Select  [y] Approve  [n] Reject  [Esc] Dismiss"
+	if m.planRejectInput {
+		footer = "Enter feedback, then press Enter to confirm  [Esc] Back"
+	}
+	title := "📐 Plan Review: " + m.planReviewTitle
+	return m.bottomPromptView(title, options, m.planReviewSelected, showTextInput, footer)
+}
+
+// askUserPromptView renders the ask_user question as a bottom prompt with options.
+func (m Model) askUserPromptView() string {
+	title := "❓ " + m.askUserQuestion
+	optCount := len(m.askUserOptions)
+	if optCount == 0 {
+		// No predefined options — just show text input
+		footer := "[Enter] Submit  [Esc] Skip  [PgUp/PgDn] Scroll"
+		return m.bottomPromptView(title, nil, -1, true, footer)
+	}
+	options := make([]string, optCount+1)
+	copy(options, m.askUserOptions)
+	options[optCount] = "Other (type below)"
+	showTextInput := m.askUserSelected == optCount
+	footer := "[↑/↓] Navigate  [Enter] Select/Submit  [Esc] Skip  [PgUp/PgDn] Scroll"
+	return m.bottomPromptView(title, options, m.askUserSelected, showTextInput, footer)
+}

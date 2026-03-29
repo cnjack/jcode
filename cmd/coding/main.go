@@ -121,34 +121,23 @@ func main() {
 	// Used by closures that need to send messages to the TUI.
 	var tuiProgram *tea.Program
 
-	toolList := []tool.BaseTool{
-		env.NewReadTool(), env.NewEditTool(), env.NewWriteTool(),
-		env.NewExecuteTool(), env.NewGrepTool(),
-		env.NewTodoWriteTool(), env.NewTodoReadTool(),
-		env.NewSwitchEnvTool(),
-		env.NewBackgroundRunTool(bgManager),
-		env.NewCheckBackgroundTool(bgManager),
-		env.NewSubagentTool(&tools.SubagentDeps{
-			ChatModel: chatModel,
-			Notifier: func(name, agentType string, done bool, result string, err error) {
-				if tuiProgram == nil {
-					return
-				}
-				if !done {
-					tuiProgram.Send(tui.SubagentStartMsg{Name: name, Type: agentType})
-				} else {
-					tuiProgram.Send(tui.SubagentDoneMsg{Name: name, Result: result, Err: err})
-				}
-			},
-		}),
+	subagentNotifier := func(name, agentType string, done bool, result string, err error) {
+		if tuiProgram == nil {
+			return
+		}
+		if !done {
+			tuiProgram.Send(tui.SubagentStartMsg{Name: name, Type: agentType})
+		} else {
+			tuiProgram.Send(tui.SubagentDoneMsg{Name: name, Result: result, Err: err})
+		}
 	}
 
+	// mcpTools holds MCP tools loaded at startup, preserved across mode switches.
+	var mcpTools []tool.BaseTool
 	var mcpStatuses []tui.MCPStatusItem
 	if len(cfg.MCPServers) > 0 {
-		var mcpTools []tool.BaseTool
 		var internalStatuses []tools.MCPStatus
 		mcpTools, internalStatuses = tools.LoadMCPTools(ctx, cfg.MCPServers)
-		toolList = append(toolList, mcpTools...)
 		for _, st := range internalStatuses {
 			errMsg := ""
 			if st.Error != nil {
@@ -159,6 +148,49 @@ func main() {
 			})
 		}
 	}
+
+	// PlanStore holds the active plan content across mode transitions.
+	planStore := tools.NewPlanStore()
+
+	// Channel for ask_user tool ← TUI user answers.
+	askUserCh := make(chan tools.AskUserResponse, 1)
+
+	// askUserDeps are shared across both normal and plan modes.
+	askUserDeps := &tools.AskUserDeps{
+		ResponseCh: askUserCh,
+		// NotifyFn is set after tuiProgram is available.
+	}
+
+	// buildAllTools returns the full tool set for Agent (normal) mode.
+	buildAllTools := func() []tool.BaseTool {
+		all := []tool.BaseTool{
+			env.NewReadTool(), env.NewEditTool(), env.NewWriteTool(),
+			env.NewExecuteTool(bgManager), env.NewGrepTool(),
+			env.NewTodoWriteTool(), env.NewTodoReadTool(),
+			env.NewSwitchEnvTool(),
+			env.NewCheckBackgroundTool(bgManager),
+			env.NewSubagentTool(&tools.SubagentDeps{
+				ChatModel: chatModel,
+				Notifier:  subagentNotifier,
+			}),
+			tools.NewAskUserTool(askUserDeps),
+		}
+		return append(all, mcpTools...)
+	}
+
+	// buildPlanTools returns the read-only tool set for Plan mode.
+	buildPlanTools := func() []tool.BaseTool {
+		return []tool.BaseTool{
+			env.NewReadTool(),
+			env.NewExecuteTool(nil), // no background in plan mode
+			env.NewGrepTool(),
+			env.NewTodoWriteTool(), env.NewTodoReadTool(),
+			tools.NewAskUserTool(askUserDeps),
+		}
+	}
+
+	agentMode := tui.ModeNormal
+	toolList := buildAllTools()
 
 	approvalState := runner.NewApprovalState(pwd)
 
@@ -174,6 +206,19 @@ func main() {
 		p.Send(tui.BgTaskDoneMsg{TaskID: taskID, Command: command, Status: status})
 	})
 	approvalState.SetProgram(p)
+
+	// Wire NotifyFn callbacks now that tuiProgram is available.
+	askUserDeps.NotifyFn = func(question string, options []string) {
+		p.Send(tui.AskUserQuestionMsg{Question: question, Options: options})
+	}
+
+	// Bridge TUI response channels → tool channels.
+	go func() {
+		tuiAskCh := tui.GetAskUserResponseChannel()
+		for resp := range tuiAskCh {
+			askUserCh <- tools.AskUserResponse{Answer: resp.Answer}
+		}
+	}()
 
 	createAgent := func() (*adk.ChatModelAgent, error) {
 		var middlewares []adk.AgentMiddleware
@@ -225,9 +270,10 @@ func main() {
 		}
 
 		// Reminder middleware: injects conditional system reminders
-		// (todo check, token warning, error streak) before each model call.
+		// (todo check, token warning, error streak, plan execution) before each model call.
 		reminderMw := agent.NewReminderMiddleware(agent.ReminderConfig{
 			TodoStore:    env.TodoStore,
+			PlanStore:    planStore,
 			EnvLabel:     "local",
 			IsRemote:     env.IsRemote(),
 			ContextLimit: contextLimit,
@@ -253,7 +299,11 @@ func main() {
 		}
 		if isLocal {
 			approvalState.SetWorkpath(pwd)
-			systemPrompt = prompts.GetSystemPrompt(platform, pwd, "local", envInfo)
+			if agentMode == tui.ModePlanning {
+				systemPrompt = prompts.GetPlanSystemPrompt(platform, pwd, "local", envInfo)
+			} else {
+				systemPrompt = prompts.GetSystemPrompt(platform, pwd, "local", envInfo)
+			}
 			if newAg, err := createAgent(); err == nil {
 				ag = newAg
 			}
@@ -261,7 +311,11 @@ func main() {
 			return
 		}
 		approvalState.SetWorkpath(env.Pwd())
-		systemPrompt = prompts.GetSystemPrompt(platform, pwd, envLabel, nil)
+		if agentMode == tui.ModePlanning {
+			systemPrompt = prompts.GetPlanSystemPrompt(platform, pwd, envLabel, nil)
+		} else {
+			systemPrompt = prompts.GetSystemPrompt(platform, pwd, envLabel, nil)
+		}
 		if newAg, err := createAgent(); err == nil {
 			ag = newAg
 		}
@@ -373,10 +427,127 @@ func main() {
 		resumeCh := tui.GetResumeChannel()
 		autoApproveCh := tui.GetAutoApproveChannel()
 		compactCh := tui.GetCompactChannel()
+		planModeCh := tui.GetPlanModeChannel()
+
+		// applyModeSwitch rebuilds the agent for the given mode.
+		applyModeSwitch := func(newMode tui.AgentMode) {
+			agentMode = newMode
+			config.Logger().Printf("[plan] mode switch to %d (0=normal, 1=plan)", newMode)
+			if agentMode == tui.ModePlanning {
+				systemPrompt = prompts.GetPlanSystemPrompt(platform, pwd, env.Exec.Label(), envInfo)
+				toolList = buildPlanTools()
+				config.Logger().Printf("[plan] built plan tools: %d tools", len(toolList))
+			} else {
+				systemPrompt = prompts.GetSystemPrompt(platform, pwd, env.Exec.Label(), envInfo)
+				toolList = buildAllTools()
+				config.Logger().Printf("[plan] built all tools: %d tools", len(toolList))
+			}
+			if newAg, err := createAgent(); err == nil {
+				ag = newAg
+				config.Logger().Printf("[plan] agent recreated successfully")
+			} else {
+				config.Logger().Printf("[plan] agent creation failed: %v", err)
+			}
+		}
+
+		// drainModeSwitch applies any pending mode switch before processing a prompt.
+		drainModeSwitch := func() {
+			for {
+				select {
+				case newMode := <-planModeCh:
+					applyModeSwitch(newMode)
+				default:
+					return
+				}
+			}
+		}
+
+		// handlePlanCompletion is called after runner.Run() returns in plan mode.
+		// It submits the agent's response as the plan, shows the review dialog,
+		// and blocks until the user approves or rejects.
+		var handlePlanCompletion func(resp string)
+		handlePlanCompletion = func(resp string) {
+			if agentMode != tui.ModePlanning || resp == "" {
+				return
+			}
+
+			// Store the agent's response as the submitted plan.
+			planStore.Submit("Plan", resp)
+			config.Logger().Printf("[plan] plan submitted for review (%d chars)", len(resp))
+
+			// Show plan review dialog in TUI.
+			p.Send(tui.PlanApprovalMsg{PlanContent: resp, PlanPath: "Plan"})
+
+			// Block waiting for user response.
+			planRespCh := tui.GetPlanResponseChannel()
+			planResp := <-planRespCh
+
+			if !planResp.Approved {
+				feedback := planResp.Feedback
+				planStore.Reject(feedback)
+				config.Logger().Printf("[plan] plan rejected: %s", feedback)
+
+				// Re-run with feedback so the agent can revise.
+				revisePrompt := "Your plan was rejected."
+				if feedback != "" {
+					revisePrompt += " Feedback: " + feedback
+				}
+				revisePrompt += "\nPlease revise your plan based on this feedback."
+				p.Send(tui.UserPromptMsg{Prompt: revisePrompt})
+				if rec != nil {
+					rec.RecordUser(revisePrompt)
+				}
+				history = append(history, schema.UserMessage(revisePrompt))
+				newResp := runner.Run(ctx, ag, history, p, rec, env.TodoStore, langfuseTracer)
+				if newResp != "" {
+					history = append(history, &schema.Message{Role: schema.Assistant, Content: newResp})
+				}
+				// Recurse to handle the revised plan.
+				handlePlanCompletion(newResp)
+				return
+			}
+
+			planStore.Approve()
+			config.Logger().Printf("[plan] plan approved, transitioning to execution mode")
+
+			// Extract todos from plan steps.
+			todos := tools.ExtractTodosFromPlan(planStore.Content())
+			if len(todos) > 0 {
+				env.TodoStore.Update(todos)
+				p.Send(tui.TodoUpdateMsg{})
+				config.Logger().Printf("[plan] populated %d todos from plan", len(todos))
+			}
+
+			// Switch to executing mode (full tools + normal prompt).
+			applyModeSwitch(tui.ModeExecuting)
+
+			// Auto-send execution prompt.
+			execPrompt := "Your plan has been approved. Execute it step by step, tracking progress with the todo list. Mark each step complete as you finish it."
+			p.Send(tui.UserPromptMsg{Prompt: execPrompt})
+			if rec != nil {
+				rec.RecordUser(execPrompt)
+			}
+			history = append(history, schema.UserMessage(execPrompt))
+			execResp := runner.Run(ctx, ag, history, p, rec, env.TodoStore, langfuseTracer)
+			if execResp != "" {
+				history = append(history, &schema.Message{Role: schema.Assistant, Content: execResp})
+			}
+
+			// Check if all todos are done → transition back to normal.
+			if env.TodoStore.HasItems() && !env.TodoStore.HasIncomplete() {
+				config.Logger().Printf("[plan] all todos complete, switching to normal mode")
+				planStore.Clear()
+				applyModeSwitch(tui.ModeNormal)
+			}
+		}
+
 		for {
 			select {
 			case enabled := <-autoApproveCh:
 				approvalState.SetSessionApproval(enabled)
+
+			case newMode := <-planModeCh:
+				applyModeSwitch(newMode)
 
 			case cfgMsg := <-configCh:
 				providerCfg := cfgMsg.Models[cfgMsg.Provider]
@@ -393,6 +564,8 @@ func main() {
 				}
 
 			case userPrompt := <-promptCh:
+				drainModeSwitch()
+				config.Logger().Printf("[plan] processing prompt, agentMode=%d, toolCount=%d", agentMode, len(toolList))
 				if sessionResumeWarning != "" {
 					userPrompt = sessionResumeWarning + "\n\n" + userPrompt
 					sessionResumeWarning = ""
@@ -406,8 +579,10 @@ func main() {
 				if resp != "" {
 					history = append(history, &schema.Message{Role: schema.Assistant, Content: resp})
 				}
+				handlePlanCompletion(resp)
 
 			case pendingPrompt := <-pendingPromptCh:
+				drainModeSwitch()
 				p.Send(tui.UserPromptMsg{Prompt: pendingPrompt})
 				if sessionResumeWarning != "" {
 					pendingPrompt = sessionResumeWarning + "\n\n" + pendingPrompt
@@ -422,6 +597,7 @@ func main() {
 				if resp != "" {
 					history = append(history, &schema.Message{Role: schema.Assistant, Content: resp})
 				}
+				handlePlanCompletion(resp)
 
 			case uuid := <-resumeCh:
 				entries, loadErr := session.LoadSession(uuid)
@@ -447,7 +623,11 @@ func main() {
 				case tui.SSHCancelMsg:
 					_ = msg
 					env.ResetToLocal(pwd, platform)
-					systemPrompt = prompts.GetSystemPrompt(platform, pwd, "local", envInfo)
+					if agentMode == tui.ModePlanning {
+						systemPrompt = prompts.GetPlanSystemPrompt(platform, pwd, "local", envInfo)
+					} else {
+						systemPrompt = prompts.GetSystemPrompt(platform, pwd, "local", envInfo)
+					}
 					if newAg, err := createAgent(); err == nil {
 						ag = newAg
 					}

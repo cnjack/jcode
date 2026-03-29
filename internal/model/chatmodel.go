@@ -8,10 +8,11 @@ import (
 
 	openai "github.com/sashabaranov/go-openai"
 
+	"time"
+
 	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"github.com/cnjack/coding/internal/config"
-	"time"
 )
 
 // TokenUsage tracks token consumption across all API calls
@@ -78,6 +79,7 @@ func NewChatModel(_ context.Context, cfg *ChatModelConfig) (einomodel.ToolCallin
 }
 
 func (m *chatModel) WithTools(tools []*schema.ToolInfo) (einomodel.ToolCallingChatModel, error) {
+	config.Logger().Printf("[chatmodel] WithTools called with %d tools", len(tools))
 	oaiTools := make([]openai.Tool, 0, len(tools))
 	for _, ti := range tools {
 		if ti == nil {
@@ -96,11 +98,15 @@ func (m *chatModel) WithTools(tools []*schema.ToolInfo) (einomodel.ToolCallingCh
 			},
 		})
 	}
+	config.Logger().Printf("[chatmodel] WithTools: bound %d tools", len(oaiTools))
+	for _, t := range oaiTools {
+		config.Logger().Printf("[chatmodel]   tool: %s", t.Function.Name)
+	}
 	return &chatModel{client: m.client, model: m.model, tools: oaiTools}, nil
 }
 
-func (m *chatModel) Generate(ctx context.Context, input []*schema.Message, _ ...einomodel.Option) (*schema.Message, error) {
-	req := m.buildRequest(input, false)
+func (m *chatModel) Generate(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.Message, error) {
+	req := m.buildRequest(input, false, opts...)
 	config.Logger().Printf("[chatmodel] Generate start (model: %s)", m.model)
 	start := time.Now()
 	resp, err := m.client.CreateChatCompletion(ctx, req)
@@ -118,8 +124,8 @@ func (m *chatModel) Generate(ctx context.Context, input []*schema.Message, _ ...
 	return toEinoMessage(resp.Choices[0].Message), nil
 }
 
-func (m *chatModel) Stream(ctx context.Context, input []*schema.Message, _ ...einomodel.Option) (*schema.StreamReader[*schema.Message], error) {
-	req := m.buildRequest(input, true)
+func (m *chatModel) Stream(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.StreamReader[*schema.Message], error) {
+	req := m.buildRequest(input, true, opts...)
 	// Enable stream options to get usage information
 	req.StreamOptions = &openai.StreamOptions{
 		IncludeUsage: true,
@@ -137,15 +143,20 @@ func (m *chatModel) Stream(ctx context.Context, input []*schema.Message, _ ...ei
 	go func() {
 		defer sw.Close()
 		defer stream.Close()
+		chunkCount := 0
+		toolCallSeen := false
 		for {
 			resp, err := stream.Recv()
 			if err == io.EOF {
+				config.Logger().Printf("[chatmodel] Stream EOF after %d chunks, toolCallSeen=%v", chunkCount, toolCallSeen)
 				break
 			}
 			if err != nil {
+				config.Logger().Printf("[chatmodel] Stream recv error after %d chunks: %v", chunkCount, err)
 				sw.Send(nil, err)
 				break
 			}
+			chunkCount++
 			// Track token usage from stream response
 			if resp.Usage != nil && resp.Usage.TotalTokens > 0 {
 				TokenTracker.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
@@ -154,6 +165,10 @@ func (m *chatModel) Stream(ctx context.Context, input []*schema.Message, _ ...ei
 				continue
 			}
 			delta := resp.Choices[0].Delta
+			if len(delta.ToolCalls) > 0 && !toolCallSeen {
+				toolCallSeen = true
+				config.Logger().Printf("[chatmodel] Stream: first tool call detected at chunk %d: %s", chunkCount, delta.ToolCalls[0].Function.Name)
+			}
 			msg := &schema.Message{
 				Role:    schema.Assistant,
 				Content: delta.Content,
@@ -168,7 +183,7 @@ func (m *chatModel) Stream(ctx context.Context, input []*schema.Message, _ ...ei
 	return sr, nil
 }
 
-func (m *chatModel) buildRequest(input []*schema.Message, stream bool) openai.ChatCompletionRequest {
+func (m *chatModel) buildRequest(input []*schema.Message, stream bool, opts ...einomodel.Option) openai.ChatCompletionRequest {
 	msgs := make([]openai.ChatCompletionMessage, 0, len(input))
 	for _, msg := range input {
 		msgs = append(msgs, toOpenAIMessage(msg))
@@ -178,9 +193,35 @@ func (m *chatModel) buildRequest(input []*schema.Message, stream bool) openai.Ch
 		Messages: msgs,
 		Stream:   stream,
 	}
-	if len(m.tools) > 0 {
+
+	// Apply call-time options (e.g. model.WithTools from Eino framework).
+	commonOpts := einomodel.GetCommonOptions(nil, opts...)
+	if len(commonOpts.Tools) > 0 {
+		oaiTools := make([]openai.Tool, 0, len(commonOpts.Tools))
+		for _, ti := range commonOpts.Tools {
+			if ti == nil {
+				continue
+			}
+			params, err := ti.ParamsOneOf.ToJSONSchema()
+			if err != nil {
+				config.Logger().Printf("[chatmodel] buildRequest: skip tool %s: %v", ti.Name, err)
+				continue
+			}
+			oaiTools = append(oaiTools, openai.Tool{
+				Type: openai.ToolTypeFunction,
+				Function: &openai.FunctionDefinition{
+					Name:        ti.Name,
+					Description: ti.Desc,
+					Parameters:  params,
+				},
+			})
+		}
+		req.Tools = oaiTools
+	} else if len(m.tools) > 0 {
+		// Fallback to pre-bound tools (from WithTools method).
 		req.Tools = m.tools
 	}
+	config.Logger().Printf("[chatmodel] buildRequest: model=%s, messages=%d, tools=%d, stream=%v", m.model, len(msgs), len(req.Tools), stream)
 	return req
 }
 
@@ -246,44 +287,44 @@ func toEinoToolCalls(tcs []openai.ToolCall) []schema.ToolCall {
 // This is used as a fallback when the /models API doesn't return this info.
 var knownModelContextLimits = map[string]int{
 	// OpenAI models
-	"gpt-4o":                 128000,
-	"gpt-4o-mini":            128000,
-	"gpt-4-turbo":            128000,
-	"gpt-4-turbo-preview":    128000,
-	"gpt-4-0125-preview":     128000,
-	"gpt-4-1106-preview":     128000,
-	"gpt-4":                  8192,
-	"gpt-4-32k":              32768,
-	"gpt-3.5-turbo":          16385,
-	"gpt-3.5-turbo-16k":      16385,
-	"o1":                     200000,
-	"o1-preview":             128000,
-	"o1-mini":                128000,
+	"gpt-4o":              128000,
+	"gpt-4o-mini":         128000,
+	"gpt-4-turbo":         128000,
+	"gpt-4-turbo-preview": 128000,
+	"gpt-4-0125-preview":  128000,
+	"gpt-4-1106-preview":  128000,
+	"gpt-4":               8192,
+	"gpt-4-32k":           32768,
+	"gpt-3.5-turbo":       16385,
+	"gpt-3.5-turbo-16k":   16385,
+	"o1":                  200000,
+	"o1-preview":          128000,
+	"o1-mini":             128000,
 	// Claude models (for Anthropic-compatible APIs)
-	"claude-3-5-sonnet-latest": 200000,
+	"claude-3-5-sonnet-latest":   200000,
 	"claude-3-5-sonnet-20241022": 200000,
 	"claude-3-5-sonnet-20240620": 200000,
-	"claude-3-5-haiku-latest":   200000,
-	"claude-3-5-haiku-20241022": 200000,
-	"claude-3-opus-20240229":    200000,
-	"claude-3-sonnet-20240229":  200000,
-	"claude-3-haiku-20240307":   200000,
-	"claude-sonnet-4-20250514":  200000,
-	"claude-opus-4-20250514":    200000,
+	"claude-3-5-haiku-latest":    200000,
+	"claude-3-5-haiku-20241022":  200000,
+	"claude-3-opus-20240229":     200000,
+	"claude-3-sonnet-20240229":   200000,
+	"claude-3-haiku-20240307":    200000,
+	"claude-sonnet-4-20250514":   200000,
+	"claude-opus-4-20250514":     200000,
 	// DeepSeek models
-	"deepseek-chat":      64000,
-	"deepseek-coder":     16000,
-	"deepseek-reasoner":  64000,
+	"deepseek-chat":     64000,
+	"deepseek-coder":    16000,
+	"deepseek-reasoner": 64000,
 	// Other common models
-	"llama-3.1-405b":  128000,
-	"llama-3.1-70b":   128000,
-	"llama-3.1-8b":    128000,
-	"llama-3-70b":     8192,
-	"llama-3-8b":      8192,
-	"mixtral-8x7b":    32768,
-	"mixtral-8x22b":   65536,
-	"mistral-large":   128000,
-	"gemini-1.5-pro":  1000000,
+	"llama-3.1-405b":   128000,
+	"llama-3.1-70b":    128000,
+	"llama-3.1-8b":     128000,
+	"llama-3-70b":      8192,
+	"llama-3-8b":       8192,
+	"mixtral-8x7b":     32768,
+	"mixtral-8x22b":    65536,
+	"mistral-large":    128000,
+	"gemini-1.5-pro":   1000000,
 	"gemini-1.5-flash": 1000000,
 }
 

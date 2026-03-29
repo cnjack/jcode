@@ -196,50 +196,6 @@ func (bm *BackgroundManager) RunningCount() int {
 	return count
 }
 
-// --- background_run tool ---
-
-type bgRunInput struct {
-	Command string `json:"command"`
-}
-
-func (e *Env) NewBackgroundRunTool(bm *BackgroundManager) tool.InvokableTool {
-	info := &schema.ToolInfo{
-		Name: "background_run",
-		Desc: "Run a shell command in the background. Returns immediately with a task ID. " +
-			"Use for long-running commands (npm install, go test, docker build, etc.) so you can keep working. " +
-			"Check results later with check_background.",
-		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"command": {
-				Type: schema.String, Desc: "The shell command to run in the background.", Required: true,
-			},
-		}),
-	}
-	return &bgRunTool{env: e, bm: bm, info: info}
-}
-
-type bgRunTool struct {
-	env  *Env
-	bm   *BackgroundManager
-	info *schema.ToolInfo
-}
-
-func (t *bgRunTool) Info(_ context.Context) (*schema.ToolInfo, error) {
-	return t.info, nil
-}
-
-func (t *bgRunTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ ...tool.Option) (string, error) {
-	var input bgRunInput
-	if err := json.Unmarshal([]byte(argumentsInJSON), &input); err != nil {
-		return "", fmt.Errorf("failed to parse input: %w", err)
-	}
-	if input.Command == "" {
-		return "", fmt.Errorf("command is required")
-	}
-
-	taskID := t.bm.Run(ctx, input.Command)
-	return fmt.Sprintf("Background task %s started: %s", taskID, input.Command), nil
-}
-
 // --- check_background tool ---
 
 type bgCheckInput struct {

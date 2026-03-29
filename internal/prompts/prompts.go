@@ -16,6 +16,9 @@ import (
 //go:embed system.md
 var systemPrompt string
 
+//go:embed plan.md
+var planPrompt string
+
 func GetSystemPrompt(platform, pwd, envLabel string, envInfo *utils.EnvInfo) string {
 	t, err := template.New("template").Parse(systemPrompt)
 	if err != nil {
@@ -81,6 +84,50 @@ func HasAgentsMd(pwd string) string {
 		}
 	}
 	return ""
+}
+
+// GetPlanSystemPrompt returns the system prompt for Plan mode (read-only exploration).
+func GetPlanSystemPrompt(platform, pwd, envLabel string, envInfo *utils.EnvInfo) string {
+	t, err := template.New("plan").Parse(planPrompt)
+	if err != nil {
+		return ""
+	}
+
+	data := struct {
+		Platform    string
+		Pwd         string
+		Date        string
+		EnvLabel    string
+		GitBranch   string
+		GitDirty    bool
+		LastCommit  string
+		ProjectType string
+		DirTree     string
+	}{
+		Platform: platform,
+		Pwd:      pwd,
+		Date:     time.Now().Format("2006-01-02"),
+		EnvLabel: envLabel,
+	}
+
+	if envInfo != nil {
+		data.GitBranch = envInfo.GitBranch
+		data.GitDirty = envInfo.GitDirty
+		data.LastCommit = envInfo.LastCommit
+		data.ProjectType = envInfo.ProjectType
+		data.DirTree = envInfo.DirTree
+	}
+
+	var buf bytes.Buffer
+	if err := t.Execute(&buf, data); err != nil {
+		return ""
+	}
+	result := buf.String()
+
+	if content := loadAgentsMd(pwd); content != "" {
+		result += "\n\n## Custom Agent Instructions\n\n" + content
+	}
+	return result
 }
 
 func loadAgentsMd(pwd string) string {
