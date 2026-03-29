@@ -1,6 +1,6 @@
 package tui
 
-import "github.com/cnjack/coding/internal/session"
+import "github.com/cnjack/jcode/internal/session"
 
 // ConvertSessionEntries converts recorded session entries to display-ready
 // SessionEntry values for the TUI session-replay view.

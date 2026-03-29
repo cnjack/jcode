@@ -9,8 +9,8 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/cnjack/coding/internal/config"
-	utils "github.com/cnjack/coding/internal/util"
+	"github.com/cnjack/jcode/internal/config"
+	utils "github.com/cnjack/jcode/internal/util"
 )
 
 //go:embed system.md

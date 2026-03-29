@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	appconfig "github.com/cnjack/coding/internal/config"
+	appconfig "github.com/cnjack/jcode/internal/config"
 	"golang.org/x/crypto/ssh"
 )
 

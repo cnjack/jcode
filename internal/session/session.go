@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/cnjack/coding/internal/config"
+	"github.com/cnjack/jcode/internal/config"
 )
 
 // EntryType identifies the kind of JSONL record.

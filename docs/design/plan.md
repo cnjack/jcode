@@ -2,7 +2,7 @@
 
 > **Created**: 2026-03-28
 > **Based on**: Claude Code v2.1.86 system prompt analysis + current codebase audit
-> **Module**: `github.com/cnjack/coding` (Eino v0.7.37 + BubbleTea TUI)
+> **Module**: `github.com/cnjack/jcode` (Eino v0.7.37 + BubbleTea TUI)
 
 ---
 

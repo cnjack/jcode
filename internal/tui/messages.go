@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"github.com/cnjack/coding/internal/config"
+	"github.com/cnjack/jcode/internal/config"
 )
 
 const maxToolOutputLen = 500

@@ -7,8 +7,8 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/cnjack/coding/internal/config"
-	"github.com/cnjack/coding/internal/session"
+	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/session"
 )
 
 func (m Model) handleModelInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {

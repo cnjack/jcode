@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/cnjack/coding/internal/tui"
+	"github.com/cnjack/jcode/internal/tui"
 )
 
 func TestNewApprovalState(t *testing.T) {

@@ -1,5 +1,5 @@
-BIN := coding
-PKG := ./cmd/coding/
+BIN := jcode
+PKG := ./cmd/jcode/
 
 export GOFLAGS := -buildvcs=false
 

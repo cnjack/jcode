@@ -9,7 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/cnjack/coding/internal/tui"
+	"github.com/cnjack/jcode/internal/tui"
 )
 
 // ApprovalState manages whether tool calls require interactive user approval.

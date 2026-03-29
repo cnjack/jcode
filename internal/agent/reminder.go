@@ -7,9 +7,9 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
-	internalmodel "github.com/cnjack/coding/internal/model"
-	"github.com/cnjack/coding/internal/prompts"
-	"github.com/cnjack/coding/internal/tools"
+	internalmodel "github.com/cnjack/jcode/internal/model"
+	"github.com/cnjack/jcode/internal/prompts"
+	"github.com/cnjack/jcode/internal/tools"
 )
 
 // ReminderConfig holds the static configuration for the reminder middleware.

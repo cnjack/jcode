@@ -4,7 +4,7 @@
 
 Go CLI coding assistant — [Eino](https://github.com/cloudwego/eino) framework + [BubbleTea](https://github.com/charmbracelet/bubbletea) TUI.
 
-- **Entry point:** `cmd/coding/` | **Config:** `~/.jcoding/` | **Module:** `github.com/cnjack/coding`
+- **Entry point:** `cmd/coding/` | **Config:** `~/.jcoding/` | **Module:** `github.com/cnjack/jcode`
 - **Build:** `make build` / `make run` / `make install`
 
 ---

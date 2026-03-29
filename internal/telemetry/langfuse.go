@@ -9,7 +9,7 @@ import (
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/cnjack/coding/internal/config"
+	"github.com/cnjack/jcode/internal/config"
 )
 
 const defaultFlushTimeout = 3 * time.Second

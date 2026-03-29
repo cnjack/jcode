@@ -8,7 +8,7 @@ import (
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
-	"github.com/cnjack/coding/internal/config"
+	"github.com/cnjack/jcode/internal/config"
 )
 
 type SwitchEnvInput struct {
@@ -94,7 +94,7 @@ func (s *switchEnvTool) InvokableRun(ctx context.Context, argumentsInJSON string
 		// Wait, my env.go says NewSSHExecutor(addr, user string, authMethods []ssh.AuthMethod)
 		addr = addr[idx+1:]
 	}
-	
+
 	sshExec, err := NewSSHExecutor(addr, user, authMethods)
 	if err != nil {
 		if s.env.OnEnvChange != nil {
@@ -105,7 +105,7 @@ func (s *switchEnvTool) InvokableRun(ctx context.Context, argumentsInJSON string
 
 	s.env.SetSSH(sshExec, match.Path)
 	label := sshExec.Label()
-	
+
 	if s.env.OnEnvChange != nil {
 		s.env.OnEnvChange(label, false, nil)
 	}

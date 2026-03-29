@@ -193,7 +193,7 @@ import (
     eutils "github.com/cloudwego/eino/utils/callbacks"
     "github.com/cloudwego/eino/components/model"
     "github.com/cloudwego/eino/components/tool"
-    "github.com/cnjack/coding/internal/config"
+    "github.com/cnjack/jcode/internal/config"
 )
 
 // NewDebugLogHandler returns a callbacks.Handler that writes lifecycle events

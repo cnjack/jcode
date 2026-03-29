@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/cnjack/coding/internal/config"
+	"github.com/cnjack/jcode/internal/config"
 )
 
 // handleSSHInput parses the /ssh command and begins the guided flow.

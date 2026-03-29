@@ -1,4 +1,4 @@
-module github.com/cnjack/coding
+module github.com/cnjack/jcode
 
 go 1.24.7
 

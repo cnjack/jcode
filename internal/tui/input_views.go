@@ -7,8 +7,8 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/cnjack/coding/internal/config"
-	"github.com/cnjack/coding/internal/tools"
+	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/tools"
 )
 
 // renderTodoBar renders the todo items as a compact block above the input.

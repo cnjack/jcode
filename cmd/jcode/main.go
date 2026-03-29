@@ -18,17 +18,17 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/cnjack/coding/internal/agent"
-	"github.com/cnjack/coding/internal/config"
-	internalmodel "github.com/cnjack/coding/internal/model"
-	"github.com/cnjack/coding/internal/prompts"
-	"github.com/cnjack/coding/internal/runner"
-	"github.com/cnjack/coding/internal/session"
-	"github.com/cnjack/coding/internal/skills"
-	"github.com/cnjack/coding/internal/telemetry"
-	"github.com/cnjack/coding/internal/tools"
-	"github.com/cnjack/coding/internal/tui"
-	util "github.com/cnjack/coding/internal/util"
+	"github.com/cnjack/jcode/internal/agent"
+	"github.com/cnjack/jcode/internal/config"
+	internalmodel "github.com/cnjack/jcode/internal/model"
+	"github.com/cnjack/jcode/internal/prompts"
+	"github.com/cnjack/jcode/internal/runner"
+	"github.com/cnjack/jcode/internal/session"
+	"github.com/cnjack/jcode/internal/skills"
+	"github.com/cnjack/jcode/internal/telemetry"
+	"github.com/cnjack/jcode/internal/tools"
+	"github.com/cnjack/jcode/internal/tui"
+	util "github.com/cnjack/jcode/internal/util"
 )
 
 var (

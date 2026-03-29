@@ -9,12 +9,12 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/cnjack/coding/internal/config"
-	internalmodel "github.com/cnjack/coding/internal/model"
-	"github.com/cnjack/coding/internal/session"
-	"github.com/cnjack/coding/internal/telemetry"
-	"github.com/cnjack/coding/internal/tools"
-	"github.com/cnjack/coding/internal/tui"
+	"github.com/cnjack/jcode/internal/config"
+	internalmodel "github.com/cnjack/jcode/internal/model"
+	"github.com/cnjack/jcode/internal/session"
+	"github.com/cnjack/jcode/internal/telemetry"
+	"github.com/cnjack/jcode/internal/tools"
+	"github.com/cnjack/jcode/internal/tui"
 )
 
 // Run executes the agent for a single turn, wrapping the response with a

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cnjack/coding/internal/config"
+	"github.com/cnjack/jcode/internal/config"
 )
 
 // Skill represents a loaded skill with metadata and content.

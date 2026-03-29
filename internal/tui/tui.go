@@ -14,9 +14,9 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/cnjack/coding/internal/config"
-	"github.com/cnjack/coding/internal/session"
-	"github.com/cnjack/coding/internal/tools"
+	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/session"
+	"github.com/cnjack/jcode/internal/tools"
 )
 
 // --- Model ---
