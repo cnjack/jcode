@@ -203,6 +203,14 @@ type SubagentDoneMsg struct {
 	Err    error
 }
 
+// SubagentProgressMsg is sent for intermediate subagent events (tool calls / results).
+type SubagentProgressMsg struct {
+	AgentName string
+	Event     string // "tool_call" or "tool_result"
+	ToolName  string
+	Detail    string
+}
+
 // CompactRequestMsg is sent when the user requests manual context compaction.
 type CompactRequestMsg struct{}
 

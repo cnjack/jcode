@@ -138,6 +138,18 @@ func main() {
 		}
 	}
 
+	subagentProgress := func(agentName, event, toolName, detail string) {
+		if tuiProgram == nil {
+			return
+		}
+		tuiProgram.Send(tui.SubagentProgressMsg{
+			AgentName: agentName,
+			Event:     event,
+			ToolName:  toolName,
+			Detail:    detail,
+		})
+	}
+
 	// mcpTools holds MCP tools loaded at startup, preserved across mode switches.
 	var mcpTools []tool.BaseTool
 	var mcpStatuses []tui.MCPStatusItem
@@ -193,9 +205,10 @@ func main() {
 			env.NewSwitchEnvTool(),
 			env.NewCheckBackgroundTool(bgManager),
 			env.NewSubagentTool(&tools.SubagentDeps{
-				ChatModel: chatModel,
-				Notifier:  subagentNotifier,
-				Recorder:  rec,
+				ChatModel:  chatModel,
+				Notifier:   subagentNotifier,
+				ProgressFn: subagentProgress,
+				Recorder:   rec,
 			}),
 			tools.NewAskUserTool(askUserDeps),
 			skills.NewLoadSkillTool(skillLoader),
