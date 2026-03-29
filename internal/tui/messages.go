@@ -284,3 +284,20 @@ type AskUserResponse struct {
 func GetAskUserResponseChannel() <-chan AskUserResponse {
 	return askUserResponseCh
 }
+
+// SkillSlashMsg is sent when a user triggers a slash command mapped to a skill.
+type SkillSlashMsg struct {
+	SkillName string // skill name to load
+	UserInput string // additional user input after the slash command
+}
+
+// SkillsLoadedMsg is sent at startup to inform the TUI about available skill slash commands.
+type SkillsLoadedMsg struct {
+	SlashCommands []SkillSlashInfo
+}
+
+// SkillSlashInfo describes a skill's slash command for TUI hint display.
+type SkillSlashInfo struct {
+	Slash       string
+	Description string
+}

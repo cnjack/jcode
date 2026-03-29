@@ -111,6 +111,9 @@ type Model struct {
 	askUserQuestion string
 	askUserOptions  []string
 	askUserSelected int // currently highlighted option index
+
+	// Skill slash commands from skill loader
+	skillSlashCommands []SkillSlashInfo
 }
 
 // dirItem implements list.Item
@@ -846,6 +849,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m.handleCompactInput(cmds)
 					}
 
+					// Check skill slash commands (e.g. /review-pr, /security-review)
+					if strings.HasPrefix(prompt, "/") {
+						if skillCmd := m.matchSkillSlash(prompt); skillCmd != nil {
+							return m.handleSkillSlashInput(skillCmd.SkillName, skillCmd.UserInput, cmds)
+						}
+					}
+
 					if m.sshSavePrompt {
 						return m.handleSSHSaveAlias(prompt, cmds)
 					}
@@ -1033,6 +1043,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case AgentsMdMsg:
 		m.agentsMdFound = msg.Found
 		m.refreshViewport()
+
+	case SkillsLoadedMsg:
+		m.skillSlashCommands = msg.SlashCommands
 
 	case SessionResumedMsg:
 		m.approvalMode = ModeManual

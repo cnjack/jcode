@@ -126,6 +126,11 @@ func (m Model) getCommandHints(input string) string {
 		{"/bg", "List background tasks"},
 	}
 
+	// Add dynamically-loaded skill slash commands.
+	for _, sc := range m.skillSlashCommands {
+		commands = append(commands, cmdHint{sc.Slash, sc.Description})
+	}
+
 	var matches []string
 	for _, c := range commands {
 		if strings.HasPrefix(c.cmd, input) {
@@ -186,6 +191,55 @@ func (m Model) handleCompactInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	default:
 	}
 
+	cmds = append(cmds, m.spinner.Tick)
+	return m, tea.Batch(cmds...)
+}
+
+// matchSkillSlash checks if the prompt matches a registered skill slash command.
+// Returns a SkillSlashMsg if matched, nil otherwise.
+func (m Model) matchSkillSlash(prompt string) *SkillSlashMsg {
+	for _, sc := range m.skillSlashCommands {
+		if prompt == sc.Slash || strings.HasPrefix(prompt, sc.Slash+" ") {
+			userInput := ""
+			if strings.HasPrefix(prompt, sc.Slash+" ") {
+				userInput = strings.TrimSpace(prompt[len(sc.Slash):])
+			}
+			skillName := strings.TrimPrefix(sc.Slash, "/")
+			return &SkillSlashMsg{
+				SkillName: skillName,
+				UserInput: userInput,
+			}
+		}
+	}
+	return nil
+}
+
+// handleSkillSlashInput handles a skill slash command by sending a prompt that
+// loads the skill and follows its instructions.
+func (m Model) handleSkillSlashInput(skillName, userInput string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	prompt := fmt.Sprintf("Use the load_skill tool with name=%q and follow its instructions.", skillName)
+	if userInput != "" {
+		prompt += fmt.Sprintf("\n\nAdditional context: %s", userInput)
+	}
+
+	displayLabel := "/" + skillName
+	if userInput != "" {
+		displayLabel += " " + userInput
+	}
+
+	m.mode = ModeAgent
+	m.agentDone = false
+	m.thinking = true
+	m.lines = append(m.lines, fmt.Sprintf("%s %s",
+		userLabelStyle.Render("🔧 Skill:"), displayLabel))
+	if m.ready {
+		m.viewport.Height = m.calcViewportHeight(false)
+		m.viewport.SetContent(m.renderContent())
+		m.viewport.GotoBottom()
+	}
+	cmds = append(cmds, func() tea.Msg {
+		return PromptSubmitMsg{Prompt: prompt}
+	})
 	cmds = append(cmds, m.spinner.Tick)
 	return m, tea.Batch(cmds...)
 }
