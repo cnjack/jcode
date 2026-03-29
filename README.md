@@ -81,6 +81,11 @@ Save connections as named aliases and jump between hosts with a keypress:
 - **MCP servers** — connect HTTP / SSE / stdio MCP servers; their tools merge with the built-ins
 - **Approval mode** — default is *Ask* (confirm each tool call); toggle to *Auto* for unattended runs
 - **Session resume** — `/resume` brings back the full conversation history for any past project session
+- **Plan mode** — agent explores the codebase read-only and presents a plan before making changes
+- **Skills** — built-in skills (PR review, security review, etc.) loaded on demand for domain-specific tasks
+- **Subagents** — delegate subtasks to independent child agents for parallel research or exploration
+- **Background tasks** — long-running commands (builds, tests) run in the background; check status anytime
+- **Context awareness** — auto-detects Git branch, project type, and directory structure at startup
 
 ```
   ┌──────────────── Resume Session ─────────────────┐
