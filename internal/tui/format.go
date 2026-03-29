@@ -39,10 +39,54 @@ func formatToolResult(toolName, output string, termWidth int) []string {
 		return formatExecuteOutput(output, termWidth)
 	case "edit":
 		return formatEditOutput(output, termWidth)
+	case "subagent":
+		return formatSubagentOutput(output, termWidth)
+	case "todowrite":
+		return formatTodoWriteOutput(output)
 	default:
-		return []string{fmt.Sprintf("   %s %s",
-			toolSuccessStyle.Render("✓ Done:"),
-			toolResultStyle.Render(truncate(output, maxToolOutputLen)))}
+		return formatDefaultOutput(toolName, output, termWidth)
+	}
+}
+
+// formatDefaultOutput renders tool output in a bordered box, truncating if too many lines.
+func formatDefaultOutput(toolName, output string, termWidth int) []string {
+	output = strings.TrimRight(output, "\n")
+	if output == "" {
+		return []string{fmt.Sprintf("   %s", toolSuccessStyle.Render("✓ Done"))}
+	}
+
+	const maxLines = 6
+	rawLines := strings.Split(output, "\n")
+
+	shown := rawLines
+	hidden := 0
+	if len(rawLines) > maxLines {
+		shown = rawLines[:maxLines]
+		hidden = len(rawLines) - maxLines
+	}
+
+	var boxContent strings.Builder
+	for i, line := range shown {
+		boxContent.WriteString(line)
+		if i < len(shown)-1 {
+			boxContent.WriteString("\n")
+		}
+	}
+	if hidden > 0 {
+		boxContent.WriteString("\n")
+		boxContent.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
+			Render(fmt.Sprintf("... (%d more lines)", hidden)))
+	}
+
+	boxWidth := termWidth - 8
+	if boxWidth < 30 {
+		boxWidth = 30
+	}
+
+	box := outputBoxStyle.Width(boxWidth).Render(boxContent.String())
+	return []string{
+		fmt.Sprintf("   %s", toolSuccessStyle.Render("✓ Done:")),
+		box,
 	}
 }
 
@@ -127,4 +171,53 @@ func formatEditOutput(output string, termWidth int) []string {
 	diffBox := outputBoxStyle.Width(boxWidth).Render(strings.TrimRight(diffContent.String(), "\n"))
 	result = append(result, diffBox)
 	return result
+}
+
+// formatSubagentOutput shows the first few lines of subagent output in a bordered box.
+func formatSubagentOutput(output string, termWidth int) []string {
+	const tailLines = 8
+	rawLines := strings.Split(strings.TrimRight(output, "\n"), "\n")
+
+	shown := rawLines
+	hidden := 0
+	if len(rawLines) > tailLines {
+		shown = rawLines[:tailLines]
+		hidden = len(rawLines) - tailLines
+	}
+
+	var boxContent strings.Builder
+	for i, line := range shown {
+		boxContent.WriteString(line)
+		if i < len(shown)-1 {
+			boxContent.WriteString("\n")
+		}
+	}
+	if hidden > 0 {
+		boxContent.WriteString("\n")
+		boxContent.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
+			Render(fmt.Sprintf("... (%d more lines)", hidden)))
+	}
+
+	boxWidth := termWidth - 8
+	if boxWidth < 30 {
+		boxWidth = 30
+	}
+
+	box := outputBoxStyle.Width(boxWidth).Render(boxContent.String())
+	return []string{
+		fmt.Sprintf("   %s", toolSuccessStyle.Render("✓ Subagent Result:")),
+		box,
+	}
+}
+
+// formatTodoWriteOutput renders todowrite result as a compact single line.
+// The full state is visible in the todo bar, so just show the summary line.
+func formatTodoWriteOutput(output string) []string {
+	summary := strings.SplitN(output, "\n", 2)[0]
+	if summary == "" {
+		summary = "updated"
+	}
+	return []string{
+		fmt.Sprintf("   %s %s", toolSuccessStyle.Render("✓"), toolArgsStyle.Render(summary)),
+	}
 }

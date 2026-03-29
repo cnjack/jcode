@@ -11,20 +11,6 @@ import (
 	"github.com/cnjack/coding/internal/tools"
 )
 
-// todoBarHeight returns the number of lines the todo bar occupies.
-func (m Model) todoBarHeight() int {
-	if m.todoStore == nil || !m.todoStore.HasItems() {
-		return 0
-	}
-	items := m.todoStore.Items()
-	// Count: label line + item lines (max 5 visible)
-	n := len(items)
-	if n > 5 {
-		n = 5
-	}
-	return 1 + n // header + items
-}
-
 // renderTodoBar renders the todo items as a compact block above the input.
 func (m Model) renderTodoBar() string {
 	if m.todoStore == nil {
@@ -64,7 +50,7 @@ func (m Model) renderTodoBar() string {
 		case tools.TodoCancelled:
 			icon = todoCancelledStyle.Render("✗")
 			text = todoCancelledStyle.Render(item.Title)
-		default: // pending
+		default:
 			icon = todoPendingStyle.Render("○")
 			text = todoPendingStyle.Render(item.Title)
 		}
@@ -80,6 +66,7 @@ func (m Model) renderTodoBar() string {
 func (m Model) inputAreaView() string {
 	var parts []string
 
+	// Show todo bar (compact) unless a bottom prompt needs the space
 	if m.todoStore != nil && m.todoStore.HasItems() {
 		todoLine := m.renderTodoBar()
 		if todoLine != "" {
@@ -89,16 +76,22 @@ func (m Model) inputAreaView() string {
 
 	parts = append(parts, divider(m.width))
 
-	val := m.textarea.Value()
-	if strings.HasPrefix(val, "/") {
-		hints := m.getCommandHints(val)
-		if hints != "" {
-			hintStyle := lipgloss.NewStyle().PaddingLeft(2).Foreground(colorMuted).Italic(true)
-			parts = append(parts, hintStyle.Render(hints))
+	if m.planReviewActive {
+		parts = append(parts, m.planReviewPromptView())
+	} else if m.askUserActive {
+		parts = append(parts, m.askUserPromptView())
+	} else {
+		val := m.textarea.Value()
+		if strings.HasPrefix(val, "/") {
+			hints := m.getCommandHints(val)
+			if hints != "" {
+				hintStyle := lipgloss.NewStyle().PaddingLeft(2).Foreground(colorMuted).Italic(true)
+				parts = append(parts, hintStyle.Render(hints))
+			}
 		}
+		parts = append(parts, lipgloss.NewStyle().PaddingLeft(1).PaddingRight(2).Render(strings.TrimRight(m.textarea.View(), "\n")))
 	}
 
-	parts = append(parts, lipgloss.NewStyle().PaddingLeft(1).PaddingRight(2).Render(strings.TrimRight(m.textarea.View(), "\n")))
 	parts = append(parts, divider(m.width))
 
 	// Render StatusBar using StatusBarComponent
@@ -111,6 +104,8 @@ func (m Model) inputAreaView() string {
 		TotalTokens:       m.totalTokens,
 		ModelContextLimit: m.modelContextLimit,
 		MCPStatuses:       m.mcpStatuses,
+		Mode:              m.agentMode,
+		BgRunning:         m.bgRunning,
 	})
 	parts = append(parts, statusLine)
 
@@ -127,6 +122,13 @@ func (m Model) getCommandHints(input string) string {
 		{"/model", "Switch model"},
 		{"/ssh", "SSH connection"},
 		{"/resume", "Resume a previous session"},
+		{"/compact", "Compress conversation context"},
+		{"/bg", "List background tasks"},
+	}
+
+	// Add dynamically-loaded skill slash commands.
+	for _, sc := range m.skillSlashCommands {
+		commands = append(commands, cmdHint{sc.Slash, sc.Description})
 	}
 
 	var matches []string
@@ -151,5 +153,93 @@ func (m Model) handleSettingInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	m.settingMenu.SetItems(items)
 	m.showingSetting = true
 	m.textarea.Blur()
+	return m, tea.Batch(cmds...)
+}
+
+// handleBgInput handles `/bg` command to show background task status.
+func (m Model) handleBgInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	prompt := "Use the check_background tool to list all background tasks and report their status."
+	m.mode = ModeAgent
+	m.agentDone = false
+	m.thinking = true
+	m.lines = append(m.lines, fmt.Sprintf("%s /bg",
+		userLabelStyle.Render("👤 You:")))
+	if m.ready {
+		m.viewport.Height = m.calcViewportHeight(false)
+		m.viewport.SetContent(m.renderContent())
+		m.viewport.GotoBottom()
+	}
+	cmds = append(cmds, func() tea.Msg {
+		return PromptSubmitMsg{Prompt: prompt}
+	})
+	cmds = append(cmds, m.spinner.Tick)
+	return m, tea.Batch(cmds...)
+}
+
+// handleCompactInput handles `/compact` by sending a compact request to the main goroutine.
+func (m Model) handleCompactInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	m.lines = append(m.lines, toolLabelStyle.Render("  ⏳ Compacting context..."))
+	m.thinking = true
+	m.agentDone = false
+	if m.ready {
+		m.viewport.SetContent(m.renderContent())
+		m.viewport.GotoBottom()
+	}
+
+	select {
+	case compactCh <- struct{}{}:
+	default:
+	}
+
+	cmds = append(cmds, m.spinner.Tick)
+	return m, tea.Batch(cmds...)
+}
+
+// matchSkillSlash checks if the prompt matches a registered skill slash command.
+// Returns a SkillSlashMsg if matched, nil otherwise.
+func (m Model) matchSkillSlash(prompt string) *SkillSlashMsg {
+	for _, sc := range m.skillSlashCommands {
+		if prompt == sc.Slash || strings.HasPrefix(prompt, sc.Slash+" ") {
+			userInput := ""
+			if strings.HasPrefix(prompt, sc.Slash+" ") {
+				userInput = strings.TrimSpace(prompt[len(sc.Slash):])
+			}
+			skillName := strings.TrimPrefix(sc.Slash, "/")
+			return &SkillSlashMsg{
+				SkillName: skillName,
+				UserInput: userInput,
+			}
+		}
+	}
+	return nil
+}
+
+// handleSkillSlashInput handles a skill slash command by sending a prompt that
+// loads the skill and follows its instructions.
+func (m Model) handleSkillSlashInput(skillName, userInput string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	prompt := fmt.Sprintf("Use the load_skill tool with name=%q and follow its instructions.", skillName)
+	if userInput != "" {
+		prompt += fmt.Sprintf("\n\nAdditional context: %s", userInput)
+	}
+
+	displayLabel := "/" + skillName
+	if userInput != "" {
+		displayLabel += " " + userInput
+	}
+
+	m.mode = ModeAgent
+	m.agentDone = false
+	m.thinking = true
+	m.lines = append(m.lines, fmt.Sprintf("%s %s",
+		userLabelStyle.Render("🔧 Skill:"), displayLabel))
+	if m.ready {
+		m.viewport.Height = m.calcViewportHeight(false)
+		m.viewport.SetContent(m.renderContent())
+		m.viewport.GotoBottom()
+	}
+	cmds = append(cmds, func() tea.Msg {
+		return PromptSubmitMsg{Prompt: prompt}
+	})
+	cmds = append(cmds, m.spinner.Tick)
 	return m, tea.Batch(cmds...)
 }

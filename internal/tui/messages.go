@@ -181,3 +181,131 @@ type MCPStatusItem struct {
 type MCPStatusMsg struct {
 	Statuses []MCPStatusItem
 }
+
+// BgTaskDoneMsg is sent when a background task completes.
+type BgTaskDoneMsg struct {
+	TaskID  string
+	Command string
+	Status  string
+	Output  string
+}
+
+// SubagentStartMsg is sent when a subagent begins executing.
+type SubagentStartMsg struct {
+	Name string
+	Type string
+}
+
+// SubagentDoneMsg is sent when a subagent finishes.
+type SubagentDoneMsg struct {
+	Name   string
+	Result string
+	Err    error
+}
+
+// SubagentProgressMsg is sent for intermediate subagent events (tool calls / results).
+type SubagentProgressMsg struct {
+	AgentName string
+	Event     string // "tool_call" or "tool_result"
+	ToolName  string
+	Detail    string
+}
+
+// CompactRequestMsg is sent when the user requests manual context compaction.
+type CompactRequestMsg struct{}
+
+// CompactDoneMsg is sent when context compaction completes.
+type CompactDoneMsg struct {
+	OldTokens int64
+	NewTokens int64
+	Err       error
+}
+
+// compactCh is used to notify main goroutine to compact context.
+var compactCh = make(chan struct{}, 1)
+
+// GetCompactChannel returns the channel that receives compact requests.
+func GetCompactChannel() <-chan struct{} {
+	return compactCh
+}
+
+// AgentMode represents the agent's operational mode.
+type AgentMode int
+
+const (
+	ModeNormal    AgentMode = iota // Default mode
+	ModePlanning                   // Plan mode — read-only exploration
+	ModeExecuting                  // Executing an approved plan
+)
+
+// PlanApprovalMsg is sent when the agent wants to show a plan for approval.
+type PlanApprovalMsg struct {
+	PlanContent string
+	PlanPath    string
+}
+
+// PlanApprovedMsg is sent when the user approves a plan.
+type PlanApprovedMsg struct{}
+
+// PlanRejectedMsg is sent when the user rejects a plan.
+type PlanRejectedMsg struct {
+	Feedback string
+}
+
+// planResponseCh carries plan approval/rejection from TUI to main goroutine.
+var planResponseCh = make(chan PlanResponse, 1)
+
+// PlanResponse is the user's response to a plan approval.
+type PlanResponse struct {
+	Approved bool
+	Feedback string // non-empty on rejection
+}
+
+// GetPlanResponseChannel returns the channel for plan responses.
+func GetPlanResponseChannel() <-chan PlanResponse {
+	return planResponseCh
+}
+
+// planModeCh carries agent mode changes from TUI to main goroutine.
+var planModeCh = make(chan AgentMode, 1)
+
+// GetPlanModeChannel returns the channel that receives plan mode switch events.
+func GetPlanModeChannel() <-chan AgentMode {
+	return planModeCh
+}
+
+// AskUserQuestionMsg is sent when the agent asks the user a question via ask_user tool.
+type AskUserQuestionMsg struct {
+	Question string
+	Options  []string // optional selectable choices
+}
+
+// askUserResponseCh carries the user's answer from TUI back to the ask_user tool.
+var askUserResponseCh = make(chan AskUserResponse, 1)
+
+// AskUserResponse is the user's answer to an ask_user question.
+type AskUserResponse struct {
+	Answer string
+}
+
+// GetAskUserResponseChannel returns the channel for ask_user responses.
+func GetAskUserResponseChannel() <-chan AskUserResponse {
+	return askUserResponseCh
+}
+
+// SkillSlashMsg is sent when a user triggers a slash command mapped to a skill.
+type SkillSlashMsg struct {
+	SkillName string // skill name to load
+	UserInput string // additional user input after the slash command
+}
+
+// SkillsLoadedMsg is sent at startup to inform the TUI about available skill slash commands.
+type SkillsLoadedMsg struct {
+	SlashCommands []SkillSlashInfo
+}
+
+// SkillSlashInfo describes a skill's slash command for TUI hint display.
+type SkillSlashInfo struct {
+	Slash       string
+	Description string
+}

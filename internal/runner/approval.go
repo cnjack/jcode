@@ -70,12 +70,14 @@ func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs 
 
 	// 1. No-approval-needed tools (read is handled separately below)
 	noApprovalNeeded := map[string]bool{
-		"glob":      true,
-		"grep":      true,
-		"todowrite": true,
-		"todoread":  true,
-		"question":  true,
-		"webfetch":  true,
+		"glob":             true,
+		"grep":             true,
+		"todowrite":        true,
+		"todoread":         true,
+		"question":         true,
+		"webfetch":         true,
+		"subagent":         true,
+		"check_background": true,
 	}
 	if noApprovalNeeded[toolName] {
 		return true, nil
@@ -95,12 +97,17 @@ func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs 
 		}
 	}
 
-	// 3. execute safe command detection
+	// 3. execute: auto-approve safe commands and background tasks
 	if toolName == "execute" {
 		var input struct {
-			Command string `json:"command"`
+			Command    string `json:"command"`
+			Background bool   `json:"background"`
 		}
 		if err := json.Unmarshal([]byte(toolArgs), &input); err == nil {
+			// Background tasks are auto-approved (long-running, agent can check later).
+			if input.Background {
+				return true, nil
+			}
 			cmd := strings.TrimSpace(input.Command)
 			safePrefix := []string{"ls", "pwd", "env", "ls ", "cat ", "pwd ", "echo ", "which ", "git status", "git log"}
 			for _, p := range safePrefix {

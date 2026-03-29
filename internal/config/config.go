@@ -58,6 +58,17 @@ type Config struct {
 	Telemetry     *TelemetryConfig           `json:"telemetry,omitempty"`
 }
 
+// ConfigDir returns the full path to the config directory (~/.jcoding).
+func ConfigDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// Fallback: use /tmp so callers never get a literal "~" path
+		// that Go's filesystem APIs cannot resolve.
+		return filepath.Join(os.TempDir(), configDir)
+	}
+	return filepath.Join(home, configDir)
+}
+
 // configFilePath returns the full path to the config file
 func configFilePath() (string, error) {
 	home, err := os.UserHomeDir()

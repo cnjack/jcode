@@ -10,37 +10,58 @@ import (
 	"time"
 
 	"github.com/cnjack/coding/internal/config"
+	utils "github.com/cnjack/coding/internal/util"
 )
 
 //go:embed system.md
 var systemPrompt string
 
-func GetSystemPrompt(platform, pwd, envLabel string) string {
+//go:embed plan.md
+var planPrompt string
+
+func GetSystemPrompt(platform, pwd, envLabel string, envInfo *utils.EnvInfo, skillDescriptions string) string {
 	t, err := template.New("template").Parse(systemPrompt)
 	if err != nil {
 		return ""
 	}
-	
+
 	cfg, _ := config.LoadConfig()
 	var sshAliases []config.SSHAlias
 	if cfg != nil {
 		sshAliases = cfg.SSHAliases
 	}
 
-	var stringBuffer = bytes.NewBuffer(nil)
-	err = t.Execute(stringBuffer, struct {
-		Platform   string
-		Pwd        string
-		Date       string
-		EnvLabel   string
-		SSHAliases []config.SSHAlias
+	data := struct {
+		Platform          string
+		Pwd               string
+		Date              string
+		EnvLabel          string
+		SSHAliases        []config.SSHAlias
+		GitBranch         string
+		GitDirty          bool
+		LastCommit        string
+		ProjectType       string
+		DirTree           string
+		SkillDescriptions string
 	}{
-		Platform:   platform,
-		Pwd:        pwd,
-		Date:       time.Now().Format("2006-01-02"),
-		EnvLabel:   envLabel,
-		SSHAliases: sshAliases,
-	})
+		Platform:          platform,
+		Pwd:               pwd,
+		Date:              time.Now().Format("2006-01-02"),
+		EnvLabel:          envLabel,
+		SSHAliases:        sshAliases,
+		SkillDescriptions: skillDescriptions,
+	}
+
+	if envInfo != nil {
+		data.GitBranch = envInfo.GitBranch
+		data.GitDirty = envInfo.GitDirty
+		data.LastCommit = envInfo.LastCommit
+		data.ProjectType = envInfo.ProjectType
+		data.DirTree = envInfo.DirTree
+	}
+
+	var stringBuffer = bytes.NewBuffer(nil)
+	err = t.Execute(stringBuffer, data)
 	if err != nil {
 		return ""
 	}
@@ -65,6 +86,50 @@ func HasAgentsMd(pwd string) string {
 		}
 	}
 	return ""
+}
+
+// GetPlanSystemPrompt returns the system prompt for Plan mode (read-only exploration).
+func GetPlanSystemPrompt(platform, pwd, envLabel string, envInfo *utils.EnvInfo) string {
+	t, err := template.New("plan").Parse(planPrompt)
+	if err != nil {
+		return ""
+	}
+
+	data := struct {
+		Platform    string
+		Pwd         string
+		Date        string
+		EnvLabel    string
+		GitBranch   string
+		GitDirty    bool
+		LastCommit  string
+		ProjectType string
+		DirTree     string
+	}{
+		Platform: platform,
+		Pwd:      pwd,
+		Date:     time.Now().Format("2006-01-02"),
+		EnvLabel: envLabel,
+	}
+
+	if envInfo != nil {
+		data.GitBranch = envInfo.GitBranch
+		data.GitDirty = envInfo.GitDirty
+		data.LastCommit = envInfo.LastCommit
+		data.ProjectType = envInfo.ProjectType
+		data.DirTree = envInfo.DirTree
+	}
+
+	var buf bytes.Buffer
+	if err := t.Execute(&buf, data); err != nil {
+		return ""
+	}
+	result := buf.String()
+
+	if content := loadAgentsMd(pwd); content != "" {
+		result += "\n\n## Custom Agent Instructions\n\n" + content
+	}
+	return result
 }
 
 func loadAgentsMd(pwd string) string {
