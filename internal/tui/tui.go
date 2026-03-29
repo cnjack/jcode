@@ -114,6 +114,14 @@ type Model struct {
 
 	// Skill slash commands from skill loader
 	skillSlashCommands []SkillSlashInfo
+
+	// Subagent progress tracking
+	subagentActive    bool
+	subagentName      string
+	subagentType      string
+	subagentStepCount int      // total tool calls so far
+	subagentLastTool  string   // last tool name + args summary
+	subagentProgress  []string // tool call progress lines for box display
 }
 
 // dirItem implements list.Item
@@ -1248,6 +1256,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			typeLabel = "explore"
 		}
 		m.pendingTool = "subagent"
+		m.subagentActive = true
+		m.subagentName = msg.Name
+		m.subagentType = typeLabel
+		m.subagentStepCount = 0
+		m.subagentLastTool = ""
+		m.subagentProgress = nil
 		m.lines = append(m.lines, fmt.Sprintf("  %s %s %s",
 			subagentLabelStyle.Render("🤖 Subagent:"),
 			toolNameStyle.Render(msg.Name),
@@ -1256,8 +1270,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		cmds = append(cmds, m.spinner.Tick)
 
+	case SubagentProgressMsg:
+		if m.subagentActive && msg.Event == "tool_call" {
+			m.subagentStepCount++
+			args := formatToolArgs(msg.Detail)
+			if args != "" {
+				m.subagentLastTool = msg.ToolName + " " + args
+			} else {
+				m.subagentLastTool = msg.ToolName
+			}
+			line := fmt.Sprintf("%s %s", toolNameStyle.Render(msg.ToolName), toolArgsStyle.Render(args))
+			m.subagentProgress = append(m.subagentProgress, line)
+			m.refreshViewport()
+		}
+
 	case SubagentDoneMsg:
 		m.pendingTool = ""
+		m.subagentActive = false
+		m.subagentLastTool = ""
+		m.subagentProgress = nil
 		if msg.Err != nil {
 			m.lines = append(m.lines, fmt.Sprintf("   %s %s",
 				toolErrorStyle.Render("✗ Subagent Error:"),
@@ -1461,7 +1492,14 @@ func (m *Model) renderContent() string {
 	}
 	if m.thinking && !m.agentDone {
 		var statusLine string
-		if m.pendingTool != "" {
+		if m.subagentActive && len(m.subagentProgress) > 0 {
+			sb.WriteString(m.renderSubagentBox())
+			sb.WriteString("\n")
+			statusLine = fmt.Sprintf("  %s %s",
+				m.spinner.View(),
+				subagentLabelStyle.Render(fmt.Sprintf("Subagent [%d steps]...", m.subagentStepCount)),
+			)
+		} else if m.pendingTool != "" {
 			statusLine = fmt.Sprintf("  %s Running %s...", m.spinner.View(), toolNameStyle.Render(m.pendingTool))
 		} else {
 			statusLine = fmt.Sprintf("  %s Thinking...", m.spinner.View())
@@ -1470,6 +1508,38 @@ func (m *Model) renderContent() string {
 		sb.WriteString("\n")
 	}
 	return sb.String()
+}
+
+// renderSubagentBox returns a bordered box showing live subagent tool calls.
+func (m *Model) renderSubagentBox() string {
+	const maxVisible = 8
+	lines := m.subagentProgress
+	hidden := 0
+	if len(lines) > maxVisible {
+		hidden = len(lines) - maxVisible
+		lines = lines[hidden:]
+	}
+
+	var content strings.Builder
+	if hidden > 0 {
+		content.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
+			Render(fmt.Sprintf("... (%d earlier steps)", hidden)))
+		content.WriteString("\n")
+	}
+	for i, line := range lines {
+		content.WriteString(line)
+		if i < len(lines)-1 {
+			content.WriteString("\n")
+		}
+	}
+
+	boxWidth := m.width - 8
+	if boxWidth < 30 {
+		boxWidth = 30
+	}
+
+	box := subagentBoxStyle.Width(boxWidth).Render(content.String())
+	return box
 }
 
 func RunTUI(hasPrompt bool, pwd string, todoStore *tools.TodoStore) (*tea.Program, Model) {

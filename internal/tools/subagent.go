@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -26,11 +27,16 @@ const (
 // SubagentNotifier receives subagent lifecycle events for TUI display.
 type SubagentNotifier func(name, agentType string, done bool, result string, err error)
 
+// SubagentProgressFn receives intermediate progress events (tool calls, tool results)
+// from a running subagent so the TUI can display live progress.
+type SubagentProgressFn func(agentName, event, toolName, detail string)
+
 // SubagentDeps holds dependencies injected into the subagent tool at creation time.
 type SubagentDeps struct {
-	ChatModel model.ToolCallingChatModel
-	Notifier  SubagentNotifier
-	Recorder  *session.Recorder // records subagent start/result to session JSONL
+	ChatModel  model.ToolCallingChatModel
+	Notifier   SubagentNotifier
+	ProgressFn SubagentProgressFn // intermediate tool call/result events
+	Recorder   *session.Recorder  // records subagent start/result to session JSONL
 }
 
 type subagentInput struct {
@@ -147,6 +153,7 @@ func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, 
 		Messages: []adk.Message{
 			schema.UserMessage(input.Prompt),
 		},
+		EnableStreaming: true,
 	}
 
 	var assistantText strings.Builder
@@ -164,25 +171,75 @@ func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, 
 			continue
 		}
 		mo := event.Output.MessageOutput
+
+		// Forward tool-role events as progress.
+		if mo.Role == schema.Tool {
+			toolName := mo.ToolName
+			if !mo.IsStreaming && mo.Message != nil {
+				s.notifyProgress(input.Name, "tool_result", toolName, mo.Message.Content)
+			} else if mo.IsStreaming {
+				var sb strings.Builder
+				for {
+					chunk, err := mo.MessageStream.Recv()
+					if err == io.EOF {
+						break
+					}
+					if err != nil {
+						break
+					}
+					if chunk != nil {
+						sb.WriteString(chunk.Content)
+					}
+				}
+				s.notifyProgress(input.Name, "tool_result", toolName, sb.String())
+			}
+			continue
+		}
+
 		if mo.Role != schema.Assistant {
 			continue
 		}
+
 		if mo.IsStreaming {
 			for {
 				chunk, err := mo.MessageStream.Recv()
 				if err != nil {
 					break
 				}
-				if chunk != nil && chunk.Content != "" {
+				if chunk == nil {
+					continue
+				}
+				// Forward tool call events.
+				for _, tc := range chunk.ToolCalls {
+					if tc.Function.Name != "" {
+						s.notifyProgress(input.Name, "tool_call", tc.Function.Name, tc.Function.Arguments)
+					}
+				}
+				if chunk.Content != "" {
 					assistantText.WriteString(chunk.Content)
 				}
 			}
-		} else if mo.Message != nil && mo.Message.Content != "" {
-			assistantText.WriteString(mo.Message.Content)
+		} else if mo.Message != nil {
+			// Forward tool call events.
+			for _, tc := range mo.Message.ToolCalls {
+				if tc.Function.Name != "" {
+					s.notifyProgress(input.Name, "tool_call", tc.Function.Name, tc.Function.Arguments)
+				}
+			}
+			if mo.Message.Content != "" {
+				assistantText.WriteString(mo.Message.Content)
+			}
 		}
 	}
 
 	return assistantText.String()
+}
+
+// notifyProgress sends an intermediate progress event to the TUI if a ProgressFn is set.
+func (s *subagentTool) notifyProgress(agentName, event, toolName, detail string) {
+	if s.deps.ProgressFn != nil {
+		s.deps.ProgressFn(agentName, event, toolName, detail)
+	}
 }
 
 func (s *subagentTool) buildTools(childEnv *Env, agentType string) []tool.BaseTool {
