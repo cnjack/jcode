@@ -1,12 +1,21 @@
 # Task Summary & Observability
 
-> **Last verified**: 2026-03-28 against codebase at `github.com/cloudwego/eino v0.7.37`
-> **Priority**: P3 — Low (existing Langfuse + TokenTracker + debug.log already cover most needs)
-> **Scope reduction**: Task summary generation is nice but not critical. The Eino callback handler for debug logging is the only high-value item. Summary generation is **deferred** until context compaction is in place (they share the summarization infrastructure).
+> **Status**: NOT IMPLEMENTED — still a draft
+> **Last reviewed**: 2026-03-29, Eino v0.8.5
+> **Priority**: P3 — Low
 
-## 1. Problem Statement
+Context compaction is now implemented (summarization + reduction middleware). Task summary and extended observability remain deferred.
 
-Two related gaps make long sessions opaque and hard to resume:
+## Current State (as of 2026-03-29)
+
+- **Langfuse tracing**: Implemented via `adk.AgentMiddleware` hooks (`BeforeChatModel`/`AfterChatModel`). Captures per-model-call spans only.
+- **TokenTracker**: Global counter in `internal/model/chatmodel.go`, displayed in TUI statusbar.
+- **debug.log**: `config.Logger()` writes to `~/.jcoding/debug.log`.
+- **Task summary**: Not implemented. Agent still just replies "Done." after completing todos.
+- **Session summary entry**: No `task_summary` entry type in the JSONL session format.
+- **Eino callbacks.Handler**: Not implemented.
+
+
 
 **Gap 1 — No task summary**: When the agent completes a multi-step task (creating files, refactoring, fixing bugs), it just replies "Done." There is no structured record of what was accomplished, what files changed, or what the user should be aware of. When the user runs `coding --resume <uuid>` to continue the session later, they are dumped back into raw conversation history with no quick orientation.
 
