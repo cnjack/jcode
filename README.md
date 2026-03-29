@@ -28,6 +28,14 @@
 
 ---
 
+## Install
+
+```bash
+go install github.com/cnjack/jcode/cmd/jcode@latest
+```
+
+---
+
 ## What it does
 
 Describe a task with human language. The agent reads your files, writes changes, runs commands, and shows you exactly what it did — step by step.
