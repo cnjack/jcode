@@ -24,6 +24,7 @@ import (
 	"github.com/cnjack/coding/internal/prompts"
 	"github.com/cnjack/coding/internal/runner"
 	"github.com/cnjack/coding/internal/session"
+	"github.com/cnjack/coding/internal/skills"
 	"github.com/cnjack/coding/internal/telemetry"
 	"github.com/cnjack/coding/internal/tools"
 	"github.com/cnjack/coding/internal/tui"
@@ -98,7 +99,12 @@ func main() {
 	pwd := util.GetWorkDir()
 	platform := util.GetSystemInfo()
 	envInfo := util.CollectEnvInfo(pwd)
-	systemPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo)
+
+	// Initialize skill loader: discovers built-in + user + project skills.
+	skillLoader := skills.NewLoader()
+	skillLoader.ScanProjectSkills(pwd)
+
+	systemPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
 
 	providerCfg := cfg.Models[cfg.Provider]
 	if providerCfg == nil {
@@ -192,6 +198,7 @@ func main() {
 				Recorder:  rec,
 			}),
 			tools.NewAskUserTool(askUserDeps),
+			skills.NewLoadSkillTool(skillLoader),
 		}
 		return append(all, mcpTools...)
 	}
@@ -342,7 +349,7 @@ func main() {
 			if agentMode == tui.ModePlanning {
 				systemPrompt = prompts.GetPlanSystemPrompt(platform, pwd, "local", envInfo)
 			} else {
-				systemPrompt = prompts.GetSystemPrompt(platform, pwd, "local", envInfo)
+				systemPrompt = prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
 			}
 			if newAg, err := createAgent(); err == nil {
 				ag = newAg
@@ -354,7 +361,7 @@ func main() {
 		if agentMode == tui.ModePlanning {
 			systemPrompt = prompts.GetPlanSystemPrompt(platform, pwd, envLabel, nil)
 		} else {
-			systemPrompt = prompts.GetSystemPrompt(platform, pwd, envLabel, nil)
+			systemPrompt = prompts.GetSystemPrompt(platform, pwd, envLabel, nil, skillLoader.Descriptions())
 		}
 		if newAg, err := createAgent(); err == nil {
 			ag = newAg
@@ -466,6 +473,18 @@ func main() {
 			p.Send(tui.AgentsMdMsg{Found: true, Path: agentsMdPath})
 		}
 
+		// Notify TUI about available skill slash commands.
+		if slashSkills := skillLoader.SlashCommands(); len(slashSkills) > 0 {
+			var slashInfos []tui.SkillSlashInfo
+			for _, sk := range slashSkills {
+				slashInfos = append(slashInfos, tui.SkillSlashInfo{
+					Slash:       sk.Slash,
+					Description: sk.Description,
+				})
+			}
+			p.Send(tui.SkillsLoadedMsg{SlashCommands: slashInfos})
+		}
+
 		history := initialHistory
 		if initialResumeUUID != "" {
 			p.Send(tui.SessionResumedMsg{UUID: initialResumeUUID, Entries: initialResumeEntries})
@@ -509,7 +528,7 @@ func main() {
 				toolList = buildPlanTools()
 				config.Logger().Printf("[plan] built plan tools: %d tools", len(toolList))
 			} else {
-				systemPrompt = prompts.GetSystemPrompt(platform, pwd, env.Exec.Label(), envInfo)
+				systemPrompt = prompts.GetSystemPrompt(platform, pwd, env.Exec.Label(), envInfo, skillLoader.Descriptions())
 				toolList = buildAllTools()
 				config.Logger().Printf("[plan] built all tools: %d tools", len(toolList))
 			}
@@ -727,7 +746,7 @@ func main() {
 			case connMsg := <-sshCh:
 				switch msg := connMsg.(type) {
 				case tui.SSHConnectMsg:
-					handleSSHConnect(ctx, env, msg.Addr, msg.Path, p, &systemPrompt, &ag, chatModel, createAgent)
+					handleSSHConnect(ctx, env, msg.Addr, msg.Path, p, &systemPrompt, &ag, chatModel, createAgent, skillLoader.Descriptions())
 				case tui.SSHListDirReqMsg:
 					handleSSHListDir(ctx, env, msg.Path, p)
 				case tui.SSHCancelMsg:
@@ -736,7 +755,7 @@ func main() {
 					if agentMode == tui.ModePlanning {
 						systemPrompt = prompts.GetPlanSystemPrompt(platform, pwd, "local", envInfo)
 					} else {
-						systemPrompt = prompts.GetSystemPrompt(platform, pwd, "local", envInfo)
+						systemPrompt = prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
 					}
 					if newAg, err := createAgent(); err == nil {
 						ag = newAg

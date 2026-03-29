@@ -19,7 +19,7 @@ var systemPrompt string
 //go:embed plan.md
 var planPrompt string
 
-func GetSystemPrompt(platform, pwd, envLabel string, envInfo *utils.EnvInfo) string {
+func GetSystemPrompt(platform, pwd, envLabel string, envInfo *utils.EnvInfo, skillDescriptions string) string {
 	t, err := template.New("template").Parse(systemPrompt)
 	if err != nil {
 		return ""
@@ -32,22 +32,24 @@ func GetSystemPrompt(platform, pwd, envLabel string, envInfo *utils.EnvInfo) str
 	}
 
 	data := struct {
-		Platform    string
-		Pwd         string
-		Date        string
-		EnvLabel    string
-		SSHAliases  []config.SSHAlias
-		GitBranch   string
-		GitDirty    bool
-		LastCommit  string
-		ProjectType string
-		DirTree     string
+		Platform          string
+		Pwd               string
+		Date              string
+		EnvLabel          string
+		SSHAliases        []config.SSHAlias
+		GitBranch         string
+		GitDirty          bool
+		LastCommit        string
+		ProjectType       string
+		DirTree           string
+		SkillDescriptions string
 	}{
-		Platform:   platform,
-		Pwd:        pwd,
-		Date:       time.Now().Format("2006-01-02"),
-		EnvLabel:   envLabel,
-		SSHAliases: sshAliases,
+		Platform:          platform,
+		Pwd:               pwd,
+		Date:              time.Now().Format("2006-01-02"),
+		EnvLabel:          envLabel,
+		SSHAliases:        sshAliases,
+		SkillDescriptions: skillDescriptions,
 	}
 
 	if envInfo != nil {
