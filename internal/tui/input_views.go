@@ -11,20 +11,6 @@ import (
 	"github.com/cnjack/coding/internal/tools"
 )
 
-// todoBarHeight returns the number of lines the todo bar occupies.
-func (m Model) todoBarHeight() int {
-	if m.todoStore == nil || !m.todoStore.HasItems() {
-		return 0
-	}
-	items := m.todoStore.Items()
-	// Count: label line + item lines (max 5 visible)
-	n := len(items)
-	if n > 5 {
-		n = 5
-	}
-	return 1 + n // header + items
-}
-
 // renderTodoBar renders the todo items as a compact block above the input.
 func (m Model) renderTodoBar() string {
 	if m.todoStore == nil {
@@ -64,7 +50,7 @@ func (m Model) renderTodoBar() string {
 		case tools.TodoCancelled:
 			icon = todoCancelledStyle.Render("✗")
 			text = todoCancelledStyle.Render(item.Title)
-		default: // pending
+		default:
 			icon = todoPendingStyle.Render("○")
 			text = todoPendingStyle.Render(item.Title)
 		}
@@ -80,6 +66,7 @@ func (m Model) renderTodoBar() string {
 func (m Model) inputAreaView() string {
 	var parts []string
 
+	// Show todo bar (compact) unless a bottom prompt needs the space
 	if m.todoStore != nil && m.todoStore.HasItems() {
 		todoLine := m.renderTodoBar()
 		if todoLine != "" {
@@ -89,16 +76,22 @@ func (m Model) inputAreaView() string {
 
 	parts = append(parts, divider(m.width))
 
-	val := m.textarea.Value()
-	if strings.HasPrefix(val, "/") {
-		hints := m.getCommandHints(val)
-		if hints != "" {
-			hintStyle := lipgloss.NewStyle().PaddingLeft(2).Foreground(colorMuted).Italic(true)
-			parts = append(parts, hintStyle.Render(hints))
+	if m.planReviewActive {
+		parts = append(parts, m.planReviewPromptView())
+	} else if m.askUserActive {
+		parts = append(parts, m.askUserPromptView())
+	} else {
+		val := m.textarea.Value()
+		if strings.HasPrefix(val, "/") {
+			hints := m.getCommandHints(val)
+			if hints != "" {
+				hintStyle := lipgloss.NewStyle().PaddingLeft(2).Foreground(colorMuted).Italic(true)
+				parts = append(parts, hintStyle.Render(hints))
+			}
 		}
+		parts = append(parts, lipgloss.NewStyle().PaddingLeft(1).PaddingRight(2).Render(strings.TrimRight(m.textarea.View(), "\n")))
 	}
 
-	parts = append(parts, lipgloss.NewStyle().PaddingLeft(1).PaddingRight(2).Render(strings.TrimRight(m.textarea.View(), "\n")))
 	parts = append(parts, divider(m.width))
 
 	// Render StatusBar using StatusBarComponent

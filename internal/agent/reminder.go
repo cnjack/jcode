@@ -15,6 +15,7 @@ import (
 // ReminderConfig holds the static configuration for the reminder middleware.
 type ReminderConfig struct {
 	TodoStore    *tools.TodoStore
+	PlanStore    *tools.PlanStore
 	EnvLabel     string
 	IsRemote     bool
 	ContextLimit int
@@ -70,6 +71,11 @@ func (m *reminderMiddleware) BeforeModelRewriteState(
 		ConsecutiveErrors: m.consecutiveErrors,
 		EnvLabel:          m.cfg.EnvLabel,
 		IsRemote:          m.cfg.IsRemote,
+	}
+
+	// Inject approved plan context for execution mode.
+	if m.cfg.PlanStore != nil && m.cfg.PlanStore.HasApprovedPlan() {
+		rc.PlanContent = m.cfg.PlanStore.Content()
 	}
 
 	msgs := prompts.CollectReminders(rc)

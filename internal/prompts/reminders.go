@@ -15,6 +15,7 @@ type ReminderContext struct {
 	ConsecutiveErrors int
 	EnvLabel          string
 	IsRemote          bool
+	PlanContent       string // non-empty when executing an approved plan
 }
 
 // reminder is a single conditional reminder rule.
@@ -25,6 +26,20 @@ type reminder struct {
 }
 
 var builtinReminders = []reminder{
+	{
+		name: "plan_execution",
+		condition: func(rc *ReminderContext) bool {
+			return rc.PlanContent != ""
+		},
+		message: func(rc *ReminderContext) string {
+			plan := rc.PlanContent
+			// Truncate very long plans to keep context manageable
+			if len(plan) > 2000 {
+				plan = plan[:2000] + "\n... (plan truncated)"
+			}
+			return fmt.Sprintf("[Executing Approved Plan]\nYou are executing a user-approved plan. Follow it closely.\n\n%s\n\nTrack progress using the todo list. Mark each step complete as you finish it. If you need to deviate significantly, explain why.", plan)
+		},
+	},
 	{
 		name: "todo_check",
 		condition: func(rc *ReminderContext) bool {

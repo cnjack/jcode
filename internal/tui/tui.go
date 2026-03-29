@@ -99,6 +99,18 @@ type Model struct {
 	envLabel  string
 	agentMode AgentMode
 	bgRunning int // count of running background tasks
+
+	// Plan review state
+	planReviewActive   bool
+	planReviewTitle    string
+	planRejectInput    bool // true when prompting for rejection feedback
+	planReviewSelected int  // 0=Approve, 1=Reject, 2=Dismiss
+
+	// Ask user state
+	askUserActive   bool
+	askUserQuestion string
+	askUserOptions  []string
+	askUserSelected int // currently highlighted option index
 }
 
 // dirItem implements list.Item
@@ -308,7 +320,7 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) inputActive() bool {
-	return (m.mode == ModeAgent || m.sshStep > 0 || m.sshSavePrompt) && !m.pickingModel && !m.showingSetting && !m.pickingSSHAlias && !m.pickingSession && !m.approvalPending
+	return (m.mode == ModeAgent || m.sshStep > 0 || m.sshSavePrompt) && !m.pickingModel && !m.showingSetting && !m.pickingSSHAlias && !m.pickingSession && !m.approvalPending && !m.planReviewActive && !m.askUserActive
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -386,6 +398,194 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(cmds...)
 			}
 			return m, tea.Batch(cmds...)
+		}
+
+		// Plan review handling (bottom prompt with 3 options)
+		if m.planReviewActive {
+			if m.planRejectInput {
+				// Collecting rejection feedback
+				switch msg.String() {
+				case "enter":
+					feedback := strings.TrimSpace(m.textarea.Value())
+					m.textarea.Reset()
+					m.textarea.SetHeight(1)
+					m.textareaLines = 1
+					m.planRejectInput = false
+					m.planReviewActive = false
+					planResponseCh <- PlanResponse{Approved: false, Feedback: feedback}
+					m.lines = append(m.lines, fmt.Sprintf("   %s Plan rejected%s",
+						toolErrorStyle.Render("✗"),
+						func() string {
+							if feedback != "" {
+								return ": " + feedback
+							}
+							return ""
+						}()))
+					m.textarea.Focus()
+					m.textarea.Placeholder = "Type your prompt here..."
+					m.refreshViewport()
+					return m, tea.Batch(cmds...)
+				case "esc":
+					m.planRejectInput = false
+					m.textarea.Reset()
+					m.textarea.SetHeight(1)
+					m.textareaLines = 1
+					m.textarea.Placeholder = "Type your prompt here..."
+					return m, tea.Batch(cmds...)
+				default:
+					var cmd tea.Cmd
+					m.textarea, cmd = m.textarea.Update(msg)
+					cmds = append(cmds, cmd)
+					return m, tea.Batch(cmds...)
+				}
+			}
+			switch msg.String() {
+			case "y", "Y":
+				m.planReviewActive = false
+				planResponseCh <- PlanResponse{Approved: true}
+				m.lines = append(m.lines, fmt.Sprintf("   %s Plan approved: %s",
+					toolSuccessStyle.Render("✓"),
+					toolNameStyle.Render(m.planReviewTitle)))
+				m.textarea.Focus()
+				m.refreshViewport()
+				return m, tea.Batch(cmds...)
+			case "n", "N":
+				m.planReviewSelected = 1
+				m.planRejectInput = true
+				m.textarea.Focus()
+				m.textarea.Placeholder = "Enter feedback (optional, then press Enter)..."
+				return m, tea.Batch(cmds...)
+			case "up":
+				if m.planReviewSelected > 0 {
+					m.planReviewSelected--
+				}
+				return m, tea.Batch(cmds...)
+			case "down":
+				if m.planReviewSelected < 2 {
+					m.planReviewSelected++
+				}
+				return m, tea.Batch(cmds...)
+			case "enter":
+				switch m.planReviewSelected {
+				case 0: // Approve
+					m.planReviewActive = false
+					planResponseCh <- PlanResponse{Approved: true}
+					m.lines = append(m.lines, fmt.Sprintf("   %s Plan approved: %s",
+						toolSuccessStyle.Render("✓"),
+						toolNameStyle.Render(m.planReviewTitle)))
+					m.textarea.Focus()
+					m.refreshViewport()
+				case 1: // Reject with feedback
+					m.planRejectInput = true
+					m.textarea.Focus()
+					m.textarea.Placeholder = "Enter feedback (optional, then press Enter)..."
+				case 2: // Dismiss
+					m.planReviewActive = false
+					planResponseCh <- PlanResponse{Approved: false, Feedback: ""}
+					m.lines = append(m.lines, fmt.Sprintf("   %s Plan dismissed",
+						toolErrorStyle.Render("✗")))
+					m.textarea.Focus()
+					m.refreshViewport()
+				}
+				return m, tea.Batch(cmds...)
+			case "esc":
+				m.planReviewActive = false
+				planResponseCh <- PlanResponse{Approved: false, Feedback: ""}
+				m.lines = append(m.lines, fmt.Sprintf("   %s Plan dismissed",
+					toolErrorStyle.Render("✗")))
+				m.textarea.Focus()
+				m.refreshViewport()
+				return m, tea.Batch(cmds...)
+			case "pgup", "pgdown":
+				if m.ready {
+					var cmd tea.Cmd
+					m.viewport, cmd = m.viewport.Update(msg)
+					cmds = append(cmds, cmd)
+				}
+				return m, tea.Batch(cmds...)
+			}
+			return m, tea.Batch(cmds...)
+		}
+
+		// Ask user question handling (bottom prompt with options)
+		if m.askUserActive {
+			optCount := len(m.askUserOptions)
+			totalOpts := optCount // predefined options count
+			if optCount > 0 {
+				totalOpts = optCount + 1 // +1 for "Other (type below)"
+			}
+			switch msg.String() {
+			case "up":
+				if m.askUserSelected > 0 {
+					m.askUserSelected--
+				}
+				// Focus/blur textarea based on selection
+				if optCount > 0 && m.askUserSelected == optCount {
+					m.textarea.Focus()
+					m.textarea.Placeholder = "Type your answer..."
+				} else if optCount > 0 {
+					m.textarea.Blur()
+				}
+				return m, tea.Batch(cmds...)
+			case "down":
+				if m.askUserSelected < totalOpts-1 {
+					m.askUserSelected++
+				}
+				if optCount > 0 && m.askUserSelected == optCount {
+					m.textarea.Focus()
+					m.textarea.Placeholder = "Type your answer..."
+				} else if optCount > 0 {
+					m.textarea.Blur()
+				}
+				return m, tea.Batch(cmds...)
+			case "enter":
+				var answer string
+				if m.askUserSelected < optCount {
+					// Selected a predefined option
+					answer = m.askUserOptions[m.askUserSelected]
+				} else {
+					// Custom text input
+					answer = strings.TrimSpace(m.textarea.Value())
+					m.textarea.Reset()
+					m.textarea.SetHeight(1)
+					m.textareaLines = 1
+				}
+				m.askUserActive = false
+				askUserResponseCh <- AskUserResponse{Answer: answer}
+				m.lines = append(m.lines, fmt.Sprintf("   %s %s",
+					userLabelStyle.Render("💬 Answer:"), answer))
+				m.textarea.Focus()
+				m.textarea.Placeholder = "Type your prompt here..."
+				m.refreshViewport()
+				return m, tea.Batch(cmds...)
+			case "esc":
+				m.askUserActive = false
+				m.textarea.Reset()
+				m.textarea.SetHeight(1)
+				m.textareaLines = 1
+				m.textarea.Placeholder = "Type your prompt here..."
+				askUserResponseCh <- AskUserResponse{Answer: ""}
+				m.lines = append(m.lines, fmt.Sprintf("   %s Question dismissed",
+					toolErrorStyle.Render("✗")))
+				m.textarea.Focus()
+				m.refreshViewport()
+				return m, tea.Batch(cmds...)
+			case "pgup", "pgdown":
+				if m.ready {
+					var cmd tea.Cmd
+					m.viewport, cmd = m.viewport.Update(msg)
+					cmds = append(cmds, cmd)
+				}
+				return m, tea.Batch(cmds...)
+			default:
+				// If text input is selected (Other or no options), forward keys to textarea
+				if optCount == 0 || m.askUserSelected == optCount {
+					var cmd tea.Cmd
+					m.textarea, cmd = m.textarea.Update(msg)
+					cmds = append(cmds, cmd)
+				}
+				return m, tea.Batch(cmds...)
+			}
 		}
 
 		// Session picker handling
@@ -590,6 +790,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.agentMode = ModeNormal
 				}
+				// Notify main goroutine to rebuild agent with different prompt/tools.
+				select {
+				case planModeCh <- m.agentMode:
+				default:
+				}
 				m.refreshViewport()
 				return m, tea.Batch(cmds...)
 			case "ctrl+a":
@@ -672,11 +877,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.agentDone = false
 					m.thinking = true
 
-					// In Plan mode, wrap the user prompt as a plan subagent call.
+					// In Plan mode, send prompt directly (agent already has plan system prompt + read-only tools).
 					actualPrompt := prompt
 					modeLabel := "👤 You:"
 					if m.agentMode == ModePlanning {
-						actualPrompt = fmt.Sprintf("Use the subagent tool with agent_type 'plan' to plan: %s", prompt)
 						modeLabel = "📐 Plan:"
 					}
 
@@ -804,10 +1008,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.activeModel = msg.Model
 		if msg.Message != "" {
 			m.lines = append(m.lines, msg.Message)
-			if m.ready {
-				m.viewport.SetContent(m.renderContent())
-				m.viewport.GotoBottom()
-			}
+			m.refreshViewport()
 		}
 
 	case MCPStatusMsg:
@@ -954,17 +1155,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case UserPromptMsg:
 		m.lines = append(m.lines, fmt.Sprintf("%s %s",
 			userLabelStyle.Render("👤 You:"), msg.Prompt))
-		if m.ready {
-			m.viewport.SetContent(m.renderContent())
-			m.viewport.GotoBottom()
-		}
+		m.refreshViewport()
 
 	case AgentTextMsg:
 		m.currentText.WriteString(msg.Text)
-		if m.ready {
-			m.viewport.SetContent(m.renderContent())
-			m.viewport.GotoBottom()
-		}
+		m.refreshViewport()
 
 	case ToolCallMsg:
 		m.thinking = true
@@ -976,10 +1171,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			toolNameStyle.Render(msg.Name),
 			toolArgsStyle.Render(argsDisplay),
 		))
-		if m.ready {
-			m.viewport.SetContent(m.renderContent())
-			m.viewport.GotoBottom()
-		}
+		m.refreshViewport()
 		cmds = append(cmds, m.spinner.Tick)
 
 	case ToolResultMsg:
@@ -992,10 +1184,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.lines = append(m.lines, formatToolResult(msg.Name, msg.Output, m.width)...)
 		}
-		if m.ready {
-			m.viewport.SetContent(m.renderContent())
-			m.viewport.GotoBottom()
-		}
+		m.refreshViewport()
 		cmds = append(cmds, m.spinner.Tick)
 
 	case TokenUpdateMsg:
@@ -1051,10 +1240,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			toolNameStyle.Render(msg.Name),
 			toolArgsStyle.Render("("+typeLabel+")"),
 		))
-		if m.ready {
-			m.viewport.SetContent(m.renderContent())
-			m.viewport.GotoBottom()
-		}
+		m.refreshViewport()
 		cmds = append(cmds, m.spinner.Tick)
 
 	case SubagentDoneMsg:
@@ -1068,10 +1254,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				toolSuccessStyle.Render("✓ Subagent Done:"),
 				toolResultStyle.Render(truncate(msg.Result, maxToolOutputLen))))
 		}
-		if m.ready {
-			m.viewport.SetContent(m.renderContent())
-			m.viewport.GotoBottom()
-		}
+		m.refreshViewport()
 		cmds = append(cmds, m.spinner.Tick)
 
 	case CompactDoneMsg:
@@ -1109,6 +1292,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.refreshViewport()
 
+	case PlanApprovalMsg:
+		m.planReviewActive = true
+		m.planReviewTitle = msg.PlanPath
+		m.planRejectInput = false
+		m.planReviewSelected = 0
+		m.textarea.Blur()
+		m.refreshViewport()
+
+	case AskUserQuestionMsg:
+		m.askUserActive = true
+		m.askUserQuestion = msg.Question
+		m.askUserOptions = msg.Options
+		m.askUserSelected = 0
+		if len(msg.Options) == 0 {
+			m.textarea.Focus()
+			m.textarea.Placeholder = "Type your answer..."
+		} else {
+			m.textarea.Blur()
+			m.textarea.Placeholder = "Or type a custom answer..."
+		}
+		m.refreshViewport()
+
 	}
 
 	if m.ready && m.mode == ModeAgent {
@@ -1134,27 +1339,13 @@ func recalcLines(s string) int {
 }
 
 func (m Model) inputAreaHeight() int {
-	lines := m.textareaLines
-	if lines < 1 {
-		lines = 1
-	}
-	h := lines + 3
-	if m.todoStore != nil && m.todoStore.HasItems() {
-		h += m.todoBarHeight()
-	}
-	val := m.textarea.Value()
-	if strings.HasPrefix(val, "/") && m.getCommandHints(val) != "" {
-		h += 1
-	}
-	return h
+	// Dynamically compute by rendering the actual footer
+	return lipgloss.Height(m.inputAreaView())
 }
 
-func (m Model) calcViewportHeight(withInput bool) int {
+func (m Model) calcViewportHeight(_ ...bool) int {
 	headerHeight := 3
-	footerHeight := 1
-	if withInput {
-		footerHeight = m.inputAreaHeight()
-	}
+	footerHeight := m.inputAreaHeight()
 	h := m.height - headerHeight - footerHeight
 	if h < 3 {
 		h = 3
@@ -1216,9 +1407,10 @@ func (m Model) View() string {
 	return mainView
 }
 
-// refreshViewport updates the viewport content if ready.
+// refreshViewport recalculates viewport height, updates content and scrolls to bottom.
 func (m *Model) refreshViewport() {
 	if m.ready {
+		m.viewport.Height = m.calcViewportHeight()
 		m.viewport.SetContent(m.renderContent())
 		m.viewport.GotoBottom()
 	}

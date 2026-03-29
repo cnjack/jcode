@@ -257,3 +257,30 @@ type PlanResponse struct {
 func GetPlanResponseChannel() <-chan PlanResponse {
 	return planResponseCh
 }
+
+// planModeCh carries agent mode changes from TUI to main goroutine.
+var planModeCh = make(chan AgentMode, 1)
+
+// GetPlanModeChannel returns the channel that receives plan mode switch events.
+func GetPlanModeChannel() <-chan AgentMode {
+	return planModeCh
+}
+
+// AskUserQuestionMsg is sent when the agent asks the user a question via ask_user tool.
+type AskUserQuestionMsg struct {
+	Question string
+	Options  []string // optional selectable choices
+}
+
+// askUserResponseCh carries the user's answer from TUI back to the ask_user tool.
+var askUserResponseCh = make(chan AskUserResponse, 1)
+
+// AskUserResponse is the user's answer to an ask_user question.
+type AskUserResponse struct {
+	Answer string
+}
+
+// GetAskUserResponseChannel returns the channel for ask_user responses.
+func GetAskUserResponseChannel() <-chan AskUserResponse {
+	return askUserResponseCh
+}

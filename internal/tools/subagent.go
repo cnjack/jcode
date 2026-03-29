@@ -19,7 +19,6 @@ import (
 const (
 	AgentTypeExplore = "explore"
 	AgentTypeGeneral = "general"
-	AgentTypePlan    = "plan"
 	subagentMaxIter  = 50
 )
 
@@ -57,7 +56,7 @@ func (e *Env) NewSubagentTool(deps *SubagentDeps) tool.InvokableTool {
 				Type: schema.String, Desc: "Detailed instructions for the subagent. Include all necessary context.", Required: true,
 			},
 			"agent_type": {
-				Type: schema.String, Desc: "Agent type: 'explore' (read-only, default), 'general' (full tools, no nesting), or 'plan' (read-only planning/architecture)", Required: false,
+				Type: schema.String, Desc: "Agent type: 'explore' (read-only, default) or 'general' (full tools, no nesting)", Required: false,
 			},
 		}),
 	}
@@ -87,8 +86,8 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 	if agentType == "" {
 		agentType = AgentTypeExplore
 	}
-	if agentType != AgentTypeExplore && agentType != AgentTypeGeneral && agentType != AgentTypePlan {
-		return "", fmt.Errorf("agent_type must be 'explore', 'general', or 'plan', got %q", agentType)
+	if agentType != AgentTypeExplore && agentType != AgentTypeGeneral {
+		return "", fmt.Errorf("agent_type must be 'explore' or 'general', got %q", agentType)
 	}
 
 	config.Logger().Printf("[subagent] start name=%q type=%s", input.Name, agentType)
@@ -181,7 +180,7 @@ func (s *subagentTool) buildTools(childEnv *Env, agentType string) []tool.BaseTo
 	tools := []tool.BaseTool{
 		childEnv.NewReadTool(),
 		childEnv.NewGrepTool(),
-		childEnv.NewExecuteTool(),
+		childEnv.NewExecuteTool(nil), // no background in subagent
 	}
 
 	if agentType == AgentTypeGeneral {
@@ -219,28 +218,6 @@ Report your findings in a structured format.`
 - Complete the specific task described in your prompt
 - Report what you did and any issues encountered
 - Keep your scope narrow — only do what was asked`
-	case AgentTypePlan:
-		return base + `You are a planning/architecture subagent. Your job is to:
-- Explore the codebase thoroughly to understand the current state
-- Produce a structured implementation plan for the task described in your prompt
-- Do NOT make any file changes — only read and analyze
-
-Output your plan in this format:
-
-## Goal
-One-line summary of the objective.
-
-## Analysis
-Key findings from codebase exploration (what exists, what needs to change).
-
-## Plan
-Numbered steps with:
-- What to do
-- Which files to modify/create
-- Key implementation details
-
-## Risks
-Potential issues or trade-offs to consider.`
 	}
 	return base
 }
