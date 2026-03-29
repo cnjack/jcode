@@ -14,6 +14,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/cnjack/coding/internal/config"
+	"github.com/cnjack/coding/internal/session"
 )
 
 const (
@@ -29,6 +30,7 @@ type SubagentNotifier func(name, agentType string, done bool, result string, err
 type SubagentDeps struct {
 	ChatModel model.ToolCallingChatModel
 	Notifier  SubagentNotifier
+	Recorder  *session.Recorder // records subagent start/result to session JSONL
 }
 
 type subagentInput struct {
@@ -92,6 +94,11 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 
 	config.Logger().Printf("[subagent] start name=%q type=%s", input.Name, agentType)
 
+	// Record subagent start event to session.
+	if s.deps.Recorder != nil {
+		s.deps.Recorder.RecordSubagentStart(input.Name, agentType)
+	}
+
 	// Notify TUI of subagent start.
 	if s.deps.Notifier != nil {
 		s.deps.Notifier(input.Name, agentType, false, "", nil)
@@ -126,6 +133,9 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 	result := s.runSubagent(ctx, ag, input)
 
 	config.Logger().Printf("[subagent] done name=%q len=%d", input.Name, len(result))
+	if s.deps.Recorder != nil {
+		s.deps.Recorder.RecordSubagentResult(input.Name, result, nil)
+	}
 	if s.deps.Notifier != nil {
 		s.deps.Notifier(input.Name, agentType, true, result, nil)
 	}

@@ -14,13 +14,13 @@ Seven design documents cover the full roadmap. They are organized into three imp
 
 | # | Document | Priority | Status | Phase |
 |---|----------|----------|--------|-------|
-| 1 | [context_management.md](draft/context_management.md) | **P0** | Draft ready | Phase 1 |
-| 2 | [plan_mode.md](draft/plan_mode.md) | **P0** | Draft ready | Phase 1 |
-| 3 | [subagent.md](draft/subagent.md) | **P0** | Draft ready | Phase 1 |
-| 4 | [middleware_pipeline.md](draft/middleware_pipeline.md) | **P1** | Draft ready (descoped) | Phase 1 |
-| 5 | [system_reminders.md](draft/system_reminders.md) | **P2** | Draft ready (descoped) | Phase 2 |
-| 6 | [environment_awareness.md](draft/environment_awareness.md) | **P2** | Draft ready (descoped) | Phase 2 |
-| 7 | [task_summary_and_observability.md](draft/task_summary_and_observability.md) | **P3** | Draft ready (descoped) | Phase 3 |
+| 1 | [context_management.md](context_management.md) | **P0** | Implemented | Phase 1 |
+| 2 | [plan_mode.md](plan_mode.md) | **P0** | Implemented | Phase 1 |
+| 3 | [subagent.md](subagent.md) | **P0** | Implemented | Phase 1 |
+| 4 | [middleware_pipeline.md](middleware_pipeline.md) | **P1** | Implemented | Phase 1 |
+| 5 | [system_reminders.md](system_reminders.md) | **P2** | Implemented | Phase 2 |
+| 6 | [environment_awareness.md](environment_awareness.md) | **P2** | Implemented | Phase 2 |
+| 7 | [task_summary_and_observability.md](draft/task_summary_and_observability.md) | **P3** | Draft ready | Phase 3 |
 
 Plus **two prompt-only changes** (no design doc needed, zero code cost):
 - Output Efficiency (add conciseness rules to system.md)

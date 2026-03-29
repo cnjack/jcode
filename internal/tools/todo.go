@@ -29,8 +29,9 @@ type TodoItem struct {
 
 // TodoStore is a concurrency-safe in-memory store for todo items.
 type TodoStore struct {
-	mu    sync.RWMutex
-	items []TodoItem
+	mu       sync.RWMutex
+	items    []TodoItem
+	OnUpdate func(items []TodoItem) // called after Update() with a snapshot copy
 }
 
 // NewTodoStore creates an empty TodoStore.
@@ -41,9 +42,15 @@ func NewTodoStore() *TodoStore {
 // Update replaces the entire todo list (full-replacement semantics).
 func (s *TodoStore) Update(items []TodoItem) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.items = make([]TodoItem, len(items))
 	copy(s.items, items)
+	cb := s.OnUpdate
+	s.mu.Unlock()
+	if cb != nil {
+		snapshot := make([]TodoItem, len(items))
+		copy(snapshot, items)
+		cb(snapshot)
+	}
 }
 
 // Items returns a snapshot copy of the current todo items.

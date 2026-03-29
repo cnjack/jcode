@@ -152,6 +152,23 @@ func main() {
 	// PlanStore holds the active plan content across mode transitions.
 	planStore := tools.NewPlanStore()
 
+	// Session recorder — created early so closures (subagent, todo callback)
+	// can reference it. Lazy file creation means no disk I/O until first message.
+	rec, _ := session.NewRecorder(pwd, cfg.Provider, cfg.Model)
+
+	// Wire TodoStore → session recording: each todowrite update is persisted.
+	env.TodoStore.OnUpdate = func(items []tools.TodoItem) {
+		if rec != nil {
+			snapItems := make([]session.TodoSnapshotItem, len(items))
+			for i, it := range items {
+				snapItems[i] = session.TodoSnapshotItem{
+					ID: it.ID, Title: it.Title, Status: string(it.Status),
+				}
+			}
+			rec.RecordTodoSnapshot(snapItems)
+		}
+	}
+
 	// Channel for ask_user tool ← TUI user answers.
 	askUserCh := make(chan tools.AskUserResponse, 1)
 
@@ -172,6 +189,7 @@ func main() {
 			env.NewSubagentTool(&tools.SubagentDeps{
 				ChatModel: chatModel,
 				Notifier:  subagentNotifier,
+				Recorder:  rec,
 			}),
 			tools.NewAskUserTool(askUserDeps),
 		}
@@ -191,6 +209,12 @@ func main() {
 
 	agentMode := tui.ModeNormal
 	toolList := buildAllTools()
+
+	// summCapture is shared between the Finalize callback (inside Eino's
+	// summarization middleware) and the prompt-handling goroutine. It is
+	// single-threaded: the Finalize callback runs synchronously inside
+	// runner.Run, and the drain happens right after runner.Run returns.
+	summCapture := &summarizationCapture{}
 
 	approvalState := runner.NewApprovalState(pwd)
 
@@ -243,6 +267,22 @@ func main() {
 				ContextTokens: int(float64(contextLimit) * 0.75),
 			},
 			TranscriptFilePath: filepath.Join(config.ConfigDir(), "transcript.txt"),
+			Finalize: func(ctx context.Context, originalMsgs []adk.Message, summary adk.Message) ([]adk.Message, error) {
+				// Default behavior: keep system messages + summary.
+				var systemMsgs []adk.Message
+				var contextN int
+				for _, msg := range originalMsgs {
+					if msg.Role == schema.System {
+						systemMsgs = append(systemMsgs, msg)
+					} else {
+						contextN++
+					}
+				}
+				// Capture so the prompt loop can sync history.
+				summCapture.capture(summary.Content, contextN)
+				config.Logger().Printf("[summarization] Finalize: compacted %d context messages", contextN)
+				return append(systemMsgs, summary), nil
+			},
 		})
 		if err != nil {
 			config.Logger().Printf("[agent] summarization middleware init error: %v", err)
@@ -373,19 +413,43 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Cannot load session: %v\n", loadErr)
 			os.Exit(1)
 		}
-		initialHistory = session.ReconstructHistory(entries)
+		state := session.ReconstructState(entries)
+		initialHistory = state.History
 		initialResumeUUID = resumeUUID
 		initialResumeEntries = tui.ConvertSessionEntries(entries)
 		hasPrompt = false // treat as interactive, not one-shot
 
-		targetEnv := session.GetLastEnvironment(entries)
+		// Restore plan state.
+		if state.Plan != nil {
+			switch state.Plan.Status {
+			case "approved":
+				planStore.Submit(state.Plan.Title, state.Plan.Content)
+				planStore.Approve()
+			case "submitted":
+				planStore.Submit(state.Plan.Title, state.Plan.Content)
+			case "rejected":
+				planStore.SetDraft(state.Plan.Title, state.Plan.Content)
+			}
+		}
+
+		// Restore todo items.
+		if len(state.Todos) > 0 {
+			todoItems := make([]tools.TodoItem, len(state.Todos))
+			for i, t := range state.Todos {
+				todoItems[i] = tools.TodoItem{
+					ID: t.ID, Title: t.Title, Status: tools.TodoStatus(t.Status),
+				}
+			}
+			env.TodoStore.Update(todoItems)
+		}
+
+		targetEnv := state.EnvTarget
 		if targetEnv != "local" {
 			sessionResumeWarning = attemptSSHResume(targetEnv)
 		}
 	}
 
 	go func() {
-		rec, _ := session.NewRecorder(pwd, cfg.Provider, cfg.Model)
 		defer func() {
 			if rec != nil {
 				rec.Close()
@@ -417,6 +481,7 @@ func main() {
 			if resp != "" {
 				history = append(history, &schema.Message{Role: schema.Assistant, Content: resp})
 			}
+			history = syncSummarization(summCapture, history, rec)
 		}
 
 		promptCh := tui.GetPromptChannel()
@@ -433,6 +498,12 @@ func main() {
 		applyModeSwitch := func(newMode tui.AgentMode) {
 			agentMode = newMode
 			config.Logger().Printf("[plan] mode switch to %d (0=normal, 1=plan)", newMode)
+
+			// Record mode transition to session.
+			if rec != nil {
+				rec.RecordModeChange(agentModeString(newMode))
+			}
+
 			if agentMode == tui.ModePlanning {
 				systemPrompt = prompts.GetPlanSystemPrompt(platform, pwd, env.Exec.Label(), envInfo)
 				toolList = buildPlanTools()
@@ -474,6 +545,9 @@ func main() {
 			// Store the agent's response as the submitted plan.
 			planStore.Submit("Plan", resp)
 			config.Logger().Printf("[plan] plan submitted for review (%d chars)", len(resp))
+			if rec != nil {
+				rec.RecordPlanUpdate("submitted", "Plan", resp, "")
+			}
 
 			// Show plan review dialog in TUI.
 			p.Send(tui.PlanApprovalMsg{PlanContent: resp, PlanPath: "Plan"})
@@ -486,6 +560,9 @@ func main() {
 				feedback := planResp.Feedback
 				planStore.Reject(feedback)
 				config.Logger().Printf("[plan] plan rejected: %s", feedback)
+				if rec != nil {
+					rec.RecordPlanUpdate("rejected", "", "", feedback)
+				}
 
 				// Re-run with feedback so the agent can revise.
 				revisePrompt := "Your plan was rejected."
@@ -502,6 +579,7 @@ func main() {
 				if newResp != "" {
 					history = append(history, &schema.Message{Role: schema.Assistant, Content: newResp})
 				}
+				history = syncSummarization(summCapture, history, rec)
 				// Recurse to handle the revised plan.
 				handlePlanCompletion(newResp)
 				return
@@ -509,6 +587,9 @@ func main() {
 
 			planStore.Approve()
 			config.Logger().Printf("[plan] plan approved, transitioning to execution mode")
+			if rec != nil {
+				rec.RecordPlanUpdate("approved", planStore.Title(), planStore.Content(), "")
+			}
 
 			// Extract todos from plan steps.
 			todos := tools.ExtractTodosFromPlan(planStore.Content())
@@ -532,6 +613,7 @@ func main() {
 			if execResp != "" {
 				history = append(history, &schema.Message{Role: schema.Assistant, Content: execResp})
 			}
+			history = syncSummarization(summCapture, history, rec)
 
 			// Check if all todos are done → transition back to normal.
 			if env.TodoStore.HasItems() && !env.TodoStore.HasIncomplete() {
@@ -579,6 +661,7 @@ func main() {
 				if resp != "" {
 					history = append(history, &schema.Message{Role: schema.Assistant, Content: resp})
 				}
+				history = syncSummarization(summCapture, history, rec)
 				handlePlanCompletion(resp)
 
 			case pendingPrompt := <-pendingPromptCh:
@@ -597,6 +680,7 @@ func main() {
 				if resp != "" {
 					history = append(history, &schema.Message{Role: schema.Assistant, Content: resp})
 				}
+				history = syncSummarization(summCapture, history, rec)
 				handlePlanCompletion(resp)
 
 			case uuid := <-resumeCh:
@@ -605,11 +689,37 @@ func main() {
 					p.Send(tui.AgentDoneMsg{Err: fmt.Errorf("load session: %w", loadErr)})
 					break
 				}
-				history = session.ReconstructHistory(entries)
+				state := session.ReconstructState(entries)
+				history = state.History
 				approvalState.SetSessionApproval(false)
 				p.Send(tui.SessionResumedMsg{UUID: uuid, Entries: tui.ConvertSessionEntries(entries)})
 
-				targetEnv := session.GetLastEnvironment(entries)
+				// Restore plan state.
+				if state.Plan != nil {
+					switch state.Plan.Status {
+					case "approved":
+						planStore.Submit(state.Plan.Title, state.Plan.Content)
+						planStore.Approve()
+					case "submitted":
+						planStore.Submit(state.Plan.Title, state.Plan.Content)
+					case "rejected":
+						planStore.SetDraft(state.Plan.Title, state.Plan.Content)
+					}
+				}
+
+				// Restore todos.
+				if len(state.Todos) > 0 {
+					todoItems := make([]tools.TodoItem, len(state.Todos))
+					for i, t := range state.Todos {
+						todoItems[i] = tools.TodoItem{
+							ID: t.ID, Title: t.Title, Status: tools.TodoStatus(t.Status),
+						}
+					}
+					env.TodoStore.Update(todoItems)
+					p.Send(tui.TodoUpdateMsg{})
+				}
+
+				targetEnv := state.EnvTarget
 				if targetEnv != "local" {
 					sessionResumeWarning = attemptSSHResume(targetEnv)
 				}
@@ -635,8 +745,13 @@ func main() {
 
 			case <-compactCh:
 				_, _, oldTokens := internalmodel.TokenTracker.Get()
+				oldLen := len(history)
 				history = compactHistory(ctx, chatModel, history)
 				_, _, newTokens := internalmodel.TokenTracker.Get()
+				// Record compact event if history was actually compacted.
+				if rec != nil && len(history) < oldLen && len(history) > 0 {
+					rec.RecordCompact(history[0].Content, oldLen-len(history))
+				}
 				p.Send(tui.CompactDoneMsg{
 					OldTokens: oldTokens,
 					NewTokens: newTokens,
@@ -755,6 +870,73 @@ func truncateStr(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// agentModeString converts an AgentMode to its string representation for session recording.
+func agentModeString(m tui.AgentMode) string {
+	switch m {
+	case tui.ModePlanning:
+		return "planning"
+	case tui.ModeExecuting:
+		return "executing"
+	default:
+		return "normal"
+	}
+}
+
+// summarizationCapture captures the result when Eino's summarization middleware
+// fires, so that the application-level history can be synced afterwards.
+type summarizationCapture struct {
+	fired      bool
+	summary    string
+	compactedN int
+}
+
+// capture records a summarization event. Called from the Finalize callback.
+func (c *summarizationCapture) capture(summary string, compactedN int) {
+	c.fired = true
+	c.summary = summary
+	c.compactedN = compactedN
+}
+
+// drain returns and resets the captured state.
+func (c *summarizationCapture) drain() (fired bool, summary string, compactedN int) {
+	fired = c.fired
+	summary = c.summary
+	compactedN = c.compactedN
+	c.fired = false
+	c.summary = ""
+	c.compactedN = 0
+	return
+}
+
+// syncSummarization checks whether Eino's summarization middleware fired
+// during the last runner.Run() and, if so, replaces history with the
+// compacted version so the next turn starts from the summarized state.
+func syncSummarization(cap *summarizationCapture, history []adk.Message, rec *session.Recorder) []adk.Message {
+	fired, summary, compactedN := cap.drain()
+	if !fired {
+		return history
+	}
+	// Keep the most recent messages (typically latest user + assistant).
+	keepCount := 2
+	if keepCount > len(history) {
+		keepCount = len(history)
+	}
+	kept := make([]adk.Message, keepCount)
+	copy(kept, history[len(history)-keepCount:])
+
+	var newHistory []adk.Message
+	newHistory = append(newHistory, schema.SystemMessage(
+		"[Context Summary — conversation was auto-summarized]\n\n"+summary,
+	))
+	newHistory = append(newHistory, kept...)
+
+	if rec != nil {
+		rec.RecordCompact(summary, compactedN)
+	}
+	config.Logger().Printf("[summarization] synced history: %d → %d messages", len(history), len(newHistory))
+	return newHistory
 }
 
 // drainBgNotifications injects any completed background task results into
