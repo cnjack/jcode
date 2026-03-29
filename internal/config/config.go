@@ -62,7 +62,9 @@ type Config struct {
 func ConfigDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join("~", configDir)
+		// Fallback: use /tmp so callers never get a literal "~" path
+		// that Go's filesystem APIs cannot resolve.
+		return filepath.Join(os.TempDir(), configDir)
 	}
 	return filepath.Join(home, configDir)
 }

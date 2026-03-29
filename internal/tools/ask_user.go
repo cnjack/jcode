@@ -73,7 +73,7 @@ func (t *askUserTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 	return t.info, nil
 }
 
-func (t *askUserTool) InvokableRun(_ context.Context, argumentsInJSON string, _ ...tool.Option) (string, error) {
+func (t *askUserTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ ...tool.Option) (string, error) {
 	var input askUserInput
 	if err := json.Unmarshal([]byte(argumentsInJSON), &input); err != nil {
 		return fmt.Sprintf("Failed to parse ask_user input: %v", err), nil
@@ -96,8 +96,13 @@ func (t *askUserTool) InvokableRun(_ context.Context, argumentsInJSON string, _ 
 		t.deps.NotifyFn(input.Question, labels)
 	}
 
-	// Block waiting for user response
-	resp := <-t.deps.ResponseCh
+	// Block waiting for user response, respecting context cancellation.
+	var resp AskUserResponse
+	select {
+	case resp = <-t.deps.ResponseCh:
+	case <-ctx.Done():
+		return "ask_user cancelled: context expired", nil
+	}
 
 	config.Logger().Printf("[ask_user] answer: %q", resp.Answer)
 

@@ -95,7 +95,9 @@ func (bm *BackgroundManager) Run(ctx context.Context, command string) string {
 		notify(taskID, command, string(BgStatusRunning))
 	}
 
-	go bm.execute(ctx, task)
+	// Detach from parent context so background tasks survive after the
+	// caller's request context is cancelled.
+	go bm.execute(context.WithoutCancel(ctx), task)
 
 	return taskID
 }
@@ -135,12 +137,16 @@ func (bm *BackgroundManager) execute(ctx context.Context, task *BgTask) {
 		task.Status = BgStatusDone
 	}
 
-	bm.notifications = append(bm.notifications, BgNotification{
-		TaskID:  task.ID,
-		Command: task.Command,
-		Status:  task.Status,
-		Output:  result,
-	})
+	// Cap notifications to prevent unbounded memory growth.
+	const maxNotifications = 100
+	if len(bm.notifications) < maxNotifications {
+		bm.notifications = append(bm.notifications, BgNotification{
+			TaskID:  task.ID,
+			Command: task.Command,
+			Status:  task.Status,
+			Output:  result,
+		})
+	}
 
 	notify := bm.notifier
 	bm.mu.Unlock()
@@ -165,20 +171,26 @@ func (bm *BackgroundManager) DrainNotifications() []BgNotification {
 	return notifs
 }
 
-// GetTask returns the current state of a task.
+// GetTask returns a snapshot of the task's current state.
 func (bm *BackgroundManager) GetTask(id string) *BgTask {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
-	return bm.tasks[id]
+	t := bm.tasks[id]
+	if t == nil {
+		return nil
+	}
+	copy := *t
+	return &copy
 }
 
-// ListTasks returns all tasks.
+// ListTasks returns snapshots of all tasks.
 func (bm *BackgroundManager) ListTasks() []*BgTask {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 	result := make([]*BgTask, 0, len(bm.tasks))
 	for _, t := range bm.tasks {
-		result = append(result, t)
+		copy := *t
+		result = append(result, &copy)
 	}
 	return result
 }
