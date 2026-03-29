@@ -3,6 +3,7 @@ package tools
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // numbered step: "1. Do something" or "1) Do something"
@@ -89,13 +90,14 @@ func cleanStepTitle(raw string) string {
 	title = strings.ReplaceAll(title, "`", "")
 	title = strings.TrimSpace(title)
 
-	// Truncate to reasonable length
-	if len(title) > 120 {
-		title = title[:117] + "..."
+	// Truncate to reasonable length (by rune count to avoid splitting UTF-8).
+	if utf8.RuneCountInString(title) > 120 {
+		runes := []rune(title)
+		title = string(runes[:117]) + "..."
 	}
 
 	// Skip empty or very short noise
-	if len(title) < 3 {
+	if utf8.RuneCountInString(title) < 3 {
 		return ""
 	}
 

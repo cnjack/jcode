@@ -463,6 +463,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "n", "N":
 				m.planReviewSelected = 1
 				m.planRejectInput = true
+				m.textarea.SetValue("")
 				m.textarea.Focus()
 				m.textarea.Placeholder = "Enter feedback (optional, then press Enter)..."
 				return m, tea.Batch(cmds...)
@@ -488,6 +489,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.refreshViewport()
 				case 1: // Reject with feedback
 					m.planRejectInput = true
+					m.textarea.SetValue("")
 					m.textarea.Focus()
 					m.textarea.Placeholder = "Enter feedback (optional, then press Enter)..."
 				case 2: // Dismiss
@@ -1349,6 +1351,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.askUserQuestion = msg.Question
 		m.askUserOptions = msg.Options
 		m.askUserSelected = 0
+		m.textarea.SetValue("")
 		if len(msg.Options) == 0 {
 			m.textarea.Focus()
 			m.textarea.Placeholder = "Type your answer..."
