@@ -1177,11 +1177,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case UserPromptMsg:
 		m.lines = append(m.lines, fmt.Sprintf("%s %s",
-			userLabelStyle.Render("👤 You:"), msg.Prompt))
+			userLabelStyle.Render("👤 You:"), sanitize(msg.Prompt)))
 		m.refreshViewport()
 
 	case AgentTextMsg:
-		m.currentText.WriteString(msg.Text)
+		m.currentText.WriteString(sanitize(msg.Text))
 		m.refreshViewport()
 
 	case ToolCallMsg:
@@ -1205,7 +1205,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				toolErrorStyle.Render("✗ Error:"),
 				toolResultStyle.Render(truncate(msg.Err.Error(), maxToolOutputLen))))
 		} else {
-			m.lines = append(m.lines, formatToolResult(msg.Name, msg.Output, m.width)...)
+			m.lines = append(m.lines, formatToolResult(msg.Name, sanitize(msg.Output), m.width)...)
 		}
 		m.refreshViewport()
 		cmds = append(cmds, m.spinner.Tick)
