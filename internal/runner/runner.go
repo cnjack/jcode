@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
