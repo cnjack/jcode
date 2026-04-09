@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 func formatToolArgs(argsJSON string) string {
@@ -16,11 +16,11 @@ func formatToolArgs(argsJSON string) string {
 	}
 	var args map[string]interface{}
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return truncate(argsJSON, 120)
+		return truncate(sanitize(argsJSON), 120)
 	}
 	parts := make([]string, 0, len(args))
 	for k, v := range args {
-		val := truncate(fmt.Sprintf("%v", v), 60)
+		val := truncate(sanitize(fmt.Sprintf("%v", v)), 60)
 		parts = append(parts, fmt.Sprintf("%s=%s", k, val))
 	}
 	return truncate(strings.Join(parts, " "), 200)
@@ -57,7 +57,6 @@ func sanitize(s string) string {
 }
 
 func truncate(s string, maxLen int) string {
-	s = sanitize(s)
 	s = strings.ReplaceAll(s, "\n", "↲")
 	runes := []rune(s)
 	if len(runes) <= maxLen {

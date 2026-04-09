@@ -6,13 +6,13 @@ import (
 	"path"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/glamour/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/session"
@@ -194,8 +194,10 @@ func newTextarea() textarea.Model {
 	ta.ShowLineNumbers = false
 	ta.SetHeight(1)
 	ta.Prompt = "> "
-	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
-	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+	st := ta.Styles()
+	st.Focused.CursorLine = lipgloss.NewStyle()
+	st.Focused.Prompt = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+	ta.SetStyles(st)
 	ta.Focus()
 	return ta
 }
@@ -206,7 +208,7 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 	s.Style = spinnerStyle
 
 	md, _ := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
+		glamour.WithStandardStyle("dark"),
 		glamour.WithWordWrap(100),
 	)
 
@@ -367,7 +369,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Tool approval dialog handling
 		if m.approvalPending {
 			switch msg.String() {
@@ -886,7 +888,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.lines = append(m.lines, fmt.Sprintf("%s %s",
 							userLabelStyle.Render("👤 You (queued):"), prompt))
 						if m.ready {
-							m.viewport.Height = m.calcViewportHeight(true)
+							m.viewport.SetHeight(m.calcViewportHeight(true))
 							m.viewport.SetContent(m.renderContent())
 							m.viewport.GotoBottom()
 						}
@@ -907,7 +909,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.lines = append(m.lines, fmt.Sprintf("%s %s",
 						userLabelStyle.Render(modeLabel), prompt))
 					if m.ready {
-						m.viewport.Height = m.calcViewportHeight(false)
+						m.viewport.SetHeight(m.calcViewportHeight(false))
 						m.viewport.SetContent(m.renderContent())
 						m.viewport.GotoBottom()
 					}
@@ -920,12 +922,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "shift+enter":
 				// Insert newline into textarea by forwarding a plain enter key
 				var cmd tea.Cmd
-				m.textarea, cmd = m.textarea.Update(tea.KeyMsg{Type: tea.KeyEnter})
+				m.textarea, cmd = m.textarea.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 				cmds = append(cmds, cmd)
 				m.textareaLines = recalcLines(m.textarea.Value())
 				m.textarea.SetHeight(m.textareaLines)
 				if m.ready {
-					m.viewport.Height = m.calcViewportHeight(m.inputActive())
+					m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))
 				}
 				return m, tea.Batch(cmds...)
 			case "up":
@@ -936,7 +938,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.textareaLines = recalcLines(m.textarea.Value())
 					m.textarea.SetHeight(m.textareaLines)
 					if m.ready {
-						m.viewport.Height = m.calcViewportHeight(m.inputActive())
+						m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))
 					}
 				}
 				return m, tea.Batch(cmds...)
@@ -952,7 +954,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.textareaLines = recalcLines(m.textarea.Value())
 				m.textarea.SetHeight(m.textareaLines)
 				if m.ready {
-					m.viewport.Height = m.calcViewportHeight(m.inputActive())
+					m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))
 				}
 				return m, tea.Batch(cmds...)
 			case "pgup", "pgdown":
@@ -970,7 +972,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.textareaLines = recalcLines(m.textarea.Value())
 			m.textarea.SetHeight(m.textareaLines)
 			if m.ready {
-				m.viewport.Height = m.calcViewportHeight(m.inputActive())
+				m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))
 			}
 			return m, tea.Batch(cmds...)
 		}
@@ -990,12 +992,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		vpH := m.calcViewportHeight(m.inputActive())
 		if !m.ready {
-			m.viewport = viewport.New(msg.Width, vpH)
-			m.viewport.HighPerformanceRendering = false
+			m.viewport = viewport.New(viewport.WithWidth(msg.Width), viewport.WithHeight(vpH))
+
 			m.ready = true
 		} else {
-			m.viewport.Width = msg.Width
-			m.viewport.Height = vpH
+			m.viewport.SetWidth(msg.Width)
+			m.viewport.SetHeight(vpH)
 		}
 		m.dirList.SetSize(msg.Width, vpH)
 		m.settingMenu.SetSize(msg.Width, vpH)
@@ -1086,13 +1088,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.lines = append(m.lines, fmt.Sprintf("%s %s %s",
 					toolLabelStyle.Render("🔧 Tool:"),
 					toolNameStyle.Render(e.Name),
-					toolArgsStyle.Render(truncate(e.Args, 100)),
+					toolArgsStyle.Render(truncate(sanitize(e.Args), 100)),
 				))
 			case string(session.EntryToolResult):
 				if e.Error != "" {
 					m.lines = append(m.lines, fmt.Sprintf("   %s %s",
 						toolErrorStyle.Render("✗ Error:"),
-						toolResultStyle.Render(truncate(e.Error, 200))))
+						toolResultStyle.Render(truncate(sanitize(e.Error), 200))))
 				} else {
 					m.lines = append(m.lines, formatToolResult(e.Name, e.Output, m.width)...)
 				}
@@ -1101,7 +1103,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lines = append(m.lines, "")
 		m.lines = append(m.lines, divider(m.width-4))
 		if m.ready {
-			m.viewport.Height = m.calcViewportHeight(true)
+			m.viewport.SetHeight(m.calcViewportHeight(true))
 			m.viewport.SetContent(m.renderContent())
 			m.viewport.GotoBottom()
 		}
@@ -1170,7 +1172,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.agentDone = true
 		m.textarea.Focus()
 		if m.ready {
-			m.viewport.Height = m.calcViewportHeight(true)
+			m.viewport.SetHeight(m.calcViewportHeight(true))
 			m.viewport.SetContent(m.renderContent())
 			m.viewport.GotoBottom()
 		}
@@ -1203,7 +1205,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			m.lines = append(m.lines, fmt.Sprintf("   %s %s",
 				toolErrorStyle.Render("✗ Error:"),
-				toolResultStyle.Render(truncate(msg.Err.Error(), maxToolOutputLen))))
+				toolResultStyle.Render(truncate(sanitize(msg.Err.Error()), maxToolOutputLen))))
 		} else {
 			m.lines = append(m.lines, formatToolResult(msg.Name, sanitize(msg.Output), m.width)...)
 		}
@@ -1227,7 +1229,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.agentDone = true
 		m.textarea.Focus()
 		if m.ready {
-			m.viewport.Height = m.calcViewportHeight(true)
+			m.viewport.SetHeight(m.calcViewportHeight(true))
 			m.viewport.SetContent(m.renderContent())
 			m.viewport.GotoBottom()
 		}
@@ -1294,11 +1296,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			m.lines = append(m.lines, fmt.Sprintf("   %s %s",
 				toolErrorStyle.Render("✗ Subagent Error:"),
-				toolResultStyle.Render(truncate(msg.Err.Error(), maxToolOutputLen))))
+				toolResultStyle.Render(truncate(sanitize(msg.Err.Error()), maxToolOutputLen))))
 		} else {
 			m.lines = append(m.lines, fmt.Sprintf("   %s %s",
 				toolSuccessStyle.Render("✓ Subagent Done:"),
-				toolResultStyle.Render(truncate(msg.Result, maxToolOutputLen))))
+				toolResultStyle.Render(truncate(sanitize(msg.Result), maxToolOutputLen))))
 		}
 		m.refreshViewport()
 		cmds = append(cmds, m.spinner.Tick)
@@ -1334,7 +1336,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				statusIcon,
 				toolNameStyle.Render(msg.TaskID),
 				msg.Status,
-				toolArgsStyle.Render(truncate(msg.Command, 60))))
+				toolArgsStyle.Render(truncate(sanitize(msg.Command), 60))))
 		}
 		m.refreshViewport()
 
@@ -1400,33 +1402,40 @@ func (m Model) calcViewportHeight(_ ...bool) int {
 	return h
 }
 
-func (m Model) View() string {
+func (m Model) newView(content string) tea.View {
+	v := tea.NewView(content)
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
+}
+
+func (m Model) View() tea.View {
 	if m.showingSetting {
-		return m.settingMenuView()
+		return m.newView(m.settingMenuView())
 	}
 
 	if m.pickingSSHAlias {
-		return m.sshAliasPickerView()
+		return m.newView(m.sshAliasPickerView())
 	}
 
 	if m.pickingModel {
-		return m.modelPickerView()
+		return m.newView(m.modelPickerView())
 	}
 
 	if m.pickingSession {
-		return m.sessionPickerView()
+		return m.newView(m.sessionPickerView())
 	}
 
 	if !m.ready {
-		return "\n  Initializing..."
+		return m.newView("\n  Initializing...")
 	}
 
 	if m.sshStep == 3 {
-		return m.dirPickerView()
+		return m.newView(m.dirPickerView())
 	}
 
 	if m.approvalPending {
-		return m.approvalDialogView()
+		return m.newView(m.approvalDialogView())
 	}
 
 	headerText := "🚀 Little Jack — Coding Assistant  |  "
@@ -1443,21 +1452,21 @@ func (m Model) View() string {
 	footerHeight := lipgloss.Height(footer)
 
 	if m.ready {
-		m.viewport.Height = m.height - headerHeight - footerHeight
-		if m.viewport.Height < 3 {
-			m.viewport.Height = 3
+		m.viewport.SetHeight(m.height - headerHeight - footerHeight)
+		if m.viewport.Height() < 3 {
+			m.viewport.SetHeight(3)
 		}
 		m.viewport.SetContent(strings.TrimRight(m.renderContent(), "\n"))
 	}
 
 	mainView := lipgloss.JoinVertical(lipgloss.Left, header, headerLine, m.viewport.View(), footer)
-	return mainView
+	return m.newView(mainView)
 }
 
 // refreshViewport recalculates viewport height, updates content and scrolls to bottom.
 func (m *Model) refreshViewport() {
 	if m.ready {
-		m.viewport.Height = m.calcViewportHeight()
+		m.viewport.SetHeight(m.calcViewportHeight())
 		m.viewport.SetContent(m.renderContent())
 		m.viewport.GotoBottom()
 	}
@@ -1547,7 +1556,7 @@ func (m *Model) renderSubagentBox() string {
 
 func RunTUI(hasPrompt bool, pwd string, todoStore *tools.TodoStore) (*tea.Program, Model) {
 	m := NewModel(hasPrompt, pwd, todoStore)
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(m)
 	return p, m
 }
 
