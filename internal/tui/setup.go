@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/cnjack/jcode/internal/config"
 )
@@ -139,19 +139,19 @@ func NewSetupModel() SetupModel {
 	m.customModelIn = textinput.New()
 	m.customModelIn.Placeholder = "Enter custom model name..."
 	m.customModelIn.Prompt = "Model Name: "
-	m.customModelIn.Width = 50
+	m.customModelIn.SetWidth(50)
 
 	m.urlIn = textinput.New()
 	m.urlIn.Placeholder = "https://your-base-url/v1"
 	m.urlIn.Prompt = "Base URL: "
-	m.urlIn.Width = 50
+	m.urlIn.SetWidth(50)
 
 	m.keyIn = textinput.New()
 	m.keyIn.Placeholder = "sk-..."
 	m.keyIn.Prompt = "API Key: "
 	m.keyIn.EchoMode = textinput.EchoPassword
 	m.keyIn.EchoCharacter = '•'
-	m.keyIn.Width = 50
+	m.keyIn.SetWidth(50)
 
 	return m
 }
@@ -164,7 +164,7 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
 		}
@@ -382,7 +382,7 @@ func (m SetupModel) submit() (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-func (m SetupModel) View() string {
+func (m SetupModel) View() tea.View {
 	w := m.width
 	if w <= 0 {
 		w = 80
@@ -422,7 +422,7 @@ func (m SetupModel) View() string {
 	helpLine := lipgloss.NewStyle().Foreground(colorMuted).PaddingLeft(2).Render("  Ctrl+C quit")
 	cfgPath := lipgloss.NewStyle().Foreground(colorMuted).Italic(true).PaddingLeft(2).Render("  Config: " + config.ConfigPath())
 
-	return lipgloss.JoinVertical(lipgloss.Left,
+	result := lipgloss.JoinVertical(lipgloss.Left,
 		header,
 		divider(w-4),
 		"\n",
@@ -433,6 +433,9 @@ func (m SetupModel) View() string {
 		helpLine,
 		cfgPath,
 	)
+	v := tea.NewView(result)
+	v.AltScreen = true
+	return v
 }
 
 func (m SetupModel) IsDone() bool {
@@ -441,7 +444,7 @@ func (m SetupModel) IsDone() bool {
 
 func RunSetupTUI() (bool, error) {
 	m := NewSetupModel()
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m)
 	finalModel, err := p.Run()
 	if err != nil {
 		return false, err
