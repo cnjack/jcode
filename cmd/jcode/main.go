@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/filesystem"
 	"github.com/cloudwego/eino/adk/middlewares/reduction"

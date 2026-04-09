@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/tools"
 )
@@ -165,7 +165,7 @@ func (m Model) handleBgInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	m.lines = append(m.lines, fmt.Sprintf("%s /bg",
 		userLabelStyle.Render("👤 You:")))
 	if m.ready {
-		m.viewport.Height = m.calcViewportHeight(false)
+		m.viewport.SetHeight(m.calcViewportHeight(false))
 		m.viewport.SetContent(m.renderContent())
 		m.viewport.GotoBottom()
 	}
@@ -233,7 +233,7 @@ func (m Model) handleSkillSlashInput(skillName, userInput string, cmds []tea.Cmd
 	m.lines = append(m.lines, fmt.Sprintf("%s %s",
 		userLabelStyle.Render("🔧 Skill:"), displayLabel))
 	if m.ready {
-		m.viewport.Height = m.calcViewportHeight(false)
+		m.viewport.SetHeight(m.calcViewportHeight(false))
 		m.viewport.SetContent(m.renderContent())
 		m.viewport.GotoBottom()
 	}

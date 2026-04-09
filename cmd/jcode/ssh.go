@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/cloudwego/eino/adk"
 	einomodel "github.com/cloudwego/eino/components/model"
 

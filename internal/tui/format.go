@@ -3,9 +3,11 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
+	"unicode"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 func formatToolArgs(argsJSON string) string {
@@ -14,22 +16,53 @@ func formatToolArgs(argsJSON string) string {
 	}
 	var args map[string]interface{}
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return truncate(argsJSON, 120)
+		return truncate(sanitize(argsJSON), 120)
 	}
 	parts := make([]string, 0, len(args))
 	for k, v := range args {
-		val := truncate(fmt.Sprintf("%v", v), 60)
+		val := truncate(sanitize(fmt.Sprintf("%v", v)), 60)
 		parts = append(parts, fmt.Sprintf("%s=%s", k, val))
 	}
 	return truncate(strings.Join(parts, " "), 200)
 }
 
+// ansiRe matches ANSI escape sequences (CSI, OSC, etc.).
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x1b]*\x1b\\|\x1b[^\[\]]`)
+
+// sanitize removes ANSI escape sequences and replaces control characters
+// (except newline and tab) with their Unicode Control Pictures or a placeholder.
+// This prevents special characters from corrupting the TUI layout.
+func sanitize(s string) string {
+	// Strip ANSI escape sequences
+	s = ansiRe.ReplaceAllString(s, "")
+	// Replace control characters
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r == '\n' || r == '\t':
+			b.WriteRune(r)
+		case r < 0x20: // C0 control characters
+			// Map to Unicode Control Pictures block (U+2400)
+			b.WriteRune(0x2400 + r)
+		case r == 0x7f: // DEL
+			b.WriteRune('␡')
+		case unicode.Is(unicode.Co, r): // Private Use Area - could break rendering
+			b.WriteRune('�')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 func truncate(s string, maxLen int) string {
 	s = strings.ReplaceAll(s, "\n", "↲")
-	if len(s) <= maxLen {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "…"
+	return string(runes[:maxLen]) + "…"
 }
 
 // formatToolResult returns styled output lines depending on the tool name.
