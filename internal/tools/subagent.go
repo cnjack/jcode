@@ -15,13 +15,15 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/cnjack/jcode/internal/config"
+	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/session"
 )
 
 const (
-	AgentTypeExplore = "explore"
-	AgentTypeGeneral = "general"
-	subagentMaxIter  = 50
+	AgentTypeExplore     = "explore"
+	AgentTypeGeneral     = "general"
+	AgentTypeCoordinator = "coordinator"
+	subagentMaxIter      = 50
 )
 
 // SubagentNotifier receives subagent lifecycle events for TUI display.
@@ -33,17 +35,21 @@ type SubagentProgressFn func(agentName, event, toolName, detail string)
 
 // SubagentDeps holds dependencies injected into the subagent tool at creation time.
 type SubagentDeps struct {
-	ChatModel  model.ToolCallingChatModel
-	Notifier   SubagentNotifier
-	ProgressFn SubagentProgressFn // intermediate tool call/result events
-	Recorder   *session.Recorder  // records subagent start/result to session JSONL
+	ChatModel    model.ToolCallingChatModel
+	ModelFactory *internalmodel.ModelFactory // optional, for multi-model subagents
+	TaskManager  *SubagentTaskManager        // optional, for async background tasks
+	Notifier     SubagentNotifier
+	ProgressFn   SubagentProgressFn // intermediate tool call/result events
+	Recorder     *session.Recorder  // records subagent start/result to session JSONL
 }
 
 type subagentInput struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Prompt      string `json:"prompt"`
-	AgentType   string `json:"agent_type"`
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	Prompt          string `json:"prompt"`
+	AgentType       string `json:"agent_type"`
+	Model           string `json:"model"`
+	RunInBackground bool   `json:"run_in_background"`
 }
 
 // NewSubagentTool creates the "subagent" tool that delegates tasks to a child agent.
@@ -64,7 +70,13 @@ func (e *Env) NewSubagentTool(deps *SubagentDeps) tool.InvokableTool {
 				Type: schema.String, Desc: "Detailed instructions for the subagent. Include all necessary context.", Required: true,
 			},
 			"agent_type": {
-				Type: schema.String, Desc: "Agent type: 'explore' (read-only, default) or 'general' (full tools, no nesting)", Required: false,
+				Type: schema.String, Desc: "Agent type: 'explore' (read-only, default), 'general' (full tools), or 'coordinator' (can spawn sub-subagents)", Required: false,
+			},
+			"model": {
+				Type: schema.String, Desc: "Override model for this subagent in 'provider/model' format (optional, uses parent model by default)", Required: false,
+			},
+			"run_in_background": {
+				Type: schema.Boolean, Desc: "If true, run asynchronously and return a task ID immediately. Check result later with task_get.", Required: false,
 			},
 		}),
 	}
@@ -94,11 +106,27 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 	if agentType == "" {
 		agentType = AgentTypeExplore
 	}
-	if agentType != AgentTypeExplore && agentType != AgentTypeGeneral {
-		return "", fmt.Errorf("agent_type must be 'explore' or 'general', got %q", agentType)
+	if agentType != AgentTypeExplore && agentType != AgentTypeGeneral && agentType != AgentTypeCoordinator {
+		return "", fmt.Errorf("agent_type must be 'explore', 'general', or 'coordinator', got %q", agentType)
 	}
 
-	config.Logger().Printf("[subagent] start name=%q type=%s", input.Name, agentType)
+	// Check nesting depth.
+	if !s.env.CanNest() {
+		return "", fmt.Errorf("maximum subagent nesting depth (%d) reached", MaxSubagentDepth)
+	}
+
+	// Resolve model.
+	chatModel := s.deps.ChatModel
+	if input.Model != "" && s.deps.ModelFactory != nil {
+		m, err := s.deps.ModelFactory.GetModel(ctx, input.Model)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve model %q: %w", input.Model, err)
+		}
+		chatModel = m
+	}
+
+	config.Logger().Printf("[subagent] start name=%q type=%s depth=%d model=%q bg=%v",
+		input.Name, agentType, s.env.Depth, input.Model, input.RunInBackground)
 
 	// Record subagent start event to session.
 	if s.deps.Recorder != nil {
@@ -110,33 +138,63 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 		s.deps.Notifier(input.Name, agentType, false, "", nil)
 	}
 
-	childEnv := s.env.CloneForSubagent()
-	childTools := s.buildTools(childEnv, agentType)
-	prompt := subagentSystemPrompt(agentType, s.env.Pwd(), s.env.platform)
+	// Build the run function that creates and executes the agent.
+	runFn := func(runCtx context.Context) (string, error) {
+		childEnv := s.env.CloneForSubagent()
+		childTools := s.buildTools(childEnv, agentType)
+		prompt := subagentSystemPrompt(agentType, s.env.Pwd(), s.env.platform)
 
-	ag, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
-		Name:        fmt.Sprintf("subagent-%s", input.Name),
-		Description: input.Description,
-		Instruction: prompt,
-		Model:       s.deps.ChatModel,
-		ToolsConfig: adk.ToolsConfig{
-			ToolsNodeConfig: compose.ToolsNodeConfig{
-				Tools: childTools,
+		ag, err := adk.NewChatModelAgent(runCtx, &adk.ChatModelAgentConfig{
+			Name:        fmt.Sprintf("subagent-%s", input.Name),
+			Description: input.Description,
+			Instruction: prompt,
+			Model:       chatModel,
+			ToolsConfig: adk.ToolsConfig{
+				ToolsNodeConfig: compose.ToolsNodeConfig{
+					Tools: childTools,
+				},
 			},
-		},
-		MaxIterations: subagentMaxIter,
-		ModelRetryConfig: &adk.ModelRetryConfig{
-			MaxRetries: 2,
-		},
-	})
+			MaxIterations: subagentMaxIter,
+			ModelRetryConfig: &adk.ModelRetryConfig{
+				MaxRetries: 2,
+			},
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to create subagent: %w", err)
+		}
+		return s.runSubagent(runCtx, ag, input), nil
+	}
+
+	// Background async path via TaskManager.
+	if input.RunInBackground && s.deps.TaskManager != nil {
+		task := &SubagentTask{
+			Name:      input.Name,
+			AgentType: agentType,
+			Model:     input.Model,
+			Depth:     s.env.Depth + 1,
+		}
+		taskID, _, err := s.deps.TaskManager.Submit(ctx, task, runFn, true)
+		if err != nil {
+			if s.deps.Notifier != nil {
+				s.deps.Notifier(input.Name, agentType, true, "", err)
+			}
+			return "", fmt.Errorf("failed to submit background task: %w", err)
+		}
+		// Record async launch.
+		if s.deps.Recorder != nil {
+			s.deps.Recorder.RecordSubagentAsync(input.Name, taskID, agentType)
+		}
+		return fmt.Sprintf("Background task started: %s\nUse task_get with task_id=%q to check status and retrieve result.", taskID, taskID), nil
+	}
+
+	// Synchronous execution (default, backward-compatible).
+	result, err := runFn(ctx)
 	if err != nil {
 		if s.deps.Notifier != nil {
 			s.deps.Notifier(input.Name, agentType, true, "", err)
 		}
-		return "", fmt.Errorf("failed to create subagent: %w", err)
+		return "", err
 	}
-
-	result := s.runSubagent(ctx, ag, input)
 
 	config.Logger().Printf("[subagent] done name=%q len=%d", input.Name, len(result))
 	if s.deps.Recorder != nil {
@@ -257,7 +315,27 @@ func (s *subagentTool) buildTools(childEnv *Env, agentType string) []tool.BaseTo
 			childEnv.NewTodoWriteTool(),
 			childEnv.NewTodoReadTool(),
 		)
-		// Note: no subagent tool — no nesting allowed.
+	}
+
+	if agentType == AgentTypeCoordinator {
+		tools = append(tools,
+			childEnv.NewEditTool(),
+			childEnv.NewWriteTool(),
+			childEnv.NewTodoWriteTool(),
+			childEnv.NewTodoReadTool(),
+		)
+		// Allow coordinator to spawn sub-subagents if depth allows.
+		if childEnv.CanNest() {
+			tools = append(tools, childEnv.NewSubagentTool(s.deps))
+		}
+		// Add task management tools if a TaskManager is available.
+		if s.deps.TaskManager != nil {
+			tools = append(tools,
+				NewTaskListTool(s.deps.TaskManager),
+				NewTaskGetTool(s.deps.TaskManager),
+				NewTaskStopTool(s.deps.TaskManager),
+			)
+		}
 	}
 
 	return tools
@@ -285,6 +363,14 @@ Report your findings in a structured format.`
 - Complete the specific task described in your prompt
 - Report what you did and any issues encountered
 - Keep your scope narrow — only do what was asked`
+	case AgentTypeCoordinator:
+		return base + `You are a coordinator subagent. Your job is to:
+- Break down the task into smaller subtasks
+- Delegate subtasks to child subagents using the subagent tool
+- Use run_in_background=true for independent parallel tasks
+- Monitor task progress with task_list and task_get
+- Synthesize results from all subtasks into a final answer
+- Stop any stuck tasks with task_stop`
 	}
 	return base
 }

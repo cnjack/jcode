@@ -46,10 +46,17 @@ func (t *TokenUsage) Reset() {
 	atomic.StoreInt64(&t.TotalTokens, 0)
 }
 
+// ModelPricing contains cost information for a model.
+type ModelPricing struct {
+	InputPer1M  float64 // cost per 1M input tokens
+	OutputPer1M float64 // cost per 1M output tokens
+}
+
 // ModelInfo contains information about a model
 type ModelInfo struct {
 	ID           string
 	ContextLimit int // Maximum context window size, 0 if unknown
+	Pricing      ModelPricing
 }
 
 type ChatModelConfig struct {
@@ -283,50 +290,66 @@ func toEinoToolCalls(tcs []openai.ToolCall) []schema.ToolCall {
 	return ret
 }
 
-// knownModelContextLimits maps model names to their context window sizes.
-// This is used as a fallback when the /models API doesn't return this info.
-var knownModelContextLimits = map[string]int{
-	// OpenAI models
-	"gpt-4o":              128000,
-	"gpt-4o-mini":         128000,
-	"gpt-4-turbo":         128000,
-	"gpt-4-turbo-preview": 128000,
-	"gpt-4-0125-preview":  128000,
-	"gpt-4-1106-preview":  128000,
-	"gpt-4":               8192,
-	"gpt-4-32k":           32768,
-	"gpt-3.5-turbo":       16385,
-	"gpt-3.5-turbo-16k":   16385,
-	"o1":                  200000,
-	"o1-preview":          128000,
-	"o1-mini":             128000,
-	// Claude models (for Anthropic-compatible APIs)
-	"claude-3-5-sonnet-latest":   200000,
-	"claude-3-5-sonnet-20241022": 200000,
-	"claude-3-5-sonnet-20240620": 200000,
-	"claude-3-5-haiku-latest":    200000,
-	"claude-3-5-haiku-20241022":  200000,
-	"claude-3-opus-20240229":     200000,
-	"claude-3-sonnet-20240229":   200000,
-	"claude-3-haiku-20240307":    200000,
-	"claude-sonnet-4-20250514":   200000,
-	"claude-opus-4-20250514":     200000,
-	// DeepSeek models
-	"deepseek-chat":     64000,
-	"deepseek-coder":    16000,
-	"deepseek-reasoner": 64000,
-	// Other common models
-	"llama-3.1-405b":   128000,
-	"llama-3.1-70b":    128000,
-	"llama-3.1-8b":     128000,
-	"llama-3-70b":      8192,
-	"llama-3-8b":       8192,
-	"mixtral-8x7b":     32768,
-	"mixtral-8x22b":    65536,
-	"mistral-large":    128000,
-	"gemini-1.5-pro":   1000000,
-	"gemini-1.5-flash": 1000000,
+type knownModel struct {
+	ContextLimit int
+	InputPer1M   float64
+	OutputPer1M  float64
 }
+
+// knownModels maps model names to their context window sizes and pricing.
+// This is used as a local fallback when the models.dev registry is unavailable.
+var knownModels = map[string]knownModel{
+	// OpenAI models
+	"gpt-4o":              {128000, 2.50, 10.00},
+	"gpt-4o-mini":         {128000, 0.15, 0.60},
+	"gpt-4-turbo":         {128000, 10.00, 30.00},
+	"gpt-4-turbo-preview": {128000, 10.00, 30.00},
+	"gpt-4-0125-preview":  {128000, 10.00, 30.00},
+	"gpt-4-1106-preview":  {128000, 10.00, 30.00},
+	"gpt-4":               {8192, 30.00, 60.00},
+	"gpt-4-32k":           {32768, 60.00, 120.00},
+	"gpt-3.5-turbo":       {16385, 0.50, 1.50},
+	"gpt-3.5-turbo-16k":   {16385, 0.50, 1.50},
+	"o1":                  {200000, 15.00, 60.00},
+	"o1-preview":          {128000, 15.00, 60.00},
+	"o1-mini":             {128000, 3.00, 12.00},
+	// Claude models (for Anthropic-compatible APIs)
+	"claude-3-5-sonnet-latest":   {200000, 3.00, 15.00},
+	"claude-3-5-sonnet-20241022": {200000, 3.00, 15.00},
+	"claude-3-5-sonnet-20240620": {200000, 3.00, 15.00},
+	"claude-3-5-haiku-latest":    {200000, 0.80, 4.00},
+	"claude-3-5-haiku-20241022":  {200000, 0.80, 4.00},
+	"claude-3-opus-20240229":     {200000, 15.00, 75.00},
+	"claude-3-sonnet-20240229":   {200000, 3.00, 15.00},
+	"claude-3-haiku-20240307":    {200000, 0.25, 1.25},
+	"claude-sonnet-4-20250514":   {200000, 3.00, 15.00},
+	"claude-opus-4-20250514":     {200000, 15.00, 75.00},
+	// DeepSeek models
+	"deepseek-chat":     {64000, 0.14, 0.28},
+	"deepseek-coder":    {16000, 0.14, 0.28},
+	"deepseek-reasoner": {64000, 0.55, 2.19},
+	// Other common models
+	"llama-3.1-405b":   {128000, 0, 0},
+	"llama-3.1-70b":    {128000, 0, 0},
+	"llama-3.1-8b":     {128000, 0, 0},
+	"llama-3-70b":      {8192, 0, 0},
+	"llama-3-8b":       {8192, 0, 0},
+	"mixtral-8x7b":     {32768, 0, 0},
+	"mixtral-8x22b":    {65536, 0, 0},
+	"mistral-large":    {128000, 0, 0},
+	"gemini-1.5-pro":   {1000000, 1.25, 5.00},
+	"gemini-1.5-flash": {1000000, 0.075, 0.30},
+}
+
+// knownModelContextLimits is kept for backward compatibility.
+// Deprecated: use knownModels instead.
+var knownModelContextLimits = func() map[string]int {
+	m := make(map[string]int, len(knownModels))
+	for k, v := range knownModels {
+		m[k] = v.ContextLimit
+	}
+	return m
+}()
 
 // GetModelInfo retrieves model information. It first tries the /models API,
 // then falls back to known model limits.
@@ -339,14 +362,16 @@ func (m *chatModel) GetModelInfo(ctx context.Context) ModelInfo {
 		info.ID = model.ID
 	}
 
-	// Look up known context limit
-	if limit, ok := knownModelContextLimits[m.model]; ok {
-		info.ContextLimit = limit
+	// Look up known model info (context limit + pricing)
+	if km, ok := knownModels[m.model]; ok {
+		info.ContextLimit = km.ContextLimit
+		info.Pricing = ModelPricing{InputPer1M: km.InputPer1M, OutputPer1M: km.OutputPer1M}
 	} else {
 		// Try partial match for model name patterns
-		for pattern, limit := range knownModelContextLimits {
+		for pattern, km := range knownModels {
 			if containsModelPattern(m.model, pattern) {
-				info.ContextLimit = limit
+				info.ContextLimit = km.ContextLimit
+				info.Pricing = ModelPricing{InputPer1M: km.InputPer1M, OutputPer1M: km.OutputPer1M}
 				break
 			}
 		}

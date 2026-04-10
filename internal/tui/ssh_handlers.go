@@ -80,7 +80,7 @@ func (m Model) handleSSHSaveAlias(input string, cmds []tea.Cmd) (tea.Model, tea.
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		cfg = &config.Config{
-			Models:        make(map[string]*config.ProviderConfig),
+			Providers:     make(map[string]*config.ProviderConfig),
 			MaxIterations: 1000,
 		}
 	}

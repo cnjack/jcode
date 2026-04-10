@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 )
+
+const MaxWriteFileSize = 10 * 1024 * 1024 // 10MB
 
 type WriteInput struct {
 	FilePath string `json:"file_path"`
@@ -54,12 +58,56 @@ func (w *writeTool) InvokableRun(ctx context.Context, argumentsInJSON string, op
 	if input.FilePath == "" {
 		return "", fmt.Errorf("file_path is required")
 	}
+	input.FilePath = w.env.ResolvePath(input.FilePath)
+
+	// File size limit.
+	if len(input.Content) > MaxWriteFileSize {
+		return "", fmt.Errorf("content too large (%d bytes, max %d)", len(input.Content), MaxWriteFileSize)
+	}
 
 	fi, _ := w.env.Exec.Stat(ctx, input.FilePath)
 	isNew := fi == nil || !fi.Exists
 
+	var oldContent string
+	var backupPath string
+
+	if !isNew {
+		// Conflict detection.
+		if w.env.FileTracker != nil {
+			cr, err := w.env.FileTracker.CheckConflict(input.FilePath)
+			if err == nil {
+				switch cr.Status {
+				case ConflictModified:
+					return fmt.Sprintf("conflict: file %s was modified externally since last read. Please re-read the file before writing", input.FilePath), nil
+				case ConflictFileGone:
+					// File was deleted externally; treat as new.
+					isNew = true
+				}
+			}
+		}
+
+		// Read existing content for backup and diff.
+		if existing, err := w.env.Exec.ReadFile(ctx, input.FilePath); err == nil {
+			oldContent = string(existing)
+			// Backup before overwriting.
+			if w.env.FileTracker != nil {
+				bp, bErr := w.env.FileTracker.CreateBackup(input.FilePath, existing)
+				if bErr == nil {
+					backupPath = bp
+				}
+			}
+		}
+	}
+
 	if err := w.env.Exec.WriteFile(ctx, input.FilePath, []byte(input.Content), 0644); err != nil {
 		return "", fmt.Errorf("failed to write file %s: %w", input.FilePath, err)
+	}
+
+	// Update FileTracker after write.
+	if w.env.FileTracker != nil {
+		if info, err := os.Stat(input.FilePath); err == nil {
+			w.env.FileTracker.UpdateAfterWrite(input.FilePath, []byte(input.Content), info.ModTime())
+		}
 	}
 
 	lines := strings.Count(input.Content, "\n") + 1
@@ -68,5 +116,21 @@ func (w *writeTool) InvokableRun(ctx context.Context, argumentsInJSON string, op
 		action = "Wrote"
 	}
 
-	return fmt.Sprintf("%s %s (%d lines, %d bytes)", action, input.FilePath, lines, len(input.Content)), nil
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("%s %s (%d lines, %d bytes)", action, input.FilePath, lines, len(input.Content)))
+	if backupPath != "" {
+		result.WriteString(fmt.Sprintf("\nBackup: %s", backupPath))
+	}
+
+	// Unified diff for overwrites.
+	if !isNew && oldContent != "" && oldContent != input.Content {
+		diff := generateUnifiedDiff(oldContent, input.Content, filepath.Base(input.FilePath))
+		if diff != "" {
+			result.WriteString("\n\n```diff\n")
+			result.WriteString(diff)
+			result.WriteString("```")
+		}
+	}
+
+	return result.String(), nil
 }

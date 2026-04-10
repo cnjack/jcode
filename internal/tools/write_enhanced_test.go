@@ -1,0 +1,177 @@
+package tools
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+// W-01: Normal write creates file with correct content.
+func TestWrite_NormalWrite(t *testing.T) {
+	env, dir := newTestEnv(t)
+	tool := env.NewWriteTool()
+
+	file := filepath.Join(dir, "new.txt")
+	result, err := tool.InvokableRun(context.Background(),
+		`{"file_path":"`+file+`","content":"hello world\n"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "Created") {
+		t.Fatalf("expected 'Created' in result, got: %s", result)
+	}
+	if !strings.Contains(result, file) {
+		t.Fatalf("expected file path in result, got: %s", result)
+	}
+
+	content, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("failed to read written file: %v", err)
+	}
+	if string(content) != "hello world\n" {
+		t.Fatalf("unexpected content: %q", content)
+	}
+}
+
+// W-02: Conflict detection (read file, externally modify, then write → conflict message).
+func TestWrite_ConflictDetection(t *testing.T) {
+	env, dir := newTestEnv(t)
+	sm := newTestStorageManager(t)
+	defer sm.Close()
+	ft := NewFileTracker(sm)
+	env.FileTracker = ft
+
+	tool := env.NewWriteTool()
+
+	// Create and track the original file.
+	file := filepath.Join(dir, "conflict.txt")
+	if err := os.WriteFile(file, []byte("original"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Stat(file)
+	ft.TrackRead(file, []byte("original"), info.ModTime())
+
+	// Externally modify the file.
+	time.Sleep(10 * time.Millisecond)
+	if err := os.WriteFile(file, []byte("externally modified"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write should detect the conflict.
+	result, err := tool.InvokableRun(context.Background(),
+		`{"file_path":"`+file+`","content":"new content"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "conflict") {
+		t.Fatalf("expected conflict message, got: %s", result)
+	}
+
+	// File should not have been overwritten.
+	content, _ := os.ReadFile(file)
+	if string(content) != "externally modified" {
+		t.Fatalf("file should not have been overwritten, got: %q", content)
+	}
+}
+
+// W-03: Auto backup (write to tracked file → backup exists).
+func TestWrite_AutoBackup(t *testing.T) {
+	env, dir := newTestEnv(t)
+	sm := newTestStorageManager(t)
+	defer sm.Close()
+	ft := NewFileTracker(sm)
+	env.FileTracker = ft
+
+	tool := env.NewWriteTool()
+
+	// Create, read (track), then overwrite.
+	file := filepath.Join(dir, "backup.txt")
+	if err := os.WriteFile(file, []byte("original content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Stat(file)
+	ft.TrackRead(file, []byte("original content"), info.ModTime())
+
+	result, err := tool.InvokableRun(context.Background(),
+		`{"file_path":"`+file+`","content":"updated content"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "Backup:") {
+		t.Fatalf("expected backup path in result, got: %s", result)
+	}
+
+	// Verify backup exists in file-history dir.
+	entries, err := os.ReadDir(sm.FileHistoryDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("expected at least one backup file")
+	}
+
+	// Verify backup content.
+	backupData, err := os.ReadFile(filepath.Join(sm.FileHistoryDir(), entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(backupData) != "original content" {
+		t.Fatalf("backup content mismatch: %q", backupData)
+	}
+}
+
+// W-04: Unified diff output (overwrite → output contains diff).
+func TestWrite_UnifiedDiff(t *testing.T) {
+	env, dir := newTestEnv(t)
+	sm := newTestStorageManager(t)
+	defer sm.Close()
+	ft := NewFileTracker(sm)
+	env.FileTracker = ft
+
+	tool := env.NewWriteTool()
+
+	file := filepath.Join(dir, "diff.txt")
+	if err := os.WriteFile(file, []byte("line1\nline2\nline3\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Stat(file)
+	ft.TrackRead(file, []byte("line1\nline2\nline3\n"), info.ModTime())
+
+	result, err := tool.InvokableRun(context.Background(),
+		`{"file_path":"`+file+`","content":"line1\nmodified\nline3\n"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "diff") {
+		t.Fatalf("expected diff in output, got: %s", result)
+	}
+	if !strings.Contains(result, "-line2") || !strings.Contains(result, "+modified") {
+		t.Fatalf("expected diff showing line2→modified change, got: %s", result)
+	}
+}
+
+// W-05: >10MB content returns error.
+func TestWrite_ContentTooLarge(t *testing.T) {
+	env, dir := newTestEnv(t)
+	tool := env.NewWriteTool()
+
+	file := filepath.Join(dir, "huge.txt")
+	bigContent := strings.Repeat("x", MaxWriteFileSize+1)
+
+	_, err := tool.InvokableRun(context.Background(),
+		`{"file_path":"`+file+`","content":"`+bigContent+`"}`)
+	if err == nil {
+		t.Fatal("expected error for oversized content")
+	}
+	if !strings.Contains(err.Error(), "content too large") {
+		t.Fatalf("expected 'content too large' error, got: %v", err)
+	}
+
+	// File should not have been created.
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Fatal("file should not exist after rejected write")
+	}
+}

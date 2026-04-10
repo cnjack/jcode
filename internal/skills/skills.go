@@ -33,7 +33,7 @@ type Loader struct {
 var builtinFS embed.FS
 
 // NewLoader creates a Loader pre-populated with built-in skills, then scans
-// the user skills directory (~/.jcoding/skills/) for additional skills.
+// the user skills directory (~/.jcode/skills/) for additional skills.
 func NewLoader() *Loader {
 	l := &Loader{
 		skills: make(map[string]*Skill),
@@ -68,7 +68,7 @@ func (l *Loader) loadBuiltin() {
 	}
 }
 
-// ScanUserSkills scans ~/.jcoding/skills/ for user-defined skills.
+// ScanUserSkills scans ~/.jcode/skills/ for user-defined skills.
 // Each subdirectory (or symlink to a directory) containing a SKILL.md is treated as a skill.
 // User skills override built-in skills with the same name.
 func (l *Loader) ScanUserSkills() {
@@ -76,9 +76,9 @@ func (l *Loader) ScanUserSkills() {
 	l.scanDir(dir, "user")
 }
 
-// ScanProjectSkills scans <projectDir>/.jcoding/skills/ for project-local skills.
+// ScanProjectSkills scans <projectDir>/.jcode/skills/ for project-local skills.
 func (l *Loader) ScanProjectSkills(projectDir string) {
-	dir := filepath.Join(projectDir, ".jcoding", "skills")
+	dir := filepath.Join(projectDir, ".jcode", "skills")
 	l.scanDir(dir, "project")
 }
 

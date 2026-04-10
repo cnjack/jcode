@@ -37,17 +37,27 @@ func runDoctorMode() {
 	}
 
 	fmt.Printf("✓ Config loaded from: %s\n", config.ConfigPath())
-	fmt.Printf("✓ Active Model: %s / %s\n", cfg.Provider, cfg.Model)
 
-	providerCfg := cfg.Models[cfg.Provider]
+	providerName, modelName := cfg.GetProviderModel()
+	fmt.Printf("✓ Active Model: %s / %s\n", providerName, modelName)
+
+	providers := cfg.GetProviders()
+	providerCfg := providers[providerName]
 	if providerCfg == nil {
-		fmt.Printf("✗ Provider %q not found in config\n", cfg.Provider)
+		fmt.Printf("✗ Provider %q not found in config\n", providerName)
 		return
+	}
+
+	// Resolve base URL from config or registry
+	baseURL := providerCfg.BaseURL
+	if baseURL == "" {
+		registry := internalmodel.NewModelRegistry()
+		baseURL = registry.GetProviderAPI(providerName)
 	}
 
 	fmt.Println("\n[1] Testing Model Connection...")
 	chatModel, err := internalmodel.NewChatModel(context.Background(), &internalmodel.ChatModelConfig{
-		Model: cfg.Model, APIKey: providerCfg.APIKey, BaseURL: providerCfg.BaseURL,
+		Model: modelName, APIKey: providerCfg.APIKey, BaseURL: baseURL,
 	})
 	if err != nil {
 		fmt.Printf("  ✗ Failed to initialize model: %v\n", err)
@@ -57,7 +67,7 @@ func runDoctorMode() {
 		if err != nil {
 			fmt.Printf("  ✗ Model generate error: %v\n", err)
 		} else {
-			fmt.Printf("  ✅ Model connection successful! (%s)\n", cfg.Model)
+			fmt.Printf("  ✅ Model connection successful! (%s)\n", modelName)
 		}
 	}
 

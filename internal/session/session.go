@@ -29,8 +29,10 @@ const (
 	EntryTodoSnapshot   EntryType = "todo_snapshot"
 	EntrySubagentStart  EntryType = "subagent_start"
 	EntrySubagentResult EntryType = "subagent_result"
+	EntrySubagentAsync  EntryType = "subagent_async"
 	EntryModeChange     EntryType = "mode_change"
 	EntryCompact        EntryType = "compact"
+	EntryBudgetWarning  EntryType = "budget_warning"
 )
 
 // TodoSnapshotItem is a single todo entry stored in a todo_snapshot event.
@@ -171,6 +173,11 @@ func (r *Recorder) RecordSubagentResult(name, output string, err error) {
 		errStr = err.Error()
 	}
 	_ = r.writeEntry(Entry{Type: EntrySubagentResult, SubagentName: name, Output: output, Error: errStr})
+}
+
+// RecordSubagentAsync appends an async subagent launch entry with the task ID.
+func (r *Recorder) RecordSubagentAsync(name, taskID, agentType string) {
+	_ = r.writeEntry(Entry{Type: EntrySubagentAsync, SubagentName: name, Output: taskID, SubagentType: agentType})
 }
 
 // RecordModeChange appends a mode transition entry.

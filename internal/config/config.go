@@ -8,14 +8,16 @@ import (
 )
 
 const (
-	configDir  = ".jcoding"
+	configDir  = ".jcode"
 	configFile = "config.json"
 )
 
 type ProviderConfig struct {
-	APIKey  string   `json:"api_key"`
-	BaseURL string   `json:"base_url,omitempty"`
-	Models  []string `json:"models"`
+	APIKey  string `json:"api_key"`
+	BaseURL string `json:"base_url,omitempty"`
+	// Deprecated: model lists are now sourced from the models.dev registry.
+	// Preserved for backward compatibility with existing config files.
+	Models []string `json:"models,omitempty"`
 }
 
 // SSHAlias represents a saved SSH connection alias
@@ -47,18 +49,100 @@ type TelemetryConfig struct {
 	Langfuse *LangfuseConfig `json:"langfuse,omitempty"`
 }
 
-// Config represents the application configuration
-type Config struct {
-	Models        map[string]*ProviderConfig `json:"models"`
-	Provider      string                     `json:"provider"`
-	Model         string                     `json:"model"`
-	MaxIterations int                        `json:"max_iterations,omitempty"`
-	SSHAliases    []SSHAlias                 `json:"ssh_aliases,omitempty"`
-	MCPServers    map[string]*MCPServer      `json:"mcp_servers,omitempty"`
-	Telemetry     *TelemetryConfig           `json:"telemetry,omitempty"`
+// BudgetConfig controls token and cost budget limits.
+type BudgetConfig struct {
+	MaxTokensPerTurn  int64   `json:"max_tokens_per_turn,omitempty"`
+	MaxCostPerSession float64 `json:"max_cost_per_session,omitempty"`
+	WarningThreshold  float64 `json:"warning_threshold,omitempty"`
 }
 
-// ConfigDir returns the full path to the config directory (~/.jcoding).
+// CompactionConfig controls automatic context compaction.
+type CompactionConfig struct {
+	Enabled      bool    `json:"enabled,omitempty"`
+	Threshold    float64 `json:"threshold,omitempty"`
+	KeepRecent   int     `json:"keep_recent,omitempty"`
+	SummaryModel string  `json:"summary_model,omitempty"`
+}
+
+// PromptConfig controls prompt system behavior.
+type PromptConfig struct {
+	Compaction      *CompactionConfig `json:"compaction,omitempty"`
+	MemoryMaxChars  int               `json:"memory_max_chars,omitempty"`
+	MemoryMaxDepth  int               `json:"memory_max_depth,omitempty"`
+	CacheEnabled    bool              `json:"cache_enabled,omitempty"`
+	AsyncEnvTimeout string            `json:"async_env_timeout,omitempty"`
+}
+
+// SubagentConfig controls subagent behavior.
+type SubagentConfig struct {
+	MaxParallel  int `json:"max_parallel,omitempty"`
+	MaxCompleted int `json:"max_completed,omitempty"`
+	MaxDepth     int `json:"max_depth,omitempty"`
+}
+
+// Config represents the application configuration
+type Config struct {
+	// Provider settings: map of provider name → config (api_key, base_url)
+	Providers map[string]*ProviderConfig `json:"providers"`
+	// Deprecated: use Providers instead. Kept for backward compatibility.
+	Models map[string]*ProviderConfig `json:"models,omitempty"`
+
+	// Active model in "provider/model" format (e.g. "openai/gpt-4o")
+	Model string `json:"model"`
+	// SmallModel for lightweight tasks (summaries, compaction) in "provider/model" format
+	SmallModel string `json:"small_model,omitempty"`
+
+	// Deprecated: use Model field with "provider/model" format instead.
+	Provider string `json:"provider,omitempty"`
+
+	MaxIterations int                   `json:"max_iterations,omitempty"`
+	SSHAliases    []SSHAlias            `json:"ssh_aliases,omitempty"`
+	MCPServers    map[string]*MCPServer `json:"mcp_servers,omitempty"`
+	Telemetry     *TelemetryConfig      `json:"telemetry,omitempty"`
+	Budget        *BudgetConfig         `json:"budget,omitempty"`
+	FallbackModel string                `json:"fallback_model,omitempty"`
+	Compaction    *CompactionConfig     `json:"compaction,omitempty"`
+	Prompt        *PromptConfig         `json:"prompt,omitempty"`
+	Subagent      *SubagentConfig       `json:"subagent,omitempty"`
+
+	// DisabledProviders lists provider IDs to exclude from registry
+	DisabledProviders []string `json:"disabled_providers,omitempty"`
+}
+
+// GetProviders returns the effective provider map, merging legacy Models field into Providers.
+func (c *Config) GetProviders() map[string]*ProviderConfig {
+	if len(c.Providers) > 0 {
+		return c.Providers
+	}
+	return c.Models
+}
+
+// GetProviderModel returns the provider name and model name from the active
+// Model field. If Model is in "provider/model" format, it splits them.
+// Otherwise it falls back to the legacy Provider + Model fields.
+func (c *Config) GetProviderModel() (provider, model string) {
+	if parts := splitProviderModel(c.Model); len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	// Legacy fallback
+	return c.Provider, c.Model
+}
+
+func splitProviderModel(s string) []string {
+	idx := -1
+	for i, ch := range s {
+		if ch == '/' {
+			idx = i
+			break
+		}
+	}
+	if idx <= 0 || idx >= len(s)-1 {
+		return nil
+	}
+	return []string{s[:idx], s[idx+1:]}
+}
+
+// ConfigDir returns the full path to the config directory (~/.jcode).
 func ConfigDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -101,10 +185,10 @@ func NeedsSetup() bool {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return true
 	}
-	return len(cfg.Models) == 0
+	return len(cfg.GetProviders()) == 0
 }
 
-// LoadConfig loads configuration from $HOME/.jcoding/config.json.
+// LoadConfig loads configuration from $HOME/.jcode/config.json.
 func LoadConfig() (*Config, error) {
 	cfg := &Config{
 		MaxIterations: 1000, // default
@@ -124,20 +208,24 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file %s: %w", cfgPath, err)
 	}
 
-	// Validation
-	if len(cfg.Models) == 0 {
-		return nil, fmt.Errorf("no models configured: set 'models' in %s", cfgPath)
+	// Migrate legacy "models" field to "providers"
+	if len(cfg.Providers) == 0 && len(cfg.Models) > 0 {
+		cfg.Providers = cfg.Models
 	}
 
-	// Resolve default provider and model if not set
-	if cfg.Provider == "" || cfg.Model == "" {
-		for providerName, providerCfg := range cfg.Models {
-			if len(providerCfg.Models) > 0 {
-				cfg.Provider = providerName
-				cfg.Model = providerCfg.Models[0]
-				break
-			}
-		}
+	// Validation
+	if len(cfg.GetProviders()) == 0 {
+		return nil, fmt.Errorf("no providers configured: set 'providers' in %s", cfgPath)
+	}
+
+	// Resolve legacy Provider field format
+	if cfg.Provider != "" && !containsSlash(cfg.Model) {
+		cfg.Model = cfg.Provider + "/" + cfg.Model
+	}
+
+	// Validate Model field is set
+	if cfg.Model == "" {
+		return nil, fmt.Errorf("model not configured: set 'model' field in 'provider/model' format in %s", cfgPath)
 	}
 
 	if cfg.MaxIterations <= 0 {
@@ -147,7 +235,16 @@ func LoadConfig() (*Config, error) {
 	return cfg, nil
 }
 
-// SaveConfig writes the config to $HOME/.jcoding/config.json.
+func containsSlash(s string) bool {
+	for _, ch := range s {
+		if ch == '/' {
+			return true
+		}
+	}
+	return false
+}
+
+// SaveConfig writes the config to $HOME/.jcode/config.json.
 func SaveConfig(cfg *Config) error {
 	cfgPath, err := configFilePath()
 	if err != nil {
@@ -181,7 +278,7 @@ func ConfigPath() string {
 	return p
 }
 
-// SessionsDir returns the path to the sessions directory (~/.jcoding/sessions).
+// SessionsDir returns the path to the sessions directory (~/.jcode/sessions).
 func SessionsDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -191,7 +288,7 @@ func SessionsDir() (string, error) {
 }
 
 // SessionsIndexPath returns the path to the sessions index file
-// (~/.jcoding/sessions/session.json).
+// (~/.jcode/sessions/session.json).
 func SessionsIndexPath() (string, error) {
 	dir, err := SessionsDir()
 	if err != nil {

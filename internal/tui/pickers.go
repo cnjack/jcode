@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/session"
 )
 
@@ -18,19 +19,42 @@ func (m Model) handleModelInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 	}
 
+	currentProvider, currentModel := cfg.GetProviderModel()
+	registry := model.NewModelRegistry()
+
 	var items []list.Item
-	for provider, pCfg := range cfg.Models {
-		for _, modelName := range pCfg.Models {
-			desc := "Provider: " + provider
-			if provider == cfg.Provider && modelName == cfg.Model {
-				desc += " (Current)"
+	for provider := range cfg.GetProviders() {
+		// Try loading models from registry
+		models := registry.ListProviderModels(provider, false)
+		if len(models) > 0 {
+			for _, rm := range models {
+				desc := "Provider: " + provider
+				if rm.Limit != nil && rm.Limit.Context > 0 {
+					desc += fmt.Sprintf(" · %dk ctx", rm.Limit.Context/1000)
+				}
+				if rm.ToolCall {
+					desc += " · tool_call"
+				}
+				if provider == currentProvider && rm.ID == currentModel {
+					desc += " (Current)"
+				}
+				items = append(items, modelItem{
+					provider: provider,
+					model:    rm.ID,
+					title:    provider + "/" + rm.ID,
+					desc:     desc,
+				})
 			}
-			items = append(items, modelItem{
-				provider: provider,
-				model:    modelName,
-				title:    provider + " - " + modelName,
-				desc:     desc,
-			})
+		} else {
+			// Provider not in registry — show current model only
+			if provider == currentProvider {
+				items = append(items, modelItem{
+					provider: provider,
+					model:    currentModel,
+					title:    provider + "/" + currentModel,
+					desc:     "Provider: " + provider + " (Current)",
+				})
+			}
 		}
 	}
 	m.modelPicker.SetItems(items)

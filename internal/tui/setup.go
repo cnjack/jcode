@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"charm.land/bubbles/v2/list"
@@ -10,41 +11,63 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/model"
 )
 
 type SetupDoneMsg struct{}
 
+// ProviderProfile holds the minimal info needed for the setup wizard flow.
 type ProviderProfile struct {
+	ID           string
+	Name         string
+	BaseURL      string
+	NeedURL      bool // if true, prompt for custom URL
+	NeedKey      bool // if true, prompt for API Key
+	FromRegistry bool // true if provider exists in models.dev
+}
+
+// popularProviderIDs is a curated list of well-known provider IDs from models.dev.
+var popularProviderIDs = []string{
+	// International providers
+	"openai", "anthropic", "google", "deepseek", "mistral",
+	"openrouter", "groq", "together-ai", "fireworks-ai", "perplexity",
+	// Chinese providers (using models.dev official IDs)
+	"zhipuai", "zhipuai-coding-plan",
+	"moonshotai", "moonshotai-cn", "kimi-for-coding",
+	"minimax", "minimax-coding-plan",
+	"siliconflow",
+	"tencent-coding-plan",
+}
+
+// ExtraProvider represents a provider not in the models.dev registry.
+type ExtraProvider struct {
 	ID      string
 	Name    string
 	BaseURL string
-	Models  []string
-	NeedURL bool // if true, prompt for URL
-	NeedKey bool // if true, prompt for API Key
+	NoKey   bool // true for local providers like Ollama
+	NeedURL bool // true if user must provide URL
 }
 
-var DefaultProviders = []ProviderProfile{
-	{ID: "openai", Name: "OpenAI", BaseURL: "https://api.openai.com/v1", Models: []string{"gpt-5.4", "gpt-5.4-pro", "gpt-5-mini", "gpt-5-nano", "gpt-5", "gpt-4.1"}, NeedKey: true}, // doc: https://developers.openai.com/api/docs/models
-	{ID: "openai-compatible", Name: "OpenAI Compatible", BaseURL: "", Models: []string{"custom"}, NeedURL: true, NeedKey: true},
-	{ID: "openrouter", Name: "OpenRouter", BaseURL: "https://openrouter.ai/api/v1", Models: []string{"anthropic/claude-3.5-sonnet", "google/gemini-1.5-pro", "meta-llama/llama-3.1-405b"}, NeedKey: true},
-	{ID: "ollama-cloud", Name: "Ollama Cloud", BaseURL: "", Models: []string{"llama3", "llama3.1", "qwen2.5", "mistral"}, NeedURL: true, NeedKey: true},
-	{ID: "ollama", Name: "Ollama (Local)", BaseURL: "http://localhost:11434/v1", Models: []string{"llama3", "llama3.1", "qwen2.5", "mistral", "gemma2"}, NeedKey: false},
-	{ID: "minimax", Name: "MiniMax", BaseURL: "https://api.minimaxi.com/v1", Models: []string{"MiniMax M2.5-highspeed", "MiniMax M2.5", "MiniMax M2.1", "MiniMax M2"}, NeedKey: true},                                                                                 // doc: https://platform.minimaxi.com/docs/api-reference/api-overview
-	{ID: "bigmodel", Name: "BigModel (Zhipu)", BaseURL: "https://open.bigmodel.cn/api/paas/v4", Models: []string{"glm-5", "glm-4.7", "glm-4-7-flashx", "glm-4.6"}, NeedKey: true},                                                                                     // doc: https://docs.bigmodel.cn/cn/guide/models/text/glm-5
-	{ID: "bigmodel-plan", Name: "BigModel Plan", BaseURL: "https://open.bigmodel.cn/api/coding/paas/v4", Models: []string{"glm-5", "glm-4.7"}, NeedKey: true},                                                                                                         // doc: https://docs.bigmodel.cn/cn/coding-plan/overview
-	{ID: "z.ai", Name: "Z.AI", BaseURL: "https://api.z.ai/v1", Models: []string{"glm-5", "glm-4.7", "glm-4-7-flashx", "glm-4.6"}, NeedKey: true},                                                                                                                      // same as the bigmodel
-	{ID: "z.ai-plan", Name: "Z.AI Plan", BaseURL: "https://api.z.ai/v1", Models: []string{"glm-5", "glm-4.7"}, NeedKey: true},                                                                                                                                         // same as the bigmodel
-	{ID: "moonshot-cn", Name: "Moonshot CN (Kimi)", BaseURL: "https://api.moonshot.cn/v1", Models: []string{"kimi-k2.5", "kimi-k2-turbo-preview", "kimi-k2-thinking", "kimi-k2-thinking-turbo"}, NeedKey: true},                                                       // doc: https://platform.moonshot.cn/docs/pricing/chat
-	{ID: "moonshot-global", Name: "Moonshot Global", BaseURL: "https://api.moonshot.ai/v1", Models: []string{"moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"}, NeedKey: true},                                                                                 // reviewed
-	{ID: "kimi-plan", Name: "Kimi Plan", BaseURL: "https://api.kimi.com/coding/v1", Models: []string{"kimi-for-coding"}, NeedKey: true},                                                                                                                               // doc: https://www.kimi.com/code/docs/en/more/third-party-agents.html
-	{ID: "deepseek", Name: "DeepSeek", BaseURL: "https://api.deepseek.com", Models: []string{"deepseek-chat", "deepseek-reasoner"}, NeedKey: true},                                                                                                                    // doc: https://api-docs.deepseek.com/zh-cn/quick_start/pricing
-	{ID: "bailian", Name: "Bailian (Aliyun)", BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", Models: []string{"qwen-plus", "qwen-max", "qwen-turbo"}, NeedKey: true},                                                                                   // doc: https://bailian.console.aliyun.com/cn-beijing/?tab=doc&spm=0.0.0.i0#/doc/?type=model&url=2840914
-	{ID: "bailian-plan", Name: "Bailian Plan", BaseURL: "https://coding.dashscope.aliyuncs.com/v1", Models: []string{"qwen3.5-plus", "kimi-k2.5", "glm-5", "MiniMax-M2.5", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "glm-4.7"}, NeedKey: true}, //doc: https://bailian.console.aliyun.com/cn-beijing/?tab=doc&spm=0.0.0.i0#/doc/?type=model&url=3005961
-	{ID: "siliconflow", Name: "硅基流动 (SiliconFlow)", BaseURL: "https://api.siliconflow.cn/v1", Models: []string{"deepseek-ai/DeepSeek-V2.5", "Qwen/Qwen2.5-72B-Instruct"}, NeedKey: true},
-	{ID: "magicark", Name: "魔力方舟", BaseURL: "https://api.gitee.com/v1", Models: []string{"qwen", "moonshot", "deepseek"}, NeedKey: true},
-	{ID: "groq", Name: "Groq", BaseURL: "https://api.groq.com/openai/v1", Models: []string{"llama3-8b-8192", "llama3-70b-8192", "mixtral-8x7b-32768"}, NeedKey: true},
-	{ID: "together", Name: "Together AI", BaseURL: "https://api.together.xyz/v1", Models: []string{"meta-llama/Llama-3-70b-chat-hf", "mistralai/Mixtral-8x7B-Instruct-v0.1"}, NeedKey: true},
-	{ID: "tencent", Name: "腾讯混元 (Tencent)", BaseURL: "https://api.hunyuan.cloud.tencent.com/v1", Models: []string{"hunyuan-pro", "hunyuan-standard", "hunyuan-lite"}, NeedKey: true},
+// extraProviders are popular providers not available in models.dev.
+var extraProviders = []ExtraProvider{
+	{ID: "ollama", Name: "Ollama (Local)", BaseURL: "http://localhost:11434/v1", NoKey: true},
+	{ID: "ollama-cloud", Name: "Ollama Cloud", NeedURL: true},
+	// Chinese regional providers not in models.dev
+	{ID: "z.ai", Name: "Z.AI", BaseURL: "https://api.z.ai/v1"},
+	{ID: "z.ai-plan", Name: "Z.AI Plan", BaseURL: "https://api.z.ai/v1"},
+	{ID: "bailian", Name: "Bailian (Aliyun)", BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1"},
+	{ID: "bailian-plan", Name: "Bailian Plan", BaseURL: "https://coding.dashscope.aliyuncs.com/v1"},
+	{ID: "magicark", Name: "魔力方舟", BaseURL: "https://api.gitee.com/v1"},
+}
+
+// fallbackProviders are shown when the registry is not available.
+var fallbackProviders = []ProviderProfile{
+	{ID: "openai", Name: "OpenAI", BaseURL: "https://api.openai.com/v1", NeedKey: true},
+	{ID: "anthropic", Name: "Anthropic", BaseURL: "https://api.anthropic.com/v1", NeedKey: true},
+	{ID: "deepseek", Name: "DeepSeek", BaseURL: "https://api.deepseek.com", NeedKey: true},
+	{ID: "zhipuai", Name: "Zhipu AI", BaseURL: "https://open.bigmodel.cn/api/paas/v4", NeedKey: true},
+	{ID: "openrouter", Name: "OpenRouter", BaseURL: "https://openrouter.ai/api/v1", NeedKey: true},
+	{ID: "groq", Name: "Groq", BaseURL: "https://api.groq.com/openai/v1", NeedKey: true},
 }
 
 type providerItem struct {
@@ -91,6 +114,7 @@ type SetupModel struct {
 	urlIn         textinput.Model
 	keyIn         textinput.Model
 
+	registry         *model.ModelRegistry
 	selectedProvider *ProviderProfile
 	selectedModel    string
 	finalURL         string
@@ -104,30 +128,110 @@ type SetupModel struct {
 
 func NewSetupModel() SetupModel {
 	m := SetupModel{
-		state: StateProvider,
+		state:    StateProvider,
+		registry: model.NewModelRegistry(),
 	}
 
-	// Build a set of configured providers
+	// Build a set of configured providers (from existing config)
 	configuredProviders := make(map[string]bool)
 	if cfg, err := config.LoadConfig(); err == nil && cfg != nil {
-		for _, dp := range DefaultProviders {
-			if pCfg, ok := cfg.Models[dp.ID]; ok && pCfg.APIKey != "" {
-				configuredProviders[dp.ID] = true
+		for provID, pCfg := range cfg.GetProviders() {
+			if pCfg.APIKey != "" {
+				configuredProviders[provID] = true
 			}
 		}
 	}
 
-	pItems := make([]list.Item, len(DefaultProviders))
-	for i, p := range DefaultProviders {
-		item := providerItem{profile: p}
-		if configuredProviders[p.ID] {
-			item.configured = true
+	// Try loading registry for provider metadata
+	registryProviders, _ := m.registry.Load()
+
+	var items []list.Item
+
+	if len(registryProviders) > 0 {
+		// Registry available: show popular providers from registry
+		addedIDs := make(map[string]bool)
+		for _, pid := range popularProviderIDs {
+			rp, ok := registryProviders[pid]
+			if !ok {
+				continue
+			}
+			needKey := len(rp.Env) > 0
+			items = append(items, providerItem{
+				profile: ProviderProfile{
+					ID:           pid,
+					Name:         rp.Name,
+					BaseURL:      rp.API,
+					NeedKey:      needKey,
+					FromRegistry: true,
+				},
+				configured: configuredProviders[pid],
+			})
+			addedIDs[pid] = true
 		}
-		pItems[i] = item
+
+		// Add extra providers (skip if already in registry popular list)
+		for _, ep := range extraProviders {
+			if addedIDs[ep.ID] {
+				continue
+			}
+			// Check if this extra provider actually exists in registry
+			fromRegistry := false
+			baseURL := ep.BaseURL
+			needKey := !ep.NoKey
+			if rp, ok := registryProviders[ep.ID]; ok {
+				fromRegistry = true
+				if baseURL == "" {
+					baseURL = rp.API
+				}
+				needKey = len(rp.Env) > 0 || needKey
+			}
+			items = append(items, providerItem{
+				profile: ProviderProfile{
+					ID:           ep.ID,
+					Name:         ep.Name,
+					BaseURL:      baseURL,
+					NeedURL:      ep.NeedURL,
+					NeedKey:      needKey,
+					FromRegistry: fromRegistry,
+				},
+				configured: configuredProviders[ep.ID],
+			})
+		}
+	} else {
+		// Registry unavailable: show fallback providers
+		for _, fp := range fallbackProviders {
+			items = append(items, providerItem{
+				profile:    fp,
+				configured: configuredProviders[fp.ID],
+			})
+		}
+		// Also add extra providers
+		for _, ep := range extraProviders {
+			items = append(items, providerItem{
+				profile: ProviderProfile{
+					ID:      ep.ID,
+					Name:    ep.Name,
+					BaseURL: ep.BaseURL,
+					NeedURL: ep.NeedURL,
+					NeedKey: !ep.NoKey,
+				},
+				configured: configuredProviders[ep.ID],
+			})
+		}
 	}
+
+	// Always add "OpenAI Compatible" as the last option
+	items = append(items, providerItem{
+		profile: ProviderProfile{
+			ID:      "openai-compatible",
+			Name:    "OpenAI Compatible",
+			NeedURL: true,
+			NeedKey: true,
+		},
+	})
 	del := list.NewDefaultDelegate()
 	del.SetSpacing(0)
-	pl := list.New(pItems, del, 60, 15)
+	pl := list.New(items, del, 60, 15)
 	pl.Title = "Select LLM Provider (↑/↓ to navigate, Enter to confirm)"
 	pl.SetShowHelp(false)
 	m.providerList = pl
@@ -149,8 +253,6 @@ func NewSetupModel() SetupModel {
 	m.keyIn = textinput.New()
 	m.keyIn.Placeholder = "sk-..."
 	m.keyIn.Prompt = "API Key: "
-	m.keyIn.EchoMode = textinput.EchoPassword
-	m.keyIn.EchoCharacter = '•'
 	m.keyIn.SetWidth(50)
 
 	return m
@@ -178,9 +280,16 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.selectedProvider = &p
 
 					var mItems []list.Item
-					for _, mod := range p.Models {
-						mItems = append(mItems, modelListItem{name: mod, desc: "Built-in model"})
+					// Always try to load models from registry, regardless of initial FromRegistry flag.
+					// This handles cases where registry was temporarily unavailable during init.
+					models := m.registry.ListProviderModels(p.ID, false)
+					if len(models) > 0 {
+						for _, rm := range models {
+							desc := modelDescription(rm)
+							mItems = append(mItems, modelListItem{name: rm.ID, desc: desc})
+						}
 					}
+					// Always offer "Custom..." as the last option
 					mItems = append(mItems, modelListItem{name: "Custom...", desc: "Enter a custom model name"})
 					m.modelList.SetItems(mItems)
 					m.modelList.Title = "Select Model (" + p.Name + ")"
@@ -320,11 +429,22 @@ func (m SetupModel) advanceAfterURL() (tea.Model, tea.Cmd) {
 	}
 }
 
-// findProviderAPIKey checks existing config for an API key for the selected provider.
+// findProviderAPIKey checks existing config and environment variables for an API key.
 func (m SetupModel) findProviderAPIKey() string {
+	// Check config first
 	if cfg, err := config.LoadConfig(); err == nil && cfg != nil {
-		if pCfg, ok := cfg.Models[m.selectedProvider.ID]; ok && pCfg.APIKey != "" {
+		providers := cfg.GetProviders()
+		if pCfg, ok := providers[m.selectedProvider.ID]; ok && pCfg.APIKey != "" {
 			return pCfg.APIKey
+		}
+	}
+	// Check environment variables from registry
+	if m.registry != nil {
+		envVars := m.registry.GetProviderEnvVars(m.selectedProvider.ID)
+		for _, envVar := range envVars {
+			if val := os.Getenv(envVar); val != "" {
+				return val
+			}
 		}
 	}
 	return ""
@@ -335,43 +455,32 @@ func (m SetupModel) submit() (tea.Model, tea.Cmd) {
 	if err != nil {
 		// New config
 		cfg = &config.Config{
-			Models:        make(map[string]*config.ProviderConfig),
+			Providers:     make(map[string]*config.ProviderConfig),
 			MaxIterations: 1000,
 		}
 	}
 
 	pID := m.selectedProvider.ID
 
-	// Create or update provider config
-	if cfg.Models == nil {
-		cfg.Models = make(map[string]*config.ProviderConfig)
+	if cfg.Providers == nil {
+		cfg.Providers = make(map[string]*config.ProviderConfig)
+		// Migrate legacy Models into Providers
+		for k, v := range cfg.Models {
+			cfg.Providers[k] = v
+		}
 	}
 
-	pCfg, exists := cfg.Models[pID]
+	pCfg, exists := cfg.Providers[pID]
 	if !exists {
-		pCfg = &config.ProviderConfig{
-			Models: []string{},
-		}
-		cfg.Models[pID] = pCfg
+		pCfg = &config.ProviderConfig{}
+		cfg.Providers[pID] = pCfg
 	}
 
 	pCfg.APIKey = m.finalKey
 	pCfg.BaseURL = m.finalURL
 
-	// Add model to the history if not present
-	found := false
-	for _, mod := range pCfg.Models {
-		if mod == m.selectedModel {
-			found = true
-			break
-		}
-	}
-	if !found {
-		pCfg.Models = append(pCfg.Models, m.selectedModel)
-	}
-
-	cfg.Provider = pID
-	cfg.Model = m.selectedModel
+	// Set model in "provider/model" format
+	cfg.Model = pID + "/" + m.selectedModel
 
 	if err := config.SaveConfig(cfg); err != nil {
 		m.err = fmt.Sprintf("Failed to save config: %v", err)
@@ -380,6 +489,27 @@ func (m SetupModel) submit() (tea.Model, tea.Cmd) {
 
 	m.done = true
 	return m, tea.Quit
+}
+
+// modelDescription builds a short description for a registry model.
+func modelDescription(rm *model.RegistryModel) string {
+	var parts []string
+	if rm.Limit != nil && rm.Limit.Context > 0 {
+		parts = append(parts, fmt.Sprintf("%dk ctx", rm.Limit.Context/1000))
+	}
+	if rm.ToolCall {
+		parts = append(parts, "tool_call")
+	}
+	if rm.Reasoning {
+		parts = append(parts, "reasoning")
+	}
+	if rm.Cost != nil && rm.Cost.Input > 0 {
+		parts = append(parts, fmt.Sprintf("$%.2f/1M in", rm.Cost.Input))
+	}
+	if len(parts) == 0 {
+		return rm.ID
+	}
+	return strings.Join(parts, " · ")
 }
 
 func (m SetupModel) View() tea.View {
@@ -411,7 +541,13 @@ func (m SetupModel) View() tea.View {
 	}
 
 	if m.state != StateProvider && m.state != StateModel {
-		content = "\n" + content + "\n\n  Press Enter to submit, Esc to go back."
+		var helpText string
+		if m.state == StateAPIKey {
+			helpText = "  Press Enter to submit, Esc to go back. Paste: Ctrl+Shift+V (Win/Linux) or Cmd+V (Mac)"
+		} else {
+			helpText = "  Press Enter to submit, Esc to go back."
+		}
+		content = "\n" + content + "\n\n" + helpText
 	}
 
 	errLine := ""
