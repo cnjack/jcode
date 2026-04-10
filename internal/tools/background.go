@@ -27,12 +27,13 @@ const (
 
 // BgTask is a single background task.
 type BgTask struct {
-	ID      string
-	Command string
-	Status  BgTaskStatus
-	Output  string
-	Started time.Time
-	Ended   time.Time
+	ID          string
+	Command     string
+	Description string
+	Status      BgTaskStatus
+	Output      string
+	Started     time.Time
+	Ended       time.Time
 }
 
 // BgNotification is a completion notification queued for injection.
@@ -54,6 +55,7 @@ type BackgroundManager struct {
 	nextID        int
 	env           *Env
 	notifier      BgNotifier
+	storage       *StorageManager
 }
 
 // NewBackgroundManager creates a new background task manager.
@@ -62,6 +64,13 @@ func NewBackgroundManager(env *Env) *BackgroundManager {
 		tasks: make(map[string]*BgTask),
 		env:   env,
 	}
+}
+
+// SetStorage sets the optional StorageManager for TaskLog integration.
+func (bm *BackgroundManager) SetStorage(s *StorageManager) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	bm.storage = s
 }
 
 // SetNotifier sets the callback for TUI notifications.
@@ -103,6 +112,23 @@ func (bm *BackgroundManager) Run(ctx context.Context, command string) string {
 }
 
 func (bm *BackgroundManager) execute(ctx context.Context, task *BgTask) {
+	// Open a TaskLog if storage is available.
+	bm.mu.Lock()
+	storage := bm.storage
+	bm.mu.Unlock()
+
+	var taskLog *TaskLog
+	if storage != nil {
+		var err error
+		taskLog, err = NewTaskLog(storage, task.ID)
+		if err != nil {
+			config.Logger().Printf("[background] failed to create task log for %s: %v", task.ID, err)
+		}
+	}
+	if taskLog != nil {
+		defer taskLog.Close()
+	}
+
 	timeout := 5 * time.Minute
 	stdout, stderr, err := bm.env.Exec.Exec(ctx, task.Command, bm.env.pwd, timeout)
 
@@ -116,10 +142,17 @@ func (bm *BackgroundManager) execute(ctx context.Context, task *BgTask) {
 		}
 		output.WriteString(stderr)
 	}
-	// Truncate output to keep notifications lean.
+
+	// Write full output to TaskLog on disk.
+	if taskLog != nil {
+		taskLog.Write([]byte(output.String())) //nolint:errcheck
+	}
+
+	// Truncate in-memory output to keep notifications lean.
 	result := output.String()
-	if len(result) > 2000 {
-		result = result[:2000] + "\n... (truncated)"
+	const maxInMemoryOutput = 4096
+	if len(result) > maxInMemoryOutput {
+		result = result[:maxInMemoryOutput] + "\n... (truncated)"
 	}
 
 	bm.mu.Lock()

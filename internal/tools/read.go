@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 )
+
+const MaxReadFileSize = 10 * 1024 * 1024 // 10MB
+const defaultReadLimit = 2000
 
 type ReadInput struct {
 	FilePath string `json:"file_path"`
@@ -20,7 +24,10 @@ type ReadInput struct {
 func (e *Env) NewReadTool() tool.InvokableTool {
 	info := &schema.ToolInfo{
 		Name: "read",
-		Desc: "Reads a file. Works on both local and remote (SSH) machines. If the path is a directory, it returns the directory structure instead.",
+		Desc: `Reads a file with line numbers. Works on both local and remote (SSH) machines.
+If the path is a directory, it returns the directory structure instead.
+Output format: line numbers followed by │ and content. Default limit is 2000 lines.
+Binary files (images, executables, etc.) are detected and rejected.`,
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"file_path": {
 				Type:     schema.String,
@@ -34,7 +41,7 @@ func (e *Env) NewReadTool() tool.InvokableTool {
 			},
 			"limit": {
 				Type:     schema.Integer,
-				Desc:     "The number of lines to read.",
+				Desc:     "The number of lines to read. Default 2000.",
 				Required: false,
 			},
 		}),
@@ -61,6 +68,13 @@ func (r *readTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 	if input.FilePath == "" {
 		return "", fmt.Errorf("file_path is required")
 	}
+	input.FilePath = r.env.ResolvePath(input.FilePath)
+
+	// Binary detection by extension (before reading content).
+	if detectBinaryByExtension(input.FilePath) {
+		return "", fmt.Errorf("cannot read binary file %s (detected by extension %s)",
+			input.FilePath, strings.ToLower(getExt(input.FilePath)))
+	}
 
 	stat, err := r.env.Exec.Stat(ctx, input.FilePath)
 	if err != nil {
@@ -83,28 +97,71 @@ func (r *readTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 		return "", fmt.Errorf("failed to read file %s: %w", input.FilePath, err)
 	}
 
-	if input.Offset == 0 && input.Limit == 0 {
-		return string(content), nil
+	// File size check.
+	if len(content) > MaxReadFileSize {
+		return "", fmt.Errorf("file %s is too large (%d bytes, max %d). Use offset and limit to read a specific range",
+			input.FilePath, len(content), MaxReadFileSize)
+	}
+
+	// Content-based binary detection.
+	if detectBinaryByContent(content) {
+		return "", fmt.Errorf("cannot read binary file %s (binary content detected)", input.FilePath)
+	}
+
+	// Track the read in FileTracker if available.
+	if r.env.FileTracker != nil {
+		modTime := time.Now()
+		if info, err := os.Stat(input.FilePath); err == nil {
+			modTime = info.ModTime()
+		}
+		r.env.FileTracker.TrackRead(input.FilePath, content, modTime)
 	}
 
 	lines := strings.Split(string(content), "\n")
+	totalLines := len(lines)
+
 	start := input.Offset
 	if start < 0 {
 		start = 0
 	}
-	if start > len(lines) {
-		start = len(lines)
+	if start > totalLines {
+		start = totalLines
 	}
 
-	end := len(lines)
-	if input.Limit > 0 && start+input.Limit < end {
-		end = start + input.Limit
+	// Apply default limit if not specified.
+	limit := input.Limit
+	if limit <= 0 {
+		limit = defaultReadLimit
 	}
 
+	end := totalLines
+	if start+limit < end {
+		end = start + limit
+	}
+
+	// Format with line numbers.
 	var result strings.Builder
 	for i := start; i < end; i++ {
-		result.WriteString(fmt.Sprintf("%6d\t%s\n", i+1, lines[i]))
+		result.WriteString(fmt.Sprintf("%4d │ %s\n", i+1, lines[i]))
+	}
+
+	// Truncation message.
+	if end < totalLines {
+		result.WriteString(fmt.Sprintf("\n... (%d more lines, total %d)\n", totalLines-end, totalLines))
 	}
 
 	return result.String(), nil
+}
+
+// getExt returns the file extension including the dot.
+func getExt(path string) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '.' {
+			return path[i:]
+		}
+		if path[i] == '/' || path[i] == '\\' {
+			break
+		}
+	}
+	return ""
 }

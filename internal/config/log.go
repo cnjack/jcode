@@ -12,7 +12,7 @@ var (
 	logOnce   sync.Once
 )
 
-// Logger returns the shared application logger that writes to ~/.jcoding/debug.log.
+// Logger returns the shared application logger that writes to ~/.jcode/debug.log.
 // It is initialised lazily and is safe for concurrent use.
 func Logger() *log.Logger {
 	logOnce.Do(func() {

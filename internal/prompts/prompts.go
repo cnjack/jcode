@@ -133,13 +133,13 @@ func GetPlanSystemPrompt(platform, pwd, envLabel string, envInfo *utils.EnvInfo)
 }
 
 func loadAgentsMd(pwd string) string {
-	p := HasAgentsMd(pwd)
-	if p == "" {
-		return ""
-	}
-	content, err := os.ReadFile(p)
+	loader := NewMemoryLoader(MemoryConfig{
+		MaxTotalChars: 40000,
+		MaxIncDepth:   5,
+	})
+	content, err := loader.Load(pwd)
 	if err != nil {
 		return ""
 	}
-	return string(content)
+	return content
 }

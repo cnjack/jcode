@@ -288,8 +288,7 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 	m.historyIndex = len(m.history)
 
 	if cfg, err := config.LoadConfig(); err == nil {
-		m.activeProvider = cfg.Provider
-		m.activeModel = cfg.Model
+		m.activeProvider, m.activeModel = cfg.GetProviderModel()
 	}
 
 	return m
@@ -718,8 +717,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					selItem := selected.(modelItem)
 					cfg, err := config.LoadConfig()
 					if err == nil {
-						cfg.Provider = selItem.provider
-						cfg.Model = selItem.model
+						cfg.Model = selItem.provider + "/" + selItem.model
 						config.SaveConfig(cfg)
 						m.activeProvider = selItem.provider
 						m.activeModel = selItem.model

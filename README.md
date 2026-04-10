@@ -105,7 +105,7 @@ Save connections as named aliases and jump between hosts with a keypress:
 
 ---
 
-Config is created on first launch at `~/.jcoding/config.json`. Run `coding --doctor` to verify connectivity.
+Config is created on first launch at `~/.jcode/config.json`. Run `jcode --doctor` to verify connectivity.
 
 ---
 

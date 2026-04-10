@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -11,13 +12,22 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
+const MaxEditFileSize = 10 * 1024 * 1024 // 10MB
+
+// EditOp represents a single edit operation in multi-edit mode.
+type EditOp struct {
+	OldString string `json:"old_string"`
+	NewString string `json:"new_string"`
+}
+
 type EditInput struct {
-	FilePath   string `json:"file_path"`
-	OldString  string `json:"old_string"`
-	NewString  string `json:"new_string"`
-	ReplaceAll bool   `json:"replace_all,omitempty"`
-	StartLine  int    `json:"start_line,omitempty"`
-	EndLine    int    `json:"end_line,omitempty"`
+	FilePath   string   `json:"file_path"`
+	OldString  string   `json:"old_string"`
+	NewString  string   `json:"new_string"`
+	ReplaceAll bool     `json:"replace_all,omitempty"`
+	StartLine  int      `json:"start_line,omitempty"`
+	EndLine    int      `json:"end_line,omitempty"`
+	Edits      []EditOp `json:"edits,omitempty"`
 }
 
 func (e *Env) NewEditTool() tool.InvokableTool {
@@ -26,8 +36,10 @@ func (e *Env) NewEditTool() tool.InvokableTool {
 		Desc: `Performs exact string replacements in files. Can also create new files.
 - To EDIT a file: provide file_path, old_string, and new_string. old_string must match exactly.
 - To CREATE a file: provide file_path with new_string and leave old_string empty. The file must not already exist.
+- For MULTI-EDIT: provide file_path and edits array. Each edit has old_string and new_string. Applied sequentially.
 - Use start_line/end_line to narrow the search scope when old_string is ambiguous.
-- Whitespace (including trailing spaces and line endings) must match exactly.`,
+- Whitespace (including trailing spaces and line endings) must match exactly.
+- edits and old_string are mutually exclusive.`,
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"file_path": {
 				Type:     schema.String,
@@ -36,13 +48,13 @@ func (e *Env) NewEditTool() tool.InvokableTool {
 			},
 			"old_string": {
 				Type:     schema.String,
-				Desc:     "The text to replace. Must match exactly. Leave empty to create a new file.",
+				Desc:     "The text to replace. Must match exactly. Leave empty to create a new file. Mutually exclusive with edits.",
 				Required: false,
 			},
 			"new_string": {
 				Type:     schema.String,
 				Desc:     "The replacement text, or the full file content when creating.",
-				Required: true,
+				Required: false,
 			},
 			"replace_all": {
 				Type:     schema.Boolean,
@@ -57,6 +69,11 @@ func (e *Env) NewEditTool() tool.InvokableTool {
 			"end_line": {
 				Type:     schema.Integer,
 				Desc:     "Optional 1-based end line to narrow the search scope for old_string.",
+				Required: false,
+			},
+			"edits": {
+				Type:     schema.Array,
+				Desc:     "Array of edit operations [{old_string, new_string}, ...]. Applied sequentially. Mutually exclusive with old_string.",
 				Required: false,
 			},
 		}),
@@ -85,6 +102,22 @@ func (e *editTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 
 	if input.FilePath == "" {
 		return "", fmt.Errorf("file_path is required")
+	}
+	input.FilePath = e.env.ResolvePath(input.FilePath)
+
+	// Validate mutual exclusivity.
+	if len(input.Edits) > 0 && input.OldString != "" {
+		return "", fmt.Errorf("edits and old_string are mutually exclusive; use one or the other")
+	}
+
+	// Binary detection by extension.
+	if detectBinaryByExtension(input.FilePath) {
+		return "", fmt.Errorf("cannot edit binary file %s (detected by extension)", input.FilePath)
+	}
+
+	// Multi-edit mode.
+	if len(input.Edits) > 0 {
+		return e.applyMultiEdits(ctx, input)
 	}
 
 	// === CREATE mode: old_string is empty ===
@@ -128,7 +161,23 @@ func (e *editTool) editFile(ctx context.Context, input EditInput) (string, error
 		return "", fmt.Errorf("failed to read file %s: %w", input.FilePath, err)
 	}
 
+	// File size check.
+	if len(content) > MaxEditFileSize {
+		return "", fmt.Errorf("file %s is too large (%d bytes, max %d). Use start_line/end_line to edit a specific range",
+			input.FilePath, len(content), MaxEditFileSize)
+	}
+
+	// Binary content detection.
+	if detectBinaryByContent(content) {
+		return "", fmt.Errorf("cannot edit binary file %s (binary content detected)", input.FilePath)
+	}
+
 	contentStr := string(content)
+
+	// Conflict detection.
+	if err := e.checkConflict(input.FilePath); err != nil {
+		return err.Error(), nil
+	}
 
 	// If start_line/end_line specified, narrow the scope
 	if input.StartLine > 0 || input.EndLine > 0 {
@@ -154,20 +203,37 @@ func (e *editTool) editFile(ctx context.Context, input EditInput) (string, error
 		newContent = strings.Replace(contentStr, input.OldString, input.NewString, 1)
 	}
 
+	// Backup before writing.
+	backupPath := e.createBackup(input.FilePath, content)
+
 	// Write back
 	if err := e.env.Exec.WriteFile(ctx, input.FilePath, []byte(newContent), 0644); err != nil {
 		return "", fmt.Errorf("failed to write file %s: %w", input.FilePath, err)
 	}
+
+	// Update FileTracker after write.
+	e.updateTrackerAfterWrite(input.FilePath, []byte(newContent))
 
 	replacedCount := 1
 	if input.ReplaceAll {
 		replacedCount = count
 	}
 
-	// Generate a diff snippet
-	diffSnippet := generateDiffSnippet(input.OldString, input.NewString)
+	// Generate unified diff.
+	diff := generateUnifiedDiff(contentStr, newContent, filepath.Base(input.FilePath))
 
-	return fmt.Sprintf("Successfully replaced %d occurrence(s) in %s\n\n%s", replacedCount, input.FilePath, diffSnippet), nil
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("Successfully replaced %d occurrence(s) in %s", replacedCount, input.FilePath))
+	if backupPath != "" {
+		result.WriteString(fmt.Sprintf("\nBackup: %s", backupPath))
+	}
+	if diff != "" {
+		result.WriteString("\n\n```diff\n")
+		result.WriteString(diff)
+		result.WriteString("```")
+	}
+
+	return result.String(), nil
 }
 
 func (e *editTool) editWithLineRange(ctx context.Context, input EditInput, contentStr string) (string, error) {
@@ -221,18 +287,36 @@ func (e *editTool) editWithLineRange(ctx context.Context, input EditInput, conte
 
 	newContent := before + newSection + after
 
+	// Backup before writing.
+	backupPath := e.createBackup(input.FilePath, []byte(contentStr))
+
 	if err := e.env.Exec.WriteFile(ctx, input.FilePath, []byte(newContent), 0644); err != nil {
 		return "", fmt.Errorf("failed to write file %s: %w", input.FilePath, err)
 	}
+
+	// Update FileTracker after write.
+	e.updateTrackerAfterWrite(input.FilePath, []byte(newContent))
 
 	replacedCount := 1
 	if input.ReplaceAll {
 		replacedCount = count
 	}
 
-	diffSnippet := generateDiffSnippet(input.OldString, input.NewString)
-	return fmt.Sprintf("Successfully replaced %d occurrence(s) in %s (lines %d-%d)\n\n%s",
-		replacedCount, input.FilePath, startLine, endLine, diffSnippet), nil
+	diff := generateUnifiedDiff(contentStr, newContent, filepath.Base(input.FilePath))
+
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("Successfully replaced %d occurrence(s) in %s (lines %d-%d)",
+		replacedCount, input.FilePath, startLine, endLine))
+	if backupPath != "" {
+		result.WriteString(fmt.Sprintf("\nBackup: %s", backupPath))
+	}
+	if diff != "" {
+		result.WriteString("\n\n```diff\n")
+		result.WriteString(diff)
+		result.WriteString("```")
+	}
+
+	return result.String(), nil
 }
 
 func (e *editTool) handleNoMatch(input EditInput, contentStr string) (string, error) {
@@ -348,4 +432,111 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "\n... (truncated)"
+}
+
+// checkConflict checks if the file was modified externally since last read.
+// Returns an error (as a user-visible message) if there is a conflict, nil otherwise.
+func (e *editTool) checkConflict(path string) error {
+	if e.env.FileTracker == nil {
+		return nil
+	}
+	cr, err := e.env.FileTracker.CheckConflict(path)
+	if err != nil {
+		return nil // ignore check errors
+	}
+	switch cr.Status {
+	case ConflictModified:
+		return fmt.Errorf("conflict: file %s was modified externally since last read. Please re-read the file before editing", path)
+	case ConflictFileGone:
+		return fmt.Errorf("conflict: file %s no longer exists on disk. It may have been deleted externally", path)
+	}
+	return nil
+}
+
+// createBackup creates a backup of the file content via FileTracker.
+// Returns the backup path, or empty string if FileTracker is nil or backup fails.
+func (e *editTool) createBackup(path string, content []byte) string {
+	if e.env.FileTracker == nil {
+		return ""
+	}
+	bp, err := e.env.FileTracker.CreateBackup(path, content)
+	if err != nil {
+		return ""
+	}
+	return bp
+}
+
+// updateTrackerAfterWrite updates the FileTracker with new content after a write.
+func (e *editTool) updateTrackerAfterWrite(path string, content []byte) {
+	if e.env.FileTracker == nil {
+		return
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	e.env.FileTracker.UpdateAfterWrite(path, content, info.ModTime())
+}
+
+// applyMultiEdits applies multiple edit operations sequentially to a file.
+func (e *editTool) applyMultiEdits(ctx context.Context, input EditInput) (string, error) {
+	content, err := e.env.Exec.ReadFile(ctx, input.FilePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file %s: %w", input.FilePath, err)
+	}
+
+	// File size check.
+	if len(content) > MaxEditFileSize {
+		return "", fmt.Errorf("file %s is too large (%d bytes, max %d)", input.FilePath, len(content), MaxEditFileSize)
+	}
+
+	// Binary content detection.
+	if detectBinaryByContent(content) {
+		return "", fmt.Errorf("cannot edit binary file %s (binary content detected)", input.FilePath)
+	}
+
+	original := string(content)
+
+	// Conflict detection.
+	if err := e.checkConflict(input.FilePath); err != nil {
+		return err.Error(), nil
+	}
+
+	modified := original
+	for i, op := range input.Edits {
+		if op.OldString == op.NewString {
+			return "", fmt.Errorf("edit #%d: old_string and new_string are identical", i+1)
+		}
+		if !strings.Contains(modified, op.OldString) {
+			return "", fmt.Errorf("edit #%d: old_string not found in file (%d of %d edits applied successfully before failure)",
+				i+1, i, len(input.Edits))
+		}
+		modified = strings.Replace(modified, op.OldString, op.NewString, 1)
+	}
+
+	// Backup before writing.
+	backupPath := e.createBackup(input.FilePath, content)
+
+	// Write back.
+	if err := e.env.Exec.WriteFile(ctx, input.FilePath, []byte(modified), 0644); err != nil {
+		return "", fmt.Errorf("failed to write file %s: %w", input.FilePath, err)
+	}
+
+	// Update FileTracker after write.
+	e.updateTrackerAfterWrite(input.FilePath, []byte(modified))
+
+	diff := generateUnifiedDiff(original, modified, filepath.Base(input.FilePath))
+
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("Successfully applied %d edit(s) to %s", len(input.Edits), input.FilePath))
+	if backupPath != "" {
+		result.WriteString(fmt.Sprintf("\nBackup: %s", backupPath))
+	}
+	if diff != "" {
+		result.WriteString("\n\n```diff\n")
+		result.WriteString(diff)
+		result.WriteString("```")
+	}
+
+	return result.String(), nil
 }

@@ -12,6 +12,26 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 )
 
+// StreamChunk represents a chunk of command output (for future streaming support).
+type StreamChunk struct {
+	Data      string
+	Timestamp time.Time
+	IsStderr  bool
+}
+
+// ToolProgressMsg conveys partial progress for long-running commands.
+type ToolProgressMsg struct {
+	ToolName      string
+	PartialOutput string
+	ElapsedSec    int
+}
+
+const (
+	defaultTimeoutMs = 120000
+	maxTimeoutMs     = 600000
+	bgHintThreshold  = 15 * time.Second
+)
+
 type ExecuteInput struct {
 	Command    string `json:"command"`
 	Timeout    int    `json:"timeout,omitempty"`    // milliseconds
@@ -67,24 +87,34 @@ func (et *executeTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 		return "", fmt.Errorf("command is required")
 	}
 
+	// Sleep detection: block dangerous sleep commands.
+	if blocked, reason := detectSleep(input.Command); blocked {
+		return reason, nil
+	}
+
+	// Classify the command for logging/UI hints.
+	category := classifyCommand(input.Command)
+	config.Logger().Printf("[execute] category=%s command=%s", category, input.Command)
+
 	// Background mode: delegate to BackgroundManager and return immediately.
 	if input.Background && et.bm != nil {
 		taskID := et.bm.Run(ctx, input.Command)
 		return fmt.Sprintf("Background task %s started: %s\nUse check_background to check status.", taskID, input.Command), nil
 	}
 
-	timeout := 120000 // 2 min default
+	timeout := defaultTimeoutMs
 	if input.Timeout > 0 {
 		timeout = input.Timeout
-		if timeout > 600000 {
-			timeout = 600000
+		if timeout > maxTimeoutMs {
+			timeout = maxTimeoutMs
 		}
 	}
 
 	config.Logger().Printf("[execute] running (timeout=%dms): %s", timeout, input.Command)
 	start := time.Now()
 	stdout, stderr, err := et.env.Exec.Exec(ctx, input.Command, et.env.pwd, time.Duration(timeout)*time.Millisecond)
-	config.Logger().Printf("[execute] finished in %v, err=%v", time.Since(start), err)
+	elapsed := time.Since(start)
+	config.Logger().Printf("[execute] finished in %v, err=%v", elapsed, err)
 
 	var result strings.Builder
 	if stdout != "" {
@@ -100,10 +130,30 @@ func (et *executeTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 	}
 
 	if err != nil {
+		if result.Len() > 0 {
+			result.WriteString("\n")
+		}
+		result.WriteString(fmt.Sprintf("[Exit code: non-zero]\n"))
+		result.WriteString(fmt.Sprintf("[Completed in %.1fs]", elapsed.Seconds()))
+		if elapsed > bgHintThreshold {
+			result.WriteString(fmt.Sprintf(
+				"\n[Hint: command took %.0fs. Consider using background=true for long-running commands.]",
+				elapsed.Seconds(),
+			))
+		}
 		return result.String(), fmt.Errorf("command failed: %w", err)
 	}
+
 	if result.Len() == 0 {
-		return "Command executed successfully (no output)", nil
+		result.WriteString("Command executed successfully (no output)")
+	}
+
+	result.WriteString(fmt.Sprintf("\n[Completed in %.1fs]", elapsed.Seconds()))
+	if elapsed > bgHintThreshold {
+		result.WriteString(fmt.Sprintf(
+			"\n[Hint: command took %.0fs. Consider using background=true for long-running commands.]",
+			elapsed.Seconds(),
+		))
 	}
 
 	return result.String(), nil

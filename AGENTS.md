@@ -4,7 +4,7 @@
 
 Go CLI coding assistant — [Eino](https://github.com/cloudwego/eino) framework + [BubbleTea](https://github.com/charmbracelet/bubbletea) TUI.
 
-- **Entry point:** `cmd/coding/` | **Config:** `~/.jcoding/` | **Module:** `github.com/cnjack/jcode`
+- **Entry point:** `cmd/jcode/` | **Config:** `~/.jcode/` | **Module:** `github.com/cnjack/jcode`
 - **Build:** `make build` / `make run` / `make install`
 
 ---
@@ -23,7 +23,7 @@ Go CLI coding assistant — [Eino](https://github.com/cloudwego/eino) framework 
 cmd/coding/          # main: flags, main loop, MCP subcommand, SSH setup
 internal/
   agent/             # Eino ChatModelAgent factory + middlewares (approval, reminder, etc.)
-  config/            # JSON config loader + logger (→ ~/.jcoding/debug.log)
+  config/            # JSON config loader + logger (→ ~/.jcode/debug.log)
   model/             # OpenAI-compatible chat model + token tracker
   prompts/           # System prompt template (system.md) + AGENTS.md injection
   runner/            # Agent run loop, todo-completion guard, approval state
@@ -40,8 +40,8 @@ internal/
 ## Key Patterns
 
 ### Config (`internal/config/`)
-- File: `~/.jcoding/config.json` — fields: `Models`, `Provider`, `Model`, `MaxIterations`, `SSHAliases`, `MCPServers`, `Telemetry`
-- **Logger:** `config.Logger()` → `~/.jcoding/debug.log`. Never use `fmt.Print*` for diagnostics.
+- File: `~/.jcode/config.json` — fields: `Providers`, `Provider`, `Model`, `MaxIterations`, `SSHAliases`, `MCPServers`, `Telemetry`
+- **Logger:** `config.Logger()` → `~/.jcode/debug.log`. Never use `fmt.Print*` for diagnostics.
 
 ### Tools (`internal/tools/`)
 All implement `tool.InvokableTool` — JSON in, string out, shared `*Env` (local or SSH).
@@ -90,6 +90,6 @@ Template vars: Platform, Pwd, Date, EnvLabel, SSHAliases, GitBranch, GitDirty, L
 
 ## Debugging
 
-1. `~/.jcoding/debug.log` — runtime diagnostics
+1. `~/.jcode/debug.log` — runtime diagnostics
 2. `make doctor` — test model + MCP connectivity
 3. `coding --session` — list sessions | `coding --resume <UUID>` — resume

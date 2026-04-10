@@ -15,13 +15,18 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// MaxSubagentDepth is the maximum allowed nesting depth for subagents.
+const MaxSubagentDepth = 3
+
 // Env holds the execution context (local or remote) and is shared by all tools.
 type Env struct {
 	Exec        Executor
 	pwd         string
 	platform    string
 	TodoStore   *TodoStore
+	FileTracker *FileTracker
 	OnEnvChange func(envLabel string, isLocal bool, err error)
+	Depth       int // subagent nesting depth, 0 for top-level
 }
 
 // NewEnv creates a local Env.
@@ -51,15 +56,38 @@ func (e *Env) ResetToLocal(pwd, platform string) {
 // Pwd returns the current working directory.
 func (e *Env) Pwd() string { return e.pwd }
 
+// ResolvePath resolves a file path relative to the working directory.
+// Absolute paths are cleaned and returned as-is.
+// Relative paths are joined with Pwd and cleaned.
+// Logs a warning if the resolved relative path escapes the working directory.
+func (e *Env) ResolvePath(path string) string {
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	cleaned := filepath.Clean(filepath.Join(e.pwd, path))
+	pwd := filepath.Clean(e.pwd)
+	if cleaned != pwd && !strings.HasPrefix(cleaned, pwd+string(filepath.Separator)) {
+		appconfig.Logger().Printf("warning: resolved path %s escapes working directory %s", cleaned, pwd)
+	}
+	return cleaned
+}
+
 // CloneForSubagent creates a copy of this Env with the same executor and pwd
 // but an isolated TodoStore, suitable for use by a subagent.
 func (e *Env) CloneForSubagent() *Env {
 	return &Env{
-		Exec:      e.Exec,
-		pwd:       e.pwd,
-		platform:  e.platform,
-		TodoStore: NewTodoStore(),
+		Exec:        e.Exec,
+		pwd:         e.pwd,
+		platform:    e.platform,
+		TodoStore:   NewTodoStore(),
+		FileTracker: e.FileTracker,
+		Depth:       e.Depth + 1,
 	}
+}
+
+// CanNest returns whether this Env can spawn further subagents.
+func (e *Env) CanNest() bool {
+	return e.Depth < MaxSubagentDepth
 }
 
 // IsRemote returns true if operating over SSH.

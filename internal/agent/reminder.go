@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/cloudwego/eino/adk"
@@ -19,6 +20,7 @@ type ReminderConfig struct {
 	EnvLabel     string
 	IsRemote     bool
 	ContextLimit int
+	TaskManager  *tools.SubagentTaskManager
 }
 
 // reminderMiddleware implements ChatModelAgentMiddleware to inject conditional
@@ -87,6 +89,20 @@ func (m *reminderMiddleware) BeforeModelRewriteState(
 		})
 	}
 
+	// Inject subagent task notifications if available.
+	if m.cfg.TaskManager != nil {
+		notifications := m.cfg.TaskManager.DrainNotifications()
+		for _, n := range notifications {
+			reminder := fmt.Sprintf(
+				"<subagent-notification>\n  <task-id>%s</task-id>\n  <name>%s</name>\n  <status>%s</status>\n  <summary>%s</summary>\n</subagent-notification>",
+				n.TaskID, n.Name, n.Status, truncateStr(n.Summary, 500))
+			state.Messages = append(state.Messages, &schema.Message{
+				Role:    schema.System,
+				Content: reminder,
+			})
+		}
+	}
+
 	return ctx, state, nil
 }
 
@@ -110,4 +126,13 @@ func (m *reminderMiddleware) updateErrorStreak(state *adk.ChatModelAgentState) {
 			return
 		}
 	}
+}
+
+// truncateStr truncates s to maxLen runes, appending "..." if truncated.
+func truncateStr(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "..."
 }

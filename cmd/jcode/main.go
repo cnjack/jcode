@@ -106,14 +106,24 @@ func main() {
 
 	systemPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
 
-	providerCfg := cfg.Models[cfg.Provider]
+	providerName, modelName := cfg.GetProviderModel()
+
+	providers := cfg.GetProviders()
+	providerCfg := providers[providerName]
 	if providerCfg == nil {
-		fmt.Fprintf(os.Stderr, "Provider %q not found in config\n", cfg.Provider)
+		fmt.Fprintf(os.Stderr, "Provider %q not found in config\n", providerName)
 		os.Exit(1)
 	}
 
+	// Resolve base URL from config or models.dev registry
+	registry := internalmodel.NewModelRegistry()
+	baseURL := providerCfg.BaseURL
+	if baseURL == "" {
+		baseURL = registry.GetProviderAPI(providerName)
+	}
+
 	chatModel, err := internalmodel.NewChatModel(ctx, &internalmodel.ChatModelConfig{
-		Model: cfg.Model, APIKey: providerCfg.APIKey, BaseURL: providerCfg.BaseURL,
+		Model: modelName, APIKey: providerCfg.APIKey, BaseURL: baseURL,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating model: %v\n", err)
@@ -172,7 +182,7 @@ func main() {
 
 	// Session recorder — created early so closures (subagent, todo callback)
 	// can reference it. Lazy file creation means no disk I/O until first message.
-	rec, _ := session.NewRecorder(pwd, cfg.Provider, cfg.Model)
+	rec, _ := session.NewRecorder(pwd, providerName, modelName)
 
 	// Wire TodoStore → session recording: each todowrite update is persisted.
 	env.TodoStore.OnUpdate = func(items []tools.TodoItem) {
@@ -277,7 +287,11 @@ func main() {
 
 		// Summarization middleware: compresses conversation history when tokens
 		// exceed the threshold, preventing context overflow in long sessions.
-		contextLimit := internalmodel.GetModelContextLimit(cfg.Model)
+		// Resolve context limit: registry → hardcoded → default
+		contextLimit := registry.GetModelContextLimit(providerName, modelName)
+		if contextLimit <= 0 {
+			contextLimit = internalmodel.GetModelContextLimit(modelName)
+		}
 		if contextLimit <= 0 {
 			contextLimit = 200000 // conservative default
 		}
@@ -664,10 +678,16 @@ func main() {
 				applyModeSwitch(newMode)
 
 			case cfgMsg := <-configCh:
-				providerCfg := cfgMsg.Models[cfgMsg.Provider]
-				if providerCfg != nil {
+				newProvName, newModelName := cfgMsg.GetProviderModel()
+				newProviders := cfgMsg.GetProviders()
+				newProvCfg := newProviders[newProvName]
+				if newProvCfg != nil {
+					newBaseURL := newProvCfg.BaseURL
+					if newBaseURL == "" {
+						newBaseURL = registry.GetProviderAPI(newProvName)
+					}
 					newChatModel, err := internalmodel.NewChatModel(ctx, &internalmodel.ChatModelConfig{
-						Model: cfgMsg.Model, APIKey: providerCfg.APIKey, BaseURL: providerCfg.BaseURL,
+						Model: newModelName, APIKey: newProvCfg.APIKey, BaseURL: newBaseURL,
 					})
 					if err == nil {
 						chatModel = newChatModel
@@ -798,10 +818,16 @@ func main() {
 				} else if ok {
 					newCfg, loadErr := config.LoadConfig()
 					if loadErr == nil {
-						providerCfg := newCfg.Models[newCfg.Provider]
-						if providerCfg != nil {
+						newProvName, newModelName := newCfg.GetProviderModel()
+						newProviders := newCfg.GetProviders()
+						newProvCfg := newProviders[newProvName]
+						if newProvCfg != nil {
+							newBaseURL := newProvCfg.BaseURL
+							if newBaseURL == "" {
+								newBaseURL = registry.GetProviderAPI(newProvName)
+							}
 							newChatModel, cmErr := internalmodel.NewChatModel(ctx, &internalmodel.ChatModelConfig{
-								Model: newCfg.Model, APIKey: providerCfg.APIKey, BaseURL: newCfg.Models[newCfg.Provider].BaseURL,
+								Model: newModelName, APIKey: newProvCfg.APIKey, BaseURL: newBaseURL,
 							})
 							if cmErr == nil {
 								chatModel = newChatModel
@@ -811,9 +837,9 @@ func main() {
 							}
 						}
 						p.Send(tui.ConfigUpdatedMsg{
-							Provider: newCfg.Provider,
-							Model:    newCfg.Model,
-							Message:  fmt.Sprintf("✅ Added model: %s - %s\n", newCfg.Provider, newCfg.Model),
+							Provider: newProvName,
+							Model:    newModelName,
+							Message:  fmt.Sprintf("✅ Added model: %s/%s\n", newProvName, newModelName),
 						})
 					}
 				}
