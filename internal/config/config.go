@@ -104,9 +104,17 @@ type Config struct {
 	Compaction    *CompactionConfig     `json:"compaction,omitempty"`
 	Prompt        *PromptConfig         `json:"prompt,omitempty"`
 	Subagent      *SubagentConfig       `json:"subagent,omitempty"`
+	Team          *TeamConfig           `json:"team,omitempty"`
 
 	// DisabledProviders lists provider IDs to exclude from registry
 	DisabledProviders []string `json:"disabled_providers,omitempty"`
+}
+
+// TeamConfig controls agent team behavior.
+type TeamConfig struct {
+	MaxTeammates  int `json:"max_teammates,omitempty"`   // max teammates per team (default 5)
+	MailboxPollMs int `json:"mailbox_poll_ms,omitempty"` // mailbox poll interval in ms (default 500)
+	MessageCap    int `json:"message_cap,omitempty"`     // max messages in UI per teammate (default 50)
 }
 
 // GetProviders returns the effective provider map, merging legacy Models field into Providers.

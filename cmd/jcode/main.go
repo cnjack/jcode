@@ -25,6 +25,7 @@ import (
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/skills"
+	"github.com/cnjack/jcode/internal/team"
 	"github.com/cnjack/jcode/internal/telemetry"
 	"github.com/cnjack/jcode/internal/tools"
 	"github.com/cnjack/jcode/internal/tui"
@@ -206,6 +207,49 @@ func main() {
 		// NotifyFn is set after tuiProgram is available.
 	}
 
+	// TeamManager — created before buildAllTools so team tools can reference it.
+	// TuiProgram is nil here; set after RunTUI.
+	teamManager := team.NewManager(&team.ManagerDeps{
+		DefaultModel: chatModel,
+		EnvFactory: func(cwd string) any {
+			return tools.NewEnv(cwd, platform)
+		},
+		ToolBuilder: func(childEnv any, agentType string) []tool.BaseTool {
+			e, ok := childEnv.(*tools.Env)
+			if !ok {
+				return nil
+			}
+			return []tool.BaseTool{
+				e.NewReadTool(), e.NewEditTool(), e.NewWriteTool(),
+				e.NewExecuteTool(nil), e.NewGrepTool(),
+				e.NewTodoWriteTool(), e.NewTodoReadTool(),
+			}
+		},
+		ModelFactory: func(ctx context.Context, modelName string) (any, error) {
+			parts := strings.SplitN(modelName, "/", 2)
+			if len(parts) != 2 {
+				return nil, fmt.Errorf("invalid model format %q, expected 'provider/model'", modelName)
+			}
+			pName, mName := parts[0], parts[1]
+			providers := cfg.GetProviders()
+			pCfg := providers[pName]
+			if pCfg == nil {
+				return nil, fmt.Errorf("unknown provider %q", pName)
+			}
+			bURL := pCfg.BaseURL
+			if bURL == "" {
+				bURL = registry.GetProviderAPI(pName)
+			}
+			return internalmodel.NewChatModel(ctx, &internalmodel.ChatModelConfig{
+				Model: mName, APIKey: pCfg.APIKey, BaseURL: bURL,
+			})
+		},
+		PromptBuilder: func(agentType, agentPwd, agentPlatform string) string {
+			return prompts.GetSystemPrompt(agentPlatform, agentPwd, "local", nil, "")
+		},
+		LeaderSessionUUID: rec.UUID(),
+	})
+
 	// buildAllTools returns the full tool set for Agent (normal) mode.
 	buildAllTools := func() []tool.BaseTool {
 		all := []tool.BaseTool{
@@ -222,6 +266,12 @@ func main() {
 			}),
 			tools.NewAskUserTool(askUserDeps),
 			skills.NewLoadSkillTool(skillLoader),
+			// Team tools
+			tools.NewTeamCreateTool(teamManager),
+			tools.NewTeamSpawnTool(teamManager),
+			tools.NewTeamSendMessageTool(teamManager),
+			tools.NewTeamListTool(teamManager),
+			tools.NewTeamDeleteTool(teamManager),
 		}
 		return append(all, mcpTools...)
 	}
@@ -259,7 +309,14 @@ func main() {
 	bgManager.SetNotifier(func(taskID, command, status string) {
 		p.Send(tui.BgTaskDoneMsg{TaskID: taskID, Command: command, Status: status})
 	})
+	// Wire team manager to TUI (message sent later in goroutine).
+	teamManager.SetTuiProgram(p)
 	approvalState.SetProgram(p)
+
+	// Wire teammate approval handlers — creates per-teammate middleware with worker badge.
+	teamManager.SetHandlersFactory(func(workerName, workerColor string) []adk.ChatModelAgentMiddleware {
+		return agent.NewTeammateHandlers(approvalState.NewTeammateApprovalFunc(workerName, workerColor))
+	})
 
 	// Wire NotifyFn callbacks now that tuiProgram is available.
 	askUserDeps.NotifyFn = func(question string, options []string) {
@@ -492,6 +549,9 @@ func main() {
 				langfuseTracer.Flush()
 			}
 		}()
+
+		// Send team manager to TUI after event loop is running.
+		p.Send(team.SetTeamManagerMsg{Manager: teamManager})
 
 		if len(mcpStatuses) > 0 {
 			p.Send(tui.MCPStatusMsg{Statuses: mcpStatuses})

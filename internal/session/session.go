@@ -103,6 +103,9 @@ type Recorder struct {
 	startTime time.Time
 	file      *os.File
 	mu        sync.Mutex
+	// Per-teammate fields (empty for leader recorder).
+	customDir string // leader UUID for subagent path
+	agentID   string // teammate agent ID
 }
 
 // NewRecorder returns a Recorder that will create the session file only when
@@ -201,6 +204,26 @@ func (r *Recorder) Close() {
 	}
 }
 
+// NewTeammateRecorder creates a Recorder that stores its JSONL transcript
+// under the leader session's subagents directory:
+//
+//	~/.jcode/sessions/{leaderUUID}/subagents/agent-{agentID}.jsonl
+//
+// This mirrors Claude Code's per-agent transcript pattern.
+func NewTeammateRecorder(leaderUUID, agentID, model string) (*Recorder, error) {
+	r := &Recorder{
+		uuid:      leaderUUID + "/" + agentID,
+		project:   agentID,
+		provider:  "teammate",
+		model:     model,
+		startTime: time.Now(),
+	}
+	// Override ensureFile to write to subagent path.
+	r.customDir = leaderUUID
+	r.agentID = agentID
+	return r, nil
+}
+
 // ensureFile creates the session file and writes the session_start header the
 // first time it is called.  Must be called with r.mu held.
 func (r *Recorder) ensureFile() error {
@@ -211,11 +234,23 @@ func (r *Recorder) ensureFile() error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("create sessions dir: %w", err)
+
+	var filePath string
+	if r.agentID != "" {
+		// Teammate recorder: ~/.jcode/sessions/{leaderUUID}/subagents/agent-{agentID}.jsonl
+		subDir := filepath.Join(dir, r.customDir, "subagents")
+		if err := os.MkdirAll(subDir, 0755); err != nil {
+			return fmt.Errorf("create subagents dir: %w", err)
+		}
+		filePath = filepath.Join(subDir, "agent-"+r.agentID+".jsonl")
+	} else {
+		// Leader recorder: ~/.jcode/sessions/{uuid}.json
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("create sessions dir: %w", err)
+		}
+		filePath = filepath.Join(dir, r.uuid+".json")
 	}
 
-	filePath := filepath.Join(dir, r.uuid+".json")
 	f, err := os.Create(filePath)
 	if err != nil {
 		return fmt.Errorf("create session file: %w", err)
@@ -239,14 +274,16 @@ func (r *Recorder) ensureFile() error {
 		return err
 	}
 
-	// Update the shared index (non-fatal).
-	_ = addToIndex(r.project, SessionMeta{
-		UUID:      r.uuid,
-		Project:   r.project,
-		Provider:  r.provider,
-		Model:     r.model,
-		StartTime: r.startTime.Format(time.RFC3339),
-	})
+	// Update the shared index (non-fatal, skip for teammate recorders).
+	if r.agentID == "" {
+		_ = addToIndex(r.project, SessionMeta{
+			UUID:      r.uuid,
+			Project:   r.project,
+			Provider:  r.provider,
+			Model:     r.model,
+			StartTime: r.startTime.Format(time.RFC3339),
+		})
+	}
 	return nil
 }
 

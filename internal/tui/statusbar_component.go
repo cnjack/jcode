@@ -18,6 +18,7 @@ type StatusBarState struct {
 	MCPStatuses       []MCPStatusItem
 	Mode              AgentMode
 	BgRunning         int
+	TeammateCount     int
 }
 
 // StatusBarComponent is a stateless-like component in Bubble Tea.
@@ -68,6 +69,10 @@ func (s *StatusBarComponent) View(state StatusBarState) string {
 		rightParts = append(rightParts, lipgloss.NewStyle().Foreground(colorWarning).Render(fmt.Sprintf("Bg: %d running", state.BgRunning)))
 	}
 
+	if state.TeammateCount > 0 {
+		rightParts = append(rightParts, RenderTeamStatusPill(state.TeammateCount))
+	}
+
 	if len(state.MCPStatuses) > 0 {
 		activeServers := 0
 		loadedTools := 0
@@ -112,7 +117,7 @@ func renderProgressBar(percent float64, width int) string {
 
 	var bar strings.Builder
 	bar.WriteString("[")
-	
+
 	// Choose color based on usage
 	var barStyle lipgloss.Style
 	if percent >= 90 {
@@ -131,7 +136,7 @@ func renderProgressBar(percent float64, width int) string {
 	for i := filled; i < width; i++ {
 		bar.WriteString("░")
 	}
-	
+
 	bar.WriteString("]")
 	return barStyle.Render(bar.String())
 }

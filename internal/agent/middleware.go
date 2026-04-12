@@ -53,3 +53,11 @@ func (m *approvalMiddleware) WrapInvokableToolCall(
 		return result, nil
 	}, nil
 }
+
+// NewTeammateHandlers returns the middleware stack for a teammate agent.
+// It includes the approval + safe-tool-error middleware with the given approval function.
+func NewTeammateHandlers(approvalFunc ApprovalFunc) []adk.ChatModelAgentMiddleware {
+	return []adk.ChatModelAgentMiddleware{
+		newApprovalMiddleware(approvalFunc),
+	}
+}
