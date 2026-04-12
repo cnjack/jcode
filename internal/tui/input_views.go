@@ -96,6 +96,7 @@ func (m Model) inputAreaView() string {
 
 	// Render StatusBar using StatusBarComponent
 	sbComp := NewStatusBarComponent()
+	teammateCount := len(m.teamState.Teammates)
 	statusLine := sbComp.View(StatusBarState{
 		Width:             m.width,
 		ActiveProvider:    m.activeProvider,
@@ -106,6 +107,7 @@ func (m Model) inputAreaView() string {
 		MCPStatuses:       m.mcpStatuses,
 		Mode:              m.agentMode,
 		BgRunning:         m.bgRunning,
+		TeammateCount:     teammateCount,
 	})
 	parts = append(parts, statusLine)
 

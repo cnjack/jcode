@@ -17,6 +17,7 @@ import (
 
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/session"
+	"github.com/cnjack/jcode/internal/team"
 	"github.com/cnjack/jcode/internal/tools"
 )
 
@@ -90,12 +91,14 @@ type Model struct {
 
 	pendingPrompts []string
 
-	approvalPending    bool
-	approvalToolName   string
-	approvalToolArgs   string
-	approvalRespChan   chan ToolApprovalResponse
-	approvalIsExternal bool // Whether this is an external path access
-	approvalMode       ApprovalMode
+	approvalPending     bool
+	approvalToolName    string
+	approvalToolArgs    string
+	approvalRespChan    chan ToolApprovalResponse
+	approvalIsExternal  bool   // Whether this is an external path access
+	approvalWorkerName  string // Non-empty for teammate approval
+	approvalWorkerColor string // Teammate color
+	approvalMode        ApprovalMode
 
 	envLabel  string
 	agentMode AgentMode
@@ -127,6 +130,12 @@ type Model struct {
 	// Exit confirmation
 	exitPending     bool      // true when waiting for 2nd Ctrl+C
 	exitWarningTime time.Time // when the warning was shown
+
+	// Team state
+	teamState TeamViewState
+	// teamLeaderLines stores the leader's viewport content when switching to teammate view
+	teamLeaderLines []string
+	teamLeaderText  string
 }
 
 // dirItem implements list.Item
@@ -893,6 +902,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.textareaLines = 1
 					m.textarea.SetHeight(1)
 
+					// Team: route input to viewed teammate
+					if m.teamState.ViewMode == TeamViewTeammate && m.teamState.ViewingAgent != "" {
+						m.teamState.Manager.EnqueueUserMessage(m.teamState.ViewingAgent, prompt)
+						m.lines = append(m.lines, fmt.Sprintf("%s %s",
+							userLabelStyle.Render("👤 You:"), prompt))
+						m.refreshViewport()
+						return m, tea.Batch(cmds...)
+					}
+
 					if prompt == "/setting" {
 						return m.handleSettingInput(cmds)
 					}
@@ -1019,6 +1037,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, vpCmd)
 				}
 				return m, tea.Batch(cmds...)
+			case "shift+up":
+				// Team: switch to previous agent view
+				if m.teamState.HasTeam() {
+					m.switchTeamView(-1)
+					m.refreshViewport()
+					return m, tea.Batch(cmds...)
+				}
+			case "shift+down":
+				// Team: switch to next agent view
+				if m.teamState.HasTeam() {
+					m.switchTeamView(1)
+					m.refreshViewport()
+					return m, tea.Batch(cmds...)
+				}
+			case "ctrl+t":
+				// Team: toggle coordinator panel
+				if m.teamState.HasTeam() {
+					m.teamState.PanelVisible = !m.teamState.PanelVisible
+					m.refreshViewport()
+					return m, tea.Batch(cmds...)
+				}
+			case "escape":
+				// Team: exit teammate view, return to leader
+				if m.teamState.ViewMode == TeamViewTeammate {
+					m.exitTeammateView()
+					m.refreshViewport()
+					return m, tea.Batch(cmds...)
+				}
 			}
 			// Forward other keys to textarea
 			var cmd tea.Cmd
@@ -1316,6 +1362,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.approvalToolArgs = msg.Args
 		m.approvalRespChan = msg.Resp
 		m.approvalIsExternal = msg.IsExternal
+		m.approvalWorkerName = msg.WorkerName
+		m.approvalWorkerColor = msg.WorkerColor
 		m.textarea.Blur()
 		m.refreshViewport()
 
@@ -1407,6 +1455,120 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.refreshViewport()
 
+	// --- Team messages ---
+	case team.SetTeamManagerMsg:
+		m.teamState.Manager = msg.Manager
+
+	case team.TeammateSpawnedMsg:
+		m.teamState.RefreshTeammates()
+		// Auto-show panel when first teammate spawns.
+		if !m.teamState.PanelVisible {
+			m.teamState.PanelVisible = true
+		}
+		nameStyled := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(msg.Color)).Render("@" + msg.Name)
+		spawnLine := fmt.Sprintf("  %s Teammate %s spawned", toolSuccessStyle.Render("👥"), nameStyled)
+		promptLine := fmt.Sprintf("    %s", lipgloss.NewStyle().Faint(true).Render(truncate(msg.Prompt, 80)))
+		// Add to leader view.
+		m.lines = append(m.lines, spawnLine, promptLine)
+		// Initialize per-teammate display lines.
+		m.teamState.AppendTeammateLine(msg.AgentID, spawnLine, promptLine, "")
+		m.refreshViewport()
+
+	case team.TeammateStatusMsg:
+		m.teamState.RefreshTeammates()
+		nameStyled := toolNameStyle.Render(msg.AgentID)
+		icon := statusIcon(msg.Status)
+		switch {
+		case msg.Status == team.StatusRunning:
+			m.lines = append(m.lines, fmt.Sprintf("  %s %s is working...", icon, nameStyled))
+		case msg.Status.IsTerminal():
+			errInfo := ""
+			if msg.Error != "" {
+				errInfo = ": " + msg.Error
+			}
+			m.lines = append(m.lines, fmt.Sprintf("  %s %s %s%s", icon, nameStyled, string(msg.Status), errInfo))
+		case msg.Status == team.StatusIdle:
+			m.lines = append(m.lines, fmt.Sprintf("  %s %s idle, waiting for messages", icon, nameStyled))
+		}
+		m.refreshViewport()
+
+	case team.TeammateProgressMsg:
+		// Update cached state, refresh panel if visible
+		m.teamState.RefreshTeammates()
+		if m.teamState.PanelVisible {
+			m.refreshViewport()
+		}
+
+	case team.TeammateMessageMsg:
+		switch msg.Role {
+		case "user":
+			// Render incoming message like "👤 From @leader: message text"
+			fromLabel := "user"
+			if msg.From != "" {
+				fromLabel = "@" + msg.From
+			}
+			line := fmt.Sprintf("%s %s",
+				userLabelStyle.Render(fmt.Sprintf("📨 %s:", fromLabel)),
+				sanitize(msg.Content))
+			m.teamState.FlushTeammateText(msg.AgentID)
+			m.teamState.AppendTeammateLine(msg.AgentID, line)
+		case "tool_call":
+			argsDisplay := formatToolArgs(msg.ToolArgs)
+			line := fmt.Sprintf("%s %s %s",
+				toolLabelStyle.Render("🔧 Tool:"),
+				toolNameStyle.Render(msg.ToolName),
+				toolArgsStyle.Render(argsDisplay))
+			m.teamState.FlushTeammateText(msg.AgentID)
+			m.teamState.AppendTeammateLine(msg.AgentID, line)
+		case "tool_result":
+			if msg.ToolErr != "" {
+				m.teamState.AppendTeammateLine(msg.AgentID,
+					fmt.Sprintf("   %s %s",
+						toolErrorStyle.Render("✗ Error:"),
+						toolResultStyle.Render(truncate(sanitize(msg.ToolErr), maxToolOutputLen))))
+			} else {
+				m.teamState.AppendTeammateLine(msg.AgentID,
+					formatToolResult(msg.ToolName, sanitize(msg.Content), m.width)...)
+			}
+		case "assistant":
+			m.teamState.FlushTeammateText(msg.AgentID)
+			// Render assistant label with teammate name, like "🤖 @backend:"
+			state := m.teamState.Manager.GetTeammateState(msg.AgentID)
+			label := "🤖 Assistant:"
+			if state != nil {
+				nameStyled := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(state.Identity.Color)).Render("@" + state.Identity.AgentName)
+				label = fmt.Sprintf("🤖 %s:", nameStyled)
+			}
+			rendered := sanitize(msg.Content)
+			if m.mdRenderer != nil {
+				if md, err := m.mdRenderer.Render(msg.Content); err == nil {
+					rendered = md
+				}
+			}
+			m.teamState.AppendTeammateLine(msg.AgentID, assistantLabelStyle.Render(label))
+			m.teamState.AppendTeammateLine(msg.AgentID, rendered)
+		}
+
+		// If viewing this teammate, update the viewport with latest lines.
+		if m.teamState.ViewingAgent == msg.AgentID {
+			state := m.teamState.Manager.GetTeammateState(msg.AgentID)
+			if state != nil {
+				m.lines = nil
+				m.lines = append(m.lines, RenderTeammateViewHeader(state.Identity))
+				m.lines = append(m.lines, "")
+				m.lines = append(m.lines, m.teamState.GetTeammateDisplayLines(msg.AgentID)...)
+			}
+			m.refreshViewport()
+		}
+		// Show brief notification in leader view for assistant messages.
+		if m.teamState.ViewingAgent == "" && msg.Role == "assistant" {
+			preview := truncate(msg.Content, 60)
+			m.lines = append(m.lines, fmt.Sprintf("  💬 %s: %s",
+				toolNameStyle.Render(msg.AgentID), lipgloss.NewStyle().Faint(true).Render(preview)))
+			m.refreshViewport()
+		}
+	// --- End team messages ---
+
 	case PlanApprovalMsg:
 		m.planReviewActive = true
 		m.planReviewTitle = msg.PlanPath
@@ -1444,6 +1606,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case tea.InterruptMsg:
+		// Handle ctrl+c from non-TTY / signal handler path.
+		if m.exitPending {
+			return m, tea.Quit
+		}
+		if m.thinking && !m.agentDone {
+			m.exitPending = true
+			m.exitWarningTime = time.Now()
+			m.lines = append(m.lines,
+				lipgloss.NewStyle().Foreground(colorWarning).Bold(true).Render("⚠ Agent is running. Press Ctrl+C again to force quit."))
+			m.refreshViewport()
+			return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+				return ExitTimeoutMsg{}
+			})
+		}
+		return m, tea.Quit
+
 	}
 
 	if m.ready && m.mode == ModeAgent {
@@ -1476,11 +1655,24 @@ func (m Model) inputAreaHeight() int {
 func (m Model) calcViewportHeight(_ ...bool) int {
 	headerHeight := 3
 	footerHeight := m.inputAreaHeight()
-	h := m.height - headerHeight - footerHeight
+	teamPanelHeight := 0
+	if m.teamState.HasTeam() && m.teamState.PanelVisible {
+		teamPanelHeight = m.teamPanelHeight()
+	}
+	h := m.height - headerHeight - footerHeight - teamPanelHeight
 	if h < 3 {
 		h = 3
 	}
 	return h
+}
+
+// teamPanelHeight calculates the rendered height of the team coordinator panel.
+func (m Model) teamPanelHeight() int {
+	if !m.teamState.HasTeam() || !m.teamState.PanelVisible {
+		return 0
+	}
+	panel := RenderCoordinatorPanel(&m.teamState, m.width)
+	return lipgloss.Height(panel)
 }
 
 func (m Model) newView(content string) tea.View {
@@ -1525,22 +1717,43 @@ func (m Model) View() tea.View {
 	} else {
 		headerText += "🔗 Env: SSH (" + m.envLabel + ")"
 	}
+	// Add team status pill to header
+	if m.teamState.HasTeam() {
+		m.teamState.RefreshTeammates()
+		pill := RenderTeamStatusPill(len(m.teamState.Teammates))
+		if pill != "" {
+			headerText += "  " + pill
+		}
+	}
 	header := titleStyle.Render(headerText)
 	headerLine := divider(m.width)
 	headerHeight := lipgloss.Height(header) + lipgloss.Height(headerLine)
+
+	// Team coordinator panel
+	teamPanel := ""
+	teamPanelHeight := 0
+	if m.teamState.HasTeam() && m.teamState.PanelVisible {
+		teamPanel = RenderCoordinatorPanel(&m.teamState, m.width)
+		teamPanelHeight = lipgloss.Height(teamPanel)
+	}
 
 	footer := m.inputAreaView()
 	footerHeight := lipgloss.Height(footer)
 
 	if m.ready {
-		m.viewport.SetHeight(m.height - headerHeight - footerHeight)
+		m.viewport.SetHeight(m.height - headerHeight - footerHeight - teamPanelHeight)
 		if m.viewport.Height() < 3 {
 			m.viewport.SetHeight(3)
 		}
 		m.viewport.SetContent(strings.TrimRight(m.renderContent(), "\n"))
 	}
 
-	mainView := lipgloss.JoinVertical(lipgloss.Left, header, headerLine, m.viewport.View(), footer)
+	parts := []string{header, headerLine, m.viewport.View()}
+	if teamPanel != "" {
+		parts = append(parts, teamPanel)
+	}
+	parts = append(parts, footer)
+	mainView := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	return m.newView(mainView)
 }
 

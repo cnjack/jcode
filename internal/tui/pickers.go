@@ -288,6 +288,12 @@ func (m Model) approvalDialogView() string {
 	var headerText string
 	if m.approvalIsExternal {
 		headerText = toolNameStyle.Render("⚠️ External Path Access")
+	} else if m.approvalWorkerName != "" {
+		workerBadge := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color(m.approvalWorkerColor)).
+			Render("@" + m.approvalWorkerName)
+		headerText = toolNameStyle.Render("⚠️ Teammate Approval: ") + workerBadge
 	} else {
 		headerText = toolNameStyle.Render("⚠️ Tool Approval Required")
 	}

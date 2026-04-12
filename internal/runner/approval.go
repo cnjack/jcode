@@ -70,14 +70,19 @@ func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs 
 
 	// 1. No-approval-needed tools (read is handled separately below)
 	noApprovalNeeded := map[string]bool{
-		"glob":             true,
-		"grep":             true,
-		"todowrite":        true,
-		"todoread":         true,
-		"question":         true,
-		"webfetch":         true,
-		"subagent":         true,
-		"check_background": true,
+		"glob":              true,
+		"grep":              true,
+		"todowrite":         true,
+		"todoread":          true,
+		"question":          true,
+		"webfetch":          true,
+		"subagent":          true,
+		"check_background":  true,
+		"team_create":       true,
+		"team_spawn":        true,
+		"team_send_message": true,
+		"team_list":         true,
+		"team_delete":       true,
 	}
 	if noApprovalNeeded[toolName] {
 		return true, nil
@@ -124,16 +129,23 @@ func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs 
 
 // requestUserApproval handles the unified approval request process
 func (s *ApprovalState) requestUserApproval(ctx context.Context, toolName, toolArgs string, isExternal bool) (bool, error) {
+	return s.requestUserApprovalWithWorker(ctx, toolName, toolArgs, isExternal, "", "")
+}
+
+// requestUserApprovalWithWorker handles approval with optional worker identity
+func (s *ApprovalState) requestUserApprovalWithWorker(ctx context.Context, toolName, toolArgs string, isExternal bool, workerName, workerColor string) (bool, error) {
 	if s.p == nil {
 		return false, fmt.Errorf("TUI program not initialized")
 	}
 
 	respCh := make(chan tui.ToolApprovalResponse, 1)
 	s.p.Send(tui.ToolApprovalRequestMsg{
-		Name:       toolName,
-		Args:       toolArgs,
-		Resp:       respCh,
-		IsExternal: isExternal,
+		Name:        toolName,
+		Args:        toolArgs,
+		Resp:        respCh,
+		IsExternal:  isExternal,
+		WorkerName:  workerName,
+		WorkerColor: workerColor,
 	})
 
 	select {
@@ -145,6 +157,69 @@ func (s *ApprovalState) requestUserApproval(ctx context.Context, toolName, toolA
 		return resp.Approved, nil
 	case <-ctx.Done():
 		return false, ctx.Err()
+	}
+}
+
+// NewTeammateApprovalFunc creates an approval function for a teammate that includes
+// the worker identity in the TUI approval prompt.
+func (s *ApprovalState) NewTeammateApprovalFunc(workerName, workerColor string) func(ctx context.Context, toolName, toolArgs string) (bool, error) {
+	return func(ctx context.Context, toolName, toolArgs string) (bool, error) {
+		// Same logic as RequestApproval, but with worker badge.
+		if s.mode == tui.ModeAuto {
+			return true, nil
+		}
+
+		noApprovalNeeded := map[string]bool{
+			"glob":              true,
+			"grep":              true,
+			"todowrite":         true,
+			"todoread":          true,
+			"question":          true,
+			"webfetch":          true,
+			"subagent":          true,
+			"check_background":  true,
+			"team_create":       true,
+			"team_spawn":        true,
+			"team_send_message": true,
+			"team_list":         true,
+			"team_delete":       true,
+		}
+		if noApprovalNeeded[toolName] {
+			return true, nil
+		}
+
+		if toolName == "read" {
+			var input struct {
+				FilePath string `json:"file_path"`
+			}
+			if err := json.Unmarshal([]byte(toolArgs), &input); err == nil {
+				if s.isWithinWorkpath(input.FilePath) {
+					return true, nil
+				}
+				return s.requestUserApprovalWithWorker(ctx, toolName, toolArgs, true, workerName, workerColor)
+			}
+		}
+
+		if toolName == "execute" {
+			var input struct {
+				Command    string `json:"command"`
+				Background bool   `json:"background"`
+			}
+			if err := json.Unmarshal([]byte(toolArgs), &input); err == nil {
+				if input.Background {
+					return true, nil
+				}
+				cmd := strings.TrimSpace(input.Command)
+				safePrefix := []string{"ls", "pwd", "env", "ls ", "cat ", "pwd ", "echo ", "which ", "git status", "git log"}
+				for _, p := range safePrefix {
+					if cmd == p || strings.HasPrefix(cmd, p) {
+						return true, nil
+					}
+				}
+			}
+		}
+
+		return s.requestUserApprovalWithWorker(ctx, toolName, toolArgs, false, workerName, workerColor)
 	}
 }
 

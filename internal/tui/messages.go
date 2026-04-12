@@ -124,10 +124,12 @@ const (
 
 // ToolApprovalRequestMsg is sent when a tool needs user approval
 type ToolApprovalRequestMsg struct {
-	Name       string
-	Args       string
-	Resp       chan ToolApprovalResponse
-	IsExternal bool // Whether this is an external path access (for read tool)
+	Name        string
+	Args        string
+	Resp        chan ToolApprovalResponse
+	IsExternal  bool   // Whether this is an external path access (for read tool)
+	WorkerName  string // Non-empty when approval is from a teammate (e.g. "@backend")
+	WorkerColor string // Teammate's color for TUI display
 }
 
 // ToolApprovalResponse is the user's response to a tool approval request
