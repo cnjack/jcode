@@ -288,6 +288,9 @@ type AskUserResponse struct {
 	Answer string
 }
 
+// ExitTimeoutMsg is sent after 2s to clear exit warning
+type ExitTimeoutMsg struct{}
+
 // GetAskUserResponseChannel returns the channel for ask_user responses.
 func GetAskUserResponseChannel() <-chan AskUserResponse {
 	return askUserResponseCh
