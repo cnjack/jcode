@@ -32,6 +32,7 @@ var popularProviderIDs = []string{
 	"openai", "anthropic", "google", "deepseek", "mistral",
 	"openrouter", "groq", "together-ai", "fireworks-ai", "perplexity",
 	// Chinese providers (using models.dev official IDs)
+	"alibaba-cn", "alibaba-coding-plan-cn",
 	"zhipuai", "zhipuai-coding-plan",
 	"moonshotai", "moonshotai-cn", "kimi-for-coding",
 	"minimax", "minimax-coding-plan",
@@ -55,8 +56,6 @@ var extraProviders = []ExtraProvider{
 	// Chinese regional providers not in models.dev
 	{ID: "z.ai", Name: "Z.AI", BaseURL: "https://api.z.ai/v1"},
 	{ID: "z.ai-plan", Name: "Z.AI Plan", BaseURL: "https://api.z.ai/v1"},
-	{ID: "bailian", Name: "Bailian (Aliyun)", BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1"},
-	{ID: "bailian-plan", Name: "Bailian Plan", BaseURL: "https://coding.dashscope.aliyuncs.com/v1"},
 	{ID: "magicark", Name: "魔力方舟", BaseURL: "https://api.gitee.com/v1"},
 }
 
@@ -266,6 +265,54 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case tea.PasteMsg:
+		// Forward bracketed paste (Ctrl+Shift+V) to active textinput
+		switch m.state {
+		case StateCustomModel:
+			var cmd tea.Cmd
+			m.customModelIn, cmd = m.customModelIn.Update(msg)
+			return m, cmd
+		case StateURL:
+			var cmd tea.Cmd
+			m.urlIn, cmd = m.urlIn.Update(msg)
+			return m, cmd
+		case StateAPIKey:
+			var cmd tea.Cmd
+			m.keyIn, cmd = m.keyIn.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+
+	case tea.ClipboardMsg:
+		// OSC52 clipboard read result — convert to PasteMsg and forward to active textinput
+		if msg.Content != "" {
+			switch m.state {
+			case StateCustomModel:
+				var cmd tea.Cmd
+				m.customModelIn, cmd = m.customModelIn.Update(tea.PasteMsg{Content: msg.Content})
+				return m, cmd
+			case StateURL:
+				var cmd tea.Cmd
+				m.urlIn, cmd = m.urlIn.Update(tea.PasteMsg{Content: msg.Content})
+				return m, cmd
+			case StateAPIKey:
+				var cmd tea.Cmd
+				m.keyIn, cmd = m.keyIn.Update(tea.PasteMsg{Content: msg.Content})
+				return m, cmd
+			}
+		}
+		return m, nil
+
+	case tea.MouseMsg:
+		// Right-click paste: request clipboard via OSC52
+		if click, ok := msg.(tea.MouseClickMsg); ok && click.Button == tea.MouseRight {
+			// Only handle right-click when a textinput is active
+			if m.state == StateCustomModel || m.state == StateURL || m.state == StateAPIKey {
+				return m, func() tea.Msg { return tea.ReadClipboard() }
+			}
+		}
+		return m, nil
+
 	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit

@@ -213,6 +213,9 @@ func LoadConfig() (*Config, error) {
 		cfg.Providers = cfg.Models
 	}
 
+	// Migrate legacy provider IDs to models.dev canonical IDs
+	cfg.migrateProviderIDs()
+
 	// Validation
 	if len(cfg.GetProviders()) == 0 {
 		return nil, fmt.Errorf("no providers configured: set 'providers' in %s", cfgPath)
@@ -233,6 +236,63 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// migrateProviderIDs converts legacy provider IDs to models.dev canonical IDs.
+// This ensures backward compatibility with configs using old IDs like "bailian" or "bailian-plan".
+func (c *Config) migrateProviderIDs() {
+	// Map of legacy provider ID → models.dev canonical ID
+	migrations := map[string]string{
+		"bailian":      "alibaba-cn",
+		"bailian-plan": "alibaba-coding-plan-cn",
+	}
+
+	// Migrate provider keys in Providers map
+	if c.Providers != nil {
+		for oldID, newID := range migrations {
+			if provCfg, exists := c.Providers[oldID]; exists {
+				c.Providers[newID] = provCfg
+				delete(c.Providers, oldID)
+				Logger().Printf("[config] Migrated provider ID: %s → %s", oldID, newID)
+			}
+		}
+	}
+
+	// Migrate Model field (active model in "provider/model" format)
+	for oldID, newID := range migrations {
+		if hasPrefix(c.Model, oldID+"/") {
+			c.Model = newID + c.Model[len(oldID):]
+			Logger().Printf("[config] Migrated active model: %s → %s", oldID, newID)
+		}
+	}
+
+	// Migrate SmallModel field
+	for oldID, newID := range migrations {
+		if hasPrefix(c.SmallModel, oldID+"/") {
+			c.SmallModel = newID + c.SmallModel[len(oldID):]
+			Logger().Printf("[config] Migrated small_model: %s → %s", oldID, newID)
+		}
+	}
+
+	// Migrate FallbackModel field
+	for oldID, newID := range migrations {
+		if hasPrefix(c.FallbackModel, oldID+"/") {
+			c.FallbackModel = newID + c.FallbackModel[len(oldID):]
+			Logger().Printf("[config] Migrated fallback_model: %s → %s", oldID, newID)
+		}
+	}
+}
+
+func hasPrefix(s, prefix string) bool {
+	if len(s) < len(prefix) {
+		return false
+	}
+	for i := 0; i < len(prefix); i++ {
+		if s[i] != prefix[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func containsSlash(s string) bool {

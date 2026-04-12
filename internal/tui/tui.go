@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/spinner"
@@ -122,6 +123,10 @@ type Model struct {
 	subagentStepCount int      // total tool calls so far
 	subagentLastTool  string   // last tool name + args summary
 	subagentProgress  []string // tool call progress lines for box display
+
+	// Exit confirmation
+	exitPending     bool      // true when waiting for 2nd Ctrl+C
+	exitWarningTime time.Time // when the warning was shown
 }
 
 // dirItem implements list.Item
@@ -340,7 +345,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 
+	case tea.PasteMsg:
+		// Forward bracketed paste (Ctrl+Shift+V / right-click paste) to textarea
+		if m.inputActive() {
+			var cmd tea.Cmd
+			m.textarea, cmd = m.textarea.Update(msg)
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
+
+	case tea.ClipboardMsg:
+		// OSC52 clipboard read result — forward as paste to textarea
+		if m.inputActive() && msg.Content != "" {
+			var cmd tea.Cmd
+			m.textarea, cmd = m.textarea.Update(tea.PasteMsg{Content: msg.Content})
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
+
 	case tea.MouseMsg:
+		// Right-click paste: request clipboard via OSC52 terminal protocol
+		if click, ok := msg.(tea.MouseClickMsg); ok && click.Button == tea.MouseRight && m.inputActive() {
+			cmds = append(cmds, func() tea.Msg { return tea.ReadClipboard() })
+			return m, tea.Batch(cmds...)
+		}
 		if m.pickingSession {
 			var cmd tea.Cmd
 			m.sessionPicker, cmd = m.sessionPicker.Update(msg)
@@ -793,8 +821,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.inputActive() {
+			// Clear exit warning if user presses any other key
+			if m.exitPending && msg.String() != "ctrl+c" {
+				m.exitPending = false
+				// Remove warning line (last line if it's the warning)
+				if len(m.lines) > 0 {
+					lastLine := m.lines[len(m.lines)-1]
+					if strings.Contains(lastLine, "Press Ctrl+C again") {
+						m.lines = m.lines[:len(m.lines)-1]
+						m.refreshViewport()
+					}
+				}
+			}
+
 			switch msg.String() {
 			case "ctrl+c":
+				// Check if already pending (2nd Ctrl+C)
+				if m.exitPending {
+					return m, tea.Quit
+				}
+				// Check if agent is running
+				if m.thinking && !m.agentDone {
+					m.exitPending = true
+					m.exitWarningTime = time.Now()
+					m.lines = append(m.lines,
+						lipgloss.NewStyle().Foreground(colorWarning).Bold(true).Render("⚠ Agent is running. Press Ctrl+C again to force quit."))
+					m.refreshViewport()
+					return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+						return ExitTimeoutMsg{}
+					})
+				}
+				// No task running, quit immediately
 				return m, tea.Quit
 			case "ctrl+p":
 				// Toggle agent mode: Agent <-> Plan
@@ -976,7 +1033,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Agent running — only ctrl+c
 		if msg.String() == "ctrl+c" {
-			return m, tea.Quit
+			// Check if already pending (2nd Ctrl+C)
+			if m.exitPending {
+				return m, tea.Quit
+			}
+			// First Ctrl+C - show warning
+			m.exitPending = true
+			m.exitWarningTime = time.Now()
+			m.lines = append(m.lines,
+				lipgloss.NewStyle().Foreground(colorWarning).Bold(true).Render("⚠ Agent is running. Press Ctrl+C again to force quit."))
+			m.refreshViewport()
+			return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+				return ExitTimeoutMsg{}
+			})
 		}
 
 	case tea.WindowSizeMsg:
@@ -1360,6 +1429,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.textarea.Placeholder = "Or type a custom answer..."
 		}
 		m.refreshViewport()
+
+	case ExitTimeoutMsg:
+		// Clear exit warning after 2s if still pending
+		if m.exitPending && time.Since(m.exitWarningTime) >= 2*time.Second {
+			m.exitPending = false
+			// Remove warning line (last line if it's the warning)
+			if len(m.lines) > 0 {
+				lastLine := m.lines[len(m.lines)-1]
+				if strings.Contains(lastLine, "Press Ctrl+C again") {
+					m.lines = m.lines[:len(m.lines)-1]
+					m.refreshViewport()
+				}
+			}
+		}
 
 	}
 

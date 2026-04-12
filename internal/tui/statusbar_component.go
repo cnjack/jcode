@@ -57,7 +57,8 @@ func (s *StatusBarComponent) View(state StatusBarState) string {
 	if state.TotalTokens > 0 || state.ModelContextLimit > 0 {
 		if state.ModelContextLimit > 0 {
 			usagePercent := float64(state.TotalTokens) / float64(state.ModelContextLimit) * 100
-			rightParts = append(rightParts, fmt.Sprintf("Tokens: %d/%d (%.0f%%)", state.TotalTokens, state.ModelContextLimit, usagePercent))
+			bar := renderProgressBar(usagePercent, 10)
+			rightParts = append(rightParts, fmt.Sprintf("%s %.0f%%", bar, usagePercent))
 		} else {
 			rightParts = append(rightParts, fmt.Sprintf("Tokens: %d", state.TotalTokens))
 		}
@@ -92,4 +93,45 @@ func (s *StatusBarComponent) View(state StatusBarState) string {
 
 	statusLine := leftTxt + strings.Repeat(" ", space) + rightTxt
 	return statusStyle.Render(statusLine)
+}
+
+// renderProgressBar renders a progress bar for token usage.
+// percent: 0-100, width: number of cells in the bar
+func renderProgressBar(percent float64, width int) string {
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 100 {
+		percent = 100
+	}
+
+	filled := int(percent / 100.0 * float64(width))
+	if filled > width {
+		filled = width
+	}
+
+	var bar strings.Builder
+	bar.WriteString("[")
+	
+	// Choose color based on usage
+	var barStyle lipgloss.Style
+	if percent >= 90 {
+		barStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("196")) // Red
+	} else if percent >= 70 {
+		barStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // Orange
+	} else {
+		barStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("42")) // Green
+	}
+
+	// Filled part
+	for i := 0; i < filled; i++ {
+		bar.WriteString("█")
+	}
+	// Empty part
+	for i := filled; i < width; i++ {
+		bar.WriteString("░")
+	}
+	
+	bar.WriteString("]")
+	return barStyle.Render(bar.String())
 }
