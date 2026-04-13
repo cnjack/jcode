@@ -114,6 +114,8 @@ func (m *Model) handleMouseRelease(x, y int) tea.Cmd {
 // viewport content between the selection start and end positions.
 // Uses display-column (not byte) positions, properly handling multi-byte
 // and wide characters (CJK, emoji).
+// It detects soft-wrapped lines (produced by glamour word wrapping) and
+// merges them into single logical lines instead of inserting false newlines.
 func (m *Model) extractSelectedText() string {
 	content := m.viewport.View()
 	lines := strings.Split(content, "\n")
@@ -142,6 +144,13 @@ func (m *Model) extractSelectedText() string {
 		endY = len(lines) - 1
 	}
 
+	// Determine the wrap width used by the renderer.
+	// The viewport width is the effective display width.
+	vpWidth := m.viewport.Width()
+	if vpWidth <= 0 {
+		vpWidth = 100
+	}
+
 	var sb strings.Builder
 
 	for lineIdx := startY; lineIdx <= endY; lineIdx++ {
@@ -158,9 +167,22 @@ func (m *Model) extractSelectedText() string {
 			eCol = endX
 		}
 
-		sb.WriteString(sliceByDisplayCol(plain, sCol, eCol))
+		extracted := sliceByDisplayCol(plain, sCol, eCol)
+		sb.WriteString(extracted)
+
 		if lineIdx < endY {
-			sb.WriteString("\n")
+			// Decide whether to emit a real newline or merge (soft wrap).
+			// A line is soft-wrapped if its visible text fills the full
+			// viewport width. We measure the stripped text (no ANSI) with
+			// trailing spaces trimmed, because lipgloss pads styled blocks
+			// to the full width.
+			plainWidth := ansi.StringWidth(strings.TrimRight(plain, " "))
+			if plainWidth >= vpWidth {
+				// Soft-wrapped line: don't add newline, the next line
+				// is a continuation of this one.
+			} else {
+				sb.WriteString("\n")
+			}
 		}
 	}
 
