@@ -20,6 +20,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/cnjack/jcode/internal/config"
+	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/session"
 )
 
@@ -576,7 +577,9 @@ func (m *Manager) runAgentTurn(ctx context.Context, state *TeammateState) (strin
 		MaxIterations: teammateMaxIter,
 		Handlers:      handlers,
 		ModelRetryConfig: &adk.ModelRetryConfig{
-			MaxRetries: 2,
+			MaxRetries:  3,
+			IsRetryAble: internalmodel.IsRetryable,
+			BackoffFunc: internalmodel.SmartBackoff,
 		},
 	})
 	if err != nil {

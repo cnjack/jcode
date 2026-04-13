@@ -7,6 +7,8 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
+
+	internalmodel "github.com/cnjack/jcode/internal/model"
 )
 
 const maxIterations = 1000
@@ -97,7 +99,9 @@ func NewAgent(
 		Middlewares:   middlewares,
 		Handlers:      enhanced,
 		ModelRetryConfig: &adk.ModelRetryConfig{
-			MaxRetries: 3,
+			MaxRetries:  5,
+			IsRetryAble: internalmodel.IsRetryable,
+			BackoffFunc: internalmodel.SmartBackoff,
 		},
 	})
 }

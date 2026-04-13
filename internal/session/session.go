@@ -299,8 +299,11 @@ func (r *Recorder) writeEntry(e Entry) error {
 	if err := r.ensureFile(); err != nil {
 		return err
 	}
-	_, err = r.file.WriteString(string(data) + "\n")
-	return err
+	if _, err = r.file.WriteString(string(data) + "\n"); err != nil {
+		return err
+	}
+	// Sync to disk so entries survive a crash.
+	return r.file.Sync()
 }
 
 // addToIndex adds a SessionMeta to the shared index file.
@@ -327,7 +330,13 @@ func addToIndex(project string, meta SessionMeta) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(indexPath, newData, 0644)
+	// Atomic write: write to temp file then rename to prevent corruption
+	// from concurrent writes or interrupted I/O.
+	tmpPath := indexPath + ".tmp"
+	if err := os.WriteFile(tmpPath, newData, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, indexPath)
 }
 
 // ListSessions returns all sessions recorded for a given project path, newest last.
@@ -363,6 +372,7 @@ func LoadSession(id string) ([]Entry, error) {
 	}
 
 	var entries []Entry
+	var skipped int
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -370,9 +380,18 @@ func LoadSession(id string) ([]Entry, error) {
 		}
 		var e Entry
 		if err := json.Unmarshal([]byte(line), &e); err != nil {
-			continue // skip malformed lines
+			skipped++
+			preview := line
+			if len(preview) > 80 {
+				preview = preview[:80] + "..."
+			}
+			config.Logger().Printf("[session] corrupted line in %s (skipped %d): %v — %s", id, skipped, err, preview)
+			continue
 		}
 		entries = append(entries, e)
+	}
+	if skipped > 0 {
+		config.Logger().Printf("[session] loaded %s with %d corrupted lines skipped", id, skipped)
 	}
 	return entries, nil
 }

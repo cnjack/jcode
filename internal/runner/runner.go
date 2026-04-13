@@ -80,6 +80,16 @@ func runInner(
 	iterator := ag.Run(ctx, input)
 	eventCount := 0
 	for {
+		// Check context cancellation before each iteration so user
+		// interrupts and timeouts are respected promptly.
+		select {
+		case <-ctx.Done():
+			config.Logger().Printf("[runner] context cancelled, stopping iteration")
+			h.OnAgentDone(ctx.Err())
+			return assistantText.String()
+		default:
+		}
+
 		event, ok := iterator.Next()
 		if !ok {
 			config.Logger().Printf("[runner] iterator done after %d events", eventCount)

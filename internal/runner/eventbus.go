@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cnjack/jcode/internal/config"
 )
@@ -51,6 +52,7 @@ type EventBus struct {
 	done      chan struct{}
 	cancel    context.CancelFunc
 	closeOnce sync.Once
+	closed    atomic.Bool
 }
 
 // NewEventBus creates an event bus with the given channel buffer size.
@@ -67,8 +69,11 @@ func NewEventBus(bufferSize int) *EventBus {
 }
 
 // Emit sends an event to the bus. Non-blocking: drops the event if the
-// channel is full and logs a warning.
+// channel is full or the bus is closed, and logs a warning.
 func (eb *EventBus) Emit(event Event) {
+	if eb.closed.Load() {
+		return
+	}
 	select {
 	case eb.ch <- event:
 	default:
@@ -84,6 +89,7 @@ func (eb *EventBus) Subscribe() <-chan Event {
 // Close shuts down the event bus. Safe to call multiple times.
 func (eb *EventBus) Close() {
 	eb.closeOnce.Do(func() {
+		eb.closed.Store(true)
 		eb.cancel()
 		close(eb.done)
 		close(eb.ch)

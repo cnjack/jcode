@@ -34,6 +34,7 @@ type BgTask struct {
 	Output      string
 	Started     time.Time
 	Ended       time.Time
+	Timeout     time.Duration // 0 means use default (5 minutes)
 }
 
 // BgNotification is a completion notification queued for injection.
@@ -129,7 +130,10 @@ func (bm *BackgroundManager) execute(ctx context.Context, task *BgTask) {
 		defer taskLog.Close()
 	}
 
-	timeout := 5 * time.Minute
+	timeout := task.Timeout
+	if timeout <= 0 {
+		timeout = 5 * time.Minute
+	}
 	stdout, stderr, err := bm.env.Exec.Exec(ctx, task.Command, bm.env.pwd, timeout)
 
 	var output strings.Builder
