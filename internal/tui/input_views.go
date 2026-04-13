@@ -108,6 +108,7 @@ func (m Model) inputAreaView() string {
 		Mode:              m.agentMode,
 		BgRunning:         m.bgRunning,
 		TeammateCount:     teammateCount,
+		CopyNotice:        m.copyNotice,
 	})
 	parts = append(parts, statusLine)
 

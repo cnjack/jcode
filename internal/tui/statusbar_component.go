@@ -19,6 +19,7 @@ type StatusBarState struct {
 	Mode              AgentMode
 	BgRunning         int
 	TeammateCount     int
+	CopyNotice        string
 }
 
 // StatusBarComponent is a stateless-like component in Bubble Tea.
@@ -49,6 +50,11 @@ func (s *StatusBarComponent) View(state StatusBarState) string {
 	}
 
 	var rightParts []string
+
+	if state.CopyNotice != "" {
+		rightParts = append(rightParts, lipgloss.NewStyle().Foreground(colorSuccess).Italic(true).Render(state.CopyNotice))
+	}
+
 	if state.AutoApprove {
 		rightParts = append(rightParts, "Approve: "+lipgloss.NewStyle().Foreground(colorWarning).Render("Auto"))
 	} else {

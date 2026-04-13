@@ -99,6 +99,7 @@ type Model struct {
 	approvalWorkerName  string // Non-empty for teammate approval
 	approvalWorkerColor string // Teammate color
 	approvalMode        ApprovalMode
+	approvalSelected    int // 0=Approve, 1=ApproveAll, 2=Reject
 
 	envLabel  string
 	agentMode AgentMode
@@ -128,8 +129,20 @@ type Model struct {
 	subagentProgress  []string // tool call progress lines for box display
 
 	// Exit confirmation
-	exitPending     bool      // true when waiting for 2nd Ctrl+C
+	exitPending     bool      // true when quit dialog is showing
 	exitWarningTime time.Time // when the warning was shown
+	exitSelected    int       // 0=Yes, 1=No (default No for safety)
+
+	// Copy notice
+	copyNotice string
+
+	// Mouse text selection state
+	mouseSelecting bool // true while dragging to select
+	mouseStartX    int  // viewport-relative X where selection started
+	mouseStartY    int  // viewport-relative Y where selection started
+	mouseEndX      int  // current drag endpoint X
+	mouseEndY      int  // current drag endpoint Y
+	hasSelection   bool // true when valid selection exists (after drag)
 
 	// Team state
 	teamState TeamViewState
@@ -152,15 +165,17 @@ func (i dirItem) Description() string { return i.desc }
 func (i dirItem) FilterValue() string { return i.title }
 
 type modelItem struct {
-	provider string
-	model    string
-	title    string
-	desc     string
+	provider  string
+	model     string
+	title     string
+	desc      string
+	isCurrent bool // currently active model
+	isAction  bool // action item (e.g. "Add New Model")
 }
 
 func (i modelItem) Title() string       { return i.title }
 func (i modelItem) Description() string { return i.desc }
-func (i modelItem) FilterValue() string { return i.title }
+func (i modelItem) FilterValue() string { return i.provider + "/" + i.model + " " + i.title }
 
 // settingItem is used for the /setting menu
 type settingItem struct {
@@ -239,7 +254,7 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 			lipgloss.NewStyle().Foreground(colorText).PaddingLeft(2).Render("📁 I can read, write, and edit files in your project"),
 			lipgloss.NewStyle().Foreground(colorText).PaddingLeft(2).Render("⚡ I can execute shell commands for you"),
 			"",
-			lipgloss.NewStyle().Foreground(colorMuted).PaddingLeft(2).Render("Ctrl+P: toggle Agent/Plan mode  │  Ctrl+A: toggle approval  │  /compact /bg /ssh"),
+			lipgloss.NewStyle().Foreground(colorMuted).PaddingLeft(2).Render("Ctrl+P: Plan  │  Ctrl+A: Approval  │  Ctrl+L: Model  │  Drag: Select & Copy"),
 			"",
 		}
 	}
@@ -378,6 +393,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, func() tea.Msg { return tea.ReadClipboard() })
 			return m, tea.Batch(cmds...)
 		}
+
+		// Text selection: handle left-click drag in viewport
+		if click, ok := msg.(tea.MouseClickMsg); ok && click.Button == tea.MouseLeft && m.ready {
+			if !m.pickingSession && !m.showingSetting && !m.pickingSSHAlias && !m.pickingModel && m.sshStep != 3 && !m.approvalPending && !m.exitPending {
+				m.handleMouseClick(click.X, click.Y)
+			}
+		}
+		if motion, ok := msg.(tea.MouseMotionMsg); ok && m.mouseSelecting {
+			m.handleMouseDrag(motion.X, motion.Y)
+			return m, tea.Batch(cmds...)
+		}
+		if release, ok := msg.(tea.MouseReleaseMsg); ok && m.mouseSelecting {
+			if cmd := m.handleMouseRelease(release.X, release.Y); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return m, tea.Batch(cmds...)
+		}
+
 		if m.pickingSession {
 			var cmd tea.Cmd
 			m.sessionPicker, cmd = m.sessionPicker.Update(msg)
@@ -409,6 +442,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Tool approval dialog handling
 		if m.approvalPending {
 			switch msg.String() {
+			case "left":
+				if m.approvalSelected > 0 {
+					m.approvalSelected--
+				}
+				return m, tea.Batch(cmds...)
+			case "right", "tab":
+				if m.approvalSelected < 2 {
+					m.approvalSelected++
+				}
+				return m, tea.Batch(cmds...)
+			case "enter", " ":
+				switch m.approvalSelected {
+				case 0: // Approve once
+					m.approvalPending = false
+					if m.approvalRespChan != nil {
+						m.approvalRespChan <- ToolApprovalResponse{Approved: true, Mode: ModeManual}
+					}
+				case 1: // Approve all
+					m.approvalPending = false
+					m.approvalMode = ModeAuto
+					if m.approvalRespChan != nil {
+						m.approvalRespChan <- ToolApprovalResponse{Approved: true, Mode: ModeAuto}
+					}
+					select {
+					case autoApproveCh <- true:
+					default:
+					}
+				case 2: // Reject
+					m.approvalPending = false
+					if m.approvalRespChan != nil {
+						m.approvalRespChan <- ToolApprovalResponse{Approved: false, Mode: m.approvalMode}
+					}
+					m.lines = append(m.lines, fmt.Sprintf("   %s %s — user denied this operation",
+						toolErrorStyle.Render("⚠ Rejected:"),
+						toolNameStyle.Render(m.approvalToolName)))
+				}
+				m.textarea.Focus()
+				m.refreshViewport()
+				return m, tea.Batch(cmds...)
 			case "y", "Y":
 				// Event: ApproveOnce - approve current only, stay in MANUAL mode
 				m.approvalPending = false
@@ -752,6 +824,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				selected := m.modelPicker.SelectedItem()
 				if selected != nil {
 					selItem := selected.(modelItem)
+					if selItem.isAction {
+						// "Add New Model" — launch setup wizard
+						m.pickingModel = false
+						m.textarea.Focus()
+						cmds = append(cmds, func() tea.Msg {
+							return AddModelMsg{}
+						})
+						return m, tea.Batch(cmds...)
+					}
+					if selItem.isCurrent {
+						// Already active — just close picker
+						m.pickingModel = false
+						m.textarea.Focus()
+						m.refreshViewport()
+						return m, tea.Batch(cmds...)
+					}
 					cfg, err := config.LoadConfig()
 					if err == nil {
 						cfg.Model = selItem.provider + "/" + selItem.model
@@ -764,7 +852,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 					m.pickingModel = false
-					m.lines = append(m.lines, toolLabelStyle.Render("⚙ Setup:")+" Switched to "+selItem.provider+" - "+selItem.model)
+					m.lines = append(m.lines, fmt.Sprintf("  %s Switched to %s",
+						toolSuccessStyle.Render("✓"),
+						toolNameStyle.Render(selItem.provider+"/"+selItem.model)))
 					m.textarea.Focus()
 					m.refreshViewport()
 					return m, tea.Batch(cmds...)
@@ -830,38 +920,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.inputActive() {
-			// Clear exit warning if user presses any other key
+			// Exit dialog is an overlay — handle its keys first
 			if m.exitPending && msg.String() != "ctrl+c" {
-				m.exitPending = false
-				// Remove warning line (last line if it's the warning)
-				if len(m.lines) > 0 {
-					lastLine := m.lines[len(m.lines)-1]
-					if strings.Contains(lastLine, "Press Ctrl+C again") {
-						m.lines = m.lines[:len(m.lines)-1]
-						m.refreshViewport()
+				switch msg.String() {
+				case "left", "right", "tab":
+					m.exitSelected = 1 - m.exitSelected // toggle 0/1
+					return m, tea.Batch(cmds...)
+				case "enter", " ":
+					m.exitPending = false
+					if m.exitSelected == 0 {
+						return m, tea.Quit
 					}
+					return m, tea.Batch(cmds...)
+				case "y", "Y":
+					m.exitPending = false
+					return m, tea.Quit
+				case "n", "N", "esc":
+					m.exitPending = false
+					return m, tea.Batch(cmds...)
+				default:
+					m.exitPending = false
 				}
 			}
 
 			switch msg.String() {
 			case "ctrl+c":
-				// Check if already pending (2nd Ctrl+C)
+				// Check if already pending (2nd Ctrl+C = force quit)
 				if m.exitPending {
 					return m, tea.Quit
 				}
-				// Check if agent is running
-				if m.thinking && !m.agentDone {
-					m.exitPending = true
-					m.exitWarningTime = time.Now()
-					m.lines = append(m.lines,
-						lipgloss.NewStyle().Foreground(colorWarning).Bold(true).Render("⚠ Agent is running. Press Ctrl+C again to force quit."))
-					m.refreshViewport()
-					return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
-						return ExitTimeoutMsg{}
-					})
-				}
-				// No task running, quit immediately
-				return m, tea.Quit
+				// Show exit confirmation dialog overlay
+				m.exitPending = true
+				m.exitSelected = 1 // Default to "No" for safety
+				m.exitWarningTime = time.Now()
+				return m, tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
+					return ExitTimeoutMsg{}
+				})
 			case "ctrl+p":
 				// Toggle agent mode: Agent <-> Plan
 				if m.agentMode == ModeNormal {
@@ -889,6 +983,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.refreshViewport()
 				return m, tea.Batch(cmds...)
+			case "ctrl+l":
+				// Quick model switch
+				return m.handleModelInput(cmds)
 			case "enter":
 				prompt := strings.TrimSpace(m.textarea.Value())
 				if prompt != "" {
@@ -979,6 +1076,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						modeLabel = "📐 Plan:"
 					}
 
+					m.lines = append(m.lines, "")
 					m.lines = append(m.lines, fmt.Sprintf("%s %s",
 						userLabelStyle.Render(modeLabel), prompt))
 					if m.ready {
@@ -1058,7 +1156,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.refreshViewport()
 					return m, tea.Batch(cmds...)
 				}
+			case "ctrl+y":
+				// Copy last assistant message to clipboard
+				text := m.getLastAssistantText()
+				if text != "" {
+					cmds = append(cmds, tea.SetClipboard(text))
+					cmds = append(cmds, func() tea.Msg {
+						return CopyNoticeMsg{Message: "Copied to clipboard"}
+					})
+					cmds = append(cmds, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+						return CopyNoticeTimeoutMsg{}
+					}))
+				}
+				return m, tea.Batch(cmds...)
 			case "escape":
+				// Clear text selection if active
+				if m.hasSelection {
+					m.clearSelection()
+					return m, tea.Batch(cmds...)
+				}
 				// Team: exit teammate view, return to leader
 				if m.teamState.ViewMode == TeamViewTeammate {
 					m.exitTeammateView()
@@ -1077,19 +1193,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Batch(cmds...)
 		}
-		// Agent running — only ctrl+c
-		if msg.String() == "ctrl+c" {
-			// Check if already pending (2nd Ctrl+C)
-			if m.exitPending {
+		// Agent running — handle exit dialog or ctrl+c
+		if m.exitPending {
+			switch msg.String() {
+			case "ctrl+c":
 				return m, tea.Quit
+			case "left", "right", "tab":
+				m.exitSelected = 1 - m.exitSelected
+				return m, tea.Batch(cmds...)
+			case "enter", " ":
+				m.exitPending = false
+				if m.exitSelected == 0 {
+					return m, tea.Quit
+				}
+				return m, tea.Batch(cmds...)
+			case "y", "Y":
+				m.exitPending = false
+				return m, tea.Quit
+			case "n", "N", "esc":
+				m.exitPending = false
+				return m, tea.Batch(cmds...)
+			default:
+				m.exitPending = false
 			}
-			// First Ctrl+C - show warning
+		} else if msg.String() == "ctrl+c" {
 			m.exitPending = true
+			m.exitSelected = 1 // Default to "No"
 			m.exitWarningTime = time.Now()
-			m.lines = append(m.lines,
-				lipgloss.NewStyle().Foreground(colorWarning).Bold(true).Render("⚠ Agent is running. Press Ctrl+C again to force quit."))
-			m.refreshViewport()
-			return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+			return m, tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
 				return ExitTimeoutMsg{}
 			})
 		}
@@ -1184,6 +1315,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, e := range msg.Entries {
 			switch e.Type {
 			case string(session.EntryUser):
+				m.lines = append(m.lines, "")
 				m.lines = append(m.lines, fmt.Sprintf("%s %s",
 					userLabelStyle.Render("👤 You:"), e.Content))
 			case string(session.EntryAssistant):
@@ -1194,27 +1326,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							rendered = md
 						}
 					}
+					m.lines = append(m.lines, "")
 					m.lines = append(m.lines, assistantLabelStyle.Render("🤖 Assistant:"))
 					m.lines = append(m.lines, rendered)
 				}
 			case string(session.EntryToolCall):
-				m.lines = append(m.lines, fmt.Sprintf("%s %s %s",
-					toolLabelStyle.Render("🔧 Tool:"),
+				icon := toolIconSuccess
+				if e.Error != "" {
+					icon = toolIconError
+				}
+				m.lines = append(m.lines, fmt.Sprintf("  %s %s %s",
+					icon,
 					toolNameStyle.Render(e.Name),
 					toolArgsStyle.Render(truncate(sanitize(e.Args), 100)),
 				))
 			case string(session.EntryToolResult):
 				if e.Error != "" {
-					m.lines = append(m.lines, fmt.Sprintf("   %s %s",
-						toolErrorStyle.Render("✗ Error:"),
-						toolResultStyle.Render(truncate(sanitize(e.Error), 200))))
+					m.lines = append(m.lines, formatToolResultBody(e.Name, "", fmt.Errorf("%s", e.Error), m.width)...)
 				} else {
 					m.lines = append(m.lines, formatToolResult(e.Name, e.Output, m.width)...)
 				}
 			}
 		}
 		m.lines = append(m.lines, "")
-		m.lines = append(m.lines, divider(m.width-4))
 		if m.ready {
 			m.viewport.SetHeight(m.calcViewportHeight(true))
 			m.viewport.SetContent(m.renderContent())
@@ -1291,6 +1425,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case UserPromptMsg:
+		m.lines = append(m.lines, "")
 		m.lines = append(m.lines, fmt.Sprintf("%s %s",
 			userLabelStyle.Render("👤 You:"), sanitize(msg.Prompt)))
 		m.refreshViewport()
@@ -1304,8 +1439,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.flushText()
 		m.pendingTool = msg.Name
 		argsDisplay := formatToolArgs(msg.Args)
-		m.lines = append(m.lines, fmt.Sprintf("%s %s %s",
-			toolLabelStyle.Render("🔧 Tool:"),
+		// Tool call header with status icon
+		m.lines = append(m.lines, fmt.Sprintf("  %s %s %s",
+			toolIconRunning,
 			toolNameStyle.Render(msg.Name),
 			toolArgsStyle.Render(argsDisplay),
 		))
@@ -1316,11 +1452,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.thinking = true
 		m.pendingTool = ""
 		if msg.Err != nil {
-			m.lines = append(m.lines, fmt.Sprintf("   %s %s",
-				toolErrorStyle.Render("✗ Error:"),
-				toolResultStyle.Render(truncate(sanitize(msg.Err.Error()), maxToolOutputLen))))
+			// Replace the running icon with error icon on the last tool line
+			m.replaceLastToolIcon(toolIconError)
+			m.lines = append(m.lines, formatToolResultBody(msg.Name, "", msg.Err, m.width)...)
 		} else {
-			m.lines = append(m.lines, formatToolResult(msg.Name, sanitize(msg.Output), m.width)...)
+			// Replace the running icon with success icon
+			m.replaceLastToolIcon(toolIconSuccess)
+			m.lines = append(m.lines, formatToolResultBody(msg.Name, sanitize(msg.Output), nil, m.width)...)
 		}
 		m.refreshViewport()
 		cmds = append(cmds, m.spinner.Tick)
@@ -1338,7 +1476,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lines = append(m.lines, errorStyle.Render("Error: "+msg.Err.Error()))
 		}
 		m.lines = append(m.lines, "")
-		m.lines = append(m.lines, divider(m.width-4))
 		m.agentDone = true
 		m.textarea.Focus()
 		if m.ready {
@@ -1364,6 +1501,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.approvalIsExternal = msg.IsExternal
 		m.approvalWorkerName = msg.WorkerName
 		m.approvalWorkerColor = msg.WorkerColor
+		m.approvalSelected = 0 // Default to "Approve"
 		m.textarea.Blur()
 		m.refreshViewport()
 
@@ -1593,35 +1731,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 
 	case ExitTimeoutMsg:
-		// Clear exit warning after 2s if still pending
-		if m.exitPending && time.Since(m.exitWarningTime) >= 2*time.Second {
+		// Clear exit confirmation after 5s if still pending
+		if m.exitPending && time.Since(m.exitWarningTime) >= 5*time.Second {
 			m.exitPending = false
-			// Remove warning line (last line if it's the warning)
-			if len(m.lines) > 0 {
-				lastLine := m.lines[len(m.lines)-1]
-				if strings.Contains(lastLine, "Press Ctrl+C again") {
-					m.lines = m.lines[:len(m.lines)-1]
-					m.refreshViewport()
-				}
-			}
 		}
+
+	case CopyNoticeMsg:
+		m.copyNotice = msg.Message
+		m.refreshViewport()
+
+	case CopyNoticeTimeoutMsg:
+		m.copyNotice = ""
+		m.refreshViewport()
 
 	case tea.InterruptMsg:
 		// Handle ctrl+c from non-TTY / signal handler path.
 		if m.exitPending {
 			return m, tea.Quit
 		}
+		m.exitPending = true
+		m.exitSelected = 1
+		m.exitWarningTime = time.Now()
+		quitButtons := buttonGroup([]buttonOpts{
+			{text: " Yes ", selected: false},
+			{text: " No ", selected: true},
+		}, "  ")
+		hint := ""
 		if m.thinking && !m.agentDone {
-			m.exitPending = true
-			m.exitWarningTime = time.Now()
-			m.lines = append(m.lines,
-				lipgloss.NewStyle().Foreground(colorWarning).Bold(true).Render("⚠ Agent is running. Press Ctrl+C again to force quit."))
-			m.refreshViewport()
-			return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
-				return ExitTimeoutMsg{}
-			})
+			hint = "  " + lipgloss.NewStyle().Foreground(colorMuted).Italic(true).Render("(agent is running)")
 		}
-		return m, tea.Quit
+		m.lines = append(m.lines, fmt.Sprintf("  %s  %s%s",
+			lipgloss.NewStyle().Foreground(colorWarning).Bold(true).Render("Quit?"),
+			quitButtons, hint))
+		m.refreshViewport()
+		return m, tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
+			return ExitTimeoutMsg{}
+		})
 
 	}
 
@@ -1711,6 +1856,10 @@ func (m Model) View() tea.View {
 		return m.newView(m.approvalDialogView())
 	}
 
+	if m.exitPending {
+		return m.newView(m.exitDialogView())
+	}
+
 	headerText := "🚀 Little Jack — Coding Assistant  |  "
 	if m.envLabel == "Local" || m.envLabel == "local" || m.envLabel == "" {
 		headerText += "🖥️  Env: Local"
@@ -1748,7 +1897,11 @@ func (m Model) View() tea.View {
 		m.viewport.SetContent(strings.TrimRight(m.renderContent(), "\n"))
 	}
 
-	parts := []string{header, headerLine, m.viewport.View()}
+	vpView := m.viewport.View()
+	if m.hasSelection || m.mouseSelecting {
+		vpView = m.applySelectionHighlight(vpView)
+	}
+	parts := []string{header, headerLine, vpView}
 	if teamPanel != "" {
 		parts = append(parts, teamPanel)
 	}
@@ -1768,6 +1921,51 @@ func (m *Model) refreshViewport() {
 
 // --- Helpers ---
 
+// replaceLastToolIcon replaces the status icon on the last tool call line.
+func (m *Model) replaceLastToolIcon(newIcon string) {
+	for i := len(m.lines) - 1; i >= 0; i-- {
+		line := m.lines[i]
+		if strings.Contains(line, toolIconRunning) {
+			m.lines[i] = strings.Replace(line, toolIconRunning, newIcon, 1)
+			return
+		}
+		if strings.Contains(line, toolIconPending) {
+			m.lines[i] = strings.Replace(line, toolIconPending, newIcon, 1)
+			return
+		}
+	}
+}
+
+// getLastAssistantText extracts the last assistant response text from lines.
+func (m *Model) getLastAssistantText() string {
+	// If we have streaming text, that's the latest
+	if m.currentText.Len() > 0 {
+		return m.currentText.String()
+	}
+	// Scan backwards for the last "🤖 Assistant:" label, collect text until next label
+	for i := len(m.lines) - 1; i >= 0; i-- {
+		if strings.Contains(m.lines[i], "🤖 Assistant:") {
+			var textLines []string
+			for j := i + 1; j < len(m.lines); j++ {
+				line := m.lines[j]
+				// Stop at next role label or tool call
+				if strings.Contains(line, "👤 You:") ||
+					strings.Contains(line, "🤖 Assistant:") ||
+					strings.Contains(line, toolIconRunning) ||
+					strings.Contains(line, toolIconSuccess) ||
+					strings.Contains(line, toolIconError) {
+					break
+				}
+				if line != "" {
+					textLines = append(textLines, line)
+				}
+			}
+			return strings.Join(textLines, "\n")
+		}
+	}
+	return ""
+}
+
 func (m *Model) flushText() {
 	text := m.currentText.String()
 	if text == "" {
@@ -1780,6 +1978,7 @@ func (m *Model) flushText() {
 			rendered = md
 		}
 	}
+	m.lines = append(m.lines, "")
 	m.lines = append(m.lines, assistantLabelStyle.Render("🤖 Assistant:"))
 	m.lines = append(m.lines, rendered)
 }
@@ -1791,6 +1990,7 @@ func (m *Model) renderContent() string {
 		sb.WriteString("\n")
 	}
 	if m.currentText.Len() > 0 {
+		sb.WriteString("\n")
 		sb.WriteString(assistantLabelStyle.Render("🤖 Assistant:"))
 		sb.WriteString("\n")
 		sb.WriteString(m.currentText.String())
