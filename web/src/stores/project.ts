@@ -2,6 +2,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Project } from '@/types/api'
+import { api } from '@/composables/api'
 
 const STORAGE_KEY = 'jcode_projects'
 const ACTIVE_KEY = 'jcode_active_project'
@@ -55,6 +56,34 @@ export const useProjectStore = defineStore('project', () => {
     localStorage.setItem(ACTIVE_KEY, id)
   }
 
+  const switching = ref(false)
+  const switchError = ref('')
+
+  async function switchToProject(id: string): Promise<boolean> {
+    const project = projects.value.find((p) => p.id === id)
+    if (!project) return false
+    // If already active, no-op.
+    if (activeId.value === id) return true
+
+    switching.value = true
+    switchError.value = ''
+    try {
+      await api.switchProject(project.path)
+      setActive(id)
+      return true
+    } catch (err: any) {
+      switchError.value = err.message || 'Failed to switch project'
+      return false
+    } finally {
+      switching.value = false
+    }
+  }
+
+  async function openProject(path: string): Promise<boolean> {
+    const proj = addProject(path)
+    return switchToProject(proj.id)
+  }
+
   function ensureCurrentProject(pwd: string) {
     // Auto-create project for current workspace if none exists
     const existing = projects.value.find((p) => p.path === pwd)
@@ -74,9 +103,13 @@ export const useProjectStore = defineStore('project', () => {
     projects,
     activeId,
     activeProject,
+    switching,
+    switchError,
     addProject,
     removeProject,
     setActive,
+    switchToProject,
+    openProject,
     ensureCurrentProject,
     projectName,
   }
