@@ -85,6 +85,11 @@ export const api = {
     const q = path ? `?path=${encodeURIComponent(path)}` : ''
     return request<BrowseResponse>(`/api/browse${q}`)
   },
+  switchProject: (path: string) =>
+    request<{ status: string; pwd: string }>('/api/project/switch', {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    }),
   ptyCreate: () =>
     request<{ id: string }>('/api/pty', { method: 'POST' }),
   ptyList: () =>

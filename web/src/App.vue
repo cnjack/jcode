@@ -78,6 +78,14 @@ function togglePanel(panel: 'terminal' | 'diff') {
   bottomPanel.value = bottomPanel.value === panel ? 'none' : panel
 }
 
+async function onProjectSwitched() {
+  // Refresh all state from the server after project switch.
+  await store.fetchHealth()
+  store.clearChat()
+  store.fetchTodos()
+  store.fetchSessions()
+}
+
 onMounted(async () => {
   await store.fetchHealth()
   store.fetchConfig()
@@ -187,6 +195,6 @@ onMounted(async () => {
     />
 
     <SettingsDialog :open="settingsOpen" @close="settingsOpen = false" />
-    <ProjectSwitcher :open="projectsOpen" @close="projectsOpen = false" />
+    <ProjectSwitcher :open="projectsOpen" @close="projectsOpen = false" @project-switched="onProjectSwitched" />
   </div>
 </template>

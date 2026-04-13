@@ -17,6 +17,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: []
+  projectSwitched: []
 }>()
 
 const projectStore = useProjectStore()
@@ -86,15 +87,21 @@ function handlePathKeyDown(e: KeyboardEvent) {
 
 function selectCurrentPath() {
   if (!browsePath.value) return
-  const proj = projectStore.addProject(browsePath.value)
-  projectStore.setActive(proj.id)
-  showBrowser.value = false
-  emit('close')
+  projectStore.openProject(browsePath.value).then((ok) => {
+    if (ok) {
+      showBrowser.value = false
+      emit('close')
+      emit('projectSwitched')
+    }
+  })
 }
 
-function selectProject(id: string) {
-  projectStore.setActive(id)
-  emit('close')
+async function selectProject(id: string) {
+  const ok = await projectStore.switchToProject(id)
+  if (ok) {
+    emit('close')
+    emit('projectSwitched')
+  }
 }
 
 function deleteProject(id: string) {
@@ -204,7 +211,19 @@ function deleteProject(id: string) {
 
             <!-- Project list mode -->
             <div v-else>
-              <div class="px-3 pb-2 max-h-72 overflow-y-auto">
+              <!-- Switch error -->
+              <div v-if="projectStore.switchError" class="px-5 py-2">
+                <div class="text-xs text-red-500 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                  {{ projectStore.switchError }}
+                </div>
+              </div>
+
+              <!-- Switching overlay -->
+              <div v-if="projectStore.switching" class="px-3 py-6 text-center text-xs text-stone-400 animate-pulse">
+                Switching project...
+              </div>
+
+              <div v-else class="px-3 pb-2 max-h-72 overflow-y-auto">
                 <div v-if="projectStore.projects.length === 0" class="text-xs text-stone-400 py-6 text-center">
                   No projects yet
                 </div>

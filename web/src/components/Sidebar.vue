@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { useProjectStore } from '@/stores/project'
 import { api } from '@/composables/api'
@@ -12,6 +12,15 @@ const activeTab = ref<'sessions' | 'files'>('sessions')
 const files = ref<FileItem[]>([])
 const currentPath = ref('')
 const contextMenuId = ref<string | null>(null)
+
+// Refresh files when project (pwd) changes.
+watch(() => store.pwd, () => {
+  currentPath.value = ''
+  files.value = []
+  if (activeTab.value === 'files') {
+    loadFiles()
+  }
+})
 
 const emit = defineEmits<{
   openFile: [path: string, content: string]

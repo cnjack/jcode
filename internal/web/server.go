@@ -61,48 +61,53 @@ type Server struct {
 	// Accepts provider and model names so the caller can switch models.
 	createAgent func(providerName, modelName string) (*adk.ChatModelAgent, error)
 
+	// switchProject changes the working directory and rebuilds the agent.
+	switchProject func(newPwd string) (*adk.ChatModelAgent, *session.Recorder, error)
+
 	// PTY manager for terminal sessions.
 	ptyMgr *ptyManager
 }
 
 // ServerConfig holds the configuration for creating a new Server.
 type ServerConfig struct {
-	Port         int
-	Host         string
-	Pwd          string
-	Agent        *adk.ChatModelAgent
-	CreateAgent  func(providerName, modelName string) (*adk.ChatModelAgent, error)
-	TodoStore    *tools.TodoStore
-	Recorder     *session.Recorder
-	Tracer       *telemetry.LangfuseTracer
-	Env          *tools.Env
-	ProviderName string
-	ModelName    string
-	Config       *config.Config
-	Registry     *model.ModelRegistry
+	Port          int
+	Host          string
+	Pwd           string
+	Agent         *adk.ChatModelAgent
+	CreateAgent   func(providerName, modelName string) (*adk.ChatModelAgent, error)
+	SwitchProject func(newPwd string) (*adk.ChatModelAgent, *session.Recorder, error)
+	TodoStore     *tools.TodoStore
+	Recorder      *session.Recorder
+	Tracer        *telemetry.LangfuseTracer
+	Env           *tools.Env
+	ProviderName  string
+	ModelName     string
+	Config        *config.Config
+	Registry      *model.ModelRegistry
 }
 
 // NewServer creates a new web server.
 func NewServer(cfg *ServerConfig) *Server {
 	h := handler.NewWebHandler()
 	return &Server{
-		port:         cfg.Port,
-		host:         cfg.Host,
-		pwd:          cfg.Pwd,
-		handler:      h,
-		broker:       NewSSEBroker(),
-		agent:        cfg.Agent,
-		createAgent:  cfg.CreateAgent,
-		todoStore:    cfg.TodoStore,
-		recorder:     cfg.Recorder,
-		tracer:       cfg.Tracer,
-		env:          cfg.Env,
-		providerName: cfg.ProviderName,
-		modelName:    cfg.ModelName,
-		mode:         "build",
-		cfg:          cfg.Config,
-		registry:     cfg.Registry,
-		ptyMgr:       newPTYManager(),
+		port:          cfg.Port,
+		host:          cfg.Host,
+		pwd:           cfg.Pwd,
+		handler:       h,
+		broker:        NewSSEBroker(),
+		agent:         cfg.Agent,
+		createAgent:   cfg.CreateAgent,
+		switchProject: cfg.SwitchProject,
+		todoStore:     cfg.TodoStore,
+		recorder:      cfg.Recorder,
+		tracer:        cfg.Tracer,
+		env:           cfg.Env,
+		providerName:  cfg.ProviderName,
+		modelName:     cfg.ModelName,
+		mode:          "build",
+		cfg:           cfg.Config,
+		registry:      cfg.Registry,
+		ptyMgr:        newPTYManager(),
 	}
 }
 
@@ -138,6 +143,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/mcp", s.handleListMCP)
 	mux.HandleFunc("POST /api/mcp/{name}/toggle", s.handleToggleMCP)
 	mux.HandleFunc("GET /api/browse", s.handleBrowse)
+	mux.HandleFunc("POST /api/project/switch", s.handleSwitchProject)
 	mux.HandleFunc("POST /api/pty", s.handleCreatePTY)
 	mux.HandleFunc("GET /api/pty", s.handleListPTY)
 	mux.HandleFunc("DELETE /api/pty/{id}", s.handleKillPTY)
@@ -538,11 +544,13 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
 	dir := r.URL.Query().Get("path")
 	if dir == "" {
 		dir = s.pwd
+	} else if !filepath.IsAbs(dir) {
+		dir = filepath.Join(s.pwd, dir)
 	}
 
 	// Prevent path traversal.
-	abs, err := filepath.Abs(dir)
-	if err != nil || !strings.HasPrefix(abs, s.pwd) {
+	abs := filepath.Clean(dir)
+	if !strings.HasPrefix(abs, s.pwd) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
 		return
 	}
@@ -908,6 +916,75 @@ func (s *Server) handleKillPTY(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePTYWebSocket(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	s.ptyMgr.serveWS(w, r, id)
+}
+
+func (s *Server) handleSwitchProject(w http.ResponseWriter, r *http.Request) {
+	if s.running.Load() {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "agent is running, cannot switch project",
+		})
+		return
+	}
+	if s.switchProject == nil {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": "project switching is not supported",
+		})
+		return
+	}
+
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if req.Path == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path is required"})
+		return
+	}
+
+	// Validate path exists and is a directory.
+	info, err := os.Stat(req.Path)
+	if err != nil || !info.IsDir() {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path does not exist or is not a directory"})
+		return
+	}
+
+	// Kill all PTY sessions (they were in the old directory).
+	s.ptyMgr.closeAll()
+
+	// Call the switchProject callback to rebuild env, prompt, agent.
+	ag, rec, err := s.switchProject(req.Path)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": fmt.Sprintf("failed to switch project: %v", err),
+		})
+		return
+	}
+
+	s.mu.Lock()
+	s.pwd = req.Path
+	s.agent = ag
+	s.recorder = rec
+	s.history = nil
+	s.mu.Unlock()
+
+	// Reset todos.
+	s.todoStore.Update(nil)
+
+	// Broadcast project change to SSE clients.
+	s.broker.Broadcast(SSEEvent{
+		Event: "project_switched",
+		Data: map[string]string{
+			"pwd": req.Path,
+		},
+	})
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"pwd":    req.Path,
+	})
 }
 
 // --- Helpers ---
