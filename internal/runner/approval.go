@@ -7,33 +7,31 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
-
-	"github.com/cnjack/jcode/internal/tui"
+	"github.com/cnjack/jcode/internal/handler"
 )
 
 // ApprovalState manages whether tool calls require interactive user approval.
 type ApprovalState struct {
-	p        *tea.Program
-	mode     tui.ApprovalMode // Current approval mode (replaces approvedSession)
-	workpath string           // Current working directory for path detection
+	h        handler.AgentEventHandler
+	mode     handler.ApprovalMode // Current approval mode
+	workpath string               // Current working directory for path detection
 }
 
 // NewApprovalState creates a new ApprovalState with the given workpath.
 func NewApprovalState(workpath string) *ApprovalState {
 	return &ApprovalState{
-		mode:     tui.ModeManual, // Default to manual approval
+		mode:     handler.ModeManual, // Default to manual approval
 		workpath: workpath,
 	}
 }
 
-// SetProgram stores the TUI program used to send approval-request messages.
-func (s *ApprovalState) SetProgram(p *tea.Program) {
-	s.p = p
+// SetHandler stores the handler used to send approval-request messages.
+func (s *ApprovalState) SetHandler(h handler.AgentEventHandler) {
+	s.h = h
 }
 
 // SetMode sets the approval mode (used for external mode changes).
-func (s *ApprovalState) SetMode(mode tui.ApprovalMode) {
+func (s *ApprovalState) SetMode(mode handler.ApprovalMode) {
 	s.mode = mode
 }
 
@@ -43,7 +41,7 @@ func (s *ApprovalState) SetWorkpath(path string) {
 }
 
 // GetMode returns the current approval mode.
-func (s *ApprovalState) GetMode() tui.ApprovalMode {
+func (s *ApprovalState) GetMode() handler.ApprovalMode {
 	return s.mode
 }
 
@@ -51,9 +49,9 @@ func (s *ApprovalState) GetMode() tui.ApprovalMode {
 // This is kept for backward compatibility with the channel-based mode sync.
 func (s *ApprovalState) SetSessionApproval(enabled bool) {
 	if enabled {
-		s.mode = tui.ModeAuto
+		s.mode = handler.ModeAuto
 	} else {
-		s.mode = tui.ModeManual
+		s.mode = handler.ModeManual
 	}
 }
 
@@ -62,7 +60,7 @@ func (s *ApprovalState) SetSessionApproval(enabled bool) {
 // For everything else it sends a TUI prompt and waits for the user's answer.
 func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs string) (bool, error) {
 	// State machine: AUTO mode passes all operations directly
-	if s.mode == tui.ModeAuto {
+	if s.mode == handler.ModeAuto {
 		return true, nil
 	}
 
@@ -134,30 +132,26 @@ func (s *ApprovalState) requestUserApproval(ctx context.Context, toolName, toolA
 
 // requestUserApprovalWithWorker handles approval with optional worker identity
 func (s *ApprovalState) requestUserApprovalWithWorker(ctx context.Context, toolName, toolArgs string, isExternal bool, workerName, workerColor string) (bool, error) {
-	if s.p == nil {
-		return false, fmt.Errorf("TUI program not initialized")
+	if s.h == nil {
+		return false, fmt.Errorf("event handler not initialized")
 	}
 
-	respCh := make(chan tui.ToolApprovalResponse, 1)
-	s.p.Send(tui.ToolApprovalRequestMsg{
-		Name:        toolName,
-		Args:        toolArgs,
-		Resp:        respCh,
+	resp, err := s.h.RequestApproval(ctx, handler.ApprovalRequest{
+		ToolName:    toolName,
+		ToolArgs:    toolArgs,
 		IsExternal:  isExternal,
 		WorkerName:  workerName,
 		WorkerColor: workerColor,
 	})
-
-	select {
-	case resp := <-respCh:
-		// State transition: update mode based on user choice
-		if resp.Approved {
-			s.mode = resp.Mode // May stay MANUAL or switch to AUTO
-		}
-		return resp.Approved, nil
-	case <-ctx.Done():
-		return false, ctx.Err()
+	if err != nil {
+		return false, err
 	}
+
+	// State transition: update mode based on user choice
+	if resp.Approved {
+		s.mode = resp.Mode
+	}
+	return resp.Approved, nil
 }
 
 // NewTeammateApprovalFunc creates an approval function for a teammate that includes
@@ -165,7 +159,7 @@ func (s *ApprovalState) requestUserApprovalWithWorker(ctx context.Context, toolN
 func (s *ApprovalState) NewTeammateApprovalFunc(workerName, workerColor string) func(ctx context.Context, toolName, toolArgs string) (bool, error) {
 	return func(ctx context.Context, toolName, toolArgs string) (bool, error) {
 		// Same logic as RequestApproval, but with worker badge.
-		if s.mode == tui.ModeAuto {
+		if s.mode == handler.ModeAuto {
 			return true, nil
 		}
 

@@ -5,26 +5,25 @@ import (
 	"io"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/handler"
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/telemetry"
 	"github.com/cnjack/jcode/internal/tools"
-	"github.com/cnjack/jcode/internal/tui"
 )
 
 // Run executes the agent for a single turn, wrapping the response with a
 // Langfuse trace when a tracer is present, enforcing todo-completion guards,
-// and sending token-usage updates to the TUI when done.
+// and sending token-usage updates to the handler when done.
 func Run(
 	ctx context.Context,
 	ag *adk.ChatModelAgent,
 	messages []adk.Message,
-	p *tea.Program,
+	h handler.AgentEventHandler,
 	rec *session.Recorder,
 	todoStore *tools.TodoStore,
 	tracer *telemetry.LangfuseTracer,
@@ -32,7 +31,7 @@ func Run(
 	if tracer != nil {
 		ctx = tracer.WithNewTrace(ctx, "coding_agent")
 	}
-	resp := runInner(ctx, ag, messages, p, rec, todoStore)
+	resp := runInner(ctx, ag, messages, h, rec, todoStore)
 
 	// Completion guard: if the agent finished but there are still incomplete
 	// todos, re-run with a reminder so nothing is left behind.
@@ -42,23 +41,23 @@ func Run(
 			break
 		}
 		reminder := todoStore.IncompleteSummary()
-		p.Send(tui.AgentTextMsg{Text: "\n⚠️ Incomplete todos detected, continuing...\n"})
+		h.OnAgentText("\n⚠️ Incomplete todos detected, continuing...\n")
 		messages = append(messages, &schema.Message{Role: schema.Assistant, Content: resp})
 		messages = append(messages, schema.UserMessage(reminder))
-		extra := runInner(ctx, ag, messages, p, rec, todoStore)
+		extra := runInner(ctx, ag, messages, h, rec, todoStore)
 		resp += extra
 	}
 
 	// Send token usage update before signalling done.
 	promptTokens, completionTokens, totalTokens := internalmodel.GetTokenUsage()
-	p.Send(tui.TokenUpdateMsg{
+	h.OnTokenUpdate(handler.TokenUsage{
 		PromptTokens:      promptTokens,
 		CompletionTokens:  completionTokens,
 		TotalTokens:       totalTokens,
 		ModelContextLimit: modelContextLimit(),
 	})
 
-	p.Send(tui.AgentDoneMsg{})
+	h.OnAgentDone(nil)
 	return resp
 }
 
@@ -66,7 +65,7 @@ func runInner(
 	ctx context.Context,
 	ag *adk.ChatModelAgent,
 	messages []adk.Message,
-	p *tea.Program,
+	h handler.AgentEventHandler,
 	rec *session.Recorder,
 	todoStore *tools.TodoStore,
 ) string {
@@ -89,7 +88,7 @@ func runInner(
 		eventCount++
 		if event.Err != nil {
 			config.Logger().Printf("[runner] event error: %v", event.Err)
-			p.Send(tui.AgentDoneMsg{Err: event.Err})
+			h.OnAgentDone(event.Err)
 			return assistantText.String()
 		}
 		if event.Output == nil || event.Output.MessageOutput == nil {
@@ -104,9 +103,9 @@ func runInner(
 			toolName := mo.ToolName
 			if !mo.IsStreaming && mo.Message != nil {
 				output := mo.Message.Content
-				p.Send(tui.ToolResultMsg{Name: toolName, Output: output})
+				h.OnToolResult(toolName, output, nil)
 				if toolName == "todowrite" || toolName == "todoread" {
-					p.Send(tui.TodoUpdateMsg{})
+					h.OnTodoUpdate()
 				}
 				if rec != nil {
 					rec.RecordToolResult(toolName, output, nil)
@@ -121,7 +120,7 @@ func runInner(
 					}
 					if err != nil {
 						toolErr = err
-						p.Send(tui.ToolResultMsg{Name: toolName, Err: err})
+						h.OnToolResult(toolName, "", err)
 						break
 					}
 					if chunk != nil {
@@ -129,9 +128,9 @@ func runInner(
 					}
 				}
 				if toolErr == nil {
-					p.Send(tui.ToolResultMsg{Name: toolName, Output: sb.String()})
+					h.OnToolResult(toolName, sb.String(), nil)
 					if toolName == "todowrite" || toolName == "todoread" {
-						p.Send(tui.TodoUpdateMsg{})
+						h.OnTodoUpdate()
 					}
 					if rec != nil {
 						rec.RecordToolResult(toolName, sb.String(), nil)
@@ -162,7 +161,7 @@ func runInner(
 				if len(chunk.ToolCalls) > 0 {
 					for _, tc := range chunk.ToolCalls {
 						if tc.Function.Name != "" {
-							p.Send(tui.ToolCallMsg{Name: tc.Function.Name, Args: tc.Function.Arguments})
+							h.OnToolCall(tc.Function.Name, tc.Function.Arguments)
 							if rec != nil {
 								rec.RecordToolCall(tc.Function.Name, tc.Function.Arguments)
 							}
@@ -171,13 +170,13 @@ func runInner(
 				}
 				if chunk.Content != "" {
 					assistantText.WriteString(chunk.Content)
-					p.Send(tui.AgentTextMsg{Text: chunk.Content})
+					h.OnAgentText(chunk.Content)
 				}
 			}
 		} else if mo.Message != nil {
 			if len(mo.Message.ToolCalls) > 0 {
 				for _, tc := range mo.Message.ToolCalls {
-					p.Send(tui.ToolCallMsg{Name: tc.Function.Name, Args: tc.Function.Arguments})
+					h.OnToolCall(tc.Function.Name, tc.Function.Arguments)
 					if rec != nil {
 						rec.RecordToolCall(tc.Function.Name, tc.Function.Arguments)
 					}
@@ -185,7 +184,7 @@ func runInner(
 			}
 			if mo.Message.Content != "" {
 				assistantText.WriteString(mo.Message.Content)
-				p.Send(tui.AgentTextMsg{Text: mo.Message.Content})
+				h.OnAgentText(mo.Message.Content)
 			}
 		}
 	}

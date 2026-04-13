@@ -20,6 +20,7 @@ import (
 
 	"github.com/cnjack/jcode/internal/agent"
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/handler"
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/prompts"
 	"github.com/cnjack/jcode/internal/runner"
@@ -39,9 +40,13 @@ var (
 )
 
 func main() {
-	// Handle mcp subcommand before standard flag parsing.
+	// Handle subcommands before standard flag parsing.
 	if len(os.Args) > 1 && os.Args[1] == "mcp" {
 		handleMCPSubcommand(os.Args[2:])
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "acp" {
+		handleACPSubcommand()
 		return
 	}
 
@@ -311,7 +316,10 @@ func main() {
 	})
 	// Wire team manager to TUI (message sent later in goroutine).
 	teamManager.SetTuiProgram(p)
-	approvalState.SetProgram(p)
+
+	// Create handler that bridges agent events to the TUI.
+	h := handler.NewTUIHandler(p)
+	approvalState.SetHandler(h)
 
 	// Wire teammate approval handlers — creates per-teammate middleware with worker badge.
 	teamManager.SetHandlersFactory(func(workerName, workerColor string) []adk.ChatModelAgentMiddleware {
@@ -583,7 +591,7 @@ func main() {
 				rec.RecordUser(prompt)
 			}
 			history = append(history, schema.UserMessage(prompt))
-			resp := runner.Run(ctx, ag, history, p, rec, env.TodoStore, langfuseTracer)
+			resp := runner.Run(ctx, ag, history, h, rec, env.TodoStore, langfuseTracer)
 			if resp != "" {
 				history = append(history, &schema.Message{Role: schema.Assistant, Content: resp})
 			}
@@ -681,7 +689,7 @@ func main() {
 					rec.RecordUser(revisePrompt)
 				}
 				history = append(history, schema.UserMessage(revisePrompt))
-				newResp := runner.Run(ctx, ag, history, p, rec, env.TodoStore, langfuseTracer)
+				newResp := runner.Run(ctx, ag, history, h, rec, env.TodoStore, langfuseTracer)
 				if newResp != "" {
 					history = append(history, &schema.Message{Role: schema.Assistant, Content: newResp})
 				}
@@ -715,7 +723,7 @@ func main() {
 				rec.RecordUser(execPrompt)
 			}
 			history = append(history, schema.UserMessage(execPrompt))
-			execResp := runner.Run(ctx, ag, history, p, rec, env.TodoStore, langfuseTracer)
+			execResp := runner.Run(ctx, ag, history, h, rec, env.TodoStore, langfuseTracer)
 			if execResp != "" {
 				history = append(history, &schema.Message{Role: schema.Assistant, Content: execResp})
 			}
@@ -769,7 +777,7 @@ func main() {
 				}
 				history = append(history, schema.UserMessage(userPrompt))
 				history = drainBgNotifications(bgManager, history)
-				resp := runner.Run(ctx, ag, history, p, rec, env.TodoStore, langfuseTracer)
+				resp := runner.Run(ctx, ag, history, h, rec, env.TodoStore, langfuseTracer)
 				if resp != "" {
 					history = append(history, &schema.Message{Role: schema.Assistant, Content: resp})
 				}
@@ -788,7 +796,7 @@ func main() {
 				}
 				history = append(history, schema.UserMessage(pendingPrompt))
 				history = drainBgNotifications(bgManager, history)
-				resp := runner.Run(ctx, ag, history, p, rec, env.TodoStore, langfuseTracer)
+				resp := runner.Run(ctx, ag, history, h, rec, env.TodoStore, langfuseTracer)
 				if resp != "" {
 					history = append(history, &schema.Message{Role: schema.Assistant, Content: resp})
 				}
