@@ -4,12 +4,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/cnjack/jcode/internal/tui"
+	"github.com/cnjack/jcode/internal/handler"
 )
 
 func TestNewApprovalState(t *testing.T) {
 	s := NewApprovalState("/tmp/workdir")
-	if s.mode != tui.ModeManual {
+	if s.mode != handler.ModeManual {
 		t.Errorf("expected default mode to be Manual, got %v", s.mode)
 	}
 }
@@ -50,7 +50,7 @@ func TestIsWithinWorkpath(t *testing.T) {
 
 func TestRequestApproval_AutoMode(t *testing.T) {
 	s := NewApprovalState("/tmp/workdir")
-	s.SetMode(tui.ModeAuto)
+	s.SetMode(handler.ModeAuto)
 
 	ctx := context.Background()
 
