@@ -67,6 +67,20 @@ func truncate(s string, maxLen int) string {
 
 // formatToolResult returns styled output lines depending on the tool name.
 func formatToolResult(toolName, output string, termWidth int) []string {
+	return formatToolResultBody(toolName, output, nil, termWidth)
+}
+
+// formatToolResultBody returns styled output lines for a tool result with optional error.
+func formatToolResultBody(toolName, output string, err error, termWidth int) []string {
+	if err != nil {
+		errText := truncate(sanitize(err.Error()), maxToolOutputLen)
+		return []string{
+			fmt.Sprintf("    %s %s",
+				toolErrorStyle.Render("Error:"),
+				lipgloss.NewStyle().Foreground(colorError).Render(errText)),
+		}
+	}
+
 	switch toolName {
 	case "execute":
 		return formatExecuteOutput(output, termWidth)
@@ -81,11 +95,11 @@ func formatToolResult(toolName, output string, termWidth int) []string {
 	}
 }
 
-// formatDefaultOutput renders tool output in a bordered box, truncating if too many lines.
+// formatDefaultOutput renders tool output with left border, truncating if too many lines.
 func formatDefaultOutput(toolName, output string, termWidth int) []string {
 	output = strings.TrimRight(output, "\n")
 	if output == "" {
-		return []string{fmt.Sprintf("   %s", toolSuccessStyle.Render("✓ Done"))}
+		return nil
 	}
 
 	const maxLines = 6
@@ -108,7 +122,7 @@ func formatDefaultOutput(toolName, output string, termWidth int) []string {
 	if hidden > 0 {
 		boxContent.WriteString("\n")
 		boxContent.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
-			Render(fmt.Sprintf("... (%d more lines)", hidden)))
+			Render(fmt.Sprintf("… %d more lines", hidden)))
 	}
 
 	boxWidth := termWidth - 8
@@ -116,14 +130,11 @@ func formatDefaultOutput(toolName, output string, termWidth int) []string {
 		boxWidth = 30
 	}
 
-	box := outputBoxStyle.Width(boxWidth).Render(boxContent.String())
-	return []string{
-		fmt.Sprintf("   %s", toolSuccessStyle.Render("✓ Done:")),
-		box,
-	}
+	box := toolBodyStyle.Width(boxWidth).Render(boxContent.String())
+	return []string{box}
 }
 
-// formatExecuteOutput shows the last 5 lines of command output in a bordered box.
+// formatExecuteOutput shows the last 5 lines of command output with left border.
 func formatExecuteOutput(output string, termWidth int) []string {
 	const tailLines = 5
 	rawLines := strings.Split(strings.TrimRight(output, "\n"), "\n")
@@ -138,7 +149,7 @@ func formatExecuteOutput(output string, termWidth int) []string {
 	var boxContent strings.Builder
 	if start > 0 {
 		boxContent.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
-			Render(fmt.Sprintf("... (%d lines hidden)", start)))
+			Render(fmt.Sprintf("… %d lines hidden", start)))
 		boxContent.WriteString("\n")
 	}
 	for i, line := range tail {
@@ -153,11 +164,8 @@ func formatExecuteOutput(output string, termWidth int) []string {
 		boxWidth = 30
 	}
 
-	box := outputBoxStyle.Width(boxWidth).Render(boxContent.String())
-	return []string{
-		fmt.Sprintf("   %s", toolSuccessStyle.Render("✓ Output:")),
-		box,
-	}
+	box := toolBodyStyle.Width(boxWidth).Render(boxContent.String())
+	return []string{box}
 }
 
 // formatEditOutput renders the edit result with colored diff lines.
@@ -167,7 +175,7 @@ func formatEditOutput(output string, termWidth int) []string {
 	statusLine := parts[0]
 
 	result := []string{
-		fmt.Sprintf("   %s %s", toolSuccessStyle.Render("✓"), toolResultStyle.Render(statusLine)),
+		fmt.Sprintf("    %s", lipgloss.NewStyle().Foreground(colorDimText).Render(statusLine)),
 	}
 
 	if len(parts) < 2 {
@@ -201,12 +209,12 @@ func formatEditOutput(output string, termWidth int) []string {
 		boxWidth = 30
 	}
 
-	diffBox := outputBoxStyle.Width(boxWidth).Render(strings.TrimRight(diffContent.String(), "\n"))
+	diffBox := toolBodyStyle.Width(boxWidth).Render(strings.TrimRight(diffContent.String(), "\n"))
 	result = append(result, diffBox)
 	return result
 }
 
-// formatSubagentOutput shows the first few lines of subagent output in a bordered box.
+// formatSubagentOutput shows the first few lines of subagent output with left border.
 func formatSubagentOutput(output string, termWidth int) []string {
 	const tailLines = 8
 	rawLines := strings.Split(strings.TrimRight(output, "\n"), "\n")
@@ -228,7 +236,7 @@ func formatSubagentOutput(output string, termWidth int) []string {
 	if hidden > 0 {
 		boxContent.WriteString("\n")
 		boxContent.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
-			Render(fmt.Sprintf("... (%d more lines)", hidden)))
+			Render(fmt.Sprintf("… %d more lines", hidden)))
 	}
 
 	boxWidth := termWidth - 8
@@ -236,11 +244,8 @@ func formatSubagentOutput(output string, termWidth int) []string {
 		boxWidth = 30
 	}
 
-	box := outputBoxStyle.Width(boxWidth).Render(boxContent.String())
-	return []string{
-		fmt.Sprintf("   %s", toolSuccessStyle.Render("✓ Subagent Result:")),
-		box,
-	}
+	box := toolBodyStyle.Width(boxWidth).Render(boxContent.String())
+	return []string{box}
 }
 
 // formatTodoWriteOutput renders todowrite result as a compact single line.

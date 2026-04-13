@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"charm.land/bubbles/v2/list"
@@ -22,45 +23,75 @@ func (m Model) handleModelInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	currentProvider, currentModel := cfg.GetProviderModel()
 	registry := model.NewModelRegistry()
 
+	// Collect providers and sort them for stable ordering
+	providers := cfg.GetProviders()
+	providerNames := make([]string, 0, len(providers))
+	for name := range providers {
+		providerNames = append(providerNames, name)
+	}
+	sort.Strings(providerNames)
+
 	var items []list.Item
-	for provider := range cfg.GetProviders() {
-		// Try loading models from registry
+
+	for _, provider := range providerNames {
 		models := registry.ListProviderModels(provider, false)
 		if len(models) > 0 {
 			for _, rm := range models {
-				desc := "Provider: " + provider
+				isCurrent := provider == currentProvider && rm.ID == currentModel
+
+				// Build rich description with metadata
+				var tags []string
 				if rm.Limit != nil && rm.Limit.Context > 0 {
-					desc += fmt.Sprintf(" · %dk ctx", rm.Limit.Context/1000)
+					tags = append(tags, fmt.Sprintf("%dk ctx", rm.Limit.Context/1000))
 				}
 				if rm.ToolCall {
-					desc += " · tool_call"
+					tags = append(tags, "tools")
 				}
-				if provider == currentProvider && rm.ID == currentModel {
-					desc += " (Current)"
+				if rm.Reasoning {
+					tags = append(tags, "reasoning")
 				}
+				desc := provider
+				if len(tags) > 0 {
+					desc += " · " + strings.Join(tags, " · ")
+				}
+
+				title := rm.ID
+				if isCurrent {
+					title = "★ " + title
+				}
+
 				items = append(items, modelItem{
-					provider: provider,
-					model:    rm.ID,
-					title:    provider + "/" + rm.ID,
-					desc:     desc,
+					provider:  provider,
+					model:     rm.ID,
+					title:     title,
+					desc:      desc,
+					isCurrent: isCurrent,
 				})
 			}
 		} else {
-			// Provider not in registry — show current model only
+			// Provider not in registry — show configured model only
 			if provider == currentProvider {
 				items = append(items, modelItem{
-					provider: provider,
-					model:    currentModel,
-					title:    provider + "/" + currentModel,
-					desc:     "Provider: " + provider + " (Current)",
+					provider:  provider,
+					model:     currentModel,
+					title:     "★ " + currentModel,
+					desc:      provider,
+					isCurrent: true,
 				})
 			}
 		}
 	}
+
+	// Add "Add New Model" option at the end
+	items = append(items, modelItem{
+		title:    "➕ Add New Model…",
+		desc:     "Configure a new provider and model",
+		isAction: true,
+	})
+
 	m.modelPicker.SetItems(items)
 	m.pickingModel = true
 	m.textarea.Blur()
-	m.modelPicker.Title = "Select Model"
 	return m, tea.Batch(cmds...)
 }
 
@@ -116,30 +147,45 @@ func (m Model) settingMenuView() string {
 		h = 24
 	}
 
-	modW, modH := w-8, h-4
-	if modW > 120 {
-		modW = 120
+	contentW := w - 12
+	if contentW > 72 {
+		contentW = 72
+	}
+	if contentW < 30 {
+		contentW = 30
+	}
+	listH := h - 10
+	if listH < 4 {
+		listH = 4
 	}
 
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorPrimary).
-		Padding(0, 1).
-		Width(modW)
+	boxStyle := dialogBoxStyle.Width(contentW)
 
-	headerText := fmt.Sprintf(" %s ", toolNameStyle.Render("⚙ Settings"))
+	headerText := lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).
+		Render("⚙  Settings")
 
-	m.settingMenu.SetSize(modW-6, modH-6)
-	m.settingMenu.Title = "Settings (↑/↓ to navigate, Enter to confirm, Esc to cancel)"
+	// Current model info
+	modelInfo := ""
+	if m.activeProvider != "" {
+		modelInfo = lipgloss.NewStyle().Foreground(colorDimText).
+			Render(fmt.Sprintf("Current: %s/%s", m.activeProvider, m.activeModel))
+	}
+
+	m.settingMenu.SetSize(contentW-4, listH)
+	m.settingMenu.Title = "↑/↓ navigate · Enter confirm · Esc cancel"
 	m.settingMenu.SetShowHelp(false)
-	m.settingMenu.SetShowStatusBar(true)
+	m.settingMenu.SetShowStatusBar(false)
 	m.settingMenu.SetShowPagination(false)
 
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Bold(true).Padding(0, 1).Render(headerText),
-		"",
-		m.settingMenu.View(),
-	)
+	var contentParts []string
+	contentParts = append(contentParts, headerText)
+	if modelInfo != "" {
+		contentParts = append(contentParts, modelInfo)
+	}
+	contentParts = append(contentParts, "")
+	contentParts = append(contentParts, m.settingMenu.View())
+
+	content := lipgloss.JoinVertical(lipgloss.Left, contentParts...)
 
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, boxStyle.Render(content))
 }
@@ -190,30 +236,45 @@ func (m Model) modelPickerView() string {
 		h = 24
 	}
 
-	modW, modH := w-8, h-4
-	if modW > 120 {
-		modW = 120
+	contentW := w - 12
+	if contentW > 72 {
+		contentW = 72
+	}
+	if contentW < 30 {
+		contentW = 30
+	}
+	listH := h - 10
+	if listH < 4 {
+		listH = 4
 	}
 
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorPrimary).
-		Padding(0, 1).
-		Width(modW)
+	boxStyle := dialogBoxStyle.Width(contentW)
 
-	headerText := fmt.Sprintf(" %s ", toolNameStyle.Render("Select Model"))
+	headerText := lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).
+		Render("🔀 Select Model")
 
-	m.modelPicker.SetSize(modW-6, modH-6)
-	m.modelPicker.Title = "Select model (↑/↓ to navigate, Enter to confirm, Esc to cancel)"
+	// Current model info
+	modelInfo := ""
+	if m.activeProvider != "" {
+		modelInfo = lipgloss.NewStyle().Foreground(colorDimText).
+			Render(fmt.Sprintf("Current: %s/%s", m.activeProvider, m.activeModel))
+	}
+
+	m.modelPicker.SetSize(contentW-4, listH)
+	m.modelPicker.Title = "/ filter · ↑/↓ navigate · Enter confirm · Esc cancel"
 	m.modelPicker.SetShowHelp(false)
-	m.modelPicker.SetShowStatusBar(true)
-	m.modelPicker.SetShowPagination(false)
+	m.modelPicker.SetShowStatusBar(false)
+	m.modelPicker.SetShowPagination(true)
 
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Bold(true).Padding(0, 1).Render(headerText),
-		"",
-		m.modelPicker.View(),
-	)
+	var contentParts []string
+	contentParts = append(contentParts, headerText)
+	if modelInfo != "" {
+		contentParts = append(contentParts, modelInfo)
+	}
+	contentParts = append(contentParts, "")
+	contentParts = append(contentParts, m.modelPicker.View())
+
+	content := lipgloss.JoinVertical(lipgloss.Left, contentParts...)
 
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, boxStyle.Render(content))
 }
@@ -273,29 +334,33 @@ func (m Model) approvalDialogView() string {
 		h = 24
 	}
 
-	modW := 60
-	if modW > w-8 {
-		modW = w - 8
+	// Dialog content width (excluding border + padding)
+	contentW := 60
+	if contentW > w-12 {
+		contentW = w - 12
+	}
+	if contentW < 30 {
+		contentW = 30
 	}
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(colorWarning).
 		Padding(1, 2).
-		Width(modW)
+		Width(contentW)
 
 	// Different header based on whether this is external path access
 	var headerText string
 	if m.approvalIsExternal {
-		headerText = toolNameStyle.Render("⚠️ External Path Access")
+		headerText = toolNameStyle.Render("⚠️  External Path Access")
 	} else if m.approvalWorkerName != "" {
 		workerBadge := lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color(m.approvalWorkerColor)).
 			Render("@" + m.approvalWorkerName)
-		headerText = toolNameStyle.Render("⚠️ Teammate Approval: ") + workerBadge
+		headerText = toolNameStyle.Render("⚠️  Teammate Approval: ") + workerBadge
 	} else {
-		headerText = toolNameStyle.Render("⚠️ Tool Approval Required")
+		headerText = toolNameStyle.Render("⚠️  Permission Required")
 	}
 
 	argsDisplay := m.approvalToolArgs
@@ -303,20 +368,86 @@ func (m Model) approvalDialogView() string {
 		argsDisplay = argsDisplay[:200] + "..."
 	}
 
-	// Updated options: [y] once, [a] all, [n] reject
-	optionsText := lipgloss.NewStyle().Foreground(colorMuted).Render(
-		"[y] Approve once  [a] Approve all  [n] Reject")
+	// Tool info with icon
+	toolLine := fmt.Sprintf("%s  %s", toolIconRunning, toolNameStyle.Render(m.approvalToolName))
 
-	content := lipgloss.JoinVertical(lipgloss.Left,
+	// Args in a subtle section
+	argsBox := lipgloss.NewStyle().
+		Foreground(colorDimText).
+		Width(contentW - 4).
+		Render(argsDisplay)
+
+	// Button group — left/right navigation
+	buttons := buttonGroup([]buttonOpts{
+		{text: " Approve ", selected: m.approvalSelected == 0},
+		{text: " Approve All ", selected: m.approvalSelected == 1},
+		{text: " Reject ", selected: m.approvalSelected == 2},
+	}, "  ")
+
+	// Keyboard hints
+	hintText := lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
+		Render("←/→ switch  ·  Enter confirm  ·  y/a/n")
+
+	content := lipgloss.JoinVertical(lipgloss.Center,
 		lipgloss.NewStyle().Bold(true).Render(headerText),
 		"",
-		fmt.Sprintf("Tool: %s", toolNameStyle.Render(m.approvalToolName)),
+		toolLine,
 		"",
-		lipgloss.NewStyle().Foreground(colorMuted).Render("Arguments:"),
-		lipgloss.NewStyle().Foreground(colorText).Render(argsDisplay),
+		argsBox,
 		"",
-		optionsText,
+		buttons,
+		"",
+		hintText,
 	)
+
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, boxStyle.Render(content))
+}
+
+func (m Model) exitDialogView() string {
+	w, h := m.width, m.height
+	if w <= 0 {
+		w = 80
+	}
+	if h <= 0 {
+		h = 24
+	}
+
+	contentW := 48
+	if contentW > w-12 {
+		contentW = w - 12
+	}
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorWarning).
+		Padding(1, 2).
+		Width(contentW)
+
+	headerText := lipgloss.NewStyle().Bold(true).Foreground(colorWarning).
+		Render("⚠️  Quit?")
+
+	var statusText string
+	if m.thinking && !m.agentDone {
+		statusText = lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
+			Render("Agent is still running.")
+	}
+
+	buttons := buttonGroup([]buttonOpts{
+		{text: " Yes ", selected: m.exitSelected == 0},
+		{text: " No ", selected: m.exitSelected == 1},
+	}, "  ")
+
+	hintText := lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
+		Render("←/→ switch  ·  Enter confirm  ·  y/n")
+
+	var parts []string
+	parts = append(parts, headerText)
+	if statusText != "" {
+		parts = append(parts, statusText)
+	}
+	parts = append(parts, "", buttons, "", hintText)
+
+	content := lipgloss.JoinVertical(lipgloss.Center, parts...)
 
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, boxStyle.Render(content))
 }
