@@ -3,12 +3,17 @@ PKG := ./cmd/jcode/
 
 export GOFLAGS := -buildvcs=false
 
-.PHONY: build run doctor version install clean
+.PHONY: build run doctor version install clean build-web
 
-build:
+build-web:
+	@echo "Building frontend..."
+	cd web && (pnpm install --frozen-lockfile 2>/dev/null || pnpm install)
+	cd web && npx vite build
+
+build: build-web
 	go build -o $(BIN) $(PKG)
 
-install:
+install: build-web
 	go install $(PKG)
 
 run:
@@ -22,3 +27,4 @@ version:
 
 clean:
 	rm -f $(BIN)
+	rm -rf internal/web/dist

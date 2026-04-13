@@ -49,6 +49,10 @@ func main() {
 		handleACPSubcommand()
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "web" {
+		handleWebSubcommand(os.Args[2:])
+		return
+	}
 
 	var prompt string
 	flag.StringVar(&prompt, "prompt", "", "The prompt to send to the coding assistant")
