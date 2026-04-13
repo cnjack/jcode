@@ -339,6 +339,59 @@ func addToIndex(project string, meta SessionMeta) error {
 	return os.Rename(tmpPath, indexPath)
 }
 
+// DeleteSession removes a session file and its index entry.
+func DeleteSession(project, uuid string) error {
+	// 1. Remove from index.
+	if err := removeFromIndex(project, uuid); err != nil {
+		return fmt.Errorf("remove index entry: %w", err)
+	}
+	// 2. Delete the JSONL file.
+	dir, err := config.SessionsDir()
+	if err != nil {
+		return err
+	}
+	filePath := filepath.Join(dir, uuid+".json")
+	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("delete session file: %w", err)
+	}
+	return nil
+}
+
+func removeFromIndex(project, uuid string) error {
+	indexPath, err := config.SessionsIndexPath()
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(indexPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var idx sessionIndex
+	if err := json.Unmarshal(data, &idx); err != nil {
+		return err
+	}
+	metas := idx.Sessions[project]
+	filtered := make([]SessionMeta, 0, len(metas))
+	for _, m := range metas {
+		if m.UUID != uuid {
+			filtered = append(filtered, m)
+		}
+	}
+	idx.Sessions[project] = filtered
+	newData, err := json.MarshalIndent(idx, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmpPath := indexPath + ".tmp"
+	if err := os.WriteFile(tmpPath, newData, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, indexPath)
+}
+
 // ListSessions returns all sessions recorded for a given project path, newest last.
 func ListSessions(project string) ([]SessionMeta, error) {
 	indexPath, err := config.SessionsIndexPath()
