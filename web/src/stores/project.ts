@@ -27,10 +27,12 @@ export const useProjectStore = defineStore('project', () => {
     projects.value.find((p) => p.id === activeId.value) || null,
   )
 
-  function addProject(name: string, path: string): Project {
+  function addProject(path: string): Project {
+    // Deduplicate by path
+    const existing = projects.value.find((p) => p.path === path)
+    if (existing) return existing
     const project: Project = {
       id: `proj_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      name,
       path,
       createdAt: Date.now(),
     }
@@ -60,9 +62,12 @@ export const useProjectStore = defineStore('project', () => {
       if (!activeId.value) setActive(existing.id)
       return
     }
-    const name = pwd.split('/').filter(Boolean).pop() || 'workspace'
-    const proj = addProject(name, pwd)
+    const proj = addProject(pwd)
     setActive(proj.id)
+  }
+
+  function projectName(p: Project): string {
+    return p.path.split('/').filter(Boolean).pop() || p.path
   }
 
   return {
@@ -73,5 +78,6 @@ export const useProjectStore = defineStore('project', () => {
     removeProject,
     setActive,
     ensureCurrentProject,
+    projectName,
   }
 })

@@ -1,110 +1,188 @@
 <script setup lang="ts">
-import { ref, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import { api } from '@/composables/api'
+import '@xterm/xterm/css/xterm.css'
 
-interface TerminalEntry {
-  command: string
-  output: string
-  exitCode: number
-  timestamp: number
+const termEl = ref<HTMLDivElement | null>(null)
+const connected = ref(false)
+const sessionId = ref('')
+
+let term: Terminal | null = null
+let fitAddon: FitAddon | null = null
+let ws: WebSocket | null = null
+let resizeObserver: ResizeObserver | null = null
+
+function getWsUrl(ptyId: string): string {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${proto}//${location.host}/api/pty/${encodeURIComponent(ptyId)}/ws`
 }
 
-const history = ref<TerminalEntry[]>([])
-const input = ref('')
-const running = ref(false)
-const outputEl = ref<HTMLDivElement | null>(null)
+async function initTerminal() {
+  if (!termEl.value) return
 
-async function execute() {
-  const cmd = input.value.trim()
-  if (!cmd || running.value) return
-  input.value = ''
-  running.value = true
+  // Create xterm instance
+  term = new Terminal({
+    cursorBlink: true,
+    fontSize: 13,
+    fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, monospace",
+    theme: {
+      background: '#fafaf9',
+      foreground: '#292524',
+      cursor: '#0d9488',
+      selectionBackground: '#d6d3d180',
+      black: '#1c1917',
+      red: '#dc2626',
+      green: '#16a34a',
+      yellow: '#ca8a04',
+      blue: '#2563eb',
+      magenta: '#9333ea',
+      cyan: '#0891b2',
+      white: '#d6d3d1',
+      brightBlack: '#78716c',
+      brightRed: '#ef4444',
+      brightGreen: '#22c55e',
+      brightYellow: '#eab308',
+      brightBlue: '#3b82f6',
+      brightMagenta: '#a855f7',
+      brightCyan: '#06b6d4',
+      brightWhite: '#fafaf9',
+    },
+  })
 
+  fitAddon = new FitAddon()
+  term.loadAddon(fitAddon)
+  term.loadAddon(new WebLinksAddon())
+  term.open(termEl.value)
+  fitAddon.fit()
+
+  // Observe container resizes
+  resizeObserver = new ResizeObserver(() => {
+    fitAddon?.fit()
+    if (ws && ws.readyState === WebSocket.OPEN && term) {
+      ws.send(JSON.stringify({
+        type: 'resize',
+        cols: term.cols,
+        rows: term.rows,
+      }))
+    }
+  })
+  resizeObserver.observe(termEl.value)
+
+  // Create PTY session on backend
   try {
-    const result = await api.exec(cmd)
-    history.value.push({
-      command: cmd,
-      output: result.output,
-      exitCode: result.exit_code,
-      timestamp: Date.now(),
-    })
+    const result = await api.ptyCreate()
+    sessionId.value = result.id
+    connectWS(result.id)
   } catch (err: any) {
-    history.value.push({
-      command: cmd,
-      output: `Error: ${err.message}`,
-      exitCode: -1,
-      timestamp: Date.now(),
-    })
-  } finally {
-    running.value = false
-    await nextTick()
-    if (outputEl.value) {
-      outputEl.value.scrollTop = outputEl.value.scrollHeight
+    term.writeln(`\r\n\x1b[31mFailed to create terminal: ${err.message}\x1b[0m`)
+  }
+}
+
+function connectWS(ptyId: string) {
+  if (!term) return
+
+  const url = getWsUrl(ptyId)
+  ws = new WebSocket(url)
+  ws.binaryType = 'arraybuffer'
+
+  ws.onopen = () => {
+    connected.value = true
+    // Send initial resize
+    ws!.send(JSON.stringify({
+      type: 'resize',
+      cols: term!.cols,
+      rows: term!.rows,
+    }))
+  }
+
+  ws.onmessage = (event) => {
+    if (event.data instanceof ArrayBuffer) {
+      term!.write(new Uint8Array(event.data))
+    } else {
+      term!.write(event.data)
     }
   }
-}
 
-function handleKeyDown(e: KeyboardEvent) {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault()
-    execute()
+  ws.onclose = () => {
+    connected.value = false
+    term?.writeln('\r\n\x1b[33m[Session ended]\x1b[0m')
   }
+
+  ws.onerror = () => {
+    connected.value = false
+  }
+
+  // Terminal input → WebSocket
+  term.onData((data) => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(new TextEncoder().encode(data))
+    }
+  })
 }
 
-function clearHistory() {
-  history.value = []
+async function reconnect() {
+  cleanup()
+  await nextTick()
+  initTerminal()
 }
+
+function cleanup() {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+  if (ws) {
+    ws.close()
+    ws = null
+  }
+  if (sessionId.value) {
+    api.ptyKill(sessionId.value).catch(() => {})
+    sessionId.value = ''
+  }
+  if (term) {
+    term.dispose()
+    term = null
+  }
+  fitAddon = null
+  connected.value = false
+}
+
+onMounted(initTerminal)
+onUnmounted(cleanup)
 </script>
 
 <template>
-  <div class="flex flex-col h-full bg-stone-50 border-t border-stone-200">
+  <div class="flex flex-col h-full bg-stone-50">
     <!-- Header -->
-    <div class="flex items-center justify-between px-3 py-1.5 border-b border-stone-200 bg-stone-100/80">
-      <span class="text-[11px] font-medium text-stone-500 uppercase tracking-wider">Terminal</span>
+    <div class="flex items-center justify-between px-3 py-1 border-b border-stone-200 bg-stone-100/80 shrink-0">
+      <div class="flex items-center gap-2">
+        <span class="text-[11px] font-medium text-stone-500 uppercase tracking-wider">Terminal</span>
+        <span
+          class="w-1.5 h-1.5 rounded-full"
+          :class="connected ? 'bg-emerald-400' : 'bg-stone-300'"
+        />
+      </div>
       <button
-        v-if="history.length > 0"
         class="text-[10px] text-stone-400 hover:text-stone-600 cursor-pointer transition-colors"
-        @click="clearHistory"
+        @click="reconnect"
+        title="New terminal"
       >
-        Clear
+        + New
       </button>
     </div>
 
-    <!-- Output -->
-    <div ref="outputEl" class="flex-1 overflow-y-auto p-3 font-mono text-xs space-y-2 min-h-0">
-      <div v-if="history.length === 0" class="text-stone-400 text-center py-4">
-        Run commands in the workspace directory
-      </div>
-      <div v-for="entry in history" :key="entry.timestamp" class="space-y-0.5">
-        <div class="flex items-center gap-1.5">
-          <span class="text-teal-600">$</span>
-          <span class="text-stone-700">{{ entry.command }}</span>
-        </div>
-        <pre
-          v-if="entry.output"
-          class="whitespace-pre-wrap text-[11px] leading-relaxed pl-4"
-          :class="entry.exitCode !== 0 ? 'text-red-600' : 'text-stone-500'"
-        >{{ entry.output }}</pre>
-        <div v-if="entry.exitCode !== 0" class="text-[10px] text-red-500 pl-4">
-          exit code: {{ entry.exitCode }}
-        </div>
-      </div>
-      <div v-if="running" class="flex items-center gap-1.5 text-stone-400">
-        <span class="animate-pulse">●</span> running...
-      </div>
-    </div>
-
-    <!-- Input -->
-    <div class="border-t border-stone-200 px-3 py-2 flex items-center gap-2">
-      <span class="text-teal-600 font-mono text-xs">$</span>
-      <input
-        v-model="input"
-        type="text"
-        placeholder="Enter command..."
-        class="flex-1 bg-transparent text-stone-700 text-xs font-mono outline-none placeholder-stone-400"
-        @keydown="handleKeyDown"
-        :disabled="running"
-      />
-    </div>
+    <!-- xterm container -->
+    <div ref="termEl" class="flex-1 min-h-0 px-1 py-1" />
   </div>
 </template>
+
+<style scoped>
+:deep(.xterm) {
+  height: 100%;
+  padding: 2px;
+}
+:deep(.xterm-viewport) {
+  background-color: #fafaf9 !important;
+}
+</style>
