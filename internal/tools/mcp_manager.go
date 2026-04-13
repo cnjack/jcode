@@ -231,6 +231,14 @@ func (m *MCPManager) doConnect(ctx context.Context, conn *MCPConnection) error {
 		return fmt.Errorf("client create: %w", err)
 	}
 
+	// Ensure the client is closed on any subsequent failure.
+	success := false
+	defer func() {
+		if !success {
+			_ = cli.Close()
+		}
+	}()
+
 	if err := cli.Start(ctx); err != nil {
 		return fmt.Errorf("start: %w", err)
 	}
@@ -244,7 +252,6 @@ func (m *MCPManager) doConnect(ctx context.Context, conn *MCPConnection) error {
 
 	initResult, err := cli.Initialize(ctx, initReq)
 	if err != nil {
-		_ = cli.Close()
 		return fmt.Errorf("initialize: %w", err)
 	}
 
@@ -280,6 +287,7 @@ func (m *MCPManager) doConnect(ctx context.Context, conn *MCPConnection) error {
 	conn.Capabilities = caps
 	conn.mu.Unlock()
 
+	success = true
 	return nil
 }
 

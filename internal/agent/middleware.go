@@ -30,7 +30,16 @@ func (m *approvalMiddleware) WrapInvokableToolCall(
 	endpoint adk.InvokableToolCallEndpoint,
 	tCtx *adk.ToolContext,
 ) (adk.InvokableToolCallEndpoint, error) {
-	return func(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
+	return func(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (result string, retErr error) {
+		// Recover from panics in tool execution so a single buggy tool
+		// cannot crash the entire agent loop.
+		defer func() {
+			if r := recover(); r != nil {
+				result = fmt.Sprintf("Tool execution panicked: %v", r)
+				retErr = nil // surface as agent-visible string, not error
+			}
+		}()
+
 		// Approval gate
 		if m.approvalFunc != nil {
 			approved, err := m.approvalFunc(ctx, tCtx.Name, argumentsInJSON)

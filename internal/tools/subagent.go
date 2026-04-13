@@ -156,7 +156,9 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 			},
 			MaxIterations: subagentMaxIter,
 			ModelRetryConfig: &adk.ModelRetryConfig{
-				MaxRetries: 2,
+				MaxRetries:  3,
+				IsRetryAble: internalmodel.IsRetryable,
+				BackoffFunc: internalmodel.SmartBackoff,
 			},
 		})
 		if err != nil {

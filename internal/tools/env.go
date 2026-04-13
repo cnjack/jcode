@@ -327,8 +327,8 @@ func (s *SSHExecutor) Label() string {
 	return fmt.Sprintf("%s@%s", s.user, s.host)
 }
 
-// run executes a command over SSH.
-func (s *SSHExecutor) run(_ context.Context, command, _ string, timeout time.Duration) (string, string, error) {
+// run executes a command over SSH, respecting both the context and timeout.
+func (s *SSHExecutor) run(ctx context.Context, command, _ string, timeout time.Duration) (string, string, error) {
 	session, err := s.client.NewSession()
 	if err != nil {
 		return "", "", fmt.Errorf("ssh session: %w", err)
@@ -349,8 +349,11 @@ func (s *SSHExecutor) run(_ context.Context, command, _ string, timeout time.Dur
 	case err := <-done:
 		return stdout.String(), stderr.String(), err
 	case <-time.After(timeout):
-		session.Signal(ssh.SIGTERM)
+		_ = session.Signal(ssh.SIGTERM)
 		return stdout.String(), stderr.String(), fmt.Errorf("command timed out after %v", timeout)
+	case <-ctx.Done():
+		_ = session.Signal(ssh.SIGTERM)
+		return stdout.String(), stderr.String(), fmt.Errorf("command cancelled: %w", ctx.Err())
 	}
 }
 

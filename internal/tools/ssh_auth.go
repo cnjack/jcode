@@ -18,8 +18,12 @@ func BuildSSHAuthMethods() []ssh.AuthMethod {
 		if conn, err := net.Dial("unix", sock); err == nil {
 			ag := sshagent.NewClient(conn)
 			if keys, err := ag.List(); err == nil && len(keys) > 0 {
-				methods = append(methods, ssh.PublicKeysCallback(ag.Signers))
+				// Extract signers eagerly so we can close the agent connection.
+				if signers, err := ag.Signers(); err == nil {
+					methods = append(methods, ssh.PublicKeys(signers...))
+				}
 			}
+			conn.Close()
 		}
 	}
 
