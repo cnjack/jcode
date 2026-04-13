@@ -1,5 +1,5 @@
 // API client for jcode backend
-import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, MCPListResponse } from '@/types/api'
+import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, MCPListResponse, BrowseResponse } from '@/types/api'
 
 const BASE = ''
 
@@ -81,4 +81,14 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ enabled }),
     }),
+  browse: (path?: string) => {
+    const q = path ? `?path=${encodeURIComponent(path)}` : ''
+    return request<BrowseResponse>(`/api/browse${q}`)
+  },
+  ptyCreate: () =>
+    request<{ id: string }>('/api/pty', { method: 'POST' }),
+  ptyList: () =>
+    request<{ sessions: string[] }>('/api/pty'),
+  ptyKill: (id: string) =>
+    request<{ status: string }>(`/api/pty/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 }

@@ -60,6 +60,9 @@ type Server struct {
 	// createAgent rebuilds the agent (after config changes).
 	// Accepts provider and model names so the caller can switch models.
 	createAgent func(providerName, modelName string) (*adk.ChatModelAgent, error)
+
+	// PTY manager for terminal sessions.
+	ptyMgr *ptyManager
 }
 
 // ServerConfig holds the configuration for creating a new Server.
@@ -99,6 +102,7 @@ func NewServer(cfg *ServerConfig) *Server {
 		mode:         "build",
 		cfg:          cfg.Config,
 		registry:     cfg.Registry,
+		ptyMgr:       newPTYManager(),
 	}
 }
 
@@ -133,6 +137,11 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/diff", s.handleDiff)
 	mux.HandleFunc("GET /api/mcp", s.handleListMCP)
 	mux.HandleFunc("POST /api/mcp/{name}/toggle", s.handleToggleMCP)
+	mux.HandleFunc("GET /api/browse", s.handleBrowse)
+	mux.HandleFunc("POST /api/pty", s.handleCreatePTY)
+	mux.HandleFunc("GET /api/pty", s.handleListPTY)
+	mux.HandleFunc("DELETE /api/pty/{id}", s.handleKillPTY)
+	mux.HandleFunc("GET /api/pty/{id}/ws", s.handlePTYWebSocket)
 
 	// Serve embedded frontend (SPA with fallback to index.html)
 	mux.Handle("GET /", newSPAHandler())
@@ -153,6 +162,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// Graceful shutdown on context cancellation.
 	go func() {
 		<-ctx.Done()
+		s.ptyMgr.closeAll()
 		s.broker.Close()
 		srv.Shutdown(context.Background())
 	}()
@@ -822,6 +832,82 @@ func (s *Server) handleToggleMCP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "name": name})
+}
+
+func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
+	dir := r.URL.Query().Get("path")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		dir = home
+	}
+
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
+		return
+	}
+
+	entries, err := os.ReadDir(abs)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	type folderItem struct {
+		Name string `json:"name"`
+		Path string `json:"path"`
+	}
+
+	var folders []folderItem
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		// Skip hidden folders
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		folders = append(folders, folderItem{
+			Name: e.Name(),
+			Path: filepath.Join(abs, e.Name()),
+		})
+	}
+	if folders == nil {
+		folders = []folderItem{}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"current": abs,
+		"folders": folders,
+	})
+}
+
+func (s *Server) handleCreatePTY(w http.ResponseWriter, r *http.Request) {
+	id, err := s.ptyMgr.create(s.pwd)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": id})
+}
+
+func (s *Server) handleListPTY(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": s.ptyMgr.list()})
+}
+
+func (s *Server) handleKillPTY(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	s.ptyMgr.kill(id)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handlePTYWebSocket(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	s.ptyMgr.serveWS(w, r, id)
 }
 
 // --- Helpers ---

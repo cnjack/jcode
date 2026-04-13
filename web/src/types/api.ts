@@ -173,7 +173,17 @@ export interface PendingApproval {
 // Project management (localStorage)
 export interface Project {
   id: string
-  name: string
   path: string
   createdAt: number
+}
+
+// Browse (folder picker)
+export interface BrowseFolder {
+  name: string
+  path: string
+}
+
+export interface BrowseResponse {
+  current: string
+  folders: BrowseFolder[]
 }
