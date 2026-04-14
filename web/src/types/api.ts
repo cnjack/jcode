@@ -180,15 +180,7 @@ export interface ToolCall {
   status: 'running' | 'done' | 'error'
   timestamp: number
   /** For subagent tools: nested tool calls from within the subagent */
-  children?: SubagentToolEvent[]
-}
-
-/** An intermediate tool call or tool result from a running subagent. */
-export interface SubagentToolEvent {
-  event: 'tool_call' | 'tool_result'
-  toolName: string
-  detail: string
-  timestamp: number
+  children?: ToolCall[]
 }
 
 /** Subagent lifecycle event (start/done). */
