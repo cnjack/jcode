@@ -308,7 +308,7 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if click, ok := msg.(tea.MouseClickMsg); ok && click.Button == tea.MouseRight {
 			// Only handle right-click when a textinput is active
 			if m.state == StateCustomModel || m.state == StateURL || m.state == StateAPIKey {
-				return m, func() tea.Msg { return tea.ReadClipboard() }
+				return m, tea.ReadClipboard
 			}
 		}
 		return m, nil
@@ -418,13 +418,14 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.err = "API Key is required"
 				}
 			} else if msg.String() == "esc" {
-				if m.selectedProvider.NeedURL || m.selectedProvider.BaseURL == "" {
+				switch {
+				case m.selectedProvider.NeedURL || m.selectedProvider.BaseURL == "":
 					m.state = StateURL
 					m.urlIn.Focus()
-				} else if m.selectedModel == "Custom..." {
+				case m.selectedModel == "Custom...":
 					m.state = StateCustomModel
 					m.customModelIn.Focus()
-				} else {
+				default:
 					m.state = StateModel
 				}
 				return m, nil
@@ -452,10 +453,9 @@ func (m SetupModel) advanceAfterModel() (tea.Model, tea.Cmd) {
 		}
 		m.urlIn.Focus()
 		return m, nil
-	} else {
-		m.finalURL = m.selectedProvider.BaseURL
-		return m.advanceAfterURL()
 	}
+	m.finalURL = m.selectedProvider.BaseURL
+	return m.advanceAfterURL()
 }
 
 func (m SetupModel) advanceAfterURL() (tea.Model, tea.Cmd) {
@@ -469,11 +469,10 @@ func (m SetupModel) advanceAfterURL() (tea.Model, tea.Cmd) {
 		m.state = StateAPIKey
 		m.keyIn.Focus()
 		return m, nil
-	} else {
-		// skip key
-		m.finalKey = ""
-		return m.submit()
 	}
+	// skip key
+	m.finalKey = ""
+	return m.submit()
 }
 
 // findProviderAPIKey checks existing config and environment variables for an API key.
@@ -512,7 +511,7 @@ func (m SetupModel) submit() (tea.Model, tea.Cmd) {
 	if cfg.Providers == nil {
 		cfg.Providers = make(map[string]*config.ProviderConfig)
 		// Migrate legacy Models into Providers
-		for k, v := range cfg.Models {
+		for k, v := range cfg.Models { //nolint:staticcheck
 			cfg.Providers[k] = v
 		}
 	}

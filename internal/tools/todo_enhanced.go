@@ -324,7 +324,7 @@ func (s *EnhancedTodoStore) Items() []TodoItem {
 	out := make([]TodoItem, len(s.items))
 	for i, it := range s.items {
 		var id int
-		fmt.Sscanf(it.ID, "%d", &id)
+		_, _ = fmt.Sscanf(it.ID, "%d", &id)
 		status := TodoStatus(it.Status)
 		switch it.Status {
 		case StatusNotStarted:

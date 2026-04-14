@@ -21,7 +21,7 @@ func TestEdit_SingleEdit(t *testing.T) {
 	tool := env.NewEditTool()
 
 	file := filepath.Join(dir, "test.txt")
-	os.WriteFile(file, []byte("hello world\n"), 0644)
+	_ = os.WriteFile(file, []byte("hello world\n"), 0644)
 
 	result, err := tool.InvokableRun(context.Background(),
 		`{"file_path":"`+file+`","old_string":"hello","new_string":"goodbye"}`)
@@ -44,7 +44,7 @@ func TestEdit_MultiEdit(t *testing.T) {
 	tool := env.NewEditTool()
 
 	file := filepath.Join(dir, "multi.txt")
-	os.WriteFile(file, []byte("aaa bbb ccc\n"), 0644)
+	_ = os.WriteFile(file, []byte("aaa bbb ccc\n"), 0644)
 
 	result, err := tool.InvokableRun(context.Background(),
 		`{"file_path":"`+file+`","edits":[{"old_string":"aaa","new_string":"AAA"},{"old_string":"bbb","new_string":"BBB"}]}`)
@@ -67,7 +67,7 @@ func TestEdit_MultiEditFailure(t *testing.T) {
 	tool := env.NewEditTool()
 
 	file := filepath.Join(dir, "fail.txt")
-	os.WriteFile(file, []byte("aaa bbb ccc\n"), 0644)
+	_ = os.WriteFile(file, []byte("aaa bbb ccc\n"), 0644)
 
 	_, err := tool.InvokableRun(context.Background(),
 		`{"file_path":"`+file+`","edits":[{"old_string":"aaa","new_string":"AAA"},{"old_string":"MISSING","new_string":"XXX"}]}`)
@@ -94,7 +94,7 @@ func TestEdit_BinaryRejected(t *testing.T) {
 	tool := env.NewEditTool()
 
 	file := filepath.Join(dir, "image.png")
-	os.WriteFile(file, []byte("fake png"), 0644)
+	_ = os.WriteFile(file, []byte("fake png"), 0644)
 
 	_, err := tool.InvokableRun(context.Background(),
 		`{"file_path":"`+file+`","old_string":"fake","new_string":"real"}`)
@@ -133,7 +133,7 @@ func TestEdit_UnifiedDiffOutput(t *testing.T) {
 	tool := env.NewEditTool()
 
 	file := filepath.Join(dir, "diff.txt")
-	os.WriteFile(file, []byte("line1\nline2\nline3\n"), 0644)
+	_ = os.WriteFile(file, []byte("line1\nline2\nline3\n"), 0644)
 
 	result, err := tool.InvokableRun(context.Background(),
 		`{"file_path":"`+file+`","old_string":"line2","new_string":"LINE_TWO"}`)
@@ -154,7 +154,7 @@ func TestEdit_MutuallyExclusive(t *testing.T) {
 	tool := env.NewEditTool()
 
 	file := filepath.Join(dir, "excl.txt")
-	os.WriteFile(file, []byte("content\n"), 0644)
+	_ = os.WriteFile(file, []byte("content\n"), 0644)
 
 	_, err := tool.InvokableRun(context.Background(),
 		`{"file_path":"`+file+`","old_string":"content","new_string":"new","edits":[{"old_string":"a","new_string":"b"}]}`)

@@ -96,4 +96,11 @@ export const api = {
     request<{ sessions: string[] }>('/api/pty'),
   ptyKill: (id: string) =>
     request<{ status: string }>(`/api/pty/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  approvalMode: () =>
+    request<{ auto_approve: boolean }>('/api/approval/mode'),
+  setApprovalMode: (autoApprove: boolean) =>
+    request<{ auto_approve: boolean }>('/api/approval/mode', {
+      method: 'POST',
+      body: JSON.stringify({ auto_approve: autoApprove }),
+    }),
 }

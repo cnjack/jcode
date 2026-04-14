@@ -304,10 +304,6 @@ func retryErrorFromCtx(ctx context.Context) error {
 // ---------------------------------------------------------------------------
 
 func asAPIErr(err error, target **openai.APIError) bool {
-	type apiError interface {
-		Error() string
-	}
-
 	// Walk the error chain.
 	for err != nil {
 		if ae, ok := err.(*openai.APIError); ok {

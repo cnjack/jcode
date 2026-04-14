@@ -116,8 +116,7 @@ func (m Model) handleSSHSaveAlias(input string, cmds []tea.Cmd) (tea.Model, tea.
 
 // handleSSHStep handles input during the SSH setup wizard.
 func (m Model) handleSSHStep(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
-	switch m.sshStep {
-	case 1: // User entered host
+	if m.sshStep == 1 {
 		addr := input
 		// Check for addr:/path format
 		if colonIdx := strings.LastIndex(addr, ":"); colonIdx > 0 {

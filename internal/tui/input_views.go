@@ -76,11 +76,12 @@ func (m Model) inputAreaView() string {
 
 	parts = append(parts, divider(m.width))
 
-	if m.planReviewActive {
+	switch {
+	case m.planReviewActive:
 		parts = append(parts, m.planReviewPromptView())
-	} else if m.askUserActive {
+	case m.askUserActive:
 		parts = append(parts, m.askUserPromptView())
-	} else {
+	default:
 		val := m.textarea.Value()
 		if strings.HasPrefix(val, "/") {
 			hints := m.getCommandHints(val)

@@ -172,7 +172,7 @@ func (l *Loader) Descriptions() string {
 		if sk.Slash != "" {
 			slash = fmt.Sprintf(" (%s)", sk.Slash)
 		}
-		sb.WriteString(fmt.Sprintf("  - %s%s: %s\n", sk.Name, slash, sk.Description))
+		fmt.Fprintf(&sb, "  - %s%s: %s\n", sk.Name, slash, sk.Description)
 	}
 	return sb.String()
 }

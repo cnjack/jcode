@@ -63,11 +63,11 @@ func (m *ptyManager) create(workDir string) (string, error) {
 
 	// Clean up when shell exits.
 	go func() {
-		cmd.Wait()
+		_ = cmd.Wait()
 		m.mu.Lock()
 		delete(m.sessions, id)
 		m.mu.Unlock()
-		ptmx.Close()
+		_ = ptmx.Close()
 	}()
 
 	config.Logger().Printf("[pty] created session %s (shell=%s, dir=%s)", id, shell, workDir)
@@ -99,8 +99,8 @@ func (m *ptyManager) kill(id string) {
 	delete(m.sessions, id)
 	m.mu.Unlock()
 	if sess != nil {
-		sess.cmd.Process.Kill()
-		sess.ptmx.Close()
+		_ = sess.cmd.Process.Kill()
+		_ = sess.ptmx.Close()
 	}
 }
 
@@ -114,8 +114,8 @@ func (m *ptyManager) closeAll() {
 	m.sessions = make(map[string]*ptySession)
 	m.mu.Unlock()
 	for _, s := range sessions {
-		s.cmd.Process.Kill()
-		s.ptmx.Close()
+		_ = s.cmd.Process.Kill()
+		_ = s.ptmx.Close()
 	}
 }
 
@@ -133,7 +133,7 @@ func (m *ptyManager) serveWS(w http.ResponseWriter, r *http.Request, id string) 
 		config.Logger().Printf("[pty] websocket upgrade error: %v", err)
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Handle resize messages from client.
 	// Client sends JSON: {"type":"resize","cols":80,"rows":24}
@@ -150,7 +150,7 @@ func (m *ptyManager) serveWS(w http.ResponseWriter, r *http.Request, id string) 
 				if err != io.EOF {
 					config.Logger().Printf("[pty] read error: %v", err)
 				}
-				conn.WriteMessage(websocket.CloseMessage,
+				_ = conn.WriteMessage(websocket.CloseMessage,
 					websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 				return
 			}
@@ -193,7 +193,7 @@ func (m *ptyManager) handleControlMessage(sess *ptySession, msg []byte) {
 		return
 	}
 	if ctrl.Type == "resize" && ctrl.Cols > 0 && ctrl.Rows > 0 {
-		pty.Setsize(sess.ptmx, &pty.Winsize{
+		_ = pty.Setsize(sess.ptmx, &pty.Winsize{
 			Cols: ctrl.Cols,
 			Rows: ctrl.Rows,
 		})

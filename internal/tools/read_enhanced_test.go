@@ -14,7 +14,7 @@ func TestRead_LineNumbers(t *testing.T) {
 	tool := env.NewReadTool()
 
 	file := filepath.Join(dir, "lines.txt")
-	os.WriteFile(file, []byte("aaa\nbbb\nccc\n"), 0644)
+	_ = os.WriteFile(file, []byte("aaa\nbbb\nccc\n"), 0644)
 
 	result, err := tool.InvokableRun(context.Background(),
 		`{"file_path":"`+file+`"}`)
@@ -43,7 +43,7 @@ func TestRead_OffsetLimit(t *testing.T) {
 	for i := 1; i <= 100; i++ {
 		content.WriteString("line" + strings.Repeat("x", i) + "\n")
 	}
-	os.WriteFile(file, []byte(content.String()), 0644)
+	_ = os.WriteFile(file, []byte(content.String()), 0644)
 
 	result, err := tool.InvokableRun(context.Background(),
 		`{"file_path":"`+file+`","offset":10,"limit":5}`)
@@ -78,7 +78,7 @@ func TestRead_DefaultLimit(t *testing.T) {
 	for i := 0; i < 3000; i++ {
 		content.WriteString("line\n")
 	}
-	os.WriteFile(file, []byte(content.String()), 0644)
+	_ = os.WriteFile(file, []byte(content.String()), 0644)
 
 	result, err := tool.InvokableRun(context.Background(),
 		`{"file_path":"`+file+`"}`)
@@ -104,7 +104,7 @@ func TestRead_BinaryExtension(t *testing.T) {
 	tool := env.NewReadTool()
 
 	file := filepath.Join(dir, "image.png")
-	os.WriteFile(file, []byte("fake png"), 0644)
+	_ = os.WriteFile(file, []byte("fake png"), 0644)
 
 	_, err := tool.InvokableRun(context.Background(),
 		`{"file_path":"`+file+`"}`)
@@ -122,7 +122,7 @@ func TestRead_DirectoryListing(t *testing.T) {
 	tool := env.NewReadTool()
 
 	// Create a file inside the dir so listing shows something.
-	os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hi"), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hi"), 0644)
 
 	result, err := tool.InvokableRun(context.Background(),
 		`{"file_path":"`+dir+`"}`)

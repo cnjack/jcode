@@ -133,13 +133,13 @@ func (et *executeTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 		if result.Len() > 0 {
 			result.WriteString("\n")
 		}
-		result.WriteString(fmt.Sprintf("[Exit code: non-zero]\n"))
-		result.WriteString(fmt.Sprintf("[Completed in %.1fs]", elapsed.Seconds()))
+		result.WriteString("[Exit code: non-zero]\n")
+		fmt.Fprintf(&result, "[Completed in %.1fs]", elapsed.Seconds())
 		if elapsed > bgHintThreshold {
-			result.WriteString(fmt.Sprintf(
+			fmt.Fprintf(&result,
 				"\n[Hint: command took %.0fs. Consider using background=true for long-running commands.]",
 				elapsed.Seconds(),
-			))
+			)
 		}
 		return result.String(), fmt.Errorf("command failed: %w", err)
 	}
@@ -148,12 +148,12 @@ func (et *executeTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 		result.WriteString("Command executed successfully (no output)")
 	}
 
-	result.WriteString(fmt.Sprintf("\n[Completed in %.1fs]", elapsed.Seconds()))
+	fmt.Fprintf(&result, "\n[Completed in %.1fs]", elapsed.Seconds())
 	if elapsed > bgHintThreshold {
-		result.WriteString(fmt.Sprintf(
+		fmt.Fprintf(&result,
 			"\n[Hint: command took %.0fs. Consider using background=true for long-running commands.]",
 			elapsed.Seconds(),
-		))
+		)
 	}
 
 	return result.String(), nil

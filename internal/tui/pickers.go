@@ -68,17 +68,15 @@ func (m Model) handleModelInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 					isCurrent: isCurrent,
 				})
 			}
-		} else {
+		} else if provider == currentProvider {
 			// Provider not in registry — show configured model only
-			if provider == currentProvider {
-				items = append(items, modelItem{
-					provider:  provider,
-					model:     currentModel,
-					title:     "★ " + currentModel,
-					desc:      provider,
-					isCurrent: true,
-				})
-			}
+			items = append(items, modelItem{
+				provider:  provider,
+				model:     currentModel,
+				title:     "★ " + currentModel,
+				desc:      provider,
+				isCurrent: true,
+			})
 		}
 	}
 
@@ -351,15 +349,16 @@ func (m Model) approvalDialogView() string {
 
 	// Different header based on whether this is external path access
 	var headerText string
-	if m.approvalIsExternal {
+	switch {
+	case m.approvalIsExternal:
 		headerText = toolNameStyle.Render("⚠️  External Path Access")
-	} else if m.approvalWorkerName != "" {
+	case m.approvalWorkerName != "":
 		workerBadge := lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color(m.approvalWorkerColor)).
 			Render("@" + m.approvalWorkerName)
 		headerText = toolNameStyle.Render("⚠️  Teammate Approval: ") + workerBadge
-	} else {
+	default:
 		headerText = toolNameStyle.Render("⚠️  Permission Required")
 	}
 

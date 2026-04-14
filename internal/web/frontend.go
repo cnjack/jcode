@@ -39,7 +39,7 @@ func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Try to serve static file first.
 	f, err := h.fs.Open(path)
 	if err == nil {
-		f.Close()
+		_ = f.Close()
 		http.FileServer(h.fs).ServeHTTP(w, r)
 		return
 	}

@@ -23,7 +23,7 @@ func BuildSSHAuthMethods() []ssh.AuthMethod {
 					methods = append(methods, ssh.PublicKeys(signers...))
 				}
 			}
-			conn.Close()
+			_ = conn.Close()
 		}
 	}
 

@@ -1,4 +1,4 @@
-package main
+package command
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/cloudwego/eino/schema"
+	"github.com/spf13/cobra"
 
 	"github.com/cnjack/jcode/internal/config"
 	internalmodel "github.com/cnjack/jcode/internal/model"
@@ -106,5 +107,35 @@ func handleListSessions() {
 		fmt.Printf("      Provider:  %s / %s\n", m.Provider, m.Model)
 		fmt.Println()
 	}
-	fmt.Printf("Resume with: coding --resume <UUID>\n")
+	fmt.Printf("Resume with: jcode --resume <UUID>\n")
+}
+
+func NewVersionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print version information",
+		Run: func(cmd *cobra.Command, args []string) {
+			printVersion()
+		},
+	}
+}
+
+func NewDoctorCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "doctor",
+		Short: "Run system check (tests model and MCP connections)",
+		Run: func(cmd *cobra.Command, args []string) {
+			runDoctorMode()
+		},
+	}
+}
+
+func NewSessionsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "sessions",
+		Short: "List sessions for the current project",
+		Run: func(cmd *cobra.Command, args []string) {
+			handleListSessions()
+		},
+	}
 }

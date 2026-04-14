@@ -44,6 +44,9 @@ const { connected } = useSSE({
   onModeChanged: (data) => {
     store.mode = data.mode as 'build' | 'plan'
   },
+  onApprovalModeChanged: (data) => {
+    store.autoApprove = data.auto_approve
+  },
 })
 
 watch(connected, (val) => { store.sseConnected = val })
@@ -92,6 +95,7 @@ onMounted(async () => {
   store.fetchTodos()
   store.fetchModels()
   store.fetchSessions()
+  store.fetchApprovalMode()
   // Auto-create project for current workspace
   if (store.pwd) {
     projectStore.ensureCurrentProject(store.pwd)

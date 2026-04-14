@@ -1,4 +1,4 @@
-package main
+package command
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 )
 
 // handleSSHConnect connects to a remote machine via SSH and reconfigures the env.
-func handleSSHConnect(
+func HandleSSHConnect(
 	ctx context.Context,
 	env *tools.Env,
 	addr, path string,
@@ -50,7 +50,7 @@ func handleSSHConnect(
 				remotePwd = trimmed
 			}
 		}
-		handleSSHListDir(ctx, env, remotePwd, p)
+		HandleSSHListDir(ctx, env, remotePwd, p)
 		return // Do not initialize agent yet
 	}
 
@@ -82,7 +82,7 @@ func handleSSHConnect(
 
 // handleSSHListDir runs `ls` on the remote host and sends the results to the
 // TUI directory picker.
-func handleSSHListDir(ctx context.Context, env *tools.Env, path string, p *tea.Program) {
+func HandleSSHListDir(ctx context.Context, env *tools.Env, path string, p *tea.Program) {
 	cmd := fmt.Sprintf("ls -F -1 %s", tools.ShellQuote(path))
 	stdout, stderr, err := env.Exec.Exec(ctx, cmd, "", 10*1e9)
 	if err != nil {

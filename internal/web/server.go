@@ -66,6 +66,9 @@ type Server struct {
 
 	// PTY manager for terminal sessions.
 	ptyMgr *ptyManager
+
+	// approvalState controls whether tool calls require approval.
+	approvalState *runner.ApprovalState
 }
 
 // ServerConfig holds the configuration for creating a new Server.
@@ -84,6 +87,7 @@ type ServerConfig struct {
 	ModelName     string
 	Config        *config.Config
 	Registry      *model.ModelRegistry
+	ApprovalState *runner.ApprovalState
 }
 
 // NewServer creates a new web server.
@@ -108,6 +112,7 @@ func NewServer(cfg *ServerConfig) *Server {
 		cfg:           cfg.Config,
 		registry:      cfg.Registry,
 		ptyMgr:        newPTYManager(),
+		approvalState: cfg.ApprovalState,
 	}
 }
 
@@ -148,6 +153,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/pty", s.handleListPTY)
 	mux.HandleFunc("DELETE /api/pty/{id}", s.handleKillPTY)
 	mux.HandleFunc("GET /api/pty/{id}/ws", s.handlePTYWebSocket)
+	mux.HandleFunc("GET /api/approval/mode", s.handleGetApprovalMode)
+	mux.HandleFunc("POST /api/approval/mode", s.handleSetApprovalMode)
 
 	// Serve embedded frontend (SPA with fallback to index.html)
 	mux.Handle("GET /", newSPAHandler())
@@ -170,7 +177,7 @@ func (s *Server) Start(ctx context.Context) error {
 		<-ctx.Done()
 		s.ptyMgr.closeAll()
 		s.broker.Close()
-		srv.Shutdown(context.Background())
+		_ = srv.Shutdown(context.Background())
 	}()
 
 	config.Logger().Printf("[web] server starting on http://%s", addr)
@@ -698,13 +705,14 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 
 	// Also get changed file list for status
 	statCmd := exec.CommandContext(s.ctx, "git", "diff", "--stat", "--no-color")
-	if mode == "staged" {
+	switch mode {
+	case "staged":
 		statCmd = exec.CommandContext(s.ctx, "git", "diff", "--cached", "--stat", "--no-color")
-	} else if mode == "branch" {
+	case "branch":
 		statCmd = exec.CommandContext(s.ctx, "git", "diff", "HEAD~1", "--stat", "--no-color")
 	}
 	statCmd.Dir = s.pwd
-	statCmd.CombinedOutput()
+	_, _ = statCmd.CombinedOutput()
 
 	// Parse unified diff into per-file entries
 	sections := splitDiffByFile(rawDiff)
@@ -987,12 +995,38 @@ func (s *Server) handleSwitchProject(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleGetApprovalMode(w http.ResponseWriter, r *http.Request) {
+	autoApprove := false
+	if s.approvalState != nil {
+		autoApprove = s.approvalState.GetMode() == handler.ModeAuto
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"auto_approve": autoApprove})
+}
+
+func (s *Server) handleSetApprovalMode(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AutoApprove bool `json:"auto_approve"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if s.approvalState != nil {
+		s.approvalState.SetSessionApproval(req.AutoApprove)
+	}
+	s.broker.Broadcast(SSEEvent{
+		Event: "approval_mode_changed",
+		Data:  map[string]any{"auto_approve": req.AutoApprove},
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"auto_approve": req.AutoApprove})
+}
+
 // --- Helpers ---
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	_ = json.NewEncoder(w).Encode(data)
 }
 
 func corsMiddleware(next http.Handler) http.Handler {

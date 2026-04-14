@@ -31,7 +31,7 @@ func Run(
 	if tracer != nil {
 		ctx = tracer.WithNewTrace(ctx, "coding_agent")
 	}
-	resp := runInner(ctx, ag, messages, h, rec, todoStore)
+	resp := runInner(ctx, ag, messages, h, rec)
 
 	// Completion guard: if the agent finished but there are still incomplete
 	// todos, re-run with a reminder so nothing is left behind.
@@ -44,7 +44,7 @@ func Run(
 		h.OnAgentText("\n⚠️ Incomplete todos detected, continuing...\n")
 		messages = append(messages, &schema.Message{Role: schema.Assistant, Content: resp})
 		messages = append(messages, schema.UserMessage(reminder))
-		extra := runInner(ctx, ag, messages, h, rec, todoStore)
+		extra := runInner(ctx, ag, messages, h, rec)
 		resp += extra
 	}
 
@@ -67,7 +67,6 @@ func runInner(
 	messages []adk.Message,
 	h handler.AgentEventHandler,
 	rec *session.Recorder,
-	todoStore *tools.TodoStore,
 ) string {
 	input := &adk.AgentInput{
 		Messages:        messages,

@@ -25,8 +25,8 @@ func generateUnifiedDiff(original, modified, filename string) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("--- a/%s\n", filename))
-	sb.WriteString(fmt.Sprintf("+++ b/%s\n", filename))
+	fmt.Fprintf(&sb, "--- a/%s\n", filename)
+	fmt.Fprintf(&sb, "+++ b/%s\n", filename)
 
 	for _, h := range hunks {
 		sb.WriteString(h)
@@ -67,11 +67,12 @@ func computeLCS(a, b []string) []lcsEntry {
 	}
 	for i := 1; i <= m; i++ {
 		for j := 1; j <= n; j++ {
-			if a[i-1] == b[j-1] {
+			switch {
+			case a[i-1] == b[j-1]:
 				dp[i][j] = dp[i-1][j-1] + 1
-			} else if dp[i-1][j] >= dp[i][j-1] {
+			case dp[i-1][j] >= dp[i][j-1]:
 				dp[i][j] = dp[i-1][j]
-			} else {
+			default:
 				dp[i][j] = dp[i][j-1]
 			}
 		}
@@ -81,13 +82,14 @@ func computeLCS(a, b []string) []lcsEntry {
 	var result []lcsEntry
 	i, j := m, n
 	for i > 0 && j > 0 {
-		if a[i-1] == b[j-1] {
+		switch {
+		case a[i-1] == b[j-1]:
 			result = append(result, lcsEntry{i - 1, j - 1})
 			i--
 			j--
-		} else if dp[i-1][j] >= dp[i][j-1] {
+		case dp[i-1][j] >= dp[i][j-1]:
 			i--
-		} else {
+		default:
 			j--
 		}
 	}

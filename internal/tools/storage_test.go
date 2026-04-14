@@ -15,7 +15,7 @@ import (
 
 func TestStorageManagerCreatesDirectories(t *testing.T) {
 	sm := newTestStorageManager(t)
-	defer sm.Close()
+	defer func() { _ = sm.Close() }()
 
 	subdirs := []string{"file-history", "tool-results", "todos", "plans", "tasks", "oauth"}
 	for _, sub := range subdirs {
@@ -35,7 +35,7 @@ func TestStorageManagerCreatesDirectories(t *testing.T) {
 
 func TestStorageManagerWrite(t *testing.T) {
 	sm := newTestStorageManager(t)
-	defer sm.Close()
+	defer func() { _ = sm.Close() }()
 
 	path := filepath.Join(sm.baseDir, "test", "hello.txt")
 	if err := sm.Write(path, []byte("hello"), 0o644); err != nil {
@@ -126,7 +126,7 @@ func TestWriteQueueConcurrency(t *testing.T) {
 
 func TestFileTrackerNoConflict(t *testing.T) {
 	sm := newTestStorageManager(t)
-	defer sm.Close()
+	defer func() { _ = sm.Close() }()
 	ft := NewFileTracker(sm)
 
 	// Write a file, track it, check — no conflict.
@@ -148,7 +148,7 @@ func TestFileTrackerNoConflict(t *testing.T) {
 
 func TestFileTrackerConflictModified(t *testing.T) {
 	sm := newTestStorageManager(t)
-	defer sm.Close()
+	defer func() { _ = sm.Close() }()
 	ft := NewFileTracker(sm)
 
 	path := filepath.Join(t.TempDir(), "b.txt")
@@ -178,7 +178,7 @@ func TestFileTrackerConflictModified(t *testing.T) {
 
 func TestFileTrackerConflictFileGone(t *testing.T) {
 	sm := newTestStorageManager(t)
-	defer sm.Close()
+	defer func() { _ = sm.Close() }()
 	ft := NewFileTracker(sm)
 
 	path := filepath.Join(t.TempDir(), "c.txt")
@@ -188,7 +188,7 @@ func TestFileTrackerConflictFileGone(t *testing.T) {
 	info, _ := os.Stat(path)
 	ft.TrackRead(path, []byte("data"), info.ModTime())
 
-	os.Remove(path)
+	_ = os.Remove(path)
 	cr, err := ft.CheckConflict(path)
 	if err != nil {
 		t.Fatal(err)
@@ -200,7 +200,7 @@ func TestFileTrackerConflictFileGone(t *testing.T) {
 
 func TestFileTrackerTouchOnly(t *testing.T) {
 	sm := newTestStorageManager(t)
-	defer sm.Close()
+	defer func() { _ = sm.Close() }()
 	ft := NewFileTracker(sm)
 
 	path := filepath.Join(t.TempDir(), "d.txt")
@@ -228,7 +228,7 @@ func TestFileTrackerTouchOnly(t *testing.T) {
 
 func TestFileTrackerCreateBackup(t *testing.T) {
 	sm := newTestStorageManager(t)
-	defer sm.Close()
+	defer func() { _ = sm.Close() }()
 	ft := NewFileTracker(sm)
 
 	path := "/some/project/main.go"
@@ -267,7 +267,7 @@ func TestFileTrackerCreateBackup(t *testing.T) {
 
 func TestToolResultStoreSmallResult(t *testing.T) {
 	sm := newTestStorageManager(t)
-	defer sm.Close()
+	defer func() { _ = sm.Close() }()
 	ts := NewToolResultStore(sm)
 
 	_, persisted := ts.PersistIfLarge("test", "small output")
@@ -278,7 +278,7 @@ func TestToolResultStoreSmallResult(t *testing.T) {
 
 func TestToolResultStoreLargeResult(t *testing.T) {
 	sm := newTestStorageManager(t)
-	defer sm.Close()
+	defer func() { _ = sm.Close() }()
 	ts := NewToolResultStore(sm)
 
 	big := strings.Repeat("x", 60000)
@@ -400,7 +400,7 @@ func newTestStorageManager(t *testing.T) *StorageManager {
 
 func TestCleanupTodos(t *testing.T) {
 	sm := newTestStorageManager(t)
-	defer sm.Close()
+	defer func() { _ = sm.Close() }()
 
 	// Create 25 todo files with distinct modification times.
 	for i := 0; i < 25; i++ {
@@ -449,7 +449,7 @@ func TestCleanupTodos(t *testing.T) {
 
 func TestCleanupTaskLogs(t *testing.T) {
 	sm := newTestStorageManager(t)
-	defer sm.Close()
+	defer func() { _ = sm.Close() }()
 
 	// Create 55 task log files with distinct modification times.
 	for i := 0; i < 55; i++ {
@@ -490,7 +490,7 @@ func TestCleanupTaskLogs(t *testing.T) {
 
 func TestFileTrackerEviction(t *testing.T) {
 	sm := newTestStorageManager(t)
-	defer sm.Close()
+	defer func() { _ = sm.Close() }()
 	ft := NewFileTracker(sm)
 
 	// Create >100 backups by simulating writes to different "files".

@@ -116,12 +116,7 @@ func (h *WebHandler) OnAgentDone(err error) {
 }
 
 func (h *WebHandler) OnTokenUpdate(info TokenUsage) {
-	h.emit("token_update", WebTokenData{
-		PromptTokens:      info.PromptTokens,
-		CompletionTokens:  info.CompletionTokens,
-		TotalTokens:       info.TotalTokens,
-		ModelContextLimit: info.ModelContextLimit,
-	})
+	h.emit("token_update", WebTokenData(info))
 }
 
 // --- Approval flow ---

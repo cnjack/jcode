@@ -185,9 +185,9 @@ func formatGlobOutput(output string, limit int, elapsed time.Duration) (string, 
 	}
 
 	if truncated {
-		result.WriteString(fmt.Sprintf("\n(%d files shown, more available — increase limit. %.0fms)\n", limit, float64(elapsed.Milliseconds())))
+		fmt.Fprintf(&result, "\n(%d files shown, more available — increase limit. %.0fms)\n", limit, float64(elapsed.Milliseconds()))
 	} else {
-		result.WriteString(fmt.Sprintf("\n(%d files found. %.0fms)\n", len(lines), float64(elapsed.Milliseconds())))
+		fmt.Fprintf(&result, "\n(%d files found. %.0fms)\n", len(lines), float64(elapsed.Milliseconds()))
 	}
 
 	return result.String(), nil

@@ -117,9 +117,9 @@ func (w *writeTool) InvokableRun(ctx context.Context, argumentsInJSON string, op
 	}
 
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("%s %s (%d lines, %d bytes)", action, input.FilePath, lines, len(input.Content)))
+	fmt.Fprintf(&result, "%s %s (%d lines, %d bytes)", action, input.FilePath, lines, len(input.Content))
 	if backupPath != "" {
-		result.WriteString(fmt.Sprintf("\nBackup: %s", backupPath))
+		fmt.Fprintf(&result, "\nBackup: %s", backupPath)
 	}
 
 	// Unified diff for overwrites.

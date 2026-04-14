@@ -515,7 +515,7 @@ func (m *Manager) runTeammate(ctx context.Context, state *TeammateState) {
 // It uses the full accumulated state.History so teammates maintain context across turns.
 func (m *Manager) runAgentTurn(ctx context.Context, state *TeammateState) (string, error) {
 	// Resolve model.
-	var chatModel any = m.deps.DefaultModel
+	var chatModel = m.deps.DefaultModel
 	if state.Model != "" && m.deps.ModelFactory != nil {
 		resolved, err := m.deps.ModelFactory(ctx, state.Model)
 		if err != nil {
@@ -805,14 +805,6 @@ func (m *Manager) cleanupTeammate(state *TeammateState) {
 	}
 
 	config.Logger().Printf("[team] teammate %s cleaned up (status=%s)", state.Identity.AgentName, state.Status)
-}
-
-// getLeaderCwd tries to get the leader's working directory.
-func (m *Manager) getLeaderCwd() string {
-	// The leader doesn't have a TeammateState, so return empty.
-	// The caller should provide a Cwd.
-	cwd, _ := os.Getwd()
-	return cwd
 }
 
 func (m *Manager) nextColor() string {

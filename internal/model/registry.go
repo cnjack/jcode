@@ -246,7 +246,7 @@ func (r *ModelRegistry) fetchRemote() (map[string]*RegistryProvider, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fetch models.dev: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("models.dev returned status %d", resp.StatusCode)

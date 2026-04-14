@@ -412,13 +412,14 @@ func formatGrepOutput(output string, maxResults int, offset int) (string, error)
 		result.WriteString("\n")
 	}
 
-	if truncated {
-		result.WriteString(fmt.Sprintf("\n(showing %d results, %d total, offset %d — use offset=%d for next page)\n",
-			len(lines), totalLines, offset, offset+maxResults))
-	} else if offset > 0 {
-		result.WriteString(fmt.Sprintf("\n(%d results, offset %d, %d total)\n", len(lines), offset, totalLines))
-	} else {
-		result.WriteString(fmt.Sprintf("\n(%d matches found)\n", len(lines)))
+	switch {
+	case truncated:
+		fmt.Fprintf(&result, "\n(showing %d results, %d total, offset %d — use offset=%d for next page)\n",
+			len(lines), totalLines, offset, offset+maxResults)
+	case offset > 0:
+		fmt.Fprintf(&result, "\n(%d results, offset %d, %d total)\n", len(lines), offset, totalLines)
+	default:
+		fmt.Fprintf(&result, "\n(%d matches found)\n", len(lines))
 	}
 
 	return result.String(), nil

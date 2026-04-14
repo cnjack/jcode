@@ -1,41 +1,51 @@
-package main
+package command
 
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/tools"
 )
 
-func handleMCPSubcommand(args []string) {
-	if len(args) == 0 {
-		fmt.Println("Usage: coding mcp <add|list>")
-		fmt.Println()
-		fmt.Println("  coding mcp add <name> <url>               Add SSE/HTTP MCP server")
-		fmt.Println("  coding mcp add <name> <command> [args...]  Add stdio MCP server")
-		fmt.Println("  coding mcp list                            List configured MCP servers")
-		os.Exit(1)
+func NewMCPCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:          "mcp",
+		Short:        "Manage MCP servers",
+		SilenceUsage: true,
 	}
-	switch args[0] {
-	case "add":
-		handleMCPAdd(args[1:])
-	case "list":
-		handleMCPList()
-	default:
-		fmt.Fprintf(os.Stderr, "Unknown mcp subcommand: %s\n", args[0])
-		os.Exit(1)
+	cmd.AddCommand(newMCPAddCmd(), newMCPListCmd())
+	return cmd
+}
+
+func newMCPAddCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:          "add <name> <url-or-command> [args...]",
+		Short:        "Add an MCP server (SSE/HTTP or stdio)",
+		Args:         cobra.MinimumNArgs(2),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return handleMCPAdd(args)
+		},
 	}
 }
 
-func handleMCPAdd(args []string) {
-	if len(args) < 2 {
-		fmt.Println("Usage: coding mcp add <name> <url-or-command> [args...]")
-		os.Exit(1)
+func newMCPListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:          "list",
+		Short:        "List configured MCP servers",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return handleMCPList()
+		},
 	}
+}
+
+func handleMCPAdd(args []string) error {
 	name := args[0]
 	urlOrCmd := args[1]
 	extraArgs := args[2:]
@@ -62,37 +72,34 @@ func handleMCPAdd(args []string) {
 		if len(statuses) > 0 && statuses[0].Error != nil {
 			errMsg = statuses[0].Error.Error()
 		}
-		fmt.Fprintf(os.Stderr, "❌ Connection test failed: %s\n", errMsg)
-		os.Exit(1)
+		return fmt.Errorf("connection test failed: %s", errMsg)
 	}
 
-	fmt.Printf("✅ Connected — %d tool(s) loaded\n", statuses[0].ToolCount)
+	fmt.Printf("Connected — %d tool(s) loaded\n", statuses[0].ToolCount)
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 	if cfg.MCPServers == nil {
 		cfg.MCPServers = make(map[string]*config.MCPServer)
 	}
 	cfg.MCPServers[name] = srv
 	if err := config.SaveConfig(cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to save config: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to save config: %w", err)
 	}
-	fmt.Printf("✅ MCP server '%s' saved to config\n", name)
+	fmt.Printf("MCP server '%s' saved to config\n", name)
+	return nil
 }
 
-func handleMCPList() {
+func handleMCPList() error {
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 	if len(cfg.MCPServers) == 0 {
 		fmt.Println("No MCP servers configured.")
-		return
+		return nil
 	}
 	fmt.Println("Configured MCP servers:")
 	fmt.Println()
@@ -103,4 +110,5 @@ func handleMCPList() {
 			fmt.Printf("  %-20s  cmd=%s  args=%v  type=%s\n", name, srv.Command, srv.Args, srv.Type)
 		}
 	}
+	return nil
 }

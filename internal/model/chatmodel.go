@@ -92,7 +92,7 @@ func (m *chatModel) WithTools(tools []*schema.ToolInfo) (einomodel.ToolCallingCh
 		if ti == nil {
 			continue
 		}
-		params, err := ti.ParamsOneOf.ToJSONSchema()
+		params, err := ti.ToJSONSchema()
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert params for tool %s: %w", ti.Name, err)
 		}
@@ -149,7 +149,7 @@ func (m *chatModel) Stream(ctx context.Context, input []*schema.Message, opts ..
 	sr, sw := schema.Pipe[*schema.Message](16)
 	go func() {
 		defer sw.Close()
-		defer stream.Close()
+		defer func() { _ = stream.Close() }()
 		chunkCount := 0
 		toolCallSeen := false
 		for {
@@ -209,7 +209,7 @@ func (m *chatModel) buildRequest(input []*schema.Message, stream bool, opts ...e
 			if ti == nil {
 				continue
 			}
-			params, err := ti.ParamsOneOf.ToJSONSchema()
+			params, err := ti.ToJSONSchema()
 			if err != nil {
 				config.Logger().Printf("[chatmodel] buildRequest: skip tool %s: %v", ti.Name, err)
 				continue
@@ -342,6 +342,7 @@ var knownModels = map[string]knownModel{
 }
 
 // knownModelContextLimits is kept for backward compatibility.
+//
 // Deprecated: use knownModels instead.
 var knownModelContextLimits = func() map[string]int {
 	m := make(map[string]int, len(knownModels))

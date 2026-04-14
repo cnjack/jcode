@@ -64,7 +64,7 @@ func (c *ContextCompactor) ShouldCompact(tokensUsed int64, contextLimit int) boo
 func (c *ContextCompactor) Compact(
 	ctx context.Context,
 	messages []*schema.Message,
-	model einomodel.ChatModel,
+	model einomodel.ToolCallingChatModel,
 	contextLimit int,
 ) ([]*schema.Message, *CompactResult, error) {
 	if len(messages) < 4 {
@@ -100,7 +100,7 @@ func (c *ContextCompactor) Compact(
 		if len(content) > 800 {
 			content = content[:800] + "…"
 		}
-		sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", m.Role, content))
+		fmt.Fprintf(&sb, "[%s]: %s\n\n", m.Role, content)
 	}
 
 	summaryInput := []*schema.Message{

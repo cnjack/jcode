@@ -223,9 +223,9 @@ func (e *editTool) editFile(ctx context.Context, input EditInput) (string, error
 	diff := generateUnifiedDiff(contentStr, newContent, filepath.Base(input.FilePath))
 
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("Successfully replaced %d occurrence(s) in %s", replacedCount, input.FilePath))
+	fmt.Fprintf(&result, "Successfully replaced %d occurrence(s) in %s", replacedCount, input.FilePath)
 	if backupPath != "" {
-		result.WriteString(fmt.Sprintf("\nBackup: %s", backupPath))
+		fmt.Fprintf(&result, "\nBackup: %s", backupPath)
 	}
 	if diff != "" {
 		result.WriteString("\n\n```diff\n")
@@ -305,10 +305,10 @@ func (e *editTool) editWithLineRange(ctx context.Context, input EditInput, conte
 	diff := generateUnifiedDiff(contentStr, newContent, filepath.Base(input.FilePath))
 
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("Successfully replaced %d occurrence(s) in %s (lines %d-%d)",
-		replacedCount, input.FilePath, startLine, endLine))
+	fmt.Fprintf(&result, "Successfully replaced %d occurrence(s) in %s (lines %d-%d)",
+		replacedCount, input.FilePath, startLine, endLine)
 	if backupPath != "" {
-		result.WriteString(fmt.Sprintf("\nBackup: %s", backupPath))
+		fmt.Fprintf(&result, "\nBackup: %s", backupPath)
 	}
 	if diff != "" {
 		result.WriteString("\n\n```diff\n")
@@ -356,30 +356,6 @@ func (e *editTool) handleNoMatch(input EditInput, contentStr string) (string, er
 	}
 
 	return "", fmt.Errorf("old_string not found in file %s. Use the read tool to verify the file content first", input.FilePath)
-}
-
-// generateDiffSnippet creates a simple diff-like output
-func generateDiffSnippet(oldStr, newStr string) string {
-	oldLines := strings.Split(oldStr, "\n")
-	newLines := strings.Split(newStr, "\n")
-
-	var diff strings.Builder
-	diff.WriteString("```diff\n")
-
-	for _, line := range oldLines {
-		diff.WriteString("- " + line + "\n")
-	}
-	for _, line := range newLines {
-		diff.WriteString("+ " + line + "\n")
-	}
-
-	diff.WriteString("```")
-
-	result := diff.String()
-	if len(result) > 1000 {
-		return truncateString(result, 1000)
-	}
-	return result
 }
 
 // normalizeWhitespace collapses all whitespace to single spaces and trims
@@ -528,9 +504,9 @@ func (e *editTool) applyMultiEdits(ctx context.Context, input EditInput) (string
 	diff := generateUnifiedDiff(original, modified, filepath.Base(input.FilePath))
 
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("Successfully applied %d edit(s) to %s", len(input.Edits), input.FilePath))
+	fmt.Fprintf(&result, "Successfully applied %d edit(s) to %s", len(input.Edits), input.FilePath)
 	if backupPath != "" {
-		result.WriteString(fmt.Sprintf("\nBackup: %s", backupPath))
+		fmt.Fprintf(&result, "\nBackup: %s", backupPath)
 	}
 	if diff != "" {
 		result.WriteString("\n\n```diff\n")

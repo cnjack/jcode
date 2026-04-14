@@ -81,7 +81,7 @@ func (s *switchEnvTool) InvokableRun(ctx context.Context, argumentsInJSON string
 	}
 
 	if match == nil {
-		return "", fmt.Errorf("SSH alias '%s' not found locally. Switch to 'local' or valid alias.", input.Target)
+		return "", fmt.Errorf("SSH alias '%s' not found locally. Switch to 'local' or valid alias", input.Target)
 	}
 
 	authMethods := BuildSSHAuthMethods()

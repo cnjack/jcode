@@ -106,7 +106,7 @@ func ServeSSE(w http.ResponseWriter, r *http.Request, events <-chan SSEEvent) {
 			if err != nil {
 				continue
 			}
-			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Event, data)
+			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Event, data)
 			flusher.Flush()
 		}
 	}
