@@ -33,6 +33,10 @@ type SubagentNotifier func(name, agentType string, done bool, result string, err
 // from a running subagent so the TUI can display live progress.
 type SubagentProgressFn func(agentName, event, toolName, detail string)
 
+// SubagentTokenFn is called after each model turn with the cumulative token delta
+// (tokens used by this subagent since it started) so the TUI can display progress.
+type SubagentTokenFn func(totalTokens int64)
+
 // SubagentDeps holds dependencies injected into the subagent tool at creation time.
 type SubagentDeps struct {
 	ChatModel    model.ToolCallingChatModel
@@ -40,6 +44,7 @@ type SubagentDeps struct {
 	TaskManager  *SubagentTaskManager        // optional, for async background tasks
 	Notifier     SubagentNotifier
 	ProgressFn   SubagentProgressFn // intermediate tool call/result events
+	TokenFn      SubagentTokenFn    // optional: token usage update after each model turn
 	Recorder     *session.Recorder  // records subagent start/result to session JSONL
 }
 
@@ -216,6 +221,15 @@ func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, 
 		EnableStreaming: true,
 	}
 
+	// Snapshot global token tracker so we can report per-subagent delta.
+	_, _, startTotal := internalmodel.TokenTracker.Get()
+	reportTokens := func() {
+		if s.deps.TokenFn != nil {
+			_, _, cur := internalmodel.TokenTracker.Get()
+			s.deps.TokenFn(cur - startTotal)
+		}
+	}
+
 	var assistantText strings.Builder
 	iterator := ag.Run(ctx, agentInput)
 	for {
@@ -279,6 +293,7 @@ func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, 
 					assistantText.WriteString(chunk.Content)
 				}
 			}
+			reportTokens()
 		} else if mo.Message != nil {
 			// Forward tool call events.
 			for _, tc := range mo.Message.ToolCalls {
@@ -289,6 +304,7 @@ func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, 
 			if mo.Message.Content != "" {
 				assistantText.WriteString(mo.Message.Content)
 			}
+			reportTokens()
 		}
 	}
 

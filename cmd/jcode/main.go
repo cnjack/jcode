@@ -170,6 +170,12 @@ func main() {
 		})
 	}
 
+	subagentTokenFn := func(totalTokens int64) {
+		if tuiProgram != nil {
+			tuiProgram.Send(tui.SubagentTokenUpdateMsg{TotalTokens: totalTokens})
+		}
+	}
+
 	// mcpTools holds MCP tools loaded at startup, preserved across mode switches.
 	var mcpTools []tool.BaseTool
 	var mcpStatuses []tui.MCPStatusItem
@@ -271,6 +277,7 @@ func main() {
 				ChatModel:  chatModel,
 				Notifier:   subagentNotifier,
 				ProgressFn: subagentProgress,
+				TokenFn:    subagentTokenFn,
 				Recorder:   rec,
 			}),
 			tools.NewAskUserTool(askUserDeps),
@@ -305,7 +312,7 @@ func main() {
 	// runner.Run, and the drain happens right after runner.Run returns.
 	summCapture := &summarizationCapture{}
 
-	approvalState := runner.NewApprovalState(pwd)
+	approvalState := runner.NewApprovalState(pwd, cfg.AutoApprove)
 
 	// Setup Langfuse tracer if telemetry is configured.
 	var langfuseTracer *telemetry.LangfuseTracer

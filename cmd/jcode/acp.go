@@ -147,7 +147,7 @@ func (a *acpAgent) NewSession(ctx context.Context, params acp.NewSessionRequest)
 	allTools = append(allTools, mcpTools...)
 
 	systemPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
-	approvalState := runner.NewApprovalState(pwd)
+	approvalState := runner.NewApprovalState(pwd, cfg.AutoApprove)
 
 	// Session ID
 	sessionID := acp.SessionId(fmt.Sprintf("sess_%s", generateSessionID()))

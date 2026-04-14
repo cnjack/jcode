@@ -18,9 +18,13 @@ type ApprovalState struct {
 }
 
 // NewApprovalState creates a new ApprovalState with the given workpath.
-func NewApprovalState(workpath string) *ApprovalState {
+func NewApprovalState(workpath string, autoApprove bool) *ApprovalState {
+	mode := handler.ModeManual
+	if autoApprove {
+		mode = handler.ModeAuto
+	}
 	return &ApprovalState{
-		mode:     handler.ModeManual, // Default to manual approval
+		mode:     mode,
 		workpath: workpath,
 	}
 }

@@ -34,7 +34,7 @@ var popularProviderIDs = []string{
 	// Chinese providers (using models.dev official IDs)
 	"alibaba-cn", "alibaba-coding-plan-cn",
 	"zhipuai", "zhipuai-coding-plan",
-	"moonshotai", "moonshotai-cn", "kimi-for-coding",
+	"moonshotai", "moonshotai-cn",
 	"minimax", "minimax-coding-plan",
 	"siliconflow",
 	"tencent-coding-plan",

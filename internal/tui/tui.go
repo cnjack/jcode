@@ -127,6 +127,7 @@ type Model struct {
 	subagentStepCount int      // total tool calls so far
 	subagentLastTool  string   // last tool name + args summary
 	subagentProgress  []string // tool call progress lines for box display
+	subagentTokens    int64    // cumulative tokens used by current subagent
 
 	// Exit confirmation
 	exitPending     bool      // true when quit dialog is showing
@@ -1519,6 +1520,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.subagentStepCount = 0
 		m.subagentLastTool = ""
 		m.subagentProgress = nil
+		m.subagentTokens = 0
 		m.lines = append(m.lines, fmt.Sprintf("  %s %s %s",
 			subagentLabelStyle.Render("🤖 Subagent:"),
 			toolNameStyle.Render(msg.Name),
@@ -1541,11 +1543,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshViewport()
 		}
 
+	case SubagentTokenUpdateMsg:
+		m.subagentTokens = msg.TotalTokens
+		m.refreshViewport()
+
 	case SubagentDoneMsg:
 		m.pendingTool = ""
 		m.subagentActive = false
 		m.subagentLastTool = ""
 		m.subagentProgress = nil
+		m.subagentTokens = 0
 		if msg.Err != nil {
 			m.lines = append(m.lines, fmt.Sprintf("   %s %s",
 				toolErrorStyle.Render("✗ Subagent Error:"),
@@ -2001,9 +2008,19 @@ func (m *Model) renderContent() string {
 		if m.subagentActive && len(m.subagentProgress) > 0 {
 			sb.WriteString(m.renderSubagentBox())
 			sb.WriteString("\n")
-			statusLine = fmt.Sprintf("  %s %s",
+			tokenStr := ""
+			if m.subagentTokens > 0 {
+				if m.modelContextLimit > 0 {
+					pct := float64(m.subagentTokens) / float64(m.modelContextLimit) * 100
+					tokenStr = fmt.Sprintf(" %d tok / %.0f%%", m.subagentTokens, pct)
+				} else {
+					tokenStr = fmt.Sprintf(" %d tok", m.subagentTokens)
+				}
+			}
+			statusLine = fmt.Sprintf("  %s %s%s",
 				m.spinner.View(),
 				subagentLabelStyle.Render(fmt.Sprintf("Subagent [%d steps]...", m.subagentStepCount)),
+				toolArgsStyle.Render(tokenStr),
 			)
 		} else if m.pendingTool != "" {
 			statusLine = fmt.Sprintf("  %s Running %s...", m.spinner.View(), toolNameStyle.Render(m.pendingTool))
