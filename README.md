@@ -2,13 +2,16 @@
 
 # jcode
 
-**AI Coding Agent in Your Terminal**
+### **Think it. Code it.**
 
-Read files · Edit code · Run commands · Manage tasks — all driven by natural language, right where your code lives.
+**The AI coding agent that lives in your terminal.**
+
+Describe tasks in plain language. jcode reads your codebase, writes surgical edits,
+runs commands, and shows every step — no black boxes.
 
 Works locally and on remote servers over SSH. Supports any OpenAI-compatible model.
 
-[Install](#install) · [Features](#features) · [Agent Teams](#-agent-teams) · [SSH](#-ssh--work-on-any-machine) · [Config](#configuration)
+[📖 Documentation](https://cnjack.github.io/jcode) · [Install](#install) · [Features](#features) · [Configuration](#configuration)
 
 </div>
 
@@ -33,13 +36,23 @@ Works locally and on remote servers over SSH. Supports any OpenAI-compatible mod
   Agent │ Model: openai / gpt-4o │ Approve: Ask │ [████░░░░░░] 2% │ MCP: 2/5
 ```
 
+## Why jcode?
+
+| | |
+|---|---|
+| **Transparent by design** | Every tool call is visible. Approve or reject edits before they happen. |
+| **Plan before you act** | Plan Mode explores read-only and presents a structured plan for your review. |
+| **Parallel teams** | Spawn multiple AI teammates that work simultaneously on different tasks. |
+| **SSH anywhere** | All tools work seamlessly on remote machines — same experience, zero friction. |
+| **Bring your own model** | Any OpenAI-compatible API. Switch models mid-session with one keystroke. |
+
 ## Install
 
 ```bash
 go install github.com/cnjack/jcode/cmd/jcode@latest
 ```
 
-First launch creates `~/.jcode/config.json` with a setup wizard. Run `jcode --doctor` to verify model & MCP connectivity.
+First launch creates `~/.jcode/config.json` with a setup wizard. Run `jcode doctor` to verify model & MCP connectivity.
 
 ## Features
 
@@ -137,8 +150,8 @@ Connect any [MCP](https://modelcontextprotocol.io/)-compatible server — stdio,
 ```json
 {
   "mcp_servers": {
-    "github": { "transport": "stdio", "command": "gh-mcp" },
-    "db":     { "transport": "http",  "url": "http://localhost:3001/mcp" }
+    "github": { "type": "stdio", "command": "gh-mcp" },
+    "db":     { "type": "http",  "url": "http://localhost:3001/mcp" }
   }
 }
 ```
@@ -202,9 +215,13 @@ Every conversation is recorded as JSONL. Resume any past session:
 ```
 
 ```bash
-jcode --session           # list sessions
-jcode --resume <UUID>     # pick up where you left off
+jcode sessions          # list sessions
+jcode --resume <UUID>   # pick up where you left off
 ```
+
+### 🌐 Web Interface
+
+Start a browser-based UI with `jcode web`. Chat interface, file browser, built-in terminal, and full agent control — all accessible from `http://localhost:8080`.
 
 ### 🧭 Context Awareness
 
@@ -226,7 +243,8 @@ No manual configuration needed — the agent adapts to your project.
 | **Ctrl+C** | Press once to warn, twice to exit |
 | **Ctrl+A** | Toggle approval mode (Ask ↔ Auto) |
 | **Ctrl+P** | Toggle Plan ↔ Agent mode |
-| **Ctrl+L** | Clear viewport |
+| **Ctrl+L** | Model picker |
+| **Ctrl+T** | Toggle team panel |
 | **Shift+↑/↓** | Switch between teammates |
 | **Esc** | Return to leader view |
 | **/** | Start slash command |
@@ -251,6 +269,7 @@ Config lives at `~/.jcode/config.json`. Key sections:
 |---|---|
 | `providers` | API keys and base URLs for each model provider |
 | `model` / `small_model` | Active model and lightweight model for summaries |
+| `fallback_model` | Fallback when primary model fails |
 | `ssh_aliases` | Named SSH connections |
 | `mcp_servers` | MCP server definitions (stdio / HTTP / SSE) |
 | `budget` | Token and cost limits per session |
@@ -261,9 +280,13 @@ Config lives at `~/.jcode/config.json`. Key sections:
 | `telemetry` | Optional [Langfuse](https://langfuse.com) tracing |
 
 ```bash
-jcode --doctor    # verify model + MCP connectivity
-jcode --version   # show version, commit, build time
+jcode doctor    # verify model + MCP connectivity
+jcode version   # show version, commit, build time
 ```
+
+## Documentation
+
+📖 Full documentation is available at [cnjack.github.io/jcode](https://cnjack.github.io/jcode)
 
 ## License
 
