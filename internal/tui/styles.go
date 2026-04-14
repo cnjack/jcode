@@ -16,7 +16,6 @@ var (
 	colorMuted     = lipgloss.Color("#6B7280") // gray
 	colorText      = lipgloss.Color("#E5E7EB") // light gray
 	colorBg        = lipgloss.Color("#111827") // dark bg
-	colorToolBg    = lipgloss.Color("#1F2937") // slightly lighter
 	colorDimText   = lipgloss.Color("#9CA3AF") // dim text for secondary info
 
 	// Styles
@@ -64,23 +63,6 @@ var (
 			Foreground(colorError).
 			Bold(true)
 
-	toolBlockStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorMuted).
-			Padding(0, 1)
-
-	outputBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorMuted).
-			Foreground(colorText).
-			Padding(0, 1).
-			MarginLeft(3)
-
-	toolMutedStyle = lipgloss.NewStyle().
-			Foreground(colorMuted).
-			PaddingLeft(4).
-			Italic(true)
-
 	diffAddStyle = lipgloss.NewStyle().
 			Foreground(colorSuccess)
 
@@ -94,16 +76,9 @@ var (
 			Foreground(colorError).
 			Bold(true)
 
-	promptStyle = lipgloss.NewStyle().
-			Foreground(colorPrimary).
-			Bold(true)
-
 	userLabelStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(colorSecondary)
-
-	inputStyle = lipgloss.NewStyle().
-			Foreground(colorText)
 
 	dividerStyle = lipgloss.NewStyle().
 			Foreground(colorMuted)
@@ -127,17 +102,10 @@ var (
 				Italic(true)
 
 	// --- Tool call status icons ---
-	toolIconPending  = lipgloss.NewStyle().Foreground(colorWarning).Render("●")
-	toolIconRunning  = lipgloss.NewStyle().Foreground(colorSecondary).Render("●")
-	toolIconSuccess  = lipgloss.NewStyle().Foreground(colorSuccess).Render("✓")
-	toolIconError    = lipgloss.NewStyle().Foreground(colorError).Render("✗")
-	toolIconCanceled = lipgloss.NewStyle().Foreground(colorMuted).Render("⊘")
-
-	// --- Tool call header style ---
-	toolHeaderStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(colorText)
-
+	toolIconPending = lipgloss.NewStyle().Foreground(colorWarning).Render("●")
+	toolIconRunning = lipgloss.NewStyle().Foreground(colorSecondary).Render("●")
+	toolIconSuccess = lipgloss.NewStyle().Foreground(colorSuccess).Render("✓")
+	toolIconError   = lipgloss.NewStyle().Foreground(colorError).Render("✗")
 	// --- Tool output body style (indented with left border) ---
 	toolBodyStyle = lipgloss.NewStyle().
 			Border(lipgloss.Border{Left: "│"}).
@@ -161,11 +129,6 @@ var (
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(colorPrimary).
 			Padding(1, 2)
-
-	// --- Copy notification style ---
-	copyNoticeStyle = lipgloss.NewStyle().
-			Foreground(colorSuccess).
-			Italic(true)
 )
 
 func divider(width int) string {

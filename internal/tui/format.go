@@ -91,12 +91,12 @@ func formatToolResultBody(toolName, output string, err error, termWidth int) []s
 	case "todowrite":
 		return formatTodoWriteOutput(output)
 	default:
-		return formatDefaultOutput(toolName, output, termWidth)
+		return formatDefaultOutput(output, termWidth)
 	}
 }
 
 // formatDefaultOutput renders tool output with left border, truncating if too many lines.
-func formatDefaultOutput(toolName, output string, termWidth int) []string {
+func formatDefaultOutput(output string, termWidth int) []string {
 	output = strings.TrimRight(output, "\n")
 	if output == "" {
 		return nil
@@ -194,11 +194,12 @@ func formatEditOutput(output string, termWidth int) []string {
 
 	var diffContent strings.Builder
 	for _, line := range strings.Split(diffBlock, "\n") {
-		if strings.HasPrefix(line, "+ ") {
+		switch {
+		case strings.HasPrefix(line, "+ "):
 			diffContent.WriteString(diffAddStyle.Render(line))
-		} else if strings.HasPrefix(line, "- ") {
+		case strings.HasPrefix(line, "- "):
 			diffContent.WriteString(diffRemoveStyle.Render(line))
-		} else {
+		default:
 			diffContent.WriteString(line)
 		}
 		diffContent.WriteString("\n")

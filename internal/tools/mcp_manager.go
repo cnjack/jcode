@@ -477,66 +477,6 @@ func (m *MCPManager) reconnectOnce(ctx context.Context, conn *MCPConnection) err
 	return nil
 }
 
-// reconnect runs background reconnection with exponential backoff.
-// It respects the manager's context and the policy's MaxRetries.
-func (m *MCPManager) reconnect(ctx context.Context, conn *MCPConnection) {
-	conn.mu.Lock()
-	conn.setState(MCPReconnecting)
-	conn.mu.Unlock()
-	m.notifyState(conn.Name, MCPReconnecting)
-
-	for attempt := 0; attempt < m.policy.MaxRetries; attempt++ {
-		select {
-		case <-ctx.Done():
-			return
-		case <-m.ctx.Done():
-			return
-		default:
-		}
-
-		delay := m.policy.Delay(attempt)
-		config.Logger().Printf("mcp_manager: reconnect %q attempt %d/%d (delay %v)", conn.Name, attempt+1, m.policy.MaxRetries, delay)
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-m.ctx.Done():
-			return
-		case <-time.After(delay):
-		}
-
-		conn.mu.Lock()
-		conn.RetryCount = attempt + 1
-		conn.mu.Unlock()
-
-		if err := m.doConnect(ctx, conn); err != nil {
-			conn.mu.Lock()
-			conn.LastError = err
-			conn.mu.Unlock()
-			config.Logger().Printf("mcp_manager: reconnect %q attempt %d failed: %v", conn.Name, attempt+1, err)
-			continue
-		}
-
-		// Success
-		conn.mu.Lock()
-		conn.setState(MCPConnected)
-		conn.LastConnected = time.Now()
-		conn.RetryCount = 0
-		conn.LastError = nil
-		conn.mu.Unlock()
-		m.notifyState(conn.Name, MCPConnected)
-		config.Logger().Printf("mcp_manager: reconnected to %q", conn.Name)
-		return
-	}
-
-	// All retries exhausted.
-	conn.mu.Lock()
-	conn.setState(MCPFailed)
-	conn.mu.Unlock()
-	m.notifyState(conn.Name, MCPFailed)
-	config.Logger().Printf("mcp_manager: reconnection to %q failed after %d attempts", conn.Name, m.policy.MaxRetries)
-}
-
 // getConnection looks up a connection by name.
 func (m *MCPManager) getConnection(name string) (*MCPConnection, error) {
 	m.mu.RLock()

@@ -214,7 +214,7 @@ func sliceByDisplayCol(s string, startCol, endCol int) string {
 			break
 		}
 		if col+width > startCol {
-			sb.WriteString(string(seq))
+			sb.WriteString(seq)
 		}
 
 		col += width
@@ -301,7 +301,7 @@ func highlightLine(line string, startCol, endCol int) string {
 
 		if width == 0 {
 			// Control or escape sequence — pass through without advancing visCol
-			result.WriteString(string(seq))
+			result.WriteString(seq)
 			// Re-apply reverse video: the content may contain SGR resets
 			// (\x1b[0m) that clear all attributes including our reverse video.
 			if highlighted {
@@ -319,7 +319,7 @@ func highlightLine(line string, startCol, endCol int) string {
 				result.WriteString("\x1b[27m") // reverse video OFF
 				highlighted = false
 			}
-			result.WriteString(string(seq))
+			result.WriteString(seq)
 			visCol += width
 		}
 

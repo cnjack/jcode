@@ -90,10 +90,10 @@ func TestTaskManager_AsyncSubmit(t *testing.T) {
 
 func TestTaskManager_ListByStatus(t *testing.T) {
 	mgr := NewSubagentTaskManager(5, 10)
-	mgr.Submit(context.Background(), &SubagentTask{Name: "a"}, func(ctx context.Context) (string, error) {
+	_, _, _ = mgr.Submit(context.Background(), &SubagentTask{Name: "a"}, func(ctx context.Context) (string, error) {
 		return "ok", nil
 	}, false)
-	mgr.Submit(context.Background(), &SubagentTask{Name: "b"}, func(ctx context.Context) (string, error) {
+	_, _, _ = mgr.Submit(context.Background(), &SubagentTask{Name: "b"}, func(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("fail")
 	}, false)
 
@@ -136,7 +136,7 @@ func TestTaskManager_StopRunning(t *testing.T) {
 
 func TestTaskManager_StopNonRunning(t *testing.T) {
 	mgr := NewSubagentTaskManager(5, 10)
-	mgr.Submit(context.Background(), &SubagentTask{Name: "done"}, func(ctx context.Context) (string, error) {
+	_, _, _ = mgr.Submit(context.Background(), &SubagentTask{Name: "done"}, func(ctx context.Context) (string, error) {
 		return "ok", nil
 	}, false)
 	tasks := mgr.List(TaskStatusCompleted)
@@ -152,7 +152,7 @@ func TestTaskManager_StopNonRunning(t *testing.T) {
 func TestTaskManager_DrainNotifications(t *testing.T) {
 	mgr := NewSubagentTaskManager(5, 10)
 	ch := make(chan struct{})
-	mgr.Submit(context.Background(), &SubagentTask{Name: "notify"}, func(ctx context.Context) (string, error) {
+	_, _, _ = mgr.Submit(context.Background(), &SubagentTask{Name: "notify"}, func(ctx context.Context) (string, error) {
 		<-ch
 		return "done", nil
 	}, true)
@@ -178,7 +178,7 @@ func TestTaskManager_MaxParallelLimit(t *testing.T) {
 	mgr := NewSubagentTaskManager(1, 10)
 	ch := make(chan struct{})
 	// First async task takes the slot.
-	mgr.Submit(context.Background(), &SubagentTask{Name: "first"}, func(ctx context.Context) (string, error) {
+	_, _, _ = mgr.Submit(context.Background(), &SubagentTask{Name: "first"}, func(ctx context.Context) (string, error) {
 		<-ch
 		return "ok", nil
 	}, true)
@@ -204,7 +204,7 @@ func TestTaskManager_ConcurrentSubmit(t *testing.T) {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			mgr.Submit(context.Background(), &SubagentTask{Name: fmt.Sprintf("t%d", n)}, func(ctx context.Context) (string, error) {
+			_, _, _ = mgr.Submit(context.Background(), &SubagentTask{Name: fmt.Sprintf("t%d", n)}, func(ctx context.Context) (string, error) {
 				return fmt.Sprintf("result-%d", n), nil
 			}, false)
 		}(i)

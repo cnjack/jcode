@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f766e"/>
+      <stop offset="100%" stop-color="#14b8a6"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5eead4" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#2dd4bf" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded square background -->
+  <rect x="16" y="16" width="480" height="480" rx="96" ry="96" fill="url(#bg)"/>
+
+  <!-- Subtle highlight overlay -->
+  <rect x="16" y="16" width="480" height="240" rx="96" ry="96" fill="url(#glow)"/>
+  <rect x="16" y="160" width="480" height="96" fill="url(#glow)" opacity="0.3"/>
+
+  <!-- Terminal prompt chevron ">_" -->
+  <g fill="none" stroke="#ffffff" stroke-width="32" stroke-linecap="round" stroke-linejoin="round" opacity="0.15">
+    <!-- > symbol -->
+    <polyline points="90,150 160,210 90,270"/>
+    <!-- _ cursor -->
+    <line x1="185" y1="265" x2="260" y2="265"/>
+  </g>
+
+  <!-- Main "J" letter -->
+  <g fill="#ffffff">
+    <path d="
+      M 195 130
+      L 345 130
+      Q 365 130 365 150
+      Q 365 170 345 170
+      L 265 170
+      L 265 330
+      Q 265 380 235 405
+      Q 210 425 175 425
+      Q 145 425 125 410
+      Q 105 395 105 370
+      Q 105 355 115 345
+      Q 125 335 140 335
+      Q 155 335 163 344
+      Q 170 353 170 365
+      Q 170 375 165 382
+      Q 175 390 188 390
+      Q 205 390 215 375
+      Q 225 360 225 340
+      L 225 170
+      L 195 170
+      Q 175 170 175 150
+      Q 175 130 195 130
+      Z
+    "/>
+  </g>
+
+  <!-- Sparkle / AI indicator dot -->
+  <circle cx="385" cy="135" r="18" fill="#5eead4" opacity="0.9"/>
+  <circle cx="385" cy="135" r="10" fill="#ffffff" opacity="0.8"/>
+  <circle cx="385" cy="135" r="5" fill="#ffffff"/>
+
+  <!-- Small sparkle rays -->
+  <g stroke="#5eead4" stroke-width="3" stroke-linecap="round" opacity="0.7">
+    <line x1="385" y1="105" x2="385" y2="98"/>
+    <line x1="385" y1="165" x2="385" y2="172"/>
+    <line x1="355" y1="135" x2="348" y2="135"/>
+    <line x1="415" y1="135" x2="422" y2="135"/>
+  </g>
+
+  <!-- Code brackets decoration at bottom -->
+  <g fill="none" stroke="#ffffff" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" opacity="0.2">
+    <polyline points="110,440 80,460 110,480"/>
+    <polyline points="400,440 430,460 400,480"/>
+  </g>
+</svg>

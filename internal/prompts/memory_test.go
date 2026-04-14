@@ -119,10 +119,6 @@ func TestMemoryLoader_MaxDepth(t *testing.T) {
 	// Create chain: d0.md -> d1.md -> d2.md -> d3.md
 	for i := 0; i < 4; i++ {
 		var content string
-		if i < 3 {
-			content = strings.Repeat("x", 10) + "\n@include " + filepath.Base(filepath.Join(dir, "d"+string(rune('0'+i+1))+".md"))
-			// Fix: use proper formatting
-		}
 		name := "d" + string(rune('0'+i)) + ".md"
 		if i < 3 {
 			next := "d" + string(rune('0'+i+1)) + ".md"

@@ -114,7 +114,7 @@ func TestNewMCPManager(t *testing.T) {
 	mgr := NewMCPManager(nil, func(name string, state MCPServerState) {
 		called = true
 	})
-	defer mgr.Close()
+	defer func() { _ = mgr.Close() }()
 
 	if mgr.connections == nil {
 		t.Fatal("connections map is nil")
@@ -135,7 +135,7 @@ func TestNewMCPManager(t *testing.T) {
 
 func TestNewMCPManager_NilCallback(t *testing.T) {
 	mgr := NewMCPManager(nil, nil)
-	defer mgr.Close()
+	defer func() { _ = mgr.Close() }()
 
 	// Should not panic with nil callback
 	mgr.notifyState("test", MCPConnecting)
@@ -160,7 +160,7 @@ func TestStateCallback_ConnectDisconnect(t *testing.T) {
 		}{name, state})
 		mu.Unlock()
 	})
-	defer mgr.Close()
+	defer func() { _ = mgr.Close() }()
 
 	// Simulate a connection by manually inserting a connection and
 	// walking through states. We can't use a real MCP server, but we
@@ -275,7 +275,7 @@ func TestSuccessfulReconnectResetsRetryCount(t *testing.T) {
 
 func TestGetServerStatus(t *testing.T) {
 	mgr := NewMCPManager(nil, nil)
-	defer mgr.Close()
+	defer func() { _ = mgr.Close() }()
 
 	// Empty
 	statuses := mgr.GetServerStatus()
@@ -333,7 +333,7 @@ func TestGetServerStatus(t *testing.T) {
 
 func TestGetAllTools(t *testing.T) {
 	mgr := NewMCPManager(nil, nil)
-	defer mgr.Close()
+	defer func() { _ = mgr.Close() }()
 
 	mgr.mu.Lock()
 	mgr.connections["s1"] = &MCPConnection{
@@ -397,7 +397,7 @@ func TestMCPConnectionSetState(t *testing.T) {
 
 func TestConnect_NilConfig(t *testing.T) {
 	mgr := NewMCPManager(nil, nil)
-	defer mgr.Close()
+	defer func() { _ = mgr.Close() }()
 
 	err := mgr.Connect(context.Background(), "bad", nil)
 	if err == nil {
@@ -411,7 +411,7 @@ func TestConnect_NilConfig(t *testing.T) {
 
 func TestDisconnect_UnknownServer(t *testing.T) {
 	mgr := NewMCPManager(nil, nil)
-	defer mgr.Close()
+	defer func() { _ = mgr.Close() }()
 
 	err := mgr.Disconnect("nonexistent")
 	if err == nil {
@@ -425,7 +425,7 @@ func TestDisconnect_UnknownServer(t *testing.T) {
 
 func TestAddServer_Duplicate(t *testing.T) {
 	mgr := NewMCPManager(nil, nil)
-	defer mgr.Close()
+	defer func() { _ = mgr.Close() }()
 
 	mgr.mu.Lock()
 	mgr.connections["dup"] = &MCPConnection{Name: "dup", State: MCPConnected}

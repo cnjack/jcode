@@ -212,7 +212,7 @@ func NewSSHExecutor(addr, user string, authMethods []ssh.AuthMethod) (*SSHExecut
 
 	// Ensure addr includes port
 	if !strings.Contains(addr, ":") {
-		addr = addr + ":22"
+		addr += ":22"
 	}
 
 	appconfig.Logger().Printf("[ssh] dial tcp %s@%s", user, addr)
@@ -333,7 +333,7 @@ func (s *SSHExecutor) run(ctx context.Context, command, _ string, timeout time.D
 	if err != nil {
 		return "", "", fmt.Errorf("ssh session: %w", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	var stdout, stderr bytes.Buffer
 	session.Stdout = &stdout
@@ -366,7 +366,7 @@ func sshExecSimple(client *ssh.Client, command string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	var stdout, stderr bytes.Buffer
 	session.Stdout = &stdout

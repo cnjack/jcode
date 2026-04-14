@@ -20,6 +20,7 @@ type SSEHandler = {
   onSessionReset?: (data: { session_id: string }) => void
   onModelChanged?: (data: { provider: string; model: string }) => void
   onModeChanged?: (data: { mode: string }) => void
+  onApprovalModeChanged?: (data: { auto_approve: boolean }) => void
 }
 
 export function useSSE(handlers: SSEHandler) {
@@ -53,6 +54,7 @@ export function useSSE(handlers: SSEHandler) {
       ['session_reset', (d) => handlers.onSessionReset?.(d)],
       ['model_changed', (d) => handlers.onModelChanged?.(d)],
       ['mode_changed', (d) => handlers.onModeChanged?.(d)],
+      ['approval_mode_changed', (d) => handlers.onApprovalModeChanged?.(d)],
     ]
 
     for (const [event, handler] of events) {

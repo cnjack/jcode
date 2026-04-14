@@ -319,6 +319,9 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 
 	if cfg, err := config.LoadConfig(); err == nil {
 		m.activeProvider, m.activeModel = cfg.GetProviderModel()
+		if cfg.AutoApprove {
+			m.approvalMode = ModeAuto
+		}
 	}
 
 	return m
@@ -353,8 +356,8 @@ func appendHistory(prompt string) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
-	f.WriteString(prompt + "\n")
+	defer func() { _ = f.Close() }()
+	_, _ = f.WriteString(prompt + "\n")
 }
 
 func (m Model) Init() tea.Cmd {
@@ -365,7 +368,7 @@ func (m Model) inputActive() bool {
 	return (m.mode == ModeAgent || m.sshStep > 0 || m.sshSavePrompt) && !m.pickingModel && !m.showingSetting && !m.pickingSSHAlias && !m.pickingSession && !m.approvalPending && !m.planReviewActive && !m.askUserActive
 }
 
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
@@ -391,7 +394,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		// Right-click paste: request clipboard via OSC52 terminal protocol
 		if click, ok := msg.(tea.MouseClickMsg); ok && click.Button == tea.MouseRight && m.inputActive() {
-			cmds = append(cmds, func() tea.Msg { return tea.ReadClipboard() })
+			cmds = append(cmds, tea.ReadClipboard)
 			return m, tea.Batch(cmds...)
 		}
 
@@ -412,27 +415,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 
-		if m.pickingSession {
+		switch {
+		case m.pickingSession:
 			var cmd tea.Cmd
 			m.sessionPicker, cmd = m.sessionPicker.Update(msg)
 			cmds = append(cmds, cmd)
-		} else if m.showingSetting {
+		case m.showingSetting:
 			var cmd tea.Cmd
 			m.settingMenu, cmd = m.settingMenu.Update(msg)
 			cmds = append(cmds, cmd)
-		} else if m.pickingSSHAlias {
+		case m.pickingSSHAlias:
 			var cmd tea.Cmd
 			m.sshAliasPicker, cmd = m.sshAliasPicker.Update(msg)
 			cmds = append(cmds, cmd)
-		} else if m.pickingModel {
+		case m.pickingModel:
 			var cmd tea.Cmd
 			m.modelPicker, cmd = m.modelPicker.Update(msg)
 			cmds = append(cmds, cmd)
-		} else if m.sshStep == 3 {
+		case m.sshStep == 3:
 			var cmd tea.Cmd
 			m.dirList, cmd = m.dirList.Update(msg)
 			cmds = append(cmds, cmd)
-		} else if m.ready {
+		case m.ready:
 			var vpCmd tea.Cmd
 			m.viewport, vpCmd = m.viewport.Update(msg)
 			cmds = append(cmds, vpCmd)
@@ -844,7 +848,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cfg, err := config.LoadConfig()
 					if err == nil {
 						cfg.Model = selItem.provider + "/" + selItem.model
-						config.SaveConfig(cfg)
+						_ = config.SaveConfig(cfg)
 						m.activeProvider = selItem.provider
 						m.activeModel = selItem.model
 						select {
@@ -1047,7 +1051,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m.handleSSHStep(prompt, cmds)
 					}
 
-					if m.lines != nil && len(m.lines) > 0 {
+					if len(m.lines) > 0 {
 						// Check if the lines are the initial welcome message, we clear it.
 						if strings.Contains(m.lines[0], "Welcome to Little Jack") {
 							m.lines = nil
@@ -2005,7 +2009,8 @@ func (m *Model) renderContent() string {
 	}
 	if m.thinking && !m.agentDone {
 		var statusLine string
-		if m.subagentActive && len(m.subagentProgress) > 0 {
+		switch {
+		case m.subagentActive && len(m.subagentProgress) > 0:
 			sb.WriteString(m.renderSubagentBox())
 			sb.WriteString("\n")
 			tokenStr := ""
@@ -2022,9 +2027,9 @@ func (m *Model) renderContent() string {
 				subagentLabelStyle.Render(fmt.Sprintf("Subagent [%d steps]...", m.subagentStepCount)),
 				toolArgsStyle.Render(tokenStr),
 			)
-		} else if m.pendingTool != "" {
+		case m.pendingTool != "":
 			statusLine = fmt.Sprintf("  %s Running %s...", m.spinner.View(), toolNameStyle.Render(m.pendingTool))
-		} else {
+		default:
 			statusLine = fmt.Sprintf("  %s Thinking...", m.spinner.View())
 		}
 		sb.WriteString(statusLine)

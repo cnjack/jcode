@@ -40,7 +40,7 @@ func TestWrite_NormalWrite(t *testing.T) {
 func TestWrite_ConflictDetection(t *testing.T) {
 	env, dir := newTestEnv(t)
 	sm := newTestStorageManager(t)
-	defer sm.Close()
+	defer func() { _ = sm.Close() }()
 	ft := NewFileTracker(sm)
 	env.FileTracker = ft
 
@@ -81,7 +81,7 @@ func TestWrite_ConflictDetection(t *testing.T) {
 func TestWrite_AutoBackup(t *testing.T) {
 	env, dir := newTestEnv(t)
 	sm := newTestStorageManager(t)
-	defer sm.Close()
+	defer func() { _ = sm.Close() }()
 	ft := NewFileTracker(sm)
 	env.FileTracker = ft
 
@@ -127,7 +127,7 @@ func TestWrite_AutoBackup(t *testing.T) {
 func TestWrite_UnifiedDiff(t *testing.T) {
 	env, dir := newTestEnv(t)
 	sm := newTestStorageManager(t)
-	defer sm.Close()
+	defer func() { _ = sm.Close() }()
 	ft := NewFileTracker(sm)
 	env.FileTracker = ft
 

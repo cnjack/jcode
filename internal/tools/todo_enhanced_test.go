@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -40,7 +41,7 @@ func TestTD01_LegacyCompat(t *testing.T) {
 	tw := NewEnhancedTodoWriteTool(store)
 
 	input := `{"todos": [{"id": 1, "title": "task one", "status": "pending"}, {"id": 2, "title": "task two", "status": "in_progress"}]}`
-	result, err := tw.InvokableRun(nil, input)
+	result, err := tw.InvokableRun(context.TODO(), input)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -65,13 +66,13 @@ func TestTD02_UpdateReplacesAll(t *testing.T) {
 	store := newTestEnhancedStore(t)
 
 	// Seed with initial items.
-	store.Update([]EnhancedTodoItem{
+	_ = store.Update([]EnhancedTodoItem{
 		{ID: "a", Title: "old", Status: StatusNotStarted},
 	})
 
 	tw := NewEnhancedTodoWriteTool(store)
 	input := `{"action": "update", "items": [{"id": "x", "title": "new", "status": "not_started"}]}`
-	_, err := tw.InvokableRun(nil, input)
+	_, err := tw.InvokableRun(context.TODO(), input)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -87,13 +88,13 @@ func TestTD02_UpdateReplacesAll(t *testing.T) {
 // TD-03: add action appends
 func TestTD03_AddAppends(t *testing.T) {
 	store := newTestEnhancedStore(t)
-	store.Update([]EnhancedTodoItem{
+	_ = store.Update([]EnhancedTodoItem{
 		{ID: "a", Title: "first", Status: StatusNotStarted},
 	})
 
 	tw := NewEnhancedTodoWriteTool(store)
 	input := `{"action": "add", "items": [{"id": "b", "title": "second", "status": "not_started"}]}`
-	result, err := tw.InvokableRun(nil, input)
+	result, err := tw.InvokableRun(context.TODO(), input)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -108,13 +109,13 @@ func TestTD03_AddAppends(t *testing.T) {
 // TD-04: modify action changes status
 func TestTD04_ModifyStatus(t *testing.T) {
 	store := newTestEnhancedStore(t)
-	store.Update([]EnhancedTodoItem{
+	_ = store.Update([]EnhancedTodoItem{
 		{ID: "a", Title: "task", Status: StatusNotStarted},
 	})
 
 	tw := NewEnhancedTodoWriteTool(store)
 	input := `{"action": "modify", "id": "a", "status": "in_progress"}`
-	_, err := tw.InvokableRun(nil, input)
+	_, err := tw.InvokableRun(context.TODO(), input)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -126,14 +127,14 @@ func TestTD04_ModifyStatus(t *testing.T) {
 // TD-05: remove action deletes
 func TestTD05_Remove(t *testing.T) {
 	store := newTestEnhancedStore(t)
-	store.Update([]EnhancedTodoItem{
+	_ = store.Update([]EnhancedTodoItem{
 		{ID: "a", Title: "first", Status: StatusCompleted},
 		{ID: "b", Title: "second", Status: StatusNotStarted},
 	})
 
 	tw := NewEnhancedTodoWriteTool(store)
 	input := `{"action": "remove", "id": "a"}`
-	_, err := tw.InvokableRun(nil, input)
+	_, err := tw.InvokableRun(context.TODO(), input)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -146,12 +147,12 @@ func TestTD05_Remove(t *testing.T) {
 // TD-06: read action returns summary
 func TestTD06_ReadAction(t *testing.T) {
 	store := newTestEnhancedStore(t)
-	store.Update([]EnhancedTodoItem{
+	_ = store.Update([]EnhancedTodoItem{
 		{ID: "a", Title: "task", Status: StatusCompleted},
 	})
 
 	tw := NewEnhancedTodoWriteTool(store)
-	result, err := tw.InvokableRun(nil, `{"action": "read"}`)
+	result, err := tw.InvokableRun(context.TODO(), `{"action": "read"}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -192,7 +193,7 @@ func TestTD08_CircularDependency(t *testing.T) {
 // TD-09: blocked_by not completed → cannot start
 func TestTD09_BlockedByNotCompleted(t *testing.T) {
 	store := newTestEnhancedStore(t)
-	store.Update([]EnhancedTodoItem{
+	_ = store.Update([]EnhancedTodoItem{
 		{ID: "a", Title: "blocker", Status: StatusNotStarted},
 		{ID: "b", Title: "blocked", Status: StatusNotStarted, BlockedBy: []string{"a"}},
 	})
@@ -208,7 +209,7 @@ func TestTD09_BlockedByNotCompleted(t *testing.T) {
 // TD-10: dependencies all completed → can start
 func TestTD10_DependenciesCompleted(t *testing.T) {
 	store := newTestEnhancedStore(t)
-	store.Update([]EnhancedTodoItem{
+	_ = store.Update([]EnhancedTodoItem{
 		{ID: "a", Title: "blocker", Status: StatusCompleted},
 		{ID: "b", Title: "blocked", Status: StatusNotStarted, BlockedBy: []string{"a"}},
 	})
@@ -224,7 +225,7 @@ func TestTD10_DependenciesCompleted(t *testing.T) {
 // TD-11: cannot remove item that others depend on
 func TestTD11_CannotRemoveDependency(t *testing.T) {
 	store := newTestEnhancedStore(t)
-	store.Update([]EnhancedTodoItem{
+	_ = store.Update([]EnhancedTodoItem{
 		{ID: "a", Title: "blocker", Status: StatusCompleted},
 		{ID: "b", Title: "blocked", Status: StatusNotStarted, BlockedBy: []string{"a"}},
 	})
@@ -240,9 +241,9 @@ func TestTD11_CannotRemoveDependency(t *testing.T) {
 // TD-12: save format is correct JSON with version=2
 func TestTD12_SaveFormat(t *testing.T) {
 	store, sm := newTestEnhancedStoreWithStorage(t)
-	defer sm.Close()
+	defer func() { _ = sm.Close() }()
 
-	store.Update([]EnhancedTodoItem{
+	_ = store.Update([]EnhancedTodoItem{
 		{ID: "a", Title: "task", Status: StatusNotStarted},
 	})
 
@@ -284,7 +285,7 @@ func TestTD14_LoadFromDisk(t *testing.T) {
 		sessionID:  "load-test",
 		writeQueue: NewWriteQueue(10 * time.Millisecond),
 	}
-	defer sm.Close()
+	defer func() { _ = sm.Close() }()
 
 	// Write a file to disk manually.
 	file := TodoFileFormat{
@@ -297,7 +298,7 @@ func TestTD14_LoadFromDisk(t *testing.T) {
 	}
 	data, _ := json.Marshal(file)
 	path := filepath.Join(sm.TodosDir(), "load-test.json")
-	os.WriteFile(path, data, 0o600)
+	_ = os.WriteFile(path, data, 0o600)
 
 	// Create store — should load automatically.
 	store := NewEnhancedTodoStore("load-test", sm)
@@ -324,11 +325,11 @@ func TestTD15_CorruptedJSON(t *testing.T) {
 		sessionID:  "corrupt-test",
 		writeQueue: NewWriteQueue(10 * time.Millisecond),
 	}
-	defer sm.Close()
+	defer func() { _ = sm.Close() }()
 
 	// Write garbage.
 	path := filepath.Join(sm.TodosDir(), "corrupt-test.json")
-	os.WriteFile(path, []byte("{invalid json!!!"), 0o600)
+	_ = os.WriteFile(path, []byte("{invalid json!!!"), 0o600)
 
 	// Should not panic.
 	store := NewEnhancedTodoStore("corrupt-test", sm)
@@ -390,7 +391,7 @@ func TestTD19_DuplicateID(t *testing.T) {
 func TestEnhanced_ReadToolEmpty(t *testing.T) {
 	store := newTestEnhancedStore(t)
 	tr := NewEnhancedTodoReadTool(store)
-	result, err := tr.InvokableRun(nil, "{}")
+	result, err := tr.InvokableRun(context.TODO(), "{}")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -401,7 +402,7 @@ func TestEnhanced_ReadToolEmpty(t *testing.T) {
 
 func TestEnhanced_AddConflictingID(t *testing.T) {
 	store := newTestEnhancedStore(t)
-	store.Update([]EnhancedTodoItem{
+	_ = store.Update([]EnhancedTodoItem{
 		{ID: "a", Title: "first", Status: StatusNotStarted},
 	})
 	err := store.Add([]EnhancedTodoItem{
@@ -417,7 +418,7 @@ func TestEnhanced_AddConflictingID(t *testing.T) {
 
 func TestEnhanced_ItemsBackwardCompat(t *testing.T) {
 	store := newTestEnhancedStore(t)
-	store.Update([]EnhancedTodoItem{
+	_ = store.Update([]EnhancedTodoItem{
 		{ID: "1", Title: "task", Status: StatusNotStarted},
 		{ID: "2", Title: "done", Status: StatusSkipped},
 	})
@@ -435,7 +436,7 @@ func TestEnhanced_ItemsBackwardCompat(t *testing.T) {
 
 func TestEnhanced_IncompleteSummary(t *testing.T) {
 	store := newTestEnhancedStore(t)
-	store.Update([]EnhancedTodoItem{
+	_ = store.Update([]EnhancedTodoItem{
 		{ID: "a", Title: "pending task", Status: StatusNotStarted},
 		{ID: "b", Title: "done task", Status: StatusCompleted},
 	})
@@ -454,7 +455,7 @@ func TestEnhanced_OnChangeCallback(t *testing.T) {
 	store.SetOnChange(func(items []EnhancedTodoItem) {
 		called = true
 	})
-	store.Update([]EnhancedTodoItem{
+	_ = store.Update([]EnhancedTodoItem{
 		{ID: "a", Title: "task", Status: StatusNotStarted},
 	})
 	if !called {
@@ -464,9 +465,9 @@ func TestEnhanced_OnChangeCallback(t *testing.T) {
 
 func TestEnhanced_SaveSync(t *testing.T) {
 	store, sm := newTestEnhancedStoreWithStorage(t)
-	defer sm.Close()
+	defer func() { _ = sm.Close() }()
 
-	store.Update([]EnhancedTodoItem{
+	_ = store.Update([]EnhancedTodoItem{
 		{ID: "a", Title: "task", Status: StatusNotStarted},
 	})
 
@@ -480,7 +481,9 @@ func TestEnhanced_SaveSync(t *testing.T) {
 		t.Fatalf("failed to read: %v", err)
 	}
 	var file TodoFileFormat
-	json.Unmarshal(data, &file)
+	if err := json.Unmarshal(data, &file); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
 	if file.Version != 2 {
 		t.Errorf("expected version 2, got %d", file.Version)
 	}

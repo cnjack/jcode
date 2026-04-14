@@ -38,6 +38,9 @@ export const useChatStore = defineStore('chat', () => {
   const modelName = ref('')
   const providers = ref<ProviderInfo[]>([])
 
+  // Approval mode
+  const autoApprove = ref(false)
+
   // Current streaming text accumulator
   let streamingText = ''
   let streamingMsgId = ''
@@ -239,6 +242,24 @@ export const useChatStore = defineStore('chat', () => {
     streamingMsgId = ''
   }
 
+  async function fetchApprovalMode() {
+    try {
+      const data = await api.approvalMode()
+      autoApprove.value = data.auto_approve
+    } catch (err) {
+      console.error('Failed to fetch approval mode:', err)
+    }
+  }
+
+  async function setAutoApprove(enabled: boolean) {
+    try {
+      const data = await api.setApprovalMode(enabled)
+      autoApprove.value = data.auto_approve
+    } catch (err: any) {
+      console.error('Failed to set approval mode:', err)
+    }
+  }
+
   async function loadSession(uuid: string) {
     try {
       const entries = await api.session(uuid)
@@ -268,6 +289,7 @@ export const useChatStore = defineStore('chat', () => {
     providerName,
     modelName,
     providers,
+    autoApprove,
     // Getters
     hasMessages,
     activeTodos,
@@ -294,5 +316,7 @@ export const useChatStore = defineStore('chat', () => {
     switchMode,
     clearChat,
     loadSession,
+    fetchApprovalMode,
+    setAutoApprove,
   }
 })

@@ -142,12 +142,12 @@ func (r *readTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 	// Format with line numbers.
 	var result strings.Builder
 	for i := start; i < end; i++ {
-		result.WriteString(fmt.Sprintf("%4d │ %s\n", i+1, lines[i]))
+		fmt.Fprintf(&result, "%4d │ %s\n", i+1, lines[i])
 	}
 
 	// Truncation message.
 	if end < totalLines {
-		result.WriteString(fmt.Sprintf("\n... (%d more lines, total %d)\n", totalLines-end, totalLines))
+		fmt.Fprintf(&result, "\n... (%d more lines, total %d)\n", totalLines-end, totalLines)
 	}
 
 	return result.String(), nil

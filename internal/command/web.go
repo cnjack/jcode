@@ -1,19 +1,17 @@
-package main
+package command
 
 import (
 	"context"
-	"flag"
 	"fmt"
-	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 
 	"github.com/cloudwego/eino/adk"
-	"github.com/cloudwego/eino/adk/filesystem"
 	"github.com/cloudwego/eino/adk/middlewares/reduction"
 	"github.com/cloudwego/eino/adk/middlewares/summarization"
 	"github.com/cloudwego/eino/components/tool"
+	"github.com/spf13/cobra"
 
 	"github.com/cnjack/jcode/internal/agent"
 	"github.com/cnjack/jcode/internal/config"
@@ -28,16 +26,27 @@ import (
 	"github.com/cnjack/jcode/internal/web"
 )
 
-func handleWebSubcommand(args []string) {
-	fs := flag.NewFlagSet("web", flag.ExitOnError)
-	port := fs.Int("port", 8080, "HTTP server port")
-	host := fs.String("host", "127.0.0.1", "HTTP server host")
-	fs.Parse(args)
+func NewWebCmd() *cobra.Command {
+	var port int
+	var host string
+	cmd := &cobra.Command{
+		Use:          "web",
+		Short:        "Start the web server",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWebServer(port, host)
+		},
+	}
+	cmd.Flags().IntVar(&port, "port", 8080, "HTTP server port")
+	cmd.Flags().StringVar(&host, "host", "127.0.0.1", "HTTP server host")
+	return cmd
+}
+
+func runWebServer(port int, host string) error {
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Config error: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("config error: %w", err)
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -56,8 +65,7 @@ func handleWebSubcommand(args []string) {
 	providers := cfg.GetProviders()
 	providerCfg := providers[providerName]
 	if providerCfg == nil {
-		fmt.Fprintf(os.Stderr, "Provider %q not found in config\n", providerName)
-		os.Exit(1)
+		return fmt.Errorf("provider %q not found in config", providerName)
 	}
 
 	registry := internalmodel.NewModelRegistry()
@@ -70,8 +78,7 @@ func handleWebSubcommand(args []string) {
 	if _, err := internalmodel.NewChatModel(ctx, &internalmodel.ChatModelConfig{
 		Model: modelName, APIKey: providerCfg.APIKey, BaseURL: baseURL,
 	}); err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating model: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error creating model: %w", err)
 	}
 
 	env := tools.NewEnv(pwd, platform)
@@ -167,7 +174,7 @@ func handleWebSubcommand(args []string) {
 			handlers = append(handlers, summMw)
 		}
 
-		reductionBackend := &webReductionBackend{rootDir: config.ConfigDir()}
+		reductionBackend := &agent.LocalReductionBackend{RootDir: config.ConfigDir()}
 		reductionMw, err := reduction.New(ctx, &reduction.Config{
 			Backend:           reductionBackend,
 			RootDir:           filepath.Join(config.ConfigDir(), "reduction"),
@@ -196,8 +203,7 @@ func handleWebSubcommand(args []string) {
 
 	ag, err := createAgent(providerName, modelName)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating agent: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error creating agent: %w", err)
 	}
 
 	switchProject := func(newPwd string) (*adk.ChatModelAgent, *session.Recorder, error) {
@@ -236,8 +242,8 @@ func handleWebSubcommand(args []string) {
 	}
 
 	srv := web.NewServer(&web.ServerConfig{
-		Port:          *port,
-		Host:          *host,
+		Port:          port,
+		Host:          host,
 		Pwd:           pwd,
 		Agent:         ag,
 		CreateAgent:   createAgent,
@@ -250,14 +256,14 @@ func handleWebSubcommand(args []string) {
 		ModelName:     modelName,
 		Config:        cfg,
 		Registry:      registry,
+		ApprovalState: approvalState,
 	})
 
 	// Set handler for approval routing.
 	approvalState.SetHandler(srv.Handler())
 
 	if err := srv.Start(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("server error: %w", err)
 	}
 
 	if rec != nil {
@@ -266,23 +272,7 @@ func handleWebSubcommand(args []string) {
 	if langfuseTracer != nil {
 		langfuseTracer.Flush()
 	}
-}
-
-// webReductionBackend implements reduction.Backend.
-type webReductionBackend struct {
-	rootDir string
-}
-
-func (b *webReductionBackend) Write(_ context.Context, req *filesystem.WriteRequest) error {
-	fp := req.FilePath
-	if !filepath.IsAbs(fp) {
-		fp = filepath.Join(b.rootDir, fp)
-	}
-	if err := os.MkdirAll(filepath.Dir(fp), 0o700); err != nil {
-		return err
-	}
-	return os.WriteFile(fp, []byte(req.Content), 0o600)
+	return nil
 }
 
 // Ensure unused imports are used (some may be used only indirectly).
-var _ = runner.Run

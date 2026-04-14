@@ -230,7 +230,7 @@ func (wq *WriteQueue) drain() {
 				f, err = os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, e.Mode)
 				if err == nil {
 					_, err = f.Write(e.Data)
-					f.Close()
+					_ = f.Close()
 				}
 			} else {
 				err = os.WriteFile(path, e.Data, e.Mode)
@@ -648,7 +648,7 @@ func NewTaskLog(storage *StorageManager, taskID string) (*TaskLog, error) {
 	}
 	info, err := f.Stat()
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, err
 	}
 	return &TaskLog{

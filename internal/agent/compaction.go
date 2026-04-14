@@ -28,7 +28,7 @@ type CompactionStrategy interface {
 // generate a summary of older messages.
 type ThresholdCompactionStrategy struct {
 	threshold  float64 // fraction (0-1) e.g. 0.75
-	summarizer einomodel.ChatModel
+	summarizer einomodel.ToolCallingChatModel
 	keepRecent int
 }
 
@@ -36,7 +36,7 @@ type ThresholdCompactionStrategy struct {
 // threshold is the fraction (0-1) of the context limit that triggers compaction.
 // summarizer is the model used to generate summaries. keepRecent is the number
 // of recent messages to preserve verbatim.
-func NewThresholdCompactionStrategy(threshold float64, summarizer einomodel.ChatModel, keepRecent int) *ThresholdCompactionStrategy {
+func NewThresholdCompactionStrategy(threshold float64, summarizer einomodel.ToolCallingChatModel, keepRecent int) *ThresholdCompactionStrategy {
 	if threshold <= 0 || threshold > 1 {
 		threshold = 0.75
 	}
@@ -89,7 +89,7 @@ func (s *ThresholdCompactionStrategy) Compact(ctx context.Context, messages []*s
 	sb.WriteString("Summarise the following conversation history into a concise paragraph.\n")
 	sb.WriteString("Preserve key decisions, file paths, code changes, and pending tasks.\n\n")
 	for _, m := range toSummarise {
-		sb.WriteString(fmt.Sprintf("[%s]: %s\n", m.Role, truncate(m.Content, 500)))
+		fmt.Fprintf(&sb, "[%s]: %s\n", m.Role, truncate(m.Content, 500))
 	}
 
 	summaryInput := []*schema.Message{

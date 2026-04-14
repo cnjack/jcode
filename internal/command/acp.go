@@ -1,4 +1,4 @@
-package main
+package command
 
 import (
 	"context"
@@ -15,6 +15,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	acp "github.com/coder/acp-go-sdk"
+	"github.com/spf13/cobra"
 
 	"github.com/cnjack/jcode/internal/agent"
 	"github.com/cnjack/jcode/internal/config"
@@ -51,6 +52,18 @@ type acpAgent struct {
 	sessions map[acp.SessionId]*acpSession
 }
 
+func NewACPCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:          "acp",
+		Short:        "Start ACP JSON-RPC server (headless agent protocol)",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			handleACPSubcommand()
+			return nil
+		},
+	}
+}
+
 func handleACPSubcommand() {
 	// Redirect default log to debug log so nothing corrupts stdio JSON-RPC.
 	log.SetOutput(config.Logger().Writer())
@@ -81,7 +94,7 @@ func (a *acpAgent) Initialize(_ context.Context, params acp.InitializeRequest) (
 		AgentInfo: &acp.Implementation{
 			Name:    "jcode",
 			Title:   acp.Ptr("Little Jack — Coding Assistant"),
-			Version: Version,
+			Version: Version, // set from internal/command/version.go
 		},
 	}, nil
 }
@@ -198,7 +211,7 @@ func (a *acpAgent) NewSession(ctx context.Context, params acp.NewSessionRequest)
 		handlers = append(handlers, summMw)
 	}
 
-	reductionBackend := &localReductionBackend{rootDir: config.ConfigDir()}
+	reductionBackend := &agent.LocalReductionBackend{RootDir: config.ConfigDir()}
 	reductionMw, err := reduction.New(ctx, &reduction.Config{
 		Backend:           reductionBackend,
 		RootDir:           filepath.Join(config.ConfigDir(), "reduction"),
@@ -263,7 +276,7 @@ func (a *acpAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Pr
 			userText.WriteString(block.Text.Text)
 		}
 		if block.ResourceLink != nil {
-			userText.WriteString(fmt.Sprintf("\n[Resource: %s (%s)]", block.ResourceLink.Name, block.ResourceLink.Uri))
+			fmt.Fprintf(&userText, "\n[Resource: %s (%s)]", block.ResourceLink.Name, block.ResourceLink.Uri)
 		}
 	}
 

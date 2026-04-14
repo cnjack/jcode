@@ -124,7 +124,7 @@ func (t *teamSpawnTool) InvokableRun(ctx context.Context, argsJSON string, _ ...
 	}
 
 	if !t.manager.HasTeam() {
-		return "", fmt.Errorf("no active team. Use team_create first.")
+		return "", fmt.Errorf("no active team. Use team_create first")
 	}
 
 	agentID, err := t.manager.SpawnTeammate(ctx, team.SpawnConfig{
@@ -252,10 +252,6 @@ func (t *teamListTool) InvokableRun(_ context.Context, _ string, _ ...tool.Optio
 }
 
 // --- team_delete ---
-
-type teamDeleteInput struct {
-	Force bool `json:"force"`
-}
 
 type teamDeleteTool struct {
 	manager *team.Manager

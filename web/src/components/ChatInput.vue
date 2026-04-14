@@ -121,6 +121,21 @@ watch(() => store.isRunning, (running) => {
                 </div>
               </div>
             </div>
+
+            <!-- Auto-approve toggle -->
+            <button
+              class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-md transition-colors cursor-pointer"
+              :class="store.autoApprove
+                ? 'bg-teal-100 text-teal-600 hover:bg-teal-200'
+                : 'bg-stone-100 text-stone-400 hover:text-stone-600 hover:bg-stone-200'"
+              :title="store.autoApprove ? 'Auto-approve ON' : 'Auto-approve OFF'"
+              @click="store.setAutoApprove(!store.autoApprove)"
+            >
+              <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clip-rule="evenodd" />
+              </svg>
+              Auto
+            </button>
           </div>
 
           <div class="flex items-center gap-2">

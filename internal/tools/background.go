@@ -127,7 +127,7 @@ func (bm *BackgroundManager) execute(ctx context.Context, task *BgTask) {
 		}
 	}
 	if taskLog != nil {
-		defer taskLog.Close()
+		defer func() { _ = taskLog.Close() }()
 	}
 
 	timeout := task.Timeout
@@ -303,14 +303,14 @@ func (t *bgCheckTool) InvokableRun(_ context.Context, argumentsInJSON string, _ 
 
 func formatTask(t *BgTask) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Task %s: %s\n", t.ID, t.Status))
-	sb.WriteString(fmt.Sprintf("Command: %s\n", t.Command))
-	sb.WriteString(fmt.Sprintf("Started: %s\n", t.Started.Format("15:04:05")))
+	fmt.Fprintf(&sb, "Task %s: %s\n", t.ID, t.Status)
+	fmt.Fprintf(&sb, "Command: %s\n", t.Command)
+	fmt.Fprintf(&sb, "Started: %s\n", t.Started.Format("15:04:05"))
 	if !t.Ended.IsZero() {
-		sb.WriteString(fmt.Sprintf("Ended: %s (took %s)\n", t.Ended.Format("15:04:05"), t.Ended.Sub(t.Started).Round(time.Millisecond)))
+		fmt.Fprintf(&sb, "Ended: %s (took %s)\n", t.Ended.Format("15:04:05"), t.Ended.Sub(t.Started).Round(time.Millisecond))
 	}
 	if t.Output != "" {
-		sb.WriteString(fmt.Sprintf("Output:\n%s\n", t.Output))
+		fmt.Fprintf(&sb, "Output:\n%s\n", t.Output)
 	}
 	return sb.String()
 }

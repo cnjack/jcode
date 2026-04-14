@@ -3,7 +3,18 @@ PKG := ./cmd/jcode/
 
 export GOFLAGS := -buildvcs=false
 
-.PHONY: build run doctor version install clean build-web
+.PHONY: build run doctor version install clean build-web lint lint-go lint-web
+
+lint: lint-go lint-web
+
+lint-go:
+	@echo "Linting Go..."
+	golangci-lint run
+
+lint-web:
+	@echo "Linting frontend..."
+	cd web && (pnpm install --frozen-lockfile 2>/dev/null || pnpm install)
+	cd web && pnpm lint
 
 build-web:
 	@echo "Building frontend..."

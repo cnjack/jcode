@@ -34,21 +34,22 @@ func LoadMCPTools(ctx context.Context, mcpConfig map[string]*config.MCPServer) (
 		var cli *client.Client
 		var err error
 
-		if srv.Type == "http" {
+		switch {
+		case srv.Type == "http":
 			var opts []transport.StreamableHTTPCOption
 			if len(srv.Headers) > 0 {
 				opts = append(opts, transport.WithHTTPHeaders(srv.Headers))
 			}
 			cli, err = client.NewStreamableHttpClient(srv.URL, opts...)
-		} else if srv.URL != "" || srv.Type == "sse" {
+		case srv.URL != "" || srv.Type == "sse":
 			var opts []transport.ClientOption
 			if len(srv.Headers) > 0 {
 				opts = append(opts, transport.WithHeaders(srv.Headers))
 			}
 			cli, err = client.NewSSEMCPClient(srv.URL, opts...)
-		} else if srv.Command != "" || srv.Type == "stdio" {
+		case srv.Command != "" || srv.Type == "stdio":
 			cli, err = client.NewStdioMCPClient(srv.Command, srv.Env, srv.Args...)
-		} else {
+		default:
 			status.Error = fmt.Errorf("invalid config: missing url or command")
 			statuses = append(statuses, status)
 			continue

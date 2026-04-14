@@ -1,0 +1,902 @@
+package command
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/adk/middlewares/reduction"
+	"github.com/cloudwego/eino/adk/middlewares/summarization"
+	einomodel "github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/schema"
+
+	"github.com/cnjack/jcode/internal/agent"
+	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/handler"
+	internalmodel "github.com/cnjack/jcode/internal/model"
+	"github.com/cnjack/jcode/internal/prompts"
+	"github.com/cnjack/jcode/internal/runner"
+	"github.com/cnjack/jcode/internal/session"
+	"github.com/cnjack/jcode/internal/skills"
+	"github.com/cnjack/jcode/internal/team"
+	"github.com/cnjack/jcode/internal/telemetry"
+	"github.com/cnjack/jcode/internal/tools"
+	"github.com/cnjack/jcode/internal/tui"
+	util "github.com/cnjack/jcode/internal/util"
+)
+
+// interactiveState holds all shared state for the interactive TUI event loop.
+type interactiveState struct {
+	ctx            context.Context
+	p              *tea.Program
+	cfg            *config.Config
+	chatModel      einomodel.ToolCallingChatModel
+	ag             *adk.ChatModelAgent
+	history        []adk.Message
+	env            *tools.Env
+	bgManager      *tools.BackgroundManager
+	approvalState  *runner.ApprovalState
+	rec            *session.Recorder
+	planStore      *tools.PlanStore
+	summCapture    *agent.SummarizationCapture
+	systemPrompt   string
+	toolList       []tool.BaseTool
+	agentMode      tui.AgentMode
+	envInfo        *util.EnvInfo
+	pwd            string
+	platform       string
+	registry       *internalmodel.ModelRegistry
+	skillLoader    *skills.Loader
+	langfuseTracer *telemetry.LangfuseTracer
+	h              handler.AgentEventHandler
+	askUserDeps    *tools.AskUserDeps
+	teamManager    *team.Manager
+	mcpTools       []tool.BaseTool
+
+	sessionResumeWarning string
+}
+
+func (s *interactiveState) buildAllTools() []tool.BaseTool {
+	all := []tool.BaseTool{
+		s.env.NewReadTool(), s.env.NewEditTool(), s.env.NewWriteTool(),
+		s.env.NewExecuteTool(s.bgManager), s.env.NewGrepTool(),
+		s.env.NewTodoWriteTool(), s.env.NewTodoReadTool(),
+		s.env.NewSwitchEnvTool(),
+		s.env.NewCheckBackgroundTool(s.bgManager),
+		s.env.NewSubagentTool(&tools.SubagentDeps{
+			ChatModel:  s.chatModel,
+			Notifier:   s.subagentNotifier,
+			ProgressFn: s.subagentProgress,
+			TokenFn:    s.subagentTokenFn,
+			Recorder:   s.rec,
+		}),
+		tools.NewAskUserTool(s.askUserDeps),
+		skills.NewLoadSkillTool(s.skillLoader),
+		tools.NewTeamCreateTool(s.teamManager),
+		tools.NewTeamSpawnTool(s.teamManager),
+		tools.NewTeamSendMessageTool(s.teamManager),
+		tools.NewTeamListTool(s.teamManager),
+		tools.NewTeamDeleteTool(s.teamManager),
+	}
+	return append(all, s.mcpTools...)
+}
+
+func (s *interactiveState) buildPlanTools() []tool.BaseTool {
+	return []tool.BaseTool{
+		s.env.NewReadTool(),
+		s.env.NewExecuteTool(nil),
+		s.env.NewGrepTool(),
+		s.env.NewTodoWriteTool(), s.env.NewTodoReadTool(),
+		tools.NewAskUserTool(s.askUserDeps),
+	}
+}
+
+func (s *interactiveState) subagentNotifier(name, agentType string, done bool, result string, err error) {
+	if s.p == nil {
+		return
+	}
+	if !done {
+		s.p.Send(tui.SubagentStartMsg{Name: name, Type: agentType})
+	} else {
+		s.p.Send(tui.SubagentDoneMsg{Name: name, Result: result, Err: err})
+	}
+}
+
+func (s *interactiveState) subagentProgress(agentName, event, toolName, detail string) {
+	if s.p == nil {
+		return
+	}
+	s.p.Send(tui.SubagentProgressMsg{
+		AgentName: agentName,
+		Event:     event,
+		ToolName:  toolName,
+		Detail:    detail,
+	})
+}
+
+func (s *interactiveState) subagentTokenFn(totalTokens int64) {
+	if s.p != nil {
+		s.p.Send(tui.SubagentTokenUpdateMsg{TotalTokens: totalTokens})
+	}
+}
+
+func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
+	var middlewares []adk.AgentMiddleware
+	if s.langfuseTracer != nil {
+		middlewares = append(middlewares, s.langfuseTracer.AgentMiddleware())
+	}
+
+	var handlers []adk.ChatModelAgentMiddleware
+
+	providerName, modelName := s.cfg.GetProviderModel()
+	contextLimit := s.registry.GetModelContextLimit(providerName, modelName)
+	if contextLimit <= 0 {
+		contextLimit = internalmodel.GetModelContextLimit(modelName)
+	}
+	if contextLimit <= 0 {
+		contextLimit = 200000
+	}
+
+	summMw, err := summarization.New(s.ctx, &summarization.Config{
+		Model: s.chatModel,
+		Trigger: &summarization.TriggerCondition{
+			ContextTokens: int(float64(contextLimit) * 0.75),
+		},
+		TranscriptFilePath: filepath.Join(config.ConfigDir(), "transcript.txt"),
+		Finalize: func(ctx context.Context, originalMsgs []adk.Message, summary adk.Message) ([]adk.Message, error) {
+			var systemMsgs []adk.Message
+			var contextN int
+			for _, msg := range originalMsgs {
+				if msg.Role == schema.System {
+					systemMsgs = append(systemMsgs, msg)
+				} else {
+					contextN++
+				}
+			}
+			s.summCapture.Capture(summary.Content, contextN)
+			config.Logger().Printf("[summarization] Finalize: compacted %d context messages", contextN)
+			return append(systemMsgs, summary), nil
+		},
+	})
+	if err != nil {
+		config.Logger().Printf("[agent] summarization middleware init error: %v", err)
+	} else {
+		handlers = append(handlers, summMw)
+	}
+
+	reductionBackend := &agent.LocalReductionBackend{RootDir: config.ConfigDir()}
+	reductionMw, err := reduction.New(s.ctx, &reduction.Config{
+		Backend:           reductionBackend,
+		RootDir:           filepath.Join(config.ConfigDir(), "reduction"),
+		MaxLengthForTrunc: 50000,
+		MaxTokensForClear: int64(float64(contextLimit) * 0.60),
+		ReadFileToolName:  "read",
+		ToolConfig: map[string]*reduction.ToolReductionConfig{
+			"read": {SkipClear: true},
+		},
+	})
+	if err != nil {
+		config.Logger().Printf("[agent] reduction middleware init error: %v", err)
+	} else {
+		handlers = append(handlers, reductionMw)
+	}
+
+	reminderMw := agent.NewReminderMiddleware(agent.ReminderConfig{
+		TodoStore:    s.env.TodoStore,
+		PlanStore:    s.planStore,
+		EnvLabel:     "local",
+		IsRemote:     s.env.IsRemote(),
+		ContextLimit: contextLimit,
+	})
+	handlers = append(handlers, reminderMw)
+
+	return agent.NewAgent(s.ctx, s.chatModel, s.toolList, s.systemPrompt, s.approvalState.RequestApproval, middlewares, handlers)
+}
+
+func (s *interactiveState) applyModeSwitch(newMode tui.AgentMode) {
+	s.agentMode = newMode
+	config.Logger().Printf("[plan] mode switch to %d (0=normal, 1=plan)", newMode)
+
+	if s.rec != nil {
+		s.rec.RecordModeChange(agentModeString(newMode))
+	}
+
+	if s.agentMode == tui.ModePlanning {
+		s.systemPrompt = prompts.GetPlanSystemPrompt(s.platform, s.pwd, s.env.Exec.Label(), s.envInfo)
+		s.toolList = s.buildPlanTools()
+		config.Logger().Printf("[plan] built plan tools: %d tools", len(s.toolList))
+	} else {
+		s.systemPrompt = prompts.GetSystemPrompt(s.platform, s.pwd, s.env.Exec.Label(), s.envInfo, s.skillLoader.Descriptions())
+		s.toolList = s.buildAllTools()
+		config.Logger().Printf("[plan] built all tools: %d tools", len(s.toolList))
+	}
+	if newAg, err := s.createAgent(); err == nil {
+		s.ag = newAg
+		config.Logger().Printf("[plan] agent recreated successfully")
+	} else {
+		config.Logger().Printf("[plan] agent creation failed: %v", err)
+	}
+}
+
+func (s *interactiveState) drainModeSwitch(planModeCh <-chan tui.AgentMode) {
+	for {
+		select {
+		case newMode := <-planModeCh:
+			s.applyModeSwitch(newMode)
+		default:
+			return
+		}
+	}
+}
+
+func (s *interactiveState) handlePrompt(userPrompt string) {
+	if s.sessionResumeWarning != "" {
+		userPrompt = s.sessionResumeWarning + "\n\n" + userPrompt
+		s.sessionResumeWarning = ""
+	}
+	if s.rec != nil {
+		s.rec.RecordUser(userPrompt)
+	}
+	s.history = append(s.history, schema.UserMessage(userPrompt))
+	s.history = agent.DrainBgNotifications(s.bgManager, s.history)
+	resp := runner.Run(s.ctx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer)
+	if resp != "" {
+		s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: resp})
+	}
+	s.history = agent.SyncSummarization(s.summCapture, s.history, s.rec)
+	s.handlePlanCompletion(resp)
+}
+
+func (s *interactiveState) handlePlanCompletion(resp string) {
+	if s.agentMode != tui.ModePlanning || resp == "" {
+		return
+	}
+
+	s.planStore.Submit("Plan", resp)
+	config.Logger().Printf("[plan] plan submitted for review (%d chars)", len(resp))
+	if s.rec != nil {
+		s.rec.RecordPlanUpdate("submitted", "Plan", resp, "")
+	}
+
+	s.p.Send(tui.PlanApprovalMsg{PlanContent: resp, PlanPath: "Plan"})
+
+	planRespCh := tui.GetPlanResponseChannel()
+	planResp := <-planRespCh
+
+	if !planResp.Approved {
+		feedback := planResp.Feedback
+		s.planStore.Reject(feedback)
+		config.Logger().Printf("[plan] plan rejected: %s", feedback)
+		if s.rec != nil {
+			s.rec.RecordPlanUpdate("rejected", "", "", feedback)
+		}
+
+		revisePrompt := "Your plan was rejected."
+		if feedback != "" {
+			revisePrompt += " Feedback: " + feedback
+		}
+		revisePrompt += "\nPlease revise your plan based on this feedback."
+		s.p.Send(tui.UserPromptMsg{Prompt: revisePrompt})
+		if s.rec != nil {
+			s.rec.RecordUser(revisePrompt)
+		}
+		s.history = append(s.history, schema.UserMessage(revisePrompt))
+		newResp := runner.Run(s.ctx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer)
+		if newResp != "" {
+			s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: newResp})
+		}
+		s.history = agent.SyncSummarization(s.summCapture, s.history, s.rec)
+		s.handlePlanCompletion(newResp)
+		return
+	}
+
+	s.planStore.Approve()
+	config.Logger().Printf("[plan] plan approved, transitioning to execution mode")
+	if s.rec != nil {
+		s.rec.RecordPlanUpdate("approved", s.planStore.Title(), s.planStore.Content(), "")
+	}
+
+	todos := tools.ExtractTodosFromPlan(s.planStore.Content())
+	if len(todos) > 0 {
+		s.env.TodoStore.Update(todos)
+		s.p.Send(tui.TodoUpdateMsg{})
+		config.Logger().Printf("[plan] populated %d todos from plan", len(todos))
+	}
+
+	s.applyModeSwitch(tui.ModeExecuting)
+
+	execPrompt := "Your plan has been approved. Execute it step by step, tracking progress with the todo list. Mark each step complete as you finish it."
+	s.p.Send(tui.UserPromptMsg{Prompt: execPrompt})
+	if s.rec != nil {
+		s.rec.RecordUser(execPrompt)
+	}
+	s.history = append(s.history, schema.UserMessage(execPrompt))
+	execResp := runner.Run(s.ctx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer)
+	if execResp != "" {
+		s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: execResp})
+	}
+	s.history = agent.SyncSummarization(s.summCapture, s.history, s.rec)
+
+	if s.env.TodoStore.HasItems() && !s.env.TodoStore.HasIncomplete() {
+		config.Logger().Printf("[plan] all todos complete, switching to normal mode")
+		s.planStore.Clear()
+		s.applyModeSwitch(tui.ModeNormal)
+	}
+}
+
+func (s *interactiveState) attemptSSHResume(target string) string {
+	if target == "local" || target == "" {
+		return ""
+	}
+	var alias *config.SSHAlias
+	for _, a := range s.cfg.SSHAliases {
+		if a.Name == target {
+			alias = &a
+			break
+		}
+	}
+	if alias == nil {
+		return fmt.Sprintf("[System Note: The session was previously connected to SSH alias '%s', but it no longer exists in config. Environment dropped to 'local'.]", target)
+	}
+
+	authMethods := tools.BuildSSHAuthMethods()
+	user := ""
+	host := alias.Addr
+	if idx := strings.Index(host, "@"); idx > 0 {
+		user = host[:idx]
+		host = host[idx+1:]
+	}
+
+	sshExec, err := tools.NewSSHExecutor(host, user, authMethods)
+	if err != nil {
+		return fmt.Sprintf("[System Note: The session attempted to reconnect to SSH alias '%s' (%s) but failed: %v. Environment dropped to 'local'.]", target, alias.Addr, err)
+	}
+
+	s.env.SetSSH(sshExec, s.env.Pwd())
+	label := sshExec.Label()
+	if s.env.OnEnvChange != nil {
+		s.env.OnEnvChange(label, false, nil)
+	}
+	return ""
+}
+
+func (s *interactiveState) handleResume(uuid string) {
+	entries, loadErr := session.LoadSession(uuid)
+	if loadErr != nil {
+		s.p.Send(tui.AgentDoneMsg{Err: fmt.Errorf("load session: %w", loadErr)})
+		return
+	}
+	st := session.ReconstructState(entries)
+	s.history = st.History
+	s.approvalState.SetSessionApproval(false)
+	s.p.Send(tui.SessionResumedMsg{UUID: uuid, Entries: tui.ConvertSessionEntries(entries)})
+
+	if st.Plan != nil {
+		switch st.Plan.Status {
+		case "approved":
+			s.planStore.Submit(st.Plan.Title, st.Plan.Content)
+			s.planStore.Approve()
+		case "submitted":
+			s.planStore.Submit(st.Plan.Title, st.Plan.Content)
+		case "rejected":
+			s.planStore.SetDraft(st.Plan.Title, st.Plan.Content)
+		}
+	}
+
+	if len(st.Todos) > 0 {
+		todoItems := make([]tools.TodoItem, len(st.Todos))
+		for i, t := range st.Todos {
+			todoItems[i] = tools.TodoItem{
+				ID: t.ID, Title: t.Title, Status: tools.TodoStatus(t.Status),
+			}
+		}
+		s.env.TodoStore.Update(todoItems)
+		s.p.Send(tui.TodoUpdateMsg{})
+	}
+
+	if targetEnv := st.EnvTarget; targetEnv != "local" {
+		s.sessionResumeWarning = s.attemptSSHResume(targetEnv)
+	}
+}
+
+func (s *interactiveState) handleConfig(cfgMsg *config.Config) {
+	newProvName, newModelName := cfgMsg.GetProviderModel()
+	newProviders := cfgMsg.GetProviders()
+	newProvCfg := newProviders[newProvName]
+	if newProvCfg == nil {
+		return
+	}
+
+	newBaseURL := newProvCfg.BaseURL
+	if newBaseURL == "" {
+		newBaseURL = s.registry.GetProviderAPI(newProvName)
+	}
+	newChatModel, err := internalmodel.NewChatModel(s.ctx, &internalmodel.ChatModelConfig{
+		Model: newModelName, APIKey: newProvCfg.APIKey, BaseURL: newBaseURL,
+	})
+	if err != nil {
+		return
+	}
+	s.chatModel = newChatModel
+	if newAg, err := s.createAgent(); err == nil {
+		s.ag = newAg
+	}
+}
+
+func (s *interactiveState) handleCompact() {
+	_, _, oldTokens := internalmodel.TokenTracker.Get()
+	oldLen := len(s.history)
+	s.history = agent.CompactHistory(s.ctx, s.chatModel, s.history)
+	_, _, newTokens := internalmodel.TokenTracker.Get()
+	if s.rec != nil && len(s.history) < oldLen && len(s.history) > 0 {
+		s.rec.RecordCompact(s.history[0].Content, oldLen-len(s.history))
+	}
+	s.p.Send(tui.CompactDoneMsg{
+		OldTokens: oldTokens,
+		NewTokens: newTokens,
+	})
+}
+
+func (s *interactiveState) handleAddModel() {
+	_ = s.p.ReleaseTerminal()
+	ok, setupErr := tui.RunSetupTUI()
+	_ = s.p.RestoreTerminal()
+	if setupErr != nil {
+		s.p.Send(tui.AgentDoneMsg{Err: fmt.Errorf("setup error: %w", setupErr)})
+		return
+	}
+	if !ok {
+		return
+	}
+	newCfg, loadErr := config.LoadConfig()
+	if loadErr != nil {
+		return
+	}
+	newProvName, newModelName := newCfg.GetProviderModel()
+	newProviders := newCfg.GetProviders()
+	newProvCfg := newProviders[newProvName]
+	if newProvCfg == nil {
+		return
+	}
+	newBaseURL := newProvCfg.BaseURL
+	if newBaseURL == "" {
+		newBaseURL = s.registry.GetProviderAPI(newProvName)
+	}
+	newChatModel, cmErr := internalmodel.NewChatModel(s.ctx, &internalmodel.ChatModelConfig{
+		Model: newModelName, APIKey: newProvCfg.APIKey, BaseURL: newBaseURL,
+	})
+	if cmErr != nil {
+		return
+	}
+	s.chatModel = newChatModel
+	if newAg, agErr := s.createAgent(); agErr == nil {
+		s.ag = newAg
+	}
+	s.p.Send(tui.ConfigUpdatedMsg{
+		Provider: newProvName,
+		Model:    newModelName,
+		Message:  fmt.Sprintf("✅ Added model: %s/%s\n", newProvName, newModelName),
+	})
+}
+
+func (s *interactiveState) handleSSH(connMsg interface{}) {
+	switch msg := connMsg.(type) {
+	case tui.SSHConnectMsg:
+		HandleSSHConnect(s.ctx, s.env, msg.Addr, msg.Path, s.p, &s.systemPrompt,
+			&s.ag, s.chatModel, s.createAgent, s.skillLoader.Descriptions())
+	case tui.SSHListDirReqMsg:
+		HandleSSHListDir(s.ctx, s.env, msg.Path, s.p)
+	case tui.SSHCancelMsg:
+		s.env.ResetToLocal(s.pwd, s.platform)
+		if s.agentMode == tui.ModePlanning {
+			s.systemPrompt = prompts.GetPlanSystemPrompt(s.platform, s.pwd, "local", s.envInfo)
+		} else {
+			s.systemPrompt = prompts.GetSystemPrompt(s.platform, s.pwd, "local", s.envInfo, s.skillLoader.Descriptions())
+		}
+		if newAg, err := s.createAgent(); err == nil {
+			s.ag = newAg
+		}
+	}
+}
+
+// runEventLoop is the main goroutine that processes TUI events and drives
+// the agent loop. It is started from RunInteractive after TUI setup.
+func (s *interactiveState) runEventLoop(initialHistory []adk.Message, initialResumeUUID string,
+	initialResumeEntries []tui.SessionEntry, hasPrompt bool, prompt string, mcpStatuses []tui.MCPStatusItem) {
+	defer func() {
+		if s.rec != nil {
+			s.rec.Close()
+		}
+		if s.langfuseTracer != nil {
+			s.langfuseTracer.Flush()
+		}
+	}()
+
+	s.p.Send(team.SetTeamManagerMsg{Manager: s.teamManager})
+
+	if len(mcpStatuses) > 0 {
+		s.p.Send(tui.MCPStatusMsg{Statuses: mcpStatuses})
+	}
+	if agentsMdPath := prompts.HasAgentsMd(s.pwd); agentsMdPath != "" {
+		s.p.Send(tui.AgentsMdMsg{Found: true, Path: agentsMdPath})
+	}
+
+	if slashSkills := s.skillLoader.SlashCommands(); len(slashSkills) > 0 {
+		var slashInfos []tui.SkillSlashInfo
+		for _, sk := range slashSkills {
+			slashInfos = append(slashInfos, tui.SkillSlashInfo{
+				Slash:       sk.Slash,
+				Description: sk.Description,
+			})
+		}
+		s.p.Send(tui.SkillsLoadedMsg{SlashCommands: slashInfos})
+	}
+
+	s.history = initialHistory
+	if initialResumeUUID != "" {
+		s.p.Send(tui.SessionResumedMsg{UUID: initialResumeUUID, Entries: initialResumeEntries})
+	}
+
+	if hasPrompt {
+		s.p.Send(tui.UserPromptMsg{Prompt: prompt})
+		if s.rec != nil {
+			s.rec.RecordUser(prompt)
+		}
+		s.history = append(s.history, schema.UserMessage(prompt))
+		resp := runner.Run(s.ctx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer)
+		if resp != "" {
+			s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: resp})
+		}
+		s.history = agent.SyncSummarization(s.summCapture, s.history, s.rec)
+	}
+
+	promptCh := tui.GetPromptChannel()
+	pendingPromptCh := tui.GetPendingPromptChannel()
+	sshCh := tui.GetSSHChannel()
+	configCh := tui.GetConfigChannel()
+	addModelCh := tui.GetAddModelChannel()
+	resumeCh := tui.GetResumeChannel()
+	autoApproveCh := tui.GetAutoApproveChannel()
+	compactCh := tui.GetCompactChannel()
+	planModeCh := tui.GetPlanModeChannel()
+
+	for {
+		select {
+		case enabled := <-autoApproveCh:
+			s.approvalState.SetSessionApproval(enabled)
+
+		case newMode := <-planModeCh:
+			s.applyModeSwitch(newMode)
+
+		case cfgMsg := <-configCh:
+			s.handleConfig(cfgMsg)
+
+		case userPrompt := <-promptCh:
+			s.drainModeSwitch(planModeCh)
+			s.handlePrompt(userPrompt)
+
+		case pendingPrompt := <-pendingPromptCh:
+			s.drainModeSwitch(planModeCh)
+			s.p.Send(tui.UserPromptMsg{Prompt: pendingPrompt})
+			s.handlePrompt(pendingPrompt)
+
+		case uuid := <-resumeCh:
+			s.handleResume(uuid)
+
+		case connMsg := <-sshCh:
+			s.handleSSH(connMsg)
+
+		case <-compactCh:
+			s.handleCompact()
+
+		case <-addModelCh:
+			s.handleAddModel()
+		}
+	}
+}
+
+// RunInteractive starts the interactive TUI session.
+// The unsafe flag enables auto-approve for all tool calls and takes precedence over config.
+func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
+	prompt = strings.TrimSpace(prompt)
+	hasPrompt := prompt != ""
+
+	// Redirect default log output to the app error log so library diagnostics
+	// (e.g. Langfuse upload errors) are visible without corrupting the TUI.
+	log.SetOutput(config.Logger().Writer())
+
+	// Setup wizard if config is missing.
+	if config.NeedsSetup() {
+		ok, err := tui.RunSetupTUI()
+		if err != nil {
+			return fmt.Errorf("setup error: %w", err)
+		}
+		if !ok {
+			return nil
+		}
+	}
+
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("config error: %v\nconfig file: %s", err, config.ConfigPath())
+	}
+
+	ctx := context.Background()
+	pwd := util.GetWorkDir()
+	platform := util.GetSystemInfo()
+	envInfo := util.CollectEnvInfo(pwd)
+
+	skillLoader := skills.NewLoader()
+	skillLoader.ScanProjectSkills(pwd)
+
+	systemPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
+
+	providerName, modelName := cfg.GetProviderModel()
+
+	providers := cfg.GetProviders()
+	providerCfg := providers[providerName]
+	if providerCfg == nil {
+		return fmt.Errorf("provider %q not found in config", providerName)
+	}
+
+	registry := internalmodel.NewModelRegistry()
+	baseURL := providerCfg.BaseURL
+	if baseURL == "" {
+		baseURL = registry.GetProviderAPI(providerName)
+	}
+
+	chatModel, err := internalmodel.NewChatModel(ctx, &internalmodel.ChatModelConfig{
+		Model: modelName, APIKey: providerCfg.APIKey, BaseURL: baseURL,
+	})
+	if err != nil {
+		return fmt.Errorf("error creating model: %w", err)
+	}
+
+	env := tools.NewEnv(pwd, platform)
+	bgManager := tools.NewBackgroundManager(env)
+
+	var mcpTools []tool.BaseTool
+	var mcpStatuses []tui.MCPStatusItem
+	if len(cfg.MCPServers) > 0 {
+		var internalStatuses []tools.MCPStatus
+		mcpTools, internalStatuses = tools.LoadMCPTools(ctx, cfg.MCPServers)
+		for _, st := range internalStatuses {
+			errMsg := ""
+			if st.Error != nil {
+				errMsg = st.Error.Error()
+			}
+			mcpStatuses = append(mcpStatuses, tui.MCPStatusItem{
+				Name: st.Name, ToolCount: st.ToolCount, Running: st.Running, ErrMsg: errMsg,
+			})
+		}
+	}
+
+	planStore := tools.NewPlanStore()
+
+	rec, _ := session.NewRecorder(pwd, providerName, modelName)
+
+	env.TodoStore.OnUpdate = func(items []tools.TodoItem) {
+		if rec != nil {
+			snapItems := make([]session.TodoSnapshotItem, len(items))
+			for i, it := range items {
+				snapItems[i] = session.TodoSnapshotItem{
+					ID: it.ID, Title: it.Title, Status: string(it.Status),
+				}
+			}
+			rec.RecordTodoSnapshot(snapItems)
+		}
+	}
+
+	askUserCh := make(chan tools.AskUserResponse, 1)
+	askUserDeps := &tools.AskUserDeps{
+		ResponseCh: askUserCh,
+	}
+
+	st := &interactiveState{
+		ctx:          ctx,
+		cfg:          cfg,
+		chatModel:    chatModel,
+		env:          env,
+		bgManager:    bgManager,
+		planStore:    planStore,
+		summCapture:  &agent.SummarizationCapture{},
+		systemPrompt: systemPrompt,
+		agentMode:    tui.ModeNormal,
+		envInfo:      envInfo,
+		pwd:          pwd,
+		platform:     platform,
+		registry:     registry,
+		skillLoader:  skillLoader,
+		askUserDeps:  askUserDeps,
+		mcpTools:     mcpTools,
+		rec:          rec,
+	}
+
+	teamManager := team.NewManager(&team.ManagerDeps{
+		DefaultModel: chatModel,
+		EnvFactory: func(cwd string) any {
+			return tools.NewEnv(cwd, platform)
+		},
+		ToolBuilder: func(childEnv any, agentType string) []tool.BaseTool {
+			e, ok := childEnv.(*tools.Env)
+			if !ok {
+				return nil
+			}
+			return []tool.BaseTool{
+				e.NewReadTool(), e.NewEditTool(), e.NewWriteTool(),
+				e.NewExecuteTool(nil), e.NewGrepTool(),
+				e.NewTodoWriteTool(), e.NewTodoReadTool(),
+			}
+		},
+		ModelFactory: func(mCtx context.Context, mName string) (any, error) {
+			parts := strings.SplitN(mName, "/", 2)
+			if len(parts) != 2 {
+				return nil, fmt.Errorf("invalid model format %q, expected 'provider/model'", mName)
+			}
+			pName, modelID := parts[0], parts[1]
+			pProviders := cfg.GetProviders()
+			pCfg := pProviders[pName]
+			if pCfg == nil {
+				return nil, fmt.Errorf("unknown provider %q", pName)
+			}
+			bURL := pCfg.BaseURL
+			if bURL == "" {
+				bURL = registry.GetProviderAPI(pName)
+			}
+			return internalmodel.NewChatModel(mCtx, &internalmodel.ChatModelConfig{
+				Model: modelID, APIKey: pCfg.APIKey, BaseURL: bURL,
+			})
+		},
+		PromptBuilder: func(agentType, agentPwd, agentPlatform string) string {
+			return prompts.GetSystemPrompt(agentPlatform, agentPwd, "local", nil, "")
+		},
+		LeaderSessionUUID: rec.UUID(),
+	})
+	st.teamManager = teamManager
+	st.toolList = st.buildAllTools()
+
+	// CLI --unsafe flag takes precedence over config file.
+	autoApprove := cfg.AutoApprove || unsafe
+	approvalState := runner.NewApprovalState(pwd, autoApprove)
+	st.approvalState = approvalState
+
+	if cfg.Telemetry != nil && cfg.Telemetry.Langfuse != nil {
+		st.langfuseTracer = telemetry.NewLangfuseTracer(cfg.Telemetry.Langfuse)
+	}
+
+	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore)
+	st.p = p
+	bgManager.SetNotifier(func(taskID, cmd, status string) {
+		p.Send(tui.BgTaskDoneMsg{TaskID: taskID, Command: cmd, Status: status})
+	})
+	teamManager.SetTuiProgram(p)
+
+	h := handler.NewTUIHandler(p)
+	st.h = h
+	approvalState.SetHandler(h)
+
+	teamManager.SetHandlersFactory(func(workerName, workerColor string) []adk.ChatModelAgentMiddleware {
+		return agent.NewTeammateHandlers(approvalState.NewTeammateApprovalFunc(workerName, workerColor))
+	})
+
+	askUserDeps.NotifyFn = func(question string, options []string) {
+		p.Send(tui.AskUserQuestionMsg{Question: question, Options: options})
+	}
+
+	go func() {
+		tuiAskCh := tui.GetAskUserResponseChannel()
+		for resp := range tuiAskCh {
+			askUserCh <- tools.AskUserResponse{Answer: resp.Answer}
+		}
+	}()
+
+	ag, err := st.createAgent()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating agent: %v\n", err)
+		os.Exit(1)
+	}
+	st.ag = ag
+
+	env.OnEnvChange = func(envLabel string, isLocal bool, envErr error) {
+		if envErr != nil {
+			p.Send(tui.SSHStatusMsg{Success: false, Err: envErr})
+			return
+		}
+		if isLocal {
+			approvalState.SetWorkpath(pwd)
+			if st.agentMode == tui.ModePlanning {
+				st.systemPrompt = prompts.GetPlanSystemPrompt(platform, pwd, "local", envInfo)
+			} else {
+				st.systemPrompt = prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
+			}
+			if newAg, agErr := st.createAgent(); agErr == nil {
+				st.ag = newAg
+			}
+			p.Send(tui.SSHCancelMsg{})
+			return
+		}
+		approvalState.SetWorkpath(env.Pwd())
+		if st.agentMode == tui.ModePlanning {
+			st.systemPrompt = prompts.GetPlanSystemPrompt(platform, pwd, envLabel, nil)
+		} else {
+			st.systemPrompt = prompts.GetSystemPrompt(platform, pwd, envLabel, nil, skillLoader.Descriptions())
+		}
+		if newAg, agErr := st.createAgent(); agErr == nil {
+			st.ag = newAg
+		}
+		p.Send(tui.SSHStatusMsg{Success: true, Label: envLabel})
+	}
+
+	// Load a previous session if --resume was requested.
+	var initialHistory []adk.Message
+	var initialResumeUUID string
+	var initialResumeEntries []tui.SessionEntry
+	if resumeUUID != "" {
+		entries, loadErr := session.LoadSession(resumeUUID)
+		if loadErr != nil {
+			return fmt.Errorf("cannot load session: %w", loadErr)
+		}
+		resumeState := session.ReconstructState(entries)
+		initialHistory = resumeState.History
+		initialResumeUUID = resumeUUID
+		initialResumeEntries = tui.ConvertSessionEntries(entries)
+		hasPrompt = false
+
+		if resumeState.Plan != nil {
+			switch resumeState.Plan.Status {
+			case "approved":
+				planStore.Submit(resumeState.Plan.Title, resumeState.Plan.Content)
+				planStore.Approve()
+			case "submitted":
+				planStore.Submit(resumeState.Plan.Title, resumeState.Plan.Content)
+			case "rejected":
+				planStore.SetDraft(resumeState.Plan.Title, resumeState.Plan.Content)
+			}
+		}
+
+		if len(resumeState.Todos) > 0 {
+			todoItems := make([]tools.TodoItem, len(resumeState.Todos))
+			for i, t := range resumeState.Todos {
+				todoItems[i] = tools.TodoItem{
+					ID: t.ID, Title: t.Title, Status: tools.TodoStatus(t.Status),
+				}
+			}
+			env.TodoStore.Update(todoItems)
+		}
+
+		if targetEnv := resumeState.EnvTarget; targetEnv != "local" {
+			st.sessionResumeWarning = st.attemptSSHResume(targetEnv)
+		}
+	}
+
+	go st.runEventLoop(initialHistory, initialResumeUUID, initialResumeEntries, hasPrompt, prompt, mcpStatuses)
+
+	if _, err := p.Run(); err != nil {
+		if st.langfuseTracer != nil {
+			st.langfuseTracer.Flush()
+		}
+		return fmt.Errorf("TUI error: %w", err)
+	}
+	if st.langfuseTracer != nil {
+		st.langfuseTracer.Flush()
+	}
+	return nil
+}
+
+// agentModeString converts an AgentMode to its string representation for session recording.
+func agentModeString(m tui.AgentMode) string {
+	switch m {
+	case tui.ModePlanning:
+		return "planning"
+	case tui.ModeExecuting:
+		return "executing"
+	default:
+		return "normal"
+	}
+}
