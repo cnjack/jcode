@@ -99,7 +99,7 @@ func handleWebSubcommand(args []string) {
 
 	planStore := tools.NewPlanStore()
 
-	approvalState := runner.NewApprovalState(pwd)
+	approvalState := runner.NewApprovalState(pwd, cfg.AutoApprove)
 
 	// Langfuse tracer.
 	var langfuseTracer *telemetry.LangfuseTracer

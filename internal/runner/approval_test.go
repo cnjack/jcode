@@ -8,14 +8,21 @@ import (
 )
 
 func TestNewApprovalState(t *testing.T) {
-	s := NewApprovalState("/tmp/workdir")
+	s := NewApprovalState("/tmp/workdir", false)
 	if s.mode != handler.ModeManual {
 		t.Errorf("expected default mode to be Manual, got %v", s.mode)
 	}
 }
 
+func TestNewApprovalState_AutoApprove(t *testing.T) {
+	s := NewApprovalState("/tmp/workdir", true)
+	if s.mode != handler.ModeAuto {
+		t.Errorf("expected mode to be Auto when autoApprove=true, got %v", s.mode)
+	}
+}
+
 func TestApprovalState_SetWorkpath(t *testing.T) {
-	s := NewApprovalState("/tmp/workdir")
+	s := NewApprovalState("/tmp/workdir", false)
 	s.SetWorkpath("/tmp/otherdir")
 	if s.workpath != "/tmp/otherdir" {
 		t.Errorf("expected workpath to be /tmp/otherdir, got %v", s.workpath)
@@ -23,7 +30,7 @@ func TestApprovalState_SetWorkpath(t *testing.T) {
 }
 
 func TestIsWithinWorkpath(t *testing.T) {
-	s := NewApprovalState("/tmp/workdir")
+	s := NewApprovalState("/tmp/workdir", false)
 
 	tests := []struct {
 		path     string
@@ -49,7 +56,7 @@ func TestIsWithinWorkpath(t *testing.T) {
 }
 
 func TestRequestApproval_AutoMode(t *testing.T) {
-	s := NewApprovalState("/tmp/workdir")
+	s := NewApprovalState("/tmp/workdir", false)
 	s.SetMode(handler.ModeAuto)
 
 	ctx := context.Background()
@@ -65,7 +72,7 @@ func TestRequestApproval_AutoMode(t *testing.T) {
 }
 
 func TestRequestApproval_ManualMode(t *testing.T) {
-	s := NewApprovalState("/tmp/workdir")
+	s := NewApprovalState("/tmp/workdir", false)
 	ctx := context.Background()
 
 	// Test read within workpath - auto-approve
@@ -100,7 +107,7 @@ func TestRequestApproval_ManualMode(t *testing.T) {
 }
 
 func TestRequestApproval_NoApprovalTools(t *testing.T) {
-	s := NewApprovalState("/tmp/workdir")
+	s := NewApprovalState("/tmp/workdir", false)
 	ctx := context.Background()
 
 	// Test glob - auto-approve

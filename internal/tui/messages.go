@@ -213,6 +213,11 @@ type SubagentProgressMsg struct {
 	Detail    string
 }
 
+// SubagentTokenUpdateMsg is sent after each model turn to update the subagent's token usage.
+type SubagentTokenUpdateMsg struct {
+	TotalTokens int64 // cumulative tokens used by the subagent since it started
+}
+
 // CompactRequestMsg is sent when the user requests manual context compaction.
 type CompactRequestMsg struct{}
 

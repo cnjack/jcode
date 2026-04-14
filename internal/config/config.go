@@ -106,6 +106,9 @@ type Config struct {
 	Subagent      *SubagentConfig       `json:"subagent,omitempty"`
 	Team          *TeamConfig           `json:"team,omitempty"`
 
+	// AutoApprove sets the default approval mode to auto on startup.
+	AutoApprove bool `json:"auto_approve,omitempty"`
+
 	// DisabledProviders lists provider IDs to exclude from registry
 	DisabledProviders []string `json:"disabled_providers,omitempty"`
 }
