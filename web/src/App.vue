@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch, computed } from 'vue'
+import { ref, onMounted, nextTick, watch, onUnmounted } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { useProjectStore } from '@/stores/project'
-import { useSSE } from '@/composables/sse'
+import { useWebSocket } from '@/composables/ws'
 import ChatMessageVue from '@/components/ChatMessage.vue'
 import ToolCallCard from '@/components/ToolCallCard.vue'
 import ApprovalBanner from '@/components/ApprovalBanner.vue'
@@ -28,7 +28,8 @@ const fileViewerContent = ref('')
 const bottomPanel = ref<'none' | 'terminal' | 'diff'>('none')
 const bottomPanelHeight = ref(250)
 
-const { connected } = useSSE({
+// WebSocket connection
+const { connected } = useWebSocket({
   onAgentText: (data) => store.appendAgentText(data.text),
   onToolCall: (data) => store.addToolCall(data.name, data.args),
   onToolResult: (data) => store.resolveToolCall(data.name, data.output, data.error),
@@ -42,17 +43,21 @@ const { connected } = useSSE({
     store.modelName = data.model
   },
   onModeChanged: (data) => {
-    store.mode = data.mode as 'build' | 'plan'
+    store.mode = data.mode === 'build' ? 'agent' : (data.mode as 'agent' | 'plan')
   },
   onApprovalModeChanged: (data) => {
     store.autoApprove = data.auto_approve
   },
+  onSubagentProgress: (data) => {
+    store.addSubagentProgress(data.agent_name, data.event, data.tool_name, data.detail)
+  },
 })
 
-watch(connected, (val) => { store.sseConnected = val })
+watch(connected, (val) => { store.wsConnected = val })
 
+// Auto-scroll when timeline changes
 watch(
-  () => store.messages.length + (store.messages[store.messages.length - 1]?.content?.length || 0),
+  () => store.timeline.length + (store.messages.length > 0 ? store.messages[store.messages.length - 1]?.content?.length || 0 : 0),
   () => {
     nextTick(() => {
       if (messagesEl.value) {
@@ -62,13 +67,50 @@ watch(
   },
 )
 
-const timeline = computed(() => {
-  const items: Array<{ type: 'message' | 'tool' | 'approval'; data: any; ts: number }> = []
-  for (const m of store.messages) items.push({ type: 'message', data: m, ts: m.timestamp })
-  for (const t of store.toolCalls) items.push({ type: 'tool', data: t, ts: t.timestamp })
-  for (const a of store.approvals) items.push({ type: 'approval', data: a, ts: Date.now() })
-  items.sort((a, b) => a.ts - b.ts)
-  return items
+// Global keyboard shortcuts
+function handleGlobalKeydown(e: KeyboardEvent) {
+  // Ctrl/Cmd+Shift+N: New conversation
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'N') {
+    e.preventDefault()
+    store.newSession()
+    return
+  }
+  // Ctrl/Cmd+,: Open settings
+  if ((e.ctrlKey || e.metaKey) && e.key === ',') {
+    e.preventDefault()
+    settingsOpen.value = !settingsOpen.value
+    return
+  }
+  // Escape: Stop agent if running
+  if (e.key === 'Escape' && store.isRunning) {
+    e.preventDefault()
+    store.stopAgent()
+    return
+  }
+  // Ctrl/Cmd+`: Toggle terminal
+  if ((e.ctrlKey || e.metaKey) && e.key === '`') {
+    e.preventDefault()
+    togglePanel('terminal')
+    return
+  }
+  // Ctrl/Cmd+L: Focus input (handled in ChatInput)
+}
+
+onMounted(async () => {
+  document.addEventListener('keydown', handleGlobalKeydown)
+  await store.fetchHealth()
+  store.fetchConfig()
+  store.fetchTodos()
+  store.fetchModels()
+  store.fetchSessions()
+  store.fetchApprovalMode()
+  if (store.pwd) {
+    projectStore.ensureCurrentProject(store.pwd)
+  }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleGlobalKeydown)
 })
 
 function openFile(path: string, content: string) {
@@ -82,25 +124,11 @@ function togglePanel(panel: 'terminal' | 'diff') {
 }
 
 async function onProjectSwitched() {
-  // Refresh all state from the server after project switch.
   await store.fetchHealth()
   store.clearChat()
   store.fetchTodos()
   store.fetchSessions()
 }
-
-onMounted(async () => {
-  await store.fetchHealth()
-  store.fetchConfig()
-  store.fetchTodos()
-  store.fetchModels()
-  store.fetchSessions()
-  store.fetchApprovalMode()
-  // Auto-create project for current workspace
-  if (store.pwd) {
-    projectStore.ensureCurrentProject(store.pwd)
-  }
-})
 </script>
 
 <template>
@@ -126,7 +154,7 @@ onMounted(async () => {
               class="px-2 py-1 text-[11px] cursor-pointer transition-colors"
               :class="bottomPanel === 'terminal' ? 'bg-teal-50 text-teal-700' : 'text-stone-400 hover:text-stone-600 hover:bg-stone-50'"
               @click="togglePanel('terminal')"
-              title="Terminal"
+              title="Terminal (Ctrl+`)"
             >
               ⌘ Terminal
             </button>
@@ -142,9 +170,9 @@ onMounted(async () => {
           <div class="flex items-center gap-1.5 text-xs text-stone-400">
             <span
               class="w-1.5 h-1.5 rounded-full"
-              :class="store.isRunning ? 'bg-amber-400 animate-pulse' : store.sseConnected ? 'bg-emerald-400' : 'bg-stone-300'"
+              :class="store.isRunning ? 'bg-amber-400 animate-pulse' : store.wsConnected ? 'bg-emerald-400' : 'bg-stone-300'"
             />
-            {{ store.isRunning ? 'Working…' : store.sseConnected ? 'Ready' : 'Offline' }}
+            {{ store.isRunning ? 'Working…' : store.wsConnected ? 'Ready' : 'Offline' }}
           </div>
         </div>
       </header>
@@ -159,16 +187,16 @@ onMounted(async () => {
             <div class="text-xs text-stone-400">Send a message to start a conversation with jcode.</div>
           </div>
 
-          <!-- Timeline -->
+          <!-- Timeline (sequential via store.timeline) -->
           <div v-else class="max-w-3xl mx-auto px-5 py-6 space-y-1">
-            <template v-for="item in timeline" :key="item.data.id || item.ts">
-              <ChatMessageVue v-if="item.type === 'message'" :message="item.data" />
-              <ToolCallCard v-else-if="item.type === 'tool'" :tool="item.data" />
-              <ApprovalBanner v-else-if="item.type === 'approval'" :approval="item.data" />
+            <template v-for="item in store.timeline" :key="item.seq">
+              <ChatMessageVue v-if="item.kind === 'message'" :message="item.data" />
+              <ToolCallCard v-else-if="item.kind === 'tool'" :tool="item.data" />
+              <ApprovalBanner v-else-if="item.kind === 'approval'" :approval="item.data" />
             </template>
 
             <!-- Typing indicator -->
-            <div v-if="store.isRunning && !store.messages.some(m => m.role === 'assistant' && m.id)" class="flex gap-1 py-4 pl-1">
+            <div v-if="store.isRunning && store.timeline.length === 0" class="flex gap-1 py-4 pl-1">
               <span class="w-1.5 h-1.5 bg-stone-300 rounded-full animate-bounce" style="animation-delay: 0ms" />
               <span class="w-1.5 h-1.5 bg-stone-300 rounded-full animate-bounce" style="animation-delay: 150ms" />
               <span class="w-1.5 h-1.5 bg-stone-300 rounded-full animate-bounce" style="animation-delay: 300ms" />

@@ -107,6 +107,11 @@ func (m Model) handleSSHSaveAlias(input string, cmds []tea.Cmd) (tea.Model, tea.
 		m.lines = append(m.lines, toolErrorStyle.Render("✗ Failed to save alias: "+err.Error()))
 	} else {
 		m.lines = append(m.lines, toolLabelStyle.Render("⚙ SSH:")+" Saved alias '"+aliasName+"' → "+m.sshSaveAddr)
+		// Notify the event loop about the config change so tools can be rebuilt
+		select {
+		case configCh <- cfg:
+		default:
+		}
 	}
 	m.sshSaveAddr = ""
 	m.sshSavePath = ""

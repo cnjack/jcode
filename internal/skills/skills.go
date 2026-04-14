@@ -33,12 +33,13 @@ type Loader struct {
 var builtinFS embed.FS
 
 // NewLoader creates a Loader pre-populated with built-in skills, then scans
-// the user skills directory (~/.jcode/skills/) for additional skills.
+// the user skills directories (~/.agents/skills/ and ~/.jcode/skills/) for additional skills.
 func NewLoader() *Loader {
 	l := &Loader{
 		skills: make(map[string]*Skill),
 	}
 	l.loadBuiltin()
+	l.ScanAgentsSkills()
 	l.ScanUserSkills()
 	return l
 }
@@ -74,6 +75,18 @@ func (l *Loader) loadBuiltin() {
 func (l *Loader) ScanUserSkills() {
 	dir := filepath.Join(config.ConfigDir(), "skills")
 	l.scanDir(dir, "user")
+}
+
+// ScanAgentsSkills scans ~/.agents/skills/ for agent-defined skills.
+// Each subdirectory (or symlink to a directory) containing a SKILL.md is treated as a skill.
+// Agent skills are loaded before user skills, so user skills can override them.
+func (l *Loader) ScanAgentsSkills() {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	dir := filepath.Join(homeDir, ".agents", "skills")
+	l.scanDir(dir, "agents")
 }
 
 // ScanProjectSkills scans <projectDir>/.jcode/skills/ for project-local skills.
@@ -120,6 +133,7 @@ func (l *Loader) Rescan(projectDir string) {
 		}
 	}
 	l.mu.Unlock()
+	l.ScanAgentsSkills()
 	l.ScanUserSkills()
 	if projectDir != "" {
 		l.ScanProjectSkills(projectDir)

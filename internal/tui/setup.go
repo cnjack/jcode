@@ -26,47 +26,12 @@ type ProviderProfile struct {
 	FromRegistry bool // true if provider exists in models.dev
 }
 
-// popularProviderIDs is a curated list of well-known provider IDs from models.dev.
-var popularProviderIDs = []string{
-	// International providers
-	"openai", "anthropic", "google", "deepseek", "mistral",
-	"openrouter", "groq", "together-ai", "fireworks-ai", "perplexity",
-	// Chinese providers (using models.dev official IDs)
-	"alibaba-cn", "alibaba-coding-plan-cn",
-	"zhipuai", "zhipuai-coding-plan",
-	"moonshotai", "moonshotai-cn",
-	"minimax", "minimax-coding-plan",
-	"siliconflow",
-	"tencent-coding-plan",
-}
-
-// ExtraProvider represents a provider not in the models.dev registry.
-type ExtraProvider struct {
-	ID      string
-	Name    string
-	BaseURL string
-	NoKey   bool // true for local providers like Ollama
-	NeedURL bool // true if user must provide URL
-}
-
-// extraProviders are popular providers not available in models.dev.
-var extraProviders = []ExtraProvider{
-	{ID: "ollama", Name: "Ollama (Local)", BaseURL: "http://localhost:11434/v1", NoKey: true},
-	{ID: "ollama-cloud", Name: "Ollama Cloud", NeedURL: true},
-	// Chinese regional providers not in models.dev
-	{ID: "z.ai", Name: "Z.AI", BaseURL: "https://api.z.ai/v1"},
-	{ID: "z.ai-plan", Name: "Z.AI Plan", BaseURL: "https://api.z.ai/v1"},
-	{ID: "magicark", Name: "魔力方舟", BaseURL: "https://api.gitee.com/v1"},
-}
-
-// fallbackProviders are shown when the registry is not available.
-var fallbackProviders = []ProviderProfile{
-	{ID: "openai", Name: "OpenAI", BaseURL: "https://api.openai.com/v1", NeedKey: true},
-	{ID: "anthropic", Name: "Anthropic", BaseURL: "https://api.anthropic.com/v1", NeedKey: true},
-	{ID: "deepseek", Name: "DeepSeek", BaseURL: "https://api.deepseek.com", NeedKey: true},
-	{ID: "zhipuai", Name: "Zhipu AI", BaseURL: "https://open.bigmodel.cn/api/paas/v4", NeedKey: true},
-	{ID: "openrouter", Name: "OpenRouter", BaseURL: "https://openrouter.ai/api/v1", NeedKey: true},
-	{ID: "groq", Name: "Groq", BaseURL: "https://api.groq.com/openai/v1", NeedKey: true},
+// ollamaLocalProvider is a special-case provider not in models.dev.
+var ollamaLocalProvider = ProviderProfile{
+	ID:      "ollama",
+	Name:    "Ollama (Local)",
+	BaseURL: "http://localhost:11434/v1",
+	NeedKey: false,
 }
 
 type providerItem struct {
@@ -141,83 +106,28 @@ func NewSetupModel() SetupModel {
 		}
 	}
 
-	// Try loading registry for provider metadata
-	registryProviders, _ := m.registry.Load()
-
 	var items []list.Item
 
-	if len(registryProviders) > 0 {
-		// Registry available: show popular providers from registry
-		addedIDs := make(map[string]bool)
-		for _, pid := range popularProviderIDs {
-			rp, ok := registryProviders[pid]
-			if !ok {
-				continue
-			}
-			needKey := len(rp.Env) > 0
-			items = append(items, providerItem{
-				profile: ProviderProfile{
-					ID:           pid,
-					Name:         rp.Name,
-					BaseURL:      rp.API,
-					NeedKey:      needKey,
-					FromRegistry: true,
-				},
-				configured: configuredProviders[pid],
-			})
-			addedIDs[pid] = true
-		}
-
-		// Add extra providers (skip if already in registry popular list)
-		for _, ep := range extraProviders {
-			if addedIDs[ep.ID] {
-				continue
-			}
-			// Check if this extra provider actually exists in registry
-			fromRegistry := false
-			baseURL := ep.BaseURL
-			needKey := !ep.NoKey
-			if rp, ok := registryProviders[ep.ID]; ok {
-				fromRegistry = true
-				if baseURL == "" {
-					baseURL = rp.API
-				}
-				needKey = len(rp.Env) > 0 || needKey
-			}
-			items = append(items, providerItem{
-				profile: ProviderProfile{
-					ID:           ep.ID,
-					Name:         ep.Name,
-					BaseURL:      baseURL,
-					NeedURL:      ep.NeedURL,
-					NeedKey:      needKey,
-					FromRegistry: fromRegistry,
-				},
-				configured: configuredProviders[ep.ID],
-			})
-		}
-	} else {
-		// Registry unavailable: show fallback providers
-		for _, fp := range fallbackProviders {
-			items = append(items, providerItem{
-				profile:    fp,
-				configured: configuredProviders[fp.ID],
-			})
-		}
-		// Also add extra providers
-		for _, ep := range extraProviders {
-			items = append(items, providerItem{
-				profile: ProviderProfile{
-					ID:      ep.ID,
-					Name:    ep.Name,
-					BaseURL: ep.BaseURL,
-					NeedURL: ep.NeedURL,
-					NeedKey: !ep.NoKey,
-				},
-				configured: configuredProviders[ep.ID],
-			})
-		}
+	// Show all providers from the generated registry in curated order
+	for _, rp := range m.registry.ListProviders() {
+		needKey := len(rp.Env) > 0
+		items = append(items, providerItem{
+			profile: ProviderProfile{
+				ID:           rp.ID,
+				Name:         rp.Name,
+				BaseURL:      rp.API,
+				NeedKey:      needKey,
+				FromRegistry: true,
+			},
+			configured: configuredProviders[rp.ID],
+		})
 	}
+
+	// Add Ollama (local) — not in models.dev
+	items = append(items, providerItem{
+		profile:    ollamaLocalProvider,
+		configured: configuredProviders[ollamaLocalProvider.ID],
+	})
 
 	// Always add "OpenAI Compatible" as the last option
 	items = append(items, providerItem{

@@ -17,7 +17,7 @@ internal/
   agent/             # ChatModelAgent factory + middlewares
   config/            # JSON config loader + logger (→ ~/.jcode/debug.log)
   handler/           # Event handler interface (TUI/ACP/Web implementations)
-  model/             # OpenAI-compatible chat model + token tracker + model registry
+  model/             # OpenAI-compatible chat model + token tracker + model registry (static build-time data)
   prompts/           # System prompt (system.md) + plan prompt (plan.md) + AGENTS.md injection
   runner/            # Agent run loop, todo-completion guard, approval state, event bus
   session/           # JSONL session recording/replay with state reconstruction
@@ -28,6 +28,7 @@ internal/
   tui/               # BubbleTea v2 TUI
   util/              # GetWorkDir, GetSystemInfo, CollectEnvInfo
   web/               # Go HTTP server (REST + SSE + PTY) + Vue frontend dist
+script/              # Build-time code generation scripts
 web/                 # Vue 3 + Vite + TypeScript frontend → builds to internal/web/dist/
 ```
 
@@ -100,7 +101,7 @@ All implement `tool.InvokableTool` — JSON in, string out, shared `*Env` (local
 | `subagent` | Auto | `name, description, prompt, agent_type (explore/general/coordinator), model, run_in_background` |
 | `check_background` | Auto | `task_id` (omit to list all) |
 | `ask_user` | Auto | `question, header, options[]` (supports batch) |
-| `switch_env` | **Required** | `target` ("local" or SSH alias) |
+| `switch_env` | **Required** (only loaded if SSH configured) | `target` ("local" or SSH alias) |
 | `load_skill` | Auto | `name` |
 | `team_create` | Auto | `team_name, description` |
 | `team_spawn` | Auto | `name, prompt, agent_type, model, cwd, mode` |
@@ -194,7 +195,7 @@ JSONL at `~/.jcode/sessions/{uuid}.jsonl`. Teammate recordings at `~/.jcode/sess
 
 ## Skills (`internal/skills/`)
 
-Sources (later overrides earlier): **Builtin** (`//go:embed builtin`) → **User** (`~/.jcode/skills/{name}/SKILL.md`) → **Project** (`.jcode/skills/{name}/SKILL.md`)
+Sources (later overrides earlier): **Builtin** (`//go:embed builtin`) → **Agents** (`~/.agents/skills/{name}/SKILL.md`) → **User** (`~/.jcode/skills/{name}/SKILL.md`) → **Project** (`.jcode/skills/{name}/SKILL.md`)
 
 Two-layer: descriptions in system prompt → full content on-demand via `load_skill`.
 
@@ -214,8 +215,10 @@ Builtin: `review-pr` (`/review-pr`), `pr-comments` (`/pr-comments`), `security-r
 ## Model (`internal/model/`)
 
 - **ChatModel**: wraps `go-openai`, implements `ToolCallingChatModel` (Generate, Stream, WithTools)
-- **ModelRegistry**: fetches `models.dev/api.json`, caches at `~/.jcode/cache/models_dev.json`, 5-min TTL
+- **ModelRegistry**: static model metadata generated at build time from models.dev via `go generate`
 - **Retry**: error types `Transient`, `RateLimit`, `ContextOverflow`, `Auth`, `Fatal`
+
+Build-time code generation: `script/generate_models.go` fetches models.dev API and generates `internal/model/registry_generated.go`. Run via `go generate ./internal/model/...` (automatically invoked by `make build` and `make install`).
 
 ---
 
@@ -245,9 +248,10 @@ Builtin: `review-pr` (`/review-pr`), `pr-comments` (`/pr-comments`), `security-r
 
 | Target | Description |
 |---|---|
+| `make generate` | Generate code (models registry) via go:generate |
 | `make build-web` | `pnpm install && vite build` in `web/` |
-| `make build` | `build-web` → `go build -o jcode ./cmd/jcode/` |
-| `make install` | `build-web` → `go install ./cmd/jcode/` |
+| `make build` | `generate` → `build-web` → `go build -o jcode ./cmd/jcode/` |
+| `make install` | `generate` → `build-web` → `go install ./cmd/jcode/` |
 | `make run` | `go run ./cmd/jcode/` |
 | `make doctor` | `go run ./cmd/jcode/ --doctor` |
 | `make lint` | Run Go and Web linters |

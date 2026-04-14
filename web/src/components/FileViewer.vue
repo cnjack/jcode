@@ -12,7 +12,7 @@ const emit = defineEmits<{
 
 function ext(path: string): string {
   const parts = path.split('.')
-  return parts.length > 1 ? parts[parts.length - 1] : ''
+  return parts.length > 1 ? (parts[parts.length - 1] ?? '') : ''
 }
 
 function highlighted(): string {

@@ -18,28 +18,34 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
+	"github.com/gorilla/websocket"
 
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
+	"github.com/cnjack/jcode/internal/skills"
 	"github.com/cnjack/jcode/internal/telemetry"
 	"github.com/cnjack/jcode/internal/tools"
 )
 
 // Server is the jcode web server.
 type Server struct {
-	port    int
-	host    string
-	pwd     string
-	handler *handler.WebHandler
-	broker  *SSEBroker
+	port     int
+	host     string
+	pwd      string
+	handler  *handler.WebHandler
+	broker   *SSEBroker
+	wsBroker *WSBroker
 
 	mu      sync.RWMutex
 	agent   *adk.ChatModelAgent
 	history []adk.Message
 	running atomic.Bool
+
+	// Cancel function for the currently running agent, protected by mu.
+	runCancel context.CancelFunc
 
 	// Server-level context (from Start), used for background agent work.
 	ctx context.Context
@@ -69,6 +75,12 @@ type Server struct {
 
 	// approvalState controls whether tool calls require approval.
 	approvalState *runner.ApprovalState
+
+	// skillLoader provides skill listing for slash commands.
+	skillLoader *skills.Loader
+
+	// disabledMCP tracks MCP servers that have been disabled via the UI.
+	disabledMCP map[string]bool
 }
 
 // ServerConfig holds the configuration for creating a new Server.
@@ -88,17 +100,23 @@ type ServerConfig struct {
 	Config        *config.Config
 	Registry      *model.ModelRegistry
 	ApprovalState *runner.ApprovalState
+	SkillLoader   *skills.Loader
+	WebHandler    *handler.WebHandler // optional: pre-created handler for sharing with tools
 }
 
 // NewServer creates a new web server.
 func NewServer(cfg *ServerConfig) *Server {
-	h := handler.NewWebHandler()
+	h := cfg.WebHandler
+	if h == nil {
+		h = handler.NewWebHandler()
+	}
 	return &Server{
 		port:          cfg.Port,
 		host:          cfg.Host,
 		pwd:           cfg.Pwd,
 		handler:       h,
 		broker:        NewSSEBroker(),
+		wsBroker:      NewWSBroker(),
 		agent:         cfg.Agent,
 		createAgent:   cfg.CreateAgent,
 		switchProject: cfg.SwitchProject,
@@ -113,6 +131,8 @@ func NewServer(cfg *ServerConfig) *Server {
 		registry:      cfg.Registry,
 		ptyMgr:        newPTYManager(),
 		approvalState: cfg.ApprovalState,
+		skillLoader:   cfg.SkillLoader,
+		disabledMCP:   make(map[string]bool),
 	}
 }
 
@@ -129,7 +149,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// API routes
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
+	mux.HandleFunc("GET /api/ws", s.handleWebSocket)
 	mux.HandleFunc("POST /api/chat", s.handleChat)
+	mux.HandleFunc("POST /api/stop", s.handleStop)
 	mux.HandleFunc("GET /api/sessions", s.handleListSessions)
 	mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSession)
 	mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
@@ -147,6 +169,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/diff", s.handleDiff)
 	mux.HandleFunc("GET /api/mcp", s.handleListMCP)
 	mux.HandleFunc("POST /api/mcp/{name}/toggle", s.handleToggleMCP)
+	mux.HandleFunc("GET /api/ssh", s.handleListSSH)
+	mux.HandleFunc("GET /api/skills", s.handleListSkills)
 	mux.HandleFunc("GET /api/browse", s.handleBrowse)
 	mux.HandleFunc("POST /api/project/switch", s.handleSwitchProject)
 	mux.HandleFunc("POST /api/pty", s.handleCreatePTY)
@@ -177,6 +201,7 @@ func (s *Server) Start(ctx context.Context) error {
 		<-ctx.Done()
 		s.ptyMgr.closeAll()
 		s.broker.Close()
+		s.wsBroker.Close()
 		_ = srv.Shutdown(context.Background())
 	}()
 
@@ -190,12 +215,16 @@ func (s *Server) Start(ctx context.Context) error {
 	return nil
 }
 
-// forwardEvents reads from the WebHandler event channel and broadcasts to SSE clients.
+// forwardEvents reads from the WebHandler event channel and broadcasts to SSE and WebSocket clients.
 func (s *Server) forwardEvents() {
 	for ev := range s.handler.Events() {
 		s.broker.Broadcast(SSEEvent{
 			Event: ev.Event,
 			Data:  ev.Data,
+		})
+		s.wsBroker.Broadcast(WSEvent{
+			Type: ev.Event,
+			Data: ev.Data,
 		})
 	}
 }
@@ -215,12 +244,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"running":  s.running.Load(),
-		"clients":  s.broker.ClientCount(),
-		"pwd":      s.pwd,
-		"provider": s.providerName,
-		"model":    s.modelName,
-		"mode":     s.mode,
+		"running":    s.running.Load(),
+		"clients":    s.broker.ClientCount(),
+		"ws_clients": s.wsBroker.ClientCount(),
+		"pwd":        s.pwd,
+		"provider":   s.providerName,
+		"model":      s.modelName,
+		"mode":       s.mode,
 	})
 }
 
@@ -263,6 +293,12 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		message = "[PLAN MODE — Read-only. Analyze the codebase and create a plan. Do NOT edit, write, or delete any files.]\n\n" + message
 	}
 
+	// Ensure a recorder exists (lazy creation on first message).
+	if s.recorder == nil {
+		rec, _ := session.NewRecorder(s.pwd, s.providerName, s.modelName)
+		s.recorder = rec
+	}
+
 	// Record user message.
 	if s.recorder != nil {
 		s.recorder.RecordUser(message)
@@ -277,9 +313,19 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	// Stream response via SSE — run agent in background.
 	// Use server context, not request context (which is canceled when the response is sent).
+	runCtx, runCancel := context.WithCancel(s.ctx)
+	s.mu.Lock()
+	s.runCancel = runCancel
+	s.mu.Unlock()
+
 	go func() {
-		defer s.running.Store(false)
-		resp := runner.Run(s.ctx, agent, history, s.handler, s.recorder, s.todoStore, s.tracer)
+		defer func() {
+			s.running.Store(false)
+			s.mu.Lock()
+			s.runCancel = nil
+			s.mu.Unlock()
+		}()
+		resp := runner.Run(runCtx, agent, history, s.handler, s.recorder, s.todoStore, s.tracer)
 		if resp != "" {
 			s.mu.Lock()
 			s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: resp})
@@ -363,11 +409,8 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	// Close the old recorder.
 	if s.recorder != nil {
 		s.recorder.Close()
+		s.recorder = nil
 	}
-
-	// Create a new recorder.
-	rec, _ := session.NewRecorder(s.pwd, s.providerName, s.modelName)
-	s.recorder = rec
 
 	// Reset conversation history.
 	s.mu.Lock()
@@ -380,13 +423,10 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Notify SSE clients.
-	s.broker.Broadcast(SSEEvent{Event: "session_reset", Data: map[string]string{
-		"session_id": rec.UUID(),
-	}})
+	s.broker.Broadcast(SSEEvent{Event: "session_reset", Data: map[string]string{}})
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":     "ok",
-		"session_id": rec.UUID(),
+		"status": "ok",
 	})
 }
 
@@ -803,7 +843,8 @@ func (s *Server) handleListMCP(w http.ResponseWriter, r *http.Request) {
 		Type    string `json:"type"`
 		Command string `json:"command,omitempty"`
 		URL     string `json:"url,omitempty"`
-		Status  string `json:"status"` // "configured"
+		Status  string `json:"status"`
+		Enabled bool   `json:"enabled"`
 	}
 
 	servers := make(map[string]mcpInfo)
@@ -813,6 +854,7 @@ func (s *Server) handleListMCP(w http.ResponseWriter, r *http.Request) {
 			Command: srv.Command,
 			URL:     srv.URL,
 			Status:  "configured",
+			Enabled: !s.disabledMCP[name],
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"servers": servers})
@@ -838,16 +880,13 @@ func (s *Server) handleToggleMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.cfg.MCPServers == nil {
-		s.cfg.MCPServers = make(map[string]*config.MCPServer)
+	if req.Enabled {
+		delete(s.disabledMCP, name)
+	} else {
+		s.disabledMCP[name] = true
 	}
 
-	if !req.Enabled {
-		// Mark as disabled by removing from config (in-memory only)
-		delete(s.cfg.MCPServers, name)
-	}
-
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "name": name})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "name": name, "enabled": req.Enabled})
 }
 
 func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
@@ -1019,6 +1058,142 @@ func (s *Server) handleSetApprovalMode(w http.ResponseWriter, r *http.Request) {
 		Data:  map[string]any{"auto_approve": req.AutoApprove},
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"auto_approve": req.AutoApprove})
+}
+
+// --- WebSocket handler ---
+
+var wsUpgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	conn, err := wsUpgrader.Upgrade(w, r, nil)
+	if err != nil {
+		config.Logger().Printf("[ws] upgrade error: %v", err)
+		return
+	}
+
+	id, client, unsub := s.wsBroker.Register(conn)
+	config.Logger().Printf("[ws] client %d connected", id)
+
+	// Write pump: send events to client.
+	go client.writePump()
+
+	// Read pump: handle incoming messages.
+	defer func() {
+		unsub()
+		_ = conn.Close()
+		config.Logger().Printf("[ws] client %d disconnected", id)
+	}()
+
+	for {
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		var incoming WSIncoming
+		if err := json.Unmarshal(msg, &incoming); err != nil {
+			continue
+		}
+		s.handleWSMessage(incoming)
+	}
+}
+
+func (s *Server) handleWSMessage(msg WSIncoming) {
+	switch msg.Type {
+	case "ping":
+		s.wsBroker.Broadcast(WSEvent{Type: "pong"})
+	case "approval":
+		var data struct {
+			ID       string `json:"id"`
+			Approved bool   `json:"approved"`
+		}
+		if err := json.Unmarshal(msg.Data, &data); err != nil {
+			return
+		}
+		_ = s.handler.ResolveApproval(data.ID, data.Approved)
+	}
+}
+
+// --- Stop handler ---
+
+func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
+	if !s.running.Load() {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "not_running"})
+		return
+	}
+
+	s.mu.RLock()
+	cancel := s.runCancel
+	s.mu.RUnlock()
+
+	if cancel != nil {
+		cancel()
+	}
+
+	// Notify clients.
+	s.handler.OnAgentDone(fmt.Errorf("stopped by user"))
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
+}
+
+// --- SSH list handler ---
+
+func (s *Server) handleListSSH(w http.ResponseWriter, r *http.Request) {
+	type sshItem struct {
+		Name string `json:"name"`
+		Addr string `json:"addr"`
+		Path string `json:"path,omitempty"`
+	}
+
+	var items []sshItem
+	if s.cfg != nil {
+		for _, a := range s.cfg.SSHAliases {
+			items = append(items, sshItem{
+				Name: a.Name,
+				Addr: a.Addr,
+				Path: a.Path,
+			})
+		}
+	}
+	if items == nil {
+		items = []sshItem{}
+	}
+
+	current := "local"
+	if s.env != nil && s.env.IsRemote() {
+		current = "ssh"
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"current": current,
+		"aliases": items,
+	})
+}
+
+// --- Skills list handler (for slash commands) ---
+
+func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
+	type skillItem struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Slash       string `json:"slash,omitempty"`
+	}
+
+	var items []skillItem
+	if s.skillLoader != nil {
+		for _, sk := range s.skillLoader.All() {
+			items = append(items, skillItem{
+				Name:        sk.Name,
+				Description: sk.Description,
+				Slash:       sk.Slash,
+			})
+		}
+	}
+	if items == nil {
+		items = []skillItem{}
+	}
+	writeJSON(w, http.StatusOK, items)
 }
 
 // --- Helpers ---

@@ -1,5 +1,5 @@
 // API client for jcode backend
-import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, MCPListResponse, BrowseResponse } from '@/types/api'
+import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, MCPListResponse, BrowseResponse, SSHListResponse, SkillInfo, TodoItem, SessionItem, SessionEntry, FileItem } from '@/types/api'
 
 const BASE = ''
 
@@ -33,15 +33,15 @@ export const api = {
       mode: string
     }>('/api/status'),
   config: () => request<{ provider: string; model: string; max_iterations: number }>('/api/config'),
-  todos: () => request<any[]>('/api/todos'),
-  sessions: () => request<any[]>('/api/sessions'),
-  session: (id: string) => request<any[]>(`/api/sessions/${encodeURIComponent(id)}`),
+  todos: () => request<TodoItem[]>('/api/todos'),
+  sessions: () => request<SessionItem[]>('/api/sessions'),
+  session: (id: string) => request<SessionEntry[]>(`/api/sessions/${encodeURIComponent(id)}`),
   deleteSession: (id: string) =>
     request<{ status: string }>(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   newSession: () => request<{ status: string; session_id: string }>('/api/sessions', { method: 'POST' }),
   files: (path?: string) => {
     const q = path ? `?path=${encodeURIComponent(path)}` : ''
-    return request<any[]>(`/api/files${q}`)
+    return request<FileItem[]>(`/api/files${q}`)
   },
   fileContent: (path: string) =>
     request<{ path: string; content: string }>(`/api/files/content?path=${encodeURIComponent(path)}`),
@@ -61,7 +61,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ provider, model }),
     }),
-  switchMode: (mode: AgentMode) =>
+  switchMode: (mode: string) =>
     request<{ status: string; mode: string }>('/api/mode', {
       method: 'POST',
       body: JSON.stringify({ mode }),
@@ -103,4 +103,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ auto_approve: autoApprove }),
     }),
+  stop: () =>
+    request<{ status: string }>('/api/stop', { method: 'POST' }),
+  sshList: () =>
+    request<SSHListResponse>('/api/ssh'),
+  skillsList: () =>
+    request<SkillInfo[]>('/api/skills'),
 }

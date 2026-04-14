@@ -39,6 +39,23 @@ type WebTokenData struct {
 	ModelContextLimit int   `json:"model_context_limit"`
 }
 
+// WebSubagentData carries subagent lifecycle events.
+type WebSubagentData struct {
+	Name      string `json:"name"`
+	AgentType string `json:"agent_type"`
+	Done      bool   `json:"done"`
+	Result    string `json:"result,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+// WebSubagentProgressData carries intermediate subagent tool call/result events.
+type WebSubagentProgressData struct {
+	AgentName string `json:"agent_name"`
+	Event     string `json:"event"` // "tool_call" or "tool_result"
+	ToolName  string `json:"tool_name"`
+	Detail    string `json:"detail"`
+}
+
 // WebDoneData signals agent completion.
 type WebDoneData struct {
 	Error string `json:"error,omitempty"`
@@ -103,6 +120,24 @@ func (h *WebHandler) OnToolResult(name, output string, err error) {
 
 func (h *WebHandler) OnTodoUpdate() {
 	h.emit("todo_update", nil)
+}
+
+// --- Subagent events ---
+
+func (h *WebHandler) OnSubagentEvent(name, agentType string, done bool, result string, err error) {
+	errMsg := ""
+	if err != nil {
+		errMsg = err.Error()
+	}
+	h.emit("subagent_event", WebSubagentData{
+		Name: name, AgentType: agentType, Done: done, Result: result, Error: errMsg,
+	})
+}
+
+func (h *WebHandler) OnSubagentProgress(agentName, event, toolName, detail string) {
+	h.emit("subagent_progress", WebSubagentProgressData{
+		AgentName: agentName, Event: event, ToolName: toolName, Detail: detail,
+	})
 }
 
 // --- Lifecycle ---

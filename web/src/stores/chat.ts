@@ -9,31 +9,39 @@ import type {
   TokenUpdateData,
   SessionItem,
   AgentMode,
-  ModelsResponse,
   ProviderInfo,
+  SubagentToolEvent,
 } from '@/types/api'
 import { api } from '@/composables/api'
 
-let _nextId = 0
-function nextId() {
-  return `msg_${++_nextId}_${Date.now()}`
+let _seqId = 0
+function nextSeqId() {
+  return ++_seqId
 }
+
+function genId(prefix: string) {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+}
+
+// Timeline item: a single entry in the conversation timeline.
+export type TimelineItem =
+  | { kind: 'message'; data: ChatMessage; seq: number }
+  | { kind: 'tool'; data: ToolCall; seq: number }
+  | { kind: 'approval'; data: PendingApproval; seq: number }
 
 export const useChatStore = defineStore('chat', () => {
   // --- State ---
-  const messages = ref<ChatMessage[]>([])
-  const toolCalls = ref<ToolCall[]>([])
-  const approvals = ref<PendingApproval[]>([])
+  const timeline = ref<TimelineItem[]>([])
   const todos = ref<TodoItem[]>([])
   const sessions = ref<SessionItem[]>([])
   const isRunning = ref(false)
   const tokenInfo = ref<TokenUpdateData | null>(null)
   const config = ref<{ provider: string; model: string } | null>(null)
   const pwd = ref('')
-  const sseConnected = ref(false)
+  const wsConnected = ref(false)
 
   // Mode & model
-  const mode = ref<AgentMode>('build')
+  const mode = ref<AgentMode>('agent')
   const providerName = ref('')
   const modelName = ref('')
   const providers = ref<ProviderInfo[]>([])
@@ -46,13 +54,16 @@ export const useChatStore = defineStore('chat', () => {
   let streamingMsgId = ''
 
   // --- Getters ---
+  const messages = computed(() =>
+    timeline.value
+      .filter((i): i is TimelineItem & { kind: 'message' } => i.kind === 'message')
+      .map((i) => i.data),
+  )
   const hasMessages = computed(() => messages.value.length > 0)
   const activeTodos = computed(() => todos.value.filter((t) => t.Status !== 'completed'))
   const tokenPercentage = computed(() => {
     if (!tokenInfo.value || !tokenInfo.value.model_context_limit) return 0
-    return Math.round(
-      (tokenInfo.value.total_tokens / tokenInfo.value.model_context_limit) * 100,
-    )
+    return Math.round((tokenInfo.value.total_tokens / tokenInfo.value.model_context_limit) * 100)
   })
   const projectName = computed(() => {
     const p = pwd.value
@@ -63,14 +74,17 @@ export const useChatStore = defineStore('chat', () => {
 
   // --- Actions ---
   function addMessage(role: ChatMessage['role'], content: string): string {
-    const id = nextId()
-    messages.value.push({ id, role, content, timestamp: Date.now() })
+    const id = genId('msg')
+    const msg: ChatMessage = { id, role, content, timestamp: Date.now() }
+    timeline.value.push({ kind: 'message', data: msg, seq: nextSeqId() })
     return id
   }
 
   function updateMessage(id: string, content: string) {
-    const msg = messages.value.find((m) => m.id === id)
-    if (msg) msg.content = content
+    const item = timeline.value.find((i) => i.kind === 'message' && i.data.id === id)
+    if (item && item.kind === 'message') {
+      item.data.content = content
+    }
   }
 
   function appendAgentText(text: string) {
@@ -83,22 +97,51 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function addToolCall(name: string, args: string) {
-    toolCalls.value.push({
-      id: `tc_${Date.now()}`,
+    // Flush current streaming — new text after tool will get a fresh message
+    streamingText = ''
+    streamingMsgId = ''
+
+    const tc: ToolCall = {
+      id: genId('tc'),
       name,
       args,
       status: 'running',
       timestamp: Date.now(),
-    })
+    }
+    timeline.value.push({ kind: 'tool', data: tc, seq: nextSeqId() })
   }
 
   function resolveToolCall(name: string, output: string, error?: string) {
-    for (let i = toolCalls.value.length - 1; i >= 0; i--) {
-      const tc = toolCalls.value[i]
-      if (tc.name === name && tc.status === 'running') {
-        tc.output = output
-        tc.error = error
-        tc.status = error ? 'error' : 'done'
+    for (let i = timeline.value.length - 1; i >= 0; i--) {
+      const item = timeline.value[i]
+      if (item && item.kind === 'tool') {
+        const tc = item.data
+        if (tc.name === name && tc.status === 'running') {
+          tc.output = output
+          tc.error = error
+          tc.status = error ? 'error' : 'done'
+          break
+        }
+      }
+    }
+  }
+
+  /** Attach an intermediate tool event to the most recent running subagent tool call. */
+  function addSubagentProgress(agentName: string, event: string, toolName: string, detail: string) {
+    // Find the running subagent tool call (name === 'subagent') that matches the agentName
+    for (let i = timeline.value.length - 1; i >= 0; i--) {
+      const item = timeline.value[i]
+      if (item && item.kind === 'tool' && item.data.name === 'subagent' && item.data.status === 'running') {
+        if (!item.data.children) {
+          item.data.children = []
+        }
+        const child: SubagentToolEvent = {
+          event: event as 'tool_call' | 'tool_result',
+          toolName,
+          detail,
+          timestamp: Date.now(),
+        }
+        item.data.children.push(child)
         break
       }
     }
@@ -114,14 +157,14 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function addApprovalRequest(data: PendingApproval) {
-    approvals.value.push(data)
+    timeline.value.push({ kind: 'approval', data, seq: nextSeqId() })
   }
 
   function resolveApprovalLocal(id: string, approved: boolean) {
-    const a = approvals.value.find((x) => x.id === id)
-    if (a) {
-      a.resolved = true
-      a.approved = approved
+    const item = timeline.value.find((i) => i.kind === 'approval' && i.data.id === id)
+    if (item && item.kind === 'approval') {
+      item.data.resolved = true
+      item.data.approved = approved
     }
   }
 
@@ -131,10 +174,10 @@ export const useChatStore = defineStore('chat', () => {
     streamingText = ''
     streamingMsgId = ''
     try {
-      await api.chat(text, mode.value)
-    } catch (err: any) {
+      await api.chat(text, mode.value === 'agent' ? ('build' as AgentMode) : mode.value)
+    } catch (err: unknown) {
       isRunning.value = false
-      addMessage('system', err.message)
+      addMessage('system', err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -142,8 +185,16 @@ export const useChatStore = defineStore('chat', () => {
     try {
       await api.approval(id, approved)
       resolveApprovalLocal(id, approved)
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Approval error:', err)
+    }
+  }
+
+  async function stopAgent() {
+    try {
+      await api.stop()
+    } catch (err: unknown) {
+      console.error('Stop error:', err)
     }
   }
 
@@ -159,7 +210,7 @@ export const useChatStore = defineStore('chat', () => {
     try {
       await api.deleteSession(uuid)
       sessions.value = sessions.value.filter((s) => s.uuid !== uuid)
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to delete session:', err)
     }
   }
@@ -169,8 +220,8 @@ export const useChatStore = defineStore('chat', () => {
       await api.newSession()
       clearChat()
       await fetchSessions()
-    } catch (err: any) {
-      addMessage('system', err.message)
+    } catch (err: unknown) {
+      addMessage('system', err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -197,7 +248,8 @@ export const useChatStore = defineStore('chat', () => {
       pwd.value = h.pwd
       providerName.value = h.provider
       modelName.value = h.model
-      mode.value = (h.mode as AgentMode) || 'build'
+      const m = h.mode || 'build'
+      mode.value = m === 'build' ? 'agent' : (m as AgentMode)
     } catch (err) {
       console.error('Failed to fetch health:', err)
     }
@@ -220,24 +272,25 @@ export const useChatStore = defineStore('chat', () => {
       providerName.value = provider
       modelName.value = model
       clearChat()
-    } catch (err: any) {
-      addMessage('system', `Failed to switch model: ${err.message}`)
+    } catch (err: unknown) {
+      addMessage('system', `Failed to switch model: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
   async function switchMode(newMode: AgentMode) {
+    const backendMode = newMode === 'agent' ? 'build' : newMode
     try {
-      await api.switchMode(newMode)
+      await api.switchMode(backendMode)
       mode.value = newMode
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to switch mode:', err)
     }
   }
 
   function clearChat() {
-    messages.value = []
-    toolCalls.value = []
-    approvals.value = []
+    timeline.value = []
+    todos.value = []
+    tokenInfo.value = null
     streamingText = ''
     streamingMsgId = ''
   }
@@ -255,7 +308,7 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const data = await api.setApprovalMode(enabled)
       autoApprove.value = data.auto_approve
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to set approval mode:', err)
     }
   }
@@ -268,29 +321,28 @@ export const useChatStore = defineStore('chat', () => {
         if (e.type === 'user' && e.content) addMessage('user', e.content)
         else if (e.type === 'assistant' && e.content) addMessage('assistant', e.content)
       }
-    } catch (err: any) {
-      addMessage('system', `Failed to load session: ${err.message}`)
+    } catch (err: unknown) {
+      addMessage('system', `Failed to load session: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
   return {
     // State
-    messages,
-    toolCalls,
-    approvals,
+    timeline,
     todos,
     sessions,
     isRunning,
     tokenInfo,
     config,
     pwd,
-    sseConnected,
+    wsConnected,
     mode,
     providerName,
     modelName,
     providers,
     autoApprove,
     // Getters
+    messages,
     hasMessages,
     activeTodos,
     tokenPercentage,
@@ -301,10 +353,12 @@ export const useChatStore = defineStore('chat', () => {
     appendAgentText,
     addToolCall,
     resolveToolCall,
+    addSubagentProgress,
     agentDone,
     addApprovalRequest,
     resolveApproval,
     sendMessage,
+    stopAgent,
     fetchSessions,
     deleteSession,
     newSession,

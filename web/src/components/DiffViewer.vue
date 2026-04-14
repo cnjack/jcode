@@ -20,7 +20,7 @@ async function fetchDiff() {
     const result = await api.diff(mode.value)
     entries.value = result.entries
     if (entries.value.length > 0 && !selectedFile.value) {
-      selectedFile.value = entries.value[0].file
+      selectedFile.value = entries.value[0]?.file ?? ''
     }
   } catch (err) {
     console.error('Failed to fetch diff:', err)

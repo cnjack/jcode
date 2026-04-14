@@ -242,7 +242,7 @@ function deleteProject(id: string) {
                       ? 'bg-teal-100 text-teal-700'
                       : 'bg-stone-100 text-stone-500'"
                   >
-                    {{ projectStore.projectName(p)[0].toUpperCase() }}
+                    {{ projectStore.projectName(p).charAt(0).toUpperCase() }}
                   </div>
                   <div class="min-w-0 flex-1">
                     <div class="text-sm text-stone-700 truncate">{{ projectStore.projectName(p) }}</div>
