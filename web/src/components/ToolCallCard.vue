@@ -2,8 +2,13 @@
 import { ref, computed } from 'vue'
 import type { ToolCall } from '@/types/api'
 
+// Recursive self-reference: Vue resolves by component filename
+defineOptions({ name: 'ToolCallCard' })
+
 const props = defineProps<{
   tool: ToolCall
+  /** Depth level: 0 for top-level, 1 for subagent children */
+  depth?: number
 }>()
 
 const expanded = ref(false)
@@ -79,27 +84,17 @@ function truncate(text: string, max: number): string {
 
       <!-- Subagent body -->
       <div v-if="subagentExpanded" class="border-t border-stone-200/60">
-        <!-- Inner tool calls -->
+        <!-- Inner tool calls (reuse ToolCallCard recursively) -->
         <div
           v-if="tool.children?.length"
-          class="px-3 py-2 space-y-0.5 max-h-64 overflow-y-auto"
+          class="px-2 py-1 max-h-80 overflow-y-auto"
         >
-          <div
-            v-for="(child, idx) in tool.children"
-            :key="idx"
-            class="flex items-start gap-2 text-xs py-0.5"
-          >
-            <span
-              v-if="child.event === 'tool_call'"
-              class="text-[10px] text-blue-400 mt-0.5 shrink-0"
-            >→</span>
-            <span
-              v-else
-              class="text-[10px] text-teal-400 mt-0.5 shrink-0"
-            >←</span>
-            <span class="font-mono text-stone-500 shrink-0">{{ child.toolName }}</span>
-            <span class="text-stone-400 truncate">{{ truncate(child.detail, 120) }}</span>
-          </div>
+          <ToolCallCard
+            v-for="child in tool.children"
+            :key="child.id"
+            :tool="child"
+            :depth="(depth ?? 0) + 1"
+          />
         </div>
         <div v-else-if="tool.status === 'running'" class="px-3 py-3 text-xs text-stone-400 animate-pulse">
           Starting subagent…

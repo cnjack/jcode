@@ -422,8 +422,9 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 		s.todoStore.Update(nil)
 	}
 
-	// Notify SSE clients.
+	// Notify clients.
 	s.broker.Broadcast(SSEEvent{Event: "session_reset", Data: map[string]string{}})
+	s.wsBroker.Broadcast(WSEvent{Type: "session_reset", Data: map[string]string{}})
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "ok",
@@ -522,6 +523,10 @@ func (s *Server) handleSwitchModel(w http.ResponseWriter, r *http.Request) {
 		"provider": req.Provider,
 		"model":    req.Model,
 	}})
+	s.wsBroker.Broadcast(WSEvent{Type: "model_changed", Data: map[string]string{
+		"provider": req.Provider,
+		"model":    req.Model,
+	}})
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -541,6 +546,9 @@ func (s *Server) handleSwitchMode(w http.ResponseWriter, r *http.Request) {
 	s.mode = req.Mode
 
 	s.broker.Broadcast(SSEEvent{Event: "mode_changed", Data: map[string]string{
+		"mode": req.Mode,
+	}})
+	s.wsBroker.Broadcast(WSEvent{Type: "mode_changed", Data: map[string]string{
 		"mode": req.Mode,
 	}})
 
@@ -1020,9 +1028,15 @@ func (s *Server) handleSwitchProject(w http.ResponseWriter, r *http.Request) {
 	// Reset todos.
 	s.todoStore.Update(nil)
 
-	// Broadcast project change to SSE clients.
+	// Broadcast project change to clients.
 	s.broker.Broadcast(SSEEvent{
 		Event: "project_switched",
+		Data: map[string]string{
+			"pwd": req.Path,
+		},
+	})
+	s.wsBroker.Broadcast(WSEvent{
+		Type: "project_switched",
 		Data: map[string]string{
 			"pwd": req.Path,
 		},
@@ -1056,6 +1070,10 @@ func (s *Server) handleSetApprovalMode(w http.ResponseWriter, r *http.Request) {
 	s.broker.Broadcast(SSEEvent{
 		Event: "approval_mode_changed",
 		Data:  map[string]any{"auto_approve": req.AutoApprove},
+	})
+	s.wsBroker.Broadcast(WSEvent{
+		Type: "approval_mode_changed",
+		Data: map[string]any{"auto_approve": req.AutoApprove},
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"auto_approve": req.AutoApprove})
 }

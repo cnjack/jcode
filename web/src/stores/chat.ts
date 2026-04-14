@@ -10,7 +10,6 @@ import type {
   SessionItem,
   AgentMode,
   ProviderInfo,
-  SubagentToolEvent,
 } from '@/types/api'
 import { api } from '@/composables/api'
 
@@ -135,13 +134,28 @@ export const useChatStore = defineStore('chat', () => {
         if (!item.data.children) {
           item.data.children = []
         }
-        const child: SubagentToolEvent = {
-          event: event as 'tool_call' | 'tool_result',
-          toolName,
-          detail,
-          timestamp: Date.now(),
+        const children = item.data.children
+
+        if (event === 'tool_call') {
+          // Create a new child ToolCall in running state
+          children.push({
+            id: genId('sub_tc'),
+            name: toolName,
+            args: detail,
+            status: 'running',
+            timestamp: Date.now(),
+          })
+        } else if (event === 'tool_result') {
+          // Resolve the most recent running child with this toolName
+          for (let j = children.length - 1; j >= 0; j--) {
+            const child = children[j]
+            if (child && child.name === toolName && child.status === 'running') {
+              child.output = detail
+              child.status = 'done'
+              break
+            }
+          }
         }
-        item.data.children.push(child)
         break
       }
     }
