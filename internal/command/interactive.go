@@ -67,7 +67,6 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 		s.env.NewReadTool(), s.env.NewEditTool(), s.env.NewWriteTool(),
 		s.env.NewExecuteTool(s.bgManager), s.env.NewGrepTool(),
 		s.env.NewTodoWriteTool(), s.env.NewTodoReadTool(),
-		s.env.NewSwitchEnvTool(),
 		s.env.NewCheckBackgroundTool(s.bgManager),
 		s.env.NewSubagentTool(&tools.SubagentDeps{
 			ChatModel:  s.chatModel,
@@ -83,6 +82,10 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 		tools.NewTeamSendMessageTool(s.teamManager),
 		tools.NewTeamListTool(s.teamManager),
 		tools.NewTeamDeleteTool(s.teamManager),
+	}
+	// Only add switch_env tool if SSH aliases are configured
+	if s.cfg != nil && len(s.cfg.SSHAliases) > 0 {
+		all = append(all, s.env.NewSwitchEnvTool())
 	}
 	return append(all, s.mcpTools...)
 }
@@ -406,6 +409,9 @@ func (s *interactiveState) handleResume(uuid string) {
 }
 
 func (s *interactiveState) handleConfig(cfgMsg *config.Config) {
+	// Update stored config
+	s.cfg = cfgMsg
+
 	newProvName, newModelName := cfgMsg.GetProviderModel()
 	newProviders := cfgMsg.GetProviders()
 	newProvCfg := newProviders[newProvName]
@@ -424,6 +430,16 @@ func (s *interactiveState) handleConfig(cfgMsg *config.Config) {
 		return
 	}
 	s.chatModel = newChatModel
+
+	// Rebuild system prompt and tools to reflect config changes (e.g., SSH aliases)
+	if s.agentMode == tui.ModePlanning {
+		s.systemPrompt = prompts.GetPlanSystemPrompt(s.platform, s.pwd, s.env.Exec.Label(), s.envInfo)
+		s.toolList = s.buildPlanTools()
+	} else {
+		s.systemPrompt = prompts.GetSystemPrompt(s.platform, s.pwd, s.env.Exec.Label(), s.envInfo, s.skillLoader.Descriptions())
+		s.toolList = s.buildAllTools()
+	}
+
 	if newAg, err := s.createAgent(); err == nil {
 		s.ag = newAg
 	}

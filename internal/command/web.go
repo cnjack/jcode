@@ -15,6 +15,7 @@ import (
 
 	"github.com/cnjack/jcode/internal/agent"
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/handler"
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/prompts"
 	"github.com/cnjack/jcode/internal/runner"
@@ -74,10 +75,11 @@ func runWebServer(port int, host string) error {
 		baseURL = registry.GetProviderAPI(providerName)
 	}
 
-	// Verify the default model can be created.
-	if _, err := internalmodel.NewChatModel(ctx, &internalmodel.ChatModelConfig{
+	// Verify the default model can be created and keep reference for subagent.
+	chatModel, err := internalmodel.NewChatModel(ctx, &internalmodel.ChatModelConfig{
 		Model: modelName, APIKey: providerCfg.APIKey, BaseURL: baseURL,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("error creating model: %w", err)
 	}
 
@@ -108,6 +110,9 @@ func runWebServer(port int, host string) error {
 
 	approvalState := runner.NewApprovalState(pwd, cfg.AutoApprove)
 
+	// Create WebHandler early so subagent tool can emit events through it.
+	webHandler := handler.NewWebHandler()
+
 	// Langfuse tracer.
 	var langfuseTracer *telemetry.LangfuseTracer
 	if cfg.Telemetry != nil && cfg.Telemetry.Langfuse != nil {
@@ -121,6 +126,16 @@ func runWebServer(port int, host string) error {
 			env.NewTodoWriteTool(), env.NewTodoReadTool(),
 			env.NewSwitchEnvTool(),
 			env.NewCheckBackgroundTool(bgManager),
+			env.NewSubagentTool(&tools.SubagentDeps{
+				ChatModel: chatModel,
+				Recorder:  rec,
+				Notifier: func(name, agentType string, done bool, result string, err error) {
+					webHandler.OnSubagentEvent(name, agentType, done, result, err)
+				},
+				ProgressFn: func(agentName, event, toolName, detail string) {
+					webHandler.OnSubagentProgress(agentName, event, toolName, detail)
+				},
+			}),
 			tools.NewAskUserTool(&tools.AskUserDeps{
 				ResponseCh: make(chan tools.AskUserResponse, 1),
 			}),
@@ -257,6 +272,8 @@ func runWebServer(port int, host string) error {
 		Config:        cfg,
 		Registry:      registry,
 		ApprovalState: approvalState,
+		SkillLoader:   skillLoader,
+		WebHandler:    webHandler,
 	})
 
 	// Set handler for approval routing.

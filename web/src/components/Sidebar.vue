@@ -109,7 +109,7 @@ function fileIcon(file: FileItem): string {
         @click="emit('openProjects')"
       >
         <div class="w-7 h-7 rounded-lg bg-teal-100 text-teal-700 flex items-center justify-center text-sm font-bold">
-          {{ (store.projectName || 'J')[0].toUpperCase() }}
+          {{ (store.projectName || 'J').charAt(0).toUpperCase() }}
         </div>
         <div class="min-w-0 flex-1">
           <div class="text-sm font-medium text-stone-700 truncate">{{ store.projectName || 'jcode' }}</div>

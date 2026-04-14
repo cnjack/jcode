@@ -3,7 +3,7 @@ PKG := ./cmd/jcode/
 
 export GOFLAGS := -buildvcs=false
 
-.PHONY: build run doctor version install clean build-web lint lint-go lint-web
+.PHONY: build run doctor version install clean build-web lint lint-go lint-web generate
 
 lint: lint-go lint-web
 
@@ -16,15 +16,19 @@ lint-web:
 	cd web && (pnpm install --frozen-lockfile 2>/dev/null || pnpm install)
 	cd web && pnpm lint
 
+generate:
+	@echo "Generating code..."
+	go generate ./internal/model/...
+
 build-web:
 	@echo "Building frontend..."
 	cd web && (pnpm install --frozen-lockfile 2>/dev/null || pnpm install)
 	cd web && npx vite build
 
-build: build-web
+build: generate build-web
 	go build -o $(BIN) $(PKG)
 
-install: build-web
+install: generate build-web
 	go install $(PKG)
 
 run:

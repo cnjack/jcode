@@ -99,10 +99,30 @@ export interface MCPServerInfo {
   command?: string
   url?: string
   status: string
+  enabled: boolean
 }
 
 export interface MCPListResponse {
   servers: Record<string, MCPServerInfo>
+}
+
+// SSH types
+export interface SSHAlias {
+  name: string
+  addr: string
+  path?: string
+}
+
+export interface SSHListResponse {
+  current: string
+  aliases: SSHAlias[]
+}
+
+// Skill types (for slash commands)
+export interface SkillInfo {
+  name: string
+  description: string
+  slash?: string
 }
 
 // SSE event data types
@@ -142,7 +162,7 @@ export interface ApprovalRequestData {
 // UI message types
 export type MessageRole = 'user' | 'assistant' | 'system'
 
-export type AgentMode = 'build' | 'plan'
+export type AgentMode = 'agent' | 'plan'
 
 export interface ChatMessage {
   id: string
@@ -159,6 +179,33 @@ export interface ToolCall {
   error?: string
   status: 'running' | 'done' | 'error'
   timestamp: number
+  /** For subagent tools: nested tool calls from within the subagent */
+  children?: SubagentToolEvent[]
+}
+
+/** An intermediate tool call or tool result from a running subagent. */
+export interface SubagentToolEvent {
+  event: 'tool_call' | 'tool_result'
+  toolName: string
+  detail: string
+  timestamp: number
+}
+
+/** Subagent lifecycle event (start/done). */
+export interface SubagentEventData {
+  name: string
+  agent_type: string
+  done: boolean
+  result?: string
+  error?: string
+}
+
+/** Subagent intermediate progress (inner tool calls). */
+export interface SubagentProgressData {
+  agent_name: string
+  event: string // "tool_call" | "tool_result"
+  tool_name: string
+  detail: string
 }
 
 export interface PendingApproval {

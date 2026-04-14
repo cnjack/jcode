@@ -1,24 +1,9 @@
 package model
 
+//go:generate go run ../../script/generate_models.go
+
 import (
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
 	"strings"
-	"sync"
-	"time"
-
-	"github.com/cnjack/jcode/internal/config"
-)
-
-const (
-	modelsDevURL      = "https://models.dev/api.json"
-	registryCacheTTL  = 5 * time.Minute
-	registryCacheDir  = "cache"
-	registryCacheFile = "models_dev.json"
 )
 
 // RegistryProvider represents a provider from models.dev API.
@@ -73,55 +58,24 @@ type ModelLimit struct {
 }
 
 // ModelRegistry provides model metadata from models.dev.
-// It fetches the model database on first use and caches it locally.
+// The data is statically generated at build time via go:generate.
 type ModelRegistry struct {
-	mu        sync.RWMutex
-	providers map[string]*RegistryProvider
-	loadedAt  time.Time
-	cacheDir  string
 }
 
 // NewModelRegistry creates a new ModelRegistry.
 func NewModelRegistry() *ModelRegistry {
-	return &ModelRegistry{
-		cacheDir: filepath.Join(config.ConfigDir(), registryCacheDir),
-	}
+	return &ModelRegistry{}
 }
 
-// Load fetches or returns cached provider/model data.
+// Load returns the statically generated provider/model data.
 func (r *ModelRegistry) Load() (map[string]*RegistryProvider, error) {
-	r.mu.RLock()
-	if r.providers != nil && time.Since(r.loadedAt) < registryCacheTTL {
-		defer r.mu.RUnlock()
-		return r.providers, nil
-	}
-	r.mu.RUnlock()
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	// Double-check after acquiring write lock
-	if r.providers != nil && time.Since(r.loadedAt) < registryCacheTTL {
-		return r.providers, nil
-	}
-
-	providers, err := r.fetchOrLoadCache()
-	if err != nil {
-		return nil, err
-	}
-	r.providers = providers
-	r.loadedAt = time.Now()
-	return providers, nil
+	return generatedProviders, nil
 }
 
 // LookupModel finds a model by "provider/model" identifier.
 // Returns the provider info, model info, and whether it was found.
 func (r *ModelRegistry) LookupModel(providerID, modelID string) (*RegistryProvider, *RegistryModel, bool) {
-	providers, err := r.Load()
-	if err != nil {
-		config.Logger().Printf("[registry] load error: %v", err)
-		return nil, nil, false
-	}
+	providers := generatedProviders
 
 	prov, ok := providers[providerID]
 	if !ok {
@@ -161,12 +115,8 @@ func (r *ModelRegistry) GetModelCost(providerID, modelID string) (inputPer1M, ou
 
 // GetProviderAPI returns the API base URL for a provider from the registry.
 func (r *ModelRegistry) GetProviderAPI(providerID string) string {
-	providers, err := r.Load()
-	if err != nil {
-		return ""
-	}
-	prov, ok := providers[providerID]
-	if !ok {
+	prov := r.GetProvider(providerID)
+	if prov == nil {
 		return ""
 	}
 	return prov.API
@@ -174,12 +124,8 @@ func (r *ModelRegistry) GetProviderAPI(providerID string) string {
 
 // GetProviderEnvVars returns the environment variable names for a provider.
 func (r *ModelRegistry) GetProviderEnvVars(providerID string) []string {
-	providers, err := r.Load()
-	if err != nil {
-		return nil
-	}
-	prov, ok := providers[providerID]
-	if !ok {
+	prov := r.GetProvider(providerID)
+	if prov == nil {
 		return nil
 	}
 	return prov.Env
@@ -187,11 +133,7 @@ func (r *ModelRegistry) GetProviderEnvVars(providerID string) []string {
 
 // GetProvider returns provider info by ID, or nil if not found.
 func (r *ModelRegistry) GetProvider(providerID string) *RegistryProvider {
-	providers, err := r.Load()
-	if err != nil {
-		return nil
-	}
-	return providers[providerID]
+	return generatedProviders[providerID]
 }
 
 // ListProviderModels returns models for a provider from the registry.
@@ -209,9 +151,8 @@ func (r *ModelRegistry) ListProviderModels(providerID string, toolCallOnly bool)
 		}
 		models = append(models, m)
 	}
-	sort.Slice(models, func(i, j int) bool {
-		return models[i].ID < models[j].ID
-	})
+	// Sort by ID for consistent ordering
+	sortModelsByID(models)
 	return models
 }
 
@@ -220,70 +161,25 @@ func (r *ModelRegistry) HasProvider(providerID string) bool {
 	return r.GetProvider(providerID) != nil
 }
 
-func (r *ModelRegistry) fetchOrLoadCache() (map[string]*RegistryProvider, error) {
-	// Try fetching from remote first
-	providers, err := r.fetchRemote()
-	if err == nil {
-		// Write to cache on success
-		if writeErr := r.writeCache(providers); writeErr != nil {
-			config.Logger().Printf("[registry] cache write error: %v", writeErr)
+// ListProviders returns all providers in the curated display order.
+func (r *ModelRegistry) ListProviders() []*RegistryProvider {
+	result := make([]*RegistryProvider, 0, len(generatedProviderOrder))
+	for _, id := range generatedProviderOrder {
+		if prov, ok := generatedProviders[id]; ok {
+			result = append(result, prov)
 		}
-		return providers, nil
 	}
-	config.Logger().Printf("[registry] remote fetch failed: %v, trying cache", err)
-
-	// Fall back to local cache
-	providers, cacheErr := r.readCache()
-	if cacheErr != nil {
-		return nil, fmt.Errorf("registry unavailable: remote=%v, cache=%v", err, cacheErr)
-	}
-	return providers, nil
+	return result
 }
 
-func (r *ModelRegistry) fetchRemote() (map[string]*RegistryProvider, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Get(modelsDevURL)
-	if err != nil {
-		return nil, fmt.Errorf("fetch models.dev: %w", err)
+// sortModelsByID sorts a slice of RegistryModel by ID in-place.
+func sortModelsByID(models []*RegistryModel) {
+	// Simple bubble sort for small lists
+	for i := 0; i < len(models); i++ {
+		for j := i + 1; j < len(models); j++ {
+			if models[i].ID > models[j].ID {
+				models[i], models[j] = models[j], models[i]
+			}
+		}
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("models.dev returned status %d", resp.StatusCode)
-	}
-
-	var providers map[string]*RegistryProvider
-	if err := json.NewDecoder(resp.Body).Decode(&providers); err != nil {
-		return nil, fmt.Errorf("decode models.dev response: %w", err)
-	}
-	config.Logger().Printf("[registry] fetched %d providers from models.dev", len(providers))
-	return providers, nil
-}
-
-func (r *ModelRegistry) cachePath() string {
-	return filepath.Join(r.cacheDir, registryCacheFile)
-}
-
-func (r *ModelRegistry) writeCache(providers map[string]*RegistryProvider) error {
-	if err := os.MkdirAll(r.cacheDir, 0755); err != nil {
-		return err
-	}
-	data, err := json.Marshal(providers)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(r.cachePath(), data, 0644)
-}
-
-func (r *ModelRegistry) readCache() (map[string]*RegistryProvider, error) {
-	data, err := os.ReadFile(r.cachePath())
-	if err != nil {
-		return nil, err
-	}
-	var providers map[string]*RegistryProvider
-	if err := json.Unmarshal(data, &providers); err != nil {
-		return nil, err
-	}
-	config.Logger().Printf("[registry] loaded %d providers from cache", len(providers))
-	return providers, nil
 }
