@@ -6,7 +6,12 @@ baseurl: "/jcode"
 
 theme: just-the-docs
 
-color_scheme: dark
+color_scheme: light
+
+# Enable light/dark theme toggle
+enable_copy_code_button: true
+color_scheme_toggle: true
+dark_scheme: dark
 
 search_enabled: true
 search:
