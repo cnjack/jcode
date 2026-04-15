@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -58,8 +60,10 @@ type interactiveState struct {
 	askUserDeps    *tools.AskUserDeps
 	teamManager    *team.Manager
 	mcpTools       []tool.BaseTool
+	agentTokenUsage *internalmodel.TokenUsage
 
-	sessionResumeWarning string
+	sessionResumeWarning  string
+	sessionBaselineCommit string
 }
 
 func (s *interactiveState) buildAllTools() []tool.BaseTool {
@@ -164,6 +168,9 @@ func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
 			}
 			s.summCapture.Capture(summary.Content, contextN)
 			config.Logger().Printf("[summarization] Finalize: compacted %d context messages", contextN)
+			if s.agentTokenUsage != nil {
+				s.agentTokenUsage.Reset()
+			}
 			return append(systemMsgs, summary), nil
 		},
 	})
@@ -196,8 +203,32 @@ func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
 		EnvLabel:     "local",
 		IsRemote:     s.env.IsRemote(),
 		ContextLimit: contextLimit,
-	})
+	}, s.agentTokenUsage)
 	handlers = append(handlers, reminderMw)
+
+	// Wire up budget middleware (per-agent tracker).
+	if s.cfg.Budget != nil {
+		providerName, modelName := s.cfg.GetProviderModel()
+		inputPer1M, outputPer1M := s.registry.GetModelCost(providerName, modelName)
+		pricing := internalmodel.ModelPricing{InputPer1M: inputPer1M, OutputPer1M: outputPer1M}
+		budgetManager := agent.NewBudgetManager(s.cfg.Budget, pricing)
+		budgetMw := agent.NewBudgetMiddleware(budgetManager, s.agentTokenUsage, func(status agent.BudgetStatus) {
+			config.Logger().Printf("[budget] warning level=%d cost=%.4f", status.WarningLevel, status.EstimatedCost)
+		})
+		handlers = append([]adk.ChatModelAgentMiddleware{budgetMw}, handlers...)
+	}
+
+	// Wire up compaction middleware (per-agent tracker).
+	compactionStrategy := agent.NewThresholdCompactionStrategy(0.75, s.chatModel, 6)
+	compactionMw := agent.NewCompactionMiddleware(compactionStrategy, contextLimit, s.agentTokenUsage, func(savedTokens int) {
+		if s.agentTokenUsage != nil {
+			s.agentTokenUsage.Reset()
+		}
+		if s.p != nil {
+			s.p.Send(tui.CompactDoneMsg{OldTokens: 0, NewTokens: 0})
+		}
+	})
+	handlers = append([]adk.ChatModelAgentMiddleware{compactionMw}, handlers...)
 
 	return agent.NewAgent(s.ctx, s.chatModel, s.toolList, s.systemPrompt, s.approvalState.RequestApproval, middlewares, handlers)
 }
@@ -225,6 +256,9 @@ func (s *interactiveState) applyModeSwitch(newMode tui.AgentMode) {
 	} else {
 		config.Logger().Printf("[plan] agent creation failed: %v", err)
 	}
+	if s.agentTokenUsage != nil {
+		s.agentTokenUsage.Reset()
+	}
 }
 
 func (s *interactiveState) drainModeSwitch(planModeCh <-chan tui.AgentMode) {
@@ -246,9 +280,12 @@ func (s *interactiveState) handlePrompt(userPrompt string) {
 	if s.rec != nil {
 		s.rec.RecordUser(userPrompt)
 	}
+	if s.agentTokenUsage == nil {
+		s.agentTokenUsage = &internalmodel.TokenUsage{}
+	}
 	s.history = append(s.history, schema.UserMessage(userPrompt))
 	s.history = agent.DrainBgNotifications(s.bgManager, s.history)
-	resp := runner.Run(s.ctx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer)
+	resp := runner.Run(s.ctx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer, s.agentTokenUsage)
 	if resp != "" {
 		s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: resp})
 	}
@@ -290,7 +327,7 @@ func (s *interactiveState) handlePlanCompletion(resp string) {
 			s.rec.RecordUser(revisePrompt)
 		}
 		s.history = append(s.history, schema.UserMessage(revisePrompt))
-		newResp := runner.Run(s.ctx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer)
+		newResp := runner.Run(s.ctx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer, s.agentTokenUsage)
 		if newResp != "" {
 			s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: newResp})
 		}
@@ -320,7 +357,7 @@ func (s *interactiveState) handlePlanCompletion(resp string) {
 		s.rec.RecordUser(execPrompt)
 	}
 	s.history = append(s.history, schema.UserMessage(execPrompt))
-	execResp := runner.Run(s.ctx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer)
+	execResp := runner.Run(s.ctx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer, s.agentTokenUsage)
 	if execResp != "" {
 		s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: execResp})
 	}
@@ -446,12 +483,21 @@ func (s *interactiveState) handleConfig(cfgMsg *config.Config) {
 }
 
 func (s *interactiveState) handleCompact() {
-	_, _, oldTokens := internalmodel.TokenTracker.Get()
+	var oldTokens int64
+	if s.agentTokenUsage != nil {
+		_, _, oldTokens = s.agentTokenUsage.Get()
+	}
 	oldLen := len(s.history)
 	s.history = agent.CompactHistory(s.ctx, s.chatModel, s.history)
-	_, _, newTokens := internalmodel.TokenTracker.Get()
+	var newTokens int64
+	if s.agentTokenUsage != nil {
+		_, _, newTokens = s.agentTokenUsage.Get()
+	}
 	if s.rec != nil && len(s.history) < oldLen && len(s.history) > 0 {
 		s.rec.RecordCompact(s.history[0].Content, oldLen-len(s.history))
+	}
+	if s.agentTokenUsage != nil {
+		s.agentTokenUsage.Reset()
 	}
 	s.p.Send(tui.CompactDoneMsg{
 		OldTokens: oldTokens,
@@ -565,7 +611,7 @@ func (s *interactiveState) runEventLoop(initialHistory []adk.Message, initialRes
 			s.rec.RecordUser(prompt)
 		}
 		s.history = append(s.history, schema.UserMessage(prompt))
-		resp := runner.Run(s.ctx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer)
+		resp := runner.Run(s.ctx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer, s.agentTokenUsage)
 		if resp != "" {
 			s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: resp})
 		}
@@ -891,6 +937,9 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		}
 	}
 
+	// Capture a git baseline so the exit summary only shows changes from this session.
+	st.sessionBaselineCommit = computeGitBaseline()
+
 	go st.runEventLoop(initialHistory, initialResumeUUID, initialResumeEntries, hasPrompt, prompt, mcpStatuses)
 
 	if _, err := p.Run(); err != nil {
@@ -902,6 +951,27 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	if st.langfuseTracer != nil {
 		st.langfuseTracer.Flush()
 	}
+
+	// Print session summary on exit.
+	fmt.Println()
+	fmt.Println("Session Summary")
+	fmt.Println("===============")
+	added, deleted := computeGitDiffStats(st.sessionBaselineCommit)
+	fmt.Printf("Files changed: +%d/-%d lines\n", added, deleted)
+	promptTokens, completionTokens, totalTokens := internalmodel.TokenTracker.Get()
+	byModel := internalmodel.TokenTracker.GetByModel()
+	if len(byModel) > 0 {
+		for model, tokens := range byModel {
+			fmt.Printf("Total tokens (%s): %d\n", model, tokens)
+		}
+	} else {
+		fmt.Printf("Total tokens: %d (prompt: %d, completion: %d)\n", totalTokens, promptTokens, completionTokens)
+	}
+	if st.rec != nil {
+		fmt.Printf("Resume: jcode --resume %s\n", st.rec.UUID())
+	}
+	fmt.Println()
+
 	return nil
 }
 
@@ -915,4 +985,41 @@ func agentModeString(m tui.AgentMode) string {
 	default:
 		return "normal"
 	}
+}
+
+// computeGitBaseline creates a transient stash commit of the current working tree
+// without modifying it. Returns the commit hash or empty string if there is nothing to stash.
+func computeGitBaseline() string {
+	cmd := exec.Command("git", "stash", "create", "jcode session baseline")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// computeGitDiffStats returns the total added and deleted lines since the session started.
+// If baseline is non-empty, it diffs against that baseline commit; otherwise it falls back to git diff.
+func computeGitDiffStats(baseline string) (added, deleted int) {
+	var args []string
+	if baseline != "" {
+		args = []string{"diff", baseline, "--numstat"}
+	} else {
+		args = []string{"diff", "--numstat"}
+	}
+	cmd := exec.Command("git", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, 0
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			a, _ := strconv.Atoi(fields[0])
+			d, _ := strconv.Atoi(fields[1])
+			added += a
+			deleted += d
+		}
+	}
+	return added, deleted
 }

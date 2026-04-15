@@ -33,6 +33,12 @@ type TeammateMessageMsg struct {
 	ToolErr  string // set when Role == "tool_result" and there was an error
 }
 
+// TeammateTokenUpdateMsg notifies the TUI of a teammate's token usage update.
+type TeammateTokenUpdateMsg struct {
+	AgentID   string
+	TotalTokens int64
+}
+
 // SetTeamManagerMsg is sent to the TUI to wire the team manager after program start.
 type SetTeamManagerMsg struct {
 	Manager *Manager

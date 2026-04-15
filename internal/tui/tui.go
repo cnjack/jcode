@@ -146,7 +146,8 @@ type Model struct {
 	hasSelection   bool // true when valid selection exists (after drag)
 
 	// Team state
-	teamState TeamViewState
+	teamState      TeamViewState
+	teammateTokens map[string]int64 // per-teammate token usage for status bar
 	// teamLeaderLines stores the leader's viewport content when switching to teammate view
 	teamLeaderLines []string
 	teamLeaderText  string
@@ -1645,6 +1646,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		// Update cached state, refresh panel if visible
 		m.teamState.RefreshTeammates()
 		if m.teamState.PanelVisible {
+			m.refreshViewport()
+		}
+
+	case team.TeammateTokenUpdateMsg:
+		if m.teammateTokens == nil {
+			m.teammateTokens = make(map[string]int64)
+		}
+		m.teammateTokens[msg.AgentID] = msg.TotalTokens
+		if m.teamState.ViewingAgent == msg.AgentID {
+			// If we're currently viewing this teammate, refresh the status bar
 			m.refreshViewport()
 		}
 

@@ -28,6 +28,7 @@ type ReminderConfig struct {
 type reminderMiddleware struct {
 	*adk.BaseChatModelAgentMiddleware
 	cfg               ReminderConfig
+	tokenUsage        *internalmodel.TokenUsage
 	iteration         int
 	consecutiveErrors int
 }
@@ -35,10 +36,12 @@ type reminderMiddleware struct {
 // NewReminderMiddleware creates a ChatModelAgentMiddleware that injects
 // conditional reminders (todo check, token warning, error streak) into the
 // message stream before each model invocation.
-func NewReminderMiddleware(cfg ReminderConfig) adk.ChatModelAgentMiddleware {
+// tokenUsage is the per-agent tracker to read from; may be nil.
+func NewReminderMiddleware(cfg ReminderConfig, tokenUsage *internalmodel.TokenUsage) adk.ChatModelAgentMiddleware {
 	return &reminderMiddleware{
 		BaseChatModelAgentMiddleware: &adk.BaseChatModelAgentMiddleware{},
 		cfg:                          cfg,
+		tokenUsage:                   tokenUsage,
 	}
 }
 
@@ -50,7 +53,10 @@ func (m *reminderMiddleware) BeforeModelRewriteState(
 	m.iteration++
 	m.updateErrorStreak(state)
 
-	promptTokens, _, _ := internalmodel.TokenTracker.Get()
+	var promptTokens int64
+	if m.tokenUsage != nil {
+		promptTokens, _, _ = m.tokenUsage.Get()
+	}
 
 	var incompleteTodoN int
 	var hasIncomplete bool

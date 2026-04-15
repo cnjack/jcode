@@ -210,7 +210,7 @@ func runWebServer(port int, host string) error {
 			EnvLabel:     "local",
 			IsRemote:     env.IsRemote(),
 			ContextLimit: ctxLimit,
-		})
+		}, nil)
 		handlers = append(handlers, reminderMw)
 
 		return agent.NewAgent(ctx, cm, toolList, systemPrompt, approvalState.RequestApproval, middlewares, handlers)

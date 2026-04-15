@@ -53,6 +53,7 @@ type TeammateState struct {
 	Model       string
 	AgentType   string
 	Permission  string
+	TokenUsage  *internalmodel.TokenUsage
 }
 
 // ManagerDeps holds dependencies injected into the TeamManager.
@@ -224,6 +225,7 @@ func (m *Manager) SpawnTeammate(ctx context.Context, cfg SpawnConfig) (string, e
 		AgentType:  cfg.AgentType,
 		Permission: cfg.Permission,
 		StartedAt:  time.Now(),
+		TokenUsage: &internalmodel.TokenUsage{},
 	}
 
 	// Create per-teammate session recorder for conversation persistence.
@@ -594,6 +596,11 @@ func (m *Manager) runAgentTurn(ctx context.Context, state *TeammateState) (strin
 		EnableStreaming: true,
 	}
 
+	// Inject per-agent token tracker into the context.
+	if state.TokenUsage != nil {
+		ctx = internalmodel.WithTokenTracker(ctx, state.TokenUsage)
+	}
+
 	var result strings.Builder
 	iterator := ag.Run(ctx, input)
 	for {
@@ -716,6 +723,15 @@ func (m *Manager) runAgentTurn(ctx context.Context, state *TeammateState) (strin
 				})
 			}
 		}
+	}
+
+	// Report token usage back to the TUI after each turn.
+	if m.deps.TuiProgram != nil && state.TokenUsage != nil {
+		_, _, total := state.TokenUsage.Get()
+		m.deps.TuiProgram.Send(TeammateTokenUpdateMsg{
+			AgentID:     state.Identity.AgentID,
+			TotalTokens: total,
+		})
 	}
 
 	return result.String(), nil

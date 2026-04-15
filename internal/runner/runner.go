@@ -27,9 +27,13 @@ func Run(
 	rec *session.Recorder,
 	todoStore *tools.TodoStore,
 	tracer *telemetry.LangfuseTracer,
+	tokenUsage *internalmodel.TokenUsage,
 ) string {
 	if tracer != nil {
 		ctx = tracer.WithNewTrace(ctx, "coding_agent")
+	}
+	if tokenUsage != nil {
+		ctx = internalmodel.WithTokenTracker(ctx, tokenUsage)
 	}
 	resp := runInner(ctx, ag, messages, h, rec)
 
@@ -49,7 +53,10 @@ func Run(
 	}
 
 	// Send token usage update before signalling done.
-	promptTokens, completionTokens, totalTokens := internalmodel.GetTokenUsage()
+	var promptTokens, completionTokens, totalTokens int64
+	if tokenUsage != nil {
+		promptTokens, completionTokens, totalTokens = tokenUsage.Get()
+	}
 	h.OnTokenUpdate(handler.TokenUsage{
 		PromptTokens:      promptTokens,
 		CompletionTokens:  completionTokens,

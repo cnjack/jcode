@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 	"sync/atomic"
 
 	openai "github.com/sashabaranov/go-openai"
@@ -20,6 +21,8 @@ type TokenUsage struct {
 	PromptTokens     int64
 	CompletionTokens int64
 	TotalTokens      int64
+	byModel          map[string]int64
+	mu               sync.RWMutex
 }
 
 // TokenTracker is a global token usage tracker
@@ -44,6 +47,36 @@ func (t *TokenUsage) Reset() {
 	atomic.StoreInt64(&t.PromptTokens, 0)
 	atomic.StoreInt64(&t.CompletionTokens, 0)
 	atomic.StoreInt64(&t.TotalTokens, 0)
+	t.mu.Lock()
+	t.byModel = nil
+	t.mu.Unlock()
+}
+
+// AddByModel adds token usage attributed to a specific model name.
+func (t *TokenUsage) AddByModel(model string, prompt, completion, total int) {
+	if model == "" {
+		return
+	}
+	t.mu.Lock()
+	if t.byModel == nil {
+		t.byModel = make(map[string]int64)
+	}
+	t.byModel[model] += int64(total)
+	t.mu.Unlock()
+}
+
+// GetByModel returns a snapshot of per-model token totals.
+func (t *TokenUsage) GetByModel() map[string]int64 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if len(t.byModel) == 0 {
+		return nil
+	}
+	copy := make(map[string]int64, len(t.byModel))
+	for k, v := range t.byModel {
+		copy[k] = v
+	}
+	return copy
 }
 
 // ModelPricing contains cost information for a model.
@@ -124,6 +157,11 @@ func (m *chatModel) Generate(ctx context.Context, input []*schema.Message, opts 
 	// Track token usage
 	if resp.Usage.TotalTokens > 0 {
 		TokenTracker.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
+		TokenTracker.AddByModel(m.model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
+		if local := TokenTrackerFromContext(ctx); local != nil {
+			local.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
+			local.AddByModel(m.model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
+		}
 	}
 	if len(resp.Choices) == 0 {
 		return nil, fmt.Errorf("empty response from model")
@@ -167,6 +205,11 @@ func (m *chatModel) Stream(ctx context.Context, input []*schema.Message, opts ..
 			// Track token usage from stream response
 			if resp.Usage != nil && resp.Usage.TotalTokens > 0 {
 				TokenTracker.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
+				TokenTracker.AddByModel(m.model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
+				if local := TokenTrackerFromContext(ctx); local != nil {
+					local.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
+					local.AddByModel(m.model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
+				}
 			}
 			if len(resp.Choices) == 0 {
 				continue

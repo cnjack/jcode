@@ -124,31 +124,37 @@ func (b *BudgetManager) statusLocked() BudgetStatus {
 // after each model invocation and emits warnings when approaching limits.
 type budgetMiddleware struct {
 	*adk.BaseChatModelAgentMiddleware
-	manager *BudgetManager
-	onWarn  func(status BudgetStatus)
+	manager     *BudgetManager
+	tokenUsage  *internalmodel.TokenUsage
+	onWarn      func(status BudgetStatus)
 }
 
 // NewBudgetMiddleware creates a ChatModelAgentMiddleware that tracks budget.
+// tokenUsage is the per-agent tracker to read from.
 // onWarn is called when the budget warning level changes to WarningApproach
 // or WarningExceeded. It may be nil.
-func NewBudgetMiddleware(manager *BudgetManager, onWarn func(BudgetStatus)) adk.ChatModelAgentMiddleware {
+func NewBudgetMiddleware(manager *BudgetManager, tokenUsage *internalmodel.TokenUsage, onWarn func(BudgetStatus)) adk.ChatModelAgentMiddleware {
 	return &budgetMiddleware{
 		BaseChatModelAgentMiddleware: &adk.BaseChatModelAgentMiddleware{},
 		manager:                      manager,
+		tokenUsage:                   tokenUsage,
 		onWarn:                       onWarn,
 	}
 }
 
 // AfterModelRewriteState is called after each model invocation. We sync the
-// BudgetManager with the global TokenTracker and check budget limits.
+// BudgetManager with the per-agent tokenUsage and check budget limits.
 func (m *budgetMiddleware) AfterModelRewriteState(
 	ctx context.Context,
 	state *adk.ChatModelAgentState,
 	mc *adk.ModelContext,
 ) (context.Context, *adk.ChatModelAgentState, error) {
-	promptTokens, completionTokens, _ := internalmodel.TokenTracker.Get()
+	var promptTokens, completionTokens int64
+	if m.tokenUsage != nil {
+		promptTokens, completionTokens, _ = m.tokenUsage.Get()
+	}
 
-	// Sync budget manager with global token tracker values.
+	// Sync budget manager with per-agent token tracker values.
 	m.manager.mu.Lock()
 	m.manager.promptTokens = promptTokens
 	m.manager.completionTokens = completionTokens

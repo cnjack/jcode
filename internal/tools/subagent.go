@@ -221,12 +221,13 @@ func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, 
 		EnableStreaming: true,
 	}
 
-	// Snapshot global token tracker so we can report per-subagent delta.
-	_, _, startTotal := internalmodel.TokenTracker.Get()
+	// Per-agent token tracker for this subagent run.
+	tokenUsage := &internalmodel.TokenUsage{}
+	ctx = internalmodel.WithTokenTracker(ctx, tokenUsage)
 	reportTokens := func() {
 		if s.deps.TokenFn != nil {
-			_, _, cur := internalmodel.TokenTracker.Get()
-			s.deps.TokenFn(cur - startTotal)
+			_, _, cur := tokenUsage.Get()
+			s.deps.TokenFn(cur)
 		}
 	}
 
