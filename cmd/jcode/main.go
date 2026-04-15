@@ -38,6 +38,7 @@ func main() {
 		command.NewVersionCmd(),
 		command.NewDoctorCmd(),
 		command.NewSessionsCmd(),
+		command.NewUpdateCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {

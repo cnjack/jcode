@@ -10,24 +10,39 @@ Connect any [Model Context Protocol](https://modelcontextprotocol.io/)-compatibl
 
 ## What Is MCP?
 
-The Model Context Protocol (MCP) is a standard for connecting AI tools to external services. With MCP, jcode can:
+The Model Context Protocol (MCP) is an open protocol that allows AI models to safely interact with external tools and data sources. With MCP, jcode can:
 
 - Query databases
 - Search documentation
 - Manage cloud resources
-- Interact with APIs
+- Interact with APIs (GitHub, Linear, Notion, etc.)
+- Control browsers or other applications
 - And much more
 
-## Add an MCP Server
+jcode has built-in tools (file read/write, shell commands, search, etc.). Through MCP, you can add more tools without modifying jcode itself.
 
-### Via Command Line
+## MCP Server Management
+
+### Add a Server
+
+#### Via Command Line
 
 ```bash
-jcode mcp add github gh-mcp
-jcode mcp add db http://localhost:3001/mcp
+# Add an HTTP/SSE server
+jcode mcp add context7 https://mcp.context7.com/mcp
+
+# Add with custom headers
+jcode mcp add context7 https://mcp.context7.com/mcp \
+  --header "CONTEXT7_API_KEY: your-key"
+
+# Add a stdio server (local process)
+jcode mcp add chrome-devtools -- npx chrome-devtools-mcp@latest
+
+# Specify server type explicitly
+jcode mcp add db -t http http://localhost:3001/mcp
 ```
 
-### Via Config File
+#### Via Config File
 
 Add servers to `~/.jcode/config.json`:
 
@@ -38,9 +53,12 @@ Add servers to `~/.jcode/config.json`:
       "type": "stdio",
       "command": "gh-mcp"
     },
-    "db": {
+    "context7": {
       "type": "http",
-      "url": "http://localhost:3001/mcp"
+      "url": "https://mcp.context7.com/mcp",
+      "headers": {
+        "CONTEXT7_API_KEY": "your-key"
+      }
     },
     "remote-api": {
       "type": "sse",
@@ -48,48 +66,69 @@ Add servers to `~/.jcode/config.json`:
       "headers": {
         "Authorization": "Bearer token..."
       }
+    },
+    "chrome-devtools": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["chrome-devtools-mcp@latest"],
+      "env": ["SOME_VAR=value"]
     }
   }
 }
+```
+
+### List Servers
+
+```bash
+jcode mcp list
+```
+
+### Check Connectivity
+
+```bash
+jcode doctor
 ```
 
 ## Server Types
 
 | Type | How It Works | Use Case |
 |---|---|---|
-| **stdio** | Runs a local subprocess | Local tools like `gh-mcp`, database clients |
+| **stdio** | Runs a local subprocess, communicates via stdin/stdout | Local tools like `gh-mcp`, `npx` packages |
 | **http** | Connects to an HTTP endpoint | Self-hosted MCP servers |
 | **sse** | Server-Sent Events stream | Remote/cloud MCP servers |
 
+{: .note }
+When using `jcode mcp add`, the server type is **auto-detected** from the URL. Use `--type` / `-t` to override.
+
 ## Server Configuration
 
-### stdio servers
+### stdio Servers
 
 | Field | Description |
 |---|---|
 | `command` | Executable to run |
-| `args` | Command arguments |
+| `args` | Command arguments (array of strings) |
 | `env` | Environment variables (`["KEY=VALUE"]`) |
 
-### http / sse servers
+### http / sse Servers
 
 | Field | Description |
 |---|---|
 | `url` | Server URL |
-| `headers` | Custom HTTP headers (map) |
+| `headers` | Custom HTTP headers (map of key-value pairs) |
 
-## MCP Server Status
+## Loading Status
 
-The status bar shows connected MCP servers:
+MCP servers initialize **asynchronously** after startup, so the TUI is usable immediately. The status bar shows live connection progress:
 
 ```
   Agent │ Model: openai / gpt-4o │ Approve: Ask │ [████░░░░░░] 2% │ MCP: 2/5
 ```
 
-This means 2 out of 5 configured MCP servers are connected.
+This means 2 out of 5 configured MCP servers are connected. Once all servers connect, the status updates automatically.
 
 {: .note }
-MCP servers auto-reconnect with exponential backoff if they disconnect. Check `jcode doctor` for connection status.
+MCP servers auto-reconnect with exponential backoff if they disconnect. Check `jcode doctor` for detailed connection status.
 
 ## Using MCP Tools
 
@@ -106,11 +145,32 @@ Once connected, MCP tools appear alongside built-in tools. The agent can use the
   ╰─────────────────────────────────────────────────────╯
 ```
 
-## Managing MCP Servers
+## Security
 
-| Action | How |
+MCP tools may access and operate external systems. Be aware of security implications.
+
+### Approval Mechanism
+
+jcode requests user confirmation for sensitive operations (file modifications, command execution). MCP tools follow the **same approval mechanism** — all MCP tool calls prompt for confirmation by default.
+
+### Prompt Injection Risks
+
+Content returned by MCP tools may contain malicious instructions attempting to trick the AI into performing dangerous operations. To stay safe:
+
+- Only use MCP servers from **trusted sources**
+- Review whether AI-proposed operations are reasonable
+- Keep **manual approval** enabled for high-risk operations
+
+{: .warning }
+In unsafe mode (`--unsafe`), MCP tool operations are also auto-approved. Only use unsafe mode when you fully trust all configured MCP servers.
+
+## Quick Reference
+
+| Action | Command |
 |---|---|
+| Add a server | `jcode mcp add <name> <url-or-command>` |
+| Add with headers | `jcode mcp add <name> <url> --header "Key: Value"` |
+| Add stdio server | `jcode mcp add <name> -- <command> [args...]` |
 | List servers | `jcode mcp list` |
-| Add a server | `jcode mcp add <name> <url>` |
 | Check connectivity | `jcode doctor` |
 | View in web UI | `GET /api/mcp` |

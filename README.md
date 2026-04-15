@@ -48,8 +48,26 @@ Works locally and on remote servers over SSH. Supports any OpenAI-compatible mod
 
 ## Install
 
+### Quick Install (recommended)
+
 ```bash
-go install github.com/cnjack/jcode/cmd/jcode@latest
+curl -fsSL https://raw.githubusercontent.com/cnjack/jcode/main/script/install.sh | sh
+```
+
+### From Source
+
+Requires **Go 1.22+** and **Node.js + pnpm**.
+
+```bash
+git clone https://github.com/cnjack/jcode.git
+cd jcode
+make install
+```
+
+### Update
+
+```bash
+jcode update
 ```
 
 First launch creates `~/.jcode/config.json` with a setup wizard. Run `jcode doctor` to verify model & MCP connectivity.
@@ -282,6 +300,7 @@ Config lives at `~/.jcode/config.json`. Key sections:
 ```bash
 jcode doctor    # verify model + MCP connectivity
 jcode version   # show version, commit, build time
+jcode update    # update to latest version
 ```
 
 ## Documentation
