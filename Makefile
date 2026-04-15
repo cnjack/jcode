@@ -1,5 +1,13 @@
 BIN := jcode
 PKG := ./cmd/jcode/
+VERSION ?= 0.0.1
+BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+LDFLAGS := -s -w \
+	-X github.com/cnjack/jcode/internal/command.Version=$(VERSION) \
+	-X github.com/cnjack/jcode/internal/command.BuildTime=$(BUILD_TIME) \
+	-X github.com/cnjack/jcode/internal/command.GitCommit=$(GIT_COMMIT)
 
 export GOFLAGS := -buildvcs=false
 
@@ -26,10 +34,10 @@ build-web:
 	cd web && npx vite build
 
 build: generate build-web
-	go build -o $(BIN) $(PKG)
+	go build -ldflags "$(LDFLAGS)" -o $(BIN) $(PKG)
 
 install: generate build-web
-	go install $(PKG)
+	go install -ldflags "$(LDFLAGS)" $(PKG)
 
 run:
 	go run $(PKG)

@@ -1,7 +1,7 @@
 package command
 
 var (
-	Version   = "0.2.0"
+	Version   = "0.0.1"
 	BuildTime = "unknown"
 	GitCommit = "unknown"
 )
