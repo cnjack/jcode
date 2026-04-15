@@ -1,5 +1,6 @@
 /jcode
 internal/web/dist
+internal/model/registry_generated.go
 
 # Jekyll
 docs/_site/
