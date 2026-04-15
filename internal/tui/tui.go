@@ -1352,6 +1352,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				} else {
 					m.lines = append(m.lines, formatToolResult(e.Name, e.Output, m.width)...)
 				}
+			case string(session.EntrySubagentStart):
+				typeLabel := e.SubagentType
+				if typeLabel == "" {
+					typeLabel = "explore"
+				}
+				m.lines = append(m.lines, fmt.Sprintf("  %s %s %s",
+					subagentLabelStyle.Render("🤖 Subagent:"),
+					toolNameStyle.Render(e.SubagentName),
+					toolArgsStyle.Render("("+typeLabel+")"),
+				))
+			case string(session.EntrySubagentResult):
+				if e.Error != "" {
+					m.lines = append(m.lines, fmt.Sprintf("   %s %s",
+						toolErrorStyle.Render("✗ Subagent Error:"),
+						toolResultStyle.Render(truncate(sanitize(e.Error), maxToolOutputLen))))
+				} else {
+					m.lines = append(m.lines, fmt.Sprintf("   %s %s",
+						toolSuccessStyle.Render("✓ Subagent Done:"),
+						toolResultStyle.Render(truncate(sanitize(e.Output), maxToolOutputLen))))
+				}
 			}
 		}
 		m.lines = append(m.lines, "")
