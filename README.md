@@ -11,7 +11,7 @@ runs commands, and shows every step — no black boxes.
 
 Works locally and on remote servers over SSH. Supports any OpenAI-compatible model.
 
-[📖 Documentation](https://cnjack.github.io/jcode) · [Install](#install) · [Features](#features) · [Configuration](#configuration)
+[📖 Documentation](https://cnjack.github.io/jcode) · [Install](#install) · [Features](#features) · [Configuration](#configuration) · [Changelog](#changelog)
 
 </div>
 
@@ -306,6 +306,17 @@ jcode update    # update to latest version
 ## Documentation
 
 📖 Full documentation is available at [cnjack.github.io/jcode](https://cnjack.github.io/jcode)
+
+## Changelog
+
+See [CHANGELOG.md](./CHANGELOG.md) for release notes and version history.
+
+### Recent Releases
+
+- **[v0.0.4](https://github.com/cnjack/jcode/releases/tag/v0.0.4)** — TUI enhancements with full session recording, Langfuse nested tracing, streaming tool argument accumulation
+- **[v0.0.3](https://github.com/cnjack/jcode/releases/tag/v0.0.3)** — Self-update command and installation script
+- **[v0.0.2](https://github.com/cnjack/jcode/releases/tag/v0.0.2)** — Release workflow fixes
+- **[v0.0.1](https://github.com/cnjack/jcode/releases/tag/v0.0.1)** — Initial release
 
 ## License
 
