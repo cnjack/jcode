@@ -96,7 +96,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: prepared
-          path: .
+          path: internal/
 
       - name: Get version
         id: get_version
