@@ -11,7 +11,7 @@ LDFLAGS := -s -w \
 
 export GOFLAGS := -buildvcs=false
 
-.PHONY: build run doctor version install clean build-web lint lint-go lint-web generate
+.PHONY: build build-binary run doctor version install clean build-web lint lint-go lint-web generate
 
 lint: lint-go lint-web
 
@@ -34,6 +34,9 @@ build-web:
 	cd web && npx vite build
 
 build: generate build-web
+	go build -ldflags "$(LDFLAGS)" -o $(BIN) $(PKG)
+
+build-binary:
 	go build -ldflags "$(LDFLAGS)" -o $(BIN) $(PKG)
 
 install: generate build-web

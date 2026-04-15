@@ -15,7 +15,43 @@ permissions:
   contents: write
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Generate code
+        run: make generate
+
+      - name: Build frontend
+        run: make build-web
+
+      - name: Upload prepared artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: prepared
+          path: |
+            internal/model/registry_generated.go
+            internal/web/dist/
+
   build:
+    needs: prepare
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -56,13 +92,11 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Download prepared artifacts
+        uses: actions/download-artifact@v4
         with:
-          node-version: '20'
-
-      - name: Install pnpm
-        run: npm install -g pnpm
+          name: prepared
+          path: .
 
       - name: Get version
         id: get_version
@@ -81,7 +115,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           OUTPUT_NAME="jcode-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}"
-          make build \
+          make build-binary \
             VERSION="${{ steps.get_version.outputs.version }}" \
             BIN="dist/${OUTPUT_NAME}"
 
