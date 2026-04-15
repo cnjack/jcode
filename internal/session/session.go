@@ -124,6 +124,15 @@ func NewRecorder(project, provider, model string) (*Recorder, error) {
 // UUID returns the session identifier.
 func (r *Recorder) UUID() string { return r.uuid }
 
+// HasRecording reports whether any message has been recorded (i.e. the
+// session file has been created).  Returns false for sessions where the
+// user quit without any conversation.
+func (r *Recorder) HasRecording() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.file != nil
+}
+
 // RecordUser appends a user message entry.
 func (r *Recorder) RecordUser(content string) {
 	_ = r.writeEntry(Entry{Type: EntryUser, Content: content})

@@ -967,7 +967,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	} else {
 		fmt.Printf("Total tokens: %d (prompt: %d, completion: %d)\n", totalTokens, promptTokens, completionTokens)
 	}
-	if st.rec != nil {
+	if st.rec != nil && st.rec.HasRecording() {
 		fmt.Printf("Resume: jcode --resume %s\n", st.rec.UUID())
 	}
 	fmt.Println()
