@@ -17,6 +17,7 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/session"
+	"github.com/cnjack/jcode/internal/telemetry"
 )
 
 const (
@@ -43,9 +44,10 @@ type SubagentDeps struct {
 	ModelFactory *internalmodel.ModelFactory // optional, for multi-model subagents
 	TaskManager  *SubagentTaskManager        // optional, for async background tasks
 	Notifier     SubagentNotifier
-	ProgressFn   SubagentProgressFn // intermediate tool call/result events
-	TokenFn      SubagentTokenFn    // optional: token usage update after each model turn
-	Recorder     *session.Recorder  // records subagent start/result to session JSONL
+	ProgressFn   SubagentProgressFn        // intermediate tool call/result events
+	TokenFn      SubagentTokenFn           // optional: token usage update after each model turn
+	Recorder     *session.Recorder         // records subagent start/result to session JSONL
+	Tracer       *telemetry.LangfuseTracer // optional: Langfuse tracer for nested spans
 }
 
 type subagentInput struct {
@@ -149,6 +151,13 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 		childTools := s.buildTools(childEnv, agentType)
 		prompt := subagentSystemPrompt(agentType, s.env.Pwd(), s.env.platform)
 
+		// Inject Langfuse child trace so subagent spans nest under the parent.
+		var middlewares []adk.AgentMiddleware
+		if s.deps.Tracer != nil {
+			runCtx = s.deps.Tracer.WithChildTrace(runCtx, fmt.Sprintf("subagent-%s", input.Name))
+			middlewares = append(middlewares, s.deps.Tracer.ChildAgentMiddleware())
+		}
+
 		ag, err := adk.NewChatModelAgent(runCtx, &adk.ChatModelAgentConfig{
 			Name:        fmt.Sprintf("subagent-%s", input.Name),
 			Description: input.Description,
@@ -160,6 +169,7 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 				},
 			},
 			MaxIterations: subagentMaxIter,
+			Middlewares:   middlewares,
 			ModelRetryConfig: &adk.ModelRetryConfig{
 				MaxRetries:  3,
 				IsRetryAble: internalmodel.IsRetryable,
@@ -169,7 +179,11 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 		if err != nil {
 			return "", fmt.Errorf("failed to create subagent: %w", err)
 		}
-		return s.runSubagent(runCtx, ag, input), nil
+		result := s.runSubagent(runCtx, ag, input)
+		if s.deps.Tracer != nil {
+			s.deps.Tracer.EndChildTrace(runCtx, result)
+		}
+		return result, nil
 	}
 
 	// Background async path via TaskManager.

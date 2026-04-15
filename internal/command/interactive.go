@@ -35,31 +35,31 @@ import (
 
 // interactiveState holds all shared state for the interactive TUI event loop.
 type interactiveState struct {
-	ctx            context.Context
-	p              *tea.Program
-	cfg            *config.Config
-	chatModel      einomodel.ToolCallingChatModel
-	ag             *adk.ChatModelAgent
-	history        []adk.Message
-	env            *tools.Env
-	bgManager      *tools.BackgroundManager
-	approvalState  *runner.ApprovalState
-	rec            *session.Recorder
-	planStore      *tools.PlanStore
-	summCapture    *agent.SummarizationCapture
-	systemPrompt   string
-	toolList       []tool.BaseTool
-	agentMode      tui.AgentMode
-	envInfo        *util.EnvInfo
-	pwd            string
-	platform       string
-	registry       *internalmodel.ModelRegistry
-	skillLoader    *skills.Loader
-	langfuseTracer *telemetry.LangfuseTracer
-	h              handler.AgentEventHandler
-	askUserDeps    *tools.AskUserDeps
-	teamManager    *team.Manager
-	mcpTools       []tool.BaseTool
+	ctx             context.Context
+	p               *tea.Program
+	cfg             *config.Config
+	chatModel       einomodel.ToolCallingChatModel
+	ag              *adk.ChatModelAgent
+	history         []adk.Message
+	env             *tools.Env
+	bgManager       *tools.BackgroundManager
+	approvalState   *runner.ApprovalState
+	rec             *session.Recorder
+	planStore       *tools.PlanStore
+	summCapture     *agent.SummarizationCapture
+	systemPrompt    string
+	toolList        []tool.BaseTool
+	agentMode       tui.AgentMode
+	envInfo         *util.EnvInfo
+	pwd             string
+	platform        string
+	registry        *internalmodel.ModelRegistry
+	skillLoader     *skills.Loader
+	langfuseTracer  *telemetry.LangfuseTracer
+	h               handler.AgentEventHandler
+	askUserDeps     *tools.AskUserDeps
+	teamManager     *team.Manager
+	mcpTools        []tool.BaseTool
 	agentTokenUsage *internalmodel.TokenUsage
 
 	sessionResumeWarning  string
@@ -78,6 +78,7 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 			ProgressFn: s.subagentProgress,
 			TokenFn:    s.subagentTokenFn,
 			Recorder:   s.rec,
+			Tracer:     s.langfuseTracer,
 		}),
 		tools.NewAskUserTool(s.askUserDeps),
 		skills.NewLoadSkillTool(s.skillLoader),
@@ -187,6 +188,7 @@ func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
 		MaxLengthForTrunc: 50000,
 		MaxTokensForClear: int64(float64(contextLimit) * 0.60),
 		ReadFileToolName:  "read",
+		TruncExcludeTools: []string{"ask_user", "load_skill"},
 		ToolConfig: map[string]*reduction.ToolReductionConfig{
 			"read": {SkipClear: true},
 		},
@@ -780,6 +782,10 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		rec:          rec,
 	}
 
+	if cfg.Telemetry != nil && cfg.Telemetry.Langfuse != nil {
+		st.langfuseTracer = telemetry.NewLangfuseTracer(cfg.Telemetry.Langfuse)
+	}
+
 	teamManager := team.NewManager(&team.ManagerDeps{
 		DefaultModel: chatModel,
 		EnvFactory: func(cwd string) any {
@@ -819,6 +825,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 			return prompts.GetSystemPrompt(agentPlatform, agentPwd, "local", nil, "")
 		},
 		LeaderSessionUUID: rec.UUID(),
+		Tracer:            st.langfuseTracer,
 	})
 	st.teamManager = teamManager
 	st.toolList = st.buildAllTools()
@@ -827,10 +834,6 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	autoApprove := cfg.AutoApprove || unsafe
 	approvalState := runner.NewApprovalState(pwd, autoApprove)
 	st.approvalState = approvalState
-
-	if cfg.Telemetry != nil && cfg.Telemetry.Langfuse != nil {
-		st.langfuseTracer = telemetry.NewLangfuseTracer(cfg.Telemetry.Langfuse)
-	}
 
 	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore)
 	st.p = p

@@ -22,6 +22,7 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/session"
+	"github.com/cnjack/jcode/internal/telemetry"
 )
 
 const (
@@ -75,6 +76,8 @@ type ManagerDeps struct {
 	HandlersFactory func(workerName, workerColor string) []adk.ChatModelAgentMiddleware
 	// LeaderSessionUUID is used to store teammate transcripts under the leader's session.
 	LeaderSessionUUID string
+	// Tracer is the optional Langfuse tracer for recording teammate agent spans.
+	Tracer *telemetry.LangfuseTracer
 }
 
 // Manager coordinates a team of agents.
@@ -561,6 +564,12 @@ func (m *Manager) runAgentTurn(ctx context.Context, state *TeammateState) (strin
 		return "", fmt.Errorf("invalid chat model type")
 	}
 
+	var middlewares []adk.AgentMiddleware
+	if m.deps.Tracer != nil {
+		ctx = m.deps.Tracer.WithChildTrace(ctx, fmt.Sprintf("teammate-%s", state.Identity.AgentName))
+		middlewares = append(middlewares, m.deps.Tracer.ChildAgentMiddleware())
+	}
+
 	var handlers []adk.ChatModelAgentMiddleware
 	if m.deps.HandlersFactory != nil {
 		handlers = m.deps.HandlersFactory(state.Identity.AgentName, state.Identity.Color)
@@ -577,6 +586,7 @@ func (m *Manager) runAgentTurn(ctx context.Context, state *TeammateState) (strin
 			},
 		},
 		MaxIterations: teammateMaxIter,
+		Middlewares:   middlewares,
 		Handlers:      handlers,
 		ModelRetryConfig: &adk.ModelRetryConfig{
 			MaxRetries:  3,
@@ -602,6 +612,11 @@ func (m *Manager) runAgentTurn(ctx context.Context, state *TeammateState) (strin
 	}
 
 	var result strings.Builder
+	endTrace := func() {
+		if m.deps.Tracer != nil {
+			m.deps.Tracer.EndChildTrace(ctx, result.String())
+		}
+	}
 	iterator := ag.Run(ctx, input)
 	for {
 		event, ok := iterator.Next()
@@ -609,6 +624,7 @@ func (m *Manager) runAgentTurn(ctx context.Context, state *TeammateState) (strin
 			break
 		}
 		if event.Err != nil {
+			endTrace()
 			return result.String(), event.Err
 		}
 		if event.Output == nil || event.Output.MessageOutput == nil {
@@ -734,6 +750,7 @@ func (m *Manager) runAgentTurn(ctx context.Context, state *TeammateState) (strin
 		})
 	}
 
+	endTrace()
 	return result.String(), nil
 }
 
