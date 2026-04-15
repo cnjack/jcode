@@ -12,11 +12,35 @@ nav_order: 1
 
 ## Install
 
+### Quick Install (recommended)
+
 ```bash
-go install github.com/cnjack/jcode/cmd/jcode@latest
+curl -fsSL https://raw.githubusercontent.com/cnjack/jcode/main/script/install.sh | sh
 ```
 
-This downloads and builds the `jcode` binary to your `$GOPATH/bin`.
+This downloads the latest release binary for your platform and installs it to `/usr/local/bin`.
+
+### From Source
+
+Requires **Go 1.22+** and **Node.js + pnpm**.
+
+```bash
+git clone https://github.com/cnjack/jcode.git
+cd jcode
+make install
+```
+
+The `make install` command generates the model registry, builds the Vue 3 web frontend, and installs the Go binary to your `$GOPATH/bin`.
+
+### Update
+
+To update an existing installation:
+
+```bash
+jcode update
+```
+
+This checks GitHub releases, shows `v0.0.1 -> v0.0.2`, and replaces the binary in place.
 
 ## First Launch
 

@@ -16,6 +16,7 @@ nav_order: 7
 | `jcode acp` | Start headless JSON-RPC server (for editor integration) |
 | `jcode doctor` | Verify model and MCP connectivity |
 | `jcode version` | Show version, build time, and commit |
+| `jcode update` | Update jcode to the latest version |
 | `jcode sessions` | List recorded sessions for this project |
 | `jcode mcp add <name> <url>` | Add an MCP server |
 | `jcode mcp list` | List configured MCP servers |
