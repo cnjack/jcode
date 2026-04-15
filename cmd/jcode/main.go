@@ -9,12 +9,6 @@ import (
 	"github.com/cnjack/jcode/internal/command"
 )
 
-var (
-	Version   = "0.2.0"
-	BuildTime = "unknown"
-	GitCommit = "unknown"
-)
-
 func main() {
 	var (
 		prompt     string
@@ -25,20 +19,17 @@ func main() {
 	rootCmd := &cobra.Command{
 		Use:           "jcode",
 		Short:         "Little Jack — AI coding assistant",
+		Version:       command.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return command.RunInteractive(prompt, resumeUUID, unsafeMode)
 		},
 	}
+	rootCmd.SetVersionTemplate(fmt.Sprintf("Little Jack — Coding Assistant\nVersion:    %s\nBuild time: %s\nGit commit: %s\n", command.Version, command.BuildTime, command.GitCommit))
 	rootCmd.Flags().StringVarP(&prompt, "prompt", "p", "", "One-shot prompt (non-interactive)")
 	rootCmd.Flags().StringVar(&resumeUUID, "resume", "", "Resume a previous session by UUID")
 	rootCmd.Flags().BoolVar(&unsafeMode, "unsafe", false, "Auto-approve all tool calls (overrides config)")
-
-	// Propagate build-time variables into the command package.
-	command.Version = Version
-	command.BuildTime = BuildTime
-	command.GitCommit = GitCommit
 
 	rootCmd.AddCommand(
 		command.NewMCPCmd(),

@@ -56,6 +56,14 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
       - name: Get version
         id: get_version
         run: |
@@ -72,19 +80,10 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
         run: |
-          VERSION="${{ steps.get_version.outputs.version }}"
-          BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          GIT_COMMIT=$(git rev-parse --short HEAD)
-          
-          OUTPUT_NAME="jcode-${GOOS}-${GOARCH}${{ matrix.suffix }}"
-          
-          go build -ldflags "-s -w \
-            -X main.Version=${VERSION} \
-            -X main.BuildTime=${BUILD_TIME} \
-            -X main.GitCommit=${GIT_COMMIT} \
-            -extldflags '-static'" \
-            -o "dist/${OUTPUT_NAME}" \
-            ./cmd/jcode/
+          OUTPUT_NAME="jcode-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}"
+          make build \
+            VERSION="${{ steps.get_version.outputs.version }}" \
+            BIN="dist/${OUTPUT_NAME}"
 
       - name: Calculate checksum
         run: |
