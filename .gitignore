@@ -1,2 +1,7 @@
 /jcode
 internal/web/dist
+
+# Jekyll
+docs/_site/
+docs/.jekyll-cache/
+docs/.jekyll-metadata
