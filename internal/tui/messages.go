@@ -86,12 +86,14 @@ type ResumeRequestMsg struct{ UUID string }
 
 // SessionEntry is a display-ready record from a replayed session.
 type SessionEntry struct {
-	Type    string
-	Content string
-	Name    string
-	Args    string
-	Output  string
-	Error   string
+	Type         string
+	Content      string
+	Name         string
+	Args         string
+	Output       string
+	Error        string
+	SubagentName string
+	SubagentType string
 }
 
 // SessionResumedMsg is sent by the main goroutine to replay a session in the TUI.

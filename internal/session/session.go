@@ -44,17 +44,18 @@ type TodoSnapshotItem struct {
 
 // Entry is one line of the JSONL session file.
 type Entry struct {
-	Type      EntryType `json:"type"`
-	UUID      string    `json:"uuid,omitempty"`
-	Project   string    `json:"project,omitempty"`
-	Provider  string    `json:"provider,omitempty"`
-	Model     string    `json:"model,omitempty"`
-	Content   string    `json:"content,omitempty"`
-	Name      string    `json:"name,omitempty"`   // tool name
-	Args      string    `json:"args,omitempty"`   // tool args JSON
-	Output    string    `json:"output,omitempty"` // tool output
-	Error     string    `json:"error,omitempty"`  // tool error
-	Timestamp string    `json:"timestamp"`
+	Type       EntryType `json:"type"`
+	UUID       string    `json:"uuid,omitempty"`
+	Project    string    `json:"project,omitempty"`
+	Provider   string    `json:"provider,omitempty"`
+	Model      string    `json:"model,omitempty"`
+	Content    string    `json:"content,omitempty"`
+	Name       string    `json:"name,omitempty"`         // tool name
+	Args       string    `json:"args,omitempty"`         // tool args JSON
+	Output     string    `json:"output,omitempty"`       // tool output
+	Error      string    `json:"error,omitempty"`        // tool error
+	ToolCallID string    `json:"tool_call_id,omitempty"` // links tool_call ↔ tool_result
+	Timestamp  string    `json:"timestamp"`
 
 	// plan_update fields
 	PlanStatus  string `json:"plan_status,omitempty"`
@@ -144,17 +145,17 @@ func (r *Recorder) RecordAssistant(content string) {
 }
 
 // RecordToolCall appends a tool-call entry.
-func (r *Recorder) RecordToolCall(name, args string) {
-	_ = r.writeEntry(Entry{Type: EntryToolCall, Name: name, Args: args})
+func (r *Recorder) RecordToolCall(name, args, toolCallID string) {
+	_ = r.writeEntry(Entry{Type: EntryToolCall, Name: name, Args: args, ToolCallID: toolCallID})
 }
 
 // RecordToolResult appends a tool-result entry.
-func (r *Recorder) RecordToolResult(name, output string, err error) {
+func (r *Recorder) RecordToolResult(name, output, toolCallID string, err error) {
 	errStr := ""
 	if err != nil {
 		errStr = err.Error()
 	}
-	_ = r.writeEntry(Entry{Type: EntryToolResult, Name: name, Output: output, Error: errStr})
+	_ = r.writeEntry(Entry{Type: EntryToolResult, Name: name, Output: output, ToolCallID: toolCallID, Error: errStr})
 }
 
 // RecordPlanUpdate appends a plan state change entry.

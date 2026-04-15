@@ -9,8 +9,8 @@ import (
 
 // ReconstructHistory converts a slice of recorded session entries back into
 // LLM history messages suitable for resuming a conversation.
-// Only user and assistant text messages are included; tool calls are omitted
-// because reconstructing matching tool-call IDs is non-trivial.
+// It reconstructs tool call and tool result messages so that resumed sessions
+// retain full context.
 func ReconstructHistory(entries []Entry) []adk.Message {
 	var msgs []adk.Message
 	for _, e := range entries {
@@ -21,6 +21,21 @@ func ReconstructHistory(entries []Entry) []adk.Message {
 			if e.Content != "" {
 				msgs = append(msgs, &schema.Message{Role: schema.Assistant, Content: e.Content})
 			}
+		case EntryToolCall:
+			tc := schema.ToolCall{
+				ID:       e.ToolCallID,
+				Function: schema.FunctionCall{Name: e.Name, Arguments: e.Args},
+			}
+			// Merge into preceding assistant message if it exists, otherwise create one.
+			if n := len(msgs); n > 0 {
+				if last := msgs[n-1]; last.Role == schema.Assistant {
+					last.ToolCalls = append(last.ToolCalls, tc)
+					continue
+				}
+			}
+			msgs = append(msgs, &schema.Message{Role: schema.Assistant, ToolCalls: []schema.ToolCall{tc}})
+		case EntryToolResult:
+			msgs = append(msgs, schema.ToolMessage(e.Output, e.ToolCallID, schema.WithToolName(e.Name)))
 		}
 	}
 	return msgs
@@ -65,6 +80,39 @@ func ReconstructState(entries []Entry) *SessionState {
 				msgs = append(msgs, &schema.Message{Role: schema.Assistant, Content: e.Content})
 			}
 
+		case EntryToolCall:
+			tc := schema.ToolCall{
+				ID:       e.ToolCallID,
+				Function: schema.FunctionCall{Name: e.Name, Arguments: e.Args},
+			}
+			merged := false
+			if n := len(msgs); n > 0 {
+				if last := msgs[n-1]; last.Role == schema.Assistant {
+					last.ToolCalls = append(last.ToolCalls, tc)
+					merged = true
+				}
+			}
+			if !merged {
+				msgs = append(msgs, &schema.Message{Role: schema.Assistant, ToolCalls: []schema.ToolCall{tc}})
+			}
+			if e.Name == "switch_env" {
+				type args struct {
+					Target string `json:"target"`
+				}
+				var a args
+				if err := json.Unmarshal([]byte(e.Args), &a); err == nil {
+					lastTarget = a.Target
+				}
+			}
+
+		case EntryToolResult:
+			msgs = append(msgs, schema.ToolMessage(e.Output, e.ToolCallID, schema.WithToolName(e.Name)))
+			if e.Name == "switch_env" {
+				if e.Error == "" && lastTarget != "" {
+					state.EnvTarget = lastTarget
+				}
+			}
+
 		case EntryCompact:
 			// Discard accumulated history and use the compact summary as base.
 			msgs = []adk.Message{
@@ -89,24 +137,6 @@ func ReconstructState(entries []Entry) *SessionState {
 
 		case EntryModeChange:
 			state.Mode = e.Mode
-
-		case EntryToolCall:
-			if e.Name == "switch_env" {
-				type args struct {
-					Target string `json:"target"`
-				}
-				var a args
-				if err := json.Unmarshal([]byte(e.Args), &a); err == nil {
-					lastTarget = a.Target
-				}
-			}
-
-		case EntryToolResult:
-			if e.Name == "switch_env" {
-				if e.Error == "" && lastTarget != "" {
-					state.EnvTarget = lastTarget
-				}
-			}
 		}
 	}
 

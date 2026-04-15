@@ -11,12 +11,14 @@ func ConvertSessionEntries(entries []session.Entry) []SessionEntry {
 			continue
 		}
 		result = append(result, SessionEntry{
-			Type:    string(e.Type),
-			Content: e.Content,
-			Name:    e.Name,
-			Args:    e.Args,
-			Output:  e.Output,
-			Error:   e.Error,
+			Type:         string(e.Type),
+			Content:      e.Content,
+			Name:         e.Name,
+			Args:         e.Args,
+			Output:       e.Output,
+			Error:        e.Error,
+			SubagentName: e.SubagentName,
+			SubagentType: e.SubagentType,
 		})
 	}
 	return result
