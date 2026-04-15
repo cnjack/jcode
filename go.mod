@@ -9,7 +9,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.2
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/x/ansi v0.11.6
-	github.com/cloudwego/eino v0.8.8
+	github.com/cloudwego/eino v0.8.9
 	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.8
 	github.com/cloudwego/eino-ext/libs/acl/langfuse v0.0.0-20260313050455-88e279b3b32f
 	github.com/coder/acp-go-sdk v0.6.3

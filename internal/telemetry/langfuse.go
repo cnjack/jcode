@@ -17,6 +17,7 @@ const defaultFlushTimeout = 3 * time.Second
 type contextKey string
 
 const traceIDKey contextKey = "langfuse_trace_id"
+const parentSpanIDKey contextKey = "langfuse_parent_span_id"
 
 // LangfuseTracer wraps the Langfuse client and provides eino integration helpers.
 type LangfuseTracer struct {
@@ -66,20 +67,71 @@ func (t *LangfuseTracer) Flush() {
 	}
 }
 
+// WithChildTrace creates a child span under the current trace and returns a context
+// carrying both the original traceID and the new parentSpanID. This allows subagent
+// and teammate agent calls to appear as nested spans in Langfuse.
+func (t *LangfuseTracer) WithChildTrace(ctx context.Context, name string) context.Context {
+	traceID, _ := ctx.Value(traceIDKey).(string)
+	if traceID == "" {
+		return ctx
+	}
+	parentSpanID, _ := t.client.CreateSpan(&langfuseacl.SpanEventBody{
+		BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
+			BaseEventBody: langfuseacl.BaseEventBody{Name: name},
+			TraceID:       traceID,
+			StartTime:     time.Now(),
+		},
+	})
+	if parentSpanID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, parentSpanIDKey, parentSpanID)
+}
+
+// EndChildTrace closes the child span created by WithChildTrace.
+func (t *LangfuseTracer) EndChildTrace(ctx context.Context, output string) {
+	spanID, _ := ctx.Value(parentSpanIDKey).(string)
+	if spanID == "" {
+		return
+	}
+	_ = t.client.EndSpan(&langfuseacl.SpanEventBody{
+		BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
+			BaseEventBody: langfuseacl.BaseEventBody{ID: spanID},
+			Output:        output,
+		},
+		EndTime: time.Now(),
+	})
+}
+
+// ChildAgentMiddleware returns an adk.AgentMiddleware for child agents (subagents/teammates).
+// It nests generations and tool spans under the parent span stored in context.
+func (t *LangfuseTracer) ChildAgentMiddleware() adk.AgentMiddleware {
+	return t.buildMiddleware(true)
+}
+
 // AgentMiddleware returns an adk.AgentMiddleware that records model generations
 // and tool-call spans to Langfuse, keyed by the traceID stored in the context.
 func (t *LangfuseTracer) AgentMiddleware() adk.AgentMiddleware {
+	return t.buildMiddleware(false)
+}
+
+func (t *LangfuseTracer) buildMiddleware(useParentSpan bool) adk.AgentMiddleware {
 	return adk.AgentMiddleware{
 		BeforeChatModel: func(ctx context.Context, state *adk.ChatModelAgentState) error {
 			traceID, _ := ctx.Value(traceIDKey).(string)
 			if traceID == "" {
 				return nil
 			}
+			parentObsID := ""
+			if useParentSpan {
+				parentObsID, _ = ctx.Value(parentSpanIDKey).(string)
+			}
 			genID, _ := t.client.CreateGeneration(&langfuseacl.GenerationEventBody{
 				BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
-					BaseEventBody: langfuseacl.BaseEventBody{Name: "chat_model"},
-					TraceID:       traceID,
-					StartTime:     time.Now(),
+					BaseEventBody:       langfuseacl.BaseEventBody{Name: "chat_model"},
+					TraceID:             traceID,
+					ParentObservationID: parentObsID,
+					StartTime:           time.Now(),
 				},
 				InMessages: state.Messages,
 			})
@@ -121,12 +173,17 @@ func (t *LangfuseTracer) AgentMiddleware() adk.AgentMiddleware {
 					start := time.Now()
 					var spanID string
 					if traceID != "" {
+						parentObsID := ""
+						if useParentSpan {
+							parentObsID, _ = ctx.Value(parentSpanIDKey).(string)
+						}
 						spanID, _ = t.client.CreateSpan(&langfuseacl.SpanEventBody{
 							BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
-								BaseEventBody: langfuseacl.BaseEventBody{Name: input.Name},
-								TraceID:       traceID,
-								Input:         input.Arguments,
-								StartTime:     start,
+								BaseEventBody:       langfuseacl.BaseEventBody{Name: input.Name},
+								TraceID:             traceID,
+								ParentObservationID: parentObsID,
+								Input:               input.Arguments,
+								StartTime:           start,
 							},
 						})
 					}
