@@ -266,8 +266,12 @@ func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, 
 			toolName := mo.ToolName
 			if !mo.IsStreaming && mo.Message != nil {
 				s.notifyProgress(input.Name, "tool_result", toolName, mo.Message.Content)
+				if s.deps.Recorder != nil {
+					s.deps.Recorder.RecordToolResult(toolName, mo.Message.Content, mo.Message.ToolCallID, nil)
+				}
 			} else if mo.IsStreaming {
 				var sb strings.Builder
+				var toolCallID string
 				for {
 					chunk, err := mo.MessageStream.Recv()
 					if err == io.EOF {
@@ -278,9 +282,15 @@ func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, 
 					}
 					if chunk != nil {
 						sb.WriteString(chunk.Content)
+						if toolCallID == "" && chunk.ToolCallID != "" {
+							toolCallID = chunk.ToolCallID
+						}
 					}
 				}
 				s.notifyProgress(input.Name, "tool_result", toolName, sb.String())
+				if s.deps.Recorder != nil {
+					s.deps.Recorder.RecordToolResult(toolName, sb.String(), toolCallID, nil)
+				}
 			}
 			continue
 		}
@@ -290,6 +300,12 @@ func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, 
 		}
 
 		if mo.IsStreaming {
+			// Accumulate streaming tool call names and arguments across chunks.
+			type pendingTC struct {
+				name string
+				args strings.Builder
+			}
+			pending := make(map[int]*pendingTC)
 			for {
 				chunk, err := mo.MessageStream.Recv()
 				if err != nil {
@@ -298,14 +314,28 @@ func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, 
 				if chunk == nil {
 					continue
 				}
-				// Forward tool call events.
 				for _, tc := range chunk.ToolCalls {
+					idx := 0
+					if tc.Index != nil {
+						idx = *tc.Index
+					}
 					if tc.Function.Name != "" {
-						s.notifyProgress(input.Name, "tool_call", tc.Function.Name, tc.Function.Arguments)
+						p := &pendingTC{name: tc.Function.Name}
+						p.args.WriteString(tc.Function.Arguments)
+						pending[idx] = p
+					} else if p, ok := pending[idx]; ok {
+						p.args.WriteString(tc.Function.Arguments)
 					}
 				}
 				if chunk.Content != "" {
 					assistantText.WriteString(chunk.Content)
+				}
+			}
+			// Notify and record accumulated tool calls.
+			for _, p := range pending {
+				s.notifyProgress(input.Name, "tool_call", p.name, p.args.String())
+				if s.deps.Recorder != nil {
+					s.deps.Recorder.RecordToolCall(p.name, p.args.String(), "")
 				}
 			}
 			reportTokens()
@@ -314,6 +344,9 @@ func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, 
 			for _, tc := range mo.Message.ToolCalls {
 				if tc.Function.Name != "" {
 					s.notifyProgress(input.Name, "tool_call", tc.Function.Name, tc.Function.Arguments)
+					if s.deps.Recorder != nil {
+						s.deps.Recorder.RecordToolCall(tc.Function.Name, tc.Function.Arguments, tc.ID)
+					}
 				}
 			}
 			if mo.Message.Content != "" {

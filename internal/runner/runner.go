@@ -124,11 +124,12 @@ func runInner(
 					h.OnTodoUpdate()
 				}
 				if rec != nil {
-					rec.RecordToolResult(toolName, output, nil)
+					rec.RecordToolResult(toolName, output, mo.Message.ToolCallID, nil)
 				}
 			} else if mo.IsStreaming {
 				var sb strings.Builder
 				var toolErr error
+				var toolCallID string
 				for {
 					chunk, err := mo.MessageStream.Recv()
 					if err == io.EOF {
@@ -141,6 +142,9 @@ func runInner(
 					}
 					if chunk != nil {
 						sb.WriteString(chunk.Content)
+						if toolCallID == "" && chunk.ToolCallID != "" {
+							toolCallID = chunk.ToolCallID
+						}
 					}
 				}
 				if toolErr == nil {
@@ -149,10 +153,10 @@ func runInner(
 						h.OnTodoUpdate()
 					}
 					if rec != nil {
-						rec.RecordToolResult(toolName, sb.String(), nil)
+						rec.RecordToolResult(toolName, sb.String(), toolCallID, nil)
 					}
 				} else if rec != nil {
-					rec.RecordToolResult(toolName, "", toolErr)
+					rec.RecordToolResult(toolName, "", toolCallID, toolErr)
 				}
 			}
 			continue
@@ -163,6 +167,13 @@ func runInner(
 		}
 
 		if mo.IsStreaming {
+			// Accumulate streaming tool call names, args, and IDs across chunks.
+			type pendingTC struct {
+				name string
+				id   string
+				args strings.Builder
+			}
+			pending := make(map[int]*pendingTC)
 			for {
 				chunk, err := mo.MessageStream.Recv()
 				if err == io.EOF {
@@ -174,14 +185,17 @@ func runInner(
 				if chunk == nil {
 					continue
 				}
-				if len(chunk.ToolCalls) > 0 {
-					for _, tc := range chunk.ToolCalls {
-						if tc.Function.Name != "" {
-							h.OnToolCall(tc.Function.Name, tc.Function.Arguments)
-							if rec != nil {
-								rec.RecordToolCall(tc.Function.Name, tc.Function.Arguments)
-							}
-						}
+				for _, tc := range chunk.ToolCalls {
+					idx := 0
+					if tc.Index != nil {
+						idx = *tc.Index
+					}
+					if tc.Function.Name != "" {
+						p := &pendingTC{name: tc.Function.Name, id: tc.ID}
+						p.args.WriteString(tc.Function.Arguments)
+						pending[idx] = p
+					} else if p, ok := pending[idx]; ok {
+						p.args.WriteString(tc.Function.Arguments)
 					}
 				}
 				if chunk.Content != "" {
@@ -189,12 +203,19 @@ func runInner(
 					h.OnAgentText(chunk.Content)
 				}
 			}
+			// Notify and record accumulated tool calls.
+			for _, p := range pending {
+				h.OnToolCall(p.name, p.args.String())
+				if rec != nil {
+					rec.RecordToolCall(p.name, p.args.String(), p.id)
+				}
+			}
 		} else if mo.Message != nil {
 			if len(mo.Message.ToolCalls) > 0 {
 				for _, tc := range mo.Message.ToolCalls {
 					h.OnToolCall(tc.Function.Name, tc.Function.Arguments)
 					if rec != nil {
-						rec.RecordToolCall(tc.Function.Name, tc.Function.Arguments)
+						rec.RecordToolCall(tc.Function.Name, tc.Function.Arguments, tc.ID)
 					}
 				}
 			}

@@ -16,14 +16,14 @@ func formatToolArgs(argsJSON string) string {
 	}
 	var args map[string]interface{}
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return truncate(sanitize(argsJSON), 120)
+		return sanitize(argsJSON)
 	}
 	parts := make([]string, 0, len(args))
 	for k, v := range args {
-		val := truncate(sanitize(fmt.Sprintf("%v", v)), 60)
+		val := sanitize(fmt.Sprintf("%v", v))
 		parts = append(parts, fmt.Sprintf("%s=%s", k, val))
 	}
-	return truncate(strings.Join(parts, " "), 200)
+	return strings.Join(parts, " ")
 }
 
 // ansiRe matches ANSI escape sequences (CSI, OSC, etc.).
