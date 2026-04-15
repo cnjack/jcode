@@ -231,7 +231,7 @@ func (a *acpAgent) NewSession(ctx context.Context, params acp.NewSessionRequest)
 		EnvLabel:     "local",
 		IsRemote:     env.IsRemote(),
 		ContextLimit: contextLimit,
-	})
+	}, nil)
 	handlers = append(handlers, reminderMw)
 
 	ag, err := agent.NewAgent(ctx, chatModel, allTools, systemPrompt, approvalState.RequestApproval, nil, handlers)
@@ -298,7 +298,7 @@ func (a *acpAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Pr
 	copy(history, sess.history)
 	sess.mu.Unlock()
 
-	resp := runner.Run(promptCtx, sess.ag, history, sess.h, sess.rec, sess.todoStore, sess.tracer)
+	resp := runner.Run(promptCtx, sess.ag, history, sess.h, sess.rec, sess.todoStore, sess.tracer, nil)
 
 	sess.mu.Lock()
 	if resp != "" {

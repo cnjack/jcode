@@ -154,17 +154,20 @@ type compactionMiddleware struct {
 	state        *CompactionState
 	contextLimit int
 	onCompact    func(savedTokens int)
+	tokenUsage   *internalmodel.TokenUsage
 }
 
 // NewCompactionMiddleware creates a ChatModelAgentMiddleware that monitors
 // token usage and compacts the conversation when the strategy says to.
+// tokenUsage is the per-agent tracker to read from.
 // onCompact is an optional callback invoked after a successful compaction.
-func NewCompactionMiddleware(strategy CompactionStrategy, contextLimit int, onCompact func(int)) adk.ChatModelAgentMiddleware {
+func NewCompactionMiddleware(strategy CompactionStrategy, contextLimit int, tokenUsage *internalmodel.TokenUsage, onCompact func(int)) adk.ChatModelAgentMiddleware {
 	return &compactionMiddleware{
 		BaseChatModelAgentMiddleware: &adk.BaseChatModelAgentMiddleware{},
 		strategy:                     strategy,
 		state:                        &CompactionState{},
 		contextLimit:                 contextLimit,
+		tokenUsage:                   tokenUsage,
 		onCompact:                    onCompact,
 	}
 }
@@ -174,9 +177,12 @@ func (m *compactionMiddleware) BeforeModelRewriteState(
 	state *adk.ChatModelAgentState,
 	mc *adk.ModelContext,
 ) (context.Context, *adk.ChatModelAgentState, error) {
-	// Estimate current token usage from the global tracker.
-	promptTokens, _, _ := internalmodel.TokenTracker.Get()
-	currentTokens := int(promptTokens)
+	// Estimate current token usage from the per-agent tracker.
+	var currentTokens int
+	if m.tokenUsage != nil {
+		promptTokens, _, _ := m.tokenUsage.Get()
+		currentTokens = int(promptTokens)
+	}
 
 	if !m.strategy.ShouldCompact(currentTokens, m.contextLimit) {
 		return ctx, state, nil

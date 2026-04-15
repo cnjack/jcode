@@ -98,12 +98,16 @@ func (m Model) inputAreaView() string {
 	// Render StatusBar using StatusBarComponent
 	sbComp := NewStatusBarComponent()
 	teammateCount := len(m.teamState.Teammates)
+	activeTokens := m.totalTokens
+	if m.teamState.ViewingAgent != "" {
+		activeTokens = m.teammateTokens[m.teamState.ViewingAgent]
+	}
 	statusLine := sbComp.View(StatusBarState{
 		Width:             m.width,
 		ActiveProvider:    m.activeProvider,
 		ActiveModel:       m.activeModel,
 		AutoApprove:       m.approvalMode == ModeAuto,
-		TotalTokens:       m.totalTokens,
+		TotalTokens:       activeTokens,
 		ModelContextLimit: m.modelContextLimit,
 		MCPStatuses:       m.mcpStatuses,
 		Mode:              m.agentMode,

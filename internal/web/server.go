@@ -325,7 +325,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			s.runCancel = nil
 			s.mu.Unlock()
 		}()
-		resp := runner.Run(runCtx, agent, history, s.handler, s.recorder, s.todoStore, s.tracer)
+		resp := runner.Run(runCtx, agent, history, s.handler, s.recorder, s.todoStore, s.tracer, nil)
 		if resp != "" {
 			s.mu.Lock()
 			s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: resp})
