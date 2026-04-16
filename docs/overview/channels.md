@@ -19,9 +19,9 @@ Currently supported channels:
 1. **Connect** — Scan a QR code to link your WeChat account
 2. **Work normally** — Use jcode in the TUI or web interface
 3. **Get notified** — When the agent waits for approval or finishes a task, you receive a WeChat message
-4. **Respond** — Return to the terminal or web UI to approve, reject, or continue
+4. **Send messages** — You can also send prompts to jcode directly from WeChat
 
-Channels are a notification sidecar — they don't replace the TUI or web interface. The agent still runs in your terminal; channels just let you step away without missing anything.
+Channels are a notification sidecar — they don't replace the TUI or web interface. The agent still runs locally; channels just let you step away without missing anything.
 
 ## WeChat Setup
 
@@ -46,31 +46,34 @@ You › /channel
 
 ### Web Interface
 
-1. Open Settings (⌘/Ctrl+,)
-2. Go to the **Channels** tab
-3. Click **Connect** to see the QR code
-4. Scan with WeChat
-5. Use **Disable** / **Enable** / **Disconnect** to manage the connection
+1. Open **Settings** → **Channels** tab
+2. Click **Connect** and scan the QR code with WeChat
+3. After scanning, the channel is ready to use
+
+Once connected, a **WeChat toggle** appears in the input toolbar (next to the Auto toggle). Use it to quickly enable or disable notifications without opening Settings.
+
+To disconnect entirely, go back to **Settings** → **Channels** → **Disconnect**.
 
 ### Auto-Enable on Startup
 
-If you've previously logged in, jcode remembers your credentials (stored at `~/.jcode/wechat.json`). On the next launch, the channel auto-enables without scanning again.
+If you've previously logged in, jcode remembers your credentials. On the next launch:
+
+- **TUI mode** — The channel auto-enables automatically. No configuration needed.
+- **Web mode** — Add `"channel": { "web_enabled": true }` to your config to auto-enable on startup. Without this, you can still enable manually via the toolbar toggle.
 
 ## Notifications
 
-### When You Get Notified
+When the channel is enabled, you receive WeChat notifications for:
 
 | Event | Notification |
 |---|---|
-| **Approval needed** | Tool name + arguments, sent after 10 seconds of no response |
-| **Task completed** | Summary of the agent's last output |
+| **Approval needed** | Tool name + arguments (sent after 10 seconds of no response) |
+| **Task completed** | Summary of the agent's output |
 | **Task failed** | Error message |
-| **Session started** | Welcome message (time-aware) |
-| **Session ended** | Goodbye message (time-aware) |
+| **Session started** | Time-aware welcome message (TUI only) |
+| **Session ended** | Time-aware goodbye message |
 
 ### Message Format
-
-Messages use a title + divider + body format for readability:
 
 ```
 ⏳ Approval Needed
@@ -90,7 +93,7 @@ README with the new API documentation.
 
 ### Time-Aware Messages
 
-Welcome and goodbye messages adapt to the time of day and day of week:
+Welcome and goodbye messages adapt to the time of day:
 
 | Time | Greeting |
 |---|---|
@@ -102,28 +105,18 @@ Welcome and goodbye messages adapt to the time of day and day of week:
 
 Weekend messages include a casual "Enjoy your weekend!" touch.
 
-## Inbound Messages
+## Sending Messages from WeChat
 
-You can also send messages *to* jcode from WeChat. Messages are queued as prompts and processed in order.
+You can send prompts to jcode directly from WeChat. Your message is submitted to the agent just as if you typed it in the TUI or web interface.
 
-If the agent is currently running a task, you'll receive an immediate reply:
+- In **web mode**, inbound WeChat messages appear in the web UI with a green **WeChat** label, so you can tell them apart from locally typed prompts.
+- If the agent is currently busy, you'll receive an immediate reply letting you know your message has been queued.
 
-```
-⏳ Task In Progress
-————————————————
-A task is currently running.
-Your message has been queued and
-will be processed after the current
-task completes.
-```
-
-Once the current task finishes, your message is processed automatically.
+When the channel is disabled, inbound messages are silently ignored.
 
 ## Configuration
 
-### Web Mode
-
-To enable channels in `jcode web`, add to `~/.jcode/config.json`:
+Add to `~/.jcode/config.json`:
 
 ```json
 {
@@ -133,59 +126,14 @@ To enable channels in `jcode web`, add to `~/.jcode/config.json`:
 }
 ```
 
-### TUI Mode
+| Setting | Effect |
+|---|---|
+| `channel.web_enabled` | Auto-enable WeChat on `jcode web` startup (if already logged in) |
 
-Channels are always available in TUI mode. No extra configuration is needed — just use `/channel` to connect.
+This setting only controls auto-enable. You can always connect and toggle the channel manually through the UI, even without this config.
+
+In TUI mode, no configuration is needed — channels are always available via `/channel`.
 
 ### Credential Storage
 
-WeChat credentials are stored at `~/.jcode/wechat.json`. This file is created automatically after the first successful login. Delete it to force a re-login.
-
-## Architecture
-
-```
-┌───────────┐     ┌──────────────────┐     ┌───────────────┐
-│  TUI/Web  │────▶│ NotifyingHandler │────▶│ WeChat Client │
-│  Handler  │     │  (10s delay)     │     │ (iLink Bot)   │
-└───────────┘     └──────────────────┘     └───────────────┘
-                         │                        │
-                    Wraps inner               Sends via
-                    handler                   HTTP API
-                         │                        │
-                    ┌────▼────┐              ┌────▼────┐
-                    │ Approval│              │ WeChat  │
-                    │ + Done  │              │  User   │
-                    │ events  │              │  📱     │
-                    └─────────┘              └─────────┘
-```
-
-The `NotifyingHandler` wraps the TUI or Web handler. It delegates all events to the inner handler and additionally:
-
-- **Approval requests**: Starts a 10-second timer. If the user doesn't respond within 10 seconds, fires a notification to the channel.
-- **Agent done**: Sends the last ~600 characters of agent output as a summary.
-
-This design means channels are transparent — they don't affect normal operation. The agent and tools work exactly the same whether channels are enabled or not.
-
-## Adding New Channels
-
-The channel system is designed for extensibility. To add a new channel:
-
-1. Implement the `channel.Channel` interface in a new package under `internal/`:
-
-```go
-type Channel interface {
-    ID() string
-    State() State
-    Login() (*LoginSession, error)
-    Logout() error
-    Enable() error
-    Disable() error
-    SendText(text string) error
-}
-```
-
-2. Wire it up in `internal/command/interactive.go` and `internal/command/web.go`
-3. Add a case in `handleChannelAction()` for the TUI
-4. Add API routes in `internal/web/channel.go` for the web interface
-
-The shared message functions in `internal/channel/messages.go` (welcome, goodbye, approval, done, busy) work with any channel — they return plain text strings.
+WeChat credentials are stored at `~/.jcode/channel/wechat.json` and created automatically after the first successful login. Delete this file to force a re-login.

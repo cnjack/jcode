@@ -200,6 +200,7 @@ export interface ChatMessage {
   role: MessageRole
   content: string
   timestamp: number
+  source?: string
 }
 
 export interface ToolCall {

@@ -302,16 +302,43 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.running.Store(true)
-
-	// Apply mode prefix if plan mode requested.
-	message := req.Message
 	mode := req.Mode
 	if mode == "" {
 		mode = s.mode
 	}
+
+	s.submitMessage(req.Message, mode, "")
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "processing"})
+}
+
+// SubmitMessage submits a message for agent processing from an external source
+// (e.g. WeChat inbound message). Returns false if the agent is busy.
+func (s *Server) SubmitMessage(message, source string) bool {
+	if s.running.Load() {
+		return false
+	}
+	s.submitMessage(message, s.mode, source)
+	return true
+}
+
+// submitMessage is the shared implementation for starting an agent run.
+// source is an optional label (e.g. "wechat") for the user_message event.
+func (s *Server) submitMessage(message, mode, source string) {
+	s.running.Store(true)
+
+	// Apply mode prefix if plan mode requested.
+	agentMsg := message
 	if mode == "plan" {
-		message = "[PLAN MODE — Read-only. Analyze the codebase and create a plan. Do NOT edit, write, or delete any files.]\n\n" + message
+		agentMsg = "[PLAN MODE — Read-only. Analyze the codebase and create a plan. Do NOT edit, write, or delete any files.]\n\n" + agentMsg
+	}
+
+	// Emit user_message event for external sources (e.g. WeChat) so web clients see it.
+	// Web-originated messages are already added by the frontend's sendMessage().
+	if source != "" {
+		s.handler.Emit("user_message", map[string]string{
+			"content": message,
+			"source":  source,
+		})
 	}
 
 	// Ensure a recorder exists (lazy creation on first message).
@@ -322,18 +349,17 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	// Record user message.
 	if s.recorder != nil {
-		s.recorder.RecordUser(message)
+		s.recorder.RecordUser(agentMsg)
 	}
 
 	s.mu.Lock()
-	s.history = append(s.history, schema.UserMessage(message))
+	s.history = append(s.history, schema.UserMessage(agentMsg))
 	history := make([]adk.Message, len(s.history))
 	copy(history, s.history)
 	agent := s.agent
 	s.mu.Unlock()
 
 	// Stream response via SSE — run agent in background.
-	// Use server context, not request context (which is canceled when the response is sent).
 	runCtx, runCancel := context.WithCancel(s.ctx)
 	s.mu.Lock()
 	s.runCancel = runCancel
@@ -353,8 +379,6 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			s.mu.Unlock()
 		}
 	}()
-
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "processing"})
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {

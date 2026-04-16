@@ -76,9 +76,9 @@ export const useChatStore = defineStore('chat', () => {
   })
 
   // --- Actions ---
-  function addMessage(role: ChatMessage['role'], content: string): string {
+  function addMessage(role: ChatMessage['role'], content: string, source?: string): string {
     const id = genId('msg')
-    const msg: ChatMessage = { id, role, content, timestamp: Date.now() }
+    const msg: ChatMessage = { id, role, content, timestamp: Date.now(), source }
     timeline.value.push({ kind: 'message', data: msg, seq: nextSeqId() })
     return id
   }
