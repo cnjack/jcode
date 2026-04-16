@@ -53,7 +53,6 @@ func (s *Server) handleChannelLogin(w http.ResponseWriter, r *http.Request) {
 			config.Logger().Printf("[wechat] web auto-enable after login failed: %v", err)
 			return
 		}
-		_ = s.wechatClient.SendText(channelpkg.WelcomeMessage(time.Now()))
 	}()
 }
 
@@ -81,7 +80,6 @@ func (s *Server) handleChannelEnable(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	_ = s.wechatClient.SendText(channelpkg.WelcomeMessage(time.Now()))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "state": "enabled"})
 }
 
@@ -90,7 +88,6 @@ func (s *Server) handleChannelDisable(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "channel not available"})
 		return
 	}
-	_ = s.wechatClient.SendText(channelpkg.GoodbyeMessage(time.Now()))
 	if err := s.wechatClient.Disable(); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

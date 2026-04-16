@@ -85,6 +85,10 @@ type Server struct {
 
 	// wechatClient is the optional WeChat channel client.
 	wechatClient channel.Channel
+
+	// eventHandler is the handler passed to the runner — may be a NotifyingHandler
+	// wrapping the WebHandler, or the WebHandler itself.
+	eventHandler handler.AgentEventHandler
 }
 
 // ServerConfig holds the configuration for creating a new Server.
@@ -105,8 +109,9 @@ type ServerConfig struct {
 	Registry      *model.ModelRegistry
 	ApprovalState *runner.ApprovalState
 	SkillLoader   *skills.Loader
-	WechatClient  channel.Channel     // optional WeChat channel
-	WebHandler    *handler.WebHandler // optional: pre-created handler for sharing with tools
+	WechatClient  channel.Channel              // optional WeChat channel
+	WebHandler    *handler.WebHandler          // optional: pre-created handler for sharing with tools
+	EventHandler  handler.AgentEventHandler    // optional: handler for runner (e.g. NotifyingHandler)
 }
 
 // NewServer creates a new web server.
@@ -114,6 +119,10 @@ func NewServer(cfg *ServerConfig) *Server {
 	h := cfg.WebHandler
 	if h == nil {
 		h = handler.NewWebHandler()
+	}
+	var eh handler.AgentEventHandler = h
+	if cfg.EventHandler != nil {
+		eh = cfg.EventHandler
 	}
 	return &Server{
 		port:          cfg.Port,
@@ -139,6 +148,7 @@ func NewServer(cfg *ServerConfig) *Server {
 		skillLoader:   cfg.SkillLoader,
 		disabledMCP:   make(map[string]bool),
 		wechatClient:  cfg.WechatClient,
+		eventHandler:  eh,
 	}
 }
 
@@ -336,7 +346,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			s.runCancel = nil
 			s.mu.Unlock()
 		}()
-		resp := runner.Run(runCtx, agent, history, s.handler, s.recorder, s.todoStore, s.tracer, nil)
+		resp := runner.Run(runCtx, agent, history, s.eventHandler, s.recorder, s.todoStore, s.tracer, nil)
 		if resp != "" {
 			s.mu.Lock()
 			s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: resp})

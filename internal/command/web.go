@@ -108,28 +108,37 @@ func runWebServer(port int, host string) error {
 	// Optionally wrap with notifying handler for WeChat push in web mode.
 	var finalHandler handler.AgentEventHandler = webHandler
 	wechatClient := weixin.NewClient()
-	if cfg.Channel != nil && cfg.Channel.WebEnabled && wechatClient.State() == channel.StateDisabled {
-		if err := wechatClient.Enable(); err != nil {
-			config.Logger().Printf("[wechat] web auto-enable failed: %v", err)
-		} else {
-			config.Logger().Printf("[wechat] web auto-enabled")
-			notifyingH := handler.NewNotifyingHandler(webHandler, 10*time.Second)
-			notifyingH.SetApprovalNotifier(func(toolName, toolArgs string) {
-				if wechatClient.State() == channel.StateEnabled {
-					if err := wechatClient.SendText(channel.ApprovalMessage(toolName, toolArgs, "Please check the web interface")); err != nil {
-						config.Logger().Printf("[wechat] failed to send approval notification: %v", err)
-					}
-				}
-			})
-			notifyingH.SetDoneNotifier(func(summary string, err error) {
-				if wechatClient.State() == channel.StateEnabled {
-					if sendErr := wechatClient.SendText(channel.DoneMessage(summary, err)); sendErr != nil {
-						config.Logger().Printf("[wechat] failed to send done notification: %v", sendErr)
-					}
-				}
-			})
-			finalHandler = notifyingH
+	if cfg.Channel != nil && cfg.Channel.WebEnabled {
+		// Set up inbound message handler — ignore messages in web mode
+		// (the user interacts via the web UI, not WeChat).
+		wechatClient.SetOnMessage(func(from, text string) {
+			config.Logger().Printf("[wechat] ignoring inbound message from %s in web mode", from)
+		})
+		// Auto-enable if credentials exist but channel is disabled.
+		if wechatClient.State() == channel.StateDisabled {
+			if err := wechatClient.Enable(); err != nil {
+				config.Logger().Printf("[wechat] web auto-enable failed: %v", err)
+			} else {
+				config.Logger().Printf("[wechat] web auto-enabled")
+			}
 		}
+		// Always wrap with NotifyingHandler — the callbacks check State() before sending.
+		notifyingH := handler.NewNotifyingHandler(webHandler, 10*time.Second)
+		notifyingH.SetApprovalNotifier(func(toolName, toolArgs string) {
+			if wechatClient.State() == channel.StateEnabled {
+				if err := wechatClient.SendText(channel.ApprovalMessage(toolName, toolArgs, "Please check the web interface")); err != nil {
+					config.Logger().Printf("[wechat] failed to send approval notification: %v", err)
+				}
+			}
+		})
+		notifyingH.SetDoneNotifier(func(summary string, err error) {
+			if wechatClient.State() == channel.StateEnabled {
+				if sendErr := wechatClient.SendText(channel.DoneMessage(summary, err)); sendErr != nil {
+					config.Logger().Printf("[wechat] failed to send done notification: %v", sendErr)
+				}
+			}
+		})
+		finalHandler = notifyingH
 	}
 
 	// Langfuse tracer.
@@ -293,6 +302,7 @@ func runWebServer(port int, host string) error {
 		SkillLoader:   skillLoader,
 		WechatClient:  wechatClient,
 		WebHandler:    webHandler,
+		EventHandler:  finalHandler,
 	})
 
 	// Set handler for approval routing.
