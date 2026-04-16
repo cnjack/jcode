@@ -1,260 +1,160 @@
-# AGENTS.md — Coding Assistant Codebase Guide
+# AGENTS.md — jcode 项目开发指南
 
-## Project Overview
+Go CLI coding assistant — [Eino](https://github.com/cloudwego/eino) + BubbleTea v2 TUI + Vue 3 web UI.
 
-Go CLI coding assistant ("Little Jack") — [Eino](https://github.com/cloudwego/eino) + BubbleTea v2 TUI + Vue 3 web UI.
-
-- **Entry point:** `cmd/jcode/` | **Config:** `~/.jcode/` | **Module:** `github.com/cnjack/jcode`
-- **Build:** `make build` / `make run` / `make install` / `make doctor`
+- **Module:** `github.com/cnjack/jcode` | **Entry:** `cmd/jcode/` | **Config dir:** `~/.jcode/`
 
 ---
 
-## Directory Structure
+## Quick Start
+
+```bash
+make build        # generate → build-web → go build
+make install      # generate → build-web → go install
+make run          # go run ./cmd/jcode/
+make lint         # golangci-lint + eslint/oxlint
+make doctor       # system check
+```
+
+- `make build-web` requires `pnpm`. Frontend builds to `internal/web/dist/`.
+- `make generate` runs `go generate ./internal/model/...` — fetches models.dev data and generates `internal/model/registry_generated.go`. **Do NOT manually edit that file.**
+- Build injects `Version`, `BuildTime`, `GitCommit` via ldflags into `internal/command`.
+
+---
+
+## Architecture Overview
 
 ```
-cmd/jcode/           # main: subcommands (mcp, acp, web), flags, main event loop
+cmd/jcode/           # Entry: subcommands (mcp, acp, web), main event loop
 internal/
-  agent/             # ChatModelAgent factory + middlewares
-  config/            # JSON config loader + logger (→ ~/.jcode/debug.log)
-  handler/           # Event handler interface (TUI/ACP/Web implementations)
-  model/             # OpenAI-compatible chat model + token tracker + model registry (static build-time data)
-  prompts/           # System prompt (system.md) + plan prompt (plan.md) + AGENTS.md injection
-  runner/            # Agent run loop, todo-completion guard, approval state, event bus
-  session/           # JSONL session recording/replay with state reconstruction
-  skills/            # Skill loader + builtin skills (review-pr, pr-comments, security-review)
-  team/              # Multi-agent team (Manager, Mailbox, SpawnConfig)
-  telemetry/         # Langfuse tracing
+  command/           # Subcommand implementations + interactive session orchestration
+  agent/             # ChatModelAgent factory + middleware chain
+  runner/            # Agent run loop + event bus
+  handler/           # AgentEventHandler interface (TUI / ACP / Web implementations)
   tools/             # All built-in tools + Executor/Env abstraction
-  tui/               # BubbleTea v2 TUI
-  util/              # GetWorkDir, GetSystemInfo, CollectEnvInfo
-  web/               # Go HTTP server (REST + SSE + PTY) + Vue frontend dist
-script/              # Build-time code generation scripts
-web/                 # Vue 3 + Vite + TypeScript frontend → builds to internal/web/dist/
+  model/             # OpenAI-compatible chat model + model registry (build-time generated)
+  config/            # JSON config loader + logger
+  prompts/           # System/plan prompts + AGENTS.md injection + env info
+  session/           # JSONL session recording/replay
+  skills/            # Skill loader (builtin → user → project override chain)
+  team/              # Multi-agent team coordination
+  tui/               # BubbleTea v2 TUI components
+  web/               # HTTP server (REST + SSE + PTY) + embedded Vue dist
+web/                 # Vue 3 + Vite + TypeScript frontend source
+script/              # Build-time code generation
 ```
 
----
+### Key Design Decisions
 
-## Entry Point (`cmd/jcode/`)
-
-### Subcommands: `mcp` (add/list), `acp` (headless JSON-RPC), `web` (--port, --host)
-
-### Flags
-`-p`/`-prompt` (one-shot), `-doctor` (system check), `-version`, `-resume <UUID>`, `-session` (list sessions)
-
-### Main Loop
-Channel-based `for/select` on: `autoApproveCh`, `planModeCh`, `configCh`, `promptCh`, `pendingPromptCh`, `resumeCh`, `sshCh`, `compactCh`, `addModelCh`
-
-### Agent Modes
-| Mode | Behavior |
-|---|---|
-| `ModeNormal` (0) | Full tools, standard operation |
-| `ModePlanning` (1) | Read-only exploration, generates plan for approval |
-| `ModeExecuting` (2) | Full tools, executes approved plan step-by-step |
-
-**Plan lifecycle:** planning → generate plan → TUI review → approve/reject → rejected: revise loop → approved: extract todos → transition to executing → auto-transition to normal when todos complete.
+- **Three transports, one interface:** TUI, ACP (JSON-RPC), and Web all implement `AgentEventHandler`. New transports only need to implement this interface.
+- **Middleware chain in `agent/`:** Ordered outermost→innermost: langfuse → budget → compaction → recovery → approval. **Approval is always innermost** — never add middleware after it.
+- **Tools are methods on `*Env`:** Each tool is created via `env.NewXxxTool()`, receives the shared `Env` for file I/O and command execution. This enables transparent local/SSH switching.
+- **Eino framework:** We use [cloudwego/eino](https://github.com/cloudwego/eino) `adk.ChatModelAgent` — not raw LLM calls. Follow Eino's `tool.InvokableTool` + `schema.ToolInfo` patterns.
 
 ---
 
-## Config (`internal/config/`)
+## Conventions (MUST follow)
 
-**File:** `~/.jcode/config.json`
+### Logging & Output
+- **All diagnostics go to `config.Logger()`** (writes to `~/.jcode/debug.log`). Never use `fmt.Print`, `log.Print`, or write to stdout/stderr directly — the TUI owns stdout.
+- Tool execution errors are returned as plain strings (the agent reads them). Do NOT `panic` or `log.Fatal` in tool code.
 
-| Field | Type | Description |
-|---|---|---|
-| `Providers` | `map[string]*ProviderConfig` | `{api_key, base_url, models[]}` |
-| `Model` | `string` | Active model in `"provider/model"` format |
-| `SmallModel` | `string` | For summaries/compaction |
-| `FallbackModel` | `string` | Fallback when primary fails |
-| `MaxIterations` | `int` | Default 1000 |
-| `SSHAliases` | `[]SSHAlias` | `{name, addr, path}` |
-| `MCPServers` | `map[string]*MCPServer` | `{type, command, args[], env[], url, headers}` |
-| `Telemetry` | `*TelemetryConfig` | `{langfuse: {host, public_key, secret_key}}` |
-| `Budget` | `*BudgetConfig` | `{max_tokens_per_turn, max_cost_per_session, warning_threshold}` |
-| `Compaction` | `*CompactionConfig` | `{enabled, threshold, keep_recent, summary_model}` |
-| `Prompt` | `*PromptConfig` | `{compaction, memory_max_chars, memory_max_depth, cache_enabled, async_env_timeout}` |
-| `Subagent` | `*SubagentConfig` | `{max_parallel, max_completed, max_depth}` |
-| `Team` | `*TeamConfig` | `{max_teammates (5), mailbox_poll_ms (500), message_cap (50)}` |
-| `AutoApprove` | `bool` | Auto-approve all tool calls |
-| `DisabledProviders` | `[]string` | Providers to skip |
+### Error Handling
+- Tools return `(string, error)`. Return descriptive error strings that help the agent self-correct. Include file paths, line numbers, or command output in error messages.
+- Use `fmt.Errorf("tool_name: %w", err)` for wrapped errors in non-tool code.
 
-### Key Paths
-`~/.jcode/config.json`, `~/.jcode/debug.log`, `~/.jcode/sessions/{uuid}.jsonl`, `~/.jcode/skills/{name}/SKILL.md`, `~/.jcode/teams/{name}/`
+### File Paths
+- All file paths in tools must be resolved via `env.ResolvePath(path)`. This handles relative→absolute conversion and logs warnings for paths escaping the working directory.
+- Store and pass absolute paths internally. Only accept relative paths at the tool input boundary.
 
----
+### Tool Development Pattern
+1. Define `XxxInput` struct with `json` tags
+2. Create `func (e *Env) NewXxxTool() tool.InvokableTool` on `*Env`
+3. Build `schema.ToolInfo` with `schema.NewParamsOneOfByParams(...)` — use `schema.String`, `schema.Integer`, `schema.Boolean`, `schema.Array`
+4. Register in `buildAllTools()` in `internal/command/interactive.go` (and `acp.go`, `web.go`)
+5. If the tool is read-only, also add to `buildPlanTools()`
+6. **Approval policy:** Read-only tools skip approval. Mutating tools require approval unless `AutoApprove` is set. Match existing patterns in `approval.go`.
 
-## Tools (`internal/tools/`)
+### Approval Policy
+- Read-only tools (read, grep, glob, todoread, etc.): auto-approved
+- Mutating tools (edit, write, execute): require user approval
+- Execute exceptions: background commands and safe prefixes (`ls`, `cat`, `echo`, `which`, `git status`, `git log`, etc.) are auto-approved
+- `switch_env`: always requires approval
 
-All implement `tool.InvokableTool` — JSON in, string out, shared `*Env` (local or SSH).
+### Code Style
+- Follow standard Go conventions. The linter config (`.golangci.yml`) enforces: `errcheck`, `govet`, `staticcheck`, `unused`, `revive`, `gocritic`, `funlen` (max 800 lines/600 statements).
+- Use `context.Context` as the first parameter. Thread cancellation properly.
+- Prefer returning errors over panicking. Only `panic` for truly unrecoverable programmer errors.
+- Interfaces live in the package that consumes them (e.g., `AgentEventHandler` in `handler/`, `Executor` in `tools/`).
 
-### Tool Inventory
-
-| Tool | Approval | Key Params |
-|---|---|---|
-| `read` | Auto within workpath; approval for external | `file_path, offset, limit` |
-| `edit` | **Required** | `file_path, old_string, new_string, start_line, end_line` |
-| `write` | **Required** | `file_path, content` |
-| `execute` | Auto for background + safe prefixes; else **required** | `command, background, timeout` |
-| `grep` | Auto | `pattern, path, file_type, include, case_insensitive, max_results, context` |
-| `glob` | Auto | `pattern, path, max_depth, limit (100 default, 500 max)` |
-| `todowrite` | Auto | `{id, title, status: pending/in_progress/completed/cancelled}` |
-| `todoread` | Auto | (no params) |
-| `subagent` | Auto | `name, description, prompt, agent_type (explore/general/coordinator), model, run_in_background` |
-| `check_background` | Auto | `task_id` (omit to list all) |
-| `ask_user` | Auto | `question, header, options[]` (supports batch) |
-| `switch_env` | **Required** (only loaded if SSH configured) | `target` ("local" or SSH alias) |
-| `load_skill` | Auto | `name` |
-| `team_create` | Auto | `team_name, description` |
-| `team_spawn` | Auto | `name, prompt, agent_type, model, cwd, mode` |
-| `team_send_message` | Auto | `to, message, summary` (`"*"` = broadcast) |
-| `team_list` | Auto | (no params) |
-| `team_delete` | Auto | `force` |
-| MCP tools | Per-tool | Loaded dynamically from config |
-
-### Safe Execute Prefixes (auto-approved)
-`ls`, `pwd`, `env`, `cat`, `echo`, `which`, `git status`, `git log`
-
-### Executor / Env (`env.go`)
-- `Executor` interface: `ReadFile`, `WriteFile`, `MkdirAll`, `Stat`, `Exec`, `Platform`, `Label`
-- `LocalExecutor` / `SSHExecutor` (via `golang.org/x/crypto/ssh`)
-- `MaxSubagentDepth = 3`
-
-### Subagent System
-- Types: `explore` (read-only), `general` (full tools), `coordinator` (can spawn sub-subagents)
-- `subagentMaxIter = 50`, sync and async modes
-
-### Plan Store (`plan_store.go`)
-State machine: `draft → submitted → approved/rejected`. `plan_parse.go`: `ExtractTodosFromPlan()` parses `1. ` steps and `- [ ]` checkboxes from markdown.
+### Concurrency
+- `AgentEventHandler` implementations must be goroutine-safe — the runner may call methods from multiple goroutines simultaneously.
+- Use `sync.RWMutex` for shared state in tools (see `TodoStore`, `BackgroundManager`).
+- Channel-based coordination in `cmd/jcode/main.go` — the main event loop uses `for/select` over typed channels.
 
 ---
 
-## Agent (`internal/agent/`)
+## How To: Common Tasks
 
-### Iteration Caps
-Top-level: 1000 | Teammates: 200 | Subagents: 50
+### Add a New Tool
+1. Create `internal/tools/xxx.go` with input struct + `NewXxxTool()` method on `*Env`
+2. Add to `buildAllTools()` in `interactive.go`, `acp.go`, and `web.go`
+3. If read-only and useful in plan mode, also add to `buildPlanTools()`
+4. Set appropriate approval requirements following the approval policy above
+5. If the tool needs external dependencies (like `BackgroundManager`), pass them as parameters to `NewXxxTool()`
 
-### Middleware Stack (outermost → innermost)
-1. **Langfuse tracer** (optional)
-2. **budgetMiddleware** (optional) — token tracking, budget warnings
-3. **compactionMiddleware** (optional) — `ThresholdCompactionStrategy`
-4. **recoveryMiddleware** (optional) — `MaxOutputContinuationLayer` + `ContextOverflowLayer`
-5. **approvalMiddleware** — **always innermost**, gates tool calls
+### Add a New Middleware
+1. Implement `adk.ChatModelAgentMiddleware` in `internal/agent/`
+2. Add a functional option `WithXxx()` following the `WithCompaction`, `WithBudget`, `WithRecovery` pattern
+3. Wire it up in `internal/command/interactive.go` where the agent is constructed
+4. **Insert before approval** in the middleware chain — approval must remain innermost
 
-### Recovery Layers
-- `MaxOutputContinuationLayer` — `max_tokens`/`length`/`truncated` (3 retries)
-- `ContextOverflowLayer` — `context_length_exceeded`/`too many tokens` (2 retries, keep recent 10)
+### Add a New Handler (Transport)
+1. Implement `handler.AgentEventHandler` interface in `internal/handler/`
+2. Create a new subcommand in `internal/command/` if needed
+3. The interface is the only contract — keep handler logic independent of agent internals
 
-### Reminder Conditions (`reminders.go`)
-`plan_execution` (approved plan exists), `todo_check` (incomplete todos after iter 5), `token_warning` (>60%), `token_critical` (>85%), `tool_error_streak` (2+ failures)
+### Add a Builtin Skill
+1. Create `internal/skills/builtin/{name}/SKILL.md` with frontmatter (`name`, `description`, optional `slash`)
+2. It will be automatically embedded via `//go:embed builtin` and loaded by `skills.Loader`
+3. Skill override chain (later wins): builtin → `~/.agents/skills/` → `~/.jcode/skills/` → `.jcode/skills/`
 
-### Model Retry
-`ModelRetryConfig{MaxRetries: 5, SmartBackoff with jitter}`
+### Modify Config Schema
+1. Add fields to the appropriate struct in `internal/config/config.go`
+2. Use `json:"field_name,omitempty"` tags for optional fields
+3. Config is a flat JSON file at `~/.jcode/config.json` — keep it backward-compatible
 
----
-
-## Handler (`internal/handler/`)
-
-`AgentEventHandler` interface: `OnAgentText`, `OnToolCall`, `OnToolResult`, `OnTodoUpdate`, `OnAgentDone`, `OnTokenUpdate`, `RequestApproval`
-
-| Handler | Transport |
-|---|---|
-| **TUIHandler** | BubbleTea messages |
-| **ACPHandler** | ACP JSON-RPC |
-| **WebHandler** | SSE + REST API |
-
-Approval modes: `ModeManual` (default), `ModeAuto`.
+### Modify Model Registry
+- `internal/model/registry_generated.go` is **auto-generated** — edit `script/generate_models.go` instead
+- Run `make generate` to regenerate
 
 ---
 
-## Runner (`internal/runner/`)
+## Things to Avoid
 
-`Run(ctx, ag, messages, h, rec, todoStore, tracer)` — streams agent events → handler. **Todo completion guard**: re-runs up to 3 times if incomplete todos remain.
-
-### EventBus (`eventbus.go`)
-`EventAssistantText`, `EventAssistantDone`, `EventToolCall`, `EventToolResult`, `EventError`, `EventBudgetWarning`, `EventCompaction`, `EventWorkerStatus`
-
----
-
-## Session (`internal/session/`)
-
-JSONL at `~/.jcode/sessions/{uuid}.jsonl`. Teammate recordings at `~/.jcode/sessions/{leaderUUID}/subagents/agent-{agentID}.jsonl`.
-
-13 entry types: `session_start`, `user`, `assistant`, `tool_call`, `tool_result`, `plan_update`, `todo_snapshot`, `subagent_start`, `subagent_result`, `subagent_async`, `mode_change`, `compact`, `budget_warning`.
-
-`ReconstructState()` rebuilds full state. Compact-aware: discards history before compact entries.
+- **Don't write to stdout/stderr.** The TUI controls the terminal. Use `config.Logger()` for debug output.
+- **Don't add middleware after approval.** The approval middleware must be the innermost handler in the chain.
+- **Don't manually edit `registry_generated.go`.** It's overwritten by `make generate`.
+- **Don't use `os.Exit()` in library code.** Only `cmd/jcode/main.go` should exit.
+- **Don't store mutable state in tool closures.** Use `*Env` or pass state explicitly. Tools may be re-created across mode transitions (normal ↔ plan).
+- **Don't skip `env.ResolvePath()`.** Raw path concatenation can escape the working directory without warning.
+- **Don't import `internal/tui` from non-TUI packages.** The handler interface is the decoupling boundary.
 
 ---
 
-## Prompts (`internal/prompts/`)
+## Testing
 
-- **System prompt** (`system.md`): vars `Pwd`, `Platform`, `Date`, `EnvLabel`, `SSHAliases`, `GitBranch`, `GitDirty`, `LastCommit`, `ProjectType`, `DirTree`, `SkillDescriptions`
-- **Plan prompt** (`plan.md`): restricted to read, grep, execute (read-only), todowrite, todoread, ask_user
-- **AGENTS.md injection**: `MemoryLoader` loads `AGENTS.md` recursively from project dir. Max 40K chars, depth 5.
-- **PromptBuilder**: parallel env-info + AGENTS.md loading, block caching
-
----
-
-## Skills (`internal/skills/`)
-
-Sources (later overrides earlier): **Builtin** (`//go:embed builtin`) → **Agents** (`~/.agents/skills/{name}/SKILL.md`) → **User** (`~/.jcode/skills/{name}/SKILL.md`) → **Project** (`.jcode/skills/{name}/SKILL.md`)
-
-Two-layer: descriptions in system prompt → full content on-demand via `load_skill`.
-
-Builtin: `review-pr` (`/review-pr`), `pr-comments` (`/pr-comments`), `security-review` (`/security-review`)
+- Run tests: `go test ./...`
+- Test files follow `xxx_test.go` convention in the same package
+- For tool tests, use `NewEnv()` with a temp directory to isolate file operations
+- Lint is mandatory: `make lint` must pass before any PR
 
 ---
 
-## Team (`internal/team/`)
+## Frontend (web/)
 
-- **Manager** coordinates team, **Mailbox** for file-based message passing
-- Teammate lifecycle: `pending → idle → running → idle (loop) → completed/failed/killed`
-- Constants: `maxTeammateMessages=50`, `mailboxPollInterval=500ms`, `teammateMaxIter=200`
-- Lead: `TeamLeadName="team-lead"`, Agent ID: `"{name}@{team}"`
-
----
-
-## Model (`internal/model/`)
-
-- **ChatModel**: wraps `go-openai`, implements `ToolCallingChatModel` (Generate, Stream, WithTools)
-- **ModelRegistry**: static model metadata generated at build time from models.dev via `go generate`
-- **Retry**: error types `Transient`, `RateLimit`, `ContextOverflow`, `Auth`, `Fatal`
-
-Build-time code generation: `script/generate_models.go` fetches models.dev API and generates `internal/model/registry_generated.go`. Run via `go generate ./internal/model/...` (automatically invoked by `make build` and `make install`).
-
----
-
-## Conventions
-
-- **Lint Compliance:** All code changes MUST pass linter checks. Run `make lint` before finishing.
-- **Diagnostics** → `config.Logger()` (never stdout/stderr)
-- **Tool errors** → returned as strings (agent-visible, not panics)
-- **File paths** → absolute or relative to `Env.Pwd`
-- **Tool params** → `schema.ParamsOneOf` with Type/Desc/Required
-- **Approval** → read-only tools skip; mutating tools prompt user; `AutoApprove` bypasses all
-
----
-
-## Code Quality & Linting
-
-### Lint Tools
-- **Go:** `golangci-lint` (config: `.golangci.yml`)
-- **Web:** `eslint` + `oxlint` (config: `web/package.json`)
-
-### Agent Workflow
-- **Mandatory Check:** Before completing a coding task, run `make lint`. Fix any reported issues.
-
----
-
-## Build
-
-| Target | Description |
-|---|---|
-| `make generate` | Generate code (models registry) via go:generate |
-| `make build-web` | `pnpm install && vite build` in `web/` |
-| `make build` | `generate` → `build-web` → `go build -o jcode ./cmd/jcode/` |
-| `make install` | `generate` → `build-web` → `go install ./cmd/jcode/` |
-| `make run` | `go run ./cmd/jcode/` |
-| `make doctor` | `go run ./cmd/jcode/ --doctor` |
-| `make lint` | Run Go and Web linters |
-| `make clean` | Remove binary + `internal/web/dist` |
-
-Build ldflags: `Version`, `BuildTime`, `GitCommit`.
+- **Stack:** Vue 3 + TypeScript + Vite
+- **Build:** `cd web && pnpm install && npx vite build` (or `make build-web`)
+- **Output:** builds to `internal/web/dist/`, embedded in Go binary via `//go:embed`
+- **Lint:** `cd web && pnpm lint` (eslint + oxlint)
+- Changes to the frontend require rebuilding via `make build-web` for the Go binary to pick them up
