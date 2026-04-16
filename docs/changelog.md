@@ -11,6 +11,32 @@ For the **full changelog**, see [CHANGELOG.md](../CHANGELOG.md) in the repositor
 
 ## Latest Release
 
+### [Unreleased]
+
+**WeChat Channel Integration • Tool Call Enhancements • Bug Fixes**
+
+#### Added
+- Bidirectional WeChat messaging: send prompts from WeChat, receive results back
+- Inbound WeChat messages displayed in web UI with green "WeChat" label
+- Toolbar toggle for quick WeChat enable/disable
+- Settings dialog Channels tab with Connect/Disconnect and QR code login
+- Approval and task-done notifications pushed to WeChat
+- `toolCallID` for precise tool call/result matching
+
+#### Changed
+- Execute tool reports exit codes correctly instead of returning errors
+- NotifyingHandler always registered in web mode (UI toggle works without config)
+- DOMPurify bumped to 3.4.0
+
+#### Fixed
+- Web UI showing user messages twice
+- WeChat inbound messages not reaching agent in web mode
+- Done/approval notifications not firing in web mode
+- Approval notification race with 10s timer
+- Exit code not reported on command failure
+
+---
+
 ### [0.0.4] - 2026-04-16
 
 **TUI Session Display Enhancements • Langfuse Integration Improvements • Session Recording Enhancements**
