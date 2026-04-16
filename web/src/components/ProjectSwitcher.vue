@@ -47,7 +47,7 @@ async function loadFolders(path?: string) {
     browsePath.value = result.current
     pathInput.value = result.current
     browseFolders.value = result.folders
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('Browse failed:', err)
     browseFolders.value = []
   } finally {

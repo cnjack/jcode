@@ -54,9 +54,14 @@ func (m *approvalMiddleware) WrapInvokableToolCall(
 			}
 		}
 
-		// Safe execution: convert errors to agent-visible strings
+		// Safe execution: convert errors to agent-visible strings.
+		// Preserve any partial output (e.g. stdout/stderr from a command that
+		// exited with a non-zero status) so the agent can see the details.
 		result, err := endpoint(ctx, argumentsInJSON, opts...)
 		if err != nil {
+			if result != "" {
+				return fmt.Sprintf("%s\n\nTool execution failed: %v", result, err), nil
+			}
 			return fmt.Sprintf("Tool execution failed: %v", err), nil
 		}
 		return result, nil

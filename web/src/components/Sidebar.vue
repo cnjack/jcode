@@ -1,12 +1,11 @@
+<!-- eslint-disable vue/multi-word-component-names -->
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { useChatStore } from '@/stores/chat'
-import { useProjectStore } from '@/stores/project'
 import { api } from '@/composables/api'
 import type { FileItem } from '@/types/api'
 
 const store = useChatStore()
-const projectStore = useProjectStore()
 
 const activeTab = ref<'sessions' | 'files'>('sessions')
 const files = ref<FileItem[]>([])

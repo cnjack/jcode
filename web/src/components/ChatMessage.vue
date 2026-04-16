@@ -2,7 +2,7 @@
 import { renderMarkdown } from '@/composables/markdown'
 import type { ChatMessage } from '@/types/api'
 
-const props = defineProps<{
+defineProps<{
   message: ChatMessage
 }>()
 </script>
