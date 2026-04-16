@@ -71,8 +71,8 @@ export const useProjectStore = defineStore('project', () => {
       await api.switchProject(project.path)
       setActive(id)
       return true
-    } catch (err: any) {
-      switchError.value = err.message || 'Failed to switch project'
+    } catch (err: unknown) {
+      switchError.value = err instanceof Error ? err.message : 'Failed to switch project'
       return false
     } finally {
       switching.value = false

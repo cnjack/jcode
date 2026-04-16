@@ -43,7 +43,7 @@ export function useSSE(handlers: SSEHandler) {
       retryTimer = setTimeout(connect, 3000)
     }
 
-    const events: [string, (data: any) => void][] = [
+    const events: [string, (data: Record<string, unknown>) => void][] = [
       ['agent_text', (d) => handlers.onAgentText?.(d)],
       ['tool_call', (d) => handlers.onToolCall?.(d)],
       ['tool_result', (d) => handlers.onToolResult?.(d)],

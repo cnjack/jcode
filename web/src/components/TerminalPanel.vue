@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -76,8 +76,9 @@ async function initTerminal() {
     const result = await api.ptyCreate()
     sessionId.value = result.id
     connectWS(result.id)
-  } catch (err: any) {
-    term.writeln(`\r\n\x1b[31mFailed to create terminal: ${err.message}\x1b[0m`)
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    term.writeln(`\r\n\x1b[31mFailed to create terminal: ${message}\x1b[0m`)
   }
 }
 

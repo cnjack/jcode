@@ -2,7 +2,7 @@
 import type { PendingApproval } from '@/types/api'
 import { useChatStore } from '@/stores/chat'
 
-const props = defineProps<{
+defineProps<{
   approval: PendingApproval
 }>()
 
