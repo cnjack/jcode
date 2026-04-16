@@ -21,6 +21,7 @@ type SSEHandler = {
   onModelChanged?: (data: { provider: string; model: string }) => void
   onModeChanged?: (data: { mode: string }) => void
   onApprovalModeChanged?: (data: { auto_approve: boolean }) => void
+  onUserMessage?: (data: { content: string; source: string }) => void
 }
 
 export function useSSE(handlers: SSEHandler) {
@@ -55,6 +56,7 @@ export function useSSE(handlers: SSEHandler) {
       ['model_changed', (d) => handlers.onModelChanged?.(d)],
       ['mode_changed', (d) => handlers.onModeChanged?.(d)],
       ['approval_mode_changed', (d) => handlers.onApprovalModeChanged?.(d)],
+      ['user_message', (d) => handlers.onUserMessage?.(d)],
     ]
 
     for (const [event, handler] of events) {

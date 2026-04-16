@@ -252,6 +252,23 @@ watch(() => store.isRunning, (running) => {
               </svg>
               Auto
             </button>
+
+            <!-- Channel toggle -->
+            <button
+              v-if="store.channelAvailable"
+              class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-md transition-colors cursor-pointer"
+              :class="store.channelEnabled
+                ? 'bg-teal-100 text-teal-600 hover:bg-teal-200'
+                : 'bg-stone-100 text-stone-400 hover:text-stone-600 hover:bg-stone-200'"
+              :title="store.channelEnabled ? 'WeChat notifications ON' : 'WeChat notifications OFF'"
+              @click="store.toggleChannel(!store.channelEnabled)"
+            >
+              <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M2 5a2 2 0 012-2h7a2 2 0 012 2v4a2 2 0 01-2 2H9l-3 3v-3H4a2 2 0 01-2-2V5z" />
+                <path d="M15 7v2a4 4 0 01-4 4H9.828l-1.766 1.767A2 2 0 0011 16h2l3 3v-3h1a2 2 0 002-2V9a2 2 0 00-2-2h-2z" />
+              </svg>
+              WeChat
+            </button>
           </div>
 
           <div class="flex items-center gap-2">

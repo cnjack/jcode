@@ -25,6 +25,7 @@ type WSHandler = {
   onApprovalModeChanged?: (data: { auto_approve: boolean }) => void
   onSubagentEvent?: (data: SubagentEventData) => void
   onSubagentProgress?: (data: SubagentProgressData) => void
+  onUserMessage?: (data: { content: string; source: string }) => void
 }
 
 interface WSMessage {
@@ -53,6 +54,7 @@ export function useWebSocket(handlers: WSHandler) {
     approval_mode_changed: (d) => handlers.onApprovalModeChanged?.(d),
     subagent_event: (d) => handlers.onSubagentEvent?.(d),
     subagent_progress: (d) => handlers.onSubagentProgress?.(d),
+    user_message: (d) => handlers.onUserMessage?.(d),
     pong: () => {}, // heartbeat response, no-op
   }
 

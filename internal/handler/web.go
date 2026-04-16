@@ -102,6 +102,11 @@ func (h *WebHandler) emit(event string, data any) {
 	}
 }
 
+// Emit sends a custom event to all connected web clients.
+func (h *WebHandler) Emit(event string, data any) {
+	h.emit(event, data)
+}
+
 // --- Output events ---
 
 func (h *WebHandler) OnAgentText(text string) {

@@ -51,6 +51,10 @@ const { connected } = useWebSocket({
   onSubagentProgress: (data) => {
     store.addSubagentProgress(data.agent_name, data.event, data.tool_name, data.detail)
   },
+  onUserMessage: (data) => {
+    store.addMessage('user', data.content, data.source || undefined)
+    store.isRunning = true
+  },
 })
 
 watch(connected, (val) => { store.wsConnected = val })
@@ -104,6 +108,7 @@ onMounted(async () => {
   store.fetchModels()
   store.fetchSessions()
   store.fetchApprovalMode()
+  store.fetchChannelState()
   if (store.pwd) {
     projectStore.ensureCurrentProject(store.pwd)
   }
