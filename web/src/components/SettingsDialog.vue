@@ -116,30 +116,10 @@ async function channelLogout() {
     await api.channelLogout()
     channelState.value = 'none'
     channelQRContent.value = ''
+    // Sync store state
+    store.channelEnabled = false
   } catch (err) {
     console.error('Channel logout failed:', err)
-  }
-  channelLoading.value = false
-}
-
-async function channelDisable() {
-  channelLoading.value = true
-  try {
-    await api.channelDisable()
-    channelState.value = 'disabled'
-  } catch (err) {
-    console.error('Channel disable failed:', err)
-  }
-  channelLoading.value = false
-}
-
-async function channelEnable() {
-  channelLoading.value = true
-  try {
-    await api.channelEnable()
-    channelState.value = 'enabled'
-  } catch (err) {
-    console.error('Channel enable failed:', err)
   }
   channelLoading.value = false
 }
@@ -151,6 +131,9 @@ function pollChannelState() {
       if (ch.state === 'enabled' || ch.state === 'disabled') {
         channelState.value = ch.state
         channelQRContent.value = ''
+        // Sync store so toolbar toggle reflects the new state
+        store.channelAvailable = true
+        store.channelEnabled = ch.state === 'enabled'
         clearInterval(interval)
       }
     } catch { /* ignore */ }
@@ -409,25 +392,9 @@ const tabLabel: Record<string, string> = {
                           {{ channelLoading ? 'Loading...' : 'Connect' }}
                         </button>
                         <button
-                          v-if="channelState === 'disabled'"
-                          :disabled="channelLoading"
-                          class="flex-1 px-3 py-1.5 text-xs rounded-md bg-teal-500 text-white hover:bg-teal-600 disabled:opacity-50 cursor-pointer transition-colors"
-                          @click="channelEnable"
-                        >
-                          Enable
-                        </button>
-                        <button
-                          v-if="channelState === 'enabled'"
-                          :disabled="channelLoading"
-                          class="flex-1 px-3 py-1.5 text-xs rounded-md bg-stone-100 text-stone-600 hover:bg-stone-200 disabled:opacity-50 cursor-pointer transition-colors"
-                          @click="channelDisable"
-                        >
-                          Disable
-                        </button>
-                        <button
                           v-if="channelState === 'enabled' || channelState === 'disabled'"
                           :disabled="channelLoading"
-                          class="px-3 py-1.5 text-xs rounded-md text-red-500 hover:bg-red-50 disabled:opacity-50 cursor-pointer transition-colors"
+                          class="flex-1 px-3 py-1.5 text-xs rounded-md text-red-500 hover:bg-red-50 disabled:opacity-50 cursor-pointer transition-colors"
                           @click="channelLogout"
                         >
                           Disconnect

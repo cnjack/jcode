@@ -48,6 +48,10 @@ export const useChatStore = defineStore('chat', () => {
   // Approval mode
   const autoApprove = ref(false)
 
+  // Channel state
+  const channelAvailable = ref(false)
+  const channelEnabled = ref(false)
+
   // Current streaming text accumulator
   let streamingText = ''
   let streamingMsgId = ''
@@ -339,6 +343,30 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  async function fetchChannelState() {
+    try {
+      const data = await api.channelStatus()
+      channelAvailable.value = data.available
+      channelEnabled.value = data.state === 'enabled'
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function toggleChannel(enabled: boolean) {
+    try {
+      if (enabled) {
+        await api.channelEnable()
+        channelEnabled.value = true
+      } else {
+        await api.channelDisable()
+        channelEnabled.value = false
+      }
+    } catch (err: unknown) {
+      console.error('Failed to toggle channel:', err)
+    }
+  }
+
   async function loadSession(uuid: string) {
     try {
       const entries = await api.session(uuid)
@@ -405,6 +433,8 @@ export const useChatStore = defineStore('chat', () => {
     modelName,
     providers,
     autoApprove,
+    channelAvailable,
+    channelEnabled,
     // Getters
     messages,
     hasMessages,
@@ -436,5 +466,7 @@ export const useChatStore = defineStore('chat', () => {
     loadSession,
     fetchApprovalMode,
     setAutoApprove,
+    fetchChannelState,
+    toggleChannel,
   }
 })

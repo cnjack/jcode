@@ -104,6 +104,7 @@ onMounted(async () => {
   store.fetchModels()
   store.fetchSessions()
   store.fetchApprovalMode()
+  store.fetchChannelState()
   if (store.pwd) {
     projectStore.ensureCurrentProject(store.pwd)
   }
