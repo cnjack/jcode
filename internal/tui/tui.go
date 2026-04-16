@@ -74,6 +74,11 @@ type Model struct {
 	sessionPicker  list.Model
 	pickingSession bool
 
+	// Channel panel state
+	channelMenu    list.Model
+	showingChannel bool
+	channelStates  map[string]string // channelID → state ("none", "disabled", "enabled")
+
 	agentsMdFound bool
 
 	pwd string
@@ -218,6 +223,17 @@ func (i sshAliasItem) Title() string       { return i.title }
 func (i sshAliasItem) Description() string { return i.desc }
 func (i sshAliasItem) FilterValue() string { return i.title }
 
+// channelItem for the channel management picker
+type channelItem struct {
+	title string
+	desc  string
+	key   string // channel ID (e.g. "wechat")
+}
+
+func (i channelItem) Title() string       { return i.title }
+func (i channelItem) Description() string { return i.desc }
+func (i channelItem) FilterValue() string { return i.title }
+
 func newTextarea() textarea.Model {
 	ta := textarea.New()
 	ta.Placeholder = "Type your prompt here..."
@@ -296,6 +312,13 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 	sesl.Title = "Sessions"
 	sesl.SetShowHelp(false)
 
+	// Channel menu list
+	channelDel := list.NewDefaultDelegate()
+	channelDel.SetSpacing(0)
+	chl := list.New([]list.Item{}, channelDel, 0, 0)
+	chl.Title = "Channels"
+	chl.SetShowHelp(false)
+
 	m := Model{
 		mode:           mode,
 		spinner:        s,
@@ -309,6 +332,8 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 		settingMenu:    sl,
 		sshAliasPicker: sal,
 		sessionPicker:  sesl,
+		channelMenu:    chl,
+		channelStates:  make(map[string]string),
 		pwd:            pwd,
 		history:        loadHistory(),
 		todoStore:      todoStore,
@@ -788,6 +813,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			return m, tea.Batch(cmds...)
 		}
 
+		// Channel panel handling
+		if m.showingChannel {
+			return m.handleChannelKeyPress(msg, cmds)
+		}
+
 		// SSH alias picker handling
 		if m.pickingSSHAlias {
 			switch msg.String() {
@@ -1035,6 +1065,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 					if prompt == "/compact" {
 						return m.handleCompactInput(cmds)
+					}
+
+					if prompt == "/channel" {
+						return m.handleChannelInput(cmds)
 					}
 
 					// Check skill slash commands (e.g. /review-pr, /security-review)
@@ -1286,6 +1320,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 	case MCPStatusMsg:
 		m.mcpStatuses = msg.Statuses
 		m.refreshViewport()
+
+	case ChannelStateMsg:
+		m.channelStates[msg.ChannelID] = msg.State
+		if msg.Message != "" {
+			m.lines = append(m.lines, toolLabelStyle.Render("📡 Channel:")+" "+msg.Message)
+			m.refreshViewport()
+		}
+
+	case ChannelQRCodeMsg:
+		m.lines = append(m.lines, toolLabelStyle.Render("📡 "+msg.Message))
+		if msg.QRCodeContent != "" {
+			qrLines := renderQRCode(msg.QRCodeContent)
+			for _, line := range qrLines {
+				m.lines = append(m.lines, line)
+			}
+		}
+		m.refreshViewport()
+
+	case ChannelInboundMsg:
+		m.lines = append(m.lines, lipgloss.NewStyle().Foreground(colorSecondary).
+			Render(fmt.Sprintf("📱 [WeChat] %s", msg.Text)))
+		m.refreshViewport()
+		// Queue the inbound message as a pending prompt
+		select {
+		case pendingPromptCh <- msg.Text:
+		default:
+		}
 
 	case TodoUpdateMsg:
 		m.refreshViewport()
@@ -1872,6 +1933,10 @@ func (m Model) newView(content string) tea.View {
 func (m Model) View() tea.View {
 	if m.showingSetting {
 		return m.newView(m.settingMenuView())
+	}
+
+	if m.showingChannel {
+		return m.newView(m.channelPanelView())
 	}
 
 	if m.pickingSSHAlias {

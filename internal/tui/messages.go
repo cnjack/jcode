@@ -329,3 +329,41 @@ type SkillSlashInfo struct {
 	Slash       string
 	Description string
 }
+
+// --- Channel (WeChat etc.) messages ---
+
+// ChannelAction represents an action the user wants to perform on a channel.
+type ChannelAction struct {
+	ChannelID string // "wechat"
+	Action    string // "login", "logout", "enable", "disable"
+}
+
+// channelActionCh carries channel actions from TUI to the main goroutine.
+var channelActionCh = make(chan ChannelAction, 1)
+
+// GetChannelActionChannel returns the channel for channel action events.
+func GetChannelActionChannel() <-chan ChannelAction {
+	return channelActionCh
+}
+
+// ChannelStateMsg is sent from the main goroutine to update channel state display in TUI.
+type ChannelStateMsg struct {
+	ChannelID string // "wechat"
+	State     string // "none", "disabled", "enabled"
+	Message   string // status message (e.g. "已连接", "扫码中...")
+}
+
+// ChannelQRCodeMsg is sent when a QR code is available for scanning.
+type ChannelQRCodeMsg struct {
+	ChannelID     string
+	QRCodeURL     string // image data or URL
+	QRCodeContent string // raw content to encode as terminal QR
+	Message       string
+}
+
+// ChannelInboundMsg is sent when an inbound message arrives from a channel.
+type ChannelInboundMsg struct {
+	ChannelID string
+	From      string
+	Text      string
+}

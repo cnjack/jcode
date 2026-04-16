@@ -20,6 +20,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/gorilla/websocket"
 
+	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/model"
@@ -81,6 +82,9 @@ type Server struct {
 
 	// disabledMCP tracks MCP servers that have been disabled via the UI.
 	disabledMCP map[string]bool
+
+	// wechatClient is the optional WeChat channel client.
+	wechatClient channel.Channel
 }
 
 // ServerConfig holds the configuration for creating a new Server.
@@ -101,6 +105,7 @@ type ServerConfig struct {
 	Registry      *model.ModelRegistry
 	ApprovalState *runner.ApprovalState
 	SkillLoader   *skills.Loader
+	WechatClient  channel.Channel     // optional WeChat channel
 	WebHandler    *handler.WebHandler // optional: pre-created handler for sharing with tools
 }
 
@@ -133,6 +138,7 @@ func NewServer(cfg *ServerConfig) *Server {
 		approvalState: cfg.ApprovalState,
 		skillLoader:   cfg.SkillLoader,
 		disabledMCP:   make(map[string]bool),
+		wechatClient:  cfg.WechatClient,
 	}
 }
 
@@ -179,6 +185,11 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/pty/{id}/ws", s.handlePTYWebSocket)
 	mux.HandleFunc("GET /api/approval/mode", s.handleGetApprovalMode)
 	mux.HandleFunc("POST /api/approval/mode", s.handleSetApprovalMode)
+	mux.HandleFunc("GET /api/channel", s.handleChannelStatus)
+	mux.HandleFunc("POST /api/channel/login", s.handleChannelLogin)
+	mux.HandleFunc("POST /api/channel/logout", s.handleChannelLogout)
+	mux.HandleFunc("POST /api/channel/enable", s.handleChannelEnable)
+	mux.HandleFunc("POST /api/channel/disable", s.handleChannelDisable)
 
 	// Serve embedded frontend (SPA with fallback to index.html)
 	mux.Handle("GET /", newSPAHandler())
