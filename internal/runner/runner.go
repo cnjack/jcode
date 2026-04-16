@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/cloudwego/eino/adk"
@@ -203,8 +204,14 @@ func runInner(
 					h.OnAgentText(chunk.Content)
 				}
 			}
-			// Notify and record accumulated tool calls.
-			for _, p := range pending {
+			// Notify and record accumulated tool calls in index order.
+			indices := make([]int, 0, len(pending))
+			for idx := range pending {
+				indices = append(indices, idx)
+			}
+			sort.Ints(indices)
+			for _, idx := range indices {
+				p := pending[idx]
 				h.OnToolCall(p.name, p.args.String(), p.id)
 				if rec != nil {
 					rec.RecordToolCall(p.name, p.args.String(), p.id)
