@@ -109,9 +109,9 @@ type ServerConfig struct {
 	Registry      *model.ModelRegistry
 	ApprovalState *runner.ApprovalState
 	SkillLoader   *skills.Loader
-	WechatClient  channel.Channel              // optional WeChat channel
-	WebHandler    *handler.WebHandler          // optional: pre-created handler for sharing with tools
-	EventHandler  handler.AgentEventHandler    // optional: handler for runner (e.g. NotifyingHandler)
+	WechatClient  channel.Channel           // optional WeChat channel
+	WebHandler    *handler.WebHandler       // optional: pre-created handler for sharing with tools
+	EventHandler  handler.AgentEventHandler // optional: handler for runner (e.g. NotifyingHandler)
 }
 
 // NewServer creates a new web server.
