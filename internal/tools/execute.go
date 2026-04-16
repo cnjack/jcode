@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -133,7 +134,11 @@ func (et *executeTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 		if result.Len() > 0 {
 			result.WriteString("\n")
 		}
-		result.WriteString("[Exit code: non-zero]\n")
+		exitCode := -1
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		}
+		fmt.Fprintf(&result, "[Exit code: %d]\n", exitCode)
 		fmt.Fprintf(&result, "[Completed in %.1fs]", elapsed.Seconds())
 		if elapsed > bgHintThreshold {
 			fmt.Fprintf(&result,
