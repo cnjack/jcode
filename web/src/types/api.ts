@@ -27,8 +27,37 @@ export interface SessionItem {
 
 export interface SessionEntry {
   type: string
+  uuid?: string
+  project?: string
+  provider?: string
+  model?: string
   content?: string
   name?: string
+  args?: string
+  output?: string
+  error?: string
+  tool_call_id?: string
+  timestamp?: string
+
+  // plan_update fields
+  plan_status?: string
+  plan_title?: string
+  plan_content?: string
+  feedback?: string
+
+  // todo_snapshot fields
+  todos?: { id: number; title: string; status: string }[]
+
+  // subagent fields
+  subagent_name?: string
+  subagent_type?: string
+
+  // mode_change field
+  mode?: string
+
+  // compact fields
+  summary?: string
+  compacted_n?: number
 }
 
 export interface ConfigResponse {
@@ -133,12 +162,14 @@ export interface AgentTextData {
 export interface ToolCallData {
   name: string
   args: string
+  tool_call_id?: string
 }
 
 export interface ToolResultData {
   name: string
   output: string
   error?: string
+  tool_call_id?: string
 }
 
 export interface TokenUpdateData {
@@ -173,6 +204,7 @@ export interface ChatMessage {
 
 export interface ToolCall {
   id: string
+  toolCallID?: string  // backend tool_call_id for precise result matching
   name: string
   args: string
   output?: string

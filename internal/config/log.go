@@ -29,6 +29,11 @@ func Logger() *log.Logger {
 			return
 		}
 		appLogger = log.New(f, "", log.LstdFlags)
+		// Redirect the default stdlib logger so third-party libraries that call
+		// log.Printf directly (e.g. eino's retry_chatmodel) also write to the
+		// debug log file instead of appearing on stderr/stdout.
+		log.SetOutput(f)
+		log.SetFlags(log.LstdFlags)
 	})
 	return appLogger
 }

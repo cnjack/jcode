@@ -119,7 +119,7 @@ func runInner(
 			toolName := mo.ToolName
 			if !mo.IsStreaming && mo.Message != nil {
 				output := mo.Message.Content
-				h.OnToolResult(toolName, output, nil)
+				h.OnToolResult(toolName, output, mo.Message.ToolCallID, nil)
 				if toolName == "todowrite" || toolName == "todoread" {
 					h.OnTodoUpdate()
 				}
@@ -137,7 +137,7 @@ func runInner(
 					}
 					if err != nil {
 						toolErr = err
-						h.OnToolResult(toolName, "", err)
+						h.OnToolResult(toolName, "", toolCallID, err)
 						break
 					}
 					if chunk != nil {
@@ -148,7 +148,7 @@ func runInner(
 					}
 				}
 				if toolErr == nil {
-					h.OnToolResult(toolName, sb.String(), nil)
+					h.OnToolResult(toolName, sb.String(), toolCallID, nil)
 					if toolName == "todowrite" || toolName == "todoread" {
 						h.OnTodoUpdate()
 					}
@@ -205,7 +205,7 @@ func runInner(
 			}
 			// Notify and record accumulated tool calls.
 			for _, p := range pending {
-				h.OnToolCall(p.name, p.args.String())
+				h.OnToolCall(p.name, p.args.String(), p.id)
 				if rec != nil {
 					rec.RecordToolCall(p.name, p.args.String(), p.id)
 				}
@@ -213,7 +213,7 @@ func runInner(
 		} else if mo.Message != nil {
 			if len(mo.Message.ToolCalls) > 0 {
 				for _, tc := range mo.Message.ToolCalls {
-					h.OnToolCall(tc.Function.Name, tc.Function.Arguments)
+					h.OnToolCall(tc.Function.Name, tc.Function.Arguments, tc.ID)
 					if rec != nil {
 						rec.RecordToolCall(tc.Function.Name, tc.Function.Arguments, tc.ID)
 					}

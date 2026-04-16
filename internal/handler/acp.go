@@ -43,7 +43,7 @@ func (h *ACPHandler) OnAgentText(text string) {
 	})
 }
 
-func (h *ACPHandler) OnToolCall(name, args string) {
+func (h *ACPHandler) OnToolCall(name, args, _ string) {
 	id := h.nextToolCallID()
 	h.mu.Lock()
 	h.activeToolCall = id
@@ -58,7 +58,7 @@ func (h *ACPHandler) OnToolCall(name, args string) {
 	})
 }
 
-func (h *ACPHandler) OnToolResult(name, output string, err error) {
+func (h *ACPHandler) OnToolResult(name, output, _ string, err error) {
 	h.mu.Lock()
 	id := h.activeToolCall
 	h.mu.Unlock()
