@@ -124,9 +124,9 @@ func (b *BudgetManager) statusLocked() BudgetStatus {
 // after each model invocation and emits warnings when approaching limits.
 type budgetMiddleware struct {
 	*adk.BaseChatModelAgentMiddleware
-	manager     *BudgetManager
-	tokenUsage  *internalmodel.TokenUsage
-	onWarn      func(status BudgetStatus)
+	manager    *BudgetManager
+	tokenUsage *internalmodel.TokenUsage
+	onWarn     func(status BudgetStatus)
 }
 
 // NewBudgetMiddleware creates a ChatModelAgentMiddleware that tracks budget.

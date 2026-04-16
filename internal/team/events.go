@@ -35,7 +35,7 @@ type TeammateMessageMsg struct {
 
 // TeammateTokenUpdateMsg notifies the TUI of a teammate's token usage update.
 type TeammateTokenUpdateMsg struct {
-	AgentID   string
+	AgentID     string
 	TotalTokens int64
 }
 
