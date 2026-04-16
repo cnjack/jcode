@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { api } from '@/composables/api'
 import type { MCPServerInfo, SSHAlias } from '@/types/api'
+import QRCode from 'qrcode'
 import {
   Dialog,
   DialogPanel,
@@ -20,11 +21,18 @@ const emit = defineEmits<{
 }>()
 
 const store = useChatStore()
-const activeTab = ref<'general' | 'mcp' | 'ssh' | 'shortcuts'>('general')
+const activeTab = ref<'general' | 'mcp' | 'ssh' | 'channels' | 'shortcuts'>('general')
 const mcpServers = ref<Record<string, MCPServerInfo>>({})
 const sshAliases = ref<SSHAlias[]>([])
 const sshCurrent = ref('local')
 const mcpLoading = ref(false)
+
+// Channel state
+const channelAvailable = ref(false)
+const channelState = ref('none')
+const channelLoading = ref(false)
+const channelQRContent = ref('')
+const qrCanvas = ref<HTMLCanvasElement | null>(null)
 
 watch(() => props.open, async (isOpen) => {
   if (isOpen) {
@@ -42,6 +50,15 @@ watch(() => props.open, async (isOpen) => {
       sshAliases.value = sshData.aliases
       sshCurrent.value = sshData.current
     } catch { /* ignore */ }
+
+    // Load channel status
+    try {
+      const ch = await api.channelStatus()
+      channelAvailable.value = ch.available
+      channelState.value = ch.state ?? 'none'
+    } catch { /* ignore */ }
+  } else {
+    channelQRContent.value = ''
   }
 })
 
@@ -70,6 +87,68 @@ const shortcuts = [
   { keys: 'Ctrl+,', desc: 'Open settings' },
   { keys: 'Ctrl+`', desc: 'Toggle terminal' },
 ]
+
+async function channelLogin() {
+  channelLoading.value = true
+  try {
+    const result = await api.channelLogin()
+    channelQRContent.value = result.qr_content
+    channelState.value = 'scanning'
+    await nextTick()
+    if (qrCanvas.value && channelQRContent.value) {
+      await QRCode.toCanvas(qrCanvas.value, channelQRContent.value, {
+        width: 200,
+        margin: 2,
+        color: { dark: '#1c1917', light: '#ffffff' },
+      })
+    }
+    // Poll for state change
+    pollChannelState()
+  } catch (err) {
+    console.error('Channel login failed:', err)
+  }
+  channelLoading.value = false
+}
+
+async function channelLogout() {
+  channelLoading.value = true
+  try {
+    await api.channelLogout()
+    channelState.value = 'none'
+    channelQRContent.value = ''
+    // Sync store state
+    store.channelEnabled = false
+  } catch (err) {
+    console.error('Channel logout failed:', err)
+  }
+  channelLoading.value = false
+}
+
+function pollChannelState() {
+  const interval = setInterval(async () => {
+    try {
+      const ch = await api.channelStatus()
+      if (ch.state === 'enabled' || ch.state === 'disabled') {
+        channelState.value = ch.state
+        channelQRContent.value = ''
+        // Sync store so toolbar toggle reflects the new state
+        store.channelAvailable = true
+        store.channelEnabled = ch.state === 'enabled'
+        clearInterval(interval)
+      }
+    } catch { /* ignore */ }
+  }, 2000)
+  // Stop polling after 3 minutes
+  setTimeout(() => clearInterval(interval), 180000)
+}
+
+const tabLabel: Record<string, string> = {
+  general: 'General',
+  mcp: 'MCP Servers',
+  ssh: 'SSH',
+  channels: 'Channels',
+  shortcuts: 'Shortcuts',
+}
 </script>
 
 <template>
@@ -102,7 +181,7 @@ const shortcuts = [
               <!-- Left sidebar -->
               <nav class="w-40 border-r border-stone-200 py-2 shrink-0">
                 <button
-                  v-for="tab in (['general', 'mcp', 'ssh', 'shortcuts'] as const)"
+                  v-for="tab in (['general', 'mcp', 'ssh', 'channels', 'shortcuts'] as const)"
                   :key="tab"
                   class="w-full px-4 py-2 text-left text-xs transition-colors cursor-pointer"
                   :class="activeTab === tab
@@ -110,7 +189,7 @@ const shortcuts = [
                     : 'text-stone-500 hover:text-stone-700 hover:bg-stone-50'"
                   @click="activeTab = tab"
                 >
-                  {{ tab === 'mcp' ? 'MCP Servers' : tab === 'ssh' ? 'SSH' : tab === 'shortcuts' ? 'Shortcuts' : 'General' }}
+                  {{ tabLabel[tab] }}
                 </button>
               </nav>
 
@@ -251,6 +330,80 @@ const shortcuts = [
                       >
                         active
                       </span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Channels tab -->
+                <div v-if="activeTab === 'channels'">
+                  <div class="text-[10px] text-stone-400 uppercase tracking-wider mb-3">Notification Channels</div>
+
+                  <div v-if="!channelAvailable" class="text-center py-8">
+                    <div class="text-xs text-stone-400 mb-1">No channels configured</div>
+                    <div class="text-[10px] text-stone-400">
+                      Set <span class="font-mono">channel.web_enabled: true</span> in <span class="font-mono">~/.jcode/config.json</span>
+                    </div>
+                  </div>
+
+                  <div v-else class="space-y-4">
+                    <!-- WeChat channel card -->
+                    <div class="px-4 py-3 rounded-lg border border-stone-200 bg-white">
+                      <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-2">
+                          <span class="text-base">💬</span>
+                          <div>
+                            <div class="text-xs font-medium text-stone-700">WeChat</div>
+                            <div class="text-[10px] text-stone-400">iLink Bot integration</div>
+                          </div>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                          <span
+                            class="w-1.5 h-1.5 rounded-full"
+                            :class="{
+                              'bg-emerald-400': channelState === 'enabled',
+                              'bg-amber-400': channelState === 'disabled' || channelState === 'scanning',
+                              'bg-stone-300': channelState === 'none',
+                            }"
+                          />
+                          <span class="text-[10px] font-medium" :class="{
+                            'text-emerald-600': channelState === 'enabled',
+                            'text-amber-600': channelState === 'disabled' || channelState === 'scanning',
+                            'text-stone-400': channelState === 'none',
+                          }">
+                            {{ channelState === 'enabled' ? 'Connected' : channelState === 'disabled' ? 'Disconnected' : channelState === 'scanning' ? 'Scanning...' : 'Not configured' }}
+                          </span>
+                        </div>
+                      </div>
+
+                      <!-- QR Code display -->
+                      <div v-if="channelQRContent" class="flex flex-col items-center py-3">
+                        <canvas ref="qrCanvas" class="rounded-lg border border-stone-100" />
+                        <div class="text-[10px] text-stone-400 mt-2">Scan with WeChat to connect</div>
+                      </div>
+
+                      <!-- Action buttons -->
+                      <div class="flex gap-2 mt-2">
+                        <button
+                          v-if="channelState === 'none'"
+                          :disabled="channelLoading"
+                          class="flex-1 px-3 py-1.5 text-xs rounded-md bg-teal-500 text-white hover:bg-teal-600 disabled:opacity-50 cursor-pointer transition-colors"
+                          @click="channelLogin"
+                        >
+                          {{ channelLoading ? 'Loading...' : 'Connect' }}
+                        </button>
+                        <button
+                          v-if="channelState === 'enabled' || channelState === 'disabled'"
+                          :disabled="channelLoading"
+                          class="flex-1 px-3 py-1.5 text-xs rounded-md text-red-500 hover:bg-red-50 disabled:opacity-50 cursor-pointer transition-colors"
+                          @click="channelLogout"
+                        >
+                          Disconnect
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="text-[10px] text-stone-400 leading-relaxed">
+                      When connected, jcode sends approval requests and task completion notifications to your WeChat.
                     </div>
                   </div>
                 </div>

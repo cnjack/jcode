@@ -20,6 +20,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/gorilla/websocket"
 
+	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/model"
@@ -81,6 +82,13 @@ type Server struct {
 
 	// disabledMCP tracks MCP servers that have been disabled via the UI.
 	disabledMCP map[string]bool
+
+	// wechatClient is the optional WeChat channel client.
+	wechatClient channel.Channel
+
+	// eventHandler is the handler passed to the runner — may be a NotifyingHandler
+	// wrapping the WebHandler, or the WebHandler itself.
+	eventHandler handler.AgentEventHandler
 }
 
 // ServerConfig holds the configuration for creating a new Server.
@@ -101,7 +109,9 @@ type ServerConfig struct {
 	Registry      *model.ModelRegistry
 	ApprovalState *runner.ApprovalState
 	SkillLoader   *skills.Loader
-	WebHandler    *handler.WebHandler // optional: pre-created handler for sharing with tools
+	WechatClient  channel.Channel           // optional WeChat channel
+	WebHandler    *handler.WebHandler       // optional: pre-created handler for sharing with tools
+	EventHandler  handler.AgentEventHandler // optional: handler for runner (e.g. NotifyingHandler)
 }
 
 // NewServer creates a new web server.
@@ -109,6 +119,10 @@ func NewServer(cfg *ServerConfig) *Server {
 	h := cfg.WebHandler
 	if h == nil {
 		h = handler.NewWebHandler()
+	}
+	var eh handler.AgentEventHandler = h
+	if cfg.EventHandler != nil {
+		eh = cfg.EventHandler
 	}
 	return &Server{
 		port:          cfg.Port,
@@ -133,6 +147,8 @@ func NewServer(cfg *ServerConfig) *Server {
 		approvalState: cfg.ApprovalState,
 		skillLoader:   cfg.SkillLoader,
 		disabledMCP:   make(map[string]bool),
+		wechatClient:  cfg.WechatClient,
+		eventHandler:  eh,
 	}
 }
 
@@ -179,6 +195,11 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/pty/{id}/ws", s.handlePTYWebSocket)
 	mux.HandleFunc("GET /api/approval/mode", s.handleGetApprovalMode)
 	mux.HandleFunc("POST /api/approval/mode", s.handleSetApprovalMode)
+	mux.HandleFunc("GET /api/channel", s.handleChannelStatus)
+	mux.HandleFunc("POST /api/channel/login", s.handleChannelLogin)
+	mux.HandleFunc("POST /api/channel/logout", s.handleChannelLogout)
+	mux.HandleFunc("POST /api/channel/enable", s.handleChannelEnable)
+	mux.HandleFunc("POST /api/channel/disable", s.handleChannelDisable)
 
 	// Serve embedded frontend (SPA with fallback to index.html)
 	mux.Handle("GET /", newSPAHandler())
@@ -281,16 +302,43 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.running.Store(true)
-
-	// Apply mode prefix if plan mode requested.
-	message := req.Message
 	mode := req.Mode
 	if mode == "" {
 		mode = s.mode
 	}
+
+	s.submitMessage(req.Message, mode, "")
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "processing"})
+}
+
+// SubmitMessage submits a message for agent processing from an external source
+// (e.g. WeChat inbound message). Returns false if the agent is busy.
+func (s *Server) SubmitMessage(message, source string) bool {
+	if s.running.Load() {
+		return false
+	}
+	s.submitMessage(message, s.mode, source)
+	return true
+}
+
+// submitMessage is the shared implementation for starting an agent run.
+// source is an optional label (e.g. "wechat") for the user_message event.
+func (s *Server) submitMessage(message, mode, source string) {
+	s.running.Store(true)
+
+	// Apply mode prefix if plan mode requested.
+	agentMsg := message
 	if mode == "plan" {
-		message = "[PLAN MODE — Read-only. Analyze the codebase and create a plan. Do NOT edit, write, or delete any files.]\n\n" + message
+		agentMsg = "[PLAN MODE — Read-only. Analyze the codebase and create a plan. Do NOT edit, write, or delete any files.]\n\n" + agentMsg
+	}
+
+	// Emit user_message event for external sources (e.g. WeChat) so web clients see it.
+	// Web-originated messages are already added by the frontend's sendMessage().
+	if source != "" {
+		s.handler.Emit("user_message", map[string]string{
+			"content": message,
+			"source":  source,
+		})
 	}
 
 	// Ensure a recorder exists (lazy creation on first message).
@@ -301,18 +349,17 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	// Record user message.
 	if s.recorder != nil {
-		s.recorder.RecordUser(message)
+		s.recorder.RecordUser(agentMsg)
 	}
 
 	s.mu.Lock()
-	s.history = append(s.history, schema.UserMessage(message))
+	s.history = append(s.history, schema.UserMessage(agentMsg))
 	history := make([]adk.Message, len(s.history))
 	copy(history, s.history)
 	agent := s.agent
 	s.mu.Unlock()
 
 	// Stream response via SSE — run agent in background.
-	// Use server context, not request context (which is canceled when the response is sent).
 	runCtx, runCancel := context.WithCancel(s.ctx)
 	s.mu.Lock()
 	s.runCancel = runCancel
@@ -325,15 +372,13 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			s.runCancel = nil
 			s.mu.Unlock()
 		}()
-		resp := runner.Run(runCtx, agent, history, s.handler, s.recorder, s.todoStore, s.tracer, nil)
+		resp := runner.Run(runCtx, agent, history, s.eventHandler, s.recorder, s.todoStore, s.tracer, nil)
 		if resp != "" {
 			s.mu.Lock()
 			s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: resp})
 			s.mu.Unlock()
 		}
 	}()
-
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "processing"})
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {

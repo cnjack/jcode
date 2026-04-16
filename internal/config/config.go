@@ -56,6 +56,12 @@ type BudgetConfig struct {
 	WarningThreshold  float64 `json:"warning_threshold,omitempty"`
 }
 
+// ChannelConfig controls external messaging channel behavior.
+type ChannelConfig struct {
+	// WebEnabled enables WeChat channel in web mode (default false).
+	WebEnabled bool `json:"web_enabled,omitempty"`
+}
+
 // CompactionConfig controls automatic context compaction.
 type CompactionConfig struct {
 	Enabled      bool    `json:"enabled,omitempty"`
@@ -108,6 +114,9 @@ type Config struct {
 
 	// AutoApprove sets the default approval mode to auto on startup.
 	AutoApprove bool `json:"auto_approve,omitempty"`
+
+	// Channel controls external messaging channel behavior.
+	Channel *ChannelConfig `json:"channel,omitempty"`
 
 	// DisabledProviders lists provider IDs to exclude from registry
 	DisabledProviders []string `json:"disabled_providers,omitempty"`

@@ -31,6 +31,7 @@ jcode is an AI-powered coding agent that runs in your terminal. You describe tas
 | **MCP Integration** | Connect any MCP-compatible server for extended capabilities |
 | **Session Resume** | Every conversation is recorded. Pick up where you left off |
 | **Web Interface** | Browser-based UI with terminal access |
+| **Channels** | Push notifications to WeChat when approval is needed or tasks complete |
 | **Skills** | Domain-specific skill packs loaded on demand |
 
 ## Design Philosophy

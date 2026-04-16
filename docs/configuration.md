@@ -106,6 +106,10 @@ jcode stores all configuration in a single JSON file at `~/.jcode/config.json`. 
     }
   },
 
+  "channel": {
+    "web_enabled": true
+  },
+
   "disabled_providers": []
 }
 ```
@@ -190,6 +194,16 @@ Multi-agent team settings.
 ### auto_approve
 
 Set to `true` to auto-approve all tool calls. Equivalent to running with `--unsafe` flag.
+
+### channel
+
+Notification channel settings. See [Channels](overview/channels).
+
+| Field | Default | Description |
+|---|---|---|
+| `web_enabled` | false | Enable WeChat channel in `jcode web` mode |
+
+In TUI mode, channels are always available via `/channel` — no config needed.
 
 ## Changing Configuration
 
