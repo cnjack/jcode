@@ -105,41 +105,38 @@ func runWebServer(port int, host string) error {
 	// Create WebHandler early so subagent tool can emit events through it.
 	webHandler := handler.NewWebHandler()
 
-	// Optionally wrap with notifying handler for WeChat push in web mode.
+	// Wrap handler with NotifyingHandler for WeChat push notifications.
+	// Callbacks check wechatClient.State() before sending, so this is safe
+	// even when the channel is disabled or not yet configured.
 	var finalHandler handler.AgentEventHandler = webHandler
 	wechatClient := weixin.NewClient()
-	if cfg.Channel != nil && cfg.Channel.WebEnabled {
-		// Set up inbound message handler — ignore messages in web mode
-		// (the user interacts via the web UI, not WeChat).
-		wechatClient.SetOnMessage(func(from, text string) {
-			config.Logger().Printf("[wechat] ignoring inbound message from %s in web mode", from)
-		})
-		// Auto-enable if credentials exist but channel is disabled.
-		if wechatClient.State() == channel.StateDisabled {
-			if err := wechatClient.Enable(); err != nil {
-				config.Logger().Printf("[wechat] web auto-enable failed: %v", err)
-			} else {
-				config.Logger().Printf("[wechat] web auto-enabled")
+
+	// Auto-enable if credentials exist and channel.web_enabled is true.
+	if cfg.Channel != nil && cfg.Channel.WebEnabled && wechatClient.State() == channel.StateDisabled {
+		if err := wechatClient.Enable(); err != nil {
+			config.Logger().Printf("[wechat] web auto-enable failed: %v", err)
+		} else {
+			config.Logger().Printf("[wechat] web auto-enabled")
+		}
+	}
+
+	// Always wrap with NotifyingHandler — the user can enable via the UI toggle.
+	notifyingH := handler.NewNotifyingHandler(webHandler, 10*time.Second)
+	notifyingH.SetApprovalNotifier(func(toolName, toolArgs string) {
+		if wechatClient.State() == channel.StateEnabled {
+			if err := wechatClient.SendText(channel.ApprovalMessage(toolName, toolArgs, "Please check the web interface")); err != nil {
+				config.Logger().Printf("[wechat] failed to send approval notification: %v", err)
 			}
 		}
-		// Always wrap with NotifyingHandler — the callbacks check State() before sending.
-		notifyingH := handler.NewNotifyingHandler(webHandler, 10*time.Second)
-		notifyingH.SetApprovalNotifier(func(toolName, toolArgs string) {
-			if wechatClient.State() == channel.StateEnabled {
-				if err := wechatClient.SendText(channel.ApprovalMessage(toolName, toolArgs, "Please check the web interface")); err != nil {
-					config.Logger().Printf("[wechat] failed to send approval notification: %v", err)
-				}
+	})
+	notifyingH.SetDoneNotifier(func(summary string, err error) {
+		if wechatClient.State() == channel.StateEnabled {
+			if sendErr := wechatClient.SendText(channel.DoneMessage(summary, err)); sendErr != nil {
+				config.Logger().Printf("[wechat] failed to send done notification: %v", sendErr)
 			}
-		})
-		notifyingH.SetDoneNotifier(func(summary string, err error) {
-			if wechatClient.State() == channel.StateEnabled {
-				if sendErr := wechatClient.SendText(channel.DoneMessage(summary, err)); sendErr != nil {
-					config.Logger().Printf("[wechat] failed to send done notification: %v", sendErr)
-				}
-			}
-		})
-		finalHandler = notifyingH
-	}
+		}
+	})
+	finalHandler = notifyingH
 
 	// Langfuse tracer.
 	var langfuseTracer *telemetry.LangfuseTracer
@@ -308,6 +305,19 @@ func runWebServer(port int, host string) error {
 	// Set handler for approval routing.
 	// If WeChat channel wraps the handler, use the wrapping handler for notifications.
 	approvalState.SetHandler(finalHandler)
+
+	// Set up inbound WeChat message handler now that srv exists.
+	// Always register regardless of WebEnabled — the user can enable via the UI.
+	wechatClient.SetOnMessage(func(from, text string) {
+		if wechatClient.State() != channel.StateEnabled {
+			return // channel disabled, silently ignore
+		}
+		config.Logger().Printf("[wechat] inbound message from %s: %s", from, text)
+		if !srv.SubmitMessage(text, "wechat") {
+			// Agent is busy, let the user know.
+			_ = wechatClient.SendText(channel.BusyMessage())
+		}
+	})
 
 	// Clean up WeChat on shutdown.
 	defer func() {
