@@ -95,13 +95,14 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function addToolCall(name: string, args: string) {
+  function addToolCall(name: string, args: string, toolCallID?: string) {
     // Flush current streaming — new text after tool will get a fresh message
     streamingText = ''
     streamingMsgId = ''
 
     const tc: ToolCall = {
       id: genId('tc'),
+      toolCallID,
       name,
       args,
       status: 'running',
@@ -110,12 +111,17 @@ export const useChatStore = defineStore('chat', () => {
     timeline.value.push({ kind: 'tool', data: tc, seq: nextSeqId() })
   }
 
-  function resolveToolCall(name: string, output: string, error?: string) {
+  function resolveToolCall(name: string, output: string, toolCallID?: string, error?: string) {
+    // Prefer matching by backend tool_call_id (exact, unambiguous).
+    // Fall back to name-based scan for older events without an ID.
     for (let i = timeline.value.length - 1; i >= 0; i--) {
       const item = timeline.value[i]
       if (item && item.kind === 'tool') {
         const tc = item.data
-        if (tc.name === name && tc.status === 'running') {
+        if (tc.status !== 'running') continue
+        const idMatch = toolCallID && tc.toolCallID && tc.toolCallID === toolCallID
+        const nameMatch = !toolCallID && tc.name === name
+        if (idMatch || nameMatch) {
           tc.output = output
           tc.error = error
           tc.status = error ? 'error' : 'done'
@@ -165,6 +171,12 @@ export const useChatStore = defineStore('chat', () => {
     isRunning.value = false
     streamingText = ''
     streamingMsgId = ''
+    // Clean up any tool calls still in 'running' state — the agent has finished.
+    for (const item of timeline.value) {
+      if (item.kind === 'tool' && item.data.status === 'running') {
+        item.data.status = 'done'
+      }
+    }
     if (error) {
       addMessage('system', `Error: ${error}`)
     }
@@ -331,9 +343,47 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const entries = await api.session(uuid)
       clearChat()
+      // Track pending tool calls by tool_call_id so we can match results
+      const pendingToolCalls = new Map<string, ToolCall>()
       for (const e of entries) {
-        if (e.type === 'user' && e.content) addMessage('user', e.content)
-        else if (e.type === 'assistant' && e.content) addMessage('assistant', e.content)
+        if (e.type === 'user' && e.content) {
+          addMessage('user', e.content)
+        } else if (e.type === 'assistant' && e.content) {
+          addMessage('assistant', e.content)
+        } else if (e.type === 'tool_call' && e.name) {
+          const tc: ToolCall = {
+            id: genId('tc'),
+            toolCallID: e.tool_call_id,
+            name: e.name,
+            args: e.args || '',
+            status: 'running',
+            timestamp: e.timestamp ? new Date(e.timestamp).getTime() : Date.now(),
+          }
+          timeline.value.push({ kind: 'tool', data: tc, seq: nextSeqId() })
+        } else if (e.type === 'tool_result' && e.tool_call_id) {
+          const tc = pendingToolCalls.get(e.tool_call_id)
+          if (tc) {
+            tc.output = e.output || ''
+            tc.error = e.error || ''
+            tc.status = e.error ? 'error' : 'done'
+            pendingToolCalls.delete(e.tool_call_id)
+          }
+        } else if (e.type === 'tool_result' && e.name) {
+          // Fallback: match by name (no tool_call_id)
+          for (let i = timeline.value.length - 1; i >= 0; i--) {
+            const item = timeline.value[i]
+            if (item && item.kind === 'tool' && item.data.name === e.name && item.data.status === 'running') {
+              item.data.output = e.output || ''
+              item.data.error = e.error || ''
+              item.data.status = e.error ? 'error' : 'done'
+              break
+            }
+          }
+        }
+      }
+      // Mark any tool calls that never got a result as done (session was interrupted).
+      for (const tc of pendingToolCalls.values()) {
+        tc.status = 'done'
       }
     } catch (err: unknown) {
       addMessage('system', `Failed to load session: ${err instanceof Error ? err.message : String(err)}`)

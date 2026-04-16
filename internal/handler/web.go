@@ -20,15 +20,17 @@ type WebTextData struct {
 
 // WebToolCallData carries tool invocation info.
 type WebToolCallData struct {
-	Name string `json:"name"`
-	Args string `json:"args"`
+	Name       string `json:"name"`
+	Args       string `json:"args"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
 }
 
 // WebToolResultData carries tool completion info.
 type WebToolResultData struct {
-	Name   string `json:"name"`
-	Output string `json:"output"`
-	Error  string `json:"error,omitempty"`
+	Name       string `json:"name"`
+	Output     string `json:"output"`
+	Error      string `json:"error,omitempty"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
 }
 
 // WebTokenData carries token usage.
@@ -106,16 +108,16 @@ func (h *WebHandler) OnAgentText(text string) {
 	h.emit("agent_text", WebTextData{Text: text})
 }
 
-func (h *WebHandler) OnToolCall(name, args string) {
-	h.emit("tool_call", WebToolCallData{Name: name, Args: args})
+func (h *WebHandler) OnToolCall(name, args, toolCallID string) {
+	h.emit("tool_call", WebToolCallData{Name: name, Args: args, ToolCallID: toolCallID})
 }
 
-func (h *WebHandler) OnToolResult(name, output string, err error) {
+func (h *WebHandler) OnToolResult(name, output, toolCallID string, err error) {
 	errMsg := ""
 	if err != nil {
 		errMsg = err.Error()
 	}
-	h.emit("tool_result", WebToolResultData{Name: name, Output: output, Error: errMsg})
+	h.emit("tool_result", WebToolResultData{Name: name, Output: output, ToolCallID: toolCallID, Error: errMsg})
 }
 
 func (h *WebHandler) OnTodoUpdate() {

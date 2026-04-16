@@ -31,8 +31,8 @@ const bottomPanelHeight = ref(250)
 // WebSocket connection
 const { connected } = useWebSocket({
   onAgentText: (data) => store.appendAgentText(data.text),
-  onToolCall: (data) => store.addToolCall(data.name, data.args),
-  onToolResult: (data) => store.resolveToolCall(data.name, data.output, data.error),
+  onToolCall: (data) => store.addToolCall(data.name, data.args, data.tool_call_id),
+  onToolResult: (data) => store.resolveToolCall(data.name, data.output, data.tool_call_id, data.error),
   onTokenUpdate: (data) => { store.tokenInfo = data },
   onAgentDone: (data) => store.agentDone(data?.error),
   onTodoUpdate: () => store.fetchTodos(),

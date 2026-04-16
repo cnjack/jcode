@@ -23,10 +23,10 @@ type AgentEventHandler interface {
 	OnAgentText(text string)
 
 	// OnToolCall is called at the beginning of a tool invocation.
-	OnToolCall(name, args string)
+	OnToolCall(name, args, toolCallID string)
 
 	// OnToolResult is called when a tool execution completes.
-	OnToolResult(name, output string, err error)
+	OnToolResult(name, output, toolCallID string, err error)
 
 	// OnTodoUpdate is called when the todo store is mutated.
 	OnTodoUpdate()

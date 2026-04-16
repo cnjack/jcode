@@ -370,21 +370,7 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	type entryItem struct {
-		Type    string `json:"type"`
-		Content string `json:"content,omitempty"`
-		Name    string `json:"name,omitempty"`
-	}
-
-	items := make([]entryItem, 0, len(entries))
-	for _, e := range entries {
-		items = append(items, entryItem{
-			Type:    string(e.Type),
-			Content: e.Content,
-			Name:    e.Name,
-		})
-	}
-	writeJSON(w, http.StatusOK, items)
+	writeJSON(w, http.StatusOK, entries)
 }
 
 func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
