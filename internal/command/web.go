@@ -10,6 +10,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/reduction"
 	"github.com/cloudwego/eino/adk/middlewares/summarization"
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/spf13/cobra"
 
@@ -70,18 +71,6 @@ func runWebServer(port int, host string) error {
 	}
 
 	registry := internalmodel.NewModelRegistry()
-	baseURL := providerCfg.BaseURL
-	if baseURL == "" {
-		baseURL = registry.GetProviderAPI(providerName)
-	}
-
-	// Verify the default model can be created and keep reference for subagent.
-	chatModel, err := internalmodel.NewChatModel(ctx, &internalmodel.ChatModelConfig{
-		Model: modelName, APIKey: providerCfg.APIKey, BaseURL: baseURL,
-	})
-	if err != nil {
-		return fmt.Errorf("error creating model: %w", err)
-	}
 
 	env := tools.NewEnv(pwd, platform)
 	bgManager := tools.NewBackgroundManager(env)
@@ -119,7 +108,7 @@ func runWebServer(port int, host string) error {
 		langfuseTracer = telemetry.NewLangfuseTracer(cfg.Telemetry.Langfuse)
 	}
 
-	buildAllTools := func() []tool.BaseTool {
+	buildAllTools := func(cm model.ToolCallingChatModel) []tool.BaseTool {
 		all := []tool.BaseTool{
 			env.NewReadTool(), env.NewEditTool(), env.NewWriteTool(),
 			env.NewExecuteTool(bgManager), env.NewGrepTool(),
@@ -127,7 +116,7 @@ func runWebServer(port int, host string) error {
 			env.NewSwitchEnvTool(),
 			env.NewCheckBackgroundTool(bgManager),
 			env.NewSubagentTool(&tools.SubagentDeps{
-				ChatModel: chatModel,
+				ChatModel: cm,
 				Recorder:  rec,
 				Notifier: func(name, agentType string, done bool, result string, err error) {
 					webHandler.OnSubagentEvent(name, agentType, done, result, err)
@@ -143,8 +132,6 @@ func runWebServer(port int, host string) error {
 		}
 		return append(all, mcpTools...)
 	}
-
-	toolList := buildAllTools()
 
 	createAgent := func(prov, mod string) (*adk.ChatModelAgent, error) {
 		// Resolve provider config.
@@ -213,7 +200,8 @@ func runWebServer(port int, host string) error {
 		}, nil)
 		handlers = append(handlers, reminderMw)
 
-		return agent.NewAgent(ctx, cm, toolList, systemPrompt, approvalState.RequestApproval, middlewares, handlers)
+		tools := buildAllTools(cm)
+		return agent.NewAgent(ctx, cm, tools, systemPrompt, approvalState.RequestApproval, middlewares, handlers)
 	}
 
 	ag, err := createAgent(providerName, modelName)

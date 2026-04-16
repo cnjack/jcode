@@ -58,6 +58,7 @@ script/              # Build-time code generation
 ### Logging & Output
 - **All diagnostics go to `config.Logger()`** (writes to `~/.jcode/debug.log`). Never use `fmt.Print`, `log.Print`, or write to stdout/stderr directly — the TUI owns stdout.
 - Tool execution errors are returned as plain strings (the agent reads them). Do NOT `panic` or `log.Fatal` in tool code.
+- Exclude the script/ directory from the linter — it contains code generation scripts that may not follow all conventions.
 
 ### Error Handling
 - Tools return `(string, error)`. Return descriptive error strings that help the agent self-correct. Include file paths, line numbers, or command output in error messages.
