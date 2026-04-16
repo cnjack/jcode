@@ -32,11 +32,11 @@ func (h *TUIHandler) OnAgentText(text string) {
 	h.p.Send(tui.AgentTextMsg{Text: text})
 }
 
-func (h *TUIHandler) OnToolCall(name, args string) {
+func (h *TUIHandler) OnToolCall(name, args, _ string) {
 	h.p.Send(tui.ToolCallMsg{Name: name, Args: args})
 }
 
-func (h *TUIHandler) OnToolResult(name, output string, err error) {
+func (h *TUIHandler) OnToolResult(name, output, _ string, err error) {
 	h.p.Send(tui.ToolResultMsg{Name: name, Output: output, Err: err})
 }
 
