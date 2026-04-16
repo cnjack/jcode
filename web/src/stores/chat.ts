@@ -353,15 +353,13 @@ export const useChatStore = defineStore('chat', () => {
         } else if (e.type === 'tool_call' && e.name) {
           const tc: ToolCall = {
             id: genId('tc'),
+            toolCallID: e.tool_call_id,
             name: e.name,
             args: e.args || '',
             status: 'running',
             timestamp: e.timestamp ? new Date(e.timestamp).getTime() : Date.now(),
           }
           timeline.value.push({ kind: 'tool', data: tc, seq: nextSeqId() })
-          if (e.tool_call_id) {
-            pendingToolCalls.set(e.tool_call_id, tc)
-          }
         } else if (e.type === 'tool_result' && e.tool_call_id) {
           const tc = pendingToolCalls.get(e.tool_call_id)
           if (tc) {
