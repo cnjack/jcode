@@ -141,7 +141,7 @@ func (et *executeTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 				elapsed.Seconds(),
 			)
 		}
-		return result.String(), fmt.Errorf("command failed: %w", err)
+		return result.String(), nil
 	}
 
 	if result.Len() == 0 {
