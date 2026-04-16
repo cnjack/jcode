@@ -132,6 +132,7 @@ func (m Model) getCommandHints(input string) string {
 		{"/resume", "Resume a previous session"},
 		{"/compact", "Compress conversation context"},
 		{"/bg", "List background tasks"},
+		{"/channel", "Manage channels (WeChat etc.)"},
 	}
 
 	// Add dynamically-loaded skill slash commands.
@@ -149,6 +150,29 @@ func (m Model) getCommandHints(input string) string {
 		return ""
 	}
 	return "  " + strings.Join(matches, "  │  ")
+}
+
+// handleChannelInput shows the channel management panel.
+func (m Model) handleChannelInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	items := []list.Item{
+		channelItem{title: "💬 WeChat", desc: m.channelStateDesc("wechat"), key: "wechat"},
+	}
+	m.channelMenu.SetItems(items)
+	m.showingChannel = true
+	m.textarea.Blur()
+	return m, tea.Batch(cmds...)
+}
+
+// channelStateDesc returns a human-readable description for the channel state.
+func (m Model) channelStateDesc(channelID string) string {
+	switch m.channelStates[channelID] {
+	case "enabled":
+		return "Enabled"
+	case "disabled":
+		return "Disabled"
+	default:
+		return "Not connected"
+	}
 }
 
 // handleSettingInput shows the setting menu.

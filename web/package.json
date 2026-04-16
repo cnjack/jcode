@@ -20,6 +20,7 @@
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.2.2",
     "@types/dompurify": "^3.2.0",
+    "@types/qrcode": "^1.5.6",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/xterm": "^6.0.0",
@@ -28,6 +29,7 @@
     "marked": "^18.0.0",
     "marked-highlight": "^2.2.4",
     "pinia": "^3.0.4",
+    "qrcode": "^1.5.4",
     "vue": "^3.5.31",
     "vue-router": "^5.0.4"
   },

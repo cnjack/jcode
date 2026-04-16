@@ -59,6 +59,7 @@ type TokenUsage struct {
 type ApprovalRequest struct {
 	ToolName    string
 	ToolArgs    string
+	ToolCallID  string // unique ID of this tool invocation (from the LLM)
 	IsExternal  bool   // true when accessing paths outside workpath
 	WorkerName  string // non-empty for teammate agents
 	WorkerColor string

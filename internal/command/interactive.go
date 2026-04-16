@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/cloudwego/eino/adk"
@@ -19,9 +21,11 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/cnjack/jcode/internal/agent"
+	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
 	internalmodel "github.com/cnjack/jcode/internal/model"
+	weixin "github.com/cnjack/jcode/internal/pkg/weixin"
 	"github.com/cnjack/jcode/internal/prompts"
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
@@ -64,6 +68,10 @@ type interactiveState struct {
 
 	sessionResumeWarning  string
 	sessionBaselineCommit string
+
+	// WeChat channel
+	wechatClient *weixin.Client
+	agentRunning atomic.Bool
 }
 
 func (s *interactiveState) buildAllTools() []tool.BaseTool {
@@ -275,6 +283,9 @@ func (s *interactiveState) drainModeSwitch(planModeCh <-chan tui.AgentMode) {
 }
 
 func (s *interactiveState) handlePrompt(userPrompt string) {
+	s.agentRunning.Store(true)
+	defer s.agentRunning.Store(false)
+
 	if s.sessionResumeWarning != "" {
 		userPrompt = s.sessionResumeWarning + "\n\n" + userPrompt
 		s.sessionResumeWarning = ""
@@ -629,6 +640,13 @@ func (s *interactiveState) runEventLoop(initialHistory []adk.Message, initialRes
 	autoApproveCh := tui.GetAutoApproveChannel()
 	compactCh := tui.GetCompactChannel()
 	planModeCh := tui.GetPlanModeChannel()
+	channelActionCh := tui.GetChannelActionChannel()
+
+	// Send initial WeChat state to TUI
+	s.p.Send(tui.ChannelStateMsg{
+		ChannelID: "wechat",
+		State:     s.wechatClient.State().String(),
+	})
 
 	for {
 		select {
@@ -661,6 +679,9 @@ func (s *interactiveState) runEventLoop(initialHistory []adk.Message, initialRes
 
 		case <-addModelCh:
 			s.handleAddModel()
+
+		case action := <-channelActionCh:
+			s.handleChannelAction(action)
 		}
 	}
 }
@@ -782,6 +803,36 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		rec:          rec,
 	}
 
+	// Initialize WeChat channel
+	st.wechatClient = weixin.NewClient()
+
+	// Auto-enable WeChat if credentials exist
+	if st.wechatClient.State() == channel.StateDisabled {
+		st.wechatClient.SetOnMessage(func(from, text string) {
+			if st.p != nil {
+				// Notify user if agent is busy
+				if st.agentRunning.Load() {
+					_ = st.wechatClient.SendText(channel.BusyMessage())
+				}
+				st.p.Send(tui.ChannelInboundMsg{
+					ChannelID: "wechat",
+					From:      from,
+					Text:      text,
+				})
+			}
+		})
+		if err := st.wechatClient.Enable(); err != nil {
+			config.Logger().Printf("[wechat] auto-enable failed: %v", err)
+		} else {
+			config.Logger().Printf("[wechat] auto-enabled on startup")
+			go func() {
+				if err := st.wechatClient.SendText(channel.WelcomeMessage(time.Now())); err != nil {
+					config.Logger().Printf("[wechat] failed to send welcome: %v", err)
+				}
+			}()
+		}
+	}
+
 	if cfg.Telemetry != nil && cfg.Telemetry.Langfuse != nil {
 		st.langfuseTracer = telemetry.NewLangfuseTracer(cfg.Telemetry.Langfuse)
 	}
@@ -843,8 +894,26 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	teamManager.SetTuiProgram(p)
 
 	h := handler.NewTUIHandler(p)
-	st.h = h
-	approvalState.SetHandler(h)
+
+	// Wrap with notifying handler for WeChat push notifications
+	notifyingH := handler.NewNotifyingHandler(h, 10*time.Second)
+	notifyingH.SetApprovalNotifier(func(toolName, toolArgs string) {
+		if st.wechatClient.State() == channel.StateEnabled {
+			if err := st.wechatClient.SendText(channel.ApprovalMessage(toolName, toolArgs, "Please return to terminal")); err != nil {
+				config.Logger().Printf("[wechat] failed to send approval notification: %v", err)
+			}
+		}
+	})
+	notifyingH.SetDoneNotifier(func(summary string, err error) {
+		if st.wechatClient.State() == channel.StateEnabled {
+			if sendErr := st.wechatClient.SendText(channel.DoneMessage(summary, err)); sendErr != nil {
+				config.Logger().Printf("[wechat] failed to send done notification: %v", sendErr)
+			}
+		}
+	})
+
+	st.h = notifyingH
+	approvalState.SetHandler(notifyingH)
 
 	teamManager.SetHandlersFactory(func(workerName, workerColor string) []adk.ChatModelAgentMiddleware {
 		return agent.NewTeammateHandlers(approvalState.NewTeammateApprovalFunc(workerName, workerColor))
@@ -951,6 +1020,15 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		}
 		return fmt.Errorf("TUI error: %w", err)
 	}
+
+	// Send goodbye via WeChat if enabled
+	if st.wechatClient.State() == channel.StateEnabled {
+		// Best-effort, don't block exit
+		go func() { _ = st.wechatClient.SendText(channel.GoodbyeMessage(time.Now())) }()
+		time.Sleep(500 * time.Millisecond)
+		_ = st.wechatClient.Disable()
+	}
+
 	if st.langfuseTracer != nil {
 		st.langfuseTracer.Flush()
 	}

@@ -109,4 +109,14 @@ export const api = {
     request<SSHListResponse>('/api/ssh'),
   skillsList: () =>
     request<SkillInfo[]>('/api/skills'),
+  channelStatus: () =>
+    request<{ available: boolean; channel?: string; state?: string }>('/api/channel'),
+  channelLogin: () =>
+    request<{ status: string; qr_content: string }>('/api/channel/login', { method: 'POST' }),
+  channelLogout: () =>
+    request<{ status: string; state: string }>('/api/channel/logout', { method: 'POST' }),
+  channelEnable: () =>
+    request<{ status: string; state: string }>('/api/channel/enable', { method: 'POST' }),
+  channelDisable: () =>
+    request<{ status: string; state: string }>('/api/channel/disable', { method: 'POST' }),
 }

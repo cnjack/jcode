@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/reduction"
@@ -15,9 +16,11 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/cnjack/jcode/internal/agent"
+	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
 	internalmodel "github.com/cnjack/jcode/internal/model"
+	weixin "github.com/cnjack/jcode/internal/pkg/weixin"
 	"github.com/cnjack/jcode/internal/prompts"
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
@@ -101,6 +104,33 @@ func runWebServer(port int, host string) error {
 
 	// Create WebHandler early so subagent tool can emit events through it.
 	webHandler := handler.NewWebHandler()
+
+	// Optionally wrap with notifying handler for WeChat push in web mode.
+	var finalHandler handler.AgentEventHandler = webHandler
+	wechatClient := weixin.NewClient()
+	if cfg.Channel != nil && cfg.Channel.WebEnabled && wechatClient.State() == channel.StateDisabled {
+		if err := wechatClient.Enable(); err != nil {
+			config.Logger().Printf("[wechat] web auto-enable failed: %v", err)
+		} else {
+			config.Logger().Printf("[wechat] web auto-enabled")
+			notifyingH := handler.NewNotifyingHandler(webHandler, 10*time.Second)
+			notifyingH.SetApprovalNotifier(func(toolName, toolArgs string) {
+				if wechatClient.State() == channel.StateEnabled {
+					if err := wechatClient.SendText(channel.ApprovalMessage(toolName, toolArgs, "Please check the web interface")); err != nil {
+						config.Logger().Printf("[wechat] failed to send approval notification: %v", err)
+					}
+				}
+			})
+			notifyingH.SetDoneNotifier(func(summary string, err error) {
+				if wechatClient.State() == channel.StateEnabled {
+					if sendErr := wechatClient.SendText(channel.DoneMessage(summary, err)); sendErr != nil {
+						config.Logger().Printf("[wechat] failed to send done notification: %v", sendErr)
+					}
+				}
+			})
+			finalHandler = notifyingH
+		}
+	}
 
 	// Langfuse tracer.
 	var langfuseTracer *telemetry.LangfuseTracer
@@ -261,11 +291,23 @@ func runWebServer(port int, host string) error {
 		Registry:      registry,
 		ApprovalState: approvalState,
 		SkillLoader:   skillLoader,
+		WechatClient:  wechatClient,
 		WebHandler:    webHandler,
 	})
 
 	// Set handler for approval routing.
-	approvalState.SetHandler(srv.Handler())
+	// If WeChat channel wraps the handler, use the wrapping handler for notifications.
+	approvalState.SetHandler(finalHandler)
+
+	// Clean up WeChat on shutdown.
+	defer func() {
+		if wechatClient.State() == channel.StateEnabled {
+			// Best-effort, don't block shutdown
+			go func() { _ = wechatClient.SendText(channel.GoodbyeMessage(time.Now())) }()
+			time.Sleep(500 * time.Millisecond)
+			_ = wechatClient.Disable()
+		}
+	}()
 
 	if err := srv.Start(ctx); err != nil {
 		return fmt.Errorf("server error: %w", err)

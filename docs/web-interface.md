@@ -72,6 +72,11 @@ The web server exposes a REST API for programmatic access:
 | `GET /api/mcp` | List MCP servers and status |
 | `GET /api/skills` | List available skills |
 | `POST /api/pty` | Create a terminal session |
+| `GET /api/channel` | Get channel connection status |
+| `POST /api/channel/login` | Start channel login (returns QR code) |
+| `POST /api/channel/logout` | Disconnect channel |
+| `POST /api/channel/enable` | Enable notifications |
+| `POST /api/channel/disable` | Disable notifications |
 
 {: .tip }
 The REST API makes it easy to integrate jcode into your own tools and workflows.
