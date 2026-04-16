@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **WeChat Channel Integration**
+  - Bidirectional messaging: send prompts to jcode from WeChat, receive results back
+  - Inbound WeChat messages displayed in web UI with green "WeChat" label
+  - Toolbar toggle for quick enable/disable next to the Auto toggle
+  - Settings dialog Channels tab with Connect/Disconnect flow and QR code
+  - Approval and task-done notifications pushed to WeChat (10s delay for approvals)
+  - Auto-enable on startup when `channel.web_enabled` is set and credentials exist
+  - Busy reply when agent is running and new WeChat message arrives
+
+- **Tool Call Enhancements**
+  - `toolCallID` field for precise tool call/result matching
+  - Tool call notifications with index ordering
+
+### Changed
+- Execute tool (`InvokableRun`) now reports exit codes correctly instead of returning errors
+- NotifyingHandler and SetOnMessage always registered in web mode (UI toggle works without config)
+- DOMPurify bumped to 3.4.0
+
+### Fixed
+- Web UI showing user messages twice (duplicate from `user_message` event)
+- WeChat inbound messages not reaching the agent in web mode
+- Done/approval notifications not firing in web mode (handler wrapping issue)
+- Approval notification race: resolved approvals no longer re-notified after 10s timer
+- Exit code not reported when command fails in execute tool
+
 ## [0.0.4] - 2026-04-16
 
 ### Added
