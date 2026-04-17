@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/spf13/cobra"
@@ -23,29 +24,29 @@ func printVersion() {
 }
 
 func runDoctorMode() {
-	fmt.Printf("🚀 Little Jack — Coding Assistant\n")
-	fmt.Printf("   Version:    %s\n", Version)
-	fmt.Printf("   Build time: %s\n", BuildTime)
-	fmt.Printf("   Git commit: %s\n", GitCommit)
-	fmt.Println("----------------------------------------")
-	fmt.Println("Running system check (Doctor Mode)...")
+	fmt.Println("┌─────────────────────────────────────┐")
+	fmt.Println("│  Little Jack — Coding Assistant      │")
+	fmt.Printf("│  Version:    %-23s│\n", Version)
+	fmt.Printf("│  Build time: %-23s│\n", BuildTime)
+	fmt.Printf("│  Git commit: %-23s│\n", GitCommit)
+	fmt.Println("└─────────────────────────────────────┘")
 	fmt.Println()
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		fmt.Printf("✗ Config load failed: %v\n", err)
+		fmt.Printf("  ✗ Config load failed: %v\n", err)
 		return
 	}
 
-	fmt.Printf("✓ Config loaded from: %s\n", config.ConfigPath())
+	fmt.Printf("  ✓ Config loaded from: %s\n", config.ConfigPath())
 
 	providerName, modelName := cfg.GetProviderModel()
-	fmt.Printf("✓ Active Model: %s / %s\n", providerName, modelName)
+	fmt.Printf("  ✓ Active model: %s / %s\n", providerName, modelName)
 
 	providers := cfg.GetProviders()
 	providerCfg := providers[providerName]
 	if providerCfg == nil {
-		fmt.Printf("✗ Provider %q not found in config\n", providerName)
+		fmt.Printf("  ✗ Provider %q not found in config\n", providerName)
 		return
 	}
 
@@ -56,37 +57,45 @@ func runDoctorMode() {
 		baseURL = registry.GetProviderAPI(providerName)
 	}
 
-	fmt.Println("\n[1] Testing Model Connection...")
+	fmt.Println("\n  [1] Model Connection")
 	chatModel, err := internalmodel.NewChatModel(context.Background(), &internalmodel.ChatModelConfig{
 		Model: modelName, APIKey: providerCfg.APIKey, BaseURL: baseURL,
 	})
 	if err != nil {
-		fmt.Printf("  ✗ Failed to initialize model: %v\n", err)
+		fmt.Printf("      ✗ Failed to initialize: %v\n", err)
 	} else {
 		msg := schema.UserMessage("hi")
 		_, err := chatModel.Generate(context.Background(), []*schema.Message{msg})
 		if err != nil {
-			fmt.Printf("  ✗ Model generate error: %v\n", err)
+			fmt.Printf("      ✗ Generate error: %v\n", err)
 		} else {
-			fmt.Printf("  ✅ Model connection successful! (%s)\n", modelName)
+			fmt.Printf("      ✓ Connection successful (%s)\n", modelName)
 		}
 	}
 
-	fmt.Println("\n[2] Testing MCP Servers...")
+	fmt.Println("\n  [2] Required Tools")
+	if rgPath, err := exec.LookPath("rg"); err != nil {
+		fmt.Println("      ✗ ripgrep (rg) — not found")
+		fmt.Println("        Install: https://github.com/BurntSushi/ripgrep#installation")
+	} else {
+		fmt.Printf("      ✓ ripgrep (rg) — %s\n", rgPath)
+	}
+
+	fmt.Println("\n  [3] MCP Servers")
 	if len(cfg.MCPServers) == 0 {
-		fmt.Println("  ℹ No MCP servers configured.")
+		fmt.Println("      - No MCP servers configured")
 	} else {
 		_, statuses := tools.LoadMCPTools(context.Background(), cfg.MCPServers)
 		for _, st := range statuses {
 			if st.Running {
-				fmt.Printf("  ✅ Server: %s (Running, %d tools loaded)\n", st.Name, st.ToolCount)
+				fmt.Printf("      ✓ %s — running, %d tools\n", st.Name, st.ToolCount)
 			} else {
-				fmt.Printf("  ❌ Server: %s (Failed: %v)\n", st.Name, st.Error)
+				fmt.Printf("      ✗ %s — %v\n", st.Name, st.Error)
 			}
 		}
 	}
 
-	fmt.Println("\n✨ Doctor check complete.")
+	fmt.Println("\n  All checks complete.")
 }
 
 func handleListSessions() {
