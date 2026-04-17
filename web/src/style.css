@@ -1,19 +1,127 @@
 @import 'tailwindcss';
 @plugin '@tailwindcss/typography';
+@custom-variant dark (&:where(.dark, .dark *));
+@import './styles/tokens.css';
+@import './styles/animations.css';
 
-/* Light theme scrollbar */
-::-webkit-scrollbar {
+/* ─── Global ─── */
+html {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: oklch(0.696 0.17 162.48 / 0.3);
+}
+
+/* ─── Scrollbar (dark) ─── */
+.dark ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
-::-webkit-scrollbar-track {
+.dark ::-webkit-scrollbar-track {
   background: transparent;
 }
-::-webkit-scrollbar-thumb {
-  background: #d6d3d1;
+.dark ::-webkit-scrollbar-thumb {
+  background: #3f3f46;
   border-radius: 3px;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: #a8a29e;
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+}
+
+/* ─── Scrollbar (light) ─── */
+:root:not(.dark) ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+:root:not(.dark) ::-webkit-scrollbar-track {
+  background: transparent;
+}
+:root:not(.dark) ::-webkit-scrollbar-thumb {
+  background: #d4d4d8;
+  border-radius: 3px;
+}
+:root:not(.dark) ::-webkit-scrollbar-thumb:hover {
+  background: #a1a1aa;
+}
+
+/* ─── Focus ring ─── */
+*:focus-visible {
+  outline: 2px solid oklch(0.696 0.17 162.48 / 0.5);
+  outline-offset: 2px;
+}
+
+/* ─── Prose overrides for chat messages ─── */
+.prose-chat {
+  --tw-prose-body: #a1a1aa;
+  --tw-prose-headings: #fafafa;
+  --tw-prose-links: #34d399;
+  --tw-prose-bold: #e4e4e7;
+  --tw-prose-code: #e4e4e7;
+  --tw-prose-pre-bg: #18181b;
+  --tw-prose-pre-code: #e4e4e7;
+}
+
+:root:not(.dark) .prose-chat {
+  --tw-prose-body: #52525b;
+  --tw-prose-headings: #18181b;
+  --tw-prose-links: #059669;
+  --tw-prose-bold: #27272a;
+  --tw-prose-code: #27272a;
+  --tw-prose-pre-bg: #f4f4f5;
+  --tw-prose-pre-code: #3f3f46;
+}
+
+.prose-chat pre {
+  border-radius: var(--radius-lg);
+  border: 1px solid;
+  font-size: 0.8125rem;
+  line-height: 1.625;
+}
+.dark .prose-chat pre {
+  border-color: #27272a;
+  background: #18181b !important;
+}
+:root:not(.dark) .prose-chat pre {
+  border-color: #e4e4e7;
+  background: #f4f4f5 !important;
+}
+
+.prose-chat code:not(pre code) {
+  padding: 0.15em 0.4em;
+  border-radius: var(--radius-sm);
+  font-size: 0.8125em;
+  font-family: var(--font-mono);
+}
+.dark .prose-chat code:not(pre code) {
+  background: #27272a;
+  color: #e4e4e7;
+}
+:root:not(.dark) .prose-chat code:not(pre code) {
+  background: #f4f4f5;
+  color: #18181b;
+}
+
+.prose-chat a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: oklch(0.696 0.17 162.48 / 0.3);
+  transition: text-decoration-color 150ms;
+}
+.prose-chat a:hover {
+  text-decoration-color: oklch(0.696 0.17 162.48);
+}
+
+/* ─── Noise texture overlay ─── */
+.noise-bg::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.015;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 

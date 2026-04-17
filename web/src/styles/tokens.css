@@ -1,0 +1,109 @@
+/*
+ * Design Tokens — jcode
+ * Dark-first OKLCH color system with emerald accent.
+ * Inspired by Vercel Chatbot + Tailwind Protocol.
+ */
+
+:root {
+  /* ─── Fonts ─── */
+  --font-sans: 'Outfit', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+
+  /* ─── Radii ─── */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.25rem;
+  --radius-pill: 9999px;
+
+  /* ─── Shadows (dark mode defaults) ─── */
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.3);
+  --shadow-md: 0 4px 12px oklch(0 0 0 / 0.4);
+  --shadow-lg: 0 8px 24px oklch(0 0 0 / 0.5);
+  --shadow-glow: 0 0 20px oklch(0.696 0.17 162.48 / 0.15);
+  --shadow-glow-strong: 0 0 30px oklch(0.696 0.17 162.48 / 0.25);
+
+  /* ─── Z-index scale ─── */
+  --z-sidebar: 30;
+  --z-header: 20;
+  --z-dropdown: 40;
+  --z-modal: 50;
+  --z-toast: 60;
+
+  /* ─── Transitions ─── */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-fast: 100ms;
+  --duration-normal: 150ms;
+  --duration-slow: 300ms;
+  --duration-slower: 500ms;
+
+  /* ─── Sidebar ─── */
+  --sidebar-width: 17rem;
+  --sidebar-collapsed-width: 0px;
+  --header-height: 2.75rem;
+}
+
+/* ─── Code Syntax Highlighting (works in both modes) ─── */
+.hljs {
+  color: var(--hljs-fg, #e4e4e7);
+  background: transparent;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in { color: var(--hljs-keyword, #7dd3fc); }
+.hljs-string,
+.hljs-attr { color: var(--hljs-string, #6ee7b7); }
+.hljs-comment,
+.hljs-quote { color: var(--hljs-comment, #71717a); font-style: italic; }
+.hljs-number,
+.hljs-literal { color: var(--hljs-number, #fbbf24); }
+.hljs-title,
+.hljs-section { color: var(--hljs-title, #c4b5fd); }
+.hljs-type,
+.hljs-class .hljs-title { color: var(--hljs-type, #fca5a5); }
+.hljs-params { color: var(--hljs-params, #f0abfc); }
+.hljs-variable,
+.hljs-template-variable { color: var(--hljs-variable, #fde68a); }
+.hljs-function { color: var(--hljs-function, #c4b5fd); }
+.hljs-meta { color: var(--hljs-meta, #a1a1aa); }
+.hljs-property { color: var(--hljs-property, #93c5fd); }
+.hljs-punctuation { color: var(--hljs-punctuation, #a1a1aa); }
+.hljs-addition { color: #6ee7b7; background: oklch(0.696 0.17 162.48 / 0.1); }
+.hljs-deletion { color: #fca5a5; background: oklch(0.637 0.237 25.33 / 0.1); }
+
+/* Dark mode hljs tokens */
+.dark {
+  --hljs-fg: #e4e4e7;
+  --hljs-keyword: #7dd3fc;
+  --hljs-string: #6ee7b7;
+  --hljs-comment: #52525b;
+  --hljs-number: #fbbf24;
+  --hljs-title: #c4b5fd;
+  --hljs-type: #fca5a5;
+  --hljs-params: #f0abfc;
+  --hljs-variable: #fde68a;
+  --hljs-function: #c4b5fd;
+  --hljs-meta: #71717a;
+  --hljs-property: #93c5fd;
+  --hljs-punctuation: #71717a;
+}
+
+/* Light mode hljs tokens */
+:root:not(.dark) {
+  --hljs-fg: #3f3f46;
+  --hljs-keyword: #0369a1;
+  --hljs-string: #047857;
+  --hljs-comment: #a1a1aa;
+  --hljs-number: #b45309;
+  --hljs-title: #7c3aed;
+  --hljs-type: #dc2626;
+  --hljs-params: #c026d3;
+  --hljs-variable: #ca8a04;
+  --hljs-function: #7c3aed;
+  --hljs-meta: #71717a;
+  --hljs-property: #2563eb;
+  --hljs-punctuation: #a1a1aa;
+}
