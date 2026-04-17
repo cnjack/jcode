@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -21,7 +24,7 @@ type GrepInput struct {
 	CaseInsensitive bool   `json:"case_insensitive,omitempty"`
 	MaxResults      int    `json:"max_results,omitempty"`
 
-	OutputMode    string `json:"output_mode,omitempty"`    // "content" (default), "files_with_matches", "count"
+	OutputMode    string `json:"output_mode,omitempty"`    // "files_with_matches" (default), "content", "count"
 	BeforeContext int    `json:"before_context,omitempty"` // -B lines
 	AfterContext  int    `json:"after_context,omitempty"`  // -A lines
 	Context       int    `json:"context,omitempty"`        // -C lines (overrides before/after)
@@ -36,6 +39,9 @@ const grepDefaultMax = 250
 // grepAbsoluteMax is the hard upper limit for max_results.
 const grepAbsoluteMax = 1000
 
+// grepTimeout is the max time a local grep command may run.
+const grepTimeout = 20 * time.Second
+
 // grepVCSExclusions are directories excluded from search.
 var grepVCSExclusions = []string{
 	".git", "node_modules", "vendor", "__pycache__", ".venv",
@@ -45,15 +51,16 @@ var grepVCSExclusions = []string{
 func (e *Env) NewGrepTool() tool.InvokableTool {
 	info := &schema.ToolInfo{
 		Name: "grep",
-		Desc: `Searches for a pattern in files. Returns matching lines with file path and line number.
-Uses ripgrep (rg) if available for best performance, otherwise falls back to grep.
-By default: skips binary files, respects .gitignore, excludes VCS/dependency directories.
-Supports output modes: content (default with line numbers), files_with_matches (filenames only), count (file:count).
+		Desc: `Search tool built on ripgrep (rg). Requires rg to be installed.
+Supports full regex syntax (e.g., "log.*Error", "function\s+\w+").
+Pattern syntax: Uses ripgrep regex — literal braces need escaping (use "interface\{\}" to find "interface{}" in Go code).
+By default: skips binary files, respects .gitignore, searches hidden files, excludes VCS/dependency directories.
+Output modes: "files_with_matches" (default, filenames only sorted by mtime), "content" (matching lines with line numbers), "count" (file:count).
 Supports context lines, pagination via offset, multiline matching, and file type filtering.`,
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"pattern": {
 				Type:     schema.String,
-				Desc:     "The search pattern (supports regex).",
+				Desc:     "The search pattern (regex). Literal braces need escaping: use \\{ and \\}.",
 				Required: true,
 			},
 			"path": {
@@ -63,7 +70,7 @@ Supports context lines, pagination via offset, multiline matching, and file type
 			},
 			"include": {
 				Type:     schema.String,
-				Desc:     "Glob pattern to filter files (e.g. '*.go', '*.py').",
+				Desc:     "Glob pattern to filter files (e.g. '*.go', '*.{ts,tsx}').",
 				Required: false,
 			},
 			"case_insensitive": {
@@ -73,42 +80,42 @@ Supports context lines, pagination via offset, multiline matching, and file type
 			},
 			"max_results": {
 				Type:     schema.Integer,
-				Desc:     "Maximum number of matching lines to return. Default 250, max 1000.",
+				Desc:     "Maximum number of results to return. Default 250, max 1000. Pass 0 for unlimited (use sparingly).",
 				Required: false,
 			},
 			"output_mode": {
 				Type:     schema.String,
-				Desc:     `Output mode: "content" (default, matching lines), "files_with_matches" (filenames only), "count" (file:count format).`,
+				Desc:     `Output mode: "files_with_matches" (default, filenames sorted by mtime), "content" (matching lines), "count" (file:count format).`,
 				Required: false,
 			},
 			"before_context": {
 				Type:     schema.Integer,
-				Desc:     "Number of lines to show before each match.",
+				Desc:     "Number of lines to show before each match. Only for content mode.",
 				Required: false,
 			},
 			"after_context": {
 				Type:     schema.Integer,
-				Desc:     "Number of lines to show after each match.",
+				Desc:     "Number of lines to show after each match. Only for content mode.",
 				Required: false,
 			},
 			"context": {
 				Type:     schema.Integer,
-				Desc:     "Number of lines to show before AND after each match. Overrides before_context/after_context.",
+				Desc:     "Number of lines to show before AND after each match. Overrides before_context/after_context. Only for content mode.",
 				Required: false,
 			},
 			"offset": {
 				Type:     schema.Integer,
-				Desc:     "Skip this many result lines for pagination.",
+				Desc:     "Skip this many results for pagination.",
 				Required: false,
 			},
 			"multiline": {
 				Type:     schema.Boolean,
-				Desc:     "Enable multiline matching (rg only).",
+				Desc:     "Enable multiline matching where patterns can span lines.",
 				Required: false,
 			},
 			"file_type": {
 				Type:     schema.String,
-				Desc:     "Filter by file type (e.g. 'go', 'py', 'js'). Uses rg --type.",
+				Desc:     "Filter by file type (e.g. 'go', 'py', 'js'). Uses rg --type. More efficient than include for standard file types.",
 				Required: false,
 			},
 		}),
@@ -148,7 +155,7 @@ func (g *grepTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 	}
 
 	if input.OutputMode == "" {
-		input.OutputMode = "content"
+		input.OutputMode = "files_with_matches"
 	}
 
 	// On remote (SSH), build the command string and run via Executor.
@@ -156,17 +163,19 @@ func (g *grepTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 		return g.runRemote(ctx, input, maxResults)
 	}
 
-	// On local, use exec.Command directly for better control.
-	if rgPath, err := exec.LookPath("rg"); err == nil {
-		return g.runLocalCmd(ctx, rgPath, g.buildRgArgs(input, maxResults), input, maxResults)
+	// Require ripgrep — no grep fallback to avoid BRE/ERE regex incompatibilities.
+	rgPath, err := exec.LookPath("rg")
+	if err != nil {
+		return "", fmt.Errorf("ripgrep (rg) is required but not found in PATH. Install it: https://github.com/BurntSushi/ripgrep#installation")
 	}
-	return g.runLocalCmd(ctx, "grep", g.buildGrepArgs(input), input, maxResults)
+	return g.runLocalRg(ctx, rgPath, input, maxResults)
 }
 
 func (g *grepTool) buildRgArgs(input GrepInput, maxResults int) []string {
 	args := []string{
 		"--no-heading", "--line-number", "--color=never",
 		"--max-columns=500", "--max-columns-preview",
+		"--hidden", // search hidden files (rg respects .gitignore anyway)
 	}
 
 	// VCS exclusions
@@ -185,15 +194,17 @@ func (g *grepTool) buildRgArgs(input GrepInput, maxResults int) []string {
 		args = append(args, "--max-count", fmt.Sprintf("%d", maxResults+input.Offset+1))
 	}
 
-	// Context lines
-	if input.Context > 0 {
-		args = append(args, fmt.Sprintf("--context=%d", input.Context))
-	} else {
-		if input.BeforeContext > 0 {
-			args = append(args, fmt.Sprintf("--before-context=%d", input.BeforeContext))
-		}
-		if input.AfterContext > 0 {
-			args = append(args, fmt.Sprintf("--after-context=%d", input.AfterContext))
+	// Context lines (only meaningful for content mode)
+	if input.OutputMode == "content" || input.OutputMode == "" {
+		if input.Context > 0 {
+			args = append(args, fmt.Sprintf("--context=%d", input.Context))
+		} else {
+			if input.BeforeContext > 0 {
+				args = append(args, fmt.Sprintf("--before-context=%d", input.BeforeContext))
+			}
+			if input.AfterContext > 0 {
+				args = append(args, fmt.Sprintf("--after-context=%d", input.AfterContext))
+			}
 		}
 	}
 
@@ -204,68 +215,53 @@ func (g *grepTool) buildRgArgs(input GrepInput, maxResults int) []string {
 		args = append(args, "--glob", input.Include)
 	}
 	if input.Multiline {
-		args = append(args, "--multiline")
+		args = append(args, "--multiline", "--multiline-dotall")
 	}
 	if input.FileType != "" {
 		args = append(args, "--type", input.FileType)
 	}
 
-	args = append(args, input.Pattern, input.Path)
-	return args
-}
-
-func (g *grepTool) buildGrepArgs(input GrepInput) []string {
-	args := []string{"-rnI", "--color=never"}
-
-	// VCS exclusions
-	for _, dir := range grepVCSExclusions {
-		args = append(args, "--exclude-dir="+dir)
-	}
-
-	// Context lines
-	if input.Context > 0 {
-		args = append(args, fmt.Sprintf("-C%d", input.Context))
+	// Handle patterns starting with '-' to prevent rg interpreting them as flags
+	if strings.HasPrefix(input.Pattern, "-") {
+		args = append(args, "-e", input.Pattern)
 	} else {
-		if input.BeforeContext > 0 {
-			args = append(args, fmt.Sprintf("-B%d", input.BeforeContext))
-		}
-		if input.AfterContext > 0 {
-			args = append(args, fmt.Sprintf("-A%d", input.AfterContext))
-		}
+		args = append(args, input.Pattern)
 	}
-
-	if input.CaseInsensitive {
-		args = append(args, "-i")
-	}
-	if input.Include != "" {
-		args = append(args, "--include="+input.Include)
-	}
-	if input.FileType != "" {
-		args = append(args, "--include=*."+input.FileType)
-	}
-
-	// Output mode for grep fallback
-	switch input.OutputMode {
-	case "files_with_matches":
-		args = append(args, "-l")
-	case "count":
-		args = append(args, "-c")
-	}
-
-	args = append(args, input.Pattern, input.Path)
+	args = append(args, input.Path)
 	return args
 }
 
-func (g *grepTool) runLocalCmd(ctx context.Context, bin string, args []string, input GrepInput, maxResults int) (string, error) {
-	cmd := exec.CommandContext(ctx, bin, args...)
+// runLocalRg executes ripgrep locally with timeout and processes results.
+func (g *grepTool) runLocalRg(ctx context.Context, rgPath string, input GrepInput, maxResults int) (string, error) {
+	args := g.buildRgArgs(input, maxResults)
+
+	ctx, cancel := context.WithTimeout(ctx, grepTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, rgPath, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
 	if err != nil {
+		// Exit code 1 = no matches
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			return "No matches found.", nil
+		}
+		// Timeout: report partial results or clear error
+		if ctx.Err() == context.DeadlineExceeded {
+			partial := stdout.String()
+			if partial != "" {
+				lines := strings.Split(strings.TrimRight(partial, "\n"), "\n")
+				// Drop last line which may be incomplete
+				if len(lines) > 1 {
+					lines = lines[:len(lines)-1]
+				}
+				result := g.postProcessOutput(lines, input, maxResults)
+				return fmt.Sprintf("Search timed out after %s. Partial results:\n%s", grepTimeout, result), nil
+			}
+			return fmt.Sprintf("Search timed out after %s. Try a more specific path or pattern.", grepTimeout), nil
 		}
 		if stderr.Len() > 0 {
 			return "", fmt.Errorf("search error: %s", strings.TrimSpace(stderr.String()))
@@ -273,7 +269,198 @@ func (g *grepTool) runLocalCmd(ctx context.Context, bin string, args []string, i
 		return "", fmt.Errorf("search failed: %w", err)
 	}
 
-	return formatGrepOutput(stdout.String(), maxResults, input.Offset)
+	raw := stdout.String()
+	if raw == "" {
+		return "No matches found.", nil
+	}
+
+	lines := strings.Split(strings.TrimRight(raw, "\n"), "\n")
+	return g.postProcessOutput(lines, input, maxResults), nil
+}
+
+// postProcessOutput handles path relativization, mtime sorting (for files_with_matches),
+// pagination, and result formatting.
+func (g *grepTool) postProcessOutput(lines []string, input GrepInput, maxResults int) string {
+	pwd := g.env.Pwd()
+
+	switch input.OutputMode {
+	case "files_with_matches":
+		return g.formatFilesWithMatches(lines, pwd, maxResults, input.Offset)
+	case "count":
+		return g.formatCount(lines, pwd, maxResults, input.Offset)
+	default:
+		return g.formatContent(lines, pwd, maxResults, input.Offset)
+	}
+}
+
+// formatFilesWithMatches sorts file paths by mtime (newest first) and converts to relative paths.
+func (g *grepTool) formatFilesWithMatches(lines []string, pwd string, maxResults, offset int) string {
+	type fileEntry struct {
+		path  string
+		mtime int64
+	}
+
+	entries := make([]fileEntry, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var mtime int64
+		if info, err := os.Stat(line); err == nil {
+			mtime = info.ModTime().UnixNano()
+		}
+		entries = append(entries, fileEntry{path: line, mtime: mtime})
+	}
+
+	// Sort by mtime descending (most recently modified first)
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].mtime != entries[j].mtime {
+			return entries[i].mtime > entries[j].mtime
+		}
+		return entries[i].path < entries[j].path // stable tiebreaker
+	})
+
+	// Apply offset
+	totalFiles := len(entries)
+	if offset > 0 {
+		if offset >= len(entries) {
+			return fmt.Sprintf("No more results (offset %d exceeds %d total files).", offset, totalFiles)
+		}
+		entries = entries[offset:]
+	}
+
+	// Apply limit
+	truncated := len(entries) > maxResults
+	if truncated {
+		entries = entries[:maxResults]
+	}
+
+	var result strings.Builder
+	for _, e := range entries {
+		result.WriteString(toRelativePath(e.path, pwd))
+		result.WriteString("\n")
+	}
+
+	if truncated {
+		fmt.Fprintf(&result, "\nFound %d files (showing %d, offset %d — use offset=%d for next page)\n",
+			totalFiles, len(entries), offset, offset+maxResults)
+	} else if offset > 0 {
+		fmt.Fprintf(&result, "\nFound %d files (showing %d, offset %d)\n",
+			totalFiles, len(entries), offset)
+	} else {
+		fmt.Fprintf(&result, "\nFound %d files\n", len(entries))
+	}
+
+	return result.String()
+}
+
+// formatContent converts absolute paths in content lines to relative paths.
+func (g *grepTool) formatContent(lines []string, pwd string, maxResults, offset int) string {
+	totalLines := len(lines)
+
+	// Apply offset
+	if offset > 0 {
+		if offset >= len(lines) {
+			return fmt.Sprintf("No more results (offset %d exceeds %d total matches).", offset, totalLines)
+		}
+		lines = lines[offset:]
+	}
+
+	// Apply limit
+	truncated := len(lines) > maxResults
+	if truncated {
+		lines = lines[:maxResults]
+	}
+
+	var result strings.Builder
+	for _, line := range lines {
+		// Lines have format: /absolute/path:linenum:content — convert path to relative
+		result.WriteString(relativizeLine(line, pwd))
+		result.WriteString("\n")
+	}
+
+	switch {
+	case truncated:
+		fmt.Fprintf(&result, "\n(showing %d results, %d total, offset %d — use offset=%d for next page)\n",
+			len(lines), totalLines, offset, offset+maxResults)
+	case offset > 0:
+		fmt.Fprintf(&result, "\n(%d results, offset %d, %d total)\n", len(lines), offset, totalLines)
+	default:
+		fmt.Fprintf(&result, "\n(%d matches found)\n", len(lines))
+	}
+
+	return result.String()
+}
+
+// formatCount converts absolute paths in count lines to relative paths.
+func (g *grepTool) formatCount(lines []string, pwd string, maxResults, offset int) string {
+	totalLines := len(lines)
+
+	if offset > 0 {
+		if offset >= len(lines) {
+			return fmt.Sprintf("No more results (offset %d exceeds %d total entries).", offset, totalLines)
+		}
+		lines = lines[offset:]
+	}
+
+	truncated := len(lines) > maxResults
+	if truncated {
+		lines = lines[:maxResults]
+	}
+
+	var totalMatches int
+	var result strings.Builder
+	for _, line := range lines {
+		rel := relativizeLine(line, pwd)
+		result.WriteString(rel)
+		result.WriteString("\n")
+		// Parse count from "file:N" format
+		if idx := strings.LastIndex(line, ":"); idx > 0 {
+			var n int
+			if _, err := fmt.Sscanf(line[idx+1:], "%d", &n); err == nil {
+				totalMatches += n
+			}
+		}
+	}
+
+	if truncated {
+		fmt.Fprintf(&result, "\nFound %d occurrences (showing %d files, offset %d — use offset=%d for next page)\n",
+			totalMatches, len(lines), offset, offset+maxResults)
+	} else {
+		fmt.Fprintf(&result, "\nFound %d occurrences across %d files\n", totalMatches, len(lines))
+	}
+
+	return result.String()
+}
+
+// toRelativePath converts an absolute path to a path relative to pwd.
+// Returns the path unchanged if it cannot be made relative.
+func toRelativePath(absPath, pwd string) string {
+	if pwd == "" {
+		return absPath
+	}
+	rel, err := filepath.Rel(pwd, absPath)
+	if err != nil {
+		return absPath
+	}
+	return rel
+}
+
+// relativizeLine converts the leading absolute path in a grep output line
+// (e.g. "/abs/path/file.go:42:code") to a relative path.
+func relativizeLine(line, pwd string) string {
+	if pwd == "" || !strings.HasPrefix(line, "/") {
+		return line
+	}
+	// Find first colon that separates path from the rest
+	idx := strings.Index(line, ":")
+	if idx <= 0 {
+		return toRelativePath(line, pwd)
+	}
+	filePath := line[:idx]
+	rest := line[idx:]
+	return toRelativePath(filePath, pwd) + rest
 }
 
 // runRemote builds a command string and runs it over SSH via the Executor.
@@ -282,7 +469,7 @@ func (g *grepTool) runRemote(ctx context.Context, input GrepInput, maxResults in
 	stdout, stderr, err := g.env.Exec.Exec(ctx, cmd, "", 30*time.Second)
 
 	if err != nil {
-		// Exit code 1 = no matches (both rg and grep)
+		// Exit code 1 = no matches
 		if strings.Contains(err.Error(), "exit status 1") || strings.Contains(err.Error(), "status 1") {
 			return "No matches found.", nil
 		}
@@ -292,15 +479,18 @@ func (g *grepTool) runRemote(ctx context.Context, input GrepInput, maxResults in
 		return "", fmt.Errorf("search failed: %w", err)
 	}
 
-	return formatGrepOutput(stdout, maxResults, input.Offset)
+	if stdout == "" {
+		return "No matches found.", nil
+	}
+
+	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
+	return g.postProcessOutput(lines, input, maxResults), nil
 }
 
 func (g *grepTool) buildRemoteCmd(input GrepInput, maxResults int) string {
-	var parts []string
-
-	// rg command
+	// On remote, only use rg — fail clearly if not available.
 	rgParts := []string{"rg", "--no-heading", "--line-number", "--color=never",
-		"--max-columns=500", "--max-columns-preview"}
+		"--max-columns=500", "--max-columns-preview", "--hidden"}
 
 	for _, dir := range grepVCSExclusions {
 		rgParts = append(rgParts, "--glob", ShellQuote("!"+dir))
@@ -315,14 +505,16 @@ func (g *grepTool) buildRemoteCmd(input GrepInput, maxResults int) string {
 		rgParts = append(rgParts, "--max-count", fmt.Sprintf("%d", maxResults+input.Offset+1))
 	}
 
-	if input.Context > 0 {
-		rgParts = append(rgParts, fmt.Sprintf("--context=%d", input.Context))
-	} else {
-		if input.BeforeContext > 0 {
-			rgParts = append(rgParts, fmt.Sprintf("--before-context=%d", input.BeforeContext))
-		}
-		if input.AfterContext > 0 {
-			rgParts = append(rgParts, fmt.Sprintf("--after-context=%d", input.AfterContext))
+	if input.OutputMode == "content" || input.OutputMode == "" {
+		if input.Context > 0 {
+			rgParts = append(rgParts, fmt.Sprintf("--context=%d", input.Context))
+		} else {
+			if input.BeforeContext > 0 {
+				rgParts = append(rgParts, fmt.Sprintf("--before-context=%d", input.BeforeContext))
+			}
+			if input.AfterContext > 0 {
+				rgParts = append(rgParts, fmt.Sprintf("--after-context=%d", input.AfterContext))
+			}
 		}
 	}
 
@@ -333,94 +525,19 @@ func (g *grepTool) buildRemoteCmd(input GrepInput, maxResults int) string {
 		rgParts = append(rgParts, "--glob", ShellQuote(input.Include))
 	}
 	if input.Multiline {
-		rgParts = append(rgParts, "--multiline")
+		rgParts = append(rgParts, "--multiline", "--multiline-dotall")
 	}
 	if input.FileType != "" {
 		rgParts = append(rgParts, "--type", ShellQuote(input.FileType))
 	}
-	rgParts = append(rgParts, ShellQuote(input.Pattern), ShellQuote(input.Path))
 
-	// grep fallback
-	grepParts := []string{"grep", "-rnI", "--color=never"}
-	for _, dir := range grepVCSExclusions {
-		grepParts = append(grepParts, "--exclude-dir="+dir)
-	}
-
-	if input.Context > 0 {
-		grepParts = append(grepParts, fmt.Sprintf("-C%d", input.Context))
+	// Handle patterns starting with '-'
+	if strings.HasPrefix(input.Pattern, "-") {
+		rgParts = append(rgParts, "-e", ShellQuote(input.Pattern))
 	} else {
-		if input.BeforeContext > 0 {
-			grepParts = append(grepParts, fmt.Sprintf("-B%d", input.BeforeContext))
-		}
-		if input.AfterContext > 0 {
-			grepParts = append(grepParts, fmt.Sprintf("-A%d", input.AfterContext))
-		}
+		rgParts = append(rgParts, ShellQuote(input.Pattern))
 	}
+	rgParts = append(rgParts, ShellQuote(input.Path))
 
-	if input.CaseInsensitive {
-		grepParts = append(grepParts, "-i")
-	}
-	if input.Include != "" {
-		grepParts = append(grepParts, "--include="+ShellQuote(input.Include))
-	}
-	if input.FileType != "" {
-		grepParts = append(grepParts, "--include=*."+ShellQuote(input.FileType))
-	}
-
-	switch input.OutputMode {
-	case "files_with_matches":
-		grepParts = append(grepParts, "-l")
-	case "count":
-		grepParts = append(grepParts, "-c")
-	}
-
-	grepParts = append(grepParts, ShellQuote(input.Pattern), ShellQuote(input.Path))
-
-	// which rg && rg ... || grep ...
-	parts = append(parts, "which rg >/dev/null 2>&1 &&")
-	parts = append(parts, strings.Join(rgParts, " "))
-	parts = append(parts, "||")
-	parts = append(parts, strings.Join(grepParts, " "))
-
-	return strings.Join(parts, " ")
-}
-
-func formatGrepOutput(output string, maxResults int, offset int) (string, error) {
-	if output == "" {
-		return "No matches found.", nil
-	}
-	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
-
-	totalLines := len(lines)
-
-	// Apply offset (pagination)
-	if offset > 0 {
-		if offset >= len(lines) {
-			return fmt.Sprintf("No more results (offset %d exceeds %d total matches).\n", offset, totalLines), nil
-		}
-		lines = lines[offset:]
-	}
-
-	truncated := len(lines) > maxResults
-	if truncated {
-		lines = lines[:maxResults]
-	}
-
-	var result strings.Builder
-	for _, line := range lines {
-		result.WriteString(line)
-		result.WriteString("\n")
-	}
-
-	switch {
-	case truncated:
-		fmt.Fprintf(&result, "\n(showing %d results, %d total, offset %d — use offset=%d for next page)\n",
-			len(lines), totalLines, offset, offset+maxResults)
-	case offset > 0:
-		fmt.Fprintf(&result, "\n(%d results, offset %d, %d total)\n", len(lines), offset, totalLines)
-	default:
-		fmt.Fprintf(&result, "\n(%d matches found)\n", len(lines))
-	}
-
-	return result.String(), nil
+	return strings.Join(rgParts, " ")
 }
