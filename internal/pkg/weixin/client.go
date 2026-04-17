@@ -23,6 +23,7 @@ const (
 	sendRetryDeadline      = 45 * time.Second
 	sendRetryInterval      = 3 * time.Second
 	loginTimeout           = 8 * time.Minute
+	dedupWindowSize        = 256 // max Seq IDs kept for deduplication
 )
 
 // Credentials holds the persisted login state.
@@ -41,11 +42,17 @@ type Client struct {
 	creds     *Credentials
 	cancel    context.CancelFunc
 	onMessage func(from, text string)
+
+	// idempotent deduplication: track recently processed message Seq values.
+	seenSeqs map[int]struct{}
 }
 
 // NewClient creates a new WeChat channel client, loading any saved credentials.
 func NewClient() *Client {
-	c := &Client{state: channel.StateNone}
+	c := &Client{
+		state:    channel.StateNone,
+		seenSeqs: make(map[int]struct{}, dedupWindowSize),
+	}
 	if creds, err := loadCredentials(); err == nil && creds.Token != "" {
 		c.creds = creds
 		c.state = channel.StateDisabled
@@ -176,6 +183,11 @@ func (c *Client) SendText(text string) error {
 			config.Logger().Printf("[weixin] sent %d bytes to %s", len(text), creds.UserID)
 			return nil
 		}
+		if IsSessionExpired(err) {
+			config.Logger().Printf("[weixin] session expired during send, disabling")
+			_ = c.Disable()
+			return fmt.Errorf("wechat session expired, please re-login")
+		}
 		if IsSessionNotReady(err) && time.Now().Before(deadline) {
 			time.Sleep(sendRetryInterval)
 			continue
@@ -248,13 +260,37 @@ func (c *Client) pollLoop(ctx context.Context) {
 		}
 
 		for _, msg := range resp.Msgs {
+			seq := msg.Seq
+			if seq <= 0 {
+				continue
+			}
+
+			// Idempotent dedup: skip messages we've already processed.
+			c.mu.Lock()
+			if _, seen := c.seenSeqs[seq]; seen {
+				c.mu.Unlock()
+				config.Logger().Printf("[weixin] skipping duplicate message seq=%d", seq)
+				continue
+			}
+			// Mark as seen; evict oldest entries when window is full.
+			c.seenSeqs[seq] = struct{}{}
+			if len(c.seenSeqs) > dedupWindowSize {
+				newSeen := make(map[int]struct{}, dedupWindowSize)
+				for k := range c.seenSeqs {
+					newSeen[k] = struct{}{}
+					if len(newSeen) >= dedupWindowSize/2 {
+						break
+					}
+				}
+				c.seenSeqs = newSeen
+			}
+			handler := c.onMessage
+			c.mu.Unlock()
+
 			text := msg.TextBody()
 			if text == "" {
 				continue
 			}
-			c.mu.Lock()
-			handler := c.onMessage
-			c.mu.Unlock()
 			if handler != nil {
 				handler(msg.FromUserID, text)
 			}

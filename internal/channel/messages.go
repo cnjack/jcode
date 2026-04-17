@@ -74,6 +74,17 @@ func BusyMessage() string {
 		"task completes."
 }
 
+// LoginReminderMessage returns a reminder that the user must send a message
+// to activate the 24-hour session window on WeChat iLink Bot.
+func LoginReminderMessage() string {
+	return "⚠️ Important\n" +
+		"————————————————\n" +
+		"Please send any message to this bot\n" +
+		"on WeChat now to activate the session.\n" +
+		"Once activated, you can receive\n" +
+		"notifications for 24 hours."
+}
+
 func isWeekend(t time.Time) bool {
 	d := t.Weekday()
 	return d == time.Saturday || d == time.Sunday

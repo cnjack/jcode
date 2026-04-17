@@ -31,6 +31,7 @@ const channelAvailable = ref(false)
 const channelState = ref('none')
 const channelLoading = ref(false)
 const channelQRContent = ref('')
+const channelLoginReminder = ref(false)
 const qrCanvas = ref<HTMLCanvasElement | null>(null)
 
 watch(() => props.open, async (isOpen) => {
@@ -123,6 +124,7 @@ async function channelLogout() {
 }
 
 function pollChannelState() {
+  const previousState = channelState.value
   const interval = setInterval(async () => {
     try {
       const ch = await api.channelStatus()
@@ -131,6 +133,10 @@ function pollChannelState() {
         channelQRContent.value = ''
         store.channelAvailable = true
         store.channelEnabled = ch.state === 'enabled'
+        // Show reminder when first connected via login flow
+        if (ch.state === 'enabled' && previousState === 'scanning') {
+          channelLoginReminder.value = true
+        }
         clearInterval(interval)
       }
     } catch { /* ignore */ }
@@ -393,6 +399,24 @@ const tabLabel: Record<string, string> = {
                           Disconnect
                         </button>
                       </div>
+                    </div>
+
+                    <!-- Login reminder banner -->
+                    <div
+                      v-if="channelLoginReminder"
+                      class="px-4 py-3 rounded-xl border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 flex items-start gap-2.5"
+                    >
+                      <span class="text-sm shrink-0 mt-0.5">⚠️</span>
+                      <div class="flex-1 min-w-0">
+                        <div class="text-xs font-medium text-amber-700 dark:text-amber-400">Send a message to activate</div>
+                        <div class="text-[10px] text-amber-600 dark:text-amber-400/80 mt-0.5 leading-relaxed">
+                          Please send any message to the WeChat bot now to activate notifications. Once activated, you can receive notifications for 24 hours.
+                        </div>
+                      </div>
+                      <button
+                        class="text-amber-400 hover:text-amber-600 dark:text-amber-500 dark:hover:text-amber-300 shrink-0 cursor-pointer"
+                        @click="channelLoginReminder = false"
+                      >✕</button>
                     </div>
 
                     <div class="text-[10px] text-zinc-400 dark:text-zinc-500 leading-relaxed">

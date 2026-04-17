@@ -53,6 +53,15 @@ func (s *Server) handleChannelLogin(w http.ResponseWriter, r *http.Request) {
 			config.Logger().Printf("[wechat] web auto-enable after login failed: %v", err)
 			return
 		}
+		// Send welcome and login reminder messages
+		go func() {
+			if err := s.wechatClient.SendText(channelpkg.WelcomeMessage(time.Now())); err != nil {
+				config.Logger().Printf("[wechat] failed to send welcome: %v", err)
+			}
+			if err := s.wechatClient.SendText(channelpkg.LoginReminderMessage()); err != nil {
+				config.Logger().Printf("[wechat] failed to send login reminder: %v", err)
+			}
+		}()
 	}()
 }
 
