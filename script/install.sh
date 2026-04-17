@@ -57,6 +57,92 @@ download() {
     fi
 }
 
+install_ripgrep() {
+    if command -v rg >/dev/null 2>&1; then
+        ok "ripgrep (rg) already installed: $(command -v rg)"
+        return 0
+    fi
+
+    info "Installing ripgrep (rg)..."
+    OS=$(detect_os)
+
+    if [ "$OS" = "linux" ]; then
+        if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep
+        elif command -v dnf >/dev/null 2>&1; then
+            sudo dnf install -y ripgrep
+        elif command -v yum >/dev/null 2>&1; then
+            sudo yum install -y ripgrep
+        elif command -v pacman >/dev/null 2>&1; then
+            sudo pacman -S --noconfirm ripgrep
+        elif command -v apk >/dev/null 2>&1; then
+            sudo apk add ripgrep
+        else
+            warn "No supported package manager found. Installing from GitHub release..."
+            install_ripgrep_from_github
+            return $?
+        fi
+    elif [ "$OS" = "darwin" ]; then
+        if command -v brew >/dev/null 2>&1; then
+            brew install ripgrep
+        else
+            warn "Homebrew not found. Installing from GitHub release..."
+            install_ripgrep_from_github
+            return $?
+        fi
+    else
+        warn "Auto-install not supported on $OS. Please install manually:"
+        warn "https://github.com/BurntSushi/ripgrep#installation"
+        return 1
+    fi
+
+    if command -v rg >/dev/null 2>&1; then
+        ok "ripgrep installed successfully: $(rg --version | head -1)"
+    else
+        error "ripgrep installation failed."
+        return 1
+    fi
+}
+
+install_ripgrep_from_github() {
+    RG_VERSION=$(curl -fsSL "https://api.github.com/repos/BurntSushi/ripgrep/releases/latest" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+    if [ -z "$RG_VERSION" ]; then
+        error "Failed to fetch ripgrep version."
+        return 1
+    fi
+
+    ARCH=$(detect_arch)
+    case "$ARCH" in
+        amd64)  RG_ARCH="x86_64" ;;
+        arm64)  RG_ARCH="aarch64" ;;
+        *)      error "Unsupported arch for ripgrep: $ARCH"; return 1 ;;
+    esac
+
+    RG_TARGET="${RG_ARCH}-unknown-linux-musl"
+    RG_FILENAME="ripgrep-${RG_VERSION}-${RG_TARGET}.tar.gz"
+    RG_URL="https://github.com/BurntSushi/ripgrep/releases/download/${RG_VERSION}/${RG_FILENAME}"
+
+    RG_TMP=$(mktemp -d)
+    trap 'rm -rf "$RG_TMP"' EXIT
+
+    info "Downloading ${RG_URL}..."
+    download "$RG_URL" "${RG_TMP}/${RG_FILENAME}"
+    tar xzf "${RG_TMP}/${RG_FILENAME}" -C "$RG_TMP"
+
+    RG_BIN=$(find "$RG_TMP" -name rg -type f | head -1)
+    if [ -z "$RG_BIN" ]; then
+        error "Failed to extract ripgrep binary."
+        return 1
+    fi
+
+    chmod +x "$RG_BIN"
+    if [ -w "$INSTALL_DIR" ]; then
+        mv "$RG_BIN" "${INSTALL_DIR}/rg"
+    else
+        sudo mv "$RG_BIN" "${INSTALL_DIR}/rg"
+    fi
+}
+
 main() {
     printf "\n"
     info "  Little Jack — Coding Assistant Installer"
@@ -112,6 +198,11 @@ main() {
 
     ok "Installed ${BINARY} ${VERSION} to ${INSTALL_DIR}/${BINARY}${SUFFIX}"
     printf "\n"
+
+    # Install ripgrep dependency
+    install_ripgrep
+    printf "\n"
+
     info "Run 'jcode --version' to verify."
     printf "\n"
 }
