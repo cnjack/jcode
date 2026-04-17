@@ -113,10 +113,20 @@ func (s *interactiveState) handleWeChatAction(action string) {
 			Message:   "WeChat channel enabled",
 		})
 
+		// Remind user to send a message to activate the 24-hour session window
+		s.p.Send(tui.ChannelStateMsg{
+			ChannelID: "wechat",
+			State:     channel.StateEnabled.String(),
+			Message:   "⚠️ Please send any message to the WeChat bot now to activate notifications. Once activated, you can receive notifications for 24 hours.",
+		})
+
 		// Send welcome message to the newly connected user (async, may wait for first poll)
 		go func() {
 			if err := s.wechatClient.SendText(channel.WelcomeMessage(time.Now())); err != nil {
 				config.Logger().Printf("[wechat] failed to send welcome: %v", err)
+			}
+			if err := s.wechatClient.SendText(channel.LoginReminderMessage()); err != nil {
+				config.Logger().Printf("[wechat] failed to send login reminder: %v", err)
 			}
 		}()
 
