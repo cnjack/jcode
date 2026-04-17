@@ -11,15 +11,14 @@ const showModelPicker = ref(false)
 const showModePicker = ref(false)
 const containerRef = ref<HTMLDivElement | null>(null)
 
-// Slash command completion
 const skills = ref<SkillInfo[]>([])
 const showSlashMenu = ref(false)
 const slashFilter = ref('')
 const selectedSlashIdx = ref(0)
 
 const modes = [
-  { value: 'agent' as const, label: 'Agent' },
-  { value: 'plan' as const, label: 'Plan' },
+  { value: 'agent' as const, label: 'Agent', icon: '⚡' },
+  { value: 'plan' as const, label: 'Plan', icon: '📋' },
 ]
 
 const filteredSlashCommands = computed(() => {
@@ -37,7 +36,6 @@ function autoResize() {
 }
 
 function handleKeyDown(e: KeyboardEvent) {
-  // Slash menu navigation
   if (showSlashMenu.value) {
     if (e.key === 'ArrowDown') {
       e.preventDefault()
@@ -72,7 +70,6 @@ function handleKeyDown(e: KeyboardEvent) {
 
 function handleInput() {
   autoResize()
-  // Check for slash commands
   const text = input.value
   if (text.startsWith('/')) {
     slashFilter.value = text.slice(1)
@@ -109,7 +106,6 @@ function selectMode(mode: 'agent' | 'plan') {
   store.switchMode(mode)
 }
 
-// Click-away handler
 function handleClickOutside(e: MouseEvent) {
   if (containerRef.value && !containerRef.value.contains(e.target as Node)) {
     showModelPicker.value = false
@@ -118,7 +114,6 @@ function handleClickOutside(e: MouseEvent) {
   }
 }
 
-// Focus input shortcut (Ctrl+L)
 function handleGlobalKey(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
     e.preventDefault()
@@ -145,24 +140,26 @@ watch(() => store.isRunning, (running) => {
 </script>
 
 <template>
-  <div ref="containerRef" class="border-t border-stone-200 bg-white px-5 py-3">
+  <div ref="containerRef" class="border-t border-zinc-200 dark:border-zinc-800/80 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm px-5 py-3">
     <div class="max-w-3xl mx-auto">
-      <div class="bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 focus-within:border-teal-400 transition-colors relative">
+      <div class="bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700/60 rounded-2xl px-3.5 py-2.5 focus-within:border-emerald-400 dark:focus-within:border-emerald-500/60 focus-within:ring-1 focus-within:ring-emerald-400/20 dark:focus-within:ring-emerald-500/10 transition-all relative">
         <!-- Slash command menu -->
         <div
           v-if="showSlashMenu && filteredSlashCommands.length > 0"
-          class="absolute bottom-full mb-1 left-0 right-0 z-30 bg-white border border-stone-200 rounded-lg shadow-lg py-1 max-h-48 overflow-y-auto"
+          class="absolute bottom-full mb-2 left-0 right-0 z-30 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-lg dark:shadow-2xl py-1.5 max-h-48 overflow-y-auto"
         >
           <button
             v-for="(cmd, i) in filteredSlashCommands"
             :key="cmd.name"
-            class="w-full px-3 py-2 text-left flex items-start gap-2 cursor-pointer"
-            :class="i === selectedSlashIdx ? 'bg-teal-50' : 'hover:bg-stone-50'"
+            class="w-full px-3.5 py-2 text-left flex items-start gap-2.5 cursor-pointer transition-colors"
+            :class="i === selectedSlashIdx
+              ? 'bg-emerald-50 dark:bg-emerald-500/10'
+              : 'hover:bg-zinc-50 dark:hover:bg-zinc-700/50'"
             @click="applySlashCommand(cmd)"
             @mouseenter="selectedSlashIdx = i"
           >
-            <span class="text-xs font-mono text-teal-600 shrink-0">{{ cmd.slash }}</span>
-            <span class="text-[11px] text-stone-500 truncate">{{ cmd.description }}</span>
+            <span class="text-xs font-mono text-emerald-600 dark:text-emerald-400 shrink-0">{{ cmd.slash }}</span>
+            <span class="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">{{ cmd.description }}</span>
           </button>
         </div>
 
@@ -172,33 +169,38 @@ watch(() => store.isRunning, (running) => {
           :placeholder="store.isRunning ? 'Agent is working…' : 'Ask anything… (/ for commands)'"
           rows="1"
           :disabled="store.isRunning"
-          class="w-full bg-transparent text-stone-700 text-sm resize-none outline-none placeholder-stone-400 min-h-6 max-h-40 leading-relaxed disabled:opacity-50"
+          class="w-full bg-transparent text-zinc-800 dark:text-zinc-100 text-sm resize-none outline-none placeholder-zinc-400 dark:placeholder-zinc-500 min-h-6 max-h-40 leading-relaxed disabled:opacity-50"
           @keydown="handleKeyDown"
           @input="handleInput"
         />
         <!-- Toolbar row -->
-        <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-stone-200/60">
+        <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-zinc-200/60 dark:border-zinc-700/40">
           <div class="flex items-center gap-1.5">
             <!-- Mode selector -->
             <div class="relative">
               <button
-                class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-md bg-stone-100 text-stone-500 hover:text-stone-700 cursor-pointer transition-colors"
+                class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-lg transition-colors cursor-pointer"
+                :class="store.mode === 'plan'
+                  ? 'bg-amber-100 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                  : 'bg-zinc-100 dark:bg-zinc-700/60 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'"
                 @click.stop="showModePicker = !showModePicker; showModelPicker = false"
               >
-                {{ store.mode === 'agent' ? 'Agent' : 'Plan' }}
+                {{ store.mode === 'agent' ? '⚡ Agent' : '📋 Plan' }}
                 <svg class="w-3 h-3 opacity-50" viewBox="0 0 20 20" fill="currentColor">
                   <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
                 </svg>
               </button>
-              <div v-if="showModePicker" class="absolute bottom-full mb-1 left-0 z-20 bg-white border border-stone-200 rounded-lg shadow-lg py-1 min-w-24 focus:outline-none">
+              <div v-if="showModePicker" class="absolute bottom-full mb-1 left-0 z-20 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-lg dark:shadow-2xl py-1 min-w-28">
                 <button
                   v-for="m in modes"
                   :key="m.value"
-                  class="w-full px-3 py-1.5 text-xs cursor-pointer select-none text-left"
-                  :class="store.mode === m.value ? 'text-teal-600 bg-teal-50' : 'text-stone-500 hover:bg-stone-50 hover:text-stone-700'"
+                  class="w-full px-3 py-1.5 text-xs cursor-pointer select-none text-left transition-colors rounded-lg"
+                  :class="store.mode === m.value
+                    ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10'
+                    : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700/50 hover:text-zinc-700 dark:hover:text-zinc-200'"
                   @click="selectMode(m.value)"
                 >
-                  {{ m.label }}
+                  {{ m.icon }} {{ m.label }}
                 </button>
               </div>
             </div>
@@ -206,7 +208,7 @@ watch(() => store.isRunning, (running) => {
             <!-- Model selector -->
             <div class="relative">
               <button
-                class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-md bg-stone-100 text-stone-500 hover:text-stone-700 cursor-pointer transition-colors"
+                class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-lg bg-zinc-100 dark:bg-zinc-700/60 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer transition-colors"
                 @click.stop="showModelPicker = !showModelPicker; showModePicker = false"
               >
                 {{ store.modelName || 'model' }}
@@ -216,23 +218,25 @@ watch(() => store.isRunning, (running) => {
               </button>
               <div
                 v-if="showModelPicker"
-                class="absolute bottom-full mb-1 left-0 z-20 bg-white border border-stone-200 rounded-lg shadow-lg py-1 max-h-72 overflow-y-auto min-w-56"
+                class="absolute bottom-full mb-1 left-0 z-20 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-lg dark:shadow-2xl py-1.5 max-h-72 overflow-y-auto min-w-56"
               >
                 <template v-for="p in store.providers" :key="p.id">
-                  <div class="px-3 py-1 text-[10px] text-stone-400 uppercase tracking-wider font-semibold sticky top-0 bg-white">
+                  <div class="px-3 py-1 text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider font-semibold sticky top-0 bg-white dark:bg-zinc-800">
                     {{ p.name }}
                   </div>
                   <button
                     v-for="m in p.models"
                     :key="m.id"
-                    class="w-full px-3 py-1.5 text-xs text-left cursor-pointer select-none truncate"
-                    :class="store.providerName === p.id && store.modelName === m.id ? 'text-teal-600 bg-teal-50' : 'text-stone-500 hover:bg-stone-50 hover:text-stone-700'"
+                    class="w-full px-3 py-1.5 text-xs text-left cursor-pointer select-none truncate transition-colors"
+                    :class="store.providerName === p.id && store.modelName === m.id
+                      ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10'
+                      : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700/50 hover:text-zinc-700 dark:hover:text-zinc-200'"
                     @click="selectModel(p.id, m.id)"
                   >
                     {{ m.name || m.id }}
                   </button>
                 </template>
-                <div v-if="store.providers.length === 0" class="px-3 py-2 text-xs text-stone-400">
+                <div v-if="store.providers.length === 0" class="px-3 py-2 text-xs text-zinc-400 dark:text-zinc-500">
                   No models available
                 </div>
               </div>
@@ -240,10 +244,10 @@ watch(() => store.isRunning, (running) => {
 
             <!-- Auto-approve toggle -->
             <button
-              class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-md transition-colors cursor-pointer"
+              class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-lg transition-colors cursor-pointer"
               :class="store.autoApprove
-                ? 'bg-teal-100 text-teal-600 hover:bg-teal-200'
-                : 'bg-stone-100 text-stone-400 hover:text-stone-600 hover:bg-stone-200'"
+                ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-500/25'
+                : 'bg-zinc-100 dark:bg-zinc-700/60 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-600/60'"
               :title="store.autoApprove ? 'Auto-approve ON' : 'Auto-approve OFF'"
               @click="store.setAutoApprove(!store.autoApprove)"
             >
@@ -256,10 +260,10 @@ watch(() => store.isRunning, (running) => {
             <!-- Channel toggle -->
             <button
               v-if="store.channelAvailable"
-              class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-md transition-colors cursor-pointer"
+              class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-lg transition-colors cursor-pointer"
               :class="store.channelEnabled
-                ? 'bg-teal-100 text-teal-600 hover:bg-teal-200'
-                : 'bg-stone-100 text-stone-400 hover:text-stone-600 hover:bg-stone-200'"
+                ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-500/25'
+                : 'bg-zinc-100 dark:bg-zinc-700/60 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-600/60'"
               :title="store.channelEnabled ? 'WeChat notifications ON' : 'WeChat notifications OFF'"
               @click="store.toggleChannel(!store.channelEnabled)"
             >
@@ -272,25 +276,25 @@ watch(() => store.isRunning, (running) => {
           </div>
 
           <div class="flex items-center gap-2">
-            <span v-if="store.tokenInfo" class="text-[10px] text-stone-400">
+            <span v-if="store.tokenInfo" class="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono">
               {{ store.tokenInfo.total_tokens.toLocaleString() }} tokens
               <template v-if="store.tokenPercentage > 0"> · {{ store.tokenPercentage }}%</template>
             </span>
-            <!-- Stop button (shown when agent is running) -->
+            <!-- Stop button -->
             <button
               v-if="store.isRunning"
-              class="w-7 h-7 flex items-center justify-center rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors cursor-pointer"
+              class="w-7 h-7 flex items-center justify-center rounded-xl bg-red-500 hover:bg-red-600 text-white transition-colors cursor-pointer shadow-sm"
               title="Stop agent (Esc)"
               @click="store.stopAgent()"
             >
               <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                <rect x="6" y="6" width="12" height="12" rx="1" />
+                <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
             </button>
             <!-- Send button -->
             <button
               v-else
-              class="w-7 h-7 flex items-center justify-center rounded-lg bg-teal-500 hover:bg-teal-600 text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+              class="w-7 h-7 flex items-center justify-center rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shadow-sm"
               :disabled="!input.trim()"
               @click="send"
             >

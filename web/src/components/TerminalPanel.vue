@@ -15,6 +15,56 @@ let fitAddon: FitAddon | null = null
 let ws: WebSocket | null = null
 let resizeObserver: ResizeObserver | null = null
 
+function isDarkMode(): boolean {
+  return document.documentElement.classList.contains('dark')
+}
+
+const darkTheme = {
+  background: '#18181b',
+  foreground: '#e4e4e7',
+  cursor: '#10b981',
+  selectionBackground: '#3f3f4680',
+  black: '#09090b',
+  red: '#ef4444',
+  green: '#22c55e',
+  yellow: '#eab308',
+  blue: '#3b82f6',
+  magenta: '#a855f7',
+  cyan: '#06b6d4',
+  white: '#d4d4d8',
+  brightBlack: '#71717a',
+  brightRed: '#f87171',
+  brightGreen: '#4ade80',
+  brightYellow: '#facc15',
+  brightBlue: '#60a5fa',
+  brightMagenta: '#c084fc',
+  brightCyan: '#22d3ee',
+  brightWhite: '#fafafa',
+}
+
+const lightTheme = {
+  background: '#fafafa',
+  foreground: '#27272a',
+  cursor: '#10b981',
+  selectionBackground: '#d4d4d880',
+  black: '#18181b',
+  red: '#dc2626',
+  green: '#16a34a',
+  yellow: '#ca8a04',
+  blue: '#2563eb',
+  magenta: '#9333ea',
+  cyan: '#0891b2',
+  white: '#d4d4d8',
+  brightBlack: '#71717a',
+  brightRed: '#ef4444',
+  brightGreen: '#22c55e',
+  brightYellow: '#eab308',
+  brightBlue: '#3b82f6',
+  brightMagenta: '#a855f7',
+  brightCyan: '#06b6d4',
+  brightWhite: '#fafafa',
+}
+
 function getWsUrl(ptyId: string): string {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${proto}//${location.host}/api/pty/${encodeURIComponent(ptyId)}/ws`
@@ -23,33 +73,11 @@ function getWsUrl(ptyId: string): string {
 async function initTerminal() {
   if (!termEl.value) return
 
-  // Create xterm instance
   term = new Terminal({
     cursorBlink: true,
     fontSize: 13,
     fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, monospace",
-    theme: {
-      background: '#fafaf9',
-      foreground: '#292524',
-      cursor: '#0d9488',
-      selectionBackground: '#d6d3d180',
-      black: '#1c1917',
-      red: '#dc2626',
-      green: '#16a34a',
-      yellow: '#ca8a04',
-      blue: '#2563eb',
-      magenta: '#9333ea',
-      cyan: '#0891b2',
-      white: '#d6d3d1',
-      brightBlack: '#78716c',
-      brightRed: '#ef4444',
-      brightGreen: '#22c55e',
-      brightYellow: '#eab308',
-      brightBlue: '#3b82f6',
-      brightMagenta: '#a855f7',
-      brightCyan: '#06b6d4',
-      brightWhite: '#fafaf9',
-    },
+    theme: isDarkMode() ? darkTheme : lightTheme,
   })
 
   fitAddon = new FitAddon()
@@ -58,7 +86,6 @@ async function initTerminal() {
   term.open(termEl.value)
   fitAddon.fit()
 
-  // Observe container resizes
   resizeObserver = new ResizeObserver(() => {
     fitAddon?.fit()
     if (ws && ws.readyState === WebSocket.OPEN && term) {
@@ -71,7 +98,14 @@ async function initTerminal() {
   })
   resizeObserver.observe(termEl.value)
 
-  // Create PTY session on backend
+  // Watch for theme changes
+  const observer = new MutationObserver(() => {
+    if (term) {
+      term.options.theme = isDarkMode() ? darkTheme : lightTheme
+    }
+  })
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+
   try {
     const result = await api.ptyCreate()
     sessionId.value = result.id
@@ -91,7 +125,6 @@ function connectWS(ptyId: string) {
 
   ws.onopen = () => {
     connected.value = true
-    // Send initial resize
     ws!.send(JSON.stringify({
       type: 'resize',
       cols: term!.cols,
@@ -116,7 +149,6 @@ function connectWS(ptyId: string) {
     connected.value = false
   }
 
-  // Terminal input → WebSocket
   term.onData((data) => {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(new TextEncoder().encode(data))
@@ -154,18 +186,18 @@ onUnmounted(cleanup)
 </script>
 
 <template>
-  <div class="flex flex-col h-full bg-stone-50">
+  <div class="flex flex-col h-full bg-zinc-50 dark:bg-zinc-900">
     <!-- Header -->
-    <div class="flex items-center justify-between px-3 py-1 border-b border-stone-200 bg-stone-100/80 shrink-0">
+    <div class="flex items-center justify-between px-3 py-1.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-100/80 dark:bg-zinc-800/80 shrink-0">
       <div class="flex items-center gap-2">
-        <span class="text-[11px] font-medium text-stone-500 uppercase tracking-wider">Terminal</span>
+        <span class="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Terminal</span>
         <span
           class="w-1.5 h-1.5 rounded-full"
-          :class="connected ? 'bg-emerald-400' : 'bg-stone-300'"
+          :class="connected ? 'bg-emerald-400' : 'bg-zinc-300 dark:bg-zinc-600'"
         />
       </div>
       <button
-        class="text-[10px] text-stone-400 hover:text-stone-600 cursor-pointer transition-colors"
+        class="text-[10px] text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer transition-colors font-medium"
         @click="reconnect"
         title="New terminal"
       >
@@ -184,6 +216,9 @@ onUnmounted(cleanup)
   padding: 2px;
 }
 :deep(.xterm-viewport) {
-  background-color: #fafaf9 !important;
+  background-color: var(--term-bg, #fafafa) !important;
+}
+.dark :deep(.xterm-viewport) {
+  background-color: #18181b !important;
 }
 </style>
