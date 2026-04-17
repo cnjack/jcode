@@ -311,13 +311,6 @@ jcode update    # update to latest version
 
 See [CHANGELOG.md](./CHANGELOG.md) for release notes and version history.
 
-### Recent Releases
-
-- **[v0.0.4](https://github.com/cnjack/jcode/releases/tag/v0.0.4)** — TUI enhancements with full session recording, Langfuse nested tracing, streaming tool argument accumulation
-- **[v0.0.3](https://github.com/cnjack/jcode/releases/tag/v0.0.3)** — Self-update command and installation script
-- **[v0.0.2](https://github.com/cnjack/jcode/releases/tag/v0.0.2)** — Release workflow fixes
-- **[v0.0.1](https://github.com/cnjack/jcode/releases/tag/v0.0.1)** — Initial release
-
 ## License
 
 MIT
