@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-04-17
+
 ### Added
+- **Dark Mode / Theme System**
+  - Light / Dark / System theme modes with CSS custom-property design tokens
+  - `useTheme` composable for reactive theme management across all components
+  - Pre-hydration script in `index.html` to prevent flash of unstyled content (FOUC)
+  - Smooth cross-fade animations on theme transitions
+  - All 15+ web components updated to use token-based theming instead of hardcoded colors
+
 - **WeChat Channel Integration**
   - Bidirectional messaging: send prompts to jcode from WeChat, receive results back
   - Inbound WeChat messages displayed in web UI with green "WeChat" label
@@ -22,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Tool call notifications with index ordering
 
 ### Changed
+- Web UI design system migrated from hardcoded Tailwind classes to CSS custom properties (`tokens.css`)
 - Execute tool (`InvokableRun`) now reports exit codes correctly instead of returning errors
 - NotifyingHandler and SetOnMessage always registered in web mode (UI toggle works without config)
 - DOMPurify bumped to 3.4.0
@@ -33,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Approval notification race: resolved approvals no longer re-notified after 10s timer
 - Exit code not reported when command fails in execute tool
 
-## [0.0.4] - 2026-04-16
+## [0.1.1] - 2026-04-16
 
 ### Added
 - **TUI Session Display Enhancements**

@@ -11,11 +11,15 @@ For the **full changelog**, see [CHANGELOG.md](../CHANGELOG.md) in the repositor
 
 ## Latest Release
 
-### [Unreleased]
+### [0.2.1] - 2026-04-17
 
-**WeChat Channel Integration • Tool Call Enhancements • Bug Fixes**
+**Dark Mode / Theme System • WeChat Channel Integration • Tool Call Enhancements • Bug Fixes**
 
 #### Added
+- Dark / Light / System theme modes with CSS custom-property design tokens
+- `useTheme` composable for reactive theme management across all web components
+- Pre-hydration script to prevent flash of unstyled content (FOUC) for light-theme users
+- Smooth cross-fade animations on theme transitions
 - Bidirectional WeChat messaging: send prompts from WeChat, receive results back
 - Inbound WeChat messages displayed in web UI with green "WeChat" label
 - Toolbar toggle for quick WeChat enable/disable
@@ -24,6 +28,7 @@ For the **full changelog**, see [CHANGELOG.md](../CHANGELOG.md) in the repositor
 - `toolCallID` for precise tool call/result matching
 
 #### Changed
+- Web UI design system migrated from hardcoded Tailwind classes to CSS custom properties
 - Execute tool reports exit codes correctly instead of returning errors
 - NotifyingHandler always registered in web mode (UI toggle works without config)
 - DOMPurify bumped to 3.4.0
@@ -37,7 +42,7 @@ For the **full changelog**, see [CHANGELOG.md](../CHANGELOG.md) in the repositor
 
 ---
 
-### [0.0.4] - 2026-04-16
+### [0.1.1] - 2026-04-16
 
 **TUI Session Display Enhancements • Langfuse Integration Improvements • Session Recording Enhancements**
 

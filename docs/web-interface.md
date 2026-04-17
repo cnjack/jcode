@@ -47,6 +47,10 @@ List, view, and switch between sessions. Start a new session or resume a previou
 
 Switch models, toggle approval mode, and manage configuration — all from the web interface.
 
+### Theme / Dark Mode
+
+Toggle between **Light**, **Dark**, and **System** themes from the settings dialog. The theme preference is persisted in `localStorage` and applied instantly across all components. When set to **System**, the UI follows your OS appearance preference automatically.
+
 ### Project Switching
 
 Switch between different project directories without restarting the server.
