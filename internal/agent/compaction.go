@@ -81,8 +81,10 @@ func (s *ThresholdCompactionStrategy) Compact(ctx context.Context, messages []*s
 	}
 
 	// Split: older messages to summarise, recent messages to keep.
-	toSummarise := conversationMsgs[:len(conversationMsgs)-keepRecent]
-	recentMsgs := conversationMsgs[len(conversationMsgs)-keepRecent:]
+	// Adjust the split boundary so we don't orphan tool-result messages.
+	splitIdx := findToolBoundary(conversationMsgs, len(conversationMsgs)-keepRecent)
+	toSummarise := conversationMsgs[:splitIdx]
+	recentMsgs := conversationMsgs[splitIdx:]
 
 	// Build summary prompt.
 	var sb strings.Builder
