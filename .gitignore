@@ -1,4 +1,5 @@
 /jcode
+/weixin_poc
 internal/web/dist
 internal/model/registry_generated.go
 
