@@ -11,6 +11,27 @@ For the **full changelog**, see [CHANGELOG.md](../CHANGELOG.md) in the repositor
 
 ## Latest Release
 
+### [0.2.2] - 2026-04-18
+
+**Grep Enhancements • Doctor Command • WeChat Idempotency • Web UI Fixes**
+
+#### Added
+- Hidden file support and updated default output mode for grep tool
+- Enhanced `jcode doctor` with improved system diagnostics
+- Login reminder message for WeChat session activation
+- Idempotent message deduplication for WeChat to prevent duplicate processing
+
+#### Changed
+- Makefile computes version from latest git tag automatically
+- Message splitting adjusted to prevent orphaning tool-result messages during compaction
+- Web sessions sorted by creation date for consistent ordering
+
+#### Fixed
+- Web conversation rendering and session sort order
+- Tool result handling for proper display in web UI
+
+---
+
 ### [0.2.1] - 2026-04-17
 
 **Dark Mode / Theme System • WeChat Channel Integration • Tool Call Enhancements • Bug Fixes**

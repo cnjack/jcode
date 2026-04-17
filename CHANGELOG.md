@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-04-18
+
+### Added
+- **Grep Tool Enhancements**
+  - Hidden file support for grep searches
+  - Updated default output mode for better usability
+
+- **Doctor Command Enhancements**
+  - Enhanced `jcode doctor` with improved system diagnostics
+
+- **WeChat Idempotent Messaging**
+  - Login reminder message for WeChat session activation
+  - Idempotent message deduplication to prevent duplicate processing
+
+### Changed
+- Makefile now computes version from latest git tag automatically
+- Message splitting adjusted to prevent orphaning tool-result messages during compaction
+- Web sessions sorted by creation date for consistent ordering
+
+### Fixed
+- Web conversation rendering and session sort order
+- Tool result handling improved for proper display in web UI
+
 ## [0.2.1] - 2026-04-17
 
 ### Added
