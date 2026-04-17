@@ -26,7 +26,6 @@ const browsePath = ref('')
 const browseFolders = ref<BrowseFolder[]>([])
 const browseLoading = ref(false)
 
-// Editable path input
 const pathInput = ref('')
 
 const displayPath = computed(() => browsePath.value || '~')
@@ -120,7 +119,7 @@ function deleteProject(id: string) {
         leave-from="opacity-100"
         leave-to="opacity-0"
       >
-        <div class="fixed inset-0 bg-black/20" />
+        <div class="fixed inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-sm" />
       </TransitionChild>
 
       <div class="fixed inset-0 flex items-start justify-center pt-16 px-4">
@@ -132,76 +131,72 @@ function deleteProject(id: string) {
           leave-from="opacity-100 translate-y-0"
           leave-to="opacity-0 translate-y-2"
         >
-          <DialogPanel class="w-full max-w-lg bg-white border border-stone-200 rounded-xl shadow-xl overflow-hidden">
+          <DialogPanel class="w-full max-w-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl shadow-2xl overflow-hidden">
             <!-- Header -->
             <div class="px-5 pt-4 pb-2">
-              <DialogTitle class="text-sm font-semibold text-stone-800">
+              <DialogTitle class="text-sm font-semibold text-zinc-800 dark:text-zinc-100" style="font-family: var(--font-sans)">
                 {{ showBrowser ? 'Open Folder' : 'Projects' }}
               </DialogTitle>
             </div>
 
             <!-- Folder browser mode -->
             <div v-if="showBrowser" class="px-5 pb-4">
-              <!-- Path input -->
               <div class="flex items-center gap-2 mb-3">
                 <input
                   v-model="pathInput"
                   type="text"
-                  class="flex-1 px-3 py-1.5 text-sm font-mono rounded-lg border border-stone-200 bg-stone-50 text-stone-700 outline-none focus:border-teal-400 transition-colors"
+                  class="flex-1 px-3 py-1.5 text-sm font-mono rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 outline-none focus:border-emerald-400 dark:focus:border-emerald-500/60 transition-colors"
                   placeholder="/path/to/folder"
                   @keydown="handlePathKeyDown"
                 />
                 <button
-                  class="px-3 py-1.5 text-xs font-medium bg-teal-500 hover:bg-teal-600 text-white rounded-lg cursor-pointer transition-colors"
+                  class="px-3 py-1.5 text-xs font-medium bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl cursor-pointer transition-colors"
                   @click="handlePathSubmit"
                 >
                   OK
                 </button>
                 <button
-                  class="px-2 py-1.5 text-xs text-stone-400 hover:text-stone-600 cursor-pointer transition-colors"
+                  class="px-2 py-1.5 text-xs text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer transition-colors"
                   @click="showBrowser = false"
                 >
                   Back
                 </button>
               </div>
 
-              <!-- Folder list -->
-              <div class="border border-stone-200 rounded-lg overflow-hidden max-h-80 overflow-y-auto bg-stone-50">
-                <!-- Go up -->
+              <div class="border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-hidden max-h-80 overflow-y-auto bg-zinc-50 dark:bg-zinc-800/60">
                 <button
                   v-if="browsePath && browsePath !== '/'"
-                  class="w-full flex items-center gap-2 px-3 py-2 text-sm text-stone-500 hover:bg-stone-100 cursor-pointer transition-colors border-b border-stone-100"
+                  class="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 cursor-pointer transition-colors border-b border-zinc-100 dark:border-zinc-700/60"
                   @click="goUp"
                 >
-                  <span class="text-stone-400">..</span>
+                  <span class="text-zinc-400 dark:text-zinc-500">..</span>
                 </button>
 
-                <div v-if="browseLoading" class="px-3 py-6 text-center text-xs text-stone-400 animate-pulse">
+                <div v-if="browseLoading" class="px-3 py-6 text-center text-xs text-zinc-400 dark:text-zinc-500 animate-pulse">
                   Loading...
                 </div>
 
-                <div v-else-if="browseFolders.length === 0" class="px-3 py-6 text-center text-xs text-stone-400">
+                <div v-else-if="browseFolders.length === 0" class="px-3 py-6 text-center text-xs text-zinc-400 dark:text-zinc-500">
                   No folders found
                 </div>
 
                 <button
                   v-for="folder in browseFolders"
                   :key="folder.path"
-                  class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-stone-700 hover:bg-teal-50 hover:text-teal-700 cursor-pointer transition-colors border-b border-stone-100 last:border-0"
+                  class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-zinc-700 dark:text-zinc-300 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 hover:text-emerald-700 dark:hover:text-emerald-400 cursor-pointer transition-colors border-b border-zinc-100 dark:border-zinc-700/60 last:border-0"
                   @click="navigateTo(folder)"
                 >
-                  <span class="text-stone-400 shrink-0">📁</span>
+                  <span class="text-zinc-400 dark:text-zinc-500 shrink-0">📁</span>
                   <span class="truncate">{{ folder.name }}</span>
                 </button>
               </div>
 
-              <!-- Select current folder -->
               <div class="mt-3 flex items-center justify-between">
-                <div class="text-[11px] text-stone-400 font-mono truncate flex-1 mr-2">
+                <div class="text-[11px] text-zinc-400 dark:text-zinc-500 font-mono truncate flex-1 mr-2">
                   {{ displayPath }}
                 </div>
                 <button
-                  class="px-4 py-1.5 text-xs font-medium bg-teal-500 hover:bg-teal-600 text-white rounded-lg cursor-pointer transition-colors shrink-0"
+                  class="px-4 py-1.5 text-xs font-medium bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl cursor-pointer transition-colors shrink-0"
                   @click="selectCurrentPath"
                 >
                   Open Folder
@@ -211,45 +206,43 @@ function deleteProject(id: string) {
 
             <!-- Project list mode -->
             <div v-else>
-              <!-- Switch error -->
               <div v-if="projectStore.switchError" class="px-5 py-2">
-                <div class="text-xs text-red-500 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                <div class="text-xs text-red-500 dark:text-red-400 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl px-3 py-2">
                   {{ projectStore.switchError }}
                 </div>
               </div>
 
-              <!-- Switching overlay -->
-              <div v-if="projectStore.switching" class="px-3 py-6 text-center text-xs text-stone-400 animate-pulse">
+              <div v-if="projectStore.switching" class="px-3 py-6 text-center text-xs text-zinc-400 dark:text-zinc-500 animate-pulse">
                 Switching project...
               </div>
 
               <div v-else class="px-3 pb-2 max-h-72 overflow-y-auto">
-                <div v-if="projectStore.projects.length === 0" class="text-xs text-stone-400 py-6 text-center">
+                <div v-if="projectStore.projects.length === 0" class="text-xs text-zinc-400 dark:text-zinc-500 py-6 text-center">
                   No projects yet
                 </div>
                 <div
                   v-for="p in projectStore.projects"
                   :key="p.id"
-                  class="group flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer transition-colors"
+                  class="group flex items-center gap-2 px-3 py-2.5 rounded-xl cursor-pointer transition-colors"
                   :class="projectStore.activeId === p.id
-                    ? 'bg-teal-50 border border-teal-200'
-                    : 'hover:bg-stone-50 border border-transparent'"
+                    ? 'bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20'
+                    : 'hover:bg-zinc-50 dark:hover:bg-zinc-800 border border-transparent'"
                   @click="selectProject(p.id)"
                 >
                   <div
-                    class="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0"
+                    class="w-7 h-7 rounded-xl flex items-center justify-center text-xs font-bold shrink-0"
                     :class="projectStore.activeId === p.id
-                      ? 'bg-teal-100 text-teal-700'
-                      : 'bg-stone-100 text-stone-500'"
+                      ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400'
+                      : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400'"
                   >
                     {{ projectStore.projectName(p).charAt(0).toUpperCase() }}
                   </div>
                   <div class="min-w-0 flex-1">
-                    <div class="text-sm text-stone-700 truncate">{{ projectStore.projectName(p) }}</div>
-                    <div class="text-[10px] text-stone-400 font-mono truncate">{{ p.path }}</div>
+                    <div class="text-sm text-zinc-700 dark:text-zinc-200 truncate">{{ projectStore.projectName(p) }}</div>
+                    <div class="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono truncate">{{ p.path }}</div>
                   </div>
                   <button
-                    class="opacity-0 group-hover:opacity-100 p-1 text-stone-400 hover:text-red-500 cursor-pointer transition-all"
+                    class="opacity-0 group-hover:opacity-100 p-1 text-zinc-400 dark:text-zinc-500 hover:text-red-500 dark:hover:text-red-400 cursor-pointer transition-all"
                     @click.stop="deleteProject(p.id)"
                     title="Remove project"
                   >
@@ -260,15 +253,15 @@ function deleteProject(id: string) {
                 </div>
               </div>
 
-              <div class="px-5 py-3 border-t border-stone-100 flex justify-between items-center">
+              <div class="px-5 py-3 border-t border-zinc-100 dark:border-zinc-800 flex justify-between items-center">
                 <button
-                  class="text-xs text-teal-600 hover:text-teal-700 cursor-pointer transition-colors"
+                  class="text-xs text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 cursor-pointer transition-colors font-medium"
                   @click="openBrowser"
                 >
                   + Open Folder
                 </button>
                 <button
-                  class="px-3 py-1 text-xs text-stone-500 hover:text-stone-700 cursor-pointer transition-colors"
+                  class="px-3 py-1 text-xs text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer transition-colors"
                   @click="emit('close')"
                 >
                   Close

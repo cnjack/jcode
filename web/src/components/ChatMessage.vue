@@ -8,23 +8,38 @@ defineProps<{
 </script>
 
 <template>
-  <div
-    :class="[
-      'py-3',
-      message.role === 'user' ? (message.source === 'wechat' ? 'pl-4 border-l-2 border-green-400' : 'pl-4 border-l-2 border-stone-300') : '',
-      message.role === 'system' ? 'pl-4 border-l-2 border-amber-400/50' : '',
-    ]"
-  >
-    <div
-      :class="[
-        'text-[10px] font-medium uppercase tracking-wider mb-1.5',
-        message.role === 'user' ? (message.source === 'wechat' ? 'text-green-600' : 'text-stone-500') : message.role === 'assistant' ? 'text-teal-600' : 'text-amber-600',
-      ]"
-    >
-      {{ message.role === 'user' ? (message.source === 'wechat' ? 'WeChat' : 'You') : message.role === 'assistant' ? 'jcode' : 'System' }}
+  <div class="py-3 animate-fade-in">
+    <!-- Role label -->
+    <div class="flex items-center gap-2 mb-2">
+      <div
+        class="w-5 h-5 rounded-lg flex items-center justify-center text-[9px] font-bold shrink-0"
+        :class="{
+          'bg-emerald-500/15 text-emerald-600 dark:bg-emerald-400/15 dark:text-emerald-400': message.role === 'assistant',
+          'bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400': message.role === 'user' && message.source !== 'wechat',
+          'bg-green-500/15 text-green-600 dark:bg-green-400/15 dark:text-green-400': message.role === 'user' && message.source === 'wechat',
+          'bg-amber-500/15 text-amber-600 dark:bg-amber-400/15 dark:text-amber-400': message.role === 'system',
+        }"
+      >
+        <template v-if="message.role === 'assistant'">J</template>
+        <template v-else-if="message.role === 'user' && message.source === 'wechat'">W</template>
+        <template v-else-if="message.role === 'user'">U</template>
+        <template v-else>S</template>
+      </div>
+      <span
+        class="text-[10px] font-semibold uppercase tracking-wider"
+        :class="{
+          'text-emerald-600 dark:text-emerald-400': message.role === 'assistant',
+          'text-zinc-500 dark:text-zinc-400': message.role === 'user' && message.source !== 'wechat',
+          'text-green-600 dark:text-green-400': message.role === 'user' && message.source === 'wechat',
+          'text-amber-600 dark:text-amber-400': message.role === 'system',
+        }"
+      >
+        {{ message.role === 'user' ? (message.source === 'wechat' ? 'WeChat' : 'You') : message.role === 'assistant' ? 'jcode' : 'System' }}
+      </span>
     </div>
+    <!-- Content -->
     <div
-      class="prose prose-sm max-w-none prose-pre:bg-stone-100 prose-pre:border prose-pre:border-stone-200 prose-pre:rounded-lg prose-code:text-teal-700 prose-a:text-teal-600 prose-headings:text-stone-800 prose-strong:text-stone-800 prose-p:text-stone-600 prose-li:text-stone-600"
+      class="prose-chat pl-7"
       v-html="renderMarkdown(message.content)"
     />
   </div>

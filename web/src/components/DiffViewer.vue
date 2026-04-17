@@ -41,9 +41,9 @@ const totalChanges = computed(() => ({
 
 function statusBadge(status: string) {
   switch (status) {
-    case 'A': return { label: 'A', cls: 'bg-emerald-100 text-emerald-700' }
-    case 'D': return { label: 'D', cls: 'bg-red-100 text-red-700' }
-    default: return { label: 'M', cls: 'bg-amber-100 text-amber-700' }
+    case 'A': return { label: 'A', cls: 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' }
+    case 'D': return { label: 'D', cls: 'bg-red-100 dark:bg-red-500/15 text-red-700 dark:text-red-400' }
+    default: return { label: 'M', cls: 'bg-amber-100 dark:bg-amber-500/15 text-amber-700 dark:text-amber-400' }
   }
 }
 
@@ -67,19 +67,19 @@ onMounted(fetchDiff)
 </script>
 
 <template>
-  <div class="flex flex-col h-full bg-stone-50">
+  <div class="flex flex-col h-full bg-zinc-50 dark:bg-zinc-900">
     <!-- Header -->
-    <div class="flex items-center justify-between px-3 py-1.5 border-b border-stone-200 bg-stone-100/80">
+    <div class="flex items-center justify-between px-3 py-1.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-100/80 dark:bg-zinc-800/80">
       <div class="flex items-center gap-2">
-        <span class="text-[11px] font-medium text-stone-500 uppercase tracking-wider">Changes</span>
+        <span class="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Changes</span>
         <div class="flex gap-0.5">
           <button
             v-for="m in modes"
             :key="m.value"
-            class="px-1.5 py-0.5 text-[10px] rounded cursor-pointer transition-colors"
+            class="px-1.5 py-0.5 text-[10px] rounded-lg cursor-pointer transition-colors font-medium"
             :class="mode === m.value
-              ? 'bg-teal-100 text-teal-700'
-              : 'text-stone-400 hover:text-stone-600 hover:bg-stone-200'"
+              ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+              : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700'"
             @click="mode = m.value; fetchDiff()"
           >
             {{ m.label }}
@@ -88,12 +88,12 @@ onMounted(fetchDiff)
       </div>
       <div class="flex items-center gap-2">
         <span v-if="totalChanges.additions || totalChanges.deletions" class="text-[10px] font-mono">
-          <span class="text-emerald-600">+{{ totalChanges.additions }}</span>
-          <span class="text-stone-300 mx-0.5">/</span>
-          <span class="text-red-500">-{{ totalChanges.deletions }}</span>
+          <span class="text-emerald-600 dark:text-emerald-400">+{{ totalChanges.additions }}</span>
+          <span class="text-zinc-300 dark:text-zinc-600 mx-0.5">/</span>
+          <span class="text-red-500 dark:text-red-400">-{{ totalChanges.deletions }}</span>
         </span>
         <button
-          class="text-[10px] text-stone-400 hover:text-stone-600 cursor-pointer transition-colors"
+          class="text-[10px] text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer transition-colors font-medium"
           @click="fetchDiff"
         >
           ↻ Refresh
@@ -103,18 +103,20 @@ onMounted(fetchDiff)
 
     <div class="flex flex-1 min-h-0">
       <!-- File list -->
-      <div class="w-48 border-r border-stone-200 overflow-y-auto shrink-0">
-        <div v-if="entries.length === 0 && !loading" class="text-center text-[11px] text-stone-400 py-6">
+      <div class="w-48 border-r border-zinc-200 dark:border-zinc-800 overflow-y-auto shrink-0">
+        <div v-if="entries.length === 0 && !loading" class="text-center text-[11px] text-zinc-400 dark:text-zinc-500 py-6">
           No changes
         </div>
-        <div v-if="loading" class="text-center text-[11px] text-stone-400 py-6 animate-pulse">
+        <div v-if="loading" class="text-center text-[11px] text-zinc-400 dark:text-zinc-500 py-6 animate-pulse">
           Loading...
         </div>
         <button
           v-for="entry in entries"
           :key="entry.file"
           class="w-full flex items-center gap-1.5 px-2 py-1.5 text-left cursor-pointer transition-colors"
-          :class="selectedFile === entry.file ? 'bg-teal-50 text-stone-700' : 'text-stone-500 hover:bg-stone-100'"
+          :class="selectedFile === entry.file
+            ? 'bg-emerald-50 dark:bg-emerald-500/10 text-zinc-700 dark:text-zinc-200'
+            : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'"
           @click="selectedFile = entry.file"
         >
           <span
@@ -129,16 +131,16 @@ onMounted(fetchDiff)
 
       <!-- Diff content -->
       <div class="flex-1 overflow-auto">
-        <div v-if="!selectedEntry" class="text-center text-[11px] text-stone-400 py-8">
+        <div v-if="!selectedEntry" class="text-center text-[11px] text-zinc-400 dark:text-zinc-500 py-8">
           Select a file to view changes
         </div>
         <div v-else>
-          <div class="px-3 py-1.5 border-b border-stone-200 bg-stone-100/50">
-            <span class="text-[11px] font-mono text-stone-600">{{ selectedEntry.file }}</span>
+          <div class="px-3 py-1.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-100/50 dark:bg-zinc-800/50">
+            <span class="text-[11px] font-mono text-zinc-600 dark:text-zinc-300">{{ selectedEntry.file }}</span>
             <span class="text-[10px] font-mono ml-2">
-              <span class="text-emerald-600">+{{ selectedEntry.additions }}</span>
-              <span class="text-stone-300 mx-0.5">/</span>
-              <span class="text-red-500">-{{ selectedEntry.deletions }}</span>
+              <span class="text-emerald-600 dark:text-emerald-400">+{{ selectedEntry.additions }}</span>
+              <span class="text-zinc-300 dark:text-zinc-600 mx-0.5">/</span>
+              <span class="text-red-500 dark:text-red-400">-{{ selectedEntry.deletions }}</span>
             </span>
           </div>
           <div class="font-mono text-[11px] leading-5">
@@ -147,10 +149,10 @@ onMounted(fetchDiff)
               :key="i"
               class="px-3 border-l-2"
               :class="{
-                'bg-emerald-50 border-emerald-400 text-emerald-800': line.type === 'add',
-                'bg-red-50 border-red-400 text-red-800': line.type === 'del',
-                'bg-blue-50 border-blue-300 text-blue-600': line.type === 'hunk',
-                'border-transparent text-stone-500': line.type === 'ctx',
+                'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-400 dark:border-emerald-500/40 text-emerald-800 dark:text-emerald-300': line.type === 'add',
+                'bg-red-50 dark:bg-red-500/10 border-red-400 dark:border-red-500/40 text-red-800 dark:text-red-300': line.type === 'del',
+                'bg-blue-50 dark:bg-blue-500/10 border-blue-300 dark:border-blue-500/40 text-blue-600 dark:text-blue-300': line.type === 'hunk',
+                'border-transparent text-zinc-500 dark:text-zinc-400': line.type === 'ctx',
               }"
             >
               <pre class="whitespace-pre-wrap">{{ line.text }}</pre>
