@@ -1,7 +1,9 @@
 BIN := jcode
 PKG := ./cmd/jcode/
-VERSION ?= 0.0.1
-BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LATEST_TAG := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+COMPUTE_VERSION := $(shell tag="$(LATEST_TAG)"; tag=$${tag#v}; major=$${tag%%.*}; rest=$${tag#*.}; minor=$${rest%%.*}; patch=$${rest##*.}; echo "$${major}.$${minor}.$$((patch+1))")
+VERSION ?= $(COMPUTE_VERSION)
+BUILD_TIME ?= $(shell date +"%Y-%m-%dT%H:%M:%S%z")
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
 LDFLAGS := -s -w \
