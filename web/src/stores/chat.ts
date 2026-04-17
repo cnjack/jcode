@@ -230,7 +230,13 @@ export const useChatStore = defineStore('chat', () => {
 
   async function fetchSessions() {
     try {
-      sessions.value = await api.sessions()
+      const list = await api.sessions()
+      // Sort newest first by created_at
+      list.sort((a, b) => {
+        if (!a.created_at || !b.created_at) return 0
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      })
+      sessions.value = list
     } catch (err) {
       console.error('Failed to fetch sessions:', err)
     }
@@ -388,23 +394,32 @@ export const useChatStore = defineStore('chat', () => {
             timestamp: e.timestamp ? new Date(e.timestamp).getTime() : Date.now(),
           }
           timeline.value.push({ kind: 'tool', data: tc, seq: nextSeqId() })
-        } else if (e.type === 'tool_result' && e.tool_call_id) {
-          const tc = pendingToolCalls.get(e.tool_call_id)
-          if (tc) {
-            tc.output = e.output || ''
-            tc.error = e.error || ''
-            tc.status = e.error ? 'error' : 'done'
-            pendingToolCalls.delete(e.tool_call_id)
+          if (e.tool_call_id) {
+            pendingToolCalls.set(e.tool_call_id, tc)
           }
-        } else if (e.type === 'tool_result' && e.name) {
-          // Fallback: match by name (no tool_call_id)
-          for (let i = timeline.value.length - 1; i >= 0; i--) {
-            const item = timeline.value[i]
-            if (item && item.kind === 'tool' && item.data.name === e.name && item.data.status === 'running') {
-              item.data.output = e.output || ''
-              item.data.error = e.error || ''
-              item.data.status = e.error ? 'error' : 'done'
-              break
+        } else if (e.type === 'tool_result') {
+          let resolved = false
+          // First try matching by tool_call_id (exact, unambiguous)
+          if (e.tool_call_id) {
+            const tc = pendingToolCalls.get(e.tool_call_id)
+            if (tc) {
+              tc.output = e.output || ''
+              tc.error = e.error || ''
+              tc.status = e.error ? 'error' : 'done'
+              pendingToolCalls.delete(e.tool_call_id)
+              resolved = true
+            }
+          }
+          // Fallback: match by name scanning timeline backwards
+          if (!resolved && e.name) {
+            for (let i = timeline.value.length - 1; i >= 0; i--) {
+              const item = timeline.value[i]
+              if (item && item.kind === 'tool' && item.data.name === e.name && item.data.status === 'running') {
+                item.data.output = e.output || ''
+                item.data.error = e.error || ''
+                item.data.status = e.error ? 'error' : 'done'
+                break
+              }
             }
           }
         }
