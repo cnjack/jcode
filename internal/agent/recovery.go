@@ -224,7 +224,9 @@ func (l *ContextOverflowLayer) Recover(ctx context.Context, err error, state *ad
 		return nil, nil
 	}
 
-	trimmed := rest[len(rest)-keepRecent:]
+	// Adjust the split boundary so we don't orphan tool-result messages.
+	splitIdx := findToolBoundary(rest, len(rest)-keepRecent)
+	trimmed := rest[splitIdx:]
 	msgs := make([]*schema.Message, 0, len(systemMsgs)+len(trimmed))
 	msgs = append(msgs, systemMsgs...)
 	msgs = append(msgs, trimmed...)

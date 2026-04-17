@@ -26,8 +26,10 @@ func CompactHistory(ctx context.Context, cm einomodel.BaseChatModel, history []a
 	if keepCount > len(history) {
 		keepCount = len(history)
 	}
-	toSummarize := history[:len(history)-keepCount]
-	kept := history[len(history)-keepCount:]
+	// Adjust the split boundary so we don't orphan tool-result messages.
+	splitIdx := findToolBoundary(history, len(history)-keepCount)
+	toSummarize := history[:splitIdx]
+	kept := history[splitIdx:]
 
 	// Build a summarization prompt from the older messages.
 	var sb strings.Builder
@@ -107,8 +109,10 @@ func SyncSummarization(cap *SummarizationCapture, history []adk.Message, rec *se
 	if keepCount > len(history) {
 		keepCount = len(history)
 	}
-	kept := make([]adk.Message, keepCount)
-	copy(kept, history[len(history)-keepCount:])
+	// Adjust the split boundary so we don't orphan tool-result messages.
+	splitIdx := findToolBoundary(history, len(history)-keepCount)
+	kept := make([]adk.Message, len(history)-splitIdx)
+	copy(kept, history[splitIdx:])
 
 	var newHistory []adk.Message
 	newHistory = append(newHistory, schema.SystemMessage(
