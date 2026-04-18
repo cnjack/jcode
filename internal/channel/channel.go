@@ -28,6 +28,40 @@ func (s State) String() string {
 	}
 }
 
+// EventType identifies the kind of lifecycle event sent to notifiers.
+type EventType int
+
+const (
+	EventIdle     EventType = iota // agent is idle, waiting for user input
+	EventWorking                   // agent is actively processing
+	EventApproval                  // agent is blocked, waiting for tool approval
+	EventDone                      // agent finished a task
+)
+
+// NotifyEvent is the structured event passed to Notifier.Notify.
+type NotifyEvent struct {
+	Type EventType
+	Tool string // tool name (for EventApproval)
+	Err  error  // non-nil on failure (for EventDone)
+}
+
+// Notifier is a lightweight one-way notification sender.
+// Unlike Channel, it requires no login/configuration flow — it just sends
+// short text messages to an external device or service.
+// Implementations must be safe for concurrent use.
+type Notifier interface {
+	// Name returns a human-readable identifier (e.g. "ble", "wechat").
+	Name() string
+	// Available reports whether the notifier is ready to send.
+	Available() bool
+	// Notify pushes a lifecycle event. Implementations format the event
+	// for their own display (short text for BLE, rich text for WeChat, etc.).
+	// Must be best-effort and never block the caller for long.
+	Notify(event NotifyEvent)
+	// Close releases resources. Safe to call multiple times.
+	Close()
+}
+
 // Channel is the interface that all messaging channel implementations must satisfy.
 type Channel interface {
 	// ID returns the channel identifier (e.g. "wechat").
