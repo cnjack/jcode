@@ -22,6 +22,7 @@ import (
 
 	"github.com/cnjack/jcode/internal/agent"
 	"github.com/cnjack/jcode/internal/channel"
+	"github.com/cnjack/jcode/internal/channel/ble"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
 	internalmodel "github.com/cnjack/jcode/internal/model"
@@ -912,6 +913,14 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		}
 	})
 
+	// Register BLE notifier (lazy connect — will auto-discover JCODE-* devices).
+	bleNotifier := ble.New()
+	notifyingH.AddNotifier(bleNotifier)
+	// Register WeChat as a notifier for working/idle status pushes.
+	notifyingH.AddNotifier(channel.NewChannelNotifier(st.wechatClient))
+	// Push initial idle status (triggers BLE discovery in background).
+	bleNotifier.Notify(channel.NotifyEvent{Type: channel.EventIdle})
+
 	st.h = notifyingH
 	approvalState.SetHandler(notifyingH)
 
@@ -1028,6 +1037,9 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		time.Sleep(500 * time.Millisecond)
 		_ = st.wechatClient.Disable()
 	}
+
+	// Close all notifiers (BLE, etc.)
+	notifyingH.CloseNotifiers()
 
 	if st.langfuseTracer != nil {
 		st.langfuseTracer.Flush()
