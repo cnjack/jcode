@@ -11,6 +11,31 @@ For the **full changelog**, see [CHANGELOG.md](../CHANGELOG.md) in the repositor
 
 ## Latest Release
 
+### [0.3.1] - 2026-04-19
+
+**BLE IoT Notifications • Notifier System Refactoring • Rich Message Formatting**
+
+#### Added
+- BLE IoT device notifications with auto-discovery of JCODE-* devices
+- Real-time agent status push to BLE devices (idle/working/attention/complete)
+- Nordic UART Service (NUS) protocol support for device commands
+- Lazy background connection with automatic reconnection on failure
+- `Notifier` interface with structured `NotifyEvent` types
+- `ChannelNotifier` wrapper to use any `Channel` as a `Notifier`
+- WeChat integrated as notifier for automatic working/idle status pushes
+- Varied, time-aware rich messages for WeChat (4+ variations per event)
+- BLE-optimized short commands with ~10 character display values
+
+#### Changed
+- `Notifier.Notify()` now takes structured events instead of raw strings
+- Event types: `EventIdle`, `EventWorking`, `EventApproval`, `EventDone`
+- Each notifier formats events for its display (BLE: commands, WeChat: rich text)
+- BLE messages: idle→"ready", working→"thinking", complete→"done"/"failed"
+- WeChat messages vary by time-of-day and rotate for natural conversation
+- Agent completion triggers "complete" then returns to "idle" after 5 seconds
+
+---
+
 ### [0.2.2] - 2026-04-18
 
 **Grep Enhancements • Doctor Command • WeChat Idempotency • Web UI Fixes**
