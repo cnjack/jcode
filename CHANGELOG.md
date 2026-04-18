@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-04-19
+
+### Added
+- **BLE IoT Device Notifications**
+  - Auto-discovery and connection to JCODE-* BLE devices
+  - Real-time agent status push to IoT devices (idle/working/attention/complete)
+  - Nordic UART Service (NUS) protocol support for device commands
+  - Lazy background connection with automatic reconnection on failure
+
+- **Notifier System Refactoring**
+  - `Notifier` interface with structured `NotifyEvent` (replaces raw strings)
+  - `ChannelNotifier` wrapper to use any `Channel` as a `Notifier`
+  - WeChat now integrated as notifier for automatic working/idle status pushes
+  - Varied, time-aware rich messages for WeChat (4 variations per event type)
+  - BLE-optimized short commands with ~10 char display values
+
+### Changed
+- `Notifier.Notify()` now takes structured `NotifyEvent` instead of string
+- Event types: `EventIdle`, `EventWorking`, `EventApproval`, `EventDone`
+- Each notifier formats events for its own display (BLE: device commands, WeChat: rich text)
+- BLE messages: idle→"ready", working→"thinking", complete→"done"/"failed"
+- WeChat messages now vary by time-of-day and rotate for natural feel
+- Agent completion triggers "complete" then auto-returns to "idle" after 5 seconds
+
 ## [0.2.2] - 2026-04-18
 
 ### Added
