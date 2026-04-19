@@ -381,7 +381,7 @@ func (m Model) approvalDialogView() string {
 		{text: " Approve ", selected: m.approvalSelected == 0},
 		{text: " Approve All ", selected: m.approvalSelected == 1},
 		{text: " Reject ", selected: m.approvalSelected == 2},
-	}, "  ")
+	})
 
 	// Keyboard hints
 	hintText := lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
@@ -434,7 +434,7 @@ func (m Model) exitDialogView() string {
 	buttons := buttonGroup([]buttonOpts{
 		{text: " Yes ", selected: m.exitSelected == 0},
 		{text: " No ", selected: m.exitSelected == 1},
-	}, "  ")
+	})
 
 	hintText := lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
 		Render("←/→ switch  ·  Enter confirm  ·  y/n")
@@ -447,6 +447,46 @@ func (m Model) exitDialogView() string {
 	parts = append(parts, "", buttons, "", hintText)
 
 	content := lipgloss.JoinVertical(lipgloss.Center, parts...)
+
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, boxStyle.Render(content))
+}
+
+func (m Model) cancelDialogView() string {
+	w, h := m.width, m.height
+	if w <= 0 {
+		w = 80
+	}
+	if h <= 0 {
+		h = 24
+	}
+
+	contentW := 48
+	if contentW > w-12 {
+		contentW = w - 12
+	}
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorWarning).
+		Padding(1, 2).
+		Width(contentW)
+
+	headerText := lipgloss.NewStyle().Bold(true).Foreground(colorWarning).
+		Render("⏹  Cancel agent?")
+
+	statusText := lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
+		Render("Agent is still running.")
+
+	buttons := buttonGroup([]buttonOpts{
+		{text: " Cancel ", selected: m.cancelSelected == 0},
+		{text: " Wait ", selected: m.cancelSelected == 1},
+	})
+
+	hintText := lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
+		Render("←/→ switch  ·  Enter confirm  ·  y/n")
+
+	content := lipgloss.JoinVertical(lipgloss.Center,
+		headerText, statusText, "", buttons, "", hintText)
 
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, boxStyle.Render(content))
 }
