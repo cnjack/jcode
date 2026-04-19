@@ -55,14 +55,6 @@ func GetApprovalChannel() chan ToolApprovalRequestMsg {
 	return approvalCh
 }
 
-// autoApproveCh is used to notify main goroutine when auto-approve state changes.
-var autoApproveCh = make(chan bool, 1)
-
-// GetAutoApproveChannel returns the channel that receives auto-approve mode changes.
-func GetAutoApproveChannel() <-chan bool {
-	return autoApproveCh
-}
-
 // --- Messages ---
 
 type AgentTextMsg struct{ Text string }
@@ -293,6 +285,14 @@ var askUserResponseCh = make(chan AskUserResponse, 1)
 // AskUserResponse is the user's answer to an ask_user question.
 type AskUserResponse struct {
 	Answer string
+}
+
+// cancelAgentCh is used to signal the main goroutine to cancel a running agent job.
+var cancelAgentCh = make(chan struct{}, 1)
+
+// GetCancelAgentChannel returns the channel that receives agent cancellation requests.
+func GetCancelAgentChannel() <-chan struct{} {
+	return cancelAgentCh
 }
 
 // ExitTimeoutMsg is sent after 5s to clear exit confirmation
