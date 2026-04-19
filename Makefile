@@ -13,7 +13,11 @@ LDFLAGS := -s -w \
 
 export GOFLAGS := -buildvcs=false
 
-.PHONY: build build-binary run doctor version install clean build-web lint lint-go lint-web generate
+.PHONY: build build-binary run doctor version install clean build-web fmt lint lint-go lint-web generate
+
+fmt:
+	@echo "Formatting Go..."
+	goimports -w .
 
 lint: lint-go lint-web
 

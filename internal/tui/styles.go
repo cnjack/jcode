@@ -139,13 +139,11 @@ func divider(width int) string {
 }
 
 // buttonGroup renders a row of selectable buttons.
-func buttonGroup(buttons []buttonOpts, spacing string) string {
+func buttonGroup(buttons []buttonOpts) string {
 	if len(buttons) == 0 {
 		return ""
 	}
-	if spacing == "" {
-		spacing = "  "
-	}
+	const spacing = "  "
 	parts := make([]string, 0, len(buttons)*2-1)
 	for i, b := range buttons {
 		if i > 0 {

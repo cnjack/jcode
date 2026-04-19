@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -73,6 +72,10 @@ type interactiveState struct {
 	// WeChat channel
 	wechatClient *weixin.Client
 	agentRunning atomic.Bool
+
+	// Agent cancellation
+	cancelFunc context.CancelFunc // used to cancel a running agent job
+	runCtx     context.Context    // per-run context, non-nil while agent is running
 }
 
 func (s *interactiveState) buildAllTools() []tool.BaseTool {
@@ -287,6 +290,16 @@ func (s *interactiveState) handlePrompt(userPrompt string) {
 	s.agentRunning.Store(true)
 	defer s.agentRunning.Store(false)
 
+	// Create a per-run cancellable context so cancelling one run
+	// does not prevent future runs.
+	runCtx, runCancel := context.WithCancel(s.ctx)
+	s.cancelFunc = runCancel
+	s.runCtx = runCtx
+	defer func() {
+		runCancel()
+		s.runCtx = nil
+	}()
+
 	if s.sessionResumeWarning != "" {
 		userPrompt = s.sessionResumeWarning + "\n\n" + userPrompt
 		s.sessionResumeWarning = ""
@@ -299,7 +312,7 @@ func (s *interactiveState) handlePrompt(userPrompt string) {
 	}
 	s.history = append(s.history, schema.UserMessage(userPrompt))
 	s.history = agent.DrainBgNotifications(s.bgManager, s.history)
-	resp := runner.Run(s.ctx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer, s.agentTokenUsage)
+	resp := runner.Run(runCtx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer, s.agentTokenUsage)
 	if resp != "" {
 		s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: resp})
 	}
@@ -341,7 +354,7 @@ func (s *interactiveState) handlePlanCompletion(resp string) {
 			s.rec.RecordUser(revisePrompt)
 		}
 		s.history = append(s.history, schema.UserMessage(revisePrompt))
-		newResp := runner.Run(s.ctx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer, s.agentTokenUsage)
+		newResp := runner.Run(s.runCtx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer, s.agentTokenUsage)
 		if newResp != "" {
 			s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: newResp})
 		}
@@ -624,8 +637,15 @@ func (s *interactiveState) runEventLoop(initialHistory []adk.Message, initialRes
 		if s.rec != nil {
 			s.rec.RecordUser(prompt)
 		}
+		runCtx, runCancel := context.WithCancel(s.ctx)
+		s.cancelFunc = runCancel
+		s.runCtx = runCtx
+		s.agentRunning.Store(true)
 		s.history = append(s.history, schema.UserMessage(prompt))
-		resp := runner.Run(s.ctx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer, s.agentTokenUsage)
+		resp := runner.Run(runCtx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer, s.agentTokenUsage)
+		runCancel()
+		s.runCtx = nil
+		s.agentRunning.Store(false)
 		if resp != "" {
 			s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: resp})
 		}
@@ -638,10 +658,22 @@ func (s *interactiveState) runEventLoop(initialHistory []adk.Message, initialRes
 	configCh := tui.GetConfigChannel()
 	addModelCh := tui.GetAddModelChannel()
 	resumeCh := tui.GetResumeChannel()
-	autoApproveCh := tui.GetAutoApproveChannel()
 	compactCh := tui.GetCompactChannel()
 	planModeCh := tui.GetPlanModeChannel()
 	channelActionCh := tui.GetChannelActionChannel()
+	cancelAgentCh := tui.GetCancelAgentChannel()
+
+	// Background goroutine to handle agent cancellation requests.
+	// This is necessary because the main event loop blocks on handlePrompt/runner.Run,
+	// so the cancel channel must be consumed independently.
+	go func() {
+		for range cancelAgentCh {
+			if s.cancelFunc != nil {
+				config.Logger().Printf("[interactive] cancelling agent job via Ctrl+C")
+				s.cancelFunc()
+			}
+		}
+	}()
 
 	// Send initial WeChat state to TUI
 	s.p.Send(tui.ChannelStateMsg{
@@ -651,9 +683,6 @@ func (s *interactiveState) runEventLoop(initialHistory []adk.Message, initialRes
 
 	for {
 		select {
-		case enabled := <-autoApproveCh:
-			s.approvalState.SetSessionApproval(enabled)
-
 		case newMode := <-planModeCh:
 			s.applyModeSwitch(newMode)
 
@@ -713,7 +742,8 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		return fmt.Errorf("config error: %v\nconfig file: %s", err, config.ConfigPath())
 	}
 
-	ctx := context.Background()
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	defer cancelFunc()
 	pwd := util.GetWorkDir()
 	platform := util.GetSystemInfo()
 	envInfo := util.CollectEnvInfo(pwd)
@@ -786,6 +816,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 
 	st := &interactiveState{
 		ctx:          ctx,
+		cancelFunc:   cancelFunc,
 		cfg:          cfg,
 		chatModel:    chatModel,
 		env:          env,
@@ -887,7 +918,9 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	approvalState := runner.NewApprovalState(pwd, autoApprove)
 	st.approvalState = approvalState
 
-	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore)
+	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore, tui.WithApprovalModeChange(func(enabled bool) {
+		approvalState.SetSessionApproval(enabled)
+	}))
 	st.p = p
 	bgManager.SetNotifier(func(taskID, cmd, status string) {
 		p.Send(tui.BgTaskDoneMsg{TaskID: taskID, Command: cmd, Status: status})
@@ -941,8 +974,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 
 	ag, err := st.createAgent()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating agent: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("error creating agent: %w", err)
 	}
 	st.ag = ag
 
