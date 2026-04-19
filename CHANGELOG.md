@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-04-20
+
+### Added
+- **TUI Cancel Agent Confirmation Dialog**
+  - Confirmation dialog when cancelling a running agent to prevent accidental aborts
+  - Visual feedback with styled Yes/No options in the TUI
+
+- **TUI Interactive Slash Command Autocomplete**
+  - Interactive suggestion list above the input when typing `/` commands
+  - Keyboard navigation (Up/Down arrows) and filtering as you type
+  - Tab or Enter to accept highlighted suggestion, Esc to dismiss
+
+- **OnAgentStart Lifecycle Event**
+  - New `OnAgentStart()` hook in `AgentEventHandler` for immediate working feedback
+  - Called before any LLM call, providing instant visual indicator instead of waiting for first text chunk
+  - Web frontend handles `agent_start` event for real-time running state
+
+### Changed
+- Simplified token usage tracking with `LastTotalTokens` field and `GetLastTotal()` accessor
+- Working notification moved from `OnAgentText` to `OnAgentStart` for earlier feedback
+
+### Fixed
+- Resolved gocritic, staticcheck and ineffassign lint warnings
+- Handle unchecked error returns in BLE code (errcheck)
+
 ## [0.3.1] - 2026-04-19
 
 ### Added
@@ -163,8 +188,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-agent token usage tracking
 - WebSocket support for real-time communication
 
-[Unreleased]: https://github.com/cnjack/jcode/compare/v0.0.4...HEAD
-[0.0.4]: https://github.com/cnjack/jcode/compare/v0.0.3...v0.0.4
+[Unreleased]: https://github.com/cnjack/jcode/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/cnjack/jcode/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/cnjack/jcode/compare/v0.2.2...v0.3.1
 [0.0.3]: https://github.com/cnjack/jcode/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/cnjack/jcode/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/cnjack/jcode/releases/tag/v0.0.1

@@ -11,6 +11,28 @@ For the **full changelog**, see [CHANGELOG.md](../CHANGELOG.md) in the repositor
 
 ## Latest Release
 
+### [0.3.2] - 2026-04-20
+
+**TUI Cancel Confirmation • Slash Command Autocomplete • OnAgentStart Lifecycle Event**
+
+#### Added
+- Cancel agent confirmation dialog to prevent accidental aborts when cancelling a running agent
+- Interactive slash command autocomplete with keyboard navigation and filtering
+  - Type `/` to see all available commands, filter as you type, Up/Down to navigate
+  - Tab or Enter to accept, Esc to dismiss
+- `OnAgentStart()` lifecycle event for immediate working feedback before any LLM call
+- Web frontend handles `agent_start` SSE/WS event for real-time running state
+
+#### Changed
+- Simplified token usage tracking with `LastTotalTokens` field
+- Working notification moved from `OnAgentText` to `OnAgentStart` for earlier visual feedback
+
+#### Fixed
+- Resolved gocritic, staticcheck and ineffassign lint warnings
+- Handle unchecked error returns in BLE code (errcheck)
+
+---
+
 ### [0.3.1] - 2026-04-19
 
 **BLE IoT Notifications • Notifier System Refactoring • Rich Message Formatting**
@@ -208,4 +230,4 @@ All releases maintain backward compatibility with existing configurations and wo
 
 ---
 
-*Last updated: April 16, 2026*
+*Last updated: April 20, 2026*
