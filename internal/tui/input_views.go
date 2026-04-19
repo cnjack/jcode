@@ -63,6 +63,64 @@ func (m Model) renderTodoBar() string {
 	return strings.Join(lines, "\n")
 }
 
+// commandSuggestion represents a single slash command suggestion item.
+type commandSuggestion struct {
+	cmd  string // e.g. "/setting"
+	desc string // e.g. "Settings menu"
+}
+
+// getAllCommands returns all available slash commands (built-in + skill).
+func (m Model) getAllCommands() []commandSuggestion {
+	commands := []commandSuggestion{
+		{"/setting", "Settings menu"},
+		{"/model", "Switch model"},
+		{"/ssh", "SSH connection"},
+		{"/resume", "Resume a previous session"},
+		{"/compact", "Compress conversation context"},
+		{"/bg", "List background tasks"},
+		{"/channel", "Manage channels (WeChat etc.)"},
+	}
+	for _, sc := range m.skillSlashCommands {
+		commands = append(commands, commandSuggestion{sc.Slash, sc.Description})
+	}
+	return commands
+}
+
+// filterCommands returns commands that match the given prefix.
+func filterCommands(commands []commandSuggestion, prefix string) []commandSuggestion {
+	var matches []commandSuggestion
+	for _, c := range commands {
+		if strings.HasPrefix(c.cmd, prefix) {
+			matches = append(matches, c)
+		}
+	}
+	return matches
+}
+
+// updateSuggestions updates the command suggestion state based on current input.
+func (m *Model) updateSuggestions() {
+	val := m.textarea.Value()
+	if !strings.HasPrefix(val, "/") {
+		m.cmdSuggestionActive = false
+		m.cmdSuggestions = nil
+		m.cmdSuggestionIndex = 0
+		return
+	}
+	all := m.getAllCommands()
+	matches := filterCommands(all, val)
+	if len(matches) == 0 || (len(matches) == 1 && matches[0].cmd == val) {
+		m.cmdSuggestionActive = false
+		m.cmdSuggestions = nil
+		m.cmdSuggestionIndex = 0
+		return
+	}
+	m.cmdSuggestions = matches
+	m.cmdSuggestionActive = true
+	if m.cmdSuggestionIndex >= len(matches) {
+		m.cmdSuggestionIndex = 0
+	}
+}
+
 func (m Model) inputAreaView() string {
 	var parts []string
 
@@ -82,12 +140,10 @@ func (m Model) inputAreaView() string {
 	case m.askUserActive:
 		parts = append(parts, m.askUserPromptView())
 	default:
-		val := m.textarea.Value()
-		if strings.HasPrefix(val, "/") {
-			hints := m.getCommandHints(val)
-			if hints != "" {
-				hintStyle := lipgloss.NewStyle().PaddingLeft(2).Foreground(colorMuted).Italic(true)
-				parts = append(parts, hintStyle.Render(hints))
+		if m.cmdSuggestionActive && len(m.cmdSuggestions) > 0 {
+			suggestionView := m.renderCommandSuggestions()
+			if suggestionView != "" {
+				parts = append(parts, suggestionView)
 			}
 		}
 		parts = append(parts, lipgloss.NewStyle().PaddingLeft(1).PaddingRight(2).Render(strings.TrimRight(m.textarea.View(), "\n")))
@@ -120,37 +176,65 @@ func (m Model) inputAreaView() string {
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
-func (m Model) getCommandHints(input string) string {
-	type cmdHint struct {
-		cmd  string
-		desc string
-	}
-	commands := []cmdHint{
-		{"/setting", "Settings menu"},
-		{"/model", "Switch model"},
-		{"/ssh", "SSH connection"},
-		{"/resume", "Resume a previous session"},
-		{"/compact", "Compress conversation context"},
-		{"/bg", "List background tasks"},
-		{"/channel", "Manage channels (WeChat etc.)"},
-	}
-
-	// Add dynamically-loaded skill slash commands.
-	for _, sc := range m.skillSlashCommands {
-		commands = append(commands, cmdHint{sc.Slash, sc.Description})
-	}
-
-	var matches []string
-	for _, c := range commands {
-		if strings.HasPrefix(c.cmd, input) {
-			matches = append(matches, c.cmd+" "+c.desc)
-		}
-	}
-	if len(matches) == 0 {
+// renderCommandSuggestions renders the interactive command suggestion list with
+// the currently selected item highlighted. The user can navigate with ↑/↓ and
+// select with Tab or Enter.
+func (m Model) renderCommandSuggestions() string {
+	maxVisible := 5
+	suggestions := m.cmdSuggestions
+	total := len(suggestions)
+	if total == 0 {
 		return ""
 	}
-	return "  " + strings.Join(matches, "  │  ")
+
+	// Calculate the visible window around the selected index
+	start := 0
+	if m.cmdSuggestionIndex >= maxVisible {
+		start = m.cmdSuggestionIndex - maxVisible + 1
+	}
+	if start+maxVisible > total {
+		start = total - maxVisible
+	}
+	if start < 0 {
+		start = 0
+	}
+	end := start + maxVisible
+	if end > total {
+		end = total
+	}
+
+	var lines []string
+	for i := start; i < end; i++ {
+		s := suggestions[i]
+		cmdText := s.cmd
+		descText := s.desc
+		if i == m.cmdSuggestionIndex {
+			// Highlighted item
+			cmdStyled := lipgloss.NewStyle().Bold(true).Foreground(colorBg).Background(colorPrimary).Render(cmdText)
+			descStyled := lipgloss.NewStyle().Foreground(colorBg).Background(colorPrimary).Render(" " + descText)
+			// Indicator
+			indicator := lipgloss.NewStyle().Foreground(colorPrimary).Render("❯")
+			lines = append(lines, fmt.Sprintf("  %s %s%s", indicator, cmdStyled, descStyled))
+		} else {
+			cmdStyled := lipgloss.NewStyle().Foreground(colorText).Render(cmdText)
+			descStyled := lipgloss.NewStyle().Foreground(colorMuted).Render(" " + descText)
+			indicator := lipgloss.NewStyle().Foreground(colorMuted).Render(" ")
+			lines = append(lines, fmt.Sprintf("  %s %s%s", indicator, cmdStyled, descStyled))
+		}
+	}
+
+	if total > maxVisible {
+		remaining := total - end
+		if remaining > 0 {
+			lines = append(lines, lipgloss.NewStyle().PaddingLeft(3).Foreground(colorMuted).Italic(true).
+				Render(fmt.Sprintf("  ... and %d more (↓ to scroll)", remaining)))
+		}
+	}
+
+	return strings.Join(lines, "\n")
 }
+
+// --- Legacy hint function removed; replaced by interactive suggestion list.
 
 // handleChannelInput shows the channel management panel.
 func (m Model) handleChannelInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
