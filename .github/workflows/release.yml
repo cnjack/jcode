@@ -61,31 +61,37 @@ jobs:
             goarch: amd64
             suffix: ''
             runner: ubuntu-latest
+            cgo: 0
           # Linux ARM64
           - goos: linux
             goarch: arm64
             suffix: ''
             runner: ubuntu-latest
+            cgo: 0
           # macOS AMD64
           - goos: darwin
             goarch: amd64
             suffix: ''
             runner: macos-13
+            cgo: 1
           # macOS ARM64 (Apple Silicon)
           - goos: darwin
             goarch: arm64
             suffix: ''
             runner: macos-latest
+            cgo: 1
           # Windows AMD64
           - goos: windows
             goarch: amd64
             suffix: '.exe'
             runner: ubuntu-latest
+            cgo: 0
           # Windows ARM64
           - goos: windows
             goarch: arm64
             suffix: '.exe'
             runner: ubuntu-latest
+            cgo: 0
 
     steps:
       - name: Checkout code
@@ -118,7 +124,7 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
+          CGO_ENABLED: ${{ matrix.cgo }}
         run: |
           OUTPUT_NAME="jcode-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}"
           make build-binary \

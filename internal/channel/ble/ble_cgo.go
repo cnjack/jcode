@@ -1,3 +1,5 @@
+//go:build !darwin || cgo
+
 // Package ble provides a channel.Notifier that sends short status messages
 // to a JCODE-* BLE IoT device using the Nordic UART Service (NUS).
 //
