@@ -43,7 +43,7 @@ func main() {
 		if strings.HasPrefix(name, "JCODE-") {
 			fmt.Printf("  Found: %s (RSSI: %d)\n", name, result.RSSI)
 			foundDevice = result
-			adapter.StopScan()
+			_ = adapter.StopScan()
 			close(found)
 		}
 	})
@@ -143,7 +143,7 @@ func main() {
 		switch {
 		case line == "quit" || line == "exit":
 			fmt.Println("Disconnecting...")
-			device.Disconnect()
+			_ = device.Disconnect()
 			fmt.Println("Bye!")
 			return
 
