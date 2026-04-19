@@ -110,8 +110,6 @@ type AgentsMdMsg struct {
 
 // TokenUpdateMsg is sent periodically to update token usage display
 type TokenUpdateMsg struct {
-	PromptTokens      int64
-	CompletionTokens  int64
 	TotalTokens       int64
 	ModelContextLimit int // 0 if unknown
 }

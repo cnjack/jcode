@@ -21,6 +21,7 @@ type TokenUsage struct {
 	PromptTokens     int64
 	CompletionTokens int64
 	TotalTokens      int64
+	LastTotalTokens  int64
 	byModel          map[string]int64
 	mu               sync.RWMutex
 }
@@ -33,6 +34,7 @@ func (t *TokenUsage) Add(prompt, completion, total int) {
 	atomic.AddInt64(&t.PromptTokens, int64(prompt))
 	atomic.AddInt64(&t.CompletionTokens, int64(completion))
 	atomic.AddInt64(&t.TotalTokens, int64(total))
+	atomic.StoreInt64(&t.LastTotalTokens, int64(total))
 }
 
 // Get returns the current token usage
@@ -40,6 +42,11 @@ func (t *TokenUsage) Get() (prompt, completion, total int64) {
 	return atomic.LoadInt64(&t.PromptTokens),
 		atomic.LoadInt64(&t.CompletionTokens),
 		atomic.LoadInt64(&t.TotalTokens)
+}
+
+// GetLastTotal returns the last API call's total tokens (current context usage)
+func (t *TokenUsage) GetLastTotal() int64 {
+	return atomic.LoadInt64(&t.LastTotalTokens)
 }
 
 // Reset resets the token tracker
