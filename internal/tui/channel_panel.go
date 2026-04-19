@@ -79,7 +79,7 @@ func (m Model) showChannelActions(channelID string, cmds []tea.Cmd) (tea.Model, 
 	}
 
 	m.channelMenu.SetItems(items)
-	m.channelMenu.Title = fmt.Sprintf("↑/↓ navigate · Enter confirm · Esc cancel")
+	m.channelMenu.Title = "↑/↓ navigate · Enter confirm · Esc cancel"
 	return m, tea.Batch(cmds...)
 }
 

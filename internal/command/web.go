@@ -109,7 +109,7 @@ func runWebServer(port int, host string) error {
 	// Wrap handler with NotifyingHandler for WeChat push notifications.
 	// Callbacks check wechatClient.State() before sending, so this is safe
 	// even when the channel is disabled or not yet configured.
-	var finalHandler handler.AgentEventHandler = webHandler
+	var finalHandler handler.AgentEventHandler
 	wechatClient := weixin.NewClient()
 
 	// Auto-enable if credentials exist and channel.web_enabled is true.
