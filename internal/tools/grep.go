@@ -342,13 +342,14 @@ func (g *grepTool) formatFilesWithMatches(lines []string, pwd string, maxResults
 		result.WriteString("\n")
 	}
 
-	if truncated {
+	switch {
+	case truncated:
 		fmt.Fprintf(&result, "\nFound %d files (showing %d, offset %d — use offset=%d for next page)\n",
 			totalFiles, len(entries), offset, offset+maxResults)
-	} else if offset > 0 {
+	case offset > 0:
 		fmt.Fprintf(&result, "\nFound %d files (showing %d, offset %d)\n",
 			totalFiles, len(entries), offset)
-	} else {
+	default:
 		fmt.Fprintf(&result, "\nFound %d files\n", len(entries))
 	}
 
