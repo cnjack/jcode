@@ -12,6 +12,7 @@ import type {
 } from '@/types/api'
 
 type WSHandler = {
+  onAgentStart?: () => void
   onAgentText?: (data: AgentTextData) => void
   onToolCall?: (data: ToolCallData) => void
   onToolResult?: (data: ToolResultData) => void
@@ -41,6 +42,7 @@ export function useWebSocket(handlers: WSHandler) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handlerMap: Record<string, (data: any) => void> = {
+    agent_start: () => handlers.onAgentStart?.(),
     agent_text: (d) => handlers.onAgentText?.(d),
     tool_call: (d) => handlers.onToolCall?.(d),
     tool_result: (d) => handlers.onToolResult?.(d),

@@ -36,6 +36,8 @@ func Run(
 	if tokenUsage != nil {
 		ctx = internalmodel.WithTokenTracker(ctx, tokenUsage)
 	}
+	h.OnAgentStart()
+
 	resp := runInner(ctx, ag, messages, h, rec)
 
 	// Completion guard: if the agent finished but there are still incomplete
@@ -54,14 +56,15 @@ func Run(
 	}
 
 	// Send token usage update before signalling done.
-	var promptTokens, completionTokens, totalTokens int64
+	var lastTotalTokens int64
 	if tokenUsage != nil {
-		promptTokens, completionTokens, totalTokens = tokenUsage.Get()
+		lastTotalTokens = tokenUsage.GetLastTotal()
+	}
+	if local := internalmodel.TokenTrackerFromContext(ctx); local != nil {
+		lastTotalTokens = local.GetLastTotal()
 	}
 	h.OnTokenUpdate(handler.TokenUsage{
-		PromptTokens:      promptTokens,
-		CompletionTokens:  completionTokens,
-		TotalTokens:       totalTokens,
+		TotalTokens:       lastTotalTokens,
 		ModelContextLimit: modelContextLimit(),
 	})
 

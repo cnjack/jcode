@@ -53,6 +53,7 @@ function scrollToBottom(smooth = true) {
 
 // WebSocket connection
 const { connected } = useWebSocket({
+  onAgentStart: () => { store.isRunning = true },
   onAgentText: (data) => store.appendAgentText(data.text),
   onToolCall: (data) => store.addToolCall(data.name, data.args, data.tool_call_id),
   onToolResult: (data) => store.resolveToolCall(data.name, data.output, data.tool_call_id, data.error),

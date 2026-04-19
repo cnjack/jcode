@@ -35,8 +35,6 @@ type WebToolResultData struct {
 
 // WebTokenData carries token usage.
 type WebTokenData struct {
-	PromptTokens      int64 `json:"prompt_tokens"`
-	CompletionTokens  int64 `json:"completion_tokens"`
 	TotalTokens       int64 `json:"total_tokens"`
 	ModelContextLimit int   `json:"model_context_limit"`
 }
@@ -148,6 +146,10 @@ func (h *WebHandler) OnSubagentProgress(agentName, event, toolName, detail strin
 }
 
 // --- Lifecycle ---
+
+func (h *WebHandler) OnAgentStart() {
+	h.emit("agent_start", nil)
+}
 
 func (h *WebHandler) OnAgentDone(err error) {
 	errMsg := ""

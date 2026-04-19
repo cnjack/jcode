@@ -10,6 +10,7 @@ import type {
 } from '@/types/api'
 
 type SSEHandler = {
+  onAgentStart?: () => void
   onAgentText?: (data: AgentTextData) => void
   onToolCall?: (data: ToolCallData) => void
   onToolResult?: (data: ToolResultData) => void
@@ -45,6 +46,7 @@ export function useSSE(handlers: SSEHandler) {
     }
 
     const events: [string, (data: Record<string, unknown>) => void][] = [
+      ['agent_start', () => handlers.onAgentStart?.()],
       ['agent_text', (d) => handlers.onAgentText?.(d)],
       ['tool_call', (d) => handlers.onToolCall?.(d)],
       ['tool_result', (d) => handlers.onToolResult?.(d)],
