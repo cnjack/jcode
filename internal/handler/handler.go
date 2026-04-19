@@ -33,6 +33,11 @@ type AgentEventHandler interface {
 
 	// --- Lifecycle events ---
 
+	// OnAgentStart is called when the agent begins processing a user prompt,
+	// before any LLM call is made. Use this to show a "thinking" / "working"
+	// indicator immediately, rather than waiting for the first text chunk.
+	OnAgentStart()
+
 	// OnAgentDone is called when the agent loop finishes (err may be nil).
 	OnAgentDone(err error)
 
@@ -47,10 +52,8 @@ type AgentEventHandler interface {
 	RequestApproval(ctx context.Context, req ApprovalRequest) (ApprovalResponse, error)
 }
 
-// TokenUsage carries cumulative token counters.
+// TokenUsage carries token usage info.
 type TokenUsage struct {
-	PromptTokens      int64
-	CompletionTokens  int64
 	TotalTokens       int64
 	ModelContextLimit int // 0 if unknown
 }

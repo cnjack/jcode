@@ -84,6 +84,17 @@ func (h *NotifyingHandler) CloseNotifiers() {
 	}
 }
 
+func (h *NotifyingHandler) OnAgentStart() {
+	h.mu.Lock()
+	h.sentWorking = true
+	h.lastText = ""
+	h.mu.Unlock()
+
+	// Push "working" status immediately when the agent starts, before any LLM output.
+	h.notifyAll(channel.NotifyEvent{Type: channel.EventWorking})
+	h.inner.OnAgentStart()
+}
+
 func (h *NotifyingHandler) OnAgentText(text string) {
 	h.mu.Lock()
 	h.lastText += text
@@ -91,16 +102,8 @@ func (h *NotifyingHandler) OnAgentText(text string) {
 	if len(h.lastText) > 600 {
 		h.lastText = h.lastText[len(h.lastText)-600:]
 	}
-	firstText := !h.sentWorking
-	if firstText {
-		h.sentWorking = true
-	}
 	h.mu.Unlock()
 
-	// Push "working" status on first text chunk of a run.
-	if firstText {
-		h.notifyAll(channel.NotifyEvent{Type: channel.EventWorking})
-	}
 	h.inner.OnAgentText(text)
 }
 

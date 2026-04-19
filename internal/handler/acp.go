@@ -96,6 +96,10 @@ func (h *ACPHandler) OnTodoUpdate() {
 
 // --- Lifecycle ---
 
+func (h *ACPHandler) OnAgentStart() {
+	// ACP does not have a standard "agent started" notification.
+}
+
 func (h *ACPHandler) OnAgentDone(err error) {
 	// Prompt response is returned by the Prompt method; nothing to send here.
 }
