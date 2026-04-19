@@ -100,7 +100,7 @@ func (n *Notifier) Close() {
 	n.closed = true
 	if n.ready {
 		n.ready = false
-		go n.device.Disconnect()
+		go func() { _ = n.device.Disconnect() }()
 	}
 }
 
@@ -125,7 +125,7 @@ func (n *Notifier) connect() {
 		if strings.HasPrefix(name, "JCODE-") {
 			logger.Printf("[ble] found device: %s (RSSI: %d)", name, result.RSSI)
 			found = result
-			adapter.StopScan()
+			_ = adapter.StopScan()
 			close(foundCh)
 		}
 	})
@@ -146,7 +146,7 @@ func (n *Notifier) connect() {
 	case <-foundCh:
 	case <-time.After(10 * time.Second):
 		logger.Printf("[ble] no JCODE device found within timeout")
-		n.adapter.StopScan()
+		_ = n.adapter.StopScan()
 		n.mu.Lock()
 		n.connecting = false
 		n.mu.Unlock()
@@ -166,7 +166,7 @@ func (n *Notifier) connect() {
 	services, err := device.DiscoverServices([]bluetooth.UUID{nusServiceUUID})
 	if err != nil || len(services) == 0 {
 		logger.Printf("[ble] NUS service not found")
-		device.Disconnect()
+		_ = device.Disconnect()
 		n.mu.Lock()
 		n.connecting = false
 		n.mu.Unlock()
@@ -176,7 +176,7 @@ func (n *Notifier) connect() {
 	chars, err := services[0].DiscoverCharacteristics([]bluetooth.UUID{nusRXCharUUID})
 	if err != nil || len(chars) == 0 {
 		logger.Printf("[ble] RX characteristic not found")
-		device.Disconnect()
+		_ = device.Disconnect()
 		n.mu.Lock()
 		n.connecting = false
 		n.mu.Unlock()
