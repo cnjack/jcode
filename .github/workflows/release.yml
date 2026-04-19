@@ -52,7 +52,7 @@ jobs:
 
   build:
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         include:
@@ -60,26 +60,32 @@ jobs:
           - goos: linux
             goarch: amd64
             suffix: ''
+            runner: ubuntu-latest
           # Linux ARM64
           - goos: linux
             goarch: arm64
             suffix: ''
+            runner: ubuntu-latest
           # macOS AMD64
           - goos: darwin
             goarch: amd64
             suffix: ''
+            runner: macos-13
           # macOS ARM64 (Apple Silicon)
           - goos: darwin
             goarch: arm64
             suffix: ''
+            runner: macos-latest
           # Windows AMD64
           - goos: windows
             goarch: amd64
             suffix: '.exe'
+            runner: ubuntu-latest
           # Windows ARM64
           - goos: windows
             goarch: arm64
             suffix: '.exe'
+            runner: ubuntu-latest
 
     steps:
       - name: Checkout code
@@ -123,7 +129,11 @@ jobs:
         run: |
           cd dist
           for file in jcode-*; do
-            sha256sum "$file" > "$file.sha256"
+            if command -v sha256sum &>/dev/null; then
+              sha256sum "$file" > "$file.sha256"
+            else
+              shasum -a 256 "$file" > "$file.sha256"
+            fi
           done
 
       - name: Upload artifacts
