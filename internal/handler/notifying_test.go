@@ -45,6 +45,8 @@ func (m *mockHandler) OnToolCall(name, args, toolCallID string) {
 func (m *mockHandler) OnToolResult(name, output, toolCallID string, err error) {}
 func (m *mockHandler) OnTodoUpdate()                                           {}
 
+func (m *mockHandler) OnAgentStart() {}
+
 func (m *mockHandler) OnAgentDone(err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
