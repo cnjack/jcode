@@ -46,14 +46,16 @@ func (h *TUIHandler) OnTodoUpdate() {
 
 // --- Lifecycle ---
 
+func (h *TUIHandler) OnAgentStart() {
+	// TUI sets thinking=true at prompt submit time already, no additional action needed.
+}
+
 func (h *TUIHandler) OnAgentDone(err error) {
 	h.p.Send(tui.AgentDoneMsg{Err: err})
 }
 
 func (h *TUIHandler) OnTokenUpdate(info TokenUsage) {
 	h.p.Send(tui.TokenUpdateMsg{
-		PromptTokens:      info.PromptTokens,
-		CompletionTokens:  info.CompletionTokens,
 		TotalTokens:       info.TotalTokens,
 		ModelContextLimit: info.ModelContextLimit,
 	})
