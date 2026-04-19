@@ -89,8 +89,6 @@ type Model struct {
 
 	todoStore *tools.TodoStore
 
-	promptTokens      int64
-	completionTokens  int64
 	totalTokens       int64
 	modelContextLimit int
 
@@ -1332,9 +1330,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.lines = append(m.lines, toolLabelStyle.Render("📡 "+msg.Message))
 		if msg.QRCodeContent != "" {
 			qrLines := renderQRCode(msg.QRCodeContent)
-			for _, line := range qrLines {
-				m.lines = append(m.lines, line)
-			}
+			m.lines = append(m.lines, qrLines...)
 		}
 		m.refreshViewport()
 
@@ -1551,8 +1547,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		cmds = append(cmds, m.spinner.Tick)
 
 	case TokenUpdateMsg:
-		m.promptTokens = msg.PromptTokens
-		m.completionTokens = msg.CompletionTokens
 		m.totalTokens = msg.TotalTokens
 		m.modelContextLimit = msg.ModelContextLimit
 
