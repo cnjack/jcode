@@ -140,6 +140,11 @@ type Model struct {
 	// Copy notice
 	copyNotice string
 
+	// Command autocomplete suggestions
+	cmdSuggestionActive bool
+	cmdSuggestionIndex  int
+	cmdSuggestions      []commandSuggestion
+
 	// Mouse text selection state
 	mouseSelecting bool // true while dragging to select
 	mouseStartX    int  // viewport-relative X where selection started
@@ -1020,7 +1025,50 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			case "ctrl+l":
 				// Quick model switch
 				return m.handleModelInput(cmds)
+			case "tab":
+				// Accept command suggestion if active
+				if m.cmdSuggestionActive && len(m.cmdSuggestions) > 0 && m.cmdSuggestionIndex < len(m.cmdSuggestions) {
+					selected := m.cmdSuggestions[m.cmdSuggestionIndex]
+					m.textarea.SetValue(selected.cmd)
+					m.textarea.CursorEnd()
+					m.cmdSuggestionActive = false
+					m.cmdSuggestions = nil
+					m.cmdSuggestionIndex = 0
+					m.textareaLines = recalcLines(m.textarea.Value())
+					m.textarea.SetHeight(m.textareaLines)
+					// Re-evaluate suggestions after setting value (may show new filtered list)
+					m.updateSuggestions()
+					if m.ready {
+						m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))
+					}
+					return m, tea.Batch(cmds...)
+				}
+			case "esc":
+				// Dismiss command suggestion if active
+				if m.cmdSuggestionActive {
+					m.cmdSuggestionActive = false
+					m.cmdSuggestions = nil
+					m.cmdSuggestionIndex = 0
+					return m, tea.Batch(cmds...)
+				}
 			case "enter":
+				// If command suggestion is active, accept it instead of submitting
+				if m.cmdSuggestionActive && len(m.cmdSuggestions) > 0 && m.cmdSuggestionIndex < len(m.cmdSuggestions) {
+					selected := m.cmdSuggestions[m.cmdSuggestionIndex]
+					m.textarea.SetValue(selected.cmd)
+					m.textarea.CursorEnd()
+					m.cmdSuggestionActive = false
+					m.cmdSuggestions = nil
+					m.cmdSuggestionIndex = 0
+					m.textareaLines = recalcLines(m.textarea.Value())
+					m.textarea.SetHeight(m.textareaLines)
+					// Re-evaluate: exact match clears suggestions, partial shows new list
+					m.updateSuggestions()
+					if m.ready {
+						m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))
+					}
+					return m, tea.Batch(cmds...)
+				}
 				prompt := strings.TrimSpace(m.textarea.Value())
 				if prompt != "" {
 					appendHistory(prompt)
@@ -1032,6 +1080,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.textarea.Reset()
 					m.textareaLines = 1
 					m.textarea.SetHeight(1)
+					// Clear any active suggestions
+					m.cmdSuggestionActive = false
+					m.cmdSuggestions = nil
+					m.cmdSuggestionIndex = 0
 
 					// Team: route input to viewed teammate
 					if m.teamState.ViewMode == TeamViewTeammate && m.teamState.ViewingAgent != "" {
@@ -1140,18 +1192,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				}
 				return m, tea.Batch(cmds...)
 			case "up":
+				if m.cmdSuggestionActive && len(m.cmdSuggestions) > 0 {
+					// Navigate suggestion list up
+					if m.cmdSuggestionIndex > 0 {
+						m.cmdSuggestionIndex--
+					}
+					return m, tea.Batch(cmds...)
+				}
 				if m.historyIndex > 0 {
 					m.historyIndex--
 					m.textarea.SetValue(m.history[m.historyIndex])
 					m.textarea.CursorEnd()
 					m.textareaLines = recalcLines(m.textarea.Value())
 					m.textarea.SetHeight(m.textareaLines)
+					m.updateSuggestions()
 					if m.ready {
 						m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))
 					}
 				}
 				return m, tea.Batch(cmds...)
 			case "down":
+				if m.cmdSuggestionActive && len(m.cmdSuggestions) > 0 {
+					// Navigate suggestion list down
+					if m.cmdSuggestionIndex < len(m.cmdSuggestions)-1 {
+						m.cmdSuggestionIndex++
+					}
+					return m, tea.Batch(cmds...)
+				}
 				if m.historyIndex < len(m.history)-1 {
 					m.historyIndex++
 					m.textarea.SetValue(m.history[m.historyIndex])
@@ -1162,6 +1229,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				}
 				m.textareaLines = recalcLines(m.textarea.Value())
 				m.textarea.SetHeight(m.textareaLines)
+				m.updateSuggestions()
 				if m.ready {
 					m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))
 				}
@@ -1226,6 +1294,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			cmds = append(cmds, cmd)
 			m.textareaLines = recalcLines(m.textarea.Value())
 			m.textarea.SetHeight(m.textareaLines)
+			m.updateSuggestions()
 			if m.ready {
 				m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))
 			}
