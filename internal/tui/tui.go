@@ -132,13 +132,21 @@ type Model struct {
 	subagentProgress  []string // tool call progress lines for box display
 	subagentTokens    int64    // cumulative tokens used by current subagent
 
-	// Exit confirmation
+	// Exit / cancel confirmation
 	exitPending     bool      // true when quit dialog is showing
 	exitWarningTime time.Time // when the warning was shown
 	exitSelected    int       // 0=Yes, 1=No (default No for safety)
 
+	// Cancel-agent confirmation
+	cancelPending  bool // true when cancel-agent dialog is showing
+	cancelSelected int  // 0=Cancel, 1=Wait
+
 	// Copy notice
 	copyNotice string
+
+	// OnApprovalModeChange is called when the user toggles approval mode via Ctrl+A.
+	// It directly updates the backend ApprovalState atomically, bypassing the event loop.
+	OnApprovalModeChange func(enabled bool)
 
 	// Command autocomplete suggestions
 	cmdSuggestionActive bool
@@ -275,7 +283,7 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 			lipgloss.NewStyle().Foreground(colorText).PaddingLeft(2).Render("📁 I can read, write, and edit files in your project"),
 			lipgloss.NewStyle().Foreground(colorText).PaddingLeft(2).Render("⚡ I can execute shell commands for you"),
 			"",
-			lipgloss.NewStyle().Foreground(colorMuted).PaddingLeft(2).Render("Ctrl+P: Plan  │  Ctrl+A: Approval  │  Ctrl+L: Model  │  Drag: Select & Copy"),
+			lipgloss.NewStyle().Foreground(colorMuted).PaddingLeft(2).Render("Ctrl+P: Plan  │  Ctrl+A: Approval  │  Ctrl+L: Model  │  Ctrl+C: Cancel  │  Drag: Select & Copy"),
 			"",
 		}
 	}
@@ -393,6 +401,26 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(m.spinner.Tick, textarea.Blink)
 }
 
+// cancelAgent shows a confirmation dialog to cancel the running agent.
+// The actual cancellation happens when the user confirms.
+func (m *Model) requestCancelAgent() {
+	if !m.thinking || m.agentDone {
+		return
+	}
+	m.cancelPending = true
+	m.cancelSelected = 0 // default to "Cancel"
+	m.refreshViewport()
+}
+
+// confirmCancelAgent executes the agent cancellation after user confirms.
+func (m *Model) confirmCancelAgent() {
+	m.cancelPending = false
+	select {
+	case cancelAgentCh <- struct{}{}:
+	default:
+	}
+}
+
 func (m Model) inputActive() bool {
 	return (m.mode == ModeAgent || m.sshStep > 0 || m.sshSavePrompt) && !m.pickingModel && !m.showingSetting && !m.pickingSSHAlias && !m.pickingSession && !m.approvalPending && !m.planReviewActive && !m.askUserActive
 }
@@ -499,9 +527,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					if m.approvalRespChan != nil {
 						m.approvalRespChan <- ToolApprovalResponse{Approved: true, Mode: ModeAuto}
 					}
-					select {
-					case autoApproveCh <- true:
-					default:
+					if m.OnApprovalModeChange != nil {
+						m.OnApprovalModeChange(true)
 					}
 				case 2: // Reject
 					m.approvalPending = false
@@ -525,15 +552,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				m.refreshViewport()
 				return m, tea.Batch(cmds...)
 			case "a", "A":
-				// Event: ApproveAll - approve current and switch to AUTO mode
 				m.approvalPending = false
 				m.approvalMode = ModeAuto
 				if m.approvalRespChan != nil {
 					m.approvalRespChan <- ToolApprovalResponse{Approved: true, Mode: ModeAuto}
 				}
-				select {
-				case autoApproveCh <- true:
-				default:
+				if m.OnApprovalModeChange != nil {
+					m.OnApprovalModeChange(true)
 				}
 				m.textarea.Focus()
 				m.refreshViewport()
@@ -959,6 +984,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		}
 
 		if m.inputActive() {
+			// Cancel-agent dialog is an overlay — handle its keys first
+			if m.cancelPending {
+				switch msg.String() {
+				case "ctrl+c":
+					return m, tea.Quit
+				case "left", "right", "tab":
+					m.cancelSelected = 1 - m.cancelSelected
+					return m, tea.Batch(cmds...)
+				case "enter", " ":
+					if m.cancelSelected == 0 {
+						m.confirmCancelAgent()
+					} else {
+						m.cancelPending = false
+					}
+					return m, tea.Batch(cmds...)
+				case "y", "Y":
+					m.confirmCancelAgent()
+					return m, tea.Batch(cmds...)
+				case "n", "N", "esc":
+					m.cancelPending = false
+					return m, tea.Batch(cmds...)
+				default:
+					m.cancelPending = false
+				}
+			}
+
 			// Exit dialog is an overlay — handle its keys first
 			if m.exitPending && msg.String() != "ctrl+c" {
 				switch msg.String() {
@@ -984,6 +1035,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 			switch msg.String() {
 			case "ctrl+c":
+				// If agent is running, show cancel dialog instead of quit dialog
+				if m.thinking && !m.agentDone {
+					m.requestCancelAgent()
+					return m, tea.Batch(cmds...)
+				}
 				// Check if already pending (2nd Ctrl+C = force quit)
 				if m.exitPending {
 					return m, tea.Quit
@@ -1010,15 +1066,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				m.refreshViewport()
 				return m, tea.Batch(cmds...)
 			case "ctrl+a":
-				// Event: ToggleMode - switch between MANUAL and AUTO approval modes
 				if m.approvalMode == ModeManual {
 					m.approvalMode = ModeAuto
 				} else {
 					m.approvalMode = ModeManual
 				}
-				select {
-				case autoApproveCh <- (m.approvalMode == ModeAuto):
-				default:
+				if m.OnApprovalModeChange != nil {
+					m.OnApprovalModeChange(m.approvalMode == ModeAuto)
 				}
 				m.refreshViewport()
 				return m, tea.Batch(cmds...)
@@ -1300,10 +1354,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			}
 			return m, tea.Batch(cmds...)
 		}
-		// Agent running — handle exit dialog or ctrl+c
-		if m.exitPending {
+		// Agent running — handle cancel/exit dialogs or ctrl+c
+		switch {
+		case m.cancelPending:
 			switch msg.String() {
 			case "ctrl+c":
+				// 2nd Ctrl+C while cancel dialog → just quit
+				return m, tea.Quit
+			case "left", "right", "tab":
+				m.cancelSelected = 1 - m.cancelSelected
+				return m, tea.Batch(cmds...)
+			case "enter", " ":
+				if m.cancelSelected == 0 {
+					m.confirmCancelAgent()
+				} else {
+					m.cancelPending = false
+				}
+				return m, tea.Batch(cmds...)
+			case "y", "Y":
+				m.confirmCancelAgent()
+				return m, tea.Batch(cmds...)
+			case "n", "N", "esc":
+				m.cancelPending = false
+				return m, tea.Batch(cmds...)
+			default:
+				m.cancelPending = false
+			}
+		case m.exitPending:
+			switch msg.String() {
+			case "ctrl+c":
+				// 2nd Ctrl+C while exit dialog is showing during agent run: force quit
 				return m, tea.Quit
 			case "left", "right", "tab":
 				m.exitSelected = 1 - m.exitSelected
@@ -1323,13 +1403,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			default:
 				m.exitPending = false
 			}
-		} else if msg.String() == "ctrl+c" {
-			m.exitPending = true
-			m.exitSelected = 1 // Default to "No"
-			m.exitWarningTime = time.Now()
-			return m, tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
-				return ExitTimeoutMsg{}
-			})
+		case msg.String() == "ctrl+c":
+			// Show cancel-agent confirmation dialog
+			m.requestCancelAgent()
+			return m, tea.Batch(cmds...)
 		}
 
 	case tea.WindowSizeMsg:
@@ -1623,7 +1700,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.thinking = false
 		m.flushText()
 		if msg.Err != nil {
-			m.lines = append(m.lines, errorStyle.Render("Error: "+msg.Err.Error()))
+			if msg.Err.Error() == "context canceled" {
+				// User-initiated cancellation — show a clean message, not an error.
+				m.lines = append(m.lines, lipgloss.NewStyle().Foreground(colorMuted).Render("⏹  Agent cancelled."))
+			} else {
+				m.lines = append(m.lines, errorStyle.Render("Error: "+msg.Err.Error()))
+			}
 		}
 		m.lines = append(m.lines, "")
 		m.agentDone = true
@@ -1912,8 +1994,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 	case tea.InterruptMsg:
 		// Handle ctrl+c from non-TTY / signal handler path.
-		if m.exitPending {
+		if m.exitPending || m.cancelPending {
 			return m, tea.Quit
+		}
+		// If agent is running, show cancel dialog instead of quit dialog.
+		if m.thinking && !m.agentDone {
+			m.requestCancelAgent()
+			return m, tea.Batch(cmds...)
 		}
 		m.exitPending = true
 		m.exitSelected = 1
@@ -1921,14 +2008,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		quitButtons := buttonGroup([]buttonOpts{
 			{text: " Yes ", selected: false},
 			{text: " No ", selected: true},
-		}, "  ")
-		hint := ""
-		if m.thinking && !m.agentDone {
-			hint = "  " + lipgloss.NewStyle().Foreground(colorMuted).Italic(true).Render("(agent is running)")
-		}
-		m.lines = append(m.lines, fmt.Sprintf("  %s  %s%s",
+		})
+		m.lines = append(m.lines, fmt.Sprintf("  %s  %s",
 			lipgloss.NewStyle().Foreground(colorWarning).Bold(true).Render("Quit?"),
-			quitButtons, hint))
+			quitButtons))
 		m.refreshViewport()
 		return m, tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
 			return ExitTimeoutMsg{}
@@ -2024,6 +2107,10 @@ func (m Model) View() tea.View {
 
 	if m.approvalPending {
 		return m.newView(m.approvalDialogView())
+	}
+
+	if m.cancelPending {
+		return m.newView(m.cancelDialogView())
 	}
 
 	if m.exitPending {
@@ -2229,8 +2316,23 @@ func (m *Model) renderSubagentBox() string {
 	return box
 }
 
-func RunTUI(hasPrompt bool, pwd string, todoStore *tools.TodoStore) (*tea.Program, Model) {
+// ModelOption configures a Model before the BubbleTea program starts.
+type ModelOption func(*Model)
+
+// WithApprovalModeChange sets the callback invoked when the user toggles
+// approval mode via Ctrl+A or the approval dialog. The callback directly
+// updates the backend ApprovalState atomically, bypassing the event loop.
+func WithApprovalModeChange(fn func(bool)) ModelOption {
+	return func(m *Model) {
+		m.OnApprovalModeChange = fn
+	}
+}
+
+func RunTUI(hasPrompt bool, pwd string, todoStore *tools.TodoStore, opts ...ModelOption) (*tea.Program, Model) {
 	m := NewModel(hasPrompt, pwd, todoStore)
+	for _, opt := range opts {
+		opt(&m)
+	}
 	p := tea.NewProgram(m)
 	return p, m
 }
