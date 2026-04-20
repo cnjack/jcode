@@ -388,16 +388,8 @@ func (a *acpAgent) LoadSession(ctx context.Context, params acp.LoadSessionReques
 		rec.SetUUID(resumeUUID)
 	}
 
-	// Convert entries to message history.
-	history := make([]*schema.Message, 0, len(entries))
-	for _, entry := range entries {
-		switch entry.Type {
-		case session.EntryUser:
-			history = append(history, &schema.Message{Role: "user", Content: entry.Content})
-		case session.EntryAssistant:
-			history = append(history, &schema.Message{Role: "assistant", Content: entry.Content})
-		}
-	}
+	// Reconstruct full message history (including tool calls/results).
+	history := session.ReconstructHistory(entries)
 
 	sess, err := a.buildAgentSession(ctx, cfg, pwd, params.SessionId, rec, history)
 	if err != nil {

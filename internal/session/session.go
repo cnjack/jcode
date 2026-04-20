@@ -128,9 +128,31 @@ func NewRecorder(project, provider, model string) (*Recorder, error) {
 // UUID returns the session identifier.
 func (r *Recorder) UUID() string { return r.uuid }
 
+// ValidateSessionID checks that a session ID is safe for use as a filename.
+// It rejects empty IDs, path traversal sequences, and path separators.
+func ValidateSessionID(id string) error {
+	if id == "" {
+		return fmt.Errorf("session ID must not be empty")
+	}
+	if id == "." || id == ".." {
+		return fmt.Errorf("invalid session ID: %q", id)
+	}
+	if strings.ContainsAny(id, "/\\" ) {
+		return fmt.Errorf("session ID must not contain path separators: %q", id)
+	}
+	if strings.Contains(id, "..") {
+		return fmt.Errorf("session ID must not contain path traversal: %q", id)
+	}
+	return nil
+}
+
 // SetUUID overrides the session identifier. Used when resuming an existing session
 // so that new messages are appended to the same session file.
 func (r *Recorder) SetUUID(id string) {
+	if err := ValidateSessionID(id); err != nil {
+		config.Logger().Printf("[session] SetUUID rejected: %v", err)
+		return
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.uuid = id
@@ -452,6 +474,9 @@ func ListSessions(project string) ([]SessionMeta, error) {
 
 // LoadSession reads all entries from a session JSONL file identified by uuid.
 func LoadSession(id string) ([]Entry, error) {
+	if err := ValidateSessionID(id); err != nil {
+		return nil, err
+	}
 	dir, err := config.SessionsDir()
 	if err != nil {
 		return nil, err

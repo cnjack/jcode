@@ -463,24 +463,32 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	if req.SessionID != "" {
 		// Resuming: load prior conversation into history so the agent has context.
 		entries, _ := session.LoadSession(req.SessionID)
-		s.history = nil
-		for _, e := range entries {
-			switch e.Type {
-			case session.EntryUser:
-				s.history = append(s.history, schema.UserMessage(e.Content))
-			case session.EntryAssistant:
-				s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: e.Content})
+		// Reconstruct full message history (including tool calls/results).
+		s.history = session.ReconstructHistory(entries)
+		// Restore todos from the last snapshot in the session.
+		if s.todoStore != nil {
+			var lastTodos []session.TodoSnapshotItem
+			for _, e := range entries {
+				if e.Type == session.EntryTodoSnapshot {
+					lastTodos = e.Todos
+				}
+			}
+			if len(lastTodos) > 0 {
+				items := make([]tools.TodoItem, len(lastTodos))
+				for i, t := range lastTodos {
+					items[i] = tools.TodoItem{ID: t.ID, Title: t.Title, Status: tools.TodoStatus(t.Status)}
+				}
+				s.todoStore.Update(items)
 			}
 		}
 	} else {
 		s.history = nil
+		// Reset todos.
+		if s.todoStore != nil {
+			s.todoStore.Update(nil)
+		}
 	}
 	s.mu.Unlock()
-
-	// Reset todos.
-	if s.todoStore != nil {
-		s.todoStore.Update(nil)
-	}
 
 	// Notify clients. When resuming an existing session, do NOT broadcast session_reset
 	// (which would wipe the UI that the frontend is about to repopulate from history).
