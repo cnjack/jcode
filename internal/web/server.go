@@ -83,6 +83,10 @@ type Server struct {
 	// disabledMCP tracks MCP servers that have been disabled via the UI.
 	disabledMCP map[string]bool
 
+	// sessionSnapshot holds the git tree hash at the start of an agent run,
+	// used to compute session-scoped diffs (agent changes only).
+	sessionSnapshot string
+
 	// wechatClient is the optional WeChat channel client.
 	wechatClient channel.Channel
 
@@ -372,6 +376,10 @@ func (s *Server) submitMessage(message, mode, source string) {
 			s.runCancel = nil
 			s.mu.Unlock()
 		}()
+
+		// Take a git snapshot before the agent run for session diff tracking.
+		s.takeSessionSnapshot()
+
 		resp := runner.Run(runCtx, agent, history, s.eventHandler, s.recorder, s.todoStore, s.tracer, nil)
 		if resp != "" {
 			s.mu.Lock()
@@ -393,6 +401,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		CreatedAt string `json:"created_at"`
 		Provider  string `json:"provider"`
 		Model     string `json:"model"`
+		Title     string `json:"title,omitempty"`
 	}
 
 	items := make([]sessionItem, 0, len(metas))
@@ -402,6 +411,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: m.StartTime,
 			Provider:  m.Provider,
 			Model:     m.Model,
+			Title:     m.Title,
 		})
 	}
 	writeJSON(w, http.StatusOK, items)
@@ -579,15 +589,8 @@ func (s *Server) handleSwitchModel(w http.ResponseWriter, r *http.Request) {
 	s.agent = ag
 	s.providerName = req.Provider
 	s.modelName = req.Model
-	s.history = nil // reset history on model change
+	// Keep history — allow continuing the conversation with a different model.
 	s.mu.Unlock()
-
-	// Reset recorder for new model.
-	if s.recorder != nil {
-		s.recorder.Close()
-	}
-	rec, _ := session.NewRecorder(s.pwd, req.Provider, req.Model)
-	s.recorder = rec
 
 	// Notify clients.
 	s.broker.Broadcast(SSEEvent{Event: "model_changed", Data: map[string]string{
@@ -796,6 +799,12 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 		mode = "working"
 	}
 
+	// "session" mode: diff between snapshot taken at agent run start and current state.
+	if mode == "session" {
+		s.handleSessionDiff(w, r)
+		return
+	}
+
 	var args []string
 	switch mode {
 	case "staged":
@@ -910,6 +919,77 @@ func countDiffLines(patch string) (adds, dels int) {
 		}
 	}
 	return
+}
+
+// takeSessionSnapshot records the current git working tree state
+// so that session-scoped diffs can be computed later.
+func (s *Server) takeSessionSnapshot() {
+	// Use "git stash create" to get a tree-ish of the current state without
+	// actually stashing. If there are no changes, use HEAD.
+	cmd := exec.CommandContext(s.ctx, "git", "stash", "create")
+	cmd.Dir = s.pwd
+	out, err := cmd.Output()
+	snapshot := strings.TrimSpace(string(out))
+	if err != nil || snapshot == "" {
+		// No local changes — use HEAD as baseline
+		cmd2 := exec.CommandContext(s.ctx, "git", "rev-parse", "HEAD")
+		cmd2.Dir = s.pwd
+		out2, _ := cmd2.Output()
+		snapshot = strings.TrimSpace(string(out2))
+	}
+	s.mu.Lock()
+	s.sessionSnapshot = snapshot
+	s.mu.Unlock()
+}
+
+// handleSessionDiff computes the diff between the session start snapshot and current state.
+func (s *Server) handleSessionDiff(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	snapshot := s.sessionSnapshot
+	s.mu.RUnlock()
+
+	type diffEntry struct {
+		File      string `json:"file"`
+		Patch     string `json:"patch"`
+		Additions int    `json:"additions"`
+		Deletions int    `json:"deletions"`
+		Status    string `json:"status"`
+	}
+
+	if snapshot == "" {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"mode":    "session",
+			"entries": []diffEntry{},
+		})
+		return
+	}
+
+	// Diff from snapshot to current working tree
+	cmd := exec.CommandContext(s.ctx, "git", "diff", snapshot, "--no-color")
+	cmd.Dir = s.pwd
+	output, _ := cmd.CombinedOutput()
+
+	var entries []diffEntry
+	sections := splitDiffByFile(string(output))
+	for _, sec := range sections {
+		adds, dels := countDiffLines(sec.patch)
+		entries = append(entries, diffEntry{
+			File:      sec.file,
+			Patch:     sec.patch,
+			Additions: adds,
+			Deletions: dels,
+			Status:    sec.status,
+		})
+	}
+
+	if entries == nil {
+		entries = []diffEntry{}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"mode":    "session",
+		"entries": entries,
+	})
 }
 
 func (s *Server) handleListMCP(w http.ResponseWriter, r *http.Request) {

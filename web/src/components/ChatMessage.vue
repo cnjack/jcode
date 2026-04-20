@@ -12,7 +12,7 @@ defineProps<{
     <!-- Role label -->
     <div class="flex items-center gap-2 mb-2">
       <div
-        class="w-5 h-5 rounded-lg flex items-center justify-center text-[9px] font-bold shrink-0"
+        class="w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold shrink-0"
         :class="{
           'bg-emerald-500/15 text-emerald-600 dark:bg-emerald-400/15 dark:text-emerald-400': message.role === 'assistant',
           'bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400': message.role === 'user' && message.source !== 'wechat',

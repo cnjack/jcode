@@ -131,7 +131,7 @@ function deleteProject(id: string) {
           leave-from="opacity-100 translate-y-0"
           leave-to="opacity-0 translate-y-2"
         >
-          <DialogPanel class="w-full max-w-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl shadow-2xl overflow-hidden">
+          <DialogPanel class="w-full max-w-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded shadow-2xl overflow-hidden">
             <!-- Header -->
             <div class="px-5 pt-4 pb-2">
               <DialogTitle class="text-sm font-semibold text-zinc-800 dark:text-zinc-100" style="font-family: var(--font-sans)">
@@ -145,12 +145,12 @@ function deleteProject(id: string) {
                 <input
                   v-model="pathInput"
                   type="text"
-                  class="flex-1 px-3 py-1.5 text-sm font-mono rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 outline-none focus:border-emerald-400 dark:focus:border-emerald-500/60 transition-colors"
+                  class="flex-1 px-3 py-1.5 text-sm font-mono rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 outline-none focus:border-emerald-400 dark:focus:border-emerald-500/60 transition-colors"
                   placeholder="/path/to/folder"
                   @keydown="handlePathKeyDown"
                 />
                 <button
-                  class="px-3 py-1.5 text-xs font-medium bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl cursor-pointer transition-colors"
+                  class="px-3 py-1.5 text-xs font-medium bg-emerald-500 hover:bg-emerald-600 text-white rounded-md cursor-pointer transition-colors"
                   @click="handlePathSubmit"
                 >
                   OK
@@ -163,7 +163,7 @@ function deleteProject(id: string) {
                 </button>
               </div>
 
-              <div class="border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-hidden max-h-80 overflow-y-auto bg-zinc-50 dark:bg-zinc-800/60">
+              <div class="border border-zinc-200 dark:border-zinc-700 rounded-md overflow-hidden max-h-80 overflow-y-auto bg-zinc-50 dark:bg-zinc-800/60">
                 <button
                   v-if="browsePath && browsePath !== '/'"
                   class="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 cursor-pointer transition-colors border-b border-zinc-100 dark:border-zinc-700/60"
@@ -196,7 +196,7 @@ function deleteProject(id: string) {
                   {{ displayPath }}
                 </div>
                 <button
-                  class="px-4 py-1.5 text-xs font-medium bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl cursor-pointer transition-colors shrink-0"
+                  class="px-4 py-1.5 text-xs font-medium bg-emerald-500 hover:bg-emerald-600 text-white rounded-md cursor-pointer transition-colors shrink-0"
                   @click="selectCurrentPath"
                 >
                   Open Folder
@@ -207,7 +207,7 @@ function deleteProject(id: string) {
             <!-- Project list mode -->
             <div v-else>
               <div v-if="projectStore.switchError" class="px-5 py-2">
-                <div class="text-xs text-red-500 dark:text-red-400 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl px-3 py-2">
+                <div class="text-xs text-red-500 dark:text-red-400 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-md px-3 py-2">
                   {{ projectStore.switchError }}
                 </div>
               </div>
@@ -223,14 +223,14 @@ function deleteProject(id: string) {
                 <div
                   v-for="p in projectStore.projects"
                   :key="p.id"
-                  class="group flex items-center gap-2 px-3 py-2.5 rounded-xl cursor-pointer transition-colors"
+                  class="group flex items-center gap-2 px-3 py-2.5 rounded-md cursor-pointer transition-colors"
                   :class="projectStore.activeId === p.id
                     ? 'bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20'
                     : 'hover:bg-zinc-50 dark:hover:bg-zinc-800 border border-transparent'"
                   @click="selectProject(p.id)"
                 >
                   <div
-                    class="w-7 h-7 rounded-xl flex items-center justify-center text-xs font-bold shrink-0"
+                    class="w-7 h-7 rounded-md flex items-center justify-center text-xs font-bold shrink-0"
                     :class="projectStore.activeId === p.id
                       ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400'
                       : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400'"

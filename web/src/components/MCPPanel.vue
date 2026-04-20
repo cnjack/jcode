@@ -65,7 +65,7 @@ onMounted(fetchMCP)
       <div
         v-for="(info, name) in servers"
         :key="name"
-        class="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-700/60 bg-white dark:bg-zinc-800/60 hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors"
+        class="flex items-center gap-3 px-3 py-2.5 rounded-md border border-zinc-200 dark:border-zinc-700/60 bg-white dark:bg-zinc-800/60 hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors"
       >
         <span class="text-base">{{ serverIcon(info.type) }}</span>
         <div class="flex-1 min-w-0">

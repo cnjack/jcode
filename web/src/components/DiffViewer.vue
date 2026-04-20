@@ -4,11 +4,12 @@ import { api } from '@/composables/api'
 import type { DiffEntry } from '@/types/api'
 
 const entries = ref<DiffEntry[]>([])
-const mode = ref<'working' | 'staged' | 'branch'>('working')
+const mode = ref<'working' | 'staged' | 'branch' | 'session'>('session')
 const loading = ref(false)
 const selectedFile = ref<string | null>(null)
 
 const modes = [
+  { value: 'session' as const, label: 'Session' },
   { value: 'working' as const, label: 'Working' },
   { value: 'staged' as const, label: 'Staged' },
   { value: 'branch' as const, label: 'Branch' },
@@ -76,7 +77,7 @@ onMounted(fetchDiff)
           <button
             v-for="m in modes"
             :key="m.value"
-            class="px-1.5 py-0.5 text-[10px] rounded-lg cursor-pointer transition-colors font-medium"
+            class="px-1.5 py-0.5 text-[10px] rounded cursor-pointer transition-colors font-medium"
             :class="mode === m.value
               ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
               : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700'"

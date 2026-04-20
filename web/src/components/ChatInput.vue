@@ -142,11 +142,11 @@ watch(() => store.isRunning, (running) => {
 <template>
   <div ref="containerRef" class="border-t border-zinc-200 dark:border-zinc-800/80 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm px-5 py-3">
     <div class="max-w-3xl mx-auto">
-      <div class="bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700/60 rounded-2xl px-3.5 py-2.5 focus-within:border-emerald-400 dark:focus-within:border-emerald-500/60 focus-within:ring-1 focus-within:ring-emerald-400/20 dark:focus-within:ring-emerald-500/10 transition-all relative">
+      <div class="bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700/60 rounded-md px-3.5 py-2.5 transition-all relative">
         <!-- Slash command menu -->
         <div
           v-if="showSlashMenu && filteredSlashCommands.length > 0"
-          class="absolute bottom-full mb-2 left-0 right-0 z-30 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-lg dark:shadow-2xl py-1.5 max-h-48 overflow-y-auto"
+          class="absolute bottom-full mb-2 left-0 right-0 z-30 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md shadow-lg dark:shadow-2xl py-1.5 max-h-48 overflow-y-auto"
         >
           <button
             v-for="(cmd, i) in filteredSlashCommands"
@@ -179,7 +179,7 @@ watch(() => store.isRunning, (running) => {
             <!-- Mode selector -->
             <div class="relative">
               <button
-                class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-lg transition-colors cursor-pointer"
+                class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded transition-colors cursor-pointer"
                 :class="store.mode === 'plan'
                   ? 'bg-amber-100 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400'
                   : 'bg-zinc-100 dark:bg-zinc-700/60 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'"
@@ -190,11 +190,11 @@ watch(() => store.isRunning, (running) => {
                   <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
                 </svg>
               </button>
-              <div v-if="showModePicker" class="absolute bottom-full mb-1 left-0 z-20 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-lg dark:shadow-2xl py-1 min-w-28">
+              <div v-if="showModePicker" class="absolute bottom-full mb-1 left-0 z-20 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md shadow-lg dark:shadow-2xl py-1 min-w-28">
                 <button
                   v-for="m in modes"
                   :key="m.value"
-                  class="w-full px-3 py-1.5 text-xs cursor-pointer select-none text-left transition-colors rounded-lg"
+                  class="w-full px-3 py-1.5 text-xs cursor-pointer select-none text-left transition-colors rounded"
                   :class="store.mode === m.value
                     ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10'
                     : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700/50 hover:text-zinc-700 dark:hover:text-zinc-200'"
@@ -208,7 +208,7 @@ watch(() => store.isRunning, (running) => {
             <!-- Model selector -->
             <div class="relative">
               <button
-                class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-lg bg-zinc-100 dark:bg-zinc-700/60 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer transition-colors"
+                class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded bg-zinc-100 dark:bg-zinc-700/60 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer transition-colors"
                 @click.stop="showModelPicker = !showModelPicker; showModePicker = false"
               >
                 {{ store.modelName || 'model' }}
@@ -218,7 +218,7 @@ watch(() => store.isRunning, (running) => {
               </button>
               <div
                 v-if="showModelPicker"
-                class="absolute bottom-full mb-1 left-0 z-20 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-lg dark:shadow-2xl py-1.5 max-h-72 overflow-y-auto min-w-56"
+                class="absolute bottom-full mb-1 left-0 z-20 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md shadow-lg dark:shadow-2xl py-1.5 max-h-72 overflow-y-auto min-w-56"
               >
                 <template v-for="p in store.providers" :key="p.id">
                   <div class="px-3 py-1 text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider font-semibold sticky top-0 bg-white dark:bg-zinc-800">
@@ -244,7 +244,7 @@ watch(() => store.isRunning, (running) => {
 
             <!-- Auto-approve toggle -->
             <button
-              class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-lg transition-colors cursor-pointer"
+              class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded transition-colors cursor-pointer"
               :class="store.autoApprove
                 ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-500/25'
                 : 'bg-zinc-100 dark:bg-zinc-700/60 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-600/60'"
@@ -260,7 +260,7 @@ watch(() => store.isRunning, (running) => {
             <!-- Channel toggle -->
             <button
               v-if="store.channelAvailable"
-              class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-lg transition-colors cursor-pointer"
+              class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded transition-colors cursor-pointer"
               :class="store.channelEnabled
                 ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-500/25'
                 : 'bg-zinc-100 dark:bg-zinc-700/60 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-600/60'"
@@ -283,7 +283,7 @@ watch(() => store.isRunning, (running) => {
             <!-- Stop button -->
             <button
               v-if="store.isRunning"
-              class="w-7 h-7 flex items-center justify-center rounded-xl bg-red-500 hover:bg-red-600 text-white transition-colors cursor-pointer shadow-sm"
+              class="w-7 h-7 flex items-center justify-center rounded-md bg-red-500 hover:bg-red-600 text-white transition-colors cursor-pointer shadow-sm"
               title="Stop agent (Esc)"
               @click="store.stopAgent()"
             >
@@ -294,7 +294,7 @@ watch(() => store.isRunning, (running) => {
             <!-- Send button -->
             <button
               v-else
-              class="w-7 h-7 flex items-center justify-center rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shadow-sm"
+              class="w-7 h-7 flex items-center justify-center rounded-md bg-emerald-500 hover:bg-emerald-600 text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shadow-sm"
               :disabled="!input.trim()"
               @click="send"
             >

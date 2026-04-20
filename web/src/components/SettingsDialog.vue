@@ -174,7 +174,7 @@ const tabLabel: Record<string, string> = {
           leave="ease-in duration-100"
           leave-from="opacity-100 translate-y-0"
           leave-to="opacity-0 translate-y-2">
-          <DialogPanel class="w-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl shadow-2xl overflow-hidden">
+          <DialogPanel class="w-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded shadow-2xl overflow-hidden">
             <div class="px-5 pt-5 pb-3 border-b border-zinc-200 dark:border-zinc-800">
               <DialogTitle class="text-sm font-semibold text-zinc-800 dark:text-zinc-100" style="font-family: var(--font-sans)">Settings</DialogTitle>
             </div>
@@ -267,7 +267,7 @@ const tabLabel: Record<string, string> = {
                     <div
                       v-for="(info, name) in mcpServers"
                       :key="name"
-                      class="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-700/60"
+                      class="flex items-center gap-3 px-3 py-2.5 rounded-md border border-zinc-200 dark:border-zinc-700/60"
                       :class="info.enabled
                         ? 'bg-white dark:bg-zinc-800/60'
                         : 'bg-zinc-50 dark:bg-zinc-800/30 opacity-60'"
@@ -300,7 +300,7 @@ const tabLabel: Record<string, string> = {
 
                   <div class="mb-3">
                     <div class="text-[10px] text-zinc-400 dark:text-zinc-500 mb-1">Current Environment</div>
-                    <div class="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 text-xs text-emerald-700 dark:text-emerald-400 font-medium">
+                    <div class="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-emerald-50 dark:bg-emerald-500/10 text-xs text-emerald-700 dark:text-emerald-400 font-medium">
                       <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400" />
                       {{ sshCurrent }}
                     </div>
@@ -316,7 +316,7 @@ const tabLabel: Record<string, string> = {
                     <div
                       v-for="alias in sshAliases"
                       :key="alias.name"
-                      class="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-700/60 bg-white dark:bg-zinc-800/60"
+                      class="flex items-center gap-3 px-3 py-2.5 rounded-md border border-zinc-200 dark:border-zinc-700/60 bg-white dark:bg-zinc-800/60"
                     >
                       <span class="text-sm">🖥</span>
                       <div class="flex-1 min-w-0">
@@ -348,7 +348,7 @@ const tabLabel: Record<string, string> = {
                   </div>
 
                   <div v-else class="space-y-4">
-                    <div class="px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-700/60 bg-white dark:bg-zinc-800/60">
+                    <div class="px-4 py-3 rounded-md border border-zinc-200 dark:border-zinc-700/60 bg-white dark:bg-zinc-800/60">
                       <div class="flex items-center justify-between mb-3">
                         <div class="flex items-center gap-2">
                           <span class="text-base">💬</span>
@@ -377,7 +377,7 @@ const tabLabel: Record<string, string> = {
                       </div>
 
                       <div v-if="channelQRContent" class="flex flex-col items-center py-3">
-                        <canvas ref="qrCanvas" class="rounded-xl border border-zinc-200 dark:border-zinc-700" />
+                        <canvas ref="qrCanvas" class="rounded-md border border-zinc-200 dark:border-zinc-700" />
                         <div class="text-[10px] text-zinc-400 dark:text-zinc-500 mt-2">Scan with WeChat to connect</div>
                       </div>
 
@@ -385,7 +385,7 @@ const tabLabel: Record<string, string> = {
                         <button
                           v-if="channelState === 'none'"
                           :disabled="channelLoading"
-                          class="flex-1 px-3 py-1.5 text-xs rounded-xl bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 cursor-pointer transition-colors font-medium"
+                          class="flex-1 px-3 py-1.5 text-xs rounded-md bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 cursor-pointer transition-colors font-medium"
                           @click="channelLogin"
                         >
                           {{ channelLoading ? 'Loading...' : 'Connect' }}
@@ -393,7 +393,7 @@ const tabLabel: Record<string, string> = {
                         <button
                           v-if="channelState === 'enabled' || channelState === 'disabled'"
                           :disabled="channelLoading"
-                          class="flex-1 px-3 py-1.5 text-xs rounded-xl text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 disabled:opacity-50 cursor-pointer transition-colors font-medium"
+                          class="flex-1 px-3 py-1.5 text-xs rounded-md text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 disabled:opacity-50 cursor-pointer transition-colors font-medium"
                           @click="channelLogout"
                         >
                           Disconnect
@@ -404,7 +404,7 @@ const tabLabel: Record<string, string> = {
                     <!-- Login reminder banner -->
                     <div
                       v-if="channelLoginReminder"
-                      class="px-4 py-3 rounded-xl border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 flex items-start gap-2.5"
+                      class="px-4 py-3 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 flex items-start gap-2.5"
                     >
                       <span class="text-sm shrink-0 mt-0.5">⚠️</span>
                       <div class="flex-1 min-w-0">
@@ -432,10 +432,10 @@ const tabLabel: Record<string, string> = {
                     <div
                       v-for="s in shortcuts"
                       :key="s.keys"
-                      class="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                      class="flex items-center justify-between py-1.5 px-2 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800"
                     >
                       <span class="text-xs text-zinc-600 dark:text-zinc-300">{{ s.desc }}</span>
-                      <kbd class="px-2 py-0.5 text-[10px] font-mono bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-500 dark:text-zinc-400">{{ s.keys }}</kbd>
+                      <kbd class="px-2 py-0.5 text-[10px] font-mono bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded text-zinc-500 dark:text-zinc-400">{{ s.keys }}</kbd>
                     </div>
                   </div>
                 </div>
