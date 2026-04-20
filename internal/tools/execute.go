@@ -70,7 +70,7 @@ func (e *Env) NewExecuteTool(bm *BackgroundManager) tool.InvokableTool {
 					"Input: git status\nOutput: Shows working tree status\n" +
 					"Input: npm install\nOutput: Installs package dependencies\n" +
 					"Input: mkdir foo\nOutput: Creates directory 'foo'",
-				Required: true,
+				Required: false,
 			},
 		}),
 	}
