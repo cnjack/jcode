@@ -85,6 +85,7 @@ type SessionMeta struct {
 	Provider  string `json:"provider"`
 	Model     string `json:"model"`
 	StartTime string `json:"start_time"` // RFC3339
+	Title     string `json:"title,omitempty"`
 }
 
 // sessionIndex is the on-disk structure of session.json.
@@ -110,6 +111,7 @@ type Recorder struct {
 	// resuming is true when loading an existing session via --resume.
 	// In this mode, ensureFile opens the existing file for append instead of creating new.
 	resuming bool
+	title    string
 }
 
 // NewRecorder returns a Recorder that will create the session file only when
@@ -175,8 +177,19 @@ func (r *Recorder) HasRecording() bool {
 }
 
 // RecordUser appends a user message entry.
+// On the first user message, the title is auto-generated from the content.
 func (r *Recorder) RecordUser(content string) {
+	r.mu.Lock()
+	needsTitle := r.file == nil && !r.resuming
+	r.mu.Unlock()
 	_ = r.writeEntry(Entry{Type: EntryUser, Content: content})
+	if needsTitle {
+		title := generateTitle(content)
+		r.mu.Lock()
+		r.title = title
+		r.mu.Unlock()
+		_ = updateIndexTitle(r.project, r.uuid, title)
+	}
 }
 
 // RecordAssistant appends an assistant message entry.
@@ -392,6 +405,59 @@ func addToIndex(project string, meta SessionMeta) error {
 	}
 	// Atomic write: write to temp file then rename to prevent corruption
 	// from concurrent writes or interrupted I/O.
+	tmpPath := indexPath + ".tmp"
+	if err := os.WriteFile(tmpPath, newData, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, indexPath)
+}
+
+// generateTitle creates a human-readable session title from the first user message.
+// It truncates to a reasonable length and strips newlines.
+func generateTitle(content string) string {
+	// Take first line only
+	title := content
+	if idx := strings.IndexAny(title, "\n\r"); idx >= 0 {
+		title = title[:idx]
+	}
+	title = strings.TrimSpace(title)
+	if len(title) == 0 {
+		return "New session"
+	}
+	// Truncate to 80 chars
+	runes := []rune(title)
+	if len(runes) > 80 {
+		title = string(runes[:80]) + "…"
+	}
+	return title
+}
+
+// updateIndexTitle updates the title of a session in the shared index file.
+func updateIndexTitle(project, uuid, title string) error {
+	indexPath, err := config.SessionsIndexPath()
+	if err != nil {
+		return err
+	}
+	data, readErr := os.ReadFile(indexPath)
+	if readErr != nil {
+		return readErr
+	}
+	var idx sessionIndex
+	if err := json.Unmarshal(data, &idx); err != nil {
+		return err
+	}
+	metas := idx.Sessions[project]
+	for i := range metas {
+		if metas[i].UUID == uuid {
+			metas[i].Title = title
+			break
+		}
+	}
+	idx.Sessions[project] = metas
+	newData, err := json.MarshalIndent(idx, "", "  ")
+	if err != nil {
+		return err
+	}
 	tmpPath := indexPath + ".tmp"
 	if err := os.WriteFile(tmpPath, newData, 0644); err != nil {
 		return err
