@@ -156,13 +156,11 @@ func cleanToolOutput(name, output string) string {
 	}
 	lines := strings.Split(output, "\n")
 	var clean []string
-	skipPrefixes := true
 	for _, line := range lines {
-		// Skip STDOUT:/STDERR: header lines
-		if skipPrefixes && (line == "STDOUT:" || line == "STDERR:") {
+		// Skip STDOUT:/STDERR: header lines anywhere in output
+		if line == "STDOUT:" || line == "STDERR:" {
 			continue
 		}
-		skipPrefixes = false
 		// Skip metadata lines at the end
 		if strings.HasPrefix(line, "[Exit code:") ||
 			strings.HasPrefix(line, "[Completed in") ||
