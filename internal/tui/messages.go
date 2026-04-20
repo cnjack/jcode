@@ -58,7 +58,12 @@ func GetApprovalChannel() chan ToolApprovalRequestMsg {
 // --- Messages ---
 
 type AgentTextMsg struct{ Text string }
-type ToolCallMsg struct{ Name, Args string }
+type ToolCallMsg struct {
+	Name     string
+	Args     string
+	Title    string // human-readable tool name (e.g. "Read", "Shell")
+	Subtitle string // context info (file path, description)
+}
 type ToolResultMsg struct {
 	Name, Output string
 	Err          error

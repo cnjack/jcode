@@ -33,7 +33,13 @@ func (h *TUIHandler) OnAgentText(text string) {
 }
 
 func (h *TUIHandler) OnToolCall(name, args, _ string) {
-	h.p.Send(tui.ToolCallMsg{Name: name, Args: args})
+	info := extractToolDisplayInfo(name, args)
+	h.p.Send(tui.ToolCallMsg{
+		Name:     name,
+		Args:     args,
+		Title:    info.Title,
+		Subtitle: info.Subtitle,
+	})
 }
 
 func (h *TUIHandler) OnToolResult(name, output, _ string, err error) {

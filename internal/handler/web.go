@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -20,17 +21,172 @@ type WebTextData struct {
 
 // WebToolCallData carries tool invocation info.
 type WebToolCallData struct {
-	Name       string `json:"name"`
-	Args       string `json:"args"`
-	ToolCallID string `json:"tool_call_id,omitempty"`
+	Name        string           `json:"name"`
+	Args        string           `json:"args"`
+	ToolCallID  string           `json:"tool_call_id,omitempty"`
+	DisplayInfo *ToolDisplayInfo `json:"display_info,omitempty"`
+}
+
+// ToolDisplayInfo carries human-readable tool metadata for UI rendering.
+type ToolDisplayInfo struct {
+	Title    string `json:"title"`              // Human-readable tool name (e.g. "Read", "Edit", "Shell")
+	Subtitle string `json:"subtitle,omitempty"` // Context info (file path, command description, pattern)
+	Icon     string `json:"icon,omitempty"`     // Icon identifier
+	Category string `json:"category,omitempty"` // "context" (read-only), "mutation", "execution"
+}
+
+// extractToolDisplayInfo extracts display metadata from tool name and args.
+func extractToolDisplayInfo(name, argsJSON string) *ToolDisplayInfo {
+	info := &ToolDisplayInfo{}
+
+	// Parse args to extract contextual info
+	var args map[string]interface{}
+	_ = json.Unmarshal([]byte(argsJSON), &args)
+
+	getString := func(key string) string {
+		if v, ok := args[key]; ok {
+			if s, ok := v.(string); ok {
+				return s
+			}
+		}
+		return ""
+	}
+
+	switch name {
+	case "read":
+		info.Title = "Read"
+		info.Icon = "file"
+		info.Category = "context"
+		info.Subtitle = shortenPath(getString("file_path"))
+	case "write":
+		info.Title = "Write"
+		info.Icon = "file-edit"
+		info.Category = "mutation"
+		info.Subtitle = shortenPath(getString("file_path"))
+	case "edit":
+		info.Title = "Edit"
+		info.Icon = "file-edit"
+		info.Category = "mutation"
+		info.Subtitle = shortenPath(getString("file_path"))
+	case "multi_edit":
+		info.Title = "Multi Edit"
+		info.Icon = "file-edit"
+		info.Category = "mutation"
+		info.Subtitle = shortenPath(getString("file_path"))
+	case "glob":
+		info.Title = "Glob"
+		info.Icon = "search"
+		info.Category = "context"
+		info.Subtitle = getString("pattern")
+	case "grep":
+		info.Title = "Search"
+		info.Icon = "search"
+		info.Category = "context"
+		info.Subtitle = getString("pattern")
+	case "execute":
+		info.Title = "Shell"
+		info.Icon = "terminal"
+		info.Category = "execution"
+		info.Subtitle = getString("description")
+		if info.Subtitle == "" {
+			cmd := getString("command")
+			if len(cmd) > 100 {
+				cmd = cmd[:100] + "…"
+			}
+			info.Subtitle = cmd
+		}
+	case "background":
+		info.Title = "Background"
+		info.Icon = "terminal"
+		info.Category = "execution"
+		info.Subtitle = getString("description")
+	case "todowrite":
+		info.Title = "Update Todos"
+		info.Icon = "checklist"
+		info.Category = "mutation"
+	case "todoread":
+		info.Title = "Read Todos"
+		info.Icon = "checklist"
+		info.Category = "context"
+	case "subagent":
+		info.Title = "Subagent"
+		info.Icon = "agent"
+		info.Category = "execution"
+		info.Subtitle = getString("description")
+		if info.Subtitle == "" {
+			info.Subtitle = getString("name")
+		}
+	case "ask_user":
+		info.Title = "Ask User"
+		info.Icon = "question"
+		info.Category = "context"
+		info.Subtitle = getString("question")
+		if len(info.Subtitle) > 60 {
+			info.Subtitle = info.Subtitle[:60] + "…"
+		}
+	default:
+		// MCP or unknown tools
+		info.Title = name
+		info.Icon = "tool"
+		info.Category = ""
+	}
+
+	return info
+}
+
+// shortenPath returns the last 2 path components for display.
+func shortenPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	// Handle both / and \ separators
+	parts := strings.Split(strings.ReplaceAll(path, "\\", "/"), "/")
+	if len(parts) <= 2 {
+		return path
+	}
+	return "…/" + strings.Join(parts[len(parts)-2:], "/")
+}
+
+// cleanToolOutput strips AI-oriented metadata from tool output for UI display.
+// For execute tools: removes STDOUT:/STDERR: prefixes, [Exit code], [Completed], [Hint] lines.
+// Returns empty string if no cleaning is needed (frontend will use raw output).
+func cleanToolOutput(name, output string) string {
+	if name != "execute" {
+		return ""
+	}
+	lines := strings.Split(output, "\n")
+	var clean []string
+	for _, line := range lines {
+		// Skip STDOUT:/STDERR: header lines anywhere in output
+		if line == "STDOUT:" || line == "STDERR:" {
+			continue
+		}
+		// Skip metadata lines at the end
+		if strings.HasPrefix(line, "[Exit code:") ||
+			strings.HasPrefix(line, "[Completed in") ||
+			strings.HasPrefix(line, "[Hint:") {
+			continue
+		}
+		clean = append(clean, line)
+	}
+	// Trim trailing empty lines
+	for len(clean) > 0 && strings.TrimSpace(clean[len(clean)-1]) == "" {
+		clean = clean[:len(clean)-1]
+	}
+	result := strings.Join(clean, "\n")
+	if result == output {
+		return "" // no change, don't send duplicate
+	}
+	return result
 }
 
 // WebToolResultData carries tool completion info.
 type WebToolResultData struct {
-	Name       string `json:"name"`
-	Output     string `json:"output"`
-	Error      string `json:"error,omitempty"`
-	ToolCallID string `json:"tool_call_id,omitempty"`
+	Name          string `json:"name"`
+	Output        string `json:"output"`
+	DisplayOutput string `json:"display_output,omitempty"` // clean output for UI display
+	Error         string `json:"error,omitempty"`
+	ToolCallID    string `json:"tool_call_id,omitempty"`
 }
 
 // WebTokenData carries token usage.
@@ -112,7 +268,12 @@ func (h *WebHandler) OnAgentText(text string) {
 }
 
 func (h *WebHandler) OnToolCall(name, args, toolCallID string) {
-	h.emit("tool_call", WebToolCallData{Name: name, Args: args, ToolCallID: toolCallID})
+	h.emit("tool_call", WebToolCallData{
+		Name:        name,
+		Args:        args,
+		ToolCallID:  toolCallID,
+		DisplayInfo: extractToolDisplayInfo(name, args),
+	})
 }
 
 func (h *WebHandler) OnToolResult(name, output, toolCallID string, err error) {
@@ -120,7 +281,14 @@ func (h *WebHandler) OnToolResult(name, output, toolCallID string, err error) {
 	if err != nil {
 		errMsg = err.Error()
 	}
-	h.emit("tool_result", WebToolResultData{Name: name, Output: output, ToolCallID: toolCallID, Error: errMsg})
+	display := cleanToolOutput(name, output)
+	h.emit("tool_result", WebToolResultData{
+		Name:          name,
+		Output:        output,
+		DisplayOutput: display,
+		ToolCallID:    toolCallID,
+		Error:         errMsg,
+	})
 }
 
 func (h *WebHandler) OnTodoUpdate() {

@@ -34,9 +34,10 @@ const (
 )
 
 type ExecuteInput struct {
-	Command    string `json:"command"`
-	Timeout    int    `json:"timeout,omitempty"`    // milliseconds
-	Background bool   `json:"background,omitempty"` // run in background
+	Command     string `json:"command"`
+	Timeout     int    `json:"timeout,omitempty"`     // milliseconds
+	Background  bool   `json:"background,omitempty"`  // run in background
+	Description string `json:"description,omitempty"` // short human-readable description
 }
 
 func (e *Env) NewExecuteTool(bm *BackgroundManager) tool.InvokableTool {
@@ -60,6 +61,15 @@ func (e *Env) NewExecuteTool(bm *BackgroundManager) tool.InvokableTool {
 			"background": {
 				Type:     schema.Boolean,
 				Desc:     "If true, run the command in the background and return immediately with a task ID. Default is false.",
+				Required: false,
+			},
+			"description": {
+				Type: schema.String,
+				Desc: "Clear, concise description of what this command does in 5-10 words. Examples:\n" +
+					"Input: ls\nOutput: Lists files in current directory\n" +
+					"Input: git status\nOutput: Shows working tree status\n" +
+					"Input: npm install\nOutput: Installs package dependencies\n" +
+					"Input: mkdir foo\nOutput: Creates directory 'foo'",
 				Required: false,
 			},
 		}),
