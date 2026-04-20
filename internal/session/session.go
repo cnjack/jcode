@@ -107,6 +107,9 @@ type Recorder struct {
 	// Per-teammate fields (empty for leader recorder).
 	customDir string // leader UUID for subagent path
 	agentID   string // teammate agent ID
+	// resuming is true when loading an existing session via --resume.
+	// In this mode, ensureFile opens the existing file for append instead of creating new.
+	resuming bool
 }
 
 // NewRecorder returns a Recorder that will create the session file only when
@@ -124,6 +127,43 @@ func NewRecorder(project, provider, model string) (*Recorder, error) {
 
 // UUID returns the session identifier.
 func (r *Recorder) UUID() string { return r.uuid }
+
+// ValidateSessionID checks that a session ID is safe for use as a filename.
+// It rejects empty IDs, path traversal sequences, and path separators.
+func ValidateSessionID(id string) error {
+	if id == "" {
+		return fmt.Errorf("session ID must not be empty")
+	}
+	if id == "." || id == ".." {
+		return fmt.Errorf("invalid session ID: %q", id)
+	}
+	if strings.ContainsAny(id, "/\\") {
+		return fmt.Errorf("session ID must not contain path separators: %q", id)
+	}
+	if strings.Contains(id, "..") {
+		return fmt.Errorf("session ID must not contain path traversal: %q", id)
+	}
+	return nil
+}
+
+// SetUUID overrides the session identifier. Used when resuming an existing session
+// so that new messages are appended to the same session file.
+func (r *Recorder) SetUUID(id string) {
+	if err := ValidateSessionID(id); err != nil {
+		config.Logger().Printf("[session] SetUUID rejected: %v", err)
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.uuid = id
+	r.resuming = true
+	// If a file was already opened with the old UUID, close it so the next
+	// write opens the correct file for append.
+	if r.file != nil {
+		_ = r.file.Close()
+		r.file = nil
+	}
+}
 
 // HasRecording reports whether any message has been recorded (i.e. the
 // session file has been created).  Returns false for sessions where the
@@ -259,6 +299,16 @@ func (r *Recorder) ensureFile() error {
 			return fmt.Errorf("create sessions dir: %w", err)
 		}
 		filePath = filepath.Join(dir, r.uuid+".json")
+	}
+
+	// When resuming an existing session, open the file for append instead of creating new.
+	if r.resuming {
+		f, err := os.OpenFile(filePath, os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			return fmt.Errorf("open session file for append: %w", err)
+		}
+		r.file = f
+		return nil
 	}
 
 	f, err := os.Create(filePath)
@@ -424,6 +474,9 @@ func ListSessions(project string) ([]SessionMeta, error) {
 
 // LoadSession reads all entries from a session JSONL file identified by uuid.
 func LoadSession(id string) ([]Entry, error) {
+	if err := ValidateSessionID(id); err != nil {
+		return nil, err
+	}
 	dir, err := config.SessionsDir()
 	if err != nil {
 		return nil, err

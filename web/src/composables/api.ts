@@ -38,7 +38,11 @@ export const api = {
   session: (id: string) => request<SessionEntry[]>(`/api/sessions/${encodeURIComponent(id)}`),
   deleteSession: (id: string) =>
     request<{ status: string }>(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  newSession: () => request<{ status: string; session_id: string }>('/api/sessions', { method: 'POST' }),
+  newSession: (sessionId?: string) =>
+    request<{ status: string; session_id: string }>('/api/sessions', {
+      method: 'POST',
+      body: sessionId ? JSON.stringify({ session_id: sessionId }) : undefined,
+    }),
   files: (path?: string) => {
     const q = path ? `?path=${encodeURIComponent(path)}` : ''
     return request<FileItem[]>(`/api/files${q}`)

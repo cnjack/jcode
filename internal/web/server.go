@@ -437,25 +437,65 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse optional request body for resume session ID.
+	var req struct {
+		SessionID string `json:"session_id,omitempty"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req)
+
 	// Close the old recorder.
 	if s.recorder != nil {
 		s.recorder.Close()
 		s.recorder = nil
 	}
 
-	// Reset conversation history.
-	s.mu.Lock()
-	s.history = nil
-	s.mu.Unlock()
-
-	// Reset todos.
-	if s.todoStore != nil {
-		s.todoStore.Update(nil)
+	// Create new recorder.
+	rec, _ := session.NewRecorder(s.pwd, s.providerName, s.modelName)
+	if rec != nil {
+		// If resuming an existing session, use its UUID.
+		if req.SessionID != "" {
+			rec.SetUUID(req.SessionID)
+		}
+		s.recorder = rec
 	}
 
-	// Notify clients.
-	s.broker.Broadcast(SSEEvent{Event: "session_reset", Data: map[string]string{}})
-	s.wsBroker.Broadcast(WSEvent{Type: "session_reset", Data: map[string]string{}})
+	s.mu.Lock()
+	if req.SessionID != "" {
+		// Resuming: load prior conversation into history so the agent has context.
+		entries, _ := session.LoadSession(req.SessionID)
+		// Reconstruct full message history (including tool calls/results).
+		s.history = session.ReconstructHistory(entries)
+		// Restore todos from the last snapshot in the session.
+		if s.todoStore != nil {
+			var lastTodos []session.TodoSnapshotItem
+			for _, e := range entries {
+				if e.Type == session.EntryTodoSnapshot {
+					lastTodos = e.Todos
+				}
+			}
+			if len(lastTodos) > 0 {
+				items := make([]tools.TodoItem, len(lastTodos))
+				for i, t := range lastTodos {
+					items[i] = tools.TodoItem{ID: t.ID, Title: t.Title, Status: tools.TodoStatus(t.Status)}
+				}
+				s.todoStore.Update(items)
+			}
+		}
+	} else {
+		s.history = nil
+		// Reset todos.
+		if s.todoStore != nil {
+			s.todoStore.Update(nil)
+		}
+	}
+	s.mu.Unlock()
+
+	// Notify clients. When resuming an existing session, do NOT broadcast session_reset
+	// (which would wipe the UI that the frontend is about to repopulate from history).
+	if req.SessionID == "" {
+		s.broker.Broadcast(SSEEvent{Event: "session_reset", Data: map[string]string{}})
+		s.wsBroker.Broadcast(WSEvent{Type: "session_reset", Data: map[string]string{}})
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "ok",

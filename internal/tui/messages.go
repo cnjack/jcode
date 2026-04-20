@@ -84,8 +84,32 @@ type SessionEntry struct {
 	Args         string
 	Output       string
 	Error        string
+	ToolCallID   string
 	SubagentName string
 	SubagentType string
+
+	// Plan fields
+	PlanStatus  string
+	PlanTitle   string
+	PlanContent string
+	Feedback    string
+
+	// Todo fields
+	Todos []TodoSnapshotItem
+
+	// Mode change
+	Mode string
+
+	// Compact fields
+	Summary    string
+	CompactedN int
+}
+
+// TodoSnapshotItem mirrors session.TodoSnapshotItem for TUI display.
+type TodoSnapshotItem struct {
+	ID     int    `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
 }
 
 // SessionResumedMsg is sent by the main goroutine to replay a session in the TUI.
