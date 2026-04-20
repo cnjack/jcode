@@ -44,13 +44,16 @@ type acpSession struct {
 	mu            sync.Mutex
 }
 
-// acpAgent implements the acp.Agent interface, exposing jcode as an ACP server.
+// acpAgent implements the acp.Agent and acp.AgentLoader interfaces, exposing jcode as an ACP server.
 type acpAgent struct {
 	conn *acp.AgentSideConnection
 
 	mu       sync.Mutex
 	sessions map[acp.SessionId]*acpSession
 }
+
+// Ensure acpAgent implements acp.AgentLoader interface.
+var _ acp.AgentLoader = (*acpAgent)(nil)
 
 func NewACPCmd() *cobra.Command {
 	return &cobra.Command{
@@ -90,6 +93,7 @@ func (a *acpAgent) Initialize(_ context.Context, params acp.InitializeRequest) (
 			PromptCapabilities: acp.PromptCapabilities{
 				EmbeddedContext: true,
 			},
+			LoadSession: true,
 		},
 		AgentInfo: &acp.Implementation{
 			Name:    "jcode",
@@ -115,6 +119,36 @@ func (a *acpAgent) NewSession(ctx context.Context, params acp.NewSessionRequest)
 	if pwd == "" {
 		pwd = util.GetWorkDir()
 	}
+
+	providerName, modelName := cfg.GetProviderModel()
+	rec, _ := session.NewRecorder(pwd, providerName, modelName)
+	sessionID := acp.SessionId(fmt.Sprintf("sess_%s", rec.UUID()))
+
+	sess, err := a.buildAgentSession(ctx, cfg, pwd, sessionID, rec, nil)
+	if err != nil {
+		return acp.NewSessionResponse{}, err
+	}
+
+	a.mu.Lock()
+	a.sessions[sessionID] = sess
+	a.mu.Unlock()
+
+	config.Logger().Printf("[acp] Session created: %s", sessionID)
+	return acp.NewSessionResponse{SessionId: sessionID}, nil
+}
+
+// buildAgentSession creates the env, tools, middlewares, and agent shared by
+// NewSession and LoadSession. The caller is responsible for creating the
+// Recorder (so the session ID can be derived from it) and for storing the
+// returned session in a.sessions.
+func (a *acpAgent) buildAgentSession(
+	ctx context.Context,
+	cfg *config.Config,
+	pwd string,
+	sessionID acp.SessionId,
+	rec *session.Recorder,
+	history []*schema.Message,
+) (*acpSession, error) {
 	platform := util.GetSystemInfo()
 	envInfo := util.CollectEnvInfo(pwd)
 
@@ -125,7 +159,7 @@ func (a *acpAgent) NewSession(ctx context.Context, params acp.NewSessionRequest)
 	providers := cfg.GetProviders()
 	providerCfg := providers[providerName]
 	if providerCfg == nil {
-		return acp.NewSessionResponse{}, fmt.Errorf("provider %q not found in config", providerName)
+		return nil, fmt.Errorf("provider %q not found in config", providerName)
 	}
 
 	registry := internalmodel.NewModelRegistry()
@@ -138,7 +172,7 @@ func (a *acpAgent) NewSession(ctx context.Context, params acp.NewSessionRequest)
 		Model: modelName, APIKey: providerCfg.APIKey, BaseURL: baseURL,
 	})
 	if err != nil {
-		return acp.NewSessionResponse{}, fmt.Errorf("error creating model: %w", err)
+		return nil, fmt.Errorf("error creating model: %w", err)
 	}
 
 	env := tools.NewEnv(pwd, platform)
@@ -162,17 +196,12 @@ func (a *acpAgent) NewSession(ctx context.Context, params acp.NewSessionRequest)
 	systemPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
 	approvalState := runner.NewApprovalState(pwd, cfg.AutoApprove)
 
-	// Session ID
-	sessionID := acp.SessionId(fmt.Sprintf("sess_%s", generateSessionID()))
-
 	// Create ACPHandler
 	acpHandler := handler.NewACPHandler(a.conn, sessionID)
 	approvalState.SetHandler(acpHandler)
 
-	// Session recorder
-	rec, _ := session.NewRecorder(pwd, providerName, modelName)
-	env.TodoStore.OnUpdate = func(items []tools.TodoItem) {
-		if rec != nil {
+	if rec != nil {
+		env.TodoStore.OnUpdate = func(items []tools.TodoItem) {
 			snapItems := make([]session.TodoSnapshotItem, len(items))
 			for i, it := range items {
 				snapItems[i] = session.TodoSnapshotItem{
@@ -236,7 +265,7 @@ func (a *acpAgent) NewSession(ctx context.Context, params acp.NewSessionRequest)
 
 	ag, err := agent.NewAgent(ctx, chatModel, allTools, systemPrompt, approvalState.RequestApproval, nil, handlers)
 	if err != nil {
-		return acp.NewSessionResponse{}, fmt.Errorf("error creating agent: %w", err)
+		return nil, fmt.Errorf("error creating agent: %w", err)
 	}
 
 	sess := &acpSession{
@@ -247,16 +276,10 @@ func (a *acpAgent) NewSession(ctx context.Context, params acp.NewSessionRequest)
 		rec:           rec,
 		todoStore:     env.TodoStore,
 		tracer:        tracer,
+		history:       history,
 	}
 
-	a.mu.Lock()
-	a.sessions[sessionID] = sess
-	a.mu.Unlock()
-
-	config.Logger().Printf("[acp] Session created: %s", sessionID)
-	return acp.NewSessionResponse{
-		SessionId: sessionID,
-	}, nil
+	return sess, nil
 }
 
 func (a *acpAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.PromptResponse, error) {
@@ -337,7 +360,46 @@ func (a *acpAgent) SetSessionMode(_ context.Context, params acp.SetSessionModeRe
 	return acp.SetSessionModeResponse{}, nil
 }
 
-func generateSessionID() string {
-	id, _ := os.Hostname()
-	return fmt.Sprintf("%s_%d", id, os.Getpid())
+func (a *acpAgent) LoadSession(ctx context.Context, params acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
+	config.Logger().Printf("[acp] LoadSession: sessionId=%s", params.SessionId)
+
+	// Extract the internal session UUID from the ACP session ID.
+	resumeUUID := strings.TrimPrefix(string(params.SessionId), "sess_")
+
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return acp.LoadSessionResponse{}, fmt.Errorf("config error: %w", err)
+	}
+
+	// Load session history from disk.
+	entries, err := session.LoadSession(resumeUUID)
+	if err != nil {
+		return acp.LoadSessionResponse{}, fmt.Errorf("failed to load session: %w", err)
+	}
+
+	pwd := params.Cwd
+	if pwd == "" {
+		pwd = util.GetWorkDir()
+	}
+
+	providerName, modelName := cfg.GetProviderModel()
+	rec, _ := session.NewRecorder(pwd, providerName, modelName)
+	if rec != nil {
+		rec.SetUUID(resumeUUID)
+	}
+
+	// Reconstruct full message history (including tool calls/results).
+	history := session.ReconstructHistory(entries)
+
+	sess, err := a.buildAgentSession(ctx, cfg, pwd, params.SessionId, rec, history)
+	if err != nil {
+		return acp.LoadSessionResponse{}, err
+	}
+
+	a.mu.Lock()
+	a.sessions[params.SessionId] = sess
+	a.mu.Unlock()
+
+	config.Logger().Printf("[acp] Session loaded: %s, messages=%d", params.SessionId, len(sess.history))
+	return acp.LoadSessionResponse{}, nil
 }
