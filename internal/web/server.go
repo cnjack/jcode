@@ -437,15 +437,44 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse optional request body for resume session ID.
+	var req struct {
+		SessionID string `json:"session_id,omitempty"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req)
+
 	// Close the old recorder.
 	if s.recorder != nil {
 		s.recorder.Close()
 		s.recorder = nil
 	}
 
-	// Reset conversation history.
+	// Create new recorder.
+	rec, _ := session.NewRecorder(s.pwd, s.providerName, s.modelName)
+	if rec != nil {
+		// If resuming an existing session, use its UUID.
+		if req.SessionID != "" {
+			rec.SetUUID(req.SessionID)
+		}
+		s.recorder = rec
+	}
+
 	s.mu.Lock()
-	s.history = nil
+	if req.SessionID != "" {
+		// Resuming: load prior conversation into history so the agent has context.
+		entries, _ := session.LoadSession(req.SessionID)
+		s.history = nil
+		for _, e := range entries {
+			switch e.Type {
+			case session.EntryUser:
+				s.history = append(s.history, schema.UserMessage(e.Content))
+			case session.EntryAssistant:
+				s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: e.Content})
+			}
+		}
+	} else {
+		s.history = nil
+	}
 	s.mu.Unlock()
 
 	// Reset todos.
@@ -453,9 +482,12 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 		s.todoStore.Update(nil)
 	}
 
-	// Notify clients.
-	s.broker.Broadcast(SSEEvent{Event: "session_reset", Data: map[string]string{}})
-	s.wsBroker.Broadcast(WSEvent{Type: "session_reset", Data: map[string]string{}})
+	// Notify clients. When resuming an existing session, do NOT broadcast session_reset
+	// (which would wipe the UI that the frontend is about to repopulate from history).
+	if req.SessionID == "" {
+		s.broker.Broadcast(SSEEvent{Event: "session_reset", Data: map[string]string{}})
+		s.wsBroker.Broadcast(WSEvent{Type: "session_reset", Data: map[string]string{}})
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "ok",
