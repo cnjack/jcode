@@ -1048,6 +1048,11 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		if targetEnv := resumeState.EnvTarget; targetEnv != "local" {
 			st.sessionResumeWarning = st.attemptSSHResume(targetEnv)
 		}
+
+		// Reuse the existing session UUID so new messages are appended to the same file
+		if st.rec != nil {
+			st.rec.SetUUID(resumeUUID)
+		}
 	}
 
 	// Capture a git baseline so the exit summary only shows changes from this session.

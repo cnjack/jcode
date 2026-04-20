@@ -10,6 +10,20 @@ func ConvertSessionEntries(entries []session.Entry) []SessionEntry {
 		if e.Type == session.EntrySessionStart {
 			continue
 		}
+
+		// Convert todos
+		var todos []TodoSnapshotItem
+		if len(e.Todos) > 0 {
+			todos = make([]TodoSnapshotItem, len(e.Todos))
+			for i, t := range e.Todos {
+				todos[i] = TodoSnapshotItem{
+					ID:     t.ID,
+					Title:  t.Title,
+					Status: t.Status,
+				}
+			}
+		}
+
 		result = append(result, SessionEntry{
 			Type:         string(e.Type),
 			Content:      e.Content,
@@ -17,8 +31,21 @@ func ConvertSessionEntries(entries []session.Entry) []SessionEntry {
 			Args:         e.Args,
 			Output:       e.Output,
 			Error:        e.Error,
+			ToolCallID:   e.ToolCallID,
 			SubagentName: e.SubagentName,
 			SubagentType: e.SubagentType,
+			// Plan fields
+			PlanStatus:  e.PlanStatus,
+			PlanTitle:   e.PlanTitle,
+			PlanContent: e.PlanContent,
+			Feedback:    e.Feedback,
+			// Todo fields
+			Todos: todos,
+			// Mode change
+			Mode: e.Mode,
+			// Compact fields
+			Summary:    e.Summary,
+			CompactedN: e.CompactedN,
 		})
 	}
 	return result

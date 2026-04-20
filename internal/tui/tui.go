@@ -1540,12 +1540,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.lines = append(m.lines, rendered)
 				}
 			case string(session.EntryToolCall):
-				icon := toolIconSuccess
-				if e.Error != "" {
-					icon = toolIconError
-				}
+				// Tool calls always show running icon (they don't have error status yet)
 				m.lines = append(m.lines, fmt.Sprintf("  %s %s %s",
-					icon,
+					toolIconRunning,
 					toolNameStyle.Render(e.Name),
 					toolArgsStyle.Render(truncate(sanitize(e.Args), 100)),
 				))
@@ -1575,6 +1572,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 						toolSuccessStyle.Render("✓ Subagent Done:"),
 						toolResultStyle.Render(truncate(sanitize(e.Output), maxToolOutputLen))))
 				}
+			case string(session.EntryPlanUpdate):
+				statusIcon := "📝"
+				switch e.PlanStatus {
+				case "approved":
+					statusIcon = "✅"
+				case "rejected":
+					statusIcon = "❌"
+				case "submitted":
+					statusIcon = "📤"
+				}
+				m.lines = append(m.lines, fmt.Sprintf("  %s Plan %s: %s",
+					toolLabelStyle.Render(statusIcon),
+					toolNameStyle.Render(e.PlanStatus),
+					toolArgsStyle.Render(e.PlanTitle)))
+			case string(session.EntryTodoSnapshot):
+				if len(e.Todos) > 0 {
+					m.lines = append(m.lines, toolLabelStyle.Render("  📋 Todo List:"))
+					for _, t := range e.Todos {
+						statusIcon := "⬜"
+						if t.Status == "completed" || t.Status == "done" {
+							statusIcon = "✅"
+						}
+						m.lines = append(m.lines, fmt.Sprintf("     %s %d: %s",
+							statusIcon, t.ID, t.Title))
+					}
+				}
+			case string(session.EntryModeChange):
+				m.lines = append(m.lines, fmt.Sprintf("  %s Mode changed to: %s",
+					toolLabelStyle.Render("🔄"),
+					toolNameStyle.Render(e.Mode)))
+			case string(session.EntryCompact):
+				m.lines = append(m.lines, fmt.Sprintf("  %s Context compacted: %d messages summarized",
+					toolSuccessStyle.Render("✓"),
+					e.CompactedN))
+			case string(session.EntryBudgetWarning):
+				m.lines = append(m.lines, toolErrorStyle.Render("  ⚠️ Budget warning"))
 			}
 		}
 		m.lines = append(m.lines, "")

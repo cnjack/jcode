@@ -376,7 +376,12 @@ export const useChatStore = defineStore('chat', () => {
   async function loadSession(uuid: string) {
     try {
       const entries = await api.session(uuid)
+
+      // Notify backend to switch to this session (resume) before clearing UI.
+      await api.newSession(uuid)
+
       clearChat()
+
       // Track pending tool calls by tool_call_id so we can match results
       const pendingToolCalls = new Map<string, ToolCall>()
       for (const e of entries) {
