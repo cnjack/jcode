@@ -137,7 +137,7 @@ func ValidateSessionID(id string) error {
 	if id == "." || id == ".." {
 		return fmt.Errorf("invalid session ID: %q", id)
 	}
-	if strings.ContainsAny(id, "/\\" ) {
+	if strings.ContainsAny(id, "/\\") {
 		return fmt.Errorf("session ID must not contain path separators: %q", id)
 	}
 	if strings.Contains(id, "..") {
