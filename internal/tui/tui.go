@@ -216,9 +216,17 @@ func (i sessionListItem) Title() string {
 	if len(ts) >= 16 {
 		ts = ts[:16]
 	}
+	if i.meta.Title != "" {
+		return fmt.Sprintf("%s  %s", ts, i.meta.Title)
+	}
 	return fmt.Sprintf("%s  %s / %s", ts, i.meta.Provider, i.meta.Model)
 }
-func (i sessionListItem) Description() string { return i.meta.UUID }
+func (i sessionListItem) Description() string {
+	if i.meta.Title != "" {
+		return fmt.Sprintf("%s / %s  %s", i.meta.Provider, i.meta.Model, i.meta.UUID[:8])
+	}
+	return i.meta.UUID
+}
 func (i sessionListItem) FilterValue() string { return i.meta.StartTime + i.meta.UUID }
 
 // sshAliasItem for the SSH alias picker
@@ -1700,12 +1708,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.thinking = true
 		m.flushText()
 		m.pendingTool = msg.Name
-		argsDisplay := formatToolArgs(msg.Args)
-		// Tool call header with status icon
-		m.lines = append(m.lines, fmt.Sprintf("  %s %s %s",
+		// Use display info if available, fall back to raw args
+		displayLabel := msg.Name
+		if msg.Title != "" {
+			displayLabel = msg.Title
+		}
+		subtitlePart := ""
+		if msg.Subtitle != "" {
+			subtitlePart = " " + toolArgsStyle.Render(msg.Subtitle)
+		} else {
+			argsDisplay := formatToolArgs(msg.Args)
+			if argsDisplay != "" {
+				subtitlePart = " " + toolArgsStyle.Render(argsDisplay)
+			}
+		}
+		m.lines = append(m.lines, fmt.Sprintf("  %s %s%s",
 			toolIconRunning,
-			toolNameStyle.Render(msg.Name),
-			toolArgsStyle.Render(argsDisplay),
+			toolNameStyle.Render(displayLabel),
+			subtitlePart,
 		))
 		m.refreshViewport()
 		cmds = append(cmds, m.spinner.Tick)

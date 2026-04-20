@@ -55,8 +55,8 @@ function scrollToBottom(smooth = true) {
 const { connected } = useWebSocket({
   onAgentStart: () => { store.isRunning = true },
   onAgentText: (data) => store.appendAgentText(data.text),
-  onToolCall: (data) => store.addToolCall(data.name, data.args, data.tool_call_id),
-  onToolResult: (data) => store.resolveToolCall(data.name, data.output, data.tool_call_id, data.error),
+  onToolCall: (data) => store.addToolCall(data.name, data.args, data.tool_call_id, data.display_info),
+  onToolResult: (data) => store.resolveToolCall(data.name, data.output, data.tool_call_id, data.error, data.display_output),
   onTokenUpdate: (data) => { store.tokenInfo = data },
   onAgentDone: (data) => store.agentDone(data?.error),
   onTodoUpdate: () => store.fetchTodos(),
@@ -205,7 +205,7 @@ function startResize(e: MouseEvent) {
         <div class="flex items-center gap-2.5 min-w-0">
           <!-- Sidebar toggle -->
           <button
-            class="w-7 h-7 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+            class="w-7 h-7 flex items-center justify-center rounded text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
             @click="sidebarCollapsed = !sidebarCollapsed"
             title="Toggle sidebar (Ctrl+B)"
           >
@@ -221,7 +221,7 @@ function startResize(e: MouseEvent) {
         </div>
         <div class="flex items-center gap-2">
           <!-- Panel toggles -->
-          <div class="flex items-center gap-0.5 bg-zinc-100 dark:bg-zinc-800/60 rounded-lg p-0.5">
+          <div class="flex items-center gap-0.5 bg-zinc-100 dark:bg-zinc-800/60 rounded p-0.5">
             <button
               class="px-2.5 py-1 text-[11px] font-medium rounded-md cursor-pointer transition-all duration-150"
               :class="bottomPanel === 'terminal'
@@ -263,7 +263,7 @@ function startResize(e: MouseEvent) {
         >
           <!-- Welcome -->
           <div v-if="!store.hasMessages" class="flex flex-col items-center justify-center h-full text-center px-8 animate-fade-in">
-            <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 dark:from-emerald-400/15 dark:to-emerald-500/5 flex items-center justify-center mb-5 ring-1 ring-emerald-500/20">
+            <div class="w-14 h-14 rounded bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 dark:from-emerald-400/15 dark:to-emerald-500/5 flex items-center justify-center mb-5 ring-1 ring-emerald-500/20">
               <svg class="w-7 h-7 text-emerald-500 dark:text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                 <path d="M13 10V3L4 14h7v7l9-11h-7z" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>

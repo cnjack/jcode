@@ -23,6 +23,7 @@ export interface SessionItem {
   created_at: string
   provider: string
   model: string
+  title?: string
 }
 
 export interface SessionEntry {
@@ -163,11 +164,20 @@ export interface ToolCallData {
   name: string
   args: string
   tool_call_id?: string
+  display_info?: ToolDisplayInfo
+}
+
+export interface ToolDisplayInfo {
+  title: string
+  subtitle?: string
+  icon?: string
+  category?: string // 'context' | 'mutation' | 'execution'
 }
 
 export interface ToolResultData {
   name: string
   output: string
+  display_output?: string  // clean output for UI display (no metadata)
   error?: string
   tool_call_id?: string
 }
@@ -209,9 +219,12 @@ export interface ToolCall {
   name: string
   args: string
   output?: string
+  displayOutput?: string  // clean output for UI display
   error?: string
   status: 'running' | 'done' | 'error'
   timestamp: number
+  /** Display metadata extracted from tool args */
+  displayInfo?: ToolDisplayInfo
   /** For subagent tools: nested tool calls from within the subagent */
   children?: ToolCall[]
 }

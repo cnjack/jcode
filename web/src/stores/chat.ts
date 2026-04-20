@@ -10,8 +10,10 @@ import type {
   SessionItem,
   AgentMode,
   ProviderInfo,
+  ToolDisplayInfo,
 } from '@/types/api'
 import { api } from '@/composables/api'
+import { extractToolDisplayInfo } from '@/composables/toolInfo'
 
 let _seqId = 0
 function nextSeqId() {
@@ -99,7 +101,7 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function addToolCall(name: string, args: string, toolCallID?: string) {
+  function addToolCall(name: string, args: string, toolCallID?: string, displayInfo?: ToolDisplayInfo) {
     // Flush current streaming — new text after tool will get a fresh message
     streamingText = ''
     streamingMsgId = ''
@@ -111,11 +113,12 @@ export const useChatStore = defineStore('chat', () => {
       args,
       status: 'running',
       timestamp: Date.now(),
+      displayInfo,
     }
     timeline.value.push({ kind: 'tool', data: tc, seq: nextSeqId() })
   }
 
-  function resolveToolCall(name: string, output: string, toolCallID?: string, error?: string) {
+  function resolveToolCall(name: string, output: string, toolCallID?: string, error?: string, displayOutput?: string) {
     // Prefer matching by backend tool_call_id (exact, unambiguous).
     // Fall back to name-based scan for older events without an ID.
     for (let i = timeline.value.length - 1; i >= 0; i--) {
@@ -127,6 +130,7 @@ export const useChatStore = defineStore('chat', () => {
         const nameMatch = !toolCallID && tc.name === name
         if (idMatch || nameMatch) {
           tc.output = output
+          tc.displayOutput = displayOutput || undefined
           tc.error = error
           tc.status = error ? 'error' : 'done'
           break
@@ -154,6 +158,7 @@ export const useChatStore = defineStore('chat', () => {
             args: detail,
             status: 'running',
             timestamp: Date.now(),
+            displayInfo: extractToolDisplayInfo(toolName, detail),
           })
         } else if (event === 'tool_result') {
           // Resolve the most recent running child with this toolName
@@ -307,7 +312,6 @@ export const useChatStore = defineStore('chat', () => {
       await api.switchModel(provider, model)
       providerName.value = provider
       modelName.value = model
-      clearChat()
     } catch (err: unknown) {
       addMessage('system', `Failed to switch model: ${err instanceof Error ? err.message : String(err)}`)
     }
@@ -397,6 +401,7 @@ export const useChatStore = defineStore('chat', () => {
             args: e.args || '',
             status: 'running',
             timestamp: e.timestamp ? new Date(e.timestamp).getTime() : Date.now(),
+            displayInfo: extractToolDisplayInfo(e.name, e.args || ''),
           }
           timeline.value.push({ kind: 'tool', data: tc, seq: nextSeqId() })
           if (e.tool_call_id) {

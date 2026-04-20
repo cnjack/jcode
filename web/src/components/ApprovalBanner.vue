@@ -18,7 +18,7 @@ function formatArgs(args: string): string {
 </script>
 
 <template>
-  <div class="my-2 rounded-xl border px-4 py-3 flex items-start gap-3 animate-fade-in"
+  <div class="my-2 rounded-md border px-4 py-3 flex items-start gap-3 animate-fade-in"
     :class="approval.resolved
       ? approval.approved
         ? 'border-emerald-200 dark:border-emerald-500/20 bg-emerald-50/50 dark:bg-emerald-500/5'
@@ -32,12 +32,12 @@ function formatArgs(args: string): string {
     </div>
     <div v-if="!approval.resolved" class="flex gap-1.5 shrink-0">
       <button
-        class="px-3.5 py-1.5 text-xs rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white transition-colors cursor-pointer font-medium shadow-sm"
+        class="px-3.5 py-1.5 text-xs rounded-md bg-emerald-500 hover:bg-emerald-600 text-white transition-colors cursor-pointer font-medium shadow-sm"
         @click="store.resolveApproval(approval.id, true)">
         Allow
       </button>
       <button
-        class="px-3.5 py-1.5 text-xs rounded-xl bg-zinc-200 dark:bg-zinc-700 hover:bg-zinc-300 dark:hover:bg-zinc-600 text-zinc-600 dark:text-zinc-300 transition-colors cursor-pointer font-medium"
+        class="px-3.5 py-1.5 text-xs rounded-md bg-zinc-200 dark:bg-zinc-700 hover:bg-zinc-300 dark:hover:bg-zinc-600 text-zinc-600 dark:text-zinc-300 transition-colors cursor-pointer font-medium"
         @click="store.resolveApproval(approval.id, false)">
         Deny
       </button>

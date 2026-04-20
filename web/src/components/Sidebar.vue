@@ -108,10 +108,10 @@ function fileIcon(file: FileItem): string {
     <!-- Project header -->
     <div class="px-3.5 pt-4 pb-3">
       <button
-        class="flex items-center gap-2.5 mb-3 w-full text-left cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl p-2 -m-0.5 transition-colors group"
+        class="flex items-center gap-2.5 mb-3 w-full text-left cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md p-2 -m-0.5 transition-colors group"
         @click="emit('openProjects')"
       >
-        <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 dark:from-emerald-400 dark:to-emerald-500 text-white flex items-center justify-center text-sm font-bold shadow-sm">
+        <div class="w-8 h-8 rounded-md bg-gradient-to-br from-emerald-500 to-emerald-600 dark:from-emerald-400 dark:to-emerald-500 text-white flex items-center justify-center text-sm font-bold shadow-sm">
           {{ (store.projectName || 'J').charAt(0).toUpperCase() }}
         </div>
         <div class="min-w-0 flex-1">
@@ -123,7 +123,7 @@ function fileIcon(file: FileItem): string {
         </svg>
       </button>
       <button
-        class="w-full py-2 text-xs font-medium rounded-xl border border-zinc-200 dark:border-zinc-700/60 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:border-zinc-300 dark:hover:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 transition-all cursor-pointer"
+        class="w-full py-2 text-xs font-medium rounded-md border border-zinc-200 dark:border-zinc-700/60 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:border-zinc-300 dark:hover:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 transition-all cursor-pointer"
         @click="store.newSession()"
       >
         + New conversation
@@ -157,15 +157,15 @@ function fileIcon(file: FileItem): string {
       <div
         v-for="s in store.sessions"
         :key="s.uuid"
-        class="group relative flex items-center gap-2 px-2.5 py-2.5 rounded-xl cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/60 transition-colors mb-0.5"
+        class="group relative flex items-center gap-2 px-2.5 py-2.5 rounded-md cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/60 transition-colors mb-0.5"
         @click="store.loadSession(s.uuid)"
       >
         <div class="min-w-0 flex-1">
-          <div class="text-xs text-zinc-600 dark:text-zinc-300 truncate font-medium">{{ s.uuid.slice(0, 8) }}…</div>
+          <div class="text-xs text-zinc-600 dark:text-zinc-300 truncate font-medium">{{ s.title || s.uuid.slice(0, 8) + '…' }}</div>
           <div class="text-[10px] text-zinc-400 dark:text-zinc-600 mt-0.5 font-mono">{{ s.model }} · {{ formatDate(s.created_at) }}</div>
         </div>
         <button
-          class="opacity-0 group-hover:opacity-100 shrink-0 w-6 h-6 flex items-center justify-center rounded-lg text-zinc-400 hover:text-red-500 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all cursor-pointer"
+          class="opacity-0 group-hover:opacity-100 shrink-0 w-6 h-6 flex items-center justify-center rounded text-zinc-400 hover:text-red-500 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all cursor-pointer"
           @click.stop="toggleContextMenu(s.uuid, $event)"
           title="Delete"
         >
@@ -176,11 +176,11 @@ function fileIcon(file: FileItem): string {
         <!-- Delete confirmation -->
         <div
           v-if="contextMenuId === s.uuid"
-          class="absolute right-0 top-full z-10 mt-1 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-lg py-1 min-w-[120px]"
+          class="absolute right-0 top-full z-10 mt-1 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md shadow-lg py-1 min-w-[120px]"
           @click.stop
         >
           <button
-            class="w-full px-3 py-1.5 text-xs text-left text-red-500 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer rounded-lg mx-0.5"
+            class="w-full px-3 py-1.5 text-xs text-left text-red-500 hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer rounded mx-0.5"
             style="width: calc(100% - 4px)"
             @click="handleDelete(s.uuid)"
           >
@@ -194,7 +194,7 @@ function fileIcon(file: FileItem): string {
     <div v-if="activeTab === 'files'" class="flex-1 overflow-y-auto px-2 py-2">
       <button
         v-if="currentPath"
-        class="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 mb-1 cursor-pointer rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800/60 transition-colors w-full"
+        class="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 mb-1 cursor-pointer rounded hover:bg-zinc-100 dark:hover:bg-zinc-800/60 transition-colors w-full"
         @click="goUp"
       >
         <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z" clip-rule="evenodd" /></svg>
@@ -203,7 +203,7 @@ function fileIcon(file: FileItem): string {
       <div
         v-for="file in files"
         :key="file.name"
-        class="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/60 transition-colors truncate"
+        class="flex items-center gap-2 px-2.5 py-1.5 rounded text-xs cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/60 transition-colors truncate"
         :class="file.is_dir ? 'text-zinc-700 dark:text-zinc-300 font-medium' : 'text-zinc-500 dark:text-zinc-400'"
         @click="handleFileClick(file)"
       >
@@ -220,7 +220,7 @@ function fileIcon(file: FileItem): string {
       <div class="flex items-center gap-1">
         <!-- Theme toggle -->
         <button
-          class="w-7 h-7 flex items-center justify-center rounded-lg text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+          class="w-7 h-7 flex items-center justify-center rounded text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
           @click="emit('toggleTheme')"
           :title="resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
         >
@@ -235,7 +235,7 @@ function fileIcon(file: FileItem): string {
         </button>
         <!-- Settings -->
         <button
-          class="w-7 h-7 flex items-center justify-center rounded-lg text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+          class="w-7 h-7 flex items-center justify-center rounded text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
           @click="emit('openSettings')"
           title="Settings (Ctrl+,)"
         >
