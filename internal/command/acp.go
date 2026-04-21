@@ -31,6 +31,23 @@ import (
 )
 
 // acpSession bundles all per-session state created in NewSession.
+// ACP mode IDs.
+const (
+	acpModeAgent acp.SessionModeId = "agent"
+	acpModePlan  acp.SessionModeId = "plan"
+)
+
+// acpModes returns the mode list advertised in NewSession responses.
+func acpModes(current acp.SessionModeId) *acp.SessionModeState {
+	return &acp.SessionModeState{
+		CurrentModeId: current,
+		AvailableModes: []acp.SessionMode{
+			{Id: acpModeAgent, Name: "Agent", Description: acp.Ptr("Full agent mode with all tools")},
+			{Id: acpModePlan, Name: "Plan", Description: acp.Ptr("Read-only planning mode for analysis")},
+		},
+	}
+}
+
 type acpSession struct {
 	h             *handler.ACPHandler
 	ag            *adk.ChatModelAgent
@@ -42,6 +59,29 @@ type acpSession struct {
 	tracer        *telemetry.LangfuseTracer
 	cancel        context.CancelFunc
 	mu            sync.Mutex
+
+	// Mode switching support.
+	mode         acp.SessionModeId
+	createAgent  func(sysPrompt string, toolList []tool.BaseTool) (*adk.ChatModelAgent, error)
+	allTools     []tool.BaseTool
+	planTools    []tool.BaseTool
+	normalPrompt string
+	planPrompt   string
+	skillLoader  *skills.Loader
+}
+
+// Close releases resources held by the session (recorder file handle, tracer).
+func (s *acpSession) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.rec != nil {
+		s.rec.Close()
+		s.rec = nil
+	}
+	if s.tracer != nil {
+		s.tracer.Flush()
+		s.tracer = nil
+	}
 }
 
 // acpAgent implements the acp.Agent and acp.AgentLoader interfaces, exposing jcode as an ACP server.
@@ -79,7 +119,54 @@ func handleACPSubcommand() {
 
 	config.Logger().Printf("[acp] ACP server started on stdio")
 	<-conn.Done()
+
+	// Clean up all session recorders on connection close.
+	a.mu.Lock()
+	for id, sess := range a.sessions {
+		sess.Close()
+		delete(a.sessions, id)
+	}
+	a.mu.Unlock()
+
 	config.Logger().Printf("[acp] ACP connection closed")
+}
+
+// broadcastSlashCommands sends the available slash commands to the client via
+// an available_commands_update session notification.
+func (a *acpAgent) broadcastSlashCommands(sessionID acp.SessionId, sess *acpSession) {
+	var cmds []acp.AvailableCommand
+
+	// Skill-based slash commands.
+	if sess.skillLoader != nil {
+		for _, sk := range sess.skillLoader.SlashCommands() {
+			name := strings.TrimPrefix(sk.Slash, "/")
+			cmd := acp.AvailableCommand{
+				Name:        name,
+				Description: sk.Description,
+			}
+			cmd.Input = &acp.AvailableCommandInput{
+				Unstructured: &acp.UnstructuredCommandInput{
+					Hint: "additional instructions",
+				},
+			}
+			cmds = append(cmds, cmd)
+		}
+	}
+
+	if len(cmds) == 0 {
+		return
+	}
+
+	if err := a.conn.SessionUpdate(context.Background(), acp.SessionNotification{
+		SessionId: sessionID,
+		Update: acp.SessionUpdate{
+			AvailableCommandsUpdate: &acp.SessionAvailableCommandsUpdate{
+				AvailableCommands: cmds,
+			},
+		},
+	}); err != nil {
+		config.Logger().Printf("[acp] broadcastSlashCommands error: %v", err)
+	}
 }
 
 // --- acp.Agent interface ---
@@ -94,6 +181,10 @@ func (a *acpAgent) Initialize(_ context.Context, params acp.InitializeRequest) (
 				EmbeddedContext: true,
 			},
 			LoadSession: true,
+			SessionCapabilities: acp.SessionCapabilities{
+				List:  &acp.SessionListCapabilities{},
+				Close: &acp.SessionCloseCapabilities{},
+			},
 		},
 		AgentInfo: &acp.Implementation{
 			Name:    "jcode",
@@ -134,7 +225,14 @@ func (a *acpAgent) NewSession(ctx context.Context, params acp.NewSessionRequest)
 	a.mu.Unlock()
 
 	config.Logger().Printf("[acp] Session created: %s", sessionID)
-	return acp.NewSessionResponse{SessionId: sessionID}, nil
+
+	// Broadcast available slash commands for this session.
+	a.broadcastSlashCommands(sessionID, sess)
+
+	return acp.NewSessionResponse{
+		SessionId: sessionID,
+		Modes:     acpModes(acpModeAgent),
+	}, nil
 }
 
 // buildAgentSession creates the env, tools, middlewares, and agent shared by
@@ -193,7 +291,16 @@ func (a *acpAgent) buildAgentSession(
 	}
 	allTools = append(allTools, mcpTools...)
 
-	systemPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
+	// Plan mode tools: read-only subset.
+	planTools := []tool.BaseTool{
+		env.NewReadTool(),
+		env.NewExecuteTool(nil),
+		env.NewGrepTool(),
+		env.NewTodoWriteTool(), env.NewTodoReadTool(),
+	}
+
+	normalPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
+	planPrompt := prompts.GetPlanSystemPrompt(platform, pwd, "local", envInfo)
 	approvalState := runner.NewApprovalState(pwd, cfg.AutoApprove)
 
 	// Create ACPHandler
@@ -263,9 +370,15 @@ func (a *acpAgent) buildAgentSession(
 	}, nil)
 	handlers = append(handlers, reminderMw)
 
-	ag, err := agent.NewAgent(ctx, chatModel, allTools, systemPrompt, approvalState.RequestApproval, nil, handlers)
+	ag, err := agent.NewAgent(ctx, chatModel, allTools, normalPrompt, approvalState.RequestApproval, nil, handlers)
 	if err != nil {
 		return nil, fmt.Errorf("error creating agent: %w", err)
+	}
+
+	// createAgent closure for mode switching — rebuilds agent with different prompt/tools.
+	// Uses context.Background() so the agent survives beyond the original request context.
+	makeAgent := func(sysPrompt string, toolList []tool.BaseTool) (*adk.ChatModelAgent, error) {
+		return agent.NewAgent(context.Background(), chatModel, toolList, sysPrompt, approvalState.RequestApproval, nil, handlers)
 	}
 
 	sess := &acpSession{
@@ -277,6 +390,13 @@ func (a *acpAgent) buildAgentSession(
 		todoStore:     env.TodoStore,
 		tracer:        tracer,
 		history:       history,
+		mode:          acpModeAgent,
+		createAgent:   makeAgent,
+		allTools:      allTools,
+		planTools:     planTools,
+		normalPrompt:  normalPrompt,
+		planPrompt:    planPrompt,
+		skillLoader:   skillLoader,
 	}
 
 	return sess, nil
@@ -306,6 +426,24 @@ func (a *acpAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Pr
 	prompt := userText.String()
 	if prompt == "" {
 		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+	}
+
+	// Handle slash commands.
+	if strings.HasPrefix(prompt, "/") {
+		cmd := strings.TrimPrefix(prompt, "/")
+		parts := strings.SplitN(cmd, " ", 2)
+		cmdName := parts[0]
+
+		// Check if it's a skill slash command.
+		if sess.skillLoader != nil {
+			if sk := sess.skillLoader.GetBySlash("/" + cmdName); sk != nil {
+				userInput := ""
+				if len(parts) > 1 {
+					userInput = parts[1]
+				}
+				prompt = fmt.Sprintf("Use the load_skill tool with name=%q and follow its instructions. %s", sk.Name, userInput)
+			}
+		}
 	}
 
 	sess.mu.Lock()
@@ -357,7 +495,121 @@ func (a *acpAgent) Cancel(_ context.Context, params acp.CancelNotification) erro
 
 func (a *acpAgent) SetSessionMode(_ context.Context, params acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
 	config.Logger().Printf("[acp] SetSessionMode: session=%s, mode=%s", params.SessionId, params.ModeId)
+
+	a.mu.Lock()
+	sess, ok := a.sessions[params.SessionId]
+	a.mu.Unlock()
+	if !ok {
+		return acp.SetSessionModeResponse{}, fmt.Errorf("unknown session: %s", params.SessionId)
+	}
+
+	sess.mu.Lock()
+
+	newMode := params.ModeId
+	if newMode != acpModeAgent && newMode != acpModePlan {
+		sess.mu.Unlock()
+		return acp.SetSessionModeResponse{}, fmt.Errorf("unknown mode: %s", newMode)
+	}
+	if newMode == sess.mode {
+		sess.mu.Unlock()
+		return acp.SetSessionModeResponse{}, nil
+	}
+
+	sess.mode = newMode
+	if sess.rec != nil {
+		sess.rec.RecordModeChange(string(newMode))
+	}
+
+	var sysPrompt string
+	var toolList []tool.BaseTool
+	if newMode == acpModePlan {
+		sysPrompt = sess.planPrompt
+		toolList = sess.planTools
+	} else {
+		sysPrompt = sess.normalPrompt
+		toolList = sess.allTools
+	}
+
+	if sess.createAgent != nil {
+		if newAg, err := sess.createAgent(sysPrompt, toolList); err == nil {
+			sess.ag = newAg
+			config.Logger().Printf("[acp] agent recreated for mode %s", newMode)
+		} else {
+			config.Logger().Printf("[acp] agent recreation failed: %v", err)
+		}
+	}
+
+	sess.mu.Unlock()
+
+	// Notify the client of the mode change (outside of lock).
+	if err := a.conn.SessionUpdate(context.Background(), acp.SessionNotification{
+		SessionId: params.SessionId,
+		Update: acp.SessionUpdate{
+			CurrentModeUpdate: &acp.SessionCurrentModeUpdate{
+				CurrentModeId: newMode,
+			},
+		},
+	}); err != nil {
+		config.Logger().Printf("[acp] SetSessionMode update error: %v", err)
+	}
+
 	return acp.SetSessionModeResponse{}, nil
+}
+
+func (a *acpAgent) ListSessions(_ context.Context, _ acp.ListSessionsRequest) (acp.ListSessionsResponse, error) {
+	config.Logger().Printf("[acp] ListSessions")
+
+	allSessions, err := session.ListAllSessions()
+	if err != nil {
+		config.Logger().Printf("[acp] ListSessions error: %v", err)
+		return acp.ListSessionsResponse{Sessions: []acp.SessionInfo{}}, nil
+	}
+
+	var sessions []acp.SessionInfo
+	for project, metas := range allSessions {
+		for _, m := range metas {
+			var title *string
+			if m.Title != "" {
+				title = &m.Title
+			}
+			sessions = append(sessions, acp.SessionInfo{
+				SessionId: acp.SessionId(fmt.Sprintf("sess_%s", m.UUID)),
+				Title:     title,
+				Cwd:       project,
+			})
+		}
+	}
+	return acp.ListSessionsResponse{Sessions: sessions}, nil
+}
+
+func (a *acpAgent) SetSessionConfigOption(_ context.Context, params acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+	config.Logger().Printf("[acp] SetSessionConfigOption")
+	return acp.SetSessionConfigOptionResponse{}, nil
+}
+
+// UnstableCloseSession implements the experimental session/close method.
+// It cancels any ongoing work and releases session resources.
+func (a *acpAgent) UnstableCloseSession(_ context.Context, params acp.UnstableCloseSessionRequest) (acp.UnstableCloseSessionResponse, error) {
+	config.Logger().Printf("[acp] CloseSession: session=%s", params.SessionId)
+
+	a.mu.Lock()
+	sess, ok := a.sessions[params.SessionId]
+	if ok {
+		delete(a.sessions, params.SessionId)
+	}
+	a.mu.Unlock()
+
+	if ok {
+		// Cancel any ongoing prompt, then release resources.
+		sess.mu.Lock()
+		if sess.cancel != nil {
+			sess.cancel()
+		}
+		sess.mu.Unlock()
+		sess.Close()
+	}
+
+	return acp.UnstableCloseSessionResponse{}, nil
 }
 
 func (a *acpAgent) LoadSession(ctx context.Context, params acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
@@ -397,9 +649,16 @@ func (a *acpAgent) LoadSession(ctx context.Context, params acp.LoadSessionReques
 	}
 
 	a.mu.Lock()
+	if old, ok := a.sessions[params.SessionId]; ok {
+		old.Close()
+	}
 	a.sessions[params.SessionId] = sess
 	a.mu.Unlock()
 
 	config.Logger().Printf("[acp] Session loaded: %s, messages=%d", params.SessionId, len(sess.history))
+
+	// Broadcast available slash commands for the loaded session.
+	a.broadcastSlashCommands(params.SessionId, sess)
+
 	return acp.LoadSessionResponse{}, nil
 }
