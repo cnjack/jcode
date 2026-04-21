@@ -125,7 +125,8 @@ func parseRawInput(argsJSON string) any {
 	}
 	var obj map[string]any
 	if err := json.Unmarshal([]byte(argsJSON), &obj); err != nil {
-		return argsJSON // fallback to string if not valid JSON
+		config.Logger().Printf("[acp-handler] parseRawInput: invalid JSON args: %v", err)
+		return nil
 	}
 	return obj
 }
@@ -171,6 +172,17 @@ func (h *ACPHandler) OnToolResult(name, output, einoToolCallID string, err error
 	cachedArgs := h.toolArgs[id]
 	delete(h.einoToACP, einoToolCallID)
 	delete(h.toolArgs, id)
+	// Drop any still-queued approval entry for this ACP id (e.g. auto-approved
+	// tools never go through RequestApproval and would otherwise leak and
+	// poison the FIFO fallback on the next approval request).
+	if id != "" {
+		for i, p := range h.pendingApprovals {
+			if p.acpID == id {
+				h.pendingApprovals = append(h.pendingApprovals[:i], h.pendingApprovals[i+1:]...)
+				break
+			}
+		}
+	}
 	h.mu.Unlock()
 
 	if id == "" {

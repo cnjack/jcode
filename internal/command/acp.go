@@ -504,13 +504,14 @@ func (a *acpAgent) SetSessionMode(_ context.Context, params acp.SetSessionModeRe
 	}
 
 	sess.mu.Lock()
-	defer sess.mu.Unlock()
 
 	newMode := params.ModeId
 	if newMode != acpModeAgent && newMode != acpModePlan {
+		sess.mu.Unlock()
 		return acp.SetSessionModeResponse{}, fmt.Errorf("unknown mode: %s", newMode)
 	}
 	if newMode == sess.mode {
+		sess.mu.Unlock()
 		return acp.SetSessionModeResponse{}, nil
 	}
 
@@ -538,7 +539,9 @@ func (a *acpAgent) SetSessionMode(_ context.Context, params acp.SetSessionModeRe
 		}
 	}
 
-	// Notify the client of the mode change.
+	sess.mu.Unlock()
+
+	// Notify the client of the mode change (outside of lock).
 	if err := a.conn.SessionUpdate(context.Background(), acp.SessionNotification{
 		SessionId: params.SessionId,
 		Update: acp.SessionUpdate{
@@ -565,9 +568,13 @@ func (a *acpAgent) ListSessions(_ context.Context, _ acp.ListSessionsRequest) (a
 	var sessions []acp.SessionInfo
 	for project, metas := range allSessions {
 		for _, m := range metas {
+			var title *string
+			if m.Title != "" {
+				title = &m.Title
+			}
 			sessions = append(sessions, acp.SessionInfo{
 				SessionId: acp.SessionId(fmt.Sprintf("sess_%s", m.UUID)),
-				Title:     &m.Title,
+				Title:     title,
 				Cwd:       project,
 			})
 		}
