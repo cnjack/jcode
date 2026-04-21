@@ -538,6 +538,26 @@ func ListSessions(project string) ([]SessionMeta, error) {
 	return idx.Sessions[project], nil
 }
 
+// ListAllSessions returns all sessions across all projects, keyed by project path.
+func ListAllSessions() (map[string][]SessionMeta, error) {
+	indexPath, err := config.SessionsIndexPath()
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(indexPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var idx sessionIndex
+	if err := json.Unmarshal(data, &idx); err != nil {
+		return nil, err
+	}
+	return idx.Sessions, nil
+}
+
 // LoadSession reads all entries from a session JSONL file identified by uuid.
 func LoadSession(id string) ([]Entry, error) {
 	if err := ValidateSessionID(id); err != nil {

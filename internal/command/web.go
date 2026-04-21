@@ -80,19 +80,6 @@ func runWebServer(port int, host string) error {
 	bgManager := tools.NewBackgroundManager(env)
 	rec, _ := session.NewRecorder(pwd, providerName, modelName)
 
-	// Wire TodoStore → session recording.
-	env.TodoStore.OnUpdate = func(items []tools.TodoItem) {
-		if rec != nil {
-			snapItems := make([]session.TodoSnapshotItem, len(items))
-			for i, it := range items {
-				snapItems[i] = session.TodoSnapshotItem{
-					ID: it.ID, Title: it.Title, Status: string(it.Status),
-				}
-			}
-			rec.RecordTodoSnapshot(snapItems)
-		}
-	}
-
 	// Load MCP tools.
 	var mcpTools []tool.BaseTool
 	if len(cfg.MCPServers) > 0 {
