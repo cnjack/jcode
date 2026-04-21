@@ -394,3 +394,9 @@ type ChannelInboundMsg struct {
 	From      string
 	Text      string
 }
+
+// BLECommandMsg is sent when a command is received from a BLE device.
+type BLECommandMsg struct {
+	Cmd string // "input", "submit", "cancel"
+	Val string // payload for "input" command
+}
