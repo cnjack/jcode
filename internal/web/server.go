@@ -128,7 +128,7 @@ func NewServer(cfg *ServerConfig) *Server {
 	if cfg.EventHandler != nil {
 		eh = cfg.EventHandler
 	}
-	return &Server{
+	s := &Server{
 		port:          cfg.Port,
 		host:          cfg.Host,
 		pwd:           cfg.Pwd,
@@ -154,6 +154,28 @@ func NewServer(cfg *ServerConfig) *Server {
 		wechatClient:  cfg.WechatClient,
 		eventHandler:  eh,
 	}
+
+	// Wire TodoStore → session recording.
+	// The callback always accesses s.recorder (protected by s.mu) so that
+	// handleNewSession / handleSwitchProject correctly use the latest recorder.
+	if cfg.TodoStore != nil {
+		cfg.TodoStore.OnUpdate = func(items []tools.TodoItem) {
+			s.mu.RLock()
+			r := s.recorder
+			s.mu.RUnlock()
+			if r != nil {
+				snapItems := make([]session.TodoSnapshotItem, len(items))
+				for i, it := range items {
+					snapItems[i] = session.TodoSnapshotItem{
+						ID: it.ID, Title: it.Title, Status: string(it.Status),
+					}
+				}
+				r.RecordTodoSnapshot(snapItems)
+			}
+		}
+	}
+
+	return s
 }
 
 // Handler returns the underlying WebHandler for external wiring (e.g. approval routing).
@@ -453,6 +475,7 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req)
 
+	s.mu.Lock()
 	// Close the old recorder.
 	if s.recorder != nil {
 		s.recorder.Close()
@@ -469,7 +492,10 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 		s.recorder = rec
 	}
 
-	s.mu.Lock()
+	// Prepare todo items while holding the lock, but apply them after unlocking
+	// to avoid deadlock: todoStore.Update → OnUpdate → s.mu.RLock.
+	var updateTodos bool
+	var todoItems []tools.TodoItem
 	if req.SessionID != "" {
 		// Resuming: load prior conversation into history so the agent has context.
 		entries, _ := session.LoadSession(req.SessionID)
@@ -484,21 +510,26 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if len(lastTodos) > 0 {
-				items := make([]tools.TodoItem, len(lastTodos))
+				updateTodos = true
+				todoItems = make([]tools.TodoItem, len(lastTodos))
 				for i, t := range lastTodos {
-					items[i] = tools.TodoItem{ID: t.ID, Title: t.Title, Status: tools.TodoStatus(t.Status)}
+					todoItems[i] = tools.TodoItem{ID: t.ID, Title: t.Title, Status: tools.TodoStatus(t.Status)}
 				}
-				s.todoStore.Update(items)
 			}
 		}
 	} else {
 		s.history = nil
-		// Reset todos.
+		// Mark that todos should be reset.
 		if s.todoStore != nil {
-			s.todoStore.Update(nil)
+			updateTodos = true
 		}
 	}
 	s.mu.Unlock()
+
+	// Apply todo updates outside the lock to avoid deadlock with OnUpdate callback.
+	if updateTodos && s.todoStore != nil {
+		s.todoStore.Update(todoItems)
+	}
 
 	// Notify clients. When resuming an existing session, do NOT broadcast session_reset
 	// (which would wipe the UI that the frontend is about to repopulate from history).
