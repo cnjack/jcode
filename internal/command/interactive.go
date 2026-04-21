@@ -442,6 +442,7 @@ func (s *interactiveState) handleResume(uuid string) {
 	st := session.ReconstructState(entries)
 	s.history = st.History
 	s.approvalState.SetSessionApproval(false)
+	s.rec.SetUUID(uuid)
 	s.p.Send(tui.SessionResumedMsg{UUID: uuid, Entries: tui.ConvertSessionEntries(entries)})
 
 	if st.Plan != nil {
