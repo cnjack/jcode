@@ -1498,6 +1498,81 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		default:
 		}
 
+	case BLECommandMsg:
+		switch msg.Cmd {
+		case "input":
+			// Replace input area with the received text
+			m.textarea.SetValue(msg.Val)
+			m.textarea.CursorEnd()
+			m.textareaLines = recalcLines(m.textarea.Value())
+			m.textarea.SetHeight(m.textareaLines)
+			if m.ready {
+				m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))
+			}
+		case "submit":
+			// Submit current input content to the agent
+			prompt := strings.TrimSpace(m.textarea.Value())
+			if prompt != "" {
+				appendHistory(prompt)
+				if len(m.history) == 0 || m.history[len(m.history)-1] != prompt {
+					m.history = append(m.history, prompt)
+				}
+				m.historyIndex = len(m.history)
+
+				m.textarea.Reset()
+				m.textareaLines = 1
+				m.textarea.SetHeight(1)
+				m.cmdSuggestionActive = false
+				m.cmdSuggestions = nil
+				m.cmdSuggestionIndex = 0
+
+				if len(m.lines) > 0 && strings.Contains(m.lines[0], "Welcome to Little Jack") {
+					m.lines = nil
+				}
+
+				if !m.agentDone && m.thinking {
+					m.pendingPrompts = append(m.pendingPrompts, prompt)
+					m.lines = append(m.lines, fmt.Sprintf("%s %s",
+						userLabelStyle.Render("👤 You (queued):"), prompt))
+					m.refreshViewport()
+					return m, tea.Batch(cmds...)
+				}
+
+				m.mode = ModeAgent
+				m.agentDone = false
+				m.thinking = true
+
+				modeLabel := "👤 You:"
+				if m.agentMode == ModePlanning {
+					modeLabel = "📐 Plan:"
+				}
+
+				m.lines = append(m.lines, "")
+				m.lines = append(m.lines, fmt.Sprintf("%s %s",
+					userLabelStyle.Render(modeLabel), prompt))
+				if m.ready {
+					m.viewport.SetHeight(m.calcViewportHeight(false))
+					m.viewport.SetContent(m.renderContent())
+					m.viewport.GotoBottom()
+				}
+				cmds = append(cmds, func() tea.Msg {
+					return PromptSubmitMsg{Prompt: prompt}
+				})
+				cmds = append(cmds, m.spinner.Tick)
+			}
+		case "cancel":
+			// Clear the input area
+			m.textarea.Reset()
+			m.textareaLines = 1
+			m.textarea.SetHeight(1)
+			m.cmdSuggestionActive = false
+			m.cmdSuggestions = nil
+			m.cmdSuggestionIndex = 0
+			if m.ready {
+				m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))
+			}
+		}
+
 	case TodoUpdateMsg:
 		m.refreshViewport()
 

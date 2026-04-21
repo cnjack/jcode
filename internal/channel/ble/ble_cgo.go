@@ -8,6 +8,7 @@
 package ble
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"sync"
@@ -29,12 +30,22 @@ var (
 		0x6E, 0x40, 0x00, 0x02, 0xB5, 0xA3, 0xF3, 0x93,
 		0xE0, 0xA9, 0xE5, 0x0E, 0x24, 0xDC, 0xCA, 0x9E,
 	})
+	nusTXCharUUID = bluetooth.NewUUID([16]byte{
+		0x6E, 0x40, 0x00, 0x03, 0xB5, 0xA3, 0xF3, 0x93,
+		0xE0, 0xA9, 0xE5, 0x0E, 0x24, 0xDC, 0xCA, 0x9E,
+	})
 )
 
-// command is the NDJSON protocol message sent to the device.
+// command is the NDJSON protocol message sent to/received from the device.
 type command struct {
 	Cmd string `json:"cmd"`
 	Val string `json:"val,omitempty"`
+}
+
+// ReceivedCommand is a parsed command received from the BLE device.
+type ReceivedCommand struct {
+	Cmd string // "input", "submit", "cancel"
+	Val string // payload for "input" command
 }
 
 // Notifier implements channel.Notifier for BLE IoT devices.
@@ -48,6 +59,9 @@ type Notifier struct {
 
 	// connectOnce ensures we only attempt one background connect at a time.
 	connecting bool
+
+	// inbound receives parsed commands from the BLE device.
+	inbound chan ReceivedCommand
 }
 
 // New creates a BLE notifier. It does NOT block — device discovery happens
@@ -55,10 +69,16 @@ type Notifier struct {
 func New() *Notifier {
 	return &Notifier{
 		adapter: bluetooth.DefaultAdapter,
+		inbound: make(chan ReceivedCommand, 16),
 	}
 }
 
 func (n *Notifier) Name() string { return "ble" }
+
+// Receive returns a channel that delivers commands received from the BLE device.
+func (n *Notifier) Receive() <-chan ReceivedCommand {
+	return n.inbound
+}
 
 func (n *Notifier) Available() bool {
 	n.mu.Lock()
@@ -173,9 +193,9 @@ func (n *Notifier) connect() {
 		return
 	}
 
-	chars, err := services[0].DiscoverCharacteristics([]bluetooth.UUID{nusRXCharUUID})
+	chars, err := services[0].DiscoverCharacteristics([]bluetooth.UUID{nusRXCharUUID, nusTXCharUUID})
 	if err != nil || len(chars) == 0 {
-		logger.Printf("[ble] RX characteristic not found")
+		logger.Printf("[ble] NUS characteristics not found")
 		_ = device.Disconnect()
 		n.mu.Lock()
 		n.connecting = false
@@ -183,9 +203,29 @@ func (n *Notifier) connect() {
 		return
 	}
 
+	var rxChar bluetooth.DeviceCharacteristic
+	var txCharFound bool
+	for _, c := range chars {
+		if c.UUID() == nusRXCharUUID {
+			rxChar = c
+		}
+		if c.UUID() == nusTXCharUUID {
+			txCharFound = true
+			// Subscribe to TX notifications (data FROM the device).
+			if err := c.EnableNotifications(n.handleTXNotification); err != nil {
+				logger.Printf("[ble] failed to subscribe to TX notifications: %v", err)
+			} else {
+				logger.Printf("[ble] subscribed to TX notifications")
+			}
+		}
+	}
+	if !txCharFound {
+		logger.Printf("[ble] TX characteristic not found, receive disabled")
+	}
+
 	n.mu.Lock()
 	n.device = device
-	n.rxChar = chars[0]
+	n.rxChar = rxChar
 	n.ready = true
 	n.connecting = false
 	n.mu.Unlock()
@@ -208,5 +248,31 @@ func (n *Notifier) send(rxChar bluetooth.DeviceCharacteristic, cmd, val string) 
 		n.mu.Lock()
 		n.ready = false
 		n.mu.Unlock()
+	}
+}
+
+// handleTXNotification is called when the BLE device sends data via NUS TX.
+// It parses NDJSON commands and delivers them to the inbound channel.
+func (n *Notifier) handleTXNotification(data []byte) {
+	logger := config.Logger()
+
+	// Trim trailing newline if present.
+	data = bytes.TrimRight(data, "\n\r")
+	if len(data) == 0 {
+		return
+	}
+
+	var cmd command
+	if err := json.Unmarshal(data, &cmd); err != nil {
+		logger.Printf("[ble] received invalid JSON: %s", string(data))
+		return
+	}
+
+	logger.Printf("[ble] received cmd=%s val=%s", cmd.Cmd, cmd.Val)
+
+	select {
+	case n.inbound <- ReceivedCommand{Cmd: cmd.Cmd, Val: cmd.Val}:
+	default:
+		logger.Printf("[ble] inbound channel full, dropping cmd=%s", cmd.Cmd)
 	}
 }

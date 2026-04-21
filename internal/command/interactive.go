@@ -954,6 +954,15 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	// Push initial idle status (triggers BLE discovery in background).
 	bleNotifier.Notify(channel.NotifyEvent{Type: channel.EventIdle})
 
+	// Forward BLE inbound commands to TUI.
+	if bleCh := bleNotifier.Receive(); bleCh != nil {
+		go func() {
+			for cmd := range bleCh {
+				p.Send(tui.BLECommandMsg{Cmd: cmd.Cmd, Val: cmd.Val})
+			}
+		}()
+	}
+
 	st.h = notifyingH
 	approvalState.SetHandler(notifyingH)
 
