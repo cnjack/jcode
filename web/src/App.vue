@@ -134,6 +134,8 @@ onMounted(async () => {
   if (store.pwd) {
     projectStore.ensureCurrentProject(store.pwd)
   }
+  // Restore the current session content if available
+  await store.restoreCurrentSession()
 })
 
 onUnmounted(() => {
@@ -155,6 +157,8 @@ async function onProjectSwitched() {
   store.clearChat()
   store.fetchTodos()
   store.fetchSessions()
+  // Restore the current session for the new project
+  await store.restoreCurrentSession()
 }
 
 // Panel resize
