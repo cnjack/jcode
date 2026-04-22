@@ -111,8 +111,8 @@ function fileIcon(file: FileItem): string {
         class="flex items-center gap-2.5 mb-3 w-full text-left cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md p-2 -m-0.5 transition-colors group"
         @click="emit('openProjects')"
       >
-        <div class="w-8 h-8 rounded-md bg-gradient-to-br from-emerald-500 to-emerald-600 dark:from-emerald-400 dark:to-emerald-500 text-white flex items-center justify-center text-sm font-bold shadow-sm">
-          {{ (store.projectName || 'J').charAt(0).toUpperCase() }}
+        <div class="w-8 h-8 rounded-md bg-zinc-900 dark:bg-zinc-800 text-white flex items-center justify-center text-[10px] font-bold shadow-sm" style="font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'Roboto Mono', Menlo, Monaco, monospace;">
+          [<span style="color: #FF8400;">J</span>]
         </div>
         <div class="min-w-0 flex-1">
           <div class="text-sm font-semibold text-zinc-800 dark:text-zinc-100 truncate" style="font-family: var(--font-sans)">{{ store.projectName || 'jcode' }}</div>
