@@ -17,7 +17,7 @@ const slashFilter = ref('')
 const selectedSlashIdx = ref(0)
 
 const modes = [
-  { value: 'agent' as const, label: 'Agent', icon: '⚡' },
+  { value: 'agent' as const, label: 'Agent', icon: '🔥' },
   { value: 'plan' as const, label: 'Plan', icon: '📋' },
 ]
 
@@ -185,7 +185,7 @@ watch(() => store.isRunning, (running) => {
                   : 'bg-zinc-100 dark:bg-zinc-700/60 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'"
                 @click.stop="showModePicker = !showModePicker; showModelPicker = false"
               >
-                {{ store.mode === 'agent' ? '⚡ Agent' : '📋 Plan' }}
+                {{ store.mode === 'agent' ? '🔥 Agent' : '📋 Plan' }}
                 <svg class="w-3 h-3 opacity-50" viewBox="0 0 20 20" fill="currentColor">
                   <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
                 </svg>
