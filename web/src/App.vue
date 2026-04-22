@@ -263,10 +263,8 @@ function startResize(e: MouseEvent) {
         >
           <!-- Welcome -->
           <div v-if="!store.hasMessages" class="flex flex-col items-center justify-center h-full text-center px-8 animate-fade-in">
-            <div class="w-14 h-14 rounded bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 dark:from-emerald-400/15 dark:to-emerald-500/5 flex items-center justify-center mb-5 ring-1 ring-emerald-500/20">
-              <svg class="w-7 h-7 text-emerald-500 dark:text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M13 10V3L4 14h7v7l9-11h-7z" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
+            <div class="flex items-center gap-0 mb-5 select-none" style="font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'Roboto Mono', Menlo, Monaco, monospace; font-size: 28px; font-weight: 700; letter-spacing: normal;">
+              <span class="text-zinc-400 dark:text-zinc-500">[</span><span style="color: #FF8400;">J</span><span class="text-zinc-900 dark:text-zinc-300">CODE</span><span class="text-zinc-400 dark:text-zinc-500">]</span>
             </div>
             <h2 class="text-lg font-semibold text-zinc-800 dark:text-zinc-200 mb-1.5" style="font-family: var(--font-sans)">What would you like to build?</h2>
             <p class="text-sm text-zinc-500 dark:text-zinc-500 max-w-sm">Send a message to start a conversation with jcode. Use <kbd class="px-1.5 py-0.5 text-[10px] font-mono bg-zinc-100 dark:bg-zinc-800 rounded border border-zinc-200 dark:border-zinc-700">/</kbd> for commands.</p>
