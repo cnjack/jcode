@@ -54,6 +54,9 @@ export const useChatStore = defineStore('chat', () => {
   const channelAvailable = ref(false)
   const channelEnabled = ref(false)
 
+  // Current session tracking
+  const currentSessionId = ref('')
+
   // Current streaming text accumulator
   let streamingText = ''
   let streamingMsgId = ''
@@ -189,6 +192,10 @@ export const useChatStore = defineStore('chat', () => {
     if (error) {
       addMessage('system', `Error: ${error}`)
     }
+    // Refresh session list & current session ID (the recorder may have been
+    // created lazily during this run).
+    fetchHealth()
+    fetchSessions()
   }
 
   function addApprovalRequest(data: PendingApproval) {
@@ -257,8 +264,13 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function newSession() {
+    // Already on the welcome screen — nothing to do.
+    if (!currentSessionId.value && timeline.value.length === 0) return
     try {
+      // Reset backend state (history, old recorder) but don't create a new
+      // recorder yet — it will be created lazily on the first message.
       await api.newSession()
+      currentSessionId.value = ''
       clearChat()
       await fetchSessions()
     } catch (err: unknown) {
@@ -291,6 +303,8 @@ export const useChatStore = defineStore('chat', () => {
       modelName.value = h.model
       const m = h.mode || 'build'
       mode.value = m === 'build' ? 'agent' : (m as AgentMode)
+      currentSessionId.value = h.session_id || ''
+      isRunning.value = h.running || false
     } catch (err) {
       console.error('Failed to fetch health:', err)
     }
@@ -377,12 +391,76 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  /** Restore the current session content if available (called on page load). */
+  async function restoreCurrentSession() {
+    if (!currentSessionId.value || isRunning.value) return
+    try {
+      const entries = await api.session(currentSessionId.value)
+      if (entries.length === 0) return
+
+      clearChat()
+
+      const pendingToolCalls = new Map<string, ToolCall>()
+      for (const e of entries) {
+        if (e.type === 'user' && e.content) {
+          addMessage('user', e.content)
+        } else if (e.type === 'assistant' && e.content) {
+          addMessage('assistant', e.content)
+        } else if (e.type === 'tool_call' && e.name) {
+          const tc: ToolCall = {
+            id: genId('tc'),
+            toolCallID: e.tool_call_id,
+            name: e.name,
+            args: e.args || '',
+            status: 'running',
+            timestamp: e.timestamp ? new Date(e.timestamp).getTime() : Date.now(),
+            displayInfo: extractToolDisplayInfo(e.name, e.args || ''),
+          }
+          timeline.value.push({ kind: 'tool', data: tc, seq: nextSeqId() })
+          if (e.tool_call_id) {
+            pendingToolCalls.set(e.tool_call_id, tc)
+          }
+        } else if (e.type === 'tool_result') {
+          let resolved = false
+          if (e.tool_call_id) {
+            const tc = pendingToolCalls.get(e.tool_call_id)
+            if (tc) {
+              tc.output = e.output || ''
+              tc.error = e.error || ''
+              tc.status = e.error ? 'error' : 'done'
+              pendingToolCalls.delete(e.tool_call_id)
+              resolved = true
+            }
+          }
+          if (!resolved && e.name) {
+            for (let i = timeline.value.length - 1; i >= 0; i--) {
+              const item = timeline.value[i]
+              if (item && item.kind === 'tool' && item.data.name === e.name && item.data.status === 'running') {
+                item.data.output = e.output || ''
+                item.data.error = e.error || ''
+                item.data.status = e.error ? 'error' : 'done'
+                break
+              }
+            }
+          }
+        }
+      }
+      // Mark any tool calls that never got a result as done
+      for (const tc of pendingToolCalls.values()) {
+        tc.status = 'done'
+      }
+    } catch {
+      // Session file may not exist yet (lazy creation), silently ignore
+    }
+  }
+
   async function loadSession(uuid: string) {
     try {
       const entries = await api.session(uuid)
 
       // Notify backend to switch to this session (resume) before clearing UI.
-      await api.newSession(uuid)
+      const resp = await api.newSession(uuid)
+      currentSessionId.value = resp.session_id || uuid
 
       clearChat()
 
@@ -460,6 +538,7 @@ export const useChatStore = defineStore('chat', () => {
     autoApprove,
     channelAvailable,
     channelEnabled,
+    currentSessionId,
     // Getters
     messages,
     hasMessages,
@@ -493,5 +572,6 @@ export const useChatStore = defineStore('chat', () => {
     setAutoApprove,
     fetchChannelState,
     toggleChannel,
+    restoreCurrentSession,
   }
 })
