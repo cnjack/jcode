@@ -20,7 +20,9 @@ defineProps<{
           'bg-amber-500/15 text-amber-600 dark:bg-amber-400/15 dark:text-amber-400': message.role === 'system',
         }"
       >
-        <template v-if="message.role === 'assistant'">J</template>
+        <template v-if="message.role === 'assistant'" style="font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'Roboto Mono', Menlo, Monaco, monospace;">
+          <span style="color: #FF8400;">J</span>
+        </template>
         <template v-else-if="message.role === 'user' && message.source === 'wechat'">W</template>
         <template v-else-if="message.role === 'user'">U</template>
         <template v-else>S</template>
@@ -34,7 +36,7 @@ defineProps<{
           'text-amber-600 dark:text-amber-400': message.role === 'system',
         }"
       >
-        {{ message.role === 'user' ? (message.source === 'wechat' ? 'WeChat' : 'You') : message.role === 'assistant' ? 'jcode' : 'System' }}
+        {{ message.role === 'user' ? (message.source === 'wechat' ? 'WeChat' : 'You') : message.role === 'assistant' ? '[J]CODE' : 'System' }}
       </span>
     </div>
     <!-- Content -->

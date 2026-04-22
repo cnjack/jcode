@@ -1,12 +1,16 @@
 <div align="center">
 
-# jcode
+<h1 align="center">
+  <span style="font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'Roboto Mono', Menlo, Monaco, monospace; font-size: 32px; font-weight: 700;">
+    [<span style="color: #FF8400;">J</span>CODE]
+  </span>
+</h1>
 
 ### **Think it. Code it.**
 
 **The AI coding agent that lives in your terminal.**
 
-Describe tasks in plain language. jcode reads your codebase, writes surgical edits,
+Describe tasks in plain language. [J]CODE reads your codebase, writes surgical edits,
 runs commands, and shows every step — no black boxes.
 
 Works locally and on remote servers over SSH. Supports any OpenAI-compatible model.
