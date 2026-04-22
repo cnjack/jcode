@@ -279,13 +279,22 @@ func (s *Server) forwardEvents() {
 // --- API Handlers ---
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	sessionID := ""
+	if s.recorder != nil {
+		sessionID = s.recorder.UUID()
+	}
+	s.mu.RUnlock()
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":   "ok",
-		"version":  "0.2.0",
-		"pwd":      s.pwd,
-		"provider": s.providerName,
-		"model":    s.modelName,
-		"mode":     s.mode,
+		"status":     "ok",
+		"version":    "0.2.0",
+		"pwd":        s.pwd,
+		"provider":   s.providerName,
+		"model":      s.modelName,
+		"mode":       s.mode,
+		"session_id": sessionID,
+		"running":    s.running.Load(),
 	})
 }
 
@@ -482,14 +491,16 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 		s.recorder = nil
 	}
 
-	// Create new recorder.
-	rec, _ := session.NewRecorder(s.pwd, s.providerName, s.modelName)
-	if rec != nil {
-		// If resuming an existing session, use its UUID.
-		if req.SessionID != "" {
+	// Only create a recorder when resuming an existing session.
+	// For brand-new conversations the recorder is created lazily in
+	// submitMessage on the first actual user message, which avoids
+	// persisting empty sessions.
+	if req.SessionID != "" {
+		rec, _ := session.NewRecorder(s.pwd, s.providerName, s.modelName)
+		if rec != nil {
 			rec.SetUUID(req.SessionID)
+			s.recorder = rec
 		}
-		s.recorder = rec
 	}
 
 	// Prepare todo items while holding the lock, but apply them after unlocking
@@ -538,8 +549,16 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 		s.wsBroker.Broadcast(WSEvent{Type: "session_reset", Data: map[string]string{}})
 	}
 
+	s.mu.RLock()
+	newSessionID := ""
+	if s.recorder != nil {
+		newSessionID = s.recorder.UUID()
+	}
+	s.mu.RUnlock()
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "ok",
+		"status":     "ok",
+		"session_id": newSessionID,
 	})
 }
 

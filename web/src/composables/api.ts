@@ -20,7 +20,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   health: () =>
-    request<{ status: string; version: string; pwd: string; provider: string; model: string; mode: string }>(
+    request<{ status: string; version: string; pwd: string; provider: string; model: string; mode: string; session_id: string; running: boolean }>(
       '/api/health',
     ),
   status: () =>
