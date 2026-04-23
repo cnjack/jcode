@@ -34,15 +34,14 @@ var (
 
 	// ─── Sidebar styles ───
 	sidebarStyle = lipgloss.NewStyle().
-				Border(lipgloss.Border{Left: "│"}).
-				BorderForeground(colorMuted).
-				PaddingLeft(1).
-				PaddingRight(1)
+			Border(lipgloss.Border{Left: "│"}).
+			BorderForeground(colorMuted).
+			PaddingLeft(1).
+			PaddingRight(1)
 
 	sidebarSectionTitleStyle = lipgloss.NewStyle().
 					Bold(true).
-					Foreground(colorMuted).
-					PaddingTop(1)
+					Foreground(colorMuted)
 
 	sidebarItemStyle = lipgloss.NewStyle().
 				Foreground(colorText).
@@ -145,6 +144,13 @@ var (
 	userLabelStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(colorSecondary)
+
+	// userPromptStyle renders user input with orange background (e.g. "> hi")
+	userPromptStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#1a1a2e")).
+			Background(colorPrimary).
+			Padding(0, 1)
 
 	dividerStyle = lipgloss.NewStyle().
 			Foreground(colorMuted)
