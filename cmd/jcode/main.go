@@ -18,7 +18,7 @@ func main() {
 
 	rootCmd := &cobra.Command{
 		Use:           "jcode",
-		Short:         "Little Jack — AI coding assistant",
+		Short:         "JCODE — AI coding assistant",
 		Version:       command.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -26,7 +26,7 @@ func main() {
 			return command.RunInteractive(prompt, resumeUUID, unsafeMode)
 		},
 	}
-	rootCmd.SetVersionTemplate(fmt.Sprintf("Little Jack — Coding Assistant\nVersion:    %s\nBuild time: %s\nGit commit: %s\n", command.Version, command.BuildTime, command.GitCommit))
+	rootCmd.SetVersionTemplate(fmt.Sprintf("JCODE — Coding Assistant\nVersion:    %s\nBuild time: %s\nGit commit: %s\n", command.Version, command.BuildTime, command.GitCommit))
 	rootCmd.Flags().StringVarP(&prompt, "prompt", "p", "", "One-shot prompt (non-interactive)")
 	rootCmd.Flags().StringVar(&resumeUUID, "resume", "", "Resume a previous session by UUID")
 	rootCmd.Flags().BoolVar(&unsafeMode, "unsafe", false, "Auto-approve all tool calls (overrides config)")

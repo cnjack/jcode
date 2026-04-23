@@ -10,15 +10,27 @@ import (
 )
 
 // viewportOffsetY returns the Y offset of the viewport in screen coordinates.
-// This accounts for the header + divider lines above the viewport.
+// The viewport starts at the top of the screen (header has been removed).
 func (m *Model) viewportOffsetY() int {
-	// header title + divider line = 2 lines total
-	return 2
+	return 0
+}
+
+// isMouseInSidebar checks if the given screen X coordinate is inside the sidebar area.
+func (m *Model) isMouseInSidebar(x int) bool {
+	if !m.showSidebar {
+		return false
+	}
+	return x >= m.width-sidebarWidth
 }
 
 // handleMouseClick processes a left-click to start text selection.
 // Coordinates are stored as viewport-visible-relative (not content-absolute).
 func (m *Model) handleMouseClick(x, y int) {
+	// Ignore clicks in the sidebar area
+	if m.isMouseInSidebar(x) {
+		return
+	}
+
 	vpOffsetY := m.viewportOffsetY()
 	vpY := y - vpOffsetY
 
@@ -57,6 +69,14 @@ func (m *Model) handleMouseDrag(x, y int) {
 		x = 0
 	}
 
+	// Clamp X to main content area (don't select into sidebar)
+	if m.showSidebar {
+		maxX := m.width - sidebarWidth - 1
+		if x > maxX {
+			x = maxX
+		}
+	}
+
 	m.mouseEndX = x
 	m.mouseEndY = vpY
 
@@ -80,6 +100,14 @@ func (m *Model) handleMouseRelease(x, y int) tea.Cmd {
 	}
 	if vpY >= m.viewport.Height() {
 		vpY = m.viewport.Height() - 1
+	}
+
+	// Clamp X to main content area
+	if m.showSidebar {
+		maxX := m.width - sidebarWidth - 1
+		if x > maxX {
+			x = maxX
+		}
 	}
 	m.mouseEndX = x
 	m.mouseEndY = vpY

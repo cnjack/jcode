@@ -8,7 +8,7 @@ import (
 
 var (
 	// Color palette
-	colorPrimary   = lipgloss.Color("#7C3AED") // violet
+	colorPrimary   = lipgloss.Color("#FF8400") // orange
 	colorSecondary = lipgloss.Color("#06B6D4") // cyan
 	colorSuccess   = lipgloss.Color("#10B981") // green
 	colorError     = lipgloss.Color("#EF4444") // red
@@ -17,6 +17,72 @@ var (
 	colorText      = lipgloss.Color("#E5E7EB") // light gray
 	colorBg        = lipgloss.Color("#111827") // dark bg
 	colorDimText   = lipgloss.Color("#9CA3AF") // dim text for secondary info
+	colorPlanMode  = lipgloss.Color("#C084FC") // plan mode (soft purple)
+	colorLogoJ     = lipgloss.Color("#FF8400") // orange J in [JCODE] logo
+
+	// ─── Landing page styles ───
+	landingLogoStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(colorPrimary).
+				PaddingLeft(0)
+
+	landingUnderlineStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#4B5563"))
+
+	landingTaglineStyle = lipgloss.NewStyle().
+				Foreground(colorMuted)
+
+	// ─── Sidebar styles ───
+	sidebarStyle = lipgloss.NewStyle().
+				Border(lipgloss.Border{Left: "│"}).
+				BorderForeground(colorMuted).
+				PaddingLeft(1).
+				PaddingRight(1)
+
+	sidebarSectionTitleStyle = lipgloss.NewStyle().
+					Bold(true).
+					Foreground(colorMuted).
+					PaddingTop(1)
+
+	sidebarItemStyle = lipgloss.NewStyle().
+				Foreground(colorText).
+				PaddingLeft(1)
+
+	sidebarValueStyle = lipgloss.NewStyle().
+				Foreground(colorText).
+				PaddingLeft(1)
+
+	sidebarScrollIndicatorStyle = lipgloss.NewStyle().
+					Foreground(colorMuted).
+					Italic(true).
+					PaddingLeft(1)
+
+	// ─── Mode pills styles ───
+	modePillAgentStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(colorSecondary)
+
+	modePillPlanStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(colorPlanMode)
+
+	modePillAskStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(colorMuted)
+
+	modePillAutoStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(colorWarning)
+
+	modeSeparatorStyle = lipgloss.NewStyle().
+				Foreground(colorMuted)
+
+	modeFillStyle = lipgloss.NewStyle().
+			Foreground(colorMuted)
+
+	// ─── Minimal status bar style ───
+	minimalStatusBarStyle = lipgloss.NewStyle().
+				Foreground(colorMuted)
 
 	// Styles
 	titleStyle = lipgloss.NewStyle().
