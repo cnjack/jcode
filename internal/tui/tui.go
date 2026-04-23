@@ -30,8 +30,8 @@ const (
 )
 
 const (
-	sidebarWidth         = 36
-	minWidthForSidebar   = 90
+	sidebarWidth       = 36
+	minWidthForSidebar = 90
 )
 
 type Model struct {
@@ -1096,6 +1096,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			case "ctrl+l":
 				// Quick model switch
 				return m.handleModelInput(cmds)
+			case "ctrl+up":
+				// Scroll sidebar todo list up
+				if m.showSidebar && m.sidebarScrollOffset > 0 {
+					m.sidebarScrollOffset--
+					m.refreshViewport()
+					return m, tea.Batch(cmds...)
+				}
+			case "ctrl+down":
+				// Scroll sidebar todo list down
+				if m.showSidebar && m.todoStore != nil {
+					maxOffset := len(m.todoStore.Items()) - 3
+					if maxOffset < 0 {
+						maxOffset = 0
+					}
+					if m.sidebarScrollOffset < maxOffset {
+						m.sidebarScrollOffset++
+						m.refreshViewport()
+						return m, tea.Batch(cmds...)
+					}
+				}
 			case "tab":
 				// Accept command suggestion if active
 				if m.cmdSuggestionActive && len(m.cmdSuggestions) > 0 && m.cmdSuggestionIndex < len(m.cmdSuggestions) {
@@ -1430,11 +1450,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.width = msg.Width
 		m.height = msg.Height
 
-		// Determine if sidebar will be shown (based on width)
-		m.showSidebar = m.width >= minWidthForSidebar && len(m.lines) > 0
+		// Determine if sidebar will be shown (width-only, consistent with View()).
+		m.showSidebar = m.width >= minWidthForSidebar
 		mainWidth := m.width
 		if m.showSidebar {
-			mainWidth = m.width - sidebarWidth - 1
+			mainWidth = m.width - sidebarWidth
 		}
 
 		inputWidth := mainWidth - 6
@@ -2278,7 +2298,7 @@ func (m Model) View() tea.View {
 	// ─── Calculate main content area dimensions ───
 	mainWidth := m.width
 	if showSidebar {
-		mainWidth = m.width - sidebarWidth - 1 // -1 for gap
+		mainWidth = m.width - sidebarWidth
 	}
 
 	// ─── Viewport ───

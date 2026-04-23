@@ -124,8 +124,8 @@ func (m *Model) updateSuggestions() {
 func (m Model) inputAreaView() string {
 	var parts []string
 
-	// Determine sidebar visibility locally
-	showSidebar := m.width >= minWidthForSidebar && len(m.lines) > 0
+	// Determine sidebar visibility locally (width-only, consistent with View())
+	showSidebar := m.width >= minWidthForSidebar
 
 	// 1. Mode pills line (Agent/Plan + Ask/Auto)
 	parts = append(parts, m.renderModePills())

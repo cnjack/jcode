@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/cnjack/jcode/internal/tools"
 )
@@ -134,7 +135,7 @@ func (s *SidebarComponent) renderEnvSection(state SidebarState) string {
 	if state.EnvLabel == "Local" || state.EnvLabel == "local" || state.EnvLabel == "" {
 		envText = "🖥️  Local"
 	} else {
-		envText = "🔗 " + state.EnvLabel
+		envText = "🔗 " + truncateString(state.EnvLabel, state.Width-5)
 	}
 	value := sidebarValueStyle.Render(envText)
 	return lipgloss.JoinVertical(lipgloss.Left, title, value)
@@ -302,10 +303,19 @@ func truncateString(s string, maxLen int) string {
 	if w <= maxLen {
 		return s
 	}
-	// Simple truncation: cut by runes
-	runes := []rune(s)
-	truncated := string(runes[:maxLen-1])
-	return truncated + "…"
+	// Display-width aware truncation: iterate runes and sum cell widths
+	// so CJK/emoji characters (2 cells each) are handled correctly.
+	var result []rune
+	currentWidth := 0
+	for _, r := range s {
+		rw := runewidth.RuneWidth(r)
+		if currentWidth+rw > maxLen-1 { // -1 for ellipsis
+			break
+		}
+		result = append(result, r)
+		currentWidth += rw
+	}
+	return string(result) + "…"
 }
 
 func plural(n int) string {
