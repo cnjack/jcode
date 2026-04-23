@@ -188,7 +188,7 @@ func (a *acpAgent) Initialize(_ context.Context, params acp.InitializeRequest) (
 		},
 		AgentInfo: &acp.Implementation{
 			Name:    "jcode",
-			Title:   acp.Ptr("Little Jack — Coding Assistant"),
+			Title:   acp.Ptr("JCODE — Coding Assistant"),
 			Version: Version, // set from internal/command/version.go
 		},
 	}, nil

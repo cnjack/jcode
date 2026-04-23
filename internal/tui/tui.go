@@ -29,6 +29,11 @@ const (
 	ModeAgent Mode = iota
 )
 
+const (
+	sidebarWidth         = 36
+	minWidthForSidebar   = 90
+)
+
 type Model struct {
 	mode      Mode
 	agentDone bool
@@ -167,6 +172,11 @@ type Model struct {
 	// teamLeaderLines stores the leader's viewport content when switching to teammate view
 	teamLeaderLines []string
 	teamLeaderText  string
+
+	// ─── Sidebar state ───
+	showSidebar         bool // whether sidebar is currently visible
+	sidebarScrollOffset int  // scroll offset for todo list in sidebar
+	sidebarComp         *SidebarComponent
 }
 
 // dirItem implements list.Item
@@ -262,7 +272,11 @@ func newTextarea() textarea.Model {
 	ta.Prompt = "> "
 	st := ta.Styles()
 	st.Focused.CursorLine = lipgloss.NewStyle()
+	st.Cursor.Shape = tea.CursorBlock
+	st.Cursor.Color = colorPrimary
 	st.Focused.Prompt = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+	st.Focused.Placeholder = lipgloss.NewStyle().Foreground(colorDimText)
+	st.Blurred.Placeholder = lipgloss.NewStyle().Foreground(colorDimText)
 	ta.SetStyles(st)
 	ta.Focus()
 	return ta
@@ -285,13 +299,7 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 		thinking = true
 	} else {
 		initialLines = []string{
-			lipgloss.NewStyle().Foreground(colorMuted).Render("Welcome to Little Jack. How can I help you today?"),
-			"",
-			lipgloss.NewStyle().Foreground(colorText).PaddingLeft(2).Render("💡 Describe a task and I'll help you code it"),
-			lipgloss.NewStyle().Foreground(colorText).PaddingLeft(2).Render("📁 I can read, write, and edit files in your project"),
-			lipgloss.NewStyle().Foreground(colorText).PaddingLeft(2).Render("⚡ I can execute shell commands for you"),
-			"",
-			lipgloss.NewStyle().Foreground(colorMuted).PaddingLeft(2).Render("Ctrl+P: Plan  │  Ctrl+A: Approval  │  Ctrl+L: Model  │  Ctrl+C: Cancel  │  Drag: Select & Copy"),
+			lipgloss.NewStyle().Foreground(colorMuted).Render("Welcome to JCODE. How can I help you today?"),
 			"",
 		}
 	}
@@ -346,6 +354,7 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 		textarea:       newTextarea(),
 		textareaLines:  1,
 		currentText:    &strings.Builder{},
+		sidebarComp:    NewSidebarComponent(),
 		dirList:        l,
 		modelPicker:    ml,
 		settingMenu:    sl,
@@ -1200,7 +1209,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 					if len(m.lines) > 0 {
 						// Check if the lines are the initial welcome message, we clear it.
-						if strings.Contains(m.lines[0], "Welcome to Little Jack") {
+						if strings.Contains(m.lines[0], "Welcome to JCODE") {
 							m.lines = nil
 						}
 					}
@@ -1420,7 +1429,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		inputWidth := msg.Width - 6
+
+		// Determine if sidebar will be shown (based on width)
+		m.showSidebar = m.width >= minWidthForSidebar && len(m.lines) > 0
+		mainWidth := m.width
+		if m.showSidebar {
+			mainWidth = m.width - sidebarWidth - 1
+		}
+
+		inputWidth := mainWidth - 6
 		if inputWidth < 20 {
 			inputWidth = 20
 		}
@@ -1428,11 +1445,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 		vpH := m.calcViewportHeight(m.inputActive())
 		if !m.ready {
-			m.viewport = viewport.New(viewport.WithWidth(msg.Width), viewport.WithHeight(vpH))
-
+			m.viewport = viewport.New(viewport.WithWidth(mainWidth), viewport.WithHeight(vpH))
 			m.ready = true
 		} else {
-			m.viewport.SetWidth(msg.Width)
+			m.viewport.SetWidth(mainWidth)
 			m.viewport.SetHeight(vpH)
 		}
 		m.dirList.SetSize(msg.Width, vpH)
@@ -1526,7 +1542,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				m.cmdSuggestions = nil
 				m.cmdSuggestionIndex = 0
 
-				if len(m.lines) > 0 && strings.Contains(m.lines[0], "Welcome to Little Jack") {
+				if len(m.lines) > 0 && strings.Contains(m.lines[0], "Welcome to JCODE") {
 					m.lines = nil
 				}
 
@@ -2175,13 +2191,12 @@ func (m Model) inputAreaHeight() int {
 }
 
 func (m Model) calcViewportHeight(_ ...bool) int {
-	headerHeight := 3
 	footerHeight := m.inputAreaHeight()
 	teamPanelHeight := 0
 	if m.teamState.HasTeam() && m.teamState.PanelVisible {
 		teamPanelHeight = m.teamPanelHeight()
 	}
-	h := m.height - headerHeight - footerHeight - teamPanelHeight
+	h := m.height - footerHeight - teamPanelHeight
 	if h < 3 {
 		h = 3
 	}
@@ -2245,25 +2260,14 @@ func (m Model) View() tea.View {
 		return m.newView(m.exitDialogView())
 	}
 
-	headerText := "🚀 Little Jack — Coding Assistant  |  "
-	if m.envLabel == "Local" || m.envLabel == "local" || m.envLabel == "" {
-		headerText += "🖥️  Env: Local"
-	} else {
-		headerText += "🔗 Env: SSH (" + m.envLabel + ")"
-	}
-	// Add team status pill to header
-	if m.teamState.HasTeam() {
-		m.teamState.RefreshTeammates()
-		pill := RenderTeamStatusPill(len(m.teamState.Teammates))
-		if pill != "" {
-			headerText += "  " + pill
-		}
-	}
-	header := titleStyle.Render(headerText)
-	headerLine := divider(m.width)
-	headerHeight := lipgloss.Height(header) + lipgloss.Height(headerLine)
+	// ─── Determine sidebar visibility (local, don't modify Model in View) ───
+	showSidebar := m.width >= minWidthForSidebar
 
-	// Team coordinator panel
+	// ─── Footer (input area) — always full width ───
+	footer := m.inputAreaView()
+	footerHeight := lipgloss.Height(footer)
+
+	// ─── Team coordinator panel ───
 	teamPanel := ""
 	teamPanelHeight := 0
 	if m.teamState.HasTeam() && m.teamState.PanelVisible {
@@ -2271,14 +2275,20 @@ func (m Model) View() tea.View {
 		teamPanelHeight = lipgloss.Height(teamPanel)
 	}
 
-	footer := m.inputAreaView()
-	footerHeight := lipgloss.Height(footer)
+	// ─── Calculate main content area dimensions ───
+	mainWidth := m.width
+	if showSidebar {
+		mainWidth = m.width - sidebarWidth - 1 // -1 for gap
+	}
 
+	// ─── Viewport ───
+	vpH := m.height - footerHeight - teamPanelHeight
+	if vpH < 3 {
+		vpH = 3
+	}
 	if m.ready {
-		m.viewport.SetHeight(m.height - headerHeight - footerHeight - teamPanelHeight)
-		if m.viewport.Height() < 3 {
-			m.viewport.SetHeight(3)
-		}
+		m.viewport.SetWidth(mainWidth)
+		m.viewport.SetHeight(vpH)
 		m.viewport.SetContent(strings.TrimRight(m.renderContent(), "\n"))
 	}
 
@@ -2286,13 +2296,92 @@ func (m Model) View() tea.View {
 	if m.hasSelection || m.mouseSelecting {
 		vpView = m.applySelectionHighlight(vpView)
 	}
-	parts := []string{header, headerLine, vpView}
+
+	// ─── Assemble layout ───
+	if showSidebar {
+		// Two-column layout
+		sidebar := m.renderSidebar(vpH)
+		contentRow := lipgloss.JoinHorizontal(lipgloss.Top, vpView, sidebar)
+		parts := []string{contentRow}
+		if teamPanel != "" {
+			parts = append(parts, teamPanel)
+		}
+		parts = append(parts, footer)
+		mainView := lipgloss.JoinVertical(lipgloss.Left, parts...)
+		return m.newView(mainView)
+	}
+
+	// Single-column fallback
+	parts := []string{vpView}
 	if teamPanel != "" {
 		parts = append(parts, teamPanel)
 	}
 	parts = append(parts, footer)
 	mainView := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	return m.newView(mainView)
+}
+
+// landingPageView renders the Google-style landing page (centered logo + input).
+func (m Model) landingPageView() string {
+	bracketStyle := lipgloss.NewStyle().Foreground(colorMuted).Bold(true)
+	jStyle := lipgloss.NewStyle().Foreground(colorLogoJ).Bold(true)
+	codeStyle := lipgloss.NewStyle().Foreground(colorText).Bold(true)
+	logo := lipgloss.JoinHorizontal(lipgloss.Center,
+		bracketStyle.Render("["),
+		jStyle.Render("J"),
+		codeStyle.Render("CODE"),
+		bracketStyle.Render("]"),
+	)
+	underline := landingUnderlineStyle.Render("═════════════")
+	tagline := landingTaglineStyle.Render("coding assistant")
+
+	// Calculate vertical centering
+	footer := m.inputAreaView()
+	footerHeight := lipgloss.Height(footer)
+	contentHeight := lipgloss.Height(logo) + lipgloss.Height(underline) + lipgloss.Height(tagline)
+	topPad := (m.height - contentHeight - footerHeight) / 2
+	if topPad < 0 {
+		topPad = 0
+	}
+
+	parts := []string{
+		strings.Repeat("\n", topPad),
+		lipgloss.PlaceHorizontal(m.width, lipgloss.Center, logo),
+		lipgloss.PlaceHorizontal(m.width, lipgloss.Center, underline),
+		lipgloss.PlaceHorizontal(m.width, lipgloss.Center, tagline),
+	}
+	parts = append(parts, footer)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+// renderSidebar renders the right sidebar panel.
+func (m Model) renderSidebar(height int) string {
+	if m.sidebarComp == nil {
+		m.sidebarComp = NewSidebarComponent()
+	}
+	var todos []tools.TodoItem
+	if m.todoStore != nil {
+		todos = m.todoStore.Items()
+	}
+	activeTokens := m.totalTokens
+	if m.teamState.ViewingAgent != "" {
+		activeTokens = m.teammateTokens[m.teamState.ViewingAgent]
+	}
+	return m.sidebarComp.View(SidebarState{
+		Width:             sidebarWidth - 4, // content width: total - leftBorder - leftPad - rightPad - rightBorder
+		Height:            height,
+		TotalWidth:        sidebarWidth,
+		EnvLabel:          m.envLabel,
+		ActiveProvider:    m.activeProvider,
+		ActiveModel:       m.activeModel,
+		TotalTokens:       activeTokens,
+		ModelContextLimit: m.modelContextLimit,
+		TodoItems:         todos,
+		TodoScrollOffset:  m.sidebarScrollOffset,
+		MCPStatuses:       m.mcpStatuses,
+		TeammateCount:     len(m.teamState.Teammates),
+		BgRunning:         m.bgRunning,
+	})
 }
 
 // refreshViewport recalculates viewport height, updates content and scrolls to bottom.
@@ -2466,6 +2555,13 @@ func RunTUI(hasPrompt bool, pwd string, todoStore *tools.TodoStore, opts ...Mode
 }
 
 func HeaderView() string {
-	return lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).
-		Render("🚀 Little Jack — Coding Assistant")
+	bracketStyle := lipgloss.NewStyle().Foreground(colorMuted).Bold(true)
+	jStyle := lipgloss.NewStyle().Foreground(colorLogoJ).Bold(true)
+	codeStyle := lipgloss.NewStyle().Foreground(colorText).Bold(true)
+	return lipgloss.JoinHorizontal(lipgloss.Left,
+		bracketStyle.Render("["),
+		jStyle.Render("J"),
+		codeStyle.Render("CODE"),
+		bracketStyle.Render("]"),
+	)
 }
