@@ -474,7 +474,7 @@ func (m SetupModel) View() tea.View {
 		w = 80
 	}
 
-	logo := lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render("🚀 Little Jack — Setup")
+	logo := lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render("▓▒░ JCODE — Setup ░▒▓")
 	subtitle := lipgloss.NewStyle().Foreground(colorMuted).Italic(true).Render("Follow the wizard to configure your LLM")
 	header := lipgloss.JoinVertical(lipgloss.Center, logo, subtitle)
 	header = lipgloss.NewStyle().Width(w).Align(lipgloss.Center).PaddingTop(2).PaddingBottom(1).Render(header)

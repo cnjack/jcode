@@ -145,7 +145,7 @@ install_ripgrep_from_github() {
 
 main() {
     printf "\n"
-    info "  Little Jack — Coding Assistant Installer"
+    info "  JCODE — Coding Assistant Installer"
     printf "\n"
 
     OS=$(detect_os)

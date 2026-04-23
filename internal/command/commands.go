@@ -17,15 +17,28 @@ import (
 )
 
 func printVersion() {
-	fmt.Printf("Little Jack — Coding Assistant\n")
+	fmt.Printf("JCODE — Coding Assistant\n")
 	fmt.Printf("Version:    %s\n", Version)
 	fmt.Printf("Build time: %s\n", BuildTime)
 	fmt.Printf("Git commit: %s\n", GitCommit)
 }
 
 func runDoctorMode() {
+	// ANSI color codes for [JCODE] logo
+	orange := "\033[1;38;2;255;132;0m"
+	gray := "\033[38;2;107;114;128m"
+	reset := "\033[0m"
+	logo := fmt.Sprintf("%s[%s%sJ%s%sCODE%s%s]%s", gray, reset, orange, reset, gray, reset, gray, reset)
+	// Visible width of "[JCODE]" is 7; pad manually to align the box border.
+	visibleWidth := 7 // len("[JCODE]")
+	padding := 35 - visibleWidth
+	if padding < 0 {
+		padding = 0
+	}
+
 	fmt.Println("┌─────────────────────────────────────┐")
-	fmt.Println("│  Little Jack — Coding Assistant      │")
+	fmt.Printf("│  %s%s│\n", logo, fmt.Sprintf("%*s", padding, ""))
+	fmt.Println("│  ─────────────────────────────────  │")
 	fmt.Printf("│  Version:    %-23s│\n", Version)
 	fmt.Printf("│  Build time: %-23s│\n", BuildTime)
 	fmt.Printf("│  Git commit: %-23s│\n", GitCommit)
