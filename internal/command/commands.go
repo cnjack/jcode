@@ -29,9 +29,15 @@ func runDoctorMode() {
 	gray := "\033[38;2;107;114;128m"
 	reset := "\033[0m"
 	logo := fmt.Sprintf("%s[%s%sJ%s%sCODE%s%s]%s", gray, reset, orange, reset, gray, reset, gray, reset)
+	// Visible width of "[JCODE]" is 7; pad manually to align the box border.
+	visibleWidth := 7 // len("[JCODE]")
+	padding := 35 - visibleWidth
+	if padding < 0 {
+		padding = 0
+	}
 
 	fmt.Println("┌─────────────────────────────────────┐")
-	fmt.Printf("│  %-35s│\n", logo)
+	fmt.Printf("│  %s%s│\n", logo, fmt.Sprintf("%*s", padding, ""))
 	fmt.Println("│  ─────────────────────────────────  │")
 	fmt.Printf("│  Version:    %-23s│\n", Version)
 	fmt.Printf("│  Build time: %-23s│\n", BuildTime)
