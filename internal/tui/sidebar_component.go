@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/cnjack/jcode/internal/tools"
@@ -86,24 +87,26 @@ func (s *SidebarComponent) View(state SidebarState) string {
 		lines = append(lines, "")
 	}
 
-	// Manually build the sidebar with left border only.
-	// Each line is padded to fill the content width.
-	contentWidth := state.TotalWidth - 2 // "│ "
+	// Build sidebar content without left border.
+	// The border ("│ ") is rendered separately during layout composition
+	// to guarantee alignment regardless of content width calculation.
+	contentWidth := state.TotalWidth - 2 // reserve for "│ " added externally
 	if contentWidth < 10 {
 		contentWidth = 10
 	}
 
 	var result strings.Builder
 	for i, line := range lines {
-		result.WriteString("│ ")
-		result.WriteString(line)
-		// Pad with spaces to fill width
-		w := lipgloss.Width(line)
-		pad := contentWidth - w
-		if pad < 0 {
-			pad = 0
+		// Use ansi.StringWidth for precise ANSI-aware measurement
+		w := ansi.StringWidth(line)
+		if w > contentWidth {
+			line = ansi.Truncate(line, contentWidth, "")
+			w = ansi.StringWidth(line)
 		}
-		result.WriteString(strings.Repeat(" ", pad))
+		result.WriteString(line)
+		if w < contentWidth {
+			result.WriteString(strings.Repeat(" ", contentWidth-w))
+		}
 		if i < len(lines)-1 {
 			result.WriteString("\n")
 		}
