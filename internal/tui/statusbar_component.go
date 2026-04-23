@@ -33,16 +33,10 @@ func NewStatusBarComponent() *StatusBarComponent {
 
 // View returns the rendered status bar.
 func (s *StatusBarComponent) View(state StatusBarState) string {
-	// Mode indicator (leftmost)
-	var modeStr string
-	switch state.Mode {
-	case ModePlanning:
-		modeStr = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("99")).Render(" Plan")
-	default:
-		modeStr = lipgloss.NewStyle().Bold(true).Foreground(colorSecondary).Render(" Agent")
-	}
+	// Note: Mode indicator (Agent/Plan) is now shown in mode pills above input.
+	// This status bar is only used in narrow-screen fallback mode.
 
-	leftTxt := modeStr + "  │  Model: "
+	leftTxt := "Model: "
 	if state.ActiveProvider != "" {
 		leftTxt += state.ActiveProvider + " / " + state.ActiveModel
 	} else {

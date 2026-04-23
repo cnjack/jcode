@@ -124,16 +124,13 @@ func (m *Model) updateSuggestions() {
 func (m Model) inputAreaView() string {
 	var parts []string
 
-	// Show todo bar (compact) unless a bottom prompt needs the space
-	if m.todoStore != nil && m.todoStore.HasItems() {
-		todoLine := m.renderTodoBar()
-		if todoLine != "" {
-			parts = append(parts, todoLine)
-		}
-	}
+	// Determine sidebar visibility locally
+	showSidebar := m.width >= minWidthForSidebar && len(m.lines) > 0
 
-	parts = append(parts, divider(m.width))
+	// 1. Mode pills line (Agent/Plan + Ask/Auto)
+	parts = append(parts, m.renderModePills())
 
+	// 2. Input content: textarea or special prompts
 	switch {
 	case m.planReviewActive:
 		parts = append(parts, m.planReviewPromptView())
@@ -146,32 +143,19 @@ func (m Model) inputAreaView() string {
 				parts = append(parts, suggestionView)
 			}
 		}
-		parts = append(parts, lipgloss.NewStyle().PaddingLeft(1).PaddingRight(2).Render(strings.TrimRight(m.textarea.View(), "\n")))
+		// Clean textarea — no background, no border, with subtle vertical padding
+		taView := strings.TrimRight(m.textarea.View(), "\n")
+		parts = append(parts, lipgloss.NewStyle().PaddingTop(1).PaddingBottom(1).Render(taView))
 	}
 
-	parts = append(parts, divider(m.width))
-
-	// Render StatusBar using StatusBarComponent
-	sbComp := NewStatusBarComponent()
-	teammateCount := len(m.teamState.Teammates)
-	activeTokens := m.totalTokens
-	if m.teamState.ViewingAgent != "" {
-		activeTokens = m.teammateTokens[m.teamState.ViewingAgent]
+	// 3. Status bar (minimal for wide screen, fallback for narrow)
+	if showSidebar {
+		if status := m.renderMinimalStatusBar(); status != "" {
+			parts = append(parts, status)
+		}
+	} else {
+		parts = append(parts, m.renderFallbackStatusBar())
 	}
-	statusLine := sbComp.View(StatusBarState{
-		Width:             m.width,
-		ActiveProvider:    m.activeProvider,
-		ActiveModel:       m.activeModel,
-		AutoApprove:       m.approvalMode == ModeAuto,
-		TotalTokens:       activeTokens,
-		ModelContextLimit: m.modelContextLimit,
-		MCPStatuses:       m.mcpStatuses,
-		Mode:              m.agentMode,
-		BgRunning:         m.bgRunning,
-		TeammateCount:     teammateCount,
-		CopyNotice:        m.copyNotice,
-	})
-	parts = append(parts, statusLine)
 
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
@@ -358,4 +342,88 @@ func (m Model) handleSkillSlashInput(skillName, userInput string, cmds []tea.Cmd
 	})
 	cmds = append(cmds, m.spinner.Tick)
 	return m, tea.Batch(cmds...)
+}
+
+// renderModePills renders the Agent/Plan + Ask/Auto mode indicator line above the input.
+func (m Model) renderModePills() string {
+	// Mode pill (Agent / Plan)
+	var modePill string
+	switch m.agentMode {
+	case ModePlanning:
+		modePill = modePillPlanStyle.Render(" Plan ")
+	default:
+		modePill = modePillAgentStyle.Render(" Agent ")
+	}
+
+	// Approve pill (Ask / Auto)
+	var approvePill string
+	if m.approvalMode == ModeAuto {
+		approvePill = modePillAutoStyle.Render(" Auto ")
+	} else {
+		approvePill = modePillAskStyle.Render(" Ask ")
+	}
+
+	separator := modeSeparatorStyle.Render("·")
+	leftPart := modePill + " " + separator + " " + approvePill + " "
+	leftW := lipgloss.Width(leftPart)
+
+	// Fill remaining width with dashes
+	fillWidth := m.width - leftW
+	if fillWidth < 0 {
+		fillWidth = 0
+	}
+	fill := modeFillStyle.Render(strings.Repeat("─", fillWidth))
+
+	return leftPart + fill
+}
+
+// renderMinimalStatusBar renders a minimal status bar for wide-screen mode (sidebar visible).
+// Only shows copy notice and background tasks. Returns empty string when nothing to show.
+func (m Model) renderMinimalStatusBar() string {
+	var parts []string
+	if m.copyNotice != "" {
+		parts = append(parts, lipgloss.NewStyle().Foreground(colorSuccess).Italic(true).Render(m.copyNotice))
+	}
+	if m.bgRunning > 0 {
+		parts = append(parts, lipgloss.NewStyle().Foreground(colorWarning).Render(fmt.Sprintf("⏳ %d background", m.bgRunning)))
+	}
+	if m.teamState.HasTeam() {
+		parts = append(parts, RenderTeamStatusPill(len(m.teamState.Teammates)))
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	txt := strings.Join(parts, " │ ")
+	txtW := lipgloss.Width(txt)
+	fillW := m.width - txtW - 2
+	if fillW < 0 {
+		fillW = 0
+	}
+	fill := minimalStatusBarStyle.Render(strings.Repeat("─", fillW))
+	return fill + " " + txt
+}
+
+// renderFallbackStatusBar renders a full status bar for narrow-screen mode (no sidebar).
+func (m Model) renderFallbackStatusBar() string {
+	sbComp := NewStatusBarComponent()
+	teammateCount := len(m.teamState.Teammates)
+	activeTokens := m.totalTokens
+	if m.teamState.ViewingAgent != "" {
+		activeTokens = m.teammateTokens[m.teamState.ViewingAgent]
+	}
+	return sbComp.View(StatusBarState{
+		Width:             m.width,
+		ActiveProvider:    m.activeProvider,
+		ActiveModel:       m.activeModel,
+		AutoApprove:       m.approvalMode == ModeAuto,
+		TotalTokens:       activeTokens,
+		ModelContextLimit: m.modelContextLimit,
+		MCPStatuses:       m.mcpStatuses,
+		Mode:              m.agentMode,
+		BgRunning:         m.bgRunning,
+		TeammateCount:     teammateCount,
+		CopyNotice:        m.copyNotice,
+	})
 }

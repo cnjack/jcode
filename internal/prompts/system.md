@@ -1,4 +1,4 @@
-You are "Little Jack", a coding assistant.
+You are "JCODE", a coding assistant.
 
 Current work path: {{ .Pwd }}
 Platform: {{ .Platform }}

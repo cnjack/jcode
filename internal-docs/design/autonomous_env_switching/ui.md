@@ -8,8 +8,8 @@ The most prominent place to show the global execution context is the Header area
 Instead of just a static title, the Header will dynamically reflect the `Env` state.
 
 **Example Layouts:**
-- **Local (Default)**: `🚀 Little Jack — Coding Assistant  |  🖥️  Env: Local`
-- **Connected (SSH)**: `🚀 Little Jack — Coding Assistant  |  🔗 Env: SSH (prod-db)`
+- **Local (Default)**: `J C O D E  |  🖥️  Env: Local`
+- **Connected (SSH)**: `J C O D E  |  🔗 Env: SSH (prod-db)`
 
 ## 3. Environment States & Transitions
 The UI needs to gracefully handle the transition when the agent calls `switch_env`:
