@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added `design/jcode.pen`, the source design file for the current jcode visual design.
+
+## [0.3.6] - 2026-04-24
+
+### Changed
+- Removed the redundant `build_frontend.sh` helper; frontend builds are now handled by the Makefile workflow.
+
+### Fixed
+- Reworked TUI main/sidebar composition to render the divider column independently with ANSI-aware truncation and width padding, keeping the vertical rule aligned under styled or wide-character content.
+- Fixed teammate lifecycle management so spawned teammates are no longer cancelled when the leader agent's current run finishes.
+
+## [0.3.5] - 2026-04-23
+
+### Added
+- **TUI Redesign**
+  - New two-column TUI layout with a dedicated sidebar component and refreshed orange-accented styling.
+  - Improved sidebar truncation, spacing, and status presentation.
+- **Updated Product Visuals**
+  - Added fresh documentation screenshots for the TUI, web interface, Zed ACP flow, and agent teams.
+  - Added `DESIGN_PLAN.md` to capture the redesigned product direction.
+
+### Changed
+- Updated branding across docs, icons, and UI components to `[J]CODE`.
+- Improved web session restoration to preserve current session content alongside session identifiers.
+- Removed the copy notice prompt and tightened sidebar spacing in the redesigned TUI.
+- Refreshed documentation to match the redesigned product surfaces.
+
+### Removed
+- Deleted an obsolete PR artifact file from the repository.
+
+## [0.3.4] - 2026-04-22
+
+### Added
+- **Bidirectional BLE Control**
+  - Added bidirectional BLE communication so JCODE BLE devices can send commands back to the agent runtime.
+
+### Changed
+- Made `/resume` behave consistently with the `--resume` CLI flag across entry points.
+
+### Fixed
+- Fixed ACP tool-call approval rejection when multiple tool calls are pending in the same turn.
+- Applied ACP handler stability and review fixes across approval and session flows.
+
+## [0.3.3] - 2026-04-21
+
+### Added
+- **Tool Display and Session UX Polish**
+  - Refined tool call display, session resume flow, and UI polish across TUI and web.
+  - Added stronger session ID validation and improved message history reconstruction on restore.
+
+### Changed
+- Execute tool output now strips the `STDERR` header unconditionally and supports optional descriptions.
+- Improved tool call cards, approval surfaces, and settings/session UI consistency in web and TUI.
+
+### Fixed
+- Fixed duplicated session identifiers and resume bugs across web, ACP, and TUI.
+- Fixed formatting in session ID validation logic.
+- Fixed message history reconstruction when restoring existing sessions.
+
 ## [0.3.2] - 2026-04-20
 
 ### Added
@@ -157,6 +217,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Session history reconstruction now handles tool call and tool result message types
 - Middleware stack improved for nested tracing with proper span nesting
 
+## [0.0.5] - 2026-04-16
+
+### Added
+- **Changelog and Tool Call Traceability**
+  - Added repository and docs-site changelog pages.
+  - Added `toolCallID` propagation and indexed tool notifications for clearer tool/result pairing.
+- Added a PR description guidance template for contributors.
+
+### Changed
+- Improved error handling and logging around tool execution, handlers, and web session updates.
+- Updated project documentation and AGENTS guidance.
+- Bumped DOMPurify to 3.4.0.
+
+### Fixed
+- Execute tool now reports command exit codes cleanly even when the command itself fails.
+
+## [0.0.4] - 2026-04-16
+
+### Added
+- **TUI and Session Recording Improvements**
+  - Improved TUI display and session recording flow.
+  - Added `Recorder.HasRecording()` and startup checks for existing recordings.
+- **Langfuse Tracing Improvements**
+  - Updated Langfuse integration with improved tracing capabilities for interactive runs, subagents, and teammates.
+
+### Changed
+- Refined runner, session history, and interactive startup plumbing for recorded sessions.
+- Stopped tracking generated model registry output in version control.
+
+### Fixed
+- Updated runtime dependencies for improved compatibility and telemetry behavior.
+
 ## [0.0.3] - 2026-04-10
 
 ### Added
@@ -188,9 +280,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-agent token usage tracking
 - WebSocket support for real-time communication
 
-[Unreleased]: https://github.com/cnjack/jcode/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/cnjack/jcode/compare/v0.3.6...HEAD
+[0.3.6]: https://github.com/cnjack/jcode/compare/v0.3.5...v0.3.6
+[0.3.5]: https://github.com/cnjack/jcode/compare/v0.3.4...v0.3.5
+[0.3.4]: https://github.com/cnjack/jcode/compare/v0.3.3...v0.3.4
+[0.3.3]: https://github.com/cnjack/jcode/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/cnjack/jcode/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/cnjack/jcode/compare/v0.2.2...v0.3.1
+[0.2.2]: https://github.com/cnjack/jcode/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/cnjack/jcode/compare/v0.1.1...v0.2.1
+[0.1.1]: https://github.com/cnjack/jcode/compare/v0.0.5...v0.1.1
+[0.0.5]: https://github.com/cnjack/jcode/compare/v0.0.4...v0.0.5
+[0.0.4]: https://github.com/cnjack/jcode/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/cnjack/jcode/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/cnjack/jcode/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/cnjack/jcode/releases/tag/v0.0.1
