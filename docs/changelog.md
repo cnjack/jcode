@@ -9,7 +9,79 @@ All notable changes to jcode are documented here. This project adheres to [Seman
 
 For the **full changelog**, see [CHANGELOG.md](../CHANGELOG.md) in the repository root.
 
+## Unreleased
+
+### In Development
+
+#### Added
+- Added `design/jcode.pen`, the source design file for the current jcode visual design.
+
+---
+
 ## Latest Release
+
+### [0.3.6] - 2026-04-24
+
+**Sidebar Divider Alignment • Stable Team Teammates • Build Cleanup**
+
+#### Changed
+- Removed the redundant `build_frontend.sh` helper; frontend builds now flow through `make`.
+
+#### Fixed
+- TUI sidebar divider alignment is now enforced with manual line-by-line composition and ANSI-aware truncation/padding.
+- Spawned teammates are no longer cancelled when the leader agent finishes its current run.
+
+---
+
+### [0.3.5] - 2026-04-23
+
+**TUI Redesign • [J]CODE Branding • Updated Screenshots and Docs**
+
+#### Added
+- New two-column TUI layout with a dedicated sidebar and refreshed orange-accented styling.
+- Updated screenshots for TUI, web interface, Zed ACP integration, and agent teams.
+- Added `DESIGN_PLAN.md` to capture the redesigned product direction.
+
+#### Changed
+- Rebranded docs, icons, and UI surfaces to `[J]CODE`.
+- Improved web session restoration to preserve current session content.
+- Removed the copy notice and tightened sidebar spacing in the redesigned TUI.
+
+---
+
+### [0.3.4] - 2026-04-22
+
+**Bidirectional BLE • ACP Approval Fixes • Resume Consistency**
+
+#### Added
+- Bidirectional BLE communication support so BLE devices can send commands back into the runtime.
+
+#### Changed
+- `/resume` now behaves consistently with the `--resume` CLI flag.
+
+#### Fixed
+- ACP tool-call approval rejection now works correctly when multiple tool calls are pending.
+- Additional ACP handler review fixes improved approval/session stability.
+
+---
+
+### [0.3.3] - 2026-04-21
+
+**Tool Display Polish • Session UX Improvements • Resume Bug Fixes**
+
+#### Added
+- Refined tool call display and session UX across TUI and web.
+- Stronger session ID validation and better message history reconstruction.
+
+#### Changed
+- Execute tool output now strips redundant `STDERR` headers and supports optional descriptions.
+- Tool call cards, approval surfaces, and settings/session UI were polished across interfaces.
+
+#### Fixed
+- Resume/session ID bugs were resolved across web, ACP, and TUI.
+- Message history reconstruction is more reliable when restoring sessions.
+
+---
 
 ### [0.3.2] - 2026-04-20
 
@@ -136,6 +208,39 @@ For the **full changelog**, see [CHANGELOG.md](../CHANGELOG.md) in the repositor
 
 ---
 
+### [0.0.5] - 2026-04-16
+
+**Changelog Pages • Tool Call IDs • Execute Exit-Code Handling**
+
+#### Added
+- Root and docs-site changelog pages.
+- `toolCallID` propagation and indexed tool notifications for clearer tool/result pairing.
+- PR description guidance template for contributors.
+
+#### Changed
+- Documentation and AGENTS guidance were refreshed.
+- DOMPurify bumped to 3.4.0.
+
+#### Fixed
+- Execute tool reports command exit codes cleanly even when the command fails.
+
+---
+
+### [0.0.4] - 2026-04-16
+
+**TUI Recording Flow • Langfuse Tracing Updates**
+
+#### Added
+- Improved TUI display and session recording flow.
+- `Recorder.HasRecording()` and startup checks for existing recordings.
+- Better Langfuse tracing for interactive runs, subagents, and teammates.
+
+#### Changed
+- Runner and interactive startup plumbing were refined for recorded sessions.
+- Generated model registry output stopped being tracked in version control.
+
+---
+
 ## Version History
 
 ### [0.0.3] - 2026-04-10
@@ -217,7 +322,7 @@ Use the full [CHANGELOG.md](../CHANGELOG.md) to see detailed changes for each re
 
 This section will document any breaking changes that may affect your workflow:
 
-**Currently:** No breaking changes between v0.0.1 and v0.0.4.
+**Currently:** No breaking changes between v0.0.1 and v0.3.6.
 
 All releases maintain backward compatibility with existing configurations and workflows.
 
@@ -230,4 +335,4 @@ All releases maintain backward compatibility with existing configurations and wo
 
 ---
 
-*Last updated: April 20, 2026*
+*Last updated: April 24, 2026*
