@@ -204,7 +204,7 @@ func (m *Manager) SpawnTeammate(ctx context.Context, cfg SpawnConfig) (string, e
 		childEnv = m.deps.EnvFactory(cwd)
 	}
 
-	childCtx, cancel := context.WithCancel(ctx)
+	childCtx, cancel := context.WithCancel(context.Background())
 	childCtx = WithTeammateContext(childCtx, TeammateIdentity{
 		AgentID:   agentID,
 		AgentName: cfg.Name,
