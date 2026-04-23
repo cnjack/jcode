@@ -381,9 +381,6 @@ func (m Model) renderModePills() string {
 // Only shows copy notice and background tasks. Returns empty string when nothing to show.
 func (m Model) renderMinimalStatusBar() string {
 	var parts []string
-	if m.copyNotice != "" {
-		parts = append(parts, lipgloss.NewStyle().Foreground(colorSuccess).Italic(true).Render(m.copyNotice))
-	}
 	if m.bgRunning > 0 {
 		parts = append(parts, lipgloss.NewStyle().Foreground(colorWarning).Render(fmt.Sprintf("⏳ %d background", m.bgRunning)))
 	}
@@ -424,6 +421,5 @@ func (m Model) renderFallbackStatusBar() string {
 		Mode:              m.agentMode,
 		BgRunning:         m.bgRunning,
 		TeammateCount:     teammateCount,
-		CopyNotice:        m.copyNotice,
 	})
 }

@@ -97,6 +97,8 @@ type Model struct {
 	totalTokens       int64
 	modelContextLimit int
 
+	promptStartTime time.Time // when user submitted the current prompt
+
 	pendingPrompts []string
 
 	approvalPending     bool
@@ -145,9 +147,6 @@ type Model struct {
 	// Cancel-agent confirmation
 	cancelPending  bool // true when cancel-agent dialog is showing
 	cancelSelected int  // 0=Cancel, 1=Wait
-
-	// Copy notice
-	copyNotice string
 
 	// OnApprovalModeChange is called when the user toggles approval mode via Ctrl+A.
 	// It directly updates the backend ApprovalState atomically, bypassing the event loop.
@@ -1179,8 +1178,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					// Team: route input to viewed teammate
 					if m.teamState.ViewMode == TeamViewTeammate && m.teamState.ViewingAgent != "" {
 						m.teamState.Manager.EnqueueUserMessage(m.teamState.ViewingAgent, prompt)
-						m.lines = append(m.lines, fmt.Sprintf("%s %s",
-							userLabelStyle.Render("👤 You:"), prompt))
+						m.lines = append(m.lines, userPromptStyle.Render("> "+prompt))
 						m.refreshViewport()
 						return m, tea.Batch(cmds...)
 					}
@@ -1236,8 +1234,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 					if !m.agentDone && m.thinking {
 						m.pendingPrompts = append(m.pendingPrompts, prompt)
-						m.lines = append(m.lines, fmt.Sprintf("%s %s",
-							userLabelStyle.Render("👤 You (queued):"), prompt))
+						m.lines = append(m.lines, userPromptStyle.Render("> "+prompt+" (queued)"))
 						if m.ready {
 							m.viewport.SetHeight(m.calcViewportHeight(true))
 							m.viewport.SetContent(m.renderContent())
@@ -1249,17 +1246,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.mode = ModeAgent
 					m.agentDone = false
 					m.thinking = true
+					m.promptStartTime = time.Now()
 
 					// In Plan mode, send prompt directly (agent already has plan system prompt + read-only tools).
 					actualPrompt := prompt
-					modeLabel := "👤 You:"
+					modePrefix := ">"
 					if m.agentMode == ModePlanning {
-						modeLabel = "📐 Plan:"
+						modePrefix = "📐"
 					}
 
 					m.lines = append(m.lines, "")
-					m.lines = append(m.lines, fmt.Sprintf("%s %s",
-						userLabelStyle.Render(modeLabel), prompt))
+					m.lines = append(m.lines, userPromptStyle.Render(modePrefix+" "+prompt))
 					if m.ready {
 						m.viewport.SetHeight(m.calcViewportHeight(false))
 						m.viewport.SetContent(m.renderContent())
@@ -1358,12 +1355,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				text := m.getLastAssistantText()
 				if text != "" {
 					cmds = append(cmds, tea.SetClipboard(text))
-					cmds = append(cmds, func() tea.Msg {
-						return CopyNoticeMsg{Message: "Copied to clipboard"}
-					})
-					cmds = append(cmds, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
-						return CopyNoticeTimeoutMsg{}
-					}))
 				}
 				return m, tea.Batch(cmds...)
 			case "escape":
@@ -1466,6 +1457,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		vpH := m.calcViewportHeight(m.inputActive())
 		if !m.ready {
 			m.viewport = viewport.New(viewport.WithWidth(mainWidth), viewport.WithHeight(vpH))
+			m.viewport.SoftWrap = true
 			m.ready = true
 		} else {
 			m.viewport.SetWidth(mainWidth)
@@ -1568,8 +1560,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 				if !m.agentDone && m.thinking {
 					m.pendingPrompts = append(m.pendingPrompts, prompt)
-					m.lines = append(m.lines, fmt.Sprintf("%s %s",
-						userLabelStyle.Render("👤 You (queued):"), prompt))
+					m.lines = append(m.lines, userPromptStyle.Render("> "+prompt+" (queued)"))
 					m.refreshViewport()
 					return m, tea.Batch(cmds...)
 				}
@@ -1577,15 +1568,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				m.mode = ModeAgent
 				m.agentDone = false
 				m.thinking = true
+				m.promptStartTime = time.Now()
 
-				modeLabel := "👤 You:"
+				modePrefix := ">"
 				if m.agentMode == ModePlanning {
-					modeLabel = "📐 Plan:"
+					modePrefix = "📐"
 				}
 
 				m.lines = append(m.lines, "")
-				m.lines = append(m.lines, fmt.Sprintf("%s %s",
-					userLabelStyle.Render(modeLabel), prompt))
+				m.lines = append(m.lines, userPromptStyle.Render(modePrefix+" "+prompt))
 				if m.ready {
 					m.viewport.SetHeight(m.calcViewportHeight(false))
 					m.viewport.SetContent(m.renderContent())
@@ -1638,14 +1629,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.agentDone = true
 		m.lines = nil
 		m.currentText.Reset()
+		// Clear todo and usage on resume
+		if m.todoStore != nil {
+			m.todoStore.Update(nil)
+		}
+		m.totalTokens = 0
+		m.sidebarScrollOffset = 0
 		m.lines = append(m.lines, toolLabelStyle.Render("📂 Session resumed: ")+msg.UUID)
 		m.lines = append(m.lines, "")
 		for _, e := range msg.Entries {
 			switch e.Type {
 			case string(session.EntryUser):
 				m.lines = append(m.lines, "")
-				m.lines = append(m.lines, fmt.Sprintf("%s %s",
-					userLabelStyle.Render("👤 You:"), e.Content))
+				m.lines = append(m.lines, userPromptStyle.Render("> "+e.Content))
 			case string(session.EntryAssistant):
 				if e.Content != "" {
 					rendered := e.Content
@@ -1655,7 +1651,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 						}
 					}
 					m.lines = append(m.lines, "")
-					m.lines = append(m.lines, assistantLabelStyle.Render("🤖 Assistant:"))
 					m.lines = append(m.lines, rendered)
 				}
 			case string(session.EntryToolCall):
@@ -1729,7 +1724,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				m.lines = append(m.lines, toolErrorStyle.Render("  ⚠️ Budget warning"))
 			}
 		}
-		m.lines = append(m.lines, "")
+		// Add a divider line after resumed content
+		{
+			contentW := m.width
+			if m.showSidebar {
+				contentW = m.width - sidebarWidth
+			}
+			leftMargin := 2
+			rightMargin := 2
+			dividerText := " ◇ session resumed "
+			textW := lipgloss.Width(dividerText)
+			fillW := contentW - leftMargin - rightMargin - textW
+			if fillW < 0 {
+				fillW = 0
+			}
+			line := strings.Repeat(" ", leftMargin) + lipgloss.NewStyle().Foreground(colorMuted).Render(
+				dividerText+strings.Repeat("─", fillW))
+			m.lines = append(m.lines, "")
+			m.lines = append(m.lines, line)
+			m.lines = append(m.lines, "")
+		}
 		if m.ready {
 			m.viewport.SetHeight(m.calcViewportHeight(true))
 			m.viewport.SetContent(m.renderContent())
@@ -1807,8 +1821,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 	case UserPromptMsg:
 		m.lines = append(m.lines, "")
-		m.lines = append(m.lines, fmt.Sprintf("%s %s",
-			userLabelStyle.Render("👤 You:"), sanitize(msg.Prompt)))
+		m.lines = append(m.lines, userPromptStyle.Render("> "+sanitize(msg.Prompt)))
 		m.refreshViewport()
 
 	case AgentTextMsg:
@@ -1870,6 +1883,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			} else {
 				m.lines = append(m.lines, errorStyle.Render("Error: "+msg.Err.Error()))
 			}
+		}
+		// Model info line with full-width divider (styled like "── ◇ model via provider 5s ──")
+		if m.activeModel != "" {
+			duration := time.Since(m.promptStartTime)
+			var durationStr string
+			if duration < time.Minute {
+				durationStr = fmt.Sprintf("%.0fs", duration.Seconds())
+			} else {
+				durationStr = fmt.Sprintf("%.0fm%.0fs", duration.Minutes(), duration.Seconds()-float64(int(duration.Minutes()))*60)
+			}
+			modelInfoText := fmt.Sprintf("◇ %s via %s %s ", m.activeModel, m.activeProvider, durationStr)
+			textW := lipgloss.Width(modelInfoText)
+			contentW := m.width
+			if m.showSidebar {
+				contentW = m.width - sidebarWidth
+			}
+			leftMargin := 4
+			rightMargin := 4
+			fillW := contentW - leftMargin - rightMargin - textW
+			if fillW < 0 {
+				fillW = 0
+			}
+			line := strings.Repeat(" ", leftMargin) + lipgloss.NewStyle().Foreground(colorPrimary).Render(
+				modelInfoText+strings.Repeat("─", fillW))
+			m.lines = append(m.lines, "")
+			m.lines = append(m.lines, line)
+			m.lines = append(m.lines, "")
 		}
 		m.lines = append(m.lines, "")
 		m.agentDone = true
@@ -2148,14 +2188,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			m.exitPending = false
 		}
 
-	case CopyNoticeMsg:
-		m.copyNotice = msg.Message
-		m.refreshViewport()
-
-	case CopyNoticeTimeoutMsg:
-		m.copyNotice = ""
-		m.refreshViewport()
-
 	case tea.InterruptMsg:
 		// Handle ctrl+c from non-TTY / signal handler path.
 		if m.exitPending || m.cancelPending {
@@ -2319,6 +2351,8 @@ func (m Model) View() tea.View {
 
 	// ─── Assemble layout ───
 	if showSidebar {
+		// Ensure viewport output has consistent line widths for sidebar alignment
+		vpView = lipgloss.NewStyle().Width(mainWidth).Render(vpView)
 		// Two-column layout
 		sidebar := m.renderSidebar(vpH)
 		contentRow := lipgloss.JoinHorizontal(lipgloss.Top, vpView, sidebar)
@@ -2388,7 +2422,7 @@ func (m Model) renderSidebar(height int) string {
 		activeTokens = m.teammateTokens[m.teamState.ViewingAgent]
 	}
 	return m.sidebarComp.View(SidebarState{
-		Width:             sidebarWidth - 4, // content width: total - leftBorder - leftPad - rightPad - rightBorder
+		Width:             sidebarWidth - 2, // content width: total - leftBorder - leftPad
 		Height:            height,
 		TotalWidth:        sidebarWidth,
 		EnvLabel:          m.envLabel,
@@ -2436,28 +2470,32 @@ func (m *Model) getLastAssistantText() string {
 	if m.currentText.Len() > 0 {
 		return m.currentText.String()
 	}
-	// Scan backwards for the last "🤖 Assistant:" label, collect text until next label
+	// Scan backwards from the end, collecting text until we hit a boundary
+	// (user prompt, tool call, or other structural marker)
+	var textLines []string
 	for i := len(m.lines) - 1; i >= 0; i-- {
-		if strings.Contains(m.lines[i], "🤖 Assistant:") {
-			var textLines []string
-			for j := i + 1; j < len(m.lines); j++ {
-				line := m.lines[j]
-				// Stop at next role label or tool call
-				if strings.Contains(line, "👤 You:") ||
-					strings.Contains(line, "🤖 Assistant:") ||
-					strings.Contains(line, toolIconRunning) ||
-					strings.Contains(line, toolIconSuccess) ||
-					strings.Contains(line, toolIconError) {
-					break
-				}
-				if line != "" {
-					textLines = append(textLines, line)
-				}
-			}
-			return strings.Join(textLines, "\n")
+		line := m.lines[i]
+		// Stop at user prompt (contains orange background ANSI), tool icons, or other boundaries
+		if strings.Contains(line, toolIconRunning) ||
+			strings.Contains(line, toolIconSuccess) ||
+			strings.Contains(line, toolIconError) ||
+			strings.Contains(line, "Session resumed:") ||
+			strings.Contains(line, "Subagent:") {
+			break
+		}
+		// Detect user prompt line (rendered with background color via userPromptStyle)
+		if strings.Contains(line, "\x1b[") && strings.Contains(line, "> ") && strings.Contains(line, "48;2;") {
+			break
+		}
+		if line != "" {
+			textLines = append(textLines, line)
 		}
 	}
-	return ""
+	// Reverse since we scanned backwards
+	for i, j := 0, len(textLines)-1; i < j; i, j = i+1, j-1 {
+		textLines[i], textLines[j] = textLines[j], textLines[i]
+	}
+	return strings.Join(textLines, "\n")
 }
 
 func (m *Model) flushText() {
@@ -2473,7 +2511,6 @@ func (m *Model) flushText() {
 		}
 	}
 	m.lines = append(m.lines, "")
-	m.lines = append(m.lines, assistantLabelStyle.Render("🤖 Assistant:"))
 	m.lines = append(m.lines, rendered)
 }
 
@@ -2484,8 +2521,6 @@ func (m *Model) renderContent() string {
 		sb.WriteString("\n")
 	}
 	if m.currentText.Len() > 0 {
-		sb.WriteString("\n")
-		sb.WriteString(assistantLabelStyle.Render("🤖 Assistant:"))
 		sb.WriteString("\n")
 		sb.WriteString(m.currentText.String())
 		sb.WriteString("\n")

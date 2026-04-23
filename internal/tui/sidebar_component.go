@@ -55,19 +55,23 @@ func (s *SidebarComponent) View(state SidebarState) string {
 	}
 
 	addLines(s.renderLogo())
+	addLines("") // spacing after logo
 	if state.ActiveProvider != "" && len(lines) < maxLines {
 		addLines(s.renderModelSection(state))
 	}
 	if len(lines) < maxLines {
+		addLines("") // spacing before env
 		addLines(s.renderEnvSection(state))
 	}
 	if (state.TotalTokens > 0 || state.ModelContextLimit > 0) && len(lines) < maxLines {
+		addLines("") // spacing before usage
 		addLines(s.renderUsageSection(state))
 	}
 	if len(state.TodoItems) > 0 && len(lines) < maxLines {
 		addLines(s.renderTodoSection(state))
 	}
 	if len(state.MCPStatuses) > 0 && len(lines) < maxLines {
+		addLines("") // spacing before MCP
 		addLines(s.renderMCPSection(state))
 	}
 	if state.BgRunning > 0 && len(lines) < maxLines {
@@ -82,9 +86,9 @@ func (s *SidebarComponent) View(state SidebarState) string {
 		lines = append(lines, "")
 	}
 
-	// Manually build the sidebar with left+right borders.
-	// Each line is padded so the right "│" aligns perfectly.
-	contentWidth := state.TotalWidth - 4 // "│ " and " │"
+	// Manually build the sidebar with left border only.
+	// Each line is padded to fill the content width.
+	contentWidth := state.TotalWidth - 2 // "│ "
 	if contentWidth < 10 {
 		contentWidth = 10
 	}
@@ -93,14 +97,13 @@ func (s *SidebarComponent) View(state SidebarState) string {
 	for i, line := range lines {
 		result.WriteString("│ ")
 		result.WriteString(line)
-		// Pad with spaces so right border aligns
+		// Pad with spaces to fill width
 		w := lipgloss.Width(line)
 		pad := contentWidth - w
 		if pad < 0 {
 			pad = 0
 		}
 		result.WriteString(strings.Repeat(" ", pad))
-		result.WriteString(" │")
 		if i < len(lines)-1 {
 			result.WriteString("\n")
 		}
@@ -229,21 +232,23 @@ func (s *SidebarComponent) renderMCPSection(state SidebarState) string {
 	var lines []string
 	lines = append(lines, title)
 
-	activeServers := 0
-	loadedTools := 0
-	for _, st := range state.MCPStatuses {
-		if st.Running {
-			activeServers++
-			loadedTools += st.ToolCount
-		}
-	}
+	connectedStyle := lipgloss.NewStyle().Foreground(colorSuccess)
+	disconnectedStyle := lipgloss.NewStyle().Foreground(colorMuted)
 
-	if activeServers > 0 {
-		status := sidebarValueStyle.Render(fmt.Sprintf("● %d server%s, %d tool%s",
-			activeServers, plural(activeServers), loadedTools, plural(loadedTools)))
-		lines = append(lines, status)
-	} else {
-		lines = append(lines, sidebarValueStyle.Render("○ inactive"))
+	for _, st := range state.MCPStatuses {
+		var statusDot, serverLine string
+		if st.Running {
+			statusDot = connectedStyle.Render("●")
+			serverLine = fmt.Sprintf("  %s %s (%d tool%s)", statusDot, st.Name, st.ToolCount, plural(st.ToolCount))
+		} else {
+			statusDot = disconnectedStyle.Render("●")
+			errInfo := ""
+			if st.ErrMsg != "" {
+				errInfo = " - " + truncateString(st.ErrMsg, 15)
+			}
+			serverLine = fmt.Sprintf("  %s %s%s", statusDot, st.Name, errInfo)
+		}
+		lines = append(lines, sidebarValueStyle.Render(serverLine))
 	}
 
 	return strings.Join(lines, "\n")
@@ -272,7 +277,7 @@ func (s *SidebarComponent) countFixedSectionLines(state SidebarState) int {
 		lines += 3 // usage section
 	}
 	if len(state.MCPStatuses) > 0 {
-		lines += 3 // mcp section
+		lines += 2 + len(state.MCPStatuses) // title + each server line
 	}
 	if state.BgRunning > 0 {
 		lines += 3 // bg section

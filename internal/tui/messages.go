@@ -327,14 +327,6 @@ func GetCancelAgentChannel() <-chan struct{} {
 // ExitTimeoutMsg is sent after 5s to clear exit confirmation
 type ExitTimeoutMsg struct{}
 
-// CopyNoticeMsg is sent after text is copied to clipboard
-type CopyNoticeMsg struct {
-	Message string
-}
-
-// CopyNoticeTimeoutMsg clears the copy notice
-type CopyNoticeTimeoutMsg struct{}
-
 // GetAskUserResponseChannel returns the channel for ask_user responses.
 func GetAskUserResponseChannel() <-chan AskUserResponse {
 	return askUserResponseCh

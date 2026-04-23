@@ -2,7 +2,6 @@ package tui
 
 import (
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
@@ -130,11 +129,8 @@ func (m *Model) handleMouseRelease(x, y int) tea.Cmd {
 		tea.SetClipboard(text),
 		func() tea.Msg {
 			_ = clipboard.WriteAll(text)
-			return CopyNoticeMsg{Message: "Selected text copied"}
+			return nil
 		},
-		tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
-			return CopyNoticeTimeoutMsg{}
-		}),
 	)
 }
 
