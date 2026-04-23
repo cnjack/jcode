@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/session"
@@ -2351,11 +2352,11 @@ func (m Model) View() tea.View {
 
 	// ─── Assemble layout ───
 	if showSidebar {
-		// Ensure viewport output has consistent line widths for sidebar alignment
-		vpView = lipgloss.NewStyle().Width(mainWidth).Render(vpView)
-		// Two-column layout
+		// Manual line-by-line join: viewport | divider | sidebar
+		// This avoids JoinHorizontal's reliance on width calculation which
+		// can misalign the │ when ANSI sequences or wide chars are present.
 		sidebar := m.renderSidebar(vpH)
-		contentRow := lipgloss.JoinHorizontal(lipgloss.Top, vpView, sidebar)
+		contentRow := joinColumnsWithDivider(vpView, sidebar, mainWidth, vpH)
 		parts := []string{contentRow}
 		if teamPanel != "" {
 			parts = append(parts, teamPanel)
@@ -2406,6 +2407,47 @@ func (m Model) landingPageView() string {
 	}
 	parts = append(parts, footer)
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+// joinColumnsWithDivider manually joins the viewport and sidebar line-by-line
+// with a "│ " divider. Each viewport line is ansi-aware truncated/padded to
+// exactly vpWidth so the divider is always at a fixed column.
+// Uses ansi.StringWidth/ansi.Truncate instead of lipgloss.Width for precise
+// ANSI-aware width measurement that correctly handles SGR, hyperlinks, etc.
+func joinColumnsWithDivider(vpView, sidebar string, vpWidth, height int) string {
+	vpLines := strings.Split(vpView, "\n")
+	sbLines := strings.Split(sidebar, "\n")
+
+	var buf strings.Builder
+	for i := 0; i < height; i++ {
+		var vl, sl string
+		if i < len(vpLines) {
+			vl = vpLines[i]
+		}
+		if i < len(sbLines) {
+			sl = sbLines[i]
+		}
+
+		// Truncate viewport line if it exceeds vpWidth
+		vw := ansi.StringWidth(vl)
+		if vw > vpWidth {
+			vl = ansi.Truncate(vl, vpWidth, "")
+			vw = ansi.StringWidth(vl)
+		}
+
+		buf.WriteString(vl)
+		if vw < vpWidth {
+			buf.WriteString(strings.Repeat(" ", vpWidth-vw))
+		}
+
+		buf.WriteString("│ ")
+		buf.WriteString(sl)
+
+		if i < height-1 {
+			buf.WriteByte('\n')
+		}
+	}
+	return buf.String()
 }
 
 // renderSidebar renders the right sidebar panel.
