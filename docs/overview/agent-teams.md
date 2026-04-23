@@ -8,6 +8,8 @@ nav_order: 6
 
 Agent Teams let you spawn **multiple AI teammates that work in parallel** on different parts of a task. The lead agent coordinates, and teammates communicate through a message-passing system.
 
+![Agent Teams](../asset/agent-team-screnshot.png)
+
 ## When to Use Teams
 
 Teams are ideal for:
