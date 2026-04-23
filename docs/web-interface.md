@@ -7,6 +7,8 @@ nav_order: 5
 
 jcode includes a browser-based interface for users who prefer a visual UI over the terminal. The web UI provides chat, file browsing, terminal access, and full agent control.
 
+![jcode Web UI](asset/web-screenshot.png)
+
 ## Starting the Web Server
 
 ```bash
@@ -50,6 +52,8 @@ Switch models, toggle approval mode, and manage configuration — all from the w
 ### Theme / Dark Mode
 
 Toggle between **Light**, **Dark**, and **System** themes from the settings dialog. The theme preference is persisted in `localStorage` and applied instantly across all components. When set to **System**, the UI follows your OS appearance preference automatically.
+
+![jcode Web Dark Mode](asset/web-dark-mode-screenshot.png)
 
 ### Project Switching
 

@@ -26,6 +26,8 @@ If not in PATH, use the full path in the IDE configuration below.
 
 [Zed](https://zed.dev/) has native ACP support.
 
+![jcode in Zed](../asset/zed-acp-screenshot.png)
+
 Add the following to Zed's settings file (`~/.config/zed/settings.json`):
 
 ```json

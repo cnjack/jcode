@@ -21,24 +21,9 @@ Works locally and on remote servers over SSH. Supports any OpenAI-compatible mod
 
 ---
 
-```
- ◆ Found it — the goroutine in handleConnection() is never joined.
-   I'll patch it now.
-
-   ⚙ Tool  edit   path=server.go
-
-   ╭─────────────────────────────────────────────────────╮
-   │  - go handle(conn)                                  │
-   │  + wg.Add(1)                                        │
-   │  + go func() { defer wg.Done(); handle(conn) }()   │
-   ╰─────────────────────────────────────────────────────╯
-      ✓ Edit applied
-
-──────────────────────────────────────────────────────────
- > _
-──────────────────────────────────────────────────────────
-  Agent │ Model: openai / gpt-4o │ Approve: Ask │ [████░░░░░░] 2% │ MCP: 2/5
-```
+<p align="center">
+  <img src="docs/asset/tui-screenshot.png" alt="jcode TUI" width="800">
+</p>
 
 ## Why jcode?
 
@@ -94,37 +79,9 @@ Describe a task in plain English. The agent reads your codebase, writes surgical
 
 Spawn multiple AI teammates that work **in parallel**, each with independent tools, conversation history, and environment. The lead agent coordinates; teammates idle until they receive an explicit message.
 
-```
- You › Create a team and spawn a backend developer
-
-   ⚙ Tool  team_create   team_name=dev-team
-      ✓ Done
-
-   ⚙ Tool  team_spawn   name=backend  prompt="Senior Go backend developer"
-      ✓ Done
-
- You › Send backend a task
-
-   ⚙ Tool  team_send_message   to=backend  message="Add pagination to /users"
-      ✓ Message sent to @backend
-```
-
-Switch between agent views with **Shift+↑/↓** and see live status in the team panel:
-
-```
-  ╭ Team: dev-team (2) ───────────────────────────╮
-  │  ● Main (leader)                               │
-  │  ○ ⟳ @architect 1m32s [3 tools]               │
-  │  ○ ◇ @backend   0m45s                          │
-  │                                                 │
-  │  shift+↑/↓: switch agent | esc: back to leader │
-  ╰─────────────────────────────────────────────────╯
-```
-
-- **Persistent mailbox** — session-scoped, file-based message passing between teammates
-- **Per-agent approval** — mutating tool calls surface an approval dialog tagged with the teammate's name and color
-- **Independent conversations** — each agent has its own full chat history, tool calls, and markdown-rendered output
-- **Agent types** — `explore` (read-only), `general` (full tools), `coordinator` (can spawn sub-teams)
+<p align="center">
+  <img src="docs/asset/agent-team-screnshot.png" alt="jcode Agent Teams" width="800">
+</p>
 
 ### 🌐 SSH — work on any machine
 
@@ -244,6 +201,10 @@ jcode --resume <UUID>   # pick up where you left off
 ### 🌐 Web Interface
 
 Start a browser-based UI with `jcode web`. Chat interface, file browser, built-in terminal, and full agent control — all accessible from `http://localhost:8080`.
+
+<p align="center">
+  <img src="docs/asset/web-screenshot.png" alt="jcode Web UI" width="800">
+</p>
 
 ### 🧭 Context Awareness
 
