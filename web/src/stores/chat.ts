@@ -68,7 +68,7 @@ export const useChatStore = defineStore('chat', () => {
       .map((i) => i.data),
   )
   const hasMessages = computed(() => messages.value.length > 0)
-  const activeTodos = computed(() => todos.value.filter((t) => t.Status !== 'completed'))
+  const activeTodos = computed(() => todos.value.filter((t) => t.status !== 'completed'))
   const tokenPercentage = computed(() => {
     if (!tokenInfo.value || !tokenInfo.value.model_context_limit) return 0
     return Math.round((tokenInfo.value.total_tokens / tokenInfo.value.model_context_limit) * 100)
