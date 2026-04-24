@@ -183,7 +183,6 @@ func RenderCoordinatorPanel(ts *TeamViewState, width int) string {
 	}
 
 	// Keybinding hints
-	lines = append(lines, "")
 	lines = append(lines, lipgloss.NewStyle().Faint(true).Render("  shift+↑/↓: switch agent | esc: back to leader | ctrl+t: toggle panel"))
 
 	content := strings.Join(lines, "\n")
