@@ -317,22 +317,28 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
-	if s.running.Load() {
+	// Use CompareAndSwap to atomically check and set running, preventing
+	// two concurrent requests from both entering submitMessage.
+	if !s.running.CompareAndSwap(false, true) {
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error": "agent is already processing a request",
 		})
 		return
 	}
+	// running is now true; submitMessage will proceed without re-setting it.
 
 	var req struct {
-		Message string `json:"message"`
-		Mode    string `json:"mode,omitempty"` // "build" or "plan"
+		Message   string `json:"message"`
+		Mode      string `json:"mode,omitempty"`       // "build" or "plan"
+		SessionID string `json:"session_id,omitempty"` // optional: continue existing session
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		s.running.Store(false)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
 	if strings.TrimSpace(req.Message) == "" {
+		s.running.Store(false)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "message is required"})
 		return
 	}
@@ -342,25 +348,28 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		mode = s.mode
 	}
 
-	s.submitMessage(req.Message, mode, "")
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "processing"})
+	sessionID := s.submitMessage(req.Message, mode, "", req.SessionID)
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "processing", "session_id": sessionID})
 }
 
 // SubmitMessage submits a message for agent processing from an external source
 // (e.g. WeChat inbound message). Returns false if the agent is busy.
 func (s *Server) SubmitMessage(message, source string) bool {
-	if s.running.Load() {
+	if !s.running.CompareAndSwap(false, true) {
 		return false
 	}
-	s.submitMessage(message, s.mode, source)
+	s.submitMessage(message, s.mode, source, "")
 	return true
 }
 
 // submitMessage is the shared implementation for starting an agent run.
 // source is an optional label (e.g. "wechat") for the user_message event.
-func (s *Server) submitMessage(message, mode, source string) {
-	s.running.Store(true)
-
+// sessionID is an optional session identifier from the client to ensure
+// continuity — if the current recorder has a different UUID, resume the
+// correct session instead of creating a new one.
+// The caller must have already set s.running to true (via CompareAndSwap).
+// Returns the session_id of the recorder used.
+func (s *Server) submitMessage(message, mode, source, sessionID string) string {
 	// Apply mode prefix if plan mode requested.
 	agentMsg := message
 	if mode == "plan" {
@@ -377,14 +386,29 @@ func (s *Server) submitMessage(message, mode, source string) {
 	}
 
 	// Ensure a recorder exists (lazy creation on first message).
+	// If the client provided a session_id and the current recorder differs,
+	// resume the client's session to prevent creating a duplicate.
+	s.mu.Lock()
 	if s.recorder == nil {
 		rec, _ := session.NewRecorder(s.pwd, s.providerName, s.modelName)
+		if sessionID != "" {
+			rec.SetUUID(sessionID)
+		}
+		s.recorder = rec
+	} else if sessionID != "" && s.recorder.UUID() != sessionID {
+		// Client is continuing a session that doesn't match the current recorder.
+		// Resume the client's session to keep all messages together.
+		s.recorder.Close()
+		rec, _ := session.NewRecorder(s.pwd, s.providerName, s.modelName)
+		rec.SetUUID(sessionID)
 		s.recorder = rec
 	}
+	recorder := s.recorder
+	s.mu.Unlock()
 
 	// Record user message.
-	if s.recorder != nil {
-		s.recorder.RecordUser(agentMsg)
+	if recorder != nil {
+		recorder.RecordUser(agentMsg)
 	}
 
 	s.mu.Lock()
@@ -411,13 +435,15 @@ func (s *Server) submitMessage(message, mode, source string) {
 		// Take a git snapshot before the agent run for session diff tracking.
 		s.takeSessionSnapshot()
 
-		resp := runner.Run(runCtx, agent, history, s.eventHandler, s.recorder, s.todoStore, s.tracer, nil)
+		resp := runner.Run(runCtx, agent, history, s.eventHandler, recorder, s.todoStore, s.tracer, nil)
 		if resp != "" {
 			s.mu.Lock()
 			s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: resp})
 			s.mu.Unlock()
 		}
 	}()
+
+	return recorder.UUID()
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
@@ -473,16 +499,30 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
-	if s.running.Load() {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is currently running"})
-		return
-	}
-
 	// Parse optional request body for resume session ID.
 	var req struct {
 		SessionID string `json:"session_id,omitempty"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req)
+
+	// Only block creating a brand-new session while the agent is running.
+	// Resuming (loading) an existing session is always allowed — the web UI
+	// may refresh at any time and needs to restore its view.
+	if req.SessionID == "" && s.running.Load() {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is currently running"})
+		return
+	}
+
+	// When resuming while running, skip recorder/history replacement — just
+	// return the requested session_id so the frontend can populate the UI
+	// from the session entries (which it already fetched via GET).
+	if req.SessionID != "" && s.running.Load() {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":     "ok",
+			"session_id": req.SessionID,
+		})
+		return
+	}
 
 	s.mu.Lock()
 	// Close the old recorder.
