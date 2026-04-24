@@ -1,4 +1,4 @@
-# AGENTS.md — jcode 项目开发指南
+# AGENTS.md — JCode Project Development Guide
 
 Go CLI coding assistant — [Eino](https://github.com/cloudwego/eino) + BubbleTea v2 TUI + Vue 3 web UI.
 

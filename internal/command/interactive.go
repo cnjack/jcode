@@ -947,21 +947,24 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		}
 	})
 
-	// Register BLE notifier (lazy connect — will auto-discover JCODE-* devices).
-	bleNotifier := ble.New()
-	notifyingH.AddNotifier(bleNotifier)
 	// Register WeChat as a notifier for working/idle status pushes.
 	notifyingH.AddNotifier(channel.NewChannelNotifier(st.wechatClient))
-	// Push initial idle status (triggers BLE discovery in background).
-	bleNotifier.Notify(channel.NotifyEvent{Type: channel.EventIdle})
 
-	// Forward BLE inbound commands to TUI.
-	if bleCh := bleNotifier.Receive(); bleCh != nil {
-		go func() {
-			for cmd := range bleCh {
-				p.Send(tui.BLECommandMsg{Cmd: cmd.Cmd, Val: cmd.Val})
-			}
-		}()
+	// Register BLE notifier if enabled (lazy connect — will auto-discover JCODE-* devices).
+	if cfg.Channel != nil && cfg.Channel.BLEEnabled {
+		bleNotifier := ble.New()
+		notifyingH.AddNotifier(bleNotifier)
+		// Push initial idle status (triggers BLE discovery in background).
+		bleNotifier.Notify(channel.NotifyEvent{Type: channel.EventIdle})
+
+		// Forward BLE inbound commands to TUI.
+		if bleCh := bleNotifier.Receive(); bleCh != nil {
+			go func() {
+				for cmd := range bleCh {
+					p.Send(tui.BLECommandMsg{Cmd: cmd.Cmd, Val: cmd.Val})
+				}
+			}()
+		}
 	}
 
 	st.h = notifyingH
