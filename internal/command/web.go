@@ -100,7 +100,7 @@ func runWebServer(port int, host string) error {
 	wechatClient := weixin.NewClient()
 
 	// Auto-enable if credentials exist and channel.web_enabled is true.
-	if cfg.Channel != nil && cfg.Channel.WechatEnabled && wechatClient.State() == channel.StateDisabled {
+	if cfg.Channel != nil && cfg.Channel.WebEnabled && wechatClient.State() == channel.StateDisabled {
 		if err := wechatClient.Enable(); err != nil {
 			config.Logger().Printf("[wechat] web auto-enable failed: %v", err)
 		} else {
