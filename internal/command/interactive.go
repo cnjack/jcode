@@ -919,7 +919,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	approvalState := runner.NewApprovalState(pwd, autoApprove)
 	st.approvalState = approvalState
 
-	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore, tui.WithApprovalModeChange(func(enabled bool) {
+	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore, tui.WithVersion(Version), tui.WithApprovalModeChange(func(enabled bool) {
 		approvalState.SetSessionApproval(enabled)
 	}))
 	st.p = p
