@@ -420,7 +420,19 @@ func appendHistory(prompt string) {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, textarea.Blink)
+	return tea.Batch(
+		m.spinner.Tick,
+		textarea.Blink,
+		// Force BubbleTea to use GraphemeWidth mode and enable Unicode Core
+		// mode (2027) on the terminal. This synchronizes the renderer's width
+		// calculation with the terminal, fixing emoji border alignment.
+		func() tea.Msg {
+			return tea.ModeReportMsg{
+				Mode:  ansi.ModeUnicodeCore,
+				Value: ansi.ModeReset,
+			}
+		},
+	)
 }
 
 // cancelAgent shows a confirmation dialog to cancel the running agent.
@@ -2440,44 +2452,10 @@ func (m Model) View() tea.View {
 	return m.newView(mainView)
 }
 
-// landingPageView renders the Google-style landing page (centered logo + input).
-func (m Model) landingPageView() string {
-	bracketStyle := lipgloss.NewStyle().Foreground(colorMuted).Bold(true)
-	jStyle := lipgloss.NewStyle().Foreground(colorLogoJ).Bold(true)
-	codeStyle := lipgloss.NewStyle().Foreground(colorText).Bold(true)
-	logo := lipgloss.JoinHorizontal(lipgloss.Center,
-		bracketStyle.Render("["),
-		jStyle.Render("J"),
-		codeStyle.Render("CODE"),
-		bracketStyle.Render("]"),
-	)
-	underline := landingUnderlineStyle.Render("═════════════")
-	tagline := landingTaglineStyle.Render("coding assistant")
-
-	// Calculate vertical centering
-	footer := m.inputAreaView()
-	footerHeight := lipgloss.Height(footer)
-	contentHeight := lipgloss.Height(logo) + lipgloss.Height(underline) + lipgloss.Height(tagline)
-	topPad := (m.height - contentHeight - footerHeight) / 2
-	if topPad < 0 {
-		topPad = 0
-	}
-
-	parts := []string{
-		strings.Repeat("\n", topPad),
-		lipgloss.PlaceHorizontal(m.width, lipgloss.Center, logo),
-		lipgloss.PlaceHorizontal(m.width, lipgloss.Center, underline),
-		lipgloss.PlaceHorizontal(m.width, lipgloss.Center, tagline),
-	}
-	parts = append(parts, footer)
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
-}
-
 // joinColumnsWithDivider manually joins the viewport and sidebar line-by-line
-// with a "│ " divider. Each viewport line is ansi-aware truncated/padded to
-// exactly vpWidth so the divider is always at a fixed column.
-// Uses ansi.StringWidth/ansi.Truncate instead of lipgloss.Width for precise
-// ANSI-aware width measurement that correctly handles SGR, hyperlinks, etc.
+// with a "│ " divider. Each viewport line is padded with spaces to vpWidth
+// using ansi.StringWidth (GraphemeWidth method), matching BubbleTea's internal
+// cell buffer width calculation when Unicode Core mode is enabled.
 func joinColumnsWithDivider(vpView, sidebar string, vpWidth, height int) string {
 	vpLines := strings.Split(vpView, "\n")
 	sbLines := strings.Split(sidebar, "\n")
@@ -2492,18 +2470,16 @@ func joinColumnsWithDivider(vpView, sidebar string, vpWidth, height int) string 
 			sl = sbLines[i]
 		}
 
-		// Truncate viewport line if it exceeds vpWidth
-		vw := ansi.StringWidth(vl)
-		if vw > vpWidth {
-			vl = ansi.Truncate(vl, vpWidth, "")
-			vw = ansi.StringWidth(vl)
-		}
-
+		// Pad viewport line to fixed width using the same GraphemeWidth
+		// method that BubbleTea's renderer uses when Unicode Core mode
+		// 2027 is enabled. ansi.StringWidth handles ANSI stripping internally.
+		visW := ansi.StringWidth(vl)
 		buf.WriteString(vl)
-		if vw < vpWidth {
-			buf.WriteString(strings.Repeat(" ", vpWidth-vw))
+		if pad := vpWidth - visW; pad > 0 {
+			for j := 0; j < pad; j++ {
+				buf.WriteByte(' ')
+			}
 		}
-
 		buf.WriteString("│ ")
 		buf.WriteString(sl)
 

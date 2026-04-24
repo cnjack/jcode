@@ -114,7 +114,7 @@ func (ps *PasteStore) ExpandRefs(input string) string {
 				fullRef := result[idx : idx+end+1]
 				result = strings.Replace(result, fullRef, content, 1)
 			}
-		} else if strings.Contains(result, refSimple) {
+		} else {
 			result = strings.Replace(result, refSimple, content, 1)
 		}
 	}
