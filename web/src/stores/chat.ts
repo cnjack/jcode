@@ -216,7 +216,16 @@ export const useChatStore = defineStore('chat', () => {
     streamingText = ''
     streamingMsgId = ''
     try {
-      await api.chat(text, mode.value === 'agent' ? ('build' as AgentMode) : mode.value)
+      const resp = await api.chat(
+        text,
+        mode.value === 'agent' ? ('build' as AgentMode) : mode.value,
+        currentSessionId.value || undefined,
+      )
+      // Track the session_id returned by the backend so subsequent messages
+      // continue the same session (prevents duplicate session creation).
+      if (resp.session_id) {
+        currentSessionId.value = resp.session_id
+      }
     } catch (err: unknown) {
       isRunning.value = false
       addMessage('system', err instanceof Error ? err.message : String(err))
@@ -393,7 +402,7 @@ export const useChatStore = defineStore('chat', () => {
 
   /** Restore the current session content if available (called on page load). */
   async function restoreCurrentSession() {
-    if (!currentSessionId.value || isRunning.value) return
+    if (!currentSessionId.value) return
     try {
       const entries = await api.session(currentSessionId.value)
       if (entries.length === 0) return

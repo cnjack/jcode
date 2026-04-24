@@ -49,10 +49,10 @@ export const api = {
   },
   fileContent: (path: string) =>
     request<{ path: string; content: string }>(`/api/files/content?path=${encodeURIComponent(path)}`),
-  chat: (message: string, mode?: AgentMode) =>
-    request<{ status: string }>('/api/chat', {
+  chat: (message: string, mode?: AgentMode, sessionId?: string) =>
+    request<{ status: string; session_id: string }>('/api/chat', {
       method: 'POST',
-      body: JSON.stringify({ message, mode }),
+      body: JSON.stringify({ message, mode, session_id: sessionId || undefined }),
     }),
   approval: (id: string, approved: boolean) =>
     request<{ status: string }>('/api/approval', {
