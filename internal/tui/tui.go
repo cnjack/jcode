@@ -161,12 +161,6 @@ type Model struct {
 	cmdSuggestions      []commandSuggestion
 
 	// Mouse text selection state
-	mouseSelecting bool // true while dragging to select
-	mouseStartX    int  // viewport-relative X where selection started
-	mouseStartY    int  // viewport-relative Y where selection started
-	mouseEndX      int  // current drag endpoint X
-	mouseEndY      int  // current drag endpoint Y
-	hasSelection   bool // true when valid selection exists (after drag)
 
 	// Team state
 	teamState      TeamViewState
@@ -480,23 +474,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		// Right-click paste: request clipboard via OSC52 terminal protocol
 		if click, ok := msg.(tea.MouseClickMsg); ok && click.Button == tea.MouseRight && m.inputActive() {
 			cmds = append(cmds, tea.ReadClipboard)
-			return m, tea.Batch(cmds...)
-		}
-
-		// Text selection: handle left-click drag in viewport
-		if click, ok := msg.(tea.MouseClickMsg); ok && click.Button == tea.MouseLeft && m.ready {
-			if !m.pickingSession && !m.showingSetting && !m.pickingSSHAlias && !m.pickingModel && m.sshStep != 3 && !m.approvalPending && !m.exitPending {
-				m.handleMouseClick(click.X, click.Y)
-			}
-		}
-		if motion, ok := msg.(tea.MouseMotionMsg); ok && m.mouseSelecting {
-			m.handleMouseDrag(motion.X, motion.Y)
-			return m, tea.Batch(cmds...)
-		}
-		if release, ok := msg.(tea.MouseReleaseMsg); ok && m.mouseSelecting {
-			if cmd := m.handleMouseRelease(release.X, release.Y); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
 			return m, tea.Batch(cmds...)
 		}
 
@@ -1386,11 +1363,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				}
 				return m, tea.Batch(cmds...)
 			case "escape":
-				// Clear text selection if active
-				if m.hasSelection {
-					m.clearSelection()
-					return m, tea.Batch(cmds...)
-				}
 				// Team: exit teammate view, return to leader
 				if m.teamState.ViewMode == TeamViewTeammate {
 					m.exitTeammateView()
@@ -2422,9 +2394,6 @@ func (m Model) View() tea.View {
 	}
 
 	vpView := m.viewport.View()
-	if m.hasSelection || m.mouseSelecting {
-		vpView = m.applySelectionHighlight(vpView)
-	}
 
 	// ─── Assemble layout ───
 	if showSidebar {
@@ -2577,7 +2546,7 @@ func (m *Model) getLastAssistantText() string {
 	for i, j := 0, len(textLines)-1; i < j; i, j = i+1, j-1 {
 		textLines[i], textLines[j] = textLines[j], textLines[i]
 	}
-	return strings.Join(textLines, "\n")
+	return ansi.Strip(strings.Join(textLines, "\n"))
 }
 
 func (m *Model) flushText() {
