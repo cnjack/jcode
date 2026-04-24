@@ -6,7 +6,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/mattn/go-runewidth"
 
 	"github.com/cnjack/jcode/internal/tools"
 )
@@ -97,7 +96,6 @@ func (s *SidebarComponent) View(state SidebarState) string {
 
 	var result strings.Builder
 	for i, line := range lines {
-		// Use ansi.StringWidth for precise ANSI-aware measurement
 		w := ansi.StringWidth(line)
 		if w > contentWidth {
 			line = ansi.Truncate(line, contentWidth, "")
@@ -307,23 +305,7 @@ func truncateString(s string, maxLen int) string {
 	if maxLen <= 0 {
 		return s
 	}
-	w := lipgloss.Width(s)
-	if w <= maxLen {
-		return s
-	}
-	// Display-width aware truncation: iterate runes and sum cell widths
-	// so CJK/emoji characters (2 cells each) are handled correctly.
-	var result []rune
-	currentWidth := 0
-	for _, r := range s {
-		rw := runewidth.RuneWidth(r)
-		if currentWidth+rw > maxLen-1 { // -1 for ellipsis
-			break
-		}
-		result = append(result, r)
-		currentWidth += rw
-	}
-	return string(result) + "…"
+	return ansi.Truncate(s, maxLen, "…")
 }
 
 func plural(n int) string {
