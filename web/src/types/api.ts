@@ -68,9 +68,9 @@ export interface ConfigResponse {
 }
 
 export interface TodoItem {
-  ID: number
-  Title: string
-  Status: 'not-started' | 'in-progress' | 'completed'
+  id: number
+  title: string
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
 }
 
 export interface FileItem {
