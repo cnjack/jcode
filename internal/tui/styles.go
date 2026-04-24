@@ -20,32 +20,10 @@ var (
 	colorPlanMode  = lipgloss.Color("#C084FC") // plan mode (soft purple)
 	colorLogoJ     = lipgloss.Color("#FF8400") // orange J in [JCODE] logo
 
-	// ─── Landing page styles ───
-	landingLogoStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(colorPrimary).
-				PaddingLeft(0)
-
-	landingUnderlineStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#4B5563"))
-
-	landingTaglineStyle = lipgloss.NewStyle().
-				Foreground(colorMuted)
-
 	// ─── Sidebar styles ───
-	sidebarStyle = lipgloss.NewStyle().
-			Border(lipgloss.Border{Left: "│"}).
-			BorderForeground(colorMuted).
-			PaddingLeft(1).
-			PaddingRight(1)
-
 	sidebarSectionTitleStyle = lipgloss.NewStyle().
 					Bold(true).
 					Foreground(colorMuted)
-
-	sidebarItemStyle = lipgloss.NewStyle().
-				Foreground(colorText).
-				PaddingLeft(1)
 
 	sidebarValueStyle = lipgloss.NewStyle().
 				Foreground(colorText).
@@ -82,12 +60,6 @@ var (
 	// ─── Minimal status bar style ───
 	minimalStatusBarStyle = lipgloss.NewStyle().
 				Foreground(colorMuted)
-
-	// Styles
-	titleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(colorPrimary).
-			PaddingLeft(1)
 
 	assistantLabelStyle = lipgloss.NewStyle().
 				Bold(true).
@@ -154,10 +126,6 @@ var (
 
 	dividerStyle = lipgloss.NewStyle().
 			Foreground(colorMuted)
-
-	todoLabelStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(colorSecondary)
 
 	todoCompletedStyle = lipgloss.NewStyle().
 				Foreground(colorSuccess)
