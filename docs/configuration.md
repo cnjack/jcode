@@ -107,7 +107,8 @@ jcode stores all configuration in a single JSON file at `~/.jcode/config.json`. 
   },
 
   "channel": {
-    "web_enabled": true
+    "web_enabled": true,
+    "ble_enabled": false
   },
 
   "disabled_providers": []
@@ -201,7 +202,8 @@ Notification channel settings. See [Channels](overview/channels).
 
 | Field | Default | Description |
 |---|---|---|
-| `web_enabled` | false | Enable WeChat channel in `jcode web` mode |
+| `web_enabled` | false | Auto-enable WeChat channel in `jcode web` mode |
+| `ble_enabled` | false | Enable BLE device notifications for JCode Buddy |
 
 In TUI mode, channels are always available via `/channel` — no config needed.
 
