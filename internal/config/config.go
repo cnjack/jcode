@@ -60,6 +60,8 @@ type BudgetConfig struct {
 type ChannelConfig struct {
 	// WebEnabled enables WeChat channel in web mode (default false).
 	WebEnabled bool `json:"web_enabled,omitempty"`
+	// BLEEnabled enables BLE device notifications (default false).
+	BLEEnabled bool `json:"ble_enabled,omitempty"`
 }
 
 // CompactionConfig controls automatic context compaction.

@@ -118,6 +118,7 @@ func (n *Notifier) Close() {
 		return
 	}
 	n.closed = true
+	close(n.inbound) // unblock the range loop in the forwarding goroutine
 	if n.ready {
 		n.ready = false
 		go func() { _ = n.device.Disconnect() }()
@@ -269,6 +270,13 @@ func (n *Notifier) handleTXNotification(data []byte) {
 	}
 
 	logger.Printf("[ble] received cmd=%s val=%s", cmd.Cmd, cmd.Val)
+
+	n.mu.Lock()
+	closed := n.closed
+	n.mu.Unlock()
+	if closed {
+		return
+	}
 
 	select {
 	case n.inbound <- ReceivedCommand{Cmd: cmd.Cmd, Val: cmd.Val}:

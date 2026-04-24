@@ -32,6 +32,7 @@ jcode is an AI-powered coding agent that runs in your terminal. You describe tas
 | **Session Resume** | Every conversation is recorded. Pick up where you left off |
 | **Web Interface** | Browser-based UI with terminal access |
 | **Channels** | Push notifications to WeChat when approval is needed or tasks complete |
+| **JCode Buddy** | Physical desktop companion with pixel cat that reacts to your coding activity |
 | **Skills** | Domain-specific skill packs loaded on demand |
 
 ## Design Philosophy

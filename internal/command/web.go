@@ -125,11 +125,14 @@ func runWebServer(port int, host string) error {
 		}
 	})
 
-	// Register BLE notifier (lazy connect — will auto-discover JCODE-* devices).
-	bleNotifier := ble.New()
-	notifyingH.AddNotifier(bleNotifier)
 	// Register WeChat as a notifier for working/idle status pushes.
 	notifyingH.AddNotifier(channel.NewChannelNotifier(wechatClient))
+
+	// Register BLE notifier if enabled (lazy connect — will auto-discover JCODE-* devices).
+	if cfg.Channel != nil && cfg.Channel.BLEEnabled {
+		bleNotifier := ble.New()
+		notifyingH.AddNotifier(bleNotifier)
+	}
 
 	finalHandler = notifyingH
 
