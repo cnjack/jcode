@@ -584,3 +584,139 @@ func (m Model) askUserPromptView() string {
 	footer := "[↑/↓] Navigate  [Enter] Select/Submit  [Esc] Skip  [PgUp/PgDn] Scroll"
 	return m.bottomPromptView(title, options, m.askUserSelected, showTextInput, footer)
 }
+
+// helpPanelView renders a centered panel showing all keyboard shortcuts
+// with two-column layout and scroll support.
+func (m Model) helpPanelView() string {
+	w, h := m.width, m.height
+	if w <= 0 {
+		w = 80
+	}
+	if h <= 0 {
+		h = 24
+	}
+
+	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(colorText).Width(14)
+	descStyle := lipgloss.NewStyle().Foreground(colorDimText)
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorSecondary)
+
+	renderEntry := func(key, desc string) string {
+		return keyStyle.Render(key) + " " + descStyle.Render(desc)
+	}
+
+	// Left column: General + Navigation + Mouse
+	var left []string
+	left = append(left, sectionStyle.Render("General"))
+	left = append(left, renderEntry("F1", "Toggle this help"))
+	left = append(left, renderEntry("Ctrl+C", "Cancel / Quit"))
+	left = append(left, renderEntry("Ctrl+L", "Switch model"))
+	left = append(left, renderEntry("Ctrl+P", "Agent ↔ Plan mode"))
+	left = append(left, renderEntry("Ctrl+A", "Ask ↔ Auto approve"))
+	left = append(left, renderEntry("Ctrl+Y", "Copy last response"))
+	left = append(left, renderEntry("Escape", "Cancel / Back"))
+	left = append(left, "")
+	left = append(left, sectionStyle.Render("Navigation"))
+	left = append(left, renderEntry("PgUp/PgDn", "Scroll viewport"))
+	left = append(left, renderEntry("Ctrl+↑", "Scroll sidebar up"))
+	left = append(left, renderEntry("Ctrl+↓", "Scroll sidebar down"))
+	left = append(left, "")
+	left = append(left, sectionStyle.Render("Mouse"))
+	left = append(left, renderEntry("Right-click", "Paste clipboard"))
+
+	// Right column: Team Mode + Slash Commands
+	var right []string
+	right = append(right, sectionStyle.Render("Team Mode"))
+	right = append(right, renderEntry("Shift+↑", "Previous agent"))
+	right = append(right, renderEntry("Shift+↓", "Next agent"))
+	right = append(right, renderEntry("Ctrl+T", "Coordinator panel"))
+	right = append(right, "")
+	right = append(right, sectionStyle.Render("Slash Commands"))
+	right = append(right, renderEntry("/setting", "Settings menu"))
+	right = append(right, renderEntry("/model", "Switch model"))
+	right = append(right, renderEntry("/ssh", "SSH connection"))
+	right = append(right, renderEntry("/resume", "Resume session"))
+	right = append(right, renderEntry("/compact", "Compress context"))
+	right = append(right, renderEntry("/bg", "Background tasks"))
+	right = append(right, renderEntry("/channel", "Manage channels"))
+	right = append(right, renderEntry("/help", "This help panel"))
+
+	// Determine column width
+	colWidth := 36
+	boxInner := colWidth*2 + 3 // 3 for gap
+	if boxInner > w-10 {
+		// Fall back to single column if terminal is narrow
+		boxInner = w - 10
+		colWidth = boxInner
+	}
+
+	leftCol := lipgloss.NewStyle().Width(colWidth).Render(
+		lipgloss.JoinVertical(lipgloss.Left, left...),
+	)
+	rightCol := lipgloss.NewStyle().Width(colWidth).Render(
+		lipgloss.JoinVertical(lipgloss.Left, right...),
+	)
+
+	var body string
+	if boxInner >= colWidth*2+3 {
+		body = lipgloss.JoinHorizontal(lipgloss.Top, leftCol, "   ", rightCol)
+	} else {
+		// Single column fallback
+		all := append(left, "")
+		all = append(all, right...)
+		body = lipgloss.JoinVertical(lipgloss.Left, all...)
+	}
+
+	// Split body into lines for scrolling
+	bodyLines := strings.Split(body, "\n")
+	totalLines := len(bodyLines)
+
+	// Box chrome: border(2) + padding(2) + title(2) + footer(2) = 8
+	visibleH := h - 8
+	if visibleH < 5 {
+		visibleH = 5
+	}
+
+	// Clamp scroll
+	maxScroll := totalLines - visibleH
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	scroll := m.helpScroll
+	if scroll > maxScroll {
+		scroll = maxScroll
+	}
+
+	// Slice visible lines
+	end := scroll + visibleH
+	if end > totalLines {
+		end = totalLines
+	}
+	visible := bodyLines[scroll:end]
+
+	// Scroll indicator
+	var scrollHint string
+	if maxScroll > 0 {
+		scrollHint = fmt.Sprintf(" [%d/%d] ↑↓/j/k scroll ", scroll+1, maxScroll+1)
+	}
+
+	title := lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).
+		Render("⌨  Keyboard Shortcuts")
+	footer := lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
+		Render("Esc/F1 close" + scrollHint)
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorPrimary).
+		Padding(0, 2).
+		Width(boxInner + 6) // +6 for padding(4) + border(2)
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		title,
+		"",
+		strings.Join(visible, "\n"),
+		"",
+		footer,
+	)
+
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, boxStyle.Render(content))
+}

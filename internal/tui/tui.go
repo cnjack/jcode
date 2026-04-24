@@ -85,6 +85,11 @@ type Model struct {
 	showingChannel bool
 	channelStates  map[string]string // channelID → state ("none", "disabled", "enabled")
 
+	showingHelp bool // keyboard shortcuts help panel
+	helpScroll  int  // scroll offset for help panel
+
+	version string // version string displayed in bottom bar
+
 	agentsMdFound bool
 
 	pwd string
@@ -450,7 +455,7 @@ func (m *Model) confirmCancelAgent() {
 }
 
 func (m Model) inputActive() bool {
-	return (m.mode == ModeAgent || m.sshStep > 0 || m.sshSavePrompt) && !m.pickingModel && !m.showingSetting && !m.pickingSSHAlias && !m.pickingSession && !m.approvalPending && !m.planReviewActive && !m.askUserActive
+	return (m.mode == ModeAgent || m.sshStep > 0 || m.sshSavePrompt) && !m.pickingModel && !m.showingSetting && !m.showingHelp && !m.pickingSSHAlias && !m.pickingSession && !m.approvalPending && !m.planReviewActive && !m.askUserActive
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
@@ -851,6 +856,46 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			return m.handleChannelKeyPress(msg, cmds)
 		}
 
+		// Help panel handling
+		if m.showingHelp {
+			switch msg.String() {
+			case "esc", "f1", "q", "?":
+				m.showingHelp = false
+				m.helpScroll = 0
+				m.textarea.Focus()
+				return m, tea.Batch(cmds...)
+			case "up", "k":
+				if m.helpScroll > 0 {
+					m.helpScroll--
+				}
+				return m, tea.Batch(cmds...)
+			case "down", "j":
+				m.helpScroll++
+				return m, tea.Batch(cmds...)
+			case "pgup":
+				m.helpScroll -= 5
+				if m.helpScroll < 0 {
+					m.helpScroll = 0
+				}
+				return m, tea.Batch(cmds...)
+			case "pgdown":
+				m.helpScroll += 5
+				return m, tea.Batch(cmds...)
+			case "home":
+				m.helpScroll = 0
+				return m, tea.Batch(cmds...)
+			}
+			return m, tea.Batch(cmds...)
+		}
+
+		// F1 or ? to toggle help panel (when not typing)
+		if msg.String() == "f1" {
+			m.showingHelp = true
+			m.helpScroll = 0
+			m.textarea.Blur()
+			return m, tea.Batch(cmds...)
+		}
+
 		// SSH alias picker handling
 		if m.pickingSSHAlias {
 			switch msg.String() {
@@ -1200,6 +1245,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 					if prompt == "/channel" {
 						return m.handleChannelInput(cmds)
+					}
+
+					if prompt == "/help" {
+						m.showingHelp = true
+						m.helpScroll = 0
+						m.textarea.Blur()
+						return m, tea.Batch(cmds...)
 					}
 
 					// Check skill slash commands (e.g. /review-pr, /security-review)
@@ -1673,9 +1725,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				))
 			case string(session.EntryToolResult):
 				if e.Error != "" {
-					m.lines = append(m.lines, formatToolResultBody(e.Name, "", fmt.Errorf("%s", e.Error), m.width)...)
+					m.lines = append(m.lines, formatToolResultBody(e.Name, "", fmt.Errorf("%s", e.Error), m.contentWidth())...)
 				} else {
-					m.lines = append(m.lines, formatToolResult(e.Name, e.Output, m.width)...)
+					m.lines = append(m.lines, formatToolResult(e.Name, e.Output, m.contentWidth())...)
 				}
 			case string(session.EntrySubagentStart):
 				typeLabel := e.SubagentType
@@ -1737,10 +1789,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		}
 		// Add a divider line after resumed content
 		{
-			contentW := m.width
-			if m.showSidebar {
-				contentW = m.width - sidebarWidth
-			}
+			contentW := m.contentWidth()
 			leftMargin := 2
 			rightMargin := 2
 			dividerText := " ◇ session resumed "
@@ -1872,11 +1921,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		if msg.Err != nil {
 			// Replace the running icon with error icon on the last tool line
 			m.replaceLastToolIcon(toolIconError)
-			m.lines = append(m.lines, formatToolResultBody(msg.Name, "", msg.Err, m.width)...)
+			m.lines = append(m.lines, formatToolResultBody(msg.Name, "", msg.Err, m.contentWidth())...)
 		} else {
 			// Replace the running icon with success icon
 			m.replaceLastToolIcon(toolIconSuccess)
-			m.lines = append(m.lines, formatToolResultBody(msg.Name, sanitize(msg.Output), nil, m.width)...)
+			m.lines = append(m.lines, formatToolResultBody(msg.Name, sanitize(msg.Output), nil, m.contentWidth())...)
 		}
 		m.refreshViewport()
 		cmds = append(cmds, m.spinner.Tick)
@@ -1907,10 +1956,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			}
 			modelInfoText := fmt.Sprintf("◇ %s via %s %s ", m.activeModel, m.activeProvider, durationStr)
 			textW := lipgloss.Width(modelInfoText)
-			contentW := m.width
-			if m.showSidebar {
-				contentW = m.width - sidebarWidth
-			}
+			contentW := m.contentWidth()
 			leftMargin := 4
 			rightMargin := 4
 			fillW := contentW - leftMargin - rightMargin - textW
@@ -2130,7 +2176,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 						toolResultStyle.Render(truncate(sanitize(msg.ToolErr), maxToolOutputLen))))
 			} else {
 				m.teamState.AppendTeammateLine(msg.AgentID,
-					formatToolResult(msg.ToolName, sanitize(msg.Content), m.width)...)
+					formatToolResult(msg.ToolName, sanitize(msg.Content), m.contentWidth())...)
 			}
 		case "assistant":
 			m.teamState.FlushTeammateText(msg.AgentID)
@@ -2321,6 +2367,10 @@ func (m Model) newView(content string) tea.View {
 }
 
 func (m Model) View() tea.View {
+	if m.showingHelp {
+		return m.newView(m.helpPanelView())
+	}
+
 	if m.showingSetting {
 		return m.newView(m.settingMenuView())
 	}
@@ -2565,6 +2615,15 @@ func (m *Model) flushText() {
 	m.lines = append(m.lines, rendered)
 }
 
+// contentWidth returns the width available for the main content area,
+// accounting for the sidebar when visible.
+func (m *Model) contentWidth() int {
+	if m.showSidebar {
+		return m.width - sidebarWidth
+	}
+	return m.width
+}
+
 func (m *Model) renderContent() string {
 	var sb strings.Builder
 	for _, line := range m.lines {
@@ -2648,6 +2707,13 @@ type ModelOption func(*Model)
 func WithApprovalModeChange(fn func(bool)) ModelOption {
 	return func(m *Model) {
 		m.OnApprovalModeChange = fn
+	}
+}
+
+// WithVersion sets the version string displayed in the bottom hint bar.
+func WithVersion(v string) ModelOption {
+	return func(m *Model) {
+		m.version = v
 	}
 }
 
