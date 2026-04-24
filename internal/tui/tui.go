@@ -93,6 +93,8 @@ type Model struct {
 	activeModel    string
 	textareaLines  int
 
+	pasteStore *PasteStore
+
 	todoStore *tools.TodoStore
 
 	totalTokens       int64
@@ -268,7 +270,9 @@ func newTextarea() textarea.Model {
 	ta.Placeholder = "Type your prompt here..."
 	ta.CharLimit = 0
 	ta.ShowLineNumbers = false
-	ta.SetHeight(1)
+	ta.DynamicHeight = true
+	ta.MinHeight = 1
+	ta.MaxHeight = defaultMaxTextareaLines
 	ta.Prompt = "> "
 	st := ta.Styles()
 	st.Focused.CursorLine = lipgloss.NewStyle()
@@ -365,6 +369,7 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 		pwd:            pwd,
 		history:        loadHistory(),
 		todoStore:      todoStore,
+		pasteStore:     NewPasteStore(),
 		lines:          initialLines,
 		envLabel:       "Local",
 		approvalMode:   ModeManual, // Default to manual approval mode
@@ -448,20 +453,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 	switch msg := msg.(type) {
 
 	case tea.PasteMsg:
-		// Forward bracketed paste (Ctrl+Shift+V / right-click paste) to textarea
 		if m.inputActive() {
-			var cmd tea.Cmd
-			m.textarea, cmd = m.textarea.Update(msg)
-			cmds = append(cmds, cmd)
+			return m.handlePasteContent(NormalizeLineEndings(msg.Content))
 		}
 		return m, tea.Batch(cmds...)
 
 	case tea.ClipboardMsg:
-		// OSC52 clipboard read result — forward as paste to textarea
 		if m.inputActive() && msg.Content != "" {
-			var cmd tea.Cmd
-			m.textarea, cmd = m.textarea.Update(tea.PasteMsg{Content: msg.Content})
-			cmds = append(cmds, cmd)
+			return m.handlePasteContent(NormalizeLineEndings(msg.Content))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -1125,7 +1124,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.cmdSuggestionActive = false
 					m.cmdSuggestions = nil
 					m.cmdSuggestionIndex = 0
-					m.textareaLines = recalcLines(m.textarea.Value())
+					m.textareaLines = recalcLines(m.textarea.Value(), calcMaxTextareaLines(m.height))
 					m.textarea.SetHeight(m.textareaLines)
 					// Re-evaluate suggestions after setting value (may show new filtered list)
 					m.updateSuggestions()
@@ -1151,7 +1150,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.cmdSuggestionActive = false
 					m.cmdSuggestions = nil
 					m.cmdSuggestionIndex = 0
-					m.textareaLines = recalcLines(m.textarea.Value())
+					m.textareaLines = recalcLines(m.textarea.Value(), calcMaxTextareaLines(m.height))
 					m.textarea.SetHeight(m.textareaLines)
 					// Re-evaluate: exact match clears suggestions, partial shows new list
 					m.updateSuggestions()
@@ -1162,6 +1161,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				}
 				prompt := strings.TrimSpace(m.textarea.Value())
 				if prompt != "" {
+					// Expand paste references to full content for the agent
+					actualPrompt := m.pasteStore.ExpandRefs(prompt)
 					appendHistory(prompt)
 					if len(m.history) == 0 || m.history[len(m.history)-1] != prompt {
 						m.history = append(m.history, prompt)
@@ -1178,7 +1179,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 					// Team: route input to viewed teammate
 					if m.teamState.ViewMode == TeamViewTeammate && m.teamState.ViewingAgent != "" {
-						m.teamState.Manager.EnqueueUserMessage(m.teamState.ViewingAgent, prompt)
+						m.teamState.Manager.EnqueueUserMessage(m.teamState.ViewingAgent, actualPrompt)
+						// prompt already contains compact references from paste-time
 						m.lines = append(m.lines, userPromptStyle.Render("> "+prompt))
 						m.refreshViewport()
 						return m, tea.Batch(cmds...)
@@ -1234,7 +1236,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					}
 
 					if !m.agentDone && m.thinking {
-						m.pendingPrompts = append(m.pendingPrompts, prompt)
+						m.pendingPrompts = append(m.pendingPrompts, actualPrompt)
+						// prompt already contains compact references from paste-time
 						m.lines = append(m.lines, userPromptStyle.Render("> "+prompt+" (queued)"))
 						if m.ready {
 							m.viewport.SetHeight(m.calcViewportHeight(true))
@@ -1250,12 +1253,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.promptStartTime = time.Now()
 
 					// In Plan mode, send prompt directly (agent already has plan system prompt + read-only tools).
-					actualPrompt := prompt
 					modePrefix := ">"
 					if m.agentMode == ModePlanning {
 						modePrefix = "📐"
 					}
 
+					// prompt already contains compact references from paste-time
 					m.lines = append(m.lines, "")
 					m.lines = append(m.lines, userPromptStyle.Render(modePrefix+" "+prompt))
 					if m.ready {
@@ -1274,7 +1277,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				var cmd tea.Cmd
 				m.textarea, cmd = m.textarea.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 				cmds = append(cmds, cmd)
-				m.textareaLines = recalcLines(m.textarea.Value())
+				m.textareaLines = recalcLines(m.textarea.Value(), calcMaxTextareaLines(m.height))
 				m.textarea.SetHeight(m.textareaLines)
 				if m.ready {
 					m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))
@@ -1288,11 +1291,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					}
 					return m, tea.Batch(cmds...)
 				}
+				// Smart navigation: move cursor up within textarea first;
+				// only trigger history when already on the first line.
+				if m.textarea.Line() > 0 {
+					m.textarea.CursorUp()
+					return m, tea.Batch(cmds...)
+				}
 				if m.historyIndex > 0 {
 					m.historyIndex--
 					m.textarea.SetValue(m.history[m.historyIndex])
 					m.textarea.CursorEnd()
-					m.textareaLines = recalcLines(m.textarea.Value())
+					m.textareaLines = recalcLines(m.textarea.Value(), calcMaxTextareaLines(m.height))
 					m.textarea.SetHeight(m.textareaLines)
 					m.updateSuggestions()
 					if m.ready {
@@ -1308,6 +1317,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					}
 					return m, tea.Batch(cmds...)
 				}
+				// Smart navigation: move cursor down within textarea first;
+				// only trigger history when already on the last line.
+				if m.textarea.Line() < m.textarea.LineCount()-1 {
+					m.textarea.CursorDown()
+					return m, tea.Batch(cmds...)
+				}
 				if m.historyIndex < len(m.history)-1 {
 					m.historyIndex++
 					m.textarea.SetValue(m.history[m.historyIndex])
@@ -1316,7 +1331,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.historyIndex++
 					m.textarea.SetValue("")
 				}
-				m.textareaLines = recalcLines(m.textarea.Value())
+				m.textareaLines = recalcLines(m.textarea.Value(), calcMaxTextareaLines(m.height))
 				m.textarea.SetHeight(m.textareaLines)
 				m.updateSuggestions()
 				if m.ready {
@@ -1375,7 +1390,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			var cmd tea.Cmd
 			m.textarea, cmd = m.textarea.Update(msg)
 			cmds = append(cmds, cmd)
-			m.textareaLines = recalcLines(m.textarea.Value())
+			m.textareaLines = recalcLines(m.textarea.Value(), calcMaxTextareaLines(m.height))
 			m.textarea.SetHeight(m.textareaLines)
 			m.updateSuggestions()
 			if m.ready {
@@ -1455,6 +1470,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		}
 		m.textarea.SetWidth(inputWidth)
 
+		// Update textarea max height based on new terminal dimensions
+		newMaxHeight := calcMaxTextareaLines(m.height)
+		m.textarea.MaxHeight = newMaxHeight
+		m.textareaLines = recalcLines(m.textarea.Value(), newMaxHeight)
+		m.textarea.SetHeight(m.textareaLines)
+
 		vpH := m.calcViewportHeight(m.inputActive())
 		if !m.ready {
 			m.viewport = viewport.New(viewport.WithWidth(mainWidth), viewport.WithHeight(vpH))
@@ -1533,7 +1554,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			// Replace input area with the received text
 			m.textarea.SetValue(msg.Val)
 			m.textarea.CursorEnd()
-			m.textareaLines = recalcLines(m.textarea.Value())
+			m.textareaLines = recalcLines(m.textarea.Value(), calcMaxTextareaLines(m.height))
 			m.textarea.SetHeight(m.textareaLines)
 			if m.ready {
 				m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))
@@ -1542,6 +1563,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			// Submit current input content to the agent
 			prompt := strings.TrimSpace(m.textarea.Value())
 			if prompt != "" {
+				// Expand paste references to full content for the agent
+				actualPrompt := m.pasteStore.ExpandRefs(prompt)
 				appendHistory(prompt)
 				if len(m.history) == 0 || m.history[len(m.history)-1] != prompt {
 					m.history = append(m.history, prompt)
@@ -1560,7 +1583,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				}
 
 				if !m.agentDone && m.thinking {
-					m.pendingPrompts = append(m.pendingPrompts, prompt)
+					m.pendingPrompts = append(m.pendingPrompts, actualPrompt)
+					// prompt already contains compact references from paste-time
 					m.lines = append(m.lines, userPromptStyle.Render("> "+prompt+" (queued)"))
 					m.refreshViewport()
 					return m, tea.Batch(cmds...)
@@ -1576,6 +1600,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					modePrefix = "📐"
 				}
 
+				// prompt already contains compact references from paste-time
 				m.lines = append(m.lines, "")
 				m.lines = append(m.lines, userPromptStyle.Render(modePrefix+" "+prompt))
 				if m.ready {
@@ -1584,7 +1609,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.viewport.GotoBottom()
 				}
 				cmds = append(cmds, func() tea.Msg {
-					return PromptSubmitMsg{Prompt: prompt}
+					return PromptSubmitMsg{Prompt: actualPrompt}
 				})
 				cmds = append(cmds, m.spinner.Tick)
 			}
@@ -1642,7 +1667,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			switch e.Type {
 			case string(session.EntryUser):
 				m.lines = append(m.lines, "")
-				m.lines = append(m.lines, userPromptStyle.Render("> "+e.Content))
+				displayContent := m.pasteStore.StoreAndFormat(NormalizeLineEndings(e.Content))
+				m.lines = append(m.lines, userPromptStyle.Render("> "+displayContent))
 			case string(session.EntryAssistant):
 				if e.Content != "" {
 					rendered := e.Content
@@ -1822,7 +1848,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 	case UserPromptMsg:
 		m.lines = append(m.lines, "")
-		m.lines = append(m.lines, userPromptStyle.Render("> "+sanitize(msg.Prompt)))
+		displayPrompt := m.pasteStore.StoreAndFormat(NormalizeLineEndings(sanitize(msg.Prompt)))
+		m.lines = append(m.lines, userPromptStyle.Render("> "+displayPrompt))
 		m.refreshViewport()
 
 	case AgentTextMsg:
@@ -2225,15 +2252,52 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 	return m, tea.Batch(cmds...)
 }
 
-const maxTextareaLines = 5
+const (
+	defaultMaxTextareaLines = 5
+	minTextareaLines        = 3
+	maxTextareaLinesCap     = 20
+)
 
-func recalcLines(s string) int {
+// calcMaxTextareaLines dynamically computes the max textarea height based on
+// terminal height. It returns a value between minTextareaLines and
+// maxTextareaLinesCap, capped at 40% of the terminal height.
+func calcMaxTextareaLines(termHeight int) int {
+	if termHeight <= 0 {
+		return defaultMaxTextareaLines
+	}
+	// Use up to 40% of terminal height for the input area, but keep within bounds.
+	n := termHeight * 2 / 5
+	if n < minTextareaLines {
+		n = minTextareaLines
+	}
+	if n > maxTextareaLinesCap {
+		n = maxTextareaLinesCap
+	}
+	return n
+}
+
+// handlePasteContent processes normalized paste content: stores long pastes
+// as a reference in PasteStore, inserts the appropriate text into the textarea,
+// and recalculates textarea/viewport height.
+func (m Model) handlePasteContent(content string) (tea.Model, tea.Cmd) {
+	display := m.pasteStore.StoreAndFormat(content)
+	var cmd tea.Cmd
+	m.textarea, cmd = m.textarea.Update(tea.PasteMsg{Content: display})
+	m.textareaLines = recalcLines(m.textarea.Value(), calcMaxTextareaLines(m.height))
+	m.textarea.SetHeight(m.textareaLines)
+	if m.ready {
+		m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))
+	}
+	return m, cmd
+}
+
+func recalcLines(s string, maxLines int) int {
 	n := strings.Count(s, "\n") + 1
 	if n < 1 {
 		n = 1
 	}
-	if n > maxTextareaLines {
-		n = maxTextareaLines
+	if n > maxLines {
+		n = maxLines
 	}
 	return n
 }
