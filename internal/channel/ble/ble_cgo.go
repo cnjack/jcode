@@ -279,7 +279,7 @@ func (n *Notifier) handleTXNotification(data []byte) {
 	}
 
 	select {
-	case n.inbound <- ReceivedCommand{Cmd: cmd.Cmd, Val: cmd.Val}:
+	case n.inbound <- ReceivedCommand(cmd):
 	default:
 		logger.Printf("[ble] inbound channel full, dropping cmd=%s", cmd.Cmd)
 	}

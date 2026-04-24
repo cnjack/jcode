@@ -20,7 +20,7 @@ defineProps<{
           'bg-amber-500/15 text-amber-600 dark:bg-amber-400/15 dark:text-amber-400': message.role === 'system',
         }"
       >
-        <template v-if="message.role === 'assistant'" style="font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'Roboto Mono', Menlo, Monaco, monospace;">
+        <template v-if="message.role === 'assistant'">
           <span style="color: #FF8400;">J</span>
         </template>
         <template v-else-if="message.role === 'user' && message.source === 'wechat'">W</template>

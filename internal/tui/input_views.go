@@ -8,60 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/cnjack/jcode/internal/config"
-	"github.com/cnjack/jcode/internal/tools"
 )
-
-// renderTodoBar renders the todo items as a compact block above the input.
-func (m Model) renderTodoBar() string {
-	if m.todoStore == nil {
-		return ""
-	}
-	items := m.todoStore.Items()
-	if len(items) == 0 {
-		return ""
-	}
-
-	var completed, total int
-	total = len(items)
-	for _, item := range items {
-		if item.Status == tools.TodoCompleted {
-			completed++
-		}
-	}
-
-	header := todoLabelStyle.Render(fmt.Sprintf("📋 Todo (%d/%d)", completed, total))
-
-	var lines []string
-	lines = append(lines, "  "+header)
-
-	shown := items
-	if len(shown) > 5 {
-		shown = shown[:5]
-	}
-	for _, item := range shown {
-		var icon, text string
-		switch item.Status {
-		case tools.TodoCompleted:
-			icon = todoCompletedStyle.Render("✓")
-			text = todoCompletedStyle.Render(item.Title)
-		case tools.TodoInProgress:
-			icon = todoInProgressStyle.Render("⏳")
-			text = todoInProgressStyle.Render(item.Title)
-		case tools.TodoCancelled:
-			icon = todoCancelledStyle.Render("✗")
-			text = todoCancelledStyle.Render(item.Title)
-		default:
-			icon = todoPendingStyle.Render("○")
-			text = todoPendingStyle.Render(item.Title)
-		}
-		lines = append(lines, fmt.Sprintf("    %s %s", icon, text))
-	}
-	if len(items) > 5 {
-		more := todoPendingStyle.Render(fmt.Sprintf("    ... and %d more", len(items)-5))
-		lines = append(lines, more)
-	}
-	return strings.Join(lines, "\n")
-}
 
 // commandSuggestion represents a single slash command suggestion item.
 type commandSuggestion struct {
