@@ -369,7 +369,7 @@ func GetChannelActionChannel() <-chan ChannelAction {
 type ChannelStateMsg struct {
 	ChannelID string // "wechat"
 	State     string // "none", "disabled", "enabled"
-	Message   string // status message (e.g. "已连接", "扫码中...")
+	Message   string // status message (e.g. "connected", "scanning...")
 }
 
 // ChannelQRCodeMsg is sent when a QR code is available for scanning.

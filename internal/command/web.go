@@ -100,7 +100,7 @@ func runWebServer(port int, host string) error {
 	wechatClient := weixin.NewClient()
 
 	// Auto-enable if credentials exist and channel.web_enabled is true.
-	if cfg.Channel != nil && cfg.Channel.WebEnabled && wechatClient.State() == channel.StateDisabled {
+	if cfg.Channel != nil && cfg.Channel.WechatEnabled && wechatClient.State() == channel.StateDisabled {
 		if err := wechatClient.Enable(); err != nil {
 			config.Logger().Printf("[wechat] web auto-enable failed: %v", err)
 		} else {
@@ -125,11 +125,14 @@ func runWebServer(port int, host string) error {
 		}
 	})
 
-	// Register BLE notifier (lazy connect — will auto-discover JCODE-* devices).
-	bleNotifier := ble.New()
-	notifyingH.AddNotifier(bleNotifier)
 	// Register WeChat as a notifier for working/idle status pushes.
 	notifyingH.AddNotifier(channel.NewChannelNotifier(wechatClient))
+
+	// Register BLE notifier if enabled (lazy connect — will auto-discover JCODE-* devices).
+	if cfg.Channel != nil && cfg.Channel.BLEEnabled {
+		bleNotifier := ble.New()
+		notifyingH.AddNotifier(bleNotifier)
+	}
 
 	finalHandler = notifyingH
 

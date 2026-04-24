@@ -13,6 +13,7 @@ Currently supported channels:
 | Channel | Protocol | Status |
 |---|---|---|
 | **WeChat** | [iLink Bot API](https://ilinkai.weixin.qq.com) | Supported |
+| **JCode Buddy** | BLE (Nordic UART Service) | Supported |
 
 ## How It Works
 
@@ -114,6 +115,53 @@ You can send prompts to jcode directly from WeChat. Your message is submitted to
 
 When the channel is disabled, inbound messages are silently ignored.
 
+## JCode Buddy (BLE Device)
+
+JCode Buddy is a physical desktop companion — an ESP32-based gadget with a pixel-art cat that reacts to your coding activity in real time. It connects to your computer over Bluetooth Low Energy (BLE) and displays live status updates from jcode.
+
+### What You See
+
+The buddy shows a pixel cat with different animations depending on what jcode is doing:
+
+| jcode Status | Buddy Animation |
+|---|---|
+| **Idle** | Cat sits calmly, tail wagging |
+| **Thinking / Working** | Cat walks with purpose |
+| **Approval needed** | Cat lunges forward, alert |
+| **Task complete** | Cat bounces happily with hearts 🎉 |
+| **Disconnected** | Cat sleeps (Zzz…) |
+
+Recent status messages scroll beside the cat so you can see what's happening at a glance.
+
+### Setup
+
+1. **Enable BLE** in your jcode config:
+   ```json
+   {
+     "channel": {
+       "ble_enabled": true
+     }
+   }
+   ```
+
+2. **Power on** your JCode Buddy device
+
+3. **That's it** — jcode automatically discovers nearby devices named `JCODE-*` and connects over BLE. No pairing code needed.
+
+The connection is lazy: jcode only starts scanning when you send your first message. Once connected, it stays connected until the device is turned off or goes out of range.
+
+### Voice Input
+
+If your buddy device has a microphone, you can press the record button on the device to speak a prompt. The audio is transcribed in real-time and sent to jcode as if you typed it — perfect for quick commands without touching the keyboard.
+
+### Configuration
+
+| Setting | Default | Description |
+|---|---|---|
+| `channel.ble_enabled` | `false` | Enable BLE device auto-discovery and notifications |
+
+BLE is off by default to avoid unnecessary Bluetooth scanning. Turn it on only if you have a JCode Buddy device.
+
 ## Configuration
 
 Add to `~/.jcode/config.json`:
@@ -121,7 +169,8 @@ Add to `~/.jcode/config.json`:
 ```json
 {
   "channel": {
-    "web_enabled": true
+    "web_enabled": true,
+    "ble_enabled": false
   }
 }
 ```
@@ -129,6 +178,7 @@ Add to `~/.jcode/config.json`:
 | Setting | Effect |
 |---|---|
 | `channel.web_enabled` | Auto-enable WeChat on `jcode web` startup (if already logged in) |
+| `channel.ble_enabled` | Enable BLE auto-discovery and status notifications for JCode Buddy |
 
 This setting only controls auto-enable. You can always connect and toggle the channel manually through the UI, even without this config.
 

@@ -7,7 +7,7 @@ import "github.com/cloudwego/eino/schema"
 // Given a desired split at position idx (we want to keep msgs[idx:]),
 // it moves idx backwards until the split no longer orphans tool results.
 //
-// This prevents API errors like "messages 参数非法" that occur when tool
+// This prevents API errors like "messages parameter is invalid" that occur when tool
 // result messages appear without their preceding assistant tool-call message.
 func findToolBoundary(msgs []*schema.Message, idx int) int {
 	if idx <= 0 || idx >= len(msgs) {
