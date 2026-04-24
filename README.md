@@ -7,6 +7,9 @@
 </h1>
 
 ### **Think it. Code it.**
+<p align="center">
+  <img src="docs/asset/overview.png" alt="jcode Overview" width="800">
+</p>
 
 **The AI coding agent that lives in your terminal.**
 
@@ -21,19 +24,20 @@ Works locally and on remote servers over SSH. Supports any OpenAI-compatible mod
 
 ---
 
+
 <p align="center">
   <img src="docs/asset/tui-screenshot.png" alt="jcode TUI" width="800">
 </p>
 
 ## Why jcode?
 
-| | |
-|---|---|
-| **Transparent by design** | Every tool call is visible. Approve or reject edits before they happen. |
-| **Plan before you act** | Plan Mode explores read-only and presents a structured plan for your review. |
-| **Parallel teams** | Spawn multiple AI teammates that work simultaneously on different tasks. |
-| **SSH anywhere** | All tools work seamlessly on remote machines — same experience, zero friction. |
-| **Bring your own model** | Any OpenAI-compatible API. Switch models mid-session with one keystroke. |
+|                           |                                                                                |
+| ------------------------- | ------------------------------------------------------------------------------ |
+| **Transparent by design** | Every tool call is visible. Approve or reject edits before they happen.        |
+| **Plan before you act**   | Plan Mode explores read-only and presents a structured plan for your review.   |
+| **Parallel teams**        | Spawn multiple AI teammates that work simultaneously on different tasks.       |
+| **SSH anywhere**          | All tools work seamlessly on remote machines — same experience, zero friction. |
+| **Bring your own model**  | Any OpenAI-compatible API. Switch models mid-session with one keystroke.       |
 
 ## Install
 
@@ -67,13 +71,13 @@ First launch creates `~/.jcode/config.json` with a setup wizard. Run `jcode doct
 
 Describe a task in plain English. The agent reads your codebase, writes surgical edits, runs commands, and reports every step — no black boxes.
 
-| Capability | How it works |
-|---|---|
-| **File operations** | Read, edit (string-level diffs), and write files with inline before/after display |
+| Capability          | How it works                                                                                         |
+| ------------------- | ---------------------------------------------------------------------------------------------------- |
+| **File operations** | Read, edit (string-level diffs), and write files with inline before/after display                    |
 | **Shell execution** | Run any command; output shown in a bordered box. Safe commands (`ls`, `git status`, …) auto-approved |
-| **Regex search** | `grep` tool with ripgrep fallback — search across entire codebases in seconds |
-| **Todo tracking** | Live `📋 Todo (2/5)` bar above the input area; agent updates progress automatically |
-| **Ask user** | Agent can prompt you with questions and choices mid-task when it needs clarification |
+| **Regex search**    | `grep` tool with ripgrep fallback — search across entire codebases in seconds                        |
+| **Todo tracking**   | Live `📋 Todo (2/5)` bar above the input area; agent updates progress automatically                  |
+| **Ask user**        | Agent can prompt you with questions and choices mid-task when it needs clarification                 |
 
 ### 🤝 Agent Teams
 
@@ -130,7 +134,7 @@ Connect any [MCP](https://modelcontextprotocol.io/)-compatible server — stdio,
 {
   "mcp_servers": {
     "github": { "type": "stdio", "command": "gh-mcp" },
-    "db":     { "type": "http",  "url": "http://localhost:3001/mcp" }
+    "db": { "type": "http", "url": "http://localhost:3001/mcp" }
   }
 }
 ```
@@ -143,18 +147,18 @@ Connect any [MCP](https://modelcontextprotocol.io/)-compatible server — stdio,
 
 Real-time context window tracking with a **color-coded progress bar** in the status bar:
 
-| Progress | Color | Meaning |
-|---|---|---|
-| `[████░░░░░░] 45%` | 🟢 Green | Comfortable — plenty of context left |
-| `[███████░░░] 78%` | 🟠 Orange | Approaching limit — consider compacting |
-| `[█████████░] 92%` | 🔴 Red | Near limit — auto-compaction may trigger |
+| Progress           | Color     | Meaning                                  |
+| ------------------ | --------- | ---------------------------------------- |
+| `[████░░░░░░] 45%` | 🟢 Green  | Comfortable — plenty of context left     |
+| `[███████░░░] 78%` | 🟠 Orange | Approaching limit — consider compacting  |
+| `[█████████░] 92%` | 🔴 Red    | Near limit — auto-compaction may trigger |
 
 Set cost guardrails in `config.json`:
 
 ```json
 {
   "budget": {
-    "max_cost_per_session": 5.00,
+    "max_cost_per_session": 5.0,
     "warning_threshold": 0.8
   }
 }
@@ -220,47 +224,47 @@ No manual configuration needed — the agent adapts to your project.
 
 ## Keyboard Shortcuts
 
-| Key | Action |
-|---|---|
-| **Enter** | Submit prompt / select option |
-| **Ctrl+C** | Press once to warn, twice to exit |
-| **Ctrl+A** | Toggle approval mode (Ask ↔ Auto) |
-| **Ctrl+P** | Toggle Plan ↔ Agent mode |
-| **Ctrl+L** | Model picker |
-| **Ctrl+T** | Toggle team panel |
-| **Shift+↑/↓** | Switch between teammates |
-| **Esc** | Return to leader view |
-| **/** | Start slash command |
+| Key           | Action                            |
+| ------------- | --------------------------------- |
+| **Enter**     | Submit prompt / select option     |
+| **Ctrl+C**    | Press once to warn, twice to exit |
+| **Ctrl+A**    | Toggle approval mode (Ask ↔ Auto) |
+| **Ctrl+P**    | Toggle Plan ↔ Agent mode          |
+| **Ctrl+L**    | Model picker                      |
+| **Ctrl+T**    | Toggle team panel                 |
+| **Shift+↑/↓** | Switch between teammates          |
+| **Esc**       | Return to leader view             |
+| **/**         | Start slash command               |
 
 ## Slash Commands
 
-| Command | Action |
-|---|---|
-| `/model` | Switch model mid-session |
-| `/setting` | Open settings menu |
-| `/ssh` | Connect to SSH host |
-| `/resume` | Resume a previous session |
+| Command    | Action                       |
+| ---------- | ---------------------------- |
+| `/model`   | Switch model mid-session     |
+| `/setting` | Open settings menu           |
+| `/ssh`     | Connect to SSH host          |
+| `/resume`  | Resume a previous session    |
 | `/compact` | Compact conversation context |
-| `/bg` | Check background tasks |
-| `/<skill>` | Activate a loaded skill |
+| `/bg`      | Check background tasks       |
+| `/<skill>` | Activate a loaded skill      |
 
 ## Configuration
 
 Config lives at `~/.jcode/config.json`. Key sections:
 
-| Section | What it controls |
-|---|---|
-| `providers` | API keys and base URLs for each model provider |
-| `model` / `small_model` | Active model and lightweight model for summaries |
-| `fallback_model` | Fallback when primary model fails |
-| `ssh_aliases` | Named SSH connections |
-| `mcp_servers` | MCP server definitions (stdio / HTTP / SSE) |
-| `budget` | Token and cost limits per session |
-| `compaction` | Auto-compaction threshold, recent message count |
-| `prompt` | Memory size, cache, async env timeout |
-| `subagent` | Parallel limit, nesting depth |
-| `team` | Max teammates, mailbox poll interval |
-| `telemetry` | Optional [Langfuse](https://langfuse.com) tracing |
+| Section                 | What it controls                                  |
+| ----------------------- | ------------------------------------------------- |
+| `providers`             | API keys and base URLs for each model provider    |
+| `model` / `small_model` | Active model and lightweight model for summaries  |
+| `fallback_model`        | Fallback when primary model fails                 |
+| `ssh_aliases`           | Named SSH connections                             |
+| `mcp_servers`           | MCP server definitions (stdio / HTTP / SSE)       |
+| `budget`                | Token and cost limits per session                 |
+| `compaction`            | Auto-compaction threshold, recent message count   |
+| `prompt`                | Memory size, cache, async env timeout             |
+| `subagent`              | Parallel limit, nesting depth                     |
+| `team`                  | Max teammates, mailbox poll interval              |
+| `telemetry`             | Optional [Langfuse](https://langfuse.com) tracing |
 
 ```bash
 jcode doctor    # verify model + MCP connectivity
