@@ -16,7 +16,7 @@ import (
 func (m Model) handleModelInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		m.lines = append(m.lines, toolErrorStyle.Render("✗ Failed to load config: "+err.Error()))
+		m.lines = append(m.lines, textLine(toolErrorStyle.Render("✗ Failed to load config: "+err.Error())))
 		return m, tea.Batch(cmds...)
 	}
 
@@ -101,7 +101,7 @@ func (m Model) handleResumeInput(input string, cmds []tea.Cmd) (tea.Model, tea.C
 
 	if arg != "" {
 		// Direct UUID resume
-		m.lines = append(m.lines, toolLabelStyle.Render("📂 Loading session..."))
+		m.lines = append(m.lines, textLine(toolLabelStyle.Render("📂 Loading session...")))
 		m.thinking = true
 		m.mode = ModeAgent
 		m.agentDone = false
@@ -120,7 +120,7 @@ func (m Model) handleResumeInput(input string, cmds []tea.Cmd) (tea.Model, tea.C
 		if err != nil {
 			msg = fmt.Sprintf("Error loading sessions: %v", err)
 		}
-		m.lines = append(m.lines, toolLabelStyle.Render("📂 Resume:")+" "+msg)
+		m.lines = append(m.lines, textLine(toolLabelStyle.Render("📂 Resume:")+" "+msg))
 		m.refreshViewport()
 		return m, tea.Batch(cmds...)
 	}
