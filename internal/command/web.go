@@ -35,20 +35,22 @@ import (
 func NewWebCmd() *cobra.Command {
 	var port int
 	var host string
+	var openBrowser bool
 	cmd := &cobra.Command{
 		Use:          "web",
 		Short:        "Start the web server",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWebServer(port, host)
+			return runWebServer(port, host, openBrowser)
 		},
 	}
 	cmd.Flags().IntVar(&port, "port", 8080, "HTTP server port")
 	cmd.Flags().StringVar(&host, "host", "127.0.0.1", "HTTP server host")
+	cmd.Flags().BoolVar(&openBrowser, "open", true, "Open browser after server starts")
 	return cmd
 }
 
-func runWebServer(port int, host string) error {
+func runWebServer(port int, host string, openBrowser bool) error {
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -281,6 +283,7 @@ func runWebServer(port int, host string) error {
 	srv := web.NewServer(&web.ServerConfig{
 		Port:          port,
 		Host:          host,
+		OpenBrowser:   openBrowser,
 		Pwd:           pwd,
 		Agent:         ag,
 		CreateAgent:   createAgent,
