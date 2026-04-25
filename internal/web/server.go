@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -33,9 +35,10 @@ import (
 
 // Server is the jcode web server.
 type Server struct {
-	port     int
-	host     string
-	pwd      string
+	port        int
+	host        string
+	openBrowser bool
+	pwd         string
 	handler  *handler.WebHandler
 	broker   *SSEBroker
 	wsBroker *WSBroker
@@ -99,6 +102,7 @@ type Server struct {
 type ServerConfig struct {
 	Port          int
 	Host          string
+	OpenBrowser   bool
 	Pwd           string
 	Agent         *adk.ChatModelAgent
 	CreateAgent   func(providerName, modelName string) (*adk.ChatModelAgent, error)
@@ -131,6 +135,7 @@ func NewServer(cfg *ServerConfig) *Server {
 	s := &Server{
 		port:          cfg.Port,
 		host:          cfg.Host,
+		openBrowser:   cfg.OpenBrowser,
 		pwd:           cfg.Pwd,
 		handler:       h,
 		broker:        NewSSEBroker(),
@@ -256,7 +261,20 @@ func (s *Server) Start(ctx context.Context) error {
 	fmt.Printf("🌐 jcode web server running at http://%s\n", addr)
 	fmt.Printf("   Press Ctrl+C to stop\n")
 
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	// Use net.Listen + srv.Serve so we can open the browser right after
+	// the port is bound (ListenAndServe would delay until first request).
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("server error: %w", err)
+	}
+
+	// Open browser after the port is bound.
+	if s.openBrowser {
+		url := fmt.Sprintf("http://%s", addr)
+		go openBrowser(url)
+	}
+
+	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("server error: %w", err)
 	}
 	return nil
@@ -1479,4 +1497,20 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// openBrowser opens the given URL in the user's default browser.
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", url)
+	default: // linux, freebsd, etc.
+		cmd = exec.Command("xdg-open", url)
+	}
+	if err := cmd.Start(); err != nil {
+		config.Logger().Printf("[web] failed to open browser: %v", err)
+	}
 }
