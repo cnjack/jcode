@@ -34,6 +34,8 @@ type RegistryModel struct {
 	Cost             *ModelCost       `json:"cost,omitempty"`
 	Limit            *ModelLimit      `json:"limit,omitempty"`
 	Status           string           `json:"status,omitempty"`
+	Recommended      bool             `json:"recommended,omitempty"`
+	DefaultEnabled   bool             `json:"default_enabled,omitempty"`
 }
 
 // ModelModalities describes input/output modalities.
@@ -151,8 +153,8 @@ func (r *ModelRegistry) ListProviderModels(providerID string, toolCallOnly bool)
 		}
 		models = append(models, m)
 	}
-	// Sort by ID for consistent ordering
-	sortModelsByID(models)
+	// Sort: recommended first, then by ID
+	sortModels(models)
 	return models
 }
 
@@ -179,6 +181,83 @@ func sortModelsByID(models []*RegistryModel) {
 		for j := i + 1; j < len(models); j++ {
 			if models[i].ID > models[j].ID {
 				models[i], models[j] = models[j], models[i]
+			}
+		}
+	}
+}
+
+// sortModels sorts models: recommended first, then by ID.
+func sortModels(models []*RegistryModel) {
+	for i := 0; i < len(models); i++ {
+		for j := i + 1; j < len(models); j++ {
+			iRec := models[i].Recommended
+			jRec := models[j].Recommended
+			if (!iRec && jRec) || (iRec == jRec && models[i].ID > models[j].ID) {
+				models[i], models[j] = models[j], models[i]
+			}
+		}
+	}
+}
+
+// recommendedModels defines recommended and default-enabled models per provider.
+// Key: provider ID, Value: map of model ID → true (recommended + default enabled).
+var recommendedModels = map[string]map[string]bool{
+	"zhipuai": {
+		"glm-5.1": true,
+		"glm-5":   true,
+	},
+	"zhipuai-coding-plan": {
+		"glm-5.1": true,
+		"glm-5":   true,
+	},
+	"deepseek": {
+		"deepseek-v4-pro": true,
+	},
+	"alibaba-cn": {
+		"qwen3.6-plus":         true,
+		"MiniMax/MiniMax-M2.7": true,
+		"deepseek-v3-2-exp":    true,
+		"kimi-k2.6":            true,
+	},
+	"alibaba-coding-plan-cn": {
+		"qwen3.6-plus": true,
+	},
+	"moonshotai": {
+		"kimi-k2.6": true,
+	},
+	"minimax": {
+		"MiniMax-M2.7": true,
+	},
+	"minimax-coding-plan": {
+		"MiniMax-M2.7": true,
+	},
+	"openai": {
+		"gpt-4.1": true,
+		"o4-mini": true,
+	},
+	"anthropic": {
+		"claude-sonnet-4-20250514": true,
+	},
+	"google": {
+		"gemini-2.5-pro": true,
+	},
+}
+
+func init() {
+	applyRecommendedModels()
+}
+
+// applyRecommendedModels sets Recommended and DefaultEnabled on models in the generated registry.
+func applyRecommendedModels() {
+	for provID, models := range recommendedModels {
+		prov, ok := generatedProviders[provID]
+		if !ok {
+			continue
+		}
+		for modelID := range models {
+			if m, ok := prov.Models[modelID]; ok {
+				m.Recommended = true
+				m.DefaultEnabled = true
 			}
 		}
 	}

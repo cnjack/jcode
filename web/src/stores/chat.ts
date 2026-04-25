@@ -11,6 +11,7 @@ import type {
   AgentMode,
   ProviderInfo,
   ToolDisplayInfo,
+  ModelRef,
 } from '@/types/api'
 import { api } from '@/composables/api'
 import { extractToolDisplayInfo } from '@/composables/toolInfo'
@@ -53,6 +54,10 @@ export const useChatStore = defineStore('chat', () => {
   // Channel state
   const channelAvailable = ref(false)
   const channelEnabled = ref(false)
+
+  // Model favorites & recent
+  const favoriteModels = ref<Set<string>>(new Set())
+  const recentModels = ref<ModelRef[]>([])
 
   // Current session tracking
   const currentSessionId = ref('')
@@ -314,6 +319,7 @@ export const useChatStore = defineStore('chat', () => {
       mode.value = m === 'build' ? 'agent' : (m as AgentMode)
       currentSessionId.value = h.session_id || ''
       isRunning.value = h.running || false
+      return h
     } catch (err) {
       console.error('Failed to fetch health:', err)
     }
@@ -399,6 +405,67 @@ export const useChatStore = defineStore('chat', () => {
       console.error('Failed to toggle channel:', err)
     }
   }
+
+  async function fetchModelState() {
+    try {
+      const data = await api.modelState()
+      recentModels.value = data.recent || []
+      const favs = new Set<string>()
+      for (const r of data.favorite || []) {
+        favs.add(`${r.provider}/${r.model}`)
+      }
+      favoriteModels.value = favs
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function toggleFavorite(provider: string, model: string) {
+    try {
+      const data = await api.toggleFavorite(provider, model)
+      const key = `${provider}/${model}`
+      const favs = new Set(favoriteModels.value)
+      if (data.favorite) {
+        favs.add(key)
+      } else {
+        favs.delete(key)
+      }
+      favoriteModels.value = favs
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function toggleModelEnabled(provider: string, model: string, enabled: boolean) {
+    try {
+      await api.toggleModelEnabled(provider, model, enabled)
+      // Update the local providers list to reflect the change
+      for (const p of providers.value) {
+        if (p.id === provider) {
+          const m = p.models.find(m => m.id === model)
+          if (m) {
+            m.enabled = enabled
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function isFavorite(provider: string, model: string): boolean {
+    return favoriteModels.value.has(`${provider}/${model}`)
+  }
+
+  // Providers with only enabled models (for model picker)
+  const enabledProviders = computed(() => {
+    return providers.value
+      .map(p => ({
+        ...p,
+        models: p.models.filter(m => m.enabled !== false),
+      }))
+      .filter(p => p.models.length > 0)
+  })
 
   /** Restore the current session content if available (called on page load). */
   async function restoreCurrentSession() {
@@ -582,5 +649,12 @@ export const useChatStore = defineStore('chat', () => {
     fetchChannelState,
     toggleChannel,
     restoreCurrentSession,
+    fetchModelState,
+    toggleFavorite,
+    toggleModelEnabled,
+    isFavorite,
+    recentModels,
+    favoriteModels,
+    enabledProviders,
   }
 })
