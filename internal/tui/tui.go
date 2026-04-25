@@ -2667,8 +2667,6 @@ func (m *Model) flushText() {
 	m.lines = append(m.lines, textLine(rendered))
 }
 
-// contentWidth returns the width available for the main content area,
-// accounting for the sidebar when visible.
 // recreateMDRenderer rebuilds the glamour markdown renderer with the current
 // content width, ensuring WordWrap adapts to terminal resize.
 func (m *Model) recreateMDRenderer() {
@@ -2684,6 +2682,8 @@ func (m *Model) recreateMDRenderer() {
 	}
 }
 
+// contentWidth returns the width available for the main content area,
+// accounting for the sidebar when visible.
 func (m *Model) contentWidth() int {
 	if m.showSidebar {
 		return m.width - sidebarWidth
