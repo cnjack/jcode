@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"charm.land/bubbles/v2/list"
@@ -23,24 +22,89 @@ func (m Model) handleModelInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	currentProvider, currentModel := cfg.GetProviderModel()
 	registry := model.NewModelRegistry()
 
-	// Collect providers and sort them for stable ordering
-	providers := cfg.GetProviders()
-	providerNames := make([]string, 0, len(providers))
-	for name := range providers {
-		providerNames = append(providerNames, name)
-	}
-	sort.Strings(providerNames)
+	// Configured providers (have API key)
+	configuredProviders := cfg.GetProviders()
 
 	var items []list.Item
 
-	for _, provider := range providerNames {
-		models := registry.ListProviderModels(provider, false)
-		if len(models) > 0 {
-			for _, rm := range models {
-				isCurrent := provider == currentProvider && rm.ID == currentModel
+	// Load model state for favorites, recent, and visibility.
+	modelState, _ := config.LoadModelState()
+	favSet := make(map[string]bool)
+	for _, r := range modelState.Favorite {
+		favSet[r.Provider+"/"+r.Model] = true
+	}
 
-				// Build rich description with metadata
+	// Track already-shown models to avoid duplicates.
+	shownSet := make(map[string]bool)
+
+	// Add current model section (only the current model).
+	currentKey := currentProvider + "/" + currentModel
+	items = append(items, modelItem{
+		title:            "━━━ CURRENT MODEL ━━━",
+		desc:             "",
+		isProviderHeader: true,
+	})
+
+	// Get current model info from registry
+	reg := model.NewModelRegistry()
+	if _, rm, ok := reg.LookupModel(currentProvider, currentModel); ok && rm != nil {
+		var tags []string
+		if rm.Recommended {
+			tags = append(tags, "recommended")
+		}
+		if rm.Limit != nil && rm.Limit.Context > 0 {
+			tags = append(tags, fmt.Sprintf("%dk ctx", rm.Limit.Context/1000))
+		}
+		if rm.ToolCall {
+			tags = append(tags, "tools")
+		}
+		if rm.Reasoning {
+			tags = append(tags, "reasoning")
+		}
+		desc := ""
+		if len(tags) > 0 {
+			desc = strings.Join(tags, " · ")
+		}
+		items = append(items, modelItem{
+			provider:  currentProvider,
+			model:     currentModel,
+			title:     "● " + rm.Name,
+			desc:      desc,
+			isCurrent: true,
+		})
+	} else {
+		// Fallback if not in registry
+		items = append(items, modelItem{
+			provider:  currentProvider,
+			model:     currentModel,
+			title:     "● " + currentModel,
+			desc:      currentProvider,
+			isCurrent: true,
+		})
+	}
+	shownSet[currentKey] = true
+
+	// Add favorites section if any exist.
+	if len(modelState.Favorite) > 0 {
+		items = append(items, modelItem{
+			title:            "━━━ ★ FAVORITES ━━━",
+			desc:             "",
+			isProviderHeader: true,
+		})
+		for _, r := range modelState.Favorite {
+			key := r.Provider + "/" + r.Model
+			if shownSet[key] {
+				continue // Skip if it's the current model (already shown above)
+			}
+			shownSet[key] = true
+
+			// Get model info for tags
+			var desc string
+			if _, rm, ok := reg.LookupModel(r.Provider, r.Model); ok && rm != nil {
 				var tags []string
+				if rm.Recommended {
+					tags = append(tags, "recommended")
+				}
 				if rm.Limit != nil && rm.Limit.Context > 0 {
 					tags = append(tags, fmt.Sprintf("%dk ctx", rm.Limit.Context/1000))
 				}
@@ -50,41 +114,108 @@ func (m Model) handleModelInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 				if rm.Reasoning {
 					tags = append(tags, "reasoning")
 				}
-				desc := provider
 				if len(tags) > 0 {
-					desc += " · " + strings.Join(tags, " · ")
+					desc = strings.Join(tags, " · ")
 				}
-
-				title := rm.ID
-				if isCurrent {
-					title = "★ " + title
-				}
-
-				items = append(items, modelItem{
-					provider:  provider,
-					model:     rm.ID,
-					title:     title,
-					desc:      desc,
-					isCurrent: isCurrent,
-				})
 			}
-		} else if provider == currentProvider {
-			// Provider not in registry — show configured model only
+
 			items = append(items, modelItem{
-				provider:  provider,
-				model:     currentModel,
-				title:     "★ " + currentModel,
-				desc:      provider,
-				isCurrent: true,
+				provider:  r.Provider,
+				model:     r.Model,
+				title:     "★ " + r.Model,
+				desc:      desc,
+				isCurrent: false,
 			})
 		}
 	}
 
-	// Add "Add New Model" option at the end
+	// Add models grouped by provider (in registry order), only showing enabled models.
+	for _, rp := range registry.ListProviders() {
+		// Only show providers that the user has configured (has API key).
+		if _, configured := configuredProviders[rp.ID]; !configured {
+			continue
+		}
+
+		models := registry.ListProviderModels(rp.ID, false)
+
+		// Filter to only enabled models not already shown
+		var providerModels []*model.RegistryModel
+		for _, rm := range models {
+			key := rp.ID + "/" + rm.ID
+			if shownSet[key] {
+				continue
+			}
+			ref := config.ModelRef{Provider: rp.ID, Model: rm.ID}
+			if !modelState.IsModelEnabled(ref, rm.DefaultEnabled) {
+				continue
+			}
+			providerModels = append(providerModels, rm)
+		}
+
+		// Only add provider header if there are models to show
+		if len(providerModels) > 0 {
+			items = append(items, modelItem{
+				title:            "━━━ " + strings.ToUpper(rp.Name) + " ━━━",
+				desc:             "",
+				isProviderHeader: true,
+			})
+
+			for _, rm := range providerModels {
+				key := rp.ID + "/" + rm.ID
+				shownSet[key] = true
+
+				// Build description with tags only (no provider name)
+				var tags []string
+				if rm.Recommended {
+					tags = append(tags, "recommended")
+				}
+				if rm.Limit != nil && rm.Limit.Context > 0 {
+					tags = append(tags, fmt.Sprintf("%dk ctx", rm.Limit.Context/1000))
+				}
+				if rm.ToolCall {
+					tags = append(tags, "tools")
+				}
+				if rm.Reasoning {
+					tags = append(tags, "reasoning")
+				}
+				desc := ""
+				if len(tags) > 0 {
+					desc = strings.Join(tags, " · ")
+				}
+
+				items = append(items, modelItem{
+					provider:  rp.ID,
+					model:     rm.ID,
+					title:     rm.Name,
+					desc:      desc,
+					isCurrent: false,
+				})
+			}
+		}
+	}
+
+	// Handle configured providers not in registry (custom OpenAI-compatible, etc.)
+	for provID := range configuredProviders {
+		if registry.HasProvider(provID) {
+			continue
+		}
+		// Only show if not already shown (e.g., as current model)
+		// For custom providers, we only have the current model
+		// which was already shown in the CURRENT MODEL section
+	}
+
+	// Add action items at the end
 	items = append(items, modelItem{
-		title:    "➕ Add New Model…",
+		title:    "⚙  Manage Models…",
+		desc:     "Choose which models appear in this list",
+		isAction: true,
+		actionID: "manage_models",
+	})
+	items = append(items, modelItem{
+		title:    "➕ Add New Provider…",
 		desc:     "Configure a new provider and model",
 		isAction: true,
+		actionID: "add_model",
 	})
 
 	m.modelPicker.SetItems(items)

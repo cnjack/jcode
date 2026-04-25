@@ -90,6 +90,10 @@ export interface ModelInfo {
   name: string
   tool_call: boolean
   context_limit?: number
+  reasoning?: boolean
+  recommended?: boolean
+  default_enabled?: boolean
+  enabled?: boolean
 }
 
 export interface ProviderInfo {
@@ -271,4 +275,43 @@ export interface BrowseFolder {
 export interface BrowseResponse {
   current: string
   folders: BrowseFolder[]
+}
+
+// Setup types
+export interface SetupProvider {
+  id: string
+  name: string
+  doc?: string
+  api?: string
+  env?: string[]
+  configured: boolean
+  tag?: string // "recommended", "local", etc.
+}
+
+export interface SetupModel {
+  id: string
+  name: string
+  tool_call: boolean
+  context_limit?: number
+  reasoning?: boolean
+}
+
+export interface ProviderDetail {
+  id: string
+  api_key_set: boolean
+  api_key?: string
+  base_url?: string
+}
+
+// Model state types
+export interface ModelRef {
+  provider: string
+  model: string
+}
+
+export interface ModelStateResponse {
+  recent: ModelRef[]
+  favorite: ModelRef[]
+  enabled_models: ModelRef[]
+  disabled_models: ModelRef[]
 }

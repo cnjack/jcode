@@ -15,6 +15,7 @@ import SettingsDialog from '@/components/SettingsDialog.vue'
 import ProjectSwitcher from '@/components/ProjectSwitcher.vue'
 import TerminalPanel from '@/components/TerminalPanel.vue'
 import DiffViewer from '@/components/DiffViewer.vue'
+import SetupView from '@/components/SetupView.vue'
 
 const store = useChatStore()
 const projectStore = useProjectStore()
@@ -26,6 +27,7 @@ const fileViewerOpen = ref(false)
 const fileViewerPath = ref('')
 const fileViewerContent = ref('')
 const sidebarCollapsed = ref(false)
+const needsSetup = ref(false)
 
 const bottomPanel = ref<'none' | 'terminal' | 'diff'>('none')
 const bottomPanelHeight = ref(260)
@@ -124,10 +126,16 @@ function handleGlobalKeydown(e: KeyboardEvent) {
 
 onMounted(async () => {
   document.addEventListener('keydown', handleGlobalKeydown)
-  await store.fetchHealth()
+  const health = await store.fetchHealth()
+  // Check if setup is needed — health returns needs_setup status
+  if ((health as any)?.needs_setup) {
+    needsSetup.value = true
+    return
+  }
   store.fetchConfig()
   store.fetchTodos()
   store.fetchModels()
+  store.fetchModelState()
   store.fetchSessions()
   store.fetchApprovalMode()
   store.fetchChannelState()
@@ -159,6 +167,21 @@ async function onProjectSwitched() {
   store.fetchSessions()
   // Restore the current session for the new project
   await store.restoreCurrentSession()
+}
+
+function onSetupComplete() {
+  needsSetup.value = false
+  // Now load everything
+  store.fetchConfig()
+  store.fetchTodos()
+  store.fetchModels()
+  store.fetchModelState()
+  store.fetchSessions()
+  store.fetchApprovalMode()
+  store.fetchChannelState()
+  if (store.pwd) {
+    projectStore.ensureCurrentProject(store.pwd)
+  }
 }
 
 // Panel resize
@@ -342,5 +365,8 @@ function startResize(e: MouseEvent) {
 
     <SettingsDialog :open="settingsOpen" @close="settingsOpen = false" />
     <ProjectSwitcher :open="projectsOpen" @close="projectsOpen = false" @project-switched="onProjectSwitched" />
+
+    <!-- Setup overlay — shown when no providers are configured -->
+    <SetupView v-if="needsSetup" @complete="onSetupComplete" />
   </div>
 </template>

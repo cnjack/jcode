@@ -51,10 +51,21 @@ func NewWebCmd() *cobra.Command {
 }
 
 func runWebServer(port int, host string, openBrowser bool) error {
+	// Check if we need setup (no providers configured).
+	needsSetup := config.NeedsSetup()
 
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		return fmt.Errorf("config error: %w", err)
+	var cfg *config.Config
+	if !needsSetup {
+		var err error
+		cfg, err = config.LoadConfig()
+		if err != nil {
+			return fmt.Errorf("config error: %w", err)
+		}
+	} else {
+		// Create a minimal config for setup mode.
+		cfg = &config.Config{
+			MaxIterations: 1000,
+		}
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -68,12 +79,15 @@ func runWebServer(port int, host string, openBrowser bool) error {
 	skillLoader.ScanProjectSkills(pwd)
 
 	systemPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
-	providerName, modelName := cfg.GetProviderModel()
 
-	providers := cfg.GetProviders()
-	providerCfg := providers[providerName]
-	if providerCfg == nil {
-		return fmt.Errorf("provider %q not found in config", providerName)
+	var providerName, modelName string
+	if !needsSetup {
+		providerName, modelName = cfg.GetProviderModel()
+		providers := cfg.GetProviders()
+		providerCfg := providers[providerName]
+		if providerCfg == nil {
+			return fmt.Errorf("provider %q not found in config", providerName)
+		}
 	}
 
 	registry := internalmodel.NewModelRegistry()
@@ -171,7 +185,12 @@ func runWebServer(port int, host string, openBrowser bool) error {
 
 	createAgent := func(prov, mod string) (*adk.ChatModelAgent, error) {
 		// Resolve provider config.
-		provCfg := providers[prov]
+		// Reload config to pick up any new providers added via setup.
+		currentCfg, err := config.LoadConfig()
+		if err != nil {
+			return nil, fmt.Errorf("config error: %w", err)
+		}
+		provCfg := currentCfg.GetProviders()[prov]
 		if provCfg == nil {
 			return nil, fmt.Errorf("provider %q not configured", prov)
 		}
@@ -240,9 +259,13 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		return agent.NewAgent(ctx, cm, tools, systemPrompt, approvalState.RequestApproval, middlewares, handlers)
 	}
 
-	ag, err := createAgent(providerName, modelName)
-	if err != nil {
-		return fmt.Errorf("error creating agent: %w", err)
+	var ag *adk.ChatModelAgent
+	var agentErr error
+	if !needsSetup {
+		ag, agentErr = createAgent(providerName, modelName)
+		if agentErr != nil {
+			return fmt.Errorf("error creating agent: %w", agentErr)
+		}
 	}
 
 	switchProject := func(newPwd string) (*adk.ChatModelAgent, *session.Recorder, error) {
@@ -301,6 +324,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		WechatClient:  wechatClient,
 		WebHandler:    webHandler,
 		EventHandler:  finalHandler,
+		NeedsSetup:    needsSetup,
 	})
 
 	// Set handler for approval routing.
