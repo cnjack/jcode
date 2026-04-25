@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"charm.land/lipgloss/v2"
+	"charm.land/glamour/v2"
 )
 
 func formatToolArgs(argsJSON string) string {
@@ -66,12 +67,12 @@ func truncate(s string, maxLen int) string {
 }
 
 // formatToolResult returns styled output lines depending on the tool name.
-func formatToolResult(toolName, output string, termWidth int) []string {
-	return formatToolResultBody(toolName, output, nil, termWidth)
+func formatToolResult(toolName, output string, termWidth int, expanded bool, mdRenderer *glamour.TermRenderer) []string {
+	return formatToolResultBody(toolName, output, nil, termWidth, expanded, mdRenderer)
 }
 
 // formatToolResultBody returns styled output lines for a tool result with optional error.
-func formatToolResultBody(toolName, output string, err error, termWidth int) []string {
+func formatToolResultBody(toolName, output string, err error, termWidth int, expanded bool, mdRenderer *glamour.TermRenderer) []string {
 	if err != nil {
 		errText := truncate(sanitize(err.Error()), maxToolOutputLen)
 		return []string{
@@ -87,7 +88,7 @@ func formatToolResultBody(toolName, output string, err error, termWidth int) []s
 	case "edit":
 		return formatEditOutput(output, termWidth)
 	case "subagent":
-		return formatSubagentOutput(output, termWidth)
+		return formatSubagentOutput(output, termWidth, expanded, mdRenderer)
 	case "todowrite":
 		return formatTodoWriteOutput(output)
 	default:
@@ -215,17 +216,52 @@ func formatEditOutput(output string, termWidth int) []string {
 	return result
 }
 
-// formatSubagentOutput shows the first few lines of subagent output with left border.
-func formatSubagentOutput(output string, termWidth int) []string {
-	const tailLines = 8
-	rawLines := strings.Split(strings.TrimRight(output, "\n"), "\n")
-
-	shown := rawLines
-	hidden := 0
-	if len(rawLines) > tailLines {
-		shown = rawLines[:tailLines]
-		hidden = len(rawLines) - tailLines
+// formatSubagentOutput renders subagent output with markdown support.
+// When collapsed, it shows a limited number of lines with a hint to expand.
+// When expanded, it shows the full rendered markdown output.
+func formatSubagentOutput(output string, termWidth int, expanded bool, mdRenderer *glamour.TermRenderer) []string {
+	output = strings.TrimRight(output, "\n")
+	if output == "" {
+		return nil
 	}
+
+	// Render markdown via glamour if available.
+	rendered := output
+	if mdRenderer != nil {
+		if md, err := mdRenderer.Render(output); err == nil {
+			rendered = strings.TrimRight(md, "\n")
+		}
+	}
+
+	const collapsedLines = 12
+	rawLines := strings.Split(rendered, "\n")
+
+	boxWidth := termWidth - 8
+	if boxWidth < 30 {
+		boxWidth = 30
+	}
+
+	if expanded || len(rawLines) <= collapsedLines {
+		// Show all content.
+		var boxContent strings.Builder
+		for i, line := range rawLines {
+			boxContent.WriteString(line)
+			if i < len(rawLines)-1 {
+				boxContent.WriteString("\n")
+			}
+		}
+		if expanded && len(rawLines) > collapsedLines {
+			boxContent.WriteString("\n")
+			boxContent.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
+				Render("▲ ctrl+e collapse"))
+		}
+		box := subagentBodyStyle.Width(boxWidth).Render(boxContent.String())
+		return []string{box}
+	}
+
+	// Collapsed: show limited lines.
+	shown := rawLines[:collapsedLines]
+	hidden := len(rawLines) - collapsedLines
 
 	var boxContent strings.Builder
 	for i, line := range shown {
@@ -234,18 +270,11 @@ func formatSubagentOutput(output string, termWidth int) []string {
 			boxContent.WriteString("\n")
 		}
 	}
-	if hidden > 0 {
-		boxContent.WriteString("\n")
-		boxContent.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
-			Render(fmt.Sprintf("… %d more lines", hidden)))
-	}
+	boxContent.WriteString("\n")
+	boxContent.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
+		Render(fmt.Sprintf("… %d more lines (ctrl+e expand)", hidden)))
 
-	boxWidth := termWidth - 8
-	if boxWidth < 30 {
-		boxWidth = 30
-	}
-
-	box := toolBodyStyle.Width(boxWidth).Render(boxContent.String())
+	box := subagentBodyStyle.Width(boxWidth).Render(boxContent.String())
 	return []string{box}
 }
 

@@ -153,6 +153,12 @@ var (
 			PaddingLeft(1).
 			MarginLeft(3)
 
+	// --- Subagent output body style (indented with left border, purple accent) ---
+	subagentBodyStyle = lipgloss.NewStyle().
+					Border(lipgloss.Border{Left: "│"}).
+					BorderForeground(lipgloss.Color("99")).
+					PaddingLeft(1).
+					MarginLeft(3)
 	// --- Button styles for dialogs ---
 	buttonFocusStyle = lipgloss.NewStyle().
 				Bold(true).
