@@ -39,7 +39,7 @@ type Model struct {
 	mode      Mode
 	agentDone bool
 
-	lines       []string
+	lines       []contentLine
 	currentText *strings.Builder
 
 	viewport viewport.Model
@@ -171,13 +171,66 @@ type Model struct {
 	teamState      TeamViewState
 	teammateTokens map[string]int64 // per-teammate token usage for status bar
 	// teamLeaderLines stores the leader's viewport content when switching to teammate view
-	teamLeaderLines []string
+	teamLeaderLines []contentLine
 	teamLeaderText  string
 
 	// ─── Sidebar state ───
 	showSidebar         bool // whether sidebar is currently visible
 	sidebarScrollOffset int  // scroll offset for todo list in sidebar
 	sidebarComp         *SidebarComponent
+}
+
+// --- Content line types for resize-aware rendering ---
+
+// contentLine represents a line in the conversation display.
+// Most lines are plain rendered text; tool results are stored as structured
+// data so they can be re-rendered when the terminal width changes.
+type contentLine struct {
+	text string         // plain rendered text (default)
+	tool *toolResultData // non-nil for tool results that need dynamic rendering
+}
+
+// toolResultData stores the raw data for a tool result, allowing
+// re-rendering with the current terminal width on resize.
+type toolResultData struct {
+	name   string
+	output string
+	err    error // non-nil for error results
+}
+
+// textLine creates a plain text content line.
+func textLine(s string) contentLine {
+	return contentLine{text: s}
+}
+
+// toolResultContentLine creates a tool result content line from raw data.
+func toolResultContentLine(name, output string, err error) contentLine {
+	return contentLine{tool: &toolResultData{name: name, output: output, err: err}}
+}
+
+// render returns the rendered string for this content line, using the
+// given width for tool result boxes. Plain text lines are returned as-is.
+func (cl contentLine) render(width int) string {
+	if cl.tool != nil {
+		lines := formatToolResultBody(cl.tool.name, cl.tool.output, cl.tool.err, width)
+		return strings.Join(lines, "\n")
+	}
+	return cl.text
+}
+
+// toContentLines converts a []string to []contentLine.
+func toContentLines(ss []string) []contentLine {
+	result := make([]contentLine, len(ss))
+	for i, s := range ss {
+		result[i] = contentLine{text: s}
+	}
+	return result
+}
+
+// contains reports whether the rendered content contains the given substring.
+// For tool result lines, this checks the last-rendered text.
+func (cl contentLine) contains(sub string) bool {
+	return strings.Contains(cl.text, sub)
 }
 
 // dirItem implements list.Item
@@ -292,18 +345,18 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 
 	md, _ := glamour.NewTermRenderer(
 		glamour.WithStandardStyle("dark"),
-		glamour.WithWordWrap(100),
+		glamour.WithWordWrap(96), // default, recreated on first WindowSizeMsg
 	)
 
 	mode := ModeAgent
 	thinking := false
-	var initialLines []string
+	var initialLines []contentLine
 	if hasPrompt {
 		thinking = true
 	} else {
-		initialLines = []string{
-			lipgloss.NewStyle().Foreground(colorMuted).Render("Welcome to JCODE. How can I help you today?"),
-			"",
+		initialLines = []contentLine{
+			textLine(lipgloss.NewStyle().Foreground(colorMuted).Render("Welcome to JCODE. How can I help you today?")),
+			textLine(""),
 		}
 	}
 
@@ -545,9 +598,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					if m.approvalRespChan != nil {
 						m.approvalRespChan <- ToolApprovalResponse{Approved: false, Mode: m.approvalMode}
 					}
-					m.lines = append(m.lines, fmt.Sprintf("   %s %s — user denied this operation",
+					m.lines = append(m.lines, textLine(fmt.Sprintf("   %s %s — user denied this operation",
 						toolErrorStyle.Render("⚠ Rejected:"),
-						toolNameStyle.Render(m.approvalToolName)))
+						toolNameStyle.Render(m.approvalToolName))))
 				}
 				m.textarea.Focus()
 				m.refreshViewport()
@@ -580,9 +633,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.approvalRespChan <- ToolApprovalResponse{Approved: false, Mode: m.approvalMode}
 				}
 				// Show rejection notice in chat view
-				m.lines = append(m.lines, fmt.Sprintf("   %s %s — user denied this operation",
+				m.lines = append(m.lines, textLine(fmt.Sprintf("   %s %s — user denied this operation",
 					toolErrorStyle.Render("⚠ Rejected:"),
-					toolNameStyle.Render(m.approvalToolName)))
+					toolNameStyle.Render(m.approvalToolName))))
 				m.textarea.Focus()
 				m.refreshViewport()
 				return m, tea.Batch(cmds...)
@@ -603,14 +656,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.planRejectInput = false
 					m.planReviewActive = false
 					planResponseCh <- PlanResponse{Approved: false, Feedback: feedback}
-					m.lines = append(m.lines, fmt.Sprintf("   %s Plan rejected%s",
+					m.lines = append(m.lines, textLine(fmt.Sprintf("   %s Plan rejected%s",
 						toolErrorStyle.Render("✗"),
 						func() string {
 							if feedback != "" {
 								return ": " + feedback
 							}
 							return ""
-						}()))
+						}())))
 					m.textarea.Focus()
 					m.textarea.Placeholder = "Type your prompt here..."
 					m.refreshViewport()
@@ -633,9 +686,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			case "y", "Y":
 				m.planReviewActive = false
 				planResponseCh <- PlanResponse{Approved: true}
-				m.lines = append(m.lines, fmt.Sprintf("   %s Plan approved: %s",
+				m.lines = append(m.lines, textLine(fmt.Sprintf("   %s Plan approved: %s",
 					toolSuccessStyle.Render("✓"),
-					toolNameStyle.Render(m.planReviewTitle)))
+					toolNameStyle.Render(m.planReviewTitle))))
 				m.textarea.Focus()
 				m.refreshViewport()
 				return m, tea.Batch(cmds...)
@@ -661,9 +714,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				case 0: // Approve
 					m.planReviewActive = false
 					planResponseCh <- PlanResponse{Approved: true}
-					m.lines = append(m.lines, fmt.Sprintf("   %s Plan approved: %s",
+					m.lines = append(m.lines, textLine(fmt.Sprintf("   %s Plan approved: %s",
 						toolSuccessStyle.Render("✓"),
-						toolNameStyle.Render(m.planReviewTitle)))
+						toolNameStyle.Render(m.planReviewTitle))))
 					m.textarea.Focus()
 					m.refreshViewport()
 				case 1: // Reject with feedback
@@ -674,8 +727,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				case 2: // Dismiss
 					m.planReviewActive = false
 					planResponseCh <- PlanResponse{Approved: false, Feedback: ""}
-					m.lines = append(m.lines, fmt.Sprintf("   %s Plan dismissed",
-						toolErrorStyle.Render("✗")))
+					m.lines = append(m.lines, textLine(fmt.Sprintf("   %s Plan dismissed",
+						toolErrorStyle.Render("✗"))))
 					m.textarea.Focus()
 					m.refreshViewport()
 				}
@@ -683,8 +736,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			case "esc":
 				m.planReviewActive = false
 				planResponseCh <- PlanResponse{Approved: false, Feedback: ""}
-				m.lines = append(m.lines, fmt.Sprintf("   %s Plan dismissed",
-					toolErrorStyle.Render("✗")))
+				m.lines = append(m.lines, textLine(fmt.Sprintf("   %s Plan dismissed",
+					toolErrorStyle.Render("✗"))))
 				m.textarea.Focus()
 				m.refreshViewport()
 				return m, tea.Batch(cmds...)
@@ -744,8 +797,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				}
 				m.askUserActive = false
 				askUserResponseCh <- AskUserResponse{Answer: answer}
-				m.lines = append(m.lines, fmt.Sprintf("   %s %s",
-					userLabelStyle.Render("💬 Answer:"), answer))
+				m.lines = append(m.lines, textLine(fmt.Sprintf("   %s %s",
+					userLabelStyle.Render("💬 Answer:"), answer)))
 				m.textarea.Focus()
 				m.textarea.Placeholder = "Type your prompt here..."
 				m.refreshViewport()
@@ -757,8 +810,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				m.textareaLines = 1
 				m.textarea.Placeholder = "Type your prompt here..."
 				askUserResponseCh <- AskUserResponse{Answer: ""}
-				m.lines = append(m.lines, fmt.Sprintf("   %s Question dismissed",
-					toolErrorStyle.Render("✗")))
+				m.lines = append(m.lines, textLine(fmt.Sprintf("   %s Question dismissed",
+					toolErrorStyle.Render("✗"))))
 				m.textarea.Focus()
 				m.refreshViewport()
 				return m, tea.Batch(cmds...)
@@ -789,7 +842,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					selItem := selected.(sessionListItem)
 					m.pickingSession = false
 					m.textarea.Focus()
-					m.lines = append(m.lines, toolLabelStyle.Render("📂 Loading session..."))
+					m.lines = append(m.lines, textLine(toolLabelStyle.Render("📂 Loading session...")))
 					m.thinking = true
 					m.mode = ModeAgent
 					m.agentDone = false
@@ -834,7 +887,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					case "edit_config":
 						m.showingSetting = false
 						m.textarea.Focus()
-						m.lines = append(m.lines, toolLabelStyle.Render("⚙ Settings:")+" Please edit "+config.ConfigPath())
+						m.lines = append(m.lines, textLine(toolLabelStyle.Render("⚙ Settings:")+" Please edit "+config.ConfigPath()))
 						m.refreshViewport()
 						return m, tea.Batch(cmds...)
 					}
@@ -908,7 +961,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					if selItem.isNew {
 						// Start new SSH connection wizard
 						m.sshStep = 1
-						m.lines = append(m.lines, toolLabelStyle.Render("🔗 SSH Setup"))
+						m.lines = append(m.lines, textLine(toolLabelStyle.Render("🔗 SSH Setup")))
 						m.textarea.Placeholder = "Enter SSH address (e.g. root@hostname)..."
 						m.refreshViewport()
 						return m, tea.Batch(cmds...)
@@ -966,9 +1019,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 						}
 					}
 					m.pickingModel = false
-					m.lines = append(m.lines, fmt.Sprintf("  %s Switched to %s",
+					m.lines = append(m.lines, textLine(fmt.Sprintf("  %s Switched to %s",
 						toolSuccessStyle.Render("✓"),
-						toolNameStyle.Render(selItem.provider+"/"+selItem.model)))
+						toolNameStyle.Render(selItem.provider+"/"+selItem.model))))
 					m.textarea.Focus()
 					m.refreshViewport()
 					return m, tea.Batch(cmds...)
@@ -1018,7 +1071,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				m.sshSaveAddr = ""
 				m.sshSavePath = ""
 				m.textarea.Placeholder = "Type your prompt here..."
-				m.lines = append(m.lines, toolLabelStyle.Render("🔗 SSH:")+" Cancelled.")
+				m.lines = append(m.lines, textLine(toolLabelStyle.Render("🔗 SSH:")+" Cancelled."))
 				m.refreshViewport()
 				cmds = append(cmds, func() tea.Msg {
 					return SSHCancelMsg{}
@@ -1215,7 +1268,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					if m.teamState.ViewMode == TeamViewTeammate && m.teamState.ViewingAgent != "" {
 						m.teamState.Manager.EnqueueUserMessage(m.teamState.ViewingAgent, actualPrompt)
 						// prompt already contains compact references from paste-time
-						m.lines = append(m.lines, userPromptStyle.Render("> "+prompt))
+						m.lines = append(m.lines, textLine(userPromptStyle.Render("> "+prompt)))
 						m.refreshViewport()
 						return m, tea.Batch(cmds...)
 					}
@@ -1271,7 +1324,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 					if len(m.lines) > 0 {
 						// Check if the lines are the initial welcome message, we clear it.
-						if strings.Contains(m.lines[0], "Welcome to JCODE") {
+						if strings.Contains(m.lines[0].text, "Welcome to JCODE") {
 							m.lines = nil
 						}
 					}
@@ -1279,7 +1332,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					if !m.agentDone && m.thinking {
 						m.pendingPrompts = append(m.pendingPrompts, actualPrompt)
 						// prompt already contains compact references from paste-time
-						m.lines = append(m.lines, userPromptStyle.Render("> "+prompt+" (queued)"))
+						m.lines = append(m.lines, textLine(userPromptStyle.Render("> "+prompt+" (queued)")))
 						if m.ready {
 							m.viewport.SetHeight(m.calcViewportHeight(true))
 							m.viewport.SetContent(m.renderContent())
@@ -1300,8 +1353,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					}
 
 					// prompt already contains compact references from paste-time
-					m.lines = append(m.lines, "")
-					m.lines = append(m.lines, userPromptStyle.Render(modePrefix+" "+prompt))
+					m.lines = append(m.lines, textLine(""))
+					m.lines = append(m.lines, textLine(userPromptStyle.Render(modePrefix+" "+prompt)))
 					if m.ready {
 						m.viewport.SetHeight(m.calcViewportHeight(false))
 						m.viewport.SetContent(m.renderContent())
@@ -1525,6 +1578,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.settingMenu.SetSize(msg.Width, vpH)
 		m.sshAliasPicker.SetSize(msg.Width, vpH)
 		m.sessionPicker.SetSize(msg.Width, vpH)
+		m.recreateMDRenderer()
 		m.viewport.SetContent(m.renderContent())
 
 	case spinner.TickMsg:
@@ -1551,7 +1605,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.activeProvider = msg.Provider
 		m.activeModel = msg.Model
 		if msg.Message != "" {
-			m.lines = append(m.lines, msg.Message)
+			m.lines = append(m.lines, textLine(msg.Message))
 			m.refreshViewport()
 		}
 
@@ -1562,21 +1616,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 	case ChannelStateMsg:
 		m.channelStates[msg.ChannelID] = msg.State
 		if msg.Message != "" {
-			m.lines = append(m.lines, toolLabelStyle.Render("📡 Channel:")+" "+msg.Message)
+			m.lines = append(m.lines, textLine(toolLabelStyle.Render("📡 Channel:")+" "+msg.Message))
 			m.refreshViewport()
 		}
 
 	case ChannelQRCodeMsg:
-		m.lines = append(m.lines, toolLabelStyle.Render("📡 "+msg.Message))
+		m.lines = append(m.lines, textLine(toolLabelStyle.Render("📡 "+msg.Message)))
 		if msg.QRCodeContent != "" {
 			qrLines := renderQRCode(msg.QRCodeContent)
-			m.lines = append(m.lines, qrLines...)
+			m.lines = append(m.lines, toContentLines(qrLines)...)
 		}
 		m.refreshViewport()
 
 	case ChannelInboundMsg:
-		m.lines = append(m.lines, lipgloss.NewStyle().Foreground(colorSecondary).
-			Render(fmt.Sprintf("📱 [WeChat] %s", msg.Text)))
+		m.lines = append(m.lines, textLine(lipgloss.NewStyle().Foreground(colorSecondary).
+			Render(fmt.Sprintf("📱 [WeChat] %s", msg.Text))))
 		m.refreshViewport()
 		// Queue the inbound message as a pending prompt
 		select {
@@ -1614,14 +1668,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				m.cmdSuggestions = nil
 				m.cmdSuggestionIndex = 0
 
-				if len(m.lines) > 0 && strings.Contains(m.lines[0], "Welcome to JCODE") {
+				if len(m.lines) > 0 && strings.Contains(m.lines[0].text, "Welcome to JCODE") {
 					m.lines = nil
 				}
 
 				if !m.agentDone && m.thinking {
 					m.pendingPrompts = append(m.pendingPrompts, actualPrompt)
 					// prompt already contains compact references from paste-time
-					m.lines = append(m.lines, userPromptStyle.Render("> "+prompt+" (queued)"))
+					m.lines = append(m.lines, textLine(userPromptStyle.Render("> "+prompt+" (queued)")))
 					m.refreshViewport()
 					return m, tea.Batch(cmds...)
 				}
@@ -1637,8 +1691,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				}
 
 				// prompt already contains compact references from paste-time
-				m.lines = append(m.lines, "")
-				m.lines = append(m.lines, userPromptStyle.Render(modePrefix+" "+prompt))
+				m.lines = append(m.lines, textLine(""))
+				m.lines = append(m.lines, textLine(userPromptStyle.Render(modePrefix+" "+prompt)))
 				if m.ready {
 					m.viewport.SetHeight(m.calcViewportHeight(false))
 					m.viewport.SetContent(m.renderContent())
@@ -1697,14 +1751,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		}
 		m.totalTokens = 0
 		m.sidebarScrollOffset = 0
-		m.lines = append(m.lines, toolLabelStyle.Render("📂 Session resumed: ")+msg.UUID)
-		m.lines = append(m.lines, "")
+		m.lines = append(m.lines, textLine(toolLabelStyle.Render("📂 Session resumed: ")+msg.UUID))
+		m.lines = append(m.lines, textLine(""))
 		for _, e := range msg.Entries {
 			switch e.Type {
 			case string(session.EntryUser):
-				m.lines = append(m.lines, "")
+				m.lines = append(m.lines, textLine(""))
 				displayContent := m.pasteStore.StoreAndFormat(NormalizeLineEndings(e.Content))
-				m.lines = append(m.lines, userPromptStyle.Render("> "+displayContent))
+				m.lines = append(m.lines, textLine(userPromptStyle.Render("> "+displayContent)))
 			case string(session.EntryAssistant):
 				if e.Content != "" {
 					rendered := e.Content
@@ -1713,41 +1767,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 							rendered = md
 						}
 					}
-					m.lines = append(m.lines, "")
-					m.lines = append(m.lines, rendered)
+					m.lines = append(m.lines, textLine(""))
+					m.lines = append(m.lines, textLine(rendered))
 				}
 			case string(session.EntryToolCall):
 				// Tool calls always show running icon (they don't have error status yet)
-				m.lines = append(m.lines, fmt.Sprintf("  %s %s %s",
+				m.lines = append(m.lines, textLine(fmt.Sprintf("  %s %s %s",
 					toolIconRunning,
 					toolNameStyle.Render(e.Name),
 					toolArgsStyle.Render(truncate(sanitize(e.Args), 100)),
-				))
+				)))
 			case string(session.EntryToolResult):
 				if e.Error != "" {
-					m.lines = append(m.lines, formatToolResultBody(e.Name, "", fmt.Errorf("%s", e.Error), m.contentWidth())...)
+					m.lines = append(m.lines, toolResultContentLine(e.Name, "", fmt.Errorf("%s", e.Error)))
 				} else {
-					m.lines = append(m.lines, formatToolResult(e.Name, e.Output, m.contentWidth())...)
+					m.lines = append(m.lines, toolResultContentLine(e.Name, e.Output, nil))
 				}
 			case string(session.EntrySubagentStart):
 				typeLabel := e.SubagentType
 				if typeLabel == "" {
 					typeLabel = "explore"
 				}
-				m.lines = append(m.lines, fmt.Sprintf("  %s %s %s",
+				m.lines = append(m.lines, textLine(fmt.Sprintf("  %s %s %s",
 					subagentLabelStyle.Render("🤖 Subagent:"),
 					toolNameStyle.Render(e.SubagentName),
 					toolArgsStyle.Render("("+typeLabel+")"),
-				))
+				)))
 			case string(session.EntrySubagentResult):
 				if e.Error != "" {
-					m.lines = append(m.lines, fmt.Sprintf("   %s %s",
+					m.lines = append(m.lines, textLine(fmt.Sprintf("   %s %s",
 						toolErrorStyle.Render("✗ Subagent Error:"),
-						toolResultStyle.Render(truncate(sanitize(e.Error), maxToolOutputLen))))
+						toolResultStyle.Render(truncate(sanitize(e.Error), maxToolOutputLen)))))
 				} else {
-					m.lines = append(m.lines, fmt.Sprintf("   %s %s",
+					m.lines = append(m.lines, textLine(fmt.Sprintf("   %s %s",
 						toolSuccessStyle.Render("✓ Subagent Done:"),
-						toolResultStyle.Render(truncate(sanitize(e.Output), maxToolOutputLen))))
+						toolResultStyle.Render(truncate(sanitize(e.Output), maxToolOutputLen)))))
 				}
 			case string(session.EntryPlanUpdate):
 				statusIcon := "📝"
@@ -1759,32 +1813,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				case "submitted":
 					statusIcon = "📤"
 				}
-				m.lines = append(m.lines, fmt.Sprintf("  %s Plan %s: %s",
+				m.lines = append(m.lines, textLine(fmt.Sprintf("  %s Plan %s: %s",
 					toolLabelStyle.Render(statusIcon),
 					toolNameStyle.Render(e.PlanStatus),
-					toolArgsStyle.Render(e.PlanTitle)))
+					toolArgsStyle.Render(e.PlanTitle))))
 			case string(session.EntryTodoSnapshot):
 				if len(e.Todos) > 0 {
-					m.lines = append(m.lines, toolLabelStyle.Render("  📋 Todo List:"))
+					m.lines = append(m.lines, textLine(toolLabelStyle.Render("  📋 Todo List:")))
 					for _, t := range e.Todos {
 						statusIcon := "⬜"
 						if t.Status == "completed" || t.Status == "done" {
 							statusIcon = "✅"
 						}
-						m.lines = append(m.lines, fmt.Sprintf("     %s %d: %s",
-							statusIcon, t.ID, t.Title))
+						m.lines = append(m.lines, textLine(fmt.Sprintf("     %s %d: %s",
+							statusIcon, t.ID, t.Title)))
 					}
 				}
 			case string(session.EntryModeChange):
-				m.lines = append(m.lines, fmt.Sprintf("  %s Mode changed to: %s",
+				m.lines = append(m.lines, textLine(fmt.Sprintf("  %s Mode changed to: %s",
 					toolLabelStyle.Render("🔄"),
-					toolNameStyle.Render(e.Mode)))
+					toolNameStyle.Render(e.Mode))))
 			case string(session.EntryCompact):
-				m.lines = append(m.lines, fmt.Sprintf("  %s Context compacted: %d messages summarized",
+				m.lines = append(m.lines, textLine(fmt.Sprintf("  %s Context compacted: %d messages summarized",
 					toolSuccessStyle.Render("✓"),
-					e.CompactedN))
+					e.CompactedN)))
 			case string(session.EntryBudgetWarning):
-				m.lines = append(m.lines, toolErrorStyle.Render("  ⚠️ Budget warning"))
+				m.lines = append(m.lines, textLine(toolErrorStyle.Render("  ⚠️ Budget warning")))
 			}
 		}
 		// Add a divider line after resumed content
@@ -1800,9 +1854,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			}
 			line := strings.Repeat(" ", leftMargin) + lipgloss.NewStyle().Foreground(colorMuted).Render(
 				dividerText+strings.Repeat("─", fillW))
-			m.lines = append(m.lines, "")
-			m.lines = append(m.lines, line)
-			m.lines = append(m.lines, "")
+			m.lines = append(m.lines, textLine(""))
+			m.lines = append(m.lines, textLine(line))
+			m.lines = append(m.lines, textLine(""))
 		}
 		if m.ready {
 			m.viewport.SetHeight(m.calcViewportHeight(true))
@@ -1814,8 +1868,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 	case SSHDirResultsMsg:
 		m.thinking = false
 		if msg.Err != nil {
-			m.lines = append(m.lines, fmt.Sprintf("   %s Failed to list directory: %v",
-				toolErrorStyle.Render("✗ SSH Error:"), msg.Err))
+			m.lines = append(m.lines, textLine(fmt.Sprintf("   %s Failed to list directory: %v",
+				toolErrorStyle.Render("✗ SSH Error:"), msg.Err)))
 			m.sshStep = 0
 			m.textarea.Placeholder = "Type your prompt here..."
 		} else {
@@ -1846,8 +1900,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.thinking = false
 		if msg.Success {
 			m.envLabel = msg.Label
-			m.lines = append(m.lines, fmt.Sprintf("   %s Connected to %s",
-				toolSuccessStyle.Render("✓"), toolNameStyle.Render(msg.Label)))
+			m.lines = append(m.lines, textLine(fmt.Sprintf("   %s Connected to %s",
+				toolSuccessStyle.Render("✓"), toolNameStyle.Render(msg.Label))))
 			// If this was a direct /ssh user@host connection, offer to save alias
 			if m.sshSaveAddr != "" {
 				// Update sshSavePath from the actual connected path in label
@@ -1861,13 +1915,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					}
 				}
 				m.sshSavePrompt = true
-				m.lines = append(m.lines, toolLabelStyle.Render("⚙ SSH:")+" Save as alias? Enter alias name (or press Enter/type 'n' to skip)")
+				m.lines = append(m.lines, textLine(toolLabelStyle.Render("⚙ SSH:")+" Save as alias? Enter alias name (or press Enter/type 'n' to skip)"))
 				m.textarea.Placeholder = "Enter alias name (e.g. my-server)..."
 			}
 		} else {
-			m.lines = append(m.lines, fmt.Sprintf("   %s %s",
+			m.lines = append(m.lines, textLine(fmt.Sprintf("   %s %s",
 				toolErrorStyle.Render("✗ SSH Error:"),
-				toolResultStyle.Render(msg.Err.Error())))
+				toolResultStyle.Render(msg.Err.Error()))))
 			m.sshSaveAddr = ""
 			m.sshSavePath = ""
 		}
@@ -1880,9 +1934,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		}
 
 	case UserPromptMsg:
-		m.lines = append(m.lines, "")
+		m.lines = append(m.lines, textLine(""))
 		displayPrompt := m.pasteStore.StoreAndFormat(NormalizeLineEndings(sanitize(msg.Prompt)))
-		m.lines = append(m.lines, userPromptStyle.Render("> "+displayPrompt))
+		m.lines = append(m.lines, textLine(userPromptStyle.Render("> "+displayPrompt)))
 		m.refreshViewport()
 
 	case AgentTextMsg:
@@ -1907,11 +1961,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				subtitlePart = " " + toolArgsStyle.Render(argsDisplay)
 			}
 		}
-		m.lines = append(m.lines, fmt.Sprintf("  %s %s%s",
+		m.lines = append(m.lines, textLine(fmt.Sprintf("  %s %s%s",
 			toolIconRunning,
 			toolNameStyle.Render(displayLabel),
 			subtitlePart,
-		))
+		)))
 		m.refreshViewport()
 		cmds = append(cmds, m.spinner.Tick)
 
@@ -1921,11 +1975,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		if msg.Err != nil {
 			// Replace the running icon with error icon on the last tool line
 			m.replaceLastToolIcon(toolIconError)
-			m.lines = append(m.lines, formatToolResultBody(msg.Name, "", msg.Err, m.contentWidth())...)
+			m.lines = append(m.lines, toolResultContentLine(msg.Name, "", msg.Err))
 		} else {
 			// Replace the running icon with success icon
 			m.replaceLastToolIcon(toolIconSuccess)
-			m.lines = append(m.lines, formatToolResultBody(msg.Name, sanitize(msg.Output), nil, m.contentWidth())...)
+			m.lines = append(m.lines, toolResultContentLine(msg.Name, sanitize(msg.Output), nil))
 		}
 		m.refreshViewport()
 		cmds = append(cmds, m.spinner.Tick)
@@ -1940,9 +1994,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		if msg.Err != nil {
 			if msg.Err.Error() == "context canceled" {
 				// User-initiated cancellation — show a clean message, not an error.
-				m.lines = append(m.lines, lipgloss.NewStyle().Foreground(colorMuted).Render("⏹  Agent cancelled."))
+				m.lines = append(m.lines, textLine(lipgloss.NewStyle().Foreground(colorMuted).Render("⏹  Agent cancelled.")))
 			} else {
-				m.lines = append(m.lines, errorStyle.Render("Error: "+msg.Err.Error()))
+				m.lines = append(m.lines, textLine(errorStyle.Render("Error: "+msg.Err.Error())))
 			}
 		}
 		// Model info line with full-width divider (styled like "── ◇ model via provider 5s ──")
@@ -1965,11 +2019,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			}
 			line := strings.Repeat(" ", leftMargin) + lipgloss.NewStyle().Foreground(colorPrimary).Render(
 				modelInfoText+strings.Repeat("─", fillW))
-			m.lines = append(m.lines, "")
-			m.lines = append(m.lines, line)
-			m.lines = append(m.lines, "")
+			m.lines = append(m.lines, textLine(""))
+			m.lines = append(m.lines, textLine(line))
+			m.lines = append(m.lines, textLine(""))
 		}
-		m.lines = append(m.lines, "")
+		m.lines = append(m.lines, textLine(""))
 		m.agentDone = true
 		m.textarea.Focus()
 		if m.ready {
@@ -2014,11 +2068,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.subagentLastTool = ""
 		m.subagentProgress = nil
 		m.subagentTokens = 0
-		m.lines = append(m.lines, fmt.Sprintf("  %s %s %s",
+		m.lines = append(m.lines, textLine(fmt.Sprintf("  %s %s %s",
 			subagentLabelStyle.Render("🤖 Subagent:"),
 			toolNameStyle.Render(msg.Name),
 			toolArgsStyle.Render("("+typeLabel+")"),
-		))
+		)))
 		m.refreshViewport()
 		cmds = append(cmds, m.spinner.Tick)
 
@@ -2047,13 +2101,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.subagentProgress = nil
 		m.subagentTokens = 0
 		if msg.Err != nil {
-			m.lines = append(m.lines, fmt.Sprintf("   %s %s",
+			m.lines = append(m.lines, textLine(fmt.Sprintf("   %s %s",
 				toolErrorStyle.Render("✗ Subagent Error:"),
-				toolResultStyle.Render(truncate(sanitize(msg.Err.Error()), maxToolOutputLen))))
+				toolResultStyle.Render(truncate(sanitize(msg.Err.Error()), maxToolOutputLen)))))
 		} else {
-			m.lines = append(m.lines, fmt.Sprintf("   %s %s",
+			m.lines = append(m.lines, textLine(fmt.Sprintf("   %s %s",
 				toolSuccessStyle.Render("✓ Subagent Done:"),
-				toolResultStyle.Render(truncate(sanitize(msg.Result), maxToolOutputLen))))
+				toolResultStyle.Render(truncate(sanitize(msg.Result), maxToolOutputLen)))))
 		}
 		m.refreshViewport()
 		cmds = append(cmds, m.spinner.Tick)
@@ -2061,15 +2115,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 	case CompactDoneMsg:
 		m.thinking = false
 		if msg.Err != nil {
-			m.lines = append(m.lines, fmt.Sprintf("  %s %s",
+			m.lines = append(m.lines, textLine(fmt.Sprintf("  %s %s",
 				toolErrorStyle.Render("✗ Compact Error:"),
-				toolResultStyle.Render(msg.Err.Error())))
+				toolResultStyle.Render(msg.Err.Error()))))
 		} else {
-			m.lines = append(m.lines, fmt.Sprintf("  %s Tokens: %d → %d",
+			m.lines = append(m.lines, textLine(fmt.Sprintf("  %s Tokens: %d → %d",
 				toolSuccessStyle.Render("✓ Context compacted."),
-				msg.OldTokens, msg.NewTokens))
+				msg.OldTokens, msg.NewTokens)))
 		}
-		m.lines = append(m.lines, "")
+		m.lines = append(m.lines, textLine(""))
 		m.agentDone = true
 		m.textarea.Focus()
 		m.refreshViewport()
@@ -2085,11 +2139,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			if msg.Status == "failed" || msg.Status == "timeout" {
 				statusIcon = toolErrorStyle.Render("✗")
 			}
-			m.lines = append(m.lines, fmt.Sprintf("  %s Background task %s (%s): %s",
+			m.lines = append(m.lines, textLine(fmt.Sprintf("  %s Background task %s (%s): %s",
 				statusIcon,
 				toolNameStyle.Render(msg.TaskID),
 				msg.Status,
-				toolArgsStyle.Render(truncate(sanitize(msg.Command), 60))))
+				toolArgsStyle.Render(truncate(sanitize(msg.Command), 60)))))
 		}
 		m.refreshViewport()
 
@@ -2107,7 +2161,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		spawnLine := fmt.Sprintf("  %s Teammate %s spawned", toolSuccessStyle.Render("👥"), nameStyled)
 		promptLine := fmt.Sprintf("    %s", lipgloss.NewStyle().Faint(true).Render(truncate(msg.Prompt, 80)))
 		// Add to leader view.
-		m.lines = append(m.lines, spawnLine, promptLine)
+		m.lines = append(m.lines, textLine(spawnLine), textLine(promptLine))
 		// Initialize per-teammate display lines.
 		m.teamState.AppendTeammateLine(msg.AgentID, spawnLine, promptLine, "")
 		m.refreshViewport()
@@ -2118,15 +2172,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		icon := statusIcon(msg.Status)
 		switch {
 		case msg.Status == team.StatusRunning:
-			m.lines = append(m.lines, fmt.Sprintf("  %s %s is working...", icon, nameStyled))
+			m.lines = append(m.lines, textLine(fmt.Sprintf("  %s %s is working...", icon, nameStyled)))
 		case msg.Status.IsTerminal():
 			errInfo := ""
 			if msg.Error != "" {
 				errInfo = ": " + msg.Error
 			}
-			m.lines = append(m.lines, fmt.Sprintf("  %s %s %s%s", icon, nameStyled, string(msg.Status), errInfo))
+			m.lines = append(m.lines, textLine(fmt.Sprintf("  %s %s %s%s", icon, nameStyled, string(msg.Status), errInfo)))
 		case msg.Status == team.StatusIdle:
-			m.lines = append(m.lines, fmt.Sprintf("  %s %s idle, waiting for messages", icon, nameStyled))
+			m.lines = append(m.lines, textLine(fmt.Sprintf("  %s %s idle, waiting for messages", icon, nameStyled)))
 		}
 		m.refreshViewport()
 
@@ -2202,17 +2256,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			state := m.teamState.Manager.GetTeammateState(msg.AgentID)
 			if state != nil {
 				m.lines = nil
-				m.lines = append(m.lines, RenderTeammateViewHeader(state.Identity))
-				m.lines = append(m.lines, "")
-				m.lines = append(m.lines, m.teamState.GetTeammateDisplayLines(msg.AgentID)...)
+				m.lines = append(m.lines, textLine(RenderTeammateViewHeader(state.Identity)))
+				m.lines = append(m.lines, textLine(""))
+				m.lines = append(m.lines, toContentLines(m.teamState.GetTeammateDisplayLines(msg.AgentID))...)
 			}
 			m.refreshViewport()
 		}
 		// Show brief notification in leader view for assistant messages.
 		if m.teamState.ViewingAgent == "" && msg.Role == "assistant" {
 			preview := truncate(msg.Content, 60)
-			m.lines = append(m.lines, fmt.Sprintf("  💬 %s: %s",
-				toolNameStyle.Render(msg.AgentID), lipgloss.NewStyle().Faint(true).Render(preview)))
+			m.lines = append(m.lines, textLine(fmt.Sprintf("  💬 %s: %s",
+				toolNameStyle.Render(msg.AgentID), lipgloss.NewStyle().Faint(true).Render(preview))))
 			m.refreshViewport()
 		}
 	// --- End team messages ---
@@ -2263,9 +2317,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			{text: " Yes ", selected: false},
 			{text: " No ", selected: true},
 		})
-		m.lines = append(m.lines, fmt.Sprintf("  %s  %s",
+		m.lines = append(m.lines, textLine(fmt.Sprintf("  %s  %s",
 			lipgloss.NewStyle().Foreground(colorWarning).Bold(true).Render("Quit?"),
-			quitButtons))
+			quitButtons)))
 		m.refreshViewport()
 		return m, tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
 			return ExitTimeoutMsg{}
@@ -2438,8 +2492,6 @@ func (m Model) View() tea.View {
 		vpH = 3
 	}
 	if m.ready {
-		m.viewport.SetWidth(mainWidth)
-		m.viewport.SetHeight(vpH)
 		m.viewport.SetContent(strings.TrimRight(m.renderContent(), "\n"))
 	}
 
@@ -2554,12 +2606,12 @@ func (m *Model) refreshViewport() {
 func (m *Model) replaceLastToolIcon(newIcon string) {
 	for i := len(m.lines) - 1; i >= 0; i-- {
 		line := m.lines[i]
-		if strings.Contains(line, toolIconRunning) {
-			m.lines[i] = strings.Replace(line, toolIconRunning, newIcon, 1)
+		if strings.Contains(line.text, toolIconRunning) {
+			m.lines[i] = contentLine{text: strings.Replace(line.text, toolIconRunning, newIcon, 1)}
 			return
 		}
-		if strings.Contains(line, toolIconPending) {
-			m.lines[i] = strings.Replace(line, toolIconPending, newIcon, 1)
+		if strings.Contains(line.text, toolIconPending) {
+			m.lines[i] = contentLine{text: strings.Replace(line.text, toolIconPending, newIcon, 1)}
 			return
 		}
 	}
@@ -2577,19 +2629,19 @@ func (m *Model) getLastAssistantText() string {
 	for i := len(m.lines) - 1; i >= 0; i-- {
 		line := m.lines[i]
 		// Stop at user prompt (contains orange background ANSI), tool icons, or other boundaries
-		if strings.Contains(line, toolIconRunning) ||
-			strings.Contains(line, toolIconSuccess) ||
-			strings.Contains(line, toolIconError) ||
-			strings.Contains(line, "Session resumed:") ||
-			strings.Contains(line, "Subagent:") {
+		if strings.Contains(line.text, toolIconRunning) ||
+			strings.Contains(line.text, toolIconSuccess) ||
+			strings.Contains(line.text, toolIconError) ||
+			strings.Contains(line.text, "Session resumed:") ||
+			strings.Contains(line.text, "Subagent:") {
 			break
 		}
 		// Detect user prompt line (rendered with background color via userPromptStyle)
-		if strings.Contains(line, "\x1b[") && strings.Contains(line, "> ") && strings.Contains(line, "48;2;") {
+		if strings.Contains(line.text, "\x1b[") && strings.Contains(line.text, "> ") && strings.Contains(line.text, "48;2;") {
 			break
 		}
-		if line != "" {
-			textLines = append(textLines, line)
+		if line.text != "" {
+			textLines = append(textLines, line.text)
 		}
 	}
 	// Reverse since we scanned backwards
@@ -2611,8 +2663,23 @@ func (m *Model) flushText() {
 			rendered = md
 		}
 	}
-	m.lines = append(m.lines, "")
-	m.lines = append(m.lines, rendered)
+	m.lines = append(m.lines, textLine(""))
+	m.lines = append(m.lines, textLine(rendered))
+}
+
+// recreateMDRenderer rebuilds the glamour markdown renderer with the current
+// content width, ensuring WordWrap adapts to terminal resize.
+func (m *Model) recreateMDRenderer() {
+	width := m.contentWidth()
+	if width < 40 {
+		width = 40
+	}
+	if r, err := glamour.NewTermRenderer(
+		glamour.WithStandardStyle("dark"),
+		glamour.WithWordWrap(width-4), // account for left margin/padding
+	); err == nil {
+		m.mdRenderer = r
+	}
 }
 
 // contentWidth returns the width available for the main content area,
@@ -2625,9 +2692,10 @@ func (m *Model) contentWidth() int {
 }
 
 func (m *Model) renderContent() string {
+	width := m.contentWidth()
 	var sb strings.Builder
 	for _, line := range m.lines {
-		sb.WriteString(line)
+		sb.WriteString(line.render(width))
 		sb.WriteString("\n")
 	}
 	if m.currentText.Len() > 0 {
@@ -2689,7 +2757,7 @@ func (m *Model) renderSubagentBox() string {
 		}
 	}
 
-	boxWidth := m.width - 8
+	boxWidth := m.contentWidth() - 8
 	if boxWidth < 30 {
 		boxWidth = 30
 	}
