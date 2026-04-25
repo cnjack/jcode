@@ -70,7 +70,7 @@ func (m Model) handleSSHSaveAlias(input string, cmds []tea.Cmd) (tea.Model, tea.
 
 	input = strings.TrimSpace(input)
 	if input == "" || strings.ToLower(input) == "n" || strings.ToLower(input) == "no" {
-		m.lines = append(m.lines, toolLabelStyle.Render("⚙ SSH:")+" Alias not saved.")
+		m.lines = append(m.lines, textLine(toolLabelStyle.Render("⚙ SSH:")+" Alias not saved."))
 		m.refreshViewport()
 		return m, tea.Batch(cmds...)
 	}
@@ -104,9 +104,9 @@ func (m Model) handleSSHSaveAlias(input string, cmds []tea.Cmd) (tea.Model, tea.
 	}
 
 	if err := config.SaveConfig(cfg); err != nil {
-		m.lines = append(m.lines, toolErrorStyle.Render("✗ Failed to save alias: "+err.Error()))
+		m.lines = append(m.lines, textLine(toolErrorStyle.Render("✗ Failed to save alias: "+err.Error())))
 	} else {
-		m.lines = append(m.lines, toolLabelStyle.Render("⚙ SSH:")+" Saved alias '"+aliasName+"' → "+m.sshSaveAddr)
+		m.lines = append(m.lines, textLine(toolLabelStyle.Render("⚙ SSH:")+" Saved alias '"+aliasName+"' → "+m.sshSaveAddr))
 		// Notify the event loop about the config change so tools can be rebuilt
 		select {
 		case configCh <- cfg:
@@ -155,8 +155,8 @@ func (m Model) startSSHConnect(addr, path string, cmds []tea.Cmd) (tea.Model, te
 	if path != "" {
 		display = addr + ":" + path
 	}
-	m.lines = append(m.lines, fmt.Sprintf("%s Connecting to %s...",
-		toolLabelStyle.Render("🔗 SSH:"), toolNameStyle.Render(display)))
+	m.lines = append(m.lines, textLine(fmt.Sprintf("%s Connecting to %s...",
+		toolLabelStyle.Render("🔗 SSH:"), toolNameStyle.Render(display))))
 	m.refreshViewport()
 
 	cmds = append(cmds, func() tea.Msg {

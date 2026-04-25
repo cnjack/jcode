@@ -37,8 +37,8 @@ func (m Model) handleChannelKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.M
 			default:
 			}
 
-			m.lines = append(m.lines, toolLabelStyle.Render(
-				fmt.Sprintf("📡 %s: %s...", item.channelID, item.action)))
+			m.lines = append(m.lines, textLine(toolLabelStyle.Render(
+				fmt.Sprintf("📡 %s: %s...", item.channelID, item.action))))
 			m.refreshViewport()
 			return m, tea.Batch(cmds...)
 		}
