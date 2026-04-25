@@ -193,9 +193,10 @@ type contentLine struct {
 // toolResultData stores the raw data for a tool result, allowing
 // re-rendering with the current terminal width on resize.
 type toolResultData struct {
-	name   string
-	output string
-	err    error // non-nil for error results
+	name     string
+	output   string
+	err      error // non-nil for error results
+	expanded bool  // true when subagent output is expanded (full markdown)
 }
 
 // textLine creates a plain text content line.
@@ -210,9 +211,9 @@ func toolResultContentLine(name, output string, err error) contentLine {
 
 // render returns the rendered string for this content line, using the
 // given width for tool result boxes. Plain text lines are returned as-is.
-func (cl contentLine) render(width int) string {
+func (cl contentLine) render(width int, mdRenderer *glamour.TermRenderer) string {
 	if cl.tool != nil {
-		lines := formatToolResultBody(cl.tool.name, cl.tool.output, cl.tool.err, width)
+		lines := formatToolResultBody(cl.tool.name, cl.tool.output, cl.tool.err, width, cl.tool.expanded, mdRenderer)
 		return strings.Join(lines, "\n")
 	}
 	return cl.text
@@ -1460,6 +1461,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.refreshViewport()
 					return m, tea.Batch(cmds...)
 				}
+			case "ctrl+e":
+				// Toggle expand/collapse of subagent output near viewport top
+				m.toggleSubagentExpand()
+				return m, tea.Batch(cmds...)
 			case "ctrl+y":
 				// Copy last assistant message to clipboard
 				text := m.getLastAssistantText()
@@ -1799,9 +1804,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 						toolErrorStyle.Render("✗ Subagent Error:"),
 						toolResultStyle.Render(truncate(sanitize(e.Error), maxToolOutputLen)))))
 				} else {
-					m.lines = append(m.lines, textLine(fmt.Sprintf("   %s %s",
-						toolSuccessStyle.Render("✓ Subagent Done:"),
-						toolResultStyle.Render(truncate(sanitize(e.Output), maxToolOutputLen)))))
+					m.lines = append(m.lines, textLine(fmt.Sprintf("   %s",
+						toolSuccessStyle.Render("✓ Subagent Done"))))
+					m.lines = append(m.lines, toolResultContentLine("subagent", sanitize(e.Output), nil))
 				}
 			case string(session.EntryPlanUpdate):
 				statusIcon := "📝"
@@ -2105,9 +2110,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				toolErrorStyle.Render("✗ Subagent Error:"),
 				toolResultStyle.Render(truncate(sanitize(msg.Err.Error()), maxToolOutputLen)))))
 		} else {
-			m.lines = append(m.lines, textLine(fmt.Sprintf("   %s %s",
-				toolSuccessStyle.Render("✓ Subagent Done:"),
-				toolResultStyle.Render(truncate(sanitize(msg.Result), maxToolOutputLen)))))
+			m.lines = append(m.lines, textLine(fmt.Sprintf("   %s",
+				toolSuccessStyle.Render("✓ Subagent Done"))))
 		}
 		m.refreshViewport()
 		cmds = append(cmds, m.spinner.Tick)
@@ -2230,7 +2234,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 						toolResultStyle.Render(truncate(sanitize(msg.ToolErr), maxToolOutputLen))))
 			} else {
 				m.teamState.AppendTeammateLine(msg.AgentID,
-					formatToolResult(msg.ToolName, sanitize(msg.Content), m.contentWidth())...)
+					formatToolResult(msg.ToolName, sanitize(msg.Content), m.contentWidth(), false, nil)...)
 			}
 		case "assistant":
 			m.teamState.FlushTeammateText(msg.AgentID)
@@ -2602,6 +2606,88 @@ func (m *Model) refreshViewport() {
 
 // --- Helpers ---
 
+// maxRenderedLines estimates the number of rendered lines for a tool result.
+// This is used to map viewport scroll position back to content line indices.
+func maxRenderedLines(tool *toolResultData, termWidth int) int {
+	if tool == nil {
+		return 1
+	}
+	output := tool.output
+	if tool.err != nil {
+		output = tool.err.Error()
+	}
+	output = strings.TrimRight(output, "\n")
+	if output == "" {
+		return 1
+	}
+	lines := strings.Count(output, "\n") + 1
+
+	// Account for word-wrapping: estimate based on width.
+	boxWidth := termWidth - 12 // account for border + margin + padding
+	if boxWidth < 20 {
+		boxWidth = 20
+	}
+	wrapped := 0
+	for _, line := range strings.Split(output, "\n") {
+		if len(line) > boxWidth {
+			wrapped += (len(line) / boxWidth)
+		}
+	}
+	return lines + wrapped
+}
+
+// toggleSubagentExpand finds the nearest subagent tool result to the viewport
+// top and toggles its expanded state. It searches from the viewport top line
+// downward to find the first subagent tool result.
+func (m *Model) toggleSubagentExpand() {
+	if !m.ready || len(m.lines) == 0 {
+		return
+	}
+
+	// Estimate which content line index corresponds to the viewport top.
+	// Each content line produces one or more rendered lines. For tool results,
+	// the rendered output can be multi-line. We estimate by counting newlines
+	// in the text content and using a simple heuristic for tool results.
+	topRenderedLine := m.viewport.YOffset()
+	lineCount := 0
+	startIdx := 0
+	for i, cl := range m.lines {
+		var n int
+		if cl.tool != nil {
+			// Tool results are multi-line boxes; estimate conservatively.
+			n = maxRenderedLines(cl.tool, m.contentWidth())
+		} else {
+			n = strings.Count(cl.text, "\n") + 1
+		}
+		if lineCount+n > topRenderedLine {
+			startIdx = i
+			break
+		}
+		lineCount += n
+		if i == len(m.lines)-1 {
+			startIdx = i
+		}
+	}
+
+	// Search from viewport top downward.
+	for i := startIdx; i < len(m.lines); i++ {
+		if m.lines[i].tool != nil && m.lines[i].tool.name == "subagent" {
+			m.lines[i].tool.expanded = !m.lines[i].tool.expanded
+			m.refreshViewport()
+			return
+		}
+	}
+
+	// If not found forward, search from beginning to viewport top.
+	for i := 0; i < startIdx; i++ {
+		if m.lines[i].tool != nil && m.lines[i].tool.name == "subagent" {
+			m.lines[i].tool.expanded = !m.lines[i].tool.expanded
+			m.refreshViewport()
+			return
+		}
+	}
+}
+
 // replaceLastToolIcon replaces the status icon on the last tool call line.
 func (m *Model) replaceLastToolIcon(newIcon string) {
 	for i := len(m.lines) - 1; i >= 0; i-- {
@@ -2695,7 +2781,7 @@ func (m *Model) renderContent() string {
 	width := m.contentWidth()
 	var sb strings.Builder
 	for _, line := range m.lines {
-		sb.WriteString(line.render(width))
+		sb.WriteString(line.render(width, m.mdRenderer))
 		sb.WriteString("\n")
 	}
 	if m.currentText.Len() > 0 {

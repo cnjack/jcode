@@ -613,6 +613,7 @@ func (m Model) helpPanelView() string {
 	left = append(left, renderEntry("Ctrl+P", "Agent ↔ Plan mode"))
 	left = append(left, renderEntry("Ctrl+A", "Ask ↔ Auto approve"))
 	left = append(left, renderEntry("Ctrl+Y", "Copy last response"))
+	left = append(left, renderEntry("Ctrl+E", "Expand subagent output"))
 	left = append(left, renderEntry("Escape", "Cancel / Back"))
 	left = append(left, "")
 	left = append(left, sectionStyle.Render("Navigation"))
