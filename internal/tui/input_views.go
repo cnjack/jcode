@@ -200,7 +200,8 @@ func (m Model) channelStateDesc(channelID string) string {
 func (m Model) handleSettingInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	items := []list.Item{
 		settingItem{title: "🔀 Switch Model", desc: "Switch to a different configured model", key: "switch_model"},
-		settingItem{title: "➕ Add New Model", desc: "Add a new model provider via setup wizard", key: "add_model"},
+		settingItem{title: "⚙  Manage Models", desc: "Choose which models appear in the model selector", key: "manage_models"},
+		settingItem{title: "➕ Add New Provider", desc: "Add a new model provider via setup wizard", key: "add_model"},
 		settingItem{title: "📝 Edit Config File", desc: "Manually edit " + config.ConfigPath(), key: "edit_config"},
 	}
 	m.settingMenu.SetItems(items)

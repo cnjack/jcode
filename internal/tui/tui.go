@@ -183,6 +183,11 @@ type Model struct {
 	showSidebar         bool // whether sidebar is currently visible
 	sidebarScrollOffset int  // scroll offset for todo list in sidebar
 	sidebarComp         *SidebarComponent
+
+	// ─── Manage models state ───
+	managingModels       bool
+	manageModelsPicker   list.Model
+	manageModelsProvider string // currently selected provider ID for filtering
 }
 
 // --- Content line types for resize-aware rendering ---
@@ -191,7 +196,7 @@ type Model struct {
 // Most lines are plain rendered text; tool results are stored as structured
 // data so they can be re-rendered when the terminal width changes.
 type contentLine struct {
-	text string         // plain rendered text (default)
+	text string          // plain rendered text (default)
 	tool *toolResultData // non-nil for tool results that need dynamic rendering
 }
 
@@ -253,17 +258,25 @@ func (i dirItem) Description() string { return i.desc }
 func (i dirItem) FilterValue() string { return i.title }
 
 type modelItem struct {
-	provider  string
-	model     string
-	title     string
-	desc      string
-	isCurrent bool // currently active model
-	isAction  bool // action item (e.g. "Add New Model")
+	provider         string
+	model            string
+	title            string
+	desc             string
+	isCurrent        bool   // currently active model
+	isAction         bool   // action item (e.g. "Add New Model")
+	actionID         string // action identifier (e.g. "add_model", "manage_models")
+	isProviderHeader bool   // provider group header
 }
 
 func (i modelItem) Title() string       { return i.title }
 func (i modelItem) Description() string { return i.desc }
-func (i modelItem) FilterValue() string { return i.provider + "/" + i.model + " " + i.title }
+func (i modelItem) FilterValue() string {
+	// Provider headers should not be filterable individually, but should match if any of their models match
+	if i.isProviderHeader {
+		return ""
+	}
+	return i.model + " " + i.title
+}
 
 // settingItem is used for the /setting menu
 type settingItem struct {
@@ -379,6 +392,7 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 	ml := list.New([]list.Item{}, modelDel, 0, 0)
 	ml.Title = "Select Model"
 	ml.SetShowHelp(false)
+	ml.SetFilteringEnabled(true)
 
 	// Setting menu list
 	settingDel := list.NewDefaultDelegate()
@@ -514,7 +528,7 @@ func (m *Model) confirmCancelAgent() {
 }
 
 func (m Model) inputActive() bool {
-	return (m.mode == ModeAgent || m.sshStep > 0 || m.sshSavePrompt) && !m.pickingModel && !m.showingSetting && !m.showingHelp && !m.pickingSSHAlias && !m.pickingSession && !m.approvalPending && !m.planReviewActive && !m.askUserActive
+	return (m.mode == ModeAgent || m.sshStep > 0 || m.sshSavePrompt) && !m.pickingModel && !m.managingModels && !m.showingSetting && !m.showingHelp && !m.pickingSSHAlias && !m.pickingSession && !m.approvalPending && !m.planReviewActive && !m.askUserActive
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
@@ -882,6 +896,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					case "switch_model":
 						m.showingSetting = false
 						return m.handleModelInput(cmds)
+					case "manage_models":
+						m.showingSetting = false
+						return m.openManageModels(cmds)
 					case "add_model":
 						m.showingSetting = false
 						m.textarea.Focus()
@@ -991,23 +1008,46 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			return m, tea.Batch(cmds...)
 		}
 
+		if m.managingModels {
+			return m.handleManageModelsKey(msg, cmds)
+		}
+
 		if m.pickingModel {
+			// When the list is actively filtering, let all keys pass through to the list
+			if m.modelPicker.FilterState() == list.Filtering {
+				var cmd tea.Cmd
+				m.modelPicker, cmd = m.modelPicker.Update(msg)
+				cmds = append(cmds, cmd)
+				return m, tea.Batch(cmds...)
+			}
 			switch msg.String() {
 			case "enter":
 				selected := m.modelPicker.SelectedItem()
 				if selected != nil {
 					selItem := selected.(modelItem)
+					// Skip provider headers
+					if selItem.isProviderHeader {
+						return m, tea.Batch(cmds...)
+					}
 					if selItem.isAction {
-						// "Add New Model" — launch setup wizard
+						m.modelPicker.ResetFilter()
 						m.pickingModel = false
 						m.textarea.Focus()
-						cmds = append(cmds, func() tea.Msg {
-							return AddModelMsg{}
-						})
+						switch selItem.actionID {
+						case "manage_models":
+							// Open model management view
+							return m.openManageModels(cmds)
+						default:
+							// "Add New Provider" — launch setup wizard
+							cmds = append(cmds, func() tea.Msg {
+								return AddModelMsg{}
+							})
+						}
 						return m, tea.Batch(cmds...)
 					}
 					if selItem.isCurrent {
 						// Already active — just close picker
+						m.modelPicker.ResetFilter()
 						m.pickingModel = false
 						m.textarea.Focus()
 						m.refreshViewport()
@@ -1019,11 +1059,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 						_ = config.SaveConfig(cfg)
 						m.activeProvider = selItem.provider
 						m.activeModel = selItem.model
+						// Track in recent models.
+						if state, err := config.LoadModelState(); err == nil {
+							state.AddRecent(config.ModelRef{Provider: selItem.provider, Model: selItem.model})
+							_ = config.SaveModelState(state)
+						}
 						select {
 						case configCh <- cfg:
 						default:
 						}
 					}
+					m.modelPicker.ResetFilter()
 					m.pickingModel = false
 					m.lines = append(m.lines, textLine(fmt.Sprintf("  %s Switched to %s",
 						toolSuccessStyle.Render("✓"),
@@ -1033,6 +1079,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					return m, tea.Batch(cmds...)
 				}
 			case "ctrl+c", "esc":
+				// Reset filter state before closing
+				m.modelPicker.ResetFilter()
 				m.pickingModel = false
 				m.textarea.Focus()
 				m.refreshViewport()
@@ -1041,6 +1089,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			var cmd tea.Cmd
 			m.modelPicker, cmd = m.modelPicker.Update(msg)
 			cmds = append(cmds, cmd)
+
+			// Skip provider headers when navigating with arrow keys
+			if msg.String() == "up" || msg.String() == "down" {
+				if selected := m.modelPicker.SelectedItem(); selected != nil {
+					if selItem, ok := selected.(modelItem); ok && selItem.isProviderHeader {
+						// Item is a header, move again in the same direction
+						m.modelPicker, cmd = m.modelPicker.Update(msg)
+						cmds = append(cmds, cmd)
+						// Check again in case there are consecutive headers
+						if selected := m.modelPicker.SelectedItem(); selected != nil {
+							if selItem, ok := selected.(modelItem); ok && selItem.isProviderHeader {
+								m.modelPicker, cmd = m.modelPicker.Update(msg)
+								cmds = append(cmds, cmd)
+							}
+						}
+					}
+				}
+			}
+
 			return m, tea.Batch(cmds...)
 		}
 
@@ -2340,6 +2407,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 	}
 
+	// Forward non-key/non-mouse messages (e.g. list.FilterMatchesMsg) to active pickers
+	if _, isKey := msg.(tea.KeyPressMsg); !isKey {
+		if _, isMouse := msg.(tea.MouseMsg); !isMouse {
+			switch {
+			case m.managingModels:
+				var cmd tea.Cmd
+				m.manageModelsPicker, cmd = m.manageModelsPicker.Update(msg)
+				cmds = append(cmds, cmd)
+			case m.pickingModel:
+				var cmd tea.Cmd
+				m.modelPicker, cmd = m.modelPicker.Update(msg)
+				cmds = append(cmds, cmd)
+			case m.pickingSession:
+				var cmd tea.Cmd
+				m.sessionPicker, cmd = m.sessionPicker.Update(msg)
+				cmds = append(cmds, cmd)
+			}
+		}
+	}
+
 	if m.ready && m.mode == ModeAgent {
 		var cmd tea.Cmd
 		m.viewport, cmd = m.viewport.Update(msg)
@@ -2452,6 +2539,10 @@ func (m Model) View() tea.View {
 
 	if m.pickingModel {
 		return m.newView(m.modelPickerView())
+	}
+
+	if m.managingModels {
+		return m.newView(m.manageModelsView())
 	}
 
 	if m.pickingSession {

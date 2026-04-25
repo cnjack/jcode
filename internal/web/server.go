@@ -39,9 +39,9 @@ type Server struct {
 	host        string
 	openBrowser bool
 	pwd         string
-	handler  *handler.WebHandler
-	broker   *SSEBroker
-	wsBroker *WSBroker
+	handler     *handler.WebHandler
+	broker      *SSEBroker
+	wsBroker    *WSBroker
 
 	mu      sync.RWMutex
 	agent   *adk.ChatModelAgent
@@ -96,6 +96,10 @@ type Server struct {
 	// eventHandler is the handler passed to the runner — may be a NotifyingHandler
 	// wrapping the WebHandler, or the WebHandler itself.
 	eventHandler handler.AgentEventHandler
+
+	// needsSetup is true when no providers are configured. The server starts in
+	// setup mode and exposes setup API endpoints while blocking chat operations.
+	needsSetup bool
 }
 
 // ServerConfig holds the configuration for creating a new Server.
@@ -120,6 +124,7 @@ type ServerConfig struct {
 	WechatClient  channel.Channel           // optional WeChat channel
 	WebHandler    *handler.WebHandler       // optional: pre-created handler for sharing with tools
 	EventHandler  handler.AgentEventHandler // optional: handler for runner (e.g. NotifyingHandler)
+	NeedsSetup    bool                      // true when no providers are configured (setup mode)
 }
 
 // NewServer creates a new web server.
@@ -158,6 +163,7 @@ func NewServer(cfg *ServerConfig) *Server {
 		disabledMCP:   make(map[string]bool),
 		wechatClient:  cfg.WechatClient,
 		eventHandler:  eh,
+		needsSetup:    cfg.NeedsSetup,
 	}
 
 	// Wire TodoStore → session recording.
@@ -232,6 +238,23 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/channel/enable", s.handleChannelEnable)
 	mux.HandleFunc("POST /api/channel/disable", s.handleChannelDisable)
 
+	// Setup API — available in setup mode (no provider configured yet).
+	mux.HandleFunc("GET /api/setup/providers", s.handleSetupProviders)
+	mux.HandleFunc("GET /api/setup/providers/{id}/models", s.handleSetupProviderModels)
+	mux.HandleFunc("POST /api/setup/complete", s.handleSetupComplete)
+	mux.HandleFunc("GET /api/setup/status", s.handleSetupStatus)
+	mux.HandleFunc("POST /api/setup/validate", s.handleSetupValidate)
+
+	// Provider management API — add/remove providers after initial setup.
+	mux.HandleFunc("GET /api/providers", s.handleListProviders)
+	mux.HandleFunc("POST /api/providers", s.handleAddProvider)
+	mux.HandleFunc("DELETE /api/providers/{id}", s.handleDeleteProvider)
+
+	// Model state API — favorites & recent.
+	mux.HandleFunc("GET /api/model-state", s.handleGetModelState)
+	mux.HandleFunc("POST /api/model-state/favorite", s.handleToggleFavorite)
+	mux.HandleFunc("POST /api/model-state/enabled", s.handleToggleModelEnabled)
+
 	// Serve embedded frontend (SPA with fallback to index.html)
 	mux.Handle("GET /", newSPAHandler())
 
@@ -304,6 +327,21 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.RUnlock()
 
+	if s.needsSetup {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":      "needs_setup",
+			"version":     "0.2.0",
+			"pwd":         s.pwd,
+			"provider":    "",
+			"model":       "",
+			"mode":        "build",
+			"session_id":  "",
+			"running":     false,
+			"needs_setup": true,
+		})
+		return
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":     "ok",
 		"version":    "0.2.0",
@@ -335,6 +373,11 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
+	if s.needsSetup {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "setup required: please configure a provider first"})
+		return
+	}
+
 	// Use CompareAndSwap to atomically check and set running, preventing
 	// two concurrent requests from both entering submitMessage.
 	if !s.running.CompareAndSwap(false, true) {
@@ -630,10 +673,14 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type modelInfo struct {
-		ID           string `json:"id"`
-		Name         string `json:"name"`
-		ToolCall     bool   `json:"tool_call"`
-		ContextLimit int    `json:"context_limit,omitempty"`
+		ID             string `json:"id"`
+		Name           string `json:"name"`
+		ToolCall       bool   `json:"tool_call"`
+		ContextLimit   int    `json:"context_limit,omitempty"`
+		Reasoning      bool   `json:"reasoning,omitempty"`
+		Recommended    bool   `json:"recommended,omitempty"`
+		DefaultEnabled bool   `json:"default_enabled,omitempty"`
+		Enabled        bool   `json:"enabled"`
 	}
 	type providerInfo struct {
 		ID     string      `json:"id"`
@@ -641,26 +688,34 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		Models []modelInfo `json:"models"`
 	}
 
+	modelState, _ := config.LoadModelState()
+
 	var result []providerInfo
-	providers := s.cfg.GetProviders()
-	for name := range providers {
-		models := s.registry.ListProviderModels(name, true)
+	configuredProviders := s.cfg.GetProviders()
+	for _, rp := range s.registry.ListProviders() {
+		if _, configured := configuredProviders[rp.ID]; !configured {
+			continue
+		}
+		models := s.registry.ListProviderModels(rp.ID, true)
 		if len(models) == 0 {
 			continue
 		}
-		pi := providerInfo{ID: name, Name: name}
+		pi := providerInfo{ID: rp.ID, Name: rp.Name}
 		for _, m := range models {
 			ctx := 0
 			if m.Limit != nil {
 				ctx = m.Limit.Context
 			}
+			ref := config.ModelRef{Provider: rp.ID, Model: m.ID}
+			enabled := modelState.IsModelEnabled(ref, m.DefaultEnabled)
 			pi.Models = append(pi.Models, modelInfo{
 				ID: m.ID, Name: m.Name, ToolCall: m.ToolCall, ContextLimit: ctx,
+				Reasoning: m.Reasoning, Recommended: m.Recommended,
+				DefaultEnabled: m.DefaultEnabled, Enabled: enabled,
 			})
 		}
 		result = append(result, pi)
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"current":   map[string]string{"provider": s.providerName, "model": s.modelName},
@@ -699,6 +754,12 @@ func (s *Server) handleSwitchModel(w http.ResponseWriter, r *http.Request) {
 	s.modelName = req.Model
 	// Keep history — allow continuing the conversation with a different model.
 	s.mu.Unlock()
+
+	// Track in recent models.
+	if state, err := config.LoadModelState(); err == nil {
+		state.AddRecent(config.ModelRef{Provider: req.Provider, Model: req.Model})
+		_ = config.SaveModelState(state)
+	}
 
 	// Notify clients.
 	s.broker.Broadcast(SSEEvent{Event: "model_changed", Data: map[string]string{
@@ -1471,6 +1532,444 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 		items = []skillItem{}
 	}
 	writeJSON(w, http.StatusOK, items)
+}
+
+// --- Setup & Provider Management Handlers ---
+
+// handleSetupStatus returns whether the server is in setup mode.
+func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"needs_setup": s.needsSetup,
+	})
+}
+
+// handleSetupValidate tests connectivity to a provider with the given API key.
+func (s *Server) handleSetupValidate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider string `json:"provider"`
+		APIKey   string `json:"api_key"`
+		BaseURL  string `json:"base_url,omitempty"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if req.APIKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "api_key is required"})
+		return
+	}
+
+	baseURL := req.BaseURL
+	if baseURL == "" && s.registry != nil {
+		baseURL = s.registry.GetProviderAPI(req.Provider)
+	}
+	if baseURL == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no base URL available for this provider"})
+		return
+	}
+
+	if err := model.ValidateProvider(r.Context(), req.APIKey, baseURL); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"valid": false,
+			"error": err.Error(),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"valid": true,
+	})
+}
+
+// handleSetupProviders returns all available providers from the registry.
+func (s *Server) handleSetupProviders(w http.ResponseWriter, r *http.Request) {
+	if s.registry == nil {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+
+	type providerItem struct {
+		ID         string   `json:"id"`
+		Name       string   `json:"name"`
+		Doc        string   `json:"doc,omitempty"`
+		API        string   `json:"api,omitempty"`
+		Env        []string `json:"env,omitempty"`
+		Configured bool     `json:"configured"`
+		Tag        string   `json:"tag,omitempty"` // "recommended", "free", "local"
+	}
+
+	providers := s.registry.ListProviders()
+	cfg, _ := config.LoadConfig()
+	configured := map[string]bool{}
+	if cfg != nil {
+		for k := range cfg.GetProviders() {
+			configured[k] = true
+		}
+	}
+
+	// Provider tags for recommendation.
+	tags := map[string]string{
+		"openai":    "recommended",
+		"anthropic": "recommended",
+		"ollama":    "local",
+	}
+
+	result := make([]providerItem, 0, len(providers))
+	for _, p := range providers {
+		result = append(result, providerItem{
+			ID:         p.ID,
+			Name:       p.Name,
+			Doc:        p.Doc,
+			API:        p.API,
+			Env:        p.Env,
+			Configured: configured[p.ID],
+			Tag:        tags[p.ID],
+		})
+	}
+
+	// Sort: configured first, then by tag (recommended > local > ""), then by name.
+	sort.SliceStable(result, func(i, j int) bool {
+		ri, rj := result[i], result[j]
+		if ri.Configured != rj.Configured {
+			return ri.Configured
+		}
+		tagOrder := map[string]int{"recommended": 0, "local": 1, "": 2}
+		oi, _ := tagOrder[ri.Tag]
+		oj, _ := tagOrder[rj.Tag]
+		if oi != oj {
+			return oi < oj
+		}
+		return ri.Name < rj.Name
+	})
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// handleSetupProviderModels returns models for a specific provider from the registry.
+func (s *Server) handleSetupProviderModels(w http.ResponseWriter, r *http.Request) {
+	providerID := r.PathValue("id")
+	if providerID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider id is required"})
+		return
+	}
+
+	if s.registry == nil {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+
+	models := s.registry.ListProviderModels(providerID, true)
+	type modelItem struct {
+		ID           string `json:"id"`
+		Name         string `json:"name"`
+		ToolCall     bool   `json:"tool_call"`
+		ContextLimit int    `json:"context_limit,omitempty"`
+		Reasoning    bool   `json:"reasoning,omitempty"`
+	}
+
+	result := make([]modelItem, 0, len(models))
+	for _, m := range models {
+		ctx := 0
+		if m.Limit != nil {
+			ctx = m.Limit.Context
+		}
+		result = append(result, modelItem{
+			ID:           m.ID,
+			Name:         m.Name,
+			ToolCall:     m.ToolCall,
+			ContextLimit: ctx,
+			Reasoning:    m.Reasoning,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// handleSetupComplete handles the initial setup submission.
+// It saves the provider config and creates the agent.
+func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+		APIKey   string `json:"api_key"`
+		BaseURL  string `json:"base_url,omitempty"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if req.Provider == "" || req.Model == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and model are required"})
+		return
+	}
+
+	// Build or update config.
+	var cfg *config.Config
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		// First time — create fresh config.
+		cfg = &config.Config{
+			MaxIterations: 1000,
+		}
+	}
+
+	if cfg.Providers == nil {
+		cfg.Providers = make(map[string]*config.ProviderConfig)
+	}
+	cfg.Providers[req.Provider] = &config.ProviderConfig{
+		APIKey:  req.APIKey,
+		BaseURL: req.BaseURL,
+	}
+	cfg.Model = req.Provider + "/" + req.Model
+
+	if err := config.SaveConfig(cfg); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config: " + err.Error()})
+		return
+	}
+
+	// Create the agent with the new config.
+	ag, err := s.createAgent(req.Provider, req.Model)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create agent: " + err.Error()})
+		return
+	}
+
+	s.mu.Lock()
+	s.agent = ag
+	s.providerName = req.Provider
+	s.modelName = req.Model
+	s.needsSetup = false
+	s.mu.Unlock()
+
+	// Notify clients that setup is complete.
+	s.broker.Broadcast(SSEEvent{Event: "model_changed", Data: map[string]string{
+		"provider": req.Provider,
+		"model":    req.Model,
+	}})
+	s.wsBroker.Broadcast(WSEvent{Type: "model_changed", Data: map[string]string{
+		"provider": req.Provider,
+		"model":    req.Model,
+	}})
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":   "ok",
+		"provider": req.Provider,
+		"model":    req.Model,
+	})
+}
+
+// handleListProviders returns all configured providers (key masked).
+func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+
+	type providerDetail struct {
+		ID        string `json:"id"`
+		APIKeySet bool   `json:"api_key_set"`
+		APIKey    string `json:"api_key,omitempty"` // masked
+		BaseURL   string `json:"base_url,omitempty"`
+	}
+
+	result := make([]providerDetail, 0)
+	for id, pc := range cfg.GetProviders() {
+		detail := providerDetail{
+			ID:        id,
+			APIKeySet: pc.APIKey != "",
+			BaseURL:   pc.BaseURL,
+		}
+		if pc.APIKey != "" {
+			// Mask API key: show first 4 and last 4 chars.
+			key := pc.APIKey
+			if len(key) > 8 {
+				detail.APIKey = key[:4] + "..." + key[len(key)-4:]
+			} else {
+				detail.APIKey = "****"
+			}
+		}
+		result = append(result, detail)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// handleAddProvider adds a new provider to the config.
+func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID      string `json:"id"`
+		APIKey  string `json:"api_key"`
+		BaseURL string `json:"base_url,omitempty"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if req.ID == "" || req.APIKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id and api_key are required"})
+		return
+	}
+
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		cfg = &config.Config{MaxIterations: 1000}
+	}
+	if cfg.Providers == nil {
+		cfg.Providers = make(map[string]*config.ProviderConfig)
+	}
+	cfg.Providers[req.ID] = &config.ProviderConfig{
+		APIKey:  req.APIKey,
+		BaseURL: req.BaseURL,
+	}
+	if err := config.SaveConfig(cfg); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config: " + err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleDeleteProvider removes a provider from the config.
+func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
+	providerID := r.PathValue("id")
+	if providerID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider id is required"})
+		return
+	}
+
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	providers := cfg.GetProviders()
+	if providers == nil || providers[providerID] == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "provider not found"})
+		return
+	}
+
+	// Don't allow deleting the active provider.
+	activeProvider, _ := cfg.GetProviderModel()
+	if activeProvider == providerID {
+		remaining := 0
+		for k := range providers {
+			if k != providerID {
+				remaining++
+			}
+		}
+		if remaining == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot delete the only provider"})
+			return
+		}
+	}
+
+	delete(cfg.Providers, providerID)
+	if err := config.SaveConfig(cfg); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config: " + err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleGetModelState returns the recent, favorite, and visibility settings.
+func (s *Server) handleGetModelState(w http.ResponseWriter, r *http.Request) {
+	state, err := config.LoadModelState()
+	if err != nil {
+		state = &config.ModelState{}
+	}
+	type modelRefJSON struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+	}
+
+	recent := make([]modelRefJSON, 0, len(state.Recent))
+	for _, r := range state.Recent {
+		recent = append(recent, modelRefJSON{Provider: r.Provider, Model: r.Model})
+	}
+	favorites := make([]modelRefJSON, 0, len(state.Favorite))
+	for _, r := range state.Favorite {
+		favorites = append(favorites, modelRefJSON{Provider: r.Provider, Model: r.Model})
+	}
+	enabledModels := make([]modelRefJSON, 0, len(state.EnabledModels))
+	for _, r := range state.EnabledModels {
+		enabledModels = append(enabledModels, modelRefJSON{Provider: r.Provider, Model: r.Model})
+	}
+	disabledModels := make([]modelRefJSON, 0, len(state.DisabledModels))
+	for _, r := range state.DisabledModels {
+		disabledModels = append(disabledModels, modelRefJSON{Provider: r.Provider, Model: r.Model})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"recent":          recent,
+		"favorite":        favorites,
+		"enabled_models":  enabledModels,
+		"disabled_models": disabledModels,
+	})
+}
+
+// handleToggleFavorite toggles a model in the favorites list.
+func (s *Server) handleToggleFavorite(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if req.Provider == "" || req.Model == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and model are required"})
+		return
+	}
+
+	state, err := config.LoadModelState()
+	if err != nil {
+		state = &config.ModelState{}
+	}
+	nowFavorite := state.ToggleFavorite(config.ModelRef{Provider: req.Provider, Model: req.Model})
+	if err := config.SaveModelState(state); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"favorite": nowFavorite,
+	})
+}
+
+// handleToggleModelEnabled toggles whether a model is shown in the model selector.
+func (s *Server) handleToggleModelEnabled(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+		Enabled  bool   `json:"enabled"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if req.Provider == "" || req.Model == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and model are required"})
+		return
+	}
+
+	state, err := config.LoadModelState()
+	if err != nil {
+		state = &config.ModelState{}
+	}
+	state.SetModelEnabled(config.ModelRef{Provider: req.Provider, Model: req.Model}, req.Enabled)
+	if err := config.SaveModelState(state); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled": req.Enabled,
+	})
 }
 
 // --- Helpers ---

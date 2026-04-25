@@ -230,6 +230,13 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch m.state {
 		case StateProvider:
+			// When filtering, let keys pass through to the list
+			if m.providerList.FilterState() == list.Filtering {
+				var cmd tea.Cmd
+				m.providerList, cmd = m.providerList.Update(msg)
+				cmds = append(cmds, cmd)
+				return m, tea.Batch(cmds...)
+			}
 			if msg.String() == "enter" {
 				sel := m.providerList.SelectedItem()
 				if sel != nil {
@@ -260,6 +267,13 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 
 		case StateModel:
+			// When filtering, let keys pass through to the list
+			if m.modelList.FilterState() == list.Filtering {
+				var cmd tea.Cmd
+				m.modelList, cmd = m.modelList.Update(msg)
+				cmds = append(cmds, cmd)
+				return m, tea.Batch(cmds...)
+			}
 			if msg.String() == "enter" {
 				sel := m.modelList.SelectedItem()
 				if sel != nil {
@@ -350,6 +364,22 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.providerList.SetSize(msg.Width-4, 15)
 		m.modelList.SetSize(msg.Width-4, 15)
+	}
+
+	// Forward non-key/non-mouse messages (e.g. list.FilterMatchesMsg) to active list
+	if _, isKey := msg.(tea.KeyPressMsg); !isKey {
+		if _, isMouse := msg.(tea.MouseMsg); !isMouse {
+			switch m.state {
+			case StateProvider:
+				var cmd tea.Cmd
+				m.providerList, cmd = m.providerList.Update(msg)
+				cmds = append(cmds, cmd)
+			case StateModel:
+				var cmd tea.Cmd
+				m.modelList, cmd = m.modelList.Update(msg)
+				cmds = append(cmds, cmd)
+			}
+		}
 	}
 
 	return m, tea.Batch(cmds...)

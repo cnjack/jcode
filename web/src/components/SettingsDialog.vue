@@ -2,7 +2,7 @@
 import { ref, watch, nextTick } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { api } from '@/composables/api'
-import type { MCPServerInfo, SSHAlias } from '@/types/api'
+import type { MCPServerInfo, SSHAlias, SetupProvider, SetupModel, ProviderDetail } from '@/types/api'
 import QRCode from 'qrcode'
 import {
   Dialog,
@@ -21,7 +21,7 @@ const emit = defineEmits<{
 }>()
 
 const store = useChatStore()
-const activeTab = ref<'general' | 'mcp' | 'ssh' | 'channels' | 'shortcuts'>('general')
+const activeTab = ref<'general' | 'providers' | 'mcp' | 'ssh' | 'channels' | 'shortcuts'>('general')
 const mcpServers = ref<Record<string, MCPServerInfo>>({})
 const sshAliases = ref<SSHAlias[]>([])
 const sshCurrent = ref('local')
@@ -33,6 +33,21 @@ const channelLoading = ref(false)
 const channelQRContent = ref('')
 const channelLoginReminder = ref(false)
 const qrCanvas = ref<HTMLCanvasElement | null>(null)
+
+// Provider management state
+const configuredProviders = ref<ProviderDetail[]>([])
+const showAddProvider = ref(false)
+const addProviderStep = ref<'select' | 'model' | 'apikey'>('select')
+const addProviderList = ref<SetupProvider[]>([])
+const addProviderModels = ref<SetupModel[]>([])
+const addSelectedProvider = ref('')
+const addSelectedModel = ref('')
+const addApiKey = ref('')
+const addBaseURL = ref('')
+const addShowApiKey = ref(false)
+const addLoading = ref(false)
+const addError = ref('')
+const deleteConfirmId = ref('')
 
 watch(() => props.open, async (isOpen) => {
   if (isOpen) {
@@ -54,8 +69,16 @@ watch(() => props.open, async (isOpen) => {
       channelAvailable.value = ch.available
       channelState.value = ch.state ?? 'none'
     } catch { /* ignore */ }
+
+    // Load configured providers
+    try {
+      configuredProviders.value = await api.listProviders()
+    } catch { /* ignore */ }
   } else {
     channelQRContent.value = ''
+    showAddProvider.value = false
+    addError.value = ''
+    deleteConfirmId.value = ''
   }
 })
 
@@ -146,11 +169,78 @@ function pollChannelState() {
 
 const tabLabel: Record<string, string> = {
   general: 'General',
+  providers: 'Providers',
   mcp: 'MCP Servers',
   ssh: 'SSH',
   channels: 'Channels',
   shortcuts: 'Shortcuts',
 }
+
+async function startAddProvider() {
+  showAddProvider.value = true
+  addProviderStep.value = 'select'
+  addSelectedProvider.value = ''
+  addSelectedModel.value = ''
+  addApiKey.value = ''
+  addBaseURL.value = ''
+  addError.value = ''
+  addLoading.value = true
+  try {
+    addProviderList.value = await api.setupProviders()
+  } catch { /* ignore */ }
+  addLoading.value = false
+}
+
+async function selectAddProvider(id: string) {
+  addSelectedProvider.value = id
+  addLoading.value = true
+  addError.value = ''
+  try {
+    addProviderModels.value = await api.setupProviderModels(id)
+    addProviderStep.value = 'model'
+  } catch {
+    addError.value = 'Failed to load models'
+  }
+  addLoading.value = false
+}
+
+function selectAddModel(id: string) {
+  addSelectedModel.value = id
+  addProviderStep.value = 'apikey'
+}
+
+async function submitAddProvider() {
+  addLoading.value = true
+  addError.value = ''
+  try {
+    await api.addProvider({
+      id: addSelectedProvider.value,
+      api_key: addApiKey.value,
+      base_url: addBaseURL.value || undefined,
+    })
+    // Refresh provider list
+    configuredProviders.value = await api.listProviders()
+    showAddProvider.value = false
+    // Also refresh models in the chat store
+    store.fetchModels()
+  } catch (err: unknown) {
+    addError.value = err instanceof Error ? err.message : 'Failed to add provider'
+  }
+  addLoading.value = false
+}
+
+async function deleteProvider(id: string) {
+  try {
+    await api.deleteProvider(id)
+    configuredProviders.value = configuredProviders.value.filter(p => p.id !== id)
+    deleteConfirmId.value = ''
+    store.fetchModels()
+  } catch (err: unknown) {
+    console.error('Failed to delete provider:', err)
+  }
+}
+
+const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelectedProvider.value)
 </script>
 
 <template>
@@ -183,7 +273,7 @@ const tabLabel: Record<string, string> = {
               <!-- Left sidebar -->
               <nav class="w-40 border-r border-zinc-200 dark:border-zinc-800 py-2 shrink-0">
                 <button
-                  v-for="tab in (['general', 'mcp', 'ssh', 'channels', 'shortcuts'] as const)"
+                  v-for="tab in (['general', 'providers', 'mcp', 'ssh', 'channels', 'shortcuts'] as const)"
                   :key="tab"
                   class="w-full px-4 py-2 text-left text-xs transition-colors cursor-pointer"
                   :class="activeTab === tab
@@ -247,6 +337,126 @@ const tabLabel: Record<string, string> = {
                         {{ store.tokenInfo.total_tokens.toLocaleString() }}
                         <span v-if="store.tokenInfo.model_context_limit"> / {{ store.tokenInfo.model_context_limit.toLocaleString() }}</span>
                       </span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Providers tab -->
+                <div v-if="activeTab === 'providers'">
+                  <div class="flex items-center justify-between mb-3">
+                    <div class="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider font-medium">Providers</div>
+                    <button
+                      class="px-2 py-1 text-[10px] bg-emerald-500 hover:bg-emerald-600 text-white rounded-md cursor-pointer transition-colors font-medium"
+                      @click="startAddProvider"
+                    >
+                      + Add Provider
+                    </button>
+                  </div>
+
+                  <!-- Add provider flow -->
+                  <div v-if="showAddProvider" class="mb-4 border border-zinc-200 dark:border-zinc-700 rounded-md overflow-hidden">
+                    <div class="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/60 border-b border-zinc-200 dark:border-zinc-700 flex items-center justify-between">
+                      <span class="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">
+                        {{ addProviderStep === 'select' ? 'Select Provider' : addProviderStep === 'model' ? 'Select Model' : 'Enter API Key' }}
+                      </span>
+                      <button class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer text-xs" @click="showAddProvider = false">✕</button>
+                    </div>
+                    <div class="p-3 max-h-48 overflow-y-auto">
+                      <!-- Select provider -->
+                      <div v-if="addProviderStep === 'select'">
+                        <div v-if="addLoading" class="text-center py-4 text-xs text-zinc-400 animate-pulse">Loading...</div>
+                        <div v-else class="space-y-1">
+                          <button
+                            v-for="p in addProviderList.filter(x => !configuredProviders.some(c => c.id === x.id))"
+                            :key="p.id"
+                            class="w-full px-2.5 py-2 text-left rounded-md text-xs cursor-pointer transition-colors hover:bg-emerald-50 dark:hover:bg-emerald-500/10"
+                            @click="selectAddProvider(p.id)"
+                          >
+                            <span class="font-medium text-zinc-700 dark:text-zinc-200">{{ p.name }}</span>
+                            <span class="text-zinc-400 dark:text-zinc-500 ml-1.5 font-mono">{{ p.id }}</span>
+                          </button>
+                          <div v-if="addProviderList.filter(x => !configuredProviders.some(c => c.id === x.id)).length === 0" class="text-center py-3 text-[10px] text-zinc-400">
+                            All providers configured
+                          </div>
+                        </div>
+                      </div>
+                      <!-- Select model -->
+                      <div v-if="addProviderStep === 'model'">
+                        <div class="flex items-center gap-1 mb-2">
+                          <button class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer" @click="addProviderStep = 'select'">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z" clip-rule="evenodd" /></svg>
+                          </button>
+                          <span class="text-[10px] text-zinc-500">{{ addProviderInfo()?.name }}</span>
+                        </div>
+                        <div v-if="addLoading" class="text-center py-4 text-xs text-zinc-400 animate-pulse">Loading...</div>
+                        <div v-else class="space-y-1">
+                          <button
+                            v-for="m in addProviderModels"
+                            :key="m.id"
+                            class="w-full px-2.5 py-1.5 text-left rounded-md text-xs cursor-pointer transition-colors hover:bg-emerald-50 dark:hover:bg-emerald-500/10 font-mono"
+                            @click="selectAddModel(m.id)"
+                          >
+                            {{ m.id }}
+                          </button>
+                        </div>
+                      </div>
+                      <!-- Enter API key -->
+                      <div v-if="addProviderStep === 'apikey'" class="space-y-2">
+                        <div class="flex items-center gap-1 mb-1">
+                          <button class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer" @click="addProviderStep = 'model'">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z" clip-rule="evenodd" /></svg>
+                          </button>
+                          <span class="text-[10px] text-zinc-500 font-mono">{{ addSelectedProvider }} / {{ addSelectedModel }}</span>
+                        </div>
+                        <input v-model="addApiKey" type="password" placeholder="API Key" class="w-full px-2.5 py-1.5 text-xs font-mono bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md outline-none focus:border-emerald-400" @keydown.enter="submitAddProvider" />
+                        <input v-model="addBaseURL" type="text" placeholder="Base URL (optional)" class="w-full px-2.5 py-1.5 text-xs font-mono bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md outline-none focus:border-emerald-400" @keydown.enter="submitAddProvider" />
+                        <div v-if="addError" class="text-[10px] text-red-500">{{ addError }}</div>
+                        <button :disabled="addLoading || !addApiKey" class="w-full px-2.5 py-1.5 text-xs bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-md cursor-pointer transition-colors font-medium" @click="submitAddProvider">
+                          {{ addLoading ? 'Saving...' : 'Add' }}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Provider list -->
+                  <div v-if="configuredProviders.length === 0" class="text-center py-6">
+                    <div class="text-xs text-zinc-400 dark:text-zinc-500 mb-1">No providers configured</div>
+                    <div class="text-[10px] text-zinc-400 dark:text-zinc-600">
+                      Click "Add Provider" above to get started.
+                    </div>
+                  </div>
+                  <div v-else class="space-y-2">
+                    <div
+                      v-for="p in configuredProviders"
+                      :key="p.id"
+                      class="flex items-center gap-3 px-3 py-2.5 rounded-md border border-zinc-200 dark:border-zinc-700/60 bg-white dark:bg-zinc-800/60"
+                    >
+                      <span class="text-sm">🔑</span>
+                      <div class="flex-1 min-w-0">
+                        <div class="text-xs font-medium text-zinc-700 dark:text-zinc-200 font-mono">{{ p.id }}</div>
+                        <div class="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono truncate">
+                          {{ p.api_key || '—' }}
+                          <template v-if="p.base_url"> · {{ p.base_url }}</template>
+                        </div>
+                      </div>
+                      <span
+                        v-if="store.providerName === p.id"
+                        class="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                      >
+                        active
+                      </span>
+                      <button
+                        v-if="deleteConfirmId !== p.id"
+                        class="text-zinc-300 dark:text-zinc-600 hover:text-red-400 dark:hover:text-red-400 cursor-pointer transition-colors"
+                        title="Remove provider"
+                        @click="deleteConfirmId = p.id"
+                      >
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 10.23 1.482l.149-.022.841 10.518A2.75 2.75 0 007.596 19h4.807a2.75 2.75 0 002.742-2.53l.841-10.519.149.023a.75.75 0 00.23-1.482A41.03 41.03 0 0014 4.193V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4zM8.58 7.72a.75.75 0 00-1.5.06l.3 7.5a.75.75 0 101.5-.06l-.3-7.5zm4.34.06a.75.75 0 10-1.5-.06l-.3 7.5a.75.75 0 101.5.06l.3-7.5z" clip-rule="evenodd" /></svg>
+                      </button>
+                      <div v-else class="flex items-center gap-1">
+                        <button class="text-[10px] px-1.5 py-0.5 bg-red-500 text-white rounded cursor-pointer" @click="deleteProvider(p.id)">Delete</button>
+                        <button class="text-[10px] px-1.5 py-0.5 text-zinc-400 hover:text-zinc-600 cursor-pointer" @click="deleteConfirmId = ''">Cancel</button>
+                      </div>
                     </div>
                   </div>
                 </div>
