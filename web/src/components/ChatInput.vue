@@ -9,6 +9,8 @@ const input = ref('')
 const textarea = ref<HTMLTextAreaElement | null>(null)
 const showModelPicker = ref(false)
 const showModePicker = ref(false)
+const showManageModels = ref(false)
+const modelFilter = ref('')
 const containerRef = ref<HTMLDivElement | null>(null)
 
 const skills = ref<SkillInfo[]>([])
@@ -28,6 +30,32 @@ const filteredSlashCommands = computed(() => {
   )
 })
 
+const filteredProviders = computed(() => {
+  const filter = modelFilter.value.toLowerCase()
+  if (!filter) return store.providers
+
+  return store.providers
+    .map(p => ({
+      ...p,
+      models: p.models.filter(m =>
+        (m.name || m.id).toLowerCase().includes(filter) ||
+        p.name.toLowerCase().includes(filter)
+      )
+    }))
+    .filter(p => p.models.length > 0)
+})
+
+// Get full display name for a model (e.g., "DeepSeek V4 Pro")
+function getModelDisplayName(providerId: string, modelId: string): string {
+  for (const p of store.providers) {
+    if (p.id === providerId) {
+      const m = p.models.find(model => model.id === modelId)
+      return m?.name || modelId
+    }
+  }
+  return modelId
+}
+
 function autoResize() {
   const el = textarea.value
   if (!el) return
@@ -36,6 +64,26 @@ function autoResize() {
 }
 
 function handleKeyDown(e: KeyboardEvent) {
+  // Handle ESC key for dialogs
+  if (e.key === 'Escape') {
+    if (showManageModels.value) {
+      e.preventDefault()
+      showManageModels.value = false
+      modelFilter.value = ''
+      return
+    }
+    if (showModelPicker.value) {
+      e.preventDefault()
+      showModelPicker.value = false
+      return
+    }
+    if (showSlashMenu.value) {
+      e.preventDefault()
+      showSlashMenu.value = false
+      return
+    }
+  }
+
   if (showSlashMenu.value) {
     if (e.key === 'ArrowDown') {
       e.preventDefault()
@@ -111,6 +159,10 @@ function handleClickOutside(e: MouseEvent) {
     showModelPicker.value = false
     showModePicker.value = false
     showSlashMenu.value = false
+    if (showManageModels.value) {
+      showManageModels.value = false
+      modelFilter.value = ''
+    }
   }
 }
 
@@ -118,6 +170,20 @@ function handleGlobalKey(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
     e.preventDefault()
     textarea.value?.focus()
+  }
+  // Global ESC handler for dialogs
+  if (e.key === 'Escape') {
+    if (showManageModels.value) {
+      e.preventDefault()
+      showManageModels.value = false
+      modelFilter.value = ''
+      return
+    }
+    if (showModelPicker.value) {
+      e.preventDefault()
+      showModelPicker.value = false
+      return
+    }
   }
 }
 
@@ -220,27 +286,123 @@ watch(() => store.isRunning, (running) => {
                 v-if="showModelPicker"
                 class="absolute bottom-full mb-1 left-0 z-20 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md shadow-lg dark:shadow-2xl py-1.5 max-h-72 overflow-y-auto min-w-56"
               >
-                <template v-for="p in store.providers" :key="p.id">
-                  <div class="px-3 py-1 text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider font-semibold sticky top-0 bg-white dark:bg-zinc-800">
+                <!-- Favorites section -->
+                <template v-if="store.recentModels.length > 0 && store.favoriteModels.size > 0">
+                  <div class="px-3 py-1 text-[10px] text-amber-500 dark:text-amber-400 uppercase tracking-wider font-semibold sticky top-0 bg-white dark:bg-zinc-800 flex items-center gap-1">
+                    <span>★</span> Favorites
+                  </div>
+                  <button
+                    v-for="r in store.recentModels.filter(r => store.favoriteModels.has(`${r.provider}/${r.model}`) && !(store.providerName === r.provider && store.modelName === r.model))"
+                    :key="'fav-'+r.provider+'-'+r.model"
+                    class="w-full px-3 py-1.5 text-xs text-left cursor-pointer select-none truncate transition-colors text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700/50 hover:text-zinc-700 dark:hover:text-zinc-200"
+                    @click="selectModel(r.provider, r.model)"
+                  >
+                    <span class="text-amber-400 mr-1">★</span>{{ getModelDisplayName(r.provider, r.model) }}
+                  </button>
+                </template>
+
+                <!-- Current Model section -->
+                <template v-if="store.providerName && store.modelName">
+                  <div class="px-3 py-1 text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider font-semibold sticky top-0 bg-white dark:bg-zinc-800 border-t border-zinc-100 dark:border-zinc-700/50">
+                    Current Model
+                  </div>
+                  <button
+                    class="w-full px-3 py-1.5 text-xs text-left cursor-pointer select-none truncate transition-colors text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10"
+                    @click="selectModel(store.providerName, store.modelName)"
+                  >
+                    ● {{ getModelDisplayName(store.providerName, store.modelName) }}
+                  </button>
+                </template>
+
+                <!-- All providers section (only enabled models) -->
+                <template v-for="p in store.enabledProviders" :key="p.id">
+                  <div class="px-3 py-1 text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider font-semibold sticky top-0 bg-white dark:bg-zinc-800 border-t border-zinc-100 dark:border-zinc-700/50">
                     {{ p.name }}
                   </div>
                   <button
                     v-for="m in p.models"
                     :key="m.id"
-                    class="w-full px-3 py-1.5 text-xs text-left cursor-pointer select-none truncate transition-colors"
+                    class="w-full px-3 py-1.5 text-xs text-left cursor-pointer select-none transition-colors group"
                     :class="store.providerName === p.id && store.modelName === m.id
                       ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10'
                       : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700/50 hover:text-zinc-700 dark:hover:text-zinc-200'"
                     @click="selectModel(p.id, m.id)"
                   >
-                    {{ m.name || m.id }}
+                    <span class="truncate">{{ m.name || m.id }}</span>
+                    <span v-if="m.recommended" class="ml-1 text-[9px] text-emerald-500 dark:text-emerald-400">recommended</span>
+                    <button
+                      class="ml-1 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer inline"
+                      :class="store.isFavorite(p.id, m.id) ? 'text-amber-400 opacity-100' : 'text-zinc-300 dark:text-zinc-600'"
+                      @click.stop="store.toggleFavorite(p.id, m.id)"
+                      :title="store.isFavorite(p.id, m.id) ? 'Remove from favorites' : 'Add to favorites'"
+                    >★</button>
                   </button>
                 </template>
-                <div v-if="store.providers.length === 0" class="px-3 py-2 text-xs text-zinc-400 dark:text-zinc-500">
+                <div v-if="store.enabledProviders.length === 0" class="px-3 py-2 text-xs text-zinc-400 dark:text-zinc-500">
                   No models available
+                </div>
+                <!-- Manage models link -->
+                <div class="border-t border-zinc-100 dark:border-zinc-700/50 px-3 py-1.5">
+                  <button
+                    class="w-full text-xs text-left text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer transition-colors"
+                    @click.stop="showModelPicker = false; showManageModels = true"
+                  >
+                    ⚙ Manage models…
+                  </button>
                 </div>
               </div>
             </div>
+
+            <!-- Manage Models Dialog (teleported to body for proper centering) -->
+            <Teleport to="body">
+              <div
+                v-if="showManageModels"
+                class="fixed inset-0 z-50 flex items-center justify-center bg-black/30 dark:bg-black/50"
+                @click="showManageModels = false; modelFilter = ''"
+              >
+                <div class="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-xl dark:shadow-2xl w-full max-w-lg max-h-[70vh] flex flex-col mx-4" @click.stop>
+                  <div class="px-4 py-3 border-b border-zinc-200 dark:border-zinc-700">
+                    <div class="flex items-center justify-between mb-2">
+                      <div>
+                        <h3 class="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Manage Models</h3>
+                        <p class="text-[11px] text-zinc-400 dark:text-zinc-500">Toggle which models appear in the model selector</p>
+                      </div>
+                      <button
+                        class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 cursor-pointer"
+                        @click="showManageModels = false; modelFilter = ''; store.fetchModels()"
+                      >✕</button>
+                    </div>
+                    <input
+                      v-model="modelFilter"
+                      type="text"
+                      placeholder="Filter models..."
+                      class="w-full px-2 py-1.5 text-xs border border-zinc-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div class="overflow-y-auto flex-1 py-2">
+                    <template v-for="p in filteredProviders" :key="'mgr-'+p.id">
+                      <div class="px-4 py-1.5 text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider font-semibold sticky top-0 bg-white dark:bg-zinc-800">
+                        {{ p.name }}
+                      </div>
+                      <label
+                        v-for="m in p.models"
+                        :key="'mgr-'+p.id+'-'+m.id"
+                        class="flex items-center gap-2.5 px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-700/30 cursor-pointer transition-colors"
+                      >
+                        <input
+                          type="checkbox"
+                          :checked="m.enabled !== false"
+                          class="w-4 h-4 rounded border-2 border-zinc-300 dark:border-zinc-600 text-emerald-500 focus:ring-2 focus:ring-emerald-500 focus:ring-offset-0 cursor-pointer transition-all"
+                          @change="store.toggleModelEnabled(p.id, m.id, ($event.target as HTMLInputElement).checked)"
+                        />
+                        <span class="text-xs text-zinc-700 dark:text-zinc-300 flex-1 truncate">{{ m.name || m.id }}</span>
+                        <span v-if="m.recommended" class="text-[9px] px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium shrink-0">recommended</span>
+                      </label>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </Teleport>
 
             <!-- Auto-approve toggle -->
             <button

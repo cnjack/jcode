@@ -1,5 +1,5 @@
 // API client for jcode backend
-import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, MCPListResponse, BrowseResponse, SSHListResponse, SkillInfo, TodoItem, SessionItem, SessionEntry, FileItem } from '@/types/api'
+import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, MCPListResponse, BrowseResponse, SSHListResponse, SkillInfo, TodoItem, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ModelStateResponse } from '@/types/api'
 
 const BASE = ''
 
@@ -123,4 +123,47 @@ export const api = {
     request<{ status: string; state: string }>('/api/channel/enable', { method: 'POST' }),
   channelDisable: () =>
     request<{ status: string; state: string }>('/api/channel/disable', { method: 'POST' }),
+
+  // Setup API
+  setupProviders: () =>
+    request<SetupProvider[]>('/api/setup/providers'),
+  setupProviderModels: (providerId: string) =>
+    request<SetupModel[]>(`/api/setup/providers/${encodeURIComponent(providerId)}/models`),
+  setupComplete: (data: { provider: string; model: string; api_key: string; base_url?: string }) =>
+    request<{ status: string; provider: string; model: string }>('/api/setup/complete', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  setupStatus: () =>
+    request<{ needs_setup: boolean }>('/api/setup/status'),
+  setupValidate: (data: { provider: string; api_key: string; base_url?: string }) =>
+    request<{ valid: boolean; error?: string }>('/api/setup/validate', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  // Provider management
+  listProviders: () =>
+    request<ProviderDetail[]>('/api/providers'),
+  addProvider: (data: { id: string; api_key: string; base_url?: string }) =>
+    request<{ status: string }>('/api/providers', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  deleteProvider: (id: string) =>
+    request<{ status: string }>(`/api/providers/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  // Model state
+  modelState: () =>
+    request<ModelStateResponse>('/api/model-state'),
+  toggleFavorite: (provider: string, model: string) =>
+    request<{ favorite: boolean }>('/api/model-state/favorite', {
+      method: 'POST',
+      body: JSON.stringify({ provider, model }),
+    }),
+  toggleModelEnabled: (provider: string, model: string, enabled: boolean) =>
+    request<{ enabled: boolean }>('/api/model-state/enabled', {
+      method: 'POST',
+      body: JSON.stringify({ provider, model, enabled }),
+    }),
 }
