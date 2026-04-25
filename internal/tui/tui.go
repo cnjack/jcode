@@ -123,6 +123,11 @@ type Model struct {
 	agentMode AgentMode
 	bgRunning int // count of running background tasks
 
+	// lastAssistantRawText stores the raw (unrendered) text of the last
+	// assistant response, used by Ctrl+Y to copy to clipboard without
+	// picking up structural elements like dividers.
+	lastAssistantRawText string
+
 	// Plan review state
 	planReviewActive   bool
 	planReviewTitle    string
@@ -1467,7 +1472,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				return m, tea.Batch(cmds...)
 			case "ctrl+y":
 				// Copy last assistant message to clipboard
-				text := m.getLastAssistantText()
+				text := m.currentText.String()
+				if text == "" {
+					text = m.lastAssistantRawText
+				}
 				if text != "" {
 					cmds = append(cmds, tea.SetClipboard(text))
 				}
@@ -1766,6 +1774,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				m.lines = append(m.lines, textLine(userPromptStyle.Render("> "+displayContent)))
 			case string(session.EntryAssistant):
 				if e.Content != "" {
+					m.lastAssistantRawText = e.Content
 					rendered := e.Content
 					if m.mdRenderer != nil {
 						if md, err := m.mdRenderer.Render(e.Content); err == nil {
@@ -2703,46 +2712,13 @@ func (m *Model) replaceLastToolIcon(newIcon string) {
 	}
 }
 
-// getLastAssistantText extracts the last assistant response text from lines.
-func (m *Model) getLastAssistantText() string {
-	// If we have streaming text, that's the latest
-	if m.currentText.Len() > 0 {
-		return m.currentText.String()
-	}
-	// Scan backwards from the end, collecting text until we hit a boundary
-	// (user prompt, tool call, or other structural marker)
-	var textLines []string
-	for i := len(m.lines) - 1; i >= 0; i-- {
-		line := m.lines[i]
-		// Stop at user prompt (contains orange background ANSI), tool icons, or other boundaries
-		if strings.Contains(line.text, toolIconRunning) ||
-			strings.Contains(line.text, toolIconSuccess) ||
-			strings.Contains(line.text, toolIconError) ||
-			strings.Contains(line.text, "Session resumed:") ||
-			strings.Contains(line.text, "Subagent:") {
-			break
-		}
-		// Detect user prompt line (rendered with background color via userPromptStyle)
-		if strings.Contains(line.text, "\x1b[") && strings.Contains(line.text, "> ") && strings.Contains(line.text, "48;2;") {
-			break
-		}
-		if line.text != "" {
-			textLines = append(textLines, line.text)
-		}
-	}
-	// Reverse since we scanned backwards
-	for i, j := 0, len(textLines)-1; i < j; i, j = i+1, j-1 {
-		textLines[i], textLines[j] = textLines[j], textLines[i]
-	}
-	return ansi.Strip(strings.Join(textLines, "\n"))
-}
-
 func (m *Model) flushText() {
 	text := m.currentText.String()
 	if text == "" {
 		return
 	}
 	m.currentText.Reset()
+	m.lastAssistantRawText = text
 	rendered := text
 	if m.mdRenderer != nil {
 		if md, err := m.mdRenderer.Render(text); err == nil {
