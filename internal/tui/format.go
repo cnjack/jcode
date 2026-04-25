@@ -253,7 +253,7 @@ func formatSubagentOutput(output string, termWidth int, expanded bool, mdRendere
 		if expanded && len(rawLines) > collapsedLines {
 			boxContent.WriteString("\n")
 			boxContent.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
-				Render("▲ ctrl+e 收起"))
+				Render("▲ ctrl+e collapse"))
 		}
 		box := subagentBodyStyle.Width(boxWidth).Render(boxContent.String())
 		return []string{box}
@@ -272,7 +272,7 @@ func formatSubagentOutput(output string, termWidth int, expanded bool, mdRendere
 	}
 	boxContent.WriteString("\n")
 	boxContent.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
-		Render(fmt.Sprintf("… %d more lines (ctrl+e 展开)", hidden)))
+		Render(fmt.Sprintf("… %d more lines (ctrl+e expand)", hidden)))
 
 	box := subagentBodyStyle.Width(boxWidth).Render(boxContent.String())
 	return []string{box}
