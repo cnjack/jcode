@@ -215,8 +215,8 @@ func (m Model) handleBgInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	m.mode = ModeAgent
 	m.agentDone = false
 	m.thinking = true
-	m.lines = append(m.lines, fmt.Sprintf("%s /bg",
-		userLabelStyle.Render("👤 You:")))
+	m.lines = append(m.lines, textLine(fmt.Sprintf("%s /bg",
+		userLabelStyle.Render("👤 You:"))))
 	if m.ready {
 		m.viewport.SetHeight(m.calcViewportHeight(false))
 		m.viewport.SetContent(m.renderContent())
@@ -231,7 +231,7 @@ func (m Model) handleBgInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 
 // handleCompactInput handles `/compact` by sending a compact request to the main goroutine.
 func (m Model) handleCompactInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
-	m.lines = append(m.lines, toolLabelStyle.Render("  ⏳ Compacting context..."))
+	m.lines = append(m.lines, textLine(toolLabelStyle.Render("  ⏳ Compacting context...")))
 	m.thinking = true
 	m.agentDone = false
 	if m.ready {
@@ -283,8 +283,8 @@ func (m Model) handleSkillSlashInput(skillName, userInput string, cmds []tea.Cmd
 	m.mode = ModeAgent
 	m.agentDone = false
 	m.thinking = true
-	m.lines = append(m.lines, fmt.Sprintf("%s %s",
-		userLabelStyle.Render("🔧 Skill:"), displayLabel))
+	m.lines = append(m.lines, textLine(fmt.Sprintf("%s %s",
+		userLabelStyle.Render("🔧 Skill:"), displayLabel)))
 	if m.ready {
 		m.viewport.SetHeight(m.calcViewportHeight(false))
 		m.viewport.SetContent(m.renderContent())

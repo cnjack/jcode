@@ -262,7 +262,7 @@ func (m *Model) switchTeamView(delta int) {
 func (m *Model) enterTeammateView(agentID string) {
 	// Save leader's viewport state if coming from leader.
 	if m.teamState.ViewMode != TeamViewTeammate {
-		m.teamLeaderLines = make([]string, len(m.lines))
+		m.teamLeaderLines = make([]contentLine, len(m.lines))
 		copy(m.teamLeaderLines, m.lines)
 		m.teamLeaderText = m.currentText.String()
 	}
@@ -274,9 +274,9 @@ func (m *Model) enterTeammateView(agentID string) {
 	state := m.teamState.Manager.GetTeammateState(agentID)
 	if state != nil {
 		m.lines = nil
-		m.lines = append(m.lines, RenderTeammateViewHeader(state.Identity))
-		m.lines = append(m.lines, "")
-		m.lines = append(m.lines, m.teamState.GetTeammateDisplayLines(agentID)...)
+		m.lines = append(m.lines, textLine(RenderTeammateViewHeader(state.Identity)))
+		m.lines = append(m.lines, textLine(""))
+		m.lines = append(m.lines, toContentLines(m.teamState.GetTeammateDisplayLines(agentID))...)
 	}
 	m.currentText.Reset()
 	m.refreshViewport()
