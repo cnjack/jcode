@@ -20,6 +20,70 @@ For the **full changelog**, see [CHANGELOG.md](../CHANGELOG.md) in the repositor
 
 ## Latest Release
 
+### [0.4.1] - 2026-04-26
+
+**Multimodal Image Input • ACP Vision Support • Session Image Restore**
+
+#### Added
+- Multimodal image input for the web UI and ACP transport when the selected model supports image input.
+- Session persistence now stores attached images and restores them during session replay.
+
+---
+
+### [0.3.10] - 2026-04-25
+
+**Auto-open Browser • Resize Reflow • Model Picker Redesign**
+
+#### Added
+- Automatic browser opening after the web server starts.
+- Keyboard shortcuts help in the TUI.
+
+#### Changed
+- Redesigned model picker with provider grouping and visibility controls.
+- TUI content now reflows correctly on terminal resize.
+- Subagent output renders as Markdown with expand/collapse support.
+
+#### Fixed
+- Ctrl+Y copy now uses stored raw assistant text instead of reconstructing it from rendered lines.
+
+---
+
+### [0.3.9] - 2026-04-24
+
+**Keyboard Shortcuts Help • Context-sensitive Hints**
+
+#### Added
+- Keyboard shortcuts help panel with context-sensitive usage hints.
+
+---
+
+### [0.3.8] - 2026-04-24
+
+**Sidebar Cleanup • Better ANSI Width Handling**
+
+#### Changed
+- Cleaned up the TUI sidebar component structure.
+- Improved ANSI width handling in layout rendering.
+
+---
+
+### [0.3.7] - 2026-04-24
+
+**JCode Buddy Docs • Multi-line Paste • Web Fixes**
+
+#### Added
+- JCode Buddy BLE documentation and configuration guidance.
+- Multi-line paste support with reference storage.
+
+#### Changed
+- Internal documentation cleanup around the new Buddy and paste flows.
+
+#### Fixed
+- Web TODO panel rendering issues.
+- Frontend session split issues.
+
+---
+
 ### [0.3.6] - 2026-04-24
 
 **Sidebar Divider Alignment • Stable Team Teammates • Build Cleanup**
