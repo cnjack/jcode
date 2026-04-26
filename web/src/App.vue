@@ -301,7 +301,15 @@ function startResize(e: MouseEvent) {
           <!-- Timeline -->
           <div v-else class="max-w-3xl mx-auto px-5 py-6 space-y-0.5">
             <template v-for="item in store.timeline" :key="item.seq">
-              <ChatMessageVue v-if="item.kind === 'message'" :message="item.data" class="animate-fade-up" />
+              <ChatMessageVue
+                v-if="item.kind === 'message'"
+                :message="item.data"
+                :can-retry="item.data.role === 'assistant' && !store.isRunning"
+                :can-edit="item.data.role === 'user' && !store.isRunning"
+                class="animate-fade-up"
+                @retry="store.retryFromMessage(item.data.id)"
+                @edit="(text) => store.editAndResend(item.data.id, text)"
+              />
               <ToolCallCard v-else-if="item.kind === 'tool'" :tool="item.data" class="animate-fade-up" />
               <ApprovalBanner v-else-if="item.kind === 'approval'" :approval="item.data" class="animate-fade-up" />
             </template>

@@ -266,6 +266,97 @@ func (r *Recorder) RecordCompact(summary string, compactedN int) {
 	_ = r.writeEntry(Entry{Type: EntryCompact, Summary: summary, CompactedN: compactedN})
 }
 
+// TruncateAtUserMessage rewrites the session file keeping only entries that
+// appear before the (beforeCount)th user message (0-indexed).
+// If beforeCount == 0, the file is truncated to the session_start header only.
+// The recorder is reset to append mode on the (now shorter) file.
+// This preserves the session UUID and index entry — no new session is created.
+func (r *Recorder) TruncateAtUserMessage(beforeCount int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.agentID != "" {
+		return fmt.Errorf("TruncateAtUserMessage not supported for teammate recorders")
+	}
+
+	// Close current file handle before rewriting.
+	if r.file != nil {
+		_ = r.file.Close()
+		r.file = nil
+	}
+
+	dir, err := config.SessionsDir()
+	if err != nil {
+		return err
+	}
+	filePath := filepath.Join(dir, r.uuid+".json")
+
+	// Load existing entries.
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Nothing to truncate.
+			return nil
+		}
+		return fmt.Errorf("read session file: %w", err)
+	}
+
+	// Collect entries to keep: session_start always, then everything before
+	// the beforeCount-th user entry. When beforeCount == 0 we keep nothing
+	// except the session_start header.
+	var keep []string
+	userCount := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var e Entry
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			continue
+		}
+		// Always keep the session_start header.
+		if e.Type == EntrySessionStart {
+			keep = append(keep, line)
+			continue
+		}
+		// Stop as soon as we reach the Nth user message.
+		if e.Type == EntryUser {
+			if userCount >= beforeCount {
+				break
+			}
+			userCount++
+		}
+		// For beforeCount == 0 we must not keep any non-session_start entry.
+		if beforeCount == 0 {
+			break
+		}
+		keep = append(keep, line)
+	}
+
+	// Atomically rewrite the file.
+	tmpPath := filePath + ".tmp"
+	content := strings.Join(keep, "\n")
+	if len(keep) > 0 {
+		content += "\n"
+	}
+	if err := os.WriteFile(tmpPath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("write truncated session: %w", err)
+	}
+	if err := os.Rename(tmpPath, filePath); err != nil {
+		return fmt.Errorf("rename truncated session: %w", err)
+	}
+
+	// Reopen for append so subsequent writes go to the correct file.
+	f, err := os.OpenFile(filePath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("reopen session for append: %w", err)
+	}
+	r.file = f
+	r.resuming = true
+	return nil
+}
+
 // Close flushes and closes the underlying file.  Safe to call multiple times.
 // If no messages were ever recorded the file is never created.
 func (r *Recorder) Close() {

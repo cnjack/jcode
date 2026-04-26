@@ -552,6 +552,79 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  async function retryFromMessage(messageId: string) {
+    // Find the assistant/system message to retry
+    const msgIdx = timeline.value.findIndex(i => i.kind === 'message' && i.data.id === messageId)
+    if (msgIdx === -1) return
+
+    // Find the last user message before this index
+    let userMsgText = ''
+    let userMsgIdx = -1
+    for (let i = msgIdx - 1; i >= 0; i--) {
+      const item = timeline.value[i]
+      if (item && item.kind === 'message' && item.data.role === 'user') {
+        userMsgText = item.data.content
+        userMsgIdx = i
+        break
+      }
+    }
+    if (!userMsgText || userMsgIdx === -1) return
+
+    // Count user messages BEFORE userMsgIdx in the timeline.
+    // This matches the backend's user-message count (role === 'user' entries in s.history).
+    const beforeUserMessage = timeline.value
+      .slice(0, userMsgIdx)
+      .filter(i => i.kind === 'message' && i.data.role === 'user')
+      .length
+
+    // Truncate backend history in-place and keep using the returned session id.
+    // The backend preserves the same session UUID while removing the edited tail.
+    try {
+      const res = await api.truncateHistory(beforeUserMessage)
+      if (res.session_id) {
+        currentSessionId.value = res.session_id
+      }
+    } catch (err) {
+      console.error('Failed to truncate history:', err)
+    }
+
+    // Truncate frontend timeline from the user message (inclusive) and reset streaming state
+    timeline.value.splice(userMsgIdx)
+    streamingText = ''
+    streamingMsgId = ''
+
+    await sendMessage(userMsgText)
+  }
+
+  async function editAndResend(messageId: string, newText: string) {
+    // Find the user message to edit
+    const msgIdx = timeline.value.findIndex(i => i.kind === 'message' && i.data.id === messageId)
+    if (msgIdx === -1) return
+
+    // Count user messages BEFORE this message in the timeline.
+    const beforeUserMessage = timeline.value
+      .slice(0, msgIdx)
+      .filter(i => i.kind === 'message' && i.data.role === 'user')
+      .length
+
+    // Truncate backend history in-place and keep using the returned session id.
+    try {
+      const res = await api.truncateHistory(beforeUserMessage)
+      if (res.session_id) {
+        currentSessionId.value = res.session_id
+      }
+    } catch (err) {
+      console.error('Failed to truncate history:', err)
+    }
+
+    // Truncate frontend timeline from this message (inclusive) and reset streaming state
+    timeline.value.splice(msgIdx)
+    streamingText = ''
+    streamingMsgId = ''
+
+    await sendMessage(newText)
+  }
+
   async function loadSession(uuid: string) {
     try {
       const entries = await api.session(uuid)
@@ -680,5 +753,7 @@ export const useChatStore = defineStore('chat', () => {
     recentModels,
     favoriteModels,
     enabledProviders,
+    retryFromMessage,
+    editAndResend,
   }
 })
