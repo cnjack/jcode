@@ -7,6 +7,38 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
+// entryToUserMessage converts a session Entry into a schema.Message,
+// restoring multimodal content (images) when present.
+func entryToUserMessage(e Entry) *schema.Message {
+	if len(e.Images) == 0 {
+		return schema.UserMessage(e.Content)
+	}
+	parts := make([]schema.MessageInputPart, 0, len(e.Images)+1)
+	if e.Content != "" {
+		parts = append(parts, schema.MessageInputPart{
+			Type: schema.ChatMessagePartTypeText,
+			Text: e.Content,
+		})
+	}
+	for _, img := range e.Images {
+		data := img.Data
+		parts = append(parts, schema.MessageInputPart{
+			Type: schema.ChatMessagePartTypeImageURL,
+			Image: &schema.MessageInputImage{
+				MessagePartCommon: schema.MessagePartCommon{
+					MIMEType:   img.MimeType,
+					Base64Data: &data,
+				},
+			},
+		})
+	}
+	return &schema.Message{
+		Role:                  schema.User,
+		Content:               e.Content,
+		UserInputMultiContent: parts,
+	}
+}
+
 // ReconstructHistory converts a slice of recorded session entries back into
 // LLM history messages suitable for resuming a conversation.
 // It reconstructs tool call and tool result messages so that resumed sessions
@@ -16,7 +48,7 @@ func ReconstructHistory(entries []Entry) []adk.Message {
 	for _, e := range entries {
 		switch e.Type {
 		case EntryUser:
-			msgs = append(msgs, schema.UserMessage(e.Content))
+			msgs = append(msgs, entryToUserMessage(e))
 		case EntryAssistant:
 			if e.Content != "" {
 				msgs = append(msgs, &schema.Message{Role: schema.Assistant, Content: e.Content})
@@ -73,7 +105,7 @@ func ReconstructState(entries []Entry) *SessionState {
 	for _, e := range entries {
 		switch e.Type {
 		case EntryUser:
-			msgs = append(msgs, schema.UserMessage(e.Content))
+			msgs = append(msgs, entryToUserMessage(e))
 
 		case EntryAssistant:
 			if e.Content != "" {

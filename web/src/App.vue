@@ -277,6 +277,7 @@ function startResize(e: MouseEvent) {
               :class="store.isRunning ? 'bg-amber-400 animate-pulse' : store.wsConnected ? 'bg-emerald-400' : 'bg-zinc-400 dark:bg-zinc-600'"
             />
             {{ store.isRunning ? 'Working…' : store.wsConnected ? 'Ready' : 'Offline' }}
+            <span v-if="store.serverVersion" class="text-[10px] text-zinc-300 dark:text-zinc-600">v{{ store.serverVersion }}</span>
           </div>
         </div>
       </header>

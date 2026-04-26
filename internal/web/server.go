@@ -319,6 +319,23 @@ func (s *Server) forwardEvents() {
 
 // --- API Handlers ---
 
+// currentModelSupportsImage checks if the currently selected model supports image input.
+func (s *Server) currentModelSupportsImage() bool {
+	if s.registry == nil {
+		return false
+	}
+	_, m, ok := s.registry.LookupModel(s.providerName, s.modelName)
+	if !ok || m == nil || m.Modalities == nil {
+		return false
+	}
+	for _, mod := range m.Modalities.Input {
+		if mod == "image" {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	sessionID := ""
@@ -343,14 +360,15 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":     "ok",
-		"version":    "0.2.0",
-		"pwd":        s.pwd,
-		"provider":   s.providerName,
-		"model":      s.modelName,
-		"mode":       s.mode,
-		"session_id": sessionID,
-		"running":    s.running.Load(),
+		"status":        "ok",
+		"version":       "0.2.0",
+		"pwd":           s.pwd,
+		"provider":      s.providerName,
+		"model":         s.modelName,
+		"mode":          s.mode,
+		"session_id":    sessionID,
+		"running":       s.running.Load(),
+		"image_support": s.currentModelSupportsImage(),
 	})
 }
 
@@ -389,11 +407,12 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// running is now true; submitMessage will proceed without re-setting it.
 
 	var req struct {
-		Message   string `json:"message"`
-		Mode      string `json:"mode,omitempty"`       // "build" or "plan"
-		SessionID string `json:"session_id,omitempty"` // optional: continue existing session
+		Message   string      `json:"message"`
+		Images    []chatImage `json:"images,omitempty"`     // optional: base64-encoded images
+		Mode      string      `json:"mode,omitempty"`       // "build" or "plan"
+		SessionID string      `json:"session_id,omitempty"` // optional: continue existing session
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 20<<20)).Decode(&req); err != nil {
 		s.running.Store(false)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
@@ -409,8 +428,14 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		mode = s.mode
 	}
 
-	sessionID := s.submitMessage(req.Message, mode, "", req.SessionID)
+	sessionID := s.submitMessage(req.Message, mode, "", req.SessionID, req.Images)
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "processing", "session_id": sessionID})
+}
+
+// chatImage represents a base64-encoded image in a chat request.
+type chatImage struct {
+	Data     string `json:"data"`       // base64 data (without data: prefix)
+	MimeType string `json:"media_type"` // e.g. "image/png", "image/jpeg"
 }
 
 // SubmitMessage submits a message for agent processing from an external source
@@ -419,7 +444,7 @@ func (s *Server) SubmitMessage(message, source string) bool {
 	if !s.running.CompareAndSwap(false, true) {
 		return false
 	}
-	s.submitMessage(message, s.mode, source, "")
+	s.submitMessage(message, s.mode, source, "", nil)
 	return true
 }
 
@@ -428,9 +453,10 @@ func (s *Server) SubmitMessage(message, source string) bool {
 // sessionID is an optional session identifier from the client to ensure
 // continuity — if the current recorder has a different UUID, resume the
 // correct session instead of creating a new one.
+// images is an optional list of base64-encoded images to include in the message.
 // The caller must have already set s.running to true (via CompareAndSwap).
 // Returns the session_id of the recorder used.
-func (s *Server) submitMessage(message, mode, source, sessionID string) string {
+func (s *Server) submitMessage(message, mode, source, sessionID string, images []chatImage) string {
 	// Apply mode prefix if plan mode requested.
 	agentMsg := message
 	if mode == "plan" {
@@ -469,11 +495,47 @@ func (s *Server) submitMessage(message, mode, source, sessionID string) string {
 
 	// Record user message.
 	if recorder != nil {
-		recorder.RecordUser(agentMsg)
+		var entryImages []session.EntryImage
+		for _, img := range images {
+			entryImages = append(entryImages, session.EntryImage{
+				MimeType: img.MimeType,
+				Data:     img.Data,
+			})
+		}
+		recorder.RecordUser(agentMsg, entryImages...)
+	}
+
+	// Build the user message — include images as multimodal content if provided.
+	var userMsg *schema.Message
+	if len(images) > 0 {
+		parts := make([]schema.MessageInputPart, 0, len(images)+1)
+		parts = append(parts, schema.MessageInputPart{
+			Type: schema.ChatMessagePartTypeText,
+			Text: agentMsg,
+		})
+		for _, img := range images {
+			data := img.Data
+			parts = append(parts, schema.MessageInputPart{
+				Type: schema.ChatMessagePartTypeImageURL,
+				Image: &schema.MessageInputImage{
+					MessagePartCommon: schema.MessagePartCommon{
+						MIMEType:   img.MimeType,
+						Base64Data: &data,
+					},
+				},
+			})
+		}
+		userMsg = &schema.Message{
+			Role:                  schema.User,
+			Content:               agentMsg,
+			UserInputMultiContent: parts,
+		}
+	} else {
+		userMsg = schema.UserMessage(agentMsg)
 	}
 
 	s.mu.Lock()
-	s.history = append(s.history, schema.UserMessage(agentMsg))
+	s.history = append(s.history, userMsg)
 	history := make([]adk.Message, len(s.history))
 	copy(history, s.history)
 	agent := s.agent
@@ -681,6 +743,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		Recommended    bool   `json:"recommended,omitempty"`
 		DefaultEnabled bool   `json:"default_enabled,omitempty"`
 		Enabled        bool   `json:"enabled"`
+		ImageSupport   bool   `json:"image_support,omitempty"`
 	}
 	type providerInfo struct {
 		ID     string      `json:"id"`
@@ -708,10 +771,20 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 			}
 			ref := config.ModelRef{Provider: rp.ID, Model: m.ID}
 			enabled := modelState.IsModelEnabled(ref, m.DefaultEnabled)
+			imageSupport := false
+			if m.Modalities != nil {
+				for _, mod := range m.Modalities.Input {
+					if mod == "image" {
+						imageSupport = true
+						break
+					}
+				}
+			}
 			pi.Models = append(pi.Models, modelInfo{
 				ID: m.ID, Name: m.Name, ToolCall: m.ToolCall, ContextLimit: ctx,
 				Reasoning: m.Reasoning, Recommended: m.Recommended,
 				DefaultEnabled: m.DefaultEnabled, Enabled: enabled,
+				ImageSupport: imageSupport,
 			})
 		}
 		result = append(result, pi)
