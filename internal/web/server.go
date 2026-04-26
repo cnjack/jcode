@@ -250,6 +250,9 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/providers", s.handleAddProvider)
 	mux.HandleFunc("DELETE /api/providers/{id}", s.handleDeleteProvider)
 
+	// History management.
+	mux.HandleFunc("POST /api/history/truncate", s.handleTruncateHistory)
+
 	// Model state API — favorites & recent.
 	mux.HandleFunc("GET /api/model-state", s.handleGetModelState)
 	mux.HandleFunc("POST /api/model-state/favorite", s.handleToggleFavorite)
@@ -619,6 +622,72 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleTruncateHistory(w http.ResponseWriter, r *http.Request) {
+	if s.running.Load() {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is currently running"})
+		return
+	}
+
+	var req struct {
+		// BeforeUserMessage: keep all history entries that come before the
+		// Nth user message (0-indexed). Everything from that user message
+		// onward is discarded. Pass 0 to clear everything.
+		BeforeUserMessage int `json:"before_user_message"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+
+	// Capture the recorder reference under the lock but do file I/O outside
+	// so we don't block other goroutines.
+	s.mu.Lock()
+	rec := s.recorder
+	sessionID := ""
+	if rec != nil {
+		sessionID = rec.UUID()
+	}
+	s.mu.Unlock()
+
+	// Persist first — if the file rewrite fails we abort without touching
+	// the in-memory history so state never diverges.
+	if rec != nil {
+		if err := rec.TruncateAtUserMessage(req.BeforeUserMessage); err != nil {
+			config.Logger().Printf("[truncate] rewrite session file failed: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to truncate session file"})
+			return
+		}
+	}
+
+	// Now truncate in-memory history.
+	s.mu.Lock()
+	truncAt := 0
+	if req.BeforeUserMessage > 0 {
+		userCount := 0
+		truncAt = len(s.history) // default: keep all
+		for i, msg := range s.history {
+			if msg.Role == schema.User {
+				if userCount == req.BeforeUserMessage {
+					truncAt = i
+					break
+				}
+				userCount++
+			}
+		}
+	}
+	if truncAt == 0 {
+		s.history = nil
+	} else {
+		s.history = s.history[:truncAt]
+	}
+	s.mu.Unlock()
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":     "ok",
+		"session_id": sessionID,
+	})
 }
 
 func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {

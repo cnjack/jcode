@@ -19,6 +19,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  truncateHistory: (beforeUserMessage: number) =>
+    request<{ status: string; session_id: string }>('/api/history/truncate', {
+      method: 'POST',
+      body: JSON.stringify({ before_user_message: beforeUserMessage }),
+    }),
   health: () =>
     request<{ status: string; version: string; pwd: string; provider: string; model: string; mode: string; session_id: string; running: boolean; image_support?: boolean }>(
       '/api/health',
