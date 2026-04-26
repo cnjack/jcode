@@ -42,6 +42,12 @@ type TodoSnapshotItem struct {
 	Status string `json:"status"`
 }
 
+// EntryImage stores a single image attached to a user message.
+type EntryImage struct {
+	MimeType string `json:"media_type"`
+	Data     string `json:"data"` // base64-encoded
+}
+
 // Entry is one line of the JSONL session file.
 type Entry struct {
 	Type       EntryType `json:"type"`
@@ -56,6 +62,9 @@ type Entry struct {
 	Error      string    `json:"error,omitempty"`        // tool error
 	ToolCallID string    `json:"tool_call_id,omitempty"` // links tool_call ↔ tool_result
 	Timestamp  string    `json:"timestamp"`
+
+	// Images attached to a user message.
+	Images []EntryImage `json:"images,omitempty"`
 
 	// plan_update fields
 	PlanStatus  string `json:"plan_status,omitempty"`
@@ -178,11 +187,12 @@ func (r *Recorder) HasRecording() bool {
 
 // RecordUser appends a user message entry.
 // On the first user message, the title is auto-generated from the content.
-func (r *Recorder) RecordUser(content string) {
+// Optional images are persisted alongside the text so they survive session restore.
+func (r *Recorder) RecordUser(content string, images ...EntryImage) {
 	r.mu.Lock()
 	needsTitle := r.file == nil && !r.resuming
 	r.mu.Unlock()
-	_ = r.writeEntry(Entry{Type: EntryUser, Content: content})
+	_ = r.writeEntry(Entry{Type: EntryUser, Content: content, Images: images})
 	if needsTitle {
 		title := generateTitle(content)
 		r.mu.Lock()

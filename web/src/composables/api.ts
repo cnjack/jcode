@@ -1,5 +1,5 @@
 // API client for jcode backend
-import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, MCPListResponse, BrowseResponse, SSHListResponse, SkillInfo, TodoItem, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ModelStateResponse } from '@/types/api'
+import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, MCPListResponse, BrowseResponse, SSHListResponse, SkillInfo, TodoItem, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ModelStateResponse, ChatImage } from '@/types/api'
 
 const BASE = ''
 
@@ -20,7 +20,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   health: () =>
-    request<{ status: string; version: string; pwd: string; provider: string; model: string; mode: string; session_id: string; running: boolean }>(
+    request<{ status: string; version: string; pwd: string; provider: string; model: string; mode: string; session_id: string; running: boolean; image_support?: boolean }>(
       '/api/health',
     ),
   status: () =>
@@ -49,10 +49,15 @@ export const api = {
   },
   fileContent: (path: string) =>
     request<{ path: string; content: string }>(`/api/files/content?path=${encodeURIComponent(path)}`),
-  chat: (message: string, mode?: AgentMode, sessionId?: string) =>
+  chat: (message: string, mode?: AgentMode, sessionId?: string, images?: ChatImage[]) =>
     request<{ status: string; session_id: string }>('/api/chat', {
       method: 'POST',
-      body: JSON.stringify({ message, mode, session_id: sessionId || undefined }),
+      body: JSON.stringify({
+        message,
+        mode,
+        session_id: sessionId || undefined,
+        images: images && images.length > 0 ? images : undefined,
+      }),
     }),
   approval: (id: string, approved: boolean) =>
     request<{ status: string }>('/api/approval', {

@@ -41,6 +41,8 @@ var wantedProviders = []string{
 	"tencent-coding-plan",
 	"zai",
 	"zai-coding-plan",
+	"xiaomi",
+	"xiaomi-token-plan-cn",
 	// Cloud/local
 	"ollama-cloud",
 }

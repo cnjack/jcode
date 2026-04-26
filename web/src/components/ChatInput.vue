@@ -2,7 +2,7 @@
 import { ref, nextTick, watch, computed, onMounted, onUnmounted } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { api } from '@/composables/api'
-import type { SkillInfo } from '@/types/api'
+import type { SkillInfo, ChatImage } from '@/types/api'
 
 const store = useChatStore()
 const input = ref('')
@@ -17,6 +17,11 @@ const skills = ref<SkillInfo[]>([])
 const showSlashMenu = ref(false)
 const slashFilter = ref('')
 const selectedSlashIdx = ref(0)
+
+// Image attachment state
+const pendingImages = ref<ChatImage[]>([])
+const pendingImagePreviews = ref<string[]>([])
+const fileInput = ref<HTMLInputElement | null>(null)
 
 const modes = [
   { value: 'agent' as const, label: 'Agent', icon: '🔥' },
@@ -116,6 +121,28 @@ function handleKeyDown(e: KeyboardEvent) {
   }
 }
 
+function handlePaste(e: ClipboardEvent) {
+  if (!store.imageSupport) return
+  const items = e.clipboardData?.items
+  if (!items) return
+  for (const item of Array.from(items)) {
+    if (!item.type.startsWith('image/')) continue
+    e.preventDefault()
+    const file = item.getAsFile()
+    if (!file) continue
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result as string
+      const commaIdx = result.indexOf(',')
+      if (commaIdx < 0) return
+      const base64Data = result.substring(commaIdx + 1)
+      pendingImages.value.push({ data: base64Data, media_type: file.type })
+      pendingImagePreviews.value.push(result)
+    }
+    reader.readAsDataURL(file)
+  }
+}
+
 function handleInput() {
   autoResize()
   const text = input.value
@@ -136,17 +163,52 @@ function applySlashCommand(skill: SkillInfo) {
 
 async function send() {
   const text = input.value.trim()
-  if (!text || store.isRunning) return
+  if ((!text && pendingImages.value.length === 0) || store.isRunning) return
+  const images = pendingImages.value.length > 0 ? [...pendingImages.value] : undefined
   input.value = ''
+  pendingImages.value = []
+  pendingImagePreviews.value = []
   showSlashMenu.value = false
   await nextTick()
   autoResize()
-  store.sendMessage(text)
+  store.sendMessage(text || '(see attached images)', images)
 }
 
 function selectModel(provider: string, model: string) {
   showModelPicker.value = false
   store.switchModel(provider, model)
+}
+
+function triggerImageUpload() {
+  fileInput.value?.click()
+}
+
+function handleImageSelect(e: Event) {
+  const target = e.target as HTMLInputElement
+  const files = target.files
+  if (!files) return
+  for (const file of Array.from(files)) {
+    if (!file.type.startsWith('image/')) continue
+    if (file.size > 10 * 1024 * 1024) continue // 10MB limit
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result as string
+      // result is "data:<media_type>;base64,<data>"
+      const commaIdx = result.indexOf(',')
+      if (commaIdx < 0) return
+      const base64Data = result.substring(commaIdx + 1)
+      pendingImages.value.push({ data: base64Data, media_type: file.type })
+      pendingImagePreviews.value.push(result)
+    }
+    reader.readAsDataURL(file)
+  }
+  // Reset input so the same file can be re-selected
+  target.value = ''
+}
+
+function removeImage(index: number) {
+  pendingImages.value.splice(index, 1)
+  pendingImagePreviews.value.splice(index, 1)
 }
 
 function selectMode(mode: 'agent' | 'plan') {
@@ -229,6 +291,17 @@ watch(() => store.isRunning, (running) => {
           </button>
         </div>
 
+        <!-- Image previews -->
+        <div v-if="pendingImagePreviews.length > 0" class="flex flex-wrap gap-2 mb-2">
+          <div v-for="(preview, i) in pendingImagePreviews" :key="i" class="relative group">
+            <img :src="preview" class="w-16 h-16 object-cover rounded border border-zinc-200 dark:border-zinc-700" />
+            <button
+              class="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+              @click="removeImage(i)"
+            >✕</button>
+          </div>
+        </div>
+
         <textarea
           ref="textarea"
           v-model="input"
@@ -238,10 +311,40 @@ watch(() => store.isRunning, (running) => {
           class="w-full bg-transparent text-zinc-800 dark:text-zinc-100 text-sm resize-none outline-none placeholder-zinc-400 dark:placeholder-zinc-500 min-h-6 max-h-40 leading-relaxed disabled:opacity-50"
           @keydown="handleKeyDown"
           @input="handleInput"
+          @paste="handlePaste"
+        />
+
+        <!-- Hidden file input for image upload -->
+        <input
+          ref="fileInput"
+          type="file"
+          accept="image/*"
+          multiple
+          class="hidden"
+          @change="handleImageSelect"
         />
         <!-- Toolbar row -->
         <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-zinc-200/60 dark:border-zinc-700/40">
           <div class="flex items-center gap-1.5">
+            <!-- Image attach "+" button -->
+            <button
+              class="w-6 h-6 flex items-center justify-center rounded border transition-colors shrink-0"
+              :class="[
+                store.imageSupport ? 'cursor-pointer' : 'cursor-not-allowed opacity-40',
+                pendingImages.length > 0
+                  ? 'border-blue-400 dark:border-blue-500 bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-400'
+                  : 'border-zinc-300 dark:border-zinc-600 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-700/60'
+              ]"
+              :title="!store.imageSupport ? 'Current model does not support images' : pendingImages.length > 0 ? `${pendingImages.length} image(s) attached — click to add more` : 'Attach images'"
+              :disabled="!store.imageSupport"
+              @click="store.imageSupport && triggerImageUpload()"
+            >
+              <svg v-if="pendingImages.length === 0" class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" />
+              </svg>
+              <span v-else class="text-[10px] font-bold">{{ pendingImages.length }}</span>
+            </button>
+
             <!-- Mode selector -->
             <div class="relative">
               <button
@@ -457,7 +560,7 @@ watch(() => store.isRunning, (running) => {
             <button
               v-else
               class="w-7 h-7 flex items-center justify-center rounded-md bg-emerald-500 hover:bg-emerald-600 text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shadow-sm"
-              :disabled="!input.trim()"
+              :disabled="!input.trim() && pendingImages.length === 0"
               @click="send"
             >
               <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
