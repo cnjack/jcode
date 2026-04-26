@@ -10,6 +10,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Added `design/jcode.pen`, the source design file for the current jcode visual design.
 
+## [0.4.1] - 2026-04-26
+
+### Added
+- Added multimodal image support for web and ACP transports when the selected model accepts image input.
+- Added image persistence and multimodal message reconstruction in session history so restored sessions retain attached images.
+
+## [0.3.10] - 2026-04-25
+
+### Added
+- Added automatic browser opening after the web server starts listening.
+- Added a keyboard shortcuts help surface for the TUI.
+
+### Changed
+- Redesigned the model picker with provider grouping and visibility controls.
+- Reflowed TUI content correctly when the terminal is resized.
+- Rendered subagent output as Markdown in the TUI with expand/collapse support.
+
+### Fixed
+- Stored raw assistant text for Ctrl+Y copy actions instead of reconstructing it from rendered lines.
+
+## [0.3.9] - 2026-04-24
+
+### Added
+- Added a keyboard shortcuts help panel with context-sensitive usage hints.
+
+## [0.3.8] - 2026-04-24
+
+### Changed
+- Cleaned up sidebar component structure in the TUI.
+- Improved ANSI width handling for sidebar and layout rendering.
+
+## [0.3.7] - 2026-04-24
+
+### Added
+- Added JCode Buddy BLE documentation and configuration guidance.
+- Added multi-line paste support with reference storage.
+
+### Changed
+- Cleaned up internal documentation around the new Buddy and paste workflows.
+
+### Fixed
+- Fixed web TODO panel rendering issues.
+- Fixed frontend session split issues.
+
 ## [0.3.6] - 2026-04-24
 
 ### Changed
