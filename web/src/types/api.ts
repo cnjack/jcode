@@ -94,6 +94,7 @@ export interface ModelInfo {
   recommended?: boolean
   default_enabled?: boolean
   enabled?: boolean
+  image_support?: boolean
 }
 
 export interface ProviderInfo {
@@ -209,12 +210,18 @@ export type MessageRole = 'user' | 'assistant' | 'system'
 
 export type AgentMode = 'agent' | 'plan'
 
+export interface ChatImage {
+  data: string       // base64 data (without data: prefix)
+  media_type: string // e.g. "image/png", "image/jpeg"
+}
+
 export interface ChatMessage {
   id: string
   role: MessageRole
   content: string
   timestamp: number
   source?: string
+  images?: ChatImage[]
 }
 
 export interface ToolCall {

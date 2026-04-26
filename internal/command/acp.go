@@ -174,11 +174,28 @@ func (a *acpAgent) broadcastSlashCommands(sessionID acp.SessionId, sess *acpSess
 func (a *acpAgent) Initialize(_ context.Context, params acp.InitializeRequest) (acp.InitializeResponse, error) {
 	config.Logger().Printf("[acp] Initialize: client=%v, protocol=%d",
 		params.ClientInfo, params.ProtocolVersion)
+
+	// Check if the configured model supports image input.
+	imageSupport := false
+	if cfg, err := config.LoadConfig(); err == nil {
+		providerName, modelName := cfg.GetProviderModel()
+		registry := internalmodel.NewModelRegistry()
+		if _, m, ok := registry.LookupModel(providerName, modelName); ok && m != nil && m.Modalities != nil {
+			for _, mod := range m.Modalities.Input {
+				if mod == "image" {
+					imageSupport = true
+					break
+				}
+			}
+		}
+	}
+
 	return acp.InitializeResponse{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		AgentCapabilities: acp.AgentCapabilities{
 			PromptCapabilities: acp.PromptCapabilities{
 				EmbeddedContext: true,
+				Image:           imageSupport,
 			},
 			LoadSession: true,
 			SessionCapabilities: acp.SessionCapabilities{
@@ -412,11 +429,24 @@ func (a *acpAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Pr
 		return acp.PromptResponse{}, fmt.Errorf("unknown session: %s", params.SessionId)
 	}
 
-	// Extract text from prompt content blocks.
+	// Extract text and images from prompt content blocks.
 	var userText strings.Builder
+	var imageParts []schema.MessageInputPart
 	for _, block := range params.Prompt {
 		if block.Text != nil {
 			userText.WriteString(block.Text.Text)
+		}
+		if block.Image != nil && block.Image.Data != "" {
+			data := block.Image.Data
+			imageParts = append(imageParts, schema.MessageInputPart{
+				Type: schema.ChatMessagePartTypeImageURL,
+				Image: &schema.MessageInputImage{
+					MessagePartCommon: schema.MessagePartCommon{
+						MIMEType:   block.Image.MimeType,
+						Base64Data: &data,
+					},
+				},
+			})
 		}
 		if block.ResourceLink != nil {
 			fmt.Fprintf(&userText, "\n[Resource: %s (%s)]", block.ResourceLink.Name, block.ResourceLink.Uri)
@@ -424,7 +454,7 @@ func (a *acpAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Pr
 	}
 
 	prompt := userText.String()
-	if prompt == "" {
+	if prompt == "" && len(imageParts) == 0 {
 		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 	}
 
@@ -448,9 +478,38 @@ func (a *acpAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Pr
 
 	sess.mu.Lock()
 	if sess.rec != nil {
-		sess.rec.RecordUser(prompt)
+		var entryImages []session.EntryImage
+		for _, p := range imageParts {
+			if p.Image != nil && p.Image.Base64Data != nil {
+				entryImages = append(entryImages, session.EntryImage{
+					MimeType: p.Image.MIMEType,
+					Data:     *p.Image.Base64Data,
+				})
+			}
+		}
+		sess.rec.RecordUser(prompt, entryImages...)
 	}
-	sess.history = append(sess.history, schema.UserMessage(prompt))
+
+	// Build user message — include images as multimodal content if provided.
+	var userMsg *schema.Message
+	if len(imageParts) > 0 {
+		parts := make([]schema.MessageInputPart, 0, len(imageParts)+1)
+		if prompt != "" {
+			parts = append(parts, schema.MessageInputPart{
+				Type: schema.ChatMessagePartTypeText,
+				Text: prompt,
+			})
+		}
+		parts = append(parts, imageParts...)
+		userMsg = &schema.Message{
+			Role:                  schema.User,
+			Content:               prompt,
+			UserInputMultiContent: parts,
+		}
+	} else {
+		userMsg = schema.UserMessage(prompt)
+	}
+	sess.history = append(sess.history, userMsg)
 
 	// Create a cancellable context for this prompt turn.
 	promptCtx, cancel := context.WithCancel(ctx)

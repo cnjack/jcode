@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type {
   ChatMessage,
+  ChatImage,
   ToolCall,
   PendingApproval,
   TodoItem,
@@ -55,6 +56,12 @@ export const useChatStore = defineStore('chat', () => {
   const channelAvailable = ref(false)
   const channelEnabled = ref(false)
 
+  // Image support for current model
+  const imageSupport = ref(false)
+
+  // Server version
+  const serverVersion = ref('')
+
   // Model favorites & recent
   const favoriteModels = ref<Set<string>>(new Set())
   const recentModels = ref<ModelRef[]>([])
@@ -86,9 +93,9 @@ export const useChatStore = defineStore('chat', () => {
   })
 
   // --- Actions ---
-  function addMessage(role: ChatMessage['role'], content: string, source?: string): string {
+  function addMessage(role: ChatMessage['role'], content: string, source?: string, images?: ChatImage[]): string {
     const id = genId('msg')
-    const msg: ChatMessage = { id, role, content, timestamp: Date.now(), source }
+    const msg: ChatMessage = { id, role, content, timestamp: Date.now(), source, images }
     timeline.value.push({ kind: 'message', data: msg, seq: nextSeqId() })
     return id
   }
@@ -215,8 +222,8 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function sendMessage(text: string) {
-    addMessage('user', text)
+  async function sendMessage(text: string, images?: ChatImage[]) {
+    addMessage('user', text, undefined, images)
     isRunning.value = true
     streamingText = ''
     streamingMsgId = ''
@@ -225,6 +232,7 @@ export const useChatStore = defineStore('chat', () => {
         text,
         mode.value === 'agent' ? ('build' as AgentMode) : mode.value,
         currentSessionId.value || undefined,
+        images,
       )
       // Track the session_id returned by the backend so subsequent messages
       // continue the same session (prevents duplicate session creation).
@@ -319,6 +327,8 @@ export const useChatStore = defineStore('chat', () => {
       mode.value = m === 'build' ? 'agent' : (m as AgentMode)
       currentSessionId.value = h.session_id || ''
       isRunning.value = h.running || false
+      imageSupport.value = h.image_support || false
+      serverVersion.value = h.version || ''
       return h
     } catch (err) {
       console.error('Failed to fetch health:', err)
@@ -341,8 +351,20 @@ export const useChatStore = defineStore('chat', () => {
       await api.switchModel(provider, model)
       providerName.value = provider
       modelName.value = model
+      // Update image support based on the new model's capabilities.
+      updateImageSupport(provider, model)
     } catch (err: unknown) {
       addMessage('system', `Failed to switch model: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  function updateImageSupport(provider: string, model: string) {
+    const p = providers.value.find(pv => pv.id === provider)
+    if (p) {
+      const m = p.models.find(mv => mv.id === model)
+      imageSupport.value = m?.image_support || false
+    } else {
+      imageSupport.value = false
     }
   }
 
@@ -614,6 +636,8 @@ export const useChatStore = defineStore('chat', () => {
     autoApprove,
     channelAvailable,
     channelEnabled,
+    imageSupport,
+    serverVersion,
     currentSessionId,
     // Getters
     messages,
