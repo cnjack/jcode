@@ -625,6 +625,11 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTruncateHistory(w http.ResponseWriter, r *http.Request) {
+	if s.running.Load() {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is currently running"})
+		return
+	}
+
 	var req struct {
 		// BeforeUserMessage: keep all history entries that come before the
 		// Nth user message (0-indexed). Everything from that user message
@@ -636,9 +641,28 @@ func (s *Server) handleTruncateHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Capture the recorder reference under the lock but do file I/O outside
+	// so we don't block other goroutines.
 	s.mu.Lock()
+	rec := s.recorder
+	sessionID := ""
+	if rec != nil {
+		sessionID = rec.UUID()
+	}
+	s.mu.Unlock()
 
-	// Determine the truncation index in s.history.
+	// Persist first — if the file rewrite fails we abort without touching
+	// the in-memory history so state never diverges.
+	if rec != nil {
+		if err := rec.TruncateAtUserMessage(req.BeforeUserMessage); err != nil {
+			config.Logger().Printf("[truncate] rewrite session file failed: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to truncate session file"})
+			return
+		}
+	}
+
+	// Now truncate in-memory history.
+	s.mu.Lock()
 	truncAt := 0
 	if req.BeforeUserMessage > 0 {
 		userCount := 0
@@ -653,31 +677,12 @@ func (s *Server) handleTruncateHistory(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-
-	// Truncate in-memory history.
 	if truncAt == 0 {
 		s.history = nil
 	} else {
 		s.history = s.history[:truncAt]
 	}
-
-	// Capture the recorder reference while holding the lock, then release
-	// before doing file I/O so we don't block other goroutines (e.g. the
-	// SSE forwarder that also acquires s.mu).
-	rec := s.recorder
-	sessionID := ""
-	if rec != nil {
-		sessionID = rec.UUID()
-	}
 	s.mu.Unlock()
-
-	// Rewrite the session file in-place (same UUID, same index entry) so the
-	// sidebar keeps the existing conversation and only the edited tail is removed.
-	if rec != nil {
-		if err := rec.TruncateAtUserMessage(req.BeforeUserMessage); err != nil {
-			config.Logger().Printf("[truncate] rewrite session file failed: %v", err)
-		}
-	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":     "ok",

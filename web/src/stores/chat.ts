@@ -586,6 +586,7 @@ export const useChatStore = defineStore('chat', () => {
       }
     } catch (err) {
       console.error('Failed to truncate history:', err)
+      return
     }
 
     // Truncate frontend timeline from the user message (inclusive) and reset streaming state
@@ -598,7 +599,9 @@ export const useChatStore = defineStore('chat', () => {
 
   async function editAndResend(messageId: string, newText: string) {
     // Find the user message to edit
-    const msgIdx = timeline.value.findIndex(i => i.kind === 'message' && i.data.id === messageId)
+    const msgIdx = timeline.value.findIndex(
+      i => i.kind === 'message' && i.data.id === messageId && i.data.role === 'user',
+    )
     if (msgIdx === -1) return
 
     // Count user messages BEFORE this message in the timeline.
@@ -615,6 +618,7 @@ export const useChatStore = defineStore('chat', () => {
       }
     } catch (err) {
       console.error('Failed to truncate history:', err)
+      return
     }
 
     // Truncate frontend timeline from this message (inclusive) and reset streaming state

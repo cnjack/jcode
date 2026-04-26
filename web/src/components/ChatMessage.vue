@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { renderMarkdown } from '@/composables/markdown'
 import type { ChatMessage } from '@/types/api'
-import { ref } from 'vue'
+import { ref, nextTick } from 'vue'
 
 const props = defineProps<{
   message: ChatMessage
@@ -17,17 +17,23 @@ const emit = defineEmits<{
 const copied = ref(false)
 const editing = ref(false)
 const editText = ref('')
+const editTextarea = ref<HTMLTextAreaElement | null>(null)
 
 function copyContent() {
   navigator.clipboard.writeText(props.message.content).then(() => {
     copied.value = true
     setTimeout(() => { copied.value = false }, 1500)
+  }).catch((err) => {
+    console.error('Failed to copy:', err)
   })
 }
 
 function startEdit() {
   editText.value = props.message.content
   editing.value = true
+  nextTick(() => {
+    editTextarea.value?.focus()
+  })
 }
 
 function confirmEdit() {
@@ -86,8 +92,8 @@ function handleEditKeyDown(e: KeyboardEvent) {
         {{ message.role === 'user' ? (message.source === 'wechat' ? 'WeChat' : 'You') : message.role === 'assistant' ? '[J]CODE' : 'System' }}
       </span>
 
-      <!-- Action buttons: visible on hover -->
-      <div class="flex items-center gap-0.5 ml-1 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-150">
+      <!-- Action buttons: visible on hover or keyboard focus-within -->
+      <div class="flex items-center gap-0.5 ml-1 opacity-0 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 transition-opacity duration-150">
         <!-- Copy button -->
         <button
           class="w-5 h-5 flex items-center justify-center rounded text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
@@ -148,10 +154,10 @@ function handleEditKeyDown(e: KeyboardEvent) {
     <!-- Inline edit mode -->
     <div v-else class="pl-7">
       <textarea
+        ref="editTextarea"
         v-model="editText"
         class="w-full min-h-20 max-h-80 resize-y rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 text-sm text-zinc-800 dark:text-zinc-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 dark:focus:border-emerald-400 transition-colors"
         @keydown="handleEditKeyDown"
-        autofocus
       />
       <div class="flex items-center gap-2 mt-2">
         <button
