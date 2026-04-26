@@ -39,6 +39,16 @@ defineProps<{
         {{ message.role === 'user' ? (message.source === 'wechat' ? 'WeChat' : 'You') : message.role === 'assistant' ? '[J]CODE' : 'System' }}
       </span>
     </div>
+    <!-- Images -->
+    <div v-if="message.images && message.images.length > 0" class="pl-7 mb-2 flex flex-wrap gap-2">
+      <img
+        v-for="(img, i) in message.images"
+        :key="i"
+        :src="`data:${img.media_type};base64,${img.data}`"
+        class="max-w-64 max-h-48 rounded border border-zinc-200 dark:border-zinc-700 object-contain cursor-pointer hover:opacity-90 transition-opacity"
+        @click="($event.target as HTMLImageElement).classList.toggle('max-w-64'); ($event.target as HTMLImageElement).classList.toggle('max-w-full')"
+      />
+    </div>
     <!-- Content -->
     <div
       class="prose-chat pl-7"

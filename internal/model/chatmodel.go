@@ -292,6 +292,38 @@ func toOpenAIMessage(msg *schema.Message) openai.ChatCompletionMessage {
 	if len(msg.ToolCalls) > 0 {
 		m.ToolCalls = toOpenAIToolCalls(msg.ToolCalls)
 	}
+	// Convert multimodal content (text + images) to OpenAI MultiContent format.
+	if len(msg.UserInputMultiContent) > 0 {
+		m.Content = ""
+		parts := make([]openai.ChatMessagePart, 0, len(msg.UserInputMultiContent))
+		for _, p := range msg.UserInputMultiContent {
+			switch p.Type {
+			case schema.ChatMessagePartTypeText:
+				parts = append(parts, openai.ChatMessagePart{
+					Type: openai.ChatMessagePartTypeText,
+					Text: p.Text,
+				})
+			case schema.ChatMessagePartTypeImageURL:
+				if p.Image != nil {
+					var url string
+					if p.Image.Base64Data != nil && *p.Image.Base64Data != "" {
+						url = "data:" + p.Image.MIMEType + ";base64," + *p.Image.Base64Data
+					} else if p.Image.URL != nil {
+						url = *p.Image.URL
+					}
+					if url != "" {
+						parts = append(parts, openai.ChatMessagePart{
+							Type: openai.ChatMessagePartTypeImageURL,
+							ImageURL: &openai.ChatMessageImageURL{
+								URL: url,
+							},
+						})
+					}
+				}
+			}
+		}
+		m.MultiContent = parts
+	}
 	return m
 }
 
