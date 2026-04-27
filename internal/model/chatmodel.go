@@ -263,8 +263,9 @@ func (m *chatModel) Stream(ctx context.Context, input []*schema.Message, opts ..
 				config.Logger().Printf("[chatmodel] Stream: first tool call detected at chunk %d: %s", chunkCount, delta.ToolCalls[0].Function.Name)
 			}
 			msg := &schema.Message{
-				Role:    schema.Assistant,
-				Content: delta.Content,
+				Role:             schema.Assistant,
+				Content:          delta.Content,
+				ReasoningContent: delta.ReasoningContent,
 			}
 			if len(delta.ToolCalls) > 0 {
 				msg.ToolCalls = toEinoToolCalls(delta.ToolCalls)
@@ -320,10 +321,11 @@ func (m *chatModel) buildRequest(input []*schema.Message, stream bool, opts ...e
 
 func toOpenAIMessage(msg *schema.Message) openai.ChatCompletionMessage {
 	m := openai.ChatCompletionMessage{
-		Role:       string(msg.Role),
-		Content:    msg.Content,
-		Name:       msg.Name,
-		ToolCallID: msg.ToolCallID,
+		Role:             string(msg.Role),
+		Content:          msg.Content,
+		Name:             msg.Name,
+		ToolCallID:       msg.ToolCallID,
+		ReasoningContent: msg.ReasoningContent,
 	}
 	if len(msg.ToolCalls) > 0 {
 		m.ToolCalls = toOpenAIToolCalls(msg.ToolCalls)
@@ -365,10 +367,11 @@ func toOpenAIMessage(msg *schema.Message) openai.ChatCompletionMessage {
 
 func toEinoMessage(msg openai.ChatCompletionMessage) *schema.Message {
 	m := &schema.Message{
-		Role:       schema.RoleType(msg.Role),
-		Content:    msg.Content,
-		Name:       msg.Name,
-		ToolCallID: msg.ToolCallID,
+		Role:             schema.RoleType(msg.Role),
+		Content:          msg.Content,
+		Name:             msg.Name,
+		ToolCallID:       msg.ToolCallID,
+		ReasoningContent: msg.ReasoningContent,
 	}
 	if len(msg.ToolCalls) > 0 {
 		m.ToolCalls = toEinoToolCalls(msg.ToolCalls)
