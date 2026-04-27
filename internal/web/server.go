@@ -100,6 +100,7 @@ type Server struct {
 	// needsSetup is true when no providers are configured. The server starts in
 	// setup mode and exposes setup API endpoints while blocking chat operations.
 	needsSetup bool
+	version    string
 }
 
 // ServerConfig holds the configuration for creating a new Server.
@@ -108,6 +109,7 @@ type ServerConfig struct {
 	Host          string
 	OpenBrowser   bool
 	Pwd           string
+	Version       string
 	Agent         *adk.ChatModelAgent
 	CreateAgent   func(providerName, modelName string) (*adk.ChatModelAgent, error)
 	SwitchProject func(newPwd string) (*adk.ChatModelAgent, *session.Recorder, error)
@@ -142,6 +144,7 @@ func NewServer(cfg *ServerConfig) *Server {
 		host:          cfg.Host,
 		openBrowser:   cfg.OpenBrowser,
 		pwd:           cfg.Pwd,
+		version:       cfg.Version,
 		handler:       h,
 		broker:        NewSSEBroker(),
 		wsBroker:      NewWSBroker(),
@@ -350,7 +353,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if s.needsSetup {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status":      "needs_setup",
-			"version":     "0.2.0",
+			"version":     s.version,
 			"pwd":         s.pwd,
 			"provider":    "",
 			"model":       "",
@@ -364,7 +367,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":        "ok",
-		"version":       "0.2.0",
+		"version":       s.version,
 		"pwd":           s.pwd,
 		"provider":      s.providerName,
 		"model":         s.modelName,
