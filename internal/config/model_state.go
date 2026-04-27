@@ -31,8 +31,8 @@ var (
 )
 
 // modelStatePath returns the path to the model state file.
-func modelStatePath() (string, error) {
-	return filepath.Join(ConfigDir(), modelStateFile), nil
+func modelStatePath() string {
+	return filepath.Join(ConfigDir(), modelStateFile)
 }
 
 // LoadModelState loads the model state from disk.
@@ -40,10 +40,7 @@ func LoadModelState() (*ModelState, error) {
 	modelStateMu.Lock()
 	defer modelStateMu.Unlock()
 
-	p, err := modelStatePath()
-	if err != nil {
-		return &ModelState{}, nil
-	}
+	p := modelStatePath()
 
 	data, err := os.ReadFile(p)
 	if err != nil {
@@ -62,10 +59,7 @@ func SaveModelState(state *ModelState) error {
 	modelStateMu.Lock()
 	defer modelStateMu.Unlock()
 
-	p, err := modelStatePath()
-	if err != nil {
-		return err
-	}
+	p := modelStatePath()
 
 	dir := filepath.Dir(p)
 	if err := os.MkdirAll(dir, 0755); err != nil {

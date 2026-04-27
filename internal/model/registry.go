@@ -174,18 +174,6 @@ func (r *ModelRegistry) ListProviders() []*RegistryProvider {
 	return result
 }
 
-// sortModelsByID sorts a slice of RegistryModel by ID in-place.
-func sortModelsByID(models []*RegistryModel) {
-	// Simple bubble sort for small lists
-	for i := 0; i < len(models); i++ {
-		for j := i + 1; j < len(models); j++ {
-			if models[i].ID > models[j].ID {
-				models[i], models[j] = models[j], models[i]
-			}
-		}
-	}
-}
-
 // sortModels sorts models: recommended first, then by ID.
 func sortModels(models []*RegistryModel) {
 	for i := 0; i < len(models); i++ {

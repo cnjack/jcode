@@ -7,8 +7,8 @@ import (
 	"strings"
 	"unicode"
 
-	"charm.land/lipgloss/v2"
 	"charm.land/glamour/v2"
+	"charm.land/lipgloss/v2"
 )
 
 func formatToolArgs(argsJSON string) string {
