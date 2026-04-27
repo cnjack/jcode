@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { api } from '@/composables/api'
 import type { SetupProvider, SetupModel } from '@/types/api'
@@ -54,7 +54,7 @@ onMounted(async () => {
   loading.value = true
   try {
     providers.value = await api.setupProviders()
-  } catch (err) {
+  } catch {
     error.value = 'Failed to load providers'
   }
   loading.value = false
@@ -68,7 +68,7 @@ async function selectProvider(id: string) {
     models.value = await api.setupProviderModels(id)
     step.value = 'model'
     modelSearch.value = ''
-  } catch (err) {
+  } catch {
     error.value = 'Failed to load models'
   }
   loading.value = false

@@ -793,7 +793,9 @@ func (m Model) helpPanelView() string {
 		body = lipgloss.JoinHorizontal(lipgloss.Top, leftCol, "   ", rightCol)
 	} else {
 		// Single column fallback
-		all := append(left, "")
+		all := make([]string, 0, len(left)+1+len(right))
+		all = append(all, left...)
+		all = append(all, "")
 		all = append(all, right...)
 		body = lipgloss.JoinVertical(lipgloss.Left, all...)
 	}

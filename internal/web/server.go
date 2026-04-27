@@ -1776,8 +1776,8 @@ func (s *Server) handleSetupProviders(w http.ResponseWriter, r *http.Request) {
 			return ri.Configured
 		}
 		tagOrder := map[string]int{"recommended": 0, "local": 1, "": 2}
-		oi, _ := tagOrder[ri.Tag]
-		oj, _ := tagOrder[rj.Tag]
+		oi := tagOrder[ri.Tag]
+		oj := tagOrder[rj.Tag]
 		if oi != oj {
 			return oi < oj
 		}
