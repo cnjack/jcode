@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	langfuseacl "github.com/cloudwego/eino-ext/libs/acl/langfuse"
@@ -10,6 +11,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/cnjack/jcode/internal/config"
+	internalmodel "github.com/cnjack/jcode/internal/model"
 )
 
 const defaultFlushTimeout = 3 * time.Second
@@ -156,12 +158,33 @@ func (t *LangfuseTracer) buildMiddleware(useParentSpan bool) adk.AgentMiddleware
 					break
 				}
 			}
+
+			// Read per-call token usage from the context-local TokenUsage tracker.
+			var usage *langfuseacl.Usage
+			var metadata map[string]string
+			if tracker := internalmodel.TokenTrackerFromContext(ctx); tracker != nil {
+				if d := tracker.GetLastDetail(); d != nil && d.TotalTokens > 0 {
+					usage = &langfuseacl.Usage{
+						PromptTokens:     d.PromptTokens,
+						CompletionTokens: d.CompletionTokens,
+						TotalTokens:      d.TotalTokens,
+					}
+					metadata = map[string]string{
+						"cached_tokens": fmt.Sprintf("%d", d.CachedTokens),
+					}
+				}
+			}
+
 			_ = t.client.EndGeneration(&langfuseacl.GenerationEventBody{
 				BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
-					BaseEventBody: langfuseacl.BaseEventBody{ID: genID},
+					BaseEventBody: langfuseacl.BaseEventBody{
+						ID:       genID,
+						MetaData: metadata,
+					},
 				},
 				OutMessage: outMsg,
 				EndTime:    time.Now(),
+				Usage:      usage,
 			})
 			return nil
 		},
