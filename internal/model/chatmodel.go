@@ -21,20 +21,37 @@ type TokenUsage struct {
 	PromptTokens     int64
 	CompletionTokens int64
 	TotalTokens      int64
+	CachedTokens     int64
 	LastTotalTokens  int64
-	byModel          map[string]int64
-	mu               sync.RWMutex
+	// Per-call "last" values for tracing/observability.
+	lastPrompt     int64
+	lastCompletion int64
+	lastCached     int64
+	byModel        map[string]int64
+	mu             sync.RWMutex
+}
+
+// TokenUsageDetail holds per-call token usage details for tracing/observability.
+type TokenUsageDetail struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+	CachedTokens     int `json:"cached_tokens"`
 }
 
 // TokenTracker is a global token usage tracker
 var TokenTracker = &TokenUsage{}
 
 // Add adds token usage to the tracker
-func (t *TokenUsage) Add(prompt, completion, total int) {
+func (t *TokenUsage) Add(prompt, completion, total, cached int) {
 	atomic.AddInt64(&t.PromptTokens, int64(prompt))
 	atomic.AddInt64(&t.CompletionTokens, int64(completion))
 	atomic.AddInt64(&t.TotalTokens, int64(total))
+	atomic.AddInt64(&t.CachedTokens, int64(cached))
 	atomic.StoreInt64(&t.LastTotalTokens, int64(total))
+	atomic.StoreInt64(&t.lastPrompt, int64(prompt))
+	atomic.StoreInt64(&t.lastCompletion, int64(completion))
+	atomic.StoreInt64(&t.lastCached, int64(cached))
 }
 
 // Get returns the current token usage
@@ -49,11 +66,22 @@ func (t *TokenUsage) GetLastTotal() int64 {
 	return atomic.LoadInt64(&t.LastTotalTokens)
 }
 
+// GetLastDetail returns the last API call's token usage detail.
+func (t *TokenUsage) GetLastDetail() *TokenUsageDetail {
+	return &TokenUsageDetail{
+		PromptTokens:     int(atomic.LoadInt64(&t.lastPrompt)),
+		CompletionTokens: int(atomic.LoadInt64(&t.lastCompletion)),
+		TotalTokens:      int(atomic.LoadInt64(&t.LastTotalTokens)),
+		CachedTokens:     int(atomic.LoadInt64(&t.lastCached)),
+	}
+}
+
 // Reset resets the token tracker
 func (t *TokenUsage) Reset() {
 	atomic.StoreInt64(&t.PromptTokens, 0)
 	atomic.StoreInt64(&t.CompletionTokens, 0)
 	atomic.StoreInt64(&t.TotalTokens, 0)
+	atomic.StoreInt64(&t.CachedTokens, 0)
 	t.mu.Lock()
 	t.byModel = nil
 	t.mu.Unlock()
@@ -163,10 +191,14 @@ func (m *chatModel) Generate(ctx context.Context, input []*schema.Message, opts 
 	}
 	// Track token usage
 	if resp.Usage.TotalTokens > 0 {
-		TokenTracker.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
+		cached := 0
+		if resp.Usage.PromptTokensDetails != nil {
+			cached = resp.Usage.PromptTokensDetails.CachedTokens
+		}
+		TokenTracker.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens, cached)
 		TokenTracker.AddByModel(m.model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
 		if local := TokenTrackerFromContext(ctx); local != nil {
-			local.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
+			local.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens, cached)
 			local.AddByModel(m.model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
 		}
 	}
@@ -211,10 +243,14 @@ func (m *chatModel) Stream(ctx context.Context, input []*schema.Message, opts ..
 			chunkCount++
 			// Track token usage from stream response
 			if resp.Usage != nil && resp.Usage.TotalTokens > 0 {
-				TokenTracker.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
+				cached := 0
+				if resp.Usage.PromptTokensDetails != nil {
+					cached = resp.Usage.PromptTokensDetails.CachedTokens
+				}
+				TokenTracker.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens, cached)
 				TokenTracker.AddByModel(m.model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
 				if local := TokenTrackerFromContext(ctx); local != nil {
-					local.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
+					local.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens, cached)
 					local.AddByModel(m.model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
 				}
 			}
