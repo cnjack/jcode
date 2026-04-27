@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/rivo/uniseg"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/cnjack/jcode/internal/config"
@@ -1277,7 +1278,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.cmdSuggestionActive = false
 					m.cmdSuggestions = nil
 					m.cmdSuggestionIndex = 0
-					m.textareaLines = recalcLines(m.textarea.Value(), calcMaxTextareaLines(m.height))
+					m.textareaLines = m.recalcTextareaLines()
 					m.textarea.SetHeight(m.textareaLines)
 					// Re-evaluate suggestions after setting value (may show new filtered list)
 					m.updateSuggestions()
@@ -1303,7 +1304,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.cmdSuggestionActive = false
 					m.cmdSuggestions = nil
 					m.cmdSuggestionIndex = 0
-					m.textareaLines = recalcLines(m.textarea.Value(), calcMaxTextareaLines(m.height))
+					m.textareaLines = m.recalcTextareaLines()
 					m.textarea.SetHeight(m.textareaLines)
 					// Re-evaluate: exact match clears suggestions, partial shows new list
 					m.updateSuggestions()
@@ -1437,7 +1438,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				var cmd tea.Cmd
 				m.textarea, cmd = m.textarea.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 				cmds = append(cmds, cmd)
-				m.textareaLines = recalcLines(m.textarea.Value(), calcMaxTextareaLines(m.height))
+				m.textareaLines = m.recalcTextareaLines()
 				m.textarea.SetHeight(m.textareaLines)
 				if m.ready {
 					m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))
@@ -1461,7 +1462,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.historyIndex--
 					m.textarea.SetValue(m.history[m.historyIndex])
 					m.textarea.CursorEnd()
-					m.textareaLines = recalcLines(m.textarea.Value(), calcMaxTextareaLines(m.height))
+					m.textareaLines = m.recalcTextareaLines()
 					m.textarea.SetHeight(m.textareaLines)
 					m.updateSuggestions()
 					if m.ready {
@@ -1491,7 +1492,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.historyIndex++
 					m.textarea.SetValue("")
 				}
-				m.textareaLines = recalcLines(m.textarea.Value(), calcMaxTextareaLines(m.height))
+				m.textareaLines = m.recalcTextareaLines()
 				m.textarea.SetHeight(m.textareaLines)
 				m.updateSuggestions()
 				if m.ready {
@@ -1552,7 +1553,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			var cmd tea.Cmd
 			m.textarea, cmd = m.textarea.Update(msg)
 			cmds = append(cmds, cmd)
-			m.textareaLines = recalcLines(m.textarea.Value(), calcMaxTextareaLines(m.height))
+			m.textareaLines = m.recalcTextareaLines()
 			m.textarea.SetHeight(m.textareaLines)
 			m.updateSuggestions()
 			if m.ready {
@@ -1635,7 +1636,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		// Update textarea max height based on new terminal dimensions
 		newMaxHeight := calcMaxTextareaLines(m.height)
 		m.textarea.MaxHeight = newMaxHeight
-		m.textareaLines = recalcLines(m.textarea.Value(), newMaxHeight)
+		m.textareaLines = recalcLines(m.textarea.Value(), newMaxHeight, m.textarea.Width())
 		m.textarea.SetHeight(m.textareaLines)
 
 		vpH := m.calcViewportHeight(m.inputActive())
@@ -1717,7 +1718,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			// Replace input area with the received text
 			m.textarea.SetValue(msg.Val)
 			m.textarea.CursorEnd()
-			m.textareaLines = recalcLines(m.textarea.Value(), calcMaxTextareaLines(m.height))
+			m.textareaLines = m.recalcTextareaLines()
 			m.textarea.SetHeight(m.textareaLines)
 			if m.ready {
 				m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))
@@ -2460,7 +2461,7 @@ func (m Model) handlePasteContent(content string) (tea.Model, tea.Cmd) {
 	display := m.pasteStore.StoreAndFormat(content)
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(tea.PasteMsg{Content: display})
-	m.textareaLines = recalcLines(m.textarea.Value(), calcMaxTextareaLines(m.height))
+	m.textareaLines = m.recalcTextareaLines()
 	m.textarea.SetHeight(m.textareaLines)
 	if m.ready {
 		m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))
@@ -2468,8 +2469,26 @@ func (m Model) handlePasteContent(content string) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func recalcLines(s string, maxLines int) int {
-	n := strings.Count(s, "\n") + 1
+// recalcLines counts the visual (soft-wrapped) lines needed to display the text
+// within the textarea width, clamped to maxLines. Each logical line may produce
+// multiple visual lines if it exceeds the available width.
+func recalcLines(s string, maxLines int, taWidth int) int {
+	if s == "" {
+		return 1
+	}
+	n := 0
+	for _, line := range strings.Split(s, "\n") {
+		if taWidth > 0 {
+			lineLen := uniseg.StringWidth(line)
+			wrapped := (lineLen + taWidth - 1) / taWidth
+			if wrapped < 1 {
+				wrapped = 1
+			}
+			n += wrapped
+		} else {
+			n++
+		}
+	}
 	if n < 1 {
 		n = 1
 	}
@@ -2477,6 +2496,13 @@ func recalcLines(s string, maxLines int) int {
 		n = maxLines
 	}
 	return n
+}
+
+// recalcTextareaLines is a convenience wrapper that computes the visual line
+// count for the current textarea content, clamped to the terminal-appropriate
+// maximum. It should be called after textarea content changes.
+func (m Model) recalcTextareaLines() int {
+	return recalcLines(m.textarea.Value(), calcMaxTextareaLines(m.height), m.textarea.Width())
 }
 
 func (m Model) inputAreaHeight() int {
