@@ -308,6 +308,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		Host:          host,
 		OpenBrowser:   openBrowser,
 		Pwd:           pwd,
+		Version:       Version,
 		Agent:         ag,
 		CreateAgent:   createAgent,
 		SwitchProject: switchProject,
