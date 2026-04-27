@@ -1,7 +1,7 @@
 BIN := jcode
 PKG := ./cmd/jcode/
 LATEST_TAG := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-COMPUTE_VERSION := $(shell echo "$(LATEST_TAG)" | sed 's/^v//' | awk -F. '{printf "%s.%s.%d", $$1, $$2, $$3+1}')
+COMPUTE_VERSION := $(shell echo "$(LATEST_TAG)" | sed 's/^v//' | awk -F. '{printf "v%s.%s.%d", $$1, $$2, $$3+1}')
 VERSION ?= $(COMPUTE_VERSION)
 BUILD_TIME ?= $(shell date +"%Y-%m-%dT%H:%M:%S%z")
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
