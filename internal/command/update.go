@@ -104,10 +104,10 @@ func runUpdate() error {
 		if err := copyFile(tmpPath, dstPath); err != nil {
 			return fmt.Errorf("failed to save new version: %w", err)
 		}
-		fmt.Printf("Updated successfully: %s -> %s\n", currentVersion, latest)
+		fmt.Printf("Update downloaded: %s -> %s (pending manual replacement)\n", currentVersion, latest)
 		fmt.Println()
 		fmt.Println("Windows cannot replace a running executable.")
-		fmt.Println("Please follow these steps:")
+		fmt.Println("To finish the update, please:")
 		fmt.Printf("  1. Exit jcode\n")
 		fmt.Printf("  2. Run: move /Y \"%s\" \"%s\"\n", dstPath, execPath)
 		fmt.Println("  3. Restart jcode")

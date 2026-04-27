@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -156,8 +157,12 @@ func (a *ACPExecutor) Exec(ctx context.Context, command, workDir string, timeout
 				TerminalId: termID,
 			})
 			if outErr == nil {
-				appconfig.Logger().Printf("[acp-exec] Exec timed out, partial output (%d bytes)", len(outResp.Output))
-				return outResp.Output, "", fmt.Errorf("command timed out after %v", timeout)
+				if errors.Is(waitCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+					appconfig.Logger().Printf("[acp-exec] Exec timed out, partial output (%d bytes)", len(outResp.Output))
+					return outResp.Output, "", fmt.Errorf("command timed out after %v", timeout)
+				}
+				appconfig.Logger().Printf("[acp-exec] Exec cancelled, partial output (%d bytes)", len(outResp.Output))
+				return outResp.Output, "", fmt.Errorf("command cancelled: %w", waitCtx.Err())
 			}
 		}
 		appconfig.Logger().Printf("[acp-exec] Exec WaitForTerminalExit error: %v", err)
