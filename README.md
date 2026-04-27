@@ -63,6 +63,8 @@ make install
 jcode update
 ```
 
+> **Windows users:** Windows locks the running `.exe` and prevents any file operation on it (including rename). `jcode update` will download the new version to `<current-path>.new` instead. Follow the printed instructions to exit jcode and manually replace the binary (e.g. `move /Y "jcode.exe.new" "jcode.exe"`).
+
 First launch creates `~/.jcode/config.json` with a setup wizard. Run `jcode doctor` to verify model & MCP connectivity.
 
 ## Features
