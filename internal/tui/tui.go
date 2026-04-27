@@ -185,9 +185,8 @@ type Model struct {
 	sidebarComp         *SidebarComponent
 
 	// ─── Manage models state ───
-	managingModels       bool
-	manageModelsPicker   list.Model
-	manageModelsProvider string // currently selected provider ID for filtering
+	managingModels     bool
+	manageModelsPicker list.Model
 }
 
 // --- Content line types for resize-aware rendering ---
@@ -236,12 +235,6 @@ func toContentLines(ss []string) []contentLine {
 		result[i] = contentLine{text: s}
 	}
 	return result
-}
-
-// contains reports whether the rendered content contains the given substring.
-// For tool result lines, this checks the last-rendered text.
-func (cl contentLine) contains(sub string) bool {
-	return strings.Contains(cl.text, sub)
 }
 
 // dirItem implements list.Item

@@ -28,7 +28,7 @@ func ValidateProvider(ctx context.Context, apiKey, baseURL string) error {
 	if err != nil {
 		return fmt.Errorf("connection failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		return fmt.Errorf("invalid API key (401 Unauthorized)")

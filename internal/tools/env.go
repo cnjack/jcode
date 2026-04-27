@@ -27,15 +27,35 @@ type Env struct {
 	FileTracker *FileTracker
 	OnEnvChange func(envLabel string, isLocal bool, err error)
 	Depth       int // subagent nesting depth, 0 for top-level
+
+	// origExec and origPwd remember the initial executor state so that
+	// ResetToLocal can restore the correct executor (local or ACP).
+	origExec Executor
+	origPwd  string
 }
 
 // NewEnv creates a local Env.
 func NewEnv(pwd, platform string) *Env {
+	exec := NewLocalExecutor(platform)
 	return &Env{
-		Exec:      NewLocalExecutor(platform),
+		Exec:      exec,
 		pwd:       pwd,
 		platform:  platform,
 		TodoStore: NewTodoStore(),
+		origExec:  exec,
+		origPwd:   pwd,
+	}
+}
+
+// NewEnvWithExecutor creates an Env with a custom Executor.
+func NewEnvWithExecutor(pwd, platform string, exec Executor) *Env {
+	return &Env{
+		Exec:      exec,
+		pwd:       pwd,
+		platform:  platform,
+		TodoStore: NewTodoStore(),
+		origExec:  exec,
+		origPwd:   pwd,
 	}
 }
 
@@ -46,11 +66,17 @@ func (e *Env) SetSSH(executor *SSHExecutor, remotePwd string) {
 	e.platform = executor.Platform()
 }
 
-// ResetToLocal restores this Env to use the local executor.
+// ResetToLocal restores this Env to use the original executor (local or ACP).
 func (e *Env) ResetToLocal(pwd, platform string) {
-	e.Exec = NewLocalExecutor(platform)
-	e.pwd = pwd
-	e.platform = platform
+	if e.origExec != nil {
+		e.Exec = e.origExec
+		e.pwd = e.origPwd
+		e.platform = e.origExec.Platform()
+	} else {
+		e.Exec = NewLocalExecutor(platform)
+		e.pwd = pwd
+		e.platform = platform
+	}
 }
 
 // Pwd returns the current working directory.
@@ -94,6 +120,19 @@ func (e *Env) CanNest() bool {
 func (e *Env) IsRemote() bool {
 	_, ok := e.Exec.(*SSHExecutor)
 	return ok
+}
+
+// IsACP returns true if operating via ACP client capabilities.
+func (e *Env) IsACP() bool {
+	_, ok := e.Exec.(*ACPExecutor)
+	return ok
+}
+
+// SetACP switches this Env to use an ACP executor.
+func (e *Env) SetACP(executor *ACPExecutor, pwd string) {
+	e.Exec = executor
+	e.pwd = pwd
+	e.platform = executor.Platform()
 }
 
 // Executor abstracts file and command operations so tools can work

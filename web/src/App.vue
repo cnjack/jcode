@@ -128,7 +128,7 @@ onMounted(async () => {
   document.addEventListener('keydown', handleGlobalKeydown)
   const health = await store.fetchHealth()
   // Check if setup is needed — health returns needs_setup status
-  if ((health as any)?.needs_setup) {
+  if (health?.needs_setup) {
     needsSetup.value = true
     return
   }

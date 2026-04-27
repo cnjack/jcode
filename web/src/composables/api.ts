@@ -25,7 +25,7 @@ export const api = {
       body: JSON.stringify({ before_user_message: beforeUserMessage }),
     }),
   health: () =>
-    request<{ status: string; version: string; pwd: string; provider: string; model: string; mode: string; session_id: string; running: boolean; image_support?: boolean }>(
+    request<{ status: string; version: string; pwd: string; provider: string; model: string; mode: string; session_id: string; running: boolean; image_support?: boolean; needs_setup?: boolean }>(
       '/api/health',
     ),
   status: () =>

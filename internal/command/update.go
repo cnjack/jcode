@@ -97,6 +97,25 @@ func runUpdate() error {
 		return fmt.Errorf("failed to set permissions: %w", err)
 	}
 
+	if goos == "windows" {
+		// On Windows, the running executable is locked and cannot be renamed or overwritten.
+		// Download the new version to a temp file and instruct the user to replace manually.
+		dstPath := execPath + ".new"
+		if err := copyFile(tmpPath, dstPath); err != nil {
+			return fmt.Errorf("failed to save new version: %w", err)
+		}
+		fmt.Printf("Updated successfully: %s -> %s\n", currentVersion, latest)
+		fmt.Println()
+		fmt.Println("Windows cannot replace a running executable.")
+		fmt.Println("Please follow these steps:")
+		fmt.Printf("  1. Exit jcode\n")
+		fmt.Printf("  2. Run: move /Y \"%s\" \"%s\"\n", dstPath, execPath)
+		fmt.Println("  3. Restart jcode")
+		fmt.Println()
+		fmt.Printf("New binary saved to: %s\n", dstPath)
+		return nil
+	}
+
 	// Replace the current binary
 	if err := os.Rename(tmpPath, execPath); err != nil {
 		// Cross-device rename; fall back to copy
