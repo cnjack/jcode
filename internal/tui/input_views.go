@@ -361,7 +361,7 @@ func (m Model) shortcutHints() string {
 	// Version right-aligned
 	ver := ""
 	if m.version != "" {
-		ver = hintStyle.Render("v" + m.version)
+		ver = hintStyle.Render(m.version)
 	}
 
 	leftW := lipgloss.Width(leftText)
