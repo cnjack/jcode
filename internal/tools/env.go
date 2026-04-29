@@ -214,6 +214,24 @@ func (l *LocalExecutor) Exec(ctx context.Context, command, workDir string, timeo
 		cmd.Dir = workDir
 	}
 
+	// Prevent interactive programs (pagers, editors, prompts) from blocking
+	// forever by closing stdin. This causes programs like `less` (invoked by
+	// git diff, git log, etc.) to exit immediately instead of waiting for
+	// keyboard input. Same approach as opencode's stdin:"ignore".
+	cmd.Stdin = nil
+
+	// Set environment variables to further disable interactive behaviors:
+	// - GIT_TERMINAL_PROMPT=0: prevent git from prompting for credentials
+	// - GIT_PAGER=cat: disable git's pager (less/more) entirely
+	// - PAGER=cat: disable generic pager for other commands (man, etc.)
+	// - GIT_EDITOR=true: prevent git from opening an editor (rebase -i, commit without -m)
+	cmd.Env = append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_PAGER=cat",
+		"PAGER=cat",
+		"GIT_EDITOR=true",
+	)
+
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -353,9 +371,11 @@ func (s *SSHExecutor) Stat(ctx context.Context, path string) (*FileInfo, error) 
 }
 
 func (s *SSHExecutor) Exec(ctx context.Context, command, workDir string, timeout time.Duration) (string, string, error) {
-	fullCmd := command
+	// Prepend environment variables to disable pagers/editors/prompts on remote.
+	envPrefix := "export GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat PAGER=cat GIT_EDITOR=true; "
+	fullCmd := envPrefix + command
 	if workDir != "" {
-		fullCmd = fmt.Sprintf("cd %s && %s", ShellQuote(workDir), command)
+		fullCmd = fmt.Sprintf("cd %s && %s", ShellQuote(workDir), envPrefix+command)
 	}
 	return s.run(ctx, fullCmd, "", timeout)
 }
