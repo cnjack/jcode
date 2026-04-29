@@ -99,12 +99,16 @@ func (a *ACPExecutor) Stat(ctx context.Context, path string) (*FileInfo, error) 
 func (a *ACPExecutor) Exec(ctx context.Context, command, workDir string, timeout time.Duration) (string, string, error) {
 	appconfig.Logger().Printf("[acp-exec] Exec: cmd=%q workDir=%q timeout=%v", command, workDir, timeout)
 
+	// Prepend environment variables to disable pagers/editors/prompts,
+	// preventing interactive programs (less, vim, etc.) from blocking forever.
+	wrappedCmd := "export GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat PAGER=cat GIT_EDITOR=true; " + command
+
 	// Build the terminal create request. We pass the full command via "bash -c"
 	// so that shell features (pipes, redirects, &&) work as expected.
 	req := acp.CreateTerminalRequest{
 		SessionId: a.sessionID,
 		Command:   "bash",
-		Args:      []string{"-c", command},
+		Args:      []string{"-c", wrappedCmd},
 	}
 	if workDir != "" {
 		req.Cwd = &workDir
