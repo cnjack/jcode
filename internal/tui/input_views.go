@@ -105,11 +105,6 @@ func (m Model) inputAreaView() string {
 		parts = append(parts, m.renderFallbackStatusBar())
 	}
 
-	// 4. Context-sensitive shortcut hints
-	if hints := m.shortcutHints(); hints != "" {
-		parts = append(parts, lipgloss.NewStyle().Faint(true).Render(hints))
-	}
-
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
@@ -329,49 +324,6 @@ func (m Model) renderModePills() string {
 	fill := modeFillStyle.Render(strings.Repeat("─", fillWidth))
 
 	return leftPart + fill
-}
-
-// shortcutHints returns a styled bottom hint bar with shortcuts left-aligned and version right-aligned.
-func (m Model) shortcutHints() string {
-	hintStyle := lipgloss.NewStyle().Faint(true)
-	sepStyle := lipgloss.NewStyle().Faint(true)
-
-	var parts []string
-
-	// Core shortcuts
-	parts = append(parts, "Ctrl+A Approve")
-	parts = append(parts, "Ctrl+P Mode")
-	parts = append(parts, "F1 Shortcuts")
-
-	// Context-sensitive hints
-	if m.teamState.HasTeam() {
-		parts = append(parts, "Shift+↑↓ Agent")
-	}
-
-	if m.agentDone && !m.thinking && len(m.lines) > 0 {
-		parts = append(parts, "Ctrl+Y Copy")
-	}
-
-	if m.inputActive() && strings.TrimSpace(m.textarea.Value()) == "" {
-		parts = append(parts, "RClick Paste")
-	}
-
-	leftText := hintStyle.Render(strings.Join(parts, sepStyle.Render("    ")))
-
-	// Version right-aligned
-	ver := ""
-	if m.version != "" {
-		ver = hintStyle.Render(m.version)
-	}
-
-	leftW := lipgloss.Width(leftText)
-	verW := lipgloss.Width(ver)
-	gap := m.width - leftW - verW
-	if gap < 1 {
-		gap = 1
-	}
-
-	return leftText + strings.Repeat(" ", gap) + ver
 }
 
 // renderMinimalStatusBar renders a minimal status bar for wide-screen mode (sidebar visible).

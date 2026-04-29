@@ -2711,6 +2711,7 @@ func (m Model) renderSidebar(height int) string {
 		MCPStatuses:       m.mcpStatuses,
 		TeammateCount:     len(m.teamState.Teammates),
 		BgRunning:         m.bgRunning,
+		Version:           m.version,
 	})
 }
 
