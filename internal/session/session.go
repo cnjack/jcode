@@ -33,6 +33,7 @@ const (
 	EntryModeChange     EntryType = "mode_change"
 	EntryCompact        EntryType = "compact"
 	EntryBudgetWarning  EntryType = "budget_warning"
+	EntrySystemPrompt   EntryType = "system_prompt"
 )
 
 // TodoSnapshotItem is a single todo entry stored in a todo_snapshot event.
@@ -85,6 +86,9 @@ type Entry struct {
 	// compact fields
 	Summary    string `json:"summary,omitempty"`
 	CompactedN int    `json:"compacted_n,omitempty"`
+
+	// system_prompt fields
+	EnvInfo string `json:"env_info,omitempty"` // serialized environment snapshot
 }
 
 // SessionMeta is stored in the index for fast listing.
@@ -213,11 +217,14 @@ func (r *Recorder) RecordToolCall(name, args, toolCallID string) {
 }
 
 // RecordToolResult appends a tool-result entry.
+// Large outputs are automatically truncated (head+tail preserved) and the
+// full content is saved to an overflow file on disk.
 func (r *Recorder) RecordToolResult(name, output, toolCallID string, err error) {
 	errStr := ""
 	if err != nil {
 		errStr = err.Error()
 	}
+	output = TruncateToolOutput(output, r.uuid, toolCallID)
 	_ = r.writeEntry(Entry{Type: EntryToolResult, Name: name, Output: output, ToolCallID: toolCallID, Error: errStr})
 }
 
@@ -264,6 +271,14 @@ func (r *Recorder) RecordModeChange(mode string) {
 // RecordCompact appends a compact/summarization event entry.
 func (r *Recorder) RecordCompact(summary string, compactedN int) {
 	_ = r.writeEntry(Entry{Type: EntryCompact, Summary: summary, CompactedN: compactedN})
+}
+
+// RecordSystemPrompt records the system prompt and a snapshot of the
+// environment information used to generate it. This allows resume to reuse
+// the exact same system prompt (maximising KV-cache hit) and inject only
+// an environment diff as an appended system message.
+func (r *Recorder) RecordSystemPrompt(prompt, envInfo string) {
+	_ = r.writeEntry(Entry{Type: EntrySystemPrompt, Content: prompt, EnvInfo: envInfo})
 }
 
 // TruncateAtUserMessage rewrites the session file keeping only entries that
