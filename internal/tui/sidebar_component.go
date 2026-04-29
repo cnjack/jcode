@@ -25,6 +25,7 @@ type SidebarState struct {
 	MCPStatuses       []MCPStatusItem
 	TeammateCount     int
 	BgRunning         int
+	Version           string
 }
 
 // SidebarComponent renders the right-hand info panel.
@@ -54,7 +55,7 @@ func (s *SidebarComponent) View(state SidebarState) string {
 		}
 	}
 
-	addLines(s.renderLogo())
+	addLines(s.renderLogo(state.Version))
 	addLines("") // spacing after logo
 	if state.ActiveProvider != "" && len(lines) < maxLines {
 		addLines(s.renderModelSection(state))
@@ -112,7 +113,7 @@ func (s *SidebarComponent) View(state SidebarState) string {
 	return result.String()
 }
 
-func (s *SidebarComponent) renderLogo() string {
+func (s *SidebarComponent) renderLogo(version string) string {
 	bracketStyle := lipgloss.NewStyle().Foreground(colorMuted).Bold(true)
 	jStyle := lipgloss.NewStyle().Foreground(colorLogoJ).Bold(true)
 	codeStyle := lipgloss.NewStyle().Foreground(colorText).Bold(true)
@@ -122,7 +123,11 @@ func (s *SidebarComponent) renderLogo() string {
 		codeStyle.Render("CODE"),
 		bracketStyle.Render("]"),
 	)
-	line := lipgloss.NewStyle().Foreground(colorMuted).Render("─────────")
+	if version != "" {
+		verStyle := lipgloss.NewStyle().Foreground(colorMuted).Bold(true)
+		logo = lipgloss.JoinHorizontal(lipgloss.Left, logo, " ", verStyle.Render(version))
+	}
+	line := lipgloss.NewStyle().Foreground(colorMuted).Render("──────────────")
 	return lipgloss.JoinVertical(lipgloss.Left, logo, line)
 }
 
