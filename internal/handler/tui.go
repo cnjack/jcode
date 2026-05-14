@@ -71,14 +71,21 @@ func (h *TUIHandler) OnTokenUpdate(info TokenUsage) {
 
 func (h *TUIHandler) RequestApproval(ctx context.Context, req ApprovalRequest) (ApprovalResponse, error) {
 	respCh := make(chan tui.ToolApprovalResponse, 1)
-	h.p.Send(tui.ToolApprovalRequestMsg{
+	msg := tui.ToolApprovalRequestMsg{
 		Name:        req.ToolName,
 		Args:        req.ToolArgs,
 		Resp:        respCh,
 		IsExternal:  req.IsExternal,
 		WorkerName:  req.WorkerName,
 		WorkerColor: req.WorkerColor,
-	})
+	}
+
+	// p.Send() blocks on BubbleTea's unbuffered message channel.
+	// When multiple tool calls need approval concurrently, the second
+	// Send would block until the first approval dialog is fully processed,
+	// causing unnecessary serialization. Send in a goroutine so that
+	// this goroutine can immediately proceed to wait on respCh.
+	go h.p.Send(msg)
 
 	select {
 	case resp := <-respCh:
