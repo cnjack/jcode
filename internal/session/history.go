@@ -43,14 +43,47 @@ func entryToUserMessage(e Entry) *schema.Message {
 // LLM history messages suitable for resuming a conversation.
 // It reconstructs tool call and tool result messages so that resumed sessions
 // retain full context.
+//
+// Subagent-internal entries (tool_call / tool_result / assistant recorded
+// between subagent_start and subagent_result) are skipped — only the main
+// agent's own messages are included.
+//
+// Because the runner records assistant text AFTER tool calls in the JSONL,
+// an EntryAssistant that follows tool-call entries is merged back into the
+// preceding assistant message as its Content field.
 func ReconstructHistory(entries []Entry) []adk.Message {
 	var msgs []adk.Message
+	var subagentDepth int
 	for _, e := range entries {
+		switch e.Type {
+		case EntrySubagentStart:
+			subagentDepth++
+			continue
+		case EntrySubagentResult:
+			if subagentDepth > 0 {
+				subagentDepth--
+			}
+			continue
+		}
+		// Skip entries that belong to a running subagent.
+		if subagentDepth > 0 {
+			continue
+		}
+
 		switch e.Type {
 		case EntryUser:
 			msgs = append(msgs, entryToUserMessage(e))
 		case EntryAssistant:
 			if e.Content != "" {
+				// The runner records assistant text after tool calls, so the
+				// preceding message may already be an assistant with ToolCalls
+				// but empty Content. Merge into it when possible.
+				if n := len(msgs); n > 0 {
+					if last := msgs[n-1]; last.Role == schema.Assistant && last.Content == "" && len(last.ToolCalls) > 0 {
+						last.Content = e.Content
+						continue
+					}
+				}
 				msgs = append(msgs, &schema.Message{Role: schema.Assistant, Content: e.Content})
 			}
 		case EntryToolCall:
@@ -73,6 +106,66 @@ func ReconstructHistory(entries []Entry) []adk.Message {
 	return msgs
 }
 
+// toolPlaceholders maps tool names to actionable placeholder messages.
+// These tell the model what happened and how to recover the data.
+var toolPlaceholders = map[string]string{
+	"read":    "[File was read previously. Use the read tool again if needed.]",
+	"grep":    "[Search was performed. Run grep again for current results.]",
+	"execute": "[Command was executed. Run it again if you need fresh output.]",
+}
+
+// defaultPlaceholder is used for tools not in the map above.
+const defaultPlaceholder = "[Old tool output cleared. Re-run the tool if needed.]"
+
+// PruneOldToolOutputs replaces old tool result outputs with actionable
+// placeholders, protecting the most recent turns from pruning.
+// This implements the Tier 1.5 "placeholder compression" strategy:
+// recent tool outputs are preserved verbatim; older ones are replaced
+// with hints telling the model how to recover the data.
+//
+// protectTurns is the number of recent user turns to protect (default 2).
+// Returns the pruned messages slice (same backing array, modified in place).
+func PruneOldToolOutputs(msgs []adk.Message, protectTurns int) []adk.Message {
+	if protectTurns <= 0 {
+		protectTurns = 2
+	}
+
+	// Find the protection boundary by counting user messages backwards.
+	userCount := 0
+	protectFrom := len(msgs) // index from which messages are protected
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == schema.User {
+			userCount++
+			if userCount >= protectTurns {
+				protectFrom = i
+				break
+			}
+		}
+	}
+
+	// Replace old tool outputs with placeholders.
+	for i := 0; i < protectFrom; i++ {
+		msg := msgs[i]
+		if msg.Role != schema.Tool {
+			continue
+		}
+		toolName := msg.ToolName
+		if toolName == "" {
+			// Extract from MultiContent if available.
+			for _, tc := range msg.ToolCalls {
+				toolName = tc.Function.Name
+			}
+		}
+		placeholder, ok := toolPlaceholders[toolName]
+		if !ok {
+			placeholder = defaultPlaceholder
+		}
+		msg.Content = placeholder
+	}
+
+	return msgs
+}
+
 // PlanSnapshot holds the last known plan state from a session.
 type PlanSnapshot struct {
 	Status   string
@@ -84,16 +177,20 @@ type PlanSnapshot struct {
 // SessionState is the full recoverable state from a session file, including
 // conversation history, plan, todos, mode, and environment.
 type SessionState struct {
-	History   []adk.Message
-	Plan      *PlanSnapshot      // nil if no plan events found
-	Todos     []TodoSnapshotItem // last todo snapshot, nil if none
-	Mode      string             // last mode (normal/planning/executing), empty = normal
-	EnvTarget string             // last environment (local/ssh alias)
+	History      []adk.Message
+	Plan         *PlanSnapshot      // nil if no plan events found
+	Todos        []TodoSnapshotItem // last todo snapshot, nil if none
+	Mode         string             // last mode (normal/planning/executing), empty = normal
+	EnvTarget    string             // last environment (local/ssh alias)
+	SystemPrompt string             // recorded system prompt for KV-cache-friendly resume
+	EnvInfo      string             // environment snapshot at recording time
 }
 
 // ReconstructState rebuilds the full session state from recorded entries.
 // It is compact-aware: if a compact entry is found, messages before it are
 // replaced with the compact summary.
+//
+// Subagent-internal entries are skipped (same logic as ReconstructHistory).
 func ReconstructState(entries []Entry) *SessionState {
 	state := &SessionState{
 		EnvTarget: "local",
@@ -101,14 +198,42 @@ func ReconstructState(entries []Entry) *SessionState {
 
 	var msgs []adk.Message
 	var lastTarget string
+	var subagentDepth int
 
 	for _, e := range entries {
+		// Track subagent boundaries first.
+		switch e.Type {
+		case EntrySubagentStart:
+			subagentDepth++
+			continue
+		case EntrySubagentResult:
+			if subagentDepth > 0 {
+				subagentDepth--
+			}
+			continue
+		case EntrySubagentAsync:
+			continue
+		}
+
+		// Skip entries that belong to a running subagent.
+		if subagentDepth > 0 {
+			continue
+		}
+
 		switch e.Type {
 		case EntryUser:
 			msgs = append(msgs, entryToUserMessage(e))
 
 		case EntryAssistant:
 			if e.Content != "" {
+				// Merge into preceding assistant message that has tool calls
+				// but empty content (runner records text after tool calls).
+				if n := len(msgs); n > 0 {
+					if last := msgs[n-1]; last.Role == schema.Assistant && last.Content == "" && len(last.ToolCalls) > 0 {
+						last.Content = e.Content
+						continue
+					}
+				}
 				msgs = append(msgs, &schema.Message{Role: schema.Assistant, Content: e.Content})
 			}
 
@@ -169,6 +294,10 @@ func ReconstructState(entries []Entry) *SessionState {
 
 		case EntryModeChange:
 			state.Mode = e.Mode
+
+		case EntrySystemPrompt:
+			state.SystemPrompt = e.Content
+			state.EnvInfo = e.EnvInfo
 		}
 	}
 

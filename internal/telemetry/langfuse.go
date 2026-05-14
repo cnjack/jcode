@@ -20,6 +20,19 @@ type contextKey string
 
 const traceIDKey contextKey = "langfuse_trace_id"
 const parentSpanIDKey contextKey = "langfuse_parent_span_id"
+const toolSpanIDKey contextKey = "langfuse_tool_span_id"
+const toolSpanTracerKey contextKey = "langfuse_tool_span_tracer"
+
+// SubSpanFunc creates a child span under the current tool span.
+// It returns a finish function that must be called with the output string.
+type SubSpanFunc func(name string) (finish func(output string))
+
+// SubSpanFromContext retrieves the sub-span creator stored by the langfuse
+// WrapToolCall middleware. Returns nil if tracing is not active.
+func SubSpanFromContext(ctx context.Context) SubSpanFunc {
+	fn, _ := ctx.Value(toolSpanTracerKey).(SubSpanFunc)
+	return fn
+}
 
 // LangfuseTracer wraps the Langfuse client and provides eino integration helpers.
 type LangfuseTracer struct {
@@ -210,6 +223,35 @@ func (t *LangfuseTracer) buildMiddleware(useParentSpan bool) adk.AgentMiddleware
 							},
 						})
 					}
+
+					// Store a sub-span creator in context so downstream middleware
+					// (e.g. approval) can create child spans under this tool span.
+					if spanID != "" {
+						subSpanFunc := SubSpanFunc(func(name string) func(output string) {
+							childStart := time.Now()
+							childID, _ := t.client.CreateSpan(&langfuseacl.SpanEventBody{
+								BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
+									BaseEventBody:       langfuseacl.BaseEventBody{Name: name},
+									TraceID:             traceID,
+									ParentObservationID: spanID,
+									StartTime:           childStart,
+								},
+							})
+							return func(output string) {
+								if childID != "" {
+									_ = t.client.EndSpan(&langfuseacl.SpanEventBody{
+										BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
+											BaseEventBody: langfuseacl.BaseEventBody{ID: childID},
+											Output:        output,
+										},
+										EndTime: time.Now(),
+									})
+								}
+							}
+						})
+						ctx = context.WithValue(ctx, toolSpanTracerKey, subSpanFunc)
+					}
+
 					out, err := next(ctx, input)
 					if spanID != "" {
 						output := ""

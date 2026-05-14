@@ -145,8 +145,9 @@ func (h *NotifyingHandler) OnTokenUpdate(info TokenUsage) {
 }
 
 func (h *NotifyingHandler) RequestApproval(ctx context.Context, req ApprovalRequest) (ApprovalResponse, error) {
-	// Push attention status to notifiers immediately.
-	h.notifyAll(channel.NotifyEvent{Type: channel.EventApproval, Tool: req.ToolName})
+	// Push attention status to notifiers asynchronously to avoid blocking
+	// on slow channels (e.g. WeChat HTTP calls).
+	go h.notifyAll(channel.NotifyEvent{Type: channel.EventApproval, Tool: req.ToolName})
 
 	// Use toolCallID if available, otherwise fall back to tool name + args
 	approvalID := req.ToolCallID
@@ -176,9 +177,9 @@ func (h *NotifyingHandler) RequestApproval(ctx context.Context, req ApprovalRequ
 	// Delegate to inner handler (blocks until user responds)
 	resp, err := h.inner.RequestApproval(ctx, req)
 
-	// Resume working status after approval resolved.
+	// Resume working status after approval resolved (async to avoid blocking).
 	if resp.Approved {
-		h.notifyAll(channel.NotifyEvent{Type: channel.EventWorking})
+		go h.notifyAll(channel.NotifyEvent{Type: channel.EventWorking})
 	}
 
 	// Mark as resolved and cancel the timer if it hasn't fired yet
