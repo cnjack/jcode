@@ -1,224 +1,160 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
-import { Terminal } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
-import { WebLinksAddon } from '@xterm/addon-web-links'
-import { api } from '@/composables/api'
-import '@xterm/xterm/css/xterm.css'
+import { ref, computed } from 'vue'
+import TerminalInstance from './TerminalInstance.vue'
 
-const termEl = ref<HTMLDivElement | null>(null)
-const connected = ref(false)
-const sessionId = ref('')
+const emit = defineEmits<{
+  close: []
+}>()
 
-let term: Terminal | null = null
-let fitAddon: FitAddon | null = null
-let ws: WebSocket | null = null
-let resizeObserver: ResizeObserver | null = null
-
-function isDarkMode(): boolean {
-  return document.documentElement.classList.contains('dark')
+interface Tab {
+  id: string
+  label: string
 }
 
-const darkTheme = {
-  background: '#18181b',
-  foreground: '#e4e4e7',
-  cursor: '#10b981',
-  selectionBackground: '#3f3f4680',
-  black: '#09090b',
-  red: '#ef4444',
-  green: '#22c55e',
-  yellow: '#eab308',
-  blue: '#3b82f6',
-  magenta: '#a855f7',
-  cyan: '#06b6d4',
-  white: '#d4d4d8',
-  brightBlack: '#71717a',
-  brightRed: '#f87171',
-  brightGreen: '#4ade80',
-  brightYellow: '#facc15',
-  brightBlue: '#60a5fa',
-  brightMagenta: '#c084fc',
-  brightCyan: '#22d3ee',
-  brightWhite: '#fafafa',
+let nextId = 1
+function makeTab(): Tab {
+  return { id: String(nextId++), label: `Shell ${nextId - 1}` }
 }
 
-const lightTheme = {
-  background: '#fafafa',
-  foreground: '#27272a',
-  cursor: '#10b981',
-  selectionBackground: '#d4d4d880',
-  black: '#18181b',
-  red: '#dc2626',
-  green: '#16a34a',
-  yellow: '#ca8a04',
-  blue: '#2563eb',
-  magenta: '#9333ea',
-  cyan: '#0891b2',
-  white: '#d4d4d8',
-  brightBlack: '#71717a',
-  brightRed: '#ef4444',
-  brightGreen: '#22c55e',
-  brightYellow: '#eab308',
-  brightBlue: '#3b82f6',
-  brightMagenta: '#a855f7',
-  brightCyan: '#06b6d4',
-  brightWhite: '#fafafa',
+const tabs = ref<Tab[]>([makeTab()])
+const activeId = ref(tabs.value[0].id)
+
+const activeIndex = computed(() => tabs.value.findIndex(t => t.id === activeId.value))
+
+function addTab() {
+  const tab = makeTab()
+  tabs.value.push(tab)
+  activeId.value = tab.id
 }
 
-function getWsUrl(ptyId: string): string {
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${proto}//${location.host}/api/pty/${encodeURIComponent(ptyId)}/ws`
+function closeTab(id: string) {
+  const idx = tabs.value.findIndex(t => t.id === id)
+  if (idx === -1) return
+  tabs.value.splice(idx, 1)
+  if (tabs.value.length === 0) {
+    emit('close')
+    return
+  }
+  // Select adjacent tab
+  const newIdx = Math.min(idx, tabs.value.length - 1)
+  activeId.value = tabs.value[newIdx].id
 }
-
-async function initTerminal() {
-  if (!termEl.value) return
-
-  term = new Terminal({
-    cursorBlink: true,
-    fontSize: 13,
-    fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, monospace",
-    theme: isDarkMode() ? darkTheme : lightTheme,
-  })
-
-  fitAddon = new FitAddon()
-  term.loadAddon(fitAddon)
-  term.loadAddon(new WebLinksAddon())
-  term.open(termEl.value)
-  fitAddon.fit()
-
-  resizeObserver = new ResizeObserver(() => {
-    fitAddon?.fit()
-    if (ws && ws.readyState === WebSocket.OPEN && term) {
-      ws.send(JSON.stringify({
-        type: 'resize',
-        cols: term.cols,
-        rows: term.rows,
-      }))
-    }
-  })
-  resizeObserver.observe(termEl.value)
-
-  // Watch for theme changes
-  const observer = new MutationObserver(() => {
-    if (term) {
-      term.options.theme = isDarkMode() ? darkTheme : lightTheme
-    }
-  })
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
-
-  try {
-    const result = await api.ptyCreate()
-    sessionId.value = result.id
-    connectWS(result.id)
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err)
-    term.writeln(`\r\n\x1b[31mFailed to create terminal: ${message}\x1b[0m`)
-  }
-}
-
-function connectWS(ptyId: string) {
-  if (!term) return
-
-  const url = getWsUrl(ptyId)
-  ws = new WebSocket(url)
-  ws.binaryType = 'arraybuffer'
-
-  ws.onopen = () => {
-    connected.value = true
-    ws!.send(JSON.stringify({
-      type: 'resize',
-      cols: term!.cols,
-      rows: term!.rows,
-    }))
-  }
-
-  ws.onmessage = (event) => {
-    if (event.data instanceof ArrayBuffer) {
-      term!.write(new Uint8Array(event.data))
-    } else {
-      term!.write(event.data)
-    }
-  }
-
-  ws.onclose = () => {
-    connected.value = false
-    term?.writeln('\r\n\x1b[33m[Session ended]\x1b[0m')
-  }
-
-  ws.onerror = () => {
-    connected.value = false
-  }
-
-  term.onData((data) => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(new TextEncoder().encode(data))
-    }
-  })
-}
-
-async function reconnect() {
-  cleanup()
-  await nextTick()
-  initTerminal()
-}
-
-function cleanup() {
-  resizeObserver?.disconnect()
-  resizeObserver = null
-  if (ws) {
-    ws.close()
-    ws = null
-  }
-  if (sessionId.value) {
-    api.ptyKill(sessionId.value).catch(() => {})
-    sessionId.value = ''
-  }
-  if (term) {
-    term.dispose()
-    term = null
-  }
-  fitAddon = null
-  connected.value = false
-}
-
-onMounted(initTerminal)
-onUnmounted(cleanup)
 </script>
 
 <template>
-  <div class="flex flex-col h-full bg-zinc-50 dark:bg-zinc-900">
-    <!-- Header -->
-    <div class="flex items-center justify-between px-3 py-1.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-100/80 dark:bg-zinc-800/80 shrink-0">
-      <div class="flex items-center gap-2">
-        <span class="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Terminal</span>
-        <span
-          class="w-1.5 h-1.5 rounded-full"
-          :class="connected ? 'bg-emerald-400' : 'bg-zinc-300 dark:bg-zinc-600'"
-        />
+  <div class="flex flex-col h-full" style="background: var(--color-background)">
+    <!-- Tab bar -->
+    <div
+      class="flex items-center shrink-0 px-2 gap-1"
+      style="height: 32px; border-bottom: 1px solid var(--color-border); background: var(--color-background)"
+    >
+      <!-- Tabs -->
+      <div class="flex items-center gap-0.5 h-full flex-1 min-w-0 overflow-x-auto">
+        <button
+          v-for="tab in tabs"
+          :key="tab.id"
+          class="tab-btn"
+          :class="{ 'tab-active': tab.id === activeId }"
+          @click="activeId = tab.id"
+        >
+          <span class="tab-label">{{ tab.label }}</span>
+          <span
+            v-if="tabs.length > 1"
+            class="tab-close"
+            @click.stop="closeTab(tab.id)"
+          >
+            <svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </span>
+        </button>
       </div>
-      <button
-        class="text-[10px] text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer transition-colors font-medium"
-        @click="reconnect"
-        title="New terminal"
-      >
-        + New
-      </button>
+
+      <!-- Controls -->
+      <div class="flex items-center gap-0.5 shrink-0">
+        <button class="ctrl-btn" title="New terminal" @click="addTab">
+          <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </button>
+        <button class="ctrl-btn" title="Close panel" @click="emit('close')">
+          <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
     </div>
 
-    <!-- xterm container -->
-    <div ref="termEl" class="flex-1 min-h-0 px-1 py-1" />
+    <!-- Terminal area -->
+    <div class="flex-1 min-h-0 relative" style="background: var(--color-background)">
+      <TerminalInstance
+        v-for="tab in tabs"
+        :key="tab.id"
+        :active="tab.id === activeId"
+      />
+    </div>
   </div>
 </template>
 
 <style scoped>
-:deep(.xterm) {
-  height: 100%;
-  padding: 2px;
+.tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  height: 22px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  color: var(--color-muted-foreground);
+  white-space: nowrap;
+  transition: background 0.1s, color 0.1s;
+  flex-shrink: 0;
 }
-:deep(.xterm-viewport) {
-  background-color: var(--term-bg, #fafafa) !important;
+.tab-btn:hover {
+  background: color-mix(in srgb, var(--color-foreground) 8%, transparent);
+  color: var(--color-foreground);
 }
-.dark :deep(.xterm-viewport) {
-  background-color: #18181b !important;
+.tab-active {
+  background: color-mix(in srgb, var(--color-foreground) 10%, transparent);
+  color: var(--color-foreground);
+}
+.tab-label {
+  pointer-events: none;
+}
+.tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  opacity: 0.4;
+  transition: opacity 0.1s, background 0.1s;
+}
+.tab-close:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--color-foreground) 15%, transparent);
+}
+.ctrl-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--color-muted-foreground);
+  transition: background 0.1s, color 0.1s;
+}
+.ctrl-btn:hover {
+  background: color-mix(in srgb, var(--color-foreground) 8%, transparent);
+  color: var(--color-foreground);
 }
 </style>

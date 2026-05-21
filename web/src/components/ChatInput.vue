@@ -268,105 +268,94 @@ watch(() => store.isRunning, (running) => {
 </script>
 
 <template>
-  <div ref="containerRef" class="border-t border-zinc-200 dark:border-zinc-800/80 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm px-5 py-3">
-    <div class="max-w-3xl mx-auto">
-      <div class="bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700/60 rounded-md px-3.5 py-2.5 transition-all relative">
-        <!-- Slash command menu -->
-        <div
-          v-if="showSlashMenu && filteredSlashCommands.length > 0"
-          class="absolute bottom-full mb-2 left-0 right-0 z-30 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md shadow-lg dark:shadow-2xl py-1.5 max-h-48 overflow-y-auto"
-        >
+  <div ref="containerRef" class="chat-input-wrapper">
+    <div class="chat-input-card">
+      <!-- Slash command menu -->
+      <div
+        v-if="showSlashMenu && filteredSlashCommands.length > 0"
+        class="slash-menu"
+      >
           <button
             v-for="(cmd, i) in filteredSlashCommands"
             :key="cmd.name"
-            class="w-full px-3.5 py-2 text-left flex items-start gap-2.5 cursor-pointer transition-colors"
-            :class="i === selectedSlashIdx
-              ? 'bg-emerald-50 dark:bg-emerald-500/10'
-              : 'hover:bg-zinc-50 dark:hover:bg-zinc-700/50'"
+            class="slash-item"
+            :class="{ active: i === selectedSlashIdx }"
             @click="applySlashCommand(cmd)"
             @mouseenter="selectedSlashIdx = i"
           >
-            <span class="text-xs font-mono text-emerald-600 dark:text-emerald-400 shrink-0">{{ cmd.slash }}</span>
-            <span class="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">{{ cmd.description }}</span>
+            <span class="slash-cmd">{{ cmd.slash }}</span>
+            <span class="slash-desc">{{ cmd.description }}</span>
           </button>
         </div>
 
-        <!-- Image previews -->
-        <div v-if="pendingImagePreviews.length > 0" class="flex flex-wrap gap-2 mb-2">
-          <div v-for="(preview, i) in pendingImagePreviews" :key="i" class="relative group">
-            <img :src="preview" class="w-16 h-16 object-cover rounded border border-zinc-200 dark:border-zinc-700" />
-            <button
-              class="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-              @click="removeImage(i)"
-            >✕</button>
+        <div class="chat-input-inner">
+        <!-- Textarea area -->
+        <div class="textarea-area">
+          <!-- Image previews -->
+          <div v-if="pendingImagePreviews.length > 0" class="image-previews">
+            <div v-for="(preview, i) in pendingImagePreviews" :key="i" class="image-preview-item">
+              <img :src="preview" />
+              <button class="image-remove" @click="removeImage(i)">✕</button>
+            </div>
           </div>
-        </div>
 
-        <textarea
-          ref="textarea"
-          v-model="input"
-          :placeholder="store.isRunning ? 'Agent is working…' : 'Ask anything… (/ for commands)'"
-          rows="1"
-          :disabled="store.isRunning"
-          class="w-full bg-transparent text-zinc-800 dark:text-zinc-100 text-sm resize-none outline-none placeholder-zinc-400 dark:placeholder-zinc-500 min-h-6 max-h-40 leading-relaxed disabled:opacity-50"
-          @keydown="handleKeyDown"
-          @input="handleInput"
-          @paste="handlePaste"
-        />
+          <textarea
+            ref="textarea"
+            v-model="input"
+            :placeholder="store.isRunning ? 'Agent is working…' : 'Ask JCODE, @agent, or /command'"
+            rows="1"
+            :disabled="store.isRunning"
+            @keydown="handleKeyDown"
+            @input="handleInput"
+            @paste="handlePaste"
+          />
 
-        <!-- Hidden file input for image upload -->
-        <input
-          ref="fileInput"
-          type="file"
-          accept="image/*"
-          multiple
-          class="hidden"
-          @change="handleImageSelect"
-        />
-        <!-- Toolbar row -->
-        <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-zinc-200/60 dark:border-zinc-700/40">
-          <div class="flex items-center gap-1.5">
-            <!-- Image attach "+" button -->
+          <!-- Hidden file input -->
+          <input
+            ref="fileInput"
+            type="file"
+            accept="image/*"
+            multiple
+            class="hidden"
+            @change="handleImageSelect"
+          />
+      </div>
+
+      <!-- Toolbar -->
+      <div class="toolbar">
+          <div class="toolbar-left">
+            <!-- Paperclip / attach -->
             <button
-              class="w-6 h-6 flex items-center justify-center rounded border transition-colors shrink-0"
-              :class="[
-                store.imageSupport ? 'cursor-pointer' : 'cursor-not-allowed opacity-40',
-                pendingImages.length > 0
-                  ? 'border-blue-400 dark:border-blue-500 bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-400'
-                  : 'border-zinc-300 dark:border-zinc-600 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-700/60'
-              ]"
-              :title="!store.imageSupport ? 'Current model does not support images' : pendingImages.length > 0 ? `${pendingImages.length} image(s) attached — click to add more` : 'Attach images'"
+              class="tool-btn attach-btn"
+              :class="{ disabled: !store.imageSupport, 'has-images': pendingImages.length > 0 }"
+              :title="!store.imageSupport ? 'Current model does not support images' : 'Attach images'"
               :disabled="!store.imageSupport"
               @click="store.imageSupport && triggerImageUpload()"
             >
-              <svg v-if="pendingImages.length === 0" class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                <path d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" />
+              <svg class="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M15.621 4.379a3.5 3.5 0 00-4.95 0L4.05 11a2.5 2.5 0 003.536 3.536l6.621-6.621a1.5 1.5 0 00-2.121-2.121l-6.622 6.621" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
-              <span v-else class="text-[10px] font-bold">{{ pendingImages.length }}</span>
+              <span v-if="pendingImages.length > 0" class="attach-badge">{{ pendingImages.length }}</span>
             </button>
 
-            <!-- Mode selector -->
+            <!-- Mode selector (Agent/Plan) -->
             <div class="relative">
               <button
-                class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded transition-colors cursor-pointer"
-                :class="store.mode === 'plan'
-                  ? 'bg-amber-100 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                  : 'bg-zinc-100 dark:bg-zinc-700/60 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'"
+                class="tool-btn dropdown-btn"
+                :class="{ highlighted: store.mode === 'plan' }"
                 @click.stop="showModePicker = !showModePicker; showModelPicker = false"
               >
-                {{ store.mode === 'agent' ? '🔥 Agent' : '📋 Plan' }}
-                <svg class="w-3 h-3 opacity-50" viewBox="0 0 20 20" fill="currentColor">
+                {{ store.mode === 'agent' ? 'Agent' : 'Plan' }}
+                <svg class="w-3 h-3 opacity-60" viewBox="0 0 20 20" fill="currentColor">
                   <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
                 </svg>
               </button>
-              <div v-if="showModePicker" class="absolute bottom-full mb-1 left-0 z-20 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md shadow-lg dark:shadow-2xl py-1 min-w-28">
+              <div v-if="showModePicker" class="dropdown-menu">
                 <button
                   v-for="m in modes"
                   :key="m.value"
-                  class="w-full px-3 py-1.5 text-xs cursor-pointer select-none text-left transition-colors rounded"
-                  :class="store.mode === m.value
-                    ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10'
-                    : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700/50 hover:text-zinc-700 dark:hover:text-zinc-200'"
+                  class="dropdown-item"
+                  :class="{ active: store.mode === m.value }"
                   @click="selectMode(m.value)"
                 >
                   {{ m.icon }} {{ m.label }}
@@ -377,158 +366,91 @@ watch(() => store.isRunning, (running) => {
             <!-- Model selector -->
             <div class="relative">
               <button
-                class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded bg-zinc-100 dark:bg-zinc-700/60 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer transition-colors"
+                class="tool-btn dropdown-btn"
                 @click.stop="showModelPicker = !showModelPicker; showModePicker = false"
               >
                 {{ store.modelName || 'model' }}
-                <svg class="w-3 h-3 opacity-50" viewBox="0 0 20 20" fill="currentColor">
+                <svg class="w-3 h-3 opacity-60" viewBox="0 0 20 20" fill="currentColor">
                   <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
                 </svg>
               </button>
               <div
                 v-if="showModelPicker"
-                class="absolute bottom-full mb-1 left-0 z-20 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md shadow-lg dark:shadow-2xl py-1.5 max-h-72 overflow-y-auto min-w-56"
+                class="dropdown-menu model-menu"
               >
                 <!-- Favorites section -->
                 <template v-if="store.recentModels.length > 0 && store.favoriteModels.size > 0">
-                  <div class="px-3 py-1 text-[10px] text-amber-500 dark:text-amber-400 uppercase tracking-wider font-semibold sticky top-0 bg-white dark:bg-zinc-800 flex items-center gap-1">
-                    <span>★</span> Favorites
-                  </div>
+                  <div class="dropdown-section-title"><span>★</span> Favorites</div>
                   <button
                     v-for="r in store.recentModels.filter(r => store.favoriteModels.has(`${r.provider}/${r.model}`) && !(store.providerName === r.provider && store.modelName === r.model))"
                     :key="'fav-'+r.provider+'-'+r.model"
-                    class="w-full px-3 py-1.5 text-xs text-left cursor-pointer select-none truncate transition-colors text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700/50 hover:text-zinc-700 dark:hover:text-zinc-200"
+                    class="dropdown-item"
                     @click="selectModel(r.provider, r.model)"
                   >
                     <span class="text-amber-400 mr-1">★</span>{{ getModelDisplayName(r.provider, r.model) }}
                   </button>
                 </template>
 
-                <!-- Current Model section -->
+                <!-- Current Model -->
                 <template v-if="store.providerName && store.modelName">
-                  <div class="px-3 py-1 text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider font-semibold sticky top-0 bg-white dark:bg-zinc-800 border-t border-zinc-100 dark:border-zinc-700/50">
-                    Current Model
-                  </div>
-                  <button
-                    class="w-full px-3 py-1.5 text-xs text-left cursor-pointer select-none truncate transition-colors text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10"
-                    @click="selectModel(store.providerName, store.modelName)"
-                  >
+                  <div class="dropdown-section-title">Current</div>
+                  <button class="dropdown-item active" @click="selectModel(store.providerName, store.modelName)">
                     ● {{ getModelDisplayName(store.providerName, store.modelName) }}
                   </button>
                 </template>
 
-                <!-- All providers section (only enabled models) -->
+                <!-- All providers (enabled only) -->
                 <template v-for="p in store.enabledProviders" :key="p.id">
-                  <div class="px-3 py-1 text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider font-semibold sticky top-0 bg-white dark:bg-zinc-800 border-t border-zinc-100 dark:border-zinc-700/50">
-                    {{ p.name }}
-                  </div>
+                  <div class="dropdown-section-title">{{ p.name }}</div>
                   <button
                     v-for="m in p.models"
                     :key="m.id"
-                    class="w-full px-3 py-1.5 text-xs text-left cursor-pointer select-none transition-colors group"
-                    :class="store.providerName === p.id && store.modelName === m.id
-                      ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10'
-                      : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700/50 hover:text-zinc-700 dark:hover:text-zinc-200'"
+                    class="dropdown-item group"
+                    :class="{ active: store.providerName === p.id && store.modelName === m.id }"
                     @click="selectModel(p.id, m.id)"
                   >
                     <span class="truncate">{{ m.name || m.id }}</span>
-                    <span v-if="m.recommended" class="ml-1 text-[9px] text-emerald-500 dark:text-emerald-400">recommended</span>
+                    <span v-if="m.recommended" class="recommend-badge">recommended</span>
                     <button
-                      class="ml-1 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer inline"
-                      :class="store.isFavorite(p.id, m.id) ? 'text-amber-400 opacity-100' : 'text-zinc-300 dark:text-zinc-600'"
+                      class="fav-star"
+                      :class="{ 'is-fav': store.isFavorite(p.id, m.id) }"
                       @click.stop="store.toggleFavorite(p.id, m.id)"
-                      :title="store.isFavorite(p.id, m.id) ? 'Remove from favorites' : 'Add to favorites'"
                     >★</button>
                   </button>
                 </template>
-                <div v-if="store.enabledProviders.length === 0" class="px-3 py-2 text-xs text-zinc-400 dark:text-zinc-500">
+                <div v-if="store.enabledProviders.length === 0" class="dropdown-item disabled">
                   No models available
                 </div>
                 <!-- Manage models link -->
-                <div class="border-t border-zinc-100 dark:border-zinc-700/50 px-3 py-1.5">
-                  <button
-                    class="w-full text-xs text-left text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer transition-colors"
-                    @click.stop="showModelPicker = false; showManageModels = true"
-                  >
+                <div class="dropdown-footer">
+                  <button @click.stop="showModelPicker = false; showManageModels = true">
                     ⚙ Manage models…
                   </button>
                 </div>
               </div>
             </div>
 
-            <!-- Manage Models Dialog (teleported to body for proper centering) -->
-            <Teleport to="body">
-              <div
-                v-if="showManageModels"
-                class="fixed inset-0 z-50 flex items-center justify-center bg-black/30 dark:bg-black/50"
-                @click="showManageModels = false; modelFilter = ''"
-              >
-                <div class="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-xl dark:shadow-2xl w-full max-w-lg max-h-[70vh] flex flex-col mx-4" @click.stop>
-                  <div class="px-4 py-3 border-b border-zinc-200 dark:border-zinc-700">
-                    <div class="flex items-center justify-between mb-2">
-                      <div>
-                        <h3 class="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Manage Models</h3>
-                        <p class="text-[11px] text-zinc-400 dark:text-zinc-500">Toggle which models appear in the model selector</p>
-                      </div>
-                      <button
-                        class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 cursor-pointer"
-                        @click="showManageModels = false; modelFilter = ''; store.fetchModels()"
-                      >✕</button>
-                    </div>
-                    <input
-                      v-model="modelFilter"
-                      type="text"
-                      placeholder="Filter models..."
-                      class="w-full px-2 py-1.5 text-xs border border-zinc-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                    />
-                  </div>
-                  <div class="overflow-y-auto flex-1 py-2">
-                    <template v-for="p in filteredProviders" :key="'mgr-'+p.id">
-                      <div class="px-4 py-1.5 text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider font-semibold sticky top-0 bg-white dark:bg-zinc-800">
-                        {{ p.name }}
-                      </div>
-                      <label
-                        v-for="m in p.models"
-                        :key="'mgr-'+p.id+'-'+m.id"
-                        class="flex items-center gap-2.5 px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-700/30 cursor-pointer transition-colors"
-                      >
-                        <input
-                          type="checkbox"
-                          :checked="m.enabled !== false"
-                          class="w-4 h-4 rounded border-2 border-zinc-300 dark:border-zinc-600 text-emerald-500 focus:ring-2 focus:ring-emerald-500 focus:ring-offset-0 cursor-pointer transition-all"
-                          @change="store.toggleModelEnabled(p.id, m.id, ($event.target as HTMLInputElement).checked)"
-                        />
-                        <span class="text-xs text-zinc-700 dark:text-zinc-300 flex-1 truncate">{{ m.name || m.id }}</span>
-                        <span v-if="m.recommended" class="text-[9px] px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium shrink-0">recommended</span>
-                      </label>
-                    </template>
-                  </div>
-                </div>
-              </div>
-            </Teleport>
+            <!-- Auto-approve toggle switch -->
+            <label class="toggle-switch" :title="store.autoApprove ? 'Auto-approve ON' : 'Auto-approve OFF'">
+              <input
+                type="checkbox"
+                :checked="store.autoApprove"
+                @change="store.setAutoApprove(!store.autoApprove)"
+              />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
 
-            <!-- Auto-approve toggle -->
-            <button
-              class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded transition-colors cursor-pointer"
-              :class="store.autoApprove
-                ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-500/25'
-                : 'bg-zinc-100 dark:bg-zinc-700/60 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-600/60'"
-              :title="store.autoApprove ? 'Auto-approve ON' : 'Auto-approve OFF'"
-              @click="store.setAutoApprove(!store.autoApprove)"
-            >
-              <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
-                <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clip-rule="evenodd" />
-              </svg>
-              Auto
-            </button>
+          <div class="toolbar-right">
+            <span v-if="store.tokenInfo" class="token-count">
+              {{ store.tokenInfo.total_tokens.toLocaleString() }} tokens
+            </span>
 
-            <!-- Channel toggle -->
+            <!-- Channel toggle (inline) -->
             <button
               v-if="store.channelAvailable"
-              class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded transition-colors cursor-pointer"
-              :class="store.channelEnabled
-                ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-500/25'
-                : 'bg-zinc-100 dark:bg-zinc-700/60 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-600/60'"
+              class="channel-btn"
+              :class="{ active: store.channelEnabled }"
               :title="store.channelEnabled ? 'WeChat notifications ON' : 'WeChat notifications OFF'"
               @click="store.toggleChannel(!store.channelEnabled)"
             >
@@ -536,40 +458,549 @@ watch(() => store.isRunning, (running) => {
                 <path d="M2 5a2 2 0 012-2h7a2 2 0 012 2v4a2 2 0 01-2 2H9l-3 3v-3H4a2 2 0 01-2-2V5z" />
                 <path d="M15 7v2a4 4 0 01-4 4H9.828l-1.766 1.767A2 2 0 0011 16h2l3 3v-3h1a2 2 0 002-2V9a2 2 0 00-2-2h-2z" />
               </svg>
-              WeChat
             </button>
-          </div>
-
-          <div class="flex items-center gap-2">
-            <span v-if="store.tokenInfo" class="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono">
-              {{ store.tokenInfo.total_tokens.toLocaleString() }} tokens
-              <template v-if="store.tokenPercentage > 0"> · {{ store.tokenPercentage }}%</template>
-            </span>
             <!-- Stop button -->
             <button
               v-if="store.isRunning"
-              class="w-7 h-7 flex items-center justify-center rounded-md bg-red-500 hover:bg-red-600 text-white transition-colors cursor-pointer shadow-sm"
+              class="stop-btn"
               title="Stop agent (Esc)"
               @click="store.stopAgent()"
             >
               <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
                 <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
+              Stop
             </button>
             <!-- Send button -->
             <button
               v-else
-              class="w-7 h-7 flex items-center justify-center rounded-md bg-emerald-500 hover:bg-emerald-600 text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shadow-sm"
+              class="send-btn"
               :disabled="!input.trim() && pendingImages.length === 0"
               @click="send"
             >
               <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                 <path d="M5 12h14M12 5l7 7-7 7" />
               </svg>
+              Send
             </button>
           </div>
         </div>
+        </div><!-- /chat-input-inner -->
       </div>
-    </div>
+
+    <!-- Manage Models Dialog -->
+    <Teleport to="body">
+      <div
+        v-if="showManageModels"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+        @click="showManageModels = false; modelFilter = ''"
+      >
+        <div class="w-full max-w-lg max-h-[70vh] flex flex-col mx-4 rounded-lg shadow-xl" style="background: var(--color-surface); border: 1px solid var(--color-border)" @click.stop>
+          <div class="px-4 py-3" style="border-bottom: 1px solid var(--color-border)">
+            <div class="flex items-center justify-between mb-2">
+              <div>
+                <h3 class="text-sm font-semibold" style="color: var(--color-foreground)">Manage Models</h3>
+                <p class="text-[11px]" style="color: var(--color-muted-foreground)">Toggle which models appear in the model selector</p>
+              </div>
+              <button
+                class="cursor-pointer"
+                style="color: var(--color-muted-foreground)"
+                @click="showManageModels = false; modelFilter = ''; store.fetchModels()"
+              >✕</button>
+            </div>
+            <input
+              v-model="modelFilter"
+              type="text"
+              placeholder="Filter models..."
+              class="w-full px-2 py-1.5 text-xs rounded focus:outline-none focus:ring-1"
+              style="border: 1px solid var(--color-border); background: var(--color-muted); color: var(--color-foreground); --tw-ring-color: var(--color-primary)"
+            />
+          </div>
+          <div class="overflow-y-auto flex-1 py-2">
+            <template v-for="p in filteredProviders" :key="'mgr-'+p.id">
+              <div class="px-4 py-1.5 text-[10px] uppercase tracking-wider font-semibold sticky top-0" style="color: var(--color-muted-foreground); background: var(--color-surface)">
+                {{ p.name }}
+              </div>
+              <label
+                v-for="m in p.models"
+                :key="'mgr-'+p.id+'-'+m.id"
+                class="flex items-center gap-2.5 px-4 py-2 cursor-pointer transition-colors hover:opacity-80"
+              >
+                <input
+                  type="checkbox"
+                  :checked="m.enabled !== false"
+                  class="w-4 h-4 rounded border-2 focus:ring-2 focus:ring-offset-0 cursor-pointer transition-all"
+                  style="accent-color: var(--color-primary); border-color: var(--color-border)"
+                  @change="store.toggleModelEnabled(p.id, m.id, ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="text-xs flex-1 truncate" style="color: var(--color-foreground)">{{ m.name || m.id }}</span>
+                <span v-if="m.recommended" class="text-[9px] px-1.5 py-0.5 rounded font-medium shrink-0" style="background: rgba(255,132,0,0.1); color: var(--color-primary)">recommended</span>
+              </label>
+            </template>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+
   </div>
 </template>
+
+<style scoped>
+.chat-input-wrapper {
+  padding: 12px 24px 16px;
+  background: var(--color-background);
+  position: relative;
+}
+
+.chat-input-card {
+  margin: 0 auto;
+  border-radius: 12px;
+  padding: 6px;
+  background: #F6F7F4;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.dark .chat-input-card {
+  background: var(--color-background);
+}
+
+.chat-input-inner {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  padding: 14px 16px 0;
+  transition: border-color 0.2s;
+}
+
+.chat-input-inner:focus-within {
+  border-color: color-mix(in srgb, var(--color-foreground) 30%, transparent);
+}
+
+.textarea-area {
+  padding: 0 0 8px;
+}
+
+.textarea-area textarea {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-foreground);
+  min-height: 28px;
+  max-height: 200px;
+  font-family: var(--font-sans);
+}
+
+.textarea-area textarea::placeholder {
+  color: var(--color-muted-foreground);
+}
+
+.textarea-area textarea:disabled {
+  opacity: 0.5;
+}
+
+.image-previews {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.image-preview-item {
+  position: relative;
+}
+
+.image-preview-item img {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+}
+
+.image-preview-item .image-remove {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-destructive);
+  color: white;
+  font-size: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.image-preview-item:hover .image-remove {
+  opacity: 1;
+}
+
+/* Toolbar */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0 12px;
+  gap: 8px;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.tool-btn:hover {
+  background: var(--color-muted);
+  color: var(--color-foreground);
+}
+
+.tool-btn.highlighted {
+  background: rgba(255, 132, 0, 0.1);
+  color: var(--color-primary);
+}
+
+.attach-btn {
+  padding: 4px 6px;
+  position: relative;
+}
+
+.attach-btn.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.attach-btn.has-images {
+  color: var(--color-primary);
+}
+
+.attach-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: white;
+  font-size: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+}
+
+/* Toggle switch */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 32px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: var(--color-muted);
+  border-radius: 9999px;
+  transition: background 0.2s;
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  left: 2px;
+  bottom: 2px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: var(--color-primary);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(14px);
+}
+
+/* Dropdown menus */
+.dropdown-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  z-index: 20;
+  min-width: 140px;
+  padding: 4px 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.dropdown-menu.model-menu {
+  min-width: 220px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.dropdown-item {
+  width: 100%;
+  padding: 6px 12px;
+  font-size: 12px;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  transition: background 0.1s;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dropdown-item:hover {
+  background: var(--color-muted);
+}
+
+.dropdown-item.active {
+  color: var(--color-primary);
+  background: rgba(255, 132, 0, 0.1);
+}
+
+.dropdown-item.disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.dropdown-section-title {
+  padding: 4px 12px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-muted-foreground);
+  border-top: 1px solid var(--color-border);
+  margin-top: 2px;
+}
+
+.dropdown-section-title:first-child {
+  border-top: none;
+  margin-top: 0;
+}
+
+.dropdown-footer {
+  padding: 4px 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.dropdown-footer button {
+  width: 100%;
+  text-align: left;
+  font-size: 12px;
+  color: var(--color-muted-foreground);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.recommend-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 132, 0, 0.1);
+  color: var(--color-primary);
+  font-weight: 500;
+  margin-left: 4px;
+}
+
+.fav-star {
+  opacity: 0;
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+}
+
+.fav-star.is-fav {
+  opacity: 1;
+  color: #fbbf24;
+}
+
+.dropdown-item:hover .fav-star {
+  opacity: 1;
+}
+
+/* Token count */
+.token-count {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--color-muted-foreground);
+}
+
+/* Send & Stop buttons */
+.send-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--color-primary);
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+
+.send-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.send-btn:not(:disabled):hover {
+  opacity: 0.9;
+}
+
+.stop-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--color-destructive);
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* Slash menu */
+.slash-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin-bottom: 8px;
+  z-index: 30;
+  padding: 6px 0;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.slash-item {
+  width: 100%;
+  padding: 8px 14px;
+  text-align: left;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  transition: background 0.1s;
+}
+
+.slash-item.active,
+.slash-item:hover {
+  background: var(--color-muted);
+}
+
+.slash-cmd {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.slash-desc {
+  font-size: 11px;
+  color: var(--color-muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Channel button (inline in toolbar) */
+.channel-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.channel-btn:hover {
+  background: var(--color-muted);
+}
+
+.channel-btn.active {
+  color: var(--color-primary);
+  background: rgba(255, 132, 0, 0.1);
+}
+
+.hidden {
+  display: none;
+}
+</style>

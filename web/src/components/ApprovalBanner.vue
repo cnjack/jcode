@@ -19,31 +19,36 @@ function formatArgs(args: string): string {
 
 <template>
   <div class="my-2 rounded-md border px-4 py-3 flex items-start gap-3 animate-fade-in"
-    :class="approval.resolved
-      ? approval.approved
-        ? 'border-emerald-200 dark:border-emerald-500/20 bg-emerald-50/50 dark:bg-emerald-500/5'
-        : 'border-red-200 dark:border-red-500/20 bg-red-50/50 dark:bg-red-500/5'
-      : 'border-amber-200 dark:border-amber-500/20 bg-amber-50/50 dark:bg-amber-500/5'">
+    :style="{
+      borderColor: approval.resolved
+        ? approval.approved ? 'var(--color-success-bg)' : 'var(--color-error-bg)'
+        : 'var(--color-warning-bg)',
+      backgroundColor: approval.resolved
+        ? approval.approved ? 'var(--color-success-bg)' : 'var(--color-error-bg)'
+        : 'var(--color-warning-bg)',
+    }">
     <div class="flex-1 min-w-0">
-      <div class="text-xs text-zinc-500 dark:text-zinc-400 mb-1 font-medium">Approval required</div>
-      <div class="font-mono text-xs text-zinc-700 dark:text-zinc-200">{{ approval.tool_name }}</div>
-      <pre class="text-[10px] text-zinc-400 dark:text-zinc-500 mt-1 max-h-12 overflow-hidden whitespace-pre-wrap font-mono">{{ formatArgs(approval.tool_args) }}</pre>
-      <div v-if="approval.is_external" class="text-[10px] text-amber-600 dark:text-amber-400 mt-1 font-medium">External path</div>
+      <div class="text-xs mb-1 font-medium" style="color: var(--color-muted-foreground)">Approval required</div>
+      <div class="font-mono text-xs" style="color: var(--color-foreground)">{{ approval.tool_name }}</div>
+      <pre class="text-[10px] mt-1 max-h-12 overflow-hidden whitespace-pre-wrap font-mono" style="color: var(--color-muted-foreground)">{{ formatArgs(approval.tool_args) }}</pre>
+      <div v-if="approval.is_external" class="text-[10px] mt-1 font-medium" style="color: var(--color-warning-fg)">External path</div>
     </div>
     <div v-if="!approval.resolved" class="flex gap-1.5 shrink-0">
       <button
-        class="px-3.5 py-1.5 text-xs rounded-md bg-emerald-500 hover:bg-emerald-600 text-white transition-colors cursor-pointer font-medium shadow-sm"
+        class="px-3.5 py-1.5 text-xs rounded-md text-white transition-colors cursor-pointer font-medium shadow-sm"
+        style="background-color: var(--color-primary)"
         @click="store.resolveApproval(approval.id, true)">
         Allow
       </button>
       <button
-        class="px-3.5 py-1.5 text-xs rounded-md bg-zinc-200 dark:bg-zinc-700 hover:bg-zinc-300 dark:hover:bg-zinc-600 text-zinc-600 dark:text-zinc-300 transition-colors cursor-pointer font-medium"
+        class="px-3.5 py-1.5 text-xs rounded-md transition-colors cursor-pointer font-medium"
+        style="background-color: var(--color-secondary); color: var(--color-muted-foreground)"
         @click="store.resolveApproval(approval.id, false)">
         Deny
       </button>
     </div>
     <span v-else class="text-xs shrink-0 font-medium"
-      :class="approval.approved ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'">
+      :style="{ color: approval.approved ? 'var(--color-success-fg)' : 'var(--color-destructive)' }">
       {{ approval.approved ? 'Allowed' : 'Denied' }}
     </span>
   </div>

@@ -1,28 +1,25 @@
 /*
  * Design Tokens — jcode
- * Dark-first OKLCH color system with emerald accent.
- * Inspired by Vercel Chatbot + Tailwind Protocol.
+ * Orange accent color system with light/dark mode support.
  */
 
 :root {
   /* ─── Fonts ─── */
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* ─── Radii ─── */
-  --radius-sm: 0.125rem;
-  --radius-md: 0.1875rem;
-  --radius-lg: 0.25rem;
-  --radius-xl: 0.375rem;
-  --radius-2xl: 0.5rem;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
   --radius-pill: 9999px;
 
-  /* ─── Shadows (dark mode defaults) ─── */
-  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.3);
-  --shadow-md: 0 4px 12px oklch(0 0 0 / 0.4);
-  --shadow-lg: 0 8px 24px oklch(0 0 0 / 0.5);
-  --shadow-glow: 0 0 20px oklch(0.696 0.17 162.48 / 0.15);
-  --shadow-glow-strong: 0 0 30px oklch(0.696 0.17 162.48 / 0.25);
+  /* ─── Shadows ─── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.15);
 
   /* ─── Z-index scale ─── */
   --z-sidebar: 30;
@@ -40,42 +37,71 @@
   --duration-slow: 300ms;
   --duration-slower: 500ms;
 
-  /* ─── Sidebar ─── */
-  --sidebar-width: 17rem;
+  /* ─── Sizing ─── */
+  --sidebar-width: 20rem;
   --sidebar-collapsed-width: 0px;
-  --header-height: 2.75rem;
+  --header-height: 3.25rem;
+
+  /* ─── Colors (light mode) ─── */
+  --color-primary: #FF8400;
+  --color-background: #F2F3F0;
+  --color-surface: #FFFFFF;
+  --color-foreground: #111111;
+  --color-muted-foreground: #666666;
+  --color-border: #CBCCC9;
+  --color-muted: #F2F3F0;
+  --color-secondary: #E7E8E5;
+  --color-secondary-foreground: #111111;
+  --color-success-bg: #DFE6E1;
+  --color-success-fg: #004D1A;
+  --color-error-bg: #E5DCDA;
+  --color-error-fg: #8C1C00;
+  --color-warning-bg: #E9E3D8;
+  --color-warning-fg: #804200;
+  --color-info-bg: #DFDFE6;
+  --color-info-fg: #000066;
+  --color-destructive: #D93C15;
+  --color-sidebar-bg: #FAFAF8;
+
+  /* ─── Syntax highlighting (light) ─── */
+  --hljs-fg: #3f3f46;
+  --hljs-keyword: #0369a1;
+  --hljs-string: #047857;
+  --hljs-comment: #a1a1aa;
+  --hljs-number: #b45309;
+  --hljs-title: #7c3aed;
+  --hljs-type: #dc2626;
+  --hljs-params: #c026d3;
+  --hljs-variable: #ca8a04;
+  --hljs-function: #7c3aed;
+  --hljs-meta: #71717a;
+  --hljs-property: #2563eb;
+  --hljs-punctuation: #a1a1aa;
 }
 
-/* ─── Code Syntax Highlighting (works in both modes) ─── */
-.hljs {
-  color: var(--hljs-fg, #e4e4e7);
-  background: transparent;
-}
-.hljs-keyword,
-.hljs-selector-tag,
-.hljs-built_in { color: var(--hljs-keyword, #7dd3fc); }
-.hljs-string,
-.hljs-attr { color: var(--hljs-string, #6ee7b7); }
-.hljs-comment,
-.hljs-quote { color: var(--hljs-comment, #71717a); font-style: italic; }
-.hljs-number,
-.hljs-literal { color: var(--hljs-number, #fbbf24); }
-.hljs-title,
-.hljs-section { color: var(--hljs-title, #c4b5fd); }
-.hljs-type,
-.hljs-class .hljs-title { color: var(--hljs-type, #fca5a5); }
-.hljs-params { color: var(--hljs-params, #f0abfc); }
-.hljs-variable,
-.hljs-template-variable { color: var(--hljs-variable, #fde68a); }
-.hljs-function { color: var(--hljs-function, #c4b5fd); }
-.hljs-meta { color: var(--hljs-meta, #a1a1aa); }
-.hljs-property { color: var(--hljs-property, #93c5fd); }
-.hljs-punctuation { color: var(--hljs-punctuation, #a1a1aa); }
-.hljs-addition { color: #6ee7b7; background: oklch(0.696 0.17 162.48 / 0.1); }
-.hljs-deletion { color: #fca5a5; background: oklch(0.637 0.237 25.33 / 0.1); }
-
-/* Dark mode hljs tokens */
+/* ─── Dark Mode ─── */
 .dark {
+  --color-primary: #FF8400;
+  --color-background: #111111;
+  --color-surface: #1A1A1A;
+  --color-foreground: #FFFFFF;
+  --color-muted-foreground: #B8B9B6;
+  --color-border: #2E2E2E;
+  --color-muted: #2E2E2E;
+  --color-secondary: #2E2E2E;
+  --color-secondary-foreground: #FFFFFF;
+  --color-success-bg: #222924;
+  --color-success-fg: #B6FFCE;
+  --color-error-bg: #24100B;
+  --color-error-fg: #FF5C33;
+  --color-warning-bg: #291C0F;
+  --color-warning-fg: #FF8400;
+  --color-info-bg: #222229;
+  --color-info-fg: #B2B2FF;
+  --color-destructive: #FF5C33;
+  --color-sidebar-bg: #1A1A1A;
+
+  /* ─── Syntax highlighting (dark) ─── */
   --hljs-fg: #e4e4e7;
   --hljs-keyword: #7dd3fc;
   --hljs-string: #6ee7b7;
@@ -91,19 +117,30 @@
   --hljs-punctuation: #71717a;
 }
 
-/* Light mode hljs tokens */
-:root:not(.dark) {
-  --hljs-fg: #3f3f46;
-  --hljs-keyword: #0369a1;
-  --hljs-string: #047857;
-  --hljs-comment: #a1a1aa;
-  --hljs-number: #b45309;
-  --hljs-title: #7c3aed;
-  --hljs-type: #dc2626;
-  --hljs-params: #c026d3;
-  --hljs-variable: #ca8a04;
-  --hljs-function: #7c3aed;
-  --hljs-meta: #71717a;
-  --hljs-property: #2563eb;
-  --hljs-punctuation: #a1a1aa;
+/* ─── Code Syntax Highlighting ─── */
+.hljs {
+  color: var(--hljs-fg);
+  background: transparent;
 }
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in { color: var(--hljs-keyword); }
+.hljs-string,
+.hljs-attr { color: var(--hljs-string); }
+.hljs-comment,
+.hljs-quote { color: var(--hljs-comment); font-style: italic; }
+.hljs-number,
+.hljs-literal { color: var(--hljs-number); }
+.hljs-title,
+.hljs-section { color: var(--hljs-title); }
+.hljs-type,
+.hljs-class .hljs-title { color: var(--hljs-type); }
+.hljs-params { color: var(--hljs-params); }
+.hljs-variable,
+.hljs-template-variable { color: var(--hljs-variable); }
+.hljs-function { color: var(--hljs-function); }
+.hljs-meta { color: var(--hljs-meta); }
+.hljs-property { color: var(--hljs-property); }
+.hljs-punctuation { color: var(--hljs-punctuation); }
+.hljs-addition { color: var(--color-success-fg); background: var(--color-success-bg); }
+.hljs-deletion { color: var(--color-error-fg); background: var(--color-error-bg); }
