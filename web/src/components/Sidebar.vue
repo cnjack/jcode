@@ -130,6 +130,7 @@ function formatDate(ts: string): string {
   flex-shrink: 0;
   position: relative;
   background: var(--color-sidebar-bg);
+  border-right: 1px solid var(--color-border);
 }
 
 .sidebar-header {

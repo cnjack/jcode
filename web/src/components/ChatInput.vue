@@ -288,6 +288,7 @@ watch(() => store.isRunning, (running) => {
           </button>
         </div>
 
+        <div class="chat-input-inner">
         <!-- Textarea area -->
         <div class="textarea-area">
           <!-- Image previews -->
@@ -445,6 +446,19 @@ watch(() => store.isRunning, (running) => {
               {{ store.tokenInfo.total_tokens.toLocaleString() }} tokens
             </span>
 
+            <!-- Channel toggle (inline) -->
+            <button
+              v-if="store.channelAvailable"
+              class="channel-btn"
+              :class="{ active: store.channelEnabled }"
+              :title="store.channelEnabled ? 'WeChat notifications ON' : 'WeChat notifications OFF'"
+              @click="store.toggleChannel(!store.channelEnabled)"
+            >
+              <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M2 5a2 2 0 012-2h7a2 2 0 012 2v4a2 2 0 01-2 2H9l-3 3v-3H4a2 2 0 01-2-2V5z" />
+                <path d="M15 7v2a4 4 0 01-4 4H9.828l-1.766 1.767A2 2 0 0011 16h2l3 3v-3h1a2 2 0 002-2V9a2 2 0 00-2-2h-2z" />
+              </svg>
+            </button>
             <!-- Stop button -->
             <button
               v-if="store.isRunning"
@@ -471,6 +485,7 @@ watch(() => store.isRunning, (running) => {
             </button>
           </div>
         </div>
+        </div><!-- /chat-input-inner -->
       </div>
 
     <!-- Manage Models Dialog -->
@@ -527,19 +542,7 @@ watch(() => store.isRunning, (running) => {
       </div>
     </Teleport>
 
-    <!-- Channel toggle (only if available, shown as a subtle indicator) -->
-    <button
-      v-if="store.channelAvailable"
-      class="channel-toggle"
-      :class="{ active: store.channelEnabled }"
-      :title="store.channelEnabled ? 'WeChat notifications ON' : 'WeChat notifications OFF'"
-      @click="store.toggleChannel(!store.channelEnabled)"
-    >
-      <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
-        <path d="M2 5a2 2 0 012-2h7a2 2 0 012 2v4a2 2 0 01-2 2H9l-3 3v-3H4a2 2 0 01-2-2V5z" />
-        <path d="M15 7v2a4 4 0 01-4 4H9.828l-1.766 1.767A2 2 0 0011 16h2l3 3v-3h1a2 2 0 002-2V9a2 2 0 00-2-2h-2z" />
-      </svg>
-    </button>
+
   </div>
 </template>
 
@@ -552,20 +555,33 @@ watch(() => store.isRunning, (running) => {
 
 .chat-input-card {
   margin: 0 auto;
-  border: 1px solid var(--color-border);
-  border-radius: 16px;
-  padding: 16px 20px 12px;
+  border-radius: 12px;
+  padding: 6px;
+  background: #F6F7F4;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.dark .chat-input-card {
+  background: #1C1C1C;
+}
+
+.chat-input-inner {
   background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  padding: 14px 16px 0;
   transition: border-color 0.2s;
 }
 
-.chat-input-card:focus-within {
+.chat-input-inner:focus-within {
   border-color: color-mix(in srgb, var(--color-foreground) 30%, transparent);
 }
 
 .textarea-area {
-  padding: 0 0 12px;
-  min-height: 72px;
+  padding: 0 0 8px;
+  min-height: 56px;
 }
 
 .textarea-area textarea {
@@ -637,7 +653,7 @@ watch(() => store.isRunning, (running) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 0 0;
+  padding: 8px 0 12px;
   border-top: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
   gap: 8px;
 }
@@ -962,11 +978,8 @@ watch(() => store.isRunning, (running) => {
   white-space: nowrap;
 }
 
-/* Channel toggle */
-.channel-toggle {
-  position: absolute;
-  top: 8px;
-  right: 16px;
+/* Channel button (inline in toolbar) */
+.channel-btn {
   width: 24px;
   height: 24px;
   display: flex;
@@ -980,7 +993,11 @@ watch(() => store.isRunning, (running) => {
   transition: color 0.15s, background 0.15s;
 }
 
-.channel-toggle.active {
+.channel-btn:hover {
+  background: var(--color-muted);
+}
+
+.channel-btn.active {
   color: var(--color-primary);
   background: rgba(255, 132, 0, 0.1);
 }
