@@ -252,7 +252,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
         leave="ease-in duration-100"
         leave-from="opacity-100"
         leave-to="opacity-0">
-        <div class="fixed inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-sm" />
+        <div class="fixed inset-0 bg-black/40 backdrop-blur-sm" style="background: rgba(0,0,0,0.4)" />
       </TransitionChild>
 
       <div class="fixed inset-0 flex items-start justify-center pt-16 px-4">
@@ -263,21 +263,21 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
           leave="ease-in duration-100"
           leave-from="opacity-100 translate-y-0"
           leave-to="opacity-0 translate-y-2">
-          <DialogPanel class="w-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded shadow-2xl overflow-hidden">
-            <div class="px-5 pt-5 pb-3 border-b border-zinc-200 dark:border-zinc-800">
-              <DialogTitle class="text-sm font-semibold text-zinc-800 dark:text-zinc-100" style="font-family: var(--font-sans)">Settings</DialogTitle>
+          <DialogPanel class="w-2xl rounded shadow-2xl overflow-hidden" style="background-color: var(--color-surface); border: 1px solid var(--color-border)">
+            <div class="px-5 pt-5 pb-3" style="border-bottom: 1px solid var(--color-border)">
+              <DialogTitle class="text-sm font-semibold" style="font-family: var(--font-sans); color: var(--color-foreground)">Settings</DialogTitle>
             </div>
 
             <div class="flex h-105">
               <!-- Left sidebar -->
-              <nav class="w-40 border-r border-zinc-200 dark:border-zinc-800 py-2 shrink-0">
+              <nav class="w-40 py-2 shrink-0" style="border-right: 1px solid var(--color-border)">
                 <button
                   v-for="tab in (['general', 'providers', 'mcp', 'ssh', 'channels', 'shortcuts'] as const)"
                   :key="tab"
                   class="w-full px-4 py-2 text-left text-xs transition-colors cursor-pointer"
-                  :class="activeTab === tab
-                    ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 font-medium'
-                    : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800'"
+                  :style="activeTab === tab
+                    ? { color: 'var(--color-primary)', backgroundColor: 'rgba(255,132,0,0.1)', fontWeight: '500' }
+                    : { color: 'var(--color-muted-foreground)' }"
                   @click="activeTab = tab"
                 >
                   {{ tabLabel[tab] }}
@@ -291,48 +291,47 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                   <div class="flex items-center gap-2">
                     <span
                       class="w-2 h-2 rounded-full"
-                      :class="store.wsConnected ? 'bg-emerald-400' : 'bg-zinc-300 dark:bg-zinc-600'"
+                      :style="{ backgroundColor: store.wsConnected ? 'var(--color-primary)' : 'var(--color-border)' }"
                     />
-                    <span class="text-xs font-medium" :class="store.wsConnected ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400 dark:text-zinc-500'">
+                    <span class="text-xs font-medium" :style="{ color: store.wsConnected ? 'var(--color-primary)' : 'var(--color-muted-foreground)' }">
                       Server {{ store.wsConnected ? 'Online' : 'Offline' }}
                     </span>
                   </div>
 
                   <div class="grid grid-cols-2 gap-4">
                     <div>
-                      <div class="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-0.5 font-medium">Provider</div>
-                      <div class="text-xs font-mono text-zinc-600 dark:text-zinc-300">{{ store.providerName || '—' }}</div>
+                      <div class="text-[10px] uppercase tracking-wider mb-0.5 font-medium" style="color: var(--color-muted-foreground)">Provider</div>
+                      <div class="text-xs font-mono" style="color: var(--color-foreground)">{{ store.providerName || '—' }}</div>
                     </div>
                     <div>
-                      <div class="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-0.5 font-medium">Model</div>
-                      <div class="text-xs font-mono text-zinc-600 dark:text-zinc-300">{{ store.modelName || '—' }}</div>
+                      <div class="text-[10px] uppercase tracking-wider mb-0.5 font-medium" style="color: var(--color-muted-foreground)">Model</div>
+                      <div class="text-xs font-mono" style="color: var(--color-foreground)">{{ store.modelName || '—' }}</div>
                     </div>
                     <div>
-                      <div class="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-0.5 font-medium">Mode</div>
-                      <div class="text-xs font-mono text-zinc-600 dark:text-zinc-300">{{ store.mode === 'agent' ? 'Agent' : 'Plan' }}</div>
+                      <div class="text-[10px] uppercase tracking-wider mb-0.5 font-medium" style="color: var(--color-muted-foreground)">Mode</div>
+                      <div class="text-xs font-mono" style="color: var(--color-foreground)">{{ store.mode === 'agent' ? 'Agent' : 'Plan' }}</div>
                     </div>
                     <div>
-                      <div class="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-0.5 font-medium">Auto-approve</div>
-                      <div class="text-xs font-mono text-zinc-600 dark:text-zinc-300">{{ store.autoApprove ? 'On' : 'Off' }}</div>
+                      <div class="text-[10px] uppercase tracking-wider mb-0.5 font-medium" style="color: var(--color-muted-foreground)">Auto-approve</div>
+                      <div class="text-xs font-mono" style="color: var(--color-foreground)">{{ store.autoApprove ? 'On' : 'Off' }}</div>
                     </div>
                   </div>
 
                   <div>
-                    <div class="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-0.5 font-medium">Workspace</div>
-                    <div class="text-xs font-mono text-zinc-500 dark:text-zinc-400 break-all">{{ store.pwd || '—' }}</div>
+                    <div class="text-[10px] uppercase tracking-wider mb-0.5 font-medium" style="color: var(--color-muted-foreground)">Workspace</div>
+                    <div class="text-xs font-mono break-all" style="color: var(--color-muted-foreground)">{{ store.pwd || '—' }}</div>
                   </div>
 
                   <div v-if="store.tokenInfo">
-                    <div class="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1 font-medium">Token Usage</div>
+                    <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">Token Usage</div>
                     <div class="flex items-center gap-2">
-                      <div class="flex-1 h-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+                      <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background-color: var(--color-muted)">
                         <div
                           class="h-full rounded-full transition-all"
-                          :class="store.tokenPercentage > 80 ? 'bg-red-400' : store.tokenPercentage > 50 ? 'bg-amber-400' : 'bg-emerald-400'"
-                          :style="{ width: store.tokenPercentage + '%' }"
+                          :style="{ width: store.tokenPercentage + '%', backgroundColor: store.tokenPercentage > 80 ? 'var(--color-destructive)' : store.tokenPercentage > 50 ? 'var(--color-warning-fg)' : 'var(--color-primary)' }"
                         />
                       </div>
-                      <span class="text-[10px] text-zinc-500 dark:text-zinc-400 font-mono">
+                      <span class="text-[10px] font-mono" style="color: var(--color-muted-foreground)">
                         {{ store.tokenInfo.total_tokens.toLocaleString() }}
                         <span v-if="store.tokenInfo.model_context_limit"> / {{ store.tokenInfo.model_context_limit.toLocaleString() }}</span>
                       </span>
@@ -343,9 +342,10 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                 <!-- Providers tab -->
                 <div v-if="activeTab === 'providers'">
                   <div class="flex items-center justify-between mb-3">
-                    <div class="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider font-medium">Providers</div>
+                    <div class="text-[10px] uppercase tracking-wider font-medium" style="color: var(--color-muted-foreground)">Providers</div>
                     <button
-                      class="px-2 py-1 text-[10px] bg-emerald-500 hover:bg-emerald-600 text-white rounded-md cursor-pointer transition-colors font-medium"
+                      class="px-2 py-1 text-[10px] text-white rounded-md cursor-pointer transition-colors font-medium"
+                      style="background-color: var(--color-primary)"
                       @click="startAddProvider"
                     >
                       + Add Provider
@@ -353,28 +353,29 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                   </div>
 
                   <!-- Add provider flow -->
-                  <div v-if="showAddProvider" class="mb-4 border border-zinc-200 dark:border-zinc-700 rounded-md overflow-hidden">
-                    <div class="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/60 border-b border-zinc-200 dark:border-zinc-700 flex items-center justify-between">
-                      <span class="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium uppercase tracking-wider">
+                  <div v-if="showAddProvider" class="mb-4 rounded-md overflow-hidden" style="border: 1px solid var(--color-border)">
+                    <div class="px-3 py-2 flex items-center justify-between" style="background-color: var(--color-muted); border-bottom: 1px solid var(--color-border)">
+                      <span class="text-[10px] font-medium uppercase tracking-wider" style="color: var(--color-muted-foreground)">
                         {{ addProviderStep === 'select' ? 'Select Provider' : addProviderStep === 'model' ? 'Select Model' : 'Enter API Key' }}
                       </span>
-                      <button class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer text-xs" @click="showAddProvider = false">✕</button>
+                      <button class="cursor-pointer text-xs" style="color: var(--color-muted-foreground)" @click="showAddProvider = false">✕</button>
                     </div>
                     <div class="p-3 max-h-48 overflow-y-auto">
                       <!-- Select provider -->
                       <div v-if="addProviderStep === 'select'">
-                        <div v-if="addLoading" class="text-center py-4 text-xs text-zinc-400 animate-pulse">Loading...</div>
+                        <div v-if="addLoading" class="text-center py-4 text-xs animate-pulse" style="color: var(--color-muted-foreground)">Loading...</div>
                         <div v-else class="space-y-1">
                           <button
                             v-for="p in addProviderList.filter(x => !configuredProviders.some(c => c.id === x.id))"
                             :key="p.id"
-                            class="w-full px-2.5 py-2 text-left rounded-md text-xs cursor-pointer transition-colors hover:bg-emerald-50 dark:hover:bg-emerald-500/10"
+                            class="w-full px-2.5 py-2 text-left rounded-md text-xs cursor-pointer transition-colors"
+                            style="color: var(--color-foreground)"
                             @click="selectAddProvider(p.id)"
                           >
-                            <span class="font-medium text-zinc-700 dark:text-zinc-200">{{ p.name }}</span>
-                            <span class="text-zinc-400 dark:text-zinc-500 ml-1.5 font-mono">{{ p.id }}</span>
+                            <span class="font-medium">{{ p.name }}</span>
+                            <span class="ml-1.5 font-mono" style="color: var(--color-muted-foreground)">{{ p.id }}</span>
                           </button>
-                          <div v-if="addProviderList.filter(x => !configuredProviders.some(c => c.id === x.id)).length === 0" class="text-center py-3 text-[10px] text-zinc-400">
+                          <div v-if="addProviderList.filter(x => !configuredProviders.some(c => c.id === x.id)).length === 0" class="text-center py-3 text-[10px]" style="color: var(--color-muted-foreground)">
                             All providers configured
                           </div>
                         </div>
@@ -382,17 +383,18 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       <!-- Select model -->
                       <div v-if="addProviderStep === 'model'">
                         <div class="flex items-center gap-1 mb-2">
-                          <button class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer" @click="addProviderStep = 'select'">
+                          <button class="cursor-pointer" style="color: var(--color-muted-foreground)" @click="addProviderStep = 'select'">
                             <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z" clip-rule="evenodd" /></svg>
                           </button>
-                          <span class="text-[10px] text-zinc-500">{{ addProviderInfo()?.name }}</span>
+                          <span class="text-[10px]" style="color: var(--color-muted-foreground)">{{ addProviderInfo()?.name }}</span>
                         </div>
-                        <div v-if="addLoading" class="text-center py-4 text-xs text-zinc-400 animate-pulse">Loading...</div>
+                        <div v-if="addLoading" class="text-center py-4 text-xs animate-pulse" style="color: var(--color-muted-foreground)">Loading...</div>
                         <div v-else class="space-y-1">
                           <button
                             v-for="m in addProviderModels"
                             :key="m.id"
-                            class="w-full px-2.5 py-1.5 text-left rounded-md text-xs cursor-pointer transition-colors hover:bg-emerald-50 dark:hover:bg-emerald-500/10 font-mono"
+                            class="w-full px-2.5 py-1.5 text-left rounded-md text-xs cursor-pointer transition-colors font-mono"
+                            style="color: var(--color-foreground)"
                             @click="selectAddModel(m.id)"
                           >
                             {{ m.id }}
@@ -402,15 +404,15 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       <!-- Enter API key -->
                       <div v-if="addProviderStep === 'apikey'" class="space-y-2">
                         <div class="flex items-center gap-1 mb-1">
-                          <button class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer" @click="addProviderStep = 'model'">
+                          <button class="cursor-pointer" style="color: var(--color-muted-foreground)" @click="addProviderStep = 'model'">
                             <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z" clip-rule="evenodd" /></svg>
                           </button>
-                          <span class="text-[10px] text-zinc-500 font-mono">{{ addSelectedProvider }} / {{ addSelectedModel }}</span>
+                          <span class="text-[10px] font-mono" style="color: var(--color-muted-foreground)">{{ addSelectedProvider }} / {{ addSelectedModel }}</span>
                         </div>
-                        <input v-model="addApiKey" type="password" placeholder="API Key" class="w-full px-2.5 py-1.5 text-xs font-mono bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md outline-none focus:border-emerald-400" @keydown.enter="submitAddProvider" />
-                        <input v-model="addBaseURL" type="text" placeholder="Base URL (optional)" class="w-full px-2.5 py-1.5 text-xs font-mono bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md outline-none focus:border-emerald-400" @keydown.enter="submitAddProvider" />
-                        <div v-if="addError" class="text-[10px] text-red-500">{{ addError }}</div>
-                        <button :disabled="addLoading || !addApiKey" class="w-full px-2.5 py-1.5 text-xs bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-md cursor-pointer transition-colors font-medium" @click="submitAddProvider">
+                        <input v-model="addApiKey" type="password" placeholder="API Key" class="w-full px-2.5 py-1.5 text-xs font-mono rounded-md outline-none" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-foreground)' }" @keydown.enter="submitAddProvider" />
+                        <input v-model="addBaseURL" type="text" placeholder="Base URL (optional)" class="w-full px-2.5 py-1.5 text-xs font-mono rounded-md outline-none" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-foreground)' }" @keydown.enter="submitAddProvider" />
+                        <div v-if="addError" class="text-[10px]" style="color: var(--color-destructive)">{{ addError }}</div>
+                        <button :disabled="addLoading || !addApiKey" class="w-full px-2.5 py-1.5 text-xs text-white rounded-md cursor-pointer transition-colors font-medium disabled:opacity-50" style="background-color: var(--color-primary)" @click="submitAddProvider">
                           {{ addLoading ? 'Saving...' : 'Add' }}
                         </button>
                       </div>
@@ -419,8 +421,8 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
 
                   <!-- Provider list -->
                   <div v-if="configuredProviders.length === 0" class="text-center py-6">
-                    <div class="text-xs text-zinc-400 dark:text-zinc-500 mb-1">No providers configured</div>
-                    <div class="text-[10px] text-zinc-400 dark:text-zinc-600">
+                    <div class="text-xs mb-1" style="color: var(--color-muted-foreground)">No providers configured</div>
+                    <div class="text-[10px]" style="color: var(--color-muted-foreground)">
                       Click "Add Provider" above to get started.
                     </div>
                   </div>
@@ -428,33 +430,36 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     <div
                       v-for="p in configuredProviders"
                       :key="p.id"
-                      class="flex items-center gap-3 px-3 py-2.5 rounded-md border border-zinc-200 dark:border-zinc-700/60 bg-white dark:bg-zinc-800/60"
+                      class="flex items-center gap-3 px-3 py-2.5 rounded-md"
+                      style="border: 1px solid var(--color-border); background-color: var(--color-surface)"
                     >
                       <span class="text-sm">🔑</span>
                       <div class="flex-1 min-w-0">
-                        <div class="text-xs font-medium text-zinc-700 dark:text-zinc-200 font-mono">{{ p.id }}</div>
-                        <div class="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono truncate">
+                        <div class="text-xs font-medium font-mono" style="color: var(--color-foreground)">{{ p.id }}</div>
+                        <div class="text-[10px] font-mono truncate" style="color: var(--color-muted-foreground)">
                           {{ p.api_key || '—' }}
                           <template v-if="p.base_url"> · {{ p.base_url }}</template>
                         </div>
                       </div>
                       <span
                         v-if="store.providerName === p.id"
-                        class="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                        class="text-[10px] px-1.5 py-0.5 rounded-full"
+                        style="background-color: rgba(255,132,0,0.1); color: var(--color-primary)"
                       >
                         active
                       </span>
                       <button
                         v-if="deleteConfirmId !== p.id"
-                        class="text-zinc-300 dark:text-zinc-600 hover:text-red-400 dark:hover:text-red-400 cursor-pointer transition-colors"
+                        class="cursor-pointer transition-colors"
+                        style="color: var(--color-muted-foreground)"
                         title="Remove provider"
                         @click="deleteConfirmId = p.id"
                       >
                         <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 10.23 1.482l.149-.022.841 10.518A2.75 2.75 0 007.596 19h4.807a2.75 2.75 0 002.742-2.53l.841-10.519.149.023a.75.75 0 00.23-1.482A41.03 41.03 0 0014 4.193V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4zM8.58 7.72a.75.75 0 00-1.5.06l.3 7.5a.75.75 0 101.5-.06l-.3-7.5zm4.34.06a.75.75 0 10-1.5-.06l-.3 7.5a.75.75 0 101.5.06l.3-7.5z" clip-rule="evenodd" /></svg>
                       </button>
                       <div v-else class="flex items-center gap-1">
-                        <button class="text-[10px] px-1.5 py-0.5 bg-red-500 text-white rounded cursor-pointer" @click="deleteProvider(p.id)">Delete</button>
-                        <button class="text-[10px] px-1.5 py-0.5 text-zinc-400 hover:text-zinc-600 cursor-pointer" @click="deleteConfirmId = ''">Cancel</button>
+                        <button class="text-[10px] px-1.5 py-0.5 text-white rounded cursor-pointer" style="background-color: var(--color-destructive)" @click="deleteProvider(p.id)">Delete</button>
+                        <button class="text-[10px] px-1.5 py-0.5 cursor-pointer" style="color: var(--color-muted-foreground)" @click="deleteConfirmId = ''">Cancel</button>
                       </div>
                     </div>
                   </div>
@@ -462,13 +467,13 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
 
                 <!-- MCP Servers tab -->
                 <div v-if="activeTab === 'mcp'">
-                  <div class="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-3 font-medium">MCP Servers</div>
-                  <div v-if="mcpLoading" class="text-center text-xs text-zinc-400 dark:text-zinc-500 py-6 animate-pulse">
+                  <div class="text-[10px] uppercase tracking-wider mb-3 font-medium" style="color: var(--color-muted-foreground)">MCP Servers</div>
+                  <div v-if="mcpLoading" class="text-center text-xs py-6 animate-pulse" style="color: var(--color-muted-foreground)">
                     Loading...
                   </div>
                   <div v-else-if="Object.keys(mcpServers).length === 0" class="text-center py-8">
-                    <div class="text-xs text-zinc-400 dark:text-zinc-500 mb-1">No MCP servers configured</div>
-                    <div class="text-[10px] text-zinc-400 dark:text-zinc-600">
+                    <div class="text-xs mb-1" style="color: var(--color-muted-foreground)">No MCP servers configured</div>
+                    <div class="text-[10px]" style="color: var(--color-muted-foreground)">
                       Edit <span class="font-mono">~/.jcode/config.json</span>
                     </div>
                   </div>
@@ -476,21 +481,23 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     <div
                       v-for="(info, name) in mcpServers"
                       :key="name"
-                      class="flex items-center gap-3 px-3 py-2.5 rounded-md border border-zinc-200 dark:border-zinc-700/60"
-                      :class="info.enabled
-                        ? 'bg-white dark:bg-zinc-800/60'
-                        : 'bg-zinc-50 dark:bg-zinc-800/30 opacity-60'"
+                      class="flex items-center gap-3 px-3 py-2.5 rounded-md"
+                      :style="{
+                        border: '1px solid var(--color-border)',
+                        backgroundColor: info.enabled ? 'var(--color-surface)' : 'var(--color-muted)',
+                        opacity: info.enabled ? 1 : 0.6,
+                      }"
                     >
                       <span class="text-sm">{{ serverIcon(info.type) }}</span>
                       <div class="flex-1 min-w-0">
-                        <div class="text-xs font-medium text-zinc-700 dark:text-zinc-200">{{ name }}</div>
-                        <div class="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono truncate">
+                        <div class="text-xs font-medium" style="color: var(--color-foreground)">{{ name }}</div>
+                        <div class="text-[10px] font-mono truncate" style="color: var(--color-muted-foreground)">
                           {{ info.type === 'sse' || info.type === 'http' ? info.url : info.command }}
                         </div>
                       </div>
                       <button
                         class="relative inline-flex h-5 w-9 items-center rounded-full cursor-pointer transition-colors shrink-0"
-                        :class="info.enabled ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-600'"
+                        :style="{ backgroundColor: info.enabled ? 'var(--color-primary)' : 'var(--color-border)' }"
                         @click="toggleMCP(String(name), !info.enabled)"
                         :title="info.enabled ? 'Disable' : 'Enable'"
                       >
@@ -505,19 +512,19 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
 
                 <!-- SSH tab -->
                 <div v-if="activeTab === 'ssh'">
-                  <div class="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-3 font-medium">SSH Environments</div>
+                  <div class="text-[10px] uppercase tracking-wider mb-3 font-medium" style="color: var(--color-muted-foreground)">SSH Environments</div>
 
                   <div class="mb-3">
-                    <div class="text-[10px] text-zinc-400 dark:text-zinc-500 mb-1">Current Environment</div>
-                    <div class="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-emerald-50 dark:bg-emerald-500/10 text-xs text-emerald-700 dark:text-emerald-400 font-medium">
-                      <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400" />
+                    <div class="text-[10px] mb-1" style="color: var(--color-muted-foreground)">Current Environment</div>
+                    <div class="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium" style="background-color: rgba(255,132,0,0.1); color: var(--color-primary)">
+                      <span class="w-1.5 h-1.5 rounded-full" style="background-color: var(--color-primary)" />
                       {{ sshCurrent }}
                     </div>
                   </div>
 
                   <div v-if="sshAliases.length === 0" class="text-center py-6">
-                    <div class="text-xs text-zinc-400 dark:text-zinc-500 mb-1">No SSH aliases configured</div>
-                    <div class="text-[10px] text-zinc-400 dark:text-zinc-600">
+                    <div class="text-xs mb-1" style="color: var(--color-muted-foreground)">No SSH aliases configured</div>
+                    <div class="text-[10px]" style="color: var(--color-muted-foreground)">
                       Add aliases to <span class="font-mono">~/.jcode/config.json</span>
                     </div>
                   </div>
@@ -525,19 +532,21 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     <div
                       v-for="alias in sshAliases"
                       :key="alias.name"
-                      class="flex items-center gap-3 px-3 py-2.5 rounded-md border border-zinc-200 dark:border-zinc-700/60 bg-white dark:bg-zinc-800/60"
+                      class="flex items-center gap-3 px-3 py-2.5 rounded-md"
+                      style="border: 1px solid var(--color-border); background-color: var(--color-surface)"
                     >
                       <span class="text-sm">🖥</span>
                       <div class="flex-1 min-w-0">
-                        <div class="text-xs font-medium text-zinc-700 dark:text-zinc-200">{{ alias.name }}</div>
-                        <div class="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono truncate">
+                        <div class="text-xs font-medium" style="color: var(--color-foreground)">{{ alias.name }}</div>
+                        <div class="text-[10px] font-mono truncate" style="color: var(--color-muted-foreground)">
                           {{ alias.addr }}
                           <template v-if="alias.path"> · {{ alias.path }}</template>
                         </div>
                       </div>
                       <span
                         v-if="sshCurrent === alias.name"
-                        class="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                        class="text-[10px] px-1.5 py-0.5 rounded-full"
+                        style="background-color: rgba(255,132,0,0.1); color: var(--color-primary)"
                       >
                         active
                       </span>
@@ -547,38 +556,38 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
 
                 <!-- Channels tab -->
                 <div v-if="activeTab === 'channels'">
-                  <div class="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-3 font-medium">Notification Channels</div>
+                  <div class="text-[10px] uppercase tracking-wider mb-3 font-medium" style="color: var(--color-muted-foreground)">Notification Channels</div>
 
                   <div v-if="!channelAvailable" class="text-center py-8">
-                    <div class="text-xs text-zinc-400 dark:text-zinc-500 mb-1">No channels configured</div>
-                    <div class="text-[10px] text-zinc-400 dark:text-zinc-600">
+                    <div class="text-xs mb-1" style="color: var(--color-muted-foreground)">No channels configured</div>
+                    <div class="text-[10px]" style="color: var(--color-muted-foreground)">
                       Set <span class="font-mono">channel.web_enabled: true</span> in <span class="font-mono">~/.jcode/config.json</span>
                     </div>
                   </div>
 
                   <div v-else class="space-y-4">
-                    <div class="px-4 py-3 rounded-md border border-zinc-200 dark:border-zinc-700/60 bg-white dark:bg-zinc-800/60">
+                    <div class="px-4 py-3 rounded-md" style="border: 1px solid var(--color-border); background-color: var(--color-surface)">
                       <div class="flex items-center justify-between mb-3">
                         <div class="flex items-center gap-2">
                           <span class="text-base">💬</span>
                           <div>
-                            <div class="text-xs font-medium text-zinc-700 dark:text-zinc-200">WeChat</div>
-                            <div class="text-[10px] text-zinc-400 dark:text-zinc-500">iLink Bot integration</div>
+                            <div class="text-xs font-medium" style="color: var(--color-foreground)">WeChat</div>
+                            <div class="text-[10px]" style="color: var(--color-muted-foreground)">iLink Bot integration</div>
                           </div>
                         </div>
                         <div class="flex items-center gap-1.5">
                           <span
                             class="w-1.5 h-1.5 rounded-full"
-                            :class="{
-                              'bg-emerald-400': channelState === 'enabled',
-                              'bg-amber-400': channelState === 'disabled' || channelState === 'scanning',
-                              'bg-zinc-300 dark:bg-zinc-600': channelState === 'none',
+                            :style="{
+                              backgroundColor: channelState === 'enabled' ? 'var(--color-primary)'
+                                : (channelState === 'disabled' || channelState === 'scanning') ? 'var(--color-warning-fg)'
+                                : 'var(--color-border)',
                             }"
                           />
-                          <span class="text-[10px] font-medium" :class="{
-                            'text-emerald-600 dark:text-emerald-400': channelState === 'enabled',
-                            'text-amber-600 dark:text-amber-400': channelState === 'disabled' || channelState === 'scanning',
-                            'text-zinc-400 dark:text-zinc-500': channelState === 'none',
+                          <span class="text-[10px] font-medium" :style="{
+                            color: channelState === 'enabled' ? 'var(--color-primary)'
+                              : (channelState === 'disabled' || channelState === 'scanning') ? 'var(--color-warning-fg)'
+                              : 'var(--color-muted-foreground)',
                           }">
                             {{ channelState === 'enabled' ? 'Connected' : channelState === 'disabled' ? 'Disconnected' : channelState === 'scanning' ? 'Scanning...' : 'Not configured' }}
                           </span>
@@ -586,15 +595,16 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       </div>
 
                       <div v-if="channelQRContent" class="flex flex-col items-center py-3">
-                        <canvas ref="qrCanvas" class="rounded-md border border-zinc-200 dark:border-zinc-700" />
-                        <div class="text-[10px] text-zinc-400 dark:text-zinc-500 mt-2">Scan with WeChat to connect</div>
+                        <canvas ref="qrCanvas" class="rounded-md" style="border: 1px solid var(--color-border)" />
+                        <div class="text-[10px] mt-2" style="color: var(--color-muted-foreground)">Scan with WeChat to connect</div>
                       </div>
 
                       <div class="flex gap-2 mt-2">
                         <button
                           v-if="channelState === 'none'"
                           :disabled="channelLoading"
-                          class="flex-1 px-3 py-1.5 text-xs rounded-md bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 cursor-pointer transition-colors font-medium"
+                          class="flex-1 px-3 py-1.5 text-xs rounded-md text-white disabled:opacity-50 cursor-pointer transition-colors font-medium"
+                          style="background-color: var(--color-primary)"
                           @click="channelLogin"
                         >
                           {{ channelLoading ? 'Loading...' : 'Connect' }}
@@ -602,7 +612,8 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                         <button
                           v-if="channelState === 'enabled' || channelState === 'disabled'"
                           :disabled="channelLoading"
-                          class="flex-1 px-3 py-1.5 text-xs rounded-md text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 disabled:opacity-50 cursor-pointer transition-colors font-medium"
+                          class="flex-1 px-3 py-1.5 text-xs rounded-md disabled:opacity-50 cursor-pointer transition-colors font-medium"
+                          style="color: var(--color-destructive)"
                           @click="channelLogout"
                         >
                           Disconnect
@@ -613,22 +624,24 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     <!-- Login reminder banner -->
                     <div
                       v-if="channelLoginReminder"
-                      class="px-4 py-3 rounded-md border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 flex items-start gap-2.5"
+                      class="px-4 py-3 rounded-md flex items-start gap-2.5"
+                      style="border: 1px solid var(--color-warning-fg); background-color: var(--color-warning-bg)"
                     >
                       <span class="text-sm shrink-0 mt-0.5">⚠️</span>
                       <div class="flex-1 min-w-0">
-                        <div class="text-xs font-medium text-amber-700 dark:text-amber-400">Send a message to activate</div>
-                        <div class="text-[10px] text-amber-600 dark:text-amber-400/80 mt-0.5 leading-relaxed">
+                        <div class="text-xs font-medium" style="color: var(--color-warning-fg)">Send a message to activate</div>
+                        <div class="text-[10px] mt-0.5 leading-relaxed" style="color: var(--color-warning-fg); opacity: 0.8">
                           Please send any message to the WeChat bot now to activate notifications. Once activated, you can receive notifications for 24 hours.
                         </div>
                       </div>
                       <button
-                        class="text-amber-400 hover:text-amber-600 dark:text-amber-500 dark:hover:text-amber-300 shrink-0 cursor-pointer"
+                        class="shrink-0 cursor-pointer"
+                        style="color: var(--color-warning-fg)"
                         @click="channelLoginReminder = false"
                       >✕</button>
                     </div>
 
-                    <div class="text-[10px] text-zinc-400 dark:text-zinc-500 leading-relaxed">
+                    <div class="text-[10px] leading-relaxed" style="color: var(--color-muted-foreground)">
                       When connected, jcode sends approval requests and task completion notifications to your WeChat.
                     </div>
                   </div>
@@ -636,24 +649,25 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
 
                 <!-- Shortcuts tab -->
                 <div v-if="activeTab === 'shortcuts'">
-                  <div class="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-3 font-medium">Keyboard Shortcuts</div>
+                  <div class="text-[10px] uppercase tracking-wider mb-3 font-medium" style="color: var(--color-muted-foreground)">Keyboard Shortcuts</div>
                   <div class="space-y-1.5">
                     <div
                       v-for="s in shortcuts"
                       :key="s.keys"
-                      class="flex items-center justify-between py-1.5 px-2 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                      class="flex items-center justify-between py-1.5 px-2 rounded"
                     >
-                      <span class="text-xs text-zinc-600 dark:text-zinc-300">{{ s.desc }}</span>
-                      <kbd class="px-2 py-0.5 text-[10px] font-mono bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded text-zinc-500 dark:text-zinc-400">{{ s.keys }}</kbd>
+                      <span class="text-xs" style="color: var(--color-foreground)">{{ s.desc }}</span>
+                      <kbd class="px-2 py-0.5 text-[10px] font-mono rounded" style="background-color: var(--color-secondary); border: 1px solid var(--color-border); color: var(--color-muted-foreground)">{{ s.keys }}</kbd>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div class="px-5 py-3 border-t border-zinc-200 dark:border-zinc-800 flex justify-end">
+            <div class="px-5 py-3 flex justify-end" style="border-top: 1px solid var(--color-border)">
               <button
-                class="px-3 py-1.5 text-xs text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer transition-colors font-medium"
+                class="px-3 py-1.5 text-xs cursor-pointer transition-colors font-medium"
+                style="color: var(--color-muted-foreground)"
                 @click="emit('close')">
                 Done
               </button>

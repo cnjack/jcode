@@ -174,41 +174,45 @@ function formatArgs(args: string): string {
       class="rounded-md border overflow-hidden transition-colors"
       :class="tool.status === 'running'
         ? 'border-violet-300 dark:border-violet-500/30 bg-violet-50/30 dark:bg-violet-500/5'
-        : 'border-zinc-200 dark:border-zinc-700/60 bg-zinc-50/50 dark:bg-zinc-800/30'"
+        : ''"
+      :style="tool.status !== 'running' ? 'border-color: var(--color-border); background: var(--color-surface)' : ''"
     >
       <button
-        class="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-zinc-100/50 dark:hover:bg-zinc-700/30 transition-colors cursor-pointer"
+        class="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors cursor-pointer hover:opacity-80"
+        style="background: transparent"
         @click="subagentExpanded = !subagentExpanded"
       >
         <span class="text-[10px]" :class="{
           'text-violet-500 dark:text-violet-400 animate-pulse': tool.status === 'running',
-          'text-emerald-600 dark:text-emerald-400': tool.status === 'done',
-          'text-red-500 dark:text-red-400': tool.status === 'error',
+        }" :style="{
+          color: tool.status === 'done' ? 'var(--color-primary)' : tool.status === 'error' ? 'var(--color-destructive)' : undefined
         }">
           <template v-if="tool.status === 'running'">◈</template>
           <template v-else-if="tool.status === 'done'">✓</template>
           <template v-else>✗</template>
         </span>
         <span class="text-[10px] font-semibold text-violet-500 dark:text-violet-400 uppercase tracking-wider">Subagent</span>
-        <span class="font-mono text-xs text-zinc-600 dark:text-zinc-300">{{ subagentName() }}</span>
+        <span class="font-mono text-xs" style="color: var(--color-foreground)">{{ subagentName() }}</span>
         <span
           v-if="tool.status === 'running'"
           class="text-[10px] text-violet-400 dark:text-violet-400 animate-pulse"
         >working…</span>
         <span
           v-if="tool.children?.length"
-          class="ml-auto text-[10px] text-zinc-400 dark:text-zinc-500 tabular-nums"
+          class="ml-auto text-[10px] tabular-nums"
+          style="color: var(--color-muted-foreground)"
         >{{ tool.children.length }} calls</span>
         <svg
-          class="w-3 h-3 text-zinc-400 dark:text-zinc-500 transition-transform shrink-0"
+          class="w-3 h-3 transition-transform shrink-0"
           :class="{ 'rotate-180': subagentExpanded }"
+          style="color: var(--color-muted-foreground)"
           viewBox="0 0 20 20" fill="currentColor"
         >
           <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
         </svg>
       </button>
 
-      <div v-if="subagentExpanded" class="border-t border-zinc-200/60 dark:border-zinc-700/40">
+      <div v-if="subagentExpanded" style="border-top: 1px solid var(--color-border)">
         <div
           v-if="tool.children?.length"
           class="px-2 py-1 max-h-80 overflow-y-auto"
@@ -220,18 +224,18 @@ function formatArgs(args: string): string {
             :depth="(depth ?? 0) + 1"
           />
         </div>
-        <div v-else-if="tool.status === 'running'" class="px-3 py-3 text-xs text-zinc-400 dark:text-zinc-500 animate-pulse">
+        <div v-else-if="tool.status === 'running'" class="px-3 py-3 text-xs animate-pulse" style="color: var(--color-muted-foreground)">
           Starting subagent…
         </div>
 
-        <div v-if="tool.output" class="px-3 py-2 border-t border-zinc-200/60 dark:border-zinc-700/40">
-          <div class="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">Result</div>
-          <div class="text-xs font-mono text-zinc-500 dark:text-zinc-400 whitespace-pre-wrap max-h-48 overflow-y-auto">
+        <div v-if="tool.output" class="px-3 py-2" style="border-top: 1px solid var(--color-border)">
+          <div class="text-[10px] uppercase tracking-wider mb-1" style="color: var(--color-muted-foreground)">Result</div>
+          <div class="text-xs font-mono whitespace-pre-wrap max-h-48 overflow-y-auto" style="color: var(--color-muted-foreground)">
             {{ truncate(tool.output, 800) }}
           </div>
         </div>
         <div v-if="tool.error" class="px-3 py-2 border-t border-red-200 dark:border-red-500/20">
-          <div class="text-xs text-red-500 dark:text-red-400 font-mono whitespace-pre-wrap">{{ tool.error }}</div>
+          <div class="text-xs font-mono whitespace-pre-wrap" style="color: var(--color-destructive)">{{ tool.error }}</div>
         </div>
       </div>
     </div>
@@ -240,13 +244,14 @@ function formatArgs(args: string): string {
   <!-- Regular tool call -->
   <div v-else class="my-1">
     <button
-      class="tool-trigger w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-left transition-colors cursor-pointer"
+      class="tool-trigger w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-left transition-colors cursor-pointer border"
       :class="[
-        expanded
-          ? 'bg-zinc-100 dark:bg-zinc-800/80 border border-zinc-200/80 dark:border-zinc-700/50'
-          : 'hover:bg-zinc-100 dark:hover:bg-zinc-800/60 border border-transparent',
+        expanded ? '' : 'border-transparent',
         tool.status === 'error' ? 'border-red-200/60 dark:border-red-500/20' : ''
       ]"
+      :style="expanded
+        ? 'background: var(--color-muted); border-color: var(--color-border)'
+        : ''"
       @click="expanded = !expanded"
     >
       <!-- Status indicator -->
@@ -255,14 +260,13 @@ function formatArgs(args: string): string {
       }">{{ displayIcon }}</span>
 
       <!-- Tool title -->
-      <span class="text-xs font-medium" :class="{
-        'text-zinc-500 dark:text-zinc-400': tool.status !== 'error',
-        'text-red-500 dark:text-red-400': tool.status === 'error',
+      <span class="text-xs font-medium" :style="{
+        color: tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-muted-foreground)',
       }">
         <template v-if="tool.status === 'running'">
           <span class="inline-flex items-center gap-1">
             {{ displayTitle }}
-            <span class="text-[10px] text-zinc-400 dark:text-zinc-500 animate-pulse">…</span>
+            <span class="text-[10px] animate-pulse" style="color: var(--color-muted-foreground)">…</span>
           </span>
         </template>
         <template v-else>
@@ -274,9 +278,9 @@ function formatArgs(args: string): string {
       <span
         v-if="displaySubtitle && tool.status !== 'running'"
         class="text-xs font-mono truncate min-w-0 flex-1"
-        :class="isContextTool
-          ? 'text-zinc-400 dark:text-zinc-500'
-          : 'text-emerald-600/80 dark:text-emerald-400/70'"
+        :style="isContextTool
+          ? 'color: var(--color-muted-foreground)'
+          : 'color: var(--color-primary)'"
       >{{ displaySubtitle }}</span>
 
       <!-- Diff stats badge for edit tools -->
@@ -284,8 +288,8 @@ function formatArgs(args: string): string {
         v-if="renderType === 'diff' && diffData.added + diffData.deleted > 0 && tool.status !== 'running'"
         class="text-[10px] font-mono tabular-nums shrink-0"
       >
-        <span v-if="diffData.added" class="text-emerald-600 dark:text-emerald-400">+{{ diffData.added }}</span>
-        <span v-if="diffData.added && diffData.deleted" class="text-zinc-400 dark:text-zinc-500 mx-0.5">/</span>
+        <span v-if="diffData.added" style="color: var(--color-primary)">+{{ diffData.added }}</span>
+        <span v-if="diffData.added && diffData.deleted" class="mx-0.5" style="color: var(--color-muted-foreground)">/</span>
         <span v-if="diffData.deleted" class="text-red-500 dark:text-red-400">-{{ diffData.deleted }}</span>
       </span>
 
@@ -297,8 +301,9 @@ function formatArgs(args: string): string {
 
       <!-- Expand arrow -->
       <svg
-        class="w-3 h-3 text-zinc-400 dark:text-zinc-500 ml-auto transition-transform shrink-0"
+        class="w-3 h-3 ml-auto transition-transform shrink-0"
         :class="{ 'rotate-180': expanded }"
+        style="color: var(--color-muted-foreground)"
         viewBox="0 0 20 20" fill="currentColor"
       >
         <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
@@ -308,21 +313,22 @@ function formatArgs(args: string): string {
     <!-- ═══════ Expanded: Terminal (execute) ═══════ -->
     <div
       v-if="expanded && renderType === 'terminal'"
-      class="mt-1 rounded border overflow-hidden"
+      class="mt-1 overflow-hidden"
       :class="tool.status === 'error'
-        ? 'border-red-300/60 dark:border-red-500/30'
-        : 'border-zinc-200 dark:border-zinc-700/60'"
+        ? 'border border-red-300/60 dark:border-red-500/30'
+        : ''"
+      :style="{ borderRadius: 'var(--radius-xl)', border: tool.status !== 'error' ? '1px solid var(--color-border)' : undefined }"
     >
       <!-- Terminal header -->
-      <div class="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800/80 border-b border-zinc-200 dark:border-zinc-700/60">
+      <div class="flex items-center gap-1.5 px-3 py-1.5" style="background: var(--color-muted); border-bottom: 1px solid var(--color-border)">
         <span class="w-2 h-2 rounded-full bg-red-400/80"></span>
         <span class="w-2 h-2 rounded-full bg-yellow-400/80"></span>
         <span class="w-2 h-2 rounded-full bg-green-400/80"></span>
-        <span class="text-[10px] text-zinc-400 dark:text-zinc-500 ml-1 font-mono">terminal</span>
+        <span class="text-[10px] ml-1 font-mono" style="color: var(--color-muted-foreground)">terminal</span>
       </div>
       <!-- Terminal body -->
-      <div class="bg-zinc-950 dark:bg-[#0d1117] px-3 py-2 font-mono text-xs max-h-72 overflow-y-auto">
-        <div class="text-emerald-400 dark:text-emerald-400">
+      <div class="bg-[#0d1117] px-3 py-2 font-mono text-xs max-h-72 overflow-y-auto">
+        <div style="color: var(--color-primary)">
           <span class="text-zinc-500 select-none">$ </span>
           <span class="text-zinc-200">{{ terminalCommand }}</span>
         </div>
@@ -335,49 +341,51 @@ function formatArgs(args: string): string {
     <!-- ═══════ Expanded: File Viewer (read/write) ═══════ -->
     <div
       v-if="expanded && renderType === 'file-viewer'"
-      class="mt-1 rounded border overflow-hidden"
+      class="mt-1 overflow-hidden"
       :class="tool.status === 'error'
-        ? 'border-red-300/60 dark:border-red-500/30'
-        : 'border-zinc-200 dark:border-zinc-700/60'"
+        ? 'border border-red-300/60 dark:border-red-500/30'
+        : ''"
+      :style="{ borderRadius: 'var(--radius-xl)', border: tool.status !== 'error' ? '1px solid var(--color-border)' : undefined }"
     >
       <!-- File header -->
-      <div class="flex items-center gap-2 px-3 py-1.5 bg-zinc-50 dark:bg-zinc-800/80 border-b border-zinc-200 dark:border-zinc-700/60">
+      <div class="flex items-center gap-2 px-3 py-1.5" style="background: var(--color-muted); border-bottom: 1px solid var(--color-border)">
         <span class="text-[11px]">{{ tool.name === 'write' ? '✏️' : '📄' }}</span>
-        <span class="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono truncate">{{ fileDir }}/</span>
-        <span class="text-xs text-zinc-700 dark:text-zinc-300 font-mono font-medium">{{ fileName }}</span>
+        <span class="text-[10px] font-mono truncate" style="color: var(--color-muted-foreground)">{{ fileDir }}/</span>
+        <span class="text-xs font-mono font-medium" style="color: var(--color-foreground)">{{ fileName }}</span>
       </div>
       <!-- File body -->
       <div class="bg-white dark:bg-[#0d1117] max-h-72 overflow-y-auto">
         <table v-if="fileLines.length" class="w-full text-xs font-mono border-collapse">
           <tr v-for="line in fileLines" :key="line.num" class="hover:bg-zinc-100/50 dark:hover:bg-zinc-800/30">
-            <td class="text-right select-none text-zinc-300 dark:text-zinc-600 pr-3 pl-2 py-0 w-1 align-top whitespace-nowrap">{{ line.num }}</td>
-            <td class="text-zinc-700 dark:text-zinc-300 pr-3 py-0 whitespace-pre-wrap break-all">{{ line.text }}</td>
+            <td class="text-right select-none pr-3 pl-2 py-0 w-1 align-top whitespace-nowrap" style="color: color-mix(in srgb, var(--color-muted-foreground), transparent 40%)">{{ line.num }}</td>
+            <td class="pr-3 py-0 whitespace-pre-wrap break-all" style="color: var(--color-foreground)">{{ line.text }}</td>
           </tr>
         </table>
-        <div v-else-if="tool.error" class="px-3 py-2 text-xs text-red-500 dark:text-red-400 font-mono whitespace-pre-wrap">{{ tool.error }}</div>
-        <div v-else-if="tool.status === 'running'" class="px-3 py-3 text-xs text-zinc-400 dark:text-zinc-500 animate-pulse">Loading…</div>
-        <div v-else class="px-3 py-2 text-xs text-zinc-400 dark:text-zinc-500 italic">No content</div>
+        <div v-else-if="tool.error" class="px-3 py-2 text-xs font-mono whitespace-pre-wrap" style="color: var(--color-destructive)">{{ tool.error }}</div>
+        <div v-else-if="tool.status === 'running'" class="px-3 py-3 text-xs animate-pulse" style="color: var(--color-muted-foreground)">Loading…</div>
+        <div v-else class="px-3 py-2 text-xs italic" style="color: var(--color-muted-foreground)">No content</div>
       </div>
     </div>
 
     <!-- ═══════ Expanded: Diff Viewer (edit/multi_edit) ═══════ -->
     <div
       v-if="expanded && renderType === 'diff'"
-      class="mt-1 rounded border overflow-hidden"
+      class="mt-1 overflow-hidden"
       :class="tool.status === 'error'
-        ? 'border-red-300/60 dark:border-red-500/30'
-        : 'border-zinc-200 dark:border-zinc-700/60'"
+        ? 'border border-red-300/60 dark:border-red-500/30'
+        : ''"
+      :style="{ borderRadius: 'var(--radius-xl)', border: tool.status !== 'error' ? '1px solid var(--color-border)' : undefined }"
     >
       <!-- Diff header -->
-      <div class="flex items-center gap-2 px-3 py-1.5 bg-zinc-50 dark:bg-zinc-800/80 border-b border-zinc-200 dark:border-zinc-700/60">
+      <div class="flex items-center gap-2 px-3 py-1.5" style="background: var(--color-muted); border-bottom: 1px solid var(--color-border)">
         <span class="text-[11px]">✏️</span>
-        <span class="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono truncate">{{ fileDir }}/</span>
-        <span class="text-xs text-zinc-700 dark:text-zinc-300 font-mono font-medium">{{ fileName }}</span>
+        <span class="text-[10px] font-mono truncate" style="color: var(--color-muted-foreground)">{{ fileDir }}/</span>
+        <span class="text-xs font-mono font-medium" style="color: var(--color-foreground)">{{ fileName }}</span>
         <span class="ml-auto text-[10px] font-mono tabular-nums shrink-0">
-          <span v-if="diffData.added" class="text-emerald-600 dark:text-emerald-400">+{{ diffData.added }}</span>
-          <span v-if="diffData.added && diffData.deleted" class="text-zinc-400 dark:text-zinc-500 mx-0.5">/</span>
+          <span v-if="diffData.added" style="color: var(--color-primary)">+{{ diffData.added }}</span>
+          <span v-if="diffData.added && diffData.deleted" class="mx-0.5" style="color: var(--color-muted-foreground)">/</span>
           <span v-if="diffData.deleted" class="text-red-500 dark:text-red-400">-{{ diffData.deleted }}</span>
-          <span v-if="diffData.isCreate" class="text-emerald-600 dark:text-emerald-400 italic">new file</span>
+          <span v-if="diffData.isCreate" class="italic" style="color: var(--color-primary)">new file</span>
         </span>
       </div>
       <!-- Diff body -->
@@ -396,8 +404,8 @@ function formatArgs(args: string): string {
                 :class="{
                   'text-red-300 dark:text-red-500/60': section.type === 'del',
                   'text-emerald-300 dark:text-emerald-500/60': section.type === 'add',
-                  'text-zinc-300 dark:text-zinc-600': section.type === 'context',
                 }"
+                :style="section.type === 'context' ? 'color: color-mix(in srgb, var(--color-muted-foreground), transparent 40%)' : ''"
               >{{ li + 1 }}</td>
               <td class="px-1 py-0 w-4 select-none font-bold"
                 :class="{
@@ -409,19 +417,19 @@ function formatArgs(args: string): string {
                 :class="{
                   'text-red-700 dark:text-red-300': section.type === 'del',
                   'text-emerald-700 dark:text-emerald-300': section.type === 'add',
-                  'text-zinc-700 dark:text-zinc-300': section.type === 'context',
                 }"
+                :style="section.type === 'context' ? 'color: var(--color-foreground)' : ''"
               >{{ line }}</td>
             </tr>
           </template>
         </table>
-        <div v-else-if="tool.error" class="px-3 py-2 text-xs text-red-500 dark:text-red-400 font-mono whitespace-pre-wrap">{{ tool.error }}</div>
-        <div v-else-if="tool.status === 'running'" class="px-3 py-3 text-xs text-zinc-400 dark:text-zinc-500 animate-pulse">Applying…</div>
-        <div v-else class="px-3 py-2 text-xs text-zinc-400 dark:text-zinc-500 italic">No changes</div>
+        <div v-else-if="tool.error" class="px-3 py-2 text-xs font-mono whitespace-pre-wrap" style="color: var(--color-destructive)">{{ tool.error }}</div>
+        <div v-else-if="tool.status === 'running'" class="px-3 py-3 text-xs animate-pulse" style="color: var(--color-muted-foreground)">Applying…</div>
+        <div v-else class="px-3 py-2 text-xs italic" style="color: var(--color-muted-foreground)">No changes</div>
       </div>
       <!-- Diff result -->
-      <div v-if="tool.output && !tool.error" class="px-3 py-1.5 border-t border-zinc-200/60 dark:border-zinc-700/40 bg-zinc-50/50 dark:bg-zinc-800/40">
-        <div class="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono">{{ truncate(tool.output, 200) }}</div>
+      <div v-if="tool.output && !tool.error" class="px-3 py-1.5" style="border-top: 1px solid var(--color-border); background: var(--color-surface)">
+        <div class="text-[10px] font-mono" style="color: var(--color-muted-foreground)">{{ truncate(tool.output, 200) }}</div>
       </div>
     </div>
 
@@ -429,23 +437,21 @@ function formatArgs(args: string): string {
     <div
       v-if="expanded && renderType === 'generic'"
       class="ml-3 mt-0.5 pl-3 border-l-2 text-xs font-mono py-2 max-h-64 overflow-y-auto transition-all"
-      :class="tool.status === 'error'
-        ? 'border-red-300 dark:border-red-500/30'
-        : 'border-zinc-200 dark:border-zinc-700/60'"
+      :style="'border-color: ' + (tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-border)')"
     >
       <div class="mb-1.5">
-        <span class="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">args</span>
-        <div class="text-zinc-500 dark:text-zinc-400 mt-0.5">{{ formatArgs(tool.args) }}</div>
+        <span class="text-[10px] uppercase tracking-wider" style="color: var(--color-muted-foreground)">args</span>
+        <div class="mt-0.5" style="color: var(--color-muted-foreground)">{{ formatArgs(tool.args) }}</div>
       </div>
       <div v-if="tool.output" class="mt-2">
-        <span class="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">output</span>
-        <div class="text-zinc-500 dark:text-zinc-400 whitespace-pre-wrap mt-0.5">
+        <span class="text-[10px] uppercase tracking-wider" style="color: var(--color-muted-foreground)">output</span>
+        <div class="whitespace-pre-wrap mt-0.5" style="color: var(--color-muted-foreground)">
           {{ truncate(tool.output, 500) }}
         </div>
       </div>
       <div v-if="tool.error" class="mt-2">
-        <span class="text-[10px] text-red-400 dark:text-red-500 uppercase tracking-wider">error</span>
-        <div class="text-red-500 dark:text-red-400 whitespace-pre-wrap mt-0.5">{{ tool.error }}</div>
+        <span class="text-[10px] uppercase tracking-wider" style="color: var(--color-destructive)">error</span>
+        <div class="whitespace-pre-wrap mt-0.5" style="color: var(--color-destructive)">{{ tool.error }}</div>
       </div>
     </div>
   </div>

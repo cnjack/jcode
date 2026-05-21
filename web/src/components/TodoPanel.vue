@@ -5,22 +5,23 @@ const store = useChatStore()
 </script>
 
 <template>
-  <div v-if="store.todos.length > 0" class="border-t border-zinc-200 dark:border-zinc-800/80 bg-zinc-50/80 dark:bg-zinc-900/60 backdrop-blur-sm px-5 py-2.5 max-h-40 overflow-y-auto">
+  <div v-if="store.todos.length > 0" class="border-t backdrop-blur-sm px-5 py-2.5 max-h-40 overflow-y-auto" style="border-color: var(--color-border); background-color: var(--color-muted)">
     <div class="max-w-3xl mx-auto">
-      <div class="text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1.5 font-semibold">Tasks</div>
+      <div class="text-[10px] uppercase tracking-wider mb-1.5 font-semibold" style="color: var(--color-muted-foreground)">Tasks</div>
       <div v-for="todo in store.todos" :key="todo.id" class="flex items-center gap-2 py-0.5">
         <span class="text-[10px] shrink-0"
-          :class="{
-            'text-emerald-600 dark:text-emerald-400': todo.status === 'completed',
-            'text-amber-500 dark:text-amber-400': todo.status === 'in_progress',
-            'text-zinc-400 dark:text-zinc-600': todo.status === 'pending' || todo.status === 'cancelled',
+          :style="{
+            color: todo.status === 'completed' ? 'var(--color-success-fg)'
+              : todo.status === 'in_progress' ? 'var(--color-warning-fg)'
+              : 'var(--color-muted-foreground)',
           }">
           {{ todo.status === 'completed' ? '✓' : todo.status === 'in_progress' ? '●' : todo.status === 'cancelled' ? '✗' : '○' }}
         </span>
         <span class="text-xs"
-          :class="todo.status === 'completed' || todo.status === 'cancelled'
-            ? 'text-zinc-400 dark:text-zinc-600 line-through'
-            : 'text-zinc-600 dark:text-zinc-300'">
+          :style="{
+            color: (todo.status === 'completed' || todo.status === 'cancelled') ? 'var(--color-muted-foreground)' : 'var(--color-foreground)',
+            textDecoration: (todo.status === 'completed' || todo.status === 'cancelled') ? 'line-through' : 'none',
+          }">
           {{ todo.title }}
         </span>
       </div>
