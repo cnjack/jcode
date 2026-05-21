@@ -280,84 +280,56 @@ function formatArgs(args: string): string {
 
   <!-- Regular tool call -->
   <div v-else class="my-1">
+    <!-- Trigger: only shown when collapsed -->
     <button
-      class="tool-trigger w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-left transition-colors cursor-pointer border"
-      :class="[
-        expanded ? '' : 'border-transparent',
-        tool.status === 'error' ? 'border-red-200/60 dark:border-red-500/20' : ''
-      ]"
-      :style="expanded
-        ? 'background: var(--color-muted); border-color: var(--color-border)'
-        : ''"
-      @click="expanded = !expanded"
+      v-if="!expanded"
+      class="tool-trigger w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-left transition-colors cursor-pointer border border-transparent"
+      :class="tool.status === 'error' ? 'border-red-200/60 dark:border-red-500/20' : ''"
+      @click="expanded = true"
     >
-      <!-- Status indicator -->
-      <span class="text-[11px] shrink-0" :class="{
-        'animate-pulse': tool.status === 'running',
-      }">{{ displayIcon }}</span>
-
-      <!-- Tool title -->
-      <span class="text-xs font-medium" :style="{
-        color: tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-muted-foreground)',
-      }">
+      <span class="text-[11px] shrink-0" :class="{ 'animate-pulse': tool.status === 'running' }">{{ displayIcon }}</span>
+      <span class="text-xs font-medium" :style="{ color: tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-muted-foreground)' }">
         <template v-if="tool.status === 'running'">
-          <span class="inline-flex items-center gap-1">
-            {{ displayTitle }}
-            <span class="text-[10px] animate-pulse" style="color: var(--color-muted-foreground)">…</span>
-          </span>
+          <span class="inline-flex items-center gap-1">{{ displayTitle }}<span class="text-[10px] animate-pulse" style="color: var(--color-muted-foreground)">…</span></span>
         </template>
-        <template v-else>
-          {{ displayTitle }}
-        </template>
+        <template v-else>{{ displayTitle }}</template>
       </span>
-
-      <!-- Subtitle: file path, command, pattern, etc. -->
       <span
         v-if="displaySubtitle && tool.status !== 'running'"
         class="text-xs font-mono truncate min-w-0 flex-1"
-        :style="isContextTool
-          ? 'color: var(--color-muted-foreground)'
-          : 'color: var(--color-primary)'"
+        :style="isContextTool ? 'color: var(--color-muted-foreground)' : 'color: var(--color-primary)'"
       >{{ displaySubtitle }}</span>
-
-      <!-- Diff stats badge for edit tools -->
-      <span
-        v-if="renderType === 'diff' && diffData.added + diffData.deleted > 0 && tool.status !== 'running'"
-        class="text-[10px] font-mono tabular-nums shrink-0"
-      >
+      <span v-if="renderType === 'diff' && diffData.added + diffData.deleted > 0 && tool.status !== 'running'" class="text-[10px] font-mono tabular-nums shrink-0">
         <span v-if="diffData.added" style="color: var(--color-primary)">+{{ diffData.added }}</span>
         <span v-if="diffData.added && diffData.deleted" class="mx-0.5" style="color: var(--color-muted-foreground)">/</span>
         <span v-if="diffData.deleted" class="text-red-500 dark:text-red-400">-{{ diffData.deleted }}</span>
       </span>
-
-      <!-- Error badge -->
-      <span
-        v-if="tool.status === 'error'"
-        class="text-[9px] font-semibold uppercase tracking-wider text-red-500 dark:text-red-400 bg-red-50 dark:bg-red-500/10 px-1.5 py-0.5 rounded-md"
-      >error</span>
-
-      <!-- Expand arrow -->
-      <svg
-        class="w-3 h-3 ml-auto transition-transform shrink-0"
-        :class="{ 'rotate-180': expanded }"
-        style="color: var(--color-muted-foreground)"
-        viewBox="0 0 20 20" fill="currentColor"
-      >
+      <span v-if="tool.status === 'error'" class="text-[9px] font-semibold uppercase tracking-wider text-red-500 dark:text-red-400 bg-red-50 dark:bg-red-500/10 px-1.5 py-0.5 rounded-md">error</span>
+      <svg class="w-3 h-3 ml-auto shrink-0" style="color: var(--color-muted-foreground)" viewBox="0 0 20 20" fill="currentColor">
         <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
       </svg>
     </button>
 
-    <!-- ═══════ Expanded: Terminal (execute) ═══════ -->
+    <!-- Expanded: title hidden, content only, hover shows collapse button -->
     <div
-      v-if="expanded && renderType === 'terminal'"
-      class="mt-1 overflow-hidden"
-      :class="tool.status === 'error'
-        ? 'border border-red-300/60 dark:border-red-500/30'
-        : ''"
+      v-else
+      class="relative group overflow-hidden"
+      :class="tool.status === 'error' ? 'border border-red-300/60 dark:border-red-500/30' : ''"
       :style="{ borderRadius: 'var(--radius-xl)', border: tool.status !== 'error' ? '1px solid var(--color-border)' : undefined }"
     >
-      <!-- Terminal body -->
-      <div class="bg-[#fafafa] dark:bg-[#0d1117] px-3 py-2 font-mono text-xs max-h-72 overflow-y-auto">
+      <!-- Hover-reveal collapse button -->
+      <button
+        @click="expanded = false"
+        class="absolute top-1 right-1 z-10 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded-sm"
+        style="color: var(--color-muted-foreground)"
+      >
+        <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M14.77 12.79a.75.75 0 01-1.06-.02L10 8.832l-3.71 3.938a.75.75 0 11-1.08-1.04l4.25-4.5a.75.75 0 011.08 0l4.25 4.5a.75.75 0 01-.02 1.06z" clip-rule="evenodd" />
+        </svg>
+      </button>
+
+      <!-- ═══════ Terminal (execute) ═══════ -->
+      <div v-if="renderType === 'terminal'" class="bg-[#fafafa] dark:bg-[#0d1117] px-3 py-2 font-mono text-xs max-h-72 overflow-y-auto">
         <div>
           <span class="text-zinc-400 dark:text-zinc-500 select-none">$ </span>
           <span class="text-zinc-800 dark:text-zinc-200">{{ terminalCommand }}</span>
@@ -366,19 +338,9 @@ function formatArgs(args: string): string {
         <div v-if="tool.error" class="text-red-600 dark:text-red-400 mt-1 whitespace-pre-wrap">{{ tool.error }}</div>
         <div v-if="tool.status === 'running'" class="text-zinc-400 dark:text-zinc-500 mt-1 animate-pulse">running…</div>
       </div>
-    </div>
 
-    <!-- ═══════ Expanded: File Viewer (read/write) ═══════ -->
-    <div
-      v-if="expanded && renderType === 'file-viewer'"
-      class="mt-1 overflow-hidden"
-      :class="tool.status === 'error'
-        ? 'border border-red-300/60 dark:border-red-500/30'
-        : ''"
-      :style="{ borderRadius: 'var(--radius-xl)', border: tool.status !== 'error' ? '1px solid var(--color-border)' : undefined }"
-    >
-      <!-- File body -->
-      <div class="bg-white dark:bg-[#0d1117] max-h-72 overflow-y-auto">
+      <!-- ═══════ File Viewer (read/write) ═══════ -->
+      <div v-else-if="renderType === 'file-viewer'" class="bg-white dark:bg-[#0d1117] max-h-72 overflow-y-auto">
         <table v-if="fileLines.length" class="w-full text-xs font-mono border-collapse">
           <tr v-for="line in fileLines" :key="line.num" class="hover:bg-zinc-100/50 dark:hover:bg-zinc-800/30">
             <td class="text-right select-none pr-3 pl-2 py-0 w-1 align-top whitespace-nowrap" style="color: color-mix(in srgb, var(--color-muted-foreground), transparent 40%)">{{ line.num }}</td>
@@ -389,19 +351,9 @@ function formatArgs(args: string): string {
         <div v-else-if="tool.status === 'running'" class="px-3 py-3 text-xs animate-pulse" style="color: var(--color-muted-foreground)">Loading…</div>
         <div v-else class="px-3 py-2 text-xs italic" style="color: var(--color-muted-foreground)">No content</div>
       </div>
-    </div>
 
-    <!-- ═══════ Expanded: Diff Viewer (edit/multi_edit) ═══════ -->
-    <div
-      v-if="expanded && renderType === 'diff'"
-      class="mt-1 overflow-hidden"
-      :class="tool.status === 'error'
-        ? 'border border-red-300/60 dark:border-red-500/30'
-        : ''"
-      :style="{ borderRadius: 'var(--radius-xl)', border: tool.status !== 'error' ? '1px solid var(--color-border)' : undefined }"
-    >
-      <!-- Diff body -->
-      <div class="bg-white dark:bg-[#0d1117] max-h-72 overflow-y-auto">
+      <!-- ═══════ Diff Viewer (edit/multi_edit) ═══════ -->
+      <div v-else-if="renderType === 'diff'" class="bg-white dark:bg-[#0d1117] max-h-72 overflow-y-auto">
         <table v-if="diffData.sections.length" class="w-full text-xs font-mono border-collapse">
           <template v-for="(section, si) in diffData.sections" :key="si">
             <tr
@@ -413,23 +365,14 @@ function formatArgs(args: string): string {
               }"
             >
               <td class="text-right select-none pr-2 pl-2 py-0 w-1 align-top whitespace-nowrap"
-                :class="{
-                  'text-red-300 dark:text-red-500/60': section.type === 'del',
-                  'text-emerald-300 dark:text-emerald-500/60': section.type === 'add',
-                }"
+                :class="{ 'text-red-300 dark:text-red-500/60': section.type === 'del', 'text-emerald-300 dark:text-emerald-500/60': section.type === 'add' }"
                 :style="section.type === 'context' ? 'color: color-mix(in srgb, var(--color-muted-foreground), transparent 40%)' : ''"
               >{{ li + 1 }}</td>
               <td class="px-1 py-0 w-4 select-none font-bold"
-                :class="{
-                  'text-red-400 dark:text-red-400': section.type === 'del',
-                  'text-emerald-500 dark:text-emerald-400': section.type === 'add',
-                }"
+                :class="{ 'text-red-400 dark:text-red-400': section.type === 'del', 'text-emerald-500 dark:text-emerald-400': section.type === 'add' }"
               >{{ section.type === 'del' ? '-' : section.type === 'add' ? '+' : ' ' }}</td>
               <td class="pr-3 py-0 whitespace-pre-wrap break-all"
-                :class="{
-                  'text-red-700 dark:text-red-300': section.type === 'del',
-                  'text-emerald-700 dark:text-emerald-300': section.type === 'add',
-                }"
+                :class="{ 'text-red-700 dark:text-red-300': section.type === 'del', 'text-emerald-700 dark:text-emerald-300': section.type === 'add' }"
                 :style="section.type === 'context' ? 'color: var(--color-foreground)' : ''"
               >{{ line }}</td>
             </tr>
@@ -438,26 +381,14 @@ function formatArgs(args: string): string {
         <div v-else-if="tool.error" class="px-3 py-2 text-xs font-mono whitespace-pre-wrap" style="color: var(--color-destructive)">{{ tool.error }}</div>
         <div v-else-if="tool.status === 'running'" class="px-3 py-3 text-xs animate-pulse" style="color: var(--color-muted-foreground)">Applying…</div>
         <div v-else class="px-3 py-2 text-xs italic" style="color: var(--color-muted-foreground)">No changes</div>
+        <div v-if="tool.output && !tool.error" class="px-3 py-1 text-[10px] font-mono" style="background: var(--color-surface); color: var(--color-muted-foreground)">{{ truncate(tool.output, 200) }}</div>
       </div>
-      <!-- Diff result -->
-      <div v-if="tool.output && !tool.error" class="px-3 py-1 text-[10px] font-mono" style="background: var(--color-surface); color: var(--color-muted-foreground)">{{ truncate(tool.output, 200) }}</div>
-    </div>
 
-    <!-- ═══════ Expanded: Search Viewer (grep) ═══════ -->
-    <div
-      v-if="expanded && renderType === 'search'"
-      class="mt-1 overflow-hidden"
-      :style="{ borderRadius: 'var(--radius-xl)', border: '1px solid var(--color-border)' }"
-    >
-      <!-- Results -->
-      <div class="px-3 py-2 max-h-72 overflow-y-auto" style="background: var(--color-surface)">
+      <!-- ═══════ Search Viewer (grep) ═══════ -->
+      <div v-else-if="renderType === 'search'" class="px-3 py-2 max-h-72 overflow-y-auto" style="background: var(--color-surface)">
         <div v-if="searchArgsDisplay" class="text-[11px] font-mono whitespace-pre-wrap mb-2" style="color: var(--color-muted-foreground)">{{ searchArgsDisplay }}</div>
         <template v-if="searchResults.lines.length">
-          <div
-            v-for="(line, i) in searchResults.lines"
-            :key="i"
-            class="py-0.5"
-          >
+          <div v-for="(line, i) in searchResults.lines" :key="i" class="py-0.5">
             <div v-if="line.isRef" class="flex items-baseline gap-1.5 text-[10px] font-mono">
               <span style="color: var(--color-primary)">{{ line.file }}</span>
               <span style="color: var(--color-muted-foreground)">:{{ line.lineNum }}</span>
@@ -470,27 +401,23 @@ function formatArgs(args: string): string {
         <div v-else class="py-1 text-xs italic" style="color: var(--color-muted-foreground)">No results</div>
         <div v-if="searchResults.count !== null" class="mt-1.5 text-[10px] font-mono" style="color: var(--color-muted-foreground)">({{ searchResults.count }} matches found)</div>
       </div>
-    </div>
 
-    <!-- ═══════ Expanded: Generic fallback ═══════ -->
-    <div
-      v-if="expanded && renderType === 'generic'"
-      class="ml-3 mt-0.5 pl-3 border-l-2 text-xs font-mono py-2 max-h-64 overflow-y-auto transition-all"
-      :style="'border-color: ' + (tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-border)')"
-    >
-      <div class="mb-1.5">
-        <span class="text-[10px] uppercase tracking-wider" style="color: var(--color-muted-foreground)">args</span>
-        <div class="mt-0.5" style="color: var(--color-muted-foreground)">{{ formatArgs(tool.args) }}</div>
-      </div>
-      <div v-if="tool.output" class="mt-2">
-        <span class="text-[10px] uppercase tracking-wider" style="color: var(--color-muted-foreground)">output</span>
-        <div class="whitespace-pre-wrap mt-0.5" style="color: var(--color-muted-foreground)">
-          {{ truncate(tool.output, 500) }}
+      <!-- ═══════ Generic fallback ═══════ -->
+      <div v-else class="ml-3 pl-3 border-l-2 text-xs font-mono py-2 max-h-64 overflow-y-auto"
+        :style="'border-color: ' + (tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-border)')"
+      >
+        <div class="mb-1.5">
+          <span class="text-[10px] uppercase tracking-wider" style="color: var(--color-muted-foreground)">args</span>
+          <div class="mt-0.5" style="color: var(--color-muted-foreground)">{{ formatArgs(tool.args) }}</div>
         </div>
-      </div>
-      <div v-if="tool.error" class="mt-2">
-        <span class="text-[10px] uppercase tracking-wider" style="color: var(--color-destructive)">error</span>
-        <div class="whitespace-pre-wrap mt-0.5" style="color: var(--color-destructive)">{{ tool.error }}</div>
+        <div v-if="tool.output" class="mt-2">
+          <span class="text-[10px] uppercase tracking-wider" style="color: var(--color-muted-foreground)">output</span>
+          <div class="whitespace-pre-wrap mt-0.5" style="color: var(--color-muted-foreground)">{{ truncate(tool.output, 500) }}</div>
+        </div>
+        <div v-if="tool.error" class="mt-2">
+          <span class="text-[10px] uppercase tracking-wider" style="color: var(--color-destructive)">error</span>
+          <div class="whitespace-pre-wrap mt-0.5" style="color: var(--color-destructive)">{{ tool.error }}</div>
+        </div>
       </div>
     </div>
   </div>
