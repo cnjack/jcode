@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Menu, SquareTerminal, FileDiff, FolderOpen, PanelRight, Search } from 'lucide-vue-next'
+import { Menu, SquareTerminal, FileDiff, FolderOpen, Search } from 'lucide-vue-next'
 import { useChatStore } from '@/stores/chat'
 
-type PanelType = 'terminal' | 'diff' | 'files' | 'right-panel'
+type PanelType = 'terminal' | 'files' | 'changes'
 
 const store = useChatStore()
 
@@ -41,10 +41,9 @@ const sessionSubtitle = computed(() => {
 })
 
 const panelButtons = [
-  { panel: 'terminal' as PanelType, icon: SquareTerminal },
-  { panel: 'diff' as PanelType, icon: FileDiff },
-  { panel: 'files' as PanelType, icon: FolderOpen },
-  { panel: 'right-panel' as PanelType, icon: PanelRight },
+  { panel: 'terminal' as PanelType, icon: SquareTerminal, label: 'Terminal' },
+  { panel: 'files' as PanelType, icon: FolderOpen, label: 'Files' },
+  { panel: 'changes' as PanelType, icon: FileDiff, label: 'Changes' },
 ]
 </script>
 
@@ -78,7 +77,8 @@ const panelButtons = [
           :key="btn.panel"
           class="icon-btn"
           :class="{ active: activePanel === btn.panel }"
-          :aria-label="`Toggle ${btn.panel}`"
+          :aria-label="`Toggle ${btn.label}`"
+          :title="btn.label"
           @click="emit('toggle-panel', btn.panel)"
         >
           <component :is="btn.icon" :size="18" />

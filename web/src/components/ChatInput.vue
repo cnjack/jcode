@@ -269,13 +269,13 @@ watch(() => store.isRunning, (running) => {
 
 <template>
   <div ref="containerRef" class="chat-input-wrapper">
+    <div class="chat-input-separator" />
     <div class="chat-input-container">
-      <div class="chat-input-card">
-        <!-- Slash command menu -->
-        <div
-          v-if="showSlashMenu && filteredSlashCommands.length > 0"
-          class="slash-menu"
-        >
+      <!-- Slash command menu -->
+      <div
+        v-if="showSlashMenu && filteredSlashCommands.length > 0"
+        class="slash-menu"
+      >
           <button
             v-for="(cmd, i) in filteredSlashCommands"
             :key="cmd.name"
@@ -319,10 +319,10 @@ watch(() => store.isRunning, (running) => {
             class="hidden"
             @change="handleImageSelect"
           />
-        </div>
+      </div>
 
-        <!-- Toolbar -->
-        <div class="toolbar">
+      <!-- Toolbar -->
+      <div class="toolbar">
           <div class="toolbar-left">
             <!-- Paperclip / attach -->
             <button
@@ -473,7 +473,6 @@ watch(() => store.isRunning, (running) => {
           </div>
         </div>
       </div>
-    </div>
 
     <!-- Manage Models Dialog -->
     <Teleport to="body">
@@ -547,28 +546,25 @@ watch(() => store.isRunning, (running) => {
 
 <style scoped>
 .chat-input-wrapper {
-  padding: 6px 14px 14px;
+  padding: 0;
   background: var(--color-background);
   position: relative;
+}
+
+.chat-input-separator {
+  height: 1px;
+  background: color-mix(in srgb, var(--color-border) 50%, transparent);
 }
 
 .chat-input-container {
   max-width: 48rem;
   margin: 0 auto;
-}
-
-.chat-input-card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 16px;
-  padding: 0;
-  position: relative;
-  overflow: hidden;
+  padding: 12px 20px 14px;
 }
 
 .textarea-area {
-  padding: 14px 16px 8px;
-  min-height: 70px;
+  padding: 0 0 8px;
+  min-height: 48px;
 }
 
 .textarea-area textarea {
@@ -640,8 +636,7 @@ watch(() => store.isRunning, (running) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
-  border-top: 1px solid var(--color-border);
+  padding: 4px 0 0;
   gap: 8px;
 }
 
@@ -919,8 +914,8 @@ watch(() => store.isRunning, (running) => {
 .slash-menu {
   position: absolute;
   bottom: 100%;
-  left: 12px;
-  right: 12px;
+  left: 0;
+  right: 0;
   margin-bottom: 8px;
   z-index: 30;
   padding: 6px 0;

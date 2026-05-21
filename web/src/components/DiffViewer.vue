@@ -102,9 +102,9 @@ onMounted(fetchDiff)
       </div>
     </div>
 
-    <div class="flex flex-1 min-h-0">
+    <div class="flex flex-col flex-1 min-h-0">
       <!-- File list -->
-      <div class="w-48 border-r border-zinc-200 dark:border-zinc-800 overflow-y-auto shrink-0">
+      <div class="border-b border-zinc-200 dark:border-zinc-800 overflow-y-auto shrink-0 max-h-[30%]">
         <div v-if="entries.length === 0 && !loading" class="text-center text-[11px] text-zinc-400 dark:text-zinc-500 py-6">
           No changes
         </div>
@@ -127,6 +127,10 @@ onMounted(fetchDiff)
             {{ statusBadge(entry.status).label }}
           </span>
           <span class="text-[11px] font-mono truncate">{{ entry.file.split('/').pop() }}</span>
+          <span class="text-[9px] font-mono ml-auto shrink-0">
+            <span class="text-emerald-600 dark:text-emerald-400">+{{ entry.additions }}</span>
+            <span class="text-red-500 dark:text-red-400 ml-0.5">-{{ entry.deletions }}</span>
+          </span>
         </button>
       </div>
 
