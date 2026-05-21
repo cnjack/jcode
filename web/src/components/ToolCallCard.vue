@@ -440,9 +440,7 @@ function formatArgs(args: string): string {
         <div v-else class="px-3 py-2 text-xs italic" style="color: var(--color-muted-foreground)">No changes</div>
       </div>
       <!-- Diff result -->
-      <div v-if="tool.output && !tool.error" class="px-3 py-1.5" style="border-top: 1px solid var(--color-border); background: var(--color-surface)">
-        <div class="text-[10px] font-mono" style="color: var(--color-muted-foreground)">{{ truncate(tool.output, 200) }}</div>
-      </div>
+      <div v-if="tool.output && !tool.error" class="px-3 py-1 text-[10px] font-mono" style="background: var(--color-surface); color: var(--color-muted-foreground)">{{ truncate(tool.output, 200) }}</div>
     </div>
 
     <!-- ═══════ Expanded: Search Viewer (grep) ═══════ -->
@@ -451,37 +449,27 @@ function formatArgs(args: string): string {
       class="mt-1 overflow-hidden"
       :style="{ borderRadius: 'var(--radius-xl)', border: '1px solid var(--color-border)' }"
     >
-      <!-- Args -->
-      <div v-if="searchArgsDisplay" class="px-3 py-1.5" style="border-bottom: 1px solid var(--color-border); background: var(--color-surface)">
-        <div class="text-[9px] font-semibold uppercase tracking-wider mb-1" style="color: var(--color-muted-foreground)">ARGS</div>
-        <div class="text-[11px] font-mono whitespace-pre-wrap" style="color: var(--color-muted-foreground)">{{ searchArgsDisplay }}</div>
-      </div>
       <!-- Results -->
-      <div class="max-h-72 overflow-y-auto" style="background: var(--color-surface)">
+      <div class="px-3 py-2 max-h-72 overflow-y-auto" style="background: var(--color-surface)">
+        <div v-if="searchArgsDisplay" class="text-[11px] font-mono whitespace-pre-wrap mb-2" style="color: var(--color-muted-foreground)">{{ searchArgsDisplay }}</div>
         <template v-if="searchResults.lines.length">
           <div
             v-for="(line, i) in searchResults.lines"
             :key="i"
-            class="px-3 py-1.5"
-            :style="{ borderBottom: i < searchResults.lines.length - 1 ? '1px solid var(--color-border)' : 'none' }"
+            class="py-0.5"
           >
-            <div v-if="line.isRef" class="flex items-baseline gap-1.5 text-[10px] font-mono mb-0.5">
+            <div v-if="line.isRef" class="flex items-baseline gap-1.5 text-[10px] font-mono">
               <span style="color: var(--color-primary)">{{ line.file }}</span>
               <span style="color: var(--color-muted-foreground)">:{{ line.lineNum }}</span>
             </div>
             <div class="text-xs font-mono whitespace-pre-wrap" style="color: var(--color-foreground)">{{ line.content }}</div>
           </div>
         </template>
-        <div v-else-if="tool.status === 'running'" class="px-3 py-3 text-xs animate-pulse" style="color: var(--color-muted-foreground)">Searching…</div>
-        <div v-else-if="tool.error" class="px-3 py-2 text-xs font-mono whitespace-pre-wrap" style="color: var(--color-destructive)">{{ tool.error }}</div>
-        <div v-else class="px-3 py-2 text-xs italic" style="color: var(--color-muted-foreground)">No results</div>
+        <div v-else-if="tool.status === 'running'" class="py-1 text-xs animate-pulse" style="color: var(--color-muted-foreground)">Searching…</div>
+        <div v-else-if="tool.error" class="py-1 text-xs font-mono whitespace-pre-wrap" style="color: var(--color-destructive)">{{ tool.error }}</div>
+        <div v-else class="py-1 text-xs italic" style="color: var(--color-muted-foreground)">No results</div>
+        <div v-if="searchResults.count !== null" class="mt-1.5 text-[10px] font-mono" style="color: var(--color-muted-foreground)">({{ searchResults.count }} matches found)</div>
       </div>
-      <!-- Footer count -->
-      <div
-        v-if="searchResults.count !== null"
-        class="px-3 py-1.5 text-[10px] font-mono"
-        style="border-top: 1px solid var(--color-border); background: var(--color-muted); color: var(--color-muted-foreground)"
-      >({{ searchResults.count }} matches found)</div>
     </div>
 
     <!-- ═══════ Expanded: Generic fallback ═══════ -->
