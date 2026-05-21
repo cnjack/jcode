@@ -731,7 +731,8 @@ func (a *acpAgent) LoadSession(ctx context.Context, params acp.LoadSessionReques
 	}
 
 	// Reconstruct full message history (including tool calls/results).
-	history := session.ReconstructHistory(entries)
+	resumeState := session.ReconstructState(entries)
+	history := session.PruneOldToolOutputs(resumeState.History, 2)
 
 	sess, err := a.buildAgentSession(ctx, cfg, pwd, params.SessionId, rec, history)
 	if err != nil {
