@@ -130,7 +130,6 @@ function formatDate(ts: string): string {
   flex-shrink: 0;
   position: relative;
   background: var(--color-sidebar-bg);
-  border-right: 1px solid var(--color-border);
 }
 
 .sidebar-header {
@@ -306,7 +305,6 @@ function formatDate(ts: string): string {
 
 .sidebar-footer {
   padding: 10px 12px;
-  border-top: 1px solid var(--color-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
