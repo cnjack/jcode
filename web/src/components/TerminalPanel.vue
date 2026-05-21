@@ -183,6 +183,10 @@ function cleanup() {
 
 onMounted(initTerminal)
 onUnmounted(cleanup)
+
+const emit = defineEmits<{
+  close: []
+}>()
 </script>
 
 <template>
@@ -196,14 +200,26 @@ onUnmounted(cleanup)
           :style="{ backgroundColor: connected ? 'var(--color-primary)' : 'var(--color-border)' }"
         />
       </div>
-      <button
-        class="text-[10px] cursor-pointer transition-colors font-medium"
-        style="color: var(--color-muted-foreground)"
-        @click="reconnect"
-        title="New terminal"
-      >
-        + New
-      </button>
+      <div class="flex items-center gap-2">
+        <button
+          class="text-[10px] cursor-pointer transition-colors font-medium"
+          style="color: var(--color-muted-foreground)"
+          @click="reconnect"
+          title="New terminal"
+        >
+          + New
+        </button>
+        <button
+          class="w-5 h-5 flex items-center justify-center rounded cursor-pointer transition-colors"
+          style="color: var(--color-muted-foreground)"
+          @click="emit('close')"
+          title="Close terminal"
+        >
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
     </div>
 
     <!-- xterm container -->

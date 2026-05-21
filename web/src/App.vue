@@ -337,7 +337,7 @@ function startResize(e: MouseEvent) {
         >
           <div class="absolute top-[3px] left-1/2 -translate-x-1/2 w-8 h-1 rounded-full transition-colors" style="background: var(--color-border)" />
         </div>
-        <TerminalPanel v-if="bottomPanel === 'terminal'" />
+        <TerminalPanel v-if="bottomPanel === 'terminal'" @close="bottomPanel = 'none'" />
       </div>
     </main>
 

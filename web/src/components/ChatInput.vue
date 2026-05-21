@@ -269,8 +269,7 @@ watch(() => store.isRunning, (running) => {
 
 <template>
   <div ref="containerRef" class="chat-input-wrapper">
-    <div class="chat-input-separator" />
-    <div class="chat-input-container">
+    <div class="chat-input-card">
       <!-- Slash command menu -->
       <div
         v-if="showSlashMenu && filteredSlashCommands.length > 0"
@@ -546,25 +545,28 @@ watch(() => store.isRunning, (running) => {
 
 <style scoped>
 .chat-input-wrapper {
-  padding: 0;
+  padding: 12px 24px 16px;
   background: var(--color-background);
   position: relative;
 }
 
-.chat-input-separator {
-  height: 1px;
-  background: color-mix(in srgb, var(--color-border) 50%, transparent);
-}
-
-.chat-input-container {
+.chat-input-card {
   max-width: 48rem;
   margin: 0 auto;
-  padding: 12px 20px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  padding: 16px 20px 12px;
+  background: var(--color-surface);
+  transition: border-color 0.2s;
+}
+
+.chat-input-card:focus-within {
+  border-color: color-mix(in srgb, var(--color-foreground) 30%, transparent);
 }
 
 .textarea-area {
-  padding: 0 0 8px;
-  min-height: 48px;
+  padding: 0 0 12px;
+  min-height: 72px;
 }
 
 .textarea-area textarea {
@@ -574,10 +576,10 @@ watch(() => store.isRunning, (running) => {
   outline: none;
   resize: none;
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.6;
   color: var(--color-foreground);
-  min-height: 40px;
-  max-height: 160px;
+  min-height: 56px;
+  max-height: 200px;
   font-family: var(--font-sans);
 }
 
@@ -636,7 +638,8 @@ watch(() => store.isRunning, (running) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 0 0;
+  padding: 10px 0 0;
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
   gap: 8px;
 }
 
