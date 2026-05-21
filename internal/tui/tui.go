@@ -14,8 +14,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/rivo/uniseg"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/rivo/uniseg"
 
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/session"
@@ -118,7 +118,8 @@ type Model struct {
 	approvalWorkerName  string // Non-empty for teammate approval
 	approvalWorkerColor string // Teammate color
 	approvalMode        ApprovalMode
-	approvalSelected    int // 0=Approve, 1=ApproveAll, 2=Reject
+	approvalSelected    int                      // 0=Approve, 1=ApproveAll, 2=Reject
+	approvalQueue       []ToolApprovalRequestMsg // queued requests when dialog is already active
 
 	envLabel  string
 	agentMode AgentMode
@@ -594,64 +595,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			case "enter", " ":
 				switch m.approvalSelected {
 				case 0: // Approve once
-					m.approvalPending = false
-					if m.approvalRespChan != nil {
-						m.approvalRespChan <- ToolApprovalResponse{Approved: true, Mode: ModeManual}
-					}
+					m.resolveApproval(ToolApprovalResponse{Approved: true, Mode: ModeManual})
 				case 1: // Approve all
-					m.approvalPending = false
 					m.approvalMode = ModeAuto
-					if m.approvalRespChan != nil {
-						m.approvalRespChan <- ToolApprovalResponse{Approved: true, Mode: ModeAuto}
-					}
+					m.resolveApproval(ToolApprovalResponse{Approved: true, Mode: ModeAuto})
 					if m.OnApprovalModeChange != nil {
 						m.OnApprovalModeChange(true)
 					}
 				case 2: // Reject
-					m.approvalPending = false
-					if m.approvalRespChan != nil {
-						m.approvalRespChan <- ToolApprovalResponse{Approved: false, Mode: m.approvalMode}
-					}
 					m.lines = append(m.lines, textLine(fmt.Sprintf("   %s %s — user denied this operation",
 						toolErrorStyle.Render("⚠ Rejected:"),
 						toolNameStyle.Render(m.approvalToolName))))
+					m.resolveApproval(ToolApprovalResponse{Approved: false, Mode: m.approvalMode})
 				}
-				m.textarea.Focus()
-				m.refreshViewport()
 				return m, tea.Batch(cmds...)
 			case "y", "Y":
 				// Event: ApproveOnce - approve current only, stay in MANUAL mode
-				m.approvalPending = false
-				if m.approvalRespChan != nil {
-					m.approvalRespChan <- ToolApprovalResponse{Approved: true, Mode: ModeManual}
-				}
-				m.textarea.Focus()
-				m.refreshViewport()
+				m.resolveApproval(ToolApprovalResponse{Approved: true, Mode: ModeManual})
 				return m, tea.Batch(cmds...)
 			case "a", "A":
-				m.approvalPending = false
 				m.approvalMode = ModeAuto
-				if m.approvalRespChan != nil {
-					m.approvalRespChan <- ToolApprovalResponse{Approved: true, Mode: ModeAuto}
-				}
+				m.resolveApproval(ToolApprovalResponse{Approved: true, Mode: ModeAuto})
 				if m.OnApprovalModeChange != nil {
 					m.OnApprovalModeChange(true)
 				}
-				m.textarea.Focus()
-				m.refreshViewport()
 				return m, tea.Batch(cmds...)
 			case "n", "N", "esc":
 				// Event: Reject - deny the operation
-				m.approvalPending = false
-				if m.approvalRespChan != nil {
-					m.approvalRespChan <- ToolApprovalResponse{Approved: false, Mode: m.approvalMode}
-				}
-				// Show rejection notice in chat view
 				m.lines = append(m.lines, textLine(fmt.Sprintf("   %s %s — user denied this operation",
 					toolErrorStyle.Render("⚠ Rejected:"),
 					toolNameStyle.Render(m.approvalToolName))))
-				m.textarea.Focus()
-				m.refreshViewport()
+				m.resolveApproval(ToolApprovalResponse{Approved: false, Mode: m.approvalMode})
 				return m, tea.Batch(cmds...)
 			}
 			return m, tea.Batch(cmds...)
@@ -2117,16 +2091,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		}
 
 	case ToolApprovalRequestMsg:
-		m.approvalPending = true
-		m.approvalToolName = msg.Name
-		m.approvalToolArgs = msg.Args
-		m.approvalRespChan = msg.Resp
-		m.approvalIsExternal = msg.IsExternal
-		m.approvalWorkerName = msg.WorkerName
-		m.approvalWorkerColor = msg.WorkerColor
-		m.approvalSelected = 0 // Default to "Approve"
-		m.textarea.Blur()
-		m.refreshViewport()
+		if m.approvalPending {
+			// Already showing a dialog — queue this request instead of overwriting.
+			m.approvalQueue = append(m.approvalQueue, msg)
+		} else {
+			m.showApproval(msg)
+		}
 
 	case SubagentStartMsg:
 		m.thinking = true
@@ -2721,6 +2691,53 @@ func (m *Model) refreshViewport() {
 		m.viewport.SetHeight(m.calcViewportHeight())
 		m.viewport.SetContent(m.renderContent())
 		m.viewport.GotoBottom()
+	}
+}
+
+// showApproval activates the approval dialog for a single request.
+func (m *Model) showApproval(msg ToolApprovalRequestMsg) {
+	m.approvalPending = true
+	m.approvalToolName = msg.Name
+	m.approvalToolArgs = msg.Args
+	m.approvalRespChan = msg.Resp
+	m.approvalIsExternal = msg.IsExternal
+	m.approvalWorkerName = msg.WorkerName
+	m.approvalWorkerColor = msg.WorkerColor
+	m.approvalSelected = 0 // Default to "Approve"
+	m.textarea.Blur()
+	m.refreshViewport()
+}
+
+// resolveApproval responds to the current approval dialog and, if there are
+// queued requests, immediately shows the next one. When the user selects
+// "Approve All" (ModeAuto), all queued requests are auto-approved at once.
+func (m *Model) resolveApproval(resp ToolApprovalResponse) {
+	m.approvalPending = false
+	if m.approvalRespChan != nil {
+		m.approvalRespChan <- resp
+	}
+
+	// If user chose "Approve All", auto-approve everything in the queue.
+	if resp.Mode == ModeAuto {
+		for _, queued := range m.approvalQueue {
+			if queued.Resp != nil {
+				queued.Resp <- ToolApprovalResponse{Approved: true, Mode: ModeAuto}
+			}
+		}
+		m.approvalQueue = nil
+		m.textarea.Focus()
+		m.refreshViewport()
+		return
+	}
+
+	// Show next queued approval, or restore input focus.
+	if len(m.approvalQueue) > 0 {
+		next := m.approvalQueue[0]
+		m.approvalQueue = m.approvalQueue[1:]
+		m.showApproval(next)
+	} else {
+		m.textarea.Focus()
+		m.refreshViewport()
 	}
 }
 

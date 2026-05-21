@@ -440,10 +440,22 @@ func (s *interactiveState) handleResume(uuid string) {
 		return
 	}
 	st := session.ReconstructState(entries)
-	s.history = st.History
+	s.history = session.PruneOldToolOutputs(st.History, 2)
 	s.approvalState.SetSessionApproval(false)
 	s.rec.SetUUID(uuid)
 	s.p.Send(tui.SessionResumedMsg{UUID: uuid, Entries: tui.ConvertSessionEntries(entries)})
+
+	// Restore stored system prompt for KV-cache-friendly resume.
+	if st.SystemPrompt != "" {
+		s.systemPrompt = st.SystemPrompt
+		envDiff := prompts.BuildEnvDiff(st.EnvInfo, s.platform, s.pwd, s.env.Exec.Label(), s.envInfo)
+		if envDiff != "" {
+			s.history = append(s.history, &schema.Message{
+				Role:    schema.System,
+				Content: envDiff,
+			})
+		}
+	}
 
 	if st.Plan != nil {
 		switch st.Plan.Status {
@@ -991,6 +1003,12 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	}
 	st.ag = ag
 
+	// Record the system prompt and environment snapshot for KV-cache-friendly resume.
+	if rec != nil {
+		envSnapshot := prompts.SerializeEnvInfo(platform, pwd, "local", envInfo)
+		rec.RecordSystemPrompt(systemPrompt, envSnapshot)
+	}
+
 	env.OnEnvChange = func(envLabel string, isLocal bool, envErr error) {
 		if envErr != nil {
 			p.Send(tui.SSHStatusMsg{Success: false, Err: envErr})
@@ -1031,10 +1049,24 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 			return fmt.Errorf("cannot load session: %w", loadErr)
 		}
 		resumeState := session.ReconstructState(entries)
-		initialHistory = resumeState.History
+		initialHistory = session.PruneOldToolOutputs(resumeState.History, 2)
 		initialResumeUUID = resumeUUID
 		initialResumeEntries = tui.ConvertSessionEntries(entries)
 		hasPrompt = false
+
+		// Restore stored system prompt for KV-cache-friendly resume.
+		if resumeState.SystemPrompt != "" {
+			systemPrompt = resumeState.SystemPrompt
+			st.systemPrompt = systemPrompt
+			// Inject environment diff as an additional system message.
+			envDiff := prompts.BuildEnvDiff(resumeState.EnvInfo, platform, pwd, "local", envInfo)
+			if envDiff != "" {
+				initialHistory = append(initialHistory, &schema.Message{
+					Role:    schema.System,
+					Content: envDiff,
+				})
+			}
+		}
 
 		if resumeState.Plan != nil {
 			switch resumeState.Plan.Status {

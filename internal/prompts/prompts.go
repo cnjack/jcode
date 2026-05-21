@@ -143,3 +143,67 @@ func loadAgentsMd(pwd string) string {
 	}
 	return content
 }
+
+// SerializeEnvInfo produces a stable string representation of environment info
+// for storage in session entries. The format is simple key=value lines.
+func SerializeEnvInfo(platform, pwd, envLabel string, envInfo *utils.EnvInfo) string {
+	var sb strings.Builder
+	sb.WriteString("platform=" + platform + "\n")
+	sb.WriteString("pwd=" + pwd + "\n")
+	sb.WriteString("date=" + time.Now().Format("2006-01-02") + "\n")
+	sb.WriteString("env_label=" + envLabel + "\n")
+	if envInfo != nil {
+		sb.WriteString("git_branch=" + envInfo.GitBranch + "\n")
+		if envInfo.GitDirty {
+			sb.WriteString("git_dirty=true\n")
+		} else {
+			sb.WriteString("git_dirty=false\n")
+		}
+		sb.WriteString("last_commit=" + envInfo.LastCommit + "\n")
+		sb.WriteString("project_type=" + envInfo.ProjectType + "\n")
+		// DirTree omitted from diff — too noisy and changes often.
+	}
+	return sb.String()
+}
+
+// parseEnvKV parses a key=value env info string into a map.
+func parseEnvKV(s string) map[string]string {
+	m := make(map[string]string)
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if idx := strings.IndexByte(line, '='); idx > 0 {
+			m[line[:idx]] = line[idx+1:]
+		}
+	}
+	return m
+}
+
+// BuildEnvDiff compares a stored environment snapshot (from session) with
+// the current environment and returns a human-readable diff string.
+// Returns "" if nothing changed.
+func BuildEnvDiff(storedEnvInfo string, platform, pwd, envLabel string, envInfo *utils.EnvInfo) string {
+	currentEnvInfo := SerializeEnvInfo(platform, pwd, envLabel, envInfo)
+	if storedEnvInfo == currentEnvInfo {
+		return ""
+	}
+
+	stored := parseEnvKV(storedEnvInfo)
+	current := parseEnvKV(currentEnvInfo)
+
+	var diffs []string
+	keys := []string{"date", "git_branch", "git_dirty", "last_commit", "project_type", "pwd", "env_label"}
+	for _, k := range keys {
+		sv, cv := stored[k], current[k]
+		if sv != cv {
+			diffs = append(diffs, k+": "+sv+" → "+cv)
+		}
+	}
+
+	if len(diffs) == 0 {
+		return ""
+	}
+	return "Environment changes since session was last active:\n" + strings.Join(diffs, "\n")
+}

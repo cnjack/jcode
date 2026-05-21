@@ -6,6 +6,8 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
+
+	"github.com/cnjack/jcode/internal/telemetry"
 )
 
 // approvalMiddleware implements adk.ChatModelAgentMiddleware with both
@@ -40,29 +42,59 @@ func (m *approvalMiddleware) WrapInvokableToolCall(
 			}
 		}()
 
-		// Approval gate
+		subSpan := telemetry.SubSpanFromContext(ctx)
+
+		// Approval gate — traced as a separate "approval" span.
 		if m.approvalFunc != nil {
+			var finishApproval func(string)
+			if subSpan != nil {
+				finishApproval = subSpan("approval")
+			}
+
 			approved, err := m.approvalFunc(ctx, tCtx.Name, argumentsInJSON)
+
 			if err != nil {
-				return fmt.Sprintf("Tool approval error: %v", err), nil
+				msg := fmt.Sprintf("Tool approval error: %v", err)
+				if finishApproval != nil {
+					finishApproval(msg)
+				}
+				return msg, nil
 			}
 			if !approved {
-				return "Tool execution was rejected by user. " +
+				msg := "Tool execution was rejected by user. " +
 					"IMPORTANT: The user has explicitly denied this operation. " +
 					"Do NOT attempt to perform the same action using alternative tools, different commands, or workarounds. " +
-					"Respect the user's decision and either ask the user how they would like to proceed or move on to a different task.", nil
+					"Respect the user's decision and either ask the user how they would like to proceed or move on to a different task."
+				if finishApproval != nil {
+					finishApproval("rejected")
+				}
+				return msg, nil
+			}
+			if finishApproval != nil {
+				finishApproval("approved")
 			}
 		}
 
-		// Safe execution: convert errors to agent-visible strings.
-		// Preserve any partial output (e.g. stdout/stderr from a command that
-		// exited with a non-zero status) so the agent can see the details.
+		// Execution — traced as a separate "execution" span.
+		var finishExec func(string)
+		if subSpan != nil {
+			finishExec = subSpan("execution")
+		}
+
 		result, err := endpoint(ctx, argumentsInJSON, opts...)
 		if err != nil {
 			if result != "" {
-				return fmt.Sprintf("%s\n\nTool execution failed: %v", result, err), nil
+				result = fmt.Sprintf("%s\n\nTool execution failed: %v", result, err)
+			} else {
+				result = fmt.Sprintf("Tool execution failed: %v", err)
 			}
-			return fmt.Sprintf("Tool execution failed: %v", err), nil
+			if finishExec != nil {
+				finishExec(result)
+			}
+			return result, nil
+		}
+		if finishExec != nil {
+			finishExec(result)
 		}
 		return result, nil
 	}, nil

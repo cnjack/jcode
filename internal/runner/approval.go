@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/cnjack/jcode/internal/handler"
 )
 
 // ApprovalState manages whether tool calls require interactive user approval.
 type ApprovalState struct {
+	mu       sync.Mutex
 	h        handler.AgentEventHandler
 	mode     handler.ApprovalMode // Current approval mode
 	workpath string               // Current working directory for path detection
@@ -36,22 +38,30 @@ func (s *ApprovalState) SetHandler(h handler.AgentEventHandler) {
 
 // SetMode sets the approval mode (used for external mode changes).
 func (s *ApprovalState) SetMode(mode handler.ApprovalMode) {
+	s.mu.Lock()
 	s.mode = mode
+	s.mu.Unlock()
 }
 
 // SetWorkpath sets the current working directory (called on environment switch).
 func (s *ApprovalState) SetWorkpath(path string) {
+	s.mu.Lock()
 	s.workpath = path
+	s.mu.Unlock()
 }
 
 // GetMode returns the current approval mode.
 func (s *ApprovalState) GetMode() handler.ApprovalMode {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.mode
 }
 
 // SetSessionApproval sets the approval mode based on the boolean value.
 // This is kept for backward compatibility with the channel-based mode sync.
 func (s *ApprovalState) SetSessionApproval(enabled bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if enabled {
 		s.mode = handler.ModeAuto
 	} else {
@@ -64,7 +74,10 @@ func (s *ApprovalState) SetSessionApproval(enabled bool) {
 // For everything else it sends a TUI prompt and waits for the user's answer.
 func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs string) (bool, error) {
 	// State machine: AUTO mode passes all operations directly
-	if s.mode == handler.ModeAuto {
+	s.mu.Lock()
+	currentMode := s.mode
+	s.mu.Unlock()
+	if currentMode == handler.ModeAuto {
 		return true, nil
 	}
 
@@ -116,7 +129,7 @@ func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs 
 				return true, nil
 			}
 			cmd := strings.TrimSpace(input.Command)
-			safePrefix := []string{"ls", "pwd", "env", "ls ", "cat ", "pwd ", "echo ", "which ", "git status", "git log"}
+			safePrefix := []string{"ls", "pwd", "env", "ls ", "cat ", "pwd ", "echo ", "which ", "git status", "git log", "git diff", "git show"}
 			for _, p := range safePrefix {
 				if cmd == p || strings.HasPrefix(cmd, p) {
 					return true, nil
@@ -153,7 +166,9 @@ func (s *ApprovalState) requestUserApprovalWithWorker(ctx context.Context, toolN
 
 	// State transition: update mode based on user choice
 	if resp.Approved {
+		s.mu.Lock()
 		s.mode = resp.Mode
+		s.mu.Unlock()
 	}
 	return resp.Approved, nil
 }
@@ -163,7 +178,10 @@ func (s *ApprovalState) requestUserApprovalWithWorker(ctx context.Context, toolN
 func (s *ApprovalState) NewTeammateApprovalFunc(workerName, workerColor string) func(ctx context.Context, toolName, toolArgs string) (bool, error) {
 	return func(ctx context.Context, toolName, toolArgs string) (bool, error) {
 		// Same logic as RequestApproval, but with worker badge.
-		if s.mode == handler.ModeAuto {
+		s.mu.Lock()
+		currentMode := s.mode
+		s.mu.Unlock()
+		if currentMode == handler.ModeAuto {
 			return true, nil
 		}
 
@@ -208,7 +226,7 @@ func (s *ApprovalState) NewTeammateApprovalFunc(workerName, workerColor string) 
 					return true, nil
 				}
 				cmd := strings.TrimSpace(input.Command)
-				safePrefix := []string{"ls", "pwd", "env", "ls ", "cat ", "pwd ", "echo ", "which ", "git status", "git log"}
+				safePrefix := []string{"ls", "pwd", "env", "ls ", "cat ", "pwd ", "echo ", "which ", "git status", "git log", "git diff", "git show"}
 				for _, p := range safePrefix {
 					if cmd == p || strings.HasPrefix(cmd, p) {
 						return true, nil

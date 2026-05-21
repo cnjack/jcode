@@ -266,9 +266,6 @@ func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, 
 			toolName := mo.ToolName
 			if !mo.IsStreaming && mo.Message != nil {
 				s.notifyProgress(input.Name, "tool_result", toolName, mo.Message.Content)
-				if s.deps.Recorder != nil {
-					s.deps.Recorder.RecordToolResult(toolName, mo.Message.Content, mo.Message.ToolCallID, nil)
-				}
 			} else if mo.IsStreaming {
 				var sb strings.Builder
 				var toolCallID string
@@ -288,9 +285,6 @@ func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, 
 					}
 				}
 				s.notifyProgress(input.Name, "tool_result", toolName, sb.String())
-				if s.deps.Recorder != nil {
-					s.deps.Recorder.RecordToolResult(toolName, sb.String(), toolCallID, nil)
-				}
 			}
 			continue
 		}
@@ -331,22 +325,16 @@ func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, 
 					assistantText.WriteString(chunk.Content)
 				}
 			}
-			// Notify and record accumulated tool calls.
+			// Notify accumulated tool calls (progress only, not recorded to session).
 			for _, p := range pending {
 				s.notifyProgress(input.Name, "tool_call", p.name, p.args.String())
-				if s.deps.Recorder != nil {
-					s.deps.Recorder.RecordToolCall(p.name, p.args.String(), "")
-				}
 			}
 			reportTokens()
 		} else if mo.Message != nil {
-			// Forward tool call events.
+			// Forward tool call events (progress only, not recorded to session).
 			for _, tc := range mo.Message.ToolCalls {
 				if tc.Function.Name != "" {
 					s.notifyProgress(input.Name, "tool_call", tc.Function.Name, tc.Function.Arguments)
-					if s.deps.Recorder != nil {
-						s.deps.Recorder.RecordToolCall(tc.Function.Name, tc.Function.Arguments, tc.ID)
-					}
 				}
 			}
 			if mo.Message.Content != "" {
