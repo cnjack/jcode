@@ -30,6 +30,7 @@ const renderType = computed(() => {
   if (name === 'read') return 'file-viewer'
   if (name === 'write') return 'file-viewer'
   if (name === 'edit' || name === 'multi_edit') return 'diff'
+  if (name === 'grep') return 'search'
   return 'generic'
 })
 
@@ -39,6 +40,35 @@ const terminalCommand = computed(() => {
     const parsed = JSON.parse(props.tool.args)
     return parsed.command || ''
   } catch { return '' }
+})
+
+// ─── Search renderer helpers ───
+const searchArgsDisplay = computed(() => {
+  try {
+    const parsed = JSON.parse(props.tool.args)
+    return Object.entries(parsed)
+      .filter(([, v]) => v !== undefined && v !== null && v !== '')
+      .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
+      .join('\n')
+  } catch { return props.tool.args }
+})
+
+const searchResults = computed(() => {
+  const output = props.tool.output || ''
+  if (!output) return { lines: [], count: null }
+  const countMatch = output.match(/\((\d+) (?:matches found|results?)\)/)
+  const count = countMatch ? parseInt(countMatch[1]) : null
+  const lines = output.split('\n')
+    .filter(l => {
+      const t = l.trim()
+      return t && !t.startsWith('(')
+    })
+    .map(line => {
+      const m = line.match(/^([^:]+):(\d+):(.*)$/)
+      if (m) return { file: m[1], lineNum: parseInt(m[2]), content: m[3], isRef: true }
+      return { file: '', lineNum: 0, content: line, isRef: false }
+    })
+  return { lines, count }
 })
 
 // ─── File viewer helpers ───
@@ -327,21 +357,30 @@ function formatArgs(args: string): string {
       :style="{ borderRadius: 'var(--radius-xl)', border: tool.status !== 'error' ? '1px solid var(--color-border)' : undefined }"
     >
       <!-- Terminal header -->
-      <div class="flex items-center gap-1.5 px-3 py-1.5" style="background: var(--color-muted); border-bottom: 1px solid var(--color-border)">
-        <span class="w-2 h-2 rounded-full bg-red-400/80"></span>
-        <span class="w-2 h-2 rounded-full bg-yellow-400/80"></span>
-        <span class="w-2 h-2 rounded-full bg-green-400/80"></span>
-        <span class="text-[10px] ml-1 font-mono" style="color: var(--color-muted-foreground)">terminal</span>
+      <div class="flex items-center justify-between px-3 py-1.5" style="background: var(--color-muted); border-bottom: 1px solid var(--color-border)">
+        <div class="flex items-center gap-1.5">
+          <span class="text-[11px] font-mono select-none" style="color: var(--color-muted-foreground)">›_</span>
+          <span class="text-[10px] font-mono" style="color: var(--color-foreground)">Shell</span>
+        </div>
+        <span
+          v-if="tool.status !== 'running'"
+          class="flex items-center gap-1 text-[10px] font-mono"
+          :style="{ color: tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-primary)' }"
+        >
+          <span class="w-1.5 h-1.5 rounded-full" :style="{ background: tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-primary)' }"></span>
+          {{ tool.status === 'error' ? 'Error' : 'Completed' }}
+        </span>
+        <span v-else class="text-[10px] font-mono animate-pulse" style="color: var(--color-muted-foreground)">running…</span>
       </div>
       <!-- Terminal body -->
-      <div class="bg-[#0d1117] px-3 py-2 font-mono text-xs max-h-72 overflow-y-auto">
-        <div style="color: var(--color-primary)">
-          <span class="text-zinc-500 select-none">$ </span>
-          <span class="text-zinc-200">{{ terminalCommand }}</span>
+      <div class="bg-[#fafafa] dark:bg-[#0d1117] px-3 py-2 font-mono text-xs max-h-72 overflow-y-auto">
+        <div>
+          <span class="text-zinc-400 dark:text-zinc-500 select-none">$ </span>
+          <span class="text-zinc-800 dark:text-zinc-200">{{ terminalCommand }}</span>
         </div>
-        <div v-if="tool.displayOutput || tool.output" class="text-zinc-400 mt-1 whitespace-pre-wrap break-all">{{ truncate(tool.displayOutput || tool.output || '', 2000) }}</div>
-        <div v-if="tool.error" class="text-red-400 mt-1 whitespace-pre-wrap">{{ tool.error }}</div>
-        <div v-if="tool.status === 'running'" class="text-zinc-500 mt-1 animate-pulse">running…</div>
+        <div v-if="tool.displayOutput || tool.output" class="text-zinc-600 dark:text-zinc-400 mt-1 whitespace-pre-wrap break-all">{{ truncate(tool.displayOutput || tool.output || '', 2000) }}</div>
+        <div v-if="tool.error" class="text-red-600 dark:text-red-400 mt-1 whitespace-pre-wrap">{{ tool.error }}</div>
+        <div v-if="tool.status === 'running'" class="text-zinc-400 dark:text-zinc-500 mt-1 animate-pulse">running…</div>
       </div>
     </div>
 
@@ -438,6 +477,61 @@ function formatArgs(args: string): string {
       <div v-if="tool.output && !tool.error" class="px-3 py-1.5" style="border-top: 1px solid var(--color-border); background: var(--color-surface)">
         <div class="text-[10px] font-mono" style="color: var(--color-muted-foreground)">{{ truncate(tool.output, 200) }}</div>
       </div>
+    </div>
+
+    <!-- ═══════ Expanded: Search Viewer (grep) ═══════ -->
+    <div
+      v-if="expanded && renderType === 'search'"
+      class="mt-1 overflow-hidden"
+      :style="{ borderRadius: 'var(--radius-xl)', border: '1px solid var(--color-border)' }"
+    >
+      <!-- Search header -->
+      <div class="flex items-center justify-between px-3 py-1.5" style="background: var(--color-muted); border-bottom: 1px solid var(--color-border)">
+        <div class="flex items-center gap-2">
+          <span class="text-[11px]">🔍</span>
+          <span class="text-[10px] font-mono font-medium" style="color: var(--color-foreground)">Search</span>
+        </div>
+        <span
+          v-if="tool.status !== 'running'"
+          class="flex items-center gap-1 text-[10px] font-mono"
+          :style="{ color: tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-primary)' }"
+        >
+          <span class="w-1.5 h-1.5 rounded-full" :style="{ background: tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-primary)' }"></span>
+          {{ tool.status === 'error' ? 'Error' : 'Completed' }}
+        </span>
+        <span v-else class="text-[10px] font-mono animate-pulse" style="color: var(--color-muted-foreground)">searching…</span>
+      </div>
+      <!-- Args -->
+      <div v-if="searchArgsDisplay" class="px-3 py-1.5" style="border-bottom: 1px solid var(--color-border); background: var(--color-surface)">
+        <div class="text-[9px] font-semibold uppercase tracking-wider mb-1" style="color: var(--color-muted-foreground)">ARGS</div>
+        <div class="text-[11px] font-mono whitespace-pre-wrap" style="color: var(--color-muted-foreground)">{{ searchArgsDisplay }}</div>
+      </div>
+      <!-- Results -->
+      <div class="max-h-72 overflow-y-auto" style="background: var(--color-surface)">
+        <template v-if="searchResults.lines.length">
+          <div
+            v-for="(line, i) in searchResults.lines"
+            :key="i"
+            class="px-3 py-1.5"
+            :style="{ borderBottom: i < searchResults.lines.length - 1 ? '1px solid var(--color-border)' : 'none' }"
+          >
+            <div v-if="line.isRef" class="flex items-baseline gap-1.5 text-[10px] font-mono mb-0.5">
+              <span style="color: var(--color-primary)">{{ line.file }}</span>
+              <span style="color: var(--color-muted-foreground)">:{{ line.lineNum }}</span>
+            </div>
+            <div class="text-xs font-mono whitespace-pre-wrap" style="color: var(--color-foreground)">{{ line.content }}</div>
+          </div>
+        </template>
+        <div v-else-if="tool.status === 'running'" class="px-3 py-3 text-xs animate-pulse" style="color: var(--color-muted-foreground)">Searching…</div>
+        <div v-else-if="tool.error" class="px-3 py-2 text-xs font-mono whitespace-pre-wrap" style="color: var(--color-destructive)">{{ tool.error }}</div>
+        <div v-else class="px-3 py-2 text-xs italic" style="color: var(--color-muted-foreground)">No results</div>
+      </div>
+      <!-- Footer count -->
+      <div
+        v-if="searchResults.count !== null"
+        class="px-3 py-1.5 text-[10px] font-mono"
+        style="border-top: 1px solid var(--color-border); background: var(--color-muted); color: var(--color-muted-foreground)"
+      >({{ searchResults.count }} matches found)</div>
     </div>
 
     <!-- ═══════ Expanded: Generic fallback ═══════ -->
