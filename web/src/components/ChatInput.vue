@@ -581,7 +581,6 @@ watch(() => store.isRunning, (running) => {
 
 .textarea-area {
   padding: 0 0 8px;
-  min-height: 56px;
 }
 
 .textarea-area textarea {
@@ -593,7 +592,7 @@ watch(() => store.isRunning, (running) => {
   font-size: 14px;
   line-height: 1.6;
   color: var(--color-foreground);
-  min-height: 56px;
+  min-height: 28px;
   max-height: 200px;
   font-family: var(--font-sans);
 }
@@ -654,7 +653,6 @@ watch(() => store.isRunning, (running) => {
   align-items: center;
   justify-content: space-between;
   padding: 8px 0 12px;
-  border-top: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
   gap: 8px;
 }
 
