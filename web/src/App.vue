@@ -10,12 +10,12 @@ import ApprovalBanner from '@/components/ApprovalBanner.vue'
 import TodoPanel from '@/components/TodoPanel.vue'
 import ChatInput from '@/components/ChatInput.vue'
 import Sidebar from '@/components/Sidebar.vue'
-import FileViewer from '@/components/FileViewer.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import ProjectSwitcher from '@/components/ProjectSwitcher.vue'
 import TerminalPanel from '@/components/TerminalPanel.vue'
-import DiffViewer from '@/components/DiffViewer.vue'
+import RightPanel from '@/components/RightPanel.vue'
 import SetupView from '@/components/SetupView.vue'
+import TopBar from '@/components/TopBar.vue'
 
 const store = useChatStore()
 const projectStore = useProjectStore()
@@ -23,15 +23,14 @@ const { resolvedTheme, toggleTheme } = useTheme()
 const messagesEl = ref<HTMLDivElement | null>(null)
 const settingsOpen = ref(false)
 const projectsOpen = ref(false)
-const fileViewerOpen = ref(false)
-const fileViewerPath = ref('')
-const fileViewerContent = ref('')
 const sidebarCollapsed = ref(false)
 const needsSetup = ref(false)
 
-const bottomPanel = ref<'none' | 'terminal' | 'diff'>('none')
+const bottomPanel = ref<'none' | 'terminal'>('none')
 const bottomPanelHeight = ref(260)
 const isResizingPanel = ref(false)
+const rightPanelOpen = ref(false)
+const rightPanelTab = ref<'files' | 'changes'>('files')
 
 // Scroll-to-bottom
 const isAtBottom = ref(true)
@@ -117,6 +116,16 @@ function handleGlobalKeydown(e: KeyboardEvent) {
     togglePanel('terminal')
     return
   }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'E') {
+    e.preventDefault()
+    togglePanel('files')
+    return
+  }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'G') {
+    e.preventDefault()
+    togglePanel('changes')
+    return
+  }
   if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
     e.preventDefault()
     sidebarCollapsed.value = !sidebarCollapsed.value
@@ -151,13 +160,23 @@ onUnmounted(() => {
 })
 
 function openFile(path: string, content: string) {
-  fileViewerPath.value = path
-  fileViewerContent.value = content
-  fileViewerOpen.value = true
+  // Open file in right panel files tab
+  rightPanelOpen.value = true
+  rightPanelTab.value = 'files'
 }
 
-function togglePanel(panel: 'terminal' | 'diff') {
-  bottomPanel.value = bottomPanel.value === panel ? 'none' : panel
+function togglePanel(panel: 'terminal' | 'files' | 'changes') {
+  if (panel === 'terminal') {
+    bottomPanel.value = bottomPanel.value === 'terminal' ? 'none' : 'terminal'
+    return
+  }
+  // files and changes toggle the right panel
+  if (rightPanelOpen.value && rightPanelTab.value === panel) {
+    rightPanelOpen.value = false
+  } else {
+    rightPanelOpen.value = true
+    rightPanelTab.value = panel
+  }
 }
 
 async function onProjectSwitched() {
@@ -205,7 +224,7 @@ function startResize(e: MouseEvent) {
 </script>
 
 <template>
-  <div class="flex h-[100dvh] overflow-hidden bg-zinc-50 dark:bg-zinc-950 transition-colors duration-300">
+  <div class="flex h-[100dvh] overflow-hidden transition-colors duration-300" style="background: var(--color-background); color: var(--color-foreground);">
     <!-- Sidebar -->
     <transition
       enter-active-class="transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
@@ -227,60 +246,16 @@ function startResize(e: MouseEvent) {
 
     <!-- Main content -->
     <main class="flex-1 flex flex-col min-w-0 relative">
-      <!-- Header bar -->
-      <header class="flex items-center justify-between h-11 px-4 border-b border-zinc-200 dark:border-zinc-800/80 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-xl shrink-0 z-10">
-        <div class="flex items-center gap-2.5 min-w-0">
-          <!-- Sidebar toggle -->
-          <button
-            class="w-7 h-7 flex items-center justify-center rounded text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
-            @click="sidebarCollapsed = !sidebarCollapsed"
-            title="Toggle sidebar (Ctrl+B)"
-          >
-            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-              <path d="M3 6h18M3 12h18M3 18h18" />
-            </svg>
-          </button>
-          <div class="flex items-center gap-1.5 text-sm min-w-0">
-            <span class="font-semibold text-zinc-800 dark:text-zinc-200 truncate" style="font-family: var(--font-sans)">{{ store.projectName || 'jcode' }}</span>
-            <span class="text-zinc-300 dark:text-zinc-700">/</span>
-            <span class="text-zinc-400 dark:text-zinc-600 text-xs font-mono truncate max-w-60">{{ store.pwd }}</span>
-          </div>
-        </div>
-        <div class="flex items-center gap-2">
-          <!-- Panel toggles -->
-          <div class="flex items-center gap-0.5 bg-zinc-100 dark:bg-zinc-800/60 rounded p-0.5">
-            <button
-              class="px-2.5 py-1 text-[11px] font-medium rounded-md cursor-pointer transition-all duration-150"
-              :class="bottomPanel === 'terminal'
-                ? 'bg-white dark:bg-zinc-700 text-emerald-600 dark:text-emerald-400 shadow-sm'
-                : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300'"
-              @click="togglePanel('terminal')"
-              title="Terminal (Ctrl+`)"
-            >
-              Terminal
-            </button>
-            <button
-              class="px-2.5 py-1 text-[11px] font-medium rounded-md cursor-pointer transition-all duration-150"
-              :class="bottomPanel === 'diff'
-                ? 'bg-white dark:bg-zinc-700 text-emerald-600 dark:text-emerald-400 shadow-sm'
-                : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300'"
-              @click="togglePanel('diff')"
-              title="Changes"
-            >
-              Changes
-            </button>
-          </div>
-          <!-- Status indicator -->
-          <div class="flex items-center gap-1.5 text-xs text-zinc-400 dark:text-zinc-500 pl-2 border-l border-zinc-200 dark:border-zinc-800">
-            <span
-              class="w-1.5 h-1.5 rounded-full transition-colors"
-              :class="store.isRunning ? 'bg-amber-400 animate-pulse' : store.wsConnected ? 'bg-emerald-400' : 'bg-zinc-400 dark:bg-zinc-600'"
-            />
-            {{ store.isRunning ? 'Working…' : store.wsConnected ? 'Ready' : 'Offline' }}
-            <span v-if="store.serverVersion" class="text-[10px] text-zinc-300 dark:text-zinc-600">{{ store.serverVersion }}</span>
-          </div>
-        </div>
-      </header>
+      <!-- Top Bar -->
+      <TopBar
+        :project-name="store.projectName || 'jcode'"
+        :pwd="store.pwd || ''"
+        :is-running="store.isRunning"
+        :ws-connected="store.wsConnected"
+        :active-panel="bottomPanel === 'terminal' ? 'terminal' : rightPanelOpen ? rightPanelTab : 'none'"
+        @toggle-sidebar="sidebarCollapsed = !sidebarCollapsed"
+        @toggle-panel="togglePanel"
+      />
 
       <!-- Chat area -->
       <div class="flex-1 flex flex-col min-h-0">
@@ -291,15 +266,15 @@ function startResize(e: MouseEvent) {
         >
           <!-- Welcome -->
           <div v-if="!store.hasMessages" class="flex flex-col items-center justify-center h-full text-center px-8 animate-fade-in">
-            <div class="flex items-center gap-0 mb-5 select-none" style="font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'Roboto Mono', Menlo, Monaco, monospace; font-size: 28px; font-weight: 700; letter-spacing: normal;">
-              <span class="text-zinc-400 dark:text-zinc-500">[</span><span style="color: #FF8400;">J</span><span class="text-zinc-900 dark:text-zinc-300">CODE</span><span class="text-zinc-400 dark:text-zinc-500">]</span>
+            <div class="flex items-center gap-0 mb-5 select-none" style="font-family: var(--font-mono); font-size: 28px; font-weight: 700; letter-spacing: normal;">
+              <span style="color: var(--color-muted-foreground)">[</span><span style="color: var(--color-primary);">J</span><span style="color: var(--color-foreground)">CODE</span><span style="color: var(--color-muted-foreground)">]</span>
             </div>
-            <h2 class="text-lg font-semibold text-zinc-800 dark:text-zinc-200 mb-1.5" style="font-family: var(--font-sans)">What would you like to build?</h2>
-            <p class="text-sm text-zinc-500 dark:text-zinc-500 max-w-sm">Send a message to start a conversation with jcode. Use <kbd class="px-1.5 py-0.5 text-[10px] font-mono bg-zinc-100 dark:bg-zinc-800 rounded border border-zinc-200 dark:border-zinc-700">/</kbd> for commands.</p>
+            <h2 class="text-lg font-semibold mb-1.5" style="font-family: var(--font-sans); color: var(--color-foreground)">What would you like to build?</h2>
+            <p class="text-sm max-w-sm" style="color: var(--color-muted-foreground)">Send a message to start a conversation with jcode. Use <kbd class="px-1.5 py-0.5 text-[10px] font-mono rounded border" style="background: var(--color-muted); border-color: var(--color-border)">/</kbd> for commands.</p>
           </div>
 
           <!-- Timeline -->
-          <div v-else class="max-w-3xl mx-auto px-5 py-6 space-y-0.5">
+          <div v-else class="max-w-4xl mx-auto px-5 py-6 space-y-0.5">
             <template v-for="item in store.timeline" :key="item.seq">
               <ChatMessageVue
                 v-if="item.kind === 'message'"
@@ -316,9 +291,9 @@ function startResize(e: MouseEvent) {
 
             <!-- Typing indicator -->
             <div v-if="store.isRunning && store.timeline.length === 0" class="flex gap-1.5 py-5 pl-1">
-              <span class="w-2 h-2 bg-emerald-400/60 rounded-full" style="animation: dot-pulse 1.4s ease-in-out infinite; animation-delay: 0ms" />
-              <span class="w-2 h-2 bg-emerald-400/60 rounded-full" style="animation: dot-pulse 1.4s ease-in-out infinite; animation-delay: 160ms" />
-              <span class="w-2 h-2 bg-emerald-400/60 rounded-full" style="animation: dot-pulse 1.4s ease-in-out infinite; animation-delay: 320ms" />
+              <span class="w-2 h-2 rounded-full" style="background: var(--color-primary); opacity: 0.6; animation: dot-pulse 1.4s ease-in-out infinite; animation-delay: 0ms" />
+              <span class="w-2 h-2 rounded-full" style="background: var(--color-primary); opacity: 0.6; animation: dot-pulse 1.4s ease-in-out infinite; animation-delay: 160ms" />
+              <span class="w-2 h-2 rounded-full" style="background: var(--color-primary); opacity: 0.6; animation: dot-pulse 1.4s ease-in-out infinite; animation-delay: 320ms" />
             </div>
           </div>
         </div>
@@ -334,7 +309,8 @@ function startResize(e: MouseEvent) {
         >
           <button
             v-if="showScrollBtn"
-            class="absolute bottom-40 left-1/2 -translate-x-1/2 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 shadow-lg text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer transition-colors"
+            class="absolute bottom-40 left-1/2 -translate-x-1/2 z-10 w-8 h-8 flex items-center justify-center rounded-full shadow-lg cursor-pointer transition-colors"
+            style="background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-muted-foreground)"
             @click="scrollToBottom()"
           >
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -350,7 +326,8 @@ function startResize(e: MouseEvent) {
       <!-- Bottom panel -->
       <div
         v-if="bottomPanel !== 'none'"
-        class="border-t border-zinc-200 dark:border-zinc-800 relative"
+        class="relative"
+        style="border-top: 1px solid var(--color-border)"
         :style="{ height: bottomPanelHeight + 'px' }"
       >
         <!-- Resize handle -->
@@ -358,19 +335,28 @@ function startResize(e: MouseEvent) {
           class="absolute -top-1 left-0 right-0 h-2 cursor-row-resize z-10 group"
           @mousedown="startResize"
         >
-          <div class="absolute top-[3px] left-1/2 -translate-x-1/2 w-8 h-1 rounded-full bg-zinc-300 dark:bg-zinc-700 group-hover:bg-emerald-400 dark:group-hover:bg-emerald-500 transition-colors" />
+          <div class="absolute top-[3px] left-1/2 -translate-x-1/2 w-8 h-1 rounded-full transition-colors" style="background: var(--color-border)" />
         </div>
-        <TerminalPanel v-if="bottomPanel === 'terminal'" />
-        <DiffViewer v-else-if="bottomPanel === 'diff'" />
+        <TerminalPanel v-if="bottomPanel === 'terminal'" @close="bottomPanel = 'none'" />
       </div>
     </main>
 
-    <FileViewer
-      v-if="fileViewerOpen"
-      :path="fileViewerPath"
-      :content="fileViewerContent"
-      @close="fileViewerOpen = false"
-    />
+    <!-- Right Panel -->
+    <transition
+      enter-active-class="transition-all duration-200 ease-out"
+      enter-from-class="translate-x-4 opacity-0"
+      enter-to-class="translate-x-0 opacity-100"
+      leave-active-class="transition-all duration-150 ease-in"
+      leave-from-class="translate-x-0 opacity-100"
+      leave-to-class="translate-x-4 opacity-0"
+    >
+      <RightPanel
+        v-if="rightPanelOpen"
+        :active-tab="rightPanelTab"
+        @close="rightPanelOpen = false"
+        @switch-tab="(tab) => rightPanelTab = tab"
+      />
+    </transition>
 
     <SettingsDialog :open="settingsOpen" @close="settingsOpen = false" />
     <ProjectSwitcher :open="projectsOpen" @close="projectsOpen = false" @project-switched="onProjectSwitched" />

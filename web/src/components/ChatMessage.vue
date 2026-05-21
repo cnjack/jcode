@@ -63,30 +63,29 @@ function handleEditKeyDown(e: KeyboardEvent) {
 <template>
   <div class="py-3 animate-fade-in group/msg">
     <!-- Role label + action buttons -->
-    <div class="flex items-center gap-2 mb-2">
+    <div class="flex items-center gap-2.5 mb-2">
       <div
-        class="w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold shrink-0"
-        :class="{
-          'bg-emerald-500/15 text-emerald-600 dark:bg-emerald-400/15 dark:text-emerald-400': message.role === 'assistant',
-          'bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400': message.role === 'user' && message.source !== 'wechat',
-          'bg-green-500/15 text-green-600 dark:bg-green-400/15 dark:text-green-400': message.role === 'user' && message.source === 'wechat',
-          'bg-amber-500/15 text-amber-600 dark:bg-amber-400/15 dark:text-amber-400': message.role === 'system',
+        class="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0"
+        :style="{
+          background: message.role === 'assistant' ? 'var(--color-primary)' :
+                      message.role === 'user' && message.source === 'wechat' ? 'var(--color-info-fg)' :
+                      message.role === 'system' ? 'var(--color-warning-fg)' :
+                      'var(--color-foreground)',
+          color: '#fff'
         }"
       >
-        <template v-if="message.role === 'assistant'">
-          <span style="color: #FF8400;">J</span>
-        </template>
+        <template v-if="message.role === 'assistant'">J</template>
         <template v-else-if="message.role === 'user' && message.source === 'wechat'">W</template>
         <template v-else-if="message.role === 'user'">U</template>
         <template v-else>S</template>
       </div>
       <span
-        class="text-[10px] font-semibold uppercase tracking-wider"
-        :class="{
-          'text-emerald-600 dark:text-emerald-400': message.role === 'assistant',
-          'text-zinc-500 dark:text-zinc-400': message.role === 'user' && message.source !== 'wechat',
-          'text-green-600 dark:text-green-400': message.role === 'user' && message.source === 'wechat',
-          'text-amber-600 dark:text-amber-400': message.role === 'system',
+        class="text-[11px] font-semibold"
+        :style="{
+          color: message.role === 'assistant' ? 'var(--color-primary)' :
+                 message.role === 'user' && message.source === 'wechat' ? 'var(--color-info-fg)' :
+                 message.role === 'system' ? 'var(--color-warning-fg)' :
+                 'var(--color-foreground)'
         }"
       >
         {{ message.role === 'user' ? (message.source === 'wechat' ? 'WeChat' : 'You') : message.role === 'assistant' ? '[J]CODE' : 'System' }}
@@ -96,7 +95,8 @@ function handleEditKeyDown(e: KeyboardEvent) {
       <div class="flex items-center gap-0.5 ml-1 opacity-0 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 transition-opacity duration-150">
         <!-- Copy button -->
         <button
-          class="w-5 h-5 flex items-center justify-center rounded text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+          class="w-5 h-5 flex items-center justify-center rounded transition-colors cursor-pointer"
+          style="color: var(--color-muted-foreground)"
           :title="copied ? 'Copied!' : 'Copy'"
           @click="copyContent"
         >
@@ -104,7 +104,7 @@ function handleEditKeyDown(e: KeyboardEvent) {
             <rect x="9" y="9" width="13" height="13" rx="2" />
             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
           </svg>
-          <svg v-else class="w-3 h-3 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <svg v-else class="w-3 h-3" style="color: var(--color-primary)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="20 6 9 17 4 12" />
           </svg>
         </button>
@@ -112,7 +112,8 @@ function handleEditKeyDown(e: KeyboardEvent) {
         <!-- Retry button (assistant messages) -->
         <button
           v-if="canRetry"
-          class="w-5 h-5 flex items-center justify-center rounded text-zinc-400 hover:text-amber-500 dark:hover:text-amber-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+          class="w-5 h-5 flex items-center justify-center rounded transition-colors cursor-pointer"
+          style="color: var(--color-muted-foreground)"
           title="Retry"
           @click="emit('retry')"
         >
@@ -125,7 +126,8 @@ function handleEditKeyDown(e: KeyboardEvent) {
         <!-- Edit button (user messages) -->
         <button
           v-if="canEdit && !editing"
-          class="w-5 h-5 flex items-center justify-center rounded text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+          class="w-5 h-5 flex items-center justify-center rounded transition-colors cursor-pointer"
+          style="color: var(--color-muted-foreground)"
           title="Edit"
           @click="startEdit"
         >
@@ -138,41 +140,45 @@ function handleEditKeyDown(e: KeyboardEvent) {
     </div>
 
     <!-- Images -->
-    <div v-if="message.images && message.images.length > 0" class="pl-7 mb-2 flex flex-wrap gap-2">
+    <div v-if="message.images && message.images.length > 0" class="pl-9 mb-2 flex flex-wrap gap-2">
       <img
         v-for="(img, i) in message.images"
         :key="i"
         :src="`data:${img.media_type};base64,${img.data}`"
-        class="max-w-64 max-h-48 rounded border border-zinc-200 dark:border-zinc-700 object-contain cursor-pointer hover:opacity-90 transition-opacity"
+        class="max-w-64 max-h-48 object-contain cursor-pointer hover:opacity-90 transition-opacity"
+        :style="{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)' }"
         @click="($event.target as HTMLImageElement).classList.toggle('max-w-64'); ($event.target as HTMLImageElement).classList.toggle('max-w-full')"
       />
     </div>
 
     <!-- Content or Edit mode -->
-    <div v-if="!editing" class="prose-chat pl-7" v-html="renderMarkdown(message.content)" />
+    <div v-if="!editing" class="prose-chat pl-9" v-html="renderMarkdown(message.content)" />
 
     <!-- Inline edit mode -->
-    <div v-else class="pl-7">
+    <div v-else class="pl-9">
       <textarea
         ref="editTextarea"
         v-model="editText"
-        class="w-full min-h-20 max-h-80 resize-y rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 text-sm text-zinc-800 dark:text-zinc-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 dark:focus:border-emerald-400 transition-colors"
+        class="w-full min-h-20 max-h-80 resize-y text-sm px-3 py-2 transition-colors"
+        :style="{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-foreground)' }"
         @keydown="handleEditKeyDown"
       />
       <div class="flex items-center gap-2 mt-2">
         <button
-          class="px-3 py-1 text-xs font-medium rounded bg-emerald-500 hover:bg-emerald-600 text-white transition-colors cursor-pointer"
+          class="px-3 py-1 text-xs font-medium rounded text-white transition-colors cursor-pointer"
+          :style="{ background: 'var(--color-primary)', borderRadius: 'var(--radius-md)' }"
           @click="confirmEdit"
         >
           Send
         </button>
         <button
-          class="px-3 py-1 text-xs font-medium rounded bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-700 dark:hover:bg-zinc-600 text-zinc-600 dark:text-zinc-300 transition-colors cursor-pointer"
+          class="px-3 py-1 text-xs font-medium rounded transition-colors cursor-pointer"
+          :style="{ background: 'var(--color-secondary)', color: 'var(--color-foreground)', borderRadius: 'var(--radius-md)' }"
           @click="cancelEdit"
         >
           Cancel
         </button>
-        <span class="text-[10px] text-zinc-400">Enter to send · Shift+Enter for newline · Esc to cancel</span>
+        <span class="text-[10px]" style="color: var(--color-muted-foreground)">Enter to send · Shift+Enter for newline · Esc to cancel</span>
       </div>
     </div>
   </div>
