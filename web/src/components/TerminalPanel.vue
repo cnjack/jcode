@@ -42,14 +42,14 @@ function closeTab(id: string) {
 </script>
 
 <template>
-  <div class="flex flex-col h-full" style="background-color: var(--color-muted)">
+  <div class="flex flex-col h-full" style="background: var(--color-background)">
     <!-- Tab bar -->
     <div
-      class="flex items-center shrink-0 border-b"
-      style="border-color: var(--color-border); background-color: var(--color-surface); height: 36px"
+      class="flex items-center shrink-0 px-2 gap-1"
+      style="height: 32px; border-bottom: 1px solid var(--color-border); background: var(--color-background)"
     >
       <!-- Tabs -->
-      <div class="flex items-stretch h-full overflow-x-auto flex-1 min-w-0">
+      <div class="flex items-center gap-0.5 h-full flex-1 min-w-0 overflow-x-auto">
         <button
           v-for="tab in tabs"
           :key="tab.id"
@@ -71,30 +71,22 @@ function closeTab(id: string) {
       </div>
 
       <!-- Controls -->
-      <div class="flex items-center gap-1 px-2 shrink-0">
-        <button
-          class="ctrl-btn"
-          title="New terminal"
-          @click="addTab"
-        >
-          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <div class="flex items-center gap-0.5 shrink-0">
+        <button class="ctrl-btn" title="New terminal" @click="addTab">
+          <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
             <path d="M12 5v14M5 12h14" />
           </svg>
         </button>
-        <button
-          class="ctrl-btn"
-          title="Close panel"
-          @click="emit('close')"
-        >
-          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <button class="ctrl-btn" title="Close panel" @click="emit('close')">
+          <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <path d="M18 6L6 18M6 6l12 12" />
           </svg>
         </button>
       </div>
     </div>
 
-    <!-- Terminal area (all instances stacked, only active is visible) -->
-    <div class="flex-1 min-h-0 relative px-1 py-1">
+    <!-- Terminal area -->
+    <div class="flex-1 min-h-0 relative" style="background: var(--color-background)">
       <TerminalInstance
         v-for="tab in tabs"
         :key="tab.id"
@@ -109,27 +101,27 @@ function closeTab(id: string) {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 0 10px;
-  height: 100%;
+  padding: 0 8px;
+  height: 22px;
   font-size: 11px;
+  font-family: var(--font-mono);
   font-weight: 500;
   border: none;
+  border-radius: 4px;
   background: transparent;
   cursor: pointer;
   color: var(--color-muted-foreground);
-  border-right: 1px solid var(--color-border);
   white-space: nowrap;
   transition: background 0.1s, color 0.1s;
   flex-shrink: 0;
 }
 .tab-btn:hover {
-  background: var(--color-muted);
+  background: color-mix(in srgb, var(--color-foreground) 8%, transparent);
   color: var(--color-foreground);
 }
 .tab-active {
-  background: var(--color-muted);
+  background: color-mix(in srgb, var(--color-foreground) 10%, transparent);
   color: var(--color-foreground);
-  border-bottom: 2px solid var(--color-primary);
 }
 .tab-label {
   pointer-events: none;
@@ -138,10 +130,10 @@ function closeTab(id: string) {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
-  border-radius: 3px;
-  opacity: 0.5;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  opacity: 0.4;
   transition: opacity 0.1s, background 0.1s;
 }
 .tab-close:hover {
@@ -152,8 +144,8 @@ function closeTab(id: string) {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border: none;
   background: transparent;
   border-radius: 4px;
@@ -162,7 +154,7 @@ function closeTab(id: string) {
   transition: background 0.1s, color 0.1s;
 }
 .ctrl-btn:hover {
-  background: var(--color-muted);
+  background: color-mix(in srgb, var(--color-foreground) 8%, transparent);
   color: var(--color-foreground);
 }
 </style>

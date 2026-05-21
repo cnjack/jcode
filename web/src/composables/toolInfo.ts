@@ -74,7 +74,7 @@ export const TOOL_ICONS: Record<string, string> = {
   file: '📄',
   'file-edit': '✏️',
   search: '🔍',
-  terminal: '💻',
+  terminal: '⚡',
   checklist: '☑️',
   agent: '🤖',
   question: '❓',

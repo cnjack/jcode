@@ -274,7 +274,7 @@ function startResize(e: MouseEvent) {
           </div>
 
           <!-- Timeline -->
-          <div v-else class="max-w-3xl mx-auto px-5 py-6 space-y-0.5">
+          <div v-else class="max-w-4xl mx-auto px-5 py-6 space-y-0.5">
             <template v-for="item in store.timeline" :key="item.seq">
               <ChatMessageVue
                 v-if="item.kind === 'message'"
