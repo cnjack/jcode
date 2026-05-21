@@ -356,22 +356,6 @@ function formatArgs(args: string): string {
         : ''"
       :style="{ borderRadius: 'var(--radius-xl)', border: tool.status !== 'error' ? '1px solid var(--color-border)' : undefined }"
     >
-      <!-- Terminal header -->
-      <div class="flex items-center justify-between px-3 py-1.5" style="background: var(--color-muted); border-bottom: 1px solid var(--color-border)">
-        <div class="flex items-center gap-1.5">
-          <span class="text-[11px] font-mono select-none" style="color: var(--color-muted-foreground)">›_</span>
-          <span class="text-[10px] font-mono" style="color: var(--color-foreground)">Shell</span>
-        </div>
-        <span
-          v-if="tool.status !== 'running'"
-          class="flex items-center gap-1 text-[10px] font-mono"
-          :style="{ color: tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-primary)' }"
-        >
-          <span class="w-1.5 h-1.5 rounded-full" :style="{ background: tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-primary)' }"></span>
-          {{ tool.status === 'error' ? 'Error' : 'Completed' }}
-        </span>
-        <span v-else class="text-[10px] font-mono animate-pulse" style="color: var(--color-muted-foreground)">running…</span>
-      </div>
       <!-- Terminal body -->
       <div class="bg-[#fafafa] dark:bg-[#0d1117] px-3 py-2 font-mono text-xs max-h-72 overflow-y-auto">
         <div>
@@ -393,12 +377,6 @@ function formatArgs(args: string): string {
         : ''"
       :style="{ borderRadius: 'var(--radius-xl)', border: tool.status !== 'error' ? '1px solid var(--color-border)' : undefined }"
     >
-      <!-- File header -->
-      <div class="flex items-center gap-2 px-3 py-1.5" style="background: var(--color-muted); border-bottom: 1px solid var(--color-border)">
-        <span class="text-[11px]">{{ tool.name === 'write' ? '✏️' : '📄' }}</span>
-        <span class="text-[10px] font-mono" style="color: var(--color-muted-foreground)">{{ shortFileDir }}/</span>
-        <span class="text-xs font-mono font-medium" style="color: var(--color-foreground)">{{ fileName }}</span>
-      </div>
       <!-- File body -->
       <div class="bg-white dark:bg-[#0d1117] max-h-72 overflow-y-auto">
         <table v-if="fileLines.length" class="w-full text-xs font-mono border-collapse">
@@ -422,18 +400,6 @@ function formatArgs(args: string): string {
         : ''"
       :style="{ borderRadius: 'var(--radius-xl)', border: tool.status !== 'error' ? '1px solid var(--color-border)' : undefined }"
     >
-      <!-- Diff header -->
-      <div class="flex items-center gap-2 px-3 py-1.5" style="background: var(--color-muted); border-bottom: 1px solid var(--color-border)">
-        <span class="text-[11px]">✏️</span>
-        <span class="text-[10px] font-mono" style="color: var(--color-muted-foreground)">{{ shortFileDir }}/</span>
-        <span class="text-xs font-mono font-medium" style="color: var(--color-foreground)">{{ fileName }}</span>
-        <span class="ml-auto text-[10px] font-mono tabular-nums shrink-0">
-          <span v-if="diffData.added" style="color: var(--color-primary)">+{{ diffData.added }}</span>
-          <span v-if="diffData.added && diffData.deleted" class="mx-0.5" style="color: var(--color-muted-foreground)">/</span>
-          <span v-if="diffData.deleted" class="text-red-500 dark:text-red-400">-{{ diffData.deleted }}</span>
-          <span v-if="diffData.isCreate" class="italic" style="color: var(--color-primary)">new file</span>
-        </span>
-      </div>
       <!-- Diff body -->
       <div class="bg-white dark:bg-[#0d1117] max-h-72 overflow-y-auto">
         <table v-if="diffData.sections.length" class="w-full text-xs font-mono border-collapse">
@@ -485,22 +451,6 @@ function formatArgs(args: string): string {
       class="mt-1 overflow-hidden"
       :style="{ borderRadius: 'var(--radius-xl)', border: '1px solid var(--color-border)' }"
     >
-      <!-- Search header -->
-      <div class="flex items-center justify-between px-3 py-1.5" style="background: var(--color-muted); border-bottom: 1px solid var(--color-border)">
-        <div class="flex items-center gap-2">
-          <span class="text-[11px]">🔍</span>
-          <span class="text-[10px] font-mono font-medium" style="color: var(--color-foreground)">Search</span>
-        </div>
-        <span
-          v-if="tool.status !== 'running'"
-          class="flex items-center gap-1 text-[10px] font-mono"
-          :style="{ color: tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-primary)' }"
-        >
-          <span class="w-1.5 h-1.5 rounded-full" :style="{ background: tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-primary)' }"></span>
-          {{ tool.status === 'error' ? 'Error' : 'Completed' }}
-        </span>
-        <span v-else class="text-[10px] font-mono animate-pulse" style="color: var(--color-muted-foreground)">searching…</span>
-      </div>
       <!-- Args -->
       <div v-if="searchArgsDisplay" class="px-3 py-1.5" style="border-bottom: 1px solid var(--color-border); background: var(--color-surface)">
         <div class="text-[9px] font-semibold uppercase tracking-wider mb-1" style="color: var(--color-muted-foreground)">ARGS</div>
