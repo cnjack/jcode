@@ -310,23 +310,31 @@ function formatArgs(args: string): string {
       </svg>
     </button>
 
-    <!-- Expanded: title hidden, content only, hover shows collapse button -->
+    <!-- Expanded: single card — header row (clickable to collapse) + content, no divider -->
     <div
       v-else
-      class="relative group overflow-hidden"
+      class="overflow-hidden"
       :class="tool.status === 'error' ? 'border border-red-300/60 dark:border-red-500/30' : ''"
       :style="{ borderRadius: 'var(--radius-xl)', border: tool.status !== 'error' ? '1px solid var(--color-border)' : undefined }"
     >
-      <!-- Hover-reveal collapse button -->
-      <button
-        @click="expanded = false"
-        class="absolute top-1 right-1 z-10 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity w-5 h-5 flex items-center justify-center rounded-sm"
-        style="color: var(--color-muted-foreground)"
-      >
-        <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
-          <path fill-rule="evenodd" d="M14.77 12.79a.75.75 0 01-1.06-.02L10 8.832l-3.71 3.938a.75.75 0 11-1.08-1.04l4.25-4.5a.75.75 0 011.08 0l4.25 4.5a.75.75 0 01-.02 1.06z" clip-rule="evenodd" />
-        </svg>
-      </button>
+      <!-- Header: icon + title on left, status on right — click to collapse. No border-bottom. -->
+      <div class="flex items-center justify-between px-3 py-1.5 cursor-pointer" @click="expanded = false">
+        <div class="flex items-center gap-1.5">
+          <template v-if="renderType === 'terminal'">
+            <span class="text-[11px] font-mono select-none" style="color: var(--color-muted-foreground)">›_</span>
+            <span class="text-[10px] font-mono" style="color: var(--color-foreground)">Shell</span>
+          </template>
+          <template v-else>
+            <span class="text-[11px]">{{ displayIcon }}</span>
+            <span class="text-[10px] font-mono" style="color: var(--color-foreground)">{{ displayTitle }}</span>
+          </template>
+        </div>
+        <span v-if="tool.status !== 'running'" class="flex items-center gap-1 text-[10px] font-mono" :style="{ color: tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-primary)' }">
+          <span class="w-1.5 h-1.5 rounded-full" :style="{ background: tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-primary)' }"></span>
+          {{ tool.status === 'error' ? 'Error' : 'Completed' }}
+        </span>
+        <span v-else class="text-[10px] font-mono animate-pulse" style="color: var(--color-muted-foreground)">running…</span>
+      </div>
 
       <!-- ═══════ Terminal (execute) ═══════ -->
       <div v-if="renderType === 'terminal'" class="bg-[#fafafa] dark:bg-[#0d1117] px-3 py-2 font-mono text-xs max-h-72 overflow-y-auto">
