@@ -97,26 +97,28 @@ function fileIcon(file: FileItem): string {
 </script>
 
 <template>
-  <aside class="w-[var(--sidebar-width)] bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800/80 flex flex-col shrink-0 relative">
+  <aside class="w-[var(--sidebar-width)] flex flex-col shrink-0 relative" style="background: var(--color-sidebar-bg); border-right: 1px solid var(--color-border)">
     <!-- Project header -->
-    <div class="px-3.5 pt-4 pb-3">
+    <div class="px-3 pt-4 pb-3">
       <button
-        class="flex items-center gap-2.5 mb-3 w-full text-left cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md p-2 -m-0.5 transition-colors group"
+        class="flex items-center gap-2.5 mb-3 w-full text-left cursor-pointer rounded-md p-2 -m-0.5 transition-colors group"
+        style="color: var(--color-foreground)"
         @click="emit('openProjects')"
       >
-        <div class="w-8 h-8 rounded-md bg-zinc-900 dark:bg-zinc-800 text-white flex items-center justify-center text-[10px] font-bold shadow-sm" style="font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'Roboto Mono', Menlo, Monaco, monospace;">
-          [<span style="color: #FF8400;">J</span>]
+        <div class="w-8 h-8 rounded-md flex items-center justify-center text-[10px] font-bold shadow-sm" style="background: var(--color-foreground); color: #fff; font-family: var(--font-mono)">
+          [<span style="color: var(--color-primary);">J</span>]
         </div>
         <div class="min-w-0 flex-1">
-          <div class="text-sm font-semibold text-zinc-800 dark:text-zinc-100 truncate" style="font-family: var(--font-sans)">{{ store.projectName || 'jcode' }}</div>
-          <div class="text-[10px] text-zinc-400 dark:text-zinc-600 font-mono truncate">{{ store.pwd }}</div>
+          <div class="text-sm font-semibold truncate" style="font-family: var(--font-sans); color: var(--color-foreground)">{{ store.projectName || 'jcode' }}</div>
+          <div class="text-[10px] font-mono truncate" style="color: var(--color-muted-foreground)">{{ store.pwd }}</div>
         </div>
-        <svg class="w-4 h-4 text-zinc-300 dark:text-zinc-600 shrink-0 group-hover:text-zinc-500 dark:group-hover:text-zinc-400 transition-colors" viewBox="0 0 20 20" fill="currentColor">
+        <svg class="w-4 h-4 shrink-0 transition-colors" style="color: var(--color-muted-foreground)" viewBox="0 0 20 20" fill="currentColor">
           <path d="M3 10a1.5 1.5 0 113 0 1.5 1.5 0 01-3 0zM8.5 10a1.5 1.5 0 113 0 1.5 1.5 0 01-3 0zM15.5 8.5a1.5 1.5 0 100 3 1.5 1.5 0 000-3z" />
         </svg>
       </button>
       <button
-        class="w-full py-2 text-xs font-medium rounded-md border border-zinc-200 dark:border-zinc-700/60 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:border-zinc-300 dark:hover:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 transition-all cursor-pointer"
+        class="w-full py-2 text-xs font-medium rounded-md transition-all cursor-pointer"
+        style="border: 1px solid var(--color-border); color: var(--color-muted-foreground)"
         @click="store.newSession()"
       >
         + New conversation
@@ -124,41 +126,42 @@ function fileIcon(file: FileItem): string {
     </div>
 
     <!-- Tabs -->
-    <div class="flex mx-3.5 border-b border-zinc-200 dark:border-zinc-800">
+    <div class="flex mx-3" style="border-bottom: 1px solid var(--color-border)">
       <button
         v-for="tab in (['sessions', 'files'] as const)"
         :key="tab"
         class="flex-1 pb-2 text-[11px] font-medium text-center capitalize transition-colors cursor-pointer relative"
-        :class="activeTab === tab
-          ? 'text-zinc-800 dark:text-zinc-100'
-          : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300'"
+        :style="{ color: activeTab === tab ? 'var(--color-foreground)' : 'var(--color-muted-foreground)' }"
         @click="switchTab(tab)"
       >
         {{ tab }}
         <span
           v-if="activeTab === tab"
-          class="absolute bottom-0 left-1/4 right-1/4 h-0.5 bg-emerald-500 dark:bg-emerald-400 rounded-full"
+          class="absolute bottom-0 left-1/4 right-1/4 h-0.5 rounded-full"
+          style="background: var(--color-primary)"
         />
       </button>
     </div>
 
     <!-- Sessions list -->
     <div v-if="activeTab === 'sessions'" class="flex-1 overflow-y-auto px-2 py-2">
-      <div v-if="store.sessions.length === 0" class="text-center text-[11px] text-zinc-400 dark:text-zinc-600 py-10">
+      <div v-if="store.sessions.length === 0" class="text-center text-[11px] py-10" style="color: var(--color-muted-foreground)">
         No conversations yet
       </div>
       <div
         v-for="s in store.sessions"
         :key="s.uuid"
-        class="group relative flex items-center gap-2 px-2.5 py-2.5 rounded-md cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/60 transition-colors mb-0.5"
+        class="group relative flex items-center gap-2 px-2.5 py-2.5 rounded-md cursor-pointer transition-colors mb-0.5"
+        :style="{ background: s.uuid === store.currentSessionId ? 'var(--color-muted)' : 'transparent' }"
         @click="store.loadSession(s.uuid)"
       >
         <div class="min-w-0 flex-1">
-          <div class="text-xs text-zinc-600 dark:text-zinc-300 truncate font-medium">{{ s.title || s.uuid.slice(0, 8) + '…' }}</div>
-          <div class="text-[10px] text-zinc-400 dark:text-zinc-600 mt-0.5 font-mono">{{ s.model }} · {{ formatDate(s.created_at) }}</div>
+          <div class="text-xs truncate font-medium" style="color: var(--color-foreground)">{{ s.title || s.uuid.slice(0, 8) + '…' }}</div>
+          <div class="text-[10px] mt-0.5 font-mono" style="color: var(--color-muted-foreground)">{{ s.model }} · {{ formatDate(s.created_at) }}</div>
         </div>
         <button
-          class="opacity-0 group-hover:opacity-100 shrink-0 w-6 h-6 flex items-center justify-center rounded text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all cursor-pointer"
+          class="opacity-0 group-hover:opacity-100 shrink-0 w-6 h-6 flex items-center justify-center rounded transition-all cursor-pointer"
+          style="color: var(--color-muted-foreground)"
           @click.stop="handleDelete(s.uuid)"
           title="Archive"
         >
@@ -174,7 +177,8 @@ function fileIcon(file: FileItem): string {
     <div v-if="activeTab === 'files'" class="flex-1 overflow-y-auto px-2 py-2">
       <button
         v-if="currentPath"
-        class="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 mb-1 cursor-pointer rounded hover:bg-zinc-100 dark:hover:bg-zinc-800/60 transition-colors w-full"
+        class="flex items-center gap-1.5 px-2.5 py-1.5 text-xs mb-1 cursor-pointer rounded transition-colors w-full"
+        style="color: var(--color-muted-foreground)"
         @click="goUp"
       >
         <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z" clip-rule="evenodd" /></svg>
@@ -183,8 +187,8 @@ function fileIcon(file: FileItem): string {
       <div
         v-for="file in files"
         :key="file.name"
-        class="flex items-center gap-2 px-2.5 py-1.5 rounded text-xs cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/60 transition-colors truncate"
-        :class="file.is_dir ? 'text-zinc-700 dark:text-zinc-300 font-medium' : 'text-zinc-500 dark:text-zinc-400'"
+        class="flex items-center gap-2 px-2.5 py-1.5 rounded text-xs cursor-pointer transition-colors truncate"
+        :style="{ color: file.is_dir ? 'var(--color-foreground)' : 'var(--color-muted-foreground)', fontWeight: file.is_dir ? '500' : '400' }"
         @click="handleFileClick(file)"
       >
         <span class="text-[11px] shrink-0">{{ fileIcon(file) }}</span>
@@ -193,29 +197,29 @@ function fileIcon(file: FileItem): string {
     </div>
 
     <!-- Footer -->
-    <div class="border-t border-zinc-200 dark:border-zinc-800 px-3.5 py-2.5 flex items-center justify-between">
-      <div class="text-[10px] text-zinc-400 dark:text-zinc-600 font-mono truncate max-w-36">
+    <div class="px-3 py-2.5 flex items-center justify-between" style="border-top: 1px solid var(--color-border)">
+      <div class="text-[10px] font-mono truncate max-w-36" style="color: var(--color-muted-foreground)">
         {{ store.providerName }}/{{ store.modelName }}
       </div>
       <div class="flex items-center gap-1">
         <!-- Theme toggle -->
         <button
-          class="w-7 h-7 flex items-center justify-center rounded text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+          class="w-7 h-7 flex items-center justify-center rounded transition-colors cursor-pointer"
+          style="color: var(--color-muted-foreground)"
           @click="emit('toggleTheme')"
           :title="resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
         >
-          <!-- Sun (dark mode: show sun to switch to light) -->
           <svg v-if="resolvedTheme === 'dark'" class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
             <path d="M10 2a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 2zM10 15a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 15zM10 7a3 3 0 100 6 3 3 0 000-6zM15.657 5.404a.75.75 0 10-1.06-1.06l-1.061 1.06a.75.75 0 001.06 1.06l1.06-1.06zM6.464 14.596a.75.75 0 10-1.06-1.06l-1.06 1.06a.75.75 0 001.06 1.06l1.06-1.06zM18 10a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0118 10zM5 10a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 015 10zM14.596 15.657a.75.75 0 001.06-1.06l-1.06-1.061a.75.75 0 10-1.06 1.06l1.06 1.06zM5.404 6.464a.75.75 0 001.06-1.06l-1.06-1.06a.75.75 0 10-1.06 1.06l1.06 1.06z" />
           </svg>
-          <!-- Moon (light mode: show moon to switch to dark) -->
           <svg v-else class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
             <path fill-rule="evenodd" d="M7.455 2.004a.75.75 0 01.26.77 7 7 0 009.958 7.967.75.75 0 011.067.853A8.5 8.5 0 116.647 1.921a.75.75 0 01.808.083z" clip-rule="evenodd" />
           </svg>
         </button>
         <!-- Settings -->
         <button
-          class="w-7 h-7 flex items-center justify-center rounded text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+          class="w-7 h-7 flex items-center justify-center rounded transition-colors cursor-pointer"
+          style="color: var(--color-muted-foreground)"
           @click="emit('openSettings')"
           title="Settings (Ctrl+,)"
         >

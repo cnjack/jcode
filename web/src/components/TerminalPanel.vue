@@ -186,18 +186,19 @@ onUnmounted(cleanup)
 </script>
 
 <template>
-  <div class="flex flex-col h-full bg-zinc-50 dark:bg-zinc-900">
+  <div class="flex flex-col h-full" style="background-color: var(--color-muted)">
     <!-- Header -->
-    <div class="flex items-center justify-between px-3 py-1.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-100/80 dark:bg-zinc-800/80 shrink-0">
+    <div class="flex items-center justify-between px-3 py-1.5 border-b shrink-0" style="border-color: var(--color-border); background-color: var(--color-surface)">
       <div class="flex items-center gap-2">
-        <span class="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Terminal</span>
+        <span class="text-[11px] font-semibold uppercase tracking-wider" style="color: var(--color-muted-foreground)">Terminal</span>
         <span
           class="w-1.5 h-1.5 rounded-full"
-          :class="connected ? 'bg-emerald-400' : 'bg-zinc-300 dark:bg-zinc-600'"
+          :style="{ backgroundColor: connected ? 'var(--color-primary)' : 'var(--color-border)' }"
         />
       </div>
       <button
-        class="text-[10px] text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer transition-colors font-medium"
+        class="text-[10px] cursor-pointer transition-colors font-medium"
+        style="color: var(--color-muted-foreground)"
         @click="reconnect"
         title="New terminal"
       >

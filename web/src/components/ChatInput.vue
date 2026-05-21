@@ -268,35 +268,36 @@ watch(() => store.isRunning, (running) => {
 </script>
 
 <template>
-  <div ref="containerRef" class="border-t border-zinc-200 dark:border-zinc-800/80 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm px-5 py-3">
+  <div ref="containerRef" class="px-4 pb-4" style="background: var(--color-background)">
     <div class="max-w-3xl mx-auto">
-      <div class="bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700/60 rounded-md px-3.5 py-2.5 transition-all relative">
+      <div class="p-3 relative" style="background: var(--color-muted); border-radius: var(--radius-xl)">
+        <div class="p-3" style="background: var(--color-surface); border-radius: calc(var(--radius-xl) - 3px)">
         <!-- Slash command menu -->
         <div
           v-if="showSlashMenu && filteredSlashCommands.length > 0"
-          class="absolute bottom-full mb-2 left-0 right-0 z-30 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md shadow-lg dark:shadow-2xl py-1.5 max-h-48 overflow-y-auto"
+          class="absolute bottom-full mb-2 left-3 right-3 z-30 py-1.5 max-h-48 overflow-y-auto"
+          style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg)"
         >
           <button
             v-for="(cmd, i) in filteredSlashCommands"
             :key="cmd.name"
             class="w-full px-3.5 py-2 text-left flex items-start gap-2.5 cursor-pointer transition-colors"
-            :class="i === selectedSlashIdx
-              ? 'bg-emerald-50 dark:bg-emerald-500/10'
-              : 'hover:bg-zinc-50 dark:hover:bg-zinc-700/50'"
+            :style="i === selectedSlashIdx ? 'background: var(--color-muted)' : ''"
             @click="applySlashCommand(cmd)"
             @mouseenter="selectedSlashIdx = i"
           >
-            <span class="text-xs font-mono text-emerald-600 dark:text-emerald-400 shrink-0">{{ cmd.slash }}</span>
-            <span class="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">{{ cmd.description }}</span>
+            <span class="text-xs font-mono shrink-0" style="color: var(--color-primary)">{{ cmd.slash }}</span>
+            <span class="text-[11px] truncate" style="color: var(--color-muted-foreground)">{{ cmd.description }}</span>
           </button>
         </div>
 
         <!-- Image previews -->
         <div v-if="pendingImagePreviews.length > 0" class="flex flex-wrap gap-2 mb-2">
           <div v-for="(preview, i) in pendingImagePreviews" :key="i" class="relative group">
-            <img :src="preview" class="w-16 h-16 object-cover rounded border border-zinc-200 dark:border-zinc-700" />
+            <img :src="preview" class="w-16 h-16 object-cover rounded" style="border: 1px solid var(--color-border)" />
             <button
-              class="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+              class="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full text-white text-[9px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+              style="background: var(--color-destructive)"
               @click="removeImage(i)"
             >✕</button>
           </div>
@@ -308,7 +309,9 @@ watch(() => store.isRunning, (running) => {
           :placeholder="store.isRunning ? 'Agent is working…' : 'Ask anything… (/ for commands)'"
           rows="1"
           :disabled="store.isRunning"
-          class="w-full bg-transparent text-zinc-800 dark:text-zinc-100 text-sm resize-none outline-none placeholder-zinc-400 dark:placeholder-zinc-500 min-h-6 max-h-40 leading-relaxed disabled:opacity-50"
+          class="w-full bg-transparent text-sm resize-none outline-none min-h-6 max-h-40 leading-relaxed disabled:opacity-50"
+          style="color: var(--color-foreground); --tw-placeholder-opacity: 1"
+          :style="{ '--placeholder-color': 'var(--color-muted-foreground)' }"
           @keydown="handleKeyDown"
           @input="handleInput"
           @paste="handlePaste"
@@ -324,17 +327,17 @@ watch(() => store.isRunning, (running) => {
           @change="handleImageSelect"
         />
         <!-- Toolbar row -->
-        <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-zinc-200/60 dark:border-zinc-700/40">
-          <div class="flex items-center gap-1.5">
+        <div class="flex items-center justify-between mt-1.5 gap-2">
+          <div class="flex items-center gap-2">
             <!-- Image attach "+" button -->
             <button
-              class="w-6 h-6 flex items-center justify-center rounded border transition-colors shrink-0"
+              class="w-6 h-6 flex items-center justify-center transition-colors shrink-0"
               :class="[
-                store.imageSupport ? 'cursor-pointer' : 'cursor-not-allowed opacity-40',
-                pendingImages.length > 0
-                  ? 'border-blue-400 dark:border-blue-500 bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-400'
-                  : 'border-zinc-300 dark:border-zinc-600 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:border-zinc-400 dark:hover:border-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-700/60'
+                store.imageSupport ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
               ]"
+              :style="pendingImages.length > 0
+                ? 'background: rgba(255,132,0,0.1); color: var(--color-primary); border: 1px solid var(--color-primary); border-radius: var(--radius-md)'
+                : 'background: var(--color-secondary); color: var(--color-muted-foreground); border-radius: var(--radius-md)'"
               :title="!store.imageSupport ? 'Current model does not support images' : pendingImages.length > 0 ? `${pendingImages.length} image(s) attached — click to add more` : 'Attach images'"
               :disabled="!store.imageSupport"
               @click="store.imageSupport && triggerImageUpload()"
@@ -348,10 +351,10 @@ watch(() => store.isRunning, (running) => {
             <!-- Mode selector -->
             <div class="relative">
               <button
-                class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded transition-colors cursor-pointer"
-                :class="store.mode === 'plan'
-                  ? 'bg-amber-100 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                  : 'bg-zinc-100 dark:bg-zinc-700/60 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'"
+                class="flex items-center gap-1 px-2 py-0.5 text-[11px] transition-colors cursor-pointer"
+                :style="store.mode === 'plan'
+                  ? 'background: rgba(255,132,0,0.1); color: var(--color-primary); border-radius: var(--radius-md)'
+                  : 'background: var(--color-secondary); color: var(--color-foreground); border-radius: var(--radius-md)'"
                 @click.stop="showModePicker = !showModePicker; showModelPicker = false"
               >
                 {{ store.mode === 'agent' ? '🔥 Agent' : '📋 Plan' }}
@@ -359,14 +362,14 @@ watch(() => store.isRunning, (running) => {
                   <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
                 </svg>
               </button>
-              <div v-if="showModePicker" class="absolute bottom-full mb-1 left-0 z-20 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md shadow-lg dark:shadow-2xl py-1 min-w-28">
+              <div v-if="showModePicker" class="absolute bottom-full mb-1 left-0 z-20 py-1 min-w-28" style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg)">
                 <button
                   v-for="m in modes"
                   :key="m.value"
                   class="w-full px-3 py-1.5 text-xs cursor-pointer select-none text-left transition-colors rounded"
-                  :class="store.mode === m.value
-                    ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10'
-                    : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700/50 hover:text-zinc-700 dark:hover:text-zinc-200'"
+                  :style="store.mode === m.value
+                    ? 'color: var(--color-primary); background: rgba(255,132,0,0.1)'
+                    : 'color: var(--color-muted-foreground)'"
                   @click="selectMode(m.value)"
                 >
                   {{ m.icon }} {{ m.label }}
@@ -377,7 +380,8 @@ watch(() => store.isRunning, (running) => {
             <!-- Model selector -->
             <div class="relative">
               <button
-                class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded bg-zinc-100 dark:bg-zinc-700/60 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer transition-colors"
+                class="flex items-center gap-1 px-2 py-0.5 text-[11px] cursor-pointer transition-colors"
+                style="background: var(--color-secondary); color: var(--color-foreground); border-radius: var(--radius-md)"
                 @click.stop="showModelPicker = !showModelPicker; showModePicker = false"
               >
                 {{ store.modelName || 'model' }}
@@ -387,17 +391,19 @@ watch(() => store.isRunning, (running) => {
               </button>
               <div
                 v-if="showModelPicker"
-                class="absolute bottom-full mb-1 left-0 z-20 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-md shadow-lg dark:shadow-2xl py-1.5 max-h-72 overflow-y-auto min-w-56"
+                class="absolute bottom-full mb-1 left-0 z-20 py-1.5 max-h-72 overflow-y-auto min-w-56"
+                style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg)"
               >
                 <!-- Favorites section -->
                 <template v-if="store.recentModels.length > 0 && store.favoriteModels.size > 0">
-                  <div class="px-3 py-1 text-[10px] text-amber-500 dark:text-amber-400 uppercase tracking-wider font-semibold sticky top-0 bg-white dark:bg-zinc-800 flex items-center gap-1">
+                  <div class="px-3 py-1 text-[10px] uppercase tracking-wider font-semibold sticky top-0 flex items-center gap-1" style="color: var(--color-primary); background: var(--color-surface)">
                     <span>★</span> Favorites
                   </div>
                   <button
                     v-for="r in store.recentModels.filter(r => store.favoriteModels.has(`${r.provider}/${r.model}`) && !(store.providerName === r.provider && store.modelName === r.model))"
                     :key="'fav-'+r.provider+'-'+r.model"
-                    class="w-full px-3 py-1.5 text-xs text-left cursor-pointer select-none truncate transition-colors text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700/50 hover:text-zinc-700 dark:hover:text-zinc-200"
+                    class="w-full px-3 py-1.5 text-xs text-left cursor-pointer select-none truncate transition-colors"
+                    style="color: var(--color-muted-foreground)"
                     @click="selectModel(r.provider, r.model)"
                   >
                     <span class="text-amber-400 mr-1">★</span>{{ getModelDisplayName(r.provider, r.model) }}
@@ -406,11 +412,12 @@ watch(() => store.isRunning, (running) => {
 
                 <!-- Current Model section -->
                 <template v-if="store.providerName && store.modelName">
-                  <div class="px-3 py-1 text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider font-semibold sticky top-0 bg-white dark:bg-zinc-800 border-t border-zinc-100 dark:border-zinc-700/50">
+                  <div class="px-3 py-1 text-[10px] uppercase tracking-wider font-semibold sticky top-0" style="color: var(--color-muted-foreground); background: var(--color-surface); border-top: 1px solid var(--color-border)">
                     Current Model
                   </div>
                   <button
-                    class="w-full px-3 py-1.5 text-xs text-left cursor-pointer select-none truncate transition-colors text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10"
+                    class="w-full px-3 py-1.5 text-xs text-left cursor-pointer select-none truncate transition-colors"
+                    style="color: var(--color-primary); background: rgba(255,132,0,0.1)"
                     @click="selectModel(store.providerName, store.modelName)"
                   >
                     ● {{ getModelDisplayName(store.providerName, store.modelName) }}
@@ -419,35 +426,36 @@ watch(() => store.isRunning, (running) => {
 
                 <!-- All providers section (only enabled models) -->
                 <template v-for="p in store.enabledProviders" :key="p.id">
-                  <div class="px-3 py-1 text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider font-semibold sticky top-0 bg-white dark:bg-zinc-800 border-t border-zinc-100 dark:border-zinc-700/50">
+                  <div class="px-3 py-1 text-[10px] uppercase tracking-wider font-semibold sticky top-0" style="color: var(--color-muted-foreground); background: var(--color-surface); border-top: 1px solid var(--color-border)">
                     {{ p.name }}
                   </div>
                   <button
                     v-for="m in p.models"
                     :key="m.id"
                     class="w-full px-3 py-1.5 text-xs text-left cursor-pointer select-none transition-colors group"
-                    :class="store.providerName === p.id && store.modelName === m.id
-                      ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10'
-                      : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700/50 hover:text-zinc-700 dark:hover:text-zinc-200'"
+                    :style="store.providerName === p.id && store.modelName === m.id
+                      ? 'color: var(--color-primary); background: rgba(255,132,0,0.1)'
+                      : 'color: var(--color-muted-foreground)'"
                     @click="selectModel(p.id, m.id)"
                   >
                     <span class="truncate">{{ m.name || m.id }}</span>
-                    <span v-if="m.recommended" class="ml-1 text-[9px] text-emerald-500 dark:text-emerald-400">recommended</span>
+                    <span v-if="m.recommended" class="ml-1 text-[9px] px-1 py-0.5 rounded font-medium" style="color: var(--color-primary); background: rgba(255,132,0,0.1)">recommended</span>
                     <button
                       class="ml-1 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer inline"
-                      :class="store.isFavorite(p.id, m.id) ? 'text-amber-400 opacity-100' : 'text-zinc-300 dark:text-zinc-600'"
+                      :style="store.isFavorite(p.id, m.id) ? 'color: #fbbf24; opacity: 1' : 'color: var(--color-muted-foreground)'"
                       @click.stop="store.toggleFavorite(p.id, m.id)"
                       :title="store.isFavorite(p.id, m.id) ? 'Remove from favorites' : 'Add to favorites'"
                     >★</button>
                   </button>
                 </template>
-                <div v-if="store.enabledProviders.length === 0" class="px-3 py-2 text-xs text-zinc-400 dark:text-zinc-500">
+                <div v-if="store.enabledProviders.length === 0" class="px-3 py-2 text-xs" style="color: var(--color-muted-foreground)">
                   No models available
                 </div>
                 <!-- Manage models link -->
-                <div class="border-t border-zinc-100 dark:border-zinc-700/50 px-3 py-1.5">
+                <div class="px-3 py-1.5" style="border-top: 1px solid var(--color-border)">
                   <button
-                    class="w-full text-xs text-left text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer transition-colors"
+                    class="w-full text-xs text-left cursor-pointer transition-colors"
+                    style="color: var(--color-muted-foreground)"
                     @click.stop="showModelPicker = false; showManageModels = true"
                   >
                     ⚙ Manage models…
@@ -460,18 +468,19 @@ watch(() => store.isRunning, (running) => {
             <Teleport to="body">
               <div
                 v-if="showManageModels"
-                class="fixed inset-0 z-50 flex items-center justify-center bg-black/30 dark:bg-black/50"
+                class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
                 @click="showManageModels = false; modelFilter = ''"
               >
-                <div class="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-xl dark:shadow-2xl w-full max-w-lg max-h-[70vh] flex flex-col mx-4" @click.stop>
-                  <div class="px-4 py-3 border-b border-zinc-200 dark:border-zinc-700">
+                <div class="w-full max-w-lg max-h-[70vh] flex flex-col mx-4 rounded-lg shadow-xl" style="background: var(--color-surface); border: 1px solid var(--color-border)" @click.stop>
+                  <div class="px-4 py-3" style="border-bottom: 1px solid var(--color-border)">
                     <div class="flex items-center justify-between mb-2">
                       <div>
-                        <h3 class="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Manage Models</h3>
-                        <p class="text-[11px] text-zinc-400 dark:text-zinc-500">Toggle which models appear in the model selector</p>
+                        <h3 class="text-sm font-semibold" style="color: var(--color-foreground)">Manage Models</h3>
+                        <p class="text-[11px]" style="color: var(--color-muted-foreground)">Toggle which models appear in the model selector</p>
                       </div>
                       <button
-                        class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 cursor-pointer"
+                        class="cursor-pointer"
+                        style="color: var(--color-muted-foreground)"
                         @click="showManageModels = false; modelFilter = ''; store.fetchModels()"
                       >✕</button>
                     </div>
@@ -479,27 +488,29 @@ watch(() => store.isRunning, (running) => {
                       v-model="modelFilter"
                       type="text"
                       placeholder="Filter models..."
-                      class="w-full px-2 py-1.5 text-xs border border-zinc-200 dark:border-zinc-600 rounded bg-white dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      class="w-full px-2 py-1.5 text-xs rounded focus:outline-none focus:ring-1"
+                      style="border: 1px solid var(--color-border); background: var(--color-muted); color: var(--color-foreground); --tw-ring-color: var(--color-primary)"
                     />
                   </div>
                   <div class="overflow-y-auto flex-1 py-2">
                     <template v-for="p in filteredProviders" :key="'mgr-'+p.id">
-                      <div class="px-4 py-1.5 text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider font-semibold sticky top-0 bg-white dark:bg-zinc-800">
+                      <div class="px-4 py-1.5 text-[10px] uppercase tracking-wider font-semibold sticky top-0" style="color: var(--color-muted-foreground); background: var(--color-surface)">
                         {{ p.name }}
                       </div>
                       <label
                         v-for="m in p.models"
                         :key="'mgr-'+p.id+'-'+m.id"
-                        class="flex items-center gap-2.5 px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-700/30 cursor-pointer transition-colors"
+                        class="flex items-center gap-2.5 px-4 py-2 cursor-pointer transition-colors hover:opacity-80"
                       >
                         <input
                           type="checkbox"
                           :checked="m.enabled !== false"
-                          class="w-4 h-4 rounded border-2 border-zinc-300 dark:border-zinc-600 text-emerald-500 focus:ring-2 focus:ring-emerald-500 focus:ring-offset-0 cursor-pointer transition-all"
+                          class="w-4 h-4 rounded border-2 focus:ring-2 focus:ring-offset-0 cursor-pointer transition-all"
+                          style="accent-color: var(--color-primary); border-color: var(--color-border)"
                           @change="store.toggleModelEnabled(p.id, m.id, ($event.target as HTMLInputElement).checked)"
                         />
-                        <span class="text-xs text-zinc-700 dark:text-zinc-300 flex-1 truncate">{{ m.name || m.id }}</span>
-                        <span v-if="m.recommended" class="text-[9px] px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium shrink-0">recommended</span>
+                        <span class="text-xs flex-1 truncate" style="color: var(--color-foreground)">{{ m.name || m.id }}</span>
+                        <span v-if="m.recommended" class="text-[9px] px-1.5 py-0.5 rounded font-medium shrink-0" style="background: rgba(255,132,0,0.1); color: var(--color-primary)">recommended</span>
                       </label>
                     </template>
                   </div>
@@ -509,10 +520,10 @@ watch(() => store.isRunning, (running) => {
 
             <!-- Auto-approve toggle -->
             <button
-              class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded transition-colors cursor-pointer"
-              :class="store.autoApprove
-                ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-500/25'
-                : 'bg-zinc-100 dark:bg-zinc-700/60 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-600/60'"
+              class="flex items-center gap-1 px-2 py-0.5 text-[11px] transition-colors cursor-pointer"
+              :style="store.autoApprove
+                ? 'background: rgba(255,132,0,0.1); color: var(--color-primary); border-radius: var(--radius-md)'
+                : 'background: var(--color-secondary); color: var(--color-muted-foreground); border-radius: var(--radius-md)'"
               :title="store.autoApprove ? 'Auto-approve ON' : 'Auto-approve OFF'"
               @click="store.setAutoApprove(!store.autoApprove)"
             >
@@ -525,10 +536,10 @@ watch(() => store.isRunning, (running) => {
             <!-- Channel toggle -->
             <button
               v-if="store.channelAvailable"
-              class="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded transition-colors cursor-pointer"
-              :class="store.channelEnabled
-                ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-500/25'
-                : 'bg-zinc-100 dark:bg-zinc-700/60 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-600/60'"
+              class="flex items-center gap-1 px-2 py-0.5 text-[11px] transition-colors cursor-pointer"
+              :style="store.channelEnabled
+                ? 'background: rgba(255,132,0,0.1); color: var(--color-primary); border-radius: var(--radius-md)'
+                : 'background: var(--color-secondary); color: var(--color-muted-foreground); border-radius: var(--radius-md)'"
               :title="store.channelEnabled ? 'WeChat notifications ON' : 'WeChat notifications OFF'"
               @click="store.toggleChannel(!store.channelEnabled)"
             >
@@ -541,14 +552,15 @@ watch(() => store.isRunning, (running) => {
           </div>
 
           <div class="flex items-center gap-2">
-            <span v-if="store.tokenInfo" class="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono">
+            <span v-if="store.tokenInfo" class="text-[10px] font-mono" style="color: var(--color-muted-foreground)">
               {{ store.tokenInfo.total_tokens.toLocaleString() }} tokens
               <template v-if="store.tokenPercentage > 0"> · {{ store.tokenPercentage }}%</template>
             </span>
             <!-- Stop button -->
             <button
               v-if="store.isRunning"
-              class="w-7 h-7 flex items-center justify-center rounded-md bg-red-500 hover:bg-red-600 text-white transition-colors cursor-pointer shadow-sm"
+              class="w-7 h-7 flex items-center justify-center text-white transition-colors cursor-pointer shadow-sm"
+              style="background: var(--color-destructive); border-radius: var(--radius-md)"
               title="Stop agent (Esc)"
               @click="store.stopAgent()"
             >
@@ -559,7 +571,8 @@ watch(() => store.isRunning, (running) => {
             <!-- Send button -->
             <button
               v-else
-              class="w-7 h-7 flex items-center justify-center rounded-md bg-emerald-500 hover:bg-emerald-600 text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shadow-sm"
+              class="w-7 h-7 flex items-center justify-center text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shadow-sm"
+              style="background: var(--color-primary); border-radius: var(--radius-md)"
               :disabled="!input.trim() && pendingImages.length === 0"
               @click="send"
             >
@@ -569,7 +582,14 @@ watch(() => store.isRunning, (running) => {
             </button>
           </div>
         </div>
+        </div>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+textarea::placeholder {
+  color: var(--color-muted-foreground);
+}
+</style>
