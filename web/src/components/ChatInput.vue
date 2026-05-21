@@ -551,7 +551,6 @@ watch(() => store.isRunning, (running) => {
 }
 
 .chat-input-card {
-  max-width: 48rem;
   margin: 0 auto;
   border: 1px solid var(--color-border);
   border-radius: 16px;
