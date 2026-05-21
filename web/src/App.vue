@@ -10,11 +10,10 @@ import ApprovalBanner from '@/components/ApprovalBanner.vue'
 import TodoPanel from '@/components/TodoPanel.vue'
 import ChatInput from '@/components/ChatInput.vue'
 import Sidebar from '@/components/Sidebar.vue'
-import FileViewer from '@/components/FileViewer.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import ProjectSwitcher from '@/components/ProjectSwitcher.vue'
 import TerminalPanel from '@/components/TerminalPanel.vue'
-import DiffViewer from '@/components/DiffViewer.vue'
+import RightPanel from '@/components/RightPanel.vue'
 import SetupView from '@/components/SetupView.vue'
 import TopBar from '@/components/TopBar.vue'
 
@@ -24,16 +23,14 @@ const { resolvedTheme, toggleTheme } = useTheme()
 const messagesEl = ref<HTMLDivElement | null>(null)
 const settingsOpen = ref(false)
 const projectsOpen = ref(false)
-const fileViewerOpen = ref(false)
-const fileViewerPath = ref('')
-const fileViewerContent = ref('')
 const sidebarCollapsed = ref(false)
 const needsSetup = ref(false)
 
-const bottomPanel = ref<'none' | 'terminal' | 'diff'>('none')
+const bottomPanel = ref<'none' | 'terminal'>('none')
 const bottomPanelHeight = ref(260)
 const isResizingPanel = ref(false)
 const rightPanelOpen = ref(false)
+const rightPanelTab = ref<'files' | 'changes'>('files')
 
 // Scroll-to-bottom
 const isAtBottom = ref(true)
@@ -119,6 +116,16 @@ function handleGlobalKeydown(e: KeyboardEvent) {
     togglePanel('terminal')
     return
   }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'E') {
+    e.preventDefault()
+    togglePanel('files')
+    return
+  }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'G') {
+    e.preventDefault()
+    togglePanel('changes')
+    return
+  }
   if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
     e.preventDefault()
     sidebarCollapsed.value = !sidebarCollapsed.value
@@ -153,21 +160,23 @@ onUnmounted(() => {
 })
 
 function openFile(path: string, content: string) {
-  fileViewerPath.value = path
-  fileViewerContent.value = content
-  fileViewerOpen.value = true
+  // Open file in right panel files tab
+  rightPanelOpen.value = true
+  rightPanelTab.value = 'files'
 }
 
-function togglePanel(panel: 'terminal' | 'diff' | 'files' | 'right-panel') {
-  if (panel === 'right-panel') {
-    rightPanelOpen.value = !rightPanelOpen.value
+function togglePanel(panel: 'terminal' | 'files' | 'changes') {
+  if (panel === 'terminal') {
+    bottomPanel.value = bottomPanel.value === 'terminal' ? 'none' : 'terminal'
     return
   }
-  if (panel === 'files') {
-    fileViewerOpen.value = !fileViewerOpen.value
-    return
+  // files and changes toggle the right panel
+  if (rightPanelOpen.value && rightPanelTab.value === panel) {
+    rightPanelOpen.value = false
+  } else {
+    rightPanelOpen.value = true
+    rightPanelTab.value = panel
   }
-  bottomPanel.value = bottomPanel.value === panel ? 'none' : panel
 }
 
 async function onProjectSwitched() {
@@ -243,7 +252,7 @@ function startResize(e: MouseEvent) {
         :pwd="store.pwd || ''"
         :is-running="store.isRunning"
         :ws-connected="store.wsConnected"
-        :active-panel="bottomPanel === 'terminal' ? 'terminal' : bottomPanel === 'diff' ? 'diff' : fileViewerOpen ? 'files' : 'none'"
+        :active-panel="bottomPanel === 'terminal' ? 'terminal' : rightPanelOpen ? rightPanelTab : 'none'"
         @toggle-sidebar="sidebarCollapsed = !sidebarCollapsed"
         @toggle-panel="togglePanel"
       />
@@ -329,16 +338,25 @@ function startResize(e: MouseEvent) {
           <div class="absolute top-[3px] left-1/2 -translate-x-1/2 w-8 h-1 rounded-full transition-colors" style="background: var(--color-border)" />
         </div>
         <TerminalPanel v-if="bottomPanel === 'terminal'" />
-        <DiffViewer v-else-if="bottomPanel === 'diff'" />
       </div>
     </main>
 
-    <FileViewer
-      v-if="fileViewerOpen"
-      :path="fileViewerPath"
-      :content="fileViewerContent"
-      @close="fileViewerOpen = false"
-    />
+    <!-- Right Panel -->
+    <transition
+      enter-active-class="transition-all duration-200 ease-out"
+      enter-from-class="translate-x-4 opacity-0"
+      enter-to-class="translate-x-0 opacity-100"
+      leave-active-class="transition-all duration-150 ease-in"
+      leave-from-class="translate-x-0 opacity-100"
+      leave-to-class="translate-x-4 opacity-0"
+    >
+      <RightPanel
+        v-if="rightPanelOpen"
+        :active-tab="rightPanelTab"
+        @close="rightPanelOpen = false"
+        @switch-tab="(tab) => rightPanelTab = tab"
+      />
+    </transition>
 
     <SettingsDialog :open="settingsOpen" @close="settingsOpen = false" />
     <ProjectSwitcher :open="projectsOpen" @close="projectsOpen = false" @project-switched="onProjectSwitched" />
