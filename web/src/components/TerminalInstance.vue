@@ -178,7 +178,7 @@ onUnmounted(cleanup)
 .term-instance {
   width: 100%;
   height: 100%;
-  padding: 2px;
+  padding: 4px 4px 0;
 }
 
 /* Hidden but still laid out — xterm needs to measure the container */
@@ -193,6 +193,18 @@ onUnmounted(cleanup)
 
 :deep(.xterm) {
   height: 100%;
-  padding: 2px;
+  padding: 4px 6px;
 }
-</style>
+:deep(.xterm-viewport) {
+  border-radius: 0;
+}
+:deep(.xterm-viewport::-webkit-scrollbar) {
+  width: 5px;
+}
+:deep(.xterm-viewport::-webkit-scrollbar-track) {
+  background: transparent;
+}
+:deep(.xterm-viewport::-webkit-scrollbar-thumb) {
+  background: var(--color-border);
+  border-radius: 3px;
+}</style>

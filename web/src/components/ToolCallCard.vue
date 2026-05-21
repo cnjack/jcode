@@ -31,8 +31,40 @@ const renderType = computed(() => {
   if (name === 'write') return 'file-viewer'
   if (name === 'edit' || name === 'multi_edit') return 'diff'
   if (name === 'grep') return 'search'
+  if (name === 'todowrite' || name === 'todoread') return 'todo'
   return 'generic'
 })
+
+// ─── Todo renderer helpers ───
+interface TodoItem { id: number; title: string; status: string }
+const todoItems = computed((): TodoItem[] => {
+  try {
+    // Prefer output (final state), fall back to args (requested state)
+    const output = props.tool.output || ''
+    const jsonMatch = output.match(/\[.*\]/s)
+    if (jsonMatch) return JSON.parse(jsonMatch[0]) as TodoItem[]
+    const parsed = JSON.parse(props.tool.args)
+    return (parsed.todos || []) as TodoItem[]
+  } catch { return [] }
+})
+
+function todoStatusIcon(status: string): string {
+  switch (status) {
+    case 'completed': return '✓'
+    case 'in_progress': return '●'
+    case 'cancelled': return '✗'
+    default: return '○'
+  }
+}
+
+function todoStatusColor(status: string): string {
+  switch (status) {
+    case 'completed': return 'var(--color-primary)'
+    case 'in_progress': return 'var(--color-foreground)'
+    case 'cancelled': return 'var(--color-destructive)'
+    default: return 'var(--color-muted-foreground)'
+  }
+}
 
 // ─── Terminal renderer helpers ───
 const terminalCommand = computed(() => {
@@ -205,76 +237,58 @@ function formatArgs(args: string): string {
 </script>
 
 <template>
-  <!-- Subagent card -->
-  <div v-if="isSubagent" class="my-2">
-    <div
-      class="rounded-md border overflow-hidden transition-colors"
-      :class="tool.status === 'running'
-        ? 'border-violet-300 dark:border-violet-500/30 bg-violet-50/30 dark:bg-violet-500/5'
-        : ''"
-      :style="tool.status !== 'running' ? 'border-color: var(--color-border); background: var(--color-surface)' : ''"
+  <!-- Subagent card — borderless header, children indented below -->
+  <div v-if="isSubagent" class="my-1">
+    <!-- Header: no box, just a plain label row -->
+    <button
+      class="w-full flex items-center gap-1.5 px-1 py-1 text-left cursor-pointer hover:opacity-70 transition-opacity"
+      style="background: transparent"
+      @click="subagentExpanded = !subagentExpanded"
     >
-      <button
-        class="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors cursor-pointer hover:opacity-80"
-        style="background: transparent"
-        @click="subagentExpanded = !subagentExpanded"
+      <span
+        class="text-[10px] shrink-0"
+        :class="{ 'animate-pulse': tool.status === 'running' }"
+        :style="{ color: tool.status === 'done' ? 'var(--color-primary)' : tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-muted-foreground)' }"
       >
-        <span class="text-[10px]" :class="{
-          'text-violet-500 dark:text-violet-400 animate-pulse': tool.status === 'running',
-        }" :style="{
-          color: tool.status === 'done' ? 'var(--color-primary)' : tool.status === 'error' ? 'var(--color-destructive)' : undefined
-        }">
-          <template v-if="tool.status === 'running'">◈</template>
-          <template v-else-if="tool.status === 'done'">✓</template>
-          <template v-else>✗</template>
-        </span>
-        <span class="text-[10px] font-semibold text-violet-500 dark:text-violet-400 uppercase tracking-wider">Subagent</span>
-        <span class="font-mono text-xs" style="color: var(--color-foreground)">{{ subagentName() }}</span>
-        <span
-          v-if="tool.status === 'running'"
-          class="text-[10px] text-violet-400 dark:text-violet-400 animate-pulse"
-        >working…</span>
-        <span
-          v-if="tool.children?.length"
-          class="ml-auto text-[10px] tabular-nums"
-          style="color: var(--color-muted-foreground)"
-        >{{ tool.children.length }} calls</span>
-        <svg
-          class="w-3 h-3 transition-transform shrink-0"
-          :class="{ 'rotate-180': subagentExpanded }"
-          style="color: var(--color-muted-foreground)"
-          viewBox="0 0 20 20" fill="currentColor"
-        >
-          <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-        </svg>
-      </button>
+        <template v-if="tool.status === 'running'">◈</template>
+        <template v-else-if="tool.status === 'done'">✓</template>
+        <template v-else>✗</template>
+      </span>
+      <span class="text-[10px] font-semibold uppercase tracking-wider" style="color: var(--color-muted-foreground)">subagent</span>
+      <span class="text-[11px] font-mono" style="color: var(--color-foreground)">{{ subagentName() }}</span>
+      <span v-if="tool.status === 'running'" class="text-[10px] animate-pulse" style="color: var(--color-muted-foreground)">working…</span>
+      <span v-if="tool.children?.length" class="ml-auto text-[10px] tabular-nums" style="color: var(--color-muted-foreground)">{{ tool.children.length }} calls</span>
+      <svg
+        class="w-3 h-3 transition-transform shrink-0 ml-1"
+        :class="{ 'rotate-180': subagentExpanded }"
+        style="color: var(--color-muted-foreground)"
+        viewBox="0 0 20 20" fill="currentColor"
+      >
+        <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+      </svg>
+    </button>
 
-      <div v-if="subagentExpanded" style="border-top: 1px solid var(--color-border)">
-        <div
-          v-if="tool.children?.length"
-          class="px-2 py-1 max-h-80 overflow-y-auto"
-        >
-          <ToolCallCard
-            v-for="child in tool.children"
-            :key="child.id"
-            :tool="child"
-            :depth="(depth ?? 0) + 1"
-          />
-        </div>
-        <div v-else-if="tool.status === 'running'" class="px-3 py-3 text-xs animate-pulse" style="color: var(--color-muted-foreground)">
-          Starting subagent…
-        </div>
-
-        <div v-if="tool.output" class="px-3 py-2" style="border-top: 1px solid var(--color-border)">
-          <div class="text-[10px] uppercase tracking-wider mb-1" style="color: var(--color-muted-foreground)">Result</div>
-          <div class="text-xs font-mono whitespace-pre-wrap max-h-48 overflow-y-auto" style="color: var(--color-muted-foreground)">
-            {{ truncate(tool.output, 800) }}
-          </div>
-        </div>
-        <div v-if="tool.error" class="px-3 py-2 border-t border-red-200 dark:border-red-500/20">
-          <div class="text-xs font-mono whitespace-pre-wrap" style="color: var(--color-destructive)">{{ tool.error }}</div>
-        </div>
+    <!-- Children: same inset as regular tool content -->
+    <div v-if="subagentExpanded" class="mx-2 mt-1 mb-1">
+      <div v-if="tool.children?.length" class="max-h-[600px] overflow-y-auto">
+        <ToolCallCard
+          v-for="child in tool.children"
+          :key="child.id"
+          :tool="child"
+          :depth="(depth ?? 0) + 1"
+        />
       </div>
+      <div v-else-if="tool.status === 'running'" class="py-2 text-xs animate-pulse" style="color: var(--color-muted-foreground)">
+        Starting subagent…
+      </div>
+      <div
+        v-if="tool.output"
+        class="overflow-hidden mt-1"
+        :style="{ borderRadius: 'var(--radius-xl)', border: '1px solid var(--color-border)' }"
+      >
+        <div class="px-3 py-2 text-xs font-mono whitespace-pre-wrap max-h-48 overflow-y-auto" style="color: var(--color-muted-foreground); background: var(--color-surface)">{{ truncate(tool.output, 800) }}</div>
+      </div>
+      <div v-if="tool.error" class="mt-1 px-3 py-2 text-xs font-mono whitespace-pre-wrap overflow-hidden" :style="{ borderRadius: 'var(--radius-xl)', border: '1px solid var(--color-destructive)', color: 'var(--color-destructive)' }">{{ tool.error }}</div>
     </div>
   </div>
 
@@ -283,58 +297,59 @@ function formatArgs(args: string): string {
     <!-- Trigger: only shown when collapsed -->
     <button
       v-if="!expanded"
-      class="tool-trigger w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-left transition-colors cursor-pointer border border-transparent"
-      :class="tool.status === 'error' ? 'border-red-200/60 dark:border-red-500/20' : ''"
+      class="w-full flex items-center gap-1.5 px-1 py-1 text-left cursor-pointer hover:opacity-70 transition-opacity"
+      style="background: transparent"
       @click="expanded = true"
     >
-      <span class="text-[11px] shrink-0" :class="{ 'animate-pulse': tool.status === 'running' }">{{ displayIcon }}</span>
-      <span class="text-xs font-medium" :style="{ color: tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-muted-foreground)' }">
-        <template v-if="tool.status === 'running'">
-          <span class="inline-flex items-center gap-1">{{ displayTitle }}<span class="text-[10px] animate-pulse" style="color: var(--color-muted-foreground)">…</span></span>
-        </template>
-        <template v-else>{{ displayTitle }}</template>
-      </span>
       <span
-        v-if="displaySubtitle && tool.status !== 'running'"
-        class="text-xs font-mono truncate min-w-0 flex-1"
+        class="text-xs font-medium"
+        :class="{ 'shimmer-running': tool.status === 'running' }"
+        :style="{ color: tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-muted-foreground)' }"
+      >{{ displayTitle }}</span>
+      <span
+        v-if="displaySubtitle"
+        class="text-xs font-mono truncate"
         :style="isContextTool ? 'color: var(--color-muted-foreground)' : 'color: var(--color-primary)'"
       >{{ displaySubtitle }}</span>
-      <span v-if="renderType === 'diff' && diffData.added + diffData.deleted > 0 && tool.status !== 'running'" class="text-[10px] font-mono tabular-nums shrink-0">
+      <svg class="w-3 h-3 shrink-0" style="color: var(--color-muted-foreground)" viewBox="0 0 20 20" fill="currentColor">
+        <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+      </svg>
+      <span v-if="renderType === 'diff' && diffData.added + diffData.deleted > 0" class="ml-auto text-[10px] font-mono tabular-nums shrink-0">
         <span v-if="diffData.added" style="color: var(--color-primary)">+{{ diffData.added }}</span>
         <span v-if="diffData.added && diffData.deleted" class="mx-0.5" style="color: var(--color-muted-foreground)">/</span>
         <span v-if="diffData.deleted" class="text-red-500 dark:text-red-400">-{{ diffData.deleted }}</span>
       </span>
-      <span v-if="tool.status === 'error'" class="text-[9px] font-semibold uppercase tracking-wider text-red-500 dark:text-red-400 bg-red-50 dark:bg-red-500/10 px-1.5 py-0.5 rounded-md">error</span>
-      <svg class="w-3 h-3 ml-auto shrink-0" style="color: var(--color-muted-foreground)" viewBox="0 0 20 20" fill="currentColor">
-        <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-      </svg>
     </button>
 
-    <!-- Expanded: single card — header row (clickable to collapse) + content, no divider -->
-    <div
-      v-else
-      class="overflow-hidden"
-      :class="tool.status === 'error' ? 'border border-red-300/60 dark:border-red-500/30' : ''"
-      :style="{ borderRadius: 'var(--radius-xl)', border: tool.status !== 'error' ? '1px solid var(--color-border)' : undefined }"
-    >
-      <!-- Header: icon + title on left, status on right — click to collapse. No border-bottom. -->
-      <div class="flex items-center justify-between px-3 py-1.5 cursor-pointer" @click="expanded = false">
-        <div class="flex items-center gap-1.5">
-          <template v-if="renderType === 'terminal'">
-            <span class="text-[11px] font-mono select-none" style="color: var(--color-muted-foreground)">›_</span>
-            <span class="text-[10px] font-mono" style="color: var(--color-foreground)">Shell</span>
-          </template>
-          <template v-else>
-            <span class="text-[11px]">{{ displayIcon }}</span>
-            <span class="text-[10px] font-mono" style="color: var(--color-foreground)">{{ displayTitle }}</span>
-          </template>
-        </div>
-        <span v-if="tool.status !== 'running'" class="flex items-center gap-1 text-[10px] font-mono" :style="{ color: tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-primary)' }">
-          <span class="w-1.5 h-1.5 rounded-full" :style="{ background: tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-primary)' }"></span>
-          {{ tool.status === 'error' ? 'Error' : 'Completed' }}
+    <!-- Expanded: header outside, content box below -->
+    <div v-else>
+      <!-- Header: plain text row, no box — click to collapse -->
+      <div class="flex items-center gap-1.5 px-1 py-1 cursor-pointer hover:opacity-70 transition-opacity" @click="expanded = false">
+        <span
+          class="text-xs font-medium"
+          :class="{ 'shimmer-running': tool.status === 'running' }"
+          :style="{ color: tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-muted-foreground)' }"
+        >{{ displayTitle }}</span>
+        <span
+          v-if="displaySubtitle"
+          class="text-xs font-mono truncate"
+          :style="isContextTool ? 'color: var(--color-muted-foreground)' : 'color: var(--color-primary)'"
+        >{{ displaySubtitle }}</span>
+        <svg class="w-3 h-3 shrink-0 rotate-180" style="color: var(--color-muted-foreground)" viewBox="0 0 20 20" fill="currentColor">
+          <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+        </svg>
+        <span v-if="renderType === 'diff' && diffData.added + diffData.deleted > 0" class="ml-auto text-[10px] font-mono tabular-nums shrink-0">
+          <span v-if="diffData.added" style="color: var(--color-primary)">+{{ diffData.added }}</span>
+          <span v-if="diffData.added && diffData.deleted" class="mx-0.5" style="color: var(--color-muted-foreground)">/</span>
+          <span v-if="diffData.deleted" class="text-red-500 dark:text-red-400">-{{ diffData.deleted }}</span>
         </span>
-        <span v-else class="text-[10px] font-mono animate-pulse" style="color: var(--color-muted-foreground)">running…</span>
       </div>
+      <!-- Content box: only content gets the border -->
+      <div
+        class="overflow-hidden mx-2 mt-1 mb-1"
+        :class="tool.status === 'error' ? 'border border-red-300/60 dark:border-red-500/30' : ''"
+        :style="{ borderRadius: 'var(--radius-xl)', border: tool.status !== 'error' ? '1px solid var(--color-border)' : undefined }"
+      >
 
       <!-- ═══════ Terminal (execute) ═══════ -->
       <div v-if="renderType === 'terminal'" class="bg-[#fafafa] dark:bg-[#0d1117] px-3 py-2 font-mono text-xs max-h-72 overflow-y-auto">
@@ -410,6 +425,26 @@ function formatArgs(args: string): string {
         <div v-if="searchResults.count !== null" class="mt-1.5 text-[10px] font-mono" style="color: var(--color-muted-foreground)">({{ searchResults.count }} matches found)</div>
       </div>
 
+      <!-- ═══════ Todo List ═══════ -->
+      <div v-else-if="renderType === 'todo'" class="px-3 py-2 max-h-64 overflow-y-auto" style="background: var(--color-surface)">
+        <div v-if="todoItems.length" class="space-y-0.5">
+          <div v-for="item in todoItems" :key="item.id" class="flex items-center gap-2 py-1">
+            <span class="text-[11px] w-3 text-center shrink-0 tabular-nums" :style="{ color: todoStatusColor(item.status) }">{{ todoStatusIcon(item.status) }}</span>
+            <span
+              class="text-xs flex-1 min-w-0 truncate"
+              :style="{
+                color: item.status === 'completed' ? 'var(--color-muted-foreground)' : 'var(--color-foreground)',
+                textDecoration: item.status === 'completed' ? 'line-through' : 'none'
+              }"
+            >{{ item.title }}</span>
+            <span class="text-[9px] font-mono uppercase tracking-wider shrink-0" :style="{ color: todoStatusColor(item.status) }">{{ item.status.replace('_', ' ') }}</span>
+          </div>
+        </div>
+        <div v-else-if="tool.status === 'running'" class="py-1 text-xs animate-pulse" style="color: var(--color-muted-foreground)">Loading…</div>
+        <div v-else class="py-1 text-xs italic" style="color: var(--color-muted-foreground)">No todos</div>
+        <div v-if="tool.error" class="mt-1.5 text-xs font-mono whitespace-pre-wrap" style="color: var(--color-destructive)">{{ tool.error }}</div>
+      </div>
+
       <!-- ═══════ Generic fallback ═══════ -->
       <div v-else class="ml-3 pl-3 border-l-2 text-xs font-mono py-2 max-h-64 overflow-y-auto"
         :style="'border-color: ' + (tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-border)')"
@@ -427,6 +462,27 @@ function formatArgs(args: string): string {
           <div class="whitespace-pre-wrap mt-0.5" style="color: var(--color-destructive)">{{ tool.error }}</div>
         </div>
       </div>
+      </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+@keyframes shimmer-sweep {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+.shimmer-running {
+  background: linear-gradient(
+    90deg,
+    var(--color-muted-foreground) 20%,
+    var(--color-foreground) 50%,
+    var(--color-muted-foreground) 80%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer-sweep 1.8s linear infinite;
+}
+</style>
