@@ -63,6 +63,13 @@ const fileDir = computed(() => {
   return dir || '/'
 })
 
+const shortFileDir = computed(() => {
+  if (!fileDir.value) return ''
+  const parts = fileDir.value.split('/').filter((p: string) => p)
+  const lastTwo = parts.slice(-2)
+  return lastTwo.length ? '…/' + lastTwo.join('/') : fileDir.value
+})
+
 const fileContent = computed(() => {
   const name = props.tool.name
   if (name === 'write') {
@@ -350,7 +357,7 @@ function formatArgs(args: string): string {
       <!-- File header -->
       <div class="flex items-center gap-2 px-3 py-1.5" style="background: var(--color-muted); border-bottom: 1px solid var(--color-border)">
         <span class="text-[11px]">{{ tool.name === 'write' ? '✏️' : '📄' }}</span>
-        <span class="text-[10px] font-mono truncate" style="color: var(--color-muted-foreground)">{{ fileDir }}/</span>
+        <span class="text-[10px] font-mono" style="color: var(--color-muted-foreground)">{{ shortFileDir }}/</span>
         <span class="text-xs font-mono font-medium" style="color: var(--color-foreground)">{{ fileName }}</span>
       </div>
       <!-- File body -->
@@ -379,7 +386,7 @@ function formatArgs(args: string): string {
       <!-- Diff header -->
       <div class="flex items-center gap-2 px-3 py-1.5" style="background: var(--color-muted); border-bottom: 1px solid var(--color-border)">
         <span class="text-[11px]">✏️</span>
-        <span class="text-[10px] font-mono truncate" style="color: var(--color-muted-foreground)">{{ fileDir }}/</span>
+        <span class="text-[10px] font-mono" style="color: var(--color-muted-foreground)">{{ shortFileDir }}/</span>
         <span class="text-xs font-mono font-medium" style="color: var(--color-foreground)">{{ fileName }}</span>
         <span class="ml-auto text-[10px] font-mono tabular-nums shrink-0">
           <span v-if="diffData.added" style="color: var(--color-primary)">+{{ diffData.added }}</span>
