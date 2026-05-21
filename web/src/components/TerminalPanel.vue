@@ -1,219 +1,90 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
-import { Terminal } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
-import { WebLinksAddon } from '@xterm/addon-web-links'
-import { api } from '@/composables/api'
-import '@xterm/xterm/css/xterm.css'
-
-const termEl = ref<HTMLDivElement | null>(null)
-const connected = ref(false)
-const sessionId = ref('')
-
-let term: Terminal | null = null
-let fitAddon: FitAddon | null = null
-let ws: WebSocket | null = null
-let resizeObserver: ResizeObserver | null = null
-
-function isDarkMode(): boolean {
-  return document.documentElement.classList.contains('dark')
-}
-
-const darkTheme = {
-  background: '#18181b',
-  foreground: '#e4e4e7',
-  cursor: '#10b981',
-  selectionBackground: '#3f3f4680',
-  black: '#09090b',
-  red: '#ef4444',
-  green: '#22c55e',
-  yellow: '#eab308',
-  blue: '#3b82f6',
-  magenta: '#a855f7',
-  cyan: '#06b6d4',
-  white: '#d4d4d8',
-  brightBlack: '#71717a',
-  brightRed: '#f87171',
-  brightGreen: '#4ade80',
-  brightYellow: '#facc15',
-  brightBlue: '#60a5fa',
-  brightMagenta: '#c084fc',
-  brightCyan: '#22d3ee',
-  brightWhite: '#fafafa',
-}
-
-const lightTheme = {
-  background: '#fafafa',
-  foreground: '#27272a',
-  cursor: '#10b981',
-  selectionBackground: '#d4d4d880',
-  black: '#18181b',
-  red: '#dc2626',
-  green: '#16a34a',
-  yellow: '#ca8a04',
-  blue: '#2563eb',
-  magenta: '#9333ea',
-  cyan: '#0891b2',
-  white: '#d4d4d8',
-  brightBlack: '#71717a',
-  brightRed: '#ef4444',
-  brightGreen: '#22c55e',
-  brightYellow: '#eab308',
-  brightBlue: '#3b82f6',
-  brightMagenta: '#a855f7',
-  brightCyan: '#06b6d4',
-  brightWhite: '#fafafa',
-}
-
-function getWsUrl(ptyId: string): string {
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${proto}//${location.host}/api/pty/${encodeURIComponent(ptyId)}/ws`
-}
-
-async function initTerminal() {
-  if (!termEl.value) return
-
-  term = new Terminal({
-    cursorBlink: true,
-    fontSize: 13,
-    fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, monospace",
-    theme: isDarkMode() ? darkTheme : lightTheme,
-  })
-
-  fitAddon = new FitAddon()
-  term.loadAddon(fitAddon)
-  term.loadAddon(new WebLinksAddon())
-  term.open(termEl.value)
-  fitAddon.fit()
-
-  resizeObserver = new ResizeObserver(() => {
-    fitAddon?.fit()
-    if (ws && ws.readyState === WebSocket.OPEN && term) {
-      ws.send(JSON.stringify({
-        type: 'resize',
-        cols: term.cols,
-        rows: term.rows,
-      }))
-    }
-  })
-  resizeObserver.observe(termEl.value)
-
-  // Watch for theme changes
-  const observer = new MutationObserver(() => {
-    if (term) {
-      term.options.theme = isDarkMode() ? darkTheme : lightTheme
-    }
-  })
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
-
-  try {
-    const result = await api.ptyCreate()
-    sessionId.value = result.id
-    connectWS(result.id)
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err)
-    term.writeln(`\r\n\x1b[31mFailed to create terminal: ${message}\x1b[0m`)
-  }
-}
-
-function connectWS(ptyId: string) {
-  if (!term) return
-
-  const url = getWsUrl(ptyId)
-  ws = new WebSocket(url)
-  ws.binaryType = 'arraybuffer'
-
-  ws.onopen = () => {
-    connected.value = true
-    ws!.send(JSON.stringify({
-      type: 'resize',
-      cols: term!.cols,
-      rows: term!.rows,
-    }))
-  }
-
-  ws.onmessage = (event) => {
-    if (event.data instanceof ArrayBuffer) {
-      term!.write(new Uint8Array(event.data))
-    } else {
-      term!.write(event.data)
-    }
-  }
-
-  ws.onclose = () => {
-    connected.value = false
-    term?.writeln('\r\n\x1b[33m[Session ended]\x1b[0m')
-  }
-
-  ws.onerror = () => {
-    connected.value = false
-  }
-
-  term.onData((data) => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(new TextEncoder().encode(data))
-    }
-  })
-}
-
-async function reconnect() {
-  cleanup()
-  await nextTick()
-  initTerminal()
-}
-
-function cleanup() {
-  resizeObserver?.disconnect()
-  resizeObserver = null
-  if (ws) {
-    ws.close()
-    ws = null
-  }
-  if (sessionId.value) {
-    api.ptyKill(sessionId.value).catch(() => {})
-    sessionId.value = ''
-  }
-  if (term) {
-    term.dispose()
-    term = null
-  }
-  fitAddon = null
-  connected.value = false
-}
-
-onMounted(initTerminal)
-onUnmounted(cleanup)
+import { ref, computed } from 'vue'
+import TerminalInstance from './TerminalInstance.vue'
 
 const emit = defineEmits<{
   close: []
 }>()
+
+interface Tab {
+  id: string
+  label: string
+}
+
+let nextId = 1
+function makeTab(): Tab {
+  return { id: String(nextId++), label: `Shell ${nextId - 1}` }
+}
+
+const tabs = ref<Tab[]>([makeTab()])
+const activeId = ref(tabs.value[0].id)
+
+const activeIndex = computed(() => tabs.value.findIndex(t => t.id === activeId.value))
+
+function addTab() {
+  const tab = makeTab()
+  tabs.value.push(tab)
+  activeId.value = tab.id
+}
+
+function closeTab(id: string) {
+  const idx = tabs.value.findIndex(t => t.id === id)
+  if (idx === -1) return
+  tabs.value.splice(idx, 1)
+  if (tabs.value.length === 0) {
+    emit('close')
+    return
+  }
+  // Select adjacent tab
+  const newIdx = Math.min(idx, tabs.value.length - 1)
+  activeId.value = tabs.value[newIdx].id
+}
 </script>
 
 <template>
   <div class="flex flex-col h-full" style="background-color: var(--color-muted)">
-    <!-- Header -->
-    <div class="flex items-center justify-between px-3 py-1.5 border-b shrink-0" style="border-color: var(--color-border); background-color: var(--color-surface)">
-      <div class="flex items-center gap-2">
-        <span class="text-[11px] font-semibold uppercase tracking-wider" style="color: var(--color-muted-foreground)">Terminal</span>
-        <span
-          class="w-1.5 h-1.5 rounded-full"
-          :style="{ backgroundColor: connected ? 'var(--color-primary)' : 'var(--color-border)' }"
-        />
-      </div>
-      <div class="flex items-center gap-2">
+    <!-- Tab bar -->
+    <div
+      class="flex items-center shrink-0 border-b"
+      style="border-color: var(--color-border); background-color: var(--color-surface); height: 36px"
+    >
+      <!-- Tabs -->
+      <div class="flex items-stretch h-full overflow-x-auto flex-1 min-w-0">
         <button
-          class="text-[10px] cursor-pointer transition-colors font-medium"
-          style="color: var(--color-muted-foreground)"
-          @click="reconnect"
-          title="New terminal"
+          v-for="tab in tabs"
+          :key="tab.id"
+          class="tab-btn"
+          :class="{ 'tab-active': tab.id === activeId }"
+          @click="activeId = tab.id"
         >
-          + New
+          <span class="tab-label">{{ tab.label }}</span>
+          <span
+            v-if="tabs.length > 1"
+            class="tab-close"
+            @click.stop="closeTab(tab.id)"
+          >
+            <svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </span>
+        </button>
+      </div>
+
+      <!-- Controls -->
+      <div class="flex items-center gap-1 px-2 shrink-0">
+        <button
+          class="ctrl-btn"
+          title="New terminal"
+          @click="addTab"
+        >
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
         </button>
         <button
-          class="w-5 h-5 flex items-center justify-center rounded cursor-pointer transition-colors"
-          style="color: var(--color-muted-foreground)"
+          class="ctrl-btn"
+          title="Close panel"
           @click="emit('close')"
-          title="Close terminal"
         >
           <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <path d="M18 6L6 18M6 6l12 12" />
@@ -222,20 +93,76 @@ const emit = defineEmits<{
       </div>
     </div>
 
-    <!-- xterm container -->
-    <div ref="termEl" class="flex-1 min-h-0 px-1 py-1" />
+    <!-- Terminal area (all instances stacked, only active is visible) -->
+    <div class="flex-1 min-h-0 relative px-1 py-1">
+      <TerminalInstance
+        v-for="tab in tabs"
+        :key="tab.id"
+        :active="tab.id === activeId"
+      />
+    </div>
   </div>
 </template>
 
 <style scoped>
-:deep(.xterm) {
+.tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px;
   height: 100%;
-  padding: 2px;
+  font-size: 11px;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--color-muted-foreground);
+  border-right: 1px solid var(--color-border);
+  white-space: nowrap;
+  transition: background 0.1s, color 0.1s;
+  flex-shrink: 0;
 }
-:deep(.xterm-viewport) {
-  background-color: var(--term-bg, #fafafa) !important;
+.tab-btn:hover {
+  background: var(--color-muted);
+  color: var(--color-foreground);
 }
-.dark :deep(.xterm-viewport) {
-  background-color: #18181b !important;
+.tab-active {
+  background: var(--color-muted);
+  color: var(--color-foreground);
+  border-bottom: 2px solid var(--color-primary);
+}
+.tab-label {
+  pointer-events: none;
+}
+.tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  opacity: 0.5;
+  transition: opacity 0.1s, background 0.1s;
+}
+.tab-close:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--color-foreground) 15%, transparent);
+}
+.ctrl-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--color-muted-foreground);
+  transition: background 0.1s, color 0.1s;
+}
+.ctrl-btn:hover {
+  background: var(--color-muted);
+  color: var(--color-foreground);
 }
 </style>

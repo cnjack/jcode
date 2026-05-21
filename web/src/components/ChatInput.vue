@@ -564,7 +564,7 @@ watch(() => store.isRunning, (running) => {
 }
 
 .dark .chat-input-card {
-  background: #1C1C1C;
+  background: var(--color-background);
 }
 
 .chat-input-inner {
