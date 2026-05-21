@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Menu, SquareTerminal, FileDiff, FolderOpen, PanelRight } from 'lucide-vue-next'
+import { Menu, SquareTerminal, FileDiff, FolderOpen, PanelRight, Search } from 'lucide-vue-next'
+import { useChatStore } from '@/stores/chat'
 
 type PanelType = 'terminal' | 'diff' | 'files' | 'right-panel'
+
+const store = useChatStore()
 
 const props = defineProps<{
   projectName: string
@@ -17,10 +20,24 @@ const emit = defineEmits<{
   'toggle-panel': [panel: PanelType]
 }>()
 
-const status = computed(() => {
-  if (props.isRunning) return { color: '#f59e0b', label: 'Working…' }
-  if (props.wsConnected) return { color: '#22c55e', label: 'Ready' }
-  return { color: '#9ca3af', label: 'Offline' }
+const statusColor = computed(() => {
+  if (props.isRunning) return '#f59e0b'
+  if (props.wsConnected) return '#22c55e'
+  return '#9ca3af'
+})
+
+const sessionTitle = computed(() => {
+  const session = store.sessions.find(s => s.uuid === store.currentSessionId)
+  return session?.title || 'New Chat'
+})
+
+const sessionSubtitle = computed(() => {
+  const session = store.sessions.find(s => s.uuid === store.currentSessionId)
+  if (!session) return store.modelName || ''
+  const model = session.model || store.modelName || ''
+  const d = new Date(session.created_at)
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return `${model} · ${time}`
 })
 
 const panelButtons = [
@@ -41,11 +58,17 @@ const panelButtons = [
       >
         <Menu :size="16" />
       </button>
-      <nav class="breadcrumb">
-        <span class="breadcrumb-project">{{ projectName }}</span>
-        <span class="breadcrumb-sep">/</span>
-        <span class="breadcrumb-path">{{ pwd }}</span>
-      </nav>
+      <div class="session-info">
+        <span class="session-title">{{ sessionTitle }}</span>
+        <span class="session-subtitle">{{ sessionSubtitle }}</span>
+      </div>
+    </div>
+
+    <div class="topbar-center">
+      <div class="search-pill">
+        <Search :size="12" />
+        <span>Search</span>
+      </div>
     </div>
 
     <div class="topbar-right">
@@ -58,13 +81,12 @@ const panelButtons = [
           :aria-label="`Toggle ${btn.panel}`"
           @click="emit('toggle-panel', btn.panel)"
         >
-          <component :is="btn.icon" :size="20" />
+          <component :is="btn.icon" :size="18" />
         </button>
       </div>
 
       <div class="status-indicator">
-        <span class="status-dot" :style="{ backgroundColor: status.color }" />
-        <span class="status-label">{{ status.label }}</span>
+        <span class="status-dot" :style="{ backgroundColor: statusColor }" />
       </div>
     </div>
   </header>
@@ -86,14 +108,23 @@ const panelButtons = [
 .topbar-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
+  flex: 1;
+}
+
+.topbar-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .topbar-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
+  flex: 1;
+  justify-content: flex-end;
 }
 
 .icon-btn {
@@ -104,72 +135,82 @@ const panelButtons = [
   border: none;
   background: transparent;
   border-radius: 6px;
-  color: var(--color-foreground);
+  color: var(--color-muted-foreground);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
 
 .icon-btn:hover {
-  color: var(--color-primary);
+  color: var(--color-foreground);
 }
 
 .icon-btn.active {
+  color: var(--color-foreground);
   background: var(--color-muted);
-  border-radius: 9999px;
 }
 
-.breadcrumb {
+.session-info {
   display: flex;
-  align-items: center;
-  gap: 4px;
+  flex-direction: column;
   min-width: 0;
+  gap: 1px;
 }
 
-.breadcrumb-project {
-  font-size: 14px;
+.session-title {
+  font-size: 13px;
   font-weight: 600;
   color: var(--color-foreground);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+  line-height: 1.3;
 }
 
-.breadcrumb-sep {
-  font-size: 14px;
-  color: var(--color-muted-foreground);
-}
-
-.breadcrumb-path {
-  font-size: 12px;
-  font-family: var(--font-mono);
+.session-subtitle {
+  font-size: 11px;
   color: var(--color-muted-foreground);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 15rem;
+  max-width: 220px;
+  line-height: 1.3;
+}
+
+.search-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 14px;
+  border-radius: 9999px;
+  border: 1px solid var(--color-border);
+  font-size: 12px;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  transition: border-color 0.15s;
+  white-space: nowrap;
+}
+
+.search-pill:hover {
+  border-color: var(--color-foreground);
 }
 
 .panel-buttons {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
 }
 
 .status-indicator {
   display: flex;
   align-items: center;
-  gap: 6px;
   padding-left: 8px;
 }
 
 .status-dot {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   border-radius: 9999px;
   flex-shrink: 0;
-}
-
-.status-label {
-  font-size: 12px;
-  color: var(--color-muted-foreground);
-  white-space: nowrap;
 }
 </style>
