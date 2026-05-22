@@ -159,7 +159,7 @@ onUnmounted(() => {
   document.removeEventListener('keydown', handleGlobalKeydown)
 })
 
-function openFile(path: string, content: string) {
+function openFile() {
   // Open file in right panel files tab
   rightPanelOpen.value = true
   rightPanelTab.value = 'files'

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import type { ToolCall } from '@/types/api'
-import { TOOL_ICONS } from '@/composables/toolInfo'
 
 defineOptions({ name: 'ToolCallCard' })
 
@@ -17,10 +16,6 @@ const subagentExpanded = ref(true)
 // Display info: use backend-provided or fall back to name
 const displayTitle = computed(() => props.tool.displayInfo?.title || props.tool.name)
 const displaySubtitle = computed(() => props.tool.displayInfo?.subtitle || '')
-const displayIcon = computed(() => {
-  const iconKey = props.tool.displayInfo?.icon || 'tool'
-  return TOOL_ICONS[iconKey] || '🔧'
-})
 const isContextTool = computed(() => props.tool.displayInfo?.category === 'context')
 
 // Determine render type for expanded content
@@ -184,34 +179,6 @@ const searchResults = computed(() => {
 })
 
 // ─── File viewer helpers ───
-const filePath = computed(() => {
-  try {
-    const parsed = JSON.parse(props.tool.args)
-    return parsed.file_path || ''
-  } catch { return '' }
-})
-
-const fileName = computed(() => {
-  if (!filePath.value) return ''
-  const parts = filePath.value.replace(/\\/g, '/').split('/')
-  return parts[parts.length - 1] || ''
-})
-
-const fileDir = computed(() => {
-  if (!filePath.value) return ''
-  const parts = filePath.value.replace(/\\/g, '/').split('/')
-  parts.pop()
-  const dir = parts.join('/')
-  return dir || '/'
-})
-
-const shortFileDir = computed(() => {
-  if (!fileDir.value) return ''
-  const parts = fileDir.value.split('/').filter((p: string) => p)
-  const lastTwo = parts.slice(-2)
-  return lastTwo.length ? '…/' + lastTwo.join('/') : fileDir.value
-})
-
 const fileContent = computed(() => {
   const name = props.tool.name
   if (name === 'write') {
