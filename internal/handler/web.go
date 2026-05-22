@@ -124,6 +124,39 @@ func extractToolDisplayInfo(name, argsJSON string) *ToolDisplayInfo {
 		if len(info.Subtitle) > 60 {
 			info.Subtitle = info.Subtitle[:60] + "…"
 		}
+	case "load_skill":
+		info.Title = "Load Skill"
+		info.Icon = "skill"
+		info.Category = "context"
+		info.Subtitle = getString("name")
+	case "team_list":
+		info.Title = "Team"
+		info.Icon = "agent"
+		info.Category = "context"
+	case "team_send_message":
+		info.Title = "Message"
+		info.Icon = "agent"
+		info.Category = "execution"
+		to := getString("to")
+		if to == "*" {
+			info.Subtitle = "→ all"
+		} else if to != "" {
+			info.Subtitle = "→ @" + to
+		}
+	case "team_create":
+		info.Title = "Create Team"
+		info.Icon = "agent"
+		info.Category = "execution"
+		info.Subtitle = getString("team_name")
+	case "team_spawn":
+		info.Title = "Spawn"
+		info.Icon = "agent"
+		info.Category = "execution"
+		info.Subtitle = getString("name")
+	case "team_delete":
+		info.Title = "Delete Team"
+		info.Icon = "agent"
+		info.Category = "mutation"
 	default:
 		// MCP or unknown tools
 		info.Title = name
