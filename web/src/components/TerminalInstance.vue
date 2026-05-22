@@ -25,6 +25,8 @@ let sessionId = ''
 let resizeObserver: ResizeObserver | null = null
 let themeObserver: MutationObserver | null = null
 
+const termBg = ref(isDarkMode() ? '#18181b' : '#fafafa')
+
 function isDarkMode(): boolean {
   return document.documentElement.classList.contains('dark')
 }
@@ -83,6 +85,7 @@ async function init() {
 
   themeObserver = new MutationObserver(() => {
     if (term) term.options.theme = isDarkMode() ? darkTheme : lightTheme
+    termBg.value = isDarkMode() ? '#18181b' : '#fafafa'
   })
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
 
@@ -170,6 +173,7 @@ onUnmounted(cleanup)
   <div
     class="term-instance"
     :class="{ 'term-inactive': !active }"
+    :style="{ background: termBg }"
     ref="termEl"
   />
 </template>
