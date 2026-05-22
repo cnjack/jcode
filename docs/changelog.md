@@ -13,12 +13,112 @@ For the **full changelog**, see [CHANGELOG.md](../CHANGELOG.md) in the repositor
 
 ### In Development
 
-#### Added
-- Added `design/jcode.pen`, the source design file for the current jcode visual design.
-
 ---
 
 ## Latest Release
+
+### [0.4.8] - 2026-05-22
+
+**Custom Model Registry • New Model Providers • Shared State Fix**
+
+#### Added
+- Custom model support in ModelRegistry — users can add and use custom models alongside the built-in registry.
+- Two new model providers added to the built-in registry.
+
+#### Fixed
+- Deep-copy providers in `NewModelRegistry` to prevent shared state mutation across instances.
+
+---
+
+### [0.4.7] - 2026-05-21
+
+**Web Frontend Redesign • Pencil Design System • Multi-tab Terminal**
+
+#### Added
+- Complete web frontend visual overhaul based on the Pencil design system.
+- Borderless input area with a right panel showing file tree and changes.
+- Multi-tab terminal with resizable panels and search renderer.
+- Themed bash output and dark mode fixes.
+- Inline channel toggle in the input area with sidebar border.
+
+#### Changed
+- Aligned TopBar, Sidebar, and ChatInput with the Pencil design spec.
+- Removed toolbar separator lines, compacted textarea, and shortened file paths.
+- Enlarged input card, removed sidebar lines, and added terminal close button.
+- Removed max-width constraint on input card for widescreen displays.
+
+#### Fixed
+- Updated terminal icon from laptop to lightning bolt for consistency.
+- Restored header row matching Pencil design — no separator line, click to collapse.
+- Hide title row when expanded and collapse via hover button.
+- Unified search and diff expanded content, removed internal dividers.
+- Removed duplicate inner headers from expanded tool call cards.
+
+---
+
+### [0.4.6] - 2026-05-14
+
+**Context Management • TUI Version Display • Executor Pager Fix**
+
+#### Added
+- Enhanced context management with telemetry and approval improvements.
+- Version display in TUI sidebar and logo rendering.
+
+#### Changed
+- Disabled pager and interactive prompts in all executors for non-interactive use.
+
+#### Fixed
+- Dependency updates: bumped marked (18.0.2), postcss (8.5.10), nokogiri (1.19.3).
+
+---
+
+### [0.4.5] - 2026-04-28
+
+**DeepSeek Thinking Mode Fix**
+
+#### Fixed
+- Passthrough `reasoning_content` for DeepSeek thinking mode so reasoning tokens are preserved in the response.
+
+---
+
+### [0.4.4] - 2026-04-28
+
+**Cached Token Telemetry • TUI Textarea Fix • Version Display Fixes**
+
+#### Added
+- Enhanced token usage tracking with cached tokens in Langfuse telemetry.
+- Refactored TUI textarea line calculation for improved accuracy.
+
+#### Fixed
+- Corrected version formatting in Makefile and version rendering in shortcut hints.
+- Removed version formatting in server version display.
+- Fixed web version to use the build version instead of placeholder.
+
+---
+
+### [0.4.3] - 2026-04-27
+
+**ACPExecutor • ACP Error Handling**
+
+#### Added
+- ACPExecutor to delegate file system and terminal operations via the ACP client protocol.
+
+#### Fixed
+- Improved error handling for command execution timeout and cancellation in ACP executor.
+
+---
+
+### [0.4.2] - 2026-04-27
+
+**Web Message Actions • Edit • Retry • Copy**
+
+#### Added
+- Message edit, retry, and copy actions in the web UI.
+
+#### Fixed
+- Addressed CodeRabbit review feedback on message actions implementation.
+
+---
 
 ### [0.4.1] - 2026-04-26
 
@@ -386,7 +486,7 @@ Use the full [CHANGELOG.md](../CHANGELOG.md) to see detailed changes for each re
 
 This section will document any breaking changes that may affect your workflow:
 
-**Currently:** No breaking changes between v0.0.1 and v0.3.6.
+**Currently:** No breaking changes between v0.0.1 and v0.4.8.
 
 All releases maintain backward compatibility with existing configurations and workflows.
 
@@ -399,4 +499,4 @@ All releases maintain backward compatibility with existing configurations and wo
 
 ---
 
-*Last updated: April 24, 2026*
+*Last updated: May 22, 2026*
