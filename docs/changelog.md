@@ -17,6 +17,26 @@ For the **full changelog**, see [CHANGELOG.md](../CHANGELOG.md) in the repositor
 
 ## Latest Release
 
+### [0.4.9] - 2026-05-23
+
+**Skill & Team Tool Display • Session Title Fix • Deferred Session Files**
+
+#### Added
+- Enhanced tool display info for skill and team tools (load_skill, team_list, team_create, team_spawn, team_send_message, team_delete) in the web UI.
+- TUI formatted output for load_skill, team_list, and team operations — compact, styled summaries instead of raw text.
+- ACP tool kind mappings for team tools — team_list is read-only, team_create/spawn/send_message/delete are execute-type.
+- Skill description attribute in loaded skill output for richer context in tool results.
+
+#### Changed
+- Session title generation now only fires for truly new sessions — resuming a session with a client-provided UUID that has no file on disk still generates a title.
+- System prompt recording is deferred until the first real message, preventing empty session files when jcode is opened and immediately closed.
+
+#### Fixed
+- Simplified function signatures and removed unused variables in ToolCallCard and TerminalPanel components.
+- Removed unused import in Langfuse telemetry.
+
+---
+
 ### [0.4.8] - 2026-05-22
 
 **Custom Model Registry • New Model Providers • Shared State Fix**
@@ -486,7 +506,7 @@ Use the full [CHANGELOG.md](../CHANGELOG.md) to see detailed changes for each re
 
 This section will document any breaking changes that may affect your workflow:
 
-**Currently:** No breaking changes between v0.0.1 and v0.4.8.
+**Currently:** No breaking changes between v0.0.1 and v0.4.9.
 
 All releases maintain backward compatibility with existing configurations and workflows.
 
@@ -499,4 +519,4 @@ All releases maintain backward compatibility with existing configurations and wo
 
 ---
 
-*Last updated: May 22, 2026*
+*Last updated: May 23, 2026*
