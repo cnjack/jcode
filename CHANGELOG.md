@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.9] - 2026-05-23
+
+### Added
+- Enhanced tool display info for skill and team tools (load_skill, team_list, team_create, team_spawn, team_send_message, team_delete) in the web UI.
+- TUI formatted output for load_skill, team_list, and team operations (team_send_message, team_create, team_spawn, team_delete) — compact, styled summaries instead of raw text.
+- ACP tool kind mappings for team tools — team_list is read-only, team_create/spawn/send_message/delete are execute-type.
+- Skill description attribute in loaded skill output for richer context in tool results.
+
+### Changed
+- Session title generation now only fires for truly new sessions — resuming a session with a client-provided UUID that has no file on disk still generates a title.
+- System prompt recording is deferred until the first real message, preventing empty session files when jcode is opened and immediately closed.
+
+### Fixed
+- Simplified function signatures and removed unused variables in ToolCallCard and TerminalPanel components.
+- Removed unused import in Langfuse telemetry.
+
 ## [0.4.8] - 2026-05-22
 
 ### Added
@@ -398,7 +414,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-agent token usage tracking
 - WebSocket support for real-time communication
 
-[Unreleased]: https://github.com/cnjack/jcode/compare/v0.4.8...HEAD
+[Unreleased]: https://github.com/cnjack/jcode/compare/v0.4.9...HEAD
+[0.4.9]: https://github.com/cnjack/jcode/compare/v0.4.8...v0.4.9
 [0.4.8]: https://github.com/cnjack/jcode/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/cnjack/jcode/compare/v0.4.6...v0.4.7
 [0.4.6]: https://github.com/cnjack/jcode/compare/v0.4.5...v0.4.6
