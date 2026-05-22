@@ -8,6 +8,7 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 )
 
+
 // RegistryProvider represents a provider from models.dev API.
 type RegistryProvider struct {
 	ID     string                    `json:"id"`
@@ -158,10 +159,14 @@ func (r *ModelRegistry) MergeConfigProviders(providers map[string]*config.Provid
 			if name == "" {
 				name = provID
 			}
+			// Derive an env-var name so that the setup wizard's len(rp.Env)>0 check
+			// correctly prompts for an API key for this provider.
+			envKey := strings.ToUpper(strings.ReplaceAll(provID, "-", "_")) + "_API_KEY"
 			prov = &RegistryProvider{
 				ID:     provID,
 				Name:   name,
 				API:    provCfg.BaseURL,
+				Env:    []string{envKey},
 				Models: make(map[string]*RegistryModel),
 			}
 			r.providers[provID] = prov
