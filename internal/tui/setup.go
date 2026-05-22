@@ -91,9 +91,15 @@ type SetupModel struct {
 }
 
 func NewSetupModel() SetupModel {
+	// Load existing config for custom model merging
+	var cfg *config.Config
+	if loadedCfg, err := config.LoadConfig(); err == nil {
+		cfg = loadedCfg
+	}
+
 	m := SetupModel{
 		state:    StateProvider,
-		registry: model.NewModelRegistry(),
+		registry: model.NewModelRegistryWithConfig(cfg),
 	}
 
 	// Build a set of configured providers (from existing config)
@@ -110,6 +116,9 @@ func NewSetupModel() SetupModel {
 
 	// Show all providers from the generated registry in curated order
 	for _, rp := range m.registry.ListProviders() {
+		// Providers need a key if they declare environment variable names.
+		// Custom providers added via MergeConfigProviders always get a derived
+		// Env entry, so this single check covers all cases.
 		needKey := len(rp.Env) > 0
 		items = append(items, providerItem{
 			profile: ProviderProfile{
