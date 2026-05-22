@@ -74,11 +74,11 @@ func (h *ACPHandler) OnAgentText(text string) {
 // toolKindForName maps a jcode tool name to an ACP ToolKind.
 func toolKindForName(name string) acp.ToolKind {
 	switch name {
-	case "read", "glob", "grep", "todoread", "check_background":
+	case "read", "glob", "grep", "todoread", "check_background", "team_list":
 		return acp.ToolKindRead
 	case "edit", "multi_edit", "write", "todowrite":
 		return acp.ToolKindEdit
-	case "execute", "background":
+	case "execute", "background", "team_send_message", "team_create", "team_spawn", "team_delete":
 		return acp.ToolKindExecute
 	default:
 		return acp.ToolKindOther

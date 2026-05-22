@@ -91,6 +91,12 @@ func formatToolResultBody(toolName, output string, err error, termWidth int, exp
 		return formatSubagentOutput(output, termWidth, expanded, mdRenderer)
 	case "todowrite":
 		return formatTodoWriteOutput(output)
+	case "load_skill":
+		return formatLoadSkillOutput(output)
+	case "team_list":
+		return formatTeamListOutput(output)
+	case "team_send_message", "team_create", "team_spawn", "team_delete":
+		return formatTeamShortOutput(output)
 	default:
 		return formatDefaultOutput(output, termWidth)
 	}
@@ -287,5 +293,74 @@ func formatTodoWriteOutput(output string) []string {
 	}
 	return []string{
 		fmt.Sprintf("   %s %s", toolSuccessStyle.Render("✓"), toolArgsStyle.Render(summary)),
+	}
+}
+
+// formatLoadSkillOutput shows skill name + description, skipping the full markdown body.
+func formatLoadSkillOutput(output string) []string {
+	nameMatch := regexp.MustCompile(`name="([^"]+)"`).FindStringSubmatch(output)
+	descMatch := regexp.MustCompile(`description="([^"]*)"`).FindStringSubmatch(output)
+	name := ""
+	desc := ""
+	if len(nameMatch) > 1 {
+		name = nameMatch[1]
+	}
+	if len(descMatch) > 1 {
+		desc = descMatch[1]
+	}
+	if name == "" {
+		return formatDefaultOutput(output, 80)
+	}
+	line := fmt.Sprintf("   %s %s",
+		toolSuccessStyle.Render("✓"),
+		lipgloss.NewStyle().Foreground(colorText).Bold(true).Render(name))
+	if desc != "" {
+		line += "  " + lipgloss.NewStyle().Foreground(colorMuted).Italic(true).Render(desc)
+	}
+	return []string{line}
+}
+
+// formatTeamListOutput renders team_list output as a structured member list.
+func formatTeamListOutput(output string) []string {
+	memberRe := regexp.MustCompile(`@(\S+)\s+status=(\S+)\s+type=(\S*)`)
+	teamRe := regexp.MustCompile(`^Team: (.+?) \(`)
+	var result []string
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if m := teamRe.FindStringSubmatch(line); len(m) > 1 {
+			result = append(result, fmt.Sprintf("   %s  %s",
+				lipgloss.NewStyle().Foreground(colorDimText).Render("team"),
+				lipgloss.NewStyle().Foreground(colorText).Bold(true).Render(m[1])))
+		} else if m := memberRe.FindStringSubmatch(line); len(m) > 2 {
+			statusColor := colorMuted
+			if m[2] == "running" || m[2] == "busy" {
+				statusColor = colorPrimary
+			}
+			memberLine := fmt.Sprintf("   %s  %-16s  %s",
+				lipgloss.NewStyle().Foreground(statusColor).Render("●"),
+				lipgloss.NewStyle().Foreground(colorText).Render("@"+m[1]),
+				lipgloss.NewStyle().Foreground(colorMuted).Render(m[2]))
+			if len(m) > 3 && m[3] != "" {
+				memberLine += "  " + lipgloss.NewStyle().Foreground(colorDimText).Render(m[3])
+			}
+			result = append(result, memberLine)
+		}
+	}
+	if len(result) == 0 {
+		return formatDefaultOutput(output, 80)
+	}
+	return result
+}
+
+// formatTeamShortOutput shows the first line of a team operation result as a compact status.
+func formatTeamShortOutput(output string) []string {
+	summary := strings.SplitN(strings.TrimRight(output, "\n"), "\n", 2)[0]
+	if summary == "" {
+		summary = "done"
+	}
+	return []string{
+		fmt.Sprintf("   %s %s",
+			toolSuccessStyle.Render("✓"),
+			lipgloss.NewStyle().Foreground(colorDimText).Render(truncate(summary, 80))),
 	}
 }
