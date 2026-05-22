@@ -39,6 +39,7 @@ var wantedProviders = []string{
 	"minimax-coding-plan",
 	"siliconflow",
 	"tencent-coding-plan",
+	"tencent-tokenhub",
 	"zai",
 	"zai-coding-plan",
 	"xiaomi",

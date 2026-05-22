@@ -90,7 +90,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		}
 	}
 
-	registry := internalmodel.NewModelRegistry()
+	registry := internalmodel.NewModelRegistryWithConfig(cfg)
 
 	env := tools.NewEnv(pwd, platform)
 	bgManager := tools.NewBackgroundManager(env)

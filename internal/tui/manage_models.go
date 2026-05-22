@@ -60,7 +60,7 @@ func (m Model) openManageModels(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	}
 
 	configuredProviders := cfg.GetProviders()
-	registry := model.NewModelRegistry()
+	registry := model.NewModelRegistryWithConfig(cfg)
 	modelState, _ := config.LoadModelState()
 
 	var items []list.Item

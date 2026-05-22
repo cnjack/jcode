@@ -15,9 +15,23 @@ const (
 type ProviderConfig struct {
 	APIKey  string `json:"api_key"`
 	BaseURL string `json:"base_url,omitempty"`
+	// Name is an optional display name for custom providers not in the registry.
+	Name string `json:"name,omitempty"`
 	// Deprecated: model lists are now sourced from the models.dev registry.
 	// Preserved for backward compatibility with existing config files.
 	Models []string `json:"models,omitempty"`
+	// CustomModels defines additional models for this provider.
+	// These are merged into the registry and treated identically to built-in models.
+	CustomModels []CustomModelConfig `json:"custom_models,omitempty"`
+}
+
+// CustomModelConfig defines a model that can be added via config.
+type CustomModelConfig struct {
+	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`
+	ToolCall  bool   `json:"tool_call,omitempty"`
+	Reasoning bool   `json:"reasoning,omitempty"`
+	Context   int    `json:"context,omitempty"`
 }
 
 // SSHAlias represents a saved SSH connection alias
