@@ -69,11 +69,13 @@ type ModelRegistry struct {
 	providerOrder []string
 }
 
-// NewModelRegistry creates a new ModelRegistry with generated data only.
+// NewModelRegistry creates a new ModelRegistry with a deep copy of generated data.
+// Each RegistryProvider and its Models map are copied so that merging custom models
+// at runtime never mutates the shared generatedProviders.
 func NewModelRegistry() *ModelRegistry {
 	providers := make(map[string]*RegistryProvider, len(generatedProviders))
 	for k, v := range generatedProviders {
-		providers[k] = v
+		providers[k] = deepCopyProvider(v)
 	}
 	providerOrder := make([]string, len(generatedProviderOrder))
 	copy(providerOrder, generatedProviderOrder)
@@ -81,6 +83,55 @@ func NewModelRegistry() *ModelRegistry {
 		providers:     providers,
 		providerOrder: providerOrder,
 	}
+}
+
+// deepCopyProvider creates a deep copy of a RegistryProvider, including its Models map.
+func deepCopyProvider(src *RegistryProvider) *RegistryProvider {
+	if src == nil {
+		return nil
+	}
+	cp := *src // shallow copy of value fields
+	// Deep copy Env slice
+	if src.Env != nil {
+		cp.Env = make([]string, len(src.Env))
+		copy(cp.Env, src.Env)
+	}
+	// Deep copy Models map
+	if src.Models != nil {
+		cp.Models = make(map[string]*RegistryModel, len(src.Models))
+		for mk, mv := range src.Models {
+			cp.Models[mk] = deepCopyModel(mv)
+		}
+	}
+	return &cp
+}
+
+// deepCopyModel creates a deep copy of a RegistryModel, including pointer fields.
+func deepCopyModel(src *RegistryModel) *RegistryModel {
+	if src == nil {
+		return nil
+	}
+	cp := *src
+	if src.Modalities != nil {
+		cp.Modalities = &ModelModalities{}
+		if src.Modalities.Input != nil {
+			cp.Modalities.Input = make([]string, len(src.Modalities.Input))
+			copy(cp.Modalities.Input, src.Modalities.Input)
+		}
+		if src.Modalities.Output != nil {
+			cp.Modalities.Output = make([]string, len(src.Modalities.Output))
+			copy(cp.Modalities.Output, src.Modalities.Output)
+		}
+	}
+	if src.Cost != nil {
+		costCopy := *src.Cost
+		cp.Cost = &costCopy
+	}
+	if src.Limit != nil {
+		limitCopy := *src.Limit
+		cp.Limit = &limitCopy
+	}
+	return &cp
 }
 
 // NewModelRegistryWithConfig creates a ModelRegistry and merges custom models from config.
