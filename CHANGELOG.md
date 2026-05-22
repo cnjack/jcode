@@ -7,8 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-05-22
+
 ### Added
-- Added `design/jcode.pen`, the source design file for the current jcode visual design.
+- Custom model support in ModelRegistry — users can now add and use custom models alongside the built-in registry.
+- Two new model providers added to the built-in registry.
+
+### Fixed
+- Deep-copy providers in `NewModelRegistry` to prevent shared state mutation across instances.
+- Addressed PR review comments on model registry code.
+- Removed unnecessary blank line in registry generation.
+
+## [0.4.7] - 2026-05-21
+
+### Added
+- **Web Frontend Redesign** — complete visual overhaul based on the Pencil design system.
+- Borderless input area with a right panel showing file tree and changes.
+- Multi-tab terminal with resizable panels and search renderer.
+- Themed bash output and dark mode fixes.
+- Inline channel toggle in the input area with sidebar border.
+
+### Changed
+- Aligned TopBar, Sidebar, and ChatInput with the Pencil design spec.
+- Removed toolbar separator lines, compacted textarea, and shortened file paths.
+- Enlarged input card, removed sidebar lines, and added terminal close button.
+- Removed max-width constraint on input card for widescreen displays.
+
+### Fixed
+- Updated terminal icon from laptop to lightning bolt for consistency.
+- Restored header row matching Pencil design — no separator line, click to collapse.
+- Hide title row when expanded and collapse via hover button.
+- Unified search and diff expanded content, removed internal dividers.
+- Removed duplicate inner headers from expanded tool call cards.
+
+## [0.4.6] - 2026-05-14
+
+### Added
+- Enhanced context management with telemetry and approval improvements.
+- Version display in TUI sidebar and logo rendering.
+
+### Changed
+- Disabled pager and interactive prompts in all executors for non-interactive use.
+
+### Fixed
+- Dependency updates: bumped marked (18.0.2), postcss (8.5.10), nokogiri (1.19.3).
+
+## [0.4.5] - 2026-04-28
+
+### Fixed
+- Passthrough `reasoning_content` for DeepSeek thinking mode so reasoning tokens are preserved in the response.
+
+## [0.4.4] - 2026-04-28
+
+### Added
+- Enhanced token usage tracking with cached tokens in Langfuse telemetry.
+- Refactored TUI textarea line calculation for improved accuracy.
+
+### Fixed
+- Corrected version formatting in Makefile and version rendering in shortcut hints.
+- Removed version formatting in server version display.
+- Fixed web version to use the build version instead of placeholder.
+
+## [0.4.3] - 2026-04-27
+
+### Added
+- ACPExecutor to delegate file system and terminal operations via the ACP client protocol.
+
+### Fixed
+- Improved error handling for command execution timeout and cancellation in ACP executor.
+
+## [0.4.2] - 2026-04-27
+
+### Added
+- Message edit, retry, and copy actions in the web UI.
+
+### Fixed
+- Addressed CodeRabbit review feedback on message actions implementation.
 
 ## [0.4.1] - 2026-04-26
 
@@ -324,7 +398,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-agent token usage tracking
 - WebSocket support for real-time communication
 
-[Unreleased]: https://github.com/cnjack/jcode/compare/v0.3.6...HEAD
+[Unreleased]: https://github.com/cnjack/jcode/compare/v0.4.8...HEAD
+[0.4.8]: https://github.com/cnjack/jcode/compare/v0.4.7...v0.4.8
+[0.4.7]: https://github.com/cnjack/jcode/compare/v0.4.6...v0.4.7
+[0.4.6]: https://github.com/cnjack/jcode/compare/v0.4.5...v0.4.6
+[0.4.5]: https://github.com/cnjack/jcode/compare/v0.4.4...v0.4.5
+[0.4.4]: https://github.com/cnjack/jcode/compare/v0.4.3...v0.4.4
+[0.4.3]: https://github.com/cnjack/jcode/compare/v0.4.2...v0.4.3
+[0.4.2]: https://github.com/cnjack/jcode/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/cnjack/jcode/compare/v0.3.10...v0.4.1
 [0.3.6]: https://github.com/cnjack/jcode/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/cnjack/jcode/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/cnjack/jcode/compare/v0.3.3...v0.3.4
