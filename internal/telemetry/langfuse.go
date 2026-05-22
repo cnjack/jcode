@@ -20,7 +20,6 @@ type contextKey string
 
 const traceIDKey contextKey = "langfuse_trace_id"
 const parentSpanIDKey contextKey = "langfuse_parent_span_id"
-const toolSpanIDKey contextKey = "langfuse_tool_span_id"
 const toolSpanTracerKey contextKey = "langfuse_tool_span_tracer"
 
 // SubSpanFunc creates a child span under the current tool span.

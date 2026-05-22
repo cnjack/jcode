@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import TerminalInstance from './TerminalInstance.vue'
 
 const emit = defineEmits<{
@@ -18,8 +18,6 @@ function makeTab(): Tab {
 
 const tabs = ref<Tab[]>([makeTab()])
 const activeId = ref(tabs.value[0].id)
-
-const activeIndex = computed(() => tabs.value.findIndex(t => t.id === activeId.value))
 
 function addTab() {
   const tab = makeTab()
