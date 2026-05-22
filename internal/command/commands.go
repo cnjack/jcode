@@ -66,7 +66,7 @@ func runDoctorMode() {
 	// Resolve base URL from config or registry
 	baseURL := providerCfg.BaseURL
 	if baseURL == "" {
-		registry := internalmodel.NewModelRegistry()
+		registry := internalmodel.NewModelRegistryWithConfig(cfg)
 		baseURL = registry.GetProviderAPI(providerName)
 	}
 

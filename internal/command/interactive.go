@@ -774,7 +774,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		return fmt.Errorf("provider %q not found in config", providerName)
 	}
 
-	registry := internalmodel.NewModelRegistry()
+	registry := internalmodel.NewModelRegistryWithConfig(cfg)
 	baseURL := providerCfg.BaseURL
 	if baseURL == "" {
 		baseURL = registry.GetProviderAPI(providerName)

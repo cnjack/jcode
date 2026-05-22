@@ -251,7 +251,7 @@ func modelContextLimit() int {
 	// Try registry lookup first (provider/model format)
 	provider, modelName := cfg.GetProviderModel()
 	if provider != "" && modelName != "" {
-		registry := internalmodel.NewModelRegistry()
+		registry := internalmodel.NewModelRegistryWithConfig(cfg)
 		if limit := registry.GetModelContextLimit(provider, modelName); limit > 0 {
 			return limit
 		}

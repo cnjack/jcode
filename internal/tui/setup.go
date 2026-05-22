@@ -91,9 +91,15 @@ type SetupModel struct {
 }
 
 func NewSetupModel() SetupModel {
+	// Load existing config for custom model merging
+	var cfg *config.Config
+	if loadedCfg, err := config.LoadConfig(); err == nil {
+		cfg = loadedCfg
+	}
+
 	m := SetupModel{
 		state:    StateProvider,
-		registry: model.NewModelRegistry(),
+		registry: model.NewModelRegistryWithConfig(cfg),
 	}
 
 	// Build a set of configured providers (from existing config)
@@ -110,7 +116,9 @@ func NewSetupModel() SetupModel {
 
 	// Show all providers from the generated registry in curated order
 	for _, rp := range m.registry.ListProviders() {
-		needKey := len(rp.Env) > 0
+		// Providers need a key if they have env vars defined, or if they are custom
+		// providers (no env vars, not from models.dev) that don't yet have a key configured.
+		needKey := len(rp.Env) > 0 || !configuredProviders[rp.ID]
 		items = append(items, providerItem{
 			profile: ProviderProfile{
 				ID:           rp.ID,

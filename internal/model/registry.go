@@ -4,6 +4,8 @@ package model
 
 import (
 	"strings"
+
+	"github.com/cnjack/jcode/internal/config"
 )
 
 // RegistryProvider represents a provider from models.dev API.
@@ -59,27 +61,94 @@ type ModelLimit struct {
 	Output  int `json:"output,omitempty"`
 }
 
-// ModelRegistry provides model metadata from models.dev.
-// The data is statically generated at build time via go:generate.
+// ModelRegistry provides model metadata from models.dev and custom config.
+// The base data is statically generated at build time via go:generate.
+// Custom models from config are merged in at runtime.
 type ModelRegistry struct {
+	providers     map[string]*RegistryProvider
+	providerOrder []string
 }
 
-// NewModelRegistry creates a new ModelRegistry.
+// NewModelRegistry creates a new ModelRegistry with generated data only.
 func NewModelRegistry() *ModelRegistry {
-	return &ModelRegistry{}
+	providers := make(map[string]*RegistryProvider, len(generatedProviders))
+	for k, v := range generatedProviders {
+		providers[k] = v
+	}
+	providerOrder := make([]string, len(generatedProviderOrder))
+	copy(providerOrder, generatedProviderOrder)
+	return &ModelRegistry{
+		providers:     providers,
+		providerOrder: providerOrder,
+	}
 }
 
-// Load returns the statically generated provider/model data.
+// NewModelRegistryWithConfig creates a ModelRegistry and merges custom models from config.
+func NewModelRegistryWithConfig(cfg *config.Config) *ModelRegistry {
+	r := NewModelRegistry()
+	if cfg != nil {
+		r.MergeConfigProviders(cfg.GetProviders())
+	}
+	return r
+}
+
+// MergeConfigProviders merges custom models from config providers into the registry.
+// For providers not in the registry, a new entry is created.
+// For existing providers, custom models are added (existing models are not overridden).
+func (r *ModelRegistry) MergeConfigProviders(providers map[string]*config.ProviderConfig) {
+	for provID, provCfg := range providers {
+		if len(provCfg.CustomModels) == 0 {
+			continue
+		}
+
+		prov, exists := r.providers[provID]
+		if !exists {
+			name := provCfg.Name
+			if name == "" {
+				name = provID
+			}
+			prov = &RegistryProvider{
+				ID:     provID,
+				Name:   name,
+				API:    provCfg.BaseURL,
+				Models: make(map[string]*RegistryModel),
+			}
+			r.providers[provID] = prov
+			r.providerOrder = append(r.providerOrder, provID)
+		}
+
+		for _, cm := range provCfg.CustomModels {
+			if _, exists := prov.Models[cm.ID]; exists {
+				continue
+			}
+			name := cm.Name
+			if name == "" {
+				name = cm.ID
+			}
+			rm := &RegistryModel{
+				ID:             cm.ID,
+				Name:           name,
+				ToolCall:       cm.ToolCall,
+				Reasoning:      cm.Reasoning,
+				DefaultEnabled: true,
+			}
+			if cm.Context > 0 {
+				rm.Limit = &ModelLimit{Context: cm.Context}
+			}
+			prov.Models[cm.ID] = rm
+		}
+	}
+}
+
+// Load returns the provider/model data.
 func (r *ModelRegistry) Load() (map[string]*RegistryProvider, error) {
-	return generatedProviders, nil
+	return r.providers, nil
 }
 
 // LookupModel finds a model by "provider/model" identifier.
 // Returns the provider info, model info, and whether it was found.
 func (r *ModelRegistry) LookupModel(providerID, modelID string) (*RegistryProvider, *RegistryModel, bool) {
-	providers := generatedProviders
-
-	prov, ok := providers[providerID]
+	prov, ok := r.providers[providerID]
 	if !ok {
 		return nil, nil, false
 	}
@@ -135,7 +204,7 @@ func (r *ModelRegistry) GetProviderEnvVars(providerID string) []string {
 
 // GetProvider returns provider info by ID, or nil if not found.
 func (r *ModelRegistry) GetProvider(providerID string) *RegistryProvider {
-	return generatedProviders[providerID]
+	return r.providers[providerID]
 }
 
 // ListProviderModels returns models for a provider from the registry.
@@ -165,9 +234,9 @@ func (r *ModelRegistry) HasProvider(providerID string) bool {
 
 // ListProviders returns all providers in the curated display order.
 func (r *ModelRegistry) ListProviders() []*RegistryProvider {
-	result := make([]*RegistryProvider, 0, len(generatedProviderOrder))
-	for _, id := range generatedProviderOrder {
-		if prov, ok := generatedProviders[id]; ok {
+	result := make([]*RegistryProvider, 0, len(r.providerOrder))
+	for _, id := range r.providerOrder {
+		if prov, ok := r.providers[id]; ok {
 			result = append(result, prov)
 		}
 	}
@@ -232,7 +301,96 @@ var recommendedModels = map[string]map[string]bool{
 }
 
 func init() {
+	applyStaticProviders()
 	applyRecommendedModels()
+}
+
+// staticProviders defines providers that are not on models.dev but should be
+// built into the registry. They are added to generatedProviders/generatedProviderOrder
+// at init time so they behave identically to models.dev providers.
+var staticProviders = map[string]*RegistryProvider{
+	"tencent-tokenhub-ep": {
+		ID:   "tencent-tokenhub-ep",
+		Name: "Tencent TokenHub Enterprise",
+		Env:  []string{"TENCENT_TOKENHUB_EP_API_KEY"},
+		API:  "https://tokenhub.tencentmaas.com/plan/v3",
+		Models: map[string]*RegistryModel{
+			"auto": {
+				ID: "auto", Name: "Auto", Family: "auto",
+				ToolCall: true, Temperature: true,
+				DefaultEnabled: true,
+				Modalities:     &ModelModalities{Input: []string{"text"}, Output: []string{"text"}},
+			},
+			"glm-5": {
+				ID: "glm-5", Name: "GLM-5", Family: "glm",
+				ToolCall: true, Temperature: true,
+				DefaultEnabled: true,
+				Modalities:     &ModelModalities{Input: []string{"text"}, Output: []string{"text"}},
+			},
+			"glm-5.1": {
+				ID: "glm-5.1", Name: "GLM-5.1", Family: "glm",
+				ToolCall: true, Temperature: true,
+				DefaultEnabled: true, Recommended: true,
+				Modalities: &ModelModalities{Input: []string{"text"}, Output: []string{"text"}},
+			},
+			"glm-5-turbo": {
+				ID: "glm-5-turbo", Name: "GLM-5-Turbo", Family: "glm",
+				ToolCall: true, Temperature: true,
+				DefaultEnabled: true,
+				Modalities:     &ModelModalities{Input: []string{"text"}, Output: []string{"text"}},
+			},
+			"kimi-k2.5": {
+				ID: "kimi-k2.5", Name: "Kimi-K2.5", Family: "kimi",
+				Reasoning: true, ToolCall: true, Temperature: true,
+				DefaultEnabled: true,
+				Modalities:     &ModelModalities{Input: []string{"text"}, Output: []string{"text"}},
+			},
+			"kimi-k2.6": {
+				ID: "kimi-k2.6", Name: "Kimi-K2.6", Family: "kimi",
+				Reasoning: true, ToolCall: true, Temperature: true,
+				DefaultEnabled: true, Recommended: true,
+				Modalities: &ModelModalities{Input: []string{"text"}, Output: []string{"text"}},
+			},
+			"minimax-m2.5": {
+				ID: "minimax-m2.5", Name: "MiniMax-M2.5", Family: "minimax",
+				Reasoning: true, ToolCall: true, Temperature: true,
+				DefaultEnabled: true,
+				Modalities:     &ModelModalities{Input: []string{"text"}, Output: []string{"text"}},
+			},
+			"minimax-m2.7": {
+				ID: "minimax-m2.7", Name: "MiniMax-M2.7", Family: "minimax",
+				Reasoning: true, ToolCall: true, Temperature: true,
+				DefaultEnabled: true, Recommended: true,
+				Modalities: &ModelModalities{Input: []string{"text"}, Output: []string{"text"}},
+			},
+			"deepseek-v4-flash": {
+				ID: "deepseek-v4-flash", Name: "DeepSeek-V4-Flash", Family: "deepseek",
+				Reasoning: true, ToolCall: true, Temperature: true,
+				DefaultEnabled: true,
+				Modalities:     &ModelModalities{Input: []string{"text"}, Output: []string{"text"}},
+			},
+			"deepseek-v4-pro": {
+				ID: "deepseek-v4-pro", Name: "DeepSeek-V4-Pro", Family: "deepseek",
+				Reasoning: true, ToolCall: true, Temperature: true,
+				DefaultEnabled: true, Recommended: true,
+				Modalities: &ModelModalities{Input: []string{"text"}, Output: []string{"text"}},
+			},
+		},
+	},
+}
+
+// staticProviderOrder defines the display order for static providers.
+// They are appended after the generated providers.
+var staticProviderOrder = []string{
+	"tencent-tokenhub-ep",
+}
+
+// applyStaticProviders merges staticProviders into generatedProviders.
+func applyStaticProviders() {
+	for id, prov := range staticProviders {
+		generatedProviders[id] = prov
+	}
+	generatedProviderOrder = append(generatedProviderOrder, staticProviderOrder...)
 }
 
 // applyRecommendedModels sets Recommended and DefaultEnabled on models in the generated registry.

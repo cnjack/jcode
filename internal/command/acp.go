@@ -185,7 +185,7 @@ func (a *acpAgent) Initialize(_ context.Context, params acp.InitializeRequest) (
 	imageSupport := false
 	if cfg, err := config.LoadConfig(); err == nil {
 		providerName, modelName := cfg.GetProviderModel()
-		registry := internalmodel.NewModelRegistry()
+		registry := internalmodel.NewModelRegistryWithConfig(cfg)
 		if _, m, ok := registry.LookupModel(providerName, modelName); ok && m != nil && m.Modalities != nil {
 			for _, mod := range m.Modalities.Input {
 				if mod == "image" {
@@ -283,7 +283,7 @@ func (a *acpAgent) buildAgentSession(
 		return nil, fmt.Errorf("provider %q not found in config", providerName)
 	}
 
-	registry := internalmodel.NewModelRegistry()
+	registry := internalmodel.NewModelRegistryWithConfig(cfg)
 	baseURL := providerCfg.BaseURL
 	if baseURL == "" {
 		baseURL = registry.GetProviderAPI(providerName)

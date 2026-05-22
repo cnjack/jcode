@@ -20,7 +20,7 @@ func (m Model) handleModelInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	}
 
 	currentProvider, currentModel := cfg.GetProviderModel()
-	registry := model.NewModelRegistry()
+	registry := model.NewModelRegistryWithConfig(cfg)
 
 	// Configured providers (have API key)
 	configuredProviders := cfg.GetProviders()
@@ -46,7 +46,7 @@ func (m Model) handleModelInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	})
 
 	// Get current model info from registry
-	reg := model.NewModelRegistry()
+	reg := model.NewModelRegistryWithConfig(cfg)
 	if _, rm, ok := reg.LookupModel(currentProvider, currentModel); ok && rm != nil {
 		var tags []string
 		if rm.Recommended {
