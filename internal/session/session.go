@@ -126,6 +126,11 @@ type Recorder struct {
 	resuming bool
 	title    string
 	hasTitle bool // true after title has been generated or when resuming
+	// pendingSystemPrompt / pendingEnvInfo buffer the system prompt until the
+	// first real message is recorded so that opening and immediately closing
+	// jcode does not leave an empty session on disk.
+	pendingSystemPrompt string
+	pendingEnvInfo      string
 }
 
 // NewRecorder returns a Recorder that will create the session file only when
@@ -286,12 +291,14 @@ func (r *Recorder) RecordCompact(summary string, compactedN int) {
 	_ = r.writeEntry(Entry{Type: EntryCompact, Summary: summary, CompactedN: compactedN})
 }
 
-// RecordSystemPrompt records the system prompt and a snapshot of the
-// environment information used to generate it. This allows resume to reuse
-// the exact same system prompt (maximising KV-cache hit) and inject only
-// an environment diff as an appended system message.
+// RecordSystemPrompt buffers the system prompt so it can be written together
+// with the first real message. This avoids creating a session file when the
+// user opens and immediately closes jcode without any conversation.
 func (r *Recorder) RecordSystemPrompt(prompt, envInfo string) {
-	_ = r.writeEntry(Entry{Type: EntrySystemPrompt, Content: prompt, EnvInfo: envInfo})
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pendingSystemPrompt = prompt
+	r.pendingEnvInfo = envInfo
 }
 
 // TruncateAtUserMessage rewrites the session file keeping only entries that
@@ -500,6 +507,20 @@ func (r *Recorder) writeEntry(e Entry) error {
 	// Lazily initialise the file on the first real write.
 	if err := r.ensureFile(); err != nil {
 		return err
+	}
+	// Flush buffered system prompt before the first real entry.
+	if r.pendingSystemPrompt != "" {
+		sp := Entry{
+			Type:      EntrySystemPrompt,
+			Content:   r.pendingSystemPrompt,
+			EnvInfo:   r.pendingEnvInfo,
+			Timestamp: e.Timestamp,
+		}
+		r.pendingSystemPrompt = ""
+		r.pendingEnvInfo = ""
+		if spData, spErr := json.Marshal(sp); spErr == nil {
+			_, _ = r.file.WriteString(string(spData) + "\n")
+		}
 	}
 	if _, err = r.file.WriteString(string(data) + "\n"); err != nil {
 		return err
