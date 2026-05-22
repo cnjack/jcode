@@ -32,7 +32,87 @@ const renderType = computed(() => {
   if (name === 'edit' || name === 'multi_edit') return 'diff'
   if (name === 'grep') return 'search'
   if (name === 'todowrite' || name === 'todoread') return 'todo'
+  if (name === 'load_skill') return 'skill'
+  if (name === 'team_list') return 'team-list'
+  if (name === 'team_send_message') return 'team-message'
+  if (name === 'team_create') return 'team-create'
+  if (name === 'team_spawn') return 'team-spawn'
   return 'generic'
+})
+
+// ─── Skill renderer helpers ───
+const skillData = computed(() => {
+  try {
+    const skillName = JSON.parse(props.tool.args).name || ''
+    const output = props.tool.output || ''
+    const descMatch = output.match(/description="([^"]*)"/)
+    return { name: skillName, description: descMatch ? descMatch[1] : '' }
+  } catch { return { name: '', description: '' } }
+})
+
+// ─── Team list renderer helpers ───
+interface TeamMember { name: string; status: string; type: string; progress: string }
+const teamListData = computed(() => {
+  const output = props.tool.output || ''
+  const teamMatch = output.match(/^Team: (.+?) \((\d+)/)
+  const teamName = teamMatch ? teamMatch[1] : ''
+  const members: TeamMember[] = []
+  for (const line of output.split('\n')) {
+    const m = line.match(/@(\S+)\s+status=(\S+)\s+type=(\S*)(.*)/)
+    if (m) {
+      const progress = m[4] ? m[4].trim() : ''
+      members.push({ name: m[1], status: m[2], type: m[3], progress })
+    }
+  }
+  return { teamName, members }
+})
+
+function memberStatusColor(status: string): string {
+  if (status === 'running' || status === 'busy') return 'var(--color-primary)'
+  if (status === 'done' || status === 'finished') return 'var(--color-success-fg)'
+  if (status === 'error') return 'var(--color-destructive)'
+  return 'var(--color-muted-foreground)'
+}
+
+// ─── Team create renderer helpers ───
+const teamCreateData = computed(() => {
+  try {
+    const parsed = JSON.parse(props.tool.args)
+    const output = props.tool.output || ''
+    const leadMatch = output.match(/Lead agent: (\S+)/)
+    return {
+      teamName: parsed.team_name || '',
+      description: parsed.description || '',
+      lead: leadMatch ? leadMatch[1] : '',
+    }
+  } catch { return { teamName: '', description: '', lead: '' } }
+})
+
+// ─── Team spawn renderer helpers ───
+const teamSpawnData = computed(() => {
+  try {
+    const parsed = JSON.parse(props.tool.args)
+    const output = props.tool.output || ''
+    const idMatch = output.match(/\(ID: ([^)]+)\)/)
+    return {
+      name: parsed.name || '',
+      prompt: parsed.prompt || '',
+      agentType: parsed.agent_type || '',
+      id: idMatch ? idMatch[1] : '',
+    }
+  } catch { return { name: '', prompt: '', agentType: '', id: '' } }
+})
+
+// ─── Team message renderer helpers ───
+const teamMsgData = computed(() => {
+  try {
+    const parsed = JSON.parse(props.tool.args)
+    return {
+      to: parsed.to || '',
+      message: parsed.message || '',
+      summary: parsed.summary || '',
+    }
+  } catch { return { to: '', message: '', summary: '' } }
 })
 
 // ─── Todo renderer helpers ───
@@ -241,7 +321,7 @@ function formatArgs(args: string): string {
   <div v-if="isSubagent" class="my-1">
     <!-- Header: no box, just a plain label row -->
     <button
-      class="w-full flex items-center gap-1.5 px-1 py-1 text-left cursor-pointer hover:opacity-70 transition-opacity"
+      class="w-full flex items-center gap-1.5 pl-0 pr-1 py-1 text-left cursor-pointer hover:opacity-70 transition-opacity"
       style="background: transparent"
       @click="subagentExpanded = !subagentExpanded"
     >
@@ -297,7 +377,7 @@ function formatArgs(args: string): string {
     <!-- Trigger: only shown when collapsed -->
     <button
       v-if="!expanded"
-      class="w-full flex items-center gap-1.5 px-1 py-1 text-left cursor-pointer hover:opacity-70 transition-opacity"
+      class="w-full flex items-center gap-1.5 pl-0 pr-1 py-1 text-left cursor-pointer hover:opacity-70 transition-opacity"
       style="background: transparent"
       @click="expanded = true"
     >
@@ -324,7 +404,7 @@ function formatArgs(args: string): string {
     <!-- Expanded: header outside, content box below -->
     <div v-else>
       <!-- Header: plain text row, no box — click to collapse -->
-      <div class="flex items-center gap-1.5 px-1 py-1 cursor-pointer hover:opacity-70 transition-opacity" @click="expanded = false">
+      <div class="flex items-center gap-1.5 pl-0 pr-1 py-1 cursor-pointer hover:opacity-70 transition-opacity" @click="expanded = false">
         <span
           class="text-xs font-medium"
           :class="{ 'shimmer-running': tool.status === 'running' }"
@@ -346,7 +426,7 @@ function formatArgs(args: string): string {
       </div>
       <!-- Content box: only content gets the border -->
       <div
-        class="overflow-hidden mx-2 mt-1 mb-1"
+        class="overflow-hidden ml-0 mr-2 mt-1 mb-1"
         :class="tool.status === 'error' ? 'border border-red-300/60 dark:border-red-500/30' : ''"
         :style="{ borderRadius: 'var(--radius-xl)', border: tool.status !== 'error' ? '1px solid var(--color-border)' : undefined }"
       >
@@ -443,6 +523,116 @@ function formatArgs(args: string): string {
         <div v-else-if="tool.status === 'running'" class="py-1 text-xs animate-pulse" style="color: var(--color-muted-foreground)">Loading…</div>
         <div v-else class="py-1 text-xs italic" style="color: var(--color-muted-foreground)">No todos</div>
         <div v-if="tool.error" class="mt-1.5 text-xs font-mono whitespace-pre-wrap" style="color: var(--color-destructive)">{{ tool.error }}</div>
+      </div>
+
+      <!-- ═══════ Skill Loader ═══════ -->
+      <div v-else-if="renderType === 'skill'" class="px-3 py-2.5" style="background: var(--color-surface)">
+        <div class="flex items-center gap-2">
+          <span class="text-[11px] font-semibold font-mono" style="color: var(--color-foreground)">{{ skillData.name }}</span>
+          <span
+            v-if="tool.status === 'running'"
+            class="text-[10px] animate-pulse"
+            style="color: var(--color-muted-foreground)"
+          >loading…</span>
+        </div>
+        <div
+          v-if="skillData.description"
+          class="mt-1 text-[11px] leading-snug"
+          style="color: var(--color-muted-foreground)"
+        >{{ skillData.description }}</div>
+        <div v-if="tool.error" class="mt-1 text-[11px] font-mono" style="color: var(--color-destructive)">{{ tool.error }}</div>
+      </div>
+
+      <!-- ═══════ Team List ═══════ -->
+      <div v-else-if="renderType === 'team-list'" class="px-3 py-2 max-h-64 overflow-y-auto" style="background: var(--color-surface)">
+        <div
+          v-if="teamListData.teamName"
+          class="flex items-center gap-2 mb-2 pb-1.5"
+          style="border-bottom: 1px solid var(--color-border)"
+        >
+          <span class="text-[10px] uppercase tracking-wider font-semibold" style="color: var(--color-muted-foreground)">team</span>
+          <span class="text-xs font-mono font-semibold" style="color: var(--color-foreground)">{{ teamListData.teamName }}</span>
+          <span class="ml-auto text-[10px] tabular-nums" style="color: var(--color-muted-foreground)">{{ teamListData.members.length }} members</span>
+        </div>
+        <div v-if="teamListData.members.length" class="space-y-0.5">
+          <div v-for="member in teamListData.members" :key="member.name" class="flex items-center gap-2 py-0.5">
+            <span class="text-[11px] w-3 text-center shrink-0" :style="{ color: memberStatusColor(member.status) }">●</span>
+            <span class="text-xs font-mono flex-1" style="color: var(--color-foreground)">@{{ member.name }}</span>
+            <span
+              class="text-[10px] font-mono px-1.5 py-0.5 rounded tabular-nums"
+              style="background: var(--color-muted); color: var(--color-muted-foreground)"
+            >{{ member.status }}</span>
+            <span v-if="member.type" class="text-[10px]" style="color: var(--color-muted-foreground)">{{ member.type }}</span>
+          </div>
+        </div>
+        <div v-else-if="tool.status === 'running'" class="py-1 text-xs animate-pulse" style="color: var(--color-muted-foreground)">Loading…</div>
+        <div v-else class="py-1 text-xs italic" style="color: var(--color-muted-foreground)">No teammates</div>
+        <div v-if="tool.error" class="mt-1.5 text-xs font-mono" style="color: var(--color-destructive)">{{ tool.error }}</div>
+      </div>
+
+      <!-- ═══════ Team Create ═══════ -->
+      <div v-else-if="renderType === 'team-create'" class="px-3 py-2.5" style="background: var(--color-surface)">
+        <div class="flex items-center gap-2 mb-1">
+          <span class="text-xs font-mono font-semibold" style="color: var(--color-foreground)">{{ teamCreateData.teamName }}</span>
+          <span v-if="tool.status === 'done' && !tool.error" class="ml-auto text-[10px] font-semibold" style="color: var(--color-primary)">✓ created</span>
+          <span v-else-if="tool.status === 'running'" class="ml-auto text-[10px] animate-pulse" style="color: var(--color-muted-foreground)">creating…</span>
+        </div>
+        <div v-if="teamCreateData.description" class="text-[11px] leading-snug" style="color: var(--color-muted-foreground)">{{ teamCreateData.description }}</div>
+        <div v-if="teamCreateData.lead" class="mt-1.5 text-[10px] font-mono" style="color: var(--color-muted-foreground)">lead: {{ teamCreateData.lead }}</div>
+        <div v-if="tool.error" class="mt-1 text-xs font-mono" style="color: var(--color-destructive)">{{ tool.error }}</div>
+      </div>
+
+      <!-- ═══════ Team Spawn ═══════ -->
+      <div v-else-if="renderType === 'team-spawn'" class="px-3 py-2.5" style="background: var(--color-surface)">
+        <div class="flex items-center gap-2 mb-1">
+          <span class="text-xs font-mono font-semibold" style="color: var(--color-foreground)">@{{ teamSpawnData.name }}</span>
+          <span
+            v-if="teamSpawnData.agentType"
+            class="text-[10px] px-1.5 py-0.5 rounded"
+            style="background: var(--color-muted); color: var(--color-muted-foreground)"
+          >{{ teamSpawnData.agentType }}</span>
+          <span v-if="tool.status === 'done' && !tool.error" class="ml-auto text-[10px] font-semibold" style="color: var(--color-primary)">✓ running</span>
+          <span v-else-if="tool.status === 'running'" class="ml-auto text-[10px] animate-pulse" style="color: var(--color-muted-foreground)">spawning…</span>
+        </div>
+        <div
+          v-if="teamSpawnData.prompt"
+          class="text-[11px] leading-snug"
+          style="color: var(--color-muted-foreground); font-style: italic; white-space: pre-wrap"
+        >{{ truncate(teamSpawnData.prompt, 150) }}</div>
+        <div v-if="teamSpawnData.id" class="mt-1.5 text-[10px] font-mono" style="color: var(--color-muted-foreground)">id: {{ teamSpawnData.id }}</div>
+        <div v-if="tool.error" class="mt-1 text-xs font-mono" style="color: var(--color-destructive)">{{ tool.error }}</div>
+      </div>
+
+      <!-- ═══════ Team Message ═══════ -->
+      <div v-else-if="renderType === 'team-message'" class="px-3 py-2.5" style="background: var(--color-surface)">
+        <!-- Header: recipient + sent status -->
+        <div class="flex items-center gap-2 mb-1.5">
+          <span class="text-[10px]" style="color: var(--color-muted-foreground)">→</span>
+          <span class="text-xs font-mono font-semibold" style="color: var(--color-foreground)">
+            {{ teamMsgData.to === '*' ? 'all' : '@' + teamMsgData.to }}
+          </span>
+          <span
+            v-if="tool.status === 'done' && !tool.error"
+            class="ml-auto text-[10px] font-semibold"
+            style="color: var(--color-primary)"
+          >✓ sent</span>
+          <span
+            v-else-if="tool.status === 'running'"
+            class="ml-auto text-[10px] animate-pulse"
+            style="color: var(--color-muted-foreground)"
+          >sending…</span>
+        </div>
+        <!-- Summary -->
+        <div v-if="teamMsgData.summary" class="text-[11px] leading-snug font-medium mb-1" style="color: var(--color-foreground)">
+          {{ teamMsgData.summary }}
+        </div>
+        <!-- Message body (truncated) -->
+        <div
+          v-if="teamMsgData.message"
+          class="text-[11px] leading-snug"
+          style="color: var(--color-muted-foreground); font-style: italic; white-space: pre-wrap"
+        >{{ truncate(teamMsgData.message, 200) }}</div>
+        <div v-if="tool.error" class="mt-1.5 text-xs font-mono" style="color: var(--color-destructive)">{{ tool.error }}</div>
       </div>
 
       <!-- ═══════ Generic fallback ═══════ -->

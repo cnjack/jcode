@@ -198,7 +198,7 @@ func (l *Loader) GetContent(name string) string {
 	if sk == nil {
 		return fmt.Sprintf("Error: Unknown skill '%s'. Available skills:\n%s", name, l.Descriptions())
 	}
-	return fmt.Sprintf("<skill name=%q>\n%s\n</skill>", sk.Name, sk.Body)
+	return fmt.Sprintf("<skill name=%q description=%q>\n%s\n</skill>", sk.Name, sk.Description, sk.Body)
 }
 
 // SlashCommands returns all skills that have a slash command trigger.

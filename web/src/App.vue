@@ -285,7 +285,7 @@ function startResize(e: MouseEvent) {
                 @retry="store.retryFromMessage(item.data.id)"
                 @edit="(text) => store.editAndResend(item.data.id, text)"
               />
-              <ToolCallCard v-else-if="item.kind === 'tool'" :tool="item.data" class="animate-fade-up" />
+              <ToolCallCard v-else-if="item.kind === 'tool'" :tool="item.data" class="animate-fade-up pl-9" />
               <ApprovalBanner v-else-if="item.kind === 'approval'" :approval="item.data" class="animate-fade-up" />
             </template>
 

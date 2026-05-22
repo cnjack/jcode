@@ -57,9 +57,8 @@ function closeTab(id: string) {
           :class="{ 'tab-active': tab.id === activeId }"
           @click="activeId = tab.id"
         >
-          <span class="tab-label">{{ tab.label }}</span>
+          <!-- × on the left of the label, appears on hover -->
           <span
-            v-if="tabs.length > 1"
             class="tab-close"
             @click.stop="closeTab(tab.id)"
           >
@@ -67,16 +66,19 @@ function closeTab(id: string) {
               <path d="M18 6L6 18M6 6l12 12" />
             </svg>
           </span>
+          <span class="tab-label">{{ tab.label }}</span>
         </button>
-      </div>
 
-      <!-- Controls -->
-      <div class="flex items-center gap-0.5 shrink-0">
+        <!-- + New terminal after the last tab -->
         <button class="ctrl-btn" title="New terminal" @click="addTab">
           <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
             <path d="M12 5v14M5 12h14" />
           </svg>
         </button>
+      </div>
+
+      <!-- Controls: close panel only -->
+      <div class="flex items-center gap-0.5 shrink-0">
         <button class="ctrl-btn" title="Close panel" @click="emit('close')">
           <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <path d="M18 6L6 18M6 6l12 12" />
@@ -130,15 +132,26 @@ function closeTab(id: string) {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   border-radius: 2px;
-  opacity: 0.4;
+  flex-shrink: 0;
+  opacity: 0;
   transition: opacity 0.1s, background 0.1s;
 }
-.tab-close:hover {
+/* Show × when hovering the tab or for the active tab */
+.tab-btn:hover .tab-close {
+  opacity: 0.6;
+}
+.tab-btn:hover .tab-close:hover {
   opacity: 1;
   background: color-mix(in srgb, var(--color-foreground) 15%, transparent);
+}
+.tab-active .tab-close {
+  opacity: 0.4;
+}
+.tab-active:hover .tab-close {
+  opacity: 0.7;
 }
 .ctrl-btn {
   display: flex;
