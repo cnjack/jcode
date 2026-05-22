@@ -555,7 +555,7 @@ function formatArgs(args: string): string {
           <span class="ml-auto text-[10px] tabular-nums" style="color: var(--color-muted-foreground)">{{ teamListData.members.length }} members</span>
         </div>
         <div v-if="teamListData.members.length" class="space-y-0.5">
-          <div v-for="member in teamListData.members" :key="member.name" class="flex items-center gap-2 py-0.5">
+          <div v-for="(member, idx) in teamListData.members" :key="`${member.name}-${idx}`" class="flex items-center gap-2 py-0.5">
             <span class="text-[11px] w-3 text-center shrink-0" :style="{ color: memberStatusColor(member.status) }">●</span>
             <span class="text-xs font-mono flex-1" style="color: var(--color-foreground)">@{{ member.name }}</span>
             <span

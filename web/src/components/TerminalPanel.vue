@@ -58,14 +58,18 @@ function closeTab(id: string) {
           @click="activeId = tab.id"
         >
           <!-- × on the left of the label, appears on hover -->
-          <span
+          <button
             class="tab-close"
+            :aria-label="`Close ${tab.label}`"
+            tabindex="-1"
             @click.stop="closeTab(tab.id)"
+            @keydown.enter.stop.prevent="closeTab(tab.id)"
+            @keydown.space.stop.prevent="closeTab(tab.id)"
           >
             <svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
               <path d="M18 6L6 18M6 6l12 12" />
             </svg>
-          </span>
+          </button>
           <span class="tab-label">{{ tab.label }}</span>
         </button>
 
@@ -134,14 +138,21 @@ function closeTab(id: string) {
   justify-content: center;
   width: 14px;
   height: 14px;
+  padding: 0;
+  border: none;
   border-radius: 2px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
   flex-shrink: 0;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.1s, background 0.1s;
 }
 /* Show × when hovering the tab or for the active tab */
 .tab-btn:hover .tab-close {
   opacity: 0.6;
+  pointer-events: auto;
 }
 .tab-btn:hover .tab-close:hover {
   opacity: 1;
@@ -149,6 +160,7 @@ function closeTab(id: string) {
 }
 .tab-active .tab-close {
   opacity: 0.4;
+  pointer-events: auto;
 }
 .tab-active:hover .tab-close {
   opacity: 0.7;
