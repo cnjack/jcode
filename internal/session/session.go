@@ -125,6 +125,7 @@ type Recorder struct {
 	// In this mode, ensureFile opens the existing file for append instead of creating new.
 	resuming bool
 	title    string
+	hasTitle bool // true after title has been generated or when resuming
 }
 
 // NewRecorder returns a Recorder that will create the session file only when
@@ -163,6 +164,8 @@ func ValidateSessionID(id string) error {
 
 // SetUUID overrides the session identifier. Used when resuming an existing session
 // so that new messages are appended to the same session file.
+// If the session file does not yet exist on disk, the recorder is NOT marked as
+// resuming, so the first user message will still generate a title.
 func (r *Recorder) SetUUID(id string) {
 	if err := ValidateSessionID(id); err != nil {
 		config.Logger().Printf("[session] SetUUID rejected: %v", err)
@@ -171,7 +174,16 @@ func (r *Recorder) SetUUID(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.uuid = id
-	r.resuming = true
+	// Only mark as resuming if the session file already exists on disk.
+	// For brand-new sessions with a client-provided UUID, we still want
+	// title generation on the first user message.
+	dir, err := config.SessionsDir()
+	if err == nil {
+		filePath := filepath.Join(dir, id+".json")
+		if _, statErr := os.Stat(filePath); statErr == nil {
+			r.resuming = true
+		}
+	}
 	// If a file was already opened with the old UUID, close it so the next
 	// write opens the correct file for append.
 	if r.file != nil {
@@ -194,13 +206,14 @@ func (r *Recorder) HasRecording() bool {
 // Optional images are persisted alongside the text so they survive session restore.
 func (r *Recorder) RecordUser(content string, images ...EntryImage) {
 	r.mu.Lock()
-	needsTitle := r.file == nil && !r.resuming
+	needsTitle := !r.hasTitle && !r.resuming
 	r.mu.Unlock()
 	_ = r.writeEntry(Entry{Type: EntryUser, Content: content, Images: images})
 	if needsTitle {
 		title := generateTitle(content)
 		r.mu.Lock()
 		r.title = title
+		r.hasTitle = true
 		r.mu.Unlock()
 		_ = updateIndexTitle(r.project, r.uuid, title)
 	}
