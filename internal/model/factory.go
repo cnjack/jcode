@@ -25,7 +25,7 @@ func NewModelFactory(cfg *config.Config, fallback einomodel.ToolCallingChatModel
 		cfg:      cfg,
 		cache:    make(map[string]einomodel.ToolCallingChatModel),
 		fallback: fallback,
-		registry: NewModelRegistry(),
+		registry: NewModelRegistryWithConfig(cfg),
 	}
 }
 
