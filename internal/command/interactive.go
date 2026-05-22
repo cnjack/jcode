@@ -496,6 +496,9 @@ func (s *interactiveState) handleConfig(cfgMsg *config.Config) {
 		return
 	}
 
+	// Refresh registry so new custom models / providers are available.
+	s.registry = internalmodel.NewModelRegistryWithConfig(cfgMsg)
+
 	newBaseURL := newProvCfg.BaseURL
 	if newBaseURL == "" {
 		newBaseURL = s.registry.GetProviderAPI(newProvName)
@@ -566,6 +569,9 @@ func (s *interactiveState) handleAddModel() {
 	if newProvCfg == nil {
 		return
 	}
+	// Refresh registry so new custom models / providers are available.
+	s.registry = internalmodel.NewModelRegistryWithConfig(newCfg)
+
 	newBaseURL := newProvCfg.BaseURL
 	if newBaseURL == "" {
 		newBaseURL = s.registry.GetProviderAPI(newProvName)

@@ -116,9 +116,10 @@ func NewSetupModel() SetupModel {
 
 	// Show all providers from the generated registry in curated order
 	for _, rp := range m.registry.ListProviders() {
-		// Providers need a key if they have env vars defined, or if they are custom
-		// providers (no env vars, not from models.dev) that don't yet have a key configured.
-		needKey := len(rp.Env) > 0 || !configuredProviders[rp.ID]
+		// Providers need a key if they declare environment variable names.
+		// Custom providers added via MergeConfigProviders always get a derived
+		// Env entry, so this single check covers all cases.
+		needKey := len(rp.Env) > 0
 		items = append(items, providerItem{
 			profile: ProviderProfile{
 				ID:           rp.ID,
