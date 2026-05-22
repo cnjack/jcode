@@ -8,7 +8,6 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 )
 
-
 // RegistryProvider represents a provider from models.dev API.
 type RegistryProvider struct {
 	ID     string                    `json:"id"`
