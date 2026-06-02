@@ -2050,8 +2050,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 	case AgentTextMsg:
 		m.currentText.WriteString(sanitize(msg.Text))
-		m.contentDirty = true
 		// Debounce: schedule a batch render instead of rendering every token.
+		// Do NOT set contentDirty here — View() must skip rendering until
+		// BatchRenderMsg fires, otherwise every token triggers a full render.
 		if !m.renderPending {
 			m.renderPending = true
 			cmds = append(cmds, tea.Tick(33*time.Millisecond, func(_ time.Time) tea.Msg {
@@ -2695,7 +2696,7 @@ func (m Model) View() tea.View {
 		// During streaming, the contentDirty flag is set by BatchRenderMsg.
 		// During thinking, the status line changes every tick, so we always
 		// render — but the cached lines make this cheap.
-		if m.contentDirty || (m.thinking && !m.agentDone) || m.currentText.Len() > 0 {
+		if m.contentDirty || (m.thinking && !m.agentDone) {
 			m.viewport.SetContent(strings.TrimRight(m.renderContent(), "\n"))
 		}
 	}
