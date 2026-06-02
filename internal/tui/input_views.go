@@ -169,7 +169,7 @@ func (m Model) renderCommandSuggestions() string {
 // --- Legacy hint function removed; replaced by interactive suggestion list.
 
 // handleChannelInput shows the channel management panel.
-func (m Model) handleChannelInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+func (m *Model) handleChannelInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	items := []list.Item{
 		channelItem{title: "💬 WeChat", desc: m.channelStateDesc("wechat"), key: "wechat"},
 	}
@@ -192,7 +192,7 @@ func (m Model) channelStateDesc(channelID string) string {
 }
 
 // handleSettingInput shows the setting menu.
-func (m Model) handleSettingInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+func (m *Model) handleSettingInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	items := []list.Item{
 		settingItem{title: "🔀 Switch Model", desc: "Switch to a different configured model", key: "switch_model"},
 		settingItem{title: "⚙  Manage Models", desc: "Choose which models appear in the model selector", key: "manage_models"},
@@ -206,7 +206,7 @@ func (m Model) handleSettingInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 }
 
 // handleBgInput handles `/bg` command to show background task status.
-func (m Model) handleBgInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+func (m *Model) handleBgInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	prompt := "Use the check_background tool to list all background tasks and report their status."
 	m.mode = ModeAgent
 	m.agentDone = false
@@ -226,7 +226,7 @@ func (m Model) handleBgInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 }
 
 // handleCompactInput handles `/compact` by sending a compact request to the main goroutine.
-func (m Model) handleCompactInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+func (m *Model) handleCompactInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	m.lines = append(m.lines, textLine(toolLabelStyle.Render("  ⏳ Compacting context...")))
 	m.thinking = true
 	m.agentDone = false
@@ -265,7 +265,7 @@ func (m Model) matchSkillSlash(prompt string) *SkillSlashMsg {
 
 // handleSkillSlashInput handles a skill slash command by sending a prompt that
 // loads the skill and follows its instructions.
-func (m Model) handleSkillSlashInput(skillName, userInput string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+func (m *Model) handleSkillSlashInput(skillName, userInput string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	prompt := fmt.Sprintf("Use the load_skill tool with name=%q and follow its instructions.", skillName)
 	if userInput != "" {
 		prompt += fmt.Sprintf("\n\nAdditional context: %s", userInput)

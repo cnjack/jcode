@@ -269,6 +269,8 @@ func (m *Model) enterTeammateView(agentID string) {
 
 	m.teamState.ViewingAgent = agentID
 	m.teamState.ViewMode = TeamViewTeammate
+	m.invalidateSidebarCache()
+	m.invalidateFooterCache()
 
 	// Load teammate's accumulated display lines into viewport.
 	state := m.teamState.Manager.GetTeammateState(agentID)
@@ -286,6 +288,8 @@ func (m *Model) enterTeammateView(agentID string) {
 func (m *Model) exitTeammateView() {
 	m.teamState.ViewingAgent = ""
 	m.teamState.ViewMode = TeamViewLeader
+	m.invalidateSidebarCache()
+	m.invalidateFooterCache()
 
 	// Restore leader's viewport state.
 	if m.teamLeaderLines != nil {

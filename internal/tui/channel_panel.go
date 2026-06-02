@@ -12,7 +12,7 @@ import (
 )
 
 // handleChannelKeyPress handles keyboard input when the channel panel is active.
-func (m Model) handleChannelKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+func (m *Model) handleChannelKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		selected := m.channelMenu.SelectedItem()
@@ -57,7 +57,7 @@ func (m Model) handleChannelKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.M
 }
 
 // showChannelActions replaces the channel list with available actions for the selected channel.
-func (m Model) showChannelActions(channelID string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+func (m *Model) showChannelActions(channelID string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	state := m.channelStates[channelID]
 	var items []list.Item
 
