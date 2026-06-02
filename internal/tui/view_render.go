@@ -100,12 +100,10 @@ func (m *Model) View() tea.View {
 		vpH = 3
 	}
 	if m.ready {
-		// Only re-render content when something changed. Spinner ticks during
-		// idle (non-thinking) periods won't trigger a full re-render.
-		// During streaming, the contentDirty flag is set by BatchRenderMsg.
-		// During thinking, the status line changes every tick, so we always
-		// render — but the cached lines make this cheap.
-		if m.contentDirty || (m.thinking && !m.agentDone) {
+		// Only re-render content when something changed. Stream text is
+		// batched by BatchRenderMsg; spinner ticks explicitly dirty the status
+		// line in Update.
+		if m.contentDirty {
 			m.viewport.SetContent(strings.TrimRight(m.renderContent(), "\n"))
 		}
 	}

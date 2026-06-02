@@ -520,6 +520,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 						_ = config.SaveConfig(cfg)
 						m.activeProvider = selItem.provider
 						m.activeModel = selItem.model
+						m.invalidateSidebarCache()
+						m.invalidateFooterCache()
 						// Track in recent models.
 						if state, err := config.LoadModelState(); err == nil {
 							state.AddRecent(config.ModelRef{Provider: selItem.provider, Model: selItem.model})
@@ -722,6 +724,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				// Scroll sidebar todo list up
 				if m.showSidebar && m.sidebarScrollOffset > 0 {
 					m.sidebarScrollOffset--
+					m.invalidateSidebarCache()
 					m.refreshViewport()
 					return m, tea.Batch(cmds...)
 				}
@@ -734,6 +737,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					}
 					if m.sidebarScrollOffset < maxOffset {
 						m.sidebarScrollOffset++
+						m.invalidateSidebarCache()
 						m.refreshViewport()
 						return m, tea.Batch(cmds...)
 					}
@@ -1138,6 +1142,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			cmds = append(cmds, cmd)
+			m.contentDirty = true
 		}
 
 	case PromptSubmitMsg:
@@ -1151,6 +1156,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 	case SSHCancelMsg:
 		m.envLabel = "Local"
+		m.invalidateSidebarCache()
 		sshCh <- msg
 
 	case ConfigUpdatedMsg:
@@ -1197,6 +1203,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		switch msg.Cmd {
 		case "input":
 			// Replace input area with the received text
+			m.invalidateFooterCache()
 			m.textarea.SetValue(msg.Val)
 			m.textarea.CursorEnd()
 			m.textareaLines = m.recalcTextareaLines()
@@ -1261,6 +1268,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			}
 		case "cancel":
 			// Clear the input area
+			m.invalidateFooterCache()
 			m.textarea.Reset()
 			m.textareaLines = 1
 			m.textarea.SetHeight(1)
@@ -1308,6 +1316,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		}
 		m.totalTokens = 0
 		m.sidebarScrollOffset = 0
+		m.invalidateSidebarCache()
+		m.invalidateFooterCache()
 		m.lines = append(m.lines, textLine(toolLabelStyle.Render("📂 Session resumed: ")+msg.UUID))
 		m.lines = append(m.lines, textLine(""))
 		for _, e := range msg.Entries {
@@ -1459,6 +1469,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.thinking = false
 		if msg.Success {
 			m.envLabel = msg.Label
+			m.invalidateSidebarCache()
 			m.lines = append(m.lines, textLine(fmt.Sprintf("   %s Connected to %s",
 				toolSuccessStyle.Render("✓"), toolNameStyle.Render(msg.Label))))
 			// If this was a direct /ssh user@host connection, offer to save alias
@@ -1562,6 +1573,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.totalTokens = msg.TotalTokens
 		m.modelContextLimit = msg.ModelContextLimit
 		m.invalidateSidebarCache()
+		m.invalidateFooterCache()
 
 	case AgentDoneMsg:
 		m.thinking = false
@@ -1725,9 +1737,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 	// --- Team messages ---
 	case team.SetTeamManagerMsg:
 		m.teamState.Manager = msg.Manager
+		m.invalidateSidebarCache()
+		m.invalidateFooterCache()
 
 	case team.TeammateSpawnedMsg:
 		m.teamState.RefreshTeammates()
+		m.invalidateSidebarCache()
+		m.invalidateFooterCache()
 		// Auto-show panel when first teammate spawns.
 		if !m.teamState.PanelVisible {
 			m.teamState.PanelVisible = true
@@ -1743,6 +1759,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 	case team.TeammateStatusMsg:
 		m.teamState.RefreshTeammates()
+		m.invalidateSidebarCache()
+		m.invalidateFooterCache()
 		nameStyled := toolNameStyle.Render(msg.AgentID)
 		icon := statusIcon(msg.Status)
 		switch {
@@ -1762,6 +1780,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 	case team.TeammateProgressMsg:
 		// Update cached state, refresh panel if visible
 		m.teamState.RefreshTeammates()
+		m.invalidateSidebarCache()
+		m.invalidateFooterCache()
 		if m.teamState.PanelVisible {
 			m.refreshViewport()
 		}
@@ -1773,6 +1793,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.teammateTokens[msg.AgentID] = msg.TotalTokens
 		if m.teamState.ViewingAgent == msg.AgentID {
 			// If we're currently viewing this teammate, refresh the status bar
+			m.invalidateSidebarCache()
+			m.invalidateFooterCache()
 			m.refreshViewport()
 		}
 
