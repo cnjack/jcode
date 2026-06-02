@@ -760,15 +760,21 @@ func (a *acpAgent) LoadSession(ctx context.Context, params acp.LoadSessionReques
 func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
 	config.Logger().Printf("[acp] ResumeSession: session=%s", params.SessionId)
 
+	// Extract the internal session UUID from the ACP session ID.
+	resumeUUID := strings.TrimPrefix(string(params.SessionId), "sess_")
+
 	a.mu.Lock()
-	if _, ok := a.sessions[params.SessionId]; ok {
-		// Session already in memory, nothing to do.
+	if sess, ok := a.sessions[params.SessionId]; ok {
+		// Session already in memory — broadcast slash commands so the
+		// reconnecting client receives the available_commands_update.
+		s := sess
 		a.mu.Unlock()
+		a.broadcastSlashCommands(params.SessionId, s)
 		return acp.ResumeSessionResponse{Modes: acpModes(acpModeAgent)}, nil
 	}
 	a.mu.Unlock()
 
-	// Session not in memory — treat like a fresh session with the same ID.
+	// Session not in memory — reload from disk so the agent has conversation context.
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return acp.ResumeSessionResponse{}, fmt.Errorf("config error: %w", err)
@@ -781,8 +787,23 @@ func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRe
 
 	providerName, modelName := cfg.GetProviderModel()
 	rec, _ := session.NewRecorder(pwd, providerName, modelName)
+	// Reuse the original session UUID so transcript entries are written to
+	// the same session file (same pattern as LoadSession).
+	if rec != nil {
+		rec.SetUUID(resumeUUID)
+	}
 
-	sess, err := a.buildAgentSession(ctx, cfg, pwd, params.SessionId, rec, nil)
+	// Load history from disk so the agent has conversation context.
+	var history []*schema.Message
+	if entries, err := session.LoadSession(resumeUUID); err == nil {
+		resumeState := session.ReconstructState(entries)
+		history = session.PruneOldToolOutputs(resumeState.History, 2)
+		config.Logger().Printf("[acp] ResumeSession: loaded %d history messages for %s", len(history), params.SessionId)
+	} else {
+		config.Logger().Printf("[acp] ResumeSession: could not load history for %s: %v", params.SessionId, err)
+	}
+
+	sess, err := a.buildAgentSession(ctx, cfg, pwd, params.SessionId, rec, history)
 	if err != nil {
 		return acp.ResumeSessionResponse{}, err
 	}

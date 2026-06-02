@@ -464,16 +464,13 @@ func (s *Server) SubmitMessage(message, source string) bool {
 // The caller must have already set s.running to true (via CompareAndSwap).
 // Returns the session_id of the recorder used.
 func (s *Server) submitMessage(message, mode, source, sessionID string, images []chatImage) string {
-	// Apply mode prefix if plan mode requested.
+	// Slash command rewrite: if the original message starts with "/", check for
+	// skill slash commands and rewrite to load_skill instruction (same pattern as
+	// ACP/TUI). This must happen BEFORE the plan-mode prefix is applied, otherwise
+	// HasPrefix("/"…) would fail against the prefixed string.
 	agentMsg := message
-	if mode == "plan" {
-		agentMsg = "[PLAN MODE — Read-only. Analyze the codebase and create a plan. Do NOT edit, write, or delete any files.]\n\n" + agentMsg
-	}
-
-	// Slash command rewrite: if the message starts with "/", check for skill slash
-	// commands and rewrite to load_skill instruction (same pattern as ACP/TUI).
-	if strings.HasPrefix(agentMsg, "/") {
-		cmd := strings.TrimPrefix(agentMsg, "/")
+	if strings.HasPrefix(message, "/") {
+		cmd := strings.TrimPrefix(message, "/")
 		parts := strings.SplitN(cmd, " ", 2)
 		cmdName := parts[0]
 		if s.skillLoader != nil {
@@ -491,6 +488,11 @@ func (s *Server) submitMessage(message, mode, source, sessionID string, images [
 				agentMsg = sb.String()
 			}
 		}
+	}
+
+	// Apply mode prefix if plan mode requested.
+	if mode == "plan" {
+		agentMsg = "[PLAN MODE — Read-only. Analyze the codebase and create a plan. Do NOT edit, write, or delete any files.]\n\n" + agentMsg
 	}
 
 	// Emit user_message event for external sources (e.g. WeChat) so web clients see it.
@@ -1703,26 +1705,18 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
-// handleSlashCommands returns a merged list of built-in commands and skill slash
-// commands for the web frontend autocomplete menu.
+// handleSlashCommands returns skill slash commands for the web frontend
+// autocomplete menu. Built-in commands (/setting, /model, /ssh, etc.) are
+// excluded because the web UI provides dedicated controls for those features
+// and submitMessage only dispatches skill-based slash commands.
 func (s *Server) handleSlashCommands(w http.ResponseWriter, r *http.Request) {
 	type slashItem struct {
 		Slash       string `json:"slash"`
 		Description string `json:"description"`
-		Type        string `json:"type"` // "builtin" or "skill"
+		Type        string `json:"type"` // "skill"
 	}
 
-	items := []slashItem{
-		{"/setting", "Settings menu", "builtin"},
-		{"/model", "Switch model", "builtin"},
-		{"/ssh", "SSH connection", "builtin"},
-		{"/resume", "Resume a previous session", "builtin"},
-		{"/compact", "Compress conversation context", "builtin"},
-		{"/bg", "List background tasks", "builtin"},
-		{"/channel", "Manage channels (WeChat etc.)", "builtin"},
-		{"/help", "Show keyboard shortcuts", "builtin"},
-	}
-
+	var items []slashItem
 	if s.skillLoader != nil {
 		for _, sk := range s.skillLoader.SlashCommands() {
 			items = append(items, slashItem{
@@ -1731,6 +1725,10 @@ func (s *Server) handleSlashCommands(w http.ResponseWriter, r *http.Request) {
 				Type:        "skill",
 			})
 		}
+	}
+
+	if items == nil {
+		items = []slashItem{}
 	}
 
 	sort.Slice(items, func(i, j int) bool {
