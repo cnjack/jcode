@@ -30,13 +30,40 @@ func formatToolArgs(argsJSON string) string {
 // ansiRe matches ANSI escape sequences (CSI, OSC, etc.).
 var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x1b]*\x1b\\|\x1b[^\[\]]`)
 
+// Pre-compiled regexes for tool result formatting (avoid per-call Compile).
+var (
+	skillNameRe = regexp.MustCompile(`name="([^"]+)"`)
+	skillDescRe = regexp.MustCompile(`description="([^"]*)"`)
+	teamMemberRe = regexp.MustCompile(`@(\S+)\s+status=(\S+)\s+type=(\S*)`)
+	teamNameRe   = regexp.MustCompile(`^Team: (.+?) \(`)
+)
+
 // sanitize removes ANSI escape sequences and replaces control characters
 // (except newline and tab) with their Unicode Control Pictures or a placeholder.
 // This prevents special characters from corrupting the TUI layout.
 func sanitize(s string) string {
-	// Strip ANSI escape sequences
-	s = ansiRe.ReplaceAllString(s, "")
-	// Replace control characters
+	// Fast path: most LLM output doesn't contain ANSI or control chars.
+	// Check for ESC byte before running the regex.
+	hasANSI := strings.ContainsRune(s, '\x1b')
+	hasControl := false
+	if !hasANSI {
+		// Quick scan for control characters.
+		for _, r := range s {
+			if r < 0x20 && r != '\n' && r != '\t' || r == 0x7f {
+				hasControl = true
+				break
+			}
+		}
+		if !hasControl {
+			return s // clean string, return as-is
+		}
+	}
+
+	// Strip ANSI escape sequences (only if present)
+	if hasANSI {
+		s = ansiRe.ReplaceAllString(s, "")
+	}
+	// Replace control characters (only if present or if ANSI was stripped)
 	var b strings.Builder
 	b.Grow(len(s))
 	for _, r := range s {
@@ -298,8 +325,8 @@ func formatTodoWriteOutput(output string) []string {
 
 // formatLoadSkillOutput shows skill name + description, skipping the full markdown body.
 func formatLoadSkillOutput(output string) []string {
-	nameMatch := regexp.MustCompile(`name="([^"]+)"`).FindStringSubmatch(output)
-	descMatch := regexp.MustCompile(`description="([^"]*)"`).FindStringSubmatch(output)
+	nameMatch := skillNameRe.FindStringSubmatch(output)
+	descMatch := skillDescRe.FindStringSubmatch(output)
 	name := ""
 	desc := ""
 	if len(nameMatch) > 1 {
@@ -322,16 +349,14 @@ func formatLoadSkillOutput(output string) []string {
 
 // formatTeamListOutput renders team_list output as a structured member list.
 func formatTeamListOutput(output string) []string {
-	memberRe := regexp.MustCompile(`@(\S+)\s+status=(\S+)\s+type=(\S*)`)
-	teamRe := regexp.MustCompile(`^Team: (.+?) \(`)
 	var result []string
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
-		if m := teamRe.FindStringSubmatch(line); len(m) > 1 {
+		if m := teamNameRe.FindStringSubmatch(line); len(m) > 1 {
 			result = append(result, fmt.Sprintf("   %s  %s",
 				lipgloss.NewStyle().Foreground(colorDimText).Render("team"),
 				lipgloss.NewStyle().Foreground(colorText).Bold(true).Render(m[1])))
-		} else if m := memberRe.FindStringSubmatch(line); len(m) > 2 {
+		} else if m := teamMemberRe.FindStringSubmatch(line); len(m) > 2 {
 			statusColor := colorMuted
 			if m[2] == "running" || m[2] == "busy" {
 				statusColor = colorPrimary

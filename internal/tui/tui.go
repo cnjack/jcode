@@ -189,6 +189,29 @@ type Model struct {
 	// ─── Manage models state ───
 	managingModels     bool
 	manageModelsPicker list.Model
+
+	// ─── Render performance cache ───
+	contentDirty      bool   // true when lines/currentText/thinking changed since last render
+	renderedContent   string // cached output of renderContent()
+	renderedLineWidth int    // the contentWidth() used for the cached render
+
+	// sidebarCache caches the rendered sidebar string between frames.
+	sidebarCache      string
+	sidebarCacheDirty bool // true when sidebar-affecting state changed
+
+	// renderPending tracks whether a batched stream render is scheduled.
+	renderPending bool
+
+	// footerCache caches the rendered input area (mode pills + textarea + status bar).
+	// It's invalidated when textarea content, mode, bg count, or width changes.
+	footerCache    string
+	footerCacheW   int // textarea width when cache was built
+	footerCacheH   int // height in lines
+
+	// subagentBoxCache caches the rendered subagent progress box.
+	subagentBoxCache      string
+	subagentBoxCacheLen   int // len(m.subagentProgress) when cached
+	subagentBoxCacheWidth int // content width when cached
 }
 
 // --- Content line types for resize-aware rendering ---
@@ -199,6 +222,11 @@ type Model struct {
 type contentLine struct {
 	text string          // plain rendered text (default)
 	tool *toolResultData // non-nil for tool results that need dynamic rendering
+
+	// cachedRender holds the last rendered output for this line.
+	// It is invalidated when the terminal width changes (resize).
+	cachedRender string
+	cachedWidth  int
 }
 
 // toolResultData stores the raw data for a tool result, allowing
@@ -222,12 +250,22 @@ func toolResultContentLine(name, output string, err error) contentLine {
 
 // render returns the rendered string for this content line, using the
 // given width for tool result boxes. Plain text lines are returned as-is.
-func (cl contentLine) render(width int, mdRenderer *glamour.TermRenderer) string {
+// Results are cached to avoid redundant lipgloss/glamour re-computation.
+func (cl *contentLine) render(width int, mdRenderer *glamour.TermRenderer) string {
+	// Fast path: return cached result if width hasn't changed.
+	if cl.cachedRender != "" && cl.cachedWidth == width {
+		return cl.cachedRender
+	}
+	var result string
 	if cl.tool != nil {
 		lines := formatToolResultBody(cl.tool.name, cl.tool.output, cl.tool.err, width, cl.tool.expanded, mdRenderer)
-		return strings.Join(lines, "\n")
+		result = strings.Join(lines, "\n")
+	} else {
+		result = cl.text
 	}
-	return cl.text
+	cl.cachedRender = result
+	cl.cachedWidth = width
+	return result
 }
 
 // toContentLines converts a []string to []contentLine.
@@ -418,28 +456,30 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 	chl.SetShowHelp(false)
 
 	m := Model{
-		mode:           mode,
-		spinner:        s,
-		thinking:       thinking,
-		mdRenderer:     md,
-		textarea:       newTextarea(),
-		textareaLines:  1,
-		currentText:    &strings.Builder{},
-		sidebarComp:    NewSidebarComponent(),
-		dirList:        l,
-		modelPicker:    ml,
-		settingMenu:    sl,
-		sshAliasPicker: sal,
-		sessionPicker:  sesl,
-		channelMenu:    chl,
-		channelStates:  make(map[string]string),
-		pwd:            pwd,
-		history:        loadHistory(),
-		todoStore:      todoStore,
-		pasteStore:     NewPasteStore(),
-		lines:          initialLines,
-		envLabel:       "Local",
-		approvalMode:   ModeManual, // Default to manual approval mode
+		mode:              mode,
+		spinner:           s,
+		thinking:          thinking,
+		mdRenderer:        md,
+		textarea:          newTextarea(),
+		textareaLines:     1,
+		currentText:       &strings.Builder{},
+		sidebarComp:       NewSidebarComponent(),
+		dirList:           l,
+		modelPicker:       ml,
+		settingMenu:       sl,
+		sshAliasPicker:    sal,
+		sessionPicker:     sesl,
+		channelMenu:       chl,
+		channelStates:     make(map[string]string),
+		pwd:               pwd,
+		history:           loadHistory(),
+		todoStore:         todoStore,
+		pasteStore:        NewPasteStore(),
+		lines:             initialLines,
+		envLabel:          "Local",
+		approvalMode:      ModeManual, // Default to manual approval mode
+		contentDirty:      true,
+		sidebarCacheDirty: true,
 	}
 	m.historyIndex = len(m.history)
 
@@ -532,6 +572,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 	switch msg := msg.(type) {
 
 	case tea.PasteMsg:
+		m.invalidateFooterCache()
 		if m.inputActive() {
 			return m.handlePasteContent(NormalizeLineEndings(msg.Content))
 		}
@@ -579,6 +620,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		return m, tea.Batch(cmds...)
 
 	case tea.KeyPressMsg:
+		m.invalidateFooterCache() // textarea content may change
 		// Tool approval dialog handling
 		if m.approvalPending {
 			switch msg.String() {
@@ -1202,6 +1244,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				} else {
 					m.agentMode = ModeNormal
 				}
+				m.invalidateFooterCache()
 				// Notify main goroutine to rebuild agent with different prompt/tools.
 				select {
 				case planModeCh <- m.agentMode:
@@ -1218,6 +1261,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				if m.OnApprovalModeChange != nil {
 					m.OnApprovalModeChange(m.approvalMode == ModeAuto)
 				}
+				m.invalidateFooterCache()
 				m.refreshViewport()
 				return m, tea.Batch(cmds...)
 			case "ctrl+l":
@@ -1375,6 +1419,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 						// prompt already contains compact references from paste-time
 						m.lines = append(m.lines, textLine(userPromptStyle.Render("> "+prompt+" (queued)")))
 						if m.ready {
+							m.contentDirty = true
 							m.viewport.SetHeight(m.calcViewportHeight(true))
 							m.viewport.SetContent(m.renderContent())
 							m.viewport.GotoBottom()
@@ -1397,6 +1442,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.lines = append(m.lines, textLine(""))
 					m.lines = append(m.lines, textLine(userPromptStyle.Render(modePrefix+" "+prompt)))
 					if m.ready {
+						m.contentDirty = true
 						m.viewport.SetHeight(m.calcViewportHeight(false))
 						m.viewport.SetContent(m.renderContent())
 						m.viewport.GotoBottom()
@@ -1627,6 +1673,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.sshAliasPicker.SetSize(msg.Width, vpH)
 		m.sessionPicker.SetSize(msg.Width, vpH)
 		m.recreateMDRenderer()
+		m.contentDirty = true
+		m.invalidateSidebarCache()
+		m.invalidateFooterCache()
+		// Invalidate per-line render caches since width changed.
+		// The cachedWidth check in contentLine.render() handles this naturally,
+		// but we reset renderedLineWidth so renderContent() takes the slow path.
+		m.renderedLineWidth = 0
 		m.viewport.SetContent(m.renderContent())
 
 	case spinner.TickMsg:
@@ -1652,6 +1705,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 	case ConfigUpdatedMsg:
 		m.activeProvider = msg.Provider
 		m.activeModel = msg.Model
+		m.invalidateSidebarCache()
+		m.invalidateFooterCache()
 		if msg.Message != "" {
 			m.lines = append(m.lines, textLine(msg.Message))
 			m.refreshViewport()
@@ -1659,6 +1714,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 	case MCPStatusMsg:
 		m.mcpStatuses = msg.Statuses
+		m.invalidateSidebarCache()
 		m.refreshViewport()
 
 	case ChannelStateMsg:
@@ -1742,6 +1798,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				m.lines = append(m.lines, textLine(""))
 				m.lines = append(m.lines, textLine(userPromptStyle.Render(modePrefix+" "+prompt)))
 				if m.ready {
+					m.contentDirty = true
 					m.viewport.SetHeight(m.calcViewportHeight(false))
 					m.viewport.SetContent(m.renderContent())
 					m.viewport.GotoBottom()
@@ -1765,6 +1822,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		}
 
 	case TodoUpdateMsg:
+		m.invalidateSidebarCache()
 		m.refreshViewport()
 
 	case AddModelMsg:
@@ -1908,6 +1966,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			m.lines = append(m.lines, textLine(""))
 		}
 		if m.ready {
+			m.contentDirty = true
 			m.viewport.SetHeight(m.calcViewportHeight(true))
 			m.viewport.SetContent(m.renderContent())
 			m.viewport.GotoBottom()
@@ -1977,6 +2036,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.agentDone = true
 		m.textarea.Focus()
 		if m.ready {
+			m.contentDirty = true
 			m.viewport.SetHeight(m.calcViewportHeight(true))
 			m.viewport.SetContent(m.renderContent())
 			m.viewport.GotoBottom()
@@ -1990,6 +2050,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 	case AgentTextMsg:
 		m.currentText.WriteString(sanitize(msg.Text))
+		m.contentDirty = true
+		// Debounce: schedule a batch render instead of rendering every token.
+		if !m.renderPending {
+			m.renderPending = true
+			cmds = append(cmds, tea.Tick(33*time.Millisecond, func(_ time.Time) tea.Msg {
+				return BatchRenderMsg{}
+			}))
+		}
+
+	case BatchRenderMsg:
+		m.renderPending = false
 		m.refreshViewport()
 
 	case ToolCallMsg:
@@ -2036,9 +2107,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 	case TokenUpdateMsg:
 		m.totalTokens = msg.TotalTokens
 		m.modelContextLimit = msg.ModelContextLimit
+		m.invalidateSidebarCache()
 
 	case AgentDoneMsg:
 		m.thinking = false
+		m.renderPending = false // cancel any pending batch render
 		m.flushText()
 		if msg.Err != nil {
 			if msg.Err.Error() == "context canceled" {
@@ -2076,6 +2149,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.agentDone = true
 		m.textarea.Focus()
 		if m.ready {
+			m.contentDirty = true
 			m.viewport.SetHeight(m.calcViewportHeight(true))
 			m.viewport.SetContent(m.renderContent())
 			m.viewport.GotoBottom()
@@ -2137,6 +2211,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 	case SubagentTokenUpdateMsg:
 		m.subagentTokens = msg.TotalTokens
+		m.invalidateSidebarCache()
 		m.refreshViewport()
 
 	case SubagentDoneMsg:
@@ -2173,6 +2248,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.refreshViewport()
 
 	case BgTaskDoneMsg:
+		m.invalidateFooterCache() // bgRunning count changes
+		m.invalidateSidebarCache() // sidebar shows bg count
 		if msg.Status == "running" {
 			m.bgRunning++
 		} else {
@@ -2317,6 +2394,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 	case PlanApprovalMsg:
 		m.planReviewActive = true
+		m.invalidateFooterCache()
 		m.planReviewTitle = msg.PlanPath
 		m.planRejectInput = false
 		m.planReviewSelected = 0
@@ -2325,6 +2403,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 	case AskUserQuestionMsg:
 		m.askUserActive = true
+		m.invalidateFooterCache()
 		m.askUserQuestion = msg.Question
 		m.askUserOptions = msg.Options
 		m.askUserSelected = 0
@@ -2475,9 +2554,33 @@ func (m Model) recalcTextareaLines() int {
 	return recalcLines(m.textarea.Value(), calcMaxTextareaLines(m.height), m.textarea.Width())
 }
 
-func (m Model) inputAreaHeight() int {
-	// Dynamically compute by rendering the actual footer
-	return lipgloss.Height(m.inputAreaView())
+// inputAreaHeight returns the cached height of the footer, computing it
+// only when the cache is empty or the textarea width changed.
+func (m *Model) inputAreaHeight() int {
+	if m.footerCache != "" && m.footerCacheW == m.textarea.Width() {
+		return m.footerCacheH
+	}
+	h := lipgloss.Height(m.inputAreaView())
+	m.footerCacheH = h
+	return h
+}
+
+// cachedInputAreaView returns the cached footer, rebuilding only when dirty.
+func (m *Model) cachedInputAreaView() string {
+	taW := m.textarea.Width()
+	if m.footerCache != "" && m.footerCacheW == taW {
+		return m.footerCache
+	}
+	v := m.inputAreaView()
+	m.footerCache = v
+	m.footerCacheW = taW
+	m.footerCacheH = lipgloss.Height(v)
+	return v
+}
+
+// invalidateFooterCache marks the footer cache as needing rebuild.
+func (m *Model) invalidateFooterCache() {
+	m.footerCache = ""
 }
 
 func (m Model) calcViewportHeight(_ ...bool) int {
@@ -2494,6 +2597,8 @@ func (m Model) calcViewportHeight(_ ...bool) int {
 }
 
 // teamPanelHeight calculates the rendered height of the team coordinator panel.
+// It reuses the panel string rendered in View() via the teamPanel variable
+// passed from the caller context. This avoids rendering the panel twice.
 func (m Model) teamPanelHeight() int {
 	if !m.teamState.HasTeam() || !m.teamState.PanelVisible {
 		return 0
@@ -2562,8 +2667,8 @@ func (m Model) View() tea.View {
 	showSidebar := m.width >= minWidthForSidebar
 
 	// ─── Footer (input area) — always full width ───
-	footer := m.inputAreaView()
-	footerHeight := lipgloss.Height(footer)
+	footer := m.cachedInputAreaView()
+	footerHeight := m.footerCacheH
 
 	// ─── Team coordinator panel ───
 	teamPanel := ""
@@ -2585,7 +2690,14 @@ func (m Model) View() tea.View {
 		vpH = 3
 	}
 	if m.ready {
-		m.viewport.SetContent(strings.TrimRight(m.renderContent(), "\n"))
+		// Only re-render content when something changed. Spinner ticks during
+		// idle (non-thinking) periods won't trigger a full re-render.
+		// During streaming, the contentDirty flag is set by BatchRenderMsg.
+		// During thinking, the status line changes every tick, so we always
+		// render — but the cached lines make this cheap.
+		if m.contentDirty || (m.thinking && !m.agentDone) || m.currentText.Len() > 0 {
+			m.viewport.SetContent(strings.TrimRight(m.renderContent(), "\n"))
+		}
 	}
 
 	vpView := m.viewport.View()
@@ -2595,7 +2707,7 @@ func (m Model) View() tea.View {
 		// Manual line-by-line join: viewport | divider | sidebar
 		// This avoids JoinHorizontal's reliance on width calculation which
 		// can misalign the │ when ANSI sequences or wide chars are present.
-		sidebar := m.renderSidebar(vpH)
+		sidebar := m.renderSidebarCached(vpH)
 		contentRow := joinColumnsWithDivider(vpView, sidebar, mainWidth, vpH)
 		parts := []string{contentRow}
 		if teamPanel != "" {
@@ -2617,14 +2729,21 @@ func (m Model) View() tea.View {
 }
 
 // joinColumnsWithDivider manually joins the viewport and sidebar line-by-line
-// with a "│ " divider. Each viewport line is padded with spaces to vpWidth
-// using ansi.StringWidth (GraphemeWidth method), matching BubbleTea's internal
+// with a "│ " divider. Each viewport line is padded to vpWidth using
+// ansi.StringWidth (GraphemeWidth method), matching BubbleTea's internal
 // cell buffer width calculation when Unicode Core mode is enabled.
 func joinColumnsWithDivider(vpView, sidebar string, vpWidth, height int) string {
 	vpLines := strings.Split(vpView, "\n")
 	sbLines := strings.Split(sidebar, "\n")
 
+	// Pre-allocate: estimate each line is vpWidth + divider + sidebarWidth.
+	estimatedCap := height * (vpWidth + 2 + sidebarWidth + 1)
 	var buf strings.Builder
+	buf.Grow(estimatedCap)
+
+	// Pre-build a padding string for slice-based padding (faster than loop).
+	spaces := strings.Repeat(" ", vpWidth+2)
+
 	for i := 0; i < height; i++ {
 		var vl, sl string
 		if i < len(vpLines) {
@@ -2634,15 +2753,9 @@ func joinColumnsWithDivider(vpView, sidebar string, vpWidth, height int) string 
 			sl = sbLines[i]
 		}
 
-		// Pad viewport line to fixed width using the same GraphemeWidth
-		// method that BubbleTea's renderer uses when Unicode Core mode
-		// 2027 is enabled. ansi.StringWidth handles ANSI stripping internally.
-		visW := ansi.StringWidth(vl)
 		buf.WriteString(vl)
-		if pad := vpWidth - visW; pad > 0 {
-			for j := 0; j < pad; j++ {
-				buf.WriteByte(' ')
-			}
+		if pad := vpWidth - ansi.StringWidth(vl); pad > 0 {
+			buf.WriteString(spaces[:pad])
 		}
 		buf.WriteString("│ ")
 		buf.WriteString(sl)
@@ -2685,13 +2798,30 @@ func (m Model) renderSidebar(height int) string {
 	})
 }
 
+// renderSidebarCached returns the cached sidebar or rebuilds it when dirty.
+func (m *Model) renderSidebarCached(height int) string {
+	if !m.sidebarCacheDirty && m.sidebarCache != "" {
+		return m.sidebarCache
+	}
+	m.sidebarCache = m.renderSidebar(height)
+	m.sidebarCacheDirty = false
+	return m.sidebarCache
+}
+
 // refreshViewport recalculates viewport height, updates content and scrolls to bottom.
 func (m *Model) refreshViewport() {
 	if m.ready {
+		m.contentDirty = true
 		m.viewport.SetHeight(m.calcViewportHeight())
 		m.viewport.SetContent(m.renderContent())
 		m.viewport.GotoBottom()
 	}
+}
+
+// invalidateSidebarCache marks the sidebar cache as needing rebuild.
+// Call this when sidebar-affecting state changes (tokens, model, todos, etc).
+func (m *Model) invalidateSidebarCache() {
+	m.sidebarCacheDirty = true
 }
 
 // showApproval activates the approval dialog for a single request.
@@ -2810,6 +2940,7 @@ func (m *Model) toggleSubagentExpand() {
 	for i := startIdx; i < len(m.lines); i++ {
 		if m.lines[i].tool != nil && m.lines[i].tool.name == "subagent" {
 			m.lines[i].tool.expanded = !m.lines[i].tool.expanded
+			m.lines[i].cachedRender = "" // invalidate cache for this line
 			m.refreshViewport()
 			return
 		}
@@ -2819,6 +2950,7 @@ func (m *Model) toggleSubagentExpand() {
 	for i := 0; i < startIdx; i++ {
 		if m.lines[i].tool != nil && m.lines[i].tool.name == "subagent" {
 			m.lines[i].tool.expanded = !m.lines[i].tool.expanded
+			m.lines[i].cachedRender = "" // invalidate cache for this line
 			m.refreshViewport()
 			return
 		}
@@ -2855,6 +2987,7 @@ func (m *Model) flushText() {
 	}
 	m.lines = append(m.lines, textLine(""))
 	m.lines = append(m.lines, textLine(rendered))
+	m.contentDirty = true
 }
 
 // recreateMDRenderer rebuilds the glamour markdown renderer with the current
@@ -2883,49 +3016,86 @@ func (m *Model) contentWidth() int {
 
 func (m *Model) renderContent() string {
 	width := m.contentWidth()
+
+	// Fast path: if content hasn't changed and width is the same, return
+	// the cached base content with live parts appended.
+	// We use string concatenation to avoid copying renderedContent into
+	// a strings.Builder (which would duplicate the full history every frame).
+	if !m.contentDirty && m.renderedLineWidth == width {
+		result := m.renderedContent
+		// Append live streaming text (changes on every AgentTextMsg).
+		if m.currentText.Len() > 0 {
+			result += "\n" + m.currentText.String() + "\n"
+		}
+		// Append thinking status line (changes on every spinner tick).
+		if m.thinking && !m.agentDone {
+			var sb strings.Builder
+			m.appendStatusLine(&sb)
+			result += sb.String()
+		}
+		return result
+	}
+
+	// Slow path: re-render lines that need it.
+	// We rebuild the cached base content from scratch and cache it.
 	var sb strings.Builder
-	for _, line := range m.lines {
-		sb.WriteString(line.render(width, m.mdRenderer))
+	for i := range m.lines {
+		sb.WriteString(m.lines[i].render(width, m.mdRenderer))
 		sb.WriteString("\n")
 	}
+	m.renderedContent = sb.String()
+	m.renderedLineWidth = width
+
+	// Append live parts.
 	if m.currentText.Len() > 0 {
 		sb.WriteString("\n")
 		sb.WriteString(m.currentText.String())
 		sb.WriteString("\n")
 	}
 	if m.thinking && !m.agentDone {
-		var statusLine string
-		switch {
-		case m.subagentActive && len(m.subagentProgress) > 0:
-			sb.WriteString(m.renderSubagentBox())
-			sb.WriteString("\n")
-			tokenStr := ""
-			if m.subagentTokens > 0 {
-				if m.modelContextLimit > 0 {
-					pct := float64(m.subagentTokens) / float64(m.modelContextLimit) * 100
-					tokenStr = fmt.Sprintf(" %d tok / %.0f%%", m.subagentTokens, pct)
-				} else {
-					tokenStr = fmt.Sprintf(" %d tok", m.subagentTokens)
-				}
-			}
-			statusLine = fmt.Sprintf("  %s %s%s",
-				m.spinner.View(),
-				subagentLabelStyle.Render(fmt.Sprintf("Subagent [%d steps]...", m.subagentStepCount)),
-				toolArgsStyle.Render(tokenStr),
-			)
-		case m.pendingTool != "":
-			statusLine = fmt.Sprintf("  %s Running %s...", m.spinner.View(), toolNameStyle.Render(m.pendingTool))
-		default:
-			statusLine = fmt.Sprintf("  %s Thinking...", m.spinner.View())
-		}
-		sb.WriteString(statusLine)
-		sb.WriteString("\n")
+		m.appendStatusLine(&sb)
 	}
+
+	m.contentDirty = false
 	return sb.String()
 }
 
+// appendStatusLine writes the spinner / thinking status line into sb.
+func (m *Model) appendStatusLine(sb *strings.Builder) {
+	switch {
+	case m.subagentActive && len(m.subagentProgress) > 0:
+		sb.WriteString(m.renderSubagentBox())
+		sb.WriteString("\n")
+		tokenStr := ""
+		if m.subagentTokens > 0 {
+			if m.modelContextLimit > 0 {
+				pct := float64(m.subagentTokens) / float64(m.modelContextLimit) * 100
+				tokenStr = fmt.Sprintf(" %d tok / %.0f%%", m.subagentTokens, pct)
+			} else {
+				tokenStr = fmt.Sprintf(" %d tok", m.subagentTokens)
+			}
+		}
+		sb.WriteString(fmt.Sprintf("  %s %s%s",
+			m.spinner.View(),
+			subagentLabelStyle.Render(fmt.Sprintf("Subagent [%d steps]...", m.subagentStepCount)),
+			toolArgsStyle.Render(tokenStr),
+		))
+	case m.pendingTool != "":
+		sb.WriteString(fmt.Sprintf("  %s Running %s...", m.spinner.View(), toolNameStyle.Render(m.pendingTool)))
+	default:
+		sb.WriteString(fmt.Sprintf("  %s Thinking...", m.spinner.View()))
+	}
+	sb.WriteString("\n")
+}
+
 // renderSubagentBox returns a bordered box showing live subagent tool calls.
+// Results are cached until subagentProgress changes or width changes.
 func (m *Model) renderSubagentBox() string {
+	width := m.contentWidth()
+	if m.subagentBoxCache != "" && m.subagentBoxCacheLen == len(m.subagentProgress) && m.subagentBoxCacheWidth == width {
+		return m.subagentBoxCache
+	}
+
 	const maxVisible = 8
 	lines := m.subagentProgress
 	hidden := 0
@@ -2947,12 +3117,15 @@ func (m *Model) renderSubagentBox() string {
 		}
 	}
 
-	boxWidth := m.contentWidth() - 8
+	boxWidth := width - 8
 	if boxWidth < 30 {
 		boxWidth = 30
 	}
 
 	box := subagentBoxStyle.Width(boxWidth).Render(content.String())
+	m.subagentBoxCache = box
+	m.subagentBoxCacheLen = len(m.subagentProgress)
+	m.subagentBoxCacheWidth = width
 	return box
 }
 
