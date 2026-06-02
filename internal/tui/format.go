@@ -32,8 +32,8 @@ var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x1b]*\x1b\\|\x1b
 
 // Pre-compiled regexes for tool result formatting (avoid per-call Compile).
 var (
-	skillNameRe = regexp.MustCompile(`name="([^"]+)"`)
-	skillDescRe = regexp.MustCompile(`description="([^"]*)"`)
+	skillNameRe  = regexp.MustCompile(`name="([^"]+)"`)
+	skillDescRe  = regexp.MustCompile(`description="([^"]*)"`)
 	teamMemberRe = regexp.MustCompile(`@(\S+)\s+status=(\S+)\s+type=(\S*)`)
 	teamNameRe   = regexp.MustCompile(`^Team: (.+?) \(`)
 )
