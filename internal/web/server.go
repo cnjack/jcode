@@ -480,7 +480,7 @@ func (s *Server) submitMessage(message, mode, source, sessionID string, images [
 					userInput = parts[1]
 				}
 				var sb strings.Builder
-				sb.WriteString(fmt.Sprintf("Use the load_skill tool with name=%q and follow its instructions.", sk.Name))
+				fmt.Fprintf(&sb, "Use the load_skill tool with name=%q and follow its instructions.", sk.Name)
 				if userInput != "" {
 					sb.WriteString("\n\nAdditional context: ")
 					sb.WriteString(userInput)

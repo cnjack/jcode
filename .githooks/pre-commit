@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+#
+# Pre-commit hook: runs make fmt and make lint before allowing a commit.
+# Installed via: git config core.hooksPath .githooks
+#
+
+set -euo pipefail
+
+echo "==> Running make fmt..."
+make fmt
+
+echo "==> Running make lint..."
+make lint
+
+echo "==> All checks passed."

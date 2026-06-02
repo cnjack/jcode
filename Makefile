@@ -13,7 +13,7 @@ LDFLAGS := -s -w \
 
 export GOFLAGS := -buildvcs=false
 
-.PHONY: build build-binary run doctor version install clean build-web fmt lint lint-go lint-web generate
+.PHONY: build build-binary run doctor version install clean build-web fmt lint lint-go lint-web generate setup-hooks
 
 fmt:
 	@echo "Formatting Go..."
@@ -60,3 +60,7 @@ version:
 clean:
 	rm -f $(BIN)
 	rm -rf internal/web/dist
+
+setup-hooks:
+	@git config core.hooksPath .githooks
+	@echo "Git hooks installed (core.hooksPath = .githooks)"

@@ -205,9 +205,9 @@ type Model struct {
 
 	// footerCache caches the rendered input area (mode pills + textarea + status bar).
 	// It's invalidated when textarea content, mode, bg count, or width changes.
-	footerCache    string
-	footerCacheW   int // textarea width when cache was built
-	footerCacheH   int // height in lines
+	footerCache  string
+	footerCacheW int // textarea width when cache was built
+	footerCacheH int // height in lines
 
 	// subagentBoxCache caches the rendered subagent progress box.
 	subagentBoxCache      string
@@ -2250,7 +2250,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.refreshViewport()
 
 	case BgTaskDoneMsg:
-		m.invalidateFooterCache() // bgRunning count changes
+		m.invalidateFooterCache()  // bgRunning count changes
 		m.invalidateSidebarCache() // sidebar shows bg count
 		if msg.Status == "running" {
 			m.bgRunning++
@@ -3078,15 +3078,15 @@ func (m *Model) appendStatusLine(sb *strings.Builder) {
 				tokenStr = fmt.Sprintf(" %d tok", m.subagentTokens)
 			}
 		}
-		sb.WriteString(fmt.Sprintf("  %s %s%s",
+		fmt.Fprintf(sb, "  %s %s%s",
 			m.spinner.View(),
 			subagentLabelStyle.Render(fmt.Sprintf("Subagent [%d steps]...", m.subagentStepCount)),
 			toolArgsStyle.Render(tokenStr),
-		))
+		)
 	case m.pendingTool != "":
-		sb.WriteString(fmt.Sprintf("  %s Running %s...", m.spinner.View(), toolNameStyle.Render(m.pendingTool)))
+		fmt.Fprintf(sb, "  %s Running %s...", m.spinner.View(), toolNameStyle.Render(m.pendingTool))
 	default:
-		sb.WriteString(fmt.Sprintf("  %s Thinking...", m.spinner.View()))
+		fmt.Fprintf(sb, "  %s Thinking...", m.spinner.View())
 	}
 	sb.WriteString("\n")
 }
