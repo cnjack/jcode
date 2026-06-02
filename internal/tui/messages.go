@@ -72,6 +72,10 @@ type AgentDoneMsg struct{ Err error }
 type PromptSubmitMsg struct{ Prompt string }
 type UserPromptMsg struct{ Prompt string }
 
+// BatchRenderMsg is sent by the stream debounce timer to batch-flush
+// accumulated AgentTextMsg content into a single viewport refresh.
+type BatchRenderMsg struct{}
+
 // TodoUpdateMsg signals that the todo store has been updated.
 type TodoUpdateMsg struct{}
 

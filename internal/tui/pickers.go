@@ -12,7 +12,7 @@ import (
 	"github.com/cnjack/jcode/internal/session"
 )
 
-func (m Model) handleModelInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+func (m *Model) handleModelInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		m.lines = append(m.lines, textLine(toolErrorStyle.Render("✗ Failed to load config: "+err.Error())))
@@ -227,7 +227,7 @@ func (m Model) handleModelInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 // handleResumeInput parses the /resume command.
 // /resume           — shows session picker for current project
 // /resume <UUID>    — resumes specific session directly
-func (m Model) handleResumeInput(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+func (m *Model) handleResumeInput(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	arg := strings.TrimSpace(strings.TrimPrefix(input, "/resume"))
 
 	if arg != "" {

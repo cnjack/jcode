@@ -11,7 +11,7 @@ import (
 
 // handleSSHInput parses the /ssh command and begins the guided flow.
 // Formats: /ssh | /ssh user@host | /ssh user@host:/path
-func (m Model) handleSSHInput(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+func (m *Model) handleSSHInput(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	arg := strings.TrimSpace(strings.TrimPrefix(input, "/ssh"))
 
 	// /ssh with no args → show saved aliases or new connection option
@@ -64,7 +64,7 @@ func (m Model) handleSSHInput(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd)
 }
 
 // handleSSHSaveAlias handles the user's response to the alias save prompt.
-func (m Model) handleSSHSaveAlias(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+func (m *Model) handleSSHSaveAlias(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	m.sshSavePrompt = false
 	m.textarea.Placeholder = "Type your prompt here..."
 
@@ -120,7 +120,7 @@ func (m Model) handleSSHSaveAlias(input string, cmds []tea.Cmd) (tea.Model, tea.
 }
 
 // handleSSHStep handles input during the SSH setup wizard.
-func (m Model) handleSSHStep(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+func (m *Model) handleSSHStep(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	if m.sshStep == 1 {
 		addr := input
 		// Check for addr:/path format
@@ -143,7 +143,7 @@ func (m Model) handleSSHStep(input string, cmds []tea.Cmd) (tea.Model, tea.Cmd) 
 }
 
 // startSSHConnect sends the connect message and updates the UI.
-func (m Model) startSSHConnect(addr, path string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+func (m *Model) startSSHConnect(addr, path string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	m.sshStep = 0
 	m.sshAddr = addr
 	m.mode = ModeAgent
