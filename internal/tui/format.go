@@ -47,9 +47,9 @@ func sanitize(s string) string {
 	hasANSI := strings.ContainsRune(s, '\x1b')
 	hasControl := false
 	if !hasANSI {
-		// Quick scan for control characters.
+		// Quick scan for control characters and Private Use Area runes.
 		for _, r := range s {
-			if r < 0x20 && r != '\n' && r != '\t' || r == 0x7f {
+			if r < 0x20 && r != '\n' && r != '\t' || r == 0x7f || unicode.Is(unicode.Co, r) {
 				hasControl = true
 				break
 			}
