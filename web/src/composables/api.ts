@@ -1,5 +1,5 @@
 // API client for jcode backend
-import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, MCPListResponse, BrowseResponse, SSHListResponse, SkillInfo, TodoItem, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ModelStateResponse, ChatImage } from '@/types/api'
+import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, MCPListResponse, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ModelStateResponse, ChatImage } from '@/types/api'
 
 const BASE = ''
 
@@ -123,6 +123,8 @@ export const api = {
     request<SSHListResponse>('/api/ssh'),
   skillsList: () =>
     request<SkillInfo[]>('/api/skills'),
+  slashCommands: () =>
+    request<SlashCommandInfo[]>('/api/slash-commands'),
   channelStatus: () =>
     request<{ available: boolean; channel?: string; state?: string }>('/api/channel'),
   channelLogin: () =>

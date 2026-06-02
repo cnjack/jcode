@@ -2,7 +2,7 @@
 import { ref, nextTick, watch, computed, onMounted, onUnmounted } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { api } from '@/composables/api'
-import type { SkillInfo, ChatImage } from '@/types/api'
+import type { SlashCommandInfo, ChatImage } from '@/types/api'
 
 const store = useChatStore()
 const input = ref('')
@@ -13,7 +13,7 @@ const showManageModels = ref(false)
 const modelFilter = ref('')
 const containerRef = ref<HTMLDivElement | null>(null)
 
-const skills = ref<SkillInfo[]>([])
+const slashCommands = ref<SlashCommandInfo[]>([])
 const showSlashMenu = ref(false)
 const slashFilter = ref('')
 const selectedSlashIdx = ref(0)
@@ -30,8 +30,8 @@ const modes = [
 
 const filteredSlashCommands = computed(() => {
   const filter = slashFilter.value.toLowerCase()
-  return skills.value.filter(
-    (s) => s.slash && s.slash.toLowerCase().includes(filter),
+  return slashCommands.value.filter(
+    (s) => s.slash.toLowerCase().startsWith('/' + filter),
   )
 })
 
@@ -155,8 +155,8 @@ function handleInput() {
   }
 }
 
-function applySlashCommand(skill: SkillInfo) {
-  input.value = skill.slash + ' '
+function applySlashCommand(cmd: SlashCommandInfo) {
+  input.value = cmd.slash + ' '
   showSlashMenu.value = false
   nextTick(() => textarea.value?.focus())
 }
@@ -253,7 +253,7 @@ onMounted(async () => {
   document.addEventListener('click', handleClickOutside)
   document.addEventListener('keydown', handleGlobalKey)
   try {
-    skills.value = await api.skillsList()
+    slashCommands.value = await api.slashCommands()
   } catch { /* ignore */ }
 })
 
@@ -277,7 +277,7 @@ watch(() => store.isRunning, (running) => {
       >
           <button
             v-for="(cmd, i) in filteredSlashCommands"
-            :key="cmd.name"
+            :key="cmd.slash"
             class="slash-item"
             :class="{ active: i === selectedSlashIdx }"
             @click="applySlashCommand(cmd)"

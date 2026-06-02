@@ -160,6 +160,13 @@ export interface SkillInfo {
   slash?: string
 }
 
+// Slash command types (unified built-in + skill)
+export interface SlashCommandInfo {
+  slash: string
+  description: string
+  type: 'builtin' | 'skill'
+}
+
 // SSE event data types
 export interface AgentTextData {
   text: string
