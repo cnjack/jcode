@@ -227,6 +227,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/mcp/{name}/toggle", s.handleToggleMCP)
 	mux.HandleFunc("GET /api/ssh", s.handleListSSH)
 	mux.HandleFunc("GET /api/skills", s.handleListSkills)
+	mux.HandleFunc("GET /api/slash-commands", s.handleSlashCommands)
 	mux.HandleFunc("GET /api/browse", s.handleBrowse)
 	mux.HandleFunc("POST /api/project/switch", s.handleSwitchProject)
 	mux.HandleFunc("POST /api/pty", s.handleCreatePTY)
@@ -467,6 +468,29 @@ func (s *Server) submitMessage(message, mode, source, sessionID string, images [
 	agentMsg := message
 	if mode == "plan" {
 		agentMsg = "[PLAN MODE — Read-only. Analyze the codebase and create a plan. Do NOT edit, write, or delete any files.]\n\n" + agentMsg
+	}
+
+	// Slash command rewrite: if the message starts with "/", check for skill slash
+	// commands and rewrite to load_skill instruction (same pattern as ACP/TUI).
+	if strings.HasPrefix(agentMsg, "/") {
+		cmd := strings.TrimPrefix(agentMsg, "/")
+		parts := strings.SplitN(cmd, " ", 2)
+		cmdName := parts[0]
+		if s.skillLoader != nil {
+			if sk := s.skillLoader.GetBySlash("/" + cmdName); sk != nil {
+				userInput := ""
+				if len(parts) > 1 {
+					userInput = parts[1]
+				}
+				var sb strings.Builder
+				sb.WriteString(fmt.Sprintf("Use the load_skill tool with name=%q and follow its instructions.", sk.Name))
+				if userInput != "" {
+					sb.WriteString("\n\nAdditional context: ")
+					sb.WriteString(userInput)
+				}
+				agentMsg = sb.String()
+			}
+		}
 	}
 
 	// Emit user_message event for external sources (e.g. WeChat) so web clients see it.
@@ -1660,12 +1684,12 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 	type skillItem struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
-		Slash       string `json:"slash,omitempty"`
+		Slash       string `json:"slash"`
 	}
 
 	var items []skillItem
 	if s.skillLoader != nil {
-		for _, sk := range s.skillLoader.All() {
+		for _, sk := range s.skillLoader.SlashCommands() {
 			items = append(items, skillItem{
 				Name:        sk.Name,
 				Description: sk.Description,
@@ -1676,6 +1700,43 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 	if items == nil {
 		items = []skillItem{}
 	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+// handleSlashCommands returns a merged list of built-in commands and skill slash
+// commands for the web frontend autocomplete menu.
+func (s *Server) handleSlashCommands(w http.ResponseWriter, r *http.Request) {
+	type slashItem struct {
+		Slash       string `json:"slash"`
+		Description string `json:"description"`
+		Type        string `json:"type"` // "builtin" or "skill"
+	}
+
+	items := []slashItem{
+		{"/setting", "Settings menu", "builtin"},
+		{"/model", "Switch model", "builtin"},
+		{"/ssh", "SSH connection", "builtin"},
+		{"/resume", "Resume a previous session", "builtin"},
+		{"/compact", "Compress conversation context", "builtin"},
+		{"/bg", "List background tasks", "builtin"},
+		{"/channel", "Manage channels (WeChat etc.)", "builtin"},
+		{"/help", "Show keyboard shortcuts", "builtin"},
+	}
+
+	if s.skillLoader != nil {
+		for _, sk := range s.skillLoader.SlashCommands() {
+			items = append(items, slashItem{
+				Slash:       sk.Slash,
+				Description: sk.Description,
+				Type:        "skill",
+			})
+		}
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Slash < items[j].Slash
+	})
+
 	writeJSON(w, http.StatusOK, items)
 }
 

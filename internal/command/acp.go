@@ -205,8 +205,9 @@ func (a *acpAgent) Initialize(_ context.Context, params acp.InitializeRequest) (
 			},
 			LoadSession: true,
 			SessionCapabilities: acp.SessionCapabilities{
-				List:  &acp.SessionListCapabilities{},
-				Close: &acp.SessionCloseCapabilities{},
+				List:   &acp.SessionListCapabilities{},
+				Close:  &acp.SessionCloseCapabilities{},
+				Resume: &acp.SessionResumeCapabilities{},
 			},
 		},
 		AgentInfo: &acp.Implementation{
@@ -677,9 +678,9 @@ func (a *acpAgent) SetSessionConfigOption(_ context.Context, params acp.SetSessi
 	return acp.SetSessionConfigOptionResponse{}, nil
 }
 
-// UnstableCloseSession implements the experimental session/close method.
+// CloseSession implements the session/close method.
 // It cancels any ongoing work and releases session resources.
-func (a *acpAgent) UnstableCloseSession(_ context.Context, params acp.UnstableCloseSessionRequest) (acp.UnstableCloseSessionResponse, error) {
+func (a *acpAgent) CloseSession(_ context.Context, params acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
 	config.Logger().Printf("[acp] CloseSession: session=%s", params.SessionId)
 
 	a.mu.Lock()
@@ -699,7 +700,7 @@ func (a *acpAgent) UnstableCloseSession(_ context.Context, params acp.UnstableCl
 		sess.Close()
 	}
 
-	return acp.UnstableCloseSessionResponse{}, nil
+	return acp.CloseSessionResponse{}, nil
 }
 
 func (a *acpAgent) LoadSession(ctx context.Context, params acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
@@ -752,4 +753,53 @@ func (a *acpAgent) LoadSession(ctx context.Context, params acp.LoadSessionReques
 	a.broadcastSlashCommands(params.SessionId, sess)
 
 	return acp.LoadSessionResponse{}, nil
+}
+
+// ResumeSession implements the session/resume method.
+// It resumes an existing session without returning previous messages.
+func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
+	config.Logger().Printf("[acp] ResumeSession: session=%s", params.SessionId)
+
+	a.mu.Lock()
+	if _, ok := a.sessions[params.SessionId]; ok {
+		// Session already in memory, nothing to do.
+		a.mu.Unlock()
+		return acp.ResumeSessionResponse{Modes: acpModes(acpModeAgent)}, nil
+	}
+	a.mu.Unlock()
+
+	// Session not in memory — treat like a fresh session with the same ID.
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return acp.ResumeSessionResponse{}, fmt.Errorf("config error: %w", err)
+	}
+
+	pwd := params.Cwd
+	if pwd == "" {
+		pwd = util.GetWorkDir()
+	}
+
+	providerName, modelName := cfg.GetProviderModel()
+	rec, _ := session.NewRecorder(pwd, providerName, modelName)
+
+	sess, err := a.buildAgentSession(ctx, cfg, pwd, params.SessionId, rec, nil)
+	if err != nil {
+		return acp.ResumeSessionResponse{}, err
+	}
+
+	a.mu.Lock()
+	a.sessions[params.SessionId] = sess
+	a.mu.Unlock()
+
+	config.Logger().Printf("[acp] Session resumed: %s", params.SessionId)
+	a.broadcastSlashCommands(params.SessionId, sess)
+
+	return acp.ResumeSessionResponse{Modes: acpModes(acpModeAgent)}, nil
+}
+
+// Logout implements the logout method.
+// Terminates the current authenticated session (no-op for jcode, which doesn't require auth).
+func (a *acpAgent) Logout(_ context.Context, _ acp.LogoutRequest) (acp.LogoutResponse, error) {
+	config.Logger().Printf("[acp] Logout")
+	return acp.LogoutResponse{}, nil
 }
