@@ -148,11 +148,16 @@ func (l *Loader) Get(name string) *Skill {
 }
 
 // GetBySlash returns a skill by its slash command, or nil if not found.
+// Matches both explicit slash fields and auto-generated "/<name>" triggers.
 func (l *Loader) GetBySlash(slash string) *Skill {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	for _, sk := range l.skills {
 		if sk.Slash != "" && sk.Slash == slash {
+			return sk
+		}
+		// Auto-generated slash: /name match.
+		if sk.Slash == "" && "/"+sk.Name == slash {
 			return sk
 		}
 	}
@@ -201,14 +206,27 @@ func (l *Loader) GetContent(name string) string {
 	return fmt.Sprintf("<skill name=%q description=%q>\n%s\n</skill>", sk.Name, sk.Description, sk.Body)
 }
 
-// SlashCommands returns all skills that have a slash command trigger.
+// SlashCommands returns all skills with slash command triggers.
+// Skills with an explicit "slash: false" frontmatter are excluded.
+// Skills with no slash field get an auto-generated "/<name>" trigger.
+// Skills with a custom slash field (e.g. "/review") use that value.
 func (l *Loader) SlashCommands() []*Skill {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	var result []*Skill
 	for _, sk := range l.skills {
-		if sk.Slash != "" {
+		switch {
+		case sk.Slash == "false":
+			// Explicitly disabled.
+			continue
+		case sk.Slash != "":
+			// Has custom slash.
 			result = append(result, sk)
+		default:
+			// Auto-generate: / + skill name.
+			autoSk := *sk
+			autoSk.Slash = "/" + sk.Name
+			result = append(result, &autoSk)
 		}
 	}
 	sort.Slice(result, func(i, j int) bool {

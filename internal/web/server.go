@@ -227,6 +227,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/mcp/{name}/toggle", s.handleToggleMCP)
 	mux.HandleFunc("GET /api/ssh", s.handleListSSH)
 	mux.HandleFunc("GET /api/skills", s.handleListSkills)
+	mux.HandleFunc("GET /api/slash-commands", s.handleSlashCommands)
 	mux.HandleFunc("GET /api/browse", s.handleBrowse)
 	mux.HandleFunc("POST /api/project/switch", s.handleSwitchProject)
 	mux.HandleFunc("POST /api/pty", s.handleCreatePTY)
@@ -463,8 +464,33 @@ func (s *Server) SubmitMessage(message, source string) bool {
 // The caller must have already set s.running to true (via CompareAndSwap).
 // Returns the session_id of the recorder used.
 func (s *Server) submitMessage(message, mode, source, sessionID string, images []chatImage) string {
-	// Apply mode prefix if plan mode requested.
+	// Slash command rewrite: if the original message starts with "/", check for
+	// skill slash commands and rewrite to load_skill instruction (same pattern as
+	// ACP/TUI). This must happen BEFORE the plan-mode prefix is applied, otherwise
+	// HasPrefix("/"…) would fail against the prefixed string.
 	agentMsg := message
+	if strings.HasPrefix(message, "/") {
+		cmd := strings.TrimPrefix(message, "/")
+		parts := strings.SplitN(cmd, " ", 2)
+		cmdName := parts[0]
+		if s.skillLoader != nil {
+			if sk := s.skillLoader.GetBySlash("/" + cmdName); sk != nil {
+				userInput := ""
+				if len(parts) > 1 {
+					userInput = parts[1]
+				}
+				var sb strings.Builder
+				sb.WriteString(fmt.Sprintf("Use the load_skill tool with name=%q and follow its instructions.", sk.Name))
+				if userInput != "" {
+					sb.WriteString("\n\nAdditional context: ")
+					sb.WriteString(userInput)
+				}
+				agentMsg = sb.String()
+			}
+		}
+	}
+
+	// Apply mode prefix if plan mode requested.
 	if mode == "plan" {
 		agentMsg = "[PLAN MODE — Read-only. Analyze the codebase and create a plan. Do NOT edit, write, or delete any files.]\n\n" + agentMsg
 	}
@@ -1660,12 +1686,12 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 	type skillItem struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
-		Slash       string `json:"slash,omitempty"`
+		Slash       string `json:"slash"`
 	}
 
 	var items []skillItem
 	if s.skillLoader != nil {
-		for _, sk := range s.skillLoader.All() {
+		for _, sk := range s.skillLoader.SlashCommands() {
 			items = append(items, skillItem{
 				Name:        sk.Name,
 				Description: sk.Description,
@@ -1676,6 +1702,39 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 	if items == nil {
 		items = []skillItem{}
 	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+// handleSlashCommands returns skill slash commands for the web frontend
+// autocomplete menu. Built-in commands (/setting, /model, /ssh, etc.) are
+// excluded because the web UI provides dedicated controls for those features
+// and submitMessage only dispatches skill-based slash commands.
+func (s *Server) handleSlashCommands(w http.ResponseWriter, r *http.Request) {
+	type slashItem struct {
+		Slash       string `json:"slash"`
+		Description string `json:"description"`
+		Type        string `json:"type"` // "skill"
+	}
+
+	var items []slashItem
+	if s.skillLoader != nil {
+		for _, sk := range s.skillLoader.SlashCommands() {
+			items = append(items, slashItem{
+				Slash:       sk.Slash,
+				Description: sk.Description,
+				Type:        "skill",
+			})
+		}
+	}
+
+	if items == nil {
+		items = []slashItem{}
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Slash < items[j].Slash
+	})
+
 	writeJSON(w, http.StatusOK, items)
 }
 
