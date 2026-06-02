@@ -52,7 +52,7 @@ func (i manageModelItem) FilterValue() string {
 }
 
 // openManageModels transitions to the manage models view.
-func (m Model) openManageModels(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+func (m *Model) openManageModels(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		m.lines = append(m.lines, textLine(toolErrorStyle.Render("✗ Failed to load config: "+err.Error())))
@@ -117,7 +117,7 @@ func (m Model) openManageModels(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 }
 
 // handleManageModelsKey processes key input in the manage models view.
-func (m Model) handleManageModelsKey(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+func (m *Model) handleManageModelsKey(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	// When the list is actively filtering, let all keys pass through to the list
 	if m.manageModelsPicker.FilterState() == list.Filtering {
 		var cmd tea.Cmd
