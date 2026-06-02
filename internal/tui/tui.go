@@ -198,6 +198,7 @@ type Model struct {
 	// sidebarCache caches the rendered sidebar string between frames.
 	sidebarCache      string
 	sidebarCacheDirty bool // true when sidebar-affecting state changed
+	sidebarCacheH     int  // viewport height when cache was built
 
 	// renderPending tracks whether a batched stream render is scheduled.
 	renderPending bool
@@ -2799,13 +2800,14 @@ func (m Model) renderSidebar(height int) string {
 	})
 }
 
-// renderSidebarCached returns the cached sidebar or rebuilds it when dirty.
+// renderSidebarCached returns the cached sidebar or rebuilds it when dirty or height changed.
 func (m *Model) renderSidebarCached(height int) string {
-	if !m.sidebarCacheDirty && m.sidebarCache != "" {
+	if !m.sidebarCacheDirty && m.sidebarCache != "" && m.sidebarCacheH == height {
 		return m.sidebarCache
 	}
 	m.sidebarCache = m.renderSidebar(height)
 	m.sidebarCacheDirty = false
+	m.sidebarCacheH = height
 	return m.sidebarCache
 }
 
