@@ -104,7 +104,11 @@ func (m *Model) View() tea.View {
 		// batched by BatchRenderMsg; spinner ticks explicitly dirty the status
 		// line in Update.
 		if m.contentDirty {
-			m.viewport.SetContent(strings.TrimRight(m.renderContent(), "\n"))
+			stickToBottom := m.viewport.AtBottom()
+			m.viewport.SetContent(m.renderViewportContent())
+			if stickToBottom {
+				m.viewport.GotoBottom()
+			}
 		}
 	}
 
@@ -225,9 +229,13 @@ func (m *Model) refreshViewport() {
 		m.renderPerf.refreshes++
 		m.contentDirty = true
 		m.viewport.SetHeight(m.calcViewportHeight())
-		m.viewport.SetContent(m.renderContent())
+		m.viewport.SetContent(m.renderViewportContent())
 		m.viewport.GotoBottom()
 	}
+}
+
+func (m *Model) renderViewportContent() string {
+	return strings.TrimRight(m.renderContent(), "\n")
 }
 
 // invalidateSidebarCache marks the sidebar cache as needing rebuild.
