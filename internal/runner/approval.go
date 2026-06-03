@@ -19,6 +19,10 @@ type ApprovalState struct {
 	workpath string               // Current working directory for path detection
 }
 
+type toolProgressNotifier interface {
+	NotifyToolInProgress(name, args string)
+}
+
 // NewApprovalState creates a new ApprovalState with the given workpath.
 func NewApprovalState(workpath string, autoApprove bool) *ApprovalState {
 	mode := handler.ModeManual
@@ -78,6 +82,7 @@ func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs 
 	currentMode := s.mode
 	s.mu.Unlock()
 	if currentMode == handler.ModeAuto {
+		s.notifyToolInProgress(toolName, toolArgs)
 		return true, nil
 	}
 
@@ -100,6 +105,7 @@ func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs 
 		"team_delete":       true,
 	}
 	if noApprovalNeeded[toolName] {
+		s.notifyToolInProgress(toolName, toolArgs)
 		return true, nil
 	}
 
@@ -110,6 +116,7 @@ func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs 
 		}
 		if err := json.Unmarshal([]byte(toolArgs), &input); err == nil {
 			if s.isWithinWorkpath(input.FilePath) {
+				s.notifyToolInProgress(toolName, toolArgs)
 				return true, nil // Within workpath, auto-approve
 			}
 			// Outside workpath, needs approval, mark as external access
@@ -126,12 +133,14 @@ func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs 
 		if err := json.Unmarshal([]byte(toolArgs), &input); err == nil {
 			// Background tasks are auto-approved (long-running, agent can check later).
 			if input.Background {
+				s.notifyToolInProgress(toolName, toolArgs)
 				return true, nil
 			}
 			cmd := strings.TrimSpace(input.Command)
 			safePrefix := []string{"ls", "pwd", "env", "ls ", "cat ", "pwd ", "echo ", "which ", "git status", "git log", "git diff", "git show"}
 			for _, p := range safePrefix {
 				if cmd == p || strings.HasPrefix(cmd, p) {
+					s.notifyToolInProgress(toolName, toolArgs)
 					return true, nil
 				}
 			}
@@ -140,6 +149,12 @@ func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs 
 
 	// 4. Other tools: need approval
 	return s.requestUserApproval(ctx, toolName, toolArgs, false)
+}
+
+func (s *ApprovalState) notifyToolInProgress(toolName, toolArgs string) {
+	if notifier, ok := s.h.(toolProgressNotifier); ok {
+		notifier.NotifyToolInProgress(toolName, toolArgs)
+	}
 }
 
 // requestUserApproval handles the unified approval request process
@@ -182,6 +197,7 @@ func (s *ApprovalState) NewTeammateApprovalFunc(workerName, workerColor string) 
 		currentMode := s.mode
 		s.mu.Unlock()
 		if currentMode == handler.ModeAuto {
+			s.notifyToolInProgress(toolName, toolArgs)
 			return true, nil
 		}
 
@@ -201,6 +217,7 @@ func (s *ApprovalState) NewTeammateApprovalFunc(workerName, workerColor string) 
 			"team_delete":       true,
 		}
 		if noApprovalNeeded[toolName] {
+			s.notifyToolInProgress(toolName, toolArgs)
 			return true, nil
 		}
 
@@ -210,6 +227,7 @@ func (s *ApprovalState) NewTeammateApprovalFunc(workerName, workerColor string) 
 			}
 			if err := json.Unmarshal([]byte(toolArgs), &input); err == nil {
 				if s.isWithinWorkpath(input.FilePath) {
+					s.notifyToolInProgress(toolName, toolArgs)
 					return true, nil
 				}
 				return s.requestUserApprovalWithWorker(ctx, toolName, toolArgs, true, workerName, workerColor)
@@ -223,12 +241,14 @@ func (s *ApprovalState) NewTeammateApprovalFunc(workerName, workerColor string) 
 			}
 			if err := json.Unmarshal([]byte(toolArgs), &input); err == nil {
 				if input.Background {
+					s.notifyToolInProgress(toolName, toolArgs)
 					return true, nil
 				}
 				cmd := strings.TrimSpace(input.Command)
 				safePrefix := []string{"ls", "pwd", "env", "ls ", "cat ", "pwd ", "echo ", "which ", "git status", "git log", "git diff", "git show"}
 				for _, p := range safePrefix {
 					if cmd == p || strings.HasPrefix(cmd, p) {
+						s.notifyToolInProgress(toolName, toolArgs)
 						return true, nil
 					}
 				}
