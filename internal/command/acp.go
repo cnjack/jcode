@@ -88,9 +88,8 @@ func (s *acpSession) Close() {
 type acpAgent struct {
 	conn *acp.AgentSideConnection
 
-	mu         sync.Mutex
-	sessions   map[acp.SessionId]*acpSession
-	clientCaps acp.ClientCapabilities
+	mu       sync.Mutex
+	sessions map[acp.SessionId]*acpSession
 }
 
 // Ensure acpAgent implements acp.AgentLoader interface.
@@ -175,11 +174,6 @@ func (a *acpAgent) broadcastSlashCommands(sessionID acp.SessionId, sess *acpSess
 func (a *acpAgent) Initialize(_ context.Context, params acp.InitializeRequest) (acp.InitializeResponse, error) {
 	config.Logger().Printf("[acp] Initialize: client=%v, protocol=%d",
 		params.ClientInfo, params.ProtocolVersion)
-
-	// Store client capabilities so sessions can decide which executor to use.
-	a.clientCaps = params.ClientCapabilities
-	config.Logger().Printf("[acp] Client capabilities: fs.read=%v, fs.write=%v, terminal=%v",
-		a.clientCaps.Fs.ReadTextFile, a.clientCaps.Fs.WriteTextFile, a.clientCaps.Terminal)
 
 	// Check if the configured model supports image input.
 	imageSupport := false
@@ -297,17 +291,8 @@ func (a *acpAgent) buildAgentSession(
 		return nil, fmt.Errorf("error creating model: %w", err)
 	}
 
-	// Use ACP executor if the client supports both filesystem and terminal methods;
-	// otherwise fall back to the local executor.
-	var env *tools.Env
-	if a.clientCaps.Fs.ReadTextFile && a.clientCaps.Fs.WriteTextFile && a.clientCaps.Terminal {
-		config.Logger().Printf("[acp] using ACPExecutor for session %s", sessionID)
-		acpExec := tools.NewACPExecutor(a.conn, sessionID, platform)
-		env = tools.NewEnvWithExecutor(pwd, platform, acpExec)
-	} else {
-		config.Logger().Printf("[acp] using LocalExecutor for session %s (client lacks fs/terminal)", sessionID)
-		env = tools.NewEnv(pwd, platform)
-	}
+	env := tools.NewEnv(pwd, platform)
+	config.Logger().Printf("[acp] using LocalExecutor for session %s", sessionID)
 	bgManager := tools.NewBackgroundManager(env)
 
 	// Load MCP tools from config.
@@ -338,11 +323,11 @@ func (a *acpAgent) buildAgentSession(
 	approvalState := runner.NewApprovalState(pwd, cfg.AutoApprove)
 
 	// Create ACPHandler
-	acpHandler := handler.NewACPHandler(a.conn, sessionID)
+	acpHandler := handler.NewACPHandler(a.conn, sessionID, pwd)
 	approvalState.SetHandler(acpHandler)
 
 	// Wire up environment change callback so switch_env properly restores
-	// the original executor (local or ACP) when switching back from SSH.
+	// the original local executor when switching back from SSH.
 	env.OnEnvChange = func(label string, isLocal bool, envErr error) {
 		if envErr != nil {
 			config.Logger().Printf("[acp] env change error: %v", envErr)

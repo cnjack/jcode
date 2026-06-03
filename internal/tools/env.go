@@ -29,7 +29,7 @@ type Env struct {
 	Depth       int // subagent nesting depth, 0 for top-level
 
 	// origExec and origPwd remember the initial executor state so that
-	// ResetToLocal can restore the correct executor (local or ACP).
+	// ResetToLocal can restore the correct local executor after SSH.
 	origExec Executor
 	origPwd  string
 }
@@ -47,18 +47,6 @@ func NewEnv(pwd, platform string) *Env {
 	}
 }
 
-// NewEnvWithExecutor creates an Env with a custom Executor.
-func NewEnvWithExecutor(pwd, platform string, exec Executor) *Env {
-	return &Env{
-		Exec:      exec,
-		pwd:       pwd,
-		platform:  platform,
-		TodoStore: NewTodoStore(),
-		origExec:  exec,
-		origPwd:   pwd,
-	}
-}
-
 // SetSSH switches this Env to use a remote SSH executor.
 func (e *Env) SetSSH(executor *SSHExecutor, remotePwd string) {
 	e.Exec = executor
@@ -66,7 +54,7 @@ func (e *Env) SetSSH(executor *SSHExecutor, remotePwd string) {
 	e.platform = executor.Platform()
 }
 
-// ResetToLocal restores this Env to use the original executor (local or ACP).
+// ResetToLocal restores this Env to use the original local executor.
 func (e *Env) ResetToLocal(pwd, platform string) {
 	if e.origExec != nil {
 		e.Exec = e.origExec
@@ -120,19 +108,6 @@ func (e *Env) CanNest() bool {
 func (e *Env) IsRemote() bool {
 	_, ok := e.Exec.(*SSHExecutor)
 	return ok
-}
-
-// IsACP returns true if operating via ACP client capabilities.
-func (e *Env) IsACP() bool {
-	_, ok := e.Exec.(*ACPExecutor)
-	return ok
-}
-
-// SetACP switches this Env to use an ACP executor.
-func (e *Env) SetACP(executor *ACPExecutor, pwd string) {
-	e.Exec = executor
-	e.pwd = pwd
-	e.platform = executor.Platform()
 }
 
 // Executor abstracts file and command operations so tools can work
