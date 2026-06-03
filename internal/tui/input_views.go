@@ -215,7 +215,7 @@ func (m *Model) handleBgInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 		userLabelStyle.Render("👤 You:"))))
 	if m.ready {
 		m.viewport.SetHeight(m.calcViewportHeight(false))
-		m.viewport.SetContent(m.renderContent())
+		m.viewport.SetContent(m.renderViewportContent())
 		m.viewport.GotoBottom()
 	}
 	cmds = append(cmds, func() tea.Msg {
@@ -231,7 +231,7 @@ func (m *Model) handleCompactInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	m.thinking = true
 	m.agentDone = false
 	if m.ready {
-		m.viewport.SetContent(m.renderContent())
+		m.viewport.SetContent(m.renderViewportContent())
 		m.viewport.GotoBottom()
 	}
 
@@ -283,7 +283,7 @@ func (m *Model) handleSkillSlashInput(skillName, userInput string, cmds []tea.Cm
 		userLabelStyle.Render("🔧 Skill:"), displayLabel)))
 	if m.ready {
 		m.viewport.SetHeight(m.calcViewportHeight(false))
-		m.viewport.SetContent(m.renderContent())
+		m.viewport.SetContent(m.renderViewportContent())
 		m.viewport.GotoBottom()
 	}
 	cmds = append(cmds, func() tea.Msg {

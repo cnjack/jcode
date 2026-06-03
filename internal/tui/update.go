@@ -876,7 +876,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 						if m.ready {
 							m.contentDirty = true
 							m.viewport.SetHeight(m.calcViewportHeight(true))
-							m.viewport.SetContent(m.renderContent())
+							m.viewport.SetContent(m.renderViewportContent())
 							m.viewport.GotoBottom()
 						}
 						return m, tea.Batch(cmds...)
@@ -899,7 +899,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					if m.ready {
 						m.contentDirty = true
 						m.viewport.SetHeight(m.calcViewportHeight(false))
-						m.viewport.SetContent(m.renderContent())
+						m.viewport.SetContent(m.renderViewportContent())
 						m.viewport.GotoBottom()
 					}
 					cmds = append(cmds, func() tea.Msg {
@@ -1135,7 +1135,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		// The cachedWidth check in contentLine.render() handles this naturally,
 		// but we reset renderedLineWidth so renderContent() takes the slow path.
 		m.renderedLineWidth = 0
-		m.viewport.SetContent(m.renderContent())
+		m.viewport.SetContent(m.renderViewportContent())
 
 	case spinner.TickMsg:
 		if m.thinking {
@@ -1258,7 +1258,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				if m.ready {
 					m.contentDirty = true
 					m.viewport.SetHeight(m.calcViewportHeight(false))
-					m.viewport.SetContent(m.renderContent())
+					m.viewport.SetContent(m.renderViewportContent())
 					m.viewport.GotoBottom()
 				}
 				cmds = append(cmds, func() tea.Msg {
@@ -1429,7 +1429,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		if m.ready {
 			m.contentDirty = true
 			m.viewport.SetHeight(m.calcViewportHeight(true))
-			m.viewport.SetContent(m.renderContent())
+			m.viewport.SetContent(m.renderViewportContent())
 			m.viewport.GotoBottom()
 		}
 		m.textarea.Focus()
@@ -1500,7 +1500,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		if m.ready {
 			m.contentDirty = true
 			m.viewport.SetHeight(m.calcViewportHeight(true))
-			m.viewport.SetContent(m.renderContent())
+			m.viewport.SetContent(m.renderViewportContent())
 			m.viewport.GotoBottom()
 		}
 
@@ -1617,7 +1617,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		if m.ready {
 			m.contentDirty = true
 			m.viewport.SetHeight(m.calcViewportHeight(true))
-			m.viewport.SetContent(m.renderContent())
+			m.viewport.SetContent(m.renderViewportContent())
 			m.viewport.GotoBottom()
 		}
 
