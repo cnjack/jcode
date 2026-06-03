@@ -653,28 +653,32 @@ func (a *acpAgent) SetSessionMode(_ context.Context, params acp.SetSessionModeRe
 	return acp.SetSessionModeResponse{}, nil
 }
 
-func (a *acpAgent) ListSessions(_ context.Context, _ acp.ListSessionsRequest) (acp.ListSessionsResponse, error) {
-	config.Logger().Printf("[acp] ListSessions")
+func (a *acpAgent) ListSessions(_ context.Context, params acp.ListSessionsRequest) (acp.ListSessionsResponse, error) {
+	cwd := util.GetWorkDir()
+	if params.Cwd != nil && *params.Cwd != "" {
+		cwd = *params.Cwd
+	}
+	config.Logger().Printf("[acp] ListSessions: cwd=%s", cwd)
 
-	allSessions, err := session.ListAllSessions()
+	metas, err := session.ListSessions(cwd)
 	if err != nil {
 		config.Logger().Printf("[acp] ListSessions error: %v", err)
 		return acp.ListSessionsResponse{Sessions: []acp.SessionInfo{}}, nil
 	}
 
-	var sessions []acp.SessionInfo
-	for project, metas := range allSessions {
-		for _, m := range metas {
-			var title *string
-			if m.Title != "" {
-				title = &m.Title
-			}
-			sessions = append(sessions, acp.SessionInfo{
-				SessionId: acp.SessionId(fmt.Sprintf("sess_%s", m.UUID)),
-				Title:     title,
-				Cwd:       project,
-			})
+	sessions := make([]acp.SessionInfo, 0, len(metas))
+	for _, m := range metas {
+		var title *string
+		if m.Title != "" {
+			title = &m.Title
 		}
+		updatedAt := m.StartTime
+		sessions = append(sessions, acp.SessionInfo{
+			SessionId: acp.SessionId(fmt.Sprintf("sess_%s", m.UUID)),
+			Title:     title,
+			Cwd:       cwd,
+			UpdatedAt: &updatedAt,
+		})
 	}
 	return acp.ListSessionsResponse{Sessions: sessions}, nil
 }
