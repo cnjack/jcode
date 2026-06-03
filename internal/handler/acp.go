@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -22,6 +24,7 @@ func logACPError(op string, err error) {
 type ACPHandler struct {
 	conn      *acp.AgentSideConnection
 	sessionID acp.SessionId
+	workDir   string
 
 	toolCallCounter atomic.Int64
 	mu              sync.Mutex
@@ -32,6 +35,10 @@ type ACPHandler struct {
 	// toolArgs caches the raw args JSON by ACP tool call ID so that
 	// OnToolResult can build diff content.
 	toolArgs map[acp.ToolCallId]string
+	// toolTerminated tracks tool calls that already reached a terminal ACP
+	// status before the Eino tool-result message arrives (for example a
+	// permission rejection converted into an agent-visible tool string).
+	toolTerminated map[acp.ToolCallId]bool
 	// pendingApprovals is a FIFO queue of ACP tool call IDs that have been
 	// started but not yet matched to a RequestApproval call. The approval
 	// middleware does not pass the Eino tool call ID, so we match by
@@ -46,12 +53,14 @@ type pendingApproval struct {
 }
 
 // NewACPHandler creates a handler bound to an ACP connection and session.
-func NewACPHandler(conn *acp.AgentSideConnection, sessionID acp.SessionId) *ACPHandler {
+func NewACPHandler(conn *acp.AgentSideConnection, sessionID acp.SessionId, workDir string) *ACPHandler {
 	return &ACPHandler{
-		conn:      conn,
-		sessionID: sessionID,
-		einoToACP: make(map[string]acp.ToolCallId),
-		toolArgs:  make(map[acp.ToolCallId]string),
+		conn:           conn,
+		sessionID:      sessionID,
+		workDir:        workDir,
+		einoToACP:      make(map[string]acp.ToolCallId),
+		toolArgs:       make(map[acp.ToolCallId]string),
+		toolTerminated: make(map[acp.ToolCallId]bool),
 	}
 }
 
@@ -74,47 +83,210 @@ func (h *ACPHandler) OnAgentText(text string) {
 // toolKindForName maps a jcode tool name to an ACP ToolKind.
 func toolKindForName(name string) acp.ToolKind {
 	switch name {
-	case "read", "glob", "grep", "todoread", "check_background", "team_list":
+	case "read", "todoread", "check_background", "team_list":
 		return acp.ToolKindRead
+	case "glob", "grep":
+		return acp.ToolKindSearch
 	case "edit", "multi_edit", "write", "todowrite":
 		return acp.ToolKindEdit
 	case "execute", "background", "team_send_message", "team_create", "team_spawn", "team_delete":
 		return acp.ToolKindExecute
+	case "webfetch":
+		return acp.ToolKindFetch
+	case "subagent", "ask_user", "load_skill":
+		return acp.ToolKindThink
+	case "switch_env":
+		return acp.ToolKindSwitchMode
 	default:
 		return acp.ToolKindOther
 	}
 }
 
-// toolCallMeta holds parsed metadata from a tool call's args JSON.
-type toolCallMeta struct {
-	Path      string
-	StartLine int
+type acpToolPresentation struct {
+	Title     string
+	Kind      acp.ToolKind
+	Locations []acp.ToolCallLocation
+	Content   []acp.ToolCallContent
+	RawInput  any
 }
 
-// extractToolCallMeta parses the args JSON once and returns file path and line info.
-func extractToolCallMeta(argsJSON string) toolCallMeta {
-	var args map[string]interface{}
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return toolCallMeta{}
-	}
-	var meta toolCallMeta
-	for _, key := range []string{"file_path", "path", "file"} {
-		if v, ok := args[key]; ok {
-			if s, ok := v.(string); ok && s != "" {
-				meta.Path = s
-				break
+func (h *ACPHandler) presentationForTool(name, argsJSON string) acpToolPresentation {
+	args := parseRawInput(argsJSON)
+	obj, _ := args.(map[string]any)
+	getString := func(key string) string {
+		if v, ok := obj[key]; ok {
+			if s, ok := v.(string); ok {
+				return s
 			}
 		}
+		return ""
 	}
-	for _, key := range []string{"start_line", "line"} {
-		if v, ok := args[key]; ok {
-			if n, ok := v.(float64); ok {
-				meta.StartLine = int(n)
-				break
+	getInt := func(key string) int {
+		if v, ok := obj[key]; ok {
+			switch n := v.(type) {
+			case float64:
+				return int(n)
+			case int:
+				return n
 			}
 		}
+		return 0
 	}
-	return meta
+
+	p := acpToolPresentation{
+		Title:    name,
+		Kind:     toolKindForName(name),
+		RawInput: args,
+	}
+	path := firstNonEmpty(getString("file_path"), getString("path"), getString("file"))
+	if path != "" {
+		line := firstPositive(getInt("start_line"), getInt("line"), getInt("offset"))
+		p.Locations = []acp.ToolCallLocation{h.location(path, line)}
+	}
+
+	switch name {
+	case "read":
+		p.Title = "Read " + h.displayPath(path)
+		if offset, limit := getInt("offset"), getInt("limit"); limit > 0 {
+			start := offset
+			if start <= 0 {
+				start = 1
+			}
+			p.Title = fmt.Sprintf("%s (%d-%d)", p.Title, start, start+limit-1)
+		} else if offset > 0 {
+			p.Title = fmt.Sprintf("%s (from line %d)", p.Title, offset)
+		}
+	case "write":
+		p.Title = "Write " + h.displayPath(path)
+		p.Content = buildWriteDiffContent(argsJSON, "")
+	case "edit":
+		p.Title = "Edit " + h.displayPath(path)
+		p.Content = buildEditDiffContent(argsJSON, "")
+	case "multi_edit":
+		p.Title = "Edit " + h.displayPath(path)
+		p.Content = buildEditDiffContent(argsJSON, "")
+	case "glob":
+		pattern := getString("pattern")
+		p.Title = "Find " + quoteIfPresent(pattern)
+		if path != "" {
+			p.Title += " in " + h.displayPath(path)
+		}
+	case "grep":
+		pattern := getString("pattern")
+		p.Title = "Search " + quoteIfPresent(pattern)
+		if path != "" {
+			p.Title += " in " + h.displayPath(path)
+		}
+	case "execute":
+		p.Title = firstNonEmpty(getString("description"), getString("command"), "Run command")
+	case "background":
+		p.Title = firstNonEmpty(getString("description"), getString("command"), "Run background command")
+	case "todowrite":
+		p.Title = "Update todos"
+		p.Kind = acp.ToolKindThink
+	case "todoread":
+		p.Title = "Read todos"
+	case "check_background":
+		p.Title = "Check background tasks"
+	case "subagent":
+		p.Title = firstNonEmpty(getString("description"), getString("name"), "Run subagent")
+	case "ask_user":
+		p.Title = firstNonEmpty(getString("question"), "Ask user")
+	case "load_skill":
+		p.Title = "Load skill " + getString("name")
+	case "team_send_message":
+		to := getString("to")
+		if to == "*" {
+			p.Title = "Message team"
+		} else if to != "" {
+			p.Title = "Message @" + to
+		} else {
+			p.Title = "Send team message"
+		}
+	case "team_create":
+		p.Title = "Create team " + getString("team_name")
+	case "team_spawn":
+		p.Title = "Spawn " + firstNonEmpty(getString("name"), "teammate")
+	case "team_delete":
+		p.Title = "Delete team"
+	case "switch_env":
+		p.Title = "Switch environment to " + getString("target")
+	case "webfetch":
+		p.Title = "Fetch " + getString("url")
+	default:
+		if strings.Contains(name, "__") {
+			p.Title = "Call " + strings.ReplaceAll(name, "__", "/")
+		}
+	}
+	p.Title = truncateTitle(strings.TrimSpace(p.Title))
+	if p.Title == "" {
+		p.Title = name
+	}
+	return p
+}
+
+func (h *ACPHandler) location(path string, line int) acp.ToolCallLocation {
+	loc := acp.ToolCallLocation{Path: h.absolutePath(path)}
+	if line > 0 {
+		loc.Line = &line
+	}
+	return loc
+}
+
+func (h *ACPHandler) absolutePath(path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	if h.workDir == "" {
+		return filepath.Clean(path)
+	}
+	return filepath.Clean(filepath.Join(h.workDir, path))
+}
+
+func (h *ACPHandler) displayPath(path string) string {
+	if path == "" {
+		return "file"
+	}
+	abs := h.absolutePath(path)
+	if h.workDir != "" {
+		if rel, err := filepath.Rel(h.workDir, abs); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+			return rel
+		}
+	}
+	return abs
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func firstPositive(values ...int) int {
+	for _, v := range values {
+		if v > 0 {
+			return v
+		}
+	}
+	return 0
+}
+
+func quoteIfPresent(s string) string {
+	if s == "" {
+		return "pattern"
+	}
+	return fmt.Sprintf("%q", s)
+}
+
+func truncateTitle(s string) string {
+	const max = 160
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-3] + "..."
 }
 
 // parseRawInput converts a JSON args string into a map so that it serializes
@@ -143,26 +315,54 @@ func (h *ACPHandler) OnToolCall(name, args, einoToolCallID string) {
 	})
 	h.mu.Unlock()
 
+	presentation := h.presentationForTool(name, args)
 	opts := []acp.ToolCallStartOpt{
-		acp.WithStartStatus(acp.ToolCallStatusInProgress),
-		acp.WithStartRawInput(parseRawInput(args)),
-		acp.WithStartKind(toolKindForName(name)),
+		acp.WithStartStatus(acp.ToolCallStatusPending),
+		acp.WithStartRawInput(presentation.RawInput),
+		acp.WithStartKind(presentation.Kind),
 	}
-
-	// Add file location for file-based tools, with optional line number.
-	if meta := extractToolCallMeta(args); meta.Path != "" {
-		loc := acp.ToolCallLocation{Path: meta.Path}
-		if meta.StartLine > 0 {
-			loc.Line = &meta.StartLine
-		}
-		opts = append(opts, acp.WithStartLocations([]acp.ToolCallLocation{loc}))
+	if len(presentation.Locations) > 0 {
+		opts = append(opts, acp.WithStartLocations(presentation.Locations))
+	}
+	if len(presentation.Content) > 0 {
+		opts = append(opts, acp.WithStartContent(presentation.Content))
 	}
 
 	if err := h.conn.SessionUpdate(context.Background(), acp.SessionNotification{
 		SessionId: h.sessionID,
-		Update:    acp.StartToolCall(id, name, opts...),
+		Update:    acp.StartToolCall(id, presentation.Title, opts...),
 	}); err != nil {
 		logACPError("StartToolCall", err)
+	}
+}
+
+// NotifyToolInProgress is used by the approval state when a tool is about to
+// execute without a visible permission prompt (auto-approval or safe tools).
+func (h *ACPHandler) NotifyToolInProgress(name, args string) {
+	h.updateMatchedToolStatus(name, args, acp.ToolCallStatusInProgress, false)
+}
+
+func (h *ACPHandler) updateMatchedToolStatus(name, args string, status acp.ToolCallStatus, terminal bool) {
+	h.mu.Lock()
+	var id acp.ToolCallId
+	for _, p := range h.pendingApprovals {
+		if p.toolName == name && p.toolArgs == args {
+			id = p.acpID
+			break
+		}
+	}
+	if id != "" && terminal {
+		h.toolTerminated[id] = true
+	}
+	h.mu.Unlock()
+	if id == "" {
+		return
+	}
+	if err := h.conn.SessionUpdate(context.Background(), acp.SessionNotification{
+		SessionId: h.sessionID,
+		Update:    acp.UpdateToolCall(id, acp.WithUpdateStatus(status)),
+	}); err != nil {
+		logACPError("UpdateToolStatus", err)
 	}
 }
 
@@ -172,6 +372,8 @@ func (h *ACPHandler) OnToolResult(name, output, einoToolCallID string, err error
 	cachedArgs := h.toolArgs[id]
 	delete(h.einoToACP, einoToolCallID)
 	delete(h.toolArgs, id)
+	terminated := h.toolTerminated[id]
+	delete(h.toolTerminated, id)
 	// Drop any still-queued approval entry for this ACP id (e.g. auto-approved
 	// tools never go through RequestApproval and would otherwise leak and
 	// poison the FIFO fallback on the next approval request).
@@ -188,9 +390,12 @@ func (h *ACPHandler) OnToolResult(name, output, einoToolCallID string, err error
 	if id == "" {
 		return
 	}
+	if terminated {
+		return
+	}
 
 	status := acp.ToolCallStatusCompleted
-	if err != nil {
+	if err != nil || isToolFailureOutput(output) {
 		status = acp.ToolCallStatusFailed
 	}
 
@@ -223,6 +428,13 @@ func (h *ACPHandler) OnToolResult(name, output, einoToolCallID string, err error
 	}); updateErr != nil {
 		logACPError("UpdateToolCall", updateErr)
 	}
+}
+
+func isToolFailureOutput(output string) bool {
+	output = strings.TrimSpace(output)
+	return strings.HasPrefix(output, "Tool execution failed:") ||
+		strings.Contains(output, "\n\nTool execution failed:") ||
+		strings.HasPrefix(output, "Tool execution panicked:")
 }
 
 func (h *ACPHandler) OnTodoUpdate() {
@@ -265,13 +477,18 @@ func (h *ACPHandler) RequestApproval(ctx context.Context, req ApprovalRequest) (
 	if matchedID == "" {
 		matchedID = h.nextToolCallID()
 	}
+	presentation := h.presentationForTool(req.ToolName, req.ToolArgs)
 
 	permResp, err := h.conn.RequestPermission(ctx, acp.RequestPermissionRequest{
 		SessionId: h.sessionID,
 		ToolCall: acp.ToolCallUpdate{
 			ToolCallId: matchedID,
-			Title:      acp.Ptr(req.ToolName),
-			RawInput:   parseRawInput(req.ToolArgs),
+			Title:      acp.Ptr(presentation.Title),
+			Kind:       acp.Ptr(presentation.Kind),
+			Status:     acp.Ptr(acp.ToolCallStatusPending),
+			Locations:  presentation.Locations,
+			Content:    presentation.Content,
+			RawInput:   presentation.RawInput,
 		},
 		Options: []acp.PermissionOption{
 			{
@@ -296,21 +513,47 @@ func (h *ACPHandler) RequestApproval(ctx context.Context, req ApprovalRequest) (
 	}
 
 	if permResp.Outcome.Cancelled != nil {
+		h.markPermissionRejected(matchedID)
 		return ApprovalResponse{Approved: false, Mode: ModeManual}, nil
 	}
 
 	if permResp.Outcome.Selected != nil {
 		switch string(permResp.Outcome.Selected.OptionId) {
 		case "allow_once":
+			h.markPermissionApproved(matchedID)
 			return ApprovalResponse{Approved: true, Mode: ModeManual}, nil
 		case "allow_always":
+			h.markPermissionApproved(matchedID)
 			return ApprovalResponse{Approved: true, Mode: ModeAuto}, nil
 		case "reject_once":
+			h.markPermissionRejected(matchedID)
 			return ApprovalResponse{Approved: false, Mode: ModeManual}, nil
 		}
 	}
 
+	h.markPermissionRejected(matchedID)
 	return ApprovalResponse{Approved: false, Mode: ModeManual}, nil
+}
+
+func (h *ACPHandler) markPermissionApproved(id acp.ToolCallId) {
+	if err := h.conn.SessionUpdate(context.Background(), acp.SessionNotification{
+		SessionId: h.sessionID,
+		Update:    acp.UpdateToolCall(id, acp.WithUpdateStatus(acp.ToolCallStatusInProgress)),
+	}); err != nil {
+		logACPError("PermissionApprovedStatus", err)
+	}
+}
+
+func (h *ACPHandler) markPermissionRejected(id acp.ToolCallId) {
+	h.mu.Lock()
+	h.toolTerminated[id] = true
+	h.mu.Unlock()
+	if err := h.conn.SessionUpdate(context.Background(), acp.SessionNotification{
+		SessionId: h.sessionID,
+		Update:    acp.UpdateToolCall(id, acp.WithUpdateStatus(acp.ToolCallStatusFailed)),
+	}); err != nil {
+		logACPError("PermissionRejectedStatus", err)
+	}
 }
 
 // buildEditDiffContent extracts diff information from an edit tool call and

@@ -12,6 +12,8 @@ For the **full changelog**, see [CHANGELOG.md](../CHANGELOG.md) in the repositor
 ## Unreleased
 
 ### In Development
+- Improved ACP tool-call titles, kinds, locations, permission payloads, and status transitions for friendlier editor display and follow-along support.
+- Removed the ACP client filesystem/terminal executor path because the v2 client capability extension is no longer supported; ACP sessions now use the local executor.
 
 ---
 
@@ -118,13 +120,13 @@ For the **full changelog**, see [CHANGELOG.md](../CHANGELOG.md) in the repositor
 
 ### [0.4.3] - 2026-04-27
 
-**ACPExecutor • ACP Error Handling**
+**ACP Transport • ACP Error Handling**
 
 #### Added
-- ACPExecutor to delegate file system and terminal operations via the ACP client protocol.
+- Initial ACP transport integration work for editor-driven sessions.
 
 #### Fixed
-- Improved error handling for command execution timeout and cancellation in ACP executor.
+- Improved ACP command execution timeout and cancellation error handling.
 
 ---
 
