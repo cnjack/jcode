@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/reduction"
@@ -169,6 +170,25 @@ func (a *acpAgent) broadcastSlashCommands(sessionID acp.SessionId, sess *acpSess
 	}
 }
 
+// scheduleSlashCommandsBroadcast sends slash commands after the session
+// response has had a chance to reach the client. Some ACP clients ignore
+// session updates that arrive before the new/load/resume response is fully
+// processed, which makes slash commands appear only after a later message.
+func (a *acpAgent) scheduleSlashCommandsBroadcast(sessionID acp.SessionId, sess *acpSession) {
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+
+		a.mu.Lock()
+		current, ok := a.sessions[sessionID]
+		a.mu.Unlock()
+		if !ok || current != sess {
+			return
+		}
+
+		a.broadcastSlashCommands(sessionID, sess)
+	}()
+}
+
 // --- acp.Agent interface ---
 
 func (a *acpAgent) Initialize(_ context.Context, params acp.InitializeRequest) (acp.InitializeResponse, error) {
@@ -244,8 +264,9 @@ func (a *acpAgent) NewSession(ctx context.Context, params acp.NewSessionRequest)
 
 	config.Logger().Printf("[acp] Session created: %s", sessionID)
 
-	// Broadcast available slash commands for this session.
-	a.broadcastSlashCommands(sessionID, sess)
+	// Broadcast available slash commands for this session after the response
+	// is returned so clients have registered the session before the update.
+	a.scheduleSlashCommandsBroadcast(sessionID, sess)
 
 	return acp.NewSessionResponse{
 		SessionId: sessionID,
@@ -734,8 +755,9 @@ func (a *acpAgent) LoadSession(ctx context.Context, params acp.LoadSessionReques
 
 	config.Logger().Printf("[acp] Session loaded: %s, messages=%d", params.SessionId, len(sess.history))
 
-	// Broadcast available slash commands for the loaded session.
-	a.broadcastSlashCommands(params.SessionId, sess)
+	// Broadcast available slash commands for the loaded session after the
+	// response is returned so clients have registered the session first.
+	a.scheduleSlashCommandsBroadcast(params.SessionId, sess)
 
 	return acp.LoadSessionResponse{}, nil
 }
@@ -750,11 +772,11 @@ func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRe
 
 	a.mu.Lock()
 	if sess, ok := a.sessions[params.SessionId]; ok {
-		// Session already in memory — broadcast slash commands so the
-		// reconnecting client receives the available_commands_update.
+		// Session already in memory — broadcast slash commands after the
+		// response so the reconnecting client receives the update.
 		s := sess
 		a.mu.Unlock()
-		a.broadcastSlashCommands(params.SessionId, s)
+		a.scheduleSlashCommandsBroadcast(params.SessionId, s)
 		return acp.ResumeSessionResponse{Modes: acpModes(acpModeAgent)}, nil
 	}
 	a.mu.Unlock()
@@ -798,7 +820,7 @@ func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRe
 	a.mu.Unlock()
 
 	config.Logger().Printf("[acp] Session resumed: %s", params.SessionId)
-	a.broadcastSlashCommands(params.SessionId, sess)
+	a.scheduleSlashCommandsBroadcast(params.SessionId, sess)
 
 	return acp.ResumeSessionResponse{Modes: acpModes(acpModeAgent)}, nil
 }
