@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Improved ACP tool-call titles, kinds, locations, permission payloads, and status transitions for friendlier editor display and follow-along support.
+- Removed the ACP client filesystem/terminal executor path because the v2 client capability extension is no longer supported; ACP sessions now use the local executor.
+
 ## [0.4.9] - 2026-05-23
 
 ### Added
@@ -87,10 +91,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.3] - 2026-04-27
 
 ### Added
-- ACPExecutor to delegate file system and terminal operations via the ACP client protocol.
+- Initial ACP transport integration work for editor-driven sessions.
 
 ### Fixed
-- Improved error handling for command execution timeout and cancellation in ACP executor.
+- Improved ACP command execution timeout and cancellation error handling.
 
 ## [0.4.2] - 2026-04-27
 
