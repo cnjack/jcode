@@ -24,6 +24,7 @@ type Env struct {
 	pwd         string
 	platform    string
 	TodoStore   *TodoStore
+	GoalStore   *GoalStore
 	FileTracker *FileTracker
 	OnEnvChange func(envLabel string, isLocal bool, err error)
 	Depth       int // subagent nesting depth, 0 for top-level
@@ -42,6 +43,7 @@ func NewEnv(pwd, platform string) *Env {
 		pwd:       pwd,
 		platform:  platform,
 		TodoStore: NewTodoStore(),
+		GoalStore: NewGoalStore(),
 		origExec:  exec,
 		origPwd:   pwd,
 	}

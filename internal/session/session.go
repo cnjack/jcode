@@ -34,6 +34,7 @@ const (
 	EntryCompact        EntryType = "compact"
 	EntryBudgetWarning  EntryType = "budget_warning"
 	EntrySystemPrompt   EntryType = "system_prompt"
+	EntryGoalUpdate     EntryType = "goal_update"
 )
 
 // TodoSnapshotItem is a single todo entry stored in a todo_snapshot event.
@@ -89,6 +90,11 @@ type Entry struct {
 
 	// system_prompt fields
 	EnvInfo string `json:"env_info,omitempty"` // serialized environment snapshot
+
+	// goal_update fields. GoalStatus == "cleared" marks goal removal.
+	GoalObjective  string `json:"goal_objective,omitempty"`
+	GoalStatus     string `json:"goal_status,omitempty"`
+	GoalTokensUsed int64  `json:"goal_tokens_used,omitempty"`
 }
 
 // SessionMeta is stored in the index for fast listing.
@@ -254,6 +260,20 @@ func (r *Recorder) RecordPlanUpdate(status, title, content, feedback string) {
 		PlanTitle:   title,
 		PlanContent: content,
 		Feedback:    feedback,
+	})
+}
+
+// RecordGoalUpdate appends a goal state change entry. An empty status records
+// a "cleared" marker so resume knows the goal was removed.
+func (r *Recorder) RecordGoalUpdate(objective, status string, tokensUsed int64) {
+	if status == "" {
+		status = "cleared"
+	}
+	_ = r.writeEntry(Entry{
+		Type:           EntryGoalUpdate,
+		GoalObjective:  objective,
+		GoalStatus:     status,
+		GoalTokensUsed: tokensUsed,
 	})
 }
 

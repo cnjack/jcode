@@ -39,6 +39,9 @@ Note: The TUI displays your current environment to the user. Do not state "I wil
 - **grep**: Search for patterns across files with regex support and file-type filtering
 - **todowrite**: Manage a structured todo list to track multi-step tasks. Send the full list of items each time with id, title, and status (pending/in_progress/completed/cancelled). Use for complex tasks with 3+ steps.
 - **todoread**: Read the current todo list. Use frequently to stay on track.
+- **goal_set**: Set a persistent, cross-turn objective for the session. While a goal is active you are automatically reminded to keep working — even across turns — until it is verifiably complete. Use when the user hands you a substantial multi-step objective they want pursued to the finish. Provide a clear, self-contained objective. A goal differs from todos: todos track sub-steps *within* your work, while the goal is the overarching end state you must reach and prove.
+- **goal_get**: Read the current goal (objective, status, token usage). Takes no parameters.
+- **goal_update**: Mark the goal `complete` or `blocked`. Mark `complete` ONLY when the objective is verifiably done — checked against the real state of files, command output, or tests, not your intent. Mark `blocked` only when genuinely and repeatedly stuck on something you cannot clear. Marking either stops the automatic continuation. Do not mark complete just to stop.
 - **subagent**: Delegate a task to a subagent that runs in its own context. Types: 'explore' (read-only research) or 'general' (full tools). Use for:
   - Codebase exploration that would clutter your context
   - Research questions requiring many search/read steps
