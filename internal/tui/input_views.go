@@ -278,9 +278,12 @@ func (m *Model) handleGoalInput(prompt string, cmds []tea.Cmd) (tea.Model, tea.C
 		return m, tea.Batch(cmds...)
 
 	case "clear":
-		if m.goalStore != nil {
-			m.goalStore.Clear()
+		if m.goalStore == nil {
+			m.lines = append(m.lines, textLine(toolLabelStyle.Render("  🎯 Goals are not available in this session.")))
+			refresh()
+			return m, tea.Batch(cmds...)
 		}
+		m.goalStore.Clear()
 		m.lines = append(m.lines, textLine(toolLabelStyle.Render("  🎯 Goal cleared.")))
 		refresh()
 		return m, tea.Batch(cmds...)

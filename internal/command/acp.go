@@ -149,8 +149,14 @@ func availableCommandList(skillLoader *skills.Loader) []acp.AvailableCommand {
 	}
 	if skillLoader != nil {
 		for _, sk := range skillLoader.SlashCommands() {
+			name := strings.TrimPrefix(sk.Slash, "/")
+			// "/goal" is consumed by Prompt() before the skill lookup, so a
+			// skill with that name could never run — don't advertise it.
+			if name == "goal" {
+				continue
+			}
 			cmds = append(cmds, acp.AvailableCommand{
-				Name:        strings.TrimPrefix(sk.Slash, "/"),
+				Name:        name,
 				Description: sk.Description,
 				Input: &acp.AvailableCommandInput{
 					Unstructured: &acp.UnstructuredCommandInput{
@@ -349,12 +355,16 @@ func (a *acpAgent) buildAgentSession(
 	}
 	allTools = append(allTools, mcpTools...)
 
-	// Plan mode tools: read-only subset.
+	// Plan mode tools: read-only subset. Goal tools are included — like the
+	// todo tools they only mutate session metadata, and the continuation
+	// guard runs in every mode, so the agent must be able to inspect and
+	// complete/block an active goal here too.
 	planTools := []tool.BaseTool{
 		env.NewReadTool(),
 		env.NewExecuteTool(nil),
 		env.NewGrepTool(),
 		env.NewTodoWriteTool(), env.NewTodoReadTool(),
+		env.NewGoalSetTool(), env.NewGoalGetTool(), env.NewGoalUpdateTool(),
 	}
 
 	normalPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())

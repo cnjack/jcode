@@ -803,7 +803,8 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 		st := session.ReconstructState(entries)
 		s.history = st.History
 		goalSnap = st.Goal
-		if s.todoStore != nil && len(st.Todos) > 0 {
+		// Always update (an empty list clears leftovers from the previous session).
+		if s.todoStore != nil {
 			updateTodos = true
 			todoItems = make([]tools.TodoItem, len(st.Todos))
 			for i, t := range st.Todos {

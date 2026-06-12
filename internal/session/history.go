@@ -179,6 +179,8 @@ type GoalSnapshot struct {
 	Objective  string
 	Status     string
 	TokensUsed int64
+	CreatedAt  int64
+	UpdatedAt  int64
 }
 
 // SessionState is the full recoverable state from a session file, including
@@ -308,6 +310,8 @@ func ReconstructState(entries []Entry) *SessionState {
 					Objective:  e.GoalObjective,
 					Status:     e.GoalStatus,
 					TokensUsed: e.GoalTokensUsed,
+					CreatedAt:  e.GoalCreatedAt,
+					UpdatedAt:  e.GoalUpdatedAt,
 				}
 			}
 

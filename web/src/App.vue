@@ -186,6 +186,7 @@ async function onProjectSwitched() {
   await store.fetchHealth()
   store.clearChat()
   store.fetchTodos()
+  store.fetchGoal()
   store.fetchSessions()
   // Restore the current session for the new project
   await store.restoreCurrentSession()

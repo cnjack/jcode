@@ -89,7 +89,9 @@ func (e *Env) ResolvePath(path string) string {
 }
 
 // CloneForSubagent creates a copy of this Env with the same executor and pwd
-// but an isolated TodoStore, suitable for use by a subagent.
+// but an isolated TodoStore, suitable for use by a subagent. GoalStore is
+// intentionally left nil: the session goal belongs to the top-level agent and
+// subagents are not registered with the goal tools.
 func (e *Env) CloneForSubagent() *Env {
 	return &Env{
 		Exec:        e.Exec,
