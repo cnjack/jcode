@@ -114,10 +114,21 @@ func (s *GoalStore) RestoreFromSnapshot(snap *session.GoalSnapshot) {
 		s.Restore(nil)
 		return
 	}
+	// Entries written before timestamps were persisted have zero values;
+	// fall back to "restored now" so goal_get never reports created_at: 0.
+	createdAt, updatedAt := snap.CreatedAt, snap.UpdatedAt
+	if createdAt == 0 {
+		createdAt = s.now()
+	}
+	if updatedAt == 0 {
+		updatedAt = createdAt
+	}
 	s.Restore(&Goal{
 		Objective:  snap.Objective,
 		Status:     GoalStatus(snap.Status),
 		TokensUsed: snap.TokensUsed,
+		CreatedAt:  createdAt,
+		UpdatedAt:  updatedAt,
 	})
 }
 
@@ -130,10 +141,10 @@ func GoalRecorderHook(rec *session.Recorder) func(*Goal) {
 			return
 		}
 		if g == nil {
-			rec.RecordGoalUpdate("", "", 0)
+			rec.RecordGoalUpdate("", "", 0, 0, 0)
 			return
 		}
-		rec.RecordGoalUpdate(g.Objective, string(g.Status), g.TokensUsed)
+		rec.RecordGoalUpdate(g.Objective, string(g.Status), g.TokensUsed, g.CreatedAt, g.UpdatedAt)
 	}
 }
 
@@ -221,8 +232,8 @@ func (s *GoalStore) StatusLine() string {
 		return ""
 	}
 	obj := g.Objective
-	if len(obj) > 60 {
-		obj = strings.TrimSpace(string([]rune(obj)[:60])) + "…"
+	if runes := []rune(obj); len(runes) > 60 {
+		obj = strings.TrimSpace(string(runes[:60])) + "…"
 	}
 	usage := ""
 	if g.TokensUsed > 0 {

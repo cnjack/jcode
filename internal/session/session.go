@@ -95,6 +95,8 @@ type Entry struct {
 	GoalObjective  string `json:"goal_objective,omitempty"`
 	GoalStatus     string `json:"goal_status,omitempty"`
 	GoalTokensUsed int64  `json:"goal_tokens_used,omitempty"`
+	GoalCreatedAt  int64  `json:"goal_created_at,omitempty"`
+	GoalUpdatedAt  int64  `json:"goal_updated_at,omitempty"`
 }
 
 // SessionMeta is stored in the index for fast listing.
@@ -265,7 +267,7 @@ func (r *Recorder) RecordPlanUpdate(status, title, content, feedback string) {
 
 // RecordGoalUpdate appends a goal state change entry. An empty status records
 // a "cleared" marker so resume knows the goal was removed.
-func (r *Recorder) RecordGoalUpdate(objective, status string, tokensUsed int64) {
+func (r *Recorder) RecordGoalUpdate(objective, status string, tokensUsed, createdAt, updatedAt int64) {
 	if status == "" {
 		status = "cleared"
 	}
@@ -274,6 +276,8 @@ func (r *Recorder) RecordGoalUpdate(objective, status string, tokensUsed int64) 
 		GoalObjective:  objective,
 		GoalStatus:     status,
 		GoalTokensUsed: tokensUsed,
+		GoalCreatedAt:  createdAt,
+		GoalUpdatedAt:  updatedAt,
 	})
 }
 

@@ -450,6 +450,8 @@ export const useChatStore = defineStore('chat', () => {
   function clearChat() {
     timeline.value = []
     todos.value = []
+    goal.value = null
+    goalArmed.value = false
     tokenInfo.value = null
     streamingText = ''
     streamingMsgId = ''
@@ -707,6 +709,9 @@ export const useChatStore = defineStore('chat', () => {
       currentSessionId.value = resp.session_id || uuid
 
       clearChat()
+      // The backend restored the session's goal — refresh explicitly in case
+      // the goal_update WS push is missed.
+      fetchGoal()
 
       // Track pending tool calls by tool_call_id so we can match results
       const pendingToolCalls = new Map<string, ToolCall>()

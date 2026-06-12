@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"github.com/cnjack/jcode/internal/session"
 	"strings"
 	"testing"
 )
@@ -213,5 +214,36 @@ func TestValidateGoalObjective(t *testing.T) {
 	got, err := ValidateGoalObjective("  do the thing  ")
 	if err != nil || got != "do the thing" {
 		t.Fatalf("ValidateGoalObjective = %q, %v", got, err)
+	}
+}
+
+func TestGoalStore_StatusLineMultibyteObjective(t *testing.T) {
+	s := NewGoalStore()
+	// 70 runes of CJK text: byte length far exceeds 60 while rune-based
+	// truncation must not panic (regression: byte-length check + rune slice).
+	s.Set(strings.Repeat("目", 70))
+	line := s.StatusLine()
+	if !strings.Contains(line, "…") {
+		t.Fatalf("long multibyte objective should be truncated: %q", line)
+	}
+	// A 30-rune CJK objective is 90 bytes but must NOT be truncated.
+	s.Set(strings.Repeat("标", 30))
+	if strings.Contains(s.StatusLine(), "…") {
+		t.Fatalf("30-rune objective must not be truncated: %q", s.StatusLine())
+	}
+}
+
+func TestGoalStore_RestoreFromSnapshotTimestamps(t *testing.T) {
+	s := NewGoalStore()
+	s.RestoreFromSnapshot(&session.GoalSnapshot{Objective: "x", Status: "active", CreatedAt: 1700000000, UpdatedAt: 1700000900})
+	g := s.Get()
+	if g.CreatedAt != 1700000000 || g.UpdatedAt != 1700000900 {
+		t.Fatalf("timestamps not restored: %+v", g)
+	}
+	// Legacy entries without timestamps must not surface zero values.
+	s.RestoreFromSnapshot(&session.GoalSnapshot{Objective: "y", Status: "active"})
+	g = s.Get()
+	if g.CreatedAt == 0 || g.UpdatedAt == 0 {
+		t.Fatalf("zero timestamps should fall back to now: %+v", g)
 	}
 }
