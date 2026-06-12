@@ -302,7 +302,7 @@ watch(() => store.isRunning, (running) => {
           <textarea
             ref="textarea"
             v-model="input"
-            :placeholder="store.isRunning ? 'Agent is working…' : 'Ask JCODE, @agent, or /command'"
+            :placeholder="store.isRunning ? 'Agent is working…' : store.goalArmed ? 'Describe the goal — the agent pursues it until verifiably complete' : 'Ask JCODE, @agent, or /command'"
             rows="1"
             :disabled="store.isRunning"
             @keydown="handleKeyDown"
@@ -362,6 +362,16 @@ watch(() => store.isRunning, (running) => {
                 </button>
               </div>
             </div>
+
+            <!-- Goal toggle: arm the prompt box so the next message sets the session goal -->
+            <button
+              class="tool-btn dropdown-btn"
+              :class="{ highlighted: store.goalArmed }"
+              :title="store.goal ? 'Setting a new goal replaces the current one' : 'Next message becomes the session goal'"
+              @click="store.goalArmed = !store.goalArmed"
+            >
+              🎯 Goal
+            </button>
 
             <!-- Model selector -->
             <div class="relative">

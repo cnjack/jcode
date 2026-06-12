@@ -96,6 +96,7 @@ type Model struct {
 	pasteStore *PasteStore
 
 	todoStore *tools.TodoStore
+	goalStore *tools.GoalStore
 
 	totalTokens       int64
 	modelContextLimit int
@@ -373,6 +374,14 @@ func WithApprovalModeChange(fn func(bool)) ModelOption {
 func WithVersion(v string) ModelOption {
 	return func(m *Model) {
 		m.version = v
+	}
+}
+
+// WithGoalStore wires the session goal store so the TUI can render the active
+// goal indicator. The store is read directly when rendering.
+func WithGoalStore(gs *tools.GoalStore) ModelOption {
+	return func(m *Model) {
+		m.goalStore = gs
 	}
 }
 

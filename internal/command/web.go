@@ -96,6 +96,10 @@ func runWebServer(port int, host string, openBrowser bool) error {
 	bgManager := tools.NewBackgroundManager(env)
 	rec, _ := session.NewRecorder(pwd, providerName, modelName)
 
+	// Shared token tracker for usage display (goal status, reminders, token
+	// updates).
+	agentTokenUsage := &internalmodel.TokenUsage{}
+
 	// Load MCP tools.
 	var mcpTools []tool.BaseTool
 	if len(cfg.MCPServers) > 0 {
@@ -163,6 +167,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 			env.NewReadTool(), env.NewEditTool(), env.NewWriteTool(),
 			env.NewExecuteTool(bgManager), env.NewGrepTool(),
 			env.NewTodoWriteTool(), env.NewTodoReadTool(),
+			env.NewGoalSetTool(), env.NewGoalGetTool(), env.NewGoalUpdateTool(),
 			env.NewSwitchEnvTool(),
 			env.NewCheckBackgroundTool(bgManager),
 			env.NewSubagentTool(&tools.SubagentDeps{
@@ -248,11 +253,12 @@ func runWebServer(port int, host string, openBrowser bool) error {
 
 		reminderMw := agent.NewReminderMiddleware(agent.ReminderConfig{
 			TodoStore:    env.TodoStore,
+			GoalStore:    env.GoalStore,
 			PlanStore:    planStore,
 			EnvLabel:     "local",
 			IsRemote:     env.IsRemote(),
 			ContextLimit: ctxLimit,
-		}, nil)
+		}, agentTokenUsage)
 		handlers = append(handlers, reminderMw)
 
 		tools := buildAllTools(cm)
@@ -326,6 +332,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		WebHandler:    webHandler,
 		EventHandler:  finalHandler,
 		NeedsSetup:    needsSetup,
+		TokenUsage:    agentTokenUsage,
 	})
 
 	// Set handler for approval routing.
