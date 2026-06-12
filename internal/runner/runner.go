@@ -27,6 +27,7 @@ func Run(
 	h handler.AgentEventHandler,
 	rec *session.Recorder,
 	todoStore *tools.TodoStore,
+	goalStore *tools.GoalStore,
 	tracer *telemetry.LangfuseTracer,
 	tokenUsage *internalmodel.TokenUsage,
 ) string {
@@ -39,6 +40,10 @@ func Run(
 	h.OnAgentStart()
 
 	resp := runInner(ctx, ag, messages, h, rec)
+	// pending is the assistant text produced since messages was last extended;
+	// each continuation appends only this delta, never the accumulated resp,
+	// so earlier turns are not duplicated into the context.
+	pending := resp
 
 	// Completion guard: if the agent finished but there are still incomplete
 	// todos, re-run with a reminder so nothing is left behind.
@@ -49,10 +54,46 @@ func Run(
 		}
 		reminder := todoStore.IncompleteSummary()
 		h.OnAgentText("\n⚠️ Incomplete todos detected, continuing...\n")
-		messages = append(messages, &schema.Message{Role: schema.Assistant, Content: resp})
+		messages = append(messages, &schema.Message{Role: schema.Assistant, Content: pending})
 		messages = append(messages, schema.UserMessage(reminder))
 		extra := runInner(ctx, ag, messages, h, rec)
 		resp += extra
+		pending = extra
+	}
+
+	// Goal continuation guard: if an active goal exists and the agent stopped
+	// without proving it complete, keep injecting a continuation prompt and
+	// re-running — mirroring codex's idle auto-continuation. Bounded by a hard
+	// turn cap and context cancellation.
+	if goalStore != nil {
+		const maxGoalContinuations = 25
+	goalLoop:
+		for turns := 0; turns < maxGoalContinuations; turns++ {
+			select {
+			case <-ctx.Done():
+				config.Logger().Printf("[runner] goal continuation cancelled")
+				break goalLoop
+			default:
+			}
+			// Record observed tokens for the informational usage display.
+			if tokenUsage != nil {
+				goalStore.RecordTokens(tokenUsage.GetLastTotal())
+			}
+			if !goalStore.IsActive() {
+				break
+			}
+			cont := goalStore.ContinuationPrompt()
+			if cont == "" {
+				break
+			}
+			config.Logger().Printf("[runner] goal continuation #%d", turns+1)
+			h.OnAgentText("\n🎯 Goal active — continuing toward objective...\n")
+			messages = append(messages, &schema.Message{Role: schema.Assistant, Content: pending})
+			messages = append(messages, schema.UserMessage(cont))
+			extra := runInner(ctx, ag, messages, h, rec)
+			resp += extra
+			pending = extra
+		}
 	}
 
 	// Send token usage update before signalling done.

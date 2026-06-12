@@ -79,6 +79,16 @@ export interface FileItem {
   size: number
 }
 
+export type GoalStatus = 'active' | 'complete' | 'blocked'
+
+export interface Goal {
+  objective: string
+  status: GoalStatus
+  tokens_used: number
+  created_at: number
+  updated_at: number
+}
+
 export interface FileContent {
   path: string
   content: string

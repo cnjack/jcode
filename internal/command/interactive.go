@@ -83,6 +83,7 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 		s.env.NewReadTool(), s.env.NewEditTool(), s.env.NewWriteTool(),
 		s.env.NewExecuteTool(s.bgManager), s.env.NewGrepTool(),
 		s.env.NewTodoWriteTool(), s.env.NewTodoReadTool(),
+		s.env.NewGoalSetTool(), s.env.NewGoalGetTool(), s.env.NewGoalUpdateTool(),
 		s.env.NewCheckBackgroundTool(s.bgManager),
 		s.env.NewSubagentTool(&tools.SubagentDeps{
 			ChatModel:  s.chatModel,
@@ -213,6 +214,7 @@ func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
 
 	reminderMw := agent.NewReminderMiddleware(agent.ReminderConfig{
 		TodoStore:    s.env.TodoStore,
+		GoalStore:    s.env.GoalStore,
 		PlanStore:    s.planStore,
 		EnvLabel:     "local",
 		IsRemote:     s.env.IsRemote(),
@@ -312,7 +314,7 @@ func (s *interactiveState) handlePrompt(userPrompt string) {
 	}
 	s.history = append(s.history, schema.UserMessage(userPrompt))
 	s.history = agent.DrainBgNotifications(s.bgManager, s.history)
-	resp := runner.Run(runCtx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer, s.agentTokenUsage)
+	resp := runner.Run(runCtx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.env.GoalStore, s.langfuseTracer, s.agentTokenUsage)
 	if resp != "" {
 		s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: resp})
 	}
@@ -354,7 +356,7 @@ func (s *interactiveState) handlePlanCompletion(resp string) {
 			s.rec.RecordUser(revisePrompt)
 		}
 		s.history = append(s.history, schema.UserMessage(revisePrompt))
-		newResp := runner.Run(s.runCtx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer, s.agentTokenUsage)
+		newResp := runner.Run(s.runCtx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.env.GoalStore, s.langfuseTracer, s.agentTokenUsage)
 		if newResp != "" {
 			s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: newResp})
 		}
@@ -384,7 +386,7 @@ func (s *interactiveState) handlePlanCompletion(resp string) {
 		s.rec.RecordUser(execPrompt)
 	}
 	s.history = append(s.history, schema.UserMessage(execPrompt))
-	execResp := runner.Run(s.ctx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer, s.agentTokenUsage)
+	execResp := runner.Run(s.ctx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.env.GoalStore, s.langfuseTracer, s.agentTokenUsage)
 	if execResp != "" {
 		s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: execResp})
 	}
@@ -479,6 +481,10 @@ func (s *interactiveState) handleResume(uuid string) {
 		s.env.TodoStore.Update(todoItems)
 		s.p.Send(tui.TodoUpdateMsg{})
 	}
+
+	// Restore the resumed session's goal — or reset the store when it has
+	// none, so a goal from the previously open session does not leak across.
+	s.env.GoalStore.RestoreFromSnapshot(st.Goal)
 
 	if targetEnv := st.EnvTarget; targetEnv != "local" {
 		s.sessionResumeWarning = s.attemptSSHResume(targetEnv)
@@ -661,7 +667,7 @@ func (s *interactiveState) runEventLoop(initialHistory []adk.Message, initialRes
 		s.runCtx = runCtx
 		s.agentRunning.Store(true)
 		s.history = append(s.history, schema.UserMessage(prompt))
-		resp := runner.Run(runCtx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.langfuseTracer, s.agentTokenUsage)
+		resp := runner.Run(runCtx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.env.GoalStore, s.langfuseTracer, s.agentTokenUsage)
 		runCancel()
 		s.runCtx = nil
 		s.agentRunning.Store(false)
@@ -828,6 +834,8 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		}
 	}
 
+	env.GoalStore.OnUpdate = tools.GoalRecorderHook(rec)
+
 	askUserCh := make(chan tools.AskUserResponse, 1)
 	askUserDeps := &tools.AskUserDeps{
 		ResponseCh: askUserCh,
@@ -937,7 +945,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	approvalState := runner.NewApprovalState(pwd, autoApprove)
 	st.approvalState = approvalState
 
-	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore, tui.WithVersion(Version), tui.WithApprovalModeChange(func(enabled bool) {
+	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore, tui.WithVersion(Version), tui.WithGoalStore(env.GoalStore), tui.WithApprovalModeChange(func(enabled bool) {
 		approvalState.SetSessionApproval(enabled)
 	}))
 	st.p = p
@@ -1095,6 +1103,8 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 			}
 			env.TodoStore.Update(todoItems)
 		}
+
+		env.GoalStore.RestoreFromSnapshot(resumeState.Goal)
 
 		if targetEnv := resumeState.EnvTarget; targetEnv != "local" {
 			st.sessionResumeWarning = st.attemptSSHResume(targetEnv)

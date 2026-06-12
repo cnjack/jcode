@@ -16,6 +16,7 @@ import (
 // ReminderConfig holds the static configuration for the reminder middleware.
 type ReminderConfig struct {
 	TodoStore    *tools.TodoStore
+	GoalStore    *tools.GoalStore
 	PlanStore    *tools.PlanStore
 	EnvLabel     string
 	IsRemote     bool
@@ -84,6 +85,14 @@ func (m *reminderMiddleware) BeforeModelRewriteState(
 	// Inject approved plan context for execution mode.
 	if m.cfg.PlanStore != nil && m.cfg.PlanStore.HasApprovedPlan() {
 		rc.PlanContent = m.cfg.PlanStore.Content()
+	}
+
+	// Inject active goal context so the agent never loses the objective.
+	if m.cfg.GoalStore != nil {
+		if g := m.cfg.GoalStore.Get(); g != nil && g.Status == tools.GoalActive {
+			rc.GoalActive = true
+			rc.GoalObjective = g.Objective
+		}
 	}
 
 	msgs := prompts.CollectReminders(rc)

@@ -174,12 +174,20 @@ type PlanSnapshot struct {
 	Feedback string
 }
 
+// GoalSnapshot is the recoverable state of a session goal.
+type GoalSnapshot struct {
+	Objective  string
+	Status     string
+	TokensUsed int64
+}
+
 // SessionState is the full recoverable state from a session file, including
 // conversation history, plan, todos, mode, and environment.
 type SessionState struct {
 	History      []adk.Message
 	Plan         *PlanSnapshot      // nil if no plan events found
 	Todos        []TodoSnapshotItem // last todo snapshot, nil if none
+	Goal         *GoalSnapshot      // nil if no goal events or last event cleared it
 	Mode         string             // last mode (normal/planning/executing), empty = normal
 	EnvTarget    string             // last environment (local/ssh alias)
 	SystemPrompt string             // recorded system prompt for KV-cache-friendly resume
@@ -291,6 +299,17 @@ func ReconstructState(entries []Entry) *SessionState {
 
 		case EntryTodoSnapshot:
 			state.Todos = e.Todos
+
+		case EntryGoalUpdate:
+			if e.GoalStatus == "cleared" {
+				state.Goal = nil
+			} else {
+				state.Goal = &GoalSnapshot{
+					Objective:  e.GoalObjective,
+					Status:     e.GoalStatus,
+					TokensUsed: e.GoalTokensUsed,
+				}
+			}
 
 		case EntryModeChange:
 			state.Mode = e.Mode

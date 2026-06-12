@@ -836,6 +836,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 						return m.handleCompactInput(cmds)
 					}
 
+					if prompt == "/goal" || strings.HasPrefix(prompt, "/goal ") {
+						return m.handleGoalInput(prompt, cmds)
+					}
+
 					if prompt == "/channel" {
 						return m.handleChannelInput(cmds)
 					}

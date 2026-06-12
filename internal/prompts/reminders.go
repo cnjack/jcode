@@ -16,6 +16,10 @@ type ReminderContext struct {
 	EnvLabel          string
 	IsRemote          bool
 	PlanContent       string // non-empty when executing an approved plan
+
+	// Goal context, set when an active session goal exists.
+	GoalActive    bool
+	GoalObjective string
 }
 
 // reminder is a single conditional reminder rule.
@@ -26,6 +30,19 @@ type reminder struct {
 }
 
 var builtinReminders = []reminder{
+	{
+		name: "goal_active",
+		condition: func(rc *ReminderContext) bool {
+			return rc.GoalActive && rc.GoalObjective != ""
+		},
+		message: func(rc *ReminderContext) string {
+			obj := rc.GoalObjective
+			if len(obj) > 2000 {
+				obj = obj[:2000] + "\n... (objective truncated)"
+			}
+			return fmt.Sprintf("[Active Goal]\nYou are pursuing a persistent session goal. Keep working toward it until it is verifiably complete, then call goal_update with status=\"complete\".\n\nObjective: %s", obj)
+		},
+	},
 	{
 		name: "plan_execution",
 		condition: func(rc *ReminderContext) bool {

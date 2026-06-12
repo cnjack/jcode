@@ -101,6 +101,10 @@ type Server struct {
 	// setup mode and exposes setup API endpoints while blocking chat operations.
 	needsSetup bool
 	version    string
+
+	// tokenUsage tracks per-call token totals for the agent runs, used for
+	// usage display (goal status, token updates).
+	tokenUsage *model.TokenUsage
 }
 
 // ServerConfig holds the configuration for creating a new Server.
@@ -127,6 +131,7 @@ type ServerConfig struct {
 	WebHandler    *handler.WebHandler       // optional: pre-created handler for sharing with tools
 	EventHandler  handler.AgentEventHandler // optional: handler for runner (e.g. NotifyingHandler)
 	NeedsSetup    bool                      // true when no providers are configured (setup mode)
+	TokenUsage    *model.TokenUsage         // optional: shared token tracker (created when nil)
 }
 
 // NewServer creates a new web server.
@@ -167,6 +172,10 @@ func NewServer(cfg *ServerConfig) *Server {
 		wechatClient:  cfg.WechatClient,
 		eventHandler:  eh,
 		needsSetup:    cfg.NeedsSetup,
+		tokenUsage:    cfg.TokenUsage,
+	}
+	if s.tokenUsage == nil {
+		s.tokenUsage = &model.TokenUsage{}
 	}
 
 	// Wire TodoStore → session recording.
@@ -185,6 +194,19 @@ func NewServer(cfg *ServerConfig) *Server {
 					}
 				}
 				r.RecordTodoSnapshot(snapItems)
+			}
+		}
+	}
+
+	// Wire GoalStore → session recording, mirroring the TodoStore wiring above.
+	if cfg.Env != nil && cfg.Env.GoalStore != nil {
+		cfg.Env.GoalStore.OnUpdate = func(g *tools.Goal) {
+			s.mu.RLock()
+			r := s.recorder
+			s.mu.RUnlock()
+			tools.GoalRecorderHook(r)(g)
+			if s.handler != nil {
+				s.handler.Emit("goal_update", g)
 			}
 		}
 	}
@@ -214,6 +236,9 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/sessions", s.handleNewSession)
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	mux.HandleFunc("GET /api/todos", s.handleGetTodos)
+	mux.HandleFunc("GET /api/goal", s.handleGetGoal)
+	mux.HandleFunc("POST /api/goal", s.handleSetGoal)
+	mux.HandleFunc("DELETE /api/goal", s.handleClearGoal)
 	mux.HandleFunc("POST /api/approval", s.handleApproval)
 	mux.HandleFunc("GET /api/files", s.handleListFiles)
 	mux.HandleFunc("GET /api/files/content", s.handleReadFile)
@@ -590,7 +615,7 @@ func (s *Server) submitMessage(message, mode, source, sessionID string, images [
 		// Take a git snapshot before the agent run for session diff tracking.
 		s.takeSessionSnapshot()
 
-		resp := runner.Run(runCtx, agent, history, s.eventHandler, recorder, s.todoStore, s.tracer, nil)
+		resp := runner.Run(runCtx, agent, history, s.eventHandler, recorder, s.todoStore, s.env.GoalStore, s.tracer, s.tokenUsage)
 		if resp != "" {
 			s.mu.Lock()
 			s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: resp})
@@ -768,25 +793,21 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	// to avoid deadlock: todoStore.Update → OnUpdate → s.mu.RLock.
 	var updateTodos bool
 	var todoItems []tools.TodoItem
+	var resuming bool
+	var goalSnap *session.GoalSnapshot
 	if req.SessionID != "" {
+		resuming = true
 		// Resuming: load prior conversation into history so the agent has context.
 		entries, _ := session.LoadSession(req.SessionID)
-		// Reconstruct full message history (including tool calls/results).
-		s.history = session.ReconstructHistory(entries)
-		// Restore todos from the last snapshot in the session.
-		if s.todoStore != nil {
-			var lastTodos []session.TodoSnapshotItem
-			for _, e := range entries {
-				if e.Type == session.EntryTodoSnapshot {
-					lastTodos = e.Todos
-				}
-			}
-			if len(lastTodos) > 0 {
-				updateTodos = true
-				todoItems = make([]tools.TodoItem, len(lastTodos))
-				for i, t := range lastTodos {
-					todoItems[i] = tools.TodoItem{ID: t.ID, Title: t.Title, Status: tools.TodoStatus(t.Status)}
-				}
+		// Reconstruct full state (message history, todos, goal).
+		st := session.ReconstructState(entries)
+		s.history = st.History
+		goalSnap = st.Goal
+		if s.todoStore != nil && len(st.Todos) > 0 {
+			updateTodos = true
+			todoItems = make([]tools.TodoItem, len(st.Todos))
+			for i, t := range st.Todos {
+				todoItems[i] = tools.TodoItem{ID: t.ID, Title: t.Title, Status: tools.TodoStatus(t.Status)}
 			}
 		}
 	} else {
@@ -801,6 +822,21 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	// Apply todo updates outside the lock to avoid deadlock with OnUpdate callback.
 	if updateTodos && s.todoStore != nil {
 		s.todoStore.Update(todoItems)
+	}
+
+	// Apply the session's goal state outside the lock. Restore is silent (no
+	// OnUpdate, so nothing is re-recorded into the session file); broadcast
+	// the new state to clients explicitly. A brand-new session always resets
+	// the store so a goal from the previous session does not leak across.
+	if s.env != nil && s.env.GoalStore != nil {
+		if resuming {
+			s.env.GoalStore.RestoreFromSnapshot(goalSnap)
+		} else {
+			s.env.GoalStore.Restore(nil)
+		}
+		if s.handler != nil {
+			s.handler.Emit("goal_update", s.env.GoalStore.Get())
+		}
 	}
 
 	// Notify clients. When resuming an existing session, do NOT broadcast session_reset
@@ -991,6 +1027,55 @@ func (s *Server) handleGetTodos(w http.ResponseWriter, r *http.Request) {
 	}
 	items := s.todoStore.Items()
 	writeJSON(w, http.StatusOK, items)
+}
+
+// handleGetGoal returns the current session goal (or null when none is set).
+func (s *Server) handleGetGoal(w http.ResponseWriter, _ *http.Request) {
+	if s.env == nil || s.env.GoalStore == nil {
+		writeJSON(w, http.StatusOK, nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.env.GoalStore.Get())
+}
+
+// handleSetGoal sets (or replaces) the session goal. Unless start=false, it also
+// kicks off an agent run so work begins immediately.
+func (s *Server) handleSetGoal(w http.ResponseWriter, r *http.Request) {
+	if s.env == nil || s.env.GoalStore == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "goals not available"})
+		return
+	}
+	var req struct {
+		Objective string `json:"objective"`
+		Start     *bool  `json:"start,omitempty"` // default true
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	objective, err := tools.ValidateGoalObjective(req.Objective)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	g := s.env.GoalStore.Set(objective)
+
+	if req.Start == nil || *req.Start {
+		// Start working immediately when idle; if busy, the continuation guard
+		// will pick the goal up after the current run finishes.
+		if s.running.CompareAndSwap(false, true) {
+			s.submitMessage(tools.GoalKickoffPrompt(objective), s.mode, "", "", nil)
+		}
+	}
+	writeJSON(w, http.StatusOK, g)
+}
+
+// handleClearGoal removes the session goal.
+func (s *Server) handleClearGoal(w http.ResponseWriter, _ *http.Request) {
+	if s.env != nil && s.env.GoalStore != nil {
+		s.env.GoalStore.Clear()
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "cleared"})
 }
 
 func (s *Server) handleApproval(w http.ResponseWriter, r *http.Request) {

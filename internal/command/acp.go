@@ -58,6 +58,7 @@ type acpSession struct {
 	rec           *session.Recorder
 	todoStore     *tools.TodoStore
 	tracer        *telemetry.LangfuseTracer
+	tokenUsage    *internalmodel.TokenUsage
 	cancel        context.CancelFunc
 	mu            sync.Mutex
 
@@ -132,28 +133,40 @@ func handleACPSubcommand() {
 	config.Logger().Printf("[acp] ACP connection closed")
 }
 
+// availableCommandList builds the slash commands advertised to ACP clients:
+// the built-in /goal command plus any skill-based commands.
+func availableCommandList(skillLoader *skills.Loader) []acp.AvailableCommand {
+	cmds := []acp.AvailableCommand{
+		{
+			Name:        "goal",
+			Description: "Set a persistent objective the agent pursues across turns (or 'clear' / status)",
+			Input: &acp.AvailableCommandInput{
+				Unstructured: &acp.UnstructuredCommandInput{
+					Hint: "<objective> | clear | status",
+				},
+			},
+		},
+	}
+	if skillLoader != nil {
+		for _, sk := range skillLoader.SlashCommands() {
+			cmds = append(cmds, acp.AvailableCommand{
+				Name:        strings.TrimPrefix(sk.Slash, "/"),
+				Description: sk.Description,
+				Input: &acp.AvailableCommandInput{
+					Unstructured: &acp.UnstructuredCommandInput{
+						Hint: "additional instructions",
+					},
+				},
+			})
+		}
+	}
+	return cmds
+}
+
 // broadcastSlashCommands sends the available slash commands to the client via
 // an available_commands_update session notification.
 func (a *acpAgent) broadcastSlashCommands(sessionID acp.SessionId, sess *acpSession) {
-	var cmds []acp.AvailableCommand
-
-	// Skill-based slash commands.
-	if sess.skillLoader != nil {
-		for _, sk := range sess.skillLoader.SlashCommands() {
-			name := strings.TrimPrefix(sk.Slash, "/")
-			cmd := acp.AvailableCommand{
-				Name:        name,
-				Description: sk.Description,
-			}
-			cmd.Input = &acp.AvailableCommandInput{
-				Unstructured: &acp.UnstructuredCommandInput{
-					Hint: "additional instructions",
-				},
-			}
-			cmds = append(cmds, cmd)
-		}
-	}
-
+	cmds := availableCommandList(sess.skillLoader)
 	if len(cmds) == 0 {
 		return
 	}
@@ -316,6 +329,10 @@ func (a *acpAgent) buildAgentSession(
 	config.Logger().Printf("[acp] using LocalExecutor for session %s", sessionID)
 	bgManager := tools.NewBackgroundManager(env)
 
+	// Per-session token tracker for usage display (goal status, reminders,
+	// token updates).
+	tokenUsage := &internalmodel.TokenUsage{}
+
 	// Load MCP tools from config.
 	var mcpTools []tool.BaseTool
 	if len(cfg.MCPServers) > 0 {
@@ -326,6 +343,7 @@ func (a *acpAgent) buildAgentSession(
 		env.NewReadTool(), env.NewEditTool(), env.NewWriteTool(),
 		env.NewExecuteTool(bgManager), env.NewGrepTool(),
 		env.NewTodoWriteTool(), env.NewTodoReadTool(),
+		env.NewGoalSetTool(), env.NewGoalGetTool(), env.NewGoalUpdateTool(),
 		env.NewSwitchEnvTool(),
 		env.NewCheckBackgroundTool(bgManager),
 	}
@@ -372,6 +390,7 @@ func (a *acpAgent) buildAgentSession(
 			}
 			rec.RecordTodoSnapshot(snapItems)
 		}
+		env.GoalStore.OnUpdate = tools.GoalRecorderHook(rec)
 	}
 
 	// Langfuse tracer
@@ -419,10 +438,11 @@ func (a *acpAgent) buildAgentSession(
 
 	reminderMw := agent.NewReminderMiddleware(agent.ReminderConfig{
 		TodoStore:    env.TodoStore,
+		GoalStore:    env.GoalStore,
 		EnvLabel:     "local",
 		IsRemote:     env.IsRemote(),
 		ContextLimit: contextLimit,
-	}, nil)
+	}, tokenUsage)
 	handlers = append(handlers, reminderMw)
 
 	ag, err := agent.NewAgent(ctx, chatModel, allTools, normalPrompt, approvalState.RequestApproval, nil, handlers)
@@ -444,6 +464,7 @@ func (a *acpAgent) buildAgentSession(
 		rec:           rec,
 		todoStore:     env.TodoStore,
 		tracer:        tracer,
+		tokenUsage:    tokenUsage,
 		history:       history,
 		mode:          acpModeAgent,
 		createAgent:   makeAgent,
@@ -502,6 +523,47 @@ func (a *acpAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Pr
 		parts := strings.SplitN(cmd, " ", 2)
 		cmdName := parts[0]
 
+		// Built-in /goal command. Status and clear are answered locally —
+		// the goal state lives in GoalStore, so no agent run is needed (and
+		// running one would let the continuation guard auto-continue an
+		// active goal from a mere status query).
+		if cmdName == "goal" {
+			rest := ""
+			if len(parts) > 1 {
+				rest = parts[1]
+			}
+			var goalStore *tools.GoalStore
+			if sess.env != nil {
+				goalStore = sess.env.GoalStore
+			}
+			action := tools.ParseGoalCommand(rest)
+			switch action.Kind {
+			case "status":
+				line := "🎯 No goal set. Use /goal <objective> to set one."
+				if goalStore != nil && goalStore.Has() {
+					line = goalStore.StatusLine()
+				}
+				sess.h.OnAgentText(line)
+				return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+			case "clear":
+				if goalStore != nil {
+					goalStore.Clear()
+				}
+				sess.h.OnAgentText("🎯 Goal cleared.")
+				return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+			default: // "set"
+				objective, err := tools.ValidateGoalObjective(action.Objective)
+				if err != nil {
+					sess.h.OnAgentText("🎯 " + err.Error())
+					return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+				}
+				if goalStore != nil {
+					goalStore.Set(objective)
+				}
+				prompt = tools.GoalKickoffPrompt(objective)
+			}
+		}
+
 		// Check if it's a skill slash command.
 		if sess.skillLoader != nil {
 			if sk := sess.skillLoader.GetBySlash("/" + cmdName); sk != nil {
@@ -556,7 +618,7 @@ func (a *acpAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Pr
 	copy(history, sess.history)
 	sess.mu.Unlock()
 
-	resp := runner.Run(promptCtx, sess.ag, history, sess.h, sess.rec, sess.todoStore, sess.tracer, nil)
+	resp := runner.Run(promptCtx, sess.ag, history, sess.h, sess.rec, sess.todoStore, sess.env.GoalStore, sess.tracer, sess.tokenUsage)
 
 	sess.mu.Lock()
 	if resp != "" {
@@ -749,6 +811,7 @@ func (a *acpAgent) LoadSession(ctx context.Context, params acp.LoadSessionReques
 	if err != nil {
 		return acp.LoadSessionResponse{}, err
 	}
+	sess.env.GoalStore.RestoreFromSnapshot(resumeState.Goal)
 
 	a.mu.Lock()
 	if old, ok := a.sessions[params.SessionId]; ok {
@@ -806,9 +869,11 @@ func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRe
 
 	// Load history from disk so the agent has conversation context.
 	var history []*schema.Message
+	var goalSnap *session.GoalSnapshot
 	if entries, err := session.LoadSession(resumeUUID); err == nil {
 		resumeState := session.ReconstructState(entries)
 		history = session.PruneOldToolOutputs(resumeState.History, 2)
+		goalSnap = resumeState.Goal
 		config.Logger().Printf("[acp] ResumeSession: loaded %d history messages for %s", len(history), params.SessionId)
 	} else {
 		config.Logger().Printf("[acp] ResumeSession: could not load history for %s: %v", params.SessionId, err)
@@ -818,6 +883,7 @@ func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRe
 	if err != nil {
 		return acp.ResumeSessionResponse{}, err
 	}
+	sess.env.GoalStore.RestoreFromSnapshot(goalSnap)
 
 	a.mu.Lock()
 	a.sessions[params.SessionId] = sess

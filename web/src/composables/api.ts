@@ -1,5 +1,5 @@
 // API client for jcode backend
-import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, MCPListResponse, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ModelStateResponse, ChatImage } from '@/types/api'
+import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, MCPListResponse, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ModelStateResponse, ChatImage } from '@/types/api'
 
 const BASE = ''
 
@@ -39,6 +39,13 @@ export const api = {
     }>('/api/status'),
   config: () => request<{ provider: string; model: string; max_iterations: number }>('/api/config'),
   todos: () => request<TodoItem[]>('/api/todos'),
+  goal: () => request<Goal | null>('/api/goal'),
+  setGoal: (objective: string, start = true) =>
+    request<Goal>('/api/goal', {
+      method: 'POST',
+      body: JSON.stringify({ objective, start }),
+    }),
+  clearGoal: () => request<{ status: string }>('/api/goal', { method: 'DELETE' }),
   sessions: () => request<SessionItem[]>('/api/sessions'),
   session: (id: string) => request<SessionEntry[]>(`/api/sessions/${encodeURIComponent(id)}`),
   deleteSession: (id: string) =>

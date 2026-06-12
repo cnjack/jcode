@@ -8,6 +8,7 @@ import ChatMessageVue from '@/components/ChatMessage.vue'
 import ToolCallCard from '@/components/ToolCallCard.vue'
 import ApprovalBanner from '@/components/ApprovalBanner.vue'
 import TodoPanel from '@/components/TodoPanel.vue'
+import GoalBanner from '@/components/GoalBanner.vue'
 import ChatInput from '@/components/ChatInput.vue'
 import Sidebar from '@/components/Sidebar.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
@@ -61,6 +62,7 @@ const { connected } = useWebSocket({
   onTokenUpdate: (data) => { store.tokenInfo = data },
   onAgentDone: (data) => store.agentDone(data?.error),
   onTodoUpdate: () => store.fetchTodos(),
+  onGoalUpdate: (data) => { store.goal = data },
   onApprovalRequest: (data) => store.addApprovalRequest(data),
   onSessionReset: () => store.clearChat(),
   onModelChanged: (data) => {
@@ -143,6 +145,7 @@ onMounted(async () => {
   }
   store.fetchConfig()
   store.fetchTodos()
+  store.fetchGoal()
   store.fetchModels()
   store.fetchModelState()
   store.fetchSessions()
@@ -193,6 +196,7 @@ function onSetupComplete() {
   // Now load everything
   store.fetchConfig()
   store.fetchTodos()
+  store.fetchGoal()
   store.fetchModels()
   store.fetchModelState()
   store.fetchSessions()
@@ -320,6 +324,7 @@ function startResize(e: MouseEvent) {
         </transition>
 
         <TodoPanel />
+        <GoalBanner />
         <ChatInput />
       </div>
 
