@@ -3,11 +3,13 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/tools"
 )
 
 // commandSuggestion represents a single slash command suggestion item.
@@ -24,6 +26,7 @@ func (m Model) getAllCommands() []commandSuggestion {
 		{"/ssh", "SSH connection"},
 		{"/resume", "Resume a previous session"},
 		{"/compact", "Compress conversation context"},
+		{"/goal", "Set a persistent objective (auto-continues)"},
 		{"/bg", "List background tasks"},
 		{"/channel", "Manage channels (WeChat etc.)"},
 		{"/help", "Show keyboard shortcuts"},
@@ -77,6 +80,13 @@ func (m Model) inputAreaView() string {
 
 	// 1. Mode pills line (Agent/Plan + Ask/Auto)
 	parts = append(parts, m.renderModePills())
+
+	// 1b. Active goal indicator (only while a goal exists).
+	if m.goalStore != nil {
+		if line := m.goalStore.StatusLine(); line != "" {
+			parts = append(parts, lipgloss.NewStyle().Foreground(colorPrimary).Render(line))
+		}
+	}
 
 	// 2. Input content: textarea or special prompts
 	switch {
@@ -240,6 +250,84 @@ func (m *Model) handleCompactInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	default:
 	}
 
+	cmds = append(cmds, m.spinner.Tick)
+	return m, tea.Batch(cmds...)
+}
+
+// handleGoalInput handles `/goal` (status), `/goal clear`, and
+// `/goal <objective>` (set + start working toward it).
+func (m *Model) handleGoalInput(prompt string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	refresh := func() {
+		if m.ready {
+			m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))
+			m.viewport.SetContent(m.renderViewportContent())
+			m.viewport.GotoBottom()
+		}
+	}
+
+	action := tools.ParseGoalCommand(strings.TrimPrefix(prompt, "/goal"))
+
+	switch action.Kind {
+	case "status":
+		if m.goalStore == nil || !m.goalStore.Has() {
+			m.lines = append(m.lines, textLine(toolLabelStyle.Render("  🎯 No goal set. Use /goal <objective> to set one.")))
+		} else {
+			m.lines = append(m.lines, textLine(toolLabelStyle.Render("  "+m.goalStore.StatusLine())))
+		}
+		refresh()
+		return m, tea.Batch(cmds...)
+
+	case "clear":
+		if m.goalStore == nil {
+			m.lines = append(m.lines, textLine(toolLabelStyle.Render("  🎯 Goals are not available in this session.")))
+			refresh()
+			return m, tea.Batch(cmds...)
+		}
+		m.goalStore.Clear()
+		m.lines = append(m.lines, textLine(toolLabelStyle.Render("  🎯 Goal cleared.")))
+		refresh()
+		return m, tea.Batch(cmds...)
+	}
+
+	if m.goalStore == nil {
+		m.lines = append(m.lines, textLine(toolLabelStyle.Render("  🎯 Goals are not available in this session.")))
+		refresh()
+		return m, tea.Batch(cmds...)
+	}
+
+	objective, err := tools.ValidateGoalObjective(action.Objective)
+	if err != nil {
+		m.lines = append(m.lines, textLine(toolLabelStyle.Render("  🎯 "+err.Error())))
+		refresh()
+		return m, tea.Batch(cmds...)
+	}
+
+	m.goalStore.Set(objective)
+	m.lines = append(m.lines, textLine(""))
+	m.lines = append(m.lines, textLine(userPromptStyle.Render("🎯 "+prompt)))
+	m.lines = append(m.lines, textLine(toolLabelStyle.Render("  "+m.goalStore.StatusLine())))
+
+	// If the agent is already running, do not submit a kickoff: the in-flight
+	// run's goal-continuation guard picks the new goal up as soon as the
+	// current turn finishes (a blocking send to the prompt channel here could
+	// also freeze the UI).
+	if !m.agentDone && m.thinking {
+		m.lines = append(m.lines, textLine(toolLabelStyle.Render("  🎯 Agent is running — it will continue toward this goal after the current turn.")))
+		refresh()
+		return m, tea.Batch(cmds...)
+	}
+
+	// Idle: start the agent working toward the goal immediately.
+	m.mode = ModeAgent
+	m.agentDone = false
+	m.thinking = true
+	m.promptStartTime = time.Now()
+	refresh()
+
+	kickoff := tools.GoalKickoffPrompt(objective)
+	cmds = append(cmds, func() tea.Msg {
+		return PromptSubmitMsg{Prompt: kickoff}
+	})
 	cmds = append(cmds, m.spinner.Tick)
 	return m, tea.Batch(cmds...)
 }

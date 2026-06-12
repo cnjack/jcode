@@ -7,6 +7,7 @@ import type {
   ToolCall,
   PendingApproval,
   TodoItem,
+  Goal,
   TokenUpdateData,
   SessionItem,
   AgentMode,
@@ -36,6 +37,10 @@ export const useChatStore = defineStore('chat', () => {
   // --- State ---
   const timeline = ref<TimelineItem[]>([])
   const todos = ref<TodoItem[]>([])
+  const goal = ref<Goal | null>(null)
+  // When armed (toggled from the input toolbar), the next message typed in the
+  // normal prompt box is submitted as the session goal instead of a chat message.
+  const goalArmed = ref(false)
   const sessions = ref<SessionItem[]>([])
   const isRunning = ref(false)
   const tokenInfo = ref<TokenUpdateData | null>(null)
@@ -223,6 +228,42 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function sendMessage(text: string, images?: ChatImage[]) {
+    const trimmed = text.trim()
+
+    // Goal-armed mode: the 🎯 toggle in the input toolbar arms the prompt box,
+    // and the next normal message becomes the session goal (slash commands
+    // still behave as commands).
+    if (goalArmed.value && trimmed && !trimmed.startsWith('/')) {
+      goalArmed.value = false
+      addMessage('user', text)
+      await setGoalObjective(trimmed)
+      return
+    }
+
+    // Intercept the /goal slash command so it manages the session goal instead
+    // of being sent to the model as a plain message. Grammar matches TUI/ACP:
+    // "" | "status" reports, "clear" removes, anything else sets the objective.
+    if (trimmed === '/goal' || trimmed.startsWith('/goal ')) {
+      const arg = trimmed.slice('/goal'.length).trim()
+      if (arg === '' || arg === 'status') {
+        await fetchGoal()
+        const g = goal.value
+        addMessage(
+          'system',
+          g ? `🎯 ${g.status} — ${g.objective}` : '🎯 No goal set. Use /goal <objective> to set one.',
+        )
+        return
+      }
+      if (arg === 'clear') {
+        await clearGoal()
+        addMessage('system', '🎯 Goal cleared.')
+        return
+      }
+      addMessage('user', text)
+      await setGoalObjective(arg)
+      return
+    }
+
     addMessage('user', text, undefined, images)
     isRunning.value = true
     streamingText = ''
@@ -308,6 +349,34 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  async function fetchGoal() {
+    try {
+      goal.value = await api.goal()
+    } catch (err) {
+      console.error('Failed to fetch goal:', err)
+    }
+  }
+
+  // setGoalObjective sets a new session goal. The backend starts working toward
+  // it immediately, so reflect the running state locally.
+  async function setGoalObjective(objective: string) {
+    try {
+      goal.value = await api.setGoal(objective, true)
+      isRunning.value = true
+    } catch (err: unknown) {
+      addMessage('system', err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function clearGoal() {
+    try {
+      await api.clearGoal()
+      goal.value = null
+    } catch (err) {
+      console.error('Failed to clear goal:', err)
+    }
+  }
+
   async function fetchConfig() {
     try {
       const c = await api.config()
@@ -381,6 +450,8 @@ export const useChatStore = defineStore('chat', () => {
   function clearChat() {
     timeline.value = []
     todos.value = []
+    goal.value = null
+    goalArmed.value = false
     tokenInfo.value = null
     streamingText = ''
     streamingMsgId = ''
@@ -638,6 +709,9 @@ export const useChatStore = defineStore('chat', () => {
       currentSessionId.value = resp.session_id || uuid
 
       clearChat()
+      // The backend restored the session's goal — refresh explicitly in case
+      // the goal_update WS push is missed.
+      fetchGoal()
 
       // Track pending tool calls by tool_call_id so we can match results
       const pendingToolCalls = new Map<string, ToolCall>()
@@ -700,6 +774,8 @@ export const useChatStore = defineStore('chat', () => {
     // State
     timeline,
     todos,
+    goal,
+    goalArmed,
     sessions,
     isRunning,
     tokenInfo,
@@ -738,6 +814,9 @@ export const useChatStore = defineStore('chat', () => {
     deleteSession,
     newSession,
     fetchTodos,
+    fetchGoal,
+    setGoalObjective,
+    clearGoal,
     fetchConfig,
     fetchHealth,
     fetchModels,

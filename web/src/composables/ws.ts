@@ -9,6 +9,7 @@ import type {
   ApprovalRequestData,
   SubagentEventData,
   SubagentProgressData,
+  Goal,
 } from '@/types/api'
 
 type WSHandler = {
@@ -19,6 +20,7 @@ type WSHandler = {
   onTokenUpdate?: (data: TokenUpdateData) => void
   onAgentDone?: (data: AgentDoneData) => void
   onTodoUpdate?: () => void
+  onGoalUpdate?: (data: Goal | null) => void
   onApprovalRequest?: (data: ApprovalRequestData) => void
   onSessionReset?: (data: { session_id: string }) => void
   onModelChanged?: (data: { provider: string; model: string }) => void
@@ -49,6 +51,7 @@ export function useWebSocket(handlers: WSHandler) {
     token_update: (d) => handlers.onTokenUpdate?.(d),
     agent_done: (d) => handlers.onAgentDone?.(d),
     todo_update: () => handlers.onTodoUpdate?.(),
+    goal_update: (d) => handlers.onGoalUpdate?.(d),
     approval_request: (d) => handlers.onApprovalRequest?.(d),
     session_reset: (d) => handlers.onSessionReset?.(d),
     model_changed: (d) => handlers.onModelChanged?.(d),

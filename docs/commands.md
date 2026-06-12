@@ -74,6 +74,7 @@ Type these in the TUI input area:
 | `/ssh` | Open SSH connection wizard |
 | `/resume` | Resume a previous session |
 | `/compact` | Compact conversation context |
+| `/goal` | Set a persistent objective the agent works toward ([Goals](goal.html)) |
 | `/bg` | Show background tasks |
 | `/review-pr` | Run PR review skill |
 | `/pr-comments` | Fetch PR comments |
