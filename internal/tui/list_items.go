@@ -51,6 +51,29 @@ func (i settingItem) Title() string       { return i.title }
 func (i settingItem) Description() string { return i.desc }
 func (i settingItem) FilterValue() string { return i.title }
 
+// themeItem is used for the /theme picker.
+type themeItem struct {
+	name        string // theme id, e.g. "nord-dark"
+	displayName string // human label, e.g. "Nord"
+	appearance  string // "dark" or "light"
+	isCurrent   bool   // the theme active before previewing started
+}
+
+func (i themeItem) Title() string {
+	marker := "  "
+	if i.isCurrent {
+		marker = "✓ "
+	}
+	return marker + i.displayName
+}
+func (i themeItem) Description() string {
+	if i.isCurrent {
+		return i.appearance + " · active"
+	}
+	return i.appearance
+}
+func (i themeItem) FilterValue() string { return i.displayName + " " + i.name }
+
 // sessionListItem implements list.Item for session picking.
 type sessionListItem struct {
 	meta session.SessionMeta

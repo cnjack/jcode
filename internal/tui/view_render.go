@@ -49,6 +49,10 @@ func (m *Model) View() tea.View {
 		return m.newView(m.manageModelsView())
 	}
 
+	if m.pickingTheme {
+		return m.newView(m.themePickerView())
+	}
+
 	if m.pickingSession {
 		return m.newView(m.sessionPickerView())
 	}

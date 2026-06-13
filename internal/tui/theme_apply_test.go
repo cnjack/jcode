@@ -45,6 +45,37 @@ func TestApplyThemeSwitchesPalette(t *testing.T) {
 	}
 }
 
+// TestThemePickerOpenPreviewRevert covers the picker's open/preview/revert
+// glue without touching disk: opening stashes the active theme, previewing
+// switches it live, and reverting restores the stashed one (the Esc path).
+func TestThemePickerOpenPreviewRevert(t *testing.T) {
+	defer ApplyTheme(theme.DefaultDark)
+
+	ApplyTheme("jcode-dark")
+	m := &Model{}
+	m.openThemePicker(nil)
+	if !m.pickingTheme {
+		t.Fatal("openThemePicker did not set pickingTheme")
+	}
+	if m.themeBeforePreview != "jcode-dark" {
+		t.Fatalf("themeBeforePreview = %q, want jcode-dark", m.themeBeforePreview)
+	}
+	if got := m.selectedThemeName(); got != "jcode-dark" {
+		t.Errorf("initial selection = %q, want the active theme jcode-dark", got)
+	}
+
+	m.applyThemePreview("nord-dark")
+	if currentTheme.Name != "nord-dark" {
+		t.Errorf("preview did not switch theme, got %q", currentTheme.Name)
+	}
+
+	// Esc path restores the theme active when the picker opened.
+	m.applyThemePreview(m.themeBeforePreview)
+	if currentTheme.Name != "jcode-dark" {
+		t.Errorf("revert failed, got %q", currentTheme.Name)
+	}
+}
+
 // TestGlamourStyleTracksAppearance ensures markdown rendering follows the
 // active theme's light/dark appearance.
 func TestGlamourStyleTracksAppearance(t *testing.T) {
