@@ -24,6 +24,7 @@ func (m Model) getAllCommands() []commandSuggestion {
 	commands := []commandSuggestion{
 		{"/setting", "Settings menu"},
 		{"/model", "Switch model"},
+		{"/theme", "Switch color theme"},
 		{"/ssh", "SSH connection"},
 		{"/resume", "Resume a previous session"},
 		{"/compact", "Compress conversation context"},

@@ -189,6 +189,13 @@ type Model struct {
 	managingModels     bool
 	manageModelsPicker list.Model
 
+	// ─── Theme picker state ───
+	pickingTheme       bool
+	themePicker        list.Model
+	themeBeforePreview string // theme name to restore if the picker is cancelled
+	themePersisted     bool   // true when a theme was explicitly chosen/loaded
+	//   (suppresses terminal-background auto-detection)
+
 	// ─── Render performance cache ───
 	contentDirty      bool   // true when lines/currentText/thinking changed since last render
 	renderedContent   string // cached output of renderContent()
@@ -326,6 +333,9 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
 		textarea.Blink,
+		// Ask the terminal for its background color so we can auto-pick a light
+		// or dark default theme when the user hasn't chosen one explicitly.
+		tea.RequestBackgroundColor,
 		// Force BubbleTea to use GraphemeWidth mode and enable Unicode Core
 		// mode (2027) on the terminal. This synchronizes the renderer's width
 		// calculation with the terminal, fixing emoji border alignment.
@@ -359,7 +369,7 @@ func (m *Model) confirmCancelAgent() {
 }
 
 func (m Model) inputActive() bool {
-	return (m.mode == ModeAgent || m.sshStep > 0 || m.sshSavePrompt) && !m.pickingModel && !m.managingModels && !m.showingSetting && !m.showingHelp && !m.pickingSSHAlias && !m.pickingSession && !m.approvalPending && !m.planReviewActive && !m.askUserActive
+	return (m.mode == ModeAgent || m.sshStep > 0 || m.sshSavePrompt) && !m.pickingModel && !m.managingModels && !m.pickingTheme && !m.showingSetting && !m.showingHelp && !m.pickingSSHAlias && !m.pickingSession && !m.approvalPending && !m.planReviewActive && !m.askUserActive
 }
 
 // ModelOption configures a Model before the BubbleTea program starts.
@@ -421,6 +431,20 @@ func WithVersion(v string) ModelOption {
 func WithGoalStore(gs *tools.GoalStore) ModelOption {
 	return func(m *Model) {
 		m.goalStore = gs
+	}
+}
+
+// WithTheme applies the persisted color theme at startup. A non-empty name
+// marks the theme as explicit, suppressing terminal-background auto-detection.
+func WithTheme(name string) ModelOption {
+	return func(m *Model) {
+		if name == "" {
+			return
+		}
+		ApplyTheme(name)
+		m.themePersisted = true
+		// Rebuild the markdown renderer so it matches the applied theme.
+		m.recreateMDRenderer()
 	}
 }
 

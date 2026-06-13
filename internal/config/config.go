@@ -145,6 +145,11 @@ type Config struct {
 	// "plan", or "autopilot". When empty, AutoApprove is used as a fallback.
 	DefaultMode string `json:"default_mode,omitempty"`
 
+	// Theme is the built-in color theme name for the terminal UI (e.g.
+	// "jcode-dark", "nord-dark", "github-light"). Empty auto-selects a default
+	// from the detected terminal background. See internal/theme for the catalog.
+	Theme string `json:"theme,omitempty"`
+
 	// Channel controls external messaging channel behavior.
 	Channel *ChannelConfig `json:"channel,omitempty"`
 
