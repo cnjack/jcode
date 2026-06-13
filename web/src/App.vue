@@ -8,7 +8,6 @@ import { useTheme } from '@/composables/useTheme'
 import ChatMessageVue from '@/components/ChatMessage.vue'
 import ToolCallCard from '@/components/ToolCallCard.vue'
 import ApprovalBanner from '@/components/ApprovalBanner.vue'
-import TodoPanel from '@/components/TodoPanel.vue'
 import GoalBanner from '@/components/GoalBanner.vue'
 import ChatInput from '@/components/ChatInput.vue'
 import Sidebar from '@/components/Sidebar.vue'
@@ -32,7 +31,7 @@ const bottomPanel = ref<'none' | 'terminal'>('none')
 const bottomPanelHeight = ref(260)
 const isResizingPanel = ref(false)
 const rightPanelOpen = ref(false)
-const rightPanelTab = ref<'files' | 'changes'>('files')
+const rightPanelTab = ref<'files' | 'changes' | 'plan'>('files')
 
 // Scroll-to-bottom
 const isAtBottom = ref(true)
@@ -132,6 +131,11 @@ function handleGlobalKeydown(e: KeyboardEvent) {
     togglePanel('changes')
     return
   }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'P') {
+    e.preventDefault()
+    togglePanel('plan')
+    return
+  }
   if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
     e.preventDefault()
     sidebarCollapsed.value = !sidebarCollapsed.value
@@ -172,12 +176,12 @@ function openFile() {
   rightPanelTab.value = 'files'
 }
 
-function togglePanel(panel: 'terminal' | 'files' | 'changes') {
+function togglePanel(panel: 'terminal' | 'files' | 'changes' | 'plan') {
   if (panel === 'terminal') {
     bottomPanel.value = bottomPanel.value === 'terminal' ? 'none' : 'terminal'
     return
   }
-  // files and changes toggle the right panel
+  // files, changes, and plan toggle the right panel
   if (rightPanelOpen.value && rightPanelTab.value === panel) {
     rightPanelOpen.value = false
   } else {
@@ -185,6 +189,22 @@ function togglePanel(panel: 'terminal' | 'files' | 'changes') {
     rightPanelTab.value = panel
   }
 }
+
+// Auto-open the Plan tab once when a plan first appears during an active run.
+// Gated on isRunning so page loads and session switches (not running) never
+// seize the panel, and one-shot per run so a manual close is respected for the
+// rest of that run. A new run re-arms the one-shot.
+const planAutoOpened = ref(false)
+watch(() => store.isRunning, (running) => {
+  if (running) planAutoOpened.value = false
+})
+watch(() => store.todos.length, (len) => {
+  if (len > 0 && store.isRunning && !planAutoOpened.value && !rightPanelOpen.value) {
+    rightPanelOpen.value = true
+    rightPanelTab.value = 'plan'
+    planAutoOpened.value = true
+  }
+})
 
 async function onProjectSwitched() {
   await store.fetchHealth()
@@ -261,7 +281,8 @@ function startResize(e: MouseEvent) {
         :pwd="store.pwd || ''"
         :is-running="store.isRunning"
         :ws-connected="store.wsConnected"
-        :active-panel="bottomPanel === 'terminal' ? 'terminal' : rightPanelOpen ? rightPanelTab : 'none'"
+        :active-panel="rightPanelOpen ? rightPanelTab : 'none'"
+        :terminal-open="bottomPanel === 'terminal'"
         @toggle-sidebar="sidebarCollapsed = !sidebarCollapsed"
         @toggle-panel="togglePanel"
       />
@@ -328,7 +349,6 @@ function startResize(e: MouseEvent) {
           </button>
         </transition>
 
-        <TodoPanel />
         <GoalBanner />
         <ChatInput />
       </div>

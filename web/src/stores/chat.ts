@@ -99,9 +99,16 @@ export const useChatStore = defineStore('chat', () => {
   })
 
   // --- Actions ---
-  function addMessage(role: ChatMessage['role'], content: string, source?: string, images?: ChatImage[]): string {
+  function addMessage(
+    role: ChatMessage['role'],
+    content: string,
+    source?: string,
+    images?: ChatImage[],
+    level?: ChatMessage['level'],
+    detail?: string,
+  ): string {
     const id = genId('msg')
-    const msg: ChatMessage = { id, role, content, timestamp: Date.now(), source, images }
+    const msg: ChatMessage = { id, role, content, timestamp: Date.now(), source, images, level, detail }
     timeline.value.push({ kind: 'message', data: msg, seq: nextSeqId() })
     return id
   }
@@ -197,6 +204,42 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  // Map raw backend/model error strings to a short, readable message. The raw
+  // string is preserved separately (shown collapsed) when it differs.
+  function friendlyError(raw: string): string {
+    const e = raw.toLowerCase()
+    // Phrase-based only: bare tokens like "eof" or a stray "401"/"500" in an
+    // error body (e.g. "unexpected EOF", a line number) must not be misread.
+    if (e.includes('deadline exceeded') || e.includes('timed out') || e.includes('timeout'))
+      return 'The request timed out. Please try again.'
+    if (
+      e.includes('connection refused') ||
+      e.includes('no such host') ||
+      e.includes('connection reset') ||
+      e.includes('dial tcp') ||
+      e.includes('network is unreachable') ||
+      e.includes('network error')
+    )
+      return 'Network error. Check your connection and try again.'
+    if (e.includes('unauthorized') || e.includes('invalid api key') || e.includes('api key'))
+      return 'Authentication failed. Check your API key in settings.'
+    if (e.includes('rate limit') || e.includes('too many requests'))
+      return 'Rate limited by the provider. Please wait and try again.'
+    if (
+      e.includes('internal server error') ||
+      e.includes('service unavailable') ||
+      e.includes('bad gateway') ||
+      e.includes('overloaded')
+    )
+      return 'The model provider had a temporary error. Please try again.'
+    // Otherwise strip internal framing noise (e.g. "[NodeRunError] … node path: […]").
+    const cleaned = raw
+      .replace(/^\[[A-Za-z]+Error\]\s*/, '')
+      .replace(/\s*node path:\s*\[[^\]]*\]\s*$/i, '')
+      .trim()
+    return cleaned || raw
+  }
+
   function agentDone(error?: string) {
     isRunning.value = false
     streamingText = ''
@@ -208,7 +251,28 @@ export const useChatStore = defineStore('chat', () => {
       }
     }
     if (error) {
-      addMessage('system', `Error: ${error}`)
+      // Match only the exact cancellation forms the backend emits, so a real
+      // failure that merely mentions a canceled child context is still surfaced
+      // as an error rather than swallowed as a benign "Stopped".
+      const lower = error.trim().toLowerCase()
+      const isCancel =
+        lower === 'stopped by user' ||
+        lower === 'context canceled' ||
+        lower === 'context cancelled'
+      if (isCancel) {
+        // A user stop is expected, not an error. One stop can emit several
+        // cancellation signals (stopped-by-user, the in-flight "context
+        // canceled", node errors); collapse them into a single calm notice.
+        const last = timeline.value[timeline.value.length - 1]
+        const alreadyNoted =
+          last?.kind === 'message' &&
+          last.data.role === 'system' &&
+          last.data.content === 'Stopped'
+        if (!alreadyNoted) addMessage('system', 'Stopped', undefined, undefined, 'notice')
+      } else {
+        const friendly = friendlyError(error)
+        addMessage('system', friendly, undefined, undefined, 'error', friendly !== error ? error : undefined)
+      }
     }
     // Refresh session list & current session ID (the recorder may have been
     // created lazily during this run).
