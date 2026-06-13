@@ -222,7 +222,7 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 	s.Style = spinnerStyle
 
 	md, _ := glamour.NewTermRenderer(
-		glamour.WithStandardStyle("dark"),
+		glamour.WithStandardStyle(currentTheme.GlamourStyle()),
 		glamour.WithWordWrap(96), // default, recreated on first WindowSizeMsg
 	)
 
