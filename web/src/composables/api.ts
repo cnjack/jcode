@@ -31,7 +31,7 @@ export const api = {
   status: () =>
     request<{
       running: boolean
-      clients: number
+      ws_clients: number
       pwd: string
       provider: string
       model: string
@@ -71,10 +71,10 @@ export const api = {
         images: images && images.length > 0 ? images : undefined,
       }),
     }),
-  approval: (id: string, approved: boolean) =>
+  approval: (id: string, approved: boolean, approveAll = false) =>
     request<{ status: string }>('/api/approval', {
       method: 'POST',
-      body: JSON.stringify({ id, approved }),
+      body: JSON.stringify({ id, approved, approve_all: approveAll }),
     }),
   models: () => request<ModelsResponse>('/api/models'),
   switchModel: (provider: string, model: string) =>

@@ -114,8 +114,8 @@ export function useWebSocket(handlers: WSHandler) {
     }
   }
 
-  function sendApproval(id: string, approved: boolean) {
-    send({ type: 'approval', data: { id, approved } })
+  function sendApproval(id: string, approved: boolean, approveAll = false) {
+    send({ type: 'approval', data: { id, approved, approve_all: approveAll } })
   }
 
   function disconnect() {

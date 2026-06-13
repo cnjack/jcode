@@ -396,7 +396,12 @@ func (h *WebHandler) RequestApproval(ctx context.Context, req ApprovalRequest) (
 }
 
 // ResolveApproval resolves a pending approval request. Called by API handler.
-func (h *WebHandler) ResolveApproval(id string, approved bool) error {
+// approveAll distinguishes "approve all" (promote the session to auto-approve,
+// like the TUI's "Approve All" and ACP's "Allow Always") from a plain
+// "approve once" that leaves the session mode untouched. Previously every
+// approve was treated as auto, silently flipping the whole session to
+// Autopilot on a single Allow click.
+func (h *WebHandler) ResolveApproval(id string, approved, approveAll bool) error {
 	h.mu.Lock()
 	ch, ok := h.pendingApproval[id]
 	h.mu.Unlock()
@@ -406,7 +411,7 @@ func (h *WebHandler) ResolveApproval(id string, approved bool) error {
 	}
 
 	mode := ModeManual
-	if approved {
+	if approved && approveAll {
 		mode = ModeAuto
 	}
 

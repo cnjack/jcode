@@ -56,7 +56,7 @@ const teamListData = computed(() => {
     const m = line.match(/@(\S+)\s+status=(\S+)\s+type=(\S*)(.*)/)
     if (m) {
       const progress = m[4] ? m[4].trim() : ''
-      members.push({ name: m[1], status: m[2], type: m[3], progress })
+      members.push({ name: m[1] ?? '', status: m[2] ?? '', type: m[3] ?? '', progress })
     }
   }
   return { teamName, members }
@@ -164,7 +164,7 @@ const searchResults = computed(() => {
   const output = props.tool.output || ''
   if (!output) return { lines: [], count: null }
   const countMatch = output.match(/\((\d+) (?:matches found|results?)\)/)
-  const count = countMatch ? parseInt(countMatch[1]) : null
+  const count = countMatch ? parseInt(countMatch[1] ?? '') : null
   const lines = output.split('\n')
     .filter(l => {
       const t = l.trim()
@@ -172,7 +172,7 @@ const searchResults = computed(() => {
     })
     .map(line => {
       const m = line.match(/^([^:]+):(\d+):(.*)$/)
-      if (m) return { file: m[1], lineNum: parseInt(m[2]), content: m[3], isRef: true }
+      if (m) return { file: m[1] ?? '', lineNum: parseInt(m[2] ?? ''), content: m[3] ?? '', isRef: true }
       return { file: '', lineNum: 0, content: line, isRef: false }
     })
   return { lines, count }
@@ -200,7 +200,7 @@ const fileLines = computed(() => {
   if (props.tool.name === 'read') {
     return lines.map((line: string) => {
       const match = line.match(/^\s*(\d+)│(.*)$/)
-      if (match) return { num: parseInt(match[1]), text: match[2] }
+      if (match) return { num: parseInt(match[1] ?? ''), text: match[2] ?? '' }
       return { num: 0, text: line }
     }).filter((_: { num: number; text: string }, i: number, arr: { num: number; text: string }[]) => !(i === arr.length - 1 && _.text === ''))
   }

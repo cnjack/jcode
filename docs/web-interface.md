@@ -67,7 +67,7 @@ The web server exposes a REST API for programmatic access:
 |---|---|
 | `POST /api/chat` | Send a message to the agent |
 | `POST /api/stop` | Cancel current execution |
-| `GET /api/events` | SSE stream of agent events |
+| `GET /api/ws` | WebSocket stream of agent events |
 | `GET /api/sessions` | List sessions |
 | `POST /api/sessions` | Create new session |
 | `GET /api/models` | List available models |
