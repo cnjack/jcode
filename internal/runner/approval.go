@@ -333,11 +333,17 @@ func (s *ApprovalState) NewTeammateApprovalFunc(workerName, workerColor string) 
 
 // isWithinWorkpath checks if the given path is within the workpath
 func (s *ApprovalState) isWithinWorkpath(path string) bool {
+	// Read workpath under the lock: decide() reaches here without holding it,
+	// and SetWorkpath() can mutate it concurrently on an environment switch.
+	s.mu.Lock()
+	workpath := s.workpath
+	s.mu.Unlock()
+
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return false
 	}
-	absWorkpath, err := filepath.Abs(s.workpath)
+	absWorkpath, err := filepath.Abs(workpath)
 	if err != nil {
 		return false
 	}
