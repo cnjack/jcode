@@ -1,17 +1,24 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { X } from 'lucide-vue-next'
 import FileTreePanel from './FileTreePanel.vue'
 import DiffViewer from './DiffViewer.vue'
+import TaskList from './TaskList.vue'
+import { useChatStore } from '@/stores/chat'
 
 defineProps<{
-  activeTab: 'files' | 'changes'
+  activeTab: 'files' | 'changes' | 'plan'
 }>()
 
 const emit = defineEmits<{
   close: []
-  'switch-tab': [tab: 'files' | 'changes']
+  'switch-tab': [tab: 'files' | 'changes' | 'plan']
 }>()
+
+const store = useChatStore()
+const total = computed(() => store.todos.length)
+const completed = computed(() => store.todos.filter((t) => t.status === 'completed').length)
+const progressPct = computed(() => (total.value ? Math.round((completed.value / total.value) * 100) : 0))
 
 const panelWidth = ref(320)
 
@@ -41,6 +48,13 @@ function startResize(e: MouseEvent) {
       <div class="panel-tabs">
         <button
           class="tab-btn"
+          :class="{ active: activeTab === 'plan' }"
+          @click="emit('switch-tab', 'plan')"
+        >
+          Plan
+        </button>
+        <button
+          class="tab-btn"
           :class="{ active: activeTab === 'files' }"
           @click="emit('switch-tab', 'files')"
         >
@@ -60,7 +74,18 @@ function startResize(e: MouseEvent) {
     </div>
     <div class="panel-content">
       <FileTreePanel v-if="activeTab === 'files'" />
-      <DiffViewer v-else />
+      <DiffViewer v-else-if="activeTab === 'changes'" />
+      <div v-else class="plan-pane">
+        <div class="plan-head">
+          <span class="plan-title">Plan</span>
+          <div class="plan-track"><div class="plan-fill" :style="{ width: progressPct + '%' }" /></div>
+          <span class="plan-count">{{ completed }} / {{ total }}</span>
+        </div>
+        <div class="plan-list">
+          <TaskList v-if="total" :todos="store.todos" />
+          <div v-else class="plan-empty">No tasks yet</div>
+        </div>
+      </div>
     </div>
   </aside>
 </template>
@@ -151,5 +176,61 @@ function startResize(e: MouseEvent) {
 .panel-content {
   flex: 1;
   overflow: hidden;
+}
+
+.plan-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.plan-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.plan-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-foreground);
+}
+
+.plan-track {
+  flex: 1;
+  height: 5px;
+  border-radius: 9999px;
+  background: var(--color-border);
+  overflow: hidden;
+}
+
+.plan-fill {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: 9999px;
+  transition: width var(--duration-slow) var(--ease-out);
+}
+
+.plan-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-muted-foreground);
+  white-space: nowrap;
+}
+
+.plan-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.plan-empty {
+  padding: 16px 8px;
+  font-size: 13px;
+  color: var(--color-muted-foreground);
+  text-align: center;
 }
 </style>
