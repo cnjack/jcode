@@ -114,6 +114,14 @@ type Config struct {
 	// SmallModel for lightweight tasks (summaries, compaction) in "provider/model" format
 	SmallModel string `json:"small_model,omitempty"`
 
+	// ContextLimits overrides the resolved context window (in tokens) for a model.
+	// Keys may be "provider/model" (preferred) or a bare model id. Use this to teach
+	// jcode the window of a brand-new or custom model the registry doesn't know yet.
+	ContextLimits map[string]int `json:"context_limits,omitempty"`
+	// DefaultContextLimit is the fallback context window (in tokens) assumed when a
+	// model's limit is unknown from the registry and built-in tables. Defaults to 200000.
+	DefaultContextLimit int `json:"default_context_limit,omitempty"`
+
 	// Deprecated: use Model field with "provider/model" format instead.
 	Provider string `json:"provider,omitempty"`
 
@@ -168,6 +176,15 @@ func (c *Config) GetProviderModel() (provider, model string) {
 	}
 	// Legacy fallback
 	return c.Provider, c.Model
+}
+
+// CompactionThreshold returns the configured fraction (0-1) of the context window
+// at which automatic compaction/summarization triggers, or 0.75 when unset/invalid.
+func (c *Config) CompactionThreshold() float64 {
+	if c != nil && c.Compaction != nil && c.Compaction.Threshold > 0 && c.Compaction.Threshold <= 1 {
+		return c.Compaction.Threshold
+	}
+	return 0.75
 }
 
 func splitProviderModel(s string) []string {

@@ -421,12 +421,11 @@ func (a *acpAgent) buildAgentSession(
 	}
 
 	// Build agent with middlewares
-	contextLimit := registry.GetModelContextLimit(providerName, modelName)
-	if contextLimit <= 0 {
-		contextLimit = internalmodel.GetModelContextLimit(modelName)
-	}
-	if contextLimit <= 0 {
-		contextLimit = 200000
+	contextLimit := internalmodel.ResolveContextLimit(registry, cfg, providerName, modelName)
+	compactThreshold := cfg.CompactionThreshold()
+	reductionThreshold := compactThreshold - 0.15
+	if reductionThreshold < 0.1 {
+		reductionThreshold = compactThreshold * 0.8
 	}
 
 	var handlers []adk.ChatModelAgentMiddleware
@@ -434,7 +433,7 @@ func (a *acpAgent) buildAgentSession(
 	summMw, err := summarization.New(ctx, &summarization.Config{
 		Model: chatModel,
 		Trigger: &summarization.TriggerCondition{
-			ContextTokens: int(float64(contextLimit) * 0.75),
+			ContextTokens: int(float64(contextLimit) * compactThreshold),
 		},
 		TranscriptFilePath: filepath.Join(config.ConfigDir(), "transcript.txt"),
 	})
@@ -447,7 +446,7 @@ func (a *acpAgent) buildAgentSession(
 		Backend:           reductionBackend,
 		RootDir:           filepath.Join(config.ConfigDir(), "reduction"),
 		MaxLengthForTrunc: 50000,
-		MaxTokensForClear: int64(float64(contextLimit) * 0.60),
+		MaxTokensForClear: int64(float64(contextLimit) * reductionThreshold),
 		ReadFileToolName:  "read",
 		ToolConfig: map[string]*reduction.ToolReductionConfig{
 			"read": {SkipClear: true},
