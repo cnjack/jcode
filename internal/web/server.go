@@ -41,7 +41,6 @@ type Server struct {
 	openBrowser bool
 	pwd         string
 	handler     *handler.WebHandler
-	broker      *SSEBroker
 	wsBroker    *WSBroker
 
 	mu      sync.RWMutex
@@ -158,7 +157,6 @@ func NewServer(cfg *ServerConfig) *Server {
 		pwd:            cfg.Pwd,
 		version:        cfg.Version,
 		handler:        h,
-		broker:         NewSSEBroker(),
 		wsBroker:       NewWSBroker(),
 		agent:          cfg.Agent,
 		createAgent:    cfg.CreateAgent,
@@ -234,7 +232,6 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// API routes
 	mux.HandleFunc("GET /api/health", s.handleHealth)
-	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("GET /api/ws", s.handleWebSocket)
 	mux.HandleFunc("POST /api/chat", s.handleChat)
 	mux.HandleFunc("POST /api/stop", s.handleStop)
@@ -308,14 +305,13 @@ func (s *Server) Start(ctx context.Context) error {
 		Handler: corsHandler,
 	}
 
-	// Forward WebHandler events to SSE broker.
+	// Forward WebHandler events to WebSocket clients.
 	go s.forwardEvents()
 
 	// Graceful shutdown on context cancellation.
 	go func() {
 		<-ctx.Done()
 		s.ptyMgr.closeAll()
-		s.broker.Close()
 		s.wsBroker.Close()
 		_ = srv.Shutdown(context.Background())
 	}()
@@ -343,13 +339,9 @@ func (s *Server) Start(ctx context.Context) error {
 	return nil
 }
 
-// forwardEvents reads from the WebHandler event channel and broadcasts to SSE and WebSocket clients.
+// forwardEvents reads from the WebHandler event channel and broadcasts to WebSocket clients.
 func (s *Server) forwardEvents() {
 	for ev := range s.handler.Events() {
-		s.broker.Broadcast(SSEEvent{
-			Event: ev.Event,
-			Data:  ev.Data,
-		})
 		s.wsBroker.Broadcast(WSEvent{
 			Type: ev.Event,
 			Data: ev.Data,
@@ -415,19 +407,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"running":    s.running.Load(),
-		"clients":    s.broker.ClientCount(),
 		"ws_clients": s.wsBroker.ClientCount(),
 		"pwd":        s.pwd,
 		"provider":   s.providerName,
 		"model":      s.modelName,
 		"mode":       s.mode,
 	})
-}
-
-func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
-	events, unsub := s.broker.Subscribe()
-	defer unsub()
-	ServeSSE(w, r, events)
 }
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
@@ -606,7 +591,7 @@ func (s *Server) submitMessage(message, mode, source, sessionID string, images [
 	agent := s.agent
 	s.mu.Unlock()
 
-	// Stream response via SSE — run agent in background.
+	// Stream response via WebSocket — run agent in background.
 	runCtx, runCancel := context.WithCancel(s.ctx)
 	s.mu.Lock()
 	s.runCancel = runCancel
@@ -851,7 +836,6 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	// Notify clients. When resuming an existing session, do NOT broadcast session_reset
 	// (which would wipe the UI that the frontend is about to repopulate from history).
 	if req.SessionID == "" {
-		s.broker.Broadcast(SSEEvent{Event: "session_reset", Data: map[string]string{}})
 		s.wsBroker.Broadcast(WSEvent{Type: "session_reset", Data: map[string]string{}})
 	}
 
@@ -978,10 +962,6 @@ func (s *Server) handleSwitchModel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Notify clients.
-	s.broker.Broadcast(SSEEvent{Event: "model_changed", Data: map[string]string{
-		"provider": req.Provider,
-		"model":    req.Model,
-	}})
 	s.wsBroker.Broadcast(WSEvent{Type: "model_changed", Data: map[string]string{
 		"provider": req.Provider,
 		"model":    req.Model,
@@ -1024,9 +1004,6 @@ func (s *Server) handleSwitchMode(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 
-	s.broker.Broadcast(SSEEvent{Event: "mode_changed", Data: map[string]string{
-		"mode": sm.String(),
-	}})
 	s.wsBroker.Broadcast(WSEvent{Type: "mode_changed", Data: map[string]string{
 		"mode": sm.String(),
 	}})
@@ -1109,14 +1086,15 @@ func (s *Server) handleClearGoal(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleApproval(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ID       string `json:"id"`
-		Approved bool   `json:"approved"`
+		ID         string `json:"id"`
+		Approved   bool   `json:"approved"`
+		ApproveAll bool   `json:"approve_all"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	if err := s.handler.ResolveApproval(req.ID, req.Approved); err != nil {
+	if err := s.handler.ResolveApproval(req.ID, req.Approved, req.ApproveAll); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
@@ -1634,12 +1612,6 @@ func (s *Server) handleSwitchProject(w http.ResponseWriter, r *http.Request) {
 	s.todoStore.Update(nil)
 
 	// Broadcast project change to clients.
-	s.broker.Broadcast(SSEEvent{
-		Event: "project_switched",
-		Data: map[string]string{
-			"pwd": req.Path,
-		},
-	})
 	s.wsBroker.Broadcast(WSEvent{
 		Type: "project_switched",
 		Data: map[string]string{
@@ -1689,16 +1661,11 @@ func (s *Server) handleSetApprovalMode(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 
-	s.broker.Broadcast(SSEEvent{
-		Event: "approval_mode_changed",
-		Data:  map[string]any{"auto_approve": req.AutoApprove},
-	})
 	s.wsBroker.Broadcast(WSEvent{
 		Type: "approval_mode_changed",
 		Data: map[string]any{"auto_approve": req.AutoApprove},
 	})
 	// Also emit the unified mode event so updated clients keep their selector synced.
-	s.broker.Broadcast(SSEEvent{Event: "mode_changed", Data: map[string]string{"mode": sm.String()}})
 	s.wsBroker.Broadcast(WSEvent{Type: "mode_changed", Data: map[string]string{"mode": sm.String()}})
 	writeJSON(w, http.StatusOK, map[string]any{"auto_approve": req.AutoApprove})
 }
@@ -1748,13 +1715,16 @@ func (s *Server) handleWSMessage(msg WSIncoming) {
 		s.wsBroker.Broadcast(WSEvent{Type: "pong"})
 	case "approval":
 		var data struct {
-			ID       string `json:"id"`
-			Approved bool   `json:"approved"`
+			ID         string `json:"id"`
+			Approved   bool   `json:"approved"`
+			ApproveAll bool   `json:"approve_all"`
 		}
 		if err := json.Unmarshal(msg.Data, &data); err != nil {
 			return
 		}
-		_ = s.handler.ResolveApproval(data.ID, data.Approved)
+		if err := s.handler.ResolveApproval(data.ID, data.Approved, data.ApproveAll); err != nil {
+			config.Logger().Printf("[ws] resolve approval failed for id=%q: %v", data.ID, err)
+		}
 	}
 }
 
@@ -2080,10 +2050,6 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	// Notify clients that setup is complete.
-	s.broker.Broadcast(SSEEvent{Event: "model_changed", Data: map[string]string{
-		"provider": req.Provider,
-		"model":    req.Model,
-	}})
 	s.wsBroker.Broadcast(WSEvent{Type: "model_changed", Data: map[string]string{
 		"provider": req.Provider,
 		"model":    req.Model,

@@ -5,7 +5,25 @@ import (
 	"testing"
 
 	"github.com/cnjack/jcode/internal/handler"
+	"github.com/cnjack/jcode/internal/mode"
 )
+
+// stubHandler is a minimal AgentEventHandler that returns a canned approval
+// response, used to exercise the approve-once vs approve-all promotion path.
+type stubHandler struct {
+	resp handler.ApprovalResponse
+}
+
+func (stubHandler) OnAgentText(string)                         {}
+func (stubHandler) OnToolCall(string, string, string)          {}
+func (stubHandler) OnToolResult(string, string, string, error) {}
+func (stubHandler) OnTodoUpdate()                              {}
+func (stubHandler) OnAgentStart()                              {}
+func (stubHandler) OnAgentDone(error)                          {}
+func (stubHandler) OnTokenUpdate(handler.TokenUsage)           {}
+func (h stubHandler) RequestApproval(context.Context, handler.ApprovalRequest) (handler.ApprovalResponse, error) {
+	return h.resp, nil
+}
 
 func TestNewApprovalState(t *testing.T) {
 	s := NewApprovalState("/tmp/workdir", false)
@@ -103,6 +121,113 @@ func TestRequestApproval_ManualMode(t *testing.T) {
 	_, err = s.RequestApproval(ctx, "execute", `{"command": "rm -rf /"}`)
 	if err == nil {
 		t.Errorf("expected error for dangerous command without TUI program")
+	}
+}
+
+// TestRequestApproval_BackgroundRequiresApproval covers the P0 fix: in MANUAL
+// mode a background command must never be auto-approved, even one that would be
+// "safe" in the foreground — otherwise the agent could bypass the gate by
+// setting background=true. With no handler attached, the prompt path surfaces
+// as an error, which is how we detect "did not auto-approve".
+func TestRequestApproval_BackgroundRequiresApproval(t *testing.T) {
+	s := NewApprovalState("/tmp/workdir", false) // MANUAL, no handler
+	ctx := context.Background()
+
+	background := []string{
+		`{"command": "ls -la", "background": true}`,
+		`{"command": "echo hi", "background": true}`,
+		`{"command": "rm -rf /", "background": true}`,
+	}
+	for _, args := range background {
+		if approved, err := s.RequestApproval(ctx, "execute", args); err == nil {
+			t.Errorf("background command should require approval, got auto-approve=%v for %s", approved, args)
+		}
+	}
+
+	// The same command in the foreground still auto-approves when safe.
+	if approved, err := s.RequestApproval(ctx, "execute", `{"command": "ls -la"}`); err != nil || !approved {
+		t.Errorf("foreground safe command should auto-approve: approved=%v err=%v", approved, err)
+	}
+}
+
+// TestRequestApproval_ShellOperatorInjection covers the P1 fix: a "safe" prefix
+// can no longer smuggle a payload via shell operators, and bare command names
+// are matched as whole words (so lsof != ls, env-with-args is not safe).
+func TestRequestApproval_ShellOperatorInjection(t *testing.T) {
+	s := NewApprovalState("/tmp/workdir", false)
+	ctx := context.Background()
+
+	mustPrompt := []string{
+		`{"command": "git status && rm -rf /"}`,
+		`{"command": "ls; whoami"}`,
+		`{"command": "cat foo | sh"}`,
+		`{"command": "echo pwned > /tmp/x"}`,
+		`{"command": "echo $(rm -rf x)"}`,
+		"{\"command\": \"echo `whoami`\"}",
+		`{"command": "lsof"}`,
+		`{"command": "env rm -rf x"}`,
+		`{"command": "git difftool"}`,
+	}
+	for _, args := range mustPrompt {
+		if approved, err := s.RequestApproval(ctx, "execute", args); err == nil {
+			t.Errorf("command should require approval, got auto-approve=%v for %s", approved, args)
+		}
+	}
+
+	autoOK := []string{
+		`{"command": "git status"}`,
+		`{"command": "git log --oneline -5"}`,
+		`{"command": "ls -la /tmp"}`,
+		`{"command": "cat go.mod"}`,
+		`{"command": "env"}`,
+		`{"command": "which go"}`,
+	}
+	for _, args := range autoOK {
+		if approved, err := s.RequestApproval(ctx, "execute", args); err != nil || !approved {
+			t.Errorf("command should auto-approve: %s (approved=%v err=%v)", args, approved, err)
+		}
+	}
+}
+
+// TestRequestApproval_AskUserAutoApprove covers the P1 fix: the user-facing
+// ask_user tool must not itself trigger an approval prompt (the allowlist
+// previously held the dead name "question").
+func TestRequestApproval_AskUserAutoApprove(t *testing.T) {
+	s := NewApprovalState("/tmp/workdir", false)
+	approved, err := s.RequestApproval(context.Background(), "ask_user", `{"question": "pick one"}`)
+	if err != nil || !approved {
+		t.Errorf("ask_user should auto-approve without prompting: approved=%v err=%v", approved, err)
+	}
+}
+
+// TestRequestApproval_ApproveAllPromotes covers the promotion semantics: an
+// "approve all" response (Mode=Auto) promotes the session to Autopilot, while a
+// plain "approve once" leaves it in Ask/MANUAL.
+func TestRequestApproval_ApproveAllPromotes(t *testing.T) {
+	ctx := context.Background()
+
+	all := NewApprovalState("/tmp/workdir", false)
+	all.SetHandler(stubHandler{resp: handler.ApprovalResponse{Approved: true, Mode: handler.ModeAuto}})
+	if approved, err := all.RequestApproval(ctx, "execute", `{"command": "rm -rf x"}`); err != nil || !approved {
+		t.Fatalf("approve-all: approved=%v err=%v", approved, err)
+	}
+	if all.GetMode() != handler.ModeAuto {
+		t.Errorf("approve-all should promote approval axis to Auto, got %v", all.GetMode())
+	}
+	if all.GetSessionMode() != mode.Autopilot {
+		t.Errorf("approve-all should promote session to Autopilot, got %v", all.GetSessionMode())
+	}
+
+	once := NewApprovalState("/tmp/workdir", false)
+	once.SetHandler(stubHandler{resp: handler.ApprovalResponse{Approved: true, Mode: handler.ModeManual}})
+	if approved, err := once.RequestApproval(ctx, "execute", `{"command": "rm -rf x"}`); err != nil || !approved {
+		t.Fatalf("approve-once: approved=%v err=%v", approved, err)
+	}
+	if once.GetMode() != handler.ModeManual {
+		t.Errorf("approve-once should leave approval axis at Manual, got %v", once.GetMode())
+	}
+	if once.GetSessionMode() != mode.Ask {
+		t.Errorf("approve-once should leave session at Ask, got %v", once.GetSessionMode())
 	}
 }
 

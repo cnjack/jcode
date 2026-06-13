@@ -287,9 +287,9 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function resolveApproval(id: string, approved: boolean) {
+  async function resolveApproval(id: string, approved: boolean, approveAll = false) {
     try {
-      await api.approval(id, approved)
+      await api.approval(id, approved, approveAll)
       resolveApprovalLocal(id, approved)
     } catch (err: unknown) {
       console.error('Approval error:', err)

@@ -16,8 +16,9 @@ function makeTab(): Tab {
   return { id: String(nextId++), label: `Shell ${nextId - 1}` }
 }
 
-const tabs = ref<Tab[]>([makeTab()])
-const activeId = ref(tabs.value[0].id)
+const initialTab = makeTab()
+const tabs = ref<Tab[]>([initialTab])
+const activeId = ref(initialTab.id)
 
 function addTab() {
   const tab = makeTab()
@@ -35,7 +36,8 @@ function closeTab(id: string) {
   }
   // Select adjacent tab
   const newIdx = Math.min(idx, tabs.value.length - 1)
-  activeId.value = tabs.value[newIdx].id
+  const nextTab = tabs.value[newIdx]
+  if (nextTab) activeId.value = nextTab.id
 }
 </script>
 
