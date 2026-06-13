@@ -1,73 +1,114 @@
-// Theme management composable with system preference detection
+// Theme management: named built-in themes applied via html[data-theme],
+// with terminal/Go parity through the generated registry. A `.dark` class is
+// kept in sync with the active theme's appearance so the existing
+// :root:not(.dark) / .dark forks in style.css keep working.
 import { ref, watch, onMounted } from 'vue'
+import { THEMES, type ThemeDef } from './themes.generated'
 
-export type ThemeMode = 'light' | 'dark' | 'system'
+export type { ThemeDef }
+export { THEMES }
+
+// A choice is either a built-in theme id or the special 'system' value, which
+// follows the OS light/dark preference.
+export type ThemeChoice = string
 
 const STORAGE_KEY = 'jcode_theme'
+const DEFAULT_DARK = 'jcode-dark'
+const DEFAULT_LIGHT = 'jcode-light'
 
-function getSystemTheme(): 'light' | 'dark' {
+function getSystemAppearance(): 'light' | 'dark' {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
-function loadStoredTheme(): ThemeMode {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored === 'light' || stored === 'dark' || stored === 'system') return stored
-  } catch { /* ignore */ }
-  return 'dark' // default to dark
+function appearanceOf(id: string): 'light' | 'dark' {
+  return THEMES.find((t) => t.id === id)?.appearance ?? 'dark'
 }
 
-const themeMode = ref<ThemeMode>(loadStoredTheme())
+// migrate maps legacy stored values ('light' | 'dark' | 'system') onto the new
+// named-theme scheme. Newer values (a theme id or 'system') pass through.
+function migrate(v: string | null): ThemeChoice {
+  switch (v) {
+    case null:
+    case '':
+    case 'system':
+      return 'system'
+    case 'light':
+      return DEFAULT_LIGHT
+    case 'dark':
+      return DEFAULT_DARK
+    default:
+      return THEMES.some((t) => t.id === v) ? v : 'system'
+  }
+}
+
+function loadStored(): ThemeChoice {
+  try {
+    return migrate(localStorage.getItem(STORAGE_KEY))
+  } catch {
+    return 'system'
+  }
+}
+
+const themeChoice = ref<ThemeChoice>(loadStored())
 const resolvedTheme = ref<'light' | 'dark'>('dark')
 
-function applyTheme(mode: ThemeMode) {
-  const resolved = mode === 'system' ? getSystemTheme() : mode
-  resolvedTheme.value = resolved
+// resolveId turns a choice into a concrete theme id.
+function resolveId(choice: ThemeChoice): string {
+  if (choice === 'system') {
+    return getSystemAppearance() === 'dark' ? DEFAULT_DARK : DEFAULT_LIGHT
+  }
+  return THEMES.some((t) => t.id === choice) ? choice : DEFAULT_DARK
+}
+
+function applyTheme(choice: ThemeChoice) {
+  const id = resolveId(choice)
+  const appearance = appearanceOf(id)
+  resolvedTheme.value = appearance
 
   const html = document.documentElement
-  if (resolved === 'dark') {
-    html.classList.add('dark')
-  } else {
-    html.classList.remove('dark')
-  }
+  html.setAttribute('data-theme', id)
+  // Keep .dark in sync so style.css's scrollbar/prose/diff/xterm forks work.
+  html.classList.toggle('dark', appearance === 'dark')
 
-  // Update meta theme-color
+  // Sync the browser chrome color to the active theme background.
   const meta = document.querySelector('meta[name="theme-color"]')
   if (meta) {
-    meta.setAttribute('content', resolved === 'dark' ? '#09090b' : '#fafafa')
+    const bg = getComputedStyle(html).getPropertyValue('--color-background').trim()
+    meta.setAttribute('content', bg || (appearance === 'dark' ? '#09090b' : '#fafafa'))
   }
 }
 
 export function useTheme() {
-  function setTheme(mode: ThemeMode) {
-    themeMode.value = mode
-    localStorage.setItem(STORAGE_KEY, mode)
-    applyTheme(mode)
+  function setTheme(choice: ThemeChoice) {
+    themeChoice.value = choice
+    try {
+      localStorage.setItem(STORAGE_KEY, choice)
+    } catch { /* ignore */ }
+    applyTheme(choice)
   }
 
+  // toggleTheme is the Sidebar's quick light/dark flip; it switches to the
+  // brand default of the opposite appearance. The Appearance settings tab is
+  // where specific named themes are chosen.
   function toggleTheme() {
-    const next = resolvedTheme.value === 'dark' ? 'light' : 'dark'
-    setTheme(next)
+    setTheme(resolvedTheme.value === 'dark' ? DEFAULT_LIGHT : DEFAULT_DARK)
   }
 
   onMounted(() => {
-    applyTheme(themeMode.value)
+    applyTheme(themeChoice.value)
 
-    // Listen for system preference changes
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const handler = () => {
-      if (themeMode.value === 'system') {
-        applyTheme('system')
-      }
-    }
-    mq.addEventListener('change', handler)
+    mq.addEventListener('change', () => {
+      if (themeChoice.value === 'system') applyTheme('system')
+    })
   })
 
-  watch(themeMode, (mode) => applyTheme(mode))
+  watch(themeChoice, (choice) => applyTheme(choice))
 
   return {
-    themeMode,
+    themeChoice,
     resolvedTheme,
+    themes: THEMES,
     setTheme,
     toggleTheme,
   }
