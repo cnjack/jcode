@@ -54,6 +54,7 @@ nav_order: 7
 | **Shift+Enter** | Insert new line |
 | **Shift+Tab** | Cycle session mode (Ask → Plan → Autopilot) |
 | **Ctrl+L** | Open model picker |
+| **F1** / **?** | Open keyboard shortcuts help (`?` when the input is empty) |
 | **Ctrl+C** | Exit (press once for confirmation, twice to force) |
 | **Ctrl+T** | Toggle team coordinator panel |
 | **Ctrl+Y** | Copy last assistant message to clipboard |
@@ -69,6 +70,7 @@ Type these in the TUI input area:
 | Command | Description |
 |---|---|
 | `/model` | Switch model mid-session |
+| `/theme` | Switch color theme (live preview, persisted to config) |
 | `/setting` | Open settings menu |
 | `/ssh` | Open SSH connection wizard |
 | `/resume` | Resume a previous session |
