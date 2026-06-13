@@ -70,6 +70,11 @@ function autoResize() {
 }
 
 function handleKeyDown(e: KeyboardEvent) {
+  // While an IME composition is active (e.g. confirming a CJK candidate), let
+  // the IME own every key — pressing Enter to commit a character must not send
+  // the message or trigger menu shortcuts.
+  if (e.isComposing || e.keyCode === 229) return
+
   // Handle ESC key for dialogs
   if (e.key === 'Escape') {
     if (showManageModels.value) {

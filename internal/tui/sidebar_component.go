@@ -170,12 +170,29 @@ func (s *SidebarComponent) renderTodoSection(state SidebarState) string {
 	}
 
 	completed, total := countTodos(state.TodoItems)
-	title := sidebarSectionTitleStyle.Render(fmt.Sprintf("📋 Todo (%d/%d)", completed, total))
+
+	// Header: "Todo" in section-title style + a muted "N / M" count.
+	header := lipgloss.JoinHorizontal(lipgloss.Left,
+		sidebarSectionTitleStyle.Render("Todo"),
+		"  ",
+		todoCountStyle.Render(fmt.Sprintf("%d / %d", completed, total)),
+	)
+
+	// Thin progress bar under the header. Reuse the sidebar content width
+	// (Width = total - leftBorder - leftPad), cap the bar so it fits.
+	barWidth := state.Width - 6 // leave room for " NN%" suffix + slack
+	if barWidth > 16 {
+		barWidth = 16
+	}
+	if barWidth < 4 {
+		barWidth = 4
+	}
+	progress := renderTodoProgressBar(completed, total, barWidth)
 
 	// Calculate available lines for todo items
 	// We need to estimate how many lines other sections use
 	otherLines := s.countFixedSectionLines(state)
-	available := state.Height - otherLines - 4 // reserve space for title + padding
+	available := state.Height - otherLines - 5 // reserve space for title + progress + padding
 	if available < 2 {
 		available = 2
 	}
@@ -190,7 +207,8 @@ func (s *SidebarComponent) renderTodoSection(state SidebarState) string {
 	}
 
 	var lines []string
-	lines = append(lines, title)
+	lines = append(lines, header)
+	lines = append(lines, progress)
 
 	// Top scroll indicator
 	if start > 0 {
@@ -219,9 +237,12 @@ func (s *SidebarComponent) renderTodoItem(item tools.TodoItem) string {
 	switch item.Status {
 	case tools.TodoCompleted:
 		icon = todoCompletedStyle.Render("✓")
-		text = todoCompletedStyle.Render(truncateString(item.Title, 20))
+		text = todoCompletedTextStyle.Render(truncateString(item.Title, 20))
 	case tools.TodoInProgress:
-		icon = todoInProgressStyle.Render("⏳")
+		// Static distinct glyph for the active step. A live braille spinner
+		// could be threaded in later (see followups) — the sidebar is cached
+		// per-frame and does not re-render on spinner ticks today.
+		icon = todoInProgressStyle.Render("◆")
 		text = todoInProgressStyle.Render(truncateString(item.Title, 20))
 	case tools.TodoCancelled:
 		icon = todoCancelledStyle.Render("✗")
@@ -295,6 +316,30 @@ func (s *SidebarComponent) countFixedSectionLines(state SidebarState) int {
 }
 
 // Helper functions.
+
+// renderTodoProgressBar renders a thin progress bar of `width` cells: filled
+// "█" cells in primary color for the completed fraction, empty "░" cells in
+// muted color, followed by " NN%". Guards divide-by-zero (total == 0 -> 0%).
+func renderTodoProgressBar(completed, total, width int) string {
+	if width < 1 {
+		width = 1
+	}
+	pct := 0.0
+	if total > 0 {
+		pct = float64(completed) / float64(total)
+	}
+	filled := int(pct * float64(width))
+	if filled > width {
+		filled = width
+	}
+	if filled < 0 {
+		filled = 0
+	}
+
+	bar := todoBarFilledStyle.Render(strings.Repeat("█", filled)) +
+		todoBarEmptyStyle.Render(strings.Repeat("░", width-filled))
+	return fmt.Sprintf("  %s %s", bar, todoCountStyle.Render(fmt.Sprintf("%d%%", int(pct*100))))
+}
 
 func countTodos(items []tools.TodoItem) (completed, total int) {
 	total = len(items)

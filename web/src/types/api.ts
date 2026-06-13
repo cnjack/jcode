@@ -247,6 +247,11 @@ export interface ChatMessage {
   timestamp: number
   source?: string
   images?: ChatImage[]
+  // For system messages: 'error' renders as a real error, 'notice' as a calm
+  // notice (e.g. "Stopped"). Undefined keeps the default system styling.
+  level?: 'error' | 'notice'
+  // Optional raw detail (e.g. the unmapped error string) shown collapsed.
+  detail?: string
 }
 
 export interface ToolCall {

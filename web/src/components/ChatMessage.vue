@@ -1,13 +1,22 @@
 <script setup lang="ts">
 import { renderMarkdown } from '@/composables/markdown'
 import type { ChatMessage } from '@/types/api'
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, computed } from 'vue'
 
 const props = defineProps<{
   message: ChatMessage
   canRetry?: boolean
   canEdit?: boolean
 }>()
+
+// System messages carry a level: 'error' (red), 'notice' (muted, e.g. Stopped),
+// or undefined (default warning styling).
+const systemColor = computed(() => {
+  if (props.message.level === 'error') return 'var(--color-destructive)'
+  if (props.message.level === 'notice') return 'var(--color-muted-foreground)'
+  return 'var(--color-warning-fg)'
+})
+const systemLabel = computed(() => (props.message.level === 'error' ? 'Error' : 'System'))
 
 const emit = defineEmits<{
   retry: []
@@ -69,7 +78,7 @@ function handleEditKeyDown(e: KeyboardEvent) {
         :style="{
           background: message.role === 'assistant' ? 'var(--color-primary)' :
                       message.role === 'user' && message.source === 'wechat' ? 'var(--color-info-fg)' :
-                      message.role === 'system' ? 'var(--color-warning-fg)' :
+                      message.role === 'system' ? systemColor :
                       'var(--color-foreground)',
           color: '#fff'
         }"
@@ -84,11 +93,11 @@ function handleEditKeyDown(e: KeyboardEvent) {
         :style="{
           color: message.role === 'assistant' ? 'var(--color-primary)' :
                  message.role === 'user' && message.source === 'wechat' ? 'var(--color-info-fg)' :
-                 message.role === 'system' ? 'var(--color-warning-fg)' :
+                 message.role === 'system' ? systemColor :
                  'var(--color-foreground)'
         }"
       >
-        {{ message.role === 'user' ? (message.source === 'wechat' ? 'WeChat' : 'You') : message.role === 'assistant' ? '[J]CODE' : 'System' }}
+        {{ message.role === 'user' ? (message.source === 'wechat' ? 'WeChat' : 'You') : message.role === 'assistant' ? '[J]CODE' : systemLabel }}
       </span>
 
       <!-- Action buttons: visible on hover or keyboard focus-within -->
@@ -181,5 +190,14 @@ function handleEditKeyDown(e: KeyboardEvent) {
         <span class="text-[10px]" style="color: var(--color-muted-foreground)">Enter to send · Shift+Enter for newline · Esc to cancel</span>
       </div>
     </div>
+
+    <!-- Collapsible raw detail for errors -->
+    <details
+      v-if="message.role === 'system' && message.level === 'error' && message.detail"
+      class="pl-9 mt-1"
+    >
+      <summary class="text-[11px] cursor-pointer select-none" style="color: var(--color-muted-foreground)">Details</summary>
+      <pre class="text-[11px] font-mono whitespace-pre-wrap mt-1 px-2 py-1.5 overflow-x-auto" style="color: var(--color-muted-foreground); background: var(--color-muted); border-radius: var(--radius-md)">{{ message.detail }}</pre>
+    </details>
   </div>
 </template>
