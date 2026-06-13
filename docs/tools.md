@@ -42,13 +42,13 @@ Not all tool calls require your approval. jcode categorizes tools by risk:
 | **Commands** | `execute` (non-safe) | **Require approval** |
 | **Environment** | `switch_env` | **Require approval** |
 
-When a tool requires approval, you see a dialog with the tool name and arguments. You can:
+When a tool requires approval (in **Ask** mode), you see a dialog with the tool name and arguments. You can:
 - **Y** — Approve this action
-- **A** — Approve all remaining actions (switches to auto-approve)
+- **A** — Approve all remaining actions (switches the session to **Autopilot**)
 - **N** — Reject
 
 {: .tip }
-Toggle auto-approve mode with **Ctrl+A**. When enabled, all tool calls are approved automatically. Use with caution.
+To auto-approve everything up front, switch to **Autopilot** mode with **Shift+Tab** (cycles Ask → Plan → Autopilot). In Autopilot all tool calls are approved automatically — use with caution.
 
 ## Tool Inventory
 

@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Unified **Ask / Plan / Autopilot** session-mode selector across the TUI, web, and ACP frontends (Copilot-style). A single `internal/mode.SessionMode` drives both the tool/prompt axis (Plan is read-only) and the approval axis (Autopilot auto-approves). New `default_mode` config option (`ask` / `plan` / `autopilot`); the legacy `auto_approve` is kept as a fallback (`true` → `autopilot`).
+
 ### Changed
+- TUI: the two separate mode pills (Agent/Plan + Ask/Auto) are now a single tri-state pill cycled with **Shift+Tab** (Ask → Plan → Autopilot). The old **Ctrl+P** (plan toggle) and **Ctrl+A** (approval toggle) shortcuts are removed; the approval dialog's "Approve All" now switches the session to Autopilot.
+- Web: the mode dropdown offers Ask / Plan / Autopilot and the separate auto-approve toggle is folded into Autopilot. Web **Plan** mode now actually swaps to the read-only tool set (previously it only prefixed the prompt). `POST /api/mode` accepts `ask`/`plan`/`autopilot` (legacy `build` still accepted).
+- ACP: sessions advertise three modes (`ask`/`plan`/`autopilot`); the legacy `agent` mode id is still accepted as an alias for `ask`. Selecting "Allow All" emits a `current_mode_update` to Autopilot.
 - Improved ACP tool-call titles, kinds, locations, permission payloads, and status transitions for friendlier editor display and follow-along support.
 - Removed the ACP client filesystem/terminal executor path because the v2 client capability extension is no longer supported; ACP sessions now use the local executor.
 

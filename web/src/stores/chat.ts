@@ -15,6 +15,7 @@ import type {
   ToolDisplayInfo,
   ModelRef,
 } from '@/types/api'
+import { normalizeMode } from '@/types/api'
 import { api } from '@/composables/api'
 import { extractToolDisplayInfo } from '@/composables/toolInfo'
 
@@ -49,7 +50,7 @@ export const useChatStore = defineStore('chat', () => {
   const wsConnected = ref(false)
 
   // Mode & model
-  const mode = ref<AgentMode>('agent')
+  const mode = ref<AgentMode>('ask')
   const providerName = ref('')
   const modelName = ref('')
   const providers = ref<ProviderInfo[]>([])
@@ -271,7 +272,7 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const resp = await api.chat(
         text,
-        mode.value === 'agent' ? ('build' as AgentMode) : mode.value,
+        mode.value,
         currentSessionId.value || undefined,
         images,
       )
@@ -392,8 +393,8 @@ export const useChatStore = defineStore('chat', () => {
       pwd.value = h.pwd
       providerName.value = h.provider
       modelName.value = h.model
-      const m = h.mode || 'build'
-      mode.value = m === 'build' ? 'agent' : (m as AgentMode)
+      mode.value = normalizeMode(h.mode)
+      autoApprove.value = mode.value === 'autopilot'
       currentSessionId.value = h.session_id || ''
       isRunning.value = h.running || false
       imageSupport.value = h.image_support || false
@@ -438,10 +439,10 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function switchMode(newMode: AgentMode) {
-    const backendMode = newMode === 'agent' ? 'build' : newMode
     try {
-      await api.switchMode(backendMode)
+      await api.switchMode(newMode)
       mode.value = newMode
+      autoApprove.value = newMode === 'autopilot'
     } catch (err: unknown) {
       console.error('Failed to switch mode:', err)
     }
@@ -466,14 +467,6 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function setAutoApprove(enabled: boolean) {
-    try {
-      const data = await api.setApprovalMode(enabled)
-      autoApprove.value = data.auto_approve
-    } catch (err: unknown) {
-      console.error('Failed to set approval mode:', err)
-    }
-  }
 
   async function fetchChannelState() {
     try {
@@ -825,7 +818,6 @@ export const useChatStore = defineStore('chat', () => {
     clearChat,
     loadSession,
     fetchApprovalMode,
-    setAutoApprove,
     fetchChannelState,
     toggleChannel,
     restoreCurrentSession,

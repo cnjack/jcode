@@ -12,6 +12,7 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/mode"
 )
 
 // logACPError logs a failed ACP SessionUpdate to the debug log.
@@ -44,6 +45,17 @@ type ACPHandler struct {
 	// middleware does not pass the Eino tool call ID, so we match by
 	// (toolName, toolArgs) in arrival order.
 	pendingApprovals []pendingApproval
+
+	// onModeChange, when set, is invoked after the handler promotes the session
+	// mode (e.g. "Allow All" → Autopilot) so the owning session can reconcile its
+	// own advertised mode field with the approval state's source of truth.
+	onModeChange func(mode.SessionMode)
+}
+
+// SetModeChangeCallback registers a callback invoked whenever the handler
+// changes the session mode (currently the "Allow All" → Autopilot promotion).
+func (h *ACPHandler) SetModeChangeCallback(fn func(mode.SessionMode)) {
+	h.onModeChange = fn
 }
 
 type pendingApproval struct {
@@ -524,6 +536,9 @@ func (h *ACPHandler) RequestApproval(ctx context.Context, req ApprovalRequest) (
 			return ApprovalResponse{Approved: true, Mode: ModeManual}, nil
 		case "allow_always":
 			h.markPermissionApproved(matchedID)
+			// "Allow All" promotes the session to Autopilot; tell the client so its
+			// mode selector reflects the jump to auto-approve.
+			h.notifyModeChanged(mode.Autopilot)
 			return ApprovalResponse{Approved: true, Mode: ModeAuto}, nil
 		case "reject_once":
 			h.markPermissionRejected(matchedID)
@@ -533,6 +548,24 @@ func (h *ACPHandler) RequestApproval(ctx context.Context, req ApprovalRequest) (
 
 	h.markPermissionRejected(matchedID)
 	return ApprovalResponse{Approved: false, Mode: ModeManual}, nil
+}
+
+// notifyModeChanged tells the connected client the session's unified mode
+// changed (e.g. after "Allow All" promotes to Autopilot), so its selector syncs.
+func (h *ACPHandler) notifyModeChanged(m mode.SessionMode) {
+	if h.onModeChange != nil {
+		h.onModeChange(m) // reconcile the owning session's mode field
+	}
+	if err := h.conn.SessionUpdate(context.Background(), acp.SessionNotification{
+		SessionId: h.sessionID,
+		Update: acp.SessionUpdate{
+			CurrentModeUpdate: &acp.SessionCurrentModeUpdate{
+				CurrentModeId: acp.SessionModeId(m.String()),
+			},
+		},
+	}); err != nil {
+		logACPError("CurrentModeUpdate", err)
+	}
 }
 
 func (h *ACPHandler) markPermissionApproved(id acp.ToolCallId) {

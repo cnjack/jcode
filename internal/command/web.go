@@ -79,6 +79,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 	skillLoader.ScanProjectSkills(pwd)
 
 	systemPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
+	planPrompt := prompts.GetPlanSystemPrompt(platform, pwd, "local", envInfo)
 
 	var providerName, modelName string
 	if !needsSetup {
@@ -108,7 +109,8 @@ func runWebServer(port int, host string, openBrowser bool) error {
 
 	planStore := tools.NewPlanStore()
 
-	approvalState := runner.NewApprovalState(pwd, cfg.AutoApprove)
+	startupMode := resolveStartupMode(cfg, false)
+	approvalState := runner.NewApprovalStateWithMode(pwd, startupMode)
 
 	// Create WebHandler early so subagent tool can emit events through it.
 	webHandler := handler.NewWebHandler()
@@ -188,36 +190,27 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		return append(all, mcpTools...)
 	}
 
-	createAgent := func(prov, mod string) (*adk.ChatModelAgent, error) {
-		// Resolve provider config.
-		// Reload config to pick up any new providers added via setup.
-		currentCfg, err := config.LoadConfig()
-		if err != nil {
-			return nil, fmt.Errorf("config error: %w", err)
+	// buildPlanTools mirrors the TUI/ACP read-only plan tool set: no edit/write,
+	// no background execute, no subagent/team. This is what makes web Plan mode a
+	// real read-only mode rather than just a prompt prefix.
+	buildPlanTools := func() []tool.BaseTool {
+		return []tool.BaseTool{
+			env.NewReadTool(),
+			env.NewExecuteTool(nil),
+			env.NewGrepTool(),
+			env.NewTodoWriteTool(), env.NewTodoReadTool(),
+			tools.NewAskUserTool(&tools.AskUserDeps{
+				ResponseCh: make(chan tools.AskUserResponse, 1),
+			}),
 		}
-		provCfg := currentCfg.GetProviders()[prov]
-		if provCfg == nil {
-			return nil, fmt.Errorf("provider %q not configured", prov)
-		}
-		bURL := provCfg.BaseURL
-		if bURL == "" {
-			bURL = registry.GetProviderAPI(prov)
-		}
-		cm, err := internalmodel.NewChatModel(ctx, &internalmodel.ChatModelConfig{
-			Model: mod, APIKey: provCfg.APIKey, BaseURL: bURL,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("create model %s/%s: %w", prov, mod, err)
-		}
+	}
 
-		ctxLimit := registry.GetModelContextLimit(prov, mod)
-		if ctxLimit <= 0 {
-			ctxLimit = internalmodel.GetModelContextLimit(mod)
-		}
-		if ctxLimit <= 0 {
-			ctxLimit = 200000
-		}
-
+	// makeAgent assembles the middleware stack and tools for a given chat model
+	// and plan flag, then builds the agent. Plan mode swaps to the read-only
+	// prompt + tool set; Ask/Autopilot share the full set (they differ only on
+	// the approval axis, carried by approvalState). This is the cheap per-mode
+	// assembly — it does NOT rebuild the chat model (mirrors ACP's makeAgent).
+	makeAgent := func(cm model.ToolCallingChatModel, ctxLimit int, planMode bool) (*adk.ChatModelAgent, error) {
 		var middlewares []adk.AgentMiddleware
 		if langfuseTracer != nil {
 			middlewares = append(middlewares, langfuseTracer.AgentMiddleware())
@@ -261,8 +254,65 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		}, agentTokenUsage)
 		handlers = append(handlers, reminderMw)
 
-		tools := buildAllTools(cm)
-		return agent.NewAgent(ctx, cm, tools, systemPrompt, approvalState.RequestApproval, middlewares, handlers)
+		prompt := systemPrompt
+		toolList := buildAllTools(cm)
+		if planMode {
+			prompt = planPrompt
+			toolList = buildPlanTools()
+		}
+		return agent.NewAgent(ctx, cm, toolList, prompt, approvalState.RequestApproval, middlewares, handlers)
+	}
+
+	// currentCM / currentCtxLimit cache the live chat model so a mode switch can
+	// re-assemble the agent without re-resolving config or rebuilding the model.
+	// currentPlanMode preserves the tool/prompt axis across model switches.
+	var currentCM model.ToolCallingChatModel
+	var currentCtxLimit int
+	currentPlanMode := startupMode.IsPlan()
+
+	createAgent := func(prov, mod string) (*adk.ChatModelAgent, error) {
+		// Resolve provider config.
+		// Reload config to pick up any new providers added via setup.
+		currentCfg, err := config.LoadConfig()
+		if err != nil {
+			return nil, fmt.Errorf("config error: %w", err)
+		}
+		provCfg := currentCfg.GetProviders()[prov]
+		if provCfg == nil {
+			return nil, fmt.Errorf("provider %q not configured", prov)
+		}
+		bURL := provCfg.BaseURL
+		if bURL == "" {
+			bURL = registry.GetProviderAPI(prov)
+		}
+		cm, err := internalmodel.NewChatModel(ctx, &internalmodel.ChatModelConfig{
+			Model: mod, APIKey: provCfg.APIKey, BaseURL: bURL,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create model %s/%s: %w", prov, mod, err)
+		}
+
+		ctxLimit := registry.GetModelContextLimit(prov, mod)
+		if ctxLimit <= 0 {
+			ctxLimit = internalmodel.GetModelContextLimit(mod)
+		}
+		if ctxLimit <= 0 {
+			ctxLimit = 200000
+		}
+
+		currentCM = cm
+		currentCtxLimit = ctxLimit
+		return makeAgent(cm, ctxLimit, currentPlanMode)
+	}
+
+	// rebuildForMode re-assembles the agent for a mode change, reusing the live
+	// chat model when available (cheap) and only swapping prompt + tools.
+	rebuildForMode := func(planMode bool) (*adk.ChatModelAgent, error) {
+		currentPlanMode = planMode
+		if currentCM == nil {
+			return createAgent(providerName, modelName)
+		}
+		return makeAgent(currentCM, currentCtxLimit, planMode)
 	}
 
 	var ag *adk.ChatModelAgent
@@ -310,29 +360,31 @@ func runWebServer(port int, host string, openBrowser bool) error {
 	}
 
 	srv := web.NewServer(&web.ServerConfig{
-		Port:          port,
-		Host:          host,
-		OpenBrowser:   openBrowser,
-		Pwd:           pwd,
-		Version:       Version,
-		Agent:         ag,
-		CreateAgent:   createAgent,
-		SwitchProject: switchProject,
-		TodoStore:     env.TodoStore,
-		Recorder:      rec,
-		Tracer:        langfuseTracer,
-		Env:           env,
-		ProviderName:  providerName,
-		ModelName:     modelName,
-		Config:        cfg,
-		Registry:      registry,
-		ApprovalState: approvalState,
-		SkillLoader:   skillLoader,
-		WechatClient:  wechatClient,
-		WebHandler:    webHandler,
-		EventHandler:  finalHandler,
-		NeedsSetup:    needsSetup,
-		TokenUsage:    agentTokenUsage,
+		Port:           port,
+		Host:           host,
+		OpenBrowser:    openBrowser,
+		Pwd:            pwd,
+		Version:        Version,
+		Agent:          ag,
+		CreateAgent:    createAgent,
+		RebuildForMode: rebuildForMode,
+		InitialMode:    startupMode.String(),
+		SwitchProject:  switchProject,
+		TodoStore:      env.TodoStore,
+		Recorder:       rec,
+		Tracer:         langfuseTracer,
+		Env:            env,
+		ProviderName:   providerName,
+		ModelName:      modelName,
+		Config:         cfg,
+		Registry:       registry,
+		ApprovalState:  approvalState,
+		SkillLoader:    skillLoader,
+		WechatClient:   wechatClient,
+		WebHandler:     webHandler,
+		EventHandler:   finalHandler,
+		NeedsSetup:     needsSetup,
+		TokenUsage:     agentTokenUsage,
 	})
 
 	// Set handler for approval routing.

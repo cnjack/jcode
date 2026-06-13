@@ -16,32 +16,39 @@ The agent is the core of jcode. It's the AI that understands your requests, reas
 4. Each tool call is **shown to you** for approval (if required)
 5. The agent **reports results** and continues until the task is done
 
-## Agent Modes
+## Session Modes
 
-jcode operates in three modes:
+jcode has a single mode selector with three states. Press **Shift+Tab** in the TUI to cycle **Ask → Plan → Autopilot** (or use the dropdown in the web UI / `session/set_mode` over ACP). The mode controls both which tools are available and whether tool calls need approval.
 
-### Normal Mode
+### Ask
 
-The default mode. The agent has access to all tools and works on your task directly.
+The default mode. The agent has access to all tools and works on your task directly, but you approve each non-trivial tool call before it runs (read-only and safe commands are auto-approved).
 
 ```
-  Agent │ Model: openai / gpt-4o │ Approve: Ask │ [████░░░░░░] 2%
+  Ask │ Model: openai / gpt-4o │ [████░░░░░░] 2%
 ```
 
-### Plan Mode
+### Plan
 
-Press **Ctrl+P** to enter Plan Mode. The agent explores your codebase **read-only** — it can read files and run safe commands, but cannot modify anything. It generates a structured plan for your review.
+The agent explores your codebase **read-only** — it can read files and run safe commands, but cannot modify anything. It generates a structured plan for your review; once you approve it, the agent executes the plan step by step with the full tool set and returns to Ask when done.
 
 {: .note }
-Plan Mode is ideal for complex tasks where you want to review the approach before making changes.
+Plan is ideal for complex tasks where you want to review the approach before making changes.
 
 ```
-  Plan │ Model: openai / gpt-4o │ Approve: Ask │ [██░░░░░░░░] 12%
+  Plan │ Model: openai / gpt-4o │ [██░░░░░░░░] 12%
 ```
 
-### Executing Mode
+### Autopilot
 
-After you approve a plan, the agent switches to Executing Mode. It follows the plan step by step, tracking progress with the todo list. When all tasks are complete, it automatically returns to Normal Mode.
+Full tools, every tool call auto-approved — the agent runs end-to-end with no interruptions. This is the mode `--unsafe` and `default_mode: "autopilot"` (or the legacy `auto_approve: true`) start in.
+
+{: .warning }
+Autopilot approves everything, including destructive commands. There is no separate confirmation gate in this mode — use it only when you trust the task.
+
+```
+  Autopilot │ Model: openai / gpt-4o │ [████░░░░░░] 2%
+```
 
 ## Context Awareness
 

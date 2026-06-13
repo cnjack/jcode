@@ -25,6 +25,7 @@ import (
 	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
+	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
@@ -71,6 +72,10 @@ type Server struct {
 	// Accepts provider and model names so the caller can switch models.
 	createAgent func(providerName, modelName string) (*adk.ChatModelAgent, error)
 
+	// rebuildForMode re-assembles the agent for a session-mode change, swapping
+	// the tool/prompt axis (Plan = read-only) while reusing the live chat model.
+	rebuildForMode func(planMode bool) (*adk.ChatModelAgent, error)
+
 	// switchProject changes the working directory and rebuilds the agent.
 	switchProject func(newPwd string) (*adk.ChatModelAgent, *session.Recorder, error)
 
@@ -109,29 +114,31 @@ type Server struct {
 
 // ServerConfig holds the configuration for creating a new Server.
 type ServerConfig struct {
-	Port          int
-	Host          string
-	OpenBrowser   bool
-	Pwd           string
-	Version       string
-	Agent         *adk.ChatModelAgent
-	CreateAgent   func(providerName, modelName string) (*adk.ChatModelAgent, error)
-	SwitchProject func(newPwd string) (*adk.ChatModelAgent, *session.Recorder, error)
-	TodoStore     *tools.TodoStore
-	Recorder      *session.Recorder
-	Tracer        *telemetry.LangfuseTracer
-	Env           *tools.Env
-	ProviderName  string
-	ModelName     string
-	Config        *config.Config
-	Registry      *model.ModelRegistry
-	ApprovalState *runner.ApprovalState
-	SkillLoader   *skills.Loader
-	WechatClient  channel.Channel           // optional WeChat channel
-	WebHandler    *handler.WebHandler       // optional: pre-created handler for sharing with tools
-	EventHandler  handler.AgentEventHandler // optional: handler for runner (e.g. NotifyingHandler)
-	NeedsSetup    bool                      // true when no providers are configured (setup mode)
-	TokenUsage    *model.TokenUsage         // optional: shared token tracker (created when nil)
+	Port           int
+	Host           string
+	OpenBrowser    bool
+	Pwd            string
+	Version        string
+	Agent          *adk.ChatModelAgent
+	CreateAgent    func(providerName, modelName string) (*adk.ChatModelAgent, error)
+	RebuildForMode func(planMode bool) (*adk.ChatModelAgent, error)
+	InitialMode    string // unified startup mode string ("ask"/"plan"/"autopilot")
+	SwitchProject  func(newPwd string) (*adk.ChatModelAgent, *session.Recorder, error)
+	TodoStore      *tools.TodoStore
+	Recorder       *session.Recorder
+	Tracer         *telemetry.LangfuseTracer
+	Env            *tools.Env
+	ProviderName   string
+	ModelName      string
+	Config         *config.Config
+	Registry       *model.ModelRegistry
+	ApprovalState  *runner.ApprovalState
+	SkillLoader    *skills.Loader
+	WechatClient   channel.Channel           // optional WeChat channel
+	WebHandler     *handler.WebHandler       // optional: pre-created handler for sharing with tools
+	EventHandler   handler.AgentEventHandler // optional: handler for runner (e.g. NotifyingHandler)
+	NeedsSetup     bool                      // true when no providers are configured (setup mode)
+	TokenUsage     *model.TokenUsage         // optional: shared token tracker (created when nil)
 }
 
 // NewServer creates a new web server.
@@ -145,34 +152,35 @@ func NewServer(cfg *ServerConfig) *Server {
 		eh = cfg.EventHandler
 	}
 	s := &Server{
-		port:          cfg.Port,
-		host:          cfg.Host,
-		openBrowser:   cfg.OpenBrowser,
-		pwd:           cfg.Pwd,
-		version:       cfg.Version,
-		handler:       h,
-		broker:        NewSSEBroker(),
-		wsBroker:      NewWSBroker(),
-		agent:         cfg.Agent,
-		createAgent:   cfg.CreateAgent,
-		switchProject: cfg.SwitchProject,
-		todoStore:     cfg.TodoStore,
-		recorder:      cfg.Recorder,
-		tracer:        cfg.Tracer,
-		env:           cfg.Env,
-		providerName:  cfg.ProviderName,
-		modelName:     cfg.ModelName,
-		mode:          "build",
-		cfg:           cfg.Config,
-		registry:      cfg.Registry,
-		ptyMgr:        newPTYManager(),
-		approvalState: cfg.ApprovalState,
-		skillLoader:   cfg.SkillLoader,
-		disabledMCP:   make(map[string]bool),
-		wechatClient:  cfg.WechatClient,
-		eventHandler:  eh,
-		needsSetup:    cfg.NeedsSetup,
-		tokenUsage:    cfg.TokenUsage,
+		port:           cfg.Port,
+		host:           cfg.Host,
+		openBrowser:    cfg.OpenBrowser,
+		pwd:            cfg.Pwd,
+		version:        cfg.Version,
+		handler:        h,
+		broker:         NewSSEBroker(),
+		wsBroker:       NewWSBroker(),
+		agent:          cfg.Agent,
+		createAgent:    cfg.CreateAgent,
+		rebuildForMode: cfg.RebuildForMode,
+		switchProject:  cfg.SwitchProject,
+		todoStore:      cfg.TodoStore,
+		recorder:       cfg.Recorder,
+		tracer:         cfg.Tracer,
+		env:            cfg.Env,
+		providerName:   cfg.ProviderName,
+		modelName:      cfg.ModelName,
+		mode:           mode.Parse(cfg.InitialMode).String(),
+		cfg:            cfg.Config,
+		registry:       cfg.Registry,
+		ptyMgr:         newPTYManager(),
+		approvalState:  cfg.ApprovalState,
+		skillLoader:    cfg.SkillLoader,
+		disabledMCP:    make(map[string]bool),
+		wechatClient:   cfg.WechatClient,
+		eventHandler:   eh,
+		needsSetup:     cfg.NeedsSetup,
+		tokenUsage:     cfg.TokenUsage,
 	}
 	if s.tokenUsage == nil {
 		s.tokenUsage = &model.TokenUsage{}
@@ -515,10 +523,10 @@ func (s *Server) submitMessage(message, mode, source, sessionID string, images [
 		}
 	}
 
-	// Apply mode prefix if plan mode requested.
-	if mode == "plan" {
-		agentMsg = "[PLAN MODE — Read-only. Analyze the codebase and create a plan. Do NOT edit, write, or delete any files.]\n\n" + agentMsg
-	}
+	// Plan mode no longer needs an inline prompt prefix: the agent is rebuilt with
+	// the read-only plan system prompt + tool set on mode switch (handleSwitchMode),
+	// matching TUI/ACP. The mode arg is retained for the recorder/event context.
+	_ = mode
 
 	// Emit user_message event for external sources (e.g. WeChat) so web clients see it.
 	// Web-originated messages are already added by the frontend's sendMessage().
@@ -990,20 +998,40 @@ func (s *Server) handleSwitchMode(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	if req.Mode != "build" && req.Mode != "plan" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mode must be 'build' or 'plan'"})
+	// Accept the three unified ids plus the legacy "build" alias (→ ask).
+	switch req.Mode {
+	case "ask", "plan", "autopilot", "build":
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mode must be 'ask', 'plan', or 'autopilot'"})
 		return
 	}
-	s.mode = req.Mode
+	sm := mode.Parse(req.Mode)
+
+	// Lock around the agent rebuild + mode/approval mutation so we don't race an
+	// in-flight submitMessage that reads s.agent under the same lock. The new
+	// agent (and tool set) takes effect on the next run, like TUI/ACP.
+	s.mu.Lock()
+	s.mode = sm.String()
+	if s.approvalState != nil {
+		s.approvalState.SetSessionMode(sm) // approval axis (Autopilot → auto)
+	}
+	if s.rebuildForMode != nil {
+		if ag, err := s.rebuildForMode(sm.IsPlan()); err == nil {
+			s.agent = ag // tool/prompt axis (Plan → read-only)
+		} else {
+			config.Logger().Printf("[web] mode switch agent rebuild error: %v", err)
+		}
+	}
+	s.mu.Unlock()
 
 	s.broker.Broadcast(SSEEvent{Event: "mode_changed", Data: map[string]string{
-		"mode": req.Mode,
+		"mode": sm.String(),
 	}})
 	s.wsBroker.Broadcast(WSEvent{Type: "mode_changed", Data: map[string]string{
-		"mode": req.Mode,
+		"mode": sm.String(),
 	}})
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "mode": req.Mode})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "mode": sm.String()})
 }
 
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
@@ -1641,9 +1669,26 @@ func (s *Server) handleSetApprovalMode(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	if s.approvalState != nil {
-		s.approvalState.SetSessionApproval(req.AutoApprove)
+	// Legacy endpoint: auto-approve now maps onto the unified mode (Autopilot vs
+	// Ask). Both are non-plan, so rebuild to the full tool set for consistency.
+	sm := mode.Ask
+	if req.AutoApprove {
+		sm = mode.Autopilot
 	}
+	s.mu.Lock()
+	s.mode = sm.String()
+	if s.approvalState != nil {
+		s.approvalState.SetSessionMode(sm)
+	}
+	if s.rebuildForMode != nil {
+		if ag, err := s.rebuildForMode(false); err == nil {
+			s.agent = ag
+		} else {
+			config.Logger().Printf("[web] approval mode agent rebuild error: %v", err)
+		}
+	}
+	s.mu.Unlock()
+
 	s.broker.Broadcast(SSEEvent{
 		Event: "approval_mode_changed",
 		Data:  map[string]any{"auto_approve": req.AutoApprove},
@@ -1652,6 +1697,9 @@ func (s *Server) handleSetApprovalMode(w http.ResponseWriter, r *http.Request) {
 		Type: "approval_mode_changed",
 		Data: map[string]any{"auto_approve": req.AutoApprove},
 	})
+	// Also emit the unified mode event so updated clients keep their selector synced.
+	s.broker.Broadcast(SSEEvent{Event: "mode_changed", Data: map[string]string{"mode": sm.String()}})
+	s.wsBroker.Broadcast(WSEvent{Type: "mode_changed", Data: map[string]string{"mode": sm.String()}})
 	writeJSON(w, http.StatusOK, map[string]any{"auto_approve": req.AutoApprove})
 }
 
