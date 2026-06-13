@@ -425,8 +425,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			return m, tea.Batch(cmds...)
 		}
 
-		// F1 or ? to toggle help panel (when not typing)
-		if msg.String() == "f1" {
+		// F1 (always) or ? (when the input is empty) opens the help panel.
+		if msg.String() == "f1" || (msg.String() == "?" && strings.TrimSpace(m.textarea.Value()) == "") {
 			m.showingHelp = true
 			m.helpScroll = 0
 			m.textarea.Blur()
@@ -753,6 +753,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.cmdSuggestionIndex = 0
 					return m, tea.Batch(cmds...)
 				}
+				// Team: exit teammate view, return to leader
+				if m.teamState.ViewMode == TeamViewTeammate {
+					m.exitTeammateView()
+					m.refreshViewport()
+					return m, tea.Batch(cmds...)
+				}
 			case "enter":
 				// If command suggestion is active, accept it instead of submitting
 				if m.cmdSuggestionActive && len(m.cmdSuggestions) > 0 && m.cmdSuggestionIndex < len(m.cmdSuggestions) {
@@ -1005,13 +1011,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					cmds = append(cmds, tea.SetClipboard(text))
 				}
 				return m, tea.Batch(cmds...)
-			case "escape":
-				// Team: exit teammate view, return to leader
-				if m.teamState.ViewMode == TeamViewTeammate {
-					m.exitTeammateView()
-					m.refreshViewport()
-					return m, tea.Batch(cmds...)
-				}
 			}
 			// Forward other keys to textarea
 			var cmd tea.Cmd
