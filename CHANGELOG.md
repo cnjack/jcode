@@ -7,15 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-06-13
+
+### Added
+- **1M-context model support.** New `model.ResolveContextLimit()` is the single source of truth for context-window resolution (config override → registry → `knownModels` fallback → config default → `DefaultContextLimitFallback`), replacing five copy-pasted resolution blocks across the interactive/ACP/web/runner call sites. Previously any 1M-context model the registry didn't know (or under-reported) silently fell back to a 200K window and triggered compaction at ~150K.
+- New config knobs: `context_limits` (per provider/model or bare id), `default_context_limit`, and the formerly-dead `compaction.threshold` is now wired so summarization/compaction/reduction scale off a configurable fraction.
+- Model registry updates that survive `go generate`: `additionalModels` merge-injection (GLM-5.2 on the four first-party Zhipu/Z.ai providers, `contextWindow=1000000`), `contextLimitOverrides` (corrects MiniMax-M3 to its advertised 1M window), and refreshed `recommendedModels` / offline `knownModels` tables to the 2026 1M flagships.
+- `docs/model-research.md` caching the per-provider context-window survey, plus `context_limit_test.go` covering resolution order and the registry corrections.
+- Approval dialog now splits **Allow** into "Allow once" / "Allow all" so approving a single command no longer changes the session mode.
+
+### Changed
+- Removed the dead SSE transport: the web frontend only ever used WebSocket, so `internal/web/sse.go` (`SSEBroker`/`SSEEvent`/`ServeSSE`), `web/src/composables/sse.ts`, and the `/api/events` endpoint were deleted. Every event is still broadcast over WebSocket (parity verified).
+
+### Security
+- **Hardened the approval gate (P0+P1).** Background commands no longer bypass approval (Ask/Plan previously auto-approved any `execute` with `background=true`, a model-controlled flag). `isSafeCommand` now rejects shell operators (`; & | < > \` $() ${} ()`) and matches whole command words, so a "safe" prefix can no longer smuggle a payload (e.g. `git status && rm -rf /`). Web "approve once" no longer silently promotes the whole session to Autopilot (`ResolveApproval` gained an `approveAll` flag carried through the API/WS payload). `ask_user` is auto-approved again (the allowlist held the dead name `question`). `RequestApproval` and the teammate approval path now share a single `decide()` so they can't drift.
+
+### Fixed
+- Fixed pre-existing `vue-tsc` errors (`noUncheckedIndexedAccess` narrowing in `TerminalPanel.vue` / `ToolCallCard.vue` and the dispatch typing) so `npm run build` passes again.
+- Addressed CodeRabbit review feedback: workpath race, WebSocket error logging, and test timeouts.
+
+## [0.5.0] - 2026-06-13
+
 ### Added
 - Unified **Ask / Plan / Autopilot** session-mode selector across the TUI, web, and ACP frontends (Copilot-style). A single `internal/mode.SessionMode` drives both the tool/prompt axis (Plan is read-only) and the approval axis (Autopilot auto-approves). New `default_mode` config option (`ask` / `plan` / `autopilot`); the legacy `auto_approve` is kept as a fallback (`true` → `autopilot`).
+- Persistent **session goal** with auto-continuation across TUI/Web/ACP (codex-style): a goal the agent keeps working toward across turns until it verifiably completes, marks it blocked, or hits a 25-continuation safety cap. New `goal_set`/`goal_get`/`goal_update` tools and a shared `/goal` grammar; the continuation loop injects a continuation prompt while a goal is active (appending only the per-turn delta to avoid quadratic context growth). Goals are persisted via `goal_update` session entries and restored on every resume path. TUI exposes `/goal <objective>|status|clear` with a 🎯 indicator; web adds `GET/POST/DELETE /api/goal`, `goal_update` WS events, a `GoalBanner`, and a 🎯 input toggle; ACP advertises `/goal` via `available_commands`.
 
 ### Changed
 - TUI: the two separate mode pills (Agent/Plan + Ask/Auto) are now a single tri-state pill cycled with **Shift+Tab** (Ask → Plan → Autopilot). The old **Ctrl+P** (plan toggle) and **Ctrl+A** (approval toggle) shortcuts are removed; the approval dialog's "Approve All" now switches the session to Autopilot.
 - Web: the mode dropdown offers Ask / Plan / Autopilot and the separate auto-approve toggle is folded into Autopilot. Web **Plan** mode now actually swaps to the read-only tool set (previously it only prefixed the prompt). `POST /api/mode` accepts `ask`/`plan`/`autopilot` (legacy `build` still accepted).
 - ACP: sessions advertise three modes (`ask`/`plan`/`autopilot`); the legacy `agent` mode id is still accepted as an alias for `ask`. Selecting "Allow All" emits a `current_mode_update` to Autopilot.
-- Improved ACP tool-call titles, kinds, locations, permission payloads, and status transitions for friendlier editor display and follow-along support.
-- Removed the ACP client filesystem/terminal executor path because the v2 client capability extension is no longer supported; ACP sessions now use the local executor.
+- Upgraded dependencies to latest: bubbletea v2.0.7, eino v0.9.6, eino-ext langfuse v0.1.1, acp-go-sdk v0.13.5, mcp-go v0.54.1, golang.org/x/sys v0.45.0.
+
+## [0.4.11] - 2026-06-03
+
+### Changed
+- Improved ACP tool-call presentation for friendlier editor display and follow-along support: tool names mapped to semantic `ToolKind`s, friendly per-call titles (e.g. `Read main.go (1-50)`), file locations with absolute paths and line numbers, status streaming (Pending → InProgress → Completed/Failed) including a status transition for auto-approved tools, diff content for edit/write calls, and failure detection from the output prefix.
+- ACP `ListSessions` is now scoped by `cwd` and returns an `UpdatedAt` field on each `SessionInfo`.
+- TUI: extracted `renderViewportContent()` to centralize trimmed rendering and preserve scroll-to-bottom position in the batched render path.
+
+### Removed
+- ACP client filesystem/terminal executor path (the v2 client capability extension is no longer supported); ACP sessions now use the local executor. Cleaned up `NewEnvWithExecutor`, `IsACP`, and `SetACP`.
+
+### Fixed
+- Delay the ACP slash-command broadcast so commands are advertised at the right time.
+
+## [0.4.10] - 2026-06-03
+
+### Added
+- **Slash commands.** Skills are now exposed as `/`-prefixed commands in the TUI and web UI, with ChatInput autocomplete on the web. Upgraded `coder/acp-go-sdk` v0.12.0 → v0.13.4, migrated `UnstableCloseSession` → stable `CloseSession`, added `ResumeSession` and `Logout` (both promoted to stable), and advertise the Resume capability in `SessionCapabilities`.
+
+### Changed
+- `perf(tui)`: multi-layer render cache and stream debounce with precise cache invalidation on state changes, sharply reducing redraw cost during streaming.
+- Refactored the monolithic `tui.go` into focused modules.
+- Added a pre-commit hook and applied fmt/lint fixes across the tree.
+
+### Fixed
+- Invalidate the sidebar cache on viewport height change; sanitized the render fast path and debounce logic per review.
 
 ## [0.4.9] - 2026-05-23
 
@@ -424,7 +471,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-agent token usage tracking
 - WebSocket support for real-time communication
 
-[Unreleased]: https://github.com/cnjack/jcode/compare/v0.4.9...HEAD
+[Unreleased]: https://github.com/cnjack/jcode/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/cnjack/jcode/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/cnjack/jcode/compare/v0.4.11...v0.5.0
+[0.4.11]: https://github.com/cnjack/jcode/compare/v0.4.10...v0.4.11
+[0.4.10]: https://github.com/cnjack/jcode/compare/v0.4.9...v0.4.10
 [0.4.9]: https://github.com/cnjack/jcode/compare/v0.4.8...v0.4.9
 [0.4.8]: https://github.com/cnjack/jcode/compare/v0.4.7...v0.4.8
 [0.4.7]: https://github.com/cnjack/jcode/compare/v0.4.6...v0.4.7

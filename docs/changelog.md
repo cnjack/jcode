@@ -11,14 +11,79 @@ For the **full changelog**, see [CHANGELOG.md](../CHANGELOG.md) in the repositor
 
 ## Unreleased
 
-### In Development
-- Unified **Ask / Plan / Autopilot** session-mode selector across the TUI, web, and ACP frontends. Cycle it with **Shift+Tab** in the TUI (replacing the old Ctrl+P / Ctrl+A shortcuts), the dropdown in the web UI, or `session/set_mode` over ACP. New `default_mode` config (`ask`/`plan`/`autopilot`); legacy `auto_approve: true` maps to `autopilot`. Web Plan mode now truly restricts to read-only tools.
-- Improved ACP tool-call titles, kinds, locations, permission payloads, and status transitions for friendlier editor display and follow-along support.
-- Removed the ACP client filesystem/terminal executor path because the v2 client capability extension is no longer supported; ACP sessions now use the local executor.
+_Nothing yet._
 
 ---
 
 ## Latest Release
+
+### [0.5.1] - 2026-06-13
+
+**1M-Context Models • Adaptive Window Sizing • Approval-Gate Hardening**
+
+#### Added
+- **1M-context model support.** New `model.ResolveContextLimit()` is the single source of truth for window resolution (config override → registry → known-models fallback → config default), replacing five copy-pasted blocks. 1M-context models the registry under-reported no longer fall back to a 200K window and compact at ~150K.
+- New config knobs: `context_limits` (per provider/model or bare id), `default_context_limit`, and a now-wired `compaction.threshold` so summarization/compaction scale off a configurable fraction.
+- Model registry refresh that survives `go generate`: GLM-5.2 injected on the Zhipu/Z.ai providers (1M window), MiniMax-M3 corrected to its 1M window, and `recommendedModels` / offline known-models tables updated to the 2026 flagships.
+- Approval dialog splits **Allow** into "Allow once" / "Allow all" so approving one command no longer changes the session mode.
+
+#### Security
+- **Hardened the approval gate.** Background commands no longer bypass approval; the "safe command" allowlist now rejects shell operators (`; & | < > $() ${}`) and matches whole command words, so a safe prefix can't smuggle a payload (e.g. `git status && rm -rf /`); web "approve once" no longer silently promotes the session to Autopilot; `ask_user` is auto-approved again; the manual and teammate approval paths share one `decide()`.
+
+#### Changed
+- Removed the dead SSE transport (`internal/web/sse.go`, the `sse.ts` composable, `/api/events`) — the web frontend only used WebSocket, and parity was verified.
+
+#### Fixed
+- Fixed pre-existing `vue-tsc` errors so `npm run build` passes again; addressed CodeRabbit feedback (workpath race, WebSocket error logging, test timeouts).
+
+---
+
+### [0.5.0] - 2026-06-13
+
+**Unified Ask/Plan/Autopilot Selector • Persistent Session Goal • Dependency Upgrades**
+
+#### Added
+- Unified **Ask / Plan / Autopilot** session-mode selector across the TUI, web, and ACP frontends. Cycle it with **Shift+Tab** in the TUI (replacing the old Ctrl+P / Ctrl+A shortcuts), the dropdown in the web UI, or `session/set_mode` over ACP. New `default_mode` config (`ask`/`plan`/`autopilot`); legacy `auto_approve: true` maps to `autopilot`. Web Plan mode now truly restricts to read-only tools.
+- Persistent **session goal** with auto-continuation (codex-style): the agent keeps working toward a goal across turns until it completes, blocks, or hits a 25-continuation cap. `goal_set`/`goal_get`/`goal_update` tools and a shared `/goal` command, persisted and restored on every resume path. TUI `/goal <objective>|status|clear` with a 🎯 indicator; web `GET/POST/DELETE /api/goal` + `goal_update` events, a `GoalBanner`, and a 🎯 input toggle; ACP advertises `/goal` via `available_commands`.
+
+#### Changed
+- TUI mode pills collapsed into a single tri-state pill (Shift+Tab); web auto-approve folded into Autopilot; ACP sessions advertise three modes (`agent` accepted as an alias for `ask`).
+- Upgraded dependencies: bubbletea v2.0.7, eino v0.9.6, eino-ext langfuse v0.1.1, acp-go-sdk v0.13.5, mcp-go v0.54.1, golang.org/x/sys v0.45.0.
+
+---
+
+### [0.4.11] - 2026-06-03
+
+**ACP Presentation Enhancements • Session Listing by cwd**
+
+#### Changed
+- Richer ACP tool-call presentation: semantic tool kinds, friendly titles (e.g. `Read main.go (1-50)`), file locations with line numbers, Pending → InProgress → Completed/Failed status streaming, and diff content for edit/write calls.
+- ACP `ListSessions` now scoped by `cwd` and returns an `UpdatedAt` field.
+- TUI: extracted `renderViewportContent()` and preserved scroll-to-bottom position in the batched render path.
+
+#### Removed
+- ACP client filesystem/terminal executor path (the v2 client capability extension is no longer supported); ACP sessions now use the local executor.
+
+#### Fixed
+- Delay the ACP slash-command broadcast so commands advertise at the right time.
+
+---
+
+### [0.4.10] - 2026-06-03
+
+**Slash Commands • TUI Render Performance**
+
+#### Added
+- **Slash commands** — skills exposed as `/`-prefixed commands in the TUI and web (with ChatInput autocomplete). Upgraded `acp-go-sdk` to v0.13.4, migrated to the stable `CloseSession`, and added `ResumeSession` + `Logout` with a Resume capability.
+
+#### Changed
+- TUI render performance: multi-layer render cache and stream debounce with precise cache invalidation on state changes.
+- Split the monolithic `tui.go` into focused modules; added a pre-commit hook and applied fmt/lint fixes.
+
+#### Fixed
+- Invalidate the sidebar cache on viewport height change.
+
+---
 
 ### [0.4.9] - 2026-05-23
 
