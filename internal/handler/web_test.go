@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 // TestWebHandler_ResolveApprovalOnceVsAll covers the P0 fix: the web approval
@@ -14,13 +15,24 @@ func TestWebHandler_ResolveApprovalOnceVsAll(t *testing.T) {
 		t.Helper()
 		h := NewWebHandler()
 		respCh := make(chan ApprovalResponse, 1)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
 		go func() {
-			r, _ := h.RequestApproval(context.Background(), ApprovalRequest{ToolName: "execute"})
+			r, err := h.RequestApproval(ctx, ApprovalRequest{ToolName: "execute"})
+			if err != nil {
+				t.Errorf("RequestApproval failed: %v", err)
+				return
+			}
 			respCh <- r
 		}()
 
 		// Wait for the emitted approval_request to learn the generated id.
-		ev := <-h.Events()
+		var ev WebEvent
+		select {
+		case ev = <-h.Events():
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for approval_request event")
+		}
 		data, ok := ev.Data.(WebApprovalRequestData)
 		if !ok {
 			t.Fatalf("expected WebApprovalRequestData, got %T", ev.Data)
@@ -28,7 +40,13 @@ func TestWebHandler_ResolveApprovalOnceVsAll(t *testing.T) {
 		if err := h.ResolveApproval(data.ID, true, approveAll); err != nil {
 			t.Fatalf("ResolveApproval(%q, true, %v): %v", data.ID, approveAll, err)
 		}
-		return <-respCh
+		select {
+		case r := <-respCh:
+			return r
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for approval response")
+			return ApprovalResponse{}
+		}
 	}
 
 	if r := run(false); !r.Approved || r.Mode != ModeManual {

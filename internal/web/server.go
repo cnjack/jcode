@@ -1722,7 +1722,9 @@ func (s *Server) handleWSMessage(msg WSIncoming) {
 		if err := json.Unmarshal(msg.Data, &data); err != nil {
 			return
 		}
-		_ = s.handler.ResolveApproval(data.ID, data.Approved, data.ApproveAll)
+		if err := s.handler.ResolveApproval(data.ID, data.Approved, data.ApproveAll); err != nil {
+			config.Logger().Printf("[ws] resolve approval failed for id=%q: %v", data.ID, err)
+		}
 	}
 }
 

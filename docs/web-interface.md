@@ -61,7 +61,7 @@ Switch between different project directories without restarting the server.
 
 ## API Endpoints
 
-The web server exposes a REST API for programmatic access:
+The web server exposes an HTTP API and a WebSocket stream for programmatic access:
 
 | Endpoint | Description |
 |---|---|
