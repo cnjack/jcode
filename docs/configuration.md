@@ -207,6 +207,17 @@ Deprecated — superseded by [`default_mode`](#default_mode). Still honored as a
 
 Set to `true` to auto-approve all tool calls. Equivalent to running with the `--unsafe` flag.
 
+### theme
+
+The built-in color theme for the **terminal UI**: `"jcode-dark"` (default), `"midnight"`, `"dracula"`, `"nord-dark"`, `"jcode-light"`, `"github-light"`, or `"solarized-light"`. Set it interactively with the [`/theme`](commands.html#slash-commands) command (which persists it here), or edit it directly. When unset, jcode auto-selects a light or dark default from the detected terminal background.
+
+```json
+{ "theme": "nord-dark" }
+```
+
+{: .note }
+The web UI has its own theme preference (stored in the browser); the two are independent. Both share the same catalog of built-in themes, generated from a single source (`internal/theme`).
+
 ### channel
 
 Notification channel settings. See [Channels](overview/channels).
