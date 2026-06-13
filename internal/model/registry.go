@@ -313,50 +313,113 @@ func sortModels(models []*RegistryModel) {
 
 // recommendedModels defines recommended and default-enabled models per provider.
 // Key: provider ID, Value: map of model ID → true (recommended + default enabled).
+//
+// Curated 2026-06-13 toward the current long-context flagships. See
+// docs/model-research.md for the per-provider context-window survey behind these
+// picks. Model IDs must match the registry exactly or the flag is silently ignored.
 var recommendedModels = map[string]map[string]bool{
+	// GLM-5.2 (1M window) is Zhipu's newest, injected via additionalModels since
+	// it predates its models.dev record. GLM-5.1 stays selectable but unstarred.
 	"zhipuai": {
-		"glm-5.1": true,
-		"glm-5":   true,
+		"glm-5.2": true,
 	},
 	"zhipuai-coding-plan": {
-		"glm-5.1": true,
-		"glm-5":   true,
+		"glm-5.2": true,
 	},
+	"zai": {
+		"glm-5.2": true,
+	},
+	"zai-coding-plan": {
+		"glm-5.2": true,
+	},
+	// DeepSeek-V4-Pro — genuine 1M-token window.
 	"deepseek": {
 		"deepseek-v4-pro": true,
 	},
+	// Qwen 3.7 Plus/Max and DeepSeek-V4-Pro all carry 1M windows on Alibaba's
+	// endpoint; Kimi-K2.6 (256K) rounds out the agentic options.
 	"alibaba-cn": {
-		"qwen3.6-plus":         true,
-		"MiniMax/MiniMax-M2.7": true,
-		"deepseek-v3-2-exp":    true,
-		"kimi-k2.6":            true,
+		"qwen3.7-plus":    true,
+		"qwen3.7-max":     true,
+		"deepseek-v4-pro": true,
+		"kimi-k2.6":       true,
 	},
 	"alibaba-coding-plan-cn": {
-		"qwen3.6-plus": true,
+		"qwen3.7-plus": true,
 	},
+	// Kimi-K2.7-Code is Moonshot's newest coding model (256K window).
 	"moonshotai": {
-		"kimi-k2.6": true,
+		"kimi-k2.7-code": true,
 	},
+	// MiniMax-M3 — 1M-token window (corrected via contextLimitOverrides below).
 	"minimax": {
-		"MiniMax-M2.7": true,
+		"MiniMax-M3": true,
 	},
 	"minimax-coding-plan": {
-		"MiniMax-M2.7": true,
+		"MiniMax-M3": true,
 	},
+	// GPT-5.5 carries a ~1.05M window.
 	"openai": {
-		"gpt-4.1": true,
-		"o4-mini": true,
+		"gpt-5.5": true,
 	},
+	// Claude Opus 4.8 and Sonnet 4.6 both expose 1M-token windows.
 	"anthropic": {
-		"claude-sonnet-4-20250514": true,
+		"claude-opus-4-8":   true,
+		"claude-sonnet-4-6": true,
 	},
+	// Gemini 3.1 Pro — ~1.05M window.
 	"google": {
-		"gemini-2.5-pro": true,
+		"gemini-3.1-pro-preview": true,
 	},
+}
+
+// contextLimitOverrides corrects context windows for built-in models whose
+// models.dev-sourced value understates the model's advertised window. Applied at
+// init() so corrections survive `go generate` regeneration of registry_generated.go.
+// Key: provider ID → model ID → context window (tokens). See docs/model-research.md.
+var contextLimitOverrides = map[string]map[string]int{
+	// MiniMax-M3 advertises a 1M-token window; models.dev records only the
+	// 512K "guaranteed minimum". Use the advertised window for sizing.
+	"minimax":             {"MiniMax-M3": 1_000_000},
+	"minimax-coding-plan": {"MiniMax-M3": 1_000_000},
+}
+
+// glm52Model builds a fresh GLM-5.2 entry. Returns a new object per call so each
+// provider gets its own instance (deep-copied again per ModelRegistry).
+//
+// GLM-5.2 shipped 2026-06-13 to GLM Coding Plan users but isn't on models.dev yet
+// (the standalone API / open weights land later), so it can't come through
+// registry_generated.go. Spec confirmed from the official Z.ai DevPack config
+// ("contextWindow": 1000000, "maxTokens": 131072). The full 1M window requires the
+// "glm-5.2[1m]" variant on the Coding Plan endpoint. See docs/model-research.md.
+func glm52Model() *RegistryModel {
+	return &RegistryModel{
+		ID: "glm-5.2", Name: "GLM-5.2", Family: "glm",
+		Reasoning: true, ToolCall: true, StructuredOutput: true, Temperature: true,
+		OpenWeights: true,
+		ReleaseDate: "2026-06-13", LastUpdated: "2026-06-13",
+		Modalities:     &ModelModalities{Input: []string{"text"}, Output: []string{"text"}},
+		Limit:          &ModelLimit{Context: 1_000_000, Output: 131_072},
+		DefaultEnabled: true,
+	}
+}
+
+// additionalModels injects models into EXISTING generated providers when a model is
+// released before models.dev publishes it. Applied at init() and MERGED in — an
+// entry is skipped if the provider already defines that model id, so once the
+// official record lands in registry_generated.go it transparently takes over.
+// Key: provider ID → model ID → model. See docs/model-research.md.
+var additionalModels = map[string]map[string]*RegistryModel{
+	"zhipuai":             {"glm-5.2": glm52Model()},
+	"zhipuai-coding-plan": {"glm-5.2": glm52Model()},
+	"zai":                 {"glm-5.2": glm52Model()},
+	"zai-coding-plan":     {"glm-5.2": glm52Model()},
 }
 
 func init() {
 	applyStaticProviders()
+	applyAdditionalModels()
+	applyContextLimitOverrides()
 	applyRecommendedModels()
 }
 
@@ -446,6 +509,48 @@ func applyStaticProviders() {
 		generatedProviders[id] = prov
 	}
 	generatedProviderOrder = append(generatedProviderOrder, staticProviderOrder...)
+}
+
+// applyAdditionalModels merges hand-maintained models into existing generated
+// providers, skipping any model id the provider already defines (so the official
+// models.dev record wins once it lands).
+func applyAdditionalModels() {
+	for provID, models := range additionalModels {
+		prov, ok := generatedProviders[provID]
+		if !ok {
+			continue
+		}
+		if prov.Models == nil {
+			prov.Models = make(map[string]*RegistryModel, len(models))
+		}
+		for modelID, m := range models {
+			if _, exists := prov.Models[modelID]; exists {
+				continue
+			}
+			prov.Models[modelID] = m
+		}
+	}
+}
+
+// applyContextLimitOverrides patches context windows for built-in models whose
+// generated value understates the model's real advertised window.
+func applyContextLimitOverrides() {
+	for provID, models := range contextLimitOverrides {
+		prov, ok := generatedProviders[provID]
+		if !ok {
+			continue
+		}
+		for modelID, ctx := range models {
+			m, ok := prov.Models[modelID]
+			if !ok {
+				continue
+			}
+			if m.Limit == nil {
+				m.Limit = &ModelLimit{}
+			}
+			m.Limit.Context = ctx
+		}
+	}
 }
 
 // applyRecommendedModels sets Recommended and DefaultEnabled on models in the generated registry.

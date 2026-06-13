@@ -218,10 +218,16 @@ func runWebServer(port int, host string, openBrowser bool) error {
 
 		var handlers []adk.ChatModelAgentMiddleware
 
+		compactThreshold := cfg.CompactionThreshold()
+		reductionThreshold := compactThreshold - 0.15
+		if reductionThreshold < 0.1 {
+			reductionThreshold = compactThreshold * 0.8
+		}
+
 		summMw, err := summarization.New(ctx, &summarization.Config{
 			Model: cm,
 			Trigger: &summarization.TriggerCondition{
-				ContextTokens: int(float64(ctxLimit) * 0.75),
+				ContextTokens: int(float64(ctxLimit) * compactThreshold),
 			},
 			TranscriptFilePath: filepath.Join(config.ConfigDir(), "transcript.txt"),
 		})
@@ -234,7 +240,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 			Backend:           reductionBackend,
 			RootDir:           filepath.Join(config.ConfigDir(), "reduction"),
 			MaxLengthForTrunc: 50000,
-			MaxTokensForClear: int64(float64(ctxLimit) * 0.60),
+			MaxTokensForClear: int64(float64(ctxLimit) * reductionThreshold),
 			ReadFileToolName:  "read",
 			ToolConfig: map[string]*reduction.ToolReductionConfig{
 				"read": {SkipClear: true},
@@ -292,13 +298,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 			return nil, fmt.Errorf("create model %s/%s: %w", prov, mod, err)
 		}
 
-		ctxLimit := registry.GetModelContextLimit(prov, mod)
-		if ctxLimit <= 0 {
-			ctxLimit = internalmodel.GetModelContextLimit(mod)
-		}
-		if ctxLimit <= 0 {
-			ctxLimit = 200000
-		}
+		ctxLimit := internalmodel.ResolveContextLimit(registry, currentCfg, prov, mod)
 
 		currentCM = cm
 		currentCtxLimit = ctxLimit
