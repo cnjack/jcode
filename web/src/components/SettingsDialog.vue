@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useChatStore } from '@/stores/chat'
+import { useTheme } from '@/composables/useTheme'
 import { api } from '@/composables/api'
 import type { MCPServerInfo, SSHAlias, SetupProvider, SetupModel, ProviderDetail } from '@/types/api'
 import QRCode from 'qrcode'
@@ -21,7 +22,10 @@ const emit = defineEmits<{
 }>()
 
 const store = useChatStore()
-const activeTab = ref<'general' | 'providers' | 'mcp' | 'ssh' | 'channels' | 'shortcuts'>('general')
+const { themeChoice, setTheme, themes } = useTheme()
+const darkThemes = computed(() => themes.filter((t) => t.appearance === 'dark'))
+const lightThemes = computed(() => themes.filter((t) => t.appearance === 'light'))
+const activeTab = ref<'general' | 'appearance' | 'providers' | 'mcp' | 'ssh' | 'channels' | 'shortcuts'>('general')
 const mcpServers = ref<Record<string, MCPServerInfo>>({})
 const sshAliases = ref<SSHAlias[]>([])
 const sshCurrent = ref('local')
@@ -168,6 +172,7 @@ function pollChannelState() {
 
 const tabLabel: Record<string, string> = {
   general: 'General',
+  appearance: 'Appearance',
   providers: 'Providers',
   mcp: 'MCP Servers',
   ssh: 'SSH',
@@ -272,7 +277,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
               <!-- Left sidebar -->
               <nav class="w-40 py-2 shrink-0" style="border-right: 1px solid var(--color-border)">
                 <button
-                  v-for="tab in (['general', 'providers', 'mcp', 'ssh', 'channels', 'shortcuts'] as const)"
+                  v-for="tab in (['general', 'appearance', 'providers', 'mcp', 'ssh', 'channels', 'shortcuts'] as const)"
                   :key="tab"
                   class="w-full px-4 py-2 text-left text-xs transition-colors cursor-pointer"
                   :style="activeTab === tab
@@ -336,6 +341,93 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                         <span v-if="store.tokenInfo.model_context_limit"> / {{ store.tokenInfo.model_context_limit.toLocaleString() }}</span>
                       </span>
                     </div>
+                  </div>
+                </div>
+
+                <!-- Appearance tab -->
+                <div v-if="activeTab === 'appearance'" class="space-y-4">
+                  <div class="text-[10px] uppercase tracking-wider font-medium" style="color: var(--color-muted-foreground)">Theme</div>
+
+                  <!-- System (follow OS) -->
+                  <button
+                    class="w-full flex items-center gap-3 px-3 py-2.5 rounded-md cursor-pointer transition-colors text-left"
+                    :style="themeChoice === 'system'
+                      ? { border: '1px solid var(--color-primary)', backgroundColor: 'rgba(255,132,0,0.08)' }
+                      : { border: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface)' }"
+                    @click="setTheme('system')"
+                  >
+                    <span class="text-sm">🖥</span>
+                    <div class="flex-1 min-w-0">
+                      <div class="text-xs font-medium" style="color: var(--color-foreground)">System</div>
+                      <div class="text-[10px]" style="color: var(--color-muted-foreground)">Follow your OS light / dark setting</div>
+                    </div>
+                    <span v-if="themeChoice === 'system'" class="text-[10px] px-1.5 py-0.5 rounded-full shrink-0" style="background-color: rgba(255,132,0,0.12); color: var(--color-primary)">active</span>
+                  </button>
+
+                  <!-- Dark themes -->
+                  <div>
+                    <div class="text-[10px] mb-2 font-medium" style="color: var(--color-muted-foreground)">Dark</div>
+                    <div class="grid grid-cols-2 gap-2">
+                      <button
+                        v-for="t in darkThemes"
+                        :key="t.id"
+                        :data-theme="t.id"
+                        class="rounded-md overflow-hidden cursor-pointer text-left transition-transform active:scale-[0.98]"
+                        :style="{ border: themeChoice === t.id ? '2px solid var(--color-primary)' : '1px solid var(--color-border)', backgroundColor: 'var(--color-background)' }"
+                        @click="setTheme(t.id)"
+                      >
+                        <div class="px-2.5 pt-2 pb-1.5">
+                          <div class="flex items-center gap-1.5 mb-1.5">
+                            <span class="w-2.5 h-2.5 rounded-full" style="background-color: var(--color-primary)" />
+                            <span class="w-2.5 h-2.5 rounded-full" style="background-color: var(--color-accent)" />
+                            <span class="w-2.5 h-2.5 rounded-full" style="background-color: var(--color-success-fg)" />
+                            <span class="w-2.5 h-2.5 rounded-full" style="background-color: var(--color-error-fg)" />
+                          </div>
+                          <div class="rounded px-1.5 py-1 text-[10px] font-mono truncate" style="background-color: var(--color-surface); color: var(--color-foreground)">
+                            <span style="color: var(--color-primary)">&gt;</span> jcode
+                          </div>
+                        </div>
+                        <div class="px-2.5 py-1.5 flex items-center justify-between" style="background-color: var(--color-surface); border-top: 1px solid var(--color-border)">
+                          <span class="text-[11px] font-medium truncate" style="color: var(--color-foreground)">{{ t.label }}</span>
+                          <span v-if="themeChoice === t.id" class="text-[10px] shrink-0" style="color: var(--color-primary)">●</span>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Light themes -->
+                  <div>
+                    <div class="text-[10px] mb-2 font-medium" style="color: var(--color-muted-foreground)">Light</div>
+                    <div class="grid grid-cols-2 gap-2">
+                      <button
+                        v-for="t in lightThemes"
+                        :key="t.id"
+                        :data-theme="t.id"
+                        class="rounded-md overflow-hidden cursor-pointer text-left transition-transform active:scale-[0.98]"
+                        :style="{ border: themeChoice === t.id ? '2px solid var(--color-primary)' : '1px solid var(--color-border)', backgroundColor: 'var(--color-background)' }"
+                        @click="setTheme(t.id)"
+                      >
+                        <div class="px-2.5 pt-2 pb-1.5">
+                          <div class="flex items-center gap-1.5 mb-1.5">
+                            <span class="w-2.5 h-2.5 rounded-full" style="background-color: var(--color-primary)" />
+                            <span class="w-2.5 h-2.5 rounded-full" style="background-color: var(--color-accent)" />
+                            <span class="w-2.5 h-2.5 rounded-full" style="background-color: var(--color-success-fg)" />
+                            <span class="w-2.5 h-2.5 rounded-full" style="background-color: var(--color-error-fg)" />
+                          </div>
+                          <div class="rounded px-1.5 py-1 text-[10px] font-mono truncate" style="background-color: var(--color-surface); color: var(--color-foreground)">
+                            <span style="color: var(--color-primary)">&gt;</span> jcode
+                          </div>
+                        </div>
+                        <div class="px-2.5 py-1.5 flex items-center justify-between" style="background-color: var(--color-surface); border-top: 1px solid var(--color-border)">
+                          <span class="text-[11px] font-medium truncate" style="color: var(--color-foreground)">{{ t.label }}</span>
+                          <span v-if="themeChoice === t.id" class="text-[10px] shrink-0" style="color: var(--color-primary)">●</span>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="text-[10px] leading-relaxed" style="color: var(--color-muted-foreground)">
+                    The terminal UI has its own themes — switch them there with the <span class="font-mono">/theme</span> command.
                   </div>
                 </div>
 

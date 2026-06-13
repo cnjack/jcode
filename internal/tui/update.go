@@ -15,6 +15,7 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/team"
+	"github.com/cnjack/jcode/internal/theme"
 )
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
@@ -58,6 +59,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		case m.pickingModel:
 			var cmd tea.Cmd
 			m.modelPicker, cmd = m.modelPicker.Update(msg)
+			cmds = append(cmds, cmd)
+		case m.pickingTheme:
+			var cmd tea.Cmd
+			m.themePicker, cmd = m.themePicker.Update(msg)
 			cmds = append(cmds, cmd)
 		case m.sshStep == 3:
 			var cmd tea.Cmd
@@ -425,8 +430,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			return m, tea.Batch(cmds...)
 		}
 
-		// F1 or ? to toggle help panel (when not typing)
-		if msg.String() == "f1" {
+		// F1 (always) or ? (when the input is empty) opens the help panel.
+		if msg.String() == "f1" || (msg.String() == "?" && strings.TrimSpace(m.textarea.Value()) == "") {
 			m.showingHelp = true
 			m.helpScroll = 0
 			m.textarea.Blur()
@@ -471,6 +476,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 		if m.managingModels {
 			return m.handleManageModelsKey(msg, cmds)
+		}
+
+		if m.pickingTheme {
+			return m.handleThemePickerKey(msg, cmds)
 		}
 
 		if m.pickingModel {
@@ -753,6 +762,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.cmdSuggestionIndex = 0
 					return m, tea.Batch(cmds...)
 				}
+				// Team: exit teammate view, return to leader
+				if m.teamState.ViewMode == TeamViewTeammate {
+					m.exitTeammateView()
+					m.refreshViewport()
+					return m, tea.Batch(cmds...)
+				}
 			case "enter":
 				// If command suggestion is active, accept it instead of submitting
 				if m.cmdSuggestionActive && len(m.cmdSuggestions) > 0 && m.cmdSuggestionIndex < len(m.cmdSuggestions) {
@@ -803,6 +818,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					}
 					if prompt == "/model" {
 						return m.handleModelInput(cmds)
+					}
+					if prompt == "/theme" {
+						return m.openThemePicker(cmds)
 					}
 
 					if prompt == "/ssh" || strings.HasPrefix(prompt, "/ssh ") {
@@ -1005,13 +1023,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					cmds = append(cmds, tea.SetClipboard(text))
 				}
 				return m, tea.Batch(cmds...)
-			case "escape":
-				// Team: exit teammate view, return to leader
-				if m.teamState.ViewMode == TeamViewTeammate {
-					m.exitTeammateView()
-					m.refreshViewport()
-					return m, tea.Batch(cmds...)
-				}
 			}
 			// Forward other keys to textarea
 			var cmd tea.Cmd
@@ -1079,6 +1090,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			m.requestCancelAgent()
 			return m, tea.Batch(cmds...)
 		}
+
+	case tea.BackgroundColorMsg:
+		// Auto-select a light/dark default theme from the terminal background,
+		// but only when the user hasn't explicitly chosen or persisted one.
+		if !m.themePersisted {
+			want := theme.Default(theme.Dark)
+			if !msg.IsDark() {
+				want = theme.Default(theme.Light)
+			}
+			if want != currentTheme.Name {
+				m.applyThemePreview(want)
+			}
+		}
+		return m, tea.Batch(cmds...)
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width

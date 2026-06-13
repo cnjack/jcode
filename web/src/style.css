@@ -2,6 +2,7 @@
 @plugin '@tailwindcss/typography';
 @custom-variant dark (&:where(.dark, .dark *));
 @import './styles/tokens.css';
+@import './styles/tokens.generated.css';
 @import './styles/animations.css';
 
 /* ─── Global ─── */

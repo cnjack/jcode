@@ -24,6 +24,7 @@ func (m Model) getAllCommands() []commandSuggestion {
 	commands := []commandSuggestion{
 		{"/setting", "Settings menu"},
 		{"/model", "Switch model"},
+		{"/theme", "Switch color theme"},
 		{"/ssh", "SSH connection"},
 		{"/resume", "Resume a previous session"},
 		{"/compact", "Compress conversation context"},
@@ -153,8 +154,8 @@ func (m Model) renderCommandSuggestions() string {
 		descText := s.desc
 		if i == m.cmdSuggestionIndex {
 			// Highlighted item
-			cmdStyled := lipgloss.NewStyle().Bold(true).Foreground(colorBg).Background(colorPrimary).Render(cmdText)
-			descStyled := lipgloss.NewStyle().Foreground(colorBg).Background(colorPrimary).Render(" " + descText)
+			cmdStyled := lipgloss.NewStyle().Bold(true).Foreground(colorOnPrimary).Background(colorPrimary).Render(cmdText)
+			descStyled := lipgloss.NewStyle().Foreground(colorOnPrimary).Background(colorPrimary).Render(" " + descText)
 			// Indicator
 			indicator := lipgloss.NewStyle().Foreground(colorPrimary).Render("❯")
 			lines = append(lines, fmt.Sprintf("  %s %s%s", indicator, cmdStyled, descStyled))

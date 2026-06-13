@@ -117,11 +117,11 @@ func renderProgressBar(percent float64, width int) string {
 	var barStyle lipgloss.Style
 	switch {
 	case percent >= 90:
-		barStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("196")) // Red
+		barStyle = lipgloss.NewStyle().Foreground(colorError)
 	case percent >= 70:
-		barStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // Orange
+		barStyle = lipgloss.NewStyle().Foreground(colorWarning)
 	default:
-		barStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("42")) // Green
+		barStyle = lipgloss.NewStyle().Foreground(colorSuccess)
 	}
 
 	// Filled part

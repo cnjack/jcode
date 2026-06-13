@@ -5,6 +5,27 @@
     <link rel="icon" type="image/svg+xml" href="/icon.svg">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#111111">
+    <script>
+      // Pre-mount theme application to avoid a flash before Vue boots. Mirrors
+      // useTheme.ts; the post-mount applyTheme() corrects any edge case using
+      // the real theme registry. This runs before the module bundle, so it
+      // can't import the registry: light theme ids end in "-light" and dark
+      // ids do not — a convention enforced by TestLightThemeNamingConvention
+      // in internal/theme, which keeps the /-light$/ check below correct.
+      (function () {
+        try {
+          var v = localStorage.getItem('jcode_theme');
+          var id;
+          if (!v || v === 'system') id = matchMedia('(prefers-color-scheme: dark)').matches ? 'jcode-dark' : 'jcode-light';
+          else if (v === 'dark') id = 'jcode-dark';
+          else if (v === 'light') id = 'jcode-light';
+          else id = v;
+          var html = document.documentElement;
+          html.setAttribute('data-theme', id);
+          html.classList.toggle('dark', !/-light$/.test(id));
+        } catch (e) {}
+      })();
+    </script>
     <title>JCODE — Coding Assistant</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

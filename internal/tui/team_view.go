@@ -94,26 +94,38 @@ func (t *TeamViewState) RefreshTeammates() {
 
 // --- Coordinator Panel rendering ---
 
+// agentNameStyle has no theme color of its own — the per-agent color is
+// applied at render time from team.Identity.Color.
+var agentNameStyle = lipgloss.NewStyle().Bold(true)
+
+// Theme-derived coordinator-panel styles and status icons. Rebuilt by
+// applyTeamStyles, which ApplyTheme calls after setting the palette.
 var (
-	panelBorderStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("#555555")).
-				Padding(0, 1)
+	panelBorderStyle lipgloss.Style
+	panelTitleStyle  lipgloss.Style
 
-	panelTitleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#FFFFFF"))
-
-	agentNameStyle = lipgloss.NewStyle().
-			Bold(true)
-
-	statusRunning   = lipgloss.NewStyle().Foreground(lipgloss.Color("#4ECDC4")).Render("⟳")
-	statusIdle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFE66D")).Render("◇")
-	statusCompleted = lipgloss.NewStyle().Foreground(lipgloss.Color("#95E1D3")).Render("✓")
-	statusFailed    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF6B6B")).Render("✗")
-	statusKilled    = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("⊘")
-	statusPending   = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA")).Render("…")
+	statusRunning   string
+	statusIdle      string
+	statusCompleted string
+	statusFailed    string
+	statusKilled    string
+	statusPending   string
 )
+
+func applyTeamStyles() {
+	panelBorderStyle = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorBorder).
+		Padding(0, 1)
+	panelTitleStyle = lipgloss.NewStyle().Bold(true).Foreground(colorText)
+
+	statusRunning = lipgloss.NewStyle().Foreground(colorSecondary).Render("⟳")
+	statusIdle = lipgloss.NewStyle().Foreground(colorWarning).Render("◇")
+	statusCompleted = lipgloss.NewStyle().Foreground(colorSuccess).Render("✓")
+	statusFailed = lipgloss.NewStyle().Foreground(colorError).Render("✗")
+	statusKilled = lipgloss.NewStyle().Foreground(colorMuted).Render("⊘")
+	statusPending = lipgloss.NewStyle().Foreground(colorDimText).Render("…")
+}
 
 func statusIcon(s team.TeammateStatus) string {
 	switch s {
@@ -206,8 +218,8 @@ func RenderTeamStatusPill(count int) string {
 		return ""
 	}
 	style := lipgloss.NewStyle().
-		Background(lipgloss.Color("#555555")).
-		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(colorBorder).
+		Foreground(colorText).
 		Padding(0, 1)
 	return style.Render(fmt.Sprintf("%d teammates", count))
 }
