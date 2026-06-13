@@ -32,7 +32,7 @@ lint-web:
 
 generate:
 	@echo "Generating code..."
-	go generate ./internal/model/...
+	go generate ./...
 
 build-web:
 	@echo "Building frontend..."

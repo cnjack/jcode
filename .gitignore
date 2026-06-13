@@ -3,6 +3,7 @@
 /weixin_poc
 internal/web/dist
 internal/model/registry_generated.go
+web/src/styles/tokens.generated.css
 
 # Jekyll
 docs/_site/
