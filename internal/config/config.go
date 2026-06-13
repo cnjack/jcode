@@ -129,7 +129,13 @@ type Config struct {
 	Team          *TeamConfig           `json:"team,omitempty"`
 
 	// AutoApprove sets the default approval mode to auto on startup.
+	// Deprecated: superseded by DefaultMode; still honored as a fallback when
+	// DefaultMode is empty (true → "autopilot").
 	AutoApprove bool `json:"auto_approve,omitempty"`
+
+	// DefaultMode is the unified session mode to start in: "ask" (default),
+	// "plan", or "autopilot". When empty, AutoApprove is used as a fallback.
+	DefaultMode string `json:"default_mode,omitempty"`
 
 	// Channel controls external messaging channel behavior.
 	Channel *ChannelConfig `json:"channel,omitempty"`

@@ -60,7 +60,7 @@ When you resume a session, jcode reconstructs the full state:
 - **Conversation history** — All messages between you and the agent
 - **Todo list** — Any pending or completed tasks
 - **Plan state** — Active plans and their approval status
-- **Agent mode** — Whether you were in Normal, Planning, or Executing mode
+- **Session mode** — Ask, Plan, or Autopilot (a saved Plan resumes as Ask; Autopilot resumes as-is)
 - **Environment** — Local or SSH connection
 
 {: .note }

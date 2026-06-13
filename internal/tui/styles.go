@@ -35,10 +35,6 @@ var (
 					PaddingLeft(1)
 
 	// ─── Mode pills styles ───
-	modePillAgentStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(colorSecondary)
-
 	modePillPlanStyle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(colorPlanMode)

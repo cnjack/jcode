@@ -9,14 +9,16 @@ import (
 	"sync"
 
 	"github.com/cnjack/jcode/internal/handler"
+	"github.com/cnjack/jcode/internal/mode"
 )
 
 // ApprovalState manages whether tool calls require interactive user approval.
 type ApprovalState struct {
-	mu       sync.Mutex
-	h        handler.AgentEventHandler
-	mode     handler.ApprovalMode // Current approval mode
-	workpath string               // Current working directory for path detection
+	mu          sync.Mutex
+	h           handler.AgentEventHandler
+	mode        handler.ApprovalMode // Current approval mode (derived from sessionMode)
+	sessionMode mode.SessionMode     // Unified selector mode (Ask/Plan/Autopilot)
+	workpath    string               // Current working directory for path detection
 }
 
 type toolProgressNotifier interface {
@@ -25,14 +27,34 @@ type toolProgressNotifier interface {
 
 // NewApprovalState creates a new ApprovalState with the given workpath.
 func NewApprovalState(workpath string, autoApprove bool) *ApprovalState {
-	mode := handler.ModeManual
-	if autoApprove {
-		mode = handler.ModeAuto
-	}
+	return NewApprovalStateWithMode(workpath, sessionModeFor(autoApprove))
+}
+
+// NewApprovalStateWithMode creates a new ApprovalState seeded with a unified
+// session mode (the preferred constructor; NewApprovalState wraps it for the
+// legacy autoApprove-bool callers).
+func NewApprovalStateWithMode(workpath string, m mode.SessionMode) *ApprovalState {
 	return &ApprovalState{
-		mode:     mode,
-		workpath: workpath,
+		mode:        approvalModeFor(m),
+		sessionMode: m,
+		workpath:    workpath,
 	}
+}
+
+// sessionModeFor maps the legacy autoApprove bool to a unified mode.
+func sessionModeFor(autoApprove bool) mode.SessionMode {
+	if autoApprove {
+		return mode.Autopilot
+	}
+	return mode.Ask
+}
+
+// approvalModeFor derives the low-level approval axis from the unified mode.
+func approvalModeFor(m mode.SessionMode) handler.ApprovalMode {
+	if m.AutoApprove() {
+		return handler.ModeAuto
+	}
+	return handler.ModeManual
 }
 
 // SetHandler stores the handler used to send approval-request messages.
@@ -41,10 +63,28 @@ func (s *ApprovalState) SetHandler(h handler.AgentEventHandler) {
 }
 
 // SetMode sets the approval mode (used for external mode changes).
-func (s *ApprovalState) SetMode(mode handler.ApprovalMode) {
+func (s *ApprovalState) SetMode(m handler.ApprovalMode) {
 	s.mu.Lock()
-	s.mode = mode
+	s.mode = m
 	s.mu.Unlock()
+}
+
+// SetSessionMode sets the unified session mode and derives the approval axis
+// from it under the same lock. This is the single entry point a frontend uses
+// to change the approval behavior; the tool/prompt axis is applied separately
+// by each frontend's agent-rebuild path.
+func (s *ApprovalState) SetSessionMode(m mode.SessionMode) {
+	s.mu.Lock()
+	s.sessionMode = m
+	s.mode = approvalModeFor(m)
+	s.mu.Unlock()
+}
+
+// GetSessionMode returns the current unified session mode.
+func (s *ApprovalState) GetSessionMode() mode.SessionMode {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessionMode
 }
 
 // SetWorkpath sets the current working directory (called on environment switch).
@@ -67,8 +107,10 @@ func (s *ApprovalState) SetSessionApproval(enabled bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if enabled {
+		s.sessionMode = mode.Autopilot
 		s.mode = handler.ModeAuto
 	} else {
+		s.sessionMode = mode.Ask
 		s.mode = handler.ModeManual
 	}
 }
@@ -179,10 +221,13 @@ func (s *ApprovalState) requestUserApprovalWithWorker(ctx context.Context, toolN
 		return false, err
 	}
 
-	// State transition: update mode based on user choice
-	if resp.Approved {
+	// State transition: "Approve All" promotes the session to Autopilot (both the
+	// unified mode and the derived approval axis). A plain single approve does
+	// not change the session mode.
+	if resp.Approved && resp.Mode == handler.ModeAuto {
 		s.mu.Lock()
-		s.mode = resp.Mode
+		s.sessionMode = mode.Autopilot
+		s.mode = handler.ModeAuto
 		s.mu.Unlock()
 	}
 	return resp.Approved, nil

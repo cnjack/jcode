@@ -12,6 +12,7 @@ For the **full changelog**, see [CHANGELOG.md](../CHANGELOG.md) in the repositor
 ## Unreleased
 
 ### In Development
+- Unified **Ask / Plan / Autopilot** session-mode selector across the TUI, web, and ACP frontends. Cycle it with **Shift+Tab** in the TUI (replacing the old Ctrl+P / Ctrl+A shortcuts), the dropdown in the web UI, or `session/set_mode` over ACP. New `default_mode` config (`ask`/`plan`/`autopilot`); legacy `auto_approve: true` maps to `autopilot`. Web Plan mode now truly restricts to read-only tools.
 - Improved ACP tool-call titles, kinds, locations, permission payloads, and status transitions for friendlier editor display and follow-along support.
 - Removed the ACP client filesystem/terminal executor path because the v2 client capability extension is no longer supported; ACP sessions now use the local executor.
 
