@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/tools"
 )
 
@@ -381,27 +382,22 @@ func (m *Model) handleSkillSlashInput(skillName, userInput string, cmds []tea.Cm
 	return m, tea.Batch(cmds...)
 }
 
-// renderModePills renders the Agent/Plan + Ask/Auto mode indicator line above the input.
+// renderModePills renders the unified Ask/Plan/Autopilot mode selector line
+// above the input. The three states map onto distinct pill styles; Shift+Tab
+// cycles between them.
 func (m Model) renderModePills() string {
-	// Mode pill (Agent / Plan)
 	var modePill string
-	switch m.agentMode {
-	case ModePlanning:
+	switch m.selectorMode() {
+	case mode.Plan:
 		modePill = modePillPlanStyle.Render(" Plan ")
-	default:
-		modePill = modePillAgentStyle.Render(" Agent ")
+	case mode.Autopilot:
+		modePill = modePillAutoStyle.Render(" Autopilot ")
+	default: // Ask
+		modePill = modePillAskStyle.Render(" Ask ")
 	}
 
-	// Approve pill (Ask / Auto)
-	var approvePill string
-	if m.approvalMode == ModeAuto {
-		approvePill = modePillAutoStyle.Render(" Auto ")
-	} else {
-		approvePill = modePillAskStyle.Render(" Ask ")
-	}
-
-	separator := modeSeparatorStyle.Render("·")
-	leftPart := modePill + " " + separator + " " + approvePill + " "
+	hint := modeSeparatorStyle.Render("shift+tab")
+	leftPart := modePill + " " + hint + " "
 	leftW := lipgloss.Width(leftPart)
 
 	// Fill remaining width with dashes

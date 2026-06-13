@@ -690,31 +690,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				return m, tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
 					return ExitTimeoutMsg{}
 				})
-			case "ctrl+p":
-				// Toggle agent mode: Agent <-> Plan
-				if m.agentMode == ModeNormal {
-					m.agentMode = ModePlanning
-				} else {
-					m.agentMode = ModeNormal
-				}
+			case "shift+tab":
+				// Cycle the unified session mode: Ask → Plan → Autopilot → Ask.
+				next := m.selectorMode().Next()
+				m.applySelectorMode(next)
 				m.invalidateFooterCache()
-				// Notify main goroutine to rebuild agent with different prompt/tools.
+				// Notify main goroutine to apply both axes (tools/prompt + approval).
 				select {
-				case planModeCh <- m.agentMode:
+				case modeSelectCh <- next:
 				default:
 				}
-				m.refreshViewport()
-				return m, tea.Batch(cmds...)
-			case "ctrl+a":
-				if m.approvalMode == ModeManual {
-					m.approvalMode = ModeAuto
-				} else {
-					m.approvalMode = ModeManual
-				}
-				if m.OnApprovalModeChange != nil {
-					m.OnApprovalModeChange(m.approvalMode == ModeAuto)
-				}
-				m.invalidateFooterCache()
 				m.refreshViewport()
 				return m, tea.Batch(cmds...)
 			case "ctrl+l":
@@ -1286,6 +1271,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 	case TodoUpdateMsg:
 		m.invalidateSidebarCache()
+		m.refreshViewport()
+
+	case ModeSelectedMsg:
+		// Backend changed the session mode programmatically (resume restore,
+		// plan-completion revert). Sync the pill's two underlying fields.
+		m.applySelectorMode(msg.Mode)
+		m.invalidateFooterCache()
 		m.refreshViewport()
 
 	case AddModelMsg:

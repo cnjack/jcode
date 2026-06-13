@@ -190,7 +190,7 @@ type SessionState struct {
 	Plan         *PlanSnapshot      // nil if no plan events found
 	Todos        []TodoSnapshotItem // last todo snapshot, nil if none
 	Goal         *GoalSnapshot      // nil if no goal events or last event cleared it
-	Mode         string             // last mode (normal/planning/executing), empty = normal
+	Mode         string             // last unified session mode (ask/plan/autopilot); legacy normal/planning/executing tolerated by mode.Parse; empty = ask
 	EnvTarget    string             // last environment (local/ssh alias)
 	SystemPrompt string             // recorded system prompt for KV-cache-friendly resume
 	EnvInfo      string             // environment snapshot at recording time

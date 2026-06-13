@@ -24,6 +24,7 @@ import (
 	"github.com/cnjack/jcode/internal/channel/ble"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
+	"github.com/cnjack/jcode/internal/mode"
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	weixin "github.com/cnjack/jcode/internal/pkg/weixin"
 	"github.com/cnjack/jcode/internal/prompts"
@@ -254,7 +255,9 @@ func (s *interactiveState) applyModeSwitch(newMode tui.AgentMode) {
 	config.Logger().Printf("[plan] mode switch to %d (0=normal, 1=plan)", newMode)
 
 	if s.rec != nil {
-		s.rec.RecordModeChange(agentModeString(newMode))
+		// Record the unified session mode derived from both axes (tool/prompt +
+		// approval), not just the tool axis, so resume round-trips the selector.
+		s.rec.RecordModeChange(sessionModeFrom(newMode, s.approvalState.GetMode()).String())
 	}
 
 	if s.agentMode == tui.ModePlanning {
@@ -275,13 +278,31 @@ func (s *interactiveState) applyModeSwitch(newMode tui.AgentMode) {
 	if s.agentTokenUsage != nil {
 		s.agentTokenUsage.Reset()
 	}
+	// Sync the TUI mode pill with the resulting unified mode (covers the
+	// plan-completion revert to Normal, which the user did not trigger directly).
+	if s.p != nil {
+		s.p.Send(tui.ModeSelectedMsg{Mode: sessionModeFrom(newMode, s.approvalState.GetMode())})
+	}
 }
 
-func (s *interactiveState) drainModeSwitch(planModeCh <-chan tui.AgentMode) {
+// applySessionMode applies a unified selector mode to BOTH axes: the approval
+// axis (via ApprovalState) and the tool/prompt axis (rebuilding the agent). It
+// is the single entry point for a mode change driven by the TUI selector.
+// SetSessionMode runs first so applyModeSwitch records the correct unified mode.
+func (s *interactiveState) applySessionMode(m mode.SessionMode) {
+	s.approvalState.SetSessionMode(m)
+	if m.IsPlan() {
+		s.applyModeSwitch(tui.ModePlanning)
+	} else {
+		s.applyModeSwitch(tui.ModeNormal)
+	}
+}
+
+func (s *interactiveState) drainModeSwitch(modeSelectCh <-chan mode.SessionMode) {
 	for {
 		select {
-		case newMode := <-planModeCh:
-			s.applyModeSwitch(newMode)
+		case sm := <-modeSelectCh:
+			s.applySessionMode(sm)
 		default:
 			return
 		}
@@ -443,9 +464,22 @@ func (s *interactiveState) handleResume(uuid string) {
 	}
 	st := session.ReconstructState(entries)
 	s.history = session.PruneOldToolOutputs(st.History, 2)
-	s.approvalState.SetSessionApproval(false)
+	// Restore the unified session mode. The approval axis is restored as-is, so a
+	// session saved in Autopilot resumes auto-approving (accept-all-risk policy).
+	// A saved Plan is normalized to Ask on resume: we keep full tools and restore
+	// the saved plan into planStore below rather than stranding the user in the
+	// read-only plan tool set with no execution trigger.
+	restoredMode := mode.Parse(st.Mode)
+	if restoredMode == mode.Plan {
+		restoredMode = mode.Ask
+	}
+	s.approvalState.SetSessionMode(restoredMode)
+	s.agentMode = tui.ModeNormal
 	s.rec.SetUUID(uuid)
 	s.p.Send(tui.SessionResumedMsg{UUID: uuid, Entries: tui.ConvertSessionEntries(entries)})
+	// Sync the mode pill with the restored mode (SessionResumedMsg resets the
+	// pill to Ask; this overrides it with what the session was actually saved in).
+	s.p.Send(tui.ModeSelectedMsg{Mode: restoredMode})
 
 	// Restore stored system prompt for KV-cache-friendly resume.
 	if st.SystemPrompt != "" {
@@ -684,7 +718,7 @@ func (s *interactiveState) runEventLoop(initialHistory []adk.Message, initialRes
 	addModelCh := tui.GetAddModelChannel()
 	resumeCh := tui.GetResumeChannel()
 	compactCh := tui.GetCompactChannel()
-	planModeCh := tui.GetPlanModeChannel()
+	modeSelectCh := tui.GetModeSelectChannel()
 	channelActionCh := tui.GetChannelActionChannel()
 	cancelAgentCh := tui.GetCancelAgentChannel()
 
@@ -708,18 +742,18 @@ func (s *interactiveState) runEventLoop(initialHistory []adk.Message, initialRes
 
 	for {
 		select {
-		case newMode := <-planModeCh:
-			s.applyModeSwitch(newMode)
+		case sm := <-modeSelectCh:
+			s.applySessionMode(sm)
 
 		case cfgMsg := <-configCh:
 			s.handleConfig(cfgMsg)
 
 		case userPrompt := <-promptCh:
-			s.drainModeSwitch(planModeCh)
+			s.drainModeSwitch(modeSelectCh)
 			s.handlePrompt(userPrompt)
 
 		case pendingPrompt := <-pendingPromptCh:
-			s.drainModeSwitch(planModeCh)
+			s.drainModeSwitch(modeSelectCh)
 			s.p.Send(tui.UserPromptMsg{Prompt: pendingPrompt})
 			s.handlePrompt(pendingPrompt)
 
@@ -940,12 +974,14 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	st.teamManager = teamManager
 	st.toolList = st.buildAllTools()
 
-	// CLI --unsafe flag takes precedence over config file.
-	autoApprove := cfg.AutoApprove || unsafe
-	approvalState := runner.NewApprovalState(pwd, autoApprove)
+	// Resolve the startup session mode. CLI --unsafe forces Autopilot and takes
+	// precedence over config. Otherwise DefaultMode wins, falling back to the
+	// legacy AutoApprove bool (true → Autopilot) when DefaultMode is unset.
+	startupMode := resolveStartupMode(cfg, unsafe)
+	approvalState := runner.NewApprovalStateWithMode(pwd, startupMode)
 	st.approvalState = approvalState
 
-	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore, tui.WithVersion(Version), tui.WithGoalStore(env.GoalStore), tui.WithApprovalModeChange(func(enabled bool) {
+	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore, tui.WithVersion(Version), tui.WithGoalStore(env.GoalStore), tui.WithStartupMode(startupMode), tui.WithApprovalModeChange(func(enabled bool) {
 		approvalState.SetSessionApproval(enabled)
 	}))
 	st.p = p
@@ -1166,16 +1202,33 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	return nil
 }
 
-// agentModeString converts an AgentMode to its string representation for session recording.
-func agentModeString(m tui.AgentMode) string {
-	switch m {
-	case tui.ModePlanning:
-		return "planning"
-	case tui.ModeExecuting:
-		return "executing"
-	default:
-		return "normal"
+// sessionModeFrom derives the unified selector mode from the two low-level axes
+// (tool/prompt + approval). Plan is determined purely by the tool axis; among the
+// non-plan agent modes (Normal/Executing) the approval axis decides Ask vs
+// Autopilot. This is the inverse of mode.IsPlan()/AutoApprove().
+func sessionModeFrom(am tui.AgentMode, apm handler.ApprovalMode) mode.SessionMode {
+	if am == tui.ModePlanning {
+		return mode.Plan
 	}
+	if apm == handler.ModeAuto {
+		return mode.Autopilot
+	}
+	return mode.Ask
+}
+
+// resolveStartupMode picks the initial session mode from CLI flags and config.
+// Precedence: --unsafe (forces Autopilot) > DefaultMode > legacy AutoApprove.
+func resolveStartupMode(cfg *config.Config, unsafe bool) mode.SessionMode {
+	if unsafe {
+		return mode.Autopilot
+	}
+	if cfg != nil && cfg.DefaultMode != "" {
+		return mode.Parse(cfg.DefaultMode)
+	}
+	if cfg != nil && cfg.AutoApprove {
+		return mode.Autopilot
+	}
+	return mode.Ask
 }
 
 // computeGitBaseline creates a transient stash commit of the current working tree

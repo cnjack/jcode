@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick, watch, onUnmounted } from 'vue'
+import { normalizeMode } from '@/types/api'
 import { useChatStore } from '@/stores/chat'
 import { useProjectStore } from '@/stores/project'
 import { useWebSocket } from '@/composables/ws'
@@ -70,10 +71,13 @@ const { connected } = useWebSocket({
     store.modelName = data.model
   },
   onModeChanged: (data) => {
-    store.mode = data.mode === 'build' ? 'agent' : (data.mode as 'agent' | 'plan')
+    store.mode = normalizeMode(data.mode)
+    store.autoApprove = store.mode === 'autopilot'
   },
   onApprovalModeChanged: (data) => {
     store.autoApprove = data.auto_approve
+    if (data.auto_approve) store.mode = 'autopilot'
+    else if (store.mode === 'autopilot') store.mode = 'ask'
   },
   onSubagentProgress: (data) => {
     store.addSubagentProgress(data.agent_name, data.event, data.tool_name, data.detail)

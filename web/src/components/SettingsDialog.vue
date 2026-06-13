@@ -309,7 +309,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     </div>
                     <div>
                       <div class="text-[10px] uppercase tracking-wider mb-0.5 font-medium" style="color: var(--color-muted-foreground)">Mode</div>
-                      <div class="text-xs font-mono" style="color: var(--color-foreground)">{{ store.mode === 'agent' ? 'Agent' : 'Plan' }}</div>
+                      <div class="text-xs font-mono" style="color: var(--color-foreground)">{{ store.mode.charAt(0).toUpperCase() + store.mode.slice(1) }}</div>
                     </div>
                     <div>
                       <div class="text-[10px] uppercase tracking-wider mb-0.5 font-medium" style="color: var(--color-muted-foreground)">Auto-approve</div>

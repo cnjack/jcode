@@ -24,8 +24,9 @@ const pendingImagePreviews = ref<string[]>([])
 const fileInput = ref<HTMLInputElement | null>(null)
 
 const modes = [
-  { value: 'agent' as const, label: 'Agent', icon: '🔥' },
+  { value: 'ask' as const, label: 'Ask', icon: '💬' },
   { value: 'plan' as const, label: 'Plan', icon: '📋' },
+  { value: 'autopilot' as const, label: 'Autopilot', icon: '🚀' },
 ]
 
 const filteredSlashCommands = computed(() => {
@@ -211,9 +212,13 @@ function removeImage(index: number) {
   pendingImagePreviews.value.splice(index, 1)
 }
 
-function selectMode(mode: 'agent' | 'plan') {
+function selectMode(mode: 'ask' | 'plan' | 'autopilot') {
   showModePicker.value = false
   store.switchMode(mode)
+}
+
+function modeLabel(m: string): string {
+  return m === 'plan' ? 'Plan' : m === 'autopilot' ? 'Autopilot' : 'Ask'
 }
 
 function handleClickOutside(e: MouseEvent) {
@@ -338,14 +343,14 @@ watch(() => store.isRunning, (running) => {
               <span v-if="pendingImages.length > 0" class="attach-badge">{{ pendingImages.length }}</span>
             </button>
 
-            <!-- Mode selector (Agent/Plan) -->
+            <!-- Mode selector (Ask/Plan/Autopilot) -->
             <div class="relative">
               <button
                 class="tool-btn dropdown-btn"
-                :class="{ highlighted: store.mode === 'plan' }"
+                :class="{ highlighted: store.mode !== 'ask' }"
                 @click.stop="showModePicker = !showModePicker; showModelPicker = false"
               >
-                {{ store.mode === 'agent' ? 'Agent' : 'Plan' }}
+                {{ modeLabel(store.mode) }}
                 <svg class="w-3 h-3 opacity-60" viewBox="0 0 20 20" fill="currentColor">
                   <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
                 </svg>
@@ -440,15 +445,7 @@ watch(() => store.isRunning, (running) => {
               </div>
             </div>
 
-            <!-- Auto-approve toggle switch -->
-            <label class="toggle-switch" :title="store.autoApprove ? 'Auto-approve ON' : 'Auto-approve OFF'">
-              <input
-                type="checkbox"
-                :checked="store.autoApprove"
-                @change="store.setAutoApprove(!store.autoApprove)"
-              />
-              <span class="toggle-slider"></span>
-            </label>
+            <!-- Auto-approve is now expressed by the Autopilot mode above. -->
           </div>
 
           <div class="toolbar-right">
@@ -731,49 +728,6 @@ watch(() => store.isRunning, (running) => {
   align-items: center;
   justify-content: center;
   font-weight: 600;
-}
-
-/* Toggle switch */
-.toggle-switch {
-  position: relative;
-  display: inline-block;
-  width: 32px;
-  height: 18px;
-  cursor: pointer;
-}
-
-.toggle-switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.toggle-slider {
-  position: absolute;
-  inset: 0;
-  background: var(--color-muted);
-  border-radius: 9999px;
-  transition: background 0.2s;
-}
-
-.toggle-slider::before {
-  content: '';
-  position: absolute;
-  width: 14px;
-  height: 14px;
-  left: 2px;
-  bottom: 2px;
-  background: white;
-  border-radius: 50%;
-  transition: transform 0.2s;
-}
-
-.toggle-switch input:checked + .toggle-slider {
-  background: var(--color-primary);
-}
-
-.toggle-switch input:checked + .toggle-slider::before {
-  transform: translateX(14px);
 }
 
 /* Dropdown menus */
