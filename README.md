@@ -120,12 +120,16 @@ Save connections as named aliases and jump between hosts with `/ssh`:
   └─────────────────────────────────────────────────┘
 ```
 
-### 📋 Plan Mode
+### 📋 Modes — Ask · Plan · Autopilot
 
-Press **Ctrl+P** to enter Plan Mode. The agent explores your codebase **read-only** and presents a structured plan before touching any file. Review, approve or reject with feedback — then let it execute step by step.
+Press **Shift+Tab** to cycle the session mode:
+
+- **Ask** (default) — full tools, but you approve each non-trivial tool call.
+- **Plan** — the agent explores your codebase **read-only** and presents a structured plan before touching any file. Review, approve or reject with feedback — then it executes step by step.
+- **Autopilot** — full tools, every call auto-approved, end-to-end with no interruptions.
 
 ```
-  Plan │ Model: openai / gpt-4o │ Approve: Ask │ [██░░░░░░░░] 12%
+  Plan │ Model: openai / gpt-4o │ [██░░░░░░░░] 12%
 ```
 
 ### 🔌 MCP Integration
@@ -142,7 +146,7 @@ Connect any [MCP](https://modelcontextprotocol.io/)-compatible server — stdio,
 ```
 
 ```
-  Agent │ Model: openai / gpt-4o │ Approve: Ask │ [████░░░░░░] 2% │ MCP: 2/5
+  Ask │ Model: openai / gpt-4o │ [████░░░░░░] 2% │ MCP: 2/5
 ```
 
 ### 💰 Token Usage & Budget Control
@@ -230,8 +234,7 @@ No manual configuration needed — the agent adapts to your project.
 | ------------- | --------------------------------- |
 | **Enter**     | Submit prompt / select option     |
 | **Ctrl+C**    | Press once to warn, twice to exit |
-| **Ctrl+A**    | Toggle approval mode (Ask ↔ Auto) |
-| **Ctrl+P**    | Toggle Plan ↔ Agent mode          |
+| **Shift+Tab** | Cycle mode (Ask → Plan → Autopilot) |
 | **Ctrl+L**    | Model picker                      |
 | **Ctrl+T**    | Toggle team panel                 |
 | **Shift+↑/↓** | Switch between teammates          |

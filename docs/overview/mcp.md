@@ -122,7 +122,7 @@ When using `jcode mcp add`, the server type is **auto-detected** from the URL. U
 MCP servers initialize **asynchronously** after startup, so the TUI is usable immediately. The status bar shows live connection progress:
 
 ```
-  Agent │ Model: openai / gpt-4o │ Approve: Ask │ [████░░░░░░] 2% │ MCP: 2/5
+  Ask │ Model: openai / gpt-4o │ [████░░░░░░] 2% │ MCP: 2/5
 ```
 
 This means 2 out of 5 configured MCP servers are connected. Once all servers connect, the status updates automatically.

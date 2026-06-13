@@ -21,6 +21,7 @@ import (
 	"github.com/cnjack/jcode/internal/agent"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
+	"github.com/cnjack/jcode/internal/mode"
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/prompts"
 	"github.com/cnjack/jcode/internal/runner"
@@ -32,19 +33,28 @@ import (
 )
 
 // acpSession bundles all per-session state created in NewSession.
-// ACP mode IDs.
+// ACP mode IDs. The wire ids match mode.SessionMode.String(); "agent" is kept
+// only as a legacy alias accepted by SetSessionMode for older clients.
 const (
-	acpModeAgent acp.SessionModeId = "agent"
-	acpModePlan  acp.SessionModeId = "plan"
+	acpModeAsk       acp.SessionModeId = "ask"
+	acpModePlan      acp.SessionModeId = "plan"
+	acpModeAutopilot acp.SessionModeId = "autopilot"
+	acpModeAgent     acp.SessionModeId = "agent" // legacy alias for "ask"
 )
 
-// acpModes returns the mode list advertised in NewSession responses.
+// acpModeID maps a unified mode to its advertised ACP wire id.
+func acpModeID(m mode.SessionMode) acp.SessionModeId {
+	return acp.SessionModeId(m.String())
+}
+
+// acpModes returns the mode list advertised in NewSession/ResumeSession responses.
 func acpModes(current acp.SessionModeId) *acp.SessionModeState {
 	return &acp.SessionModeState{
 		CurrentModeId: current,
 		AvailableModes: []acp.SessionMode{
-			{Id: acpModeAgent, Name: "Agent", Description: acp.Ptr("Full agent mode with all tools")},
+			{Id: acpModeAsk, Name: "Ask", Description: acp.Ptr("Step-by-step: approve each tool call")},
 			{Id: acpModePlan, Name: "Plan", Description: acp.Ptr("Read-only planning mode for analysis")},
+			{Id: acpModeAutopilot, Name: "Autopilot", Description: acp.Ptr("End-to-end execution, auto-approved")},
 		},
 	}
 }
@@ -289,7 +299,7 @@ func (a *acpAgent) NewSession(ctx context.Context, params acp.NewSessionRequest)
 
 	return acp.NewSessionResponse{
 		SessionId: sessionID,
-		Modes:     acpModes(acpModeAgent),
+		Modes:     acpModes(sess.mode),
 	}, nil
 }
 
@@ -369,7 +379,8 @@ func (a *acpAgent) buildAgentSession(
 
 	normalPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
 	planPrompt := prompts.GetPlanSystemPrompt(platform, pwd, "local", envInfo)
-	approvalState := runner.NewApprovalState(pwd, cfg.AutoApprove)
+	startupMode := resolveStartupMode(cfg, false)
+	approvalState := runner.NewApprovalStateWithMode(pwd, startupMode)
 
 	// Create ACPHandler
 	acpHandler := handler.NewACPHandler(a.conn, sessionID, pwd)
@@ -455,7 +466,14 @@ func (a *acpAgent) buildAgentSession(
 	}, tokenUsage)
 	handlers = append(handlers, reminderMw)
 
-	ag, err := agent.NewAgent(ctx, chatModel, allTools, normalPrompt, approvalState.RequestApproval, nil, handlers)
+	// Seed the initial agent from the resolved startup mode (Plan uses the
+	// read-only tool/prompt set; Ask/Autopilot share the full set and differ only
+	// on the approval axis, already seeded in approvalState above).
+	initialPrompt, initialTools := normalPrompt, allTools
+	if startupMode.IsPlan() {
+		initialPrompt, initialTools = planPrompt, planTools
+	}
+	ag, err := agent.NewAgent(ctx, chatModel, initialTools, initialPrompt, approvalState.RequestApproval, nil, handlers)
 	if err != nil {
 		return nil, fmt.Errorf("error creating agent: %w", err)
 	}
@@ -476,7 +494,7 @@ func (a *acpAgent) buildAgentSession(
 		tracer:        tracer,
 		tokenUsage:    tokenUsage,
 		history:       history,
-		mode:          acpModeAgent,
+		mode:          acpModeID(startupMode),
 		createAgent:   makeAgent,
 		allTools:      allTools,
 		planTools:     planTools,
@@ -484,6 +502,15 @@ func (a *acpAgent) buildAgentSession(
 		planPrompt:    planPrompt,
 		skillLoader:   skillLoader,
 	}
+
+	// Reconcile the session's advertised mode when the handler promotes to
+	// Autopilot via "Allow All", so sess.mode never drifts from the approval
+	// state's source of truth.
+	acpHandler.SetModeChangeCallback(func(m mode.SessionMode) {
+		sess.mu.Lock()
+		sess.mode = acpModeID(m)
+		sess.mu.Unlock()
+	})
 
 	return sess, nil
 }
@@ -674,24 +701,33 @@ func (a *acpAgent) SetSessionMode(_ context.Context, params acp.SetSessionModeRe
 
 	sess.mu.Lock()
 
-	newMode := params.ModeId
-	if newMode != acpModeAgent && newMode != acpModePlan {
+	// Accept the three canonical ids plus the legacy "agent" alias; reject anything
+	// else. mode.Parse normalizes the accepted ids to the unified SessionMode.
+	switch params.ModeId {
+	case acpModeAsk, acpModePlan, acpModeAutopilot, acpModeAgent:
+	default:
 		sess.mu.Unlock()
-		return acp.SetSessionModeResponse{}, fmt.Errorf("unknown mode: %s", newMode)
+		return acp.SetSessionModeResponse{}, fmt.Errorf("unknown mode: %s", params.ModeId)
 	}
+	sm := mode.Parse(string(params.ModeId))
+	newMode := acpModeID(sm) // canonical id ("agent" → "ask")
 	if newMode == sess.mode {
 		sess.mu.Unlock()
 		return acp.SetSessionModeResponse{}, nil
 	}
 
 	sess.mode = newMode
+	// Apply the approval axis: Autopilot flips to auto-approve, Ask/Plan to manual.
+	sess.approvalState.SetSessionMode(sm)
 	if sess.rec != nil {
-		sess.rec.RecordModeChange(string(newMode))
+		sess.rec.RecordModeChange(sm.String())
 	}
 
+	// Apply the tool/prompt axis: Plan uses the read-only set; Ask and Autopilot
+	// share the full set (they differ only on the approval axis above).
 	var sysPrompt string
 	var toolList []tool.BaseTool
-	if newMode == acpModePlan {
+	if sm.IsPlan() {
 		sysPrompt = sess.planPrompt
 		toolList = sess.planTools
 	} else {
@@ -854,7 +890,7 @@ func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRe
 		s := sess
 		a.mu.Unlock()
 		a.scheduleSlashCommandsBroadcast(params.SessionId, s)
-		return acp.ResumeSessionResponse{Modes: acpModes(acpModeAgent)}, nil
+		return acp.ResumeSessionResponse{Modes: acpModes(s.mode)}, nil
 	}
 	a.mu.Unlock()
 
@@ -880,10 +916,17 @@ func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRe
 	// Load history from disk so the agent has conversation context.
 	var history []*schema.Message
 	var goalSnap *session.GoalSnapshot
+	restoredMode := mode.Ask
 	if entries, err := session.LoadSession(resumeUUID); err == nil {
 		resumeState := session.ReconstructState(entries)
 		history = session.PruneOldToolOutputs(resumeState.History, 2)
 		goalSnap = resumeState.Goal
+		// Restore the saved mode (Autopilot as-is; Plan normalized to Ask so the
+		// reloaded full-tool agent is not stranded in read-only plan tools).
+		restoredMode = mode.Parse(resumeState.Mode)
+		if restoredMode == mode.Plan {
+			restoredMode = mode.Ask
+		}
 		config.Logger().Printf("[acp] ResumeSession: loaded %d history messages for %s", len(history), params.SessionId)
 	} else {
 		config.Logger().Printf("[acp] ResumeSession: could not load history for %s: %v", params.SessionId, err)
@@ -894,6 +937,10 @@ func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRe
 		return acp.ResumeSessionResponse{}, err
 	}
 	sess.env.GoalStore.RestoreFromSnapshot(goalSnap)
+	// Apply the restored approval axis; Ask/Autopilot both use the full-tool agent
+	// already built above, so no rebuild is needed.
+	sess.approvalState.SetSessionMode(restoredMode)
+	sess.mode = acpModeID(restoredMode)
 
 	a.mu.Lock()
 	a.sessions[params.SessionId] = sess
@@ -902,7 +949,7 @@ func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRe
 	config.Logger().Printf("[acp] Session resumed: %s", params.SessionId)
 	a.scheduleSlashCommandsBroadcast(params.SessionId, sess)
 
-	return acp.ResumeSessionResponse{Modes: acpModes(acpModeAgent)}, nil
+	return acp.ResumeSessionResponse{Modes: acpModes(sess.mode)}, nil
 }
 
 // Logout implements the logout method.

@@ -52,8 +52,7 @@ nav_order: 7
 |---|---|
 | **Enter** | Submit prompt |
 | **Shift+Enter** | Insert new line |
-| **Ctrl+P** | Toggle Plan Mode |
-| **Ctrl+A** | Toggle auto-approve |
+| **Shift+Tab** | Cycle session mode (Ask → Plan → Autopilot) |
 | **Ctrl+L** | Open model picker |
 | **Ctrl+C** | Exit (press once for confirmation, twice to force) |
 | **Ctrl+T** | Toggle team coordinator panel |

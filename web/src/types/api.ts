@@ -225,7 +225,15 @@ export interface ApprovalRequestData {
 // UI message types
 export type MessageRole = 'user' | 'assistant' | 'system'
 
-export type AgentMode = 'agent' | 'plan'
+export type AgentMode = 'ask' | 'plan' | 'autopilot'
+
+// normalizeMode maps any backend/legacy mode string to a unified AgentMode,
+// tolerating the old 'build'/'agent' aliases so older servers still work.
+export function normalizeMode(m?: string): AgentMode {
+  if (m === 'plan') return 'plan'
+  if (m === 'autopilot' || m === 'auto') return 'autopilot'
+  return 'ask' // ask / agent / build / normal / executing / empty
+}
 
 export interface ChatImage {
   data: string       // base64 data (without data: prefix)

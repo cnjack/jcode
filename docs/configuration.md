@@ -192,9 +192,20 @@ Multi-agent team settings.
 | `mailbox_poll_ms` | 500 | Mailbox polling interval |
 | `message_cap` | 50 | Messages displayed per teammate |
 
+### default_mode
+
+The session mode jcode starts in: `"ask"` (default), `"plan"`, or `"autopilot"`. Applies to the TUI, web, and ACP frontends. The `--unsafe` flag overrides this and forces `autopilot`.
+
+```json
+{ "default_mode": "ask" }
+```
+
 ### auto_approve
 
-Set to `true` to auto-approve all tool calls. Equivalent to running with `--unsafe` flag.
+{: .note }
+Deprecated — superseded by [`default_mode`](#default_mode). Still honored as a fallback when `default_mode` is unset: `true` maps to `autopilot`.
+
+Set to `true` to auto-approve all tool calls. Equivalent to running with the `--unsafe` flag.
 
 ### channel
 

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/mode"
 )
 
 const maxToolOutputLen = 500
@@ -298,12 +299,21 @@ func GetPlanResponseChannel() <-chan PlanResponse {
 	return planResponseCh
 }
 
-// planModeCh carries agent mode changes from TUI to main goroutine.
-var planModeCh = make(chan AgentMode, 1)
+// modeSelectCh carries unified session-mode changes (Ask/Plan/Autopilot) from
+// the TUI to the main goroutine. It replaces the old agent-mode-only channel so
+// the single selector drives both the tool/prompt axis and the approval axis.
+var modeSelectCh = make(chan mode.SessionMode, 1)
 
-// GetPlanModeChannel returns the channel that receives plan mode switch events.
-func GetPlanModeChannel() <-chan AgentMode {
-	return planModeCh
+// GetModeSelectChannel returns the channel that receives session-mode changes.
+func GetModeSelectChannel() <-chan mode.SessionMode {
+	return modeSelectCh
+}
+
+// ModeSelectedMsg is sent from the main goroutine back to the TUI to sync the
+// mode pill after the backend changes the session mode programmatically (resume
+// restore, plan-completion revert, or echoing a Shift+Tab change).
+type ModeSelectedMsg struct {
+	Mode mode.SessionMode
 }
 
 // AskUserQuestionMsg is sent when the agent asks the user a question via ask_user tool.

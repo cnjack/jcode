@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/tools"
 )
 
@@ -158,8 +159,11 @@ type Model struct {
 	cancelPending  bool // true when cancel-agent dialog is showing
 	cancelSelected int  // 0=Cancel, 1=Wait
 
-	// OnApprovalModeChange is called when the user toggles approval mode via Ctrl+A.
-	// It directly updates the backend ApprovalState atomically, bypassing the event loop.
+	// OnApprovalModeChange is called when the user promotes to auto-approve via the
+	// approval dialog's "Approve All". It updates the backend ApprovalState's
+	// approval axis directly (no agent rebuild), which is the correct fast path for
+	// a mid-run approval-only change. The unified Shift+Tab selector instead flows
+	// through modeSelectCh so it can also swap tools/prompt.
 	OnApprovalModeChange func(enabled bool)
 
 	// Command autocomplete suggestions
@@ -361,12 +365,47 @@ func (m Model) inputActive() bool {
 // ModelOption configures a Model before the BubbleTea program starts.
 type ModelOption func(*Model)
 
-// WithApprovalModeChange sets the callback invoked when the user toggles
-// approval mode via Ctrl+A or the approval dialog. The callback directly
+// WithApprovalModeChange sets the callback invoked when the user promotes to
+// auto-approve via the approval dialog's "Approve All". The callback directly
 // updates the backend ApprovalState atomically, bypassing the event loop.
 func WithApprovalModeChange(fn func(bool)) ModelOption {
 	return func(m *Model) {
 		m.OnApprovalModeChange = fn
+	}
+}
+
+// WithStartupMode seeds the initial selector mode so the mode pill reflects the
+// resolved startup mode (config DefaultMode / legacy AutoApprove / --unsafe).
+func WithStartupMode(sm mode.SessionMode) ModelOption {
+	return func(m *Model) {
+		m.applySelectorMode(sm)
+	}
+}
+
+// selectorMode derives the unified selector mode from the two low-level TUI
+// fields (tool axis + approval axis) for display in the mode pill.
+func (m Model) selectorMode() mode.SessionMode {
+	if m.agentMode == ModePlanning {
+		return mode.Plan
+	}
+	if m.approvalMode == ModeAuto {
+		return mode.Autopilot
+	}
+	return mode.Ask
+}
+
+// applySelectorMode sets the two low-level TUI fields to match a unified mode.
+// Plan leaves the approval field untouched (read-only tools make it moot).
+func (m *Model) applySelectorMode(sm mode.SessionMode) {
+	switch sm {
+	case mode.Plan:
+		m.agentMode = ModePlanning
+	case mode.Autopilot:
+		m.agentMode = ModeNormal
+		m.approvalMode = ModeAuto
+	default: // Ask
+		m.agentMode = ModeNormal
+		m.approvalMode = ModeManual
 	}
 }
 
