@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Built-in color themes, unified across terminal and web.** A new single source of truth (`internal/theme`) defines 7 themes — 4 dark (jcode Dark, Midnight, Dracula, Nord) and 3 light (jcode Light, GitHub Light, Solarized Light) — as a typed semantic palette. `go generate` emits the web CSS (`[data-theme]` blocks) and the picker registry from that one Go file, so the two renderers can never drift.
+- **`/theme` command** in the TUI opens a live-preview selector: arrow keys repaint the whole UI, Enter applies and persists to `config.theme`, Esc reverts. When no theme is persisted, the startup default is auto-selected from the terminal background. New `theme` config field.
+- **Appearance settings tab** in the web UI: a System (follow-OS) option plus dark/light swatch grids that render a true mini-preview of each theme. Themes apply via `html[data-theme]`; the legacy light/dark/system localStorage values migrate automatically.
+
+### Changed
+- The terminal palette was de-frozen: the ~50 lipgloss styles that were baked in at import time are now rebuilt from the active theme by `ApplyTheme`, and previously-hardcoded colors (subagent purple, on-primary text, team-panel and context-bar colors) are now semantic tokens. Markdown (glamour) follows the theme's light/dark appearance.
+
+### Fixed
+- TUI: pressing **Esc** while viewing a teammate now returns to the leader (the handler matched a key string that bubbletea never emits, so it was dead code).
+- TUI: the Cancel-agent confirmation now defaults to the non-destructive **Wait** button, matching the Quit dialog — `Ctrl+C` then `Enter` no longer aborts a running agent by reflex.
+- TUI: **`?`** opens the keyboard-shortcuts help when the input is empty, and the help panel's slash-command list is now generated from the command registry (so `/goal`, skill commands, and `/theme` always appear).
+
 ## [0.5.1] - 2026-06-13
 
 ### Added

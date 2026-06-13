@@ -761,15 +761,12 @@ func (m Model) helpPanelView() string {
 	right = append(right, renderEntry("Shift+↓", "Next agent"))
 	right = append(right, renderEntry("Ctrl+T", "Coordinator panel"))
 	right = append(right, "")
+	// Generated from getAllCommands() so the panel never drifts from the
+	// command registry (and skill-provided commands appear automatically).
 	right = append(right, sectionStyle.Render("Slash Commands"))
-	right = append(right, renderEntry("/setting", "Settings menu"))
-	right = append(right, renderEntry("/model", "Switch model"))
-	right = append(right, renderEntry("/ssh", "SSH connection"))
-	right = append(right, renderEntry("/resume", "Resume session"))
-	right = append(right, renderEntry("/compact", "Compress context"))
-	right = append(right, renderEntry("/bg", "Background tasks"))
-	right = append(right, renderEntry("/channel", "Manage channels"))
-	right = append(right, renderEntry("/help", "This help panel"))
+	for _, c := range m.getAllCommands() {
+		right = append(right, renderEntry(c.cmd, c.desc))
+	}
 
 	// Determine column width
 	colWidth := 36
@@ -835,7 +832,7 @@ func (m Model) helpPanelView() string {
 	title := lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).
 		Render("⌨  Keyboard Shortcuts")
 	footer := lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
-		Render("Esc/F1 close" + scrollHint)
+		Render("Esc/F1/q/? close" + scrollHint)
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
