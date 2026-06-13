@@ -177,7 +177,7 @@ export interface SlashCommandInfo {
   type: 'builtin' | 'skill'
 }
 
-// SSE event data types
+// WebSocket event data types
 export interface AgentTextData {
   text: string
 }

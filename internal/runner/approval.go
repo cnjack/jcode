@@ -115,11 +115,138 @@ func (s *ApprovalState) SetSessionApproval(enabled bool) {
 	}
 }
 
+// noApprovalNeeded lists tools that never require interactive approval in
+// MANUAL mode: read-only inspection, the user-facing question tool, and
+// teammate/subagent orchestration (whose own tool calls are gated separately).
+var noApprovalNeeded = map[string]bool{
+	"glob":              true,
+	"grep":              true,
+	"todowrite":         true,
+	"todoread":          true,
+	"ask_user":          true,
+	"webfetch":          true,
+	"subagent":          true,
+	"check_background":  true,
+	"team_create":       true,
+	"team_spawn":        true,
+	"team_send_message": true,
+	"team_list":         true,
+	"team_delete":       true,
+}
+
+// approvalDecision is the outcome of evaluating a tool call in MANUAL mode.
+type approvalDecision int
+
+const (
+	// decisionAutoApprove: the call is safe and runs without a prompt.
+	decisionAutoApprove approvalDecision = iota
+	// decisionPrompt: the call needs an interactive user prompt.
+	decisionPrompt
+	// decisionPromptExternal: like decisionPrompt, but flagged as touching a
+	// path outside the workpath (the UI highlights this).
+	decisionPromptExternal
+)
+
+// safeForegroundCommands are the bare command names that, run in the
+// foreground with no shell operators, only read state and never execute a
+// caller-supplied program. They are auto-approved in MANUAL mode.
+var safeForegroundCommands = map[string]bool{
+	"ls":    true,
+	"pwd":   true,
+	"cat":   true,
+	"echo":  true,
+	"which": true,
+}
+
+// safeGitSubcommands are read-only git subcommands that are auto-approved.
+var safeGitSubcommands = map[string]bool{
+	"status": true,
+	"log":    true,
+	"diff":   true,
+	"show":   true,
+}
+
+// isSafeCommand reports whether a foreground shell command is safe to run
+// without approval. It rejects anything containing shell operators that could
+// chain, redirect, or substitute additional commands (so a "safe" prefix can
+// no longer smuggle a destructive payload), then allows only an explicit set
+// of read-only programs matched on the whole command word (not a prefix, so
+// "lsof" no longer matches "ls").
+func isSafeCommand(cmd string) bool {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return false
+	}
+	// Reject command chaining / redirection / substitution. Any of these means
+	// the command can run something other than its leading program.
+	if strings.ContainsAny(cmd, ";&|<>`\n\r()") {
+		return false
+	}
+	if strings.Contains(cmd, "$(") || strings.Contains(cmd, "${") {
+		return false
+	}
+	fields := strings.Fields(cmd)
+	prog := fields[0]
+	switch {
+	case safeForegroundCommands[prog]:
+		return true
+	case prog == "env":
+		// Bare `env` prints the environment; `env CMD ...` executes CMD, so it
+		// is only safe with no arguments.
+		return len(fields) == 1
+	case prog == "git":
+		return len(fields) >= 2 && safeGitSubcommands[fields[1]]
+	}
+	return false
+}
+
+// decide evaluates a single tool call against the MANUAL-mode rules and returns
+// how it should be handled. It is the single source of truth shared by the
+// primary approval path and the teammate approval path so the two cannot drift.
+func (s *ApprovalState) decide(toolName, toolArgs string) approvalDecision {
+	if noApprovalNeeded[toolName] {
+		return decisionAutoApprove
+	}
+
+	switch toolName {
+	case "read":
+		var input struct {
+			FilePath string `json:"file_path"`
+		}
+		if err := json.Unmarshal([]byte(toolArgs), &input); err == nil {
+			if s.isWithinWorkpath(input.FilePath) {
+				return decisionAutoApprove
+			}
+			return decisionPromptExternal
+		}
+		return decisionPrompt
+	case "execute":
+		var input struct {
+			Command    string `json:"command"`
+			Background bool   `json:"background"`
+		}
+		if err := json.Unmarshal([]byte(toolArgs), &input); err == nil {
+			// Background commands always require approval: the agent controls the
+			// flag, so auto-approving them would let any command (including
+			// destructive ones) bypass the gate by setting background=true.
+			if input.Background {
+				return decisionPrompt
+			}
+			if isSafeCommand(input.Command) {
+				return decisionAutoApprove
+			}
+		}
+		return decisionPrompt
+	}
+
+	return decisionPrompt
+}
+
 // RequestApproval is the agent.ApprovalFunc implementation.
 // It returns true immediately for read-only or obviously safe commands.
 // For everything else it sends a TUI prompt and waits for the user's answer.
 func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs string) (bool, error) {
-	// State machine: AUTO mode passes all operations directly
+	// State machine: AUTO mode passes all operations directly.
 	s.mu.Lock()
 	currentMode := s.mode
 	s.mu.Unlock()
@@ -128,69 +255,15 @@ func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs 
 		return true, nil
 	}
 
-	// === Below is MANUAL mode handling ===
-
-	// 1. No-approval-needed tools (read is handled separately below)
-	noApprovalNeeded := map[string]bool{
-		"glob":              true,
-		"grep":              true,
-		"todowrite":         true,
-		"todoread":          true,
-		"question":          true,
-		"webfetch":          true,
-		"subagent":          true,
-		"check_background":  true,
-		"team_create":       true,
-		"team_spawn":        true,
-		"team_send_message": true,
-		"team_list":         true,
-		"team_delete":       true,
-	}
-	if noApprovalNeeded[toolName] {
+	switch s.decide(toolName, toolArgs) {
+	case decisionAutoApprove:
 		s.notifyToolInProgress(toolName, toolArgs)
 		return true, nil
+	case decisionPromptExternal:
+		return s.requestUserApproval(ctx, toolName, toolArgs, true)
+	default:
+		return s.requestUserApproval(ctx, toolName, toolArgs, false)
 	}
-
-	// 2. read tool: check if path is within workpath
-	if toolName == "read" {
-		var input struct {
-			FilePath string `json:"file_path"`
-		}
-		if err := json.Unmarshal([]byte(toolArgs), &input); err == nil {
-			if s.isWithinWorkpath(input.FilePath) {
-				s.notifyToolInProgress(toolName, toolArgs)
-				return true, nil // Within workpath, auto-approve
-			}
-			// Outside workpath, needs approval, mark as external access
-			return s.requestUserApproval(ctx, toolName, toolArgs, true)
-		}
-	}
-
-	// 3. execute: auto-approve safe commands and background tasks
-	if toolName == "execute" {
-		var input struct {
-			Command    string `json:"command"`
-			Background bool   `json:"background"`
-		}
-		if err := json.Unmarshal([]byte(toolArgs), &input); err == nil {
-			// Background tasks are auto-approved (long-running, agent can check later).
-			if input.Background {
-				s.notifyToolInProgress(toolName, toolArgs)
-				return true, nil
-			}
-			cmd := strings.TrimSpace(input.Command)
-			safePrefix := []string{"ls", "pwd", "env", "ls ", "cat ", "pwd ", "echo ", "which ", "git status", "git log", "git diff", "git show"}
-			for _, p := range safePrefix {
-				if cmd == p || strings.HasPrefix(cmd, p) {
-					s.notifyToolInProgress(toolName, toolArgs)
-					return true, nil
-				}
-			}
-		}
-	}
-
-	// 4. Other tools: need approval
-	return s.requestUserApproval(ctx, toolName, toolArgs, false)
 }
 
 func (s *ApprovalState) notifyToolInProgress(toolName, toolArgs string) {
@@ -234,10 +307,10 @@ func (s *ApprovalState) requestUserApprovalWithWorker(ctx context.Context, toolN
 }
 
 // NewTeammateApprovalFunc creates an approval function for a teammate that includes
-// the worker identity in the TUI approval prompt.
+// the worker identity in the TUI approval prompt. It shares the same decision
+// logic as RequestApproval (via decide) so the two paths cannot drift apart.
 func (s *ApprovalState) NewTeammateApprovalFunc(workerName, workerColor string) func(ctx context.Context, toolName, toolArgs string) (bool, error) {
 	return func(ctx context.Context, toolName, toolArgs string) (bool, error) {
-		// Same logic as RequestApproval, but with worker badge.
 		s.mu.Lock()
 		currentMode := s.mode
 		s.mu.Unlock()
@@ -246,61 +319,15 @@ func (s *ApprovalState) NewTeammateApprovalFunc(workerName, workerColor string) 
 			return true, nil
 		}
 
-		noApprovalNeeded := map[string]bool{
-			"glob":              true,
-			"grep":              true,
-			"todowrite":         true,
-			"todoread":          true,
-			"question":          true,
-			"webfetch":          true,
-			"subagent":          true,
-			"check_background":  true,
-			"team_create":       true,
-			"team_spawn":        true,
-			"team_send_message": true,
-			"team_list":         true,
-			"team_delete":       true,
-		}
-		if noApprovalNeeded[toolName] {
+		switch s.decide(toolName, toolArgs) {
+		case decisionAutoApprove:
 			s.notifyToolInProgress(toolName, toolArgs)
 			return true, nil
+		case decisionPromptExternal:
+			return s.requestUserApprovalWithWorker(ctx, toolName, toolArgs, true, workerName, workerColor)
+		default:
+			return s.requestUserApprovalWithWorker(ctx, toolName, toolArgs, false, workerName, workerColor)
 		}
-
-		if toolName == "read" {
-			var input struct {
-				FilePath string `json:"file_path"`
-			}
-			if err := json.Unmarshal([]byte(toolArgs), &input); err == nil {
-				if s.isWithinWorkpath(input.FilePath) {
-					s.notifyToolInProgress(toolName, toolArgs)
-					return true, nil
-				}
-				return s.requestUserApprovalWithWorker(ctx, toolName, toolArgs, true, workerName, workerColor)
-			}
-		}
-
-		if toolName == "execute" {
-			var input struct {
-				Command    string `json:"command"`
-				Background bool   `json:"background"`
-			}
-			if err := json.Unmarshal([]byte(toolArgs), &input); err == nil {
-				if input.Background {
-					s.notifyToolInProgress(toolName, toolArgs)
-					return true, nil
-				}
-				cmd := strings.TrimSpace(input.Command)
-				safePrefix := []string{"ls", "pwd", "env", "ls ", "cat ", "pwd ", "echo ", "which ", "git status", "git log", "git diff", "git show"}
-				for _, p := range safePrefix {
-					if cmd == p || strings.HasPrefix(cmd, p) {
-						s.notifyToolInProgress(toolName, toolArgs)
-						return true, nil
-					}
-				}
-			}
-		}
-
-		return s.requestUserApprovalWithWorker(ctx, toolName, toolArgs, false, workerName, workerColor)
 	}
 }
 

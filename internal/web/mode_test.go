@@ -17,7 +17,6 @@ import (
 // recording the planMode flag every agent rebuild is asked for.
 func newModeTestServer(rebuilt *[]bool) *Server {
 	return &Server{
-		broker:        NewSSEBroker(),
 		wsBroker:      NewWSBroker(),
 		approvalState: runner.NewApprovalStateWithMode("/tmp", mode.Ask),
 		mode:          "ask",
