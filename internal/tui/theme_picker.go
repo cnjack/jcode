@@ -95,7 +95,11 @@ func (m *Model) handleThemePickerKey(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.M
 			m.themePersisted = true
 			if cfg, err := config.LoadConfig(); err == nil {
 				cfg.Theme = name
-				_ = config.SaveConfig(cfg)
+				if saveErr := config.SaveConfig(cfg); saveErr != nil {
+					config.Logger().Printf("[theme] failed to save theme to config: %v", saveErr)
+				}
+			} else {
+				config.Logger().Printf("[theme] failed to load config to persist theme: %v", err)
 			}
 			disp := name
 			if t, ok := theme.Get(name); ok {
