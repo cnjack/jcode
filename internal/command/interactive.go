@@ -157,18 +157,19 @@ func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
 	var handlers []adk.ChatModelAgentMiddleware
 
 	providerName, modelName := s.cfg.GetProviderModel()
-	contextLimit := s.registry.GetModelContextLimit(providerName, modelName)
-	if contextLimit <= 0 {
-		contextLimit = internalmodel.GetModelContextLimit(modelName)
-	}
-	if contextLimit <= 0 {
-		contextLimit = 200000
+	contextLimit := internalmodel.ResolveContextLimit(s.registry, s.cfg, providerName, modelName)
+	// compactThreshold drives summarization + compaction; reductionThreshold (the
+	// lighter, earlier tool-output clearing) sits just below it.
+	compactThreshold := s.cfg.CompactionThreshold()
+	reductionThreshold := compactThreshold - 0.15
+	if reductionThreshold < 0.1 {
+		reductionThreshold = compactThreshold * 0.8
 	}
 
 	summMw, err := summarization.New(s.ctx, &summarization.Config{
 		Model: s.chatModel,
 		Trigger: &summarization.TriggerCondition{
-			ContextTokens: int(float64(contextLimit) * 0.75),
+			ContextTokens: int(float64(contextLimit) * compactThreshold),
 		},
 		TranscriptFilePath: filepath.Join(config.ConfigDir(), "transcript.txt"),
 		Finalize: func(ctx context.Context, originalMsgs []adk.Message, summary adk.Message) ([]adk.Message, error) {
@@ -200,7 +201,7 @@ func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
 		Backend:           reductionBackend,
 		RootDir:           filepath.Join(config.ConfigDir(), "reduction"),
 		MaxLengthForTrunc: 50000,
-		MaxTokensForClear: int64(float64(contextLimit) * 0.60),
+		MaxTokensForClear: int64(float64(contextLimit) * reductionThreshold),
 		ReadFileToolName:  "read",
 		TruncExcludeTools: []string{"ask_user", "load_skill"},
 		ToolConfig: map[string]*reduction.ToolReductionConfig{
@@ -236,7 +237,7 @@ func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
 	}
 
 	// Wire up compaction middleware (per-agent tracker).
-	compactionStrategy := agent.NewThresholdCompactionStrategy(0.75, s.chatModel, 6)
+	compactionStrategy := agent.NewThresholdCompactionStrategy(compactThreshold, s.chatModel, 6)
 	compactionMw := agent.NewCompactionMiddleware(compactionStrategy, contextLimit, s.agentTokenUsage, func(savedTokens int) {
 		if s.agentTokenUsage != nil {
 			s.agentTokenUsage.Reset()
