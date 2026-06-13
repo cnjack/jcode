@@ -8,7 +8,10 @@
     <script>
       // Pre-mount theme application to avoid a flash before Vue boots. Mirrors
       // useTheme.ts; the post-mount applyTheme() corrects any edge case using
-      // the real theme registry. The /-light$/ check matches current light ids.
+      // the real theme registry. This runs before the module bundle, so it
+      // can't import the registry: light theme ids end in "-light" and dark
+      // ids do not — a convention enforced by TestLightThemeNamingConvention
+      // in internal/theme, which keeps the /-light$/ check below correct.
       (function () {
         try {
           var v = localStorage.getItem('jcode_theme');

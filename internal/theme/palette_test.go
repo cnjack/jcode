@@ -3,6 +3,7 @@ package theme
 import (
 	"reflect"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -50,6 +51,22 @@ func TestThemeNamesUnique(t *testing.T) {
 			t.Errorf("duplicate theme name %q", th.Name)
 		}
 		seen[th.Name] = true
+	}
+}
+
+// TestLightThemeNamingConvention enforces the convention the web pre-mount
+// (FOUC) script in web/index.html relies on: a light theme's id ends with
+// "-light" and a dark theme's id does not. That script runs before the module
+// bundle loads, so it can't import the registry and instead keys off the id
+// suffix; this test keeps that heuristic provably correct.
+func TestLightThemeNamingConvention(t *testing.T) {
+	for _, th := range All() {
+		endsLight := strings.HasSuffix(th.Name, "-light")
+		if (th.Appearance == Light) != endsLight {
+			t.Errorf("theme %q (appearance %s) breaks the naming convention: id ends with -light=%v. "+
+				"Light ids must end with -light and dark ids must not, or update the FOUC script in web/index.html",
+				th.Name, th.Appearance, endsLight)
+		}
 	}
 }
 
