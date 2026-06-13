@@ -136,7 +136,7 @@ func (m *Model) recreateMDRenderer() {
 		width = 40
 	}
 	if r, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle("dark"),
+		glamour.WithStandardStyle(currentTheme.GlamourStyle()),
 		glamour.WithWordWrap(width-4), // account for left margin/padding
 	); err == nil {
 		m.mdRenderer = r
