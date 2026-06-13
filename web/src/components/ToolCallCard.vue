@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import type { ToolCall } from '@/types/api'
+import type { ToolCall, TodoItem } from '@/types/api'
+import TaskList from './TaskList.vue'
 
 defineOptions({ name: 'ToolCallCard' })
 
@@ -111,7 +112,6 @@ const teamMsgData = computed(() => {
 })
 
 // ─── Todo renderer helpers ───
-interface TodoItem { id: number; title: string; status: string }
 const todoItems = computed((): TodoItem[] => {
   try {
     // Prefer output (final state), fall back to args (requested state)
@@ -122,24 +122,6 @@ const todoItems = computed((): TodoItem[] => {
     return (parsed.todos || []) as TodoItem[]
   } catch { return [] }
 })
-
-function todoStatusIcon(status: string): string {
-  switch (status) {
-    case 'completed': return '✓'
-    case 'in_progress': return '●'
-    case 'cancelled': return '✗'
-    default: return '○'
-  }
-}
-
-function todoStatusColor(status: string): string {
-  switch (status) {
-    case 'completed': return 'var(--color-primary)'
-    case 'in_progress': return 'var(--color-foreground)'
-    case 'cancelled': return 'var(--color-destructive)'
-    default: return 'var(--color-muted-foreground)'
-  }
-}
 
 // ─── Terminal renderer helpers ───
 const terminalCommand = computed(() => {
@@ -474,19 +456,7 @@ function formatArgs(args: string): string {
 
       <!-- ═══════ Todo List ═══════ -->
       <div v-else-if="renderType === 'todo'" class="px-3 py-2 max-h-64 overflow-y-auto" style="background: var(--color-surface)">
-        <div v-if="todoItems.length" class="space-y-0.5">
-          <div v-for="item in todoItems" :key="item.id" class="flex items-center gap-2 py-1">
-            <span class="text-[11px] w-3 text-center shrink-0 tabular-nums" :style="{ color: todoStatusColor(item.status) }">{{ todoStatusIcon(item.status) }}</span>
-            <span
-              class="text-xs flex-1 min-w-0 truncate"
-              :style="{
-                color: item.status === 'completed' ? 'var(--color-muted-foreground)' : 'var(--color-foreground)',
-                textDecoration: item.status === 'completed' ? 'line-through' : 'none'
-              }"
-            >{{ item.title }}</span>
-            <span class="text-[9px] font-mono uppercase tracking-wider shrink-0" :style="{ color: todoStatusColor(item.status) }">{{ item.status.replace('_', ' ') }}</span>
-          </div>
-        </div>
+        <TaskList v-if="todoItems.length" :todos="todoItems" />
         <div v-else-if="tool.status === 'running'" class="py-1 text-xs animate-pulse" style="color: var(--color-muted-foreground)">Loading…</div>
         <div v-else class="py-1 text-xs italic" style="color: var(--color-muted-foreground)">No todos</div>
         <div v-if="tool.error" class="mt-1.5 text-xs font-mono whitespace-pre-wrap" style="color: var(--color-destructive)">{{ tool.error }}</div>

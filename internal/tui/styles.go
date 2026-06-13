@@ -28,6 +28,7 @@ var (
 	colorOnPrimary color.Color // text/icons on a primary fill
 	colorSubagent  color.Color // subagent accent (purple)
 	colorBorder    color.Color // neutral surface borders
+	colorWarningBg color.Color // subtle warning wash (active todo row tint)
 )
 
 // Theme-derived styles. All are rebuilt by ApplyTheme — lipgloss captures color
@@ -64,12 +65,16 @@ var (
 	errorStyle          lipgloss.Style
 	userLabelStyle      lipgloss.Style
 	// userPromptStyle renders user input with the primary background (e.g. "> hi")
-	userPromptStyle     lipgloss.Style
-	dividerStyle        lipgloss.Style
-	todoCompletedStyle  lipgloss.Style
-	todoInProgressStyle lipgloss.Style
-	todoPendingStyle    lipgloss.Style
-	todoCancelledStyle  lipgloss.Style
+	userPromptStyle        lipgloss.Style
+	dividerStyle           lipgloss.Style
+	todoCompletedStyle     lipgloss.Style // completed step glyph: success + strikethrough
+	todoCompletedTextStyle lipgloss.Style // completed step title: muted + strikethrough (de-emphasized)
+	todoInProgressStyle    lipgloss.Style
+	todoPendingStyle       lipgloss.Style
+	todoCancelledStyle     lipgloss.Style
+	todoCountStyle         lipgloss.Style // muted "N / M" header count + bar percent
+	todoBarFilledStyle     lipgloss.Style // filled progress-bar cells (primary)
+	todoBarEmptyStyle      lipgloss.Style // empty progress-bar cells (border/muted)
 
 	// --- Tool call status icons (pre-rendered; rebuilt on theme change) ---
 	toolIconPending string
@@ -116,6 +121,7 @@ func ApplyTheme(name string) {
 	colorOnPrimary = lipgloss.Color(t.OnPrimary)
 	colorSubagent = lipgloss.Color(t.Subagent)
 	colorBorder = lipgloss.Color(t.Border)
+	colorWarningBg = lipgloss.Color(t.WarningBg)
 
 	// ─── Sidebar ───
 	sidebarSectionTitleStyle = lipgloss.NewStyle().Bold(true).Foreground(colorMuted)
@@ -162,10 +168,18 @@ func ApplyTheme(name string) {
 
 	dividerStyle = lipgloss.NewStyle().Foreground(colorMuted)
 
-	todoCompletedStyle = lipgloss.NewStyle().Foreground(colorSuccess)
-	todoInProgressStyle = lipgloss.NewStyle().Foreground(colorWarning).Bold(true)
+	// Completed/cancelled steps are de-emphasized with a strikethrough so the
+	// eye skips past them to the active step below.
+	todoCompletedStyle = lipgloss.NewStyle().Foreground(colorSuccess).Strikethrough(true)
+	todoCompletedTextStyle = lipgloss.NewStyle().Foreground(colorMuted).Strikethrough(true)
+	todoCancelledStyle = lipgloss.NewStyle().Foreground(colorMuted).Strikethrough(true)
 	todoPendingStyle = lipgloss.NewStyle().Foreground(colorMuted)
-	todoCancelledStyle = lipgloss.NewStyle().Foreground(colorMuted).Italic(true)
+	// In-progress is the focused step: primary color, bold, with a subtle
+	// warning-wash background tint so the active row stands out.
+	todoInProgressStyle = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).Background(colorWarningBg)
+	todoCountStyle = lipgloss.NewStyle().Foreground(colorMuted)
+	todoBarFilledStyle = lipgloss.NewStyle().Foreground(colorPrimary)
+	todoBarEmptyStyle = lipgloss.NewStyle().Foreground(colorBorder)
 
 	// --- Tool call status icons ---
 	toolIconPending = lipgloss.NewStyle().Foreground(colorWarning).Render("●")

@@ -39,7 +39,11 @@ func Run(
 	}
 	h.OnAgentStart()
 
-	resp := runInner(ctx, ag, messages, h, rec)
+	resp, done := runInner(ctx, ag, messages, h, rec)
+	if done {
+		// runInner already signaled completion (cancellation or a real error).
+		return resp
+	}
 	// pending is the assistant text produced since messages was last extended;
 	// each continuation appends only this delta, never the accumulated resp,
 	// so earlier turns are not duplicated into the context.
@@ -48,7 +52,18 @@ func Run(
 	// Completion guard: if the agent finished but there are still incomplete
 	// todos, re-run with a reminder so nothing is left behind.
 	const maxGuardRetries = 3
+todoLoop:
 	for i := 0; i < maxGuardRetries; i++ {
+		// Respect cancellation (e.g. user stop): a canceled context must not
+		// drive the auto-continue path, mirroring the goal loop below. Without
+		// this, a stop floods the chat with paired "Incomplete todos
+		// detected" / "context canceled" messages for every retry.
+		select {
+		case <-ctx.Done():
+			config.Logger().Printf("[runner] todo continuation cancelled")
+			break todoLoop
+		default:
+		}
 		if todoStore == nil || !todoStore.HasIncomplete() {
 			break
 		}
@@ -56,9 +71,12 @@ func Run(
 		h.OnAgentText("\n⚠️ Incomplete todos detected, continuing...\n")
 		messages = append(messages, &schema.Message{Role: schema.Assistant, Content: pending})
 		messages = append(messages, schema.UserMessage(reminder))
-		extra := runInner(ctx, ag, messages, h, rec)
+		extra, done := runInner(ctx, ag, messages, h, rec)
 		resp += extra
 		pending = extra
+		if done {
+			return resp
+		}
 	}
 
 	// Goal continuation guard: if an active goal exists and the agent stopped
@@ -90,9 +108,12 @@ func Run(
 			h.OnAgentText("\n🎯 Goal active — continuing toward objective...\n")
 			messages = append(messages, &schema.Message{Role: schema.Assistant, Content: pending})
 			messages = append(messages, schema.UserMessage(cont))
-			extra := runInner(ctx, ag, messages, h, rec)
+			extra, done := runInner(ctx, ag, messages, h, rec)
 			resp += extra
 			pending = extra
+			if done {
+				return resp
+			}
 		}
 	}
 
@@ -119,7 +140,7 @@ func runInner(
 	messages []adk.Message,
 	h handler.AgentEventHandler,
 	rec *session.Recorder,
-) string {
+) (string, bool) {
 	input := &adk.AgentInput{
 		Messages:        messages,
 		EnableStreaming: true,
@@ -135,9 +156,13 @@ func runInner(
 		// interrupts and timeouts are respected promptly.
 		select {
 		case <-ctx.Done():
+			// Cancellation (e.g. user stop): report the clean context error so
+			// the TUI shows its cancel notice and the web classifies it as a
+			// calm "Stopped". runInner owns this OnAgentDone (returns done=true),
+			// so Run does not emit a second one.
 			config.Logger().Printf("[runner] context cancelled, stopping iteration")
 			h.OnAgentDone(ctx.Err())
-			return assistantText.String()
+			return assistantText.String(), true
 		default:
 		}
 
@@ -148,9 +173,20 @@ func runInner(
 		}
 		eventCount++
 		if event.Err != nil {
+			// If the run was canceled, the stream error is just fallout from the
+			// cancellation (e.g. "[NodeRunError] context canceled"), not a real
+			// failure — report a clean stop instead of surfacing the noise.
+			if ctx.Err() != nil {
+				// The stream error is just fallout from cancellation (e.g.
+				// "[NodeRunError] context canceled"); report the clean context
+				// error instead of the noisy wrapped one.
+				config.Logger().Printf("[runner] event error during cancellation: %v", event.Err)
+				h.OnAgentDone(ctx.Err())
+				return assistantText.String(), true
+			}
 			config.Logger().Printf("[runner] event error: %v", event.Err)
 			h.OnAgentDone(event.Err)
-			return assistantText.String()
+			return assistantText.String(), true
 		}
 		if event.Output == nil || event.Output.MessageOutput == nil {
 			config.Logger().Printf("[runner] event #%d: nil output", eventCount)
@@ -281,7 +317,8 @@ func runInner(
 		rec.RecordAssistant(assistantText.String())
 	}
 
-	return assistantText.String()
+	// Clean completion: Run emits the single final OnAgentDone(nil).
+	return assistantText.String(), false
 }
 
 func modelContextLimit() int {
