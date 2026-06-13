@@ -345,7 +345,7 @@ func (m *Model) requestCancelAgent() {
 		return
 	}
 	m.cancelPending = true
-	m.cancelSelected = 0 // default to "Cancel"
+	m.cancelSelected = 1 // default to "Wait" (non-destructive, matches Quit dialog's safe "No")
 	m.refreshViewport()
 }
 
