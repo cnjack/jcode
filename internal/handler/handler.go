@@ -2,7 +2,7 @@
 // agent runner from any specific UI implementation (TUI, ACP, Web, etc.).
 //
 // All agent-loop events flow through this interface. Concrete implementations
-// adapt the events to the target transport (BubbleTea, HTTP/SSE, ACP JSON-RPC…).
+// adapt the events to the target transport (BubbleTea, WebSocket, ACP JSON-RPC…).
 package handler
 
 import "context"

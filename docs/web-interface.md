@@ -61,13 +61,13 @@ Switch between different project directories without restarting the server.
 
 ## API Endpoints
 
-The web server exposes a REST API for programmatic access:
+The web server exposes an HTTP API and a WebSocket stream for programmatic access:
 
 | Endpoint | Description |
 |---|---|
 | `POST /api/chat` | Send a message to the agent |
 | `POST /api/stop` | Cancel current execution |
-| `GET /api/events` | SSE stream of agent events |
+| `GET /api/ws` | WebSocket stream of agent events |
 | `GET /api/sessions` | List sessions |
 | `POST /api/sessions` | Create new session |
 | `GET /api/models` | List available models |

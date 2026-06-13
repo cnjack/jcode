@@ -37,8 +37,15 @@ function formatArgs(args: string): string {
       <button
         class="px-3.5 py-1.5 text-xs rounded-md text-white transition-colors cursor-pointer font-medium shadow-sm"
         style="background-color: var(--color-primary)"
-        @click="store.resolveApproval(approval.id, true)">
-        Allow
+        @click="store.resolveApproval(approval.id, true, false)">
+        Allow once
+      </button>
+      <button
+        class="px-3.5 py-1.5 text-xs rounded-md transition-colors cursor-pointer font-medium"
+        style="background-color: var(--color-secondary); color: var(--color-foreground)"
+        title="Approve this and auto-approve the rest of the session"
+        @click="store.resolveApproval(approval.id, true, true)">
+        Allow all
       </button>
       <button
         class="px-3.5 py-1.5 text-xs rounded-md transition-colors cursor-pointer font-medium"
