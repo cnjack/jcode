@@ -251,6 +251,47 @@ func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
 	return agent.NewAgent(s.ctx, s.chatModel, s.toolList, s.systemPrompt, s.approvalState.RequestApproval, middlewares, handlers)
 }
 
+// mcpStatusItems converts internal MCP statuses to TUI status items.
+func mcpStatusItems(internalStatuses []tools.MCPStatus) []tui.MCPStatusItem {
+	items := make([]tui.MCPStatusItem, 0, len(internalStatuses))
+	for _, st := range internalStatuses {
+		errMsg := ""
+		if st.Error != nil {
+			errMsg = st.Error.Error()
+		}
+		items = append(items, tui.MCPStatusItem{
+			Name: st.Name, ToolCount: st.ToolCount, Running: st.Running,
+			ErrMsg: errMsg, NeedsAuth: st.NeedsAuth,
+		})
+	}
+	return items
+}
+
+// reloadMCP reloads MCP servers from the current config, rebuilds the agent
+// tool set in place, and pushes a fresh status to the TUI. Used after an
+// OAuth login or MCP config change so tools become usable without a restart.
+func (s *interactiveState) reloadMCP() {
+	latest, err := config.LoadConfig()
+	if err != nil {
+		config.Logger().Printf("[mcp] reload: config load failed: %v", err)
+		return
+	}
+	s.cfg = latest
+	mcpTools, statuses := tools.LoadMCPTools(s.ctx, latest.MCPServers)
+	s.mcpTools = mcpTools
+	if s.agentMode != tui.ModePlanning {
+		s.toolList = s.buildAllTools()
+		if newAg, err := s.createAgent(); err == nil {
+			s.ag = newAg
+		} else {
+			config.Logger().Printf("[mcp] reload: agent rebuild failed: %v", err)
+		}
+	}
+	if s.p != nil {
+		s.p.Send(tui.MCPStatusMsg{Statuses: mcpStatusItems(statuses)})
+	}
+}
+
 func (s *interactiveState) applyModeSwitch(newMode tui.AgentMode) {
 	s.agentMode = newMode
 	config.Logger().Printf("[plan] mode switch to %d (0=normal, 1=plan)", newMode)
@@ -721,6 +762,7 @@ func (s *interactiveState) runEventLoop(initialHistory []adk.Message, initialRes
 	compactCh := tui.GetCompactChannel()
 	modeSelectCh := tui.GetModeSelectChannel()
 	channelActionCh := tui.GetChannelActionChannel()
+	mcpLoginCh := tui.GetMCPLoginChannel()
 	cancelAgentCh := tui.GetCancelAgentChannel()
 
 	// Background goroutine to handle agent cancellation requests.
@@ -772,8 +814,48 @@ func (s *interactiveState) runEventLoop(initialHistory []adk.Message, initialRes
 
 		case action := <-channelActionCh:
 			s.handleChannelAction(action)
+
+		case name := <-mcpLoginCh:
+			s.handleMCPLogin(name)
 		}
 	}
+}
+
+// handleMCPLogin runs an OAuth login for the named server in the background so
+// the event loop is not blocked while the user completes the browser flow. On
+// success it persists config and hot-reloads MCP tools.
+func (s *interactiveState) handleMCPLogin(name string) {
+	srv := s.cfg.MCPServers[name]
+	if srv == nil {
+		s.p.Send(tui.MCPNoticeMsg{Text: "server not found: " + name})
+		return
+	}
+	if srv.URL == "" || (srv.Type != "http" && srv.Type != "sse") {
+		s.p.Send(tui.MCPNoticeMsg{Text: "OAuth login only applies to http/sse servers"})
+		return
+	}
+	if srv.OAuth == nil {
+		srv.OAuth = &config.MCPOAuthConfig{Enabled: true}
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(s.ctx, 5*time.Minute)
+		defer cancel()
+		err := tools.PerformMCPOAuthLogin(ctx, name, srv, func(authURL string) {
+			s.p.Send(tui.MCPNoticeMsg{Text: "opening browser…"})
+			if err := util.OpenURL(authURL); err != nil {
+				config.Logger().Printf("[mcp] open browser: %v", err)
+			}
+		})
+		if err != nil {
+			s.p.Send(tui.MCPNoticeMsg{Text: "login failed: " + err.Error()})
+			return
+		}
+		if err := config.SaveConfig(s.cfg); err != nil {
+			config.Logger().Printf("[mcp] save config after login: %v", err)
+		}
+		s.p.Send(tui.MCPNoticeMsg{Text: name + " authorized — reloading tools"})
+		s.reloadMCP()
+	}()
 }
 
 // RunInteractive starts the interactive TUI session.
@@ -808,7 +890,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	platform := util.GetSystemInfo()
 	envInfo := util.CollectEnvInfo(pwd)
 
-	skillLoader := skills.NewLoader()
+	skillLoader := skills.NewLoaderWithDisabled(cfg.DisabledSkills)
 	skillLoader.ScanProjectSkills(pwd)
 
 	systemPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
@@ -842,15 +924,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	if len(cfg.MCPServers) > 0 {
 		var internalStatuses []tools.MCPStatus
 		mcpTools, internalStatuses = tools.LoadMCPTools(ctx, cfg.MCPServers)
-		for _, st := range internalStatuses {
-			errMsg := ""
-			if st.Error != nil {
-				errMsg = st.Error.Error()
-			}
-			mcpStatuses = append(mcpStatuses, tui.MCPStatusItem{
-				Name: st.Name, ToolCount: st.ToolCount, Running: st.Running, ErrMsg: errMsg,
-			})
-		}
+		mcpStatuses = mcpStatusItems(internalStatuses)
 	}
 
 	planStore := tools.NewPlanStore()

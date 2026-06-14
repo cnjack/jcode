@@ -847,6 +847,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 						return m.handleChannelInput(cmds)
 					}
 
+					if prompt == "/mcp" || strings.HasPrefix(prompt, "/mcp ") {
+						return m.handleMCPInput(prompt, cmds)
+					}
+
 					if prompt == "/help" {
 						m.showingHelp = true
 						m.helpScroll = 0
@@ -1186,6 +1190,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 	case MCPStatusMsg:
 		m.mcpStatuses = msg.Statuses
 		m.invalidateSidebarCache()
+		m.refreshViewport()
+
+	case MCPNoticeMsg:
+		m.lines = append(m.lines, textLine("  "+toolLabelStyle.Render("🔐 MCP:")+" "+msg.Text))
 		m.refreshViewport()
 
 	case ChannelStateMsg:

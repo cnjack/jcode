@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import type { ToolCall, TodoItem } from '@/types/api'
 import TaskList from './TaskList.vue'
+import AskUserCard from './AskUserCard.vue'
 
 defineOptions({ name: 'ToolCallCard' })
 
@@ -12,6 +13,7 @@ const props = defineProps<{
 
 const expanded = ref(false)
 const isSubagent = computed(() => props.tool.name === 'subagent')
+const isAskUser = computed(() => props.tool.name === 'ask_user')
 const subagentExpanded = ref(true)
 
 // Display info: use backend-provided or fall back to name
@@ -320,6 +322,9 @@ function formatArgs(args: string): string {
       <div v-if="tool.error" class="mt-1 px-3 py-2 text-xs font-mono whitespace-pre-wrap overflow-hidden" :style="{ borderRadius: 'var(--radius-xl)', border: '1px solid var(--color-destructive)', color: 'var(--color-destructive)' }">{{ tool.error }}</div>
     </div>
   </div>
+
+  <!-- Ask User — interactive question card (or static answer on replay) -->
+  <AskUserCard v-else-if="isAskUser" :tool="tool" />
 
   <!-- Regular tool call -->
   <div v-else class="my-1">

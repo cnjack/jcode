@@ -75,7 +75,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 	platform := util.GetSystemInfo()
 	envInfo := util.CollectEnvInfo(pwd)
 
-	skillLoader := skills.NewLoader()
+	skillLoader := skills.NewLoaderWithDisabled(cfg.DisabledSkills)
 	skillLoader.ScanProjectSkills(pwd)
 
 	systemPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
@@ -101,10 +101,22 @@ func runWebServer(port int, host string, openBrowser bool) error {
 	// updates).
 	agentTokenUsage := &internalmodel.TokenUsage{}
 
-	// Load MCP tools.
+	// Load MCP tools. mcpTools is reassigned by reloadMCPTools (below) so the
+	// agent picks up server add/edit/delete/login without a restart — the
+	// buildAllTools closure reads this variable on each agent rebuild.
 	var mcpTools []tool.BaseTool
+	var initialMCPStatuses []tools.MCPStatus
 	if len(cfg.MCPServers) > 0 {
-		mcpTools, _ = tools.LoadMCPTools(ctx, cfg.MCPServers)
+		mcpTools, initialMCPStatuses = tools.LoadMCPTools(ctx, cfg.MCPServers)
+	}
+
+	// reloadMCPTools re-establishes connections from the given server map and
+	// swaps in the fresh tool set. The Server rebuilds the agent afterwards and
+	// uses the returned statuses for the management UI.
+	reloadMCPTools := func(servers map[string]*config.MCPServer) ([]tools.MCPStatus, error) {
+		nt, statuses := tools.LoadMCPTools(ctx, servers)
+		mcpTools = nt
+		return statuses, nil
 	}
 
 	planStore := tools.NewPlanStore()
@@ -183,7 +195,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 				},
 			}),
 			tools.NewAskUserTool(&tools.AskUserDeps{
-				ResponseCh: make(chan tools.AskUserResponse, 1),
+				BatchRequestFn: webHandler.RequestAskUser,
 			}),
 			skills.NewLoadSkillTool(skillLoader),
 		}
@@ -200,7 +212,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 			env.NewGrepTool(),
 			env.NewTodoWriteTool(), env.NewTodoReadTool(),
 			tools.NewAskUserTool(&tools.AskUserDeps{
-				ResponseCh: make(chan tools.AskUserResponse, 1),
+				BatchRequestFn: webHandler.RequestAskUser,
 			}),
 		}
 	}
@@ -360,31 +372,33 @@ func runWebServer(port int, host string, openBrowser bool) error {
 	}
 
 	srv := web.NewServer(&web.ServerConfig{
-		Port:           port,
-		Host:           host,
-		OpenBrowser:    openBrowser,
-		Pwd:            pwd,
-		Version:        Version,
-		Agent:          ag,
-		CreateAgent:    createAgent,
-		RebuildForMode: rebuildForMode,
-		InitialMode:    startupMode.String(),
-		SwitchProject:  switchProject,
-		TodoStore:      env.TodoStore,
-		Recorder:       rec,
-		Tracer:         langfuseTracer,
-		Env:            env,
-		ProviderName:   providerName,
-		ModelName:      modelName,
-		Config:         cfg,
-		Registry:       registry,
-		ApprovalState:  approvalState,
-		SkillLoader:    skillLoader,
-		WechatClient:   wechatClient,
-		WebHandler:     webHandler,
-		EventHandler:   finalHandler,
-		NeedsSetup:     needsSetup,
-		TokenUsage:     agentTokenUsage,
+		Port:               port,
+		Host:               host,
+		OpenBrowser:        openBrowser,
+		Pwd:                pwd,
+		Version:            Version,
+		Agent:              ag,
+		CreateAgent:        createAgent,
+		RebuildForMode:     rebuildForMode,
+		InitialMode:        startupMode.String(),
+		SwitchProject:      switchProject,
+		TodoStore:          env.TodoStore,
+		Recorder:           rec,
+		Tracer:             langfuseTracer,
+		Env:                env,
+		ProviderName:       providerName,
+		ModelName:          modelName,
+		Config:             cfg,
+		Registry:           registry,
+		ApprovalState:      approvalState,
+		SkillLoader:        skillLoader,
+		ReloadMCP:          reloadMCPTools,
+		InitialMCPStatuses: initialMCPStatuses,
+		WechatClient:       wechatClient,
+		WebHandler:         webHandler,
+		EventHandler:       finalHandler,
+		NeedsSetup:         needsSetup,
+		TokenUsage:         agentTokenUsage,
 	})
 
 	// Set handler for approval routing.
