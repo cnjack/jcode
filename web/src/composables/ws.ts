@@ -7,6 +7,7 @@ import type {
   TokenUpdateData,
   AgentDoneData,
   ApprovalRequestData,
+  AskUserRequestData,
   SubagentEventData,
   SubagentProgressData,
   Goal,
@@ -22,6 +23,7 @@ type WSHandler = {
   onTodoUpdate?: () => void
   onGoalUpdate?: (data: Goal | null) => void
   onApprovalRequest?: (data: ApprovalRequestData) => void
+  onAskUserRequest?: (data: AskUserRequestData) => void
   onSessionReset?: (data: { session_id: string }) => void
   onModelChanged?: (data: { provider: string; model: string }) => void
   onModeChanged?: (data: { mode: string }) => void
@@ -53,6 +55,7 @@ export function useWebSocket(handlers: WSHandler) {
     todo_update: () => handlers.onTodoUpdate?.(),
     goal_update: (d) => handlers.onGoalUpdate?.(d),
     approval_request: (d) => handlers.onApprovalRequest?.(d),
+    ask_user_request: (d) => handlers.onAskUserRequest?.(d),
     session_reset: (d) => handlers.onSessionReset?.(d),
     model_changed: (d) => handlers.onModelChanged?.(d),
     mode_changed: (d) => handlers.onModeChanged?.(d),

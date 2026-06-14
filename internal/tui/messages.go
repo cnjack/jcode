@@ -204,6 +204,9 @@ type MCPStatusItem struct {
 	ToolCount int
 	Running   bool
 	ErrMsg    string
+	// NeedsAuth is true when the server requires OAuth login before its tools
+	// become available (use /mcp to log in).
+	NeedsAuth bool
 }
 
 type MCPStatusMsg struct {
@@ -377,6 +380,29 @@ var channelActionCh = make(chan ChannelAction, 1)
 // GetChannelActionChannel returns the channel for channel action events.
 func GetChannelActionChannel() <-chan ChannelAction {
 	return channelActionCh
+}
+
+// mcpLoginCh carries an MCP server name from the TUI to the main goroutine to
+// start an OAuth login flow.
+var mcpLoginCh = make(chan string, 1)
+
+// GetMCPLoginChannel returns the channel for MCP OAuth login requests.
+func GetMCPLoginChannel() <-chan string {
+	return mcpLoginCh
+}
+
+// RequestMCPLogin asks the main goroutine to begin OAuth login for a server.
+func RequestMCPLogin(name string) {
+	select {
+	case mcpLoginCh <- name:
+	default:
+	}
+}
+
+// MCPNoticeMsg is sent from the main goroutine to surface an MCP status line
+// (login progress, errors) in the TUI transcript.
+type MCPNoticeMsg struct {
+	Text string
 }
 
 // ChannelStateMsg is sent from the main goroutine to update channel state display in TUI.

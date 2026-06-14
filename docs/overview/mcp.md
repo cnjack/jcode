@@ -40,7 +40,17 @@ jcode mcp add chrome-devtools -- npx chrome-devtools-mcp@latest
 
 # Specify server type explicitly
 jcode mcp add db -t http http://localhost:3001/mcp
+
+# Add an OAuth-protected HTTP server (opens your browser to authorize)
+jcode mcp add acme https://mcp.acme.com/mcp -t http --oauth
 ```
+
+#### Via the Web UI
+
+Open **Settings → MCP Servers** to add, edit, enable/disable, or delete servers
+with a form (transport, URL/command, headers, OAuth, timeout). Changes take
+effect immediately — no restart. For OAuth servers, click **Log in** to run the
+browser authorization flow.
 
 #### Via Config File
 
@@ -116,6 +126,48 @@ When using `jcode mcp add`, the server type is **auto-detected** from the URL. U
 |---|---|
 | `url` | Server URL |
 | `headers` | Custom HTTP headers (map of key-value pairs) |
+| `timeout_seconds` | Request timeout (default 180) |
+| `disabled` | Exclude from tool loading without deleting |
+| `oauth` | OAuth 2.0 settings (see below) |
+
+## OAuth Authentication
+
+HTTP/SSE servers that sit behind an OAuth 2.0 authorization server (per the
+[MCP authorization spec](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization))
+are supported. jcode performs **automatic discovery and dynamic client
+registration** (RFC 8414 / 9728 / 7591); if the server does not support dynamic
+registration, set an **OAuth Client ID** (and optional secret) and jcode falls
+back to it.
+
+During login, jcode opens your browser and listens for the redirect on a fixed
+loopback callback — register `http://127.0.0.1:13380/oauth/callback` as the
+redirect URI when configuring a client manually. Tokens are persisted to
+`~/.jcode/oauth/<server>.json` (mode 0600) and refreshed automatically.
+
+```json
+{
+  "mcp_servers": {
+    "acme": {
+      "type": "http",
+      "url": "https://mcp.acme.com/mcp",
+      "oauth": {
+        "enabled": true,
+        "client_id": "optional-manual-fallback",
+        "scopes": ["mcp.read", "mcp.write"]
+      }
+    }
+  }
+}
+```
+
+Log in (or re-authenticate) at any time:
+
+```bash
+jcode mcp login acme        # CLI
+```
+
+From the TUI, `/mcp` lists servers and their status; `/mcp login <name>` starts
+the browser flow. In the web UI, use the **Log in** button on the server row.
 
 ## Loading Status
 
@@ -171,6 +223,10 @@ In unsafe mode (`--unsafe`), MCP tool operations are also auto-approved. Only us
 | Add a server | `jcode mcp add <name> <url-or-command>` |
 | Add with headers | `jcode mcp add <name> <url> --header "Key: Value"` |
 | Add stdio server | `jcode mcp add <name> -- <command> [args...]` |
+| Add OAuth server | `jcode mcp add <name> <url> -t http --oauth` |
+| Authenticate (OAuth) | `jcode mcp login <name>` |
 | List servers | `jcode mcp list` |
+| List / log in (TUI) | `/mcp`, `/mcp login <name>` |
+| Manage (web UI) | Settings → MCP Servers |
 | Check connectivity | `jcode doctor` |
 | View in web UI | `GET /api/mcp` |

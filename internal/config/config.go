@@ -49,6 +49,30 @@ type MCPServer struct {
 	Env     []string          `json:"env,omitempty"`
 	URL     string            `json:"url,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
+	// TimeoutSeconds is the request timeout for HTTP/SSE transports. 0 → default (180s).
+	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
+	// Disabled, when true, excludes this server from tool loading without deleting it.
+	Disabled bool `json:"disabled,omitempty"`
+	// OAuth configures OAuth 2.0 authorization for HTTP/SSE transports (MCP
+	// authorization spec). When nil, only static Headers are used.
+	OAuth *MCPOAuthConfig `json:"oauth,omitempty"`
+}
+
+// MCPOAuthConfig holds OAuth 2.0 settings for an MCP server. Tokens are NOT
+// stored here — they live in ~/.jcode/oauth/<server>.json. ClientID/ClientSecret
+// are the manual fallback used when the authorization server does not support
+// dynamic client registration (RFC 7591).
+type MCPOAuthConfig struct {
+	// Enabled turns on the OAuth bearer-token flow for this server.
+	Enabled bool `json:"enabled,omitempty"`
+	// ClientID is the OAuth client id. Empty → attempt dynamic registration.
+	ClientID string `json:"client_id,omitempty"`
+	// ClientSecret is set for confidential clients (manual fallback).
+	ClientSecret string `json:"client_secret,omitempty"`
+	// Scopes is the list of OAuth scopes to request.
+	Scopes []string `json:"scopes,omitempty"`
+	// AuthServerMetadataURL optionally overrides automatic metadata discovery.
+	AuthServerMetadataURL string `json:"auth_server_metadata_url,omitempty"`
 }
 
 // LangfuseConfig holds Langfuse telemetry credentials.
@@ -155,6 +179,10 @@ type Config struct {
 
 	// DisabledProviders lists provider IDs to exclude from registry
 	DisabledProviders []string `json:"disabled_providers,omitempty"`
+
+	// DisabledSkills lists skill names to exclude from the agent (slash commands,
+	// system-prompt descriptions, and the load_skill tool).
+	DisabledSkills []string `json:"disabled_skills,omitempty"`
 }
 
 // TeamConfig controls agent team behavior.
