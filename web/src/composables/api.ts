@@ -1,5 +1,5 @@
 // API client for jcode backend
-import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, MCPListResponse, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ModelStateResponse, ChatImage } from '@/types/api'
+import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData } from '@/types/api'
 
 const BASE = ''
 
@@ -76,6 +76,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ id, approved, approve_all: approveAll }),
     }),
+  askUser: (id: string, answers: AskUserAnswer[]) =>
+    request<{ status: string }>('/api/ask', {
+      method: 'POST',
+      body: JSON.stringify({ id, answers }),
+    }),
+  askPending: () => request<AskUserRequestData[]>('/api/ask/pending'),
   models: () => request<ModelsResponse>('/api/models'),
   switchModel: (provider: string, model: string) =>
     request<{ status: string }>('/api/model', {
@@ -102,6 +108,24 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ enabled }),
     }),
+  mcpCreate: (data: MCPServerRequest) =>
+    request<{ status: string; name: string }>('/api/mcp/servers', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  mcpUpdate: (name: string, data: MCPServerRequest) =>
+    request<{ status: string; name: string }>(`/api/mcp/servers/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  mcpDelete: (name: string) =>
+    request<{ status: string }>(`/api/mcp/servers/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
+  mcpLogin: (name: string) =>
+    request<MCPLoginStatus>(`/api/mcp/${encodeURIComponent(name)}/login`, { method: 'POST' }),
+  mcpLoginStatus: (name: string) =>
+    request<MCPLoginStatus>(`/api/mcp/${encodeURIComponent(name)}/login/status`),
   browse: (path?: string) => {
     const q = path ? `?path=${encodeURIComponent(path)}` : ''
     return request<BrowseResponse>(`/api/browse${q}`)
@@ -130,6 +154,11 @@ export const api = {
     request<SSHListResponse>('/api/ssh'),
   skillsList: () =>
     request<SkillInfo[]>('/api/skills'),
+  skillToggle: (name: string, enabled: boolean) =>
+    request<{ status: string }>(`/api/skills/${encodeURIComponent(name)}/toggle`, {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    }),
   slashCommands: () =>
     request<SlashCommandInfo[]>('/api/slash-commands'),
   channelStatus: () =>

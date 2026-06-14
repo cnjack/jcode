@@ -7,8 +7,6 @@ import (
 	mcpp "github.com/cloudwego/eino-ext/components/tool/mcp"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cnjack/jcode/internal/config"
-	"github.com/mark3labs/mcp-go/client"
-	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -17,6 +15,9 @@ type MCPStatus struct {
 	ToolCount int
 	Error     error
 	Running   bool
+	// NeedsAuth is true when the server returned an OAuth authorization
+	// challenge — the user must log in before tools become available.
+	NeedsAuth bool
 }
 
 // LoadMCPTools establishes connections to configured MCP servers and fetches their tools.
@@ -25,36 +26,13 @@ func LoadMCPTools(ctx context.Context, mcpConfig map[string]*config.MCPServer) (
 	var statuses []MCPStatus
 
 	for name, srv := range mcpConfig {
-		if srv == nil {
+		if srv == nil || srv.Disabled {
 			continue
 		}
 
 		status := MCPStatus{Name: name, Running: false}
 
-		var cli *client.Client
-		var err error
-
-		switch {
-		case srv.Type == "http":
-			var opts []transport.StreamableHTTPCOption
-			if len(srv.Headers) > 0 {
-				opts = append(opts, transport.WithHTTPHeaders(srv.Headers))
-			}
-			cli, err = client.NewStreamableHttpClient(srv.URL, opts...)
-		case srv.URL != "" || srv.Type == "sse":
-			var opts []transport.ClientOption
-			if len(srv.Headers) > 0 {
-				opts = append(opts, transport.WithHeaders(srv.Headers))
-			}
-			cli, err = client.NewSSEMCPClient(srv.URL, opts...)
-		case srv.Command != "" || srv.Type == "stdio":
-			cli, err = client.NewStdioMCPClient(srv.Command, srv.Env, srv.Args...)
-		default:
-			status.Error = fmt.Errorf("invalid config: missing url or command")
-			statuses = append(statuses, status)
-			continue
-		}
-
+		cli, err := buildMCPClient(name, srv)
 		if err != nil {
 			status.Error = fmt.Errorf("client create failed: %w", err)
 			statuses = append(statuses, status)
@@ -62,7 +40,12 @@ func LoadMCPTools(ctx context.Context, mcpConfig map[string]*config.MCPServer) (
 		}
 
 		if err := cli.Start(ctx); err != nil {
-			status.Error = fmt.Errorf("start failed: %w", err)
+			if isMCPAuthError(err) {
+				status.NeedsAuth = true
+				status.Error = fmt.Errorf("authorization required — run login")
+			} else {
+				status.Error = fmt.Errorf("start failed: %w", err)
+			}
 			statuses = append(statuses, status)
 			continue
 		}
@@ -75,7 +58,12 @@ func LoadMCPTools(ctx context.Context, mcpConfig map[string]*config.MCPServer) (
 		}
 
 		if _, err := cli.Initialize(ctx, initReq); err != nil {
-			status.Error = fmt.Errorf("init failed: %w", err)
+			if isMCPAuthError(err) {
+				status.NeedsAuth = true
+				status.Error = fmt.Errorf("authorization required — run login")
+			} else {
+				status.Error = fmt.Errorf("init failed: %w", err)
+			}
 			statuses = append(statuses, status)
 			continue
 		}

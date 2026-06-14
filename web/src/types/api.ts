@@ -140,15 +140,47 @@ export interface DiffResponse {
 
 // MCP types
 export interface MCPServerInfo {
+  name: string
   type: string
   command?: string
   url?: string
-  status: string
+  args?: string[]
+  env?: string[]
+  headers?: Record<string, string>
+  timeout?: number
   enabled: boolean
+  oauth: boolean
+  has_auth: boolean
+  status: string // connected | needs_auth | error | disabled | configured
+  error?: string
 }
 
 export interface MCPListResponse {
   servers: Record<string, MCPServerInfo>
+}
+
+// Request body for creating/updating an MCP server.
+export interface MCPServerRequest {
+  name: string
+  type: string // local | http | sse
+  url?: string
+  command?: string
+  args?: string[]
+  env?: string[]
+  headers?: Record<string, string>
+  timeout?: number
+  oauth?: {
+    enabled: boolean
+    client_id?: string
+    client_secret?: string
+    scopes?: string[]
+  }
+}
+
+export interface MCPLoginStatus {
+  status: string // idle | pending | authorized | error | needs_client_id
+  auth_url?: string
+  message?: string
 }
 
 // SSH types
@@ -168,6 +200,9 @@ export interface SkillInfo {
   name: string
   description: string
   slash?: string
+  builtin?: boolean
+  source?: string // builtin | local
+  enabled?: boolean
 }
 
 // Slash command types (unified built-in + skill)
@@ -222,6 +257,31 @@ export interface ApprovalRequestData {
   is_external: boolean
 }
 
+// ask_user types — an interactive question (or batch of questions) the agent
+// poses mid-run. Mirrors the Go AskUserQuestion / AskUserAnswer structs.
+export interface AskUserOption {
+  label: string
+  description?: string
+}
+
+export interface AskUserQuestion {
+  question: string
+  header?: string
+  options?: AskUserOption[]
+  multi_select?: boolean
+}
+
+export interface AskUserRequestData {
+  id: string
+  questions: AskUserQuestion[]
+}
+
+export interface AskUserAnswer {
+  question_header: string
+  answer: string
+  selected?: string[]
+}
+
 // UI message types
 export type MessageRole = 'user' | 'assistant' | 'system'
 
@@ -268,6 +328,14 @@ export interface ToolCall {
   displayInfo?: ToolDisplayInfo
   /** For subagent tools: nested tool calls from within the subagent */
   children?: ToolCall[]
+  /**
+   * For ask_user tools: the request id from the ask_user_request event. Present
+   * only while the question is awaiting an answer (live runs, not replay).
+   * Cleared once answered/resolved so the interactive UI collapses.
+   */
+  askUserId?: string
+  /** For ask_user tools: the backend-normalized questions to render. */
+  askUserQuestions?: AskUserQuestion[]
 }
 
 /** Subagent lifecycle event (start/done). */

@@ -25,8 +25,9 @@ type Skill struct {
 
 // Loader discovers and caches skills from built-in embeds and user directories.
 type Loader struct {
-	mu     sync.RWMutex
-	skills map[string]*Skill
+	mu       sync.RWMutex
+	skills   map[string]*Skill
+	disabled map[string]bool // skill names hidden from the agent
 }
 
 //go:embed builtin
@@ -35,13 +36,41 @@ var builtinFS embed.FS
 // NewLoader creates a Loader pre-populated with built-in skills, then scans
 // the user skills directories (~/.agents/skills/ and ~/.jcode/skills/) for additional skills.
 func NewLoader() *Loader {
+	return NewLoaderWithDisabled(nil)
+}
+
+// NewLoaderWithDisabled creates a Loader with the given skill names disabled.
+// Disabled skills are excluded from the system-prompt descriptions, slash
+// commands, and the load_skill tool, but remain visible via All() for management UIs.
+func NewLoaderWithDisabled(disabled []string) *Loader {
 	l := &Loader{
-		skills: make(map[string]*Skill),
+		skills:   make(map[string]*Skill),
+		disabled: make(map[string]bool, len(disabled)),
+	}
+	for _, name := range disabled {
+		l.disabled[name] = true
 	}
 	l.loadBuiltin()
 	l.ScanAgentsSkills()
 	l.ScanUserSkills()
 	return l
+}
+
+// SetDisabled replaces the set of disabled skill names.
+func (l *Loader) SetDisabled(disabled []string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.disabled = make(map[string]bool, len(disabled))
+	for _, name := range disabled {
+		l.disabled[name] = true
+	}
+}
+
+// IsEnabled reports whether the named skill is active (not disabled).
+func (l *Loader) IsEnabled(name string) bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return !l.disabled[name]
 }
 
 // loadBuiltin reads embedded SKILL.md files from the builtin/ directory.
@@ -187,6 +216,9 @@ func (l *Loader) Descriptions() string {
 	}
 	var sb strings.Builder
 	for _, sk := range skills {
+		if !l.IsEnabled(sk.Name) {
+			continue
+		}
 		slash := ""
 		if sk.Slash != "" {
 			slash = fmt.Sprintf(" (%s)", sk.Slash)
@@ -200,7 +232,7 @@ func (l *Loader) Descriptions() string {
 // into tool_result (Layer 2 — on-demand, full content).
 func (l *Loader) GetContent(name string) string {
 	sk := l.Get(name)
-	if sk == nil {
+	if sk == nil || !l.IsEnabled(name) {
 		return fmt.Sprintf("Error: Unknown skill '%s'. Available skills:\n%s", name, l.Descriptions())
 	}
 	return fmt.Sprintf("<skill name=%q description=%q>\n%s\n</skill>", sk.Name, sk.Description, sk.Body)
@@ -215,6 +247,10 @@ func (l *Loader) SlashCommands() []*Skill {
 	defer l.mu.RUnlock()
 	var result []*Skill
 	for _, sk := range l.skills {
+		if l.disabled[sk.Name] {
+			// User-disabled via config/UI.
+			continue
+		}
 		switch {
 		case sk.Slash == "false":
 			// Explicitly disabled.

@@ -218,6 +218,16 @@ The built-in color theme for the **terminal UI**: `"jcode-dark"` (default), `"mi
 {: .note }
 The web UI has its own theme preference (stored in the browser); the two are independent. Both share the same catalog of built-in themes, generated from a single source (`internal/theme`).
 
+### disabled_skills
+
+A list of skill names to exclude from the agent (slash commands, system-prompt
+descriptions, and the `load_skill` tool). Toggle skills on/off from the web UI
+(**Settings → Skills**); it persists here.
+
+```json
+{ "disabled_skills": ["pptx", "docx"] }
+```
+
 ### channel
 
 Notification channel settings. See [Channels](overview/channels).

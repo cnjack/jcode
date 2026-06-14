@@ -12,7 +12,6 @@ import (
 
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/mark3labs/mcp-go/client"
-	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -206,27 +205,8 @@ func (m *MCPManager) Connect(ctx context.Context, name string, cfg *config.MCPSe
 // doConnect performs the low-level create → start → init → discover sequence.
 func (m *MCPManager) doConnect(ctx context.Context, conn *MCPConnection) error {
 	cfg := conn.Config
-	var cli *client.Client
-	var err error
 
-	switch {
-	case cfg.Type == "http":
-		var opts []transport.StreamableHTTPCOption
-		if len(cfg.Headers) > 0 {
-			opts = append(opts, transport.WithHTTPHeaders(cfg.Headers))
-		}
-		cli, err = client.NewStreamableHttpClient(cfg.URL, opts...)
-	case cfg.URL != "" || cfg.Type == "sse":
-		var opts []transport.ClientOption
-		if len(cfg.Headers) > 0 {
-			opts = append(opts, transport.WithHeaders(cfg.Headers))
-		}
-		cli, err = client.NewSSEMCPClient(cfg.URL, opts...)
-	case cfg.Command != "" || cfg.Type == "stdio":
-		cli, err = client.NewStdioMCPClient(cfg.Command, cfg.Env, cfg.Args...)
-	default:
-		return fmt.Errorf("invalid config: missing url or command")
-	}
+	cli, err := buildMCPClient(conn.Name, cfg)
 	if err != nil {
 		return fmt.Errorf("client create: %w", err)
 	}
