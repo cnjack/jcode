@@ -64,6 +64,7 @@ const { connected } = useWebSocket({
   onTodoUpdate: () => store.fetchTodos(),
   onGoalUpdate: (data) => { store.goal = data },
   onApprovalRequest: (data) => store.addApprovalRequest(data),
+  onAskUserRequest: (data) => store.attachAskUserRequest(data.id, data.questions),
   onSessionReset: () => store.clearChat(),
   onModelChanged: (data) => {
     store.providerName = data.provider
@@ -168,6 +169,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleGlobalKeydown)
+  if (runTimer) clearInterval(runTimer)
 })
 
 function openFile() {
@@ -195,8 +197,20 @@ function togglePanel(panel: 'terminal' | 'files' | 'changes' | 'plan') {
 // seize the panel, and one-shot per run so a manual close is respected for the
 // rest of that run. A new run re-arms the one-shot.
 const planAutoOpened = ref(false)
+// Elapsed-time counter for the "Thinking…" footer; ticks once per second while
+// the agent runs, resets on each new run. Appears in the UI only after 2s.
+const elapsed = ref(0)
+let runTimer: ReturnType<typeof setInterval> | null = null
 watch(() => store.isRunning, (running) => {
-  if (running) planAutoOpened.value = false
+  if (running) {
+    planAutoOpened.value = false
+    elapsed.value = 0
+    if (runTimer) clearInterval(runTimer)
+    runTimer = setInterval(() => { elapsed.value++ }, 1000)
+  } else if (runTimer) {
+    clearInterval(runTimer)
+    runTimer = null
+  }
 })
 watch(() => store.todos.length, (len) => {
   if (len > 0 && store.isRunning && !planAutoOpened.value && !rightPanelOpen.value) {
@@ -319,12 +333,38 @@ function startResize(e: MouseEvent) {
               <ApprovalBanner v-else-if="item.kind === 'approval'" :approval="item.data" class="animate-fade-up" />
             </template>
 
-            <!-- Typing indicator -->
-            <div v-if="store.isRunning && store.timeline.length === 0" class="flex gap-1.5 py-5 pl-1">
-              <span class="w-2 h-2 rounded-full" style="background: var(--color-primary); opacity: 0.6; animation: dot-pulse 1.4s ease-in-out infinite; animation-delay: 0ms" />
-              <span class="w-2 h-2 rounded-full" style="background: var(--color-primary); opacity: 0.6; animation: dot-pulse 1.4s ease-in-out infinite; animation-delay: 160ms" />
-              <span class="w-2 h-2 rounded-full" style="background: var(--color-primary); opacity: 0.6; animation: dot-pulse 1.4s ease-in-out infinite; animation-delay: 320ms" />
-            </div>
+            <!-- Thinking footer: single source of truth for "agent is working".
+                 Trails the last timeline item, rides existing auto-scroll, and
+                 stays visible the whole run (initial wait AND while content
+                 accumulates) — not only when the timeline is empty. -->
+            <transition
+              enter-active-class="transition-opacity duration-300 ease-out"
+              enter-from-class="opacity-0"
+              enter-to-class="opacity-100"
+              leave-active-class="transition-opacity duration-150 ease-in"
+              leave-from-class="opacity-100"
+              leave-to-class="opacity-0"
+            >
+              <div
+                v-if="store.isRunning"
+                class="flex items-center gap-2.5 py-3 pl-9 select-none"
+                role="status"
+                aria-live="polite"
+                aria-label="Thinking"
+              >
+                <span class="flex gap-1" aria-hidden="true">
+                  <span class="w-1.5 h-1.5 rounded-full animate-dot-pulse" style="background: var(--color-primary); animation-delay: 0ms" />
+                  <span class="w-1.5 h-1.5 rounded-full animate-dot-pulse" style="background: var(--color-primary); animation-delay: 160ms" />
+                  <span class="w-1.5 h-1.5 rounded-full animate-dot-pulse" style="background: var(--color-primary); animation-delay: 320ms" />
+                </span>
+                <span class="thinking-label text-[13px]" style="font-family: var(--font-sans)">Thinking…</span>
+                <span
+                  v-if="elapsed >= 2"
+                  class="text-xs tabular-nums"
+                  style="font-family: var(--font-mono); color: var(--color-muted-foreground); opacity: 0.6"
+                >{{ elapsed }}s</span>
+              </div>
+            </transition>
           </div>
         </div>
 

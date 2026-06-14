@@ -14,6 +14,8 @@ import type {
   ProviderInfo,
   ToolDisplayInfo,
   ModelRef,
+  AskUserQuestion,
+  AskUserAnswer,
 } from '@/types/api'
 import { normalizeMode } from '@/types/api'
 import { api } from '@/composables/api'
@@ -282,6 +284,89 @@ export const useChatStore = defineStore('chat', () => {
 
   function addApprovalRequest(data: PendingApproval) {
     timeline.value.push({ kind: 'approval', data, seq: nextSeqId() })
+  }
+
+  /**
+   * Arm a timeline ask_user tool item with a request id so its card switches to
+   * interactive answer mode. Returns true if a matching item was armed (or was
+   * already armed with this id — idempotent, so re-emits/pulls are safe).
+   * An item already armed with a *different* id is skipped, so two concurrent
+   * ask_user calls in one turn each bind to a distinct item.
+   */
+  function armAskItem(id: string, questions: AskUserQuestion[]): boolean {
+    for (let i = timeline.value.length - 1; i >= 0; i--) {
+      const item = timeline.value[i]
+      if (!item || item.kind !== 'tool' || item.data.name !== 'ask_user') continue
+      if (item.data.askUserId === id) return true // already armed (idempotent)
+      // Match an unarmed item: live (running) or a replayed one (done, no output).
+      if (!item.data.askUserId && (item.data.status === 'running' || (item.data.status === 'done' && !item.data.output))) {
+        item.data.status = 'running'
+        item.data.askUserId = id
+        item.data.askUserQuestions = questions
+        return true
+      }
+    }
+    return false
+  }
+
+  /**
+   * Handle an ask_user_request event. The tool_call event normally creates the
+   * timeline item first, so we just arm it. If no item exists — the tool_call
+   * was dropped (full event buffer), a rare but unrecoverable case — synthesize
+   * one so the question still renders instead of silently hanging the run.
+   */
+  function attachAskUserRequest(id: string, questions: AskUserQuestion[]) {
+    if (armAskItem(id, questions)) return
+    const args = JSON.stringify({ questions })
+    timeline.value.push({
+      kind: 'tool',
+      data: {
+        id: genId('tc'),
+        name: 'ask_user',
+        args,
+        status: 'running',
+        timestamp: Date.now(),
+        displayInfo: extractToolDisplayInfo('ask_user', args),
+        askUserId: id,
+        askUserQuestions: questions,
+      },
+      seq: nextSeqId(),
+    })
+  }
+
+  /**
+   * Re-attach any server-side pending ask_user questions after the timeline is
+   * (re)built from a session — covers page reload / session resume mid-question,
+   * where the live ask_user_request event was already consumed and lost.
+   */
+  async function reconcileAskUser() {
+    try {
+      const pending = await api.askPending()
+      for (const req of pending) armAskItem(req.id, req.questions)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Submit answers for a pending ask_user request and collapse its card. */
+  async function submitAskUser(id: string, answers: AskUserAnswer[]) {
+    try {
+      await api.askUser(id, answers)
+      // Clear the pending state only after the answer is delivered, so a failed
+      // POST leaves the card interactive (the agent is still blocked waiting).
+      for (const item of timeline.value) {
+        if (item.kind === 'tool' && item.data.askUserId === id) {
+          item.data.askUserId = undefined
+          break
+        }
+      }
+    } catch (err: unknown) {
+      addMessage(
+        'system',
+        `Failed to submit answer: ${err instanceof Error ? err.message : String(err)}`,
+        undefined, undefined, 'error',
+      )
+    }
   }
 
   function resolveApprovalLocal(id: string, approved: boolean) {
@@ -675,6 +760,8 @@ export const useChatStore = defineStore('chat', () => {
       for (const tc of pendingToolCalls.values()) {
         tc.status = 'done'
       }
+      // Re-attach any question still awaiting an answer on the server.
+      await reconcileAskUser()
     } catch {
       // Session file may not exist yet (lazy creation), silently ignore
     }
@@ -822,6 +909,8 @@ export const useChatStore = defineStore('chat', () => {
       for (const tc of pendingToolCalls.values()) {
         tc.status = 'done'
       }
+      // Re-attach any question still awaiting an answer on the server.
+      await reconcileAskUser()
     } catch (err: unknown) {
       addMessage('system', `Failed to load session: ${err instanceof Error ? err.message : String(err)}`)
     }
@@ -864,6 +953,9 @@ export const useChatStore = defineStore('chat', () => {
     addSubagentProgress,
     agentDone,
     addApprovalRequest,
+    attachAskUserRequest,
+    submitAskUser,
+    reconcileAskUser,
     resolveApproval,
     sendMessage,
     stopAgent,

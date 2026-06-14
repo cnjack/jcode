@@ -31,6 +31,7 @@ func (m Model) getAllCommands() []commandSuggestion {
 		{"/goal", "Set a persistent objective (auto-continues)"},
 		{"/bg", "List background tasks"},
 		{"/channel", "Manage channels (WeChat etc.)"},
+		{"/mcp", "List MCP servers / log in (/mcp login <name>)"},
 		{"/help", "Show keyboard shortcuts"},
 	}
 	for _, sc := range m.skillSlashCommands {

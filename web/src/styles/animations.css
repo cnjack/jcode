@@ -139,6 +139,33 @@
   animation: breathing 2s ease-in-out infinite;
 }
 
+/* Reusable dot-pulse utility (keyframe defined above) for the thinking footer. */
+.animate-dot-pulse {
+  animation: dot-pulse 1.4s ease-in-out infinite both;
+}
+
+/* "Thinking…" label — same text-sweep idiom as ToolCallCard's .shimmer-running,
+   so the global working cue and running tools share one motion vocabulary. */
+@keyframes thinking-sweep {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+.thinking-label {
+  background: linear-gradient(
+    90deg,
+    var(--color-muted-foreground) 20%,
+    var(--color-foreground) 50%,
+    var(--color-muted-foreground) 80%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent; /* non-webkit fallback */
+  animation: thinking-sweep 1.8s linear infinite;
+  letter-spacing: 0.01em;
+}
+
 /* Stagger children */
 .stagger-children > * {
   animation: fade-up var(--duration-slow) var(--ease-out) both;
@@ -164,7 +191,15 @@
   .animate-breathing,
   .animate-spin,
   .animate-pulse,
+  .animate-dot-pulse,
+  .thinking-label,
   .stagger-children > * {
     animation: none !important;
+  }
+  /* Repaint the clipped-gradient label as solid muted text so the word stays
+     visible once the sweep is frozen. */
+  .thinking-label {
+    -webkit-text-fill-color: var(--color-muted-foreground);
+    color: var(--color-muted-foreground);
   }
 }

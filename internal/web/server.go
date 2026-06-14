@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -12,11 +13,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
@@ -32,6 +33,7 @@ import (
 	"github.com/cnjack/jcode/internal/skills"
 	"github.com/cnjack/jcode/internal/telemetry"
 	"github.com/cnjack/jcode/internal/tools"
+	utils "github.com/cnjack/jcode/internal/util"
 )
 
 // Server is the jcode web server.
@@ -87,8 +89,17 @@ type Server struct {
 	// skillLoader provides skill listing for slash commands.
 	skillLoader *skills.Loader
 
-	// disabledMCP tracks MCP servers that have been disabled via the UI.
-	disabledMCP map[string]bool
+	// reloadMCP re-establishes MCP connections from the given server map and
+	// swaps in the fresh tool set (the agent is rebuilt by the caller). nil
+	// when MCP hot-reload is unavailable. Returns per-server statuses.
+	reloadMCP func(servers map[string]*config.MCPServer) ([]tools.MCPStatus, error)
+
+	// mcpStatuses is the most recent per-server connection status, used by the
+	// management UI. Guarded by mu.
+	mcpStatuses map[string]tools.MCPStatus
+
+	// mcpLogins tracks in-progress/finished OAuth logins per server name. Guarded by mu.
+	mcpLogins map[string]*mcpLoginState
 
 	// sessionSnapshot holds the git tree hash at the start of an agent run,
 	// used to compute session-scoped diffs (agent changes only).
@@ -113,31 +124,33 @@ type Server struct {
 
 // ServerConfig holds the configuration for creating a new Server.
 type ServerConfig struct {
-	Port           int
-	Host           string
-	OpenBrowser    bool
-	Pwd            string
-	Version        string
-	Agent          *adk.ChatModelAgent
-	CreateAgent    func(providerName, modelName string) (*adk.ChatModelAgent, error)
-	RebuildForMode func(planMode bool) (*adk.ChatModelAgent, error)
-	InitialMode    string // unified startup mode string ("ask"/"plan"/"autopilot")
-	SwitchProject  func(newPwd string) (*adk.ChatModelAgent, *session.Recorder, error)
-	TodoStore      *tools.TodoStore
-	Recorder       *session.Recorder
-	Tracer         *telemetry.LangfuseTracer
-	Env            *tools.Env
-	ProviderName   string
-	ModelName      string
-	Config         *config.Config
-	Registry       *model.ModelRegistry
-	ApprovalState  *runner.ApprovalState
-	SkillLoader    *skills.Loader
-	WechatClient   channel.Channel           // optional WeChat channel
-	WebHandler     *handler.WebHandler       // optional: pre-created handler for sharing with tools
-	EventHandler   handler.AgentEventHandler // optional: handler for runner (e.g. NotifyingHandler)
-	NeedsSetup     bool                      // true when no providers are configured (setup mode)
-	TokenUsage     *model.TokenUsage         // optional: shared token tracker (created when nil)
+	Port               int
+	Host               string
+	OpenBrowser        bool
+	Pwd                string
+	Version            string
+	Agent              *adk.ChatModelAgent
+	CreateAgent        func(providerName, modelName string) (*adk.ChatModelAgent, error)
+	RebuildForMode     func(planMode bool) (*adk.ChatModelAgent, error)
+	InitialMode        string // unified startup mode string ("ask"/"plan"/"autopilot")
+	SwitchProject      func(newPwd string) (*adk.ChatModelAgent, *session.Recorder, error)
+	TodoStore          *tools.TodoStore
+	Recorder           *session.Recorder
+	Tracer             *telemetry.LangfuseTracer
+	Env                *tools.Env
+	ProviderName       string
+	ModelName          string
+	Config             *config.Config
+	Registry           *model.ModelRegistry
+	ApprovalState      *runner.ApprovalState
+	SkillLoader        *skills.Loader
+	ReloadMCP          func(servers map[string]*config.MCPServer) ([]tools.MCPStatus, error) // optional: hot-reload MCP tools
+	InitialMCPStatuses []tools.MCPStatus                                                     // statuses from the startup MCP load
+	WechatClient       channel.Channel                                                       // optional WeChat channel
+	WebHandler         *handler.WebHandler                                                   // optional: pre-created handler for sharing with tools
+	EventHandler       handler.AgentEventHandler                                             // optional: handler for runner (e.g. NotifyingHandler)
+	NeedsSetup         bool                                                                  // true when no providers are configured (setup mode)
+	TokenUsage         *model.TokenUsage                                                     // optional: shared token tracker (created when nil)
 }
 
 // NewServer creates a new web server.
@@ -174,7 +187,9 @@ func NewServer(cfg *ServerConfig) *Server {
 		ptyMgr:         newPTYManager(),
 		approvalState:  cfg.ApprovalState,
 		skillLoader:    cfg.SkillLoader,
-		disabledMCP:    make(map[string]bool),
+		reloadMCP:      cfg.ReloadMCP,
+		mcpStatuses:    make(map[string]tools.MCPStatus),
+		mcpLogins:      make(map[string]*mcpLoginState),
 		wechatClient:   cfg.WechatClient,
 		eventHandler:   eh,
 		needsSetup:     cfg.NeedsSetup,
@@ -182,6 +197,9 @@ func NewServer(cfg *ServerConfig) *Server {
 	}
 	if s.tokenUsage == nil {
 		s.tokenUsage = &model.TokenUsage{}
+	}
+	for _, st := range cfg.InitialMCPStatuses {
+		s.mcpStatuses[st.Name] = st
 	}
 
 	// Wire TodoStore → session recording.
@@ -245,6 +263,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/goal", s.handleSetGoal)
 	mux.HandleFunc("DELETE /api/goal", s.handleClearGoal)
 	mux.HandleFunc("POST /api/approval", s.handleApproval)
+	mux.HandleFunc("POST /api/ask", s.handleAskUser)
+	mux.HandleFunc("GET /api/ask/pending", s.handlePendingAskUser)
 	mux.HandleFunc("GET /api/files", s.handleListFiles)
 	mux.HandleFunc("GET /api/files/content", s.handleReadFile)
 	mux.HandleFunc("GET /api/status", s.handleStatus)
@@ -254,9 +274,15 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/exec", s.handleExec)
 	mux.HandleFunc("GET /api/diff", s.handleDiff)
 	mux.HandleFunc("GET /api/mcp", s.handleListMCP)
+	mux.HandleFunc("POST /api/mcp/servers", s.handleCreateMCP)
+	mux.HandleFunc("PUT /api/mcp/servers/{name}", s.handleUpdateMCP)
+	mux.HandleFunc("DELETE /api/mcp/servers/{name}", s.handleDeleteMCP)
 	mux.HandleFunc("POST /api/mcp/{name}/toggle", s.handleToggleMCP)
+	mux.HandleFunc("POST /api/mcp/{name}/login", s.handleMCPLogin)
+	mux.HandleFunc("GET /api/mcp/{name}/login/status", s.handleMCPLoginStatus)
 	mux.HandleFunc("GET /api/ssh", s.handleListSSH)
 	mux.HandleFunc("GET /api/skills", s.handleListSkills)
+	mux.HandleFunc("POST /api/skills/{name}/toggle", s.handleToggleSkill)
 	mux.HandleFunc("GET /api/slash-commands", s.handleSlashCommands)
 	mux.HandleFunc("GET /api/browse", s.handleBrowse)
 	mux.HandleFunc("POST /api/project/switch", s.handleSwitchProject)
@@ -1101,6 +1127,49 @@ func (s *Server) handleApproval(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// handleAskUser resolves a pending ask_user request with the user's answers,
+// routed back to the blocked tool via WebHandler.ResolveAskUser. The "answers"
+// array is parallel to the questions the frontend received in ask_user_request:
+// each carries the question header plus either a free-text answer or selected
+// option labels.
+func (s *Server) handleAskUser(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID      string `json:"id"`
+		Answers []struct {
+			QuestionHeader string   `json:"question_header"`
+			Answer         string   `json:"answer"`
+			Selected       []string `json:"selected"`
+		} `json:"answers"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+
+	resp := tools.AskUserBatchResponse{}
+	for _, a := range req.Answers {
+		resp.Answers = append(resp.Answers, tools.AskUserAnswer{
+			QuestionHeader: a.QuestionHeader,
+			Answer:         a.Answer,
+			Selected:       a.Selected,
+		})
+	}
+
+	if err := s.handler.ResolveAskUser(req.ID, resp); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handlePendingAskUser returns ask_user questions still awaiting an answer.
+// The frontend pulls this after rebuilding the timeline (page reload / session
+// resume) so an in-flight question is re-attached to its tool card instead of
+// leaving the agent blocked forever.
+func (s *Server) handlePendingAskUser(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, s.handler.PendingAskUserRequests())
+}
+
 func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
 	dir := r.URL.Query().Get("path")
 	if dir == "" {
@@ -1424,31 +1493,278 @@ func (s *Server) handleSessionDiff(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+// mcpLoginState tracks an in-progress or finished OAuth login for a server.
+type mcpLoginState struct {
+	Status  string `json:"status"` // pending | authorized | error | needs_client_id
+	AuthURL string `json:"auth_url,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// mcpServerView is the JSON shape returned for one MCP server in the list and
+// CRUD responses — enough for the management UI's status badges and edit form.
+type mcpServerView struct {
+	Name    string            `json:"name"`
+	Type    string            `json:"type"`
+	URL     string            `json:"url,omitempty"`
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Env     []string          `json:"env,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Timeout int               `json:"timeout,omitempty"`
+	Enabled bool              `json:"enabled"`
+	OAuth   bool              `json:"oauth"`    // OAuth enabled for this server
+	HasAuth bool              `json:"has_auth"` // a token is stored
+	Status  string            `json:"status"`   // connected | needs_auth | error | disabled | configured
+	Error   string            `json:"error,omitempty"`
+}
+
+// mcpServerReq is the request body for creating/updating an MCP server.
+type mcpServerReq struct {
+	Name    string            `json:"name"`
+	Type    string            `json:"type"` // local|stdio|http|sse
+	URL     string            `json:"url"`
+	Command string            `json:"command"`
+	Args    []string          `json:"args"`
+	Env     []string          `json:"env"`
+	Headers map[string]string `json:"headers"`
+	Timeout int               `json:"timeout"`
+	OAuth   *struct {
+		Enabled      bool     `json:"enabled"`
+		ClientID     string   `json:"client_id"`
+		ClientSecret string   `json:"client_secret"`
+		Scopes       []string `json:"scopes"`
+	} `json:"oauth"`
+}
+
+// serverFromReq builds a config.MCPServer from a request body, normalizing the
+// transport ("local" → "stdio") and preserving any existing OAuth token state.
+func serverFromReq(req *mcpServerReq) (*config.MCPServer, error) {
+	srv := &config.MCPServer{
+		Headers:        req.Headers,
+		TimeoutSeconds: req.Timeout,
+	}
+	t := req.Type
+	if t == "local" {
+		t = "stdio"
+	}
+	switch t {
+	case "http", "sse":
+		if req.URL == "" {
+			return nil, fmt.Errorf("url is required for %s servers", t)
+		}
+		srv.Type = t
+		srv.URL = req.URL
+	case "stdio", "":
+		if req.Command == "" {
+			return nil, fmt.Errorf("command is required for local servers")
+		}
+		srv.Type = "stdio"
+		srv.Command = req.Command
+		srv.Args = req.Args
+		srv.Env = req.Env
+	default:
+		return nil, fmt.Errorf("unknown server type %q (use local, http, or sse)", req.Type)
+	}
+	if req.OAuth != nil && (req.OAuth.Enabled || req.OAuth.ClientID != "" || len(req.OAuth.Scopes) > 0) {
+		srv.OAuth = &config.MCPOAuthConfig{
+			Enabled:      req.OAuth.Enabled || req.OAuth.ClientID != "",
+			ClientID:     req.OAuth.ClientID,
+			ClientSecret: req.OAuth.ClientSecret,
+			Scopes:       req.OAuth.Scopes,
+		}
+	}
+	return srv, nil
+}
+
+// reloadMCPAndRebuild reconnects MCP servers from the current config and
+// rebuilds the live agent so new tools take effect without a restart.
+func (s *Server) reloadMCPAndRebuild() error {
+	if s.reloadMCP != nil {
+		s.mu.RLock()
+		servers := s.cfg.MCPServers
+		s.mu.RUnlock()
+		statuses, err := s.reloadMCP(servers)
+		if err != nil {
+			return err
+		}
+		s.mu.Lock()
+		s.mcpStatuses = make(map[string]tools.MCPStatus, len(statuses))
+		for _, st := range statuses {
+			s.mcpStatuses[st.Name] = st
+		}
+		s.mu.Unlock()
+	}
+	if s.createAgent != nil && !s.needsSetup {
+		s.mu.RLock()
+		prov, mod := s.providerName, s.modelName
+		s.mu.RUnlock()
+		ag, err := s.createAgent(prov, mod)
+		if err != nil {
+			return err
+		}
+		s.mu.Lock()
+		s.agent = ag
+		s.mu.Unlock()
+	}
+	return nil
+}
+
+// mcpServerStatus derives the UI status string for a server from its config and
+// last-known connection status.
+func (s *Server) mcpServerStatus(name string, srv *config.MCPServer) (status, errMsg string) {
+	if srv.Disabled {
+		return "disabled", ""
+	}
+	st, ok := s.mcpStatuses[name]
+	switch {
+	case !ok:
+		return "configured", ""
+	case st.NeedsAuth:
+		return "needs_auth", ""
+	case st.Running:
+		return "connected", ""
+	case st.Error != nil:
+		return "error", st.Error.Error()
+	default:
+		return "configured", ""
+	}
+}
+
 func (s *Server) handleListMCP(w http.ResponseWriter, r *http.Request) {
-	if s.cfg == nil || s.cfg.MCPServers == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"servers": map[string]any{}})
-		return
-	}
-
-	type mcpInfo struct {
-		Type    string `json:"type"`
-		Command string `json:"command,omitempty"`
-		URL     string `json:"url,omitempty"`
-		Status  string `json:"status"`
-		Enabled bool   `json:"enabled"`
-	}
-
-	servers := make(map[string]mcpInfo)
-	for name, srv := range s.cfg.MCPServers {
-		servers[name] = mcpInfo{
-			Type:    srv.Type,
-			Command: srv.Command,
-			URL:     srv.URL,
-			Status:  "configured",
-			Enabled: !s.disabledMCP[name],
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	servers := make(map[string]mcpServerView)
+	if s.cfg != nil {
+		for name, srv := range s.cfg.MCPServers {
+			status, errMsg := s.mcpServerStatus(name, srv)
+			servers[name] = mcpServerView{
+				Name:    name,
+				Type:    srv.Type,
+				URL:     srv.URL,
+				Command: srv.Command,
+				Args:    srv.Args,
+				Env:     srv.Env,
+				Headers: srv.Headers,
+				Timeout: srv.TimeoutSeconds,
+				Enabled: !srv.Disabled,
+				OAuth:   srv.OAuth != nil && srv.OAuth.Enabled,
+				HasAuth: tools.HasMCPOAuthToken(name),
+				Status:  status,
+				Error:   errMsg,
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"servers": servers})
+}
+
+func (s *Server) handleCreateMCP(w http.ResponseWriter, r *http.Request) {
+	var req mcpServerReq
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<18)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if req.Name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		return
+	}
+	srv, err := serverFromReq(&req)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.mu.Lock()
+	if s.cfg.MCPServers == nil {
+		s.cfg.MCPServers = make(map[string]*config.MCPServer)
+	}
+	if _, exists := s.cfg.MCPServers[req.Name]; exists {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "a server with that name already exists"})
+		return
+	}
+	s.cfg.MCPServers[req.Name] = srv
+	if err := config.SaveConfig(s.cfg); err != nil {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	s.mu.Unlock()
+
+	if err := s.reloadMCPAndRebuild(); err != nil {
+		config.Logger().Printf("[web] mcp create reload failed: %v", err)
+	}
+	s.wsBroker.Broadcast(WSEvent{Type: "mcp_changed", Data: map[string]string{"name": req.Name}})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "name": req.Name})
+}
+
+func (s *Server) handleUpdateMCP(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	var req mcpServerReq
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<18)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	srv, err := serverFromReq(&req)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.mu.Lock()
+	existing, ok := s.cfg.MCPServers[name]
+	if !ok {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "server not found"})
+		return
+	}
+	// Preserve disabled flag and any already-obtained OAuth client id/secret so
+	// editing other fields doesn't drop a working registration.
+	srv.Disabled = existing.Disabled
+	if srv.OAuth != nil && existing.OAuth != nil {
+		if srv.OAuth.ClientID == "" {
+			srv.OAuth.ClientID = existing.OAuth.ClientID
+		}
+		if srv.OAuth.ClientSecret == "" {
+			srv.OAuth.ClientSecret = existing.OAuth.ClientSecret
+		}
+	}
+	s.cfg.MCPServers[name] = srv
+	if err := config.SaveConfig(s.cfg); err != nil {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	s.mu.Unlock()
+
+	if err := s.reloadMCPAndRebuild(); err != nil {
+		config.Logger().Printf("[web] mcp update reload failed: %v", err)
+	}
+	s.wsBroker.Broadcast(WSEvent{Type: "mcp_changed", Data: map[string]string{"name": name}})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "name": name})
+}
+
+func (s *Server) handleDeleteMCP(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	s.mu.Lock()
+	if _, ok := s.cfg.MCPServers[name]; !ok {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "server not found"})
+		return
+	}
+	delete(s.cfg.MCPServers, name)
+	delete(s.mcpStatuses, name)
+	delete(s.mcpLogins, name)
+	if err := config.SaveConfig(s.cfg); err != nil {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	s.mu.Unlock()
+
+	_ = tools.DeleteMCPOAuthToken(name)
+	if err := s.reloadMCPAndRebuild(); err != nil {
+		config.Logger().Printf("[web] mcp delete reload failed: %v", err)
+	}
+	s.wsBroker.Broadcast(WSEvent{Type: "mcp_changed", Data: map[string]string{"name": name}})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
 func (s *Server) handleToggleMCP(w http.ResponseWriter, r *http.Request) {
@@ -1457,7 +1773,6 @@ func (s *Server) handleToggleMCP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
 		return
 	}
-
 	var req struct {
 		Enabled bool `json:"enabled"`
 	}
@@ -1465,19 +1780,126 @@ func (s *Server) handleToggleMCP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
+	s.mu.Lock()
+	srv, ok := s.cfg.MCPServers[name]
+	if !ok {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "server not found"})
+		return
+	}
+	srv.Disabled = !req.Enabled
+	if err := config.SaveConfig(s.cfg); err != nil {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	s.mu.Unlock()
 
-	if s.cfg == nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no config loaded"})
+	if err := s.reloadMCPAndRebuild(); err != nil {
+		config.Logger().Printf("[web] mcp toggle reload failed: %v", err)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "name": name, "enabled": req.Enabled})
+}
+
+// handleMCPLogin starts the OAuth authorization flow for an HTTP/SSE server in
+// the background and opens the user's browser. Progress is polled via
+// handleMCPLoginStatus.
+func (s *Server) handleMCPLogin(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	s.mu.Lock()
+	srv, ok := s.cfg.MCPServers[name]
+	if !ok {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "server not found"})
+		return
+	}
+	if srv.URL == "" || (srv.Type != "http" && srv.Type != "sse") {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "OAuth login only applies to http/sse servers"})
+		return
+	}
+	if existing := s.mcpLogins[name]; existing != nil && existing.Status == "pending" {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "a login is already in progress"})
+		return
+	}
+	if srv.OAuth == nil {
+		srv.OAuth = &config.MCPOAuthConfig{Enabled: true}
+	}
+	s.mcpLogins[name] = &mcpLoginState{Status: "pending"}
+	s.mu.Unlock()
+
+	go s.runMCPLogin(name)
+	writeJSON(w, http.StatusOK, map[string]any{"status": "pending"})
+}
+
+func (s *Server) setMCPLogin(name, status, msg string) {
+	s.mu.Lock()
+	st := s.mcpLogins[name]
+	if st == nil {
+		st = &mcpLoginState{}
+		s.mcpLogins[name] = st
+	}
+	st.Status = status
+	st.Message = msg
+	s.mu.Unlock()
+}
+
+func (s *Server) runMCPLogin(name string) {
+	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Minute)
+	defer cancel()
+
+	s.mu.RLock()
+	srv := s.cfg.MCPServers[name]
+	s.mu.RUnlock()
+	if srv == nil {
+		s.setMCPLogin(name, "error", "server not found")
 		return
 	}
 
-	if req.Enabled {
-		delete(s.disabledMCP, name)
-	} else {
-		s.disabledMCP[name] = true
+	err := tools.PerformMCPOAuthLogin(ctx, name, srv, func(authURL string) {
+		s.mu.Lock()
+		if st := s.mcpLogins[name]; st != nil {
+			st.AuthURL = authURL
+		}
+		s.mu.Unlock()
+		s.wsBroker.Broadcast(WSEvent{Type: "mcp_login", Data: map[string]string{"name": name, "auth_url": authURL}})
+		openBrowser(authURL)
+	})
+	if err != nil {
+		status := "error"
+		if errors.Is(err, tools.ErrOAuthNeedsClientID) {
+			status = "needs_client_id"
+		}
+		s.setMCPLogin(name, status, err.Error())
+		config.Logger().Printf("[web] mcp login %q failed: %v", name, err)
+		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "name": name, "enabled": req.Enabled})
+	// Persist the (possibly dynamically registered) client id and enabled flag.
+	s.mu.Lock()
+	if saveErr := config.SaveConfig(s.cfg); saveErr != nil {
+		config.Logger().Printf("[web] mcp login %q: save config failed: %v", name, saveErr)
+	}
+	s.mu.Unlock()
+
+	if reErr := s.reloadMCPAndRebuild(); reErr != nil {
+		config.Logger().Printf("[web] mcp login %q: reload failed: %v", name, reErr)
+	}
+	s.setMCPLogin(name, "authorized", "")
+	s.wsBroker.Broadcast(WSEvent{Type: "mcp_changed", Data: map[string]string{"name": name}})
+}
+
+func (s *Server) handleMCPLoginStatus(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	s.mu.RLock()
+	st := s.mcpLogins[name]
+	s.mu.RUnlock()
+	if st == nil {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "idle"})
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
 }
 
 func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
@@ -1791,15 +2213,25 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 		Name        string `json:"name"`
 		Description string `json:"description"`
 		Slash       string `json:"slash"`
+		Builtin     bool   `json:"builtin"`
+		Source      string `json:"source"` // builtin | local
+		Enabled     bool   `json:"enabled"`
 	}
 
 	var items []skillItem
 	if s.skillLoader != nil {
-		for _, sk := range s.skillLoader.SlashCommands() {
+		for _, sk := range s.skillLoader.All() {
+			source := "local"
+			if sk.Builtin {
+				source = "builtin"
+			}
 			items = append(items, skillItem{
 				Name:        sk.Name,
 				Description: sk.Description,
 				Slash:       sk.Slash,
+				Builtin:     sk.Builtin,
+				Source:      source,
+				Enabled:     s.skillLoader.IsEnabled(sk.Name),
 			})
 		}
 	}
@@ -1807,6 +2239,66 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 		items = []skillItem{}
 	}
 	writeJSON(w, http.StatusOK, items)
+}
+
+// handleToggleSkill enables/disables a skill, persisting to config and updating
+// the loader + agent so the change takes effect immediately.
+func (s *Server) handleToggleSkill(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		return
+	}
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if s.skillLoader == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "skills unavailable"})
+		return
+	}
+
+	s.mu.Lock()
+	// Rebuild the disabled set from config.
+	disabled := make(map[string]bool, len(s.cfg.DisabledSkills))
+	for _, n := range s.cfg.DisabledSkills {
+		disabled[n] = true
+	}
+	if req.Enabled {
+		delete(disabled, name)
+	} else {
+		disabled[name] = true
+	}
+	list := make([]string, 0, len(disabled))
+	for n := range disabled {
+		list = append(list, n)
+	}
+	sort.Strings(list)
+	s.cfg.DisabledSkills = list
+	if err := config.SaveConfig(s.cfg); err != nil {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	s.mu.Unlock()
+
+	s.skillLoader.SetDisabled(list)
+	// Rebuild the agent so the system prompt (skill descriptions) and load_skill
+	// tool reflect the change on the next run.
+	if s.createAgent != nil && !s.needsSetup {
+		s.mu.RLock()
+		prov, mod := s.providerName, s.modelName
+		s.mu.RUnlock()
+		if ag, err := s.createAgent(prov, mod); err == nil {
+			s.mu.Lock()
+			s.agent = ag
+			s.mu.Unlock()
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "name": name, "enabled": req.Enabled})
 }
 
 // handleSlashCommands returns skill slash commands for the web frontend
@@ -2304,16 +2796,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 // openBrowser opens the given URL in the user's default browser.
 func openBrowser(url string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", url)
-	default: // linux, freebsd, etc.
-		cmd = exec.Command("xdg-open", url)
-	}
-	if err := cmd.Start(); err != nil {
+	if err := utils.OpenURL(url); err != nil {
 		config.Logger().Printf("[web] failed to open browser: %v", err)
 	}
 }

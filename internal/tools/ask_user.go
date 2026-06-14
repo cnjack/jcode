@@ -49,6 +49,13 @@ type AskUserDeps struct {
 	ResponseCh      <-chan AskUserResponse                  // receives user answer
 	BatchNotifyFn   func(questions []AskUserQuestion)       // sends batch questions to TUI
 	BatchResponseCh <-chan AskUserBatchResponse             // receives batch answers
+
+	// BatchRequestFn, when set, blocks until the user answers the given
+	// questions and returns the structured response. It takes precedence over
+	// the notify/channel pair above. This is the model the web frontend uses: a
+	// single blocking call (emit a WS event + await the answer POST) instead of
+	// a fire-and-forget notify plus a shared response channel.
+	BatchRequestFn func(ctx context.Context, questions []AskUserQuestion) (AskUserBatchResponse, error)
 }
 
 type askUserOption struct {
@@ -151,6 +158,21 @@ func (t *askUserTool) runSingle(ctx context.Context, question string, options []
 
 	config.Logger().Printf("[ask_user] question: %q, options: %d", question, len(labels))
 
+	// Blocking-request path (web): convert to a single-element batch.
+	if t.deps.BatchRequestFn != nil {
+		q := AskUserQuestion{Question: question}
+		for _, opt := range options {
+			if opt.Label != "" {
+				q.Options = append(q.Options, AskUserOption{Label: opt.Label})
+			}
+		}
+		resp, err := t.deps.BatchRequestFn(ctx, []AskUserQuestion{q})
+		if err != nil {
+			return "ask_user cancelled: " + err.Error(), nil
+		}
+		return formatBatchResponse([]AskUserQuestion{q}, resp)
+	}
+
 	if t.deps.NotifyFn != nil {
 		t.deps.NotifyFn(question, labels)
 	}
@@ -200,6 +222,15 @@ func (t *askUserTool) runBatch(ctx context.Context, questions []AskUserQuestion)
 	}
 
 	config.Logger().Printf("[ask_user] batch: %d questions", len(questions))
+
+	// Blocking-request path (web): emit + await a single answer payload.
+	if t.deps.BatchRequestFn != nil {
+		resp, err := t.deps.BatchRequestFn(ctx, questions)
+		if err != nil {
+			return "ask_user cancelled: " + err.Error(), nil
+		}
+		return formatBatchResponse(questions, resp)
+	}
 
 	// Use batch channels if available, otherwise fall back to single-question mode
 	if t.deps.BatchNotifyFn != nil && t.deps.BatchResponseCh != nil {

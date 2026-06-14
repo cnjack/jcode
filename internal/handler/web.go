@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/cnjack/jcode/internal/tools"
 )
 
 // WebEvent is an event sent from the agent to web clients.
@@ -258,6 +260,12 @@ type WebApprovalRequestData struct {
 	IsExternal bool   `json:"is_external"`
 }
 
+// WebAskUserRequestData carries an ask_user question request to web clients.
+type WebAskUserRequestData struct {
+	ID        string                  `json:"id"`
+	Questions []tools.AskUserQuestion `json:"questions"`
+}
+
 // WebHandler implements AgentEventHandler by sending events to web clients
 // through a channel-based event broker.
 type WebHandler struct {
@@ -266,6 +274,17 @@ type WebHandler struct {
 	mu              sync.Mutex
 	approvalCounter int
 	pendingApproval map[string]chan ApprovalResponse
+
+	askUserMu      sync.Mutex
+	askUserCounter int
+	pendingAskUser map[string]*pendingAskUser
+}
+
+// pendingAskUser pairs a question's response channel with the request payload so
+// the latter can be re-surfaced to a (re)connecting client via /api/ask/pending.
+type pendingAskUser struct {
+	ch   chan tools.AskUserBatchResponse
+	data WebAskUserRequestData
 }
 
 // NewWebHandler creates a handler that sends events to the given channel.
@@ -273,6 +292,7 @@ func NewWebHandler() *WebHandler {
 	return &WebHandler{
 		eventCh:         make(chan WebEvent, 256),
 		pendingApproval: make(map[string]chan ApprovalResponse),
+		pendingAskUser:  make(map[string]*pendingAskUser),
 	}
 }
 
@@ -421,6 +441,71 @@ func (h *WebHandler) ResolveApproval(id string, approved, approveAll bool) error
 	default:
 		return fmt.Errorf("approval %q already resolved", id)
 	}
+}
+
+// --- Ask-user flow ---
+
+// RequestAskUser emits the question(s) to web clients and blocks until the user
+// answers (via the /api/ask endpoint → ResolveAskUser) or the context is
+// cancelled. It mirrors RequestApproval: a per-request id keys a one-shot
+// response channel so the API handler can route the answer back. This is wired
+// into the ask_user tool's BatchRequestFn for the web frontend.
+func (h *WebHandler) RequestAskUser(ctx context.Context, questions []tools.AskUserQuestion) (tools.AskUserBatchResponse, error) {
+	data := WebAskUserRequestData{Questions: questions}
+	h.askUserMu.Lock()
+	h.askUserCounter++
+	data.ID = fmt.Sprintf("ask_%d", h.askUserCounter)
+	respCh := make(chan tools.AskUserBatchResponse, 1)
+	h.pendingAskUser[data.ID] = &pendingAskUser{ch: respCh, data: data}
+	h.askUserMu.Unlock()
+
+	defer func() {
+		h.askUserMu.Lock()
+		delete(h.pendingAskUser, data.ID)
+		h.askUserMu.Unlock()
+	}()
+
+	h.emit("ask_user_request", data)
+
+	select {
+	case resp := <-respCh:
+		return resp, nil
+	case <-ctx.Done():
+		return tools.AskUserBatchResponse{}, ctx.Err()
+	}
+}
+
+// ResolveAskUser delivers the user's answers to a pending ask_user request.
+// Called by the API handler when the frontend submits answers.
+func (h *WebHandler) ResolveAskUser(id string, resp tools.AskUserBatchResponse) error {
+	h.askUserMu.Lock()
+	p, ok := h.pendingAskUser[id]
+	h.askUserMu.Unlock()
+
+	if !ok {
+		return fmt.Errorf("no pending ask_user with id %q", id)
+	}
+
+	select {
+	case p.ch <- resp:
+		return nil
+	default:
+		return fmt.Errorf("ask_user %q already resolved", id)
+	}
+}
+
+// PendingAskUserRequests returns the still-unanswered ask_user requests so a
+// reloaded/reconnecting client can re-surface the question (the ask_user_request
+// WS event is fire-once and ephemeral). Without this, a page refresh while a
+// question is pending would leave the agent blocked with no way to answer.
+func (h *WebHandler) PendingAskUserRequests() []WebAskUserRequestData {
+	h.askUserMu.Lock()
+	defer h.askUserMu.Unlock()
+	out := make([]WebAskUserRequestData, 0, len(h.pendingAskUser))
+	for _, p := range h.pendingAskUser {
+		out = append(out, p.data)
+	}
+	return out
 }
 
 // MarshalEvent marshals a WebEvent to JSON bytes.
