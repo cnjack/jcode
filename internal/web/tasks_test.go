@@ -153,3 +153,33 @@ func TestUpdateTaskMeta(t *testing.T) {
 		t.Fatalf("unknown id should be 404, got %d", rec.Code)
 	}
 }
+
+// Regression: deleting a task that belongs to a project OTHER than the active
+// one (s.pwd) must still remove it from the index — the sidebar tree can delete
+// across projects. Previously this silently no-op'd, leaving a ghost task.
+func TestDeleteTaskCrossProject(t *testing.T) {
+	seedIndex(t, map[string][]session.SessionMeta{
+		"/work/active": {{UUID: "act-1", Project: "/work/active"}},
+		"/work/other":  {{UUID: "oth-1", Project: "/work/other"}, {UUID: "oth-2", Project: "/work/other"}},
+	})
+	// Active project is /work/active; delete a task in /work/other.
+	s := &Server{pwd: "/work/active"}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/oth-1", nil)
+	req.SetPathValue("id", "oth-1")
+	s.handleDeleteSession(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete: code=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	all, err := session.ListAllSessions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all["/work/other"]) != 1 || all["/work/other"][0].UUID != "oth-2" {
+		t.Fatalf("oth-1 should be deleted and oth-2 kept, got %+v", all["/work/other"])
+	}
+	if len(all["/work/active"]) != 1 {
+		t.Fatalf("active project tasks should be untouched, got %+v", all["/work/active"])
+	}
+}
