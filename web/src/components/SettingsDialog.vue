@@ -500,7 +500,8 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
 
 <template>
   <TransitionRoot :show="open" as="template">
-    <Dialog @close="emit('close')" class="relative z-50">
+    <Dialog @close="emit('close')" class="relative" style="z-index: var(--z-modal)">
+      <!-- Opaque page background: settings is a full page, not a floating modal. -->
       <TransitionChild
         enter="ease-out duration-150"
         enter-from="opacity-0"
@@ -508,42 +509,38 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
         leave="ease-in duration-100"
         leave-from="opacity-100"
         leave-to="opacity-0">
-        <div class="fixed inset-0" style="background: rgba(8,8,8,0.5); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px)" />
+        <div class="fixed inset-0" style="background: var(--color-background)" />
       </TransitionChild>
 
-      <div class="fixed inset-0 flex items-center justify-center p-4 sm:p-6">
+      <!-- Edge-to-edge full page. -->
+      <div class="fixed inset-0 flex">
         <TransitionChild
-          enter="ease-out duration-150"
-          enter-from="opacity-0 scale-[0.98] translate-y-1"
-          enter-to="opacity-100 scale-100 translate-y-0"
+          class="w-full h-full"
+          enter="ease-out duration-200"
+          enter-from="opacity-0 scale-[0.995]"
+          enter-to="opacity-100 scale-100"
           leave="ease-in duration-100"
-          leave-from="opacity-100 scale-100 translate-y-0"
-          leave-to="opacity-0 scale-[0.98] translate-y-1">
-          <!-- Fixed footprint: h-[min(...)] (NOT max-h) so the panel never resizes or re-centers between tabs. -->
+          leave-from="opacity-100 scale-100"
+          leave-to="opacity-0 scale-[0.995]">
+          <!-- Mirrors the chat page shell: full-height left rail + right column
+               with a transparent top bar and an inset surface content panel. -->
           <DialogPanel
-            class="flex flex-col w-[min(880px,94vw)] h-[min(620px,86vh)] overflow-hidden"
-            style="border-radius: var(--radius-xl); background-color: var(--color-surface); border: 1px solid var(--color-border); box-shadow: var(--shadow-lg)"
+            class="flex w-full h-full overflow-hidden"
+            style="background-color: var(--color-background)"
           >
-            <!-- Header -->
-            <div class="flex items-center gap-2.5 px-5 h-14 shrink-0" style="border-bottom: 1px solid var(--color-border); background-color: var(--color-sidebar-bg)">
-              <span class="w-[5px] h-[5px] rounded-[1px]" style="background-color: var(--color-primary)" />
-              <DialogTitle class="text-[13px] font-semibold tracking-tight" style="font-family: var(--font-sans); color: var(--color-foreground)">Settings</DialogTitle>
+            <!-- Left rail (shell tone, like the sidebar): back-to-workspace at
+                 the top, then the section nav. -->
+            <nav class="settings-rail shrink-0 flex flex-col">
               <button
-                class="ml-auto grid place-items-center w-7 h-7 rounded-md transition-colors cursor-pointer hover:bg-[var(--color-secondary)]"
-                style="color: var(--color-muted-foreground)"
-                aria-label="Close"
+                class="settings-back group flex items-center gap-1.5 h-9 px-2.5 mb-1.5 rounded-md text-[13px] font-medium transition-colors cursor-pointer"
                 @click="emit('close')"
               >
-                <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
-                  <path d="M5 5l10 10M15 5L5 15" stroke-linecap="round" />
+                <svg class="w-4 h-4 transition-transform group-hover:-translate-x-0.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M11.5 5L6.5 10l5 5M6.5 10H16" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
+                Back to workspace
               </button>
-            </div>
-
-            <!-- Body: nav rail + single scrolling content column. min-h-0 on both levels is required for the scroll fix. -->
-            <div class="flex flex-1 min-h-0">
-              <!-- Nav rail -->
-              <nav class="shrink-0 w-[200px] py-2 px-2 overflow-y-auto flex flex-col gap-0.5" style="border-right: 1px solid var(--color-border); background-color: var(--color-sidebar-bg)">
+              <div class="flex flex-col gap-0.5">
                 <button
                   v-for="tab in (['general', 'appearance', 'providers', 'mcp', 'skills', 'ssh', 'channels', 'shortcuts'] as const)"
                   :key="tab"
@@ -557,11 +554,33 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                   <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" v-html="iconFor[tab]" />
                   <span class="truncate">{{ tabLabel[tab] }}</span>
                 </button>
-              </nav>
+              </div>
+            </nav>
 
-              <!-- Content frame (surface). Only the inner div scrolls. -->
-              <div class="flex-1 min-w-0 flex flex-col min-h-0" style="background-color: var(--color-surface)">
-                <div class="flex-1 min-h-0 overflow-y-auto px-6 py-5">
+            <!-- Right column: top bar (shell tone) + inset surface content panel. -->
+            <div class="flex flex-col flex-1 min-w-0">
+              <div class="flex items-center gap-2.5 h-[52px] px-4 shrink-0">
+                <span class="w-[5px] h-[5px] rounded-[1px]" style="background-color: var(--color-primary)" />
+                <div class="flex flex-col min-w-0 leading-tight">
+                  <DialogTitle class="text-[13px] font-semibold tracking-tight" style="font-family: var(--font-sans); color: var(--color-foreground)">Settings</DialogTitle>
+                  <span class="text-[11px]" style="color: var(--color-muted-foreground)">{{ tabLabel[activeTab] }}</span>
+                </div>
+                <button
+                  class="ml-auto grid place-items-center w-7 h-7 rounded-md transition-colors cursor-pointer hover:bg-[var(--color-secondary)]"
+                  style="color: var(--color-muted-foreground)"
+                  aria-label="Close"
+                  @click="emit('close')"
+                >
+                  <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
+                    <path d="M5 5l10 10M15 5L5 15" stroke-linecap="round" />
+                  </svg>
+                </button>
+              </div>
+
+              <!-- Inset content panel — matches .chat-panel. Only the inner div
+                   scrolls; each tab block is centered and width-capped. -->
+              <div class="settings-panel flex flex-col flex-1 min-h-0">
+                <div class="flex-1 min-h-0 overflow-y-auto px-8 py-7 [&>div]:max-w-3xl [&>div]:mx-auto">
                 <!-- General tab -->
                 <div v-if="activeTab === 'general'" class="space-y-5">
                   <div class="flex items-center gap-2">
@@ -1284,24 +1303,47 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                 </div>
               </div>
             </div>
-
-            <!-- Footer: keyboard hint + low-chroma Done -->
-            <div class="flex items-center px-5 h-12 shrink-0" style="border-top: 1px solid var(--color-border); background-color: var(--color-sidebar-bg)">
-              <span class="text-[11px] flex items-center gap-1.5" style="color: var(--color-muted-foreground)">
-                Press
-                <kbd class="px-1.5 py-0.5 text-[10px] font-mono rounded" style="background-color: var(--color-secondary); border: 1px solid var(--color-border); color: var(--color-muted-foreground)">Esc</kbd>
-                to close
-              </span>
-              <button
-                class="ml-auto h-7 px-3 text-xs font-medium rounded-md cursor-pointer transition-colors hover:bg-[rgba(255,132,0,0.16)]"
-                style="color: var(--color-primary); background-color: rgba(255,132,0,0.1)"
-                @click="emit('close')">
-                Done
-              </button>
-            </div>
           </DialogPanel>
         </TransitionChild>
       </div>
     </Dialog>
   </TransitionRoot>
 </template>
+
+<style scoped>
+/* Left rail mirrors the chat sidebar: same width + shell tone, no border. */
+.settings-rail {
+  width: var(--sidebar-width);
+  padding: 12px;
+  overflow-y: auto;
+  background: var(--color-background);
+}
+
+.settings-back {
+  color: var(--color-muted-foreground);
+}
+.settings-back:hover {
+  background: var(--color-secondary);
+  color: var(--color-foreground);
+}
+
+/* Inset content panel — identical treatment to App.vue's .chat-panel so the two
+   pages read as the same layout. */
+.settings-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  margin: 4px 14px 14px;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+@media (max-width: 640px) {
+  .settings-rail {
+    width: 100%;
+  }
+  .settings-panel {
+    margin: 2px 8px 8px;
+  }
+}
+</style>

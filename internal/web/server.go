@@ -268,6 +268,9 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/files", s.handleListFiles)
 	mux.HandleFunc("GET /api/files/content", s.handleReadFile)
 	mux.HandleFunc("GET /api/status", s.handleStatus)
+	mux.HandleFunc("GET /api/workspace", s.handleWorkspace)
+	mux.HandleFunc("GET /api/tasks", s.handleListAllTasks)
+	mux.HandleFunc("PATCH /api/tasks/{id}", s.handleUpdateTask)
 	mux.HandleFunc("GET /api/models", s.handleListModels)
 	mux.HandleFunc("POST /api/model", s.handleSwitchModel)
 	mux.HandleFunc("POST /api/mode", s.handleSwitchMode)
@@ -438,6 +441,26 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"provider":   s.providerName,
 		"model":      s.modelName,
 		"mode":       s.mode,
+	})
+}
+
+// handleWorkspace returns lightweight git workspace info (branch + dirty) for
+// the current project so the web UI can show the real branch name. Diff stats
+// are fetched separately via /api/diff. Empty branch = not a git repo.
+func (s *Server) handleWorkspace(w http.ResponseWriter, r *http.Request) {
+	branchCmd := exec.CommandContext(s.ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
+	branchCmd.Dir = s.pwd
+	branchOut, _ := branchCmd.Output()
+	branch := strings.TrimSpace(string(branchOut))
+
+	statusCmd := exec.CommandContext(s.ctx, "git", "status", "--porcelain")
+	statusCmd.Dir = s.pwd
+	statusOut, _ := statusCmd.Output()
+	dirty := strings.TrimSpace(string(statusOut)) != ""
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"branch": branch,
+		"dirty":  dirty,
 	})
 }
 
@@ -643,6 +666,87 @@ func (s *Server) submitMessage(message, mode, source, sessionID string, images [
 	}()
 
 	return recorder.UUID()
+}
+
+// handleListAllTasks returns every session across all projects (flat list,
+// each tagged with its project path) so the web sidebar can render a
+// Workspace > Project > Task tree without switching the active project.
+func (s *Server) handleListAllTasks(w http.ResponseWriter, r *http.Request) {
+	all, err := session.ListAllSessions()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	type taskItem struct {
+		UUID      string `json:"uuid"`
+		Project   string `json:"project"`
+		CreatedAt string `json:"created_at"`
+		Provider  string `json:"provider"`
+		Model     string `json:"model"`
+		Title     string `json:"title,omitempty"`
+		Pinned    bool   `json:"pinned"`
+		Archived  bool   `json:"archived"`
+		Unread    bool   `json:"unread"`
+		Status    string `json:"status,omitempty"`
+	}
+	items := make([]taskItem, 0)
+	for project, metas := range all {
+		for _, m := range metas {
+			items = append(items, taskItem{
+				UUID:      m.UUID,
+				Project:   project,
+				CreatedAt: m.StartTime,
+				Provider:  m.Provider,
+				Model:     m.Model,
+				Title:     m.Title,
+				Pinned:    m.Pinned,
+				Archived:  m.Archived,
+				Unread:    m.Unread,
+				Status:    m.Status,
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+// handleUpdateTask applies a partial metadata update (pin/archive/unread/title)
+// to a task by uuid across all projects.
+func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Pinned   *bool   `json:"pinned"`
+		Archived *bool   `json:"archived"`
+		Unread   *bool   `json:"unread"`
+		Title    *string `json:"title"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	meta, err := session.UpdateSessionMeta(id, func(m *session.SessionMeta) {
+		if req.Pinned != nil {
+			m.Pinned = *req.Pinned
+		}
+		if req.Archived != nil {
+			m.Archived = *req.Archived
+		}
+		if req.Unread != nil {
+			m.Unread = *req.Unread
+		}
+		if req.Title != nil {
+			m.Title = *req.Title
+		}
+		m.UpdatedAt = time.Now().Format(time.RFC3339)
+	})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if meta == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, meta)
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {

@@ -407,7 +407,7 @@ watch(() => store.isRunning, (running) => {
                     class="dropdown-item"
                     @click="selectModel(r.provider, r.model)"
                   >
-                    <span class="text-amber-400 mr-1">★</span>{{ getModelDisplayName(r.provider, r.model) }}
+                    <span class="mr-1" style="color: var(--color-primary)">★</span>{{ getModelDisplayName(r.provider, r.model) }}
                   </button>
                 </template>
 
@@ -560,8 +560,9 @@ watch(() => store.isRunning, (running) => {
 
 <style scoped>
 .chat-input-wrapper {
-  padding: 12px 24px 16px;
-  background: var(--color-background);
+  padding: 8px 16px 14px;
+  /* Sits inside the surface chat panel — transparent so it blends with it. */
+  background: transparent;
   position: relative;
 }
 
@@ -569,18 +570,17 @@ watch(() => store.isRunning, (running) => {
   margin: 0 auto;
   border-radius: 12px;
   padding: 6px;
-  background: #F6F7F4;
+  background: transparent;
   position: relative;
   display: flex;
   flex-direction: column;
 }
 
-.dark .chat-input-card {
-  background: var(--color-background);
-}
-
 .chat-input-inner {
-  background: var(--color-surface);
+  /* Recessed: always one step darker than the surface panel, derived from it so
+     the depth cue holds on every theme (some light themes have a background
+     token that is lighter than surface, which would otherwise invert it). */
+  background: color-mix(in srgb, var(--color-surface) 90%, #000);
   border: 1px solid var(--color-border);
   border-radius: 9px;
   padding: 14px 16px 0;
@@ -840,7 +840,7 @@ watch(() => store.isRunning, (running) => {
 
 .fav-star.is-fav {
   opacity: 1;
-  color: #fbbf24;
+  color: var(--color-primary);
 }
 
 .dropdown-item:hover .fav-star {
