@@ -448,12 +448,14 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 // the current project so the web UI can show the real branch name. Diff stats
 // are fetched separately via /api/diff. Empty branch = not a git repo.
 func (s *Server) handleWorkspace(w http.ResponseWriter, r *http.Request) {
-	branchCmd := exec.CommandContext(s.ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
+	// Use the request context so the git commands are cancelled if the client
+	// disconnects (CodeRabbit review feedback on PR #82).
+	branchCmd := exec.CommandContext(r.Context(), "git", "rev-parse", "--abbrev-ref", "HEAD")
 	branchCmd.Dir = s.pwd
 	branchOut, _ := branchCmd.Output()
 	branch := strings.TrimSpace(string(branchOut))
 
-	statusCmd := exec.CommandContext(s.ctx, "git", "status", "--porcelain")
+	statusCmd := exec.CommandContext(r.Context(), "git", "status", "--porcelain")
 	statusCmd.Dir = s.pwd
 	statusOut, _ := statusCmd.Output()
 	dirty := strings.TrimSpace(string(statusOut)) != ""
@@ -794,7 +796,9 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "session id is required"})
 		return
 	}
-	if err := session.DeleteSession(s.pwd, id); err != nil {
+	// Resolve the owning project across all projects: a task deleted from the
+	// sidebar tree may not belong to the active project (s.pwd).
+	if _, err := session.DeleteSessionByUUID(id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}

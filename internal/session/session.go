@@ -664,6 +664,64 @@ func DeleteSession(project, uuid string) error {
 	return nil
 }
 
+// DeleteSessionByUUID removes a session (index entry + JSONL file) located by
+// uuid across ALL projects. The web task tree can delete a task that does not
+// belong to the active project, so we must not assume a single project key.
+// Returns false if no session with that uuid exists. The JSONL file is only
+// removed when the uuid was actually found in the index, which also prevents a
+// crafted uuid from deleting an arbitrary file.
+func DeleteSessionByUUID(uuid string) (bool, error) {
+	indexPath, err := config.SessionsIndexPath()
+	if err != nil {
+		return false, err
+	}
+	data, err := os.ReadFile(indexPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	var idx sessionIndex
+	if err := json.Unmarshal(data, &idx); err != nil {
+		return false, err
+	}
+	found := false
+	for project, metas := range idx.Sessions {
+		filtered := make([]SessionMeta, 0, len(metas))
+		for _, m := range metas {
+			if m.UUID == uuid {
+				found = true
+				continue
+			}
+			filtered = append(filtered, m)
+		}
+		idx.Sessions[project] = filtered
+	}
+	if !found {
+		return false, nil
+	}
+	newData, err := json.MarshalIndent(&idx, "", "  ")
+	if err != nil {
+		return true, err
+	}
+	tmpPath := indexPath + ".tmp"
+	if err := os.WriteFile(tmpPath, newData, 0644); err != nil {
+		return true, err
+	}
+	if err := os.Rename(tmpPath, indexPath); err != nil {
+		return true, err
+	}
+	dir, err := config.SessionsDir()
+	if err != nil {
+		return true, err
+	}
+	if rmErr := os.Remove(filepath.Join(dir, uuid+".json")); rmErr != nil && !os.IsNotExist(rmErr) {
+		return true, fmt.Errorf("delete session file: %w", rmErr)
+	}
+	return true, nil
+}
+
 func removeFromIndex(project, uuid string) error {
 	indexPath, err := config.SessionsIndexPath()
 	if err != nil {
