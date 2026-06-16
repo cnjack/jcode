@@ -138,6 +138,32 @@ export interface DiffResponse {
   entries: DiffEntry[]
 }
 
+export interface WorkspaceInfo {
+  branch: string // empty if not a git repo
+  dirty: boolean
+}
+
+// A task = a conversation, listed across all projects for the sidebar tree.
+export interface TaskItem {
+  uuid: string
+  project: string // project path
+  created_at: string
+  provider: string
+  model: string
+  title?: string
+  pinned: boolean
+  archived: boolean
+  unread: boolean
+  status?: string
+}
+
+export interface TaskMetaPatch {
+  pinned?: boolean
+  archived?: boolean
+  unread?: boolean
+  title?: string
+}
+
 // MCP types
 export interface MCPServerInfo {
   name: string

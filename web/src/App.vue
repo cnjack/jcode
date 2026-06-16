@@ -17,15 +17,25 @@ import TerminalPanel from '@/components/TerminalPanel.vue'
 import RightPanel from '@/components/RightPanel.vue'
 import SetupView from '@/components/SetupView.vue'
 import TopBar from '@/components/TopBar.vue'
+import CommandPalette from '@/components/CommandPalette.vue'
+import { useNotifications } from '@/composables/notifications'
 
 const store = useChatStore()
 const projectStore = useProjectStore()
 const { resolvedTheme, toggleTheme } = useTheme()
+const { ensurePermission, notify } = useNotifications()
 const messagesEl = ref<HTMLDivElement | null>(null)
 const settingsOpen = ref(false)
 const projectsOpen = ref(false)
+const paletteOpen = ref(false)
 const sidebarCollapsed = ref(false)
 const needsSetup = ref(false)
+
+function onPaletteAction(name: 'settings' | 'projects' | 'theme') {
+  if (name === 'settings') settingsOpen.value = true
+  else if (name === 'projects') projectsOpen.value = true
+  else if (name === 'theme') toggleTheme()
+}
 
 const bottomPanel = ref<'none' | 'terminal'>('none')
 const bottomPanelHeight = ref(260)
@@ -60,10 +70,16 @@ const { connected } = useWebSocket({
   onToolCall: (data) => store.addToolCall(data.name, data.args, data.tool_call_id, data.display_info),
   onToolResult: (data) => store.resolveToolCall(data.name, data.output, data.tool_call_id, data.error, data.display_output),
   onTokenUpdate: (data) => { store.tokenInfo = data },
-  onAgentDone: (data) => store.agentDone(data?.error),
+  onAgentDone: (data) => {
+    store.agentDone(data?.error)
+    notify(data?.error ? 'jcode — task failed' : 'jcode — task finished', data?.error || 'The agent finished its run.')
+  },
   onTodoUpdate: () => store.fetchTodos(),
   onGoalUpdate: (data) => { store.goal = data },
-  onApprovalRequest: (data) => store.addApprovalRequest(data),
+  onApprovalRequest: (data) => {
+    store.addApprovalRequest(data)
+    notify('jcode — approval needed', 'The agent is waiting for your approval.')
+  },
   onAskUserRequest: (data) => store.attachAskUserRequest(data.id, data.questions),
   onSessionReset: () => store.clearChat(),
   onModelChanged: (data) => {
@@ -102,6 +118,11 @@ watch(
 
 // Global keyboard shortcuts
 function handleGlobalKeydown(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+    e.preventDefault()
+    paletteOpen.value = !paletteOpen.value
+    return
+  }
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'N') {
     e.preventDefault()
     store.newSession()
@@ -146,6 +167,7 @@ function handleGlobalKeydown(e: KeyboardEvent) {
 
 onMounted(async () => {
   document.addEventListener('keydown', handleGlobalKeydown)
+  ensurePermission()
   const health = await store.fetchHealth()
   // Check if setup is needed — health returns needs_setup status
   if (health?.needs_setup) {
@@ -267,6 +289,9 @@ function startResize(e: MouseEvent) {
 </script>
 
 <template>
+  <!-- One continuous surface: sidebar, top bar and chat area share a single
+       background with no hard dividers, so the regions read as one enclosed
+       space (包裹感) rather than separately-bordered panels. -->
   <div class="flex h-[100dvh] overflow-hidden transition-colors duration-300" style="background: var(--color-background); color: var(--color-foreground);">
     <!-- Sidebar -->
     <transition
@@ -287,7 +312,9 @@ function startResize(e: MouseEvent) {
       />
     </transition>
 
-    <!-- Main content -->
+    <!-- Main content — shell tone (same as sidebar); the conversation lives in
+         an inset surface panel below, so it reads as one continuous shell that
+         wraps a distinct chat canvas (包裹感). -->
     <main class="flex-1 flex flex-col min-w-0 relative">
       <!-- Top Bar -->
       <TopBar
@@ -301,11 +328,12 @@ function startResize(e: MouseEvent) {
         @toggle-panel="togglePanel"
       />
 
-      <!-- Chat area -->
-      <div class="flex-1 flex flex-col min-h-0">
+      <!-- Chat area — inset surface panel: distinct tone, rounded, with margin
+           above (below the top bar) and below so it reads as a wrapped canvas. -->
+      <div class="chat-panel flex-1 flex flex-col min-h-0 relative">
         <div
           ref="messagesEl"
-          class="flex-1 overflow-y-auto scroll-smooth"
+          class="flex-1 overflow-y-auto scroll-smooth rounded-t-[13px]"
           @scroll="checkScrollPosition"
         >
           <!-- Welcome -->
@@ -430,8 +458,31 @@ function startResize(e: MouseEvent) {
 
     <SettingsDialog :open="settingsOpen" @close="settingsOpen = false" />
     <ProjectSwitcher :open="projectsOpen" @close="projectsOpen = false" @project-switched="onProjectSwitched" />
+    <CommandPalette :open="paletteOpen" @close="paletteOpen = false" @action="onPaletteAction" />
 
     <!-- Setup overlay — shown when no providers are configured -->
     <SetupView v-if="needsSetup" @complete="onSetupComplete" />
   </div>
 </template>
+
+<style scoped>
+/* The conversation + composer live in one inset surface panel so the chat
+   canvas reads as distinct from the sidebar shell, wrapped with breathing room
+   above (below the top bar) and below (above the window edge) — 包裹感. */
+.chat-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  margin: 4px 14px 14px;
+  /* NOT overflow:hidden — that would clip the composer's upward model/slash
+     menus on short viewports. The scroll area rounds its own top corners
+     (rounded-t) and the composer is inset, so the panel corners stay clean. */
+  box-shadow: var(--shadow-sm);
+}
+
+@media (max-width: 640px) {
+  .chat-panel {
+    margin: 2px 8px 8px;
+  }
+}
+</style>

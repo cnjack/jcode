@@ -21,6 +21,12 @@
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.12);
   --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.15);
 
+  /* ─── Status indicators ─── */
+  /* Saturated "online" green for small status dots. Distinct from
+   * --color-success-fg (a dark text token tuned for the success chip), which
+   * reads near-black on a tiny dot in light mode. */
+  --color-success: #16A34A;
+
   /* ─── Z-index scale ─── */
   --z-sidebar: 30;
   --z-header: 20;
@@ -100,6 +106,7 @@
   --color-info-fg: #B2B2FF;
   --color-destructive: #FF5C33;
   --color-sidebar-bg: #1A1A1A;
+  --color-success: #22C55E;
 
   /* ─── Syntax highlighting (dark) ─── */
   --hljs-fg: #e4e4e7;

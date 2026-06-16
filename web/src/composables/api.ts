@@ -1,5 +1,5 @@
 // API client for jcode backend
-import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData } from '@/types/api'
+import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, TaskItem, TaskMetaPatch, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData } from '@/types/api'
 
 const BASE = ''
 
@@ -102,6 +102,13 @@ export const api = {
     const q = mode ? `?mode=${encodeURIComponent(mode)}` : ''
     return request<DiffResponse>(`/api/diff${q}`)
   },
+  workspace: () => request<WorkspaceInfo>('/api/workspace'),
+  tasks: () => request<TaskItem[]>('/api/tasks'),
+  updateTask: (id: string, patch: TaskMetaPatch) =>
+    request<TaskItem>(`/api/tasks/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
   mcpList: () => request<MCPListResponse>('/api/mcp'),
   mcpToggle: (name: string, enabled: boolean) =>
     request<{ status: string }>(`/api/mcp/${encodeURIComponent(name)}/toggle`, {

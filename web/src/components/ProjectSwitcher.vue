@@ -119,7 +119,7 @@ function deleteProject(id: string) {
         leave-from="opacity-100"
         leave-to="opacity-0"
       >
-        <div class="fixed inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-sm" />
+        <div class="fixed inset-0" style="background: rgba(8,8,8,0.5); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px)" />
       </TransitionChild>
 
       <div class="fixed inset-0 flex items-start justify-center pt-16 px-4">
@@ -131,10 +131,10 @@ function deleteProject(id: string) {
           leave-from="opacity-100 translate-y-0"
           leave-to="opacity-0 translate-y-2"
         >
-          <DialogPanel class="w-full max-w-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded shadow-2xl overflow-hidden">
+          <DialogPanel class="w-full max-w-lg overflow-hidden" style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg)">
             <!-- Header -->
             <div class="px-5 pt-4 pb-2">
-              <DialogTitle class="text-sm font-semibold text-zinc-800 dark:text-zinc-100" style="font-family: var(--font-sans)">
+              <DialogTitle class="text-sm font-semibold" style="font-family: var(--font-sans); color: var(--color-foreground)">
                 {{ showBrowser ? 'Open Folder' : 'Projects' }}
               </DialogTitle>
             </div>
@@ -145,58 +145,62 @@ function deleteProject(id: string) {
                 <input
                   v-model="pathInput"
                   type="text"
-                  class="flex-1 px-3 py-1.5 text-sm font-mono rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 outline-none focus:border-emerald-400 dark:focus:border-emerald-500/60 transition-colors"
+                  class="ps-input flex-1 px-3 py-1.5 text-sm font-mono rounded-md outline-none"
                   placeholder="/path/to/folder"
                   @keydown="handlePathKeyDown"
                 />
                 <button
-                  class="px-3 py-1.5 text-xs font-medium bg-emerald-500 hover:bg-emerald-600 text-white rounded-md cursor-pointer transition-colors"
+                  class="px-3 py-1.5 text-xs font-medium rounded-md cursor-pointer transition-opacity hover:opacity-90"
+                  style="background: var(--color-primary); color: var(--color-on-primary, #fff)"
                   @click="handlePathSubmit"
                 >
                   OK
                 </button>
                 <button
-                  class="px-2 py-1.5 text-xs text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer transition-colors"
+                  class="ps-muted-btn px-2 py-1.5 text-xs cursor-pointer transition-colors"
                   @click="showBrowser = false"
                 >
                   Back
                 </button>
               </div>
 
-              <div class="border border-zinc-200 dark:border-zinc-700 rounded-md overflow-hidden max-h-80 overflow-y-auto bg-zinc-50 dark:bg-zinc-800/60">
+              <div class="rounded-md overflow-hidden max-h-80 overflow-y-auto" style="border: 1px solid var(--color-border); background: var(--color-background)">
                 <button
                   v-if="browsePath && browsePath !== '/'"
-                  class="w-full flex items-center gap-2 px-3 py-2 text-sm text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 cursor-pointer transition-colors border-b border-zinc-100 dark:border-zinc-700/60"
+                  class="ps-folder w-full flex items-center gap-2 px-3 py-2 text-sm cursor-pointer transition-colors"
+                  style="color: var(--color-muted-foreground); border-bottom: 1px solid var(--color-border)"
                   @click="goUp"
                 >
-                  <span class="text-zinc-400 dark:text-zinc-500">..</span>
+                  <span style="color: var(--color-muted-foreground)">..</span>
                 </button>
 
-                <div v-if="browseLoading" class="px-3 py-6 text-center text-xs text-zinc-400 dark:text-zinc-500 animate-pulse">
+                <div v-if="browseLoading" class="px-3 py-6 text-center text-xs animate-pulse" style="color: var(--color-muted-foreground)">
                   Loading...
                 </div>
 
-                <div v-else-if="browseFolders.length === 0" class="px-3 py-6 text-center text-xs text-zinc-400 dark:text-zinc-500">
+                <div v-else-if="browseFolders.length === 0" class="px-3 py-6 text-center text-xs" style="color: var(--color-muted-foreground)">
                   No folders found
                 </div>
 
                 <button
                   v-for="folder in browseFolders"
                   :key="folder.path"
-                  class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-zinc-700 dark:text-zinc-300 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 hover:text-emerald-700 dark:hover:text-emerald-400 cursor-pointer transition-colors border-b border-zinc-100 dark:border-zinc-700/60 last:border-0"
+                  class="ps-folder w-full flex items-center gap-2 px-3 py-2 text-sm text-left cursor-pointer transition-colors"
+                  style="color: var(--color-foreground); border-bottom: 1px solid var(--color-border)"
                   @click="navigateTo(folder)"
                 >
-                  <span class="text-zinc-400 dark:text-zinc-500 shrink-0">📁</span>
+                  <span class="shrink-0" style="color: var(--color-muted-foreground)">📁</span>
                   <span class="truncate">{{ folder.name }}</span>
                 </button>
               </div>
 
               <div class="mt-3 flex items-center justify-between">
-                <div class="text-[11px] text-zinc-400 dark:text-zinc-500 font-mono truncate flex-1 mr-2">
+                <div class="text-[11px] font-mono truncate flex-1 mr-2" style="color: var(--color-muted-foreground)">
                   {{ displayPath }}
                 </div>
                 <button
-                  class="px-4 py-1.5 text-xs font-medium bg-emerald-500 hover:bg-emerald-600 text-white rounded-md cursor-pointer transition-colors shrink-0"
+                  class="px-4 py-1.5 text-xs font-medium rounded-md cursor-pointer transition-opacity hover:opacity-90 shrink-0"
+                  style="background: var(--color-primary); color: var(--color-on-primary, #fff)"
                   @click="selectCurrentPath"
                 >
                   Open Folder
@@ -207,42 +211,40 @@ function deleteProject(id: string) {
             <!-- Project list mode -->
             <div v-else>
               <div v-if="projectStore.switchError" class="px-5 py-2">
-                <div class="text-xs text-red-500 dark:text-red-400 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-md px-3 py-2">
+                <div class="text-xs rounded-md px-3 py-2" style="color: var(--color-error-fg); background: var(--color-error-bg); border: 1px solid var(--color-error-fg)">
                   {{ projectStore.switchError }}
                 </div>
               </div>
 
-              <div v-if="projectStore.switching" class="px-3 py-6 text-center text-xs text-zinc-400 dark:text-zinc-500 animate-pulse">
+              <div v-if="projectStore.switching" class="px-3 py-6 text-center text-xs animate-pulse" style="color: var(--color-muted-foreground)">
                 Switching project...
               </div>
 
               <div v-else class="px-3 pb-2 max-h-72 overflow-y-auto">
-                <div v-if="projectStore.projects.length === 0" class="text-xs text-zinc-400 dark:text-zinc-500 py-6 text-center">
+                <div v-if="projectStore.projects.length === 0" class="text-xs py-6 text-center" style="color: var(--color-muted-foreground)">
                   No projects yet
                 </div>
                 <div
                   v-for="p in projectStore.projects"
                   :key="p.id"
-                  class="group flex items-center gap-2 px-3 py-2.5 rounded-md cursor-pointer transition-colors"
-                  :class="projectStore.activeId === p.id
-                    ? 'bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20'
-                    : 'hover:bg-zinc-50 dark:hover:bg-zinc-800 border border-transparent'"
+                  class="ps-project group flex items-center gap-2 px-3 py-2.5 rounded-md cursor-pointer transition-colors"
+                  :class="{ active: projectStore.activeId === p.id }"
                   @click="selectProject(p.id)"
                 >
                   <div
                     class="w-7 h-7 rounded-md flex items-center justify-center text-xs font-bold shrink-0"
-                    :class="projectStore.activeId === p.id
-                      ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400'
-                      : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400'"
+                    :style="projectStore.activeId === p.id
+                      ? { background: 'rgba(255,132,0,0.14)', color: 'var(--color-primary)' }
+                      : { background: 'var(--color-muted)', color: 'var(--color-muted-foreground)' }"
                   >
                     {{ projectStore.projectName(p).charAt(0).toUpperCase() }}
                   </div>
                   <div class="min-w-0 flex-1">
-                    <div class="text-sm text-zinc-700 dark:text-zinc-200 truncate">{{ projectStore.projectName(p) }}</div>
-                    <div class="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono truncate">{{ p.path }}</div>
+                    <div class="text-sm truncate" style="color: var(--color-foreground)">{{ projectStore.projectName(p) }}</div>
+                    <div class="text-[10px] font-mono truncate" style="color: var(--color-muted-foreground)">{{ p.path }}</div>
                   </div>
                   <button
-                    class="opacity-0 group-hover:opacity-100 p-1 text-zinc-400 dark:text-zinc-500 hover:text-red-500 dark:hover:text-red-400 cursor-pointer transition-all"
+                    class="ps-delete opacity-0 group-hover:opacity-100 p-1 cursor-pointer transition-all"
                     @click.stop="deleteProject(p.id)"
                     title="Remove project"
                   >
@@ -253,15 +255,16 @@ function deleteProject(id: string) {
                 </div>
               </div>
 
-              <div class="px-5 py-3 border-t border-zinc-100 dark:border-zinc-800 flex justify-between items-center">
+              <div class="px-5 py-3 flex justify-between items-center" style="border-top: 1px solid var(--color-border)">
                 <button
-                  class="text-xs text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 cursor-pointer transition-colors font-medium"
+                  class="text-xs cursor-pointer transition-opacity hover:opacity-80 font-medium"
+                  style="color: var(--color-primary)"
                   @click="openBrowser"
                 >
                   + Open Folder
                 </button>
                 <button
-                  class="px-3 py-1 text-xs text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer transition-colors"
+                  class="ps-muted-btn px-3 py-1 text-xs cursor-pointer transition-colors"
                   @click="emit('close')"
                 >
                   Close
@@ -274,3 +277,51 @@ function deleteProject(id: string) {
     </Dialog>
   </TransitionRoot>
 </template>
+
+<style scoped>
+.ps-input {
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  color: var(--color-foreground);
+  transition: border-color 0.15s;
+}
+.ps-input::placeholder {
+  color: var(--color-muted-foreground);
+}
+.ps-input:focus {
+  border-color: var(--color-primary);
+}
+
+.ps-muted-btn {
+  color: var(--color-muted-foreground);
+}
+.ps-muted-btn:hover {
+  color: var(--color-foreground);
+}
+
+.ps-folder:last-child {
+  border-bottom: none !important;
+}
+.ps-folder:hover {
+  background: rgba(255, 132, 0, 0.08);
+  color: var(--color-primary) !important;
+}
+
+.ps-project {
+  border: 1px solid transparent;
+}
+.ps-project:hover {
+  background: var(--color-muted);
+}
+.ps-project.active {
+  background: rgba(255, 132, 0, 0.08);
+  border-color: rgba(255, 132, 0, 0.3);
+}
+
+.ps-delete {
+  color: var(--color-muted-foreground);
+}
+.ps-delete:hover {
+  color: var(--color-destructive);
+}
+</style>

@@ -50,9 +50,13 @@ const emit = defineEmits<{
 }>()
 
 const statusColor = computed(() => {
-  if (props.isRunning) return '#f59e0b'
-  if (props.wsConnected) return '#22c55e'
-  return '#9ca3af'
+  // Unified with the design tokens: orange = actively working (matches the
+  // Thinking dots), green = connected/idle, muted = offline. Uses the saturated
+  // --color-success (not the dark success-fg text token) so the dot reads as a
+  // bright "online" light in every theme.
+  if (props.isRunning) return 'var(--color-primary)'
+  if (props.wsConnected) return 'var(--color-success)'
+  return 'var(--color-muted-foreground)'
 })
 
 const statusLabel = computed(() => {
@@ -82,11 +86,18 @@ const panelButtons = [
   { panel: 'terminal' as PanelType, icon: SquareTerminal, label: 'Terminal', shortcut: '⌘`' },
 ]
 
-// Branch name is not exposed to the web frontend. The backend computes it
-// (internal/util/envinfo.go GitBranch via `git rev-parse --abbrev-ref HEAD`)
-// but no /api endpoint returns it, so we render the chip without a branch
-// label rather than fabricating one. See followups.
-const branchName = computed<string | null>(() => null)
+// Real branch name from /api/workspace (git rev-parse). Null when not a git
+// repo or before the first fetch — the chip then renders without a label.
+const branchName = ref<string | null>(null)
+
+async function loadWorkspace() {
+  try {
+    const ws = await api.workspace()
+    branchName.value = ws.branch || null
+  } catch {
+    branchName.value = null
+  }
+}
 
 // Diff stats are fetched on demand from the real /api/diff endpoint (working
 // tree). We never fabricate numbers: if the fetch fails or returns nothing,
@@ -120,11 +131,17 @@ function openChanges(close: () => void) {
 
 // Show the diff stat on first paint and refresh it whenever a run finishes (the
 // working tree likely changed), not only when the chip is clicked.
-onMounted(loadDiffStat)
+onMounted(() => {
+  loadDiffStat()
+  loadWorkspace()
+})
 watch(
   () => props.isRunning,
   (running, was) => {
-    if (was && !running) loadDiffStat()
+    if (was && !running) {
+      loadDiffStat()
+      loadWorkspace()
+    }
   },
 )
 </script>
@@ -185,8 +202,8 @@ watch(
           <template v-if="diffStat">
             <span class="chip-divider" />
             <span class="chip-stat">
-              <span class="stat-add text-emerald-600 dark:text-emerald-400">+{{ diffStat.additions }}</span>
-              <span class="stat-del text-red-500 dark:text-red-400">-{{ diffStat.deletions }}</span>
+              <span class="stat-add" style="color: var(--color-success-fg)">+{{ diffStat.additions }}</span>
+              <span class="stat-del" style="color: var(--color-error-fg)">-{{ diffStat.deletions }}</span>
             </span>
           </template>
           <span class="chip-divider" />
@@ -206,8 +223,8 @@ watch(
               <span class="ws-label">Changes</span>
               <span class="ws-right">
                 <span v-if="diffStat" class="chip-stat">
-                  <span class="stat-add text-emerald-600 dark:text-emerald-400">+{{ diffStat.additions }}</span>
-                  <span class="stat-del text-red-500 dark:text-red-400">-{{ diffStat.deletions }}</span>
+                  <span class="stat-add" style="color: var(--color-success-fg)">+{{ diffStat.additions }}</span>
+                  <span class="stat-del" style="color: var(--color-error-fg)">-{{ diffStat.deletions }}</span>
                 </span>
                 <button class="ws-action" @click="openChanges(close)">Review</button>
               </span>
@@ -251,8 +268,9 @@ watch(
 <style scoped>
 .topbar {
   height: 52px;
-  background: var(--color-sidebar-bg);
-  border-bottom: 1px solid var(--color-border);
+  /* No background/border of its own: flows into the chat area below as one
+     continuous surface (打通). */
+  background: transparent;
   padding: 0 14px;
   display: flex;
   align-items: center;
