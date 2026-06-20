@@ -1,0 +1,100 @@
+name: CI
+
+# Quality gate: runs on every push to main and on pull requests so regressions
+# are caught before they reach a release tag.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go (build · vet · test · lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Full history so golangci-lint's only-new-issues can diff against base.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+
+      # build-web (vite) is needed because internal/web embeds dist/* via
+      # //go:embed — without it the whole module fails to compile.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      # registry_generated.go + the theme TS/CSS are generated (gitignored), and
+      # internal/web/dist must exist for the go:embed. `make generate build-web`
+      # produces all three. model generate fetches models.dev; theme is offline.
+      - name: Generate code + build frontend
+        run: make generate build-web
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: latest
+          # Gate regressions without forcing a flag-day cleanup of the existing
+          # lint debt (mostly upstream adk.AgentMiddleware deprecations). New
+          # issues introduced by a PR still fail.
+          only-new-issues: true
+
+  web:
+    name: Web (type-check · build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Go is needed only to run the theme generator, which writes
+      # web/src/composables/themes.generated.ts + styles/tokens.generated.css
+      # (gitignored) — without them vue-tsc can't resolve ./themes.generated.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Generate theme assets
+        run: go generate ./internal/theme/...
+
+      - name: Install deps
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check
+        working-directory: web
+        run: pnpm type-check
+
+      - name: Lint
+        working-directory: web
+        run: npx oxlint .
+
+      - name: Build
+        working-directory: web
+        run: npx vite build

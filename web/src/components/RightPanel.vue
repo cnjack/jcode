@@ -125,7 +125,7 @@ function startResize(e: MouseEvent) {
   padding: 4px 10px;
   border: none;
   background: transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   color: var(--color-muted-foreground);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
@@ -148,7 +148,7 @@ function startResize(e: MouseEvent) {
   height: 24px;
   border: none;
   background: transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   color: var(--color-muted-foreground);
   cursor: pointer;
 }
@@ -202,7 +202,7 @@ function startResize(e: MouseEvent) {
 .plan-track {
   flex: 1;
   height: 5px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   background: var(--color-border);
   overflow: hidden;
 }
@@ -210,7 +210,7 @@ function startResize(e: MouseEvent) {
 .plan-fill {
   height: 100%;
   background: var(--color-primary);
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   transition: width var(--duration-slow) var(--ease-out);
 }
 

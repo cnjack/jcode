@@ -107,6 +107,13 @@ type SessionMeta struct {
 	Model     string `json:"model"`
 	StartTime string `json:"start_time"` // RFC3339
 	Title     string `json:"title,omitempty"`
+	// Task metadata. Additive — legacy index files simply lack these keys, which
+	// unmarshal to zero values (not pinned / not archived / read).
+	Pinned    bool   `json:"pinned,omitempty"`
+	Archived  bool   `json:"archived,omitempty"`
+	Unread    bool   `json:"unread,omitempty"`
+	Status    string `json:"status,omitempty"`     // idle/running/done/error (set by the web layer)
+	UpdatedAt string `json:"updated_at,omitempty"` // RFC3339
 }
 
 // sessionIndex is the on-disk structure of session.json.
@@ -657,6 +664,64 @@ func DeleteSession(project, uuid string) error {
 	return nil
 }
 
+// DeleteSessionByUUID removes a session (index entry + JSONL file) located by
+// uuid across ALL projects. The web task tree can delete a task that does not
+// belong to the active project, so we must not assume a single project key.
+// Returns false if no session with that uuid exists. The JSONL file is only
+// removed when the uuid was actually found in the index, which also prevents a
+// crafted uuid from deleting an arbitrary file.
+func DeleteSessionByUUID(uuid string) (bool, error) {
+	indexPath, err := config.SessionsIndexPath()
+	if err != nil {
+		return false, err
+	}
+	data, err := os.ReadFile(indexPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	var idx sessionIndex
+	if err := json.Unmarshal(data, &idx); err != nil {
+		return false, err
+	}
+	found := false
+	for project, metas := range idx.Sessions {
+		filtered := make([]SessionMeta, 0, len(metas))
+		for _, m := range metas {
+			if m.UUID == uuid {
+				found = true
+				continue
+			}
+			filtered = append(filtered, m)
+		}
+		idx.Sessions[project] = filtered
+	}
+	if !found {
+		return false, nil
+	}
+	newData, err := json.MarshalIndent(&idx, "", "  ")
+	if err != nil {
+		return true, err
+	}
+	tmpPath := indexPath + ".tmp"
+	if err := os.WriteFile(tmpPath, newData, 0644); err != nil {
+		return true, err
+	}
+	if err := os.Rename(tmpPath, indexPath); err != nil {
+		return true, err
+	}
+	dir, err := config.SessionsDir()
+	if err != nil {
+		return true, err
+	}
+	if rmErr := os.Remove(filepath.Join(dir, uuid+".json")); rmErr != nil && !os.IsNotExist(rmErr) {
+		return true, fmt.Errorf("delete session file: %w", rmErr)
+	}
+	return true, nil
+}
+
 func removeFromIndex(project, uuid string) error {
 	indexPath, err := config.SessionsIndexPath()
 	if err != nil {
@@ -710,6 +775,50 @@ func ListSessions(project string) ([]SessionMeta, error) {
 		return nil, err
 	}
 	return idx.Sessions[project], nil
+}
+
+// UpdateSessionMeta finds a session by uuid across all projects, applies mutate
+// to its metadata, and persists the index atomically. Returns the updated meta,
+// or (nil, nil) if no session with that uuid exists. uuid is only compared in
+// memory (never used as a path), so no path validation is required here.
+func UpdateSessionMeta(uuid string, mutate func(*SessionMeta)) (*SessionMeta, error) {
+	indexPath, err := config.SessionsIndexPath()
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(indexPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var idx sessionIndex
+	if err := json.Unmarshal(data, &idx); err != nil {
+		return nil, err
+	}
+	for project, metas := range idx.Sessions {
+		for i := range metas {
+			if metas[i].UUID == uuid {
+				mutate(&metas[i])
+				idx.Sessions[project] = metas
+				newData, err := json.MarshalIndent(&idx, "", "  ")
+				if err != nil {
+					return nil, err
+				}
+				tmpPath := indexPath + ".tmp"
+				if err := os.WriteFile(tmpPath, newData, 0644); err != nil {
+					return nil, err
+				}
+				if err := os.Rename(tmpPath, indexPath); err != nil {
+					return nil, err
+				}
+				updated := metas[i]
+				return &updated, nil
+			}
+		}
+	}
+	return nil, nil
 }
 
 // ListAllSessions returns all sessions across all projects, keyed by project path.

@@ -349,9 +349,9 @@ function formatArgs(args: string): string {
         <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
       </svg>
       <span v-if="renderType === 'diff' && diffData.added + diffData.deleted > 0" class="ml-auto text-[10px] font-mono tabular-nums shrink-0">
-        <span v-if="diffData.added" style="color: var(--color-primary)">+{{ diffData.added }}</span>
+        <span v-if="diffData.added" style="color: var(--color-success-fg)">+{{ diffData.added }}</span>
         <span v-if="diffData.added && diffData.deleted" class="mx-0.5" style="color: var(--color-muted-foreground)">/</span>
-        <span v-if="diffData.deleted" class="text-red-500 dark:text-red-400">-{{ diffData.deleted }}</span>
+        <span v-if="diffData.deleted" style="color: var(--color-error-fg)">-{{ diffData.deleted }}</span>
       </span>
     </button>
 
@@ -373,33 +373,32 @@ function formatArgs(args: string): string {
           <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
         </svg>
         <span v-if="renderType === 'diff' && diffData.added + diffData.deleted > 0" class="ml-auto text-[10px] font-mono tabular-nums shrink-0">
-          <span v-if="diffData.added" style="color: var(--color-primary)">+{{ diffData.added }}</span>
+          <span v-if="diffData.added" style="color: var(--color-success-fg)">+{{ diffData.added }}</span>
           <span v-if="diffData.added && diffData.deleted" class="mx-0.5" style="color: var(--color-muted-foreground)">/</span>
-          <span v-if="diffData.deleted" class="text-red-500 dark:text-red-400">-{{ diffData.deleted }}</span>
+          <span v-if="diffData.deleted" style="color: var(--color-error-fg)">-{{ diffData.deleted }}</span>
         </span>
       </div>
       <!-- Content box: only content gets the border -->
       <div
-        class="overflow-hidden ml-0 mr-2 mt-1 mb-1"
-        :class="tool.status === 'error' ? 'border border-red-300/60 dark:border-red-500/30' : ''"
-        :style="{ borderRadius: 'var(--radius-xl)', border: tool.status !== 'error' ? '1px solid var(--color-border)' : undefined }"
+        class="overflow-hidden ml-0 mr-2 mt-1.5 mb-1.5"
+        :style="{ borderRadius: 'var(--radius-xl)', border: tool.status === 'error' ? '1px solid var(--color-destructive)' : '1px solid var(--color-border)' }"
       >
 
       <!-- ═══════ Terminal (execute) ═══════ -->
-      <div v-if="renderType === 'terminal'" class="bg-[#fafafa] dark:bg-[#0d1117] px-3 py-2 font-mono text-xs max-h-72 overflow-y-auto">
+      <div v-if="renderType === 'terminal'" class="px-3 py-2 font-mono text-xs max-h-72 overflow-y-auto" style="background: var(--color-muted)">
         <div>
-          <span class="text-zinc-400 dark:text-zinc-500 select-none">$ </span>
-          <span class="text-zinc-800 dark:text-zinc-200">{{ terminalCommand }}</span>
+          <span class="select-none" style="color: var(--color-muted-foreground)">$ </span>
+          <span style="color: var(--color-foreground)">{{ terminalCommand }}</span>
         </div>
-        <div v-if="tool.displayOutput || tool.output" class="text-zinc-600 dark:text-zinc-400 mt-1 whitespace-pre-wrap break-all">{{ truncate(tool.displayOutput || tool.output || '', 2000) }}</div>
-        <div v-if="tool.error" class="text-red-600 dark:text-red-400 mt-1 whitespace-pre-wrap">{{ tool.error }}</div>
-        <div v-if="tool.status === 'running'" class="text-zinc-400 dark:text-zinc-500 mt-1 animate-pulse">running…</div>
+        <div v-if="tool.displayOutput || tool.output" class="mt-1 whitespace-pre-wrap break-all" style="color: var(--color-muted-foreground)">{{ truncate(tool.displayOutput || tool.output || '', 2000) }}</div>
+        <div v-if="tool.error" class="mt-1 whitespace-pre-wrap" style="color: var(--color-error-fg)">{{ tool.error }}</div>
+        <div v-if="tool.status === 'running'" class="mt-1 animate-pulse" style="color: var(--color-muted-foreground)">running…</div>
       </div>
 
       <!-- ═══════ File Viewer (read/write) ═══════ -->
-      <div v-else-if="renderType === 'file-viewer'" class="bg-white dark:bg-[#0d1117] max-h-72 overflow-y-auto">
+      <div v-else-if="renderType === 'file-viewer'" class="max-h-72 overflow-y-auto" style="background: var(--color-surface)">
         <table v-if="fileLines.length" class="w-full text-xs font-mono border-collapse">
-          <tr v-for="line in fileLines" :key="line.num" class="hover:bg-zinc-100/50 dark:hover:bg-zinc-800/30">
+          <tr v-for="line in fileLines" :key="line.num" class="hover:bg-[var(--accent-wash-soft)]">
             <td class="text-right select-none pr-3 pl-2 py-0 w-1 align-top whitespace-nowrap" style="color: color-mix(in srgb, var(--color-muted-foreground), transparent 40%)">{{ line.num }}</td>
             <td class="pr-3 py-0 whitespace-pre-wrap break-all" style="color: var(--color-foreground)">{{ line.text }}</td>
           </tr>
@@ -410,27 +409,22 @@ function formatArgs(args: string): string {
       </div>
 
       <!-- ═══════ Diff Viewer (edit/multi_edit) ═══════ -->
-      <div v-else-if="renderType === 'diff'" class="bg-white dark:bg-[#0d1117] max-h-72 overflow-y-auto">
+      <div v-else-if="renderType === 'diff'" class="max-h-72 overflow-y-auto" style="background: var(--color-surface)">
         <table v-if="diffData.sections.length" class="w-full text-xs font-mono border-collapse">
           <template v-for="(section, si) in diffData.sections" :key="si">
             <tr
               v-for="(line, li) in section.lines"
               :key="`${si}-${li}`"
-              :class="{
-                'bg-red-50/80 dark:bg-red-500/10': section.type === 'del',
-                'bg-emerald-50/80 dark:bg-emerald-500/10': section.type === 'add',
-              }"
+              :style="section.type === 'del' ? 'background: var(--color-error-bg)' : section.type === 'add' ? 'background: var(--color-success-bg)' : ''"
             >
               <td class="text-right select-none pr-2 pl-2 py-0 w-1 align-top whitespace-nowrap"
-                :class="{ 'text-red-300 dark:text-red-500/60': section.type === 'del', 'text-emerald-300 dark:text-emerald-500/60': section.type === 'add' }"
-                :style="section.type === 'context' ? 'color: color-mix(in srgb, var(--color-muted-foreground), transparent 40%)' : ''"
+                :style="section.type === 'del' ? 'color: var(--color-error-fg)' : section.type === 'add' ? 'color: var(--color-success-fg)' : 'color: color-mix(in srgb, var(--color-muted-foreground), transparent 40%)'"
               >{{ li + 1 }}</td>
               <td class="px-1 py-0 w-4 select-none font-bold"
-                :class="{ 'text-red-400 dark:text-red-400': section.type === 'del', 'text-emerald-500 dark:text-emerald-400': section.type === 'add' }"
+                :style="section.type === 'del' ? 'color: var(--color-error-fg)' : section.type === 'add' ? 'color: var(--color-success-fg)' : ''"
               >{{ section.type === 'del' ? '-' : section.type === 'add' ? '+' : ' ' }}</td>
               <td class="pr-3 py-0 whitespace-pre-wrap break-all"
-                :class="{ 'text-red-700 dark:text-red-300': section.type === 'del', 'text-emerald-700 dark:text-emerald-300': section.type === 'add' }"
-                :style="section.type === 'context' ? 'color: var(--color-foreground)' : ''"
+                :style="section.type === 'del' ? 'color: var(--color-error-fg)' : section.type === 'add' ? 'color: var(--color-success-fg)' : 'color: var(--color-foreground)'"
               >{{ line }}</td>
             </tr>
           </template>

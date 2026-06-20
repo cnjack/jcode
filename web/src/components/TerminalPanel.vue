@@ -113,7 +113,7 @@ function closeTab(id: string) {
   font-family: var(--font-mono);
   font-weight: 500;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: transparent;
   cursor: pointer;
   color: var(--color-muted-foreground);
@@ -140,7 +140,7 @@ function closeTab(id: string) {
   height: 14px;
   padding: 0;
   border: none;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -173,7 +173,7 @@ function closeTab(id: string) {
   height: 20px;
   border: none;
   background: transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--color-muted-foreground);
   transition: background 0.1s, color 0.1s;

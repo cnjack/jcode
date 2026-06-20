@@ -216,6 +216,17 @@ Start a browser-based UI with `jcode web`. Chat interface, file browser, built-i
   <img src="docs/asset/web-screenshot.png" alt="jcode Web UI" width="800">
 </p>
 
+### 🖥 Desktop App
+
+A native desktop app (built with [Tauri](https://tauri.app)) wraps the same web UI in a real OS window with native integration: OS notifications, a menu-bar tray, close-to-tray, single-instance focus, window-state memory, and a native folder picker. The Go backend runs as an embedded sidecar — no separate server to start.
+
+```bash
+make desktop-dev     # run the app in development
+make desktop-build   # build a distributable bundle (.app/.dmg/.msi)
+```
+
+See the [Desktop App guide](https://cnjack.github.io/jcode/desktop) for the architecture and details.
+
 ### 🧭 Context Awareness
 
 At startup the agent automatically detects:

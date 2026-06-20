@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch, nextTick, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch, nextTick, onUnmounted, inject } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { useTheme } from '@/composables/useTheme'
 import { api } from '@/composables/api'
-import type { MCPServerInfo, MCPServerRequest, SkillInfo, SSHAlias, SetupProvider, SetupModel, ProviderDetail } from '@/types/api'
+import type { MCPServerInfo, MCPServerRequest, SkillInfo, SSHAlias, SetupProvider, SetupModel, ProviderDetail, RemoteMeta } from '@/types/api'
 import QRCode from 'qrcode'
 import {
   Dialog,
@@ -12,6 +12,7 @@ import {
   TransitionRoot,
   TransitionChild,
 } from '@headlessui/vue'
+import { Globe, Zap, MessageSquare, Monitor, Key, Server, ChevronRight, Plus } from 'lucide-vue-next'
 
 const props = defineProps<{
   open: boolean
@@ -22,6 +23,40 @@ const emit = defineEmits<{
 }>()
 
 const store = useChatStore()
+
+// Launch the Remote-connect wizard from the SSH tab (provided by App). We close
+// Settings first so the wizard opens in the workspace context rather than
+// stacking on top of the full-page settings overlay.
+const openRemoteConnect = inject<(prefill?: RemoteMeta & { loadTaskUuid?: string }) => void>('openRemoteConnect')
+
+// Open the wizard ON TOP of Settings (it stacks above via DOM order), rather
+// than closing Settings first — that dumped the user back to the workspace
+// (welcome) behind the wizard. Cancelling the wizard now returns to Settings;
+// only a successful bind closes Settings (App handles @bound → go to the new
+// remote workspace).
+function launchWizard(prefill?: RemoteMeta) {
+  openRemoteConnect?.(prefill)
+}
+
+function openRemoteWizard() {
+  launchWizard()
+}
+
+function connectToAlias(alias: SSHAlias) {
+  // addr is "user@host" where host may include ":port" (mirrors the wizard's
+  // applyAlias parsing) → build a prefill the wizard jumps straight into.
+  const at = alias.addr.indexOf('@')
+  const user = at >= 0 ? alias.addr.slice(0, at) : 'root'
+  let host = at >= 0 ? alias.addr.slice(at + 1) : alias.addr
+  let port = 22
+  const colon = host.lastIndexOf(':')
+  if (colon >= 0) {
+    port = parseInt(host.slice(colon + 1), 10) || 22
+    host = host.slice(0, colon)
+  }
+  launchWizard({ host, port, user, remotePath: alias.path || '' })
+}
+
 const { themeChoice, setTheme, themes } = useTheme()
 const darkThemes = computed(() => themes.filter((t) => t.appearance === 'dark'))
 const lightThemes = computed(() => themes.filter((t) => t.appearance === 'light'))
@@ -107,7 +142,7 @@ async function toggleMCP(name: string, enabled: boolean) {
 }
 
 function serverIcon(type: string) {
-  return type === 'sse' || type === 'http' ? '🌐' : '⚡'
+  return type === 'sse' || type === 'http' ? Globe : Zap
 }
 
 function mcpStatusLabel(info: MCPServerInfo): string {
@@ -500,7 +535,8 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
 
 <template>
   <TransitionRoot :show="open" as="template">
-    <Dialog @close="emit('close')" class="relative z-50">
+    <Dialog @close="emit('close')" class="relative" style="z-index: var(--z-modal)">
+      <!-- Opaque page background: settings is a full page, not a floating modal. -->
       <TransitionChild
         enter="ease-out duration-150"
         enter-from="opacity-0"
@@ -508,42 +544,33 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
         leave="ease-in duration-100"
         leave-from="opacity-100"
         leave-to="opacity-0">
-        <div class="fixed inset-0" style="background: rgba(8,8,8,0.5); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px)" />
+        <div class="fixed inset-0" style="background: var(--color-background)" />
       </TransitionChild>
 
-      <div class="fixed inset-0 flex items-center justify-center p-4 sm:p-6">
+      <!-- Edge-to-edge full page. -->
+      <div class="fixed inset-0 flex">
         <TransitionChild
-          enter="ease-out duration-150"
-          enter-from="opacity-0 scale-[0.98] translate-y-1"
-          enter-to="opacity-100 scale-100 translate-y-0"
+          class="w-full h-full"
+          enter="ease-out duration-200"
+          enter-from="opacity-0 scale-[0.995]"
+          enter-to="opacity-100 scale-100"
           leave="ease-in duration-100"
-          leave-from="opacity-100 scale-100 translate-y-0"
-          leave-to="opacity-0 scale-[0.98] translate-y-1">
-          <!-- Fixed footprint: h-[min(...)] (NOT max-h) so the panel never resizes or re-centers between tabs. -->
+          leave-from="opacity-100 scale-100"
+          leave-to="opacity-0 scale-[0.995]">
+          <!-- Mirrors the chat page shell: full-height left rail + right column
+               with a transparent top bar and an inset surface content panel. -->
           <DialogPanel
-            class="flex flex-col w-[min(880px,94vw)] h-[min(620px,86vh)] overflow-hidden"
-            style="border-radius: var(--radius-xl); background-color: var(--color-surface); border: 1px solid var(--color-border); box-shadow: var(--shadow-lg)"
+            class="settings-shell relative flex w-full h-full overflow-hidden"
+            style="background-color: var(--color-background)"
           >
-            <!-- Header -->
-            <div class="flex items-center gap-2.5 px-5 h-14 shrink-0" style="border-bottom: 1px solid var(--color-border); background-color: var(--color-sidebar-bg)">
-              <span class="w-[5px] h-[5px] rounded-[1px]" style="background-color: var(--color-primary)" />
-              <DialogTitle class="text-[13px] font-semibold tracking-tight" style="font-family: var(--font-sans); color: var(--color-foreground)">Settings</DialogTitle>
-              <button
-                class="ml-auto grid place-items-center w-7 h-7 rounded-md transition-colors cursor-pointer hover:bg-[var(--color-secondary)]"
-                style="color: var(--color-muted-foreground)"
-                aria-label="Close"
-                @click="emit('close')"
-              >
-                <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
-                  <path d="M5 5l10 10M15 5L5 15" stroke-linecap="round" />
-                </svg>
-              </button>
-            </div>
+            <!-- Native macOS title-bar drag strip, matching the workspace shell
+                 so Settings has the same top inset / draggable region. -->
+            <div class="titlebar-drag" data-tauri-drag-region aria-hidden="true" />
 
-            <!-- Body: nav rail + single scrolling content column. min-h-0 on both levels is required for the scroll fix. -->
-            <div class="flex flex-1 min-h-0">
-              <!-- Nav rail -->
-              <nav class="shrink-0 w-[200px] py-2 px-2 overflow-y-auto flex flex-col gap-0.5" style="border-right: 1px solid var(--color-border); background-color: var(--color-sidebar-bg)">
+            <!-- Left rail (shell tone, like the sidebar): back-to-workspace at
+                 the top, then the section nav. -->
+            <nav class="settings-rail shrink-0 flex flex-col">
+              <div class="flex flex-col gap-0.5">
                 <button
                   v-for="tab in (['general', 'appearance', 'providers', 'mcp', 'skills', 'ssh', 'channels', 'shortcuts'] as const)"
                   :key="tab"
@@ -557,11 +584,32 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                   <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" v-html="iconFor[tab]" />
                   <span class="truncate">{{ tabLabel[tab] }}</span>
                 </button>
-              </nav>
+              </div>
+              <!-- A second "Back to workspace" pinned to the bottom of the rail:
+                   settings is opened from the sidebar's bottom gear, so returning
+                   shouldn't require traveling all the way back to the top. -->
+              <button
+                class="settings-back group mt-auto flex items-center gap-1.5 h-9 px-2.5 rounded-md text-[13px] font-medium transition-colors cursor-pointer"
+                @click="emit('close')"
+              >
+                <svg class="w-4 h-4 transition-transform group-hover:-translate-x-0.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M11.5 5L6.5 10l5 5M6.5 10H16" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                Back to workspace
+              </button>
+            </nav>
 
-              <!-- Content frame (surface). Only the inner div scrolls. -->
-              <div class="flex-1 min-w-0 flex flex-col min-h-0" style="background-color: var(--color-surface)">
-                <div class="flex-1 min-h-0 overflow-y-auto px-6 py-5">
+            <!-- Right column: just the inset surface content panel — no header
+                 bar. The active section is shown by the rail; close via the
+                 rail's "Back to workspace" or Esc. A visually-hidden title keeps
+                 the dialog accessible. -->
+            <div class="flex flex-col flex-1 min-w-0">
+              <DialogTitle class="sr-only">Settings · {{ tabLabel[activeTab] }}</DialogTitle>
+
+              <!-- Inset content panel — matches .chat-panel. Only the inner div
+                   scrolls; each tab block is centered and width-capped. -->
+              <div class="settings-panel flex flex-col flex-1 min-h-0">
+                <div class="flex-1 min-h-0 overflow-y-auto px-8 py-7 [&>div]:max-w-3xl [&>div]:mx-auto">
                 <!-- General tab -->
                 <div v-if="activeTab === 'general'" class="space-y-5">
                   <div class="flex items-center gap-2">
@@ -623,16 +671,16 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                   <button
                     class="w-full flex items-center gap-3 px-3 py-2.5 rounded-md cursor-pointer transition-colors text-left"
                     :style="themeChoice === 'system'
-                      ? { border: '1px solid var(--color-primary)', backgroundColor: 'rgba(255,132,0,0.08)' }
+                      ? { border: '1px solid var(--color-primary)', backgroundColor: 'var(--accent-wash-soft)' }
                       : { border: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface)' }"
                     @click="setTheme('system')"
                   >
-                    <span class="text-sm">🖥</span>
+                    <Monitor :size="15" style="color: var(--color-muted-foreground)" />
                     <div class="flex-1 min-w-0">
                       <div class="text-xs font-medium" style="color: var(--color-foreground)">System</div>
                       <div class="text-[10px]" style="color: var(--color-muted-foreground)">Follow your OS light / dark setting</div>
                     </div>
-                    <span v-if="themeChoice === 'system'" class="text-[10px] px-1.5 py-0.5 rounded-full shrink-0" style="background-color: rgba(255,132,0,0.12); color: var(--color-primary)">active</span>
+                    <span v-if="themeChoice === 'system'" class="text-[10px] px-1.5 py-0.5 rounded-full shrink-0" style="background-color: var(--accent-wash); color: var(--color-primary)">active</span>
                   </button>
 
                   <!-- Dark themes -->
@@ -710,8 +758,8 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       <span class="text-[11px] font-mono" style="color: var(--color-muted-foreground)">{{ configuredProviders.length }}</span>
                     </div>
                     <button
-                      class="h-7 px-2.5 text-[11px] font-medium rounded-md cursor-pointer transition-colors hover:bg-[rgba(255,132,0,0.16)]"
-                      style="color: var(--color-primary); background-color: rgba(255,132,0,0.1)"
+                      class="h-7 px-2.5 text-[11px] font-medium rounded-md cursor-pointer transition-colors hover:bg-[var(--accent-wash-strong)]"
+                      style="color: var(--color-primary); background-color: var(--accent-wash)"
                       @click="startAddProvider"
                     >
                       + Add provider
@@ -802,7 +850,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       class="flex items-center gap-3 px-3 py-2.5 rounded-md"
                       style="border: 1px solid var(--color-border); background-color: var(--color-surface)"
                     >
-                      <span class="text-sm">🔑</span>
+                      <Key :size="15" style="color: var(--color-muted-foreground)" />
                       <div class="flex-1 min-w-0">
                         <div class="text-xs font-medium font-mono" style="color: var(--color-foreground)">{{ p.id }}</div>
                         <div class="text-[10px] font-mono truncate" style="color: var(--color-muted-foreground)">
@@ -813,7 +861,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       <span
                         v-if="store.providerName === p.id"
                         class="text-[10px] px-1.5 py-0.5 rounded-full"
-                        style="background-color: rgba(255,132,0,0.1); color: var(--color-primary)"
+                        style="background-color: var(--accent-wash); color: var(--color-primary)"
                       >
                         active
                       </span>
@@ -843,8 +891,8 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     </div>
                     <button
                       v-if="mcpEditing === null"
-                      class="h-7 px-2.5 text-[11px] font-medium rounded-md cursor-pointer transition-colors hover:bg-[rgba(255,132,0,0.16)]"
-                      style="color: var(--color-primary); background-color: rgba(255,132,0,0.1)"
+                      class="h-7 px-2.5 text-[11px] font-medium rounded-md cursor-pointer transition-colors hover:bg-[var(--accent-wash-strong)]"
+                      style="color: var(--color-primary); background-color: var(--accent-wash)"
                       @click="openAddMCP"
                     >+ Add server</button>
                   </div>
@@ -1014,7 +1062,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       }"
                     >
                       <div class="flex items-center gap-3">
-                        <span class="text-sm">{{ serverIcon(info.type) }}</span>
+                        <component :is="serverIcon(info.type)" :size="15" style="color: var(--color-muted-foreground)" />
                         <div class="flex-1 min-w-0">
                           <div class="flex items-center gap-2">
                             <span class="text-xs font-medium" style="color: var(--color-foreground)">{{ name }}</span>
@@ -1126,11 +1174,20 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
 
                 <!-- SSH tab -->
                 <div v-if="activeTab === 'ssh'">
-                  <h3 class="text-[13px] font-semibold tracking-tight mb-4" style="color: var(--color-foreground)">SSH Environments</h3>
+                  <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-[13px] font-semibold tracking-tight" style="color: var(--color-foreground)">SSH Environments</h3>
+                    <button
+                      class="inline-flex items-center gap-1.5 px-3 h-8 rounded-md text-[12.5px] font-medium cursor-pointer transition-colors hover:bg-[var(--color-secondary)]"
+                      style="border: 1px solid var(--color-border); color: var(--color-foreground)"
+                      @click="openRemoteWizard"
+                    >
+                      <Plus :size="14" /> Connect to remote host
+                    </button>
+                  </div>
 
                   <div class="mb-3">
                     <div class="text-[11px] font-medium mb-1" style="color: var(--color-muted-foreground)">Current Environment</div>
-                    <div class="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium" style="background-color: rgba(255,132,0,0.1); color: var(--color-primary)">
+                    <div class="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium" style="background-color: var(--accent-wash); color: var(--color-primary)">
                       <span class="w-1.5 h-1.5 rounded-full" style="background-color: var(--color-primary)" />
                       {{ sshCurrent }}
                     </div>
@@ -1140,19 +1197,21 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     <div class="w-9 h-9 grid place-items-center rounded-lg" style="background-color: var(--color-secondary); color: var(--color-muted-foreground)">
                       <svg class="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" v-html="iconFor.ssh" />
                     </div>
-                    <div class="text-[13px] font-medium" style="color: var(--color-foreground)">No SSH aliases configured</div>
-                    <div class="text-[11px] leading-relaxed max-w-[240px]" style="color: var(--color-muted-foreground)">
-                      Add aliases to <span class="font-mono">~/.jcode/config.json</span>.
+                    <div class="text-[13px] font-medium" style="color: var(--color-foreground)">No saved hosts</div>
+                    <div class="text-[11px] leading-relaxed max-w-[270px]" style="color: var(--color-muted-foreground)">
+                      Use <span style="color: var(--color-foreground)">Connect to remote host</span> to add one, or pre-configure hosts in <span class="font-mono">~/.jcode/config.json</span>.
                     </div>
                   </div>
                   <div v-else class="space-y-2">
-                    <div
+                    <button
                       v-for="alias in sshAliases"
                       :key="alias.name"
-                      class="flex items-center gap-3 px-3 py-2.5 rounded-md"
+                      class="group w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-left cursor-pointer transition-colors hover:bg-[var(--color-secondary)]"
                       style="border: 1px solid var(--color-border); background-color: var(--color-surface)"
+                      :title="`Connect to ${alias.name}`"
+                      @click="connectToAlias(alias)"
                     >
-                      <span class="text-sm">🖥</span>
+                      <Server :size="15" style="color: var(--color-muted-foreground)" />
                       <div class="flex-1 min-w-0">
                         <div class="text-xs font-medium" style="color: var(--color-foreground)">{{ alias.name }}</div>
                         <div class="text-[10px] font-mono truncate" style="color: var(--color-muted-foreground)">
@@ -1163,11 +1222,12 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       <span
                         v-if="sshCurrent === alias.name"
                         class="text-[10px] px-1.5 py-0.5 rounded-full"
-                        style="background-color: rgba(255,132,0,0.1); color: var(--color-primary)"
+                        style="background-color: var(--accent-wash); color: var(--color-primary)"
                       >
                         active
                       </span>
-                    </div>
+                      <ChevronRight :size="15" class="opacity-0 group-hover:opacity-100 transition-opacity" style="color: var(--color-muted-foreground)" />
+                    </button>
                   </div>
                 </div>
 
@@ -1189,7 +1249,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     <div class="px-4 py-3 rounded-md" style="border: 1px solid var(--color-border); background-color: var(--color-surface)">
                       <div class="flex items-center justify-between mb-3">
                         <div class="flex items-center gap-2">
-                          <span class="text-base">💬</span>
+                          <MessageSquare :size="16" style="color: var(--color-muted-foreground)" />
                           <div>
                             <div class="text-xs font-medium" style="color: var(--color-foreground)">WeChat</div>
                             <div class="text-[10px]" style="color: var(--color-muted-foreground)">iLink Bot integration</div>
@@ -1284,24 +1344,47 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                 </div>
               </div>
             </div>
-
-            <!-- Footer: keyboard hint + low-chroma Done -->
-            <div class="flex items-center px-5 h-12 shrink-0" style="border-top: 1px solid var(--color-border); background-color: var(--color-sidebar-bg)">
-              <span class="text-[11px] flex items-center gap-1.5" style="color: var(--color-muted-foreground)">
-                Press
-                <kbd class="px-1.5 py-0.5 text-[10px] font-mono rounded" style="background-color: var(--color-secondary); border: 1px solid var(--color-border); color: var(--color-muted-foreground)">Esc</kbd>
-                to close
-              </span>
-              <button
-                class="ml-auto h-7 px-3 text-xs font-medium rounded-md cursor-pointer transition-colors hover:bg-[rgba(255,132,0,0.16)]"
-                style="color: var(--color-primary); background-color: rgba(255,132,0,0.1)"
-                @click="emit('close')">
-                Done
-              </button>
-            </div>
           </DialogPanel>
         </TransitionChild>
       </div>
     </Dialog>
   </TransitionRoot>
 </template>
+
+<style scoped>
+/* Left rail mirrors the chat sidebar: same width + shell tone, no border. */
+.settings-rail {
+  width: var(--sidebar-width);
+  padding: 12px;
+  overflow-y: auto;
+  background: var(--color-background);
+}
+
+.settings-back {
+  color: var(--color-muted-foreground);
+}
+.settings-back:hover {
+  background: var(--color-secondary);
+  color: var(--color-foreground);
+}
+
+/* Inset content panel — identical treatment to App.vue's .chat-panel so the two
+   pages read as the same layout. */
+.settings-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2xl);
+  margin: 4px 14px 14px;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+@media (max-width: 640px) {
+  .settings-rail {
+    width: 100%;
+  }
+  .settings-panel {
+    margin: 2px 8px 8px;
+  }
+}
+</style>

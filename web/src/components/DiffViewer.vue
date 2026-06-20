@@ -40,11 +40,11 @@ const totalChanges = computed(() => ({
   deletions: entries.value.reduce((sum, e) => sum + e.deletions, 0),
 }))
 
-function statusBadge(status: string) {
+function statusBadge(status: string): { label: string; style: Record<string, string> } {
   switch (status) {
-    case 'A': return { label: 'A', cls: 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' }
-    case 'D': return { label: 'D', cls: 'bg-red-100 dark:bg-red-500/15 text-red-700 dark:text-red-400' }
-    default: return { label: 'M', cls: 'bg-amber-100 dark:bg-amber-500/15 text-amber-700 dark:text-amber-400' }
+    case 'A': return { label: 'A', style: { background: 'var(--color-success-bg)', color: 'var(--color-success-fg)' } }
+    case 'D': return { label: 'D', style: { background: 'var(--color-error-bg)', color: 'var(--color-error-fg)' } }
+    default: return { label: 'M', style: { background: 'var(--color-warning-bg)', color: 'var(--color-warning-fg)' } }
   }
 }
 
@@ -68,19 +68,17 @@ onMounted(fetchDiff)
 </script>
 
 <template>
-  <div class="flex flex-col h-full bg-zinc-50 dark:bg-zinc-900">
+  <div class="flex flex-col h-full" style="background: var(--color-background)">
     <!-- Header -->
-    <div class="flex items-center justify-between px-3 py-1.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-100/80 dark:bg-zinc-800/80">
+    <div class="flex items-center justify-between px-3 py-1.5" style="border-bottom: 1px solid var(--color-border); background: var(--color-sidebar-bg)">
       <div class="flex items-center gap-2">
-        <span class="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Changes</span>
+        <span class="text-[11px] font-semibold uppercase tracking-wider" style="color: var(--color-muted-foreground)">Changes</span>
         <div class="flex gap-0.5">
           <button
             v-for="m in modes"
             :key="m.value"
-            class="px-1.5 py-0.5 text-[10px] rounded cursor-pointer transition-colors font-medium"
-            :class="mode === m.value
-              ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
-              : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700'"
+            class="dv-mode px-1.5 py-0.5 text-[10px] rounded cursor-pointer transition-colors font-medium"
+            :class="{ active: mode === m.value }"
             @click="mode = m.value; fetchDiff()"
           >
             {{ m.label }}
@@ -89,12 +87,12 @@ onMounted(fetchDiff)
       </div>
       <div class="flex items-center gap-2">
         <span v-if="totalChanges.additions || totalChanges.deletions" class="text-[10px] font-mono">
-          <span class="text-emerald-600 dark:text-emerald-400">+{{ totalChanges.additions }}</span>
-          <span class="text-zinc-300 dark:text-zinc-600 mx-0.5">/</span>
-          <span class="text-red-500 dark:text-red-400">-{{ totalChanges.deletions }}</span>
+          <span style="color: var(--color-success-fg)">+{{ totalChanges.additions }}</span>
+          <span class="mx-0.5" style="color: var(--color-border)">/</span>
+          <span style="color: var(--color-error-fg)">-{{ totalChanges.deletions }}</span>
         </span>
         <button
-          class="text-[10px] text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer transition-colors font-medium"
+          class="dv-mute text-[10px] cursor-pointer transition-colors font-medium"
           @click="fetchDiff"
         >
           ↻ Refresh
@@ -104,61 +102,54 @@ onMounted(fetchDiff)
 
     <div class="flex flex-col flex-1 min-h-0">
       <!-- File list -->
-      <div class="border-b border-zinc-200 dark:border-zinc-800 overflow-y-auto shrink-0 max-h-[30%]">
-        <div v-if="entries.length === 0 && !loading" class="text-center text-[11px] text-zinc-400 dark:text-zinc-500 py-6">
+      <div class="overflow-y-auto shrink-0 max-h-[30%]" style="border-bottom: 1px solid var(--color-border)">
+        <div v-if="entries.length === 0 && !loading" class="text-center text-[11px] py-6" style="color: var(--color-muted-foreground)">
           No changes
         </div>
-        <div v-if="loading" class="text-center text-[11px] text-zinc-400 dark:text-zinc-500 py-6 animate-pulse">
+        <div v-if="loading" class="text-center text-[11px] py-6 animate-pulse" style="color: var(--color-muted-foreground)">
           Loading...
         </div>
         <button
           v-for="entry in entries"
           :key="entry.file"
-          class="w-full flex items-center gap-1.5 px-2 py-1.5 text-left cursor-pointer transition-colors"
-          :class="selectedFile === entry.file
-            ? 'bg-emerald-50 dark:bg-emerald-500/10 text-zinc-700 dark:text-zinc-200'
-            : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'"
+          class="dv-file w-full flex items-center gap-1.5 px-2 py-1.5 text-left cursor-pointer transition-colors"
+          :class="{ active: selectedFile === entry.file }"
           @click="selectedFile = entry.file"
         >
           <span
             class="text-[9px] font-bold rounded px-1 py-px shrink-0"
-            :class="statusBadge(entry.status).cls"
+            :style="statusBadge(entry.status).style"
           >
             {{ statusBadge(entry.status).label }}
           </span>
           <span class="text-[11px] font-mono truncate">{{ entry.file.split('/').pop() }}</span>
           <span class="text-[9px] font-mono ml-auto shrink-0">
-            <span class="text-emerald-600 dark:text-emerald-400">+{{ entry.additions }}</span>
-            <span class="text-red-500 dark:text-red-400 ml-0.5">-{{ entry.deletions }}</span>
+            <span style="color: var(--color-success-fg)">+{{ entry.additions }}</span>
+            <span class="ml-0.5" style="color: var(--color-error-fg)">-{{ entry.deletions }}</span>
           </span>
         </button>
       </div>
 
       <!-- Diff content -->
       <div class="flex-1 overflow-auto">
-        <div v-if="!selectedEntry" class="text-center text-[11px] text-zinc-400 dark:text-zinc-500 py-8">
+        <div v-if="!selectedEntry" class="text-center text-[11px] py-8" style="color: var(--color-muted-foreground)">
           Select a file to view changes
         </div>
         <div v-else>
-          <div class="px-3 py-1.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-100/50 dark:bg-zinc-800/50">
-            <span class="text-[11px] font-mono text-zinc-600 dark:text-zinc-300">{{ selectedEntry.file }}</span>
+          <div class="px-3 py-1.5" style="border-bottom: 1px solid var(--color-border); background: var(--color-muted)">
+            <span class="text-[11px] font-mono" style="color: var(--color-foreground)">{{ selectedEntry.file }}</span>
             <span class="text-[10px] font-mono ml-2">
-              <span class="text-emerald-600 dark:text-emerald-400">+{{ selectedEntry.additions }}</span>
-              <span class="text-zinc-300 dark:text-zinc-600 mx-0.5">/</span>
-              <span class="text-red-500 dark:text-red-400">-{{ selectedEntry.deletions }}</span>
+              <span style="color: var(--color-success-fg)">+{{ selectedEntry.additions }}</span>
+              <span class="mx-0.5" style="color: var(--color-border)">/</span>
+              <span style="color: var(--color-error-fg)">-{{ selectedEntry.deletions }}</span>
             </span>
           </div>
           <div class="font-mono text-[11px] leading-5">
             <div
               v-for="(line, i) in parsePatchLines(selectedEntry.patch)"
               :key="i"
-              class="px-3 border-l-2"
-              :class="{
-                'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-400 dark:border-emerald-500/40 text-emerald-800 dark:text-emerald-300': line.type === 'add',
-                'bg-red-50 dark:bg-red-500/10 border-red-400 dark:border-red-500/40 text-red-800 dark:text-red-300': line.type === 'del',
-                'bg-blue-50 dark:bg-blue-500/10 border-blue-300 dark:border-blue-500/40 text-blue-600 dark:text-blue-300': line.type === 'hunk',
-                'border-transparent text-zinc-500 dark:text-zinc-400': line.type === 'ctx',
-              }"
+              class="dv-line px-3 border-l-2"
+              :class="`dv-${line.type}`"
             >
               <pre class="whitespace-pre-wrap">{{ line.text }}</pre>
             </div>
@@ -168,3 +159,57 @@ onMounted(fetchDiff)
     </div>
   </div>
 </template>
+
+<style scoped>
+.dv-mode {
+  color: var(--color-muted-foreground);
+}
+.dv-mode:hover {
+  color: var(--color-foreground);
+  background: var(--color-muted);
+}
+.dv-mode.active {
+  background: var(--accent-wash);
+  color: var(--color-primary);
+}
+
+.dv-mute {
+  color: var(--color-muted-foreground);
+}
+.dv-mute:hover {
+  color: var(--color-foreground);
+}
+
+.dv-file {
+  color: var(--color-muted-foreground);
+}
+.dv-file:hover {
+  background: var(--color-muted);
+}
+.dv-file.active {
+  background: var(--accent-wash-soft);
+  color: var(--color-foreground);
+}
+
+.dv-line {
+  border-color: transparent;
+}
+.dv-add {
+  background: var(--color-success-bg);
+  border-color: var(--color-success-fg);
+  color: var(--color-success-fg);
+}
+.dv-del {
+  background: var(--color-error-bg);
+  border-color: var(--color-error-fg);
+  color: var(--color-error-fg);
+}
+.dv-hunk {
+  background: var(--color-info-bg);
+  border-color: var(--color-info-fg);
+  color: var(--color-info-fg);
+}
+.dv-ctx {
+  color: var(--color-muted-foreground);
+}
+</style>

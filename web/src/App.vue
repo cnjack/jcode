@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch, onUnmounted } from 'vue'
+import { ref, onMounted, nextTick, watch, onUnmounted, provide } from 'vue'
 import { normalizeMode } from '@/types/api'
+import type { RemoteMeta } from '@/types/api'
 import { useChatStore } from '@/stores/chat'
 import { useProjectStore } from '@/stores/project'
 import { useWebSocket } from '@/composables/ws'
 import { useTheme } from '@/composables/useTheme'
+import { useBranch } from '@/composables/useBranch'
 import ChatMessageVue from '@/components/ChatMessage.vue'
 import ToolCallCard from '@/components/ToolCallCard.vue'
 import ApprovalBanner from '@/components/ApprovalBanner.vue'
@@ -13,19 +15,58 @@ import ChatInput from '@/components/ChatInput.vue'
 import Sidebar from '@/components/Sidebar.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
 import ProjectSwitcher from '@/components/ProjectSwitcher.vue'
+import RemoteConnectWizard from '@/components/RemoteConnectWizard.vue'
 import TerminalPanel from '@/components/TerminalPanel.vue'
 import RightPanel from '@/components/RightPanel.vue'
 import SetupView from '@/components/SetupView.vue'
 import TopBar from '@/components/TopBar.vue'
+import CommandPalette from '@/components/CommandPalette.vue'
+import { useNotifications } from '@/composables/notifications'
 
 const store = useChatStore()
 const projectStore = useProjectStore()
 const { resolvedTheme, toggleTheme } = useTheme()
+const { refresh: refreshBranch } = useBranch()
+const { ensurePermission, notify } = useNotifications()
 const messagesEl = ref<HTMLDivElement | null>(null)
 const settingsOpen = ref(false)
 const projectsOpen = ref(false)
-const sidebarCollapsed = ref(false)
+const paletteOpen = ref(false)
+
+// Remote-connect (SSH) wizard. `openRemoteConnect` is provided to descendants
+// (WorkspacePicker, ProjectSwitcher, Sidebar) so any of them can launch or
+// prefill it for a reconnect.
+const remoteWizardOpen = ref(false)
+const remotePrefill = ref<(RemoteMeta & { loadTaskUuid?: string }) | null>(null)
+function openRemoteConnect(prefill?: RemoteMeta & { loadTaskUuid?: string }) {
+  remotePrefill.value = prefill ?? null
+  remoteWizardOpen.value = true
+}
+provide('openRemoteConnect', openRemoteConnect)
+
+// When the wizard is launched from Settings it stacks ON TOP of the Settings
+// overlay. headlessui treats a click inside the wizard as an "outside" click for
+// Settings and would dismiss it (dropping the user back to the workspace), so we
+// ignore Settings' close requests while the wizard is open. Settings then closes
+// only via its own Back button, or programmatically when a remote bind succeeds.
+function onSettingsClose() {
+  if (remoteWizardOpen.value) return
+  settingsOpen.value = false
+}
 const needsSetup = ref(false)
+
+// Honor reduced-motion for the new-task ↔ conversation composer transition.
+const reduceMotion = ref(
+  typeof window !== 'undefined' && window.matchMedia
+    ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    : false,
+)
+
+function onPaletteAction(name: 'settings' | 'projects' | 'theme') {
+  if (name === 'settings') settingsOpen.value = true
+  else if (name === 'projects') projectsOpen.value = true
+  else if (name === 'theme') toggleTheme()
+}
 
 const bottomPanel = ref<'none' | 'terminal'>('none')
 const bottomPanelHeight = ref(260)
@@ -60,10 +101,16 @@ const { connected } = useWebSocket({
   onToolCall: (data) => store.addToolCall(data.name, data.args, data.tool_call_id, data.display_info),
   onToolResult: (data) => store.resolveToolCall(data.name, data.output, data.tool_call_id, data.error, data.display_output),
   onTokenUpdate: (data) => { store.tokenInfo = data },
-  onAgentDone: (data) => store.agentDone(data?.error),
+  onAgentDone: (data) => {
+    store.agentDone(data?.error)
+    notify(data?.error ? 'jcode — task failed' : 'jcode — task finished', data?.error || 'The agent finished its run.')
+  },
   onTodoUpdate: () => store.fetchTodos(),
   onGoalUpdate: (data) => { store.goal = data },
-  onApprovalRequest: (data) => store.addApprovalRequest(data),
+  onApprovalRequest: (data) => {
+    store.addApprovalRequest(data)
+    notify('jcode — approval needed', 'The agent is waiting for your approval.')
+  },
   onAskUserRequest: (data) => store.attachAskUserRequest(data.id, data.questions),
   onSessionReset: () => store.clearChat(),
   onModelChanged: (data) => {
@@ -102,6 +149,11 @@ watch(
 
 // Global keyboard shortcuts
 function handleGlobalKeydown(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+    e.preventDefault()
+    paletteOpen.value = !paletteOpen.value
+    return
+  }
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'N') {
     e.preventDefault()
     store.newSession()
@@ -137,15 +189,11 @@ function handleGlobalKeydown(e: KeyboardEvent) {
     togglePanel('plan')
     return
   }
-  if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
-    e.preventDefault()
-    sidebarCollapsed.value = !sidebarCollapsed.value
-    return
-  }
 }
 
 onMounted(async () => {
   document.addEventListener('keydown', handleGlobalKeydown)
+  ensurePermission()
   const health = await store.fetchHealth()
   // Check if setup is needed — health returns needs_setup status
   if (health?.needs_setup) {
@@ -155,6 +203,7 @@ onMounted(async () => {
   store.fetchConfig()
   store.fetchTodos()
   store.fetchGoal()
+  refreshBranch()
   store.fetchModels()
   store.fetchModelState()
   store.fetchSessions()
@@ -199,6 +248,13 @@ function togglePanel(panel: 'terminal' | 'files' | 'changes' | 'plan') {
 const planAutoOpened = ref(false)
 // Elapsed-time counter for the "Thinking…" footer; ticks once per second while
 // the agent runs, resets on each new run. Appears in the UI only after 2s.
+// Re-read the git branch whenever the active workspace changes (every switch
+// path — the composer's WorkspacePicker, the projects modal, opening a task in
+// another project, a remote connect — funnels through fetchHealth, which updates
+// store.pwd). Without this, switching from a non-git workspace to a git one left
+// the branch picker blank.
+watch(() => store.pwd, (pwd) => { if (pwd) refreshBranch() })
+
 const elapsed = ref(0)
 let runTimer: ReturnType<typeof setInterval> | null = null
 watch(() => store.isRunning, (running) => {
@@ -225,6 +281,7 @@ async function onProjectSwitched() {
   store.clearChat()
   store.fetchTodos()
   store.fetchGoal()
+  refreshBranch()
   store.fetchSessions()
   // Restore the current session for the new project
   await store.restoreCurrentSession()
@@ -236,6 +293,7 @@ function onSetupComplete() {
   store.fetchConfig()
   store.fetchTodos()
   store.fetchGoal()
+  refreshBranch()
   store.fetchModels()
   store.fetchModelState()
   store.fetchSessions()
@@ -267,130 +325,175 @@ function startResize(e: MouseEvent) {
 </script>
 
 <template>
-  <div class="flex h-[100dvh] overflow-hidden transition-colors duration-300" style="background: var(--color-background); color: var(--color-foreground);">
-    <!-- Sidebar -->
-    <transition
-      enter-active-class="transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
-      enter-from-class="-translate-x-full opacity-0"
-      enter-to-class="translate-x-0 opacity-100"
-      leave-active-class="transition-all duration-200 ease-[cubic-bezier(0.7,0,0.84,0)]"
-      leave-from-class="translate-x-0 opacity-100"
-      leave-to-class="-translate-x-full opacity-0"
-    >
-      <Sidebar
-        v-show="!sidebarCollapsed"
-        @open-file="openFile"
-        @open-settings="settingsOpen = true"
-        @open-projects="projectsOpen = true"
-        @toggle-theme="toggleTheme"
-        :resolved-theme="resolvedTheme"
-      />
-    </transition>
+  <!-- One continuous surface: sidebar, top bar and chat area share a single
+       background with no hard dividers, so the regions read as one enclosed
+       space (包裹感) rather than separately-bordered panels. -->
+  <div class="app-shell relative flex h-[100dvh] overflow-hidden transition-colors duration-300" style="background: var(--color-background); color: var(--color-foreground);">
+    <!-- Native title-bar drag strip. Only rendered (via CSS) inside the macOS
+         desktop shell, where the window uses an overlay title bar: it reserves
+         the band the traffic-light buttons float over and lets the user drag
+         the window. A no-op empty element in the browser. -->
+    <div class="titlebar-drag" data-tauri-drag-region aria-hidden="true" />
 
-    <!-- Main content -->
+    <!-- The single top-right control (panel menu + connection dot), floated into
+         the title-bar zone — there is no separate top bar anymore. -->
+    <TopBar
+      :is-running="store.isRunning"
+      :ws-connected="store.wsConnected"
+      :active-panel="rightPanelOpen ? rightPanelTab : 'none'"
+      :terminal-open="bottomPanel === 'terminal'"
+      @toggle-panel="togglePanel"
+    />
+
+    <!-- Sidebar — always visible (no collapse toggle on the desktop shell). -->
+    <Sidebar
+      @open-file="openFile"
+      @open-settings="settingsOpen = true"
+      @open-projects="projectsOpen = true"
+      @toggle-theme="toggleTheme"
+      :resolved-theme="resolvedTheme"
+    />
+
+    <!-- Main content — shell tone (same as sidebar); the conversation lives in
+         an inset surface panel below, so it reads as one continuous shell that
+         wraps a distinct chat canvas (包裹感). -->
     <main class="flex-1 flex flex-col min-w-0 relative">
-      <!-- Top Bar -->
-      <TopBar
-        :project-name="store.projectName || 'jcode'"
-        :pwd="store.pwd || ''"
-        :is-running="store.isRunning"
-        :ws-connected="store.wsConnected"
-        :active-panel="rightPanelOpen ? rightPanelTab : 'none'"
-        :terminal-open="bottomPanel === 'terminal'"
-        @toggle-sidebar="sidebarCollapsed = !sidebarCollapsed"
-        @toggle-panel="togglePanel"
-      />
+      <!-- Chat area — inset surface panel: distinct tone, rounded, wrapped with
+           breathing room so it reads as a distinct chat canvas (包裹感). -->
 
-      <!-- Chat area -->
-      <div class="flex-1 flex flex-col min-h-0">
-        <div
-          ref="messagesEl"
-          class="flex-1 overflow-y-auto scroll-smooth"
-          @scroll="checkScrollPosition"
+      <div class="chat-panel flex-1 flex flex-col min-h-0 relative">
+        <!-- Smoothly hand off between the centered new-task composer and the
+             docked conversation composer: the welcome slides down + fades out and
+             the conversation rises + fades in, so the composer reads as settling
+             at the bottom. No `appear`: an `appear` + `mode="out-in"` initial
+             enter could stick at opacity-0 and leave the whole new-task screen
+             invisible. The welcome now renders at full opacity on first load;
+             the welcome↔conversation crossfade still plays on message send. -->
+        <transition
+          :css="!reduceMotion"
+          enter-active-class="transition-all duration-300 ease-out"
+          enter-from-class="opacity-0 translate-y-3"
+          enter-to-class="opacity-100 translate-y-0"
+          leave-active-class="transition-all duration-200 ease-in"
+          leave-from-class="opacity-100 translate-y-0"
+          leave-to-class="opacity-0 translate-y-4"
+          mode="out-in"
         >
-          <!-- Welcome -->
-          <div v-if="!store.hasMessages" class="flex flex-col items-center justify-center h-full text-center px-8 animate-fade-in">
-            <div class="flex items-center gap-0 mb-5 select-none" style="font-family: var(--font-mono); font-size: 28px; font-weight: 700; letter-spacing: normal;">
-              <span style="color: var(--color-muted-foreground)">[</span><span style="color: var(--color-primary);">J</span><span style="color: var(--color-foreground)">CODE</span><span style="color: var(--color-muted-foreground)">]</span>
+        <!-- New-task welcome: the composer lives in the CENTER of the canvas
+             (with its workspace chip on top) until the first message is sent. -->
+        <div
+          v-if="!store.hasMessages"
+          key="welcome"
+          class="welcome flex-1 flex flex-col items-center px-6 overflow-y-auto"
+        >
+          <!-- Soft brand-tinted aura gives the empty canvas a focal point. -->
+          <div class="welcome-aura" aria-hidden="true" />
+
+          <!-- Top half: the hero floats just above the centered composer. -->
+          <div class="welcome-hero flex-1 min-h-0 flex flex-col items-center justify-end pb-10">
+            <div class="welcome-logo select-none">
+              <span class="wl-dim">[</span><span class="wl-j">J</span><span class="wl-fg">CODE</span><span class="wl-dim">]</span>
             </div>
-            <h2 class="text-lg font-semibold mb-1.5" style="font-family: var(--font-sans); color: var(--color-foreground)">What would you like to build?</h2>
-            <p class="text-sm max-w-sm" style="color: var(--color-muted-foreground)">Send a message to start a conversation with jcode. Use <kbd class="px-1.5 py-0.5 text-[10px] font-mono rounded border" style="background: var(--color-muted); border-color: var(--color-border)">/</kbd> for commands.</p>
+            <h2 class="welcome-title">
+              Start a new task in <span class="welcome-project">{{ store.projectName || 'jcode' }}</span>
+            </h2>
+            <p class="welcome-sub">
+              Pick a workspace, then send a message. Use <kbd class="welcome-kbd">/</kbd> for commands.
+            </p>
           </div>
 
-          <!-- Timeline -->
-          <div v-else class="max-w-4xl mx-auto px-5 py-6 space-y-0.5">
-            <template v-for="item in store.timeline" :key="item.seq">
-              <ChatMessageVue
-                v-if="item.kind === 'message'"
-                :message="item.data"
-                :can-retry="item.data.role === 'assistant' && !store.isRunning"
-                :can-edit="item.data.role === 'user' && !store.isRunning"
-                class="animate-fade-up"
-                @retry="store.retryFromMessage(item.data.id)"
-                @edit="(text) => store.editAndResend(item.data.id, text)"
-              />
-              <ToolCallCard v-else-if="item.kind === 'tool'" :tool="item.data" class="animate-fade-up pl-9" />
-              <ApprovalBanner v-else-if="item.kind === 'approval'" :approval="item.data" class="animate-fade-up" />
-            </template>
-
-            <!-- Thinking footer: single source of truth for "agent is working".
-                 Trails the last timeline item, rides existing auto-scroll, and
-                 stays visible the whole run (initial wait AND while content
-                 accumulates) — not only when the timeline is empty. -->
-            <transition
-              enter-active-class="transition-opacity duration-300 ease-out"
-              enter-from-class="opacity-0"
-              enter-to-class="opacity-100"
-              leave-active-class="transition-opacity duration-150 ease-in"
-              leave-from-class="opacity-100"
-              leave-to-class="opacity-0"
-            >
-              <div
-                v-if="store.isRunning"
-                class="flex items-center gap-2.5 py-3 pl-9 select-none"
-                role="status"
-                aria-live="polite"
-                aria-label="Thinking"
-              >
-                <span class="flex gap-1" aria-hidden="true">
-                  <span class="w-1.5 h-1.5 rounded-full animate-dot-pulse" style="background: var(--color-primary); animation-delay: 0ms" />
-                  <span class="w-1.5 h-1.5 rounded-full animate-dot-pulse" style="background: var(--color-primary); animation-delay: 160ms" />
-                  <span class="w-1.5 h-1.5 rounded-full animate-dot-pulse" style="background: var(--color-primary); animation-delay: 320ms" />
-                </span>
-                <span class="thinking-label text-[13px]" style="font-family: var(--font-sans)">Thinking…</span>
-                <span
-                  v-if="elapsed >= 2"
-                  class="text-xs tabular-nums"
-                  style="font-family: var(--font-mono); color: var(--color-muted-foreground); opacity: 0.6"
-                >{{ elapsed }}s</span>
-              </div>
-            </transition>
+          <!-- Composer sits on the vertical centerline. Its pickers open
+               downward into the empty lower half (room above is tighter). -->
+          <div class="welcome-composer w-full max-w-2xl">
+            <ChatInput picker-placement="bottom" />
           </div>
+
+          <!-- Bottom half balances the center. -->
+          <div class="flex-1 min-h-0" aria-hidden="true" />
         </div>
 
-        <!-- Scroll-to-bottom button -->
-        <transition
-          enter-active-class="transition-all duration-200 ease-out"
-          enter-from-class="opacity-0 translate-y-2"
-          enter-to-class="opacity-100 translate-y-0"
-          leave-active-class="transition-all duration-150 ease-in"
-          leave-from-class="opacity-100 translate-y-0"
-          leave-to-class="opacity-0 translate-y-2"
-        >
-          <button
-            v-if="showScrollBtn"
-            class="absolute bottom-40 left-1/2 -translate-x-1/2 z-10 w-8 h-8 flex items-center justify-center rounded-full shadow-lg cursor-pointer transition-colors"
-            style="background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-muted-foreground)"
-            @click="scrollToBottom()"
+        <!-- Active conversation: scrollable timeline + bottom composer. -->
+        <div v-else key="convo" class="flex-1 flex flex-col min-h-0">
+          <div
+            ref="messagesEl"
+            class="flex-1 overflow-y-auto scroll-smooth rounded-t-[13px]"
+            @scroll="checkScrollPosition"
           >
-            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-              <path d="M12 5v14M5 12l7 7 7-7" />
-            </svg>
-          </button>
-        </transition>
+            <div class="max-w-4xl mx-auto px-5 py-6 space-y-0.5">
+              <template v-for="item in store.timeline" :key="item.seq">
+                <ChatMessageVue
+                  v-if="item.kind === 'message'"
+                  :message="item.data"
+                  :can-retry="item.data.role === 'assistant' && !store.isRunning"
+                  :can-edit="item.data.role === 'user' && !store.isRunning"
+                  class="animate-fade-up"
+                  @retry="store.retryFromMessage(item.data.id)"
+                  @edit="(text) => store.editAndResend(item.data.id, text)"
+                />
+                <ToolCallCard v-else-if="item.kind === 'tool'" :tool="item.data" class="animate-fade-up pl-9" />
+                <ApprovalBanner v-else-if="item.kind === 'approval'" :approval="item.data" class="animate-fade-up" />
+              </template>
 
-        <GoalBanner />
-        <ChatInput />
+              <!-- Thinking footer: single source of truth for "agent is working".
+                   Trails the last timeline item, rides existing auto-scroll, and
+                   stays visible the whole run (initial wait AND while content
+                   accumulates) — not only when the timeline is empty. -->
+              <transition
+                enter-active-class="transition-opacity duration-300 ease-out"
+                enter-from-class="opacity-0"
+                enter-to-class="opacity-100"
+                leave-active-class="transition-opacity duration-150 ease-in"
+                leave-from-class="opacity-100"
+                leave-to-class="opacity-0"
+              >
+                <div
+                  v-if="store.isRunning"
+                  class="flex items-center gap-2.5 py-3 pl-9 select-none"
+                  role="status"
+                  aria-live="polite"
+                  aria-label="Thinking"
+                >
+                  <span class="flex gap-1" aria-hidden="true">
+                    <span class="w-1.5 h-1.5 rounded-full animate-dot-pulse" style="background: var(--color-primary); animation-delay: 0ms" />
+                    <span class="w-1.5 h-1.5 rounded-full animate-dot-pulse" style="background: var(--color-primary); animation-delay: 160ms" />
+                    <span class="w-1.5 h-1.5 rounded-full animate-dot-pulse" style="background: var(--color-primary); animation-delay: 320ms" />
+                  </span>
+                  <span class="thinking-label text-[13px]" style="font-family: var(--font-sans)">Thinking…</span>
+                  <span
+                    v-if="elapsed >= 2"
+                    class="text-xs tabular-nums"
+                    style="font-family: var(--font-mono); color: var(--color-muted-foreground); opacity: 0.6"
+                  >{{ elapsed }}s</span>
+                </div>
+              </transition>
+            </div>
+          </div>
+
+          <!-- Scroll-to-bottom button -->
+          <transition
+            enter-active-class="transition-all duration-200 ease-out"
+            enter-from-class="opacity-0 translate-y-2"
+            enter-to-class="opacity-100 translate-y-0"
+            leave-active-class="transition-all duration-150 ease-in"
+            leave-from-class="opacity-100 translate-y-0"
+            leave-to-class="opacity-0 translate-y-2"
+          >
+            <button
+              v-if="showScrollBtn"
+              class="absolute bottom-40 left-1/2 -translate-x-1/2 z-10 w-8 h-8 flex items-center justify-center rounded-full shadow-lg cursor-pointer transition-colors"
+              style="background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-muted-foreground)"
+              @click="scrollToBottom()"
+            >
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <path d="M12 5v14M5 12l7 7 7-7" />
+              </svg>
+            </button>
+          </transition>
+
+          <GoalBanner />
+          <ChatInput />
+        </div>
+        </transition>
       </div>
 
       <!-- Bottom panel -->
@@ -428,10 +531,122 @@ function startResize(e: MouseEvent) {
       />
     </transition>
 
-    <SettingsDialog :open="settingsOpen" @close="settingsOpen = false" />
+    <SettingsDialog :open="settingsOpen" @close="onSettingsClose" />
     <ProjectSwitcher :open="projectsOpen" @close="projectsOpen = false" @project-switched="onProjectSwitched" />
+    <RemoteConnectWizard
+      :open="remoteWizardOpen"
+      :prefill="remotePrefill"
+      @close="remoteWizardOpen = false"
+      @bound="remoteWizardOpen = false; settingsOpen = false"
+    />
+    <CommandPalette :open="paletteOpen" @close="paletteOpen = false" @action="onPaletteAction" />
 
     <!-- Setup overlay — shown when no providers are configured -->
     <SetupView v-if="needsSetup" @complete="onSetupComplete" />
   </div>
 </template>
+
+<style scoped>
+/* The titlebar-drag strip + macOS top inset live in the GLOBAL style.css
+   (Vue's scoped compiler mangles `:global(...) .child` selectors). */
+
+/* The conversation + composer live in one inset surface panel so the chat
+   canvas reads as distinct from the sidebar shell, wrapped with breathing room
+   above (below the top bar) and below (above the window edge) — 包裹感. */
+.chat-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2xl);
+  /* Top margin clears the floating panel control at the top-right, so it sits
+     in a band above the surface instead of overlapping its corner. On the
+     desktop shell the 28px title-bar strip already provides most of it (see the
+     is-tauri-macos override in style.css). */
+  margin: 40px 14px 14px;
+  /* NOT overflow:hidden — that would clip the composer's upward model/slash
+     menus on short viewports. The scroll area rounds its own top corners
+     (rounded-t) and the composer is inset, so the panel corners stay clean. */
+  box-shadow: var(--shadow-sm);
+}
+
+/* ─── New-task welcome ─── composer on the vertical centerline, hero floating
+   above it, a soft brand-tinted aura behind for focus, and small accents (the
+   glowing J, the orange project name) so the empty state reads as designed. */
+.welcome {
+  position: relative;
+}
+.welcome-aura {
+  position: absolute;
+  z-index: 0;
+  top: 40%;
+  left: 50%;
+  width: min(640px, 78%);
+  height: 420px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at center,
+    color-mix(in srgb, var(--color-primary) 13%, transparent),
+    transparent 70%
+  );
+  filter: blur(6px);
+}
+.welcome-hero,
+.welcome-composer {
+  position: relative;
+  z-index: 1;
+}
+.welcome-logo {
+  display: flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin-bottom: 26px;
+}
+.welcome-logo .wl-dim {
+  color: var(--color-text-muted, var(--color-muted-foreground));
+}
+.welcome-logo .wl-j {
+  color: var(--color-primary);
+  text-shadow: 0 0 22px color-mix(in srgb, var(--color-primary) 50%, transparent);
+}
+.welcome-logo .wl-fg {
+  color: var(--color-foreground);
+}
+.welcome-title {
+  font-family: var(--font-sans);
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+  color: var(--color-foreground);
+  text-align: center;
+  margin-bottom: 12px;
+  text-wrap: balance;
+}
+.welcome-project {
+  color: var(--color-primary);
+}
+.welcome-sub {
+  max-width: 24rem;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--color-muted-foreground);
+  text-align: center;
+}
+.welcome-kbd {
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-muted);
+  border: 1px solid var(--color-border);
+}
+
+@media (max-width: 640px) {
+  .chat-panel {
+    margin: 2px 8px 8px;
+  }
+}
+</style>

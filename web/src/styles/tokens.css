@@ -8,7 +8,12 @@
   --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* ─── Radii ─── */
+  /* ─── Radii ─── one scale; map by role, never hardcode px.
+   *   xs  status dots, tiny chips, kbd       sm  badges, small controls
+   *   md  rows, menu items, inputs           lg  buttons, cards, dropdowns, panels
+   *   xl  dialogs / popovers                 2xl hero composer
+   */
+  --radius-xs: 3px;
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
@@ -16,10 +21,40 @@
   --radius-2xl: 16px;
   --radius-pill: 9999px;
 
-  /* ─── Shadows ─── */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.12);
-  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.15);
+  /* ─── Shadows & elevation ─── one warm-tinted scale (near-invisible on dark
+   * surfaces, which is correct). sm = resting card · md = dropdown/menu ·
+   * lg = dialog/modal · xl = floating hero (the centered composer). */
+  --shadow-sm: 0 1px 2px rgba(24, 20, 16, 0.06);
+  --shadow-md: 0 4px 14px -4px rgba(24, 20, 16, 0.12);
+  --shadow-lg: 0 14px 36px -14px rgba(24, 20, 16, 0.20);
+  --shadow-xl: 0 1px 2px rgba(24, 20, 16, 0.04), 0 24px 56px -28px rgba(24, 20, 16, 0.26);
+
+  /* Modal scrim — one backdrop for every dialog/popover overlay. */
+  --backdrop: rgba(20, 18, 16, 0.5);
+
+  /* ─── Accent washes ─── the single source for orange tints. Derived from
+   * --color-primary via color-mix so every theme (and dark mode) adapts, and so
+   * the 8 ad-hoc rgba(255,132,0,…) alphas collapse to three semantic steps.
+   *   soft   = resting active row / subtle hover
+   *   base   = active control / highlighted button / selected item
+   *   strong = hover-on-active / emphasis
+   * border = accent hairline · fill = vivid progress · selection = ::selection */
+  --accent-wash-soft: color-mix(in srgb, var(--color-primary) 8%, transparent);
+  --accent-wash: color-mix(in srgb, var(--color-primary) 11%, transparent);
+  --accent-wash-strong: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  --accent-border: color-mix(in srgb, var(--color-primary) 30%, transparent);
+  --accent-fill: color-mix(in srgb, var(--color-primary) 45%, transparent);
+  --accent-selection: color-mix(in srgb, var(--color-primary) 22%, transparent);
+
+  /* Interactive conventions */
+  --color-border-active: var(--color-primary);
+  --icon-stroke: 2;
+
+  /* ─── Status indicators ─── */
+  /* Saturated "online" green for small status dots. Distinct from
+   * --color-success-fg (a dark text token tuned for the success chip), which
+   * reads near-black on a tiny dot in light mode. */
+  --color-success: #16A34A;
 
   /* ─── Z-index scale ─── */
   --z-sidebar: 30;
@@ -100,6 +135,7 @@
   --color-info-fg: #B2B2FF;
   --color-destructive: #FF5C33;
   --color-sidebar-bg: #1A1A1A;
+  --color-success: #22C55E;
 
   /* ─── Syntax highlighting (dark) ─── */
   --hljs-fg: #e4e4e7;
