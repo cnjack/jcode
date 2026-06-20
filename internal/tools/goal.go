@@ -169,32 +169,30 @@ func (s *GoalStore) IsActive() bool {
 	return s.goal != nil && s.goal.Status == GoalActive
 }
 
-// setStatus transitions the goal to a terminal status. Returns the snapshot and
-// whether a goal existed to update.
-func (s *GoalStore) setStatus(status GoalStatus) (*Goal, bool) {
+// setStatus transitions the goal to a terminal status. Returns whether a goal
+// existed to update.
+func (s *GoalStore) setStatus(status GoalStatus) bool {
 	s.mu.Lock()
 	if s.goal == nil {
 		s.mu.Unlock()
-		return nil, false
+		return false
 	}
 	s.goal.Status = status
 	s.goal.UpdatedAt = s.now()
 	snap := s.goal.clone()
 	s.mu.Unlock()
 	s.fireUpdate(snap)
-	return snap, true
+	return true
 }
 
 // Complete marks the goal complete. Returns false if no goal is set.
 func (s *GoalStore) Complete() bool {
-	_, ok := s.setStatus(GoalComplete)
-	return ok
+	return s.setStatus(GoalComplete)
 }
 
 // Block marks the goal blocked. Returns false if no goal is set.
 func (s *GoalStore) Block() bool {
-	_, ok := s.setStatus(GoalBlocked)
-	return ok
+	return s.setStatus(GoalBlocked)
 }
 
 // Clear removes the goal entirely.
