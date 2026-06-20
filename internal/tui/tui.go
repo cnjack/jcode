@@ -319,7 +319,7 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 
 	if cfg, err := config.LoadConfig(); err == nil {
 		m.activeProvider, m.activeModel = cfg.GetProviderModel()
-		if cfg.AutoApprove {
+		if cfg.AutoApprove { //nolint:staticcheck // intentional fallback to the deprecated field when DefaultMode is unset
 			m.approvalMode = ModeAuto
 		}
 	}

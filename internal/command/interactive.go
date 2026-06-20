@@ -1300,7 +1300,7 @@ func resolveStartupMode(cfg *config.Config, unsafe bool) mode.SessionMode {
 	if cfg != nil && cfg.DefaultMode != "" {
 		return mode.Parse(cfg.DefaultMode)
 	}
-	if cfg != nil && cfg.AutoApprove {
+	if cfg != nil && cfg.AutoApprove { //nolint:staticcheck // intentional fallback to the deprecated field when DefaultMode is unset
 		return mode.Autopilot
 	}
 	return mode.Ask

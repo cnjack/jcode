@@ -53,7 +53,7 @@ func HandleSSHConnect(
 		return // Do not initialize agent yet
 	}
 
-	remotePwd := "/root"
+	var remotePwd string
 	if path != "" {
 		remotePwd = path
 	} else {
