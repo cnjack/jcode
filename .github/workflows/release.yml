@@ -118,7 +118,7 @@ jobs:
           else
             VERSION="${GITHUB_REF#refs/tags/}"
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build binary
         env:
@@ -148,8 +148,229 @@ jobs:
           name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/jcode-*
 
+  # Desktop (Tauri) app bundles. Each platform builds on a native runner because
+  # Tauri produces OS-native installers (.dmg / .msi / .deb / AppImage). The Go
+  # binary is compiled as the Tauri "sidecar" (binaries/jcode-<target-triple>) and
+  # embedded into the bundle; at runtime it serves the same web UI on loopback.
+  desktop:
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS Apple Silicon (M-series)
+          - os: macos-latest
+            triple: aarch64-apple-darwin
+            ext: ''
+            cgo: 1
+            bundles: dmg
+            label: macos-arm64
+          # macOS Intel
+          - os: macos-15-intel
+            triple: x86_64-apple-darwin
+            ext: ''
+            cgo: 1
+            bundles: dmg
+            label: macos-x64
+          # Windows x64
+          - os: windows-latest
+            triple: x86_64-pc-windows-msvc
+            ext: '.exe'
+            cgo: 0
+            bundles: 'msi,nsis'
+            label: windows-x64
+          # Linux x64
+          - os: ubuntu-22.04
+            triple: x86_64-unknown-linux-gnu
+            ext: ''
+            cgo: 0
+            bundles: 'deb,appimage'
+            label: linux-x64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libxdo-dev \
+            libfuse2 \
+            patchelf \
+            file
+
+      - name: Download prepared artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: prepared
+          path: internal/
+
+      - name: Get version
+        id: get_version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Sync bundle version
+        shell: bash
+        run: |
+          VER="${{ steps.get_version.outputs.version }}"
+          VER="${VER#v}"
+          node -e "const fs=require('fs');const f='desktop/src-tauri/tauri.conf.json';const j=JSON.parse(fs.readFileSync(f));j.version='${VER}';fs.writeFileSync(f, JSON.stringify(j,null,2)+'\n')"
+          echo "Set desktop bundle version to ${VER}"
+
+      - name: Build sidecar
+        shell: bash
+        env:
+          CGO_ENABLED: ${{ matrix.cgo }}
+        run: |
+          VERSION="${{ steps.get_version.outputs.version }}"
+          COMMIT="$(git rev-parse --short HEAD)"
+          mkdir -p desktop/src-tauri/binaries
+          go build -trimpath \
+            -ldflags "-s -w -X github.com/cnjack/jcode/internal/command.Version=${VERSION} -X github.com/cnjack/jcode/internal/command.GitCommit=${COMMIT}" \
+            -o "desktop/src-tauri/binaries/jcode-${{ matrix.triple }}${{ matrix.ext }}" \
+            ./cmd/jcode/
+
+      # macOS signing + notarization. Everything here is optional: with no secrets
+      # the build still succeeds and produces an UNSIGNED bundle (Gatekeeper warns
+      # on first launch). When the secrets are present, the Tauri CLI imports the
+      # cert into a temp keychain, signs with Developer ID, then notarizes.
+      #
+      # We resolve the credentials into $GITHUB_ENV here (rather than as a static
+      # env block on the build step) for two reasons: the notarization .p8 is a
+      # FILE that must be written to disk from a base64 secret, and the two notary
+      # auth methods are mutually exclusive — exporting only the configured one
+      # avoids an empty APPLE_ID accidentally selecting the Apple-ID path.
+      - name: Set up macOS signing & notarization
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # Notarization — App Store Connect API key (.p8), preferred for CI.
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          # Notarization — Apple ID (alternative; use one method, not both).
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # Code-signing certificate (Tauri imports it from these env vars).
+          if [ -n "$APPLE_CERTIFICATE" ]; then
+            {
+              echo "APPLE_CERTIFICATE=$APPLE_CERTIFICATE"
+              echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD"
+            } >> "$GITHUB_ENV"
+            [ -n "$APPLE_SIGNING_IDENTITY" ] && echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY" >> "$GITHUB_ENV"
+            echo "code-signing: enabled"
+          else
+            echo "code-signing: DISABLED (APPLE_CERTIFICATE unset) — bundle will be unsigned"
+          fi
+
+          # Notarization auth — pick exactly one method.
+          if [ -n "$APPLE_API_KEY_P8_BASE64" ]; then
+            # APPLE_API_KEY is the Key ID STRING; the .p8 key material is a file
+            # referenced by APPLE_API_KEY_PATH. Decode the base64 secret to disk.
+            KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+            echo -n "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$KEY_PATH"
+            {
+              echo "APPLE_API_ISSUER=$APPLE_API_ISSUER"
+              echo "APPLE_API_KEY=$APPLE_API_KEY_ID"
+              echo "APPLE_API_KEY_PATH=$KEY_PATH"
+            } >> "$GITHUB_ENV"
+            echo "notarization: App Store Connect API key"
+          elif [ -n "$APPLE_ID" ]; then
+            {
+              echo "APPLE_ID=$APPLE_ID"
+              echo "APPLE_PASSWORD=$APPLE_PASSWORD"
+              echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"
+            } >> "$GITHUB_ENV"
+            echo "notarization: Apple ID"
+          else
+            echo "notarization: DISABLED (no API key or Apple ID secrets)"
+          fi
+
+      - name: Build desktop bundle
+        shell: bash
+        working-directory: desktop
+        env:
+          # Lets linuxdeploy build the AppImage on runners without FUSE mounted.
+          # The macOS signing/notarization vars arrive via $GITHUB_ENV (above).
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm tauri build --bundles ${{ matrix.bundles }}
+
+      - name: Collect bundles
+        shell: bash
+        run: |
+          mkdir -p dist-desktop
+          B="desktop/src-tauri/target/release/bundle"
+          shopt -s nullglob 2>/dev/null || true
+          for f in "$B"/dmg/*.dmg "$B"/msi/*.msi "$B"/nsis/*-setup.exe "$B"/deb/*.deb "$B"/appimage/*.AppImage; do
+            [ -f "$f" ] && cp "$f" dist-desktop/
+          done
+          cd dist-desktop
+          for f in *; do
+            [ -f "$f" ] || continue
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$f" > "$f.sha256"
+            else
+              shasum -a 256 "$f" > "$f.sha256"
+            fi
+          done
+          ls -la
+
+      - name: Upload desktop bundles
+        uses: actions/upload-artifact@v5
+        with:
+          name: desktop-${{ matrix.label }}
+          path: dist-desktop/*
+          if-no-files-found: error
+
   release:
-    needs: build
+    needs: [build, desktop]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -168,18 +389,26 @@ jobs:
           else
             VERSION="${GITHUB_REF#refs/tags/}"
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Download all artifacts
+      - name: Download CLI binaries
         uses: actions/download-artifact@v5
         with:
           path: dist
           pattern: binaries-*
           merge-multiple: true
 
+      - name: Download desktop bundles
+        uses: actions/download-artifact@v5
+        with:
+          path: dist-desktop
+          pattern: desktop-*
+          merge-multiple: true
+
       - name: List artifacts
         run: |
-          ls -la dist/
+          echo "── CLI binaries ──"; ls -la dist/
+          echo "── Desktop bundles ──"; ls -la dist-desktop/
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -190,6 +419,7 @@ jobs:
           prerelease: ${{ contains(steps.get_version.outputs.version, 'alpha') || contains(steps.get_version.outputs.version, 'beta') || contains(steps.get_version.outputs.version, 'rc') }}
           files: |
             dist/jcode-*
+            dist-desktop/*
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
