@@ -491,6 +491,18 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  // resetToWelcomeAfterSwitch refreshes session-scoped state after the active
+  // workspace changed (local switch or remote bind) and lands on a fresh welcome
+  // screen so the next message starts a new task in the chosen workspace.
+  async function resetToWelcomeAfterSwitch() {
+    await fetchHealth()
+    currentSessionId.value = ''
+    clearChat()
+    fetchTodos()
+    fetchGoal()
+    await fetchSessions()
+  }
+
   async function fetchTodos() {
     try {
       todos.value = await api.todos()
@@ -962,6 +974,7 @@ export const useChatStore = defineStore('chat', () => {
     fetchSessions,
     deleteSession,
     newSession,
+    resetToWelcomeAfterSwitch,
     fetchTodos,
     fetchGoal,
     setGoalObjective,

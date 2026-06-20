@@ -71,10 +71,10 @@
 
 @keyframes pulse-glow {
   0%, 100% {
-    box-shadow: 0 0 8px rgba(255, 132, 0, 0.2);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--color-primary) 20%, transparent);
   }
   50% {
-    box-shadow: 0 0 20px rgba(255, 132, 0, 0.4);
+    box-shadow: 0 0 20px color-mix(in srgb, var(--color-primary) 40%, transparent);
   }
 }
 

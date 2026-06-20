@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -80,6 +81,14 @@ type Server struct {
 	// switchProject changes the working directory and rebuilds the agent.
 	switchProject func(newPwd string) (*adk.ChatModelAgent, *session.Recorder, error)
 
+	// switchToRemote binds the shared env to a remote SSH executor and rebuilds
+	// the agent (mirrors switchProject for remote targets).
+	switchToRemote func(executor *tools.SSHExecutor, remotePwd string) (*adk.ChatModelAgent, *session.Recorder, error)
+
+	// remoteConns holds SSH connections established by the remote-connect wizard
+	// that have not yet been bound to the live env (keyed by connection id).
+	remoteConns *remoteConnRegistry
+
 	// PTY manager for terminal sessions.
 	ptyMgr *ptyManager
 
@@ -134,6 +143,7 @@ type ServerConfig struct {
 	RebuildForMode     func(planMode bool) (*adk.ChatModelAgent, error)
 	InitialMode        string // unified startup mode string ("ask"/"plan"/"autopilot")
 	SwitchProject      func(newPwd string) (*adk.ChatModelAgent, *session.Recorder, error)
+	SwitchToRemote     func(executor *tools.SSHExecutor, remotePwd string) (*adk.ChatModelAgent, *session.Recorder, error)
 	TodoStore          *tools.TodoStore
 	Recorder           *session.Recorder
 	Tracer             *telemetry.LangfuseTracer
@@ -175,6 +185,8 @@ func NewServer(cfg *ServerConfig) *Server {
 		createAgent:    cfg.CreateAgent,
 		rebuildForMode: cfg.RebuildForMode,
 		switchProject:  cfg.SwitchProject,
+		switchToRemote: cfg.SwitchToRemote,
+		remoteConns:    newRemoteConnRegistry(),
 		todoStore:      cfg.TodoStore,
 		recorder:       cfg.Recorder,
 		tracer:         cfg.Tracer,
@@ -210,7 +222,11 @@ func NewServer(cfg *ServerConfig) *Server {
 			s.mu.RLock()
 			r := s.recorder
 			s.mu.RUnlock()
-			if r != nil {
+			// Only record into a session that already has real content (a user
+			// message created the file). Otherwise an ambient todo reset — e.g.
+			// clearing the previous session's todos when starting fresh — would
+			// be the first write, creating + indexing a phantom empty session.
+			if r != nil && r.HasRecording() {
 				snapItems := make([]session.TodoSnapshotItem, len(items))
 				for i, it := range items {
 					snapItems[i] = session.TodoSnapshotItem{
@@ -228,7 +244,13 @@ func NewServer(cfg *ServerConfig) *Server {
 			s.mu.RLock()
 			r := s.recorder
 			s.mu.RUnlock()
-			tools.GoalRecorderHook(r)(g)
+			// Same guard as the todo hook: a goal change must not be the first
+			// write that creates + indexes an otherwise-empty session (e.g.
+			// clearing the previous session's goal on reset). Always emit to the
+			// UI, but only persist once the session has real content.
+			if r != nil && r.HasRecording() {
+				tools.GoalRecorderHook(r)(g)
+			}
 			if s.handler != nil {
 				s.handler.Emit("goal_update", g)
 			}
@@ -268,6 +290,11 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/files", s.handleListFiles)
 	mux.HandleFunc("GET /api/files/content", s.handleReadFile)
 	mux.HandleFunc("GET /api/status", s.handleStatus)
+	mux.HandleFunc("GET /api/workspace", s.handleWorkspace)
+	mux.HandleFunc("GET /api/git/branches", s.handleGitBranches)
+	mux.HandleFunc("POST /api/git/checkout", s.handleGitCheckout)
+	mux.HandleFunc("GET /api/tasks", s.handleListAllTasks)
+	mux.HandleFunc("PATCH /api/tasks/{id}", s.handleUpdateTask)
 	mux.HandleFunc("GET /api/models", s.handleListModels)
 	mux.HandleFunc("POST /api/model", s.handleSwitchModel)
 	mux.HandleFunc("POST /api/mode", s.handleSwitchMode)
@@ -281,6 +308,11 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/mcp/{name}/login", s.handleMCPLogin)
 	mux.HandleFunc("GET /api/mcp/{name}/login/status", s.handleMCPLoginStatus)
 	mux.HandleFunc("GET /api/ssh", s.handleListSSH)
+	mux.HandleFunc("POST /api/remote/connect", s.handleRemoteConnect)
+	mux.HandleFunc("POST /api/remote/list-dir", s.handleRemoteListDir)
+	mux.HandleFunc("POST /api/remote/bind", s.handleRemoteBind)
+	mux.HandleFunc("POST /api/remote/cancel", s.handleRemoteCancel)
+	mux.HandleFunc("POST /api/remote/save-alias", s.handleRemoteSaveAlias)
 	mux.HandleFunc("GET /api/skills", s.handleListSkills)
 	mux.HandleFunc("POST /api/skills/{name}/toggle", s.handleToggleSkill)
 	mux.HandleFunc("GET /api/slash-commands", s.handleSlashCommands)
@@ -438,6 +470,31 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"provider":   s.providerName,
 		"model":      s.modelName,
 		"mode":       s.mode,
+	})
+}
+
+// handleWorkspace returns lightweight git workspace info (branch + dirty) for
+// the current project so the web UI can show the real branch name. Diff stats
+// are fetched separately via /api/diff. Empty branch = not a git repo.
+func (s *Server) handleWorkspace(w http.ResponseWriter, r *http.Request) {
+	// Use the request context so the git commands are cancelled if the client
+	// disconnects (CodeRabbit review feedback on PR #82).
+	// `branch --show-current` (not `rev-parse --abbrev-ref HEAD`) so a freshly
+	// initialised repo with no commits still reports its unborn branch (e.g.
+	// "main") instead of the literal "HEAD".
+	branchCmd := exec.CommandContext(r.Context(), "git", "branch", "--show-current")
+	branchCmd.Dir = s.pwd
+	branchOut, _ := branchCmd.Output()
+	branch := strings.TrimSpace(string(branchOut))
+
+	statusCmd := exec.CommandContext(r.Context(), "git", "status", "--porcelain")
+	statusCmd.Dir = s.pwd
+	statusOut, _ := statusCmd.Output()
+	dirty := strings.TrimSpace(string(statusOut)) != ""
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"branch": branch,
+		"dirty":  dirty,
 	})
 }
 
@@ -645,6 +702,87 @@ func (s *Server) submitMessage(message, mode, source, sessionID string, images [
 	return recorder.UUID()
 }
 
+// handleListAllTasks returns every session across all projects (flat list,
+// each tagged with its project path) so the web sidebar can render a
+// Workspace > Project > Task tree without switching the active project.
+func (s *Server) handleListAllTasks(w http.ResponseWriter, r *http.Request) {
+	all, err := session.ListAllSessions()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	type taskItem struct {
+		UUID      string `json:"uuid"`
+		Project   string `json:"project"`
+		CreatedAt string `json:"created_at"`
+		Provider  string `json:"provider"`
+		Model     string `json:"model"`
+		Title     string `json:"title,omitempty"`
+		Pinned    bool   `json:"pinned"`
+		Archived  bool   `json:"archived"`
+		Unread    bool   `json:"unread"`
+		Status    string `json:"status,omitempty"`
+	}
+	items := make([]taskItem, 0)
+	for project, metas := range all {
+		for _, m := range metas {
+			items = append(items, taskItem{
+				UUID:      m.UUID,
+				Project:   project,
+				CreatedAt: m.StartTime,
+				Provider:  m.Provider,
+				Model:     m.Model,
+				Title:     m.Title,
+				Pinned:    m.Pinned,
+				Archived:  m.Archived,
+				Unread:    m.Unread,
+				Status:    m.Status,
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+// handleUpdateTask applies a partial metadata update (pin/archive/unread/title)
+// to a task by uuid across all projects.
+func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Pinned   *bool   `json:"pinned"`
+		Archived *bool   `json:"archived"`
+		Unread   *bool   `json:"unread"`
+		Title    *string `json:"title"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	meta, err := session.UpdateSessionMeta(id, func(m *session.SessionMeta) {
+		if req.Pinned != nil {
+			m.Pinned = *req.Pinned
+		}
+		if req.Archived != nil {
+			m.Archived = *req.Archived
+		}
+		if req.Unread != nil {
+			m.Unread = *req.Unread
+		}
+		if req.Title != nil {
+			m.Title = *req.Title
+		}
+		m.UpdatedAt = time.Now().Format(time.RFC3339)
+	})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if meta == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, meta)
+}
+
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	metas, err := session.ListSessions(s.pwd)
 	if err != nil {
@@ -690,7 +828,9 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "session id is required"})
 		return
 	}
-	if err := session.DeleteSession(s.pwd, id); err != nil {
+	// Resolve the owning project across all projects: a task deleted from the
+	// sidebar tree may not belong to the active project (s.pwd).
+	if _, err := session.DeleteSessionByUUID(id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -2094,8 +2234,11 @@ func (s *Server) handleSetApprovalMode(w http.ResponseWriter, r *http.Request) {
 
 // --- WebSocket handler ---
 
+// CheckOrigin rejects cross-origin WebSocket handshakes from untrusted web
+// pages (see isAllowedWebOrigin); without this any website could open a socket
+// to the loopback server and read the agent's live event stream.
 var wsUpgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+	CheckOrigin: isAllowedWebOrigin,
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -2776,11 +2919,50 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 	_ = json.NewEncoder(w).Encode(data)
 }
 
+// isAllowedWebOrigin decides whether a browser request's Origin is trusted.
+//
+// The server (especially the always-on desktop sidecar) exposes agent control —
+// i.e. shell/file tools — over loopback with no auth token, so an unconditional
+// `Access-Control-Allow-Origin: *` plus a WebSocket CheckOrigin that returns
+// true would let any website the user visits drive the agent or read its live
+// event stream via ws://127.0.0.1:<port>. We gate on Origin instead:
+//
+//   - empty Origin (curl, native client, same-origin navigations) → allow
+//   - Origin equal to the request's own Host (same-origin) → allow; this covers
+//     local-browser, the desktop webview, and LAN access via `--host 0.0.0.0`
+//   - Origin whose host is loopback → allow; this covers the Vite dev proxy
+//     (localhost:5173 → 127.0.0.1:<port>)
+//
+// A page on https://evil.com cannot forge its Origin, so it falls through to
+// false and is blocked. This is intentionally not a full auth solution (a local
+// process can still reach the port); it closes the cross-origin *website* vector.
+func isAllowedWebOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	if u.Host == r.Host {
+		return true
+	}
+	switch u.Hostname() {
+	case "127.0.0.1", "localhost", "::1":
+		return true
+	}
+	return false
+}
+
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin != "" {
+		// Only reflect CORS headers for trusted origins; a disallowed cross-origin
+		// request gets none, so the browser blocks the response (and its preflight).
+		if origin != "" && isAllowedWebOrigin(r) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")

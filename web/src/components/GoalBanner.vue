@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { Target } from 'lucide-vue-next'
 import { useChatStore } from '@/stores/chat'
 
 const store = useChatStore()
@@ -26,14 +27,14 @@ const tokensLabel = computed(() => {
 </script>
 
 <template>
-  <!-- Active goal display. Goals are set from the prompt box (🎯 Goal toggle
+  <!-- Active goal display. Goals are set from the prompt box (Goal toggle
        in the input toolbar, or the /goal command). -->
   <div
     v-if="goal"
     class="mx-3 mt-2 rounded-md border px-3 py-2 flex items-start gap-2"
     :style="{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-secondary)' }"
   >
-    <span class="text-base leading-none" title="Session goal">🎯</span>
+    <Target :size="15" class="shrink-0 mt-0.5" :style="{ color: statusColor }" />
     <div class="flex-1 min-w-0">
       <div class="flex items-center gap-2">
         <span class="text-[10px] uppercase tracking-wide font-semibold" :style="{ color: statusColor }">

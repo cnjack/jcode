@@ -1,0 +1,164 @@
+// Prevents a stray console window on Windows in release builds.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod sidecar;
+mod tray;
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+
+use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
+use tauri_plugin_shell::process::CommandChild;
+
+/// Holds the running jcode sidecar so we can terminate it explicitly on exit.
+/// Tauri already best-effort kills spawned children, but a background of
+/// loopback servers is exactly where a leaked process is most annoying, so we
+/// own the lifecycle outright.
+#[derive(Default)]
+pub struct SidecarHandle(pub Mutex<Option<CommandChild>>);
+
+/// Cross-cutting desktop state. `tray` records whether the menu-bar tray was
+/// actually created — close-to-tray must only swallow the window's close when
+/// there is a tray to reopen from, or the user would be stranded (e.g. on a
+/// Linux desktop with no StatusNotifier host).
+#[derive(Default)]
+pub struct DesktopState {
+    pub tray: AtomicBool,
+}
+
+/// Bring the main window to the foreground (used by the tray and the
+/// single-instance guard when a second launch is attempted).
+pub fn show_main(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
+/// Toggle window visibility — the tray icon's left-click behaviour.
+pub fn toggle_main(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        if w.is_visible().unwrap_or(false) {
+            let _ = w.hide();
+        } else {
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+    }
+}
+
+fn kill_sidecar(app: &AppHandle) {
+    if let Some(state) = app.try_state::<SidecarHandle>() {
+        if let Ok(mut guard) = state.0.lock() {
+            if let Some(child) = guard.take() {
+                let _ = child.kill();
+            }
+        }
+    }
+}
+
+fn main() {
+    let mut builder = tauri::Builder::default();
+
+    // Single-instance must be the FIRST plugin so a second launch is short-
+    // circuited before any window/sidecar work happens.
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            show_main(app);
+        }));
+    }
+
+    builder = builder
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init());
+
+    #[cfg(desktop)]
+    {
+        builder = builder
+            .plugin(tauri_plugin_window_state::Builder::default().build())
+            // Registered without a shortcut here; the accelerator is bound in
+            // setup() so a hotkey conflict logs instead of crashing the app.
+            .plugin(tauri_plugin_global_shortcut::Builder::new().build());
+    }
+
+    let app = builder
+        .manage(SidecarHandle::default())
+        .manage(DesktopState::default())
+        .setup(|app| {
+            // Start the backend FIRST so a (possibly cosmetic) tray failure can
+            // never prevent the server — and thus the whole app — from coming up.
+            if let Err(e) = sidecar::start(app.handle()) {
+                eprintln!("[jcode] failed to start sidecar: {e}");
+                use tauri_plugin_dialog::DialogExt;
+                app.handle()
+                    .dialog()
+                    .message(format!("jcode could not start its local server:\n{e}"))
+                    .title("jcode")
+                    .blocking_show();
+                app.handle().exit(1);
+                return Ok(());
+            }
+
+            // The tray is best-effort. On a Linux desktop without a tray host it
+            // may fail; we log and fall back to "closing the window quits".
+            match tray::create(app.handle()) {
+                Ok(()) => {
+                    if let Some(state) = app.try_state::<DesktopState>() {
+                        state.tray.store(true, Ordering::Relaxed);
+                    }
+                }
+                Err(e) => eprintln!("[jcode] tray unavailable, close will quit: {e}"),
+            }
+
+            // Global hotkey is a convenience; a conflict must not crash the app.
+            #[cfg(desktop)]
+            {
+                use tauri_plugin_global_shortcut::{
+                    Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
+                };
+                // ⌘/⊞ + Shift + J toggles the window from anywhere.
+                let toggle = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyJ);
+                if let Err(e) = app.global_shortcut().on_shortcut(toggle, |app, _sc, event| {
+                    if event.state == ShortcutState::Pressed {
+                        toggle_main(app);
+                    }
+                }) {
+                    eprintln!("[jcode] global shortcut not registered: {e}");
+                }
+            }
+
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Close-to-tray: when a tray icon exists, the main window's close
+            // button hides it instead of quitting, so a long-running agent keeps
+            // working in the background — reopen from the tray, the global
+            // hotkey, or relaunching. With no tray, closing quits normally. A
+            // true exit is always available via the tray "Quit" item, the macOS
+            // app menu (Cmd+Q), or Alt+F4 / closing when there is no tray.
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    let tray_active = window
+                        .app_handle()
+                        .try_state::<DesktopState>()
+                        .map(|s| s.tray.load(Ordering::Relaxed))
+                        .unwrap_or(false);
+                    if tray_active {
+                        let _ = window.hide();
+                        api.prevent_close();
+                    }
+                }
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building jcode desktop");
+
+    app.run(|app_handle, event| match event {
+        RunEvent::ExitRequested { .. } | RunEvent::Exit => kill_sidecar(app_handle),
+        _ => {}
+    });
+}
