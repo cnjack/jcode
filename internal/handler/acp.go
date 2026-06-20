@@ -208,11 +208,12 @@ func (h *ACPHandler) presentationForTool(name, argsJSON string) acpToolPresentat
 		p.Title = "Load skill " + getString("name")
 	case "team_send_message":
 		to := getString("to")
-		if to == "*" {
+		switch {
+		case to == "*":
 			p.Title = "Message team"
-		} else if to != "" {
+		case to != "":
 			p.Title = "Message @" + to
-		} else {
+		default:
 			p.Title = "Send team message"
 		}
 	case "team_create":

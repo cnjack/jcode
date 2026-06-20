@@ -3,9 +3,10 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"github.com/cnjack/jcode/internal/session"
 	"strings"
 	"testing"
+
+	"github.com/cnjack/jcode/internal/session"
 )
 
 func TestGoalStore_SetAndGet(t *testing.T) {

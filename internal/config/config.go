@@ -161,6 +161,7 @@ type Config struct {
 	Team          *TeamConfig           `json:"team,omitempty"`
 
 	// AutoApprove sets the default approval mode to auto on startup.
+	//
 	// Deprecated: superseded by DefaultMode; still honored as a fallback when
 	// DefaultMode is empty (true → "autopilot").
 	AutoApprove bool `json:"auto_approve,omitempty"`
