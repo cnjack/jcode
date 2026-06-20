@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
-import { useProjectStore } from '@/stores/project'
-import { api } from '@/composables/api'
-import type { BrowseFolder } from '@/types/api'
+import { watch, computed, inject } from 'vue'
+import { useProjectStore, parseRemoteLabel } from '@/stores/project'
+import { useFolderBrowser } from '@/composables/useFolderBrowser'
+import type { RemoteMeta } from '@/types/api'
 import {
   Dialog,
   DialogPanel,
@@ -10,6 +10,7 @@ import {
   TransitionRoot,
   TransitionChild,
 } from '@headlessui/vue'
+import { Folder } from 'lucide-vue-next'
 
 const props = defineProps<{
   open: boolean
@@ -21,68 +22,27 @@ const emit = defineEmits<{
 }>()
 
 const projectStore = useProjectStore()
-const showBrowser = ref(false)
-const browsePath = ref('')
-const browseFolders = ref<BrowseFolder[]>([])
-const browseLoading = ref(false)
+const openRemoteConnect = inject<(prefill?: RemoteMeta) => void>('openRemoteConnect')
 
-const pathInput = ref('')
+const {
+  showBrowser,
+  browsePath,
+  browseFolders,
+  browseLoading,
+  pathInput,
+  loadFolders,
+  openBrowser,
+  goUp,
+  handlePathSubmit,
+  resetBrowser,
+} = useFolderBrowser()
 
 const displayPath = computed(() => browsePath.value || '~')
 
+// Reset the folder browser each time the dialog opens.
 watch(() => props.open, (isOpen) => {
-  if (isOpen) {
-    showBrowser.value = false
-    browsePath.value = ''
-    pathInput.value = ''
-    browseFolders.value = []
-  }
+  if (isOpen) resetBrowser()
 })
-
-async function loadFolders(path?: string) {
-  browseLoading.value = true
-  try {
-    const result = await api.browse(path)
-    browsePath.value = result.current
-    pathInput.value = result.current
-    browseFolders.value = result.folders
-  } catch (err: unknown) {
-    console.error('Browse failed:', err)
-    browseFolders.value = []
-  } finally {
-    browseLoading.value = false
-  }
-}
-
-function openBrowser() {
-  showBrowser.value = true
-  loadFolders()
-}
-
-function navigateTo(folder: BrowseFolder) {
-  loadFolders(folder.path)
-}
-
-function goUp() {
-  if (!browsePath.value) return
-  const parts = browsePath.value.split('/')
-  parts.pop()
-  const parent = parts.join('/') || '/'
-  loadFolders(parent)
-}
-
-function handlePathSubmit() {
-  const path = pathInput.value.trim()
-  if (path) {
-    loadFolders(path)
-  }
-}
-
-function handlePathKeyDown(e: KeyboardEvent) {
-  if (e.key === 'Enter') {
-    handlePathSubmit()
-  }
-}
 
 function selectCurrentPath() {
   if (!browsePath.value) return
@@ -96,11 +56,23 @@ function selectCurrentPath() {
 }
 
 async function selectProject(id: string) {
+  const project = projectStore.projects.find((p) => p.id === id)
+  // Remote workspaces are reconnected through the SSH wizard, not a local switch.
+  if (project?.remote) {
+    emit('close')
+    openRemoteConnect?.(parseRemoteLabel(project.path) ?? undefined)
+    return
+  }
   const ok = await projectStore.switchToProject(id)
   if (ok) {
     emit('close')
     emit('projectSwitched')
   }
+}
+
+function openRemote() {
+  emit('close')
+  openRemoteConnect?.()
 }
 
 function deleteProject(id: string) {
@@ -119,7 +91,7 @@ function deleteProject(id: string) {
         leave-from="opacity-100"
         leave-to="opacity-0"
       >
-        <div class="fixed inset-0" style="background: rgba(8,8,8,0.5); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px)" />
+        <div class="fixed inset-0" style="background: var(--backdrop); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px)" />
       </TransitionChild>
 
       <div class="fixed inset-0 flex items-start justify-center pt-16 px-4">
@@ -147,7 +119,7 @@ function deleteProject(id: string) {
                   type="text"
                   class="ps-input flex-1 px-3 py-1.5 text-sm font-mono rounded-md outline-none"
                   placeholder="/path/to/folder"
-                  @keydown="handlePathKeyDown"
+                  @keydown.enter="handlePathSubmit"
                 />
                 <button
                   class="px-3 py-1.5 text-xs font-medium rounded-md cursor-pointer transition-opacity hover:opacity-90"
@@ -187,9 +159,9 @@ function deleteProject(id: string) {
                   :key="folder.path"
                   class="ps-folder w-full flex items-center gap-2 px-3 py-2 text-sm text-left cursor-pointer transition-colors"
                   style="color: var(--color-foreground); border-bottom: 1px solid var(--color-border)"
-                  @click="navigateTo(folder)"
+                  @click="loadFolders(folder.path)"
                 >
-                  <span class="shrink-0" style="color: var(--color-muted-foreground)">📁</span>
+                  <Folder :size="14" class="shrink-0" style="color: var(--color-muted-foreground)" />
                   <span class="truncate">{{ folder.name }}</span>
                 </button>
               </div>
@@ -234,7 +206,7 @@ function deleteProject(id: string) {
                   <div
                     class="w-7 h-7 rounded-md flex items-center justify-center text-xs font-bold shrink-0"
                     :style="projectStore.activeId === p.id
-                      ? { background: 'rgba(255,132,0,0.14)', color: 'var(--color-primary)' }
+                      ? { background: 'var(--accent-wash-strong)', color: 'var(--color-primary)' }
                       : { background: 'var(--color-muted)', color: 'var(--color-muted-foreground)' }"
                   >
                     {{ projectStore.projectName(p).charAt(0).toUpperCase() }}
@@ -256,13 +228,22 @@ function deleteProject(id: string) {
               </div>
 
               <div class="px-5 py-3 flex justify-between items-center" style="border-top: 1px solid var(--color-border)">
-                <button
-                  class="text-xs cursor-pointer transition-opacity hover:opacity-80 font-medium"
-                  style="color: var(--color-primary)"
-                  @click="openBrowser"
-                >
-                  + Open Folder
-                </button>
+                <div class="flex items-center gap-4">
+                  <button
+                    class="text-xs cursor-pointer transition-opacity hover:opacity-80 font-medium"
+                    style="color: var(--color-primary)"
+                    @click="openBrowser"
+                  >
+                    + Open Folder
+                  </button>
+                  <button
+                    class="text-xs cursor-pointer transition-opacity hover:opacity-80 font-medium"
+                    style="color: var(--color-primary)"
+                    @click="openRemote"
+                  >
+                    Remote connect
+                  </button>
+                </div>
                 <button
                   class="ps-muted-btn px-3 py-1 text-xs cursor-pointer transition-colors"
                   @click="emit('close')"
@@ -303,7 +284,7 @@ function deleteProject(id: string) {
   border-bottom: none !important;
 }
 .ps-folder:hover {
-  background: rgba(255, 132, 0, 0.08);
+  background: var(--accent-wash-soft);
   color: var(--color-primary) !important;
 }
 
@@ -314,8 +295,8 @@ function deleteProject(id: string) {
   background: var(--color-muted);
 }
 .ps-project.active {
-  background: rgba(255, 132, 0, 0.08);
-  border-color: rgba(255, 132, 0, 0.3);
+  background: var(--accent-wash-soft);
+  border-color: var(--accent-border);
 }
 
 .ps-delete {

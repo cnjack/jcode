@@ -1,0 +1,24 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capabilities for the main jcode window. The window loads the bundled jcode web server over loopback, so the Tauri JS APIs are granted to localhost origins via `remote`.",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*"]
+  },
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-minimize",
+    "core:window:allow-unminimize",
+    "core:window:allow-start-dragging",
+    "core:window:allow-close",
+    "core:app:allow-version",
+    "core:event:default",
+    "notification:default",
+    "opener:default",
+    "dialog:default"
+  ]
+}

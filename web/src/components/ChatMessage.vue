@@ -104,7 +104,7 @@ function handleEditKeyDown(e: KeyboardEvent) {
       <div class="flex items-center gap-0.5 ml-1 opacity-0 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 transition-opacity duration-150">
         <!-- Copy button -->
         <button
-          class="w-5 h-5 flex items-center justify-center rounded transition-colors cursor-pointer"
+          class="w-5 h-5 flex items-center justify-center rounded-[var(--radius-sm)] transition-all cursor-pointer hover:bg-[var(--color-secondary)] active:scale-90"
           style="color: var(--color-muted-foreground)"
           :title="copied ? 'Copied!' : 'Copy'"
           @click="copyContent"
@@ -113,7 +113,7 @@ function handleEditKeyDown(e: KeyboardEvent) {
             <rect x="9" y="9" width="13" height="13" rx="2" />
             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
           </svg>
-          <svg v-else class="w-3 h-3" style="color: var(--color-primary)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <svg v-else class="w-3 h-3" style="color: var(--color-primary)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="20 6 9 17 4 12" />
           </svg>
         </button>
@@ -121,7 +121,7 @@ function handleEditKeyDown(e: KeyboardEvent) {
         <!-- Retry button (assistant messages) -->
         <button
           v-if="canRetry"
-          class="w-5 h-5 flex items-center justify-center rounded transition-colors cursor-pointer"
+          class="w-5 h-5 flex items-center justify-center rounded-[var(--radius-sm)] transition-all cursor-pointer hover:bg-[var(--color-secondary)] active:scale-90"
           style="color: var(--color-muted-foreground)"
           title="Retry"
           @click="emit('retry')"
@@ -135,7 +135,7 @@ function handleEditKeyDown(e: KeyboardEvent) {
         <!-- Edit button (user messages) -->
         <button
           v-if="canEdit && !editing"
-          class="w-5 h-5 flex items-center justify-center rounded transition-colors cursor-pointer"
+          class="w-5 h-5 flex items-center justify-center rounded-[var(--radius-sm)] transition-all cursor-pointer hover:bg-[var(--color-secondary)] active:scale-90"
           style="color: var(--color-muted-foreground)"
           title="Edit"
           @click="startEdit"
@@ -174,14 +174,14 @@ function handleEditKeyDown(e: KeyboardEvent) {
       />
       <div class="flex items-center gap-2 mt-2">
         <button
-          class="px-3 py-1 text-xs font-medium rounded text-white transition-colors cursor-pointer"
-          :style="{ background: 'var(--color-primary)', borderRadius: 'var(--radius-md)' }"
+          class="px-3 py-1 text-xs font-semibold transition-all cursor-pointer active:scale-95"
+          :style="{ background: 'var(--color-primary)', color: 'var(--color-on-primary, #fff)', borderRadius: 'var(--radius-md)' }"
           @click="confirmEdit"
         >
           Send
         </button>
         <button
-          class="px-3 py-1 text-xs font-medium rounded transition-colors cursor-pointer"
+          class="px-3 py-1 text-xs font-medium transition-all cursor-pointer active:scale-95"
           :style="{ background: 'var(--color-secondary)', color: 'var(--color-foreground)', borderRadius: 'var(--radius-md)' }"
           @click="cancelEdit"
         >

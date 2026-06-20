@@ -168,7 +168,7 @@ watch(() => props.rootPath, () => {
   height: 22px;
   border: none;
   background: transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   color: var(--color-muted-foreground);
   cursor: pointer;
   flex-shrink: 0;
@@ -193,7 +193,7 @@ watch(() => props.rootPath, () => {
   background: transparent;
   border: none;
   padding: 2px 4px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
   white-space: nowrap;
 }

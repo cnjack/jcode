@@ -1,0 +1,36 @@
+[package]
+name = "jcode-desktop"
+version = "0.5.3"
+description = "jcode desktop — native shell around the embedded jcode web app"
+authors = ["cnjack"]
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-shell = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Desktop-only plugins (no Android/iOS support).
+# NOTE: the updater plugin is intentionally absent — it panics at startup unless
+# `plugins.updater` (endpoints + pubkey) is configured, which requires a signed
+# release feed. Add it back together with that config. Autostart is likewise
+# deferred until there's a settings toggle for it.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-global-shortcut = "2"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

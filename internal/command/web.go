@@ -23,6 +23,7 @@ import (
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	weixin "github.com/cnjack/jcode/internal/pkg/weixin"
 	"github.com/cnjack/jcode/internal/prompts"
+	"github.com/cnjack/jcode/internal/remote"
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/skills"
@@ -337,6 +338,11 @@ func runWebServer(port int, host string, openBrowser bool) error {
 	}
 
 	switchProject := func(newPwd string) (*adk.ChatModelAgent, *session.Recorder, error) {
+		// 0. Close any live remote SSH connection we're switching away from.
+		if prev, ok := env.Exec.(*tools.SSHExecutor); ok {
+			defer func() { _ = prev.Close() }()
+		}
+
 		// 1. Update env working directory (all tools share the same *Env).
 		env.ResetToLocal(newPwd, platform)
 
@@ -371,6 +377,50 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		return newAg, newRec, nil
 	}
 
+	// switchToRemote mirrors switchProject but binds the shared env to a remote
+	// SSH executor instead of a local path. It reuses the SAME agent/recorder
+	// rebuild sequence so the agent, system prompt and session recorder stay
+	// consistent with the local switch path.
+	switchToRemote := func(executor *tools.SSHExecutor, remotePwd string) (*adk.ChatModelAgent, *session.Recorder, error) {
+		// 0. Close the previous live remote SSH connection (if switching
+		//    remote→remote); switching from local has nothing to close.
+		if prev, ok := env.Exec.(*tools.SSHExecutor); ok && prev != executor {
+			defer func() { _ = prev.Close() }()
+		}
+
+		// 1. Point the shared env at the remote SSH executor.
+		env.SetSSH(executor, remotePwd)
+		remotePlatform := executor.Platform()
+
+		// 2. Approval state now governs the remote working directory.
+		approvalState.SetWorkpath(remotePwd)
+
+		// 3. Re-render the system prompt with the remote env label + platform.
+		//    Project skills are scanned from the LOCAL fs, so keep the existing
+		//    descriptions rather than rescanning against the remote path.
+		envLabel := fmt.Sprintf("%s (pwd: %s)", executor.Label(), remotePwd)
+		systemPrompt = prompts.GetSystemPrompt(remotePlatform, remotePwd, envLabel, nil, skillLoader.Descriptions())
+
+		// 4. Update the captured pwd (env already points at the remote target).
+		pwd = remotePwd
+
+		// 5. Recorder scoped to a host-qualified project key so a remote path
+		//    does not collide with a local path of the same name in the tree.
+		projectKey := remote.ProjectLabel(executor, remotePwd)
+		if rec != nil {
+			rec.Close()
+		}
+		newRec, _ := session.NewRecorder(projectKey, providerName, modelName)
+		rec = newRec
+
+		// 6. Rebuild the agent with the updated remote prompt.
+		newAg, err := createAgent(providerName, modelName)
+		if err != nil {
+			return nil, nil, err
+		}
+		return newAg, newRec, nil
+	}
+
 	srv := web.NewServer(&web.ServerConfig{
 		Port:               port,
 		Host:               host,
@@ -382,6 +432,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		RebuildForMode:     rebuildForMode,
 		InitialMode:        startupMode.String(),
 		SwitchProject:      switchProject,
+		SwitchToRemote:     switchToRemote,
 		TodoStore:          env.TodoStore,
 		Recorder:           rec,
 		Tracer:             langfuseTracer,

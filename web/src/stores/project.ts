@@ -1,8 +1,31 @@
 // Project management store using localStorage
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Project, TaskItem, TaskMetaPatch } from '@/types/api'
+import type { Project, RemoteMeta, TaskItem, TaskMetaPatch } from '@/types/api'
 import { api } from '@/composables/api'
+
+// A remote workspace is identified by a host-qualified label:
+// ssh://user@host:port/remote/path
+export function isRemotePath(path: string): boolean {
+  return path.startsWith('ssh://')
+}
+
+// parseRemoteLabel decomposes a remote project label into the pieces the SSH
+// wizard needs to reconnect. Returns null for non-remote paths.
+export function parseRemoteLabel(label: string): RemoteMeta | null {
+  if (!isRemotePath(label)) return null
+  const rest = label.slice('ssh://'.length)
+  const at = rest.indexOf('@')
+  if (at < 0) return null
+  const user = rest.slice(0, at)
+  const afterUser = rest.slice(at + 1)
+  const slash = afterUser.indexOf('/')
+  const hostPort = slash < 0 ? afterUser : afterUser.slice(0, slash)
+  const remotePath = slash < 0 ? '/' : afterUser.slice(slash)
+  const colon = hostPort.lastIndexOf(':')
+  const port = colon >= 0 ? parseInt(hostPort.slice(colon + 1), 10) || 22 : 22
+  return { host: hostPort, user, port, remotePath }
+}
 
 const STORAGE_KEY = 'jcode_projects'
 const ACTIVE_KEY = 'jcode_active_project'
@@ -42,6 +65,27 @@ export const useProjectStore = defineStore('project', () => {
     return project
   }
 
+  // upsertRemoteProject records a bound remote workspace (keyed by its
+  // host-qualified label) and returns it. Unlike addProject it carries remote
+  // metadata so the tree can render it distinctly and offer reconnect.
+  function upsertRemoteProject(label: string, remote: RemoteMeta): Project {
+    const existing = projects.value.find((p) => p.path === label)
+    if (existing) {
+      existing.remote = remote
+      saveProjects(projects.value)
+      return existing
+    }
+    const project: Project = {
+      id: `proj_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      path: label,
+      createdAt: Date.now(),
+      remote,
+    }
+    projects.value.push(project)
+    saveProjects(projects.value)
+    return project
+  }
+
   function removeProject(id: string) {
     projects.value = projects.value.filter((p) => p.id !== id)
     saveProjects(projects.value)
@@ -64,6 +108,15 @@ export const useProjectStore = defineStore('project', () => {
     if (!project) return false
     // If already active, no-op.
     if (activeId.value === id) return true
+
+    // Remote workspaces cannot be re-activated by a local path switch (the
+    // backend would `stat` a path that only exists on the remote host, and we
+    // never persist the SSH secret). Callers must route these through the SSH
+    // wizard instead.
+    if (project.remote) {
+      switchError.value = 'Remote workspace — reconnect via the SSH wizard'
+      return false
+    }
 
     switching.value = true
     switchError.value = ''
@@ -161,6 +214,7 @@ export const useProjectStore = defineStore('project', () => {
     switching,
     switchError,
     addProject,
+    upsertRemoteProject,
     removeProject,
     setActive,
     switchToProject,

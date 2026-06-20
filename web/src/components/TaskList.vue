@@ -40,7 +40,7 @@ onBeforeUnmount(() => {
       <span
         v-if="todo.status === 'in_progress'"
         class="absolute left-0 top-0.5 bottom-0.5 w-0.5"
-        style="background-color: var(--color-primary); border-radius: 9999px"
+        style="background-color: var(--color-primary); border-radius: var(--radius-pill)"
         aria-hidden="true"
       />
 

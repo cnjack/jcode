@@ -1,6 +1,6 @@
 <!-- eslint-disable vue/multi-word-component-names -->
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, inject } from 'vue'
 import {
   Menu as HMenu,
   MenuButton,
@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Folder,
   FolderOpen,
+  Server,
   Plus,
   MoreHorizontal,
   Pin,
@@ -21,11 +22,12 @@ import {
   MailOpen,
 } from 'lucide-vue-next'
 import { useChatStore } from '@/stores/chat'
-import { useProjectStore } from '@/stores/project'
-import type { TaskItem } from '@/types/api'
+import { useProjectStore, isRemotePath, parseRemoteLabel } from '@/stores/project'
+import type { TaskItem, RemoteMeta } from '@/types/api'
 
 const store = useChatStore()
 const projectStore = useProjectStore()
+const openRemoteConnect = inject<(prefill?: RemoteMeta & { loadTaskUuid?: string }) => void>('openRemoteConnect')
 
 defineProps<{
   resolvedTheme: 'light' | 'dark'
@@ -41,6 +43,17 @@ const emit = defineEmits<{
 // Expanded project paths. The active project is auto-expanded.
 const expanded = ref<Set<string>>(new Set())
 const showArchived = ref(false)
+
+// The task "⋯" menu opens downward by default; for rows near the bottom of the
+// sidebar that clips it, so flip it upward when there isn't room below.
+const flipUpMenus = ref<Set<string>>(new Set())
+function onTaskMenuClick(e: MouseEvent, uuid: string) {
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  const next = new Set(flipUpMenus.value)
+  if (rect.bottom + 200 > window.innerHeight - 12) next.add(uuid)
+  else next.delete(uuid)
+  flipUpMenus.value = next
+}
 
 const activePath = computed(() => projectStore.activeProject?.path || store.pwd)
 
@@ -92,12 +105,32 @@ watch(() => store.currentSessionId, refresh)
 
 async function openTask(task: TaskItem) {
   if (task.unread) projectStore.updateTaskMeta(task.uuid, { unread: false })
+
+  // Remote tasks: if their workspace is already the active connection just load
+  // the transcript; otherwise reconnect via the SSH wizard (it loads the task
+  // after binding). We never persist the SSH secret, so a fresh connect is
+  // required to continue the conversation.
+  if (isRemotePath(task.project)) {
+    if (activePath.value === task.project) {
+      await store.loadSession(task.uuid)
+    } else {
+      const meta = parseRemoteLabel(task.project)
+      if (meta) openRemoteConnect?.({ ...meta, loadTaskUuid: task.uuid })
+    }
+    return
+  }
+
   if (activePath.value !== task.project) {
     const ok = await projectStore.openProject(task.project)
     if (!ok) return
     await store.fetchHealth()
   }
   await store.loadSession(task.uuid)
+}
+
+function projIcon(path: string) {
+  if (isRemotePath(path)) return Server
+  return path === activePath.value ? FolderOpen : Folder
 }
 
 function isActiveTask(task: TaskItem): boolean {
@@ -149,19 +182,6 @@ function relativeTime(ts: string): string {
     <div class="tree">
       <div class="tree-head">
         <span class="tree-label">Workspace</span>
-        <div class="tree-head-actions">
-          <button
-            class="tree-icon-btn"
-            :class="{ on: showArchived }"
-            title="Show archived"
-            @click="showArchived = !showArchived"
-          >
-            <Archive :size="13" />
-          </button>
-          <button class="tree-icon-btn" title="Open project" @click="emit('openProjects')">
-            <Plus :size="14" />
-          </button>
-        </div>
       </div>
 
       <div v-if="projectNodes.length === 0" class="empty-state">No projects yet</div>
@@ -169,7 +189,7 @@ function relativeTime(ts: string): string {
       <div v-for="proj in projectNodes" :key="proj.path" class="project-group">
         <button class="project-row" :class="{ active: proj.path === activePath }" @click="toggle(proj.path)">
           <ChevronRight :size="14" class="proj-chevron" :class="{ open: isExpanded(proj.path) }" />
-          <component :is="proj.path === activePath ? FolderOpen : Folder" :size="15" class="proj-icon" />
+          <component :is="projIcon(proj.path)" :size="15" class="proj-icon" />
           <span class="proj-name">{{ proj.name }}</span>
           <span v-if="visibleCount(proj.path) > 0" class="proj-count">{{ visibleCount(proj.path) }}</span>
         </button>
@@ -189,7 +209,7 @@ function relativeTime(ts: string): string {
             <span class="task-time">{{ relativeTime(task.created_at) }}</span>
 
             <HMenu as="div" class="task-menu" @click.stop>
-              <MenuButton class="task-menu-btn" title="Task actions" @click.stop>
+              <MenuButton class="task-menu-btn" title="Task actions" @click.stop="onTaskMenuClick($event, task.uuid)">
                 <MoreHorizontal :size="14" />
               </MenuButton>
               <transition
@@ -198,7 +218,7 @@ function relativeTime(ts: string): string {
                 leave-active-class="pop-leave-active"
                 leave-to-class="pop-leave-to"
               >
-                <MenuItems class="task-menu-items">
+                <MenuItems class="task-menu-items" :class="{ 'flip-up': flipUpMenus.has(task.uuid) }">
                   <MenuItem v-slot="{ active }">
                     <button class="tmi" :class="{ hl: active }" @click.stop="projectStore.updateTaskMeta(task.uuid, { pinned: !task.pinned })">
                       <Pin :size="14" /> {{ task.pinned ? 'Unpin' : 'Pin' }}
@@ -235,7 +255,6 @@ function relativeTime(ts: string): string {
 
     <!-- Footer -->
     <div class="sidebar-footer">
-      <div class="footer-model">{{ store.modelName || 'no model' }}</div>
       <div class="footer-actions">
         <button class="footer-btn" @click="emit('toggleTheme')" :title="resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'">
           <svg v-if="resolvedTheme === 'dark'" class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -266,7 +285,7 @@ function relativeTime(ts: string): string {
 }
 
 .sidebar-header {
-  padding: 12px 12px 8px;
+  padding: 8px 12px 6px;
 }
 
 .new-task-btn {
@@ -277,17 +296,20 @@ function relativeTime(ts: string): string {
   width: 100%;
   padding: 9px 0;
   border: 1px solid var(--color-border);
-  background: transparent;
-  border-radius: 8px;
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
   font-size: 13px;
   font-weight: 500;
-  color: var(--color-muted-foreground);
+  color: var(--color-foreground);
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.08s var(--ease-out);
 }
 .new-task-btn:hover {
-  border-color: var(--color-foreground);
-  color: var(--color-foreground);
+  border-color: color-mix(in srgb, var(--color-foreground) 32%, var(--color-border));
+  box-shadow: var(--shadow-sm);
+}
+.new-task-btn:active {
+  transform: translateY(0.5px);
 }
 
 /* ─── Tree ─── */
@@ -321,7 +343,7 @@ function relativeTime(ts: string): string {
   height: 22px;
   border: none;
   background: transparent;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   color: var(--color-muted-foreground);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
@@ -350,10 +372,10 @@ function relativeTime(ts: string): string {
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 6px 6px;
+  padding: 8px 6px;
   border: none;
   background: transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   text-align: left;
   transition: background 0.15s;
@@ -406,7 +428,7 @@ function relativeTime(ts: string): string {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px;
+  padding: 8px 8px;
   margin-left: 6px;
   border-left: 1px solid var(--color-border);
   cursor: pointer;
@@ -417,7 +439,7 @@ function relativeTime(ts: string): string {
   background: var(--color-muted);
 }
 .task-row.active {
-  background: rgba(255, 132, 0, 0.08);
+  background: var(--accent-wash-soft);
   border-left-color: var(--color-primary);
 }
 .task-row.archived {
@@ -427,7 +449,7 @@ function relativeTime(ts: string): string {
 .task-dot {
   width: 6px;
   height: 6px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   flex-shrink: 0;
   background: transparent;
 }
@@ -441,7 +463,7 @@ function relativeTime(ts: string): string {
 .task-title {
   flex: 1;
   min-width: 0;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--color-foreground);
   white-space: nowrap;
   overflow: hidden;
@@ -467,7 +489,7 @@ function relativeTime(ts: string): string {
   height: 20px;
   border: none;
   background: transparent;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   color: var(--color-muted-foreground);
   cursor: pointer;
   opacity: 0;
@@ -479,6 +501,10 @@ function relativeTime(ts: string): string {
 .task-menu-btn:hover {
   background: var(--color-secondary);
   color: var(--color-foreground);
+}
+.task-menu-items.flip-up {
+  top: auto;
+  bottom: calc(100% + 4px);
 }
 .task-menu-items {
   position: absolute;
@@ -534,16 +560,7 @@ function relativeTime(ts: string): string {
   padding: 10px 12px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-}
-.footer-model {
-  font-size: 11px;
-  font-family: var(--font-mono);
-  color: var(--color-muted-foreground);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 160px;
+  justify-content: flex-end;
 }
 .footer-actions {
   display: flex;
@@ -551,17 +568,24 @@ function relativeTime(ts: string): string {
   gap: 2px;
 }
 .footer-btn {
-  width: 28px;
-  height: 28px;
+  width: 34px;
+  height: 34px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   border: none;
   background: transparent;
   color: var(--color-muted-foreground);
   cursor: pointer;
-  transition: color 0.15s;
+  transition: background 0.15s, color 0.15s;
+}
+.footer-btn:hover {
+  background: var(--color-muted);
+}
+.footer-btn svg {
+  width: 18px;
+  height: 18px;
 }
 .footer-btn:hover {
   color: var(--color-foreground);

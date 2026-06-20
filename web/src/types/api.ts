@@ -143,6 +143,11 @@ export interface WorkspaceInfo {
   dirty: boolean
 }
 
+export interface GitBranchesResponse {
+  current: string // empty if not a git repo
+  branches: string[] // local branches, most-recently-committed first
+}
+
 // A task = a conversation, listed across all projects for the sidebar tree.
 export interface TaskItem {
   uuid: string
@@ -219,6 +224,44 @@ export interface SSHAlias {
 export interface SSHListResponse {
   current: string
   aliases: SSHAlias[]
+}
+
+// Remote connection wizard
+export type RemoteAuthMethod = 'password' | 'key'
+
+export interface RemoteConnectRequest {
+  type?: 'ssh'
+  host: string
+  port?: number
+  user?: string
+  auth_method?: RemoteAuthMethod
+  password?: string
+  key_path?: string
+  passphrase?: string
+}
+
+export interface RemoteConnectResponse {
+  connection_id: string
+  remote_pwd: string
+  platform: string
+  user: string
+  host: string
+}
+
+export interface RemoteListDirResponse {
+  path: string
+  dirs: string[]
+}
+
+export interface RemoteBindResponse {
+  status: string
+  pwd: string
+  label: string
+  name: string
+  host: string
+  user: string
+  port: number
+  remote_path: string
 }
 
 // Skill types (for slash commands)
@@ -391,10 +434,21 @@ export interface PendingApproval {
 }
 
 // Project management (localStorage)
+export interface RemoteMeta {
+  host: string // host:port as dialed
+  user: string
+  port: number
+  remotePath: string
+}
+
 export interface Project {
   id: string
   path: string
   createdAt: number
+  // Present for remote (SSH) workspaces. `path` is the host-qualified label
+  // (ssh://user@host:port/remote/path); remote workspaces cannot be re-activated
+  // by a local path switch and must be reconnected through the SSH wizard.
+  remote?: RemoteMeta
 }
 
 // Browse (folder picker)

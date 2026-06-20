@@ -1,0 +1,8 @@
+# Rust / Cargo build output
+/target
+
+# Bundled sidecar binaries (built from the Go source by `make desktop-sidecar`)
+/binaries
+
+# Tauri-generated schemas and platform projects
+/gen/schemas
