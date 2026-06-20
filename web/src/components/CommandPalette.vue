@@ -117,7 +117,7 @@ function onKeydown(e: KeyboardEvent) {
       <TransitionChild
         enter="ease-out duration-150" enter-from="opacity-0" enter-to="opacity-100"
         leave="ease-in duration-100" leave-from="opacity-100" leave-to="opacity-0">
-        <div class="fixed inset-0" style="background: rgba(8,8,8,0.45); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px)" />
+        <div class="fixed inset-0" style="background: var(--backdrop); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px)" />
       </TransitionChild>
 
       <div class="fixed inset-0 flex items-start justify-center pt-[12vh] px-4">

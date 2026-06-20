@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>jcode</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --accent: #ff8400;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        height: 100%;
+        background: radial-gradient(120% 120% at 50% 30%, #211d17 0%, #15120e 60%, #100e0b 100%);
+        color: #f5f1ea;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        overflow: hidden;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      .wrap {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 22px;
+      }
+      .mark {
+        width: 84px;
+        height: 84px;
+        filter: drop-shadow(0 8px 28px rgba(255, 132, 0, 0.28));
+        animation: float 3.2s ease-in-out infinite;
+      }
+      @keyframes float {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-6px); }
+      }
+      .title {
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+      }
+      .title b { color: var(--accent); font-weight: 700; }
+      .status {
+        font-size: 12.5px;
+        color: #9a9085;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .spinner {
+        width: 13px;
+        height: 13px;
+        border: 2px solid rgba(255, 132, 0, 0.22);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <svg class="mark" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#1f1c17" />
+            <stop offset="100%" stop-color="#2c2822" />
+          </linearGradient>
+        </defs>
+        <rect x="16" y="16" width="480" height="480" rx="96" ry="96" fill="url(#bg)" />
+        <g fill="none" stroke="#ffffff" stroke-width="28" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="120,140 80,140 80,372 120,372" />
+          <polyline points="392,140 432,140 432,372 392,372" />
+        </g>
+        <path fill="#ff8400" d="M 185 165 L 327 165 Q 347 165 347 185 Q 347 205 327 205 L 250 205 L 250 340 Q 250 385 222 408 Q 200 425 168 425 Q 140 425 122 412 Q 104 398 104 375 Q 104 360 114 350 Q 124 340 138 340 Q 152 340 160 349 Q 167 358 167 370 Q 167 380 162 387 Q 170 395 183 395 Q 198 395 208 382 Q 218 369 218 348 L 218 205 L 185 205 Q 165 205 165 185 Q 165 165 185 165 Z" />
+      </svg>
+      <div class="title"><b>j</b>code</div>
+      <div class="status"><span class="spinner"></span><span>正在启动本地服务…</span></div>
+    </div>
+  </body>
+</html>

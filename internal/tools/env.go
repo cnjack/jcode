@@ -361,6 +361,12 @@ func (s *SSHExecutor) Exec(ctx context.Context, command, workDir string, timeout
 
 func (s *SSHExecutor) Platform() string { return s.platform }
 
+// User returns the SSH username.
+func (s *SSHExecutor) User() string { return s.user }
+
+// Host returns the dialed host (includes the port, e.g. "1.2.3.4:22").
+func (s *SSHExecutor) Host() string { return s.host }
+
 func (s *SSHExecutor) Label() string {
 	return fmt.Sprintf("%s@%s", s.user, s.host)
 }

@@ -14,43 +14,86 @@ html {
 }
 
 ::selection {
-  background: rgba(255, 132, 0, 0.2);
+  background: var(--accent-selection);
 }
 
-/* ─── Scrollbar (dark) ─── */
-.dark ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+/* ─── Native desktop (Tauri macOS overlay title bar) ───
+   Reserve a thin draggable strip at the top for the OS traffic-light buttons.
+   These MUST be global (not App.vue's <style scoped>): Vue's scoped compiler
+   mangles `:global(html.is-tauri-macos) .child` into `html.is-tauri-macos`,
+   dropping the descendant — which put `padding-top` on <html> and made the whole
+   window scroll 28px. Plain global selectors avoid that. padding-top on the
+   100dvh .app-shell is border-box, so it never overflows the viewport. */
+.titlebar-drag {
+  display: none;
 }
-.dark ::-webkit-scrollbar-track {
-  background: transparent;
+html.is-tauri-macos .app-shell,
+html.is-tauri-macos .settings-shell {
+  padding-top: 28px;
 }
-.dark ::-webkit-scrollbar-thumb {
-  background: #3f3f46;
-  border-radius: 3px;
+/* On desktop the 28px title-bar strip already lifts the surface below the
+   floating control, so it needs far less of its own top margin than the
+   browser (40px). 28 + 12 = 40 → consistent clearance either way. */
+html.is-tauri-macos .chat-panel {
+  margin-top: 12px;
 }
-.dark ::-webkit-scrollbar-thumb:hover {
-  background: #52525b;
+html.is-tauri-macos .titlebar-drag {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 28px;
+  /* Above the sidebar (--z-sidebar: 30) so it catches drags, but below
+     --z-modal (50) so the Settings overlay covers it. */
+  z-index: 45;
 }
 
-/* ─── Scrollbar (light) ─── */
-:root:not(.dark) ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+/* ─── Non-selectable chrome ───
+   App chrome (sidebar, top bar, composer controls, menus, settings nav) is not
+   text-selectable, the way a native app behaves. Real content — chat messages,
+   code, terminal output, and form fields — opts selection back in. */
+.app-shell,
+.settings-shell {
+  -webkit-user-select: none;
+  user-select: none;
 }
-:root:not(.dark) ::-webkit-scrollbar-track {
-  background: transparent;
-}
-:root:not(.dark) ::-webkit-scrollbar-thumb {
-  background: #d4d4d8;
-  border-radius: 3px;
-}
-:root:not(.dark) ::-webkit-scrollbar-thumb:hover {
-  background: #a1a1aa;
+.prose-chat,
+.prose-chat *,
+input,
+textarea,
+[contenteditable='true'],
+pre,
+code,
+.fv-pre,
+.preview-code,
+.xterm,
+.xterm *,
+[data-selectable],
+[data-selectable] * {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
-/* ─── Focus ring ─── */
+/* ─── Scrollbars: hidden, scrolling preserved (native-app feel) ─── */
+* {
+  scrollbar-width: none; /* Firefox */
+}
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* ─── Focus ring ─── keyboard-only via :focus-visible. Restores an a11y
+   affordance that was previously removed outright. Text fields signal focus
+   through their own border, so they opt out to avoid a double ring. */
 *:focus-visible {
+  outline: 2px solid var(--color-border-focus, var(--color-primary));
+  outline-offset: 2px;
+}
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
   outline: none;
 }
 
@@ -119,7 +162,7 @@ html {
 .prose-chat a {
   text-decoration: underline;
   text-underline-offset: 3px;
-  text-decoration-color: rgba(255, 132, 0, 0.3);
+  text-decoration-color: var(--accent-border);
   transition: text-decoration-color 150ms;
 }
 .prose-chat a:hover {

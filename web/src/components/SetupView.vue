@@ -187,7 +187,7 @@ function finish() {
                 class="w-2 h-2 rounded-full transition-colors"
                 :style="{ backgroundColor: step === s
                   ? 'var(--color-primary)'
-                  : (['provider', 'model', 'apikey'].indexOf(step) > ['provider', 'model', 'apikey'].indexOf(s) ? 'rgba(255,132,0,0.45)' : 'var(--color-border)') }"
+                  : (['provider', 'model', 'apikey'].indexOf(step) > ['provider', 'model', 'apikey'].indexOf(s) ? 'var(--accent-fill)' : 'var(--color-border)') }"
               />
             </div>
             <span class="text-[10px] uppercase tracking-wider ml-auto" style="color: var(--color-muted-foreground)">
@@ -223,7 +223,7 @@ function finish() {
                     <div v-if="p.doc" class="text-[10px] mt-0.5" style="color: var(--color-muted-foreground)">{{ p.doc }}</div>
                   </div>
                   <div class="flex items-center gap-2">
-                    <span v-if="p.tag === 'recommended'" class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: rgba(255,132,0,0.12); color: var(--color-primary)">Recommended</span>
+                    <span v-if="p.tag === 'recommended'" class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--accent-wash); color: var(--color-primary)">Recommended</span>
                     <span v-if="p.tag === 'local'" class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--color-info-bg); color: var(--color-info-fg)">Local</span>
                     <span v-if="p.configured" class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--color-success-bg); color: var(--color-success-fg)">configured</span>
                     <svg class="setup-chevron w-4 h-4 transition-colors" viewBox="0 0 20 20" fill="currentColor">
@@ -427,7 +427,7 @@ function finish() {
 }
 .setup-option.selected {
   border-color: var(--color-primary);
-  background: rgba(255, 132, 0, 0.08);
+  background: var(--accent-wash-soft);
 }
 
 .setup-chevron {

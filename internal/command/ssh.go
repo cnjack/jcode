@@ -10,11 +10,15 @@ import (
 	einomodel "github.com/cloudwego/eino/components/model"
 
 	"github.com/cnjack/jcode/internal/prompts"
+	"github.com/cnjack/jcode/internal/remote"
 	"github.com/cnjack/jcode/internal/tools"
 	"github.com/cnjack/jcode/internal/tui"
 )
 
-// handleSSHConnect connects to a remote machine via SSH and reconfigures the env.
+// HandleSSHConnect connects to a remote machine via SSH and reconfigures the
+// env. The pure connection + directory-listing logic lives in internal/remote
+// so the web server can reuse it; this function keeps only the TUI glue
+// (p.Send of status/dir messages).
 func HandleSSHConnect(
 	ctx context.Context,
 	env *tools.Env,
@@ -33,23 +37,18 @@ func HandleSSHConnect(
 		host = parts[1]
 	}
 
-	executor, err := tools.NewSSHExecutor(host, user, tools.BuildSSHAuthMethods())
+	executor, err := remote.Connect(remote.SSHOptions{Host: host, User: user})
 	if err != nil {
 		p.Send(tui.SSHStatusMsg{Success: false, Err: err})
 		return
 	}
 
-	// Temporarily set the executor so handleSSHListDir can use it during
+	// Temporarily set the executor so HandleSSHListDir can use it during
 	// interactive path selection.
 	env.SetSSH(executor, "/root")
 
 	if path == "?" {
-		remotePwd := "/root"
-		if stdout, _, execErr := executor.Exec(ctx, "pwd", "", 5*1e9); execErr == nil {
-			if trimmed := strings.TrimSpace(stdout); trimmed != "" {
-				remotePwd = trimmed
-			}
-		}
+		remotePwd := remote.DiscoverPwd(ctx, executor, "/root")
 		HandleSSHListDir(ctx, env, remotePwd, p)
 		return // Do not initialize agent yet
 	}
@@ -58,11 +57,7 @@ func HandleSSHConnect(
 	if path != "" {
 		remotePwd = path
 	} else {
-		if stdout, _, execErr := executor.Exec(ctx, "pwd", "", 5*1e9); execErr == nil {
-			if trimmed := strings.TrimSpace(stdout); trimmed != "" {
-				remotePwd = trimmed
-			}
-		}
+		remotePwd = remote.DiscoverPwd(ctx, executor, "/root")
 	}
 
 	env.SetSSH(executor, remotePwd)
@@ -76,41 +71,17 @@ func HandleSSHConnect(
 
 	p.Send(tui.SSHStatusMsg{
 		Success: true,
-		Label:   fmt.Sprintf("%s@%s (pwd: %s)", user, host, remotePwd),
+		Label:   envLabel,
 	})
 }
 
-// handleSSHListDir runs `ls` on the remote host and sends the results to the
+// HandleSSHListDir runs `ls` on the remote host and sends the results to the
 // TUI directory picker.
 func HandleSSHListDir(ctx context.Context, env *tools.Env, path string, p *tea.Program) {
-	cmd := fmt.Sprintf("ls -F -1 %s", tools.ShellQuote(path))
-	stdout, stderr, err := env.Exec.Exec(ctx, cmd, "", 10*1e9)
+	dirs, err := remote.ListDirs(ctx, env.Exec, path)
 	if err != nil {
-		p.Send(tui.SSHDirResultsMsg{Err: fmt.Errorf("ls failed: %v\nstderr: %s", err, truncate(stderr, 100))})
+		p.Send(tui.SSHDirResultsMsg{Err: err})
 		return
 	}
-
-	lines := strings.Split(strings.TrimSpace(stdout), "\n")
-	var dirs []string
-	if path != "/" {
-		dirs = append(dirs, "..")
-	}
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if strings.HasSuffix(line, "/") {
-			dirs = append(dirs, line[:len(line)-1])
-		}
-	}
-
 	p.Send(tui.SSHDirResultsMsg{Path: path, Items: dirs})
-}
-
-func truncate(s string, l int) string {
-	if len(s) > l {
-		return s[:l] + "..."
-	}
-	return s
 }

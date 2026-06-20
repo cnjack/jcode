@@ -169,7 +169,7 @@ onMounted(fetchDiff)
   background: var(--color-muted);
 }
 .dv-mode.active {
-  background: rgba(255, 132, 0, 0.12);
+  background: var(--accent-wash);
   color: var(--color-primary);
 }
 
@@ -187,7 +187,7 @@ onMounted(fetchDiff)
   background: var(--color-muted);
 }
 .dv-file.active {
-  background: rgba(255, 132, 0, 0.08);
+  background: var(--accent-wash-soft);
   color: var(--color-foreground);
 }
 

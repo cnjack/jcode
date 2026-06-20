@@ -1,5 +1,5 @@
 // API client for jcode backend
-import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, TaskItem, TaskMetaPatch, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData } from '@/types/api'
+import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, TaskItem, TaskMetaPatch, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse } from '@/types/api'
 
 const BASE = ''
 
@@ -103,6 +103,12 @@ export const api = {
     return request<DiffResponse>(`/api/diff${q}`)
   },
   workspace: () => request<WorkspaceInfo>('/api/workspace'),
+  gitBranches: () => request<GitBranchesResponse>('/api/git/branches'),
+  gitCheckout: (branch: string, create = false) =>
+    request<{ branch: string }>('/api/git/checkout', {
+      method: 'POST',
+      body: JSON.stringify({ branch, create }),
+    }),
   tasks: () => request<TaskItem[]>('/api/tasks'),
   updateTask: (id: string, patch: TaskMetaPatch) =>
     request<TaskItem>(`/api/tasks/${encodeURIComponent(id)}`, {
@@ -159,6 +165,33 @@ export const api = {
     request<{ status: string }>('/api/stop', { method: 'POST' }),
   sshList: () =>
     request<SSHListResponse>('/api/ssh'),
+
+  // Remote connection wizard (SSH)
+  remoteConnect: (data: RemoteConnectRequest) =>
+    request<RemoteConnectResponse>('/api/remote/connect', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  remoteListDir: (connectionId: string, path: string) =>
+    request<RemoteListDirResponse>('/api/remote/list-dir', {
+      method: 'POST',
+      body: JSON.stringify({ connection_id: connectionId, path }),
+    }),
+  remoteBind: (connectionId: string, path: string) =>
+    request<RemoteBindResponse>('/api/remote/bind', {
+      method: 'POST',
+      body: JSON.stringify({ connection_id: connectionId, path }),
+    }),
+  remoteCancel: (connectionId: string) =>
+    request<{ status: string }>('/api/remote/cancel', {
+      method: 'POST',
+      body: JSON.stringify({ connection_id: connectionId }),
+    }),
+  remoteSaveAlias: (name: string, addr: string, path: string) =>
+    request<{ status: string }>('/api/remote/save-alias', {
+      method: 'POST',
+      body: JSON.stringify({ name, addr, path }),
+    }),
   skillsList: () =>
     request<SkillInfo[]>('/api/skills'),
   skillToggle: (name: string, enabled: boolean) =>

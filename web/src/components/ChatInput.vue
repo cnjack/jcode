@@ -3,12 +3,23 @@ import { ref, nextTick, watch, computed, onMounted, onUnmounted } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { api } from '@/composables/api'
 import type { SlashCommandInfo, ChatImage } from '@/types/api'
+import WorkspacePicker from '@/components/WorkspacePicker.vue'
+import BranchPicker from '@/components/BranchPicker.vue'
+import { MessageSquare, ClipboardList, Zap, Target, Plus, Paperclip, Slash, X } from 'lucide-vue-next'
+
+// Which way the workspace/branch pickers open. The docked composer opens them
+// upward (default); the centered welcome composer has more empty room below, so
+// it opens them downward to avoid clipping against the top of the canvas.
+withDefaults(defineProps<{ pickerPlacement?: 'top' | 'bottom' }>(), {
+  pickerPlacement: 'top',
+})
 
 const store = useChatStore()
 const input = ref('')
 const textarea = ref<HTMLTextAreaElement | null>(null)
 const showModelPicker = ref(false)
 const showModePicker = ref(false)
+const showAddMenu = ref(false)
 const showManageModels = ref(false)
 const modelFilter = ref('')
 const containerRef = ref<HTMLDivElement | null>(null)
@@ -24,9 +35,9 @@ const pendingImagePreviews = ref<string[]>([])
 const fileInput = ref<HTMLInputElement | null>(null)
 
 const modes = [
-  { value: 'ask' as const, label: 'Ask', icon: '💬' },
-  { value: 'plan' as const, label: 'Plan', icon: '📋' },
-  { value: 'autopilot' as const, label: 'Autopilot', icon: '🚀' },
+  { value: 'ask' as const, label: 'Ask', icon: MessageSquare },
+  { value: 'plan' as const, label: 'Plan', icon: ClipboardList },
+  { value: 'autopilot' as const, label: 'Autopilot', icon: Zap },
 ]
 
 const filteredSlashCommands = computed(() => {
@@ -189,6 +200,22 @@ function triggerImageUpload() {
   fileInput.value?.click()
 }
 
+// Insert a trigger character at the cursor from the "+" menu. For "/" at the
+// start of an empty box this also opens the slash-command menu via handleInput.
+function insertToken(char: string) {
+  showAddMenu.value = false
+  const el = textarea.value
+  const start = el ? el.selectionStart : input.value.length
+  const end = el ? el.selectionEnd : input.value.length
+  input.value = input.value.slice(0, start) + char + input.value.slice(end)
+  nextTick(() => {
+    el?.focus()
+    const pos = start + char.length
+    el?.setSelectionRange(pos, pos)
+    handleInput()
+  })
+}
+
 function handleImageSelect(e: Event) {
   const target = e.target as HTMLInputElement
   const files = target.files
@@ -230,6 +257,7 @@ function handleClickOutside(e: MouseEvent) {
   if (containerRef.value && !containerRef.value.contains(e.target as Node)) {
     showModelPicker.value = false
     showModePicker.value = false
+    showAddMenu.value = false
     showSlashMenu.value = false
     if (showManageModels.value) {
       showManageModels.value = false
@@ -279,7 +307,7 @@ watch(() => store.isRunning, (running) => {
 
 <template>
   <div ref="containerRef" class="chat-input-wrapper">
-    <div class="chat-input-card">
+    <div class="chat-input-card" :class="{ 'composer-elevated': !store.hasMessages }">
       <!-- Slash command menu -->
       <div
         v-if="showSlashMenu && filteredSlashCommands.length > 0"
@@ -296,6 +324,15 @@ watch(() => store.isRunning, (running) => {
             <span class="slash-cmd">{{ cmd.slash }}</span>
             <span class="slash-desc">{{ cmd.description }}</span>
           </button>
+        </div>
+
+        <!-- Workspace selector — pick the workspace for this task directly on the
+             composer (replaces opening the projects modal from the sidebar). On
+             the centered new-task screen its menu opens downward; once docked at
+             the bottom during a conversation it opens upward. -->
+        <div class="composer-top">
+          <WorkspacePicker :placement="pickerPlacement" />
+          <BranchPicker :placement="pickerPlacement" />
         </div>
 
         <div class="chat-input-inner">
@@ -334,26 +371,48 @@ watch(() => store.isRunning, (running) => {
       <!-- Toolbar -->
       <div class="toolbar">
           <div class="toolbar-left">
-            <!-- Paperclip / attach -->
-            <button
-              class="tool-btn attach-btn"
-              :class="{ disabled: !store.imageSupport, 'has-images': pendingImages.length > 0 }"
-              :title="!store.imageSupport ? 'Current model does not support images' : 'Attach images'"
-              :disabled="!store.imageSupport"
-              @click="store.imageSupport && triggerImageUpload()"
-            >
-              <svg class="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M15.621 4.379a3.5 3.5 0 00-4.95 0L4.05 11a2.5 2.5 0 003.536 3.536l6.621-6.621a1.5 1.5 0 00-2.121-2.121l-6.622 6.621" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
-              <span v-if="pendingImages.length > 0" class="attach-badge">{{ pendingImages.length }}</span>
-            </button>
+            <!-- "+" menu: attach files, slash command, and Goal (only the items
+                 that have real functionality). -->
+            <div class="relative">
+              <button
+                class="add-btn"
+                :class="{ open: showAddMenu }"
+                title="Add"
+                @click.stop="showAddMenu = !showAddMenu; showModelPicker = false; showModePicker = false"
+              >
+                <Plus :size="18" />
+              </button>
+              <div v-if="showAddMenu" class="dropdown-menu add-menu">
+                <button
+                  class="dropdown-item"
+                  :class="{ disabled: !store.imageSupport }"
+                  :disabled="!store.imageSupport"
+                  :title="!store.imageSupport ? 'Current model does not support images' : ''"
+                  @click="triggerImageUpload(); showAddMenu = false"
+                >
+                  <Paperclip :size="15" class="dmi-icon" /> <span>Attach files</span>
+                  <span v-if="pendingImages.length > 0" class="dmi-badge">{{ pendingImages.length }}</span>
+                </button>
+                <button class="dropdown-item" @click="insertToken('/')">
+                  <Slash :size="15" class="dmi-icon" /> <span>Command</span>
+                </button>
+                <button
+                  class="dropdown-item"
+                  :class="{ active: store.goalArmed }"
+                  :title="store.goal ? 'Setting a new goal replaces the current one' : 'Next message becomes the session goal'"
+                  @click="store.goalArmed = !store.goalArmed; showAddMenu = false"
+                >
+                  <Target :size="15" class="dmi-icon" /> <span>Goal</span>
+                </button>
+              </div>
+            </div>
 
-            <!-- Mode selector (Ask/Plan/Autopilot) -->
+            <!-- Mode selector (Ask/Plan/Autopilot) — stays visible on the toolbar. -->
             <div class="relative">
               <button
                 class="tool-btn dropdown-btn"
                 :class="{ highlighted: store.mode !== 'ask' }"
-                @click.stop="showModePicker = !showModePicker; showModelPicker = false"
+                @click.stop="showModePicker = !showModePicker; showModelPicker = false; showAddMenu = false"
               >
                 {{ modeLabel(store.mode) }}
                 <svg class="w-3 h-3 opacity-60" viewBox="0 0 20 20" fill="currentColor">
@@ -368,35 +427,44 @@ watch(() => store.isRunning, (running) => {
                   :class="{ active: store.mode === m.value }"
                   @click="selectMode(m.value)"
                 >
-                  {{ m.icon }} {{ m.label }}
+                  <component :is="m.icon" :size="14" /> {{ m.label }}
                 </button>
               </div>
             </div>
 
-            <!-- Goal toggle: arm the prompt box so the next message sets the session goal -->
-            <button
-              class="tool-btn dropdown-btn"
-              :class="{ highlighted: store.goalArmed }"
-              :title="store.goal ? 'Setting a new goal replaces the current one' : 'Next message becomes the session goal'"
-              @click="store.goalArmed = !store.goalArmed"
-            >
-              🎯 Goal
-            </button>
+            <!-- Goal chip — appears once Goal is armed (from the + menu); its ×
+                 disarms it. Mirrors the Codex "目标" pill. -->
+            <template v-if="store.goalArmed">
+              <span class="tb-divider" aria-hidden="true" />
+              <div class="goal-chip" :title="store.goal ? 'Next message replaces the current goal' : 'Next message becomes the session goal'">
+                <button class="goal-chip-x" title="Remove goal" @click="store.goalArmed = false">
+                  <X :size="11" />
+                </button>
+                <Target :size="13" />
+                <span>Goal</span>
+              </div>
+            </template>
+          </div>
 
-            <!-- Model selector -->
+          <div class="toolbar-right">
+            <span v-if="store.tokenInfo" class="token-count">
+              {{ store.tokenInfo.total_tokens.toLocaleString() }} tokens
+            </span>
+
+            <!-- Model selector (moved to the right, near Send) -->
             <div class="relative">
               <button
                 class="tool-btn dropdown-btn"
-                @click.stop="showModelPicker = !showModelPicker; showModePicker = false"
+                @click.stop="showModelPicker = !showModelPicker; showModePicker = false; showAddMenu = false"
               >
-                {{ store.modelName || 'model' }}
+                {{ store.modelName ? getModelDisplayName(store.providerName, store.modelName) : 'model' }}
                 <svg class="w-3 h-3 opacity-60" viewBox="0 0 20 20" fill="currentColor">
                   <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
                 </svg>
               </button>
               <div
                 v-if="showModelPicker"
-                class="dropdown-menu model-menu"
+                class="dropdown-menu model-menu align-right"
               >
                 <!-- Favorites section -->
                 <template v-if="store.recentModels.length > 0 && store.favoriteModels.size > 0">
@@ -450,14 +518,6 @@ watch(() => store.isRunning, (running) => {
               </div>
             </div>
 
-            <!-- Auto-approve is now expressed by the Autopilot mode above. -->
-          </div>
-
-          <div class="toolbar-right">
-            <span v-if="store.tokenInfo" class="token-count">
-              {{ store.tokenInfo.total_tokens.toLocaleString() }} tokens
-            </span>
-
             <!-- Channel toggle (inline) -->
             <button
               v-if="store.channelAvailable"
@@ -504,7 +564,7 @@ watch(() => store.isRunning, (running) => {
     <Teleport to="body">
       <div
         v-if="showManageModels"
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-[var(--backdrop)] backdrop-blur-sm"
         @click="showManageModels = false; modelFilter = ''"
       >
         <div class="w-full max-w-lg max-h-[70vh] flex flex-col mx-4 rounded-lg shadow-xl" style="background: var(--color-surface); border: 1px solid var(--color-border)" @click.stop>
@@ -546,7 +606,7 @@ watch(() => store.isRunning, (running) => {
                   @change="store.toggleModelEnabled(p.id, m.id, ($event.target as HTMLInputElement).checked)"
                 />
                 <span class="text-xs flex-1 truncate" style="color: var(--color-foreground)">{{ m.name || m.id }}</span>
-                <span v-if="m.recommended" class="text-[9px] px-1.5 py-0.5 rounded font-medium shrink-0" style="background: rgba(255,132,0,0.1); color: var(--color-primary)">recommended</span>
+                <span v-if="m.recommended" class="text-[9px] px-1.5 py-0.5 rounded font-medium shrink-0" style="background: var(--accent-wash); color: var(--color-primary)">recommended</span>
               </label>
             </template>
           </div>
@@ -568,12 +628,41 @@ watch(() => store.isRunning, (running) => {
 
 .chat-input-card {
   margin: 0 auto;
-  border-radius: 12px;
-  padding: 6px;
+  border-radius: var(--radius-xl);
+  padding: 4px 6px 10px;
   background: transparent;
   position: relative;
   display: flex;
   flex-direction: column;
+}
+
+.composer-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px 5px;
+  min-width: 0;
+}
+
+/* On the new-task screen the composer is the centerpiece: lift the whole thing
+   (workspace pills + input + toolbar) into one cohesive elevated card with a
+   soft, background-tinted shadow. The docked conversation composer keeps the
+   recessed, frameless look. */
+.composer-elevated {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2xl);
+  /* Tighter at the top (workspace row), a touch more white below the toolbar. */
+  padding: 6px 12px 12px;
+  box-shadow:
+    0 1px 2px rgba(15, 18, 24, 0.04),
+    0 18px 44px -24px rgba(15, 18, 24, 0.28);
+}
+.composer-elevated .composer-top {
+  padding: 2px 4px 9px;
+}
+.composer-elevated .chat-input-inner {
+  border-radius: var(--radius-xl);
 }
 
 .chat-input-inner {
@@ -582,7 +671,7 @@ watch(() => store.isRunning, (running) => {
      token that is lighter than surface, which would otherwise invert it). */
   background: color-mix(in srgb, var(--color-surface) 90%, #000);
   border: 1px solid var(--color-border);
-  border-radius: 9px;
+  border-radius: var(--radius-lg);
   padding: 14px 16px 0;
   transition: border-color 0.2s;
 }
@@ -632,7 +721,7 @@ watch(() => store.isRunning, (running) => {
   width: 56px;
   height: 56px;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
 }
 
@@ -687,7 +776,7 @@ watch(() => store.isRunning, (running) => {
   padding: 4px 8px;
   border: none;
   background: transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-size: 12px;
   color: var(--color-muted-foreground);
   cursor: pointer;
@@ -701,7 +790,7 @@ watch(() => store.isRunning, (running) => {
 }
 
 .tool-btn.highlighted {
-  background: rgba(255, 132, 0, 0.1);
+  background: var(--accent-wash);
   color: var(--color-primary);
 }
 
@@ -746,8 +835,8 @@ watch(() => store.isRunning, (running) => {
   padding: 4px 0;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 10px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
 }
 
 .dropdown-menu.model-menu {
@@ -777,7 +866,7 @@ watch(() => store.isRunning, (running) => {
 
 .dropdown-item.active {
   color: var(--color-primary);
-  background: rgba(255, 132, 0, 0.1);
+  background: var(--accent-wash);
 }
 
 .dropdown-item.disabled {
@@ -801,6 +890,88 @@ watch(() => store.isRunning, (running) => {
   margin-top: 0;
 }
 
+/* "+" add menu button + items */
+.add-btn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: var(--color-muted);
+  border-radius: var(--radius-md);
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.add-btn:hover,
+.add-btn.open {
+  background: var(--color-secondary);
+  color: var(--color-foreground);
+}
+.add-menu {
+  min-width: 188px;
+}
+.add-menu .dropdown-item {
+  gap: 9px;
+  padding: 7px 12px;
+  color: var(--color-foreground);
+}
+.dmi-icon {
+  color: var(--color-muted-foreground);
+  flex-shrink: 0;
+}
+.dropdown-item.active .dmi-icon {
+  color: var(--color-primary);
+}
+.dmi-badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--color-primary);
+}
+
+/* Right-anchored dropdown (the model picker now lives on the toolbar's right) */
+.dropdown-menu.align-right {
+  left: auto;
+  right: 0;
+}
+
+/* Subtle divider + the armed-Goal chip (Codex-style "× Goal" pill) */
+.tb-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--color-border);
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+.goal-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px 0 4px;
+  border-radius: var(--radius-md);
+  background: var(--accent-wash);
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 500;
+}
+.goal-chip-x {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-primary) 18%, transparent);
+  color: var(--color-primary);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.goal-chip-x:hover {
+  background: color-mix(in srgb, var(--color-primary) 34%, transparent);
+}
+
 .dropdown-footer {
   padding: 4px 12px;
   border-top: 1px solid var(--color-border);
@@ -820,8 +991,8 @@ watch(() => store.isRunning, (running) => {
 .recommend-badge {
   font-size: 9px;
   padding: 1px 5px;
-  border-radius: 4px;
-  background: rgba(255, 132, 0, 0.1);
+  border-radius: var(--radius-sm);
+  background: var(--accent-wash);
   color: var(--color-primary);
   font-weight: 500;
   margin-left: 4px;
@@ -861,13 +1032,13 @@ watch(() => store.isRunning, (running) => {
   gap: 5px;
   padding: 5px 12px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--color-primary);
-  color: white;
+  color: var(--color-on-primary, #fff);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: opacity 0.15s;
+  transition: opacity 0.15s, transform 0.08s var(--ease-out);
   white-space: nowrap;
 }
 
@@ -877,7 +1048,11 @@ watch(() => store.isRunning, (running) => {
 }
 
 .send-btn:not(:disabled):hover {
-  opacity: 0.9;
+  opacity: 0.92;
+}
+
+.send-btn:not(:disabled):active {
+  transform: translateY(0.5px);
 }
 
 .stop-btn {
@@ -886,7 +1061,7 @@ watch(() => store.isRunning, (running) => {
   gap: 5px;
   padding: 5px 12px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--color-destructive);
   color: white;
   font-size: 12px;
@@ -908,8 +1083,8 @@ watch(() => store.isRunning, (running) => {
   overflow-y: auto;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 10px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
 }
 
 .slash-item {
@@ -954,7 +1129,7 @@ watch(() => store.isRunning, (running) => {
   justify-content: center;
   border: none;
   background: transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   color: var(--color-muted-foreground);
   cursor: pointer;
   transition: color 0.15s, background 0.15s;
@@ -966,7 +1141,7 @@ watch(() => store.isRunning, (running) => {
 
 .channel-btn.active {
   color: var(--color-primary);
-  background: rgba(255, 132, 0, 0.1);
+  background: var(--accent-wash);
 }
 
 .hidden {

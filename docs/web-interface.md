@@ -7,6 +7,8 @@ nav_order: 5
 
 jcode includes a browser-based interface for users who prefer a visual UI over the terminal. The web UI provides chat, file browsing, terminal access, and full agent control.
 
+> Prefer a native window with OS notifications and a menu-bar tray? The same UI ships as a [Desktop App](desktop).
+
 ![jcode Web UI](asset/web-screenshot.png)
 
 ## Starting the Web Server

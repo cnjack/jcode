@@ -13,7 +13,7 @@ LDFLAGS := -s -w \
 
 export GOFLAGS := -buildvcs=false
 
-.PHONY: build build-binary run doctor version install clean build-web fmt lint lint-go lint-web generate setup-hooks
+.PHONY: build build-binary run doctor version install clean build-web fmt lint lint-go lint-web generate setup-hooks desktop-icons desktop-sidecar desktop-dev desktop-build desktop-clean
 
 fmt:
 	@echo "Formatting Go..."
@@ -65,3 +65,36 @@ clean:
 setup-hooks:
 	@git config core.hooksPath .githooks
 	@echo "Git hooks installed (core.hooksPath = .githooks)"
+
+# ─── Desktop app (Tauri) ───
+# The desktop app embeds the same jcode binary as a sidecar: Tauri renders the
+# UI and provides native system integration, while the Go server (with the web
+# UI baked in) runs on a loopback port. See docs/desktop.md.
+DESKTOP_DIR  := desktop
+SIDECAR_DIR  := $(DESKTOP_DIR)/src-tauri/binaries
+RUST_TARGET  := $(shell rustc -vV 2>/dev/null | sed -n 's/^host: //p')
+# Tauri's externalBin resolver requires the OS executable suffix, so Windows
+# sidecars must be jcode-<triple>.exe.
+SIDECAR_EXE  := $(if $(findstring windows,$(RUST_TARGET)),.exe,)
+
+# Regenerate the app icon set from the brand mark.
+desktop-icons:
+	cd $(DESKTOP_DIR) && npx --yes @tauri-apps/cli@2 icon ../web/public/icon.svg -o src-tauri/icons
+
+# Build the sidecar binary (frontend embedded) named for the host target triple,
+# which is what Tauri's externalBin resolver expects.
+desktop-sidecar: generate build-web
+	@echo "Building jcode sidecar for $(RUST_TARGET)..."
+	@mkdir -p $(SIDECAR_DIR)
+	go build -ldflags "$(LDFLAGS)" -o $(SIDECAR_DIR)/jcode-$(RUST_TARGET)$(SIDECAR_EXE) $(PKG)
+
+# Run the desktop app in development (hot window; rebuilds the sidecar first).
+desktop-dev: desktop-sidecar
+	cd $(DESKTOP_DIR) && (pnpm install 2>/dev/null || npm install) && pnpm tauri dev
+
+# Produce a distributable bundle (.app/.dmg on macOS, .msi on Windows, etc.).
+desktop-build: desktop-sidecar
+	cd $(DESKTOP_DIR) && (pnpm install 2>/dev/null || npm install) && pnpm tauri build
+
+desktop-clean:
+	rm -rf $(SIDECAR_DIR) $(DESKTOP_DIR)/src-tauri/target

@@ -210,5 +210,5 @@ onUnmounted(cleanup)
 }
 :deep(.xterm-viewport::-webkit-scrollbar-thumb) {
   background: var(--color-border);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }</style>
