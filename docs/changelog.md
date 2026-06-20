@@ -1,6 +1,6 @@
 ---
 title: Changelog
-nav_order: 10
+nav_order: 11
 ---
 
 # Changelog
@@ -11,7 +11,9 @@ For the **full changelog**, see [CHANGELOG.md](../CHANGELOG.md) in the repositor
 
 ## Unreleased
 
-_Nothing yet._
+#### Added
+- **CI quality gate** (`.github/workflows/ci.yml`): Go `build`/`vet`/`test` + golangci-lint (new-issue gating) and web type-check/lint/build run on every push to `main` and every pull request.
+- **Desktop bundles in the release pipeline.** `release.yml` now builds the Tauri desktop app for **macOS (Intel + Apple Silicon), Windows, and Linux** on native runners and attaches the `.dmg` / `.msi` / `.exe` / `.deb` / `.AppImage` installers (with checksums) to each GitHub Release alongside the CLI binaries. macOS code-signing/notarization is wired through optional `APPLE_*` secrets (unset → unsigned build). See [Release & CI](release.html).
 
 ---
 
