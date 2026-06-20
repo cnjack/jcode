@@ -28,11 +28,19 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
-      # registry_generated.go is generated (gitignored), so the model package
-      # won't compile without it. theme generate is offline; model generate
-      # fetches models.dev.
-      - name: Generate code
-        run: make generate
+      # build-web (vite) is needed because internal/web embeds dist/* via
+      # //go:embed — without it the whole module fails to compile.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      # registry_generated.go + the theme TS/CSS are generated (gitignored), and
+      # internal/web/dist must exist for the go:embed. `make generate build-web`
+      # produces all three. model generate fetches models.dev; theme is offline.
+      - name: Generate code + build frontend
+        run: make generate build-web
 
       - name: Build
         run: go build ./...
@@ -55,11 +63,15 @@ jobs:
   web:
     name: Web (type-check · build)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
     steps:
       - uses: actions/checkout@v5
+
+      # Go is needed only to run the theme generator, which writes
+      # web/src/composables/themes.generated.ts + styles/tokens.generated.css
+      # (gitignored) — without them vue-tsc can't resolve ./themes.generated.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
 
       - uses: actions/setup-node@v5
         with:
@@ -68,14 +80,21 @@ jobs:
       - name: Install pnpm
         run: npm install -g pnpm
 
+      - name: Generate theme assets
+        run: go generate ./internal/theme/...
+
       - name: Install deps
+        working-directory: web
         run: pnpm install --frozen-lockfile
 
       - name: Type-check
+        working-directory: web
         run: pnpm type-check
 
       - name: Lint
+        working-directory: web
         run: npx oxlint .
 
       - name: Build
+        working-directory: web
         run: npx vite build
