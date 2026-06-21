@@ -52,7 +52,7 @@ nav_order: 8
 |---|---|
 | **Enter** | Submit prompt |
 | **Shift+Enter** | Insert new line |
-| **Shift+Tab** | Cycle session mode (Ask → Plan → Autopilot) |
+| **Shift+Tab** | Cycle session mode (Ask for approval → Plan → Full access) |
 | **Ctrl+L** | Open model picker |
 | **F1** / **?** | Open keyboard shortcuts help (`?` when the input is empty) |
 | **Ctrl+C** | Exit (press once for confirmation, twice to force) |

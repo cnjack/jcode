@@ -1,5 +1,6 @@
 // WebSocket client composable for jcode web
 import { ref, onUnmounted } from 'vue'
+import { wsBase } from './apiBase'
 import type {
   AgentTextData,
   ToolCallData,
@@ -72,8 +73,10 @@ export function useWebSocket(handlers: WSHandler) {
       ws = null
     }
 
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    ws = new WebSocket(`${proto}//${location.host}/api/ws`)
+    // Build the WS URL from the resolved base: relative in browser mode (the
+    // page is served by the API server), absolute in desktop mode (the page is
+    // cross-origin to the Go server). See composables/apiBase.ts.
+    ws = new WebSocket(`${wsBase()}/api/ws`)
 
     ws.onopen = () => {
       connected.value = true

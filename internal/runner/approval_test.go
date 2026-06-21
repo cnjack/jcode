@@ -201,8 +201,8 @@ func TestRequestApproval_AskUserAutoApprove(t *testing.T) {
 }
 
 // TestRequestApproval_ApproveAllPromotes covers the promotion semantics: an
-// "approve all" response (Mode=Auto) promotes the session to Autopilot, while a
-// plain "approve once" leaves it in Ask/MANUAL.
+// "approve all" response (Mode=Auto) promotes the session to Full access, while a
+// plain "approve once" leaves it in Approval/MANUAL.
 func TestRequestApproval_ApproveAllPromotes(t *testing.T) {
 	ctx := context.Background()
 
@@ -214,8 +214,8 @@ func TestRequestApproval_ApproveAllPromotes(t *testing.T) {
 	if all.GetMode() != handler.ModeAuto {
 		t.Errorf("approve-all should promote approval axis to Auto, got %v", all.GetMode())
 	}
-	if all.GetSessionMode() != mode.Autopilot {
-		t.Errorf("approve-all should promote session to Autopilot, got %v", all.GetSessionMode())
+	if all.GetSessionMode() != mode.FullAccess {
+		t.Errorf("approve-all should promote session to Full access, got %v", all.GetSessionMode())
 	}
 
 	once := NewApprovalState("/tmp/workdir", false)
@@ -226,8 +226,8 @@ func TestRequestApproval_ApproveAllPromotes(t *testing.T) {
 	if once.GetMode() != handler.ModeManual {
 		t.Errorf("approve-once should leave approval axis at Manual, got %v", once.GetMode())
 	}
-	if once.GetSessionMode() != mode.Ask {
-		t.Errorf("approve-once should leave session at Ask, got %v", once.GetSessionMode())
+	if once.GetSessionMode() != mode.Approval {
+		t.Errorf("approve-once should leave session at Approval, got %v", once.GetSessionMode())
 	}
 }
 

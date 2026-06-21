@@ -12,7 +12,7 @@ import (
 // TestWebHandler_ResolveApprovalOnceVsAll covers the P0 fix: the web approval
 // endpoint must distinguish "approve once" (no session-mode change) from
 // "approve all" (promote to auto-approve). Previously every Allow click mapped
-// to ModeAuto, silently flipping the whole session to Autopilot.
+// to ModeAuto, silently flipping the whole session to Full access.
 func TestWebHandler_ResolveApprovalOnceVsAll(t *testing.T) {
 	run := func(approveAll bool) ApprovalResponse {
 		t.Helper()

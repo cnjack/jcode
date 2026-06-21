@@ -18,7 +18,7 @@ The agent is the core of jcode. It's the AI that understands your requests, reas
 
 ## Session Modes
 
-jcode has a single mode selector with three states. Press **Shift+Tab** in the TUI to cycle **Ask → Plan → Autopilot** (or use the dropdown in the web UI / `session/set_mode` over ACP). The mode controls both which tools are available and whether tool calls need approval.
+jcode has a single mode selector with three states. Press **Shift+Tab** in the TUI to cycle **Ask for approval → Plan → Full access** (or use the dropdown in the web UI / `session/set_mode` over ACP). The mode controls both which tools are available and whether tool calls need approval.
 
 ### Ask
 
@@ -39,15 +39,15 @@ Plan is ideal for complex tasks where you want to review the approach before mak
   Plan │ Model: openai / gpt-4o │ [██░░░░░░░░] 12%
 ```
 
-### Autopilot
+### Full access
 
-Full tools, every tool call auto-approved — the agent runs end-to-end with no interruptions. This is the mode `--unsafe` and `default_mode: "autopilot"` (or the legacy `auto_approve: true`) start in.
+Full tools, every tool call auto-approved — the agent runs end-to-end with no interruptions. This is the mode `--unsafe` and `default_mode: "full_access"` (or the legacy `auto_approve: true`) start in.
 
 {: .warning }
-Autopilot approves everything, including destructive commands. There is no separate confirmation gate in this mode — use it only when you trust the task.
+Full access approves everything, including destructive commands. There is no separate confirmation gate in this mode — use it only when you trust the task.
 
 ```
-  Autopilot │ Model: openai / gpt-4o │ [████░░░░░░] 2%
+  Full access │ Model: openai / gpt-4o │ [████░░░░░░] 2%
 ```
 
 ## Context Awareness

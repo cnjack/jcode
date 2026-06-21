@@ -220,7 +220,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 
 	// makeAgent assembles the middleware stack and tools for a given chat model
 	// and plan flag, then builds the agent. Plan mode swaps to the read-only
-	// prompt + tool set; Ask/Autopilot share the full set (they differ only on
+	// prompt + tool set; Approval/Full access share the full set (they differ only on
 	// the approval axis, carried by approvalState). This is the cheap per-mode
 	// assembly — it does NOT rebuild the chat model (mirrors ACP's makeAgent).
 	makeAgent := func(cm model.ToolCallingChatModel, ctxLimit int, planMode bool) (*adk.ChatModelAgent, error) {

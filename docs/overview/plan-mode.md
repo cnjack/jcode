@@ -19,7 +19,7 @@ Plan Mode lets the agent explore your codebase **read-only** and present a struc
 
 ### 1. Enter Plan Mode
 
-Press **Shift+Tab** in the TUI to cycle the mode selector to **Plan** (Ask → Plan → Autopilot), or type a task and ask the agent to plan first.
+Press **Shift+Tab** in the TUI to cycle the mode selector to **Plan** (Ask for approval → Plan → Full access), or type a task and ask the agent to plan first.
 
 The mode pill changes to indicate Plan:
 
@@ -81,5 +81,5 @@ Planning → Generate Plan → Review → Approve/Reject → Executing → Compl
 
 {: .tip }
 - If the plan isn't what you expected, **reject with feedback** — the agent will revise it
-- You can cycle between Ask, Plan, and Autopilot with **Shift+Tab** at any time
+- You can cycle between Ask for approval, Plan, and Full access with **Shift+Tab** at any time
 - Plans are parsed from numbered steps (`1.`) and checkboxes (`- [ ]`)

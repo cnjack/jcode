@@ -1,0 +1,22 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <defs>
+    <clipPath id="card">
+      <rect x="128" y="120" width="768" height="768" rx="164"/>
+    </clipPath>
+  </defs>
+
+  <rect x="116" y="140" width="792" height="792" rx="176" fill="#0D0D0C" opacity="0.08"/>
+  <rect x="124" y="132" width="776" height="776" rx="168" fill="#0D0D0C" opacity="0.04"/>
+  <rect x="128" y="120" width="768" height="768" rx="164" fill="#FEFEFE"/>
+
+  <image
+    x="112.64"
+    y="112.64"
+    width="798.72"
+    height="798.72"
+    href="icon.png"
+    xlink:href="icon.png"
+    preserveAspectRatio="xMidYMid meet"
+    clip-path="url(#card)"
+  />
+</svg>

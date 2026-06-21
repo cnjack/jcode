@@ -507,20 +507,20 @@ func (s *interactiveState) handleResume(uuid string) {
 	st := session.ReconstructState(entries)
 	s.history = session.PruneOldToolOutputs(st.History, 2)
 	// Restore the unified session mode. The approval axis is restored as-is, so a
-	// session saved in Autopilot resumes auto-approving (accept-all-risk policy).
-	// A saved Plan is normalized to Ask on resume: we keep full tools and restore
+	// session saved in Full access resumes auto-approving (accept-all-risk policy).
+	// A saved Plan is normalized to Approval on resume: we keep full tools and restore
 	// the saved plan into planStore below rather than stranding the user in the
 	// read-only plan tool set with no execution trigger.
 	restoredMode := mode.Parse(st.Mode)
 	if restoredMode == mode.Plan {
-		restoredMode = mode.Ask
+		restoredMode = mode.Approval
 	}
 	s.approvalState.SetSessionMode(restoredMode)
 	s.agentMode = tui.ModeNormal
 	s.rec.SetUUID(uuid)
 	s.p.Send(tui.SessionResumedMsg{UUID: uuid, Entries: tui.ConvertSessionEntries(entries)})
 	// Sync the mode pill with the restored mode (SessionResumedMsg resets the
-	// pill to Ask; this overrides it with what the session was actually saved in).
+	// pill to Approval; this overrides it with what the session was actually saved in).
 	s.p.Send(tui.ModeSelectedMsg{Mode: restoredMode})
 
 	// Restore stored system prompt for KV-cache-friendly resume.
@@ -1049,9 +1049,9 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	st.teamManager = teamManager
 	st.toolList = st.buildAllTools()
 
-	// Resolve the startup session mode. CLI --unsafe forces Autopilot and takes
+	// Resolve the startup session mode. CLI --unsafe forces Full access and takes
 	// precedence over config. Otherwise DefaultMode wins, falling back to the
-	// legacy AutoApprove bool (true → Autopilot) when DefaultMode is unset.
+	// legacy AutoApprove bool (true → Full access) when DefaultMode is unset.
 	startupMode := resolveStartupMode(cfg, unsafe)
 	approvalState := runner.NewApprovalStateWithMode(pwd, startupMode)
 	st.approvalState = approvalState
@@ -1279,31 +1279,31 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 
 // sessionModeFrom derives the unified selector mode from the two low-level axes
 // (tool/prompt + approval). Plan is determined purely by the tool axis; among the
-// non-plan agent modes (Normal/Executing) the approval axis decides Ask vs
-// Autopilot. This is the inverse of mode.IsPlan()/AutoApprove().
+// non-plan agent modes (Normal/Executing) the approval axis decides Approval vs
+// Full access. This is the inverse of mode.IsPlan()/AutoApprove().
 func sessionModeFrom(am tui.AgentMode, apm handler.ApprovalMode) mode.SessionMode {
 	if am == tui.ModePlanning {
 		return mode.Plan
 	}
 	if apm == handler.ModeAuto {
-		return mode.Autopilot
+		return mode.FullAccess
 	}
-	return mode.Ask
+	return mode.Approval
 }
 
 // resolveStartupMode picks the initial session mode from CLI flags and config.
-// Precedence: --unsafe (forces Autopilot) > DefaultMode > legacy AutoApprove.
+// Precedence: --unsafe (forces Full access) > DefaultMode > legacy AutoApprove.
 func resolveStartupMode(cfg *config.Config, unsafe bool) mode.SessionMode {
 	if unsafe {
-		return mode.Autopilot
+		return mode.FullAccess
 	}
 	if cfg != nil && cfg.DefaultMode != "" {
 		return mode.Parse(cfg.DefaultMode)
 	}
 	if cfg != nil && cfg.AutoApprove { //nolint:staticcheck // intentional fallback to the deprecated field when DefaultMode is unset
-		return mode.Autopilot
+		return mode.FullAccess
 	}
-	return mode.Ask
+	return mode.Approval
 }
 
 // computeGitBaseline creates a transient stash commit of the current working tree

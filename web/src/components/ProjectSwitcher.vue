@@ -144,7 +144,7 @@ function deleteProject(id: string) {
                 />
                 <button
                   class="px-3 py-1.5 text-xs font-medium rounded-md cursor-pointer transition-opacity hover:opacity-90"
-                  style="background: var(--color-primary); color: var(--color-on-primary)"
+                  style="background: var(--color-accent-neutral); color: var(--color-surface)"
                   @click="handlePathSubmit"
                 >
                   OK
@@ -193,7 +193,7 @@ function deleteProject(id: string) {
                 </div>
                 <button
                   class="px-4 py-1.5 text-xs font-medium rounded-md cursor-pointer transition-opacity hover:opacity-90 shrink-0"
-                  style="background: var(--color-primary); color: var(--color-on-primary)"
+                  style="background: var(--color-accent-neutral); color: var(--color-surface)"
                   @click="selectCurrentPath"
                 >
                   {{ t('projectSwitcher.openFolder') }}
@@ -227,7 +227,7 @@ function deleteProject(id: string) {
                   <div
                     class="w-7 h-7 rounded-md flex items-center justify-center text-xs font-bold shrink-0"
                     :style="projectStore.activeId === p.id
-                      ? { background: 'var(--accent-wash-strong)', color: 'var(--color-primary)' }
+                      ? { background: 'var(--neutral-wash-strong)', color: 'var(--color-accent-neutral)' }
                       : { background: 'var(--color-muted)', color: 'var(--color-muted-foreground)' }"
                   >
                     {{ projectStore.projectName(p).charAt(0).toUpperCase() }}
@@ -250,14 +250,14 @@ function deleteProject(id: string) {
                 <div class="flex items-center gap-4">
                   <button
                     class="text-xs cursor-pointer transition-opacity hover:opacity-80 font-medium"
-                    style="color: var(--color-primary)"
+                    style="color: var(--color-accent-neutral)"
                     @click="openFolderAction"
                   >
                     {{ t('projectSwitcher.openFolderBtn') }}
                   </button>
                   <button
                     class="text-xs cursor-pointer transition-opacity hover:opacity-80 font-medium"
-                    style="color: var(--color-primary)"
+                    style="color: var(--color-accent-neutral)"
                     @click="openRemote"
                   >
                     {{ t('nav.remoteConnect') }}
@@ -289,7 +289,7 @@ function deleteProject(id: string) {
   color: var(--color-muted-foreground);
 }
 .ps-input:focus {
-  border-color: var(--color-primary);
+  border-color: var(--color-accent-neutral);
 }
 
 .ps-muted-btn {
@@ -303,8 +303,8 @@ function deleteProject(id: string) {
   border-bottom: none !important;
 }
 .ps-folder:hover {
-  background: var(--accent-wash-soft);
-  color: var(--color-primary) !important;
+  background: var(--neutral-wash-soft);
+  color: var(--color-accent-neutral) !important;
 }
 
 .ps-project {
@@ -314,8 +314,8 @@ function deleteProject(id: string) {
   background: var(--color-muted);
 }
 .ps-project.active {
-  background: var(--accent-wash-soft);
-  border-color: var(--accent-border);
+  background: var(--neutral-wash-soft);
+  border-color: var(--neutral-border);
 }
 
 .ps-delete {

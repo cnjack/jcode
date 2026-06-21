@@ -81,12 +81,15 @@ SIDECAR_EXE  := $(if $(findstring windows,$(RUST_TARGET)),.exe,)
 desktop-icons:
 	cd $(DESKTOP_DIR) && npx --yes @tauri-apps/cli@2 icon ../web/public/icon.svg -o src-tauri/icons
 
-# Build the sidecar binary (frontend embedded) named for the host target triple,
-# which is what Tauri's externalBin resolver expects.
-desktop-sidecar: generate build-web
+# Build the sidecar binary for the desktop shell. The desktop app serves the
+# page itself (Tauri's built-in frontend), so the sidecar is built with the
+# `jcode_headless` tag: it omits the embedded SPA (no dist/ needed, smaller
+# binary) and exposes only the REST + WebSocket API on a loopback port. The
+# frontend is built separately and bundled by the Tauri dev/build targets.
+desktop-sidecar: generate
 	@echo "Building jcode sidecar for $(RUST_TARGET)..."
 	@mkdir -p $(SIDECAR_DIR)
-	go build -ldflags "$(LDFLAGS)" -o $(SIDECAR_DIR)/jcode-$(RUST_TARGET)$(SIDECAR_EXE) $(PKG)
+	go build -tags jcode_headless -ldflags "$(LDFLAGS)" -o $(SIDECAR_DIR)/jcode-$(RUST_TARGET)$(SIDECAR_EXE) $(PKG)
 
 # Run the desktop app in development (hot window; rebuilds the sidecar first).
 desktop-dev: desktop-sidecar

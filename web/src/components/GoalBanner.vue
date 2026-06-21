@@ -16,7 +16,7 @@ const statusColor = computed(() => {
     case 'blocked':
       return 'var(--color-destructive)'
     default:
-      return 'var(--color-primary)'
+      return 'var(--color-accent-neutral)'
   }
 })
 

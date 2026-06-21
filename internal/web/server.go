@@ -141,7 +141,7 @@ type ServerConfig struct {
 	Agent              *adk.ChatModelAgent
 	CreateAgent        func(providerName, modelName string) (*adk.ChatModelAgent, error)
 	RebuildForMode     func(planMode bool) (*adk.ChatModelAgent, error)
-	InitialMode        string // unified startup mode string ("ask"/"plan"/"autopilot")
+	InitialMode        string // unified startup mode string ("approval"/"plan"/"full_access")
 	SwitchProject      func(newPwd string) (*adk.ChatModelAgent, *session.Recorder, error)
 	SwitchToRemote     func(executor *tools.SSHExecutor, remotePwd string) (*adk.ChatModelAgent, *session.Recorder, error)
 	TodoStore          *tools.TodoStore
@@ -1147,11 +1147,11 @@ func (s *Server) handleSwitchMode(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	// Accept the three unified ids plus the legacy "build" alias (→ ask).
+	// Accept only the three canonical unified mode ids.
 	switch req.Mode {
-	case "ask", "plan", "autopilot", "build":
+	case "approval", "plan", "full_access":
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mode must be 'ask', 'plan', or 'autopilot'"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mode must be 'approval', 'plan', or 'full_access'"})
 		return
 	}
 	sm := mode.Parse(req.Mode)
@@ -1162,7 +1162,7 @@ func (s *Server) handleSwitchMode(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.mode = sm.String()
 	if s.approvalState != nil {
-		s.approvalState.SetSessionMode(sm) // approval axis (Autopilot → auto)
+		s.approvalState.SetSessionMode(sm) // approval axis (Full access → auto)
 	}
 	if s.rebuildForMode != nil {
 		if ag, err := s.rebuildForMode(sm.IsPlan()); err == nil {
@@ -1267,7 +1267,30 @@ func (s *Server) handleApproval(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
+	// "Allow all" promotes the session to auto-approve (the runner flips its
+	// ApprovalState on resolve). Mirror that into the user-facing selector: keep
+	// s.mode in sync (so /api/health reports it) and broadcast mode_changed so the
+	// chat composer's Ask-for-approval / Full-access pill updates to Full access.
+	s.syncModeAfterApproval(req.Approved, req.ApproveAll)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// syncModeAfterApproval reflects an approve-all promotion onto the server's
+// user-facing mode state and notifies connected clients. A plain single approve
+// (or a deny) leaves the mode untouched. The runner's ApprovalState is the
+// source of truth for the approval axis; this only projects it onto the unified
+// selector the frontend renders.
+func (s *Server) syncModeAfterApproval(approved, approveAll bool) {
+	if !approved || !approveAll {
+		return
+	}
+	sm := mode.FullAccess
+	s.mu.Lock()
+	s.mode = sm.String()
+	s.mu.Unlock()
+	s.wsBroker.Broadcast(WSEvent{Type: "mode_changed", Data: map[string]string{
+		"mode": sm.String(),
+	}})
 }
 
 // handlePendingApproval returns approval requests still awaiting a decision.
@@ -2214,11 +2237,11 @@ func (s *Server) handleSetApprovalMode(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	// Legacy endpoint: auto-approve now maps onto the unified mode (Autopilot vs
-	// Ask). Both are non-plan, so rebuild to the full tool set for consistency.
-	sm := mode.Ask
+	// Legacy endpoint: auto-approve now maps onto the unified mode (Full access vs
+	// Approval). Both are non-plan, so rebuild to the full tool set for consistency.
+	sm := mode.Approval
 	if req.AutoApprove {
-		sm = mode.Autopilot
+		sm = mode.FullAccess
 	}
 	s.mu.Lock()
 	s.mode = sm.String()
@@ -2309,7 +2332,11 @@ func (s *Server) handleWSMessage(msg WSIncoming) {
 		}
 		if err := s.handler.ResolveApproval(data.ID, data.Approved, data.ApproveAll); err != nil {
 			config.Logger().Printf("[ws] resolve approval failed for id=%q: %v", data.ID, err)
+			return
 		}
+		// Same mode-sync as the POST path: an "allow all" over WS must also
+		// update the selector pill the user is looking at.
+		s.syncModeAfterApproval(data.Approved, data.ApproveAll)
 	}
 }
 
@@ -2952,6 +2979,10 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 //     local-browser, the desktop webview, and LAN access via `--host 0.0.0.0`
 //   - Origin whose host is loopback → allow; this covers the Vite dev proxy
 //     (localhost:5173 → 127.0.0.1:<port>)
+//   - Origin host "tauri.localhost" → allow; this is the Windows/Linux Tauri
+//     shell origin when the desktop app serves the page itself and the frontend
+//     reaches the API over an absolute loopback URL (macOS uses tauri://localhost,
+//     already covered by the loopback "localhost" case above).
 //
 // A page on https://evil.com cannot forge its Origin, so it falls through to
 // false and is blocked. This is intentionally not a full auth solution (a local
@@ -2969,7 +3000,7 @@ func isAllowedWebOrigin(r *http.Request) bool {
 		return true
 	}
 	switch u.Hostname() {
-	case "127.0.0.1", "localhost", "::1":
+	case "127.0.0.1", "localhost", "::1", "tauri.localhost":
 		return true
 	}
 	return false

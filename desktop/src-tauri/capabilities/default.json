@@ -1,10 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the main jcode window. The window loads the bundled jcode web server over loopback, so the Tauri JS APIs are granted to localhost origins via `remote`.",
+  "description": "Capabilities for the main jcode window. The page is served by the Tauri shell itself (built-in frontend in production, the Vite dev server in `tauri dev`), so the Tauri JS APIs are granted to those origins via `remote`. The backend REST + WebSocket API lives on a dynamic loopback port the page reaches over absolute URLs.",
   "windows": ["main"],
   "remote": {
-    "urls": ["http://127.0.0.1:*"]
+    "urls": ["http://127.0.0.1:*", "http://localhost:5173", "http://tauri.localhost"]
   },
   "permissions": [
     "core:default",

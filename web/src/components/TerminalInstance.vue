@@ -5,6 +5,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { useI18n } from 'vue-i18n'
 import { api } from '@/composables/api'
+import { wsBase } from '@/composables/apiBase'
 import '@xterm/xterm/css/xterm.css'
 
 const props = defineProps<{
@@ -71,8 +72,9 @@ function termTheme() {
 }
 
 function getWsUrl(ptyId: string): string {
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${proto}//${location.host}/api/pty/${encodeURIComponent(ptyId)}/ws`
+  // wsBase() yields the page origin in browser mode (same-origin) or the
+  // resolved sidecar host in desktop mode (cross-origin). See apiBase.ts.
+  return `${wsBase()}/api/pty/${encodeURIComponent(ptyId)}/ws`
 }
 
 function sendResize() {

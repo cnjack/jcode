@@ -700,7 +700,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					return ExitTimeoutMsg{}
 				})
 			case "shift+tab":
-				// Cycle the unified session mode: Ask → Plan → Autopilot → Ask.
+				// Cycle the unified session mode: Approval → Plan → Full access → Approval.
 				next := m.selectorMode().Next()
 				m.applySelectorMode(next)
 				m.invalidateFooterCache()
