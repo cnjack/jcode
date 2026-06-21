@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, nextTick } from 'vue'
 import { Popover, PopoverButton, PopoverPanel } from '@headlessui/vue'
-import { GitBranch, Search, ChevronDown, Check, Plus } from 'lucide-vue-next'
+import { CodeBracketIcon, MagnifyingGlassIcon, ChevronDownIcon, CheckIcon, PlusIcon } from '@heroicons/vue/24/outline'
 import { useBranch } from '@/composables/useBranch'
 
 withDefaults(defineProps<{
@@ -66,9 +66,9 @@ function reset() {
     <Popover class="bp-popover" style="position: relative">
       <PopoverButton as="template" :disabled="switching">
         <button class="bp-pill" :disabled="switching" :title="'Branch: ' + current">
-          <GitBranch :size="13" class="bp-pill-icon" />
+          <CodeBracketIcon class="w-3 h-3 bp-pill-icon" />
           <span class="bp-name">{{ current }}</span>
-          <ChevronDown :size="12" class="bp-caret" />
+          <ChevronDownIcon class="w-3 h-3 bp-caret" />
         </button>
       </PopoverButton>
 
@@ -84,7 +84,7 @@ function reset() {
           :class="placement === 'top' ? 'place-top' : 'place-bottom'"
         >
           <div class="bp-search">
-            <Search :size="13" class="bp-search-icon" />
+            <MagnifyingGlassIcon class="w-3 h-3 bp-search-icon" />
             <input v-model="query" class="bp-search-input" placeholder="Search branches" />
           </div>
 
@@ -99,9 +99,9 @@ function reset() {
               :disabled="switching"
               @click="pick(b, close)"
             >
-              <GitBranch :size="13" class="bp-row-icon" />
+              <CodeBracketIcon class="w-3 h-3 bp-row-icon" />
               <span class="bp-row-name">{{ b }}</span>
-              <Check v-if="b === current" :size="14" class="bp-check" />
+              <CheckIcon v-if="b === current" class="w-3.5 h-3.5 bp-check" />
             </button>
           </div>
 
@@ -109,7 +109,7 @@ function reset() {
 
           <div class="bp-actions">
             <button v-if="!creating" class="bp-action" @click="startCreate">
-              <Plus :size="14" /> <span>Create &amp; checkout new branch</span>
+              <PlusIcon class="w-3.5 h-3.5" /> <span>Create &amp; checkout new branch</span>
             </button>
             <div v-else class="bp-create">
               <input
@@ -365,7 +365,7 @@ function reset() {
   border: none;
   border-radius: var(--radius-md);
   background: var(--color-primary);
-  color: var(--color-on-primary, #fff);
+  color: var(--color-on-primary);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;

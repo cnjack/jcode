@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"time"
 
@@ -102,6 +103,48 @@ func (s *Server) handleChannelDisable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "state": "disabled"})
+}
+
+// handleChannelBLEStatus reports whether the Bluetooth (BLE) status channel is
+// enabled in config. The actual BLE notifier is only wired at startup (and only
+// on desktop builds with CoreBluetooth), so this reflects the persisted
+// preference, which takes effect on the next launch.
+func (s *Server) handleChannelBLEStatus(w http.ResponseWriter, r *http.Request) {
+	enabled := false
+	if s.cfg != nil && s.cfg.Channel != nil {
+		enabled = s.cfg.Channel.BLEEnabled
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": enabled})
+}
+
+// handleSetChannelBLE persists the Bluetooth (BLE) status-channel preference.
+// Like the proxy/cert settings, it takes effect after an app restart (the BLE
+// notifier is created once at startup when channel.ble_enabled is true).
+func (s *Server) handleSetChannelBLE(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	s.mu.Lock()
+	if s.cfg == nil {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config unavailable"})
+		return
+	}
+	if s.cfg.Channel == nil {
+		s.cfg.Channel = &config.ChannelConfig{}
+	}
+	s.cfg.Channel.BLEEnabled = req.Enabled
+	if err := config.SaveConfig(s.cfg); err != nil {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	s.mu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": req.Enabled})
 }
 
 // Ensure writeJSON is used (defined in server.go).

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { X } from 'lucide-vue-next'
+import { XMarkIcon } from '@heroicons/vue/24/outline'
 import FileTreePanel from './FileTreePanel.vue'
 import DiffViewer from './DiffViewer.vue'
 import TaskList from './TaskList.vue'
@@ -69,7 +69,7 @@ function startResize(e: MouseEvent) {
         </button>
       </div>
       <button class="close-btn" @click="emit('close')">
-        <X :size="14" />
+        <XMarkIcon class="w-3.5 h-3.5" />
       </button>
     </div>
     <div class="panel-content">

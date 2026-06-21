@@ -38,7 +38,7 @@ export function useNotifications() {
     if (typeof Notification === 'undefined' || permission.value !== 'granted') return
     if (typeof document !== 'undefined' && !document.hidden) return
     try {
-      const n = new Notification(title, { body, icon: '/icon.svg', tag: 'jcode' })
+      const n = new Notification(title, { body, icon: '/icon.png', tag: 'jcode' })
       n.onclick = () => {
         window.focus()
         n.close()
