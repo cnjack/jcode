@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the generated bundle Info.plist by the Tauri macOS bundler.
+
+  The jcode sidecar links CoreBluetooth (the optional BLE status channel via
+  tinygo.org/x/bluetooth). The moment any CoreBluetooth API is touched, macOS
+  REQUIRES a purpose string in Info.plist — without it the process is killed
+  with SIGABRT (TCC abort), no stderr, before the web server ever binds. From a
+  terminal the responsible app already holds the Bluetooth grant so it survives,
+  but a Finder-launched bundle does not: that is exactly the "stuck on 正在启动
+  本地服务 / sidecar exited signal 6" hang. Declaring the string lets macOS show
+  a permission prompt (or deny gracefully) instead of aborting.
+-->
+<plist version="1.0">
+<dict>
+  <key>NSBluetoothAlwaysUsageDescription</key>
+  <string>jcode uses Bluetooth to send agent status updates to a paired JCODE device.</string>
+  <key>NSBluetoothPeripheralUsageDescription</key>
+  <string>jcode uses Bluetooth to send agent status updates to a paired JCODE device.</string>
+</dict>
+</plist>
