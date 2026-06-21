@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, watch } from 'vue'
-import { SquareTerminal, FileDiff, FolderOpen, ListChecks, ChevronDown, PanelRight } from 'lucide-vue-next'
+import { CommandLineIcon, ArrowsRightLeftIcon, FolderOpenIcon, ClipboardDocumentCheckIcon, ChevronDownIcon, RectangleStackIcon } from '@heroicons/vue/24/outline'
 import { Menu as HMenu, MenuButton, MenuItems, MenuItem } from '@headlessui/vue'
 import { api } from '@/composables/api'
 
@@ -42,10 +42,10 @@ const statusLabel = computed(() => {
 })
 
 const panelButtons = [
-  { panel: 'plan' as PanelType, icon: ListChecks, label: 'Plan', shortcut: '⇧⌘P' },
-  { panel: 'files' as PanelType, icon: FolderOpen, label: 'Files', shortcut: '⇧⌘E' },
-  { panel: 'changes' as PanelType, icon: FileDiff, label: 'Changes', shortcut: '⇧⌘G' },
-  { panel: 'terminal' as PanelType, icon: SquareTerminal, label: 'Terminal', shortcut: '⌘`' },
+  { panel: 'plan' as PanelType, icon: ClipboardDocumentCheckIcon, label: 'Plan', shortcut: '⇧⌘P' },
+  { panel: 'files' as PanelType, icon: FolderOpenIcon, label: 'Files', shortcut: '⇧⌘E' },
+  { panel: 'changes' as PanelType, icon: ArrowsRightLeftIcon, label: 'Changes', shortcut: '⇧⌘G' },
+  { panel: 'terminal' as PanelType, icon: CommandLineIcon, label: 'Terminal', shortcut: '⌘`' },
 ]
 
 // Working-tree diff stat, shown inline on the Changes item. Fetched from the
@@ -86,11 +86,11 @@ watch(
         :class="{ open }"
         :aria-label="`Panels menu · ${statusLabel}`"
         :aria-expanded="open"
-        :title="`Panels · ${statusLabel}`"
+        :title="`Panels · ${statusLabel}  (⇧⌘P plan · ⇧⌘E files · ⇧⌘G changes · ⌘\` terminal)`"
         @click="loadDiffStat"
       >
-        <PanelRight :size="15" />
-        <ChevronDown :size="13" class="panel-menu-caret" />
+        <RectangleStackIcon class="w-3.5 h-3.5" />
+        <ChevronDownIcon class="w-3 h-3 panel-menu-caret" />
         <span class="status-dot panel-status-dot" :style="{ backgroundColor: statusColor }" />
       </MenuButton>
       <transition
@@ -107,7 +107,7 @@ watch(
               :aria-current="isCurrent(btn.panel) ? 'true' : undefined"
               @click="emit('toggle-panel', btn.panel)"
             >
-              <component :is="btn.icon" :size="16" class="pmi-icon" />
+              <component :is="btn.icon" class="w-4 h-4 pmi-icon" />
               <span class="pmi-label">{{ btn.label }}</span>
               <span v-if="btn.panel === 'changes' && diffStat" class="pmi-stat">
                 <span style="color: var(--color-success-fg)">+{{ diffStat.additions }}</span>

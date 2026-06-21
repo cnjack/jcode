@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { ChevronDownIcon } from '@heroicons/vue/24/outline'
 import type { ToolCall, TodoItem } from '@/types/api'
 import TaskList from './TaskList.vue'
 import AskUserCard from './AskUserCard.vue'
@@ -252,7 +253,12 @@ function subagentName(): string {
 }
 
 function truncate(text: string, max: number): string {
-  return text.length > max ? text.slice(0, max) + `… (${text.length} chars)` : text
+  // Count by code point ([...str]) so CJK text — where one character is far
+  // wider visually than one UTF-16 code unit — truncates at a comparable visual
+  // length to ASCII text. The trailing "(N chars)" still reports the raw length
+  // for debugging.
+  const chars = [...text]
+  return chars.length > max ? chars.slice(0, max).join('') + `… (${chars.length} chars)` : text
 }
 
 function formatArgs(args: string): string {
@@ -289,14 +295,11 @@ function formatArgs(args: string): string {
       <span class="text-[11px] font-mono" style="color: var(--color-foreground)">{{ subagentName() }}</span>
       <span v-if="tool.status === 'running'" class="text-[10px] animate-pulse" style="color: var(--color-muted-foreground)">working…</span>
       <span v-if="tool.children?.length" class="ml-auto text-[10px] tabular-nums" style="color: var(--color-muted-foreground)">{{ tool.children.length }} calls</span>
-      <svg
+      <ChevronDownIcon
         class="w-3 h-3 transition-transform shrink-0 ml-1"
         :class="{ 'rotate-180': subagentExpanded }"
         style="color: var(--color-muted-foreground)"
-        viewBox="0 0 20 20" fill="currentColor"
-      >
-        <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-      </svg>
+      />
     </button>
 
     <!-- Children: same inset as regular tool content -->
@@ -345,9 +348,7 @@ function formatArgs(args: string): string {
         class="text-xs font-mono truncate"
         :style="isContextTool ? 'color: var(--color-muted-foreground)' : 'color: var(--color-primary)'"
       >{{ displaySubtitle }}</span>
-      <svg class="w-3 h-3 shrink-0" style="color: var(--color-muted-foreground)" viewBox="0 0 20 20" fill="currentColor">
-        <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-      </svg>
+      <ChevronDownIcon class="w-3 h-3 shrink-0" style="color: var(--color-muted-foreground)" />
       <span v-if="renderType === 'diff' && diffData.added + diffData.deleted > 0" class="ml-auto text-[10px] font-mono tabular-nums shrink-0">
         <span v-if="diffData.added" style="color: var(--color-success-fg)">+{{ diffData.added }}</span>
         <span v-if="diffData.added && diffData.deleted" class="mx-0.5" style="color: var(--color-muted-foreground)">/</span>
@@ -369,9 +370,7 @@ function formatArgs(args: string): string {
           class="text-xs font-mono truncate"
           :style="isContextTool ? 'color: var(--color-muted-foreground)' : 'color: var(--color-primary)'"
         >{{ displaySubtitle }}</span>
-        <svg class="w-3 h-3 shrink-0 rotate-180" style="color: var(--color-muted-foreground)" viewBox="0 0 20 20" fill="currentColor">
-          <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-        </svg>
+        <ChevronDownIcon class="w-3 h-3 shrink-0 rotate-180" style="color: var(--color-muted-foreground)" />
         <span v-if="renderType === 'diff' && diffData.added + diffData.deleted > 0" class="ml-auto text-[10px] font-mono tabular-nums shrink-0">
           <span v-if="diffData.added" style="color: var(--color-success-fg)">+{{ diffData.added }}</span>
           <span v-if="diffData.added && diffData.deleted" class="mx-0.5" style="color: var(--color-muted-foreground)">/</span>

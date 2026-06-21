@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, inject } from 'vue'
 import { Dialog, DialogPanel, TransitionRoot, TransitionChild } from '@headlessui/vue'
-import { Plus, Settings, FolderOpen, SunMoon, MessageSquare, CornerDownLeft } from 'lucide-vue-next'
+import { PlusIcon, Cog6ToothIcon, FolderOpenIcon, SunIcon, ChatBubbleLeftIcon, MagnifyingGlassIcon } from '@heroicons/vue/24/outline'
 import { useChatStore } from '@/stores/chat'
 import { useProjectStore, isRemotePath, parseRemoteLabel } from '@/stores/project'
 import type { TaskItem, RemoteMeta } from '@/types/api'
@@ -63,10 +63,10 @@ async function openTask(task: TaskItem) {
 }
 
 const actions = computed<PaletteItem[]>(() => [
-  { id: 'a-new', group: 'Actions', label: 'New task', icon: Plus, run: () => { emit('close'); store.newSession() } },
-  { id: 'a-proj', group: 'Actions', label: 'Open project…', icon: FolderOpen, run: () => { emit('close'); emit('action', 'projects') } },
-  { id: 'a-settings', group: 'Actions', label: 'Open settings', icon: Settings, run: () => { emit('close'); emit('action', 'settings') } },
-  { id: 'a-theme', group: 'Actions', label: 'Toggle theme', icon: SunMoon, run: () => { emit('close'); emit('action', 'theme') } },
+  { id: 'a-new', group: 'Actions', label: 'New task', icon: PlusIcon, run: () => { emit('close'); store.newSession() } },
+  { id: 'a-proj', group: 'Actions', label: 'Open project…', icon: FolderOpenIcon, run: () => { emit('close'); emit('action', 'projects') } },
+  { id: 'a-settings', group: 'Actions', label: 'Open settings', icon: Cog6ToothIcon, run: () => { emit('close'); emit('action', 'settings') } },
+  { id: 'a-theme', group: 'Actions', label: 'Toggle theme', icon: SunIcon, run: () => { emit('close'); emit('action', 'theme') } },
 ])
 
 const taskItems = computed<PaletteItem[]>(() =>
@@ -77,7 +77,7 @@ const taskItems = computed<PaletteItem[]>(() =>
       group: 'Tasks',
       label: t.title || t.uuid.slice(0, 8) + '…',
       hint: projectStore.nameForPath(t.project),
-      icon: MessageSquare,
+      icon: ChatBubbleLeftIcon,
       run: () => openTask(t),
     })),
 )
@@ -155,9 +155,7 @@ function onKeydown(e: KeyboardEvent) {
           leave-to="opacity-0 scale-[0.98] -translate-y-1">
           <DialogPanel class="cp-panel">
             <div class="cp-input-row">
-              <svg class="cp-search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7">
-                <circle cx="9" cy="9" r="6" /><path d="M14 14l3.5 3.5" stroke-linecap="round" />
-              </svg>
+              <MagnifyingGlassIcon class="cp-search-icon" />
               <input
                 ref="inputEl"
                 v-model="query"
@@ -180,10 +178,10 @@ function onKeydown(e: KeyboardEvent) {
                   @click="item.run()"
                   @mousemove="selectedIdx = flatIndex(item)"
                 >
-                  <component :is="item.icon" :size="15" class="cp-item-icon" />
+                  <component :is="item.icon" class="w-3.5 h-3.5 cp-item-icon" />
                   <span class="cp-item-label">{{ item.label }}</span>
                   <span v-if="item.hint" class="cp-item-hint">{{ item.hint }}</span>
-                  <CornerDownLeft v-if="flatIndex(item) === selectedIdx" :size="13" class="cp-enter" />
+                  <kbd v-if="flatIndex(item) === selectedIdx" class="cp-enter">↵</kbd>
                 </button>
               </template>
             </div>
@@ -293,6 +291,12 @@ function onKeydown(e: KeyboardEvent) {
   flex-shrink: 0;
 }
 .cp-enter {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--color-secondary);
+  border: 1px solid var(--color-border);
   color: var(--color-muted-foreground);
   flex-shrink: 0;
 }

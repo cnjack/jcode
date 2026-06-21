@@ -81,6 +81,10 @@ export const useChatStore = defineStore('chat', () => {
   let streamingText = ''
   let streamingMsgId = ''
 
+  // Wall-clock start of the in-flight turn (set when a prompt is sent), used to
+  // stamp the turn's elapsed time onto its final assistant message on completion.
+  let turnStartedAt = 0
+
   // --- Getters ---
   const messages = computed(() =>
     timeline.value
@@ -257,6 +261,20 @@ export const useChatStore = defineStore('chat', () => {
     isRunning.value = false
     streamingText = ''
     streamingMsgId = ''
+    // Stamp the turn's elapsed time onto its final assistant message (done before
+    // any "Stopped"/error system message is appended, so we target the real
+    // response). The live "Thinking…" timer is transient; this makes the duration
+    // persist in the conversation history.
+    if (turnStartedAt > 0) {
+      for (let i = timeline.value.length - 1; i >= 0; i--) {
+        const item = timeline.value[i]
+        if (item && item.kind === 'message' && item.data.role === 'assistant') {
+          item.data.durationMs = Date.now() - turnStartedAt
+          break
+        }
+      }
+      turnStartedAt = 0
+    }
     // Clean up any tool calls still in 'running' state — the agent has finished.
     for (const item of timeline.value) {
       if (item.kind === 'tool') markToolTreeDone(item.data)
@@ -444,6 +462,7 @@ export const useChatStore = defineStore('chat', () => {
 
     addMessage('user', text, undefined, images)
     isRunning.value = true
+    turnStartedAt = Date.now()
     streamingText = ''
     streamingMsgId = ''
     try {
@@ -670,6 +689,19 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  // Set the default auto-approve preference. The backend persists it as the
+  // startup mode and applies it now (auto-approve maps onto the unified mode:
+  // Autopilot when on, Ask when off), so keep the local mode/flag in sync.
+  async function setAutoApprove(enabled: boolean) {
+    try {
+      await api.setApprovalMode(enabled)
+      autoApprove.value = enabled
+      mode.value = enabled ? 'autopilot' : 'ask'
+    } catch (err) {
+      console.error('Failed to set auto-approve:', err)
+    }
+  }
+
 
   async function fetchChannelState() {
     try {
@@ -820,51 +852,6 @@ export const useChatStore = defineStore('chat', () => {
     } catch {
       // Session file may not exist yet (lazy creation), silently ignore
     }
-  }
-
-  async function retryFromMessage(messageId: string) {
-    // Find the assistant/system message to retry
-    const msgIdx = timeline.value.findIndex(i => i.kind === 'message' && i.data.id === messageId)
-    if (msgIdx === -1) return
-
-    // Find the last user message before this index
-    let userMsgText = ''
-    let userMsgIdx = -1
-    for (let i = msgIdx - 1; i >= 0; i--) {
-      const item = timeline.value[i]
-      if (item && item.kind === 'message' && item.data.role === 'user') {
-        userMsgText = item.data.content
-        userMsgIdx = i
-        break
-      }
-    }
-    if (!userMsgText || userMsgIdx === -1) return
-
-    // Count user messages BEFORE userMsgIdx in the timeline.
-    // This matches the backend's user-message count (role === 'user' entries in s.history).
-    const beforeUserMessage = timeline.value
-      .slice(0, userMsgIdx)
-      .filter(i => i.kind === 'message' && i.data.role === 'user')
-      .length
-
-    // Truncate backend history in-place and keep using the returned session id.
-    // The backend preserves the same session UUID while removing the edited tail.
-    try {
-      const res = await api.truncateHistory(beforeUserMessage)
-      if (res.session_id) {
-        currentSessionId.value = res.session_id
-      }
-    } catch (err) {
-      console.error('Failed to truncate history:', err)
-      return
-    }
-
-    // Truncate frontend timeline from the user message (inclusive) and reset streaming state
-    timeline.value.splice(userMsgIdx)
-    streamingText = ''
-    streamingMsgId = ''
-
-    await sendMessage(userMsgText)
   }
 
   async function editAndResend(messageId: string, newText: string) {
@@ -1032,6 +1019,7 @@ export const useChatStore = defineStore('chat', () => {
     clearChat,
     loadSession,
     fetchApprovalMode,
+    setAutoApprove,
     fetchChannelState,
     toggleChannel,
     restoreCurrentSession,
@@ -1042,7 +1030,6 @@ export const useChatStore = defineStore('chat', () => {
     recentModels,
     favoriteModels,
     enabledProviders,
-    retryFromMessage,
     editAndResend,
   }
 })

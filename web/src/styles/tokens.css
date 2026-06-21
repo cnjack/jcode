@@ -98,6 +98,44 @@
   --color-destructive: #D93C15;
   --color-sidebar-bg: #FAFAF8;
 
+  /* Text color on top of the primary / destructive fills (buttons, badges). The
+   * generated themes redefine --color-on-primary per theme, but defining it here
+   * too means the many `var(--color-on-primary, #fff)` fallbacks no longer fire
+   * in the base light/dark themes. */
+  --color-on-primary: #FFFFFF;
+  --color-on-destructive: #FFFFFF;
+
+  /* Code-block surface (markdown <pre>). Distinct from --color-surface so a code
+   * block reads as its own inset surface; matches GitHub's light code bg and the
+   * dark terminal/code tone. */
+  --code-bg: #f6f8fa;
+  --code-border: #d0d7de;
+
+  /* Terminal (xterm) palette — single source for the JS theme object in
+   * TerminalInstance.vue (read via getComputedStyle). Cursor uses the brand
+   * accent; the 16 ANSI colors align with the rest of the UI's success/error/
+   * info hues so shell output and the surrounding UI share one palette. */
+  --term-bg: #fafafa;
+  --term-fg: #27272a;
+  --term-cursor: var(--color-primary);
+  --term-selection: #d4d4d880;
+  --term-black: #18181b;
+  --term-red: #dc2626;
+  --term-green: #16a34a;
+  --term-yellow: #ca8a04;
+  --term-blue: #2563eb;
+  --term-magenta: #9333ea;
+  --term-cyan: #0891b2;
+  --term-white: #d4d4d8;
+  --term-bright-black: #71717a;
+  --term-bright-red: #ef4444;
+  --term-bright-green: #22c55e;
+  --term-bright-yellow: #eab308;
+  --term-bright-blue: #3b82f6;
+  --term-bright-magenta: #a855f7;
+  --term-bright-cyan: #06b6d4;
+  --term-bright-white: #fafafa;
+
   /* ─── Syntax highlighting (light) ─── */
   --hljs-fg: #3f3f46;
   --hljs-keyword: #0369a1;
@@ -136,6 +174,37 @@
   --color-destructive: #FF5C33;
   --color-sidebar-bg: #1A1A1A;
   --color-success: #22C55E;
+
+  /* Text on primary/destructive fills (see light-mode note above). */
+  --color-on-primary: #FFFFFF;
+  --color-on-destructive: #FFFFFF;
+
+  /* Code-block surface (dark). #1A1A1A matches --color-surface here, but kept as
+   * its own token so a generated theme can diverge the code tone independently. */
+  --code-bg: #1A1A1A;
+  --code-border: var(--color-border);
+
+  /* Terminal (xterm) palette — dark variant. */
+  --term-bg: #18181b;
+  --term-fg: #e4e4e7;
+  --term-cursor: var(--color-primary);
+  --term-selection: #3f3f4680;
+  --term-black: #09090b;
+  --term-red: #ef4444;
+  --term-green: #22c55e;
+  --term-yellow: #eab308;
+  --term-blue: #3b82f6;
+  --term-magenta: #a855f7;
+  --term-cyan: #06b6d4;
+  --term-white: #d4d4d8;
+  --term-bright-black: #71717a;
+  --term-bright-red: #f87171;
+  --term-bright-green: #4ade80;
+  --term-bright-yellow: #facc15;
+  --term-bright-blue: #60a5fa;
+  --term-bright-magenta: #c084fc;
+  --term-bright-cyan: #22d3ee;
+  --term-bright-white: #fafafa;
 
   /* ─── Syntax highlighting (dark) ─── */
   --hljs-fg: #e4e4e7;

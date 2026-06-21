@@ -8,19 +8,22 @@ import {
   MenuItem,
 } from '@headlessui/vue'
 import {
-  ChevronRight,
-  Folder,
-  FolderOpen,
-  Server,
-  Plus,
-  MoreHorizontal,
-  Pin,
-  Archive,
-  ArchiveRestore,
-  Pencil,
-  Trash2,
-  MailOpen,
-} from 'lucide-vue-next'
+  ChevronRightIcon,
+  FolderIcon,
+  FolderOpenIcon,
+  ServerIcon,
+  PlusIcon,
+  EllipsisHorizontalIcon,
+  BookmarkIcon,
+  ArchiveBoxIcon,
+  ArchiveBoxArrowDownIcon,
+  PencilIcon,
+  TrashIcon,
+  EnvelopeOpenIcon,
+  SunIcon,
+  MoonIcon,
+  Cog6ToothIcon,
+} from '@heroicons/vue/24/outline'
 import { useChatStore } from '@/stores/chat'
 import { useProjectStore, isRemotePath, parseRemoteLabel } from '@/stores/project'
 import type { TaskItem, RemoteMeta } from '@/types/api'
@@ -129,8 +132,8 @@ async function openTask(task: TaskItem) {
 }
 
 function projIcon(path: string) {
-  if (isRemotePath(path)) return Server
-  return path === activePath.value ? FolderOpen : Folder
+  if (isRemotePath(path)) return ServerIcon
+  return path === activePath.value ? FolderOpenIcon : FolderIcon
 }
 
 function isActiveTask(task: TaskItem): boolean {
@@ -193,7 +196,7 @@ function relativeTime(ts: string): string {
     <!-- New task -->
     <div class="sidebar-header">
       <button class="new-task-btn" @click="store.newSession()">
-        <Plus :size="16" />
+        <PlusIcon class="w-4 h-4" />
         <span>New task</span>
       </button>
     </div>
@@ -210,7 +213,7 @@ function relativeTime(ts: string): string {
             :aria-pressed="showArchived"
             @click="showArchived = !showArchived"
           >
-            <Archive :size="14" />
+            <ArchiveBoxIcon class="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
@@ -219,8 +222,8 @@ function relativeTime(ts: string): string {
 
       <div v-for="proj in projectNodes" :key="proj.path" class="project-group">
         <button class="project-row" :class="{ active: proj.path === activePath }" @click="toggle(proj.path)">
-          <ChevronRight :size="14" class="proj-chevron" :class="{ open: isExpanded(proj.path) }" />
-          <component :is="projIcon(proj.path)" :size="15" class="proj-icon" />
+          <ChevronRightIcon class="w-3.5 h-3.5 proj-chevron" :class="{ open: isExpanded(proj.path) }" />
+          <component :is="projIcon(proj.path)" class="w-3.5 h-3.5 proj-icon" />
           <span class="proj-name">{{ proj.name }}</span>
           <span v-if="visibleCount(proj.path) > 0" class="proj-count">{{ visibleCount(proj.path) }}</span>
         </button>
@@ -235,7 +238,7 @@ function relativeTime(ts: string): string {
             @click="openTask(task)"
           >
             <span class="task-dot" :class="{ unread: task.unread }" aria-hidden="true" />
-            <Pin v-if="task.pinned" :size="11" class="task-pin" />
+            <BookmarkIcon v-if="task.pinned" class="w-2.5 h-2.5 task-pin" />
             <input
               v-if="renamingUuid === task.uuid"
               :ref="el => { renameInput = el as HTMLInputElement | null }"
@@ -251,7 +254,7 @@ function relativeTime(ts: string): string {
 
             <HMenu as="div" class="task-menu" @click.stop>
               <MenuButton class="task-menu-btn" title="Task actions" @click.stop="onTaskMenuClick($event, task.uuid)">
-                <MoreHorizontal :size="14" />
+                <EllipsisHorizontalIcon class="w-3.5 h-3.5" />
               </MenuButton>
               <transition
                 enter-active-class="pop-enter-active"
@@ -262,28 +265,28 @@ function relativeTime(ts: string): string {
                 <MenuItems class="task-menu-items" :class="{ 'flip-up': flipUpMenus.has(task.uuid) }">
                   <MenuItem v-slot="{ active }">
                     <button class="tmi" :class="{ hl: active }" @click.stop="projectStore.updateTaskMeta(task.uuid, { pinned: !task.pinned })">
-                      <Pin :size="14" /> {{ task.pinned ? 'Unpin' : 'Pin' }}
+                      <BookmarkIcon class="w-3.5 h-3.5" /> {{ task.pinned ? 'Unpin' : 'Pin' }}
                     </button>
                   </MenuItem>
                   <MenuItem v-slot="{ active }">
                     <button class="tmi" :class="{ hl: active }" @click.stop="renameTask(task)">
-                      <Pencil :size="14" /> Rename
+                      <PencilIcon class="w-3.5 h-3.5" /> Rename
                     </button>
                   </MenuItem>
                   <MenuItem v-slot="{ active }">
                     <button class="tmi" :class="{ hl: active }" @click.stop="projectStore.updateTaskMeta(task.uuid, { archived: !task.archived })">
-                      <component :is="task.archived ? ArchiveRestore : Archive" :size="14" /> {{ task.archived ? 'Unarchive' : 'Archive' }}
+                      <component :is="task.archived ? ArchiveBoxArrowDownIcon : ArchiveBoxIcon" class="w-3.5 h-3.5" /> {{ task.archived ? 'Unarchive' : 'Archive' }}
                     </button>
                   </MenuItem>
                   <MenuItem v-slot="{ active }">
                     <button class="tmi" :class="{ hl: active }" @click.stop="projectStore.updateTaskMeta(task.uuid, { unread: !task.unread })">
-                      <MailOpen :size="14" /> {{ task.unread ? 'Mark read' : 'Mark unread' }}
+                      <EnvelopeOpenIcon class="w-3.5 h-3.5" /> {{ task.unread ? 'Mark read' : 'Mark unread' }}
                     </button>
                   </MenuItem>
                   <div class="tmi-sep" />
                   <MenuItem v-slot="{ active }">
                     <button class="tmi danger" :class="{ hl: active }" @click.stop="handleDelete(task)">
-                      <Trash2 :size="14" /> Delete
+                      <TrashIcon class="w-3.5 h-3.5" /> Delete
                     </button>
                   </MenuItem>
                 </MenuItems>
@@ -298,17 +301,11 @@ function relativeTime(ts: string): string {
     <div class="sidebar-footer">
       <div class="footer-actions">
         <button class="footer-btn" @click="emit('toggleTheme')" :title="resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'">
-          <svg v-if="resolvedTheme === 'dark'" class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M10 2a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 2zM10 15a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 15zM10 7a3 3 0 100 6 3 3 0 000-6zM15.657 5.404a.75.75 0 10-1.06-1.06l-1.061 1.06a.75.75 0 001.06 1.06l1.06-1.06zM6.464 14.596a.75.75 0 10-1.06-1.06l-1.06 1.06a.75.75 0 001.06 1.06l1.06-1.06zM18 10a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0118 10zM5 10a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 015 10zM14.596 15.657a.75.75 0 001.06-1.06l-1.06-1.061a.75.75 0 10-1.06 1.06l1.06 1.06zM5.404 6.464a.75.75 0 001.06-1.06l-1.06-1.06a.75.75 0 10-1.06 1.06l1.06 1.06z" />
-          </svg>
-          <svg v-else class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M7.455 2.004a.75.75 0 01.26.77 7 7 0 009.958 7.967.75.75 0 011.067.853A8.5 8.5 0 116.647 1.921a.75.75 0 01.808.083z" clip-rule="evenodd" />
-          </svg>
+          <SunIcon v-if="resolvedTheme === 'dark'" class="w-3.5 h-3.5" />
+          <MoonIcon v-else class="w-3.5 h-3.5" />
         </button>
-        <button class="footer-btn" @click="emit('openSettings')" title="Settings">
-          <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M7.84 1.804A1 1 0 018.82 1h2.36a1 1 0 01.98.804l.331 1.652a6.993 6.993 0 011.929 1.115l1.598-.54a1 1 0 011.186.447l1.18 2.044a1 1 0 01-.205 1.251l-1.267 1.113a7.047 7.047 0 010 2.228l1.267 1.113a1 1 0 01.206 1.25l-1.18 2.045a1 1 0 01-1.187.447l-1.598-.54a6.993 6.993 0 01-1.929 1.115l-.33 1.652a1 1 0 01-.98.804H8.82a1 1 0 01-.98-.804l-.331-1.652a6.993 6.993 0 01-1.929-1.115l-1.598.54a1 1 0 01-1.186-.447l-1.18-2.044a1 1 0 01.205-1.251l1.267-1.114a7.05 7.05 0 010-2.227L1.821 7.773a1 1 0 01-.206-1.25l1.18-2.045a1 1 0 011.187-.447l1.598.54A6.993 6.993 0 017.51 3.456l.33-1.652zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
-          </svg>
+        <button class="footer-btn" @click="emit('openSettings')" title="Settings (⌘,)">
+          <Cog6ToothIcon class="w-3.5 h-3.5" />
         </button>
       </div>
     </div>

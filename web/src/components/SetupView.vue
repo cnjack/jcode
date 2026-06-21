@@ -1,5 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import {
+  CheckIcon,
+  CheckCircleIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  EyeIcon,
+  EyeSlashIcon,
+} from '@heroicons/vue/24/outline'
 import { useChatStore } from '@/stores/chat'
 import { api } from '@/composables/api'
 import type { SetupProvider, SetupModel } from '@/types/api'
@@ -193,9 +201,7 @@ function finish() {
         <!-- Done state -->
         <div v-if="step === 'done'" class="text-center animate-fade-in">
           <div class="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-5" style="background: var(--color-success-bg)">
-            <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="color: var(--color-success-fg)">
-              <path d="M5 13l4 4L19 7" />
-            </svg>
+            <CheckIcon class="w-8 h-8" style="color: var(--color-success-fg)" />
           </div>
           <h2 class="text-xl font-semibold mb-2" style="font-family: var(--font-sans); color: var(--color-foreground)">You're all set!</h2>
           <p class="text-sm mb-6" style="color: var(--color-muted-foreground)">
@@ -203,7 +209,7 @@ function finish() {
           </p>
           <button
             class="px-6 py-2.5 rounded-lg text-sm font-medium transition-opacity cursor-pointer shadow-sm hover:opacity-90"
-            style="background: var(--color-primary); color: var(--color-on-primary, #fff)"
+            style="background: var(--color-primary); color: var(--color-on-primary)"
             @click="finish"
           >
             Start coding
@@ -264,9 +270,7 @@ function finish() {
                     <span v-if="p.tag === 'recommended'" class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--accent-wash); color: var(--color-primary)">Recommended</span>
                     <span v-if="p.tag === 'local'" class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--color-info-bg); color: var(--color-info-fg)">Local</span>
                     <span v-if="p.configured" class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--color-success-bg); color: var(--color-success-fg)">configured</span>
-                    <svg class="setup-chevron w-4 h-4 transition-colors" viewBox="0 0 20 20" fill="currentColor">
-                      <path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd" />
-                    </svg>
+                    <ChevronLeftIcon class="setup-chevron w-4 h-4 transition-colors" />
                   </div>
                 </div>
               </button>
@@ -277,9 +281,7 @@ function finish() {
           <div v-if="step === 'model'" class="px-6 pb-5">
             <div class="flex items-center gap-2 mb-1">
               <button class="setup-back transition-colors cursor-pointer" @click="goBack">
-                <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-                  <path fill-rule="evenodd" d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z" clip-rule="evenodd" />
-                </svg>
+                <ChevronRightIcon class="w-4 h-4" />
               </button>
               <h2 class="text-base font-semibold" style="font-family: var(--font-sans); color: var(--color-foreground)">Choose a Model</h2>
             </div>
@@ -314,9 +316,7 @@ function finish() {
                   <div class="flex items-center gap-2">
                     <span v-if="m.context_limit" class="text-[10px]" style="color: var(--color-muted-foreground)">{{ (m.context_limit / 1000).toFixed(0) }}k ctx</span>
                     <span v-if="m.reasoning" class="text-[10px] px-1.5 py-0.5 rounded-full" style="background: var(--color-info-bg); color: var(--color-info-fg)">reasoning</span>
-                    <svg class="setup-chevron w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-                      <path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd" />
-                    </svg>
+                    <ChevronLeftIcon class="setup-chevron w-4 h-4 transition-colors" />
                   </div>
                 </div>
               </button>
@@ -327,9 +327,7 @@ function finish() {
           <div v-if="step === 'apikey'" class="px-6 pb-5">
             <div class="flex items-center gap-2 mb-1">
               <button class="setup-back transition-colors cursor-pointer" @click="goBack">
-                <svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-                  <path fill-rule="evenodd" d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z" clip-rule="evenodd" />
-                </svg>
+                <ChevronRightIcon class="w-4 h-4" />
               </button>
               <h2 class="text-base font-semibold" style="font-family: var(--font-sans); color: var(--color-foreground)">Enter API Key</h2>
             </div>
@@ -358,14 +356,8 @@ function finish() {
                     class="setup-back absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer"
                     @click="showApiKey = !showApiKey"
                   >
-                    <svg v-if="!showApiKey" class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-                      <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
-                      <path fill-rule="evenodd" d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd" />
-                    </svg>
-                    <svg v-else class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-                      <path fill-rule="evenodd" d="M3.28 2.22a.75.75 0 00-1.06 1.06l14.5 14.5a.75.75 0 101.06-1.06l-14.5-14.5z" clip-rule="evenodd" />
-                      <path d="M4.262 6.49A8.97 8.97 0 002.175 10.3a1.655 1.655 0 000 .4 10.004 10.004 0 007.548 5.953 8.97 8.97 0 004.988-.628l-1.446-1.446a4.003 4.003 0 01-5.54-5.54L4.262 6.49z" />
-                    </svg>
+                    <EyeIcon v-if="!showApiKey" class="w-4 h-4" />
+                    <EyeSlashIcon v-else class="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -391,7 +383,7 @@ function finish() {
                   {{ validating ? 'Checking...' : 'Test Connection' }}
                 </button>
                 <span v-if="validationResult?.valid" class="text-xs flex items-center gap-1" style="color: var(--color-success-fg)">
-                  <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clip-rule="evenodd" /></svg>
+                  <CheckCircleIcon class="w-3.5 h-3.5" />
                   Connected
                 </span>
                 <span v-if="validationResult?.valid === false" class="text-xs" style="color: var(--color-error-fg)">{{ validationResult.error }}</span>
@@ -405,7 +397,7 @@ function finish() {
               <button
                 :disabled="loading || !apiKey.trim()"
                 class="w-full px-4 py-2.5 rounded-lg text-sm font-medium transition-opacity cursor-pointer shadow-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                style="background: var(--color-primary); color: var(--color-on-primary, #fff)"
+                style="background: var(--color-primary); color: var(--color-on-primary)"
                 @click="submitSetup"
               >
                 {{ loading ? 'Setting up...' : 'Complete Setup' }}
@@ -441,7 +433,7 @@ function finish() {
 
 .setup-retry {
   background: var(--color-primary);
-  color: var(--color-on-primary, #fff);
+  color: var(--color-on-primary);
   transition: opacity 0.15s;
 }
 .setup-retry:hover {

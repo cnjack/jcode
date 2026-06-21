@@ -212,6 +212,13 @@ export const api = {
     request<{ status: string; state: string }>('/api/channel/enable', { method: 'POST' }),
   channelDisable: () =>
     request<{ status: string; state: string }>('/api/channel/disable', { method: 'POST' }),
+  channelBLEStatus: () =>
+    request<{ enabled: boolean }>('/api/channel/ble'),
+  setChannelBLE: (enabled: boolean) =>
+    request<{ enabled: boolean }>('/api/channel/ble', {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    }),
 
   // Setup API
   setupProviders: () =>

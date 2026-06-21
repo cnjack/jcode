@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { ChevronRight, File, Folder, ArrowLeft } from 'lucide-vue-next'
+import { ChevronRightIcon, DocumentIcon, FolderIcon, ArrowLeftIcon } from '@heroicons/vue/24/outline'
 import { api } from '@/composables/api'
 import type { FileItem } from '@/types/api'
 import hljs from 'highlight.js'
@@ -107,16 +107,16 @@ onMounted(() => fetchDir(''))
         class="back-btn"
         @click="goBack"
       >
-        <ArrowLeft :size="14" />
+        <ArrowLeftIcon class="w-3.5 h-3.5" />
       </button>
       <div class="breadcrumb">
         <button class="crumb" @click="navigateTo(-1)">root</button>
         <template v-for="(seg, i) in breadcrumbs" :key="i">
-          <ChevronRight :size="10" class="crumb-sep" />
+          <ChevronRightIcon class="w-2.5 h-2.5 crumb-sep" />
           <button class="crumb" @click="navigateTo(i)">{{ seg }}</button>
         </template>
         <template v-if="previewFile">
-          <ChevronRight :size="10" class="crumb-sep" />
+          <ChevronRightIcon class="w-2.5 h-2.5 crumb-sep" />
           <span class="crumb current">{{ previewFile.path.split('/').pop() }}</span>
         </template>
       </div>
@@ -139,8 +139,8 @@ onMounted(() => fetchDir(''))
           class="file-item"
           @click="openItem(item)"
         >
-          <Folder v-if="item.is_dir" :size="14" class="item-icon folder" />
-          <File v-else :size="14" class="item-icon file" />
+          <FolderIcon v-if="item.is_dir" class="w-3.5 h-3.5 item-icon folder" />
+          <DocumentIcon v-else class="w-3.5 h-3.5 item-icon file" />
           <span class="item-name">{{ item.name }}</span>
           <span v-if="!item.is_dir" class="item-size">{{ formatSize(item.size) }}</span>
         </button>

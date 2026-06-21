@@ -159,3 +159,11 @@ script/              # Build-time code generation
 - **Output:** builds to `internal/web/dist/`, embedded in Go binary via `//go:embed`
 - **Lint:** `cd web && pnpm lint` (eslint + oxlint)
 - Changes to the frontend require rebuilding via `make build-web` for the Go binary to pick them up
+
+### Icons & Styling
+
+- **Icons:** use `@heroicons/vue/24/outline` exclusively. Import each icon by name from its subpath (`import { XMarkIcon } from '@heroicons/vue/24/outline'`) for per-file tree-shaking. Do **not** hand-write inline `<svg>` icons or `v-html` SVG path strings.
+- **Icon sizing:** use Tailwind `w-N h-N` classes (e.g. `class="w-3.5 h-3.5"`), never a `:size` prop.
+- **Colors:** every color must come from a CSS custom property defined in `src/styles/tokens.css`. Never hardcode hex/rgb/`#fff`/`white` in `.vue` or `.css`. Text on the primary/destructive fills uses `--color-on-primary` / `--color-on-destructive`; code blocks use `--code-bg` / `--code-border`; syntax highlighting uses `--hljs-*`.
+- **Terminal (xterm) colors:** live in tokens (`--term-*` and the 16-color ANSI palette) and are read at runtime via `getComputedStyle` in `TerminalInstance.vue` — see `termTheme()`. Do not define terminal colors inline.
+- **Adding a new color:** add the token to `tokens.css` (both `:root` light and `.dark`) first, then reference it by `var(...)`. To theme it per generated theme, edit `internal/theme/palette.go` and regenerate — never edit `tokens.generated.css` by hand.

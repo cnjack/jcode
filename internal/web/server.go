@@ -330,6 +330,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/channel/logout", s.handleChannelLogout)
 	mux.HandleFunc("POST /api/channel/enable", s.handleChannelEnable)
 	mux.HandleFunc("POST /api/channel/disable", s.handleChannelDisable)
+	mux.HandleFunc("GET /api/channel/ble", s.handleChannelBLEStatus)
+	mux.HandleFunc("POST /api/channel/ble", s.handleSetChannelBLE)
 
 	// Setup API — available in setup mode (no provider configured yet).
 	mux.HandleFunc("GET /api/setup/providers", s.handleSetupProviders)
@@ -2228,6 +2230,17 @@ func (s *Server) handleSetApprovalMode(w http.ResponseWriter, r *http.Request) {
 			s.agent = ag
 		} else {
 			config.Logger().Printf("[web] approval mode agent rebuild error: %v", err)
+		}
+	}
+	// Persist as the default startup mode so the preference survives restarts —
+	// resolveStartupMode reads cfg.DefaultMode (falling back to the deprecated
+	// cfg.AutoApprove). This makes the Settings toggle a true "default", not just
+	// a one-off runtime flip.
+	if s.cfg != nil {
+		s.cfg.DefaultMode = sm.String()
+		s.cfg.AutoApprove = req.AutoApprove
+		if err := config.SaveConfig(s.cfg); err != nil {
+			config.Logger().Printf("[web] approval mode save config failed: %v", err)
 		}
 	}
 	s.mu.Unlock()

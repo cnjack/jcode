@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick, watch, onUnmounted, provide } from 'vue'
+import { ChevronDoubleDownIcon } from '@heroicons/vue/24/outline'
 import { normalizeMode } from '@/types/api'
 import type { RemoteMeta } from '@/types/api'
 import { useChatStore } from '@/stores/chat'
@@ -434,7 +435,7 @@ function startResize(e: MouseEvent) {
               Start a new task in <span class="welcome-project">{{ store.projectName || 'jcode' }}</span>
             </h2>
             <p class="welcome-sub">
-              Pick a workspace, then send a message. Use <kbd class="welcome-kbd">/</kbd> for commands.
+              Send a message to start. <kbd class="welcome-kbd">/</kbd> for commands.
             </p>
           </div>
 
@@ -460,10 +461,8 @@ function startResize(e: MouseEvent) {
                 <ChatMessageVue
                   v-if="item.kind === 'message'"
                   :message="item.data"
-                  :can-retry="item.data.role === 'assistant' && !store.isRunning"
                   :can-edit="item.data.role === 'user' && !store.isRunning"
                   class="animate-fade-up"
-                  @retry="store.retryFromMessage(item.data.id)"
                   @edit="(text) => store.editAndResend(item.data.id, text)"
                 />
                 <ToolCallCard v-else-if="item.kind === 'tool'" :tool="item.data" class="animate-fade-up pl-9" />
@@ -506,25 +505,27 @@ function startResize(e: MouseEvent) {
           </div>
 
           <!-- Scroll-to-bottom button -->
-          <transition
-            enter-active-class="transition-all duration-200 ease-out"
-            enter-from-class="opacity-0 translate-y-2"
-            enter-to-class="opacity-100 translate-y-0"
-            leave-active-class="transition-all duration-150 ease-in"
-            leave-from-class="opacity-100 translate-y-0"
-            leave-to-class="opacity-0 translate-y-2"
-          >
-            <button
-              v-if="showScrollBtn"
-              class="absolute bottom-40 left-1/2 -translate-x-1/2 z-10 w-8 h-8 flex items-center justify-center rounded-full shadow-lg cursor-pointer transition-colors"
-              style="background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-muted-foreground)"
-              @click="scrollToBottom()"
+          <!-- Scroll-to-bottom button — anchored as its own flex row above the
+               composer (no magic px offset), so it tracks composer height. -->
+          <div class="relative h-0">
+            <transition
+              enter-active-class="transition-all duration-200 ease-out"
+              enter-from-class="opacity-0 translate-y-2"
+              enter-to-class="opacity-100 translate-y-0"
+              leave-active-class="transition-all duration-150 ease-in"
+              leave-from-class="opacity-100 translate-y-0"
+              leave-to-class="opacity-0 translate-y-2"
             >
-              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                <path d="M12 5v14M5 12l7 7 7-7" />
-              </svg>
-            </button>
-          </transition>
+              <button
+                v-if="showScrollBtn"
+                class="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 w-8 h-8 flex items-center justify-center rounded-full shadow-lg cursor-pointer transition-colors"
+                style="background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-muted-foreground)"
+                @click="scrollToBottom()"
+              >
+                <ChevronDoubleDownIcon class="w-4 h-4" />
+              </button>
+            </transition>
+          </div>
 
           <GoalBanner />
           <ChatInput />
@@ -639,7 +640,7 @@ function startResize(e: MouseEvent) {
   border: none;
   border-radius: var(--radius-lg);
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-on-primary);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
