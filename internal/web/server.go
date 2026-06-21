@@ -2233,12 +2233,10 @@ func (s *Server) handleSetApprovalMode(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Persist as the default startup mode so the preference survives restarts —
-	// resolveStartupMode reads cfg.DefaultMode (falling back to the deprecated
-	// cfg.AutoApprove). This makes the Settings toggle a true "default", not just
-	// a one-off runtime flip.
+	// resolveStartupMode reads cfg.DefaultMode. This makes the Settings toggle a
+	// true "default", not just a one-off runtime flip.
 	if s.cfg != nil {
 		s.cfg.DefaultMode = sm.String()
-		s.cfg.AutoApprove = req.AutoApprove
 		if err := config.SaveConfig(s.cfg); err != nil {
 			config.Logger().Printf("[web] approval mode save config failed: %v", err)
 		}
