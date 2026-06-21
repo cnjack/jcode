@@ -24,6 +24,11 @@ function isCurrent(panel: PanelType): boolean {
   return props.activePanel === panel
 }
 
+// Dot colour and label share the same priority order (running > connected >
+// disconnected) so they never disagree — previously the colour led with
+// isRunning while the label led with wsConnected, so a running+connected agent
+// showed an orange "Running" dot but a "Connected" tooltip, and the 'Running'
+// label was effectively dead (running always implies connected).
 const statusColor = computed(() => {
   if (props.isRunning) return 'var(--color-primary)'
   if (props.wsConnected) return 'var(--color-success)'
@@ -31,8 +36,8 @@ const statusColor = computed(() => {
 })
 
 const statusLabel = computed(() => {
-  if (props.wsConnected) return 'Connected'
   if (props.isRunning) return 'Running'
+  if (props.wsConnected) return 'Connected'
   return 'Disconnected'
 })
 
@@ -79,7 +84,8 @@ watch(
       <MenuButton
         class="panel-menu-btn"
         :class="{ open }"
-        aria-label="Open panel"
+        :aria-label="`Panels menu · ${statusLabel}`"
+        :aria-expanded="open"
         :title="`Panels · ${statusLabel}`"
         @click="loadDiffStat"
       >

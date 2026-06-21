@@ -112,12 +112,14 @@ function formatArgs(args: string): string {
         >{{ formatArgs(approval.tool_args) }}</pre>
       </div>
 
-      <!-- Buttons: clear 3-tier hierarchy (primary / ghost / quiet) -->
-      <div class="flex gap-1.5 shrink-0 self-end">
+      <!-- Buttons: clear 3-tier hierarchy (primary / ghost / quiet). All disabled
+           while a decision POST is in flight to prevent double-submit. -->
+      <div class="flex gap-1.5 shrink-0 self-end" :class="{ 'approval-busy': approval.resolving }">
         <button
           type="button"
           class="px-3.5 py-1.5 text-xs rounded-md text-white transition-colors cursor-pointer font-medium shadow-sm"
           style="background-color: var(--color-primary)"
+          :disabled="approval.resolving"
           @click="store.resolveApproval(approval.id, true, false)"
         >
           Allow once
@@ -127,6 +129,7 @@ function formatArgs(args: string): string {
           class="px-3.5 py-1.5 text-xs rounded-md transition-colors cursor-pointer font-medium"
           style="background-color: transparent; color: var(--color-foreground); border: 1px solid var(--color-border)"
           title="Approve this and auto-approve the rest of the session"
+          :disabled="approval.resolving"
           @click="store.resolveApproval(approval.id, true, true)"
         >
           Allow all
@@ -135,6 +138,7 @@ function formatArgs(args: string): string {
           type="button"
           class="approval-deny px-3 py-1.5 text-xs rounded-md transition-colors cursor-pointer font-medium"
           style="background-color: transparent; color: var(--color-muted-foreground)"
+          :disabled="approval.resolving"
           @click="store.resolveApproval(approval.id, false)"
         >
           Deny
@@ -159,6 +163,14 @@ function formatArgs(args: string): string {
 .approval-deny:hover {
   color: var(--color-destructive) !important;
   background-color: var(--color-muted) !important;
+}
+
+/* In-flight: dim the button row and block further clicks. */
+.approval-busy {
+  opacity: 0.6;
+}
+.approval-busy button {
+  cursor: progress;
 }
 
 @media (prefers-reduced-motion: reduce) {

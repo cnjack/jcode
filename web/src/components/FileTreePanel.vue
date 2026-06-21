@@ -1,22 +1,25 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, onMounted } from 'vue'
 import { ChevronRight, File, Folder, ArrowLeft } from 'lucide-vue-next'
 import { api } from '@/composables/api'
 import type { FileItem } from '@/types/api'
 import hljs from 'highlight.js'
-
-const props = defineProps<{
-  rootPath?: string
-}>()
 
 const currentPath = ref('')
 const items = ref<FileItem[]>([])
 const loading = ref(false)
 const previewFile = ref<{ path: string; content: string } | null>(null)
 const breadcrumbs = ref<string[]>([])
+// Distinct error states: a directory that failed to load (replaces the list, so
+// it isn't mistaken for an empty folder) vs. a file that failed to open (a
+// dismissable banner above the still-visible listing).
+const dirError = ref('')
+const fileError = ref('')
 
 async function fetchDir(path: string) {
   loading.value = true
+  dirError.value = ''
+  fileError.value = ''
   try {
     items.value = await api.files(path || undefined)
     currentPath.value = path
@@ -24,6 +27,7 @@ async function fetchDir(path: string) {
   } catch (err) {
     console.error('Failed to fetch files:', err)
     items.value = []
+    dirError.value = '无法加载此目录。'
   } finally {
     loading.value = false
   }
@@ -35,11 +39,14 @@ async function openItem(item: FileItem) {
     await fetchDir(newPath)
   } else {
     const filePath = currentPath.value ? `${currentPath.value}/${item.name}` : item.name
+    fileError.value = ''
     try {
       const result = await api.fileContent(filePath)
       previewFile.value = result
     } catch (err) {
       console.error('Failed to fetch file content:', err)
+      // Don't fail silently — tell the user the click didn't no-op.
+      fileError.value = `无法打开 ${item.name}（可能是二进制文件、过大或权限不足）。`
     }
   }
 }
@@ -85,10 +92,10 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-watch(() => props.rootPath, () => {
-  previewFile.value = null
-  fetchDir(props.rootPath || '')
-}, { immediate: true })
+// Initial load of the workspace root. The panel is keyed on the active workspace
+// by its parent (RightPanel), so a project switch remounts it and this runs
+// again against the new server cwd.
+onMounted(() => fetchDir(''))
 </script>
 
 <template>
@@ -123,7 +130,9 @@ watch(() => props.rootPath, () => {
     <!-- Directory listing -->
     <div v-else class="file-list">
       <div v-if="loading" class="loading-state">Loading…</div>
+      <div v-else-if="dirError" class="error-state">{{ dirError }}</div>
       <template v-else>
+        <div v-if="fileError" class="file-error">{{ fileError }}</div>
         <button
           v-for="item in items"
           :key="item.name"
@@ -135,7 +144,7 @@ watch(() => props.rootPath, () => {
           <span class="item-name">{{ item.name }}</span>
           <span v-if="!item.is_dir" class="item-size">{{ formatSize(item.size) }}</span>
         </button>
-        <div v-if="items.length === 0 && !loading" class="empty-state">
+        <div v-if="items.length === 0" class="empty-state">
           Empty directory
         </div>
       </template>
@@ -286,5 +295,23 @@ watch(() => props.rootPath, () => {
   text-align: center;
   font-size: 12px;
   color: var(--color-muted-foreground);
+}
+
+.error-state {
+  padding: 24px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--color-error-fg);
+}
+
+.file-error {
+  margin: 6px 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-error-fg);
+  background: var(--color-error-bg);
+  color: var(--color-error-fg);
+  font-size: 11px;
+  line-height: 1.4;
 }
 </style>

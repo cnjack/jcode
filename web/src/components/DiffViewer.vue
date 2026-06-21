@@ -20,8 +20,13 @@ async function fetchDiff() {
   try {
     const result = await api.diff(mode.value)
     entries.value = result.entries
-    if (entries.value.length > 0 && !selectedFile.value) {
-      selectedFile.value = entries.value[0]?.file ?? ''
+    // Keep the current selection only if it still exists in the new entry set;
+    // otherwise fall back to the first entry. Without this, switching mode to one
+    // that doesn't contain the previously-selected file left the body blank
+    // ("Select a file…") even though the file list had content.
+    const stillThere = selectedFile.value && entries.value.some((e) => e.file === selectedFile.value)
+    if (!stillThere) {
+      selectedFile.value = entries.value.length > 0 ? (entries.value[0]?.file ?? null) : null
     }
   } catch (err) {
     console.error('Failed to fetch diff:', err)

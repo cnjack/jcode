@@ -14,8 +14,6 @@ const permission = ref<NotificationPermission>(
 )
 
 export function useNotifications() {
-  const supported = isTauri || typeof Notification !== 'undefined'
-
   async function ensurePermission() {
     if (isTauri) {
       await ensureNativePermission()
@@ -50,5 +48,5 @@ export function useNotifications() {
     }
   }
 
-  return { supported, permission, ensurePermission, notify }
+  return { ensurePermission, notify }
 }

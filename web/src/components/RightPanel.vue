@@ -73,8 +73,11 @@ function startResize(e: MouseEvent) {
       </button>
     </div>
     <div class="panel-content">
-      <FileTreePanel v-if="activeTab === 'files'" />
-      <DiffViewer v-else-if="activeTab === 'changes'" />
+      <!-- Keyed on the active workspace so switching projects remounts these and
+           re-fetches: both only load on mount, so without the key the Files tree
+           and Changes diff would keep showing the previous project's content. -->
+      <FileTreePanel v-if="activeTab === 'files'" :key="store.pwd" />
+      <DiffViewer v-else-if="activeTab === 'changes'" :key="store.pwd" />
       <div v-else class="plan-pane">
         <div class="plan-head">
           <span class="plan-title">Plan</span>

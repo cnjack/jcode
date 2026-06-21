@@ -313,6 +313,11 @@ function close() {
         <div class="fixed inset-0" style="background: var(--backdrop); backdrop-filter: blur(6px)" />
       </TransitionChild>
 
+      <!-- Native title-bar drag strip — the blurred backdrop covers the shell's
+           own drag band, so without this the macOS window can't be dragged while
+           the wizard is open. Rendered only inside is-tauri-macos. -->
+      <div class="titlebar-drag" data-tauri-drag-region aria-hidden="true" />
+
       <div class="fixed inset-0 flex items-center justify-center p-4">
         <TransitionChild
           enter="ease-out duration-150" enter-from="opacity-0 translate-y-2" enter-to="opacity-100 translate-y-0"
