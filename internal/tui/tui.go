@@ -399,9 +399,9 @@ func (m Model) selectorMode() mode.SessionMode {
 		return mode.Plan
 	}
 	if m.approvalMode == ModeAuto {
-		return mode.Autopilot
+		return mode.FullAccess
 	}
-	return mode.Ask
+	return mode.Approval
 }
 
 // applySelectorMode sets the two low-level TUI fields to match a unified mode.
@@ -410,10 +410,10 @@ func (m *Model) applySelectorMode(sm mode.SessionMode) {
 	switch sm {
 	case mode.Plan:
 		m.agentMode = ModePlanning
-	case mode.Autopilot:
+	case mode.FullAccess:
 		m.agentMode = ModeNormal
 		m.approvalMode = ModeAuto
-	default: // Ask
+	default: // Approval
 		m.agentMode = ModeNormal
 		m.approvalMode = ModeManual
 	}

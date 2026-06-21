@@ -1,12 +1,23 @@
-//! System-tray icon: left-click toggles the window, right-click opens a menu
+//! System-tray icon: left-click opens the window, right-click opens a menu
 //! with show / hide / quit. The tray is what keeps jcode reachable after the
 //! window is "closed" (hidden) to the background.
+//!
+//! The icon is a monochrome template image (black shapes on transparency);
+//! macOS tints it automatically to match a light or dark menu bar, so it reads
+//! as black on light and white on dark instead of the full-color app icon.
 
+use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 
-use crate::{show_main, toggle_main};
+use crate::show_main;
+
+/// Monochrome menu-bar icon, used as a macOS template image: the jcode logo
+/// converted to grayscale (luminance -> ink coverage) on a transparent
+/// background, so macOS tints it black on a light bar and white on a dark bar.
+/// See `icons/tray-template.png`.
+const TRAY_ICON: &[u8] = include_bytes!("../icons/tray-template.png");
 
 pub fn create(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let show = MenuItem::with_id(app, "show", "显示 jcode", true, None::<&str>)?;
@@ -15,13 +26,11 @@ pub fn create(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let quit = MenuItem::with_id(app, "quit", "退出 jcode", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &hide, &sep, &quit])?;
 
-    let icon = app
-        .default_window_icon()
-        .cloned()
-        .ok_or("default window icon missing from bundle config")?;
+    let icon = Image::from_bytes(TRAY_ICON)?;
 
     TrayIconBuilder::with_id("main")
         .icon(icon)
+        .icon_as_template(true)
         .tooltip("jcode")
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -42,7 +51,7 @@ pub fn create(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 ..
             } = event
             {
-                toggle_main(tray.app_handle());
+                show_main(tray.app_handle());
             }
         })
         .build(app)?;

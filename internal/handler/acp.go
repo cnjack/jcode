@@ -47,13 +47,13 @@ type ACPHandler struct {
 	pendingApprovals []pendingApproval
 
 	// onModeChange, when set, is invoked after the handler promotes the session
-	// mode (e.g. "Allow All" → Autopilot) so the owning session can reconcile its
+	// mode (e.g. "Allow All" → Full access) so the owning session can reconcile its
 	// own advertised mode field with the approval state's source of truth.
 	onModeChange func(mode.SessionMode)
 }
 
 // SetModeChangeCallback registers a callback invoked whenever the handler
-// changes the session mode (currently the "Allow All" → Autopilot promotion).
+// changes the session mode (currently the "Allow All" → Full access promotion).
 func (h *ACPHandler) SetModeChangeCallback(fn func(mode.SessionMode)) {
 	h.onModeChange = fn
 }
@@ -537,9 +537,9 @@ func (h *ACPHandler) RequestApproval(ctx context.Context, req ApprovalRequest) (
 			return ApprovalResponse{Approved: true, Mode: ModeManual}, nil
 		case "allow_always":
 			h.markPermissionApproved(matchedID)
-			// "Allow All" promotes the session to Autopilot; tell the client so its
+			// "Allow All" promotes the session to Full access; tell the client so its
 			// mode selector reflects the jump to auto-approve.
-			h.notifyModeChanged(mode.Autopilot)
+			h.notifyModeChanged(mode.FullAccess)
 			return ApprovalResponse{Approved: true, Mode: ModeAuto}, nil
 		case "reject_once":
 			h.markPermissionRejected(matchedID)
@@ -552,7 +552,7 @@ func (h *ACPHandler) RequestApproval(ctx context.Context, req ApprovalRequest) (
 }
 
 // notifyModeChanged tells the connected client the session's unified mode
-// changed (e.g. after "Allow All" promotes to Autopilot), so its selector syncs.
+// changed (e.g. after "Allow All" promotes to Full access), so its selector syncs.
 func (h *ACPHandler) notifyModeChanged(m mode.SessionMode) {
 	if h.onModeChange != nil {
 		h.onModeChange(m) // reconcile the owning session's mode field

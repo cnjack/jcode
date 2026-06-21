@@ -1,3 +1,5 @@
+//go:build !jcode_headless
+
 package web
 
 import (
@@ -6,6 +8,12 @@ import (
 	"net/http"
 	"strings"
 )
+
+// When built normally (`jcode web`), the SPA frontend is embedded and served
+// by the Go server — the browser and the API share one origin. The
+// `jcode_headless` build tag (used for the desktop sidecar) selects
+// frontend_headless.go instead, which omits the embed so the binary ships
+// without the frontend (the Tauri shell serves the page itself).
 
 //go:embed dist/*
 var distFS embed.FS

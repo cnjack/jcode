@@ -49,7 +49,7 @@ List, view, and switch between sessions. Start a new session or resume a previou
 
 ### Model & Settings
 
-Switch models, change the session mode (Ask / Plan / Autopilot), and manage configuration — all from the web interface.
+Switch models, change the session mode (Ask for approval / Plan / Full access), and manage configuration — all from the web interface.
 
 ### Theme / Dark Mode
 
@@ -74,7 +74,7 @@ The web server exposes an HTTP API and a WebSocket stream for programmatic acces
 | `POST /api/sessions` | Create new session |
 | `GET /api/models` | List available models |
 | `POST /api/model` | Switch active model |
-| `POST /api/mode` | Switch session mode (`ask`, `plan`, or `autopilot`) |
+| `POST /api/mode` | Switch session mode (`approval`, `plan`, or `full_access`) |
 | `GET /api/todos` | Get current todo items |
 | `GET /api/files` | Browse directory |
 | `POST /api/exec` | Execute a shell command |

@@ -703,7 +703,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     : { borderRadius: 'var(--radius-md)', color: 'var(--color-muted-foreground)', backgroundColor: 'transparent' }"
                   @click="activeTab = tab"
                 >
-                  <span v-if="activeTab === tab" class="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-full" style="background-color: var(--color-primary)" />
+                  <span v-if="activeTab === tab" class="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-full" style="background-color: var(--color-accent-neutral)" />
                   <component :is="iconFor[tab]" class="w-3.5 h-3.5 shrink-0" />
                   <span class="truncate">{{ tabLabel[tab] }}</span>
                 </button>
@@ -733,120 +733,121 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                 <div class="flex-1 min-h-0 overflow-y-auto px-8 py-7 [&>div]:max-w-3xl [&>div]:mx-auto">
                 <!-- General tab -->
                 <div v-if="activeTab === 'general'" class="space-y-5">
-                  <div class="flex items-center gap-2">
-                    <span
-                      class="w-2 h-2 rounded-full"
-                      :style="{ backgroundColor: store.wsConnected ? 'var(--color-primary)' : 'var(--color-border)' }"
-                    />
-                    <span class="text-xs font-medium" :style="{ color: store.wsConnected ? 'var(--color-primary)' : 'var(--color-muted-foreground)' }">
-                      {{ t('settings.general.serverState') }} {{ store.wsConnected ? t('settings.general.serverOnline') : t('settings.general.serverOffline') }}
-                    </span>
+                  <!-- Connection status -->
+                  <div class="s-row">
+                    <div class="s-row-icon">
+                      <span
+                        class="w-2 h-2 rounded-full"
+                        :style="{ backgroundColor: store.wsConnected ? 'var(--color-success)' : 'var(--color-border)' }"
+                      />
+                    </div>
+                    <div class="s-row-body">
+                      <div class="s-row-title">{{ t('settings.general.serverState') }}</div>
+                      <div class="s-row-sub" :style="{ color: store.wsConnected ? 'var(--color-success)' : 'var(--color-muted-foreground)' }">
+                        {{ store.wsConnected ? t('settings.general.serverOnline') : t('settings.general.serverOffline') }}
+                      </div>
+                    </div>
                   </div>
 
-                  <div v-if="store.tokenInfo">
-                    <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.general.tokenUsage') }}</div>
-                    <div class="flex items-center gap-2">
-                      <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background-color: var(--color-muted)">
-                        <div
-                          class="h-full rounded-full transition-all"
-                          :style="{ width: store.tokenPercentage + '%', backgroundColor: store.tokenPercentage > 80 ? 'var(--color-destructive)' : store.tokenPercentage > 50 ? 'var(--color-warning-fg)' : 'var(--color-primary)' }"
-                        />
+                  <!-- Token usage -->
+                  <div v-if="store.tokenInfo" class="s-row">
+                    <div class="s-row-body">
+                      <div class="s-row-title">{{ t('settings.general.tokenUsage') }}</div>
+                      <div class="flex items-center gap-2 mt-1.5">
+                        <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background-color: var(--color-muted)">
+                          <div
+                            class="h-full rounded-full transition-all"
+                            :style="{ width: store.tokenPercentage + '%', backgroundColor: store.tokenPercentage > 80 ? 'var(--color-destructive)' : store.tokenPercentage > 50 ? 'var(--color-warning-fg)' : 'var(--color-accent-neutral)' }"
+                          />
+                        </div>
+                        <span class="text-[10px] font-mono" style="color: var(--color-muted-foreground)">
+                          {{ store.tokenInfo.total_tokens.toLocaleString() }}
+                          <span v-if="store.tokenInfo.model_context_limit"> / {{ store.tokenInfo.model_context_limit.toLocaleString() }}</span>
+                        </span>
                       </div>
-                      <span class="text-[10px] font-mono" style="color: var(--color-muted-foreground)">
-                        {{ store.tokenInfo.total_tokens.toLocaleString() }}
-                        <span v-if="store.tokenInfo.model_context_limit"> / {{ store.tokenInfo.model_context_limit.toLocaleString() }}</span>
-                      </span>
                     </div>
                   </div>
 
                   <!-- Preferences — configurable toggles with explanations. -->
-                  <div class="space-y-2 pt-1">
-                    <div class="text-[10px] uppercase tracking-wider font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.general.preferences') }}</div>
+                  <div>
+                    <div class="text-[10px] uppercase tracking-wider font-medium mb-2" style="color: var(--color-muted-foreground)">{{ t('settings.general.preferences') }}</div>
 
                     <!-- Default auto-approve -->
-                    <div class="flex items-center gap-3 px-3 py-2.5 rounded-md" style="border: 1px solid var(--color-border); background-color: var(--color-surface)">
-                      <ShieldCheckIcon class="w-4 h-4 shrink-0" style="color: var(--color-muted-foreground)" />
-                      <div class="flex-1 min-w-0">
-                        <div class="text-xs font-medium" style="color: var(--color-foreground)">{{ t('settings.general.autoApproveTitle') }}</div>
-                        <div class="text-[10px] leading-relaxed" style="color: var(--color-muted-foreground)">
-                          {{ t('settings.general.autoApproveDesc') }}
-                        </div>
+                    <div class="s-row">
+                      <div class="s-row-icon"><ShieldCheckIcon class="w-4 h-4" /></div>
+                      <div class="s-row-body">
+                        <div class="s-row-title">{{ t('settings.general.autoApproveTitle') }}</div>
+                        <div class="s-row-sub">{{ t('settings.general.autoApproveDesc') }}</div>
                       </div>
-                      <button
-                        class="relative inline-flex h-5 w-9 items-center rounded-full cursor-pointer transition-colors shrink-0"
-                        :style="{ backgroundColor: store.autoApprove ? 'var(--color-primary)' : 'var(--color-border)' }"
-                        :title="store.autoApprove ? t('common.disable') : t('common.enable')"
-                        @click="toggleAutoApprove"
-                      >
-                        <span
-                          class="inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform"
-                          :class="store.autoApprove ? 'translate-x-[20px]' : 'translate-x-[2px]'"
+                      <div class="s-row-actions">
+                        <button
+                          class="s-switch"
+                          :data-on="store.autoApprove ? 'true' : 'false'"
+                          :title="store.autoApprove ? t('common.disable') : t('common.enable')"
+                          :aria-pressed="store.autoApprove"
+                          @click="toggleAutoApprove"
                         />
-                      </button>
+                      </div>
                     </div>
 
                     <!-- Bluetooth status notifications (desktop only) -->
-                    <div v-if="isTauri" class="flex items-center gap-3 px-3 py-2.5 rounded-md" style="border: 1px solid var(--color-border); background-color: var(--color-surface)">
-                      <SignalIcon class="w-4 h-4 shrink-0" style="color: var(--color-muted-foreground)" />
-                      <div class="flex-1 min-w-0">
-                        <div class="text-xs font-medium" style="color: var(--color-foreground)">{{ t('settings.general.bleTitle') }}</div>
-                        <div class="text-[10px] leading-relaxed" style="color: var(--color-muted-foreground)">
-                          {{ t('settings.general.bleDesc') }}
-                        </div>
+                    <div v-if="isTauri" class="s-row">
+                      <div class="s-row-icon"><SignalIcon class="w-4 h-4" /></div>
+                      <div class="s-row-body">
+                        <div class="s-row-title">{{ t('settings.general.bleTitle') }}</div>
+                        <div class="s-row-sub">{{ t('settings.general.bleDesc') }}</div>
                       </div>
-                      <button
-                        class="relative inline-flex h-5 w-9 items-center rounded-full cursor-pointer transition-colors shrink-0 disabled:opacity-50"
-                        :style="{ backgroundColor: bleEnabled ? 'var(--color-primary)' : 'var(--color-border)' }"
-                        :disabled="bleSaving"
-                        :title="bleEnabled ? t('common.disable') : t('common.enable')"
-                        @click="toggleBLE"
-                      >
-                        <span
-                          class="inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform"
-                          :class="bleEnabled ? 'translate-x-[20px]' : 'translate-x-[2px]'"
+                      <div class="s-row-actions">
+                        <button
+                          class="s-switch"
+                          :data-on="bleEnabled ? 'true' : 'false'"
+                          :disabled="bleSaving"
+                          :title="bleEnabled ? t('common.disable') : t('common.enable')"
+                          :aria-pressed="bleEnabled"
+                          @click="toggleBLE"
                         />
-                      </button>
+                      </div>
                     </div>
 
                     <!-- Language -->
-                    <div class="flex items-center gap-3 px-3 py-2.5 rounded-md" style="border: 1px solid var(--color-border); background-color: var(--color-surface)">
-                      <GlobeAltIcon class="w-4 h-4 shrink-0" style="color: var(--color-muted-foreground)" />
-                      <div class="flex-1 min-w-0">
-                        <div class="text-xs font-medium" style="color: var(--color-foreground)">{{ t('settings.general.languageTitle') }}</div>
-                        <div class="text-[10px] leading-relaxed" style="color: var(--color-muted-foreground)">
-                          {{ t('settings.general.languageDesc') }}
-                        </div>
+                    <div class="s-row">
+                      <div class="s-row-icon"><GlobeAltIcon class="w-4 h-4" /></div>
+                      <div class="s-row-body">
+                        <div class="s-row-title">{{ t('settings.general.languageTitle') }}</div>
+                        <div class="s-row-sub">{{ t('settings.general.languageDesc') }}</div>
                       </div>
-                      <HMenu as="div" class="relative lang-menu" v-slot="{ open }">
-                        <MenuButton
-                          class="lang-trigger"
-                          :aria-label="t('settings.general.languageTitle')"
-                          :aria-expanded="open"
-                        >
-                          <span class="lang-trigger-label">{{ LOCALE_LABELS[currentLocale] }}</span>
-                          <ChevronDownIcon class="w-3 h-3 lang-trigger-caret" :class="{ open }" />
-                        </MenuButton>
-                        <transition
-                          enter-active-class="pop-enter-active"
-                          enter-from-class="pop-enter-from"
-                          leave-active-class="pop-leave-active"
-                          leave-to-class="pop-leave-to"
-                        >
-                          <MenuItems class="lang-menu-items">
-                            <MenuItem v-for="loc in supportedLocales" :key="loc" v-slot="{ active }">
-                              <button
-                                class="lang-menu-item"
-                                :class="{ highlight: active, current: loc === currentLocale }"
-                                :aria-current="loc === currentLocale ? 'true' : undefined"
-                                @click="chooseLocale(loc)"
-                              >
-                                <span class="lang-item-label">{{ LOCALE_LABELS[loc] }}</span>
-                                <CheckIcon v-if="loc === currentLocale" class="w-3.5 h-3.5 lang-item-check" />
-                              </button>
-                            </MenuItem>
-                          </MenuItems>
-                        </transition>
-                      </HMenu>
+                      <div class="s-row-actions">
+                        <HMenu as="div" class="relative lang-menu" v-slot="{ open }">
+                          <MenuButton
+                            class="s-btn s-btn-secondary s-btn-sm"
+                            :aria-label="t('settings.general.languageTitle')"
+                            :aria-expanded="open"
+                          >
+                            <span class="lang-trigger-label">{{ LOCALE_LABELS[currentLocale] }}</span>
+                            <ChevronDownIcon class="w-3 h-3 lang-trigger-caret" :class="{ open }" />
+                          </MenuButton>
+                          <transition
+                            enter-active-class="pop-enter-active"
+                            enter-from-class="pop-enter-from"
+                            leave-active-class="pop-leave-active"
+                            leave-to-class="pop-leave-to"
+                          >
+                            <MenuItems class="lang-menu-items">
+                              <MenuItem v-for="loc in supportedLocales" :key="loc" v-slot="{ active }">
+                                <button
+                                  class="lang-menu-item"
+                                  :class="{ highlight: active, current: loc === currentLocale }"
+                                  :aria-current="loc === currentLocale ? 'true' : undefined"
+                                  @click="chooseLocale(loc)"
+                                >
+                                  <span class="lang-item-label">{{ LOCALE_LABELS[loc] }}</span>
+                                  <CheckIcon v-if="loc === currentLocale" class="w-3.5 h-3.5 lang-item-check" />
+                                </button>
+                              </MenuItem>
+                            </MenuItems>
+                          </transition>
+                        </HMenu>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -859,7 +860,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                   <button
                     class="w-full flex items-center gap-3 px-3 py-2.5 rounded-md cursor-pointer transition-colors text-left"
                     :style="themeChoice === 'system'
-                      ? { border: '1px solid var(--color-primary)', backgroundColor: 'var(--accent-wash-soft)' }
+                      ? { border: '1px solid var(--color-accent-neutral)', backgroundColor: 'var(--neutral-wash-soft)' }
                       : { border: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface)' }"
                     @click="setTheme('system')"
                   >
@@ -868,7 +869,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       <div class="text-xs font-medium" style="color: var(--color-foreground)">{{ t('settings.appearance.system') }}</div>
                       <div class="text-[10px]" style="color: var(--color-muted-foreground)">{{ t('settings.appearance.systemDesc') }}</div>
                     </div>
-                    <span v-if="themeChoice === 'system'" class="text-[10px] px-1.5 py-0.5 rounded-full shrink-0" style="background-color: var(--accent-wash); color: var(--color-primary)">{{ t('settings.appearance.active') }}</span>
+                    <span v-if="themeChoice === 'system'" class="text-[10px] px-1.5 py-0.5 rounded-full shrink-0" style="background-color: var(--neutral-wash); color: var(--color-accent-neutral)">{{ t('settings.appearance.active') }}</span>
                   </button>
 
                   <!-- Dark themes -->
@@ -880,7 +881,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                         :key="t.id"
                         :data-theme="t.id"
                         class="rounded-md overflow-hidden cursor-pointer text-left transition-transform active:scale-[0.98]"
-                        :style="{ border: themeChoice === t.id ? '2px solid var(--color-primary)' : '1px solid var(--color-border)', backgroundColor: 'var(--color-background)' }"
+                        :style="{ border: themeChoice === t.id ? '2px solid var(--color-accent-neutral)' : '1px solid var(--color-border)', backgroundColor: 'var(--color-background)' }"
                         @click="setTheme(t.id)"
                       >
                         <div class="px-2.5 pt-2 pb-1.5">
@@ -896,7 +897,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                         </div>
                         <div class="px-2.5 py-1.5 flex items-center justify-between" style="background-color: var(--color-surface); border-top: 1px solid var(--color-border)">
                           <span class="text-[11px] font-medium truncate" style="color: var(--color-foreground)">{{ t.label }}</span>
-                          <span v-if="themeChoice === t.id" class="text-[10px] shrink-0" style="color: var(--color-primary)">●</span>
+                          <span v-if="themeChoice === t.id" class="text-[10px] shrink-0" style="color: var(--color-accent-neutral)">●</span>
                         </div>
                       </button>
                     </div>
@@ -911,7 +912,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                         :key="t.id"
                         :data-theme="t.id"
                         class="rounded-md overflow-hidden cursor-pointer text-left transition-transform active:scale-[0.98]"
-                        :style="{ border: themeChoice === t.id ? '2px solid var(--color-primary)' : '1px solid var(--color-border)', backgroundColor: 'var(--color-background)' }"
+                        :style="{ border: themeChoice === t.id ? '2px solid var(--color-accent-neutral)' : '1px solid var(--color-border)', backgroundColor: 'var(--color-background)' }"
                         @click="setTheme(t.id)"
                       >
                         <div class="px-2.5 pt-2 pb-1.5">
@@ -927,7 +928,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                         </div>
                         <div class="px-2.5 py-1.5 flex items-center justify-between" style="background-color: var(--color-surface); border-top: 1px solid var(--color-border)">
                           <span class="text-[11px] font-medium truncate" style="color: var(--color-foreground)">{{ t.label }}</span>
-                          <span v-if="themeChoice === t.id" class="text-[10px] shrink-0" style="color: var(--color-primary)">●</span>
+                          <span v-if="themeChoice === t.id" class="text-[10px] shrink-0" style="color: var(--color-accent-neutral)">●</span>
                         </div>
                       </button>
                     </div>
@@ -943,26 +944,22 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                   <div class="flex items-center justify-between mb-4">
                     <div class="flex items-baseline gap-2">
                       <h3 class="text-[13px] font-semibold tracking-tight" style="color: var(--color-foreground)">{{ t('settings.providers.title') }}</h3>
-                      <span class="text-[11px] font-mono" style="color: var(--color-muted-foreground)">{{ configuredProviders.length }}</span>
+                      <span class="s-section-count">{{ configuredProviders.length }}</span>
                     </div>
-                    <button
-                      class="h-7 px-2.5 text-[11px] font-medium rounded-md cursor-pointer transition-colors hover:bg-[var(--accent-wash-strong)]"
-                      style="color: var(--color-primary); background-color: var(--accent-wash)"
-                      @click="startAddProvider"
-                    >
+                    <button class="s-btn s-btn-secondary s-btn-sm" @click="startAddProvider">
                       {{ t('settings.providers.add') }}
                     </button>
                   </div>
 
                   <!-- Add provider flow -->
-                  <div v-if="showAddProvider" class="mb-4 rounded-md overflow-hidden" style="border: 1px solid var(--color-border)">
-                    <div class="px-3 py-2 flex items-center justify-between" style="background-color: var(--color-muted); border-bottom: 1px solid var(--color-border)">
-                      <span class="text-[10px] font-medium uppercase tracking-wider" style="color: var(--color-muted-foreground)">
+                  <div v-if="showAddProvider" class="s-form mb-4">
+                    <div class="s-form-head">
+                      <span class="s-form-head-title">
                         {{ addProviderStep === 'select' ? t('settings.providers.selectProvider') : addProviderStep === 'model' ? t('settings.providers.selectModel') : t('settings.providers.enterApiKey') }}
                       </span>
-                      <button class="cursor-pointer text-xs" style="color: var(--color-muted-foreground)" @click="showAddProvider = false">✕</button>
+                      <button class="s-btn s-btn-ghost s-btn-xs" @click="showAddProvider = false">✕</button>
                     </div>
-                    <div class="p-3 max-h-48 overflow-y-auto">
+                    <div class="s-form-body" style="max-height: 220px; overflow-y: auto; padding: 12px">
                       <!-- Select provider -->
                       <div v-if="addProviderStep === 'select'">
                         <div v-if="addLoading" class="text-center py-4 text-xs animate-pulse" style="color: var(--color-muted-foreground)">{{ t('settings.providers.loadingHint') }}</div>
@@ -970,7 +967,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                           <button
                             v-for="p in addProviderList.filter(x => !configuredProviders.some(c => c.id === x.id))"
                             :key="p.id"
-                            class="w-full px-2.5 py-2 text-left rounded-md text-xs cursor-pointer transition-colors"
+                            class="w-full px-2.5 py-2 text-left rounded-md text-xs cursor-pointer transition-colors hover:bg-[var(--color-secondary)]"
                             style="color: var(--color-foreground)"
                             @click="selectAddProvider(p.id)"
                           >
@@ -985,9 +982,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       <!-- Select model -->
                       <div v-if="addProviderStep === 'model'">
                         <div class="flex items-center gap-1 mb-2">
-                          <button class="cursor-pointer" style="color: var(--color-muted-foreground)" @click="addProviderStep = 'select'">
-                            <ChevronRightIcon class="w-3.5 h-3.5" />
-                          </button>
+                          <button class="s-btn s-btn-ghost s-btn-xs" @click="addProviderStep = 'select'">‹</button>
                           <span class="text-[10px]" style="color: var(--color-muted-foreground)">{{ addProviderInfo()?.name }}</span>
                         </div>
                         <div v-if="addLoading" class="text-center py-4 text-xs animate-pulse" style="color: var(--color-muted-foreground)">{{ t('settings.providers.loadingHint') }}</div>
@@ -995,7 +990,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                           <button
                             v-for="m in addProviderModels"
                             :key="m.id"
-                            class="w-full px-2.5 py-1.5 text-left rounded-md text-xs cursor-pointer transition-colors font-mono"
+                            class="w-full px-2.5 py-1.5 text-left rounded-md text-xs cursor-pointer transition-colors hover:bg-[var(--color-secondary)] font-mono"
                             style="color: var(--color-foreground)"
                             @click="selectAddModel(m.id)"
                           >
@@ -1006,15 +1001,13 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       <!-- Enter API key -->
                       <div v-if="addProviderStep === 'apikey'" class="space-y-2">
                         <div class="flex items-center gap-1 mb-1">
-                          <button class="cursor-pointer" style="color: var(--color-muted-foreground)" @click="addProviderStep = 'model'">
-                            <ChevronRightIcon class="w-3.5 h-3.5" />
-                          </button>
+                          <button class="s-btn s-btn-ghost s-btn-xs" @click="addProviderStep = 'model'">‹</button>
                           <span class="text-[10px] font-mono" style="color: var(--color-muted-foreground)">{{ addSelectedProvider }} / {{ addSelectedModel }}</span>
                         </div>
-                        <input v-model="addApiKey" type="password" :placeholder="t('settings.providers.apiKey')" class="w-full px-2.5 py-1.5 text-xs font-mono rounded-md outline-none" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-foreground)' }" @keydown.enter="submitAddProvider" />
-                        <input v-model="addBaseURL" type="text" :placeholder="t('settings.providers.baseUrl')" class="w-full px-2.5 py-1.5 text-xs font-mono rounded-md outline-none" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-foreground)' }" @keydown.enter="submitAddProvider" />
-                        <div v-if="addError" class="text-[10px]" style="color: var(--color-destructive)">{{ addError }}</div>
-                        <button :disabled="addLoading || !addApiKey" class="w-full px-2.5 py-1.5 text-xs text-white rounded-md cursor-pointer transition-colors font-medium disabled:opacity-50" style="background-color: var(--color-primary)" @click="submitAddProvider">
+                        <input v-model="addApiKey" type="password" :placeholder="t('settings.providers.apiKey')" class="s-input mono" @keydown.enter="submitAddProvider" />
+                        <input v-model="addBaseURL" type="text" :placeholder="t('settings.providers.baseUrl')" class="s-input mono" @keydown.enter="submitAddProvider" />
+                        <div v-if="addError" class="s-error">{{ addError }}</div>
+                        <button :disabled="addLoading || !addApiKey" class="s-btn s-btn-primary w-full" @click="submitAddProvider">
                           {{ addLoading ? t('settings.providers.saving') : t('settings.providers.addBtn') }}
                         </button>
                       </div>
@@ -1031,40 +1024,30 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       {{ t('settings.providers.noneHint', { btn: t('settings.providers.add') }) }}
                     </div>
                   </div>
-                  <div v-else class="space-y-2">
-                    <div
-                      v-for="p in configuredProviders"
-                      :key="p.id"
-                      class="flex items-center gap-3 px-3 py-2.5 rounded-md"
-                      style="border: 1px solid var(--color-border); background-color: var(--color-surface)"
-                    >
-                      <KeyIcon class="w-3.5 h-3.5" style="color: var(--color-muted-foreground)" />
-                      <div class="flex-1 min-w-0">
-                        <div class="text-xs font-medium font-mono" style="color: var(--color-foreground)">{{ p.id }}</div>
-                        <div class="text-[10px] font-mono truncate" style="color: var(--color-muted-foreground)">
+                  <div v-else>
+                    <div v-for="p in configuredProviders" :key="p.id" class="s-row">
+                      <div class="s-row-icon"><KeyIcon class="w-3.5 h-3.5" /></div>
+                      <div class="s-row-body">
+                        <div class="s-row-title" style="font-family: var(--font-mono)">{{ p.id }}</div>
+                        <div class="s-row-sub" style="font-family: var(--font-mono)">
                           {{ p.api_key || '—' }}
                           <template v-if="p.base_url"> · {{ p.base_url }}</template>
                         </div>
                       </div>
-                      <span
-                        v-if="store.providerName === p.id"
-                        class="text-[10px] px-1.5 py-0.5 rounded-full"
-                        style="background-color: var(--accent-wash); color: var(--color-primary)"
-                      >
-                        {{ t('common.active') }}
-                      </span>
-                      <button
-                        v-if="deleteConfirmId !== p.id"
-                        class="cursor-pointer transition-colors"
-                        style="color: var(--color-muted-foreground)"
-                        :title="t('settings.providers.remove')"
-                        @click="deleteConfirmId = p.id"
-                      >
-                        <TrashIcon class="w-3.5 h-3.5" />
-                      </button>
-                      <div v-else class="flex items-center gap-1">
-                        <button class="text-[10px] px-1.5 py-0.5 text-white rounded cursor-pointer" style="background-color: var(--color-destructive)" @click="deleteProvider(p.id)">{{ t('common.delete') }}</button>
-                        <button class="text-[10px] px-1.5 py-0.5 cursor-pointer" style="color: var(--color-muted-foreground)" @click="deleteConfirmId = ''">{{ t('common.cancel') }}</button>
+                      <div class="s-row-actions">
+                        <span v-if="store.providerName === p.id" class="s-chip s-chip-accent">{{ t('common.active') }}</span>
+                        <button
+                          v-if="deleteConfirmId !== p.id"
+                          class="s-btn s-btn-ghost s-btn-xs"
+                          :title="t('settings.providers.remove')"
+                          @click="deleteConfirmId = p.id"
+                        >
+                          <TrashIcon class="w-3.5 h-3.5" />
+                        </button>
+                        <template v-else>
+                          <button class="s-btn s-btn-danger s-btn-xs" @click="deleteProvider(p.id)">{{ t('common.delete') }}</button>
+                          <button class="s-btn s-btn-ghost s-btn-xs" @click="deleteConfirmId = ''">{{ t('common.cancel') }}</button>
+                        </template>
                       </div>
                     </div>
                   </div>
@@ -1075,153 +1058,154 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                   <div class="flex items-center justify-between mb-4">
                     <div class="flex items-baseline gap-2">
                       <h3 class="text-[13px] font-semibold tracking-tight" style="color: var(--color-foreground)">{{ t('settings.mcp.title') }}</h3>
-                      <span class="text-[11px] font-mono" style="color: var(--color-muted-foreground)">{{ Object.keys(mcpServers).length }}</span>
+                      <span class="s-section-count">{{ Object.keys(mcpServers).length }}</span>
                     </div>
                     <button
                       v-if="mcpEditing === null"
-                      class="h-7 px-2.5 text-[11px] font-medium rounded-md cursor-pointer transition-colors hover:bg-[var(--accent-wash-strong)]"
-                      style="color: var(--color-primary); background-color: var(--accent-wash)"
+                      class="s-btn s-btn-secondary s-btn-sm"
                       @click="openAddMCP"
                     >{{ t('settings.mcp.add') }}</button>
                   </div>
 
                   <!-- Add / Edit form -->
-                  <div v-if="mcpEditing !== null" class="space-y-3 mb-2 p-3 rounded-md" style="border: 1px solid var(--color-border)">
-                    <div class="text-xs font-medium" style="color: var(--color-foreground)">{{ mcpEditing ? t('settings.mcp.editServer') : t('settings.mcp.addServer') }}</div>
-
-                    <div>
-                      <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.serverName') }}</div>
-                      <input
-                        v-model="mcpForm.name"
-                        :disabled="!!mcpEditing"
-                        type="text"
-                        placeholder="my-server"
-                        class="w-full px-2.5 py-1.5 text-xs rounded-md outline-none"
-                        style="background-color: var(--color-background); border: 1px solid var(--color-border); color: var(--color-foreground)"
-                      />
+                  <div v-if="mcpEditing !== null" class="s-form mb-4">
+                    <div class="s-form-head">
+                      <span class="s-form-head-title">{{ mcpEditing ? t('settings.mcp.editServer') : t('settings.mcp.addServer') }}</span>
+                      <button class="s-btn s-btn-ghost s-btn-xs" @click="cancelMCPEdit">✕</button>
                     </div>
-
-                    <div>
-                      <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.transport') }}</div>
-                      <div class="inline-flex rounded-md overflow-hidden" style="border: 1px solid var(--color-border)">
-                        <button
-                          v-for="transport in (['local', 'http', 'sse'] as const)"
-                          :key="transport"
-                          class="px-3 py-1 text-[11px] cursor-pointer transition-colors"
-                          :style="mcpForm.transport === transport
-                            ? { backgroundColor: 'var(--color-primary)', color: 'var(--color-on-primary)' }
-                            : { color: 'var(--color-muted-foreground)' }"
-                          @click="mcpForm.transport = transport"
-                        >{{ transport === 'local' ? t('settings.mcp.transportLocal') : transport.toUpperCase() }}</button>
+                    <div class="s-form-body">
+                      <div class="s-field">
+                        <label class="s-label">{{ t('settings.mcp.serverName') }}</label>
+                        <input
+                          v-model="mcpForm.name"
+                          :disabled="!!mcpEditing"
+                          type="text"
+                          placeholder="my-server"
+                          class="s-input"
+                        />
                       </div>
+
+                      <div class="s-field">
+                        <label class="s-label">{{ t('settings.mcp.transport') }}</label>
+                        <div class="s-seg">
+                          <button
+                            v-for="transport in (['local', 'http', 'sse'] as const)"
+                            :key="transport"
+                            class="s-seg-btn"
+                            :aria-pressed="mcpForm.transport === transport"
+                            @click="mcpForm.transport = transport"
+                          >{{ transport === 'local' ? t('settings.mcp.transportLocal') : transport.toUpperCase() }}</button>
+                        </div>
+                      </div>
+
+                      <!-- HTTP / SSE fields -->
+                      <template v-if="mcpForm.transport !== 'local'">
+                        <div class="s-field">
+                          <label class="s-label">{{ t('settings.mcp.url') }}</label>
+                          <input
+                            v-model="mcpForm.url"
+                            type="text"
+                            placeholder="https://api.example.com/mcp"
+                            class="s-input mono"
+                          />
+                        </div>
+
+                        <div class="s-field">
+                          <div class="flex items-center justify-between mb-1">
+                            <label class="s-label" style="margin: 0">{{ t('settings.mcp.headers') }}</label>
+                            <button class="s-btn s-btn-ghost s-btn-xs" @click="addHeaderRow">+ {{ t('settings.mcp.addHeader') }}</button>
+                          </div>
+                          <div v-for="(h, i) in mcpForm.headers" :key="i" class="s-kv">
+                            <input v-model="h.key" type="text" :placeholder="t('settings.mcp.headerKey')" class="s-input mono" />
+                            <input v-model="h.value" type="text" :placeholder="t('settings.mcp.headerValue')" class="s-input mono" />
+                            <button class="s-kv-rm" @click="removeHeaderRow(i)">✕</button>
+                          </div>
+                        </div>
+
+                        <div class="s-field">
+                          <div class="s-row" style="padding: 8px 12px">
+                            <div class="s-row-body">
+                              <div class="s-row-title">{{ t('settings.mcp.useOauth') }}</div>
+                            </div>
+                            <button
+                              class="s-switch"
+                              :data-on="mcpForm.oauthEnabled ? 'true' : 'false'"
+                              :aria-pressed="mcpForm.oauthEnabled"
+                              @click="mcpForm.oauthEnabled = !mcpForm.oauthEnabled"
+                            />
+                          </div>
+                        </div>
+
+                        <div v-if="mcpForm.oauthEnabled" class="space-y-3 pl-1 mb-3">
+                          <div class="s-field">
+                            <label class="s-label">{{ t('settings.mcp.oauthClientId') }}</label>
+                            <input
+                              v-model="mcpForm.clientId"
+                              type="text"
+                              placeholder="Optional — leave blank to auto-register"
+                              class="s-input mono"
+                            />
+                          </div>
+                          <div class="s-field">
+                            <label class="s-label">{{ t('settings.mcp.oauthClientSecret') }}</label>
+                            <input
+                              v-model="mcpForm.clientSecret"
+                              type="password"
+                              placeholder="Optional (confidential clients)"
+                              class="s-input mono"
+                            />
+                          </div>
+                          <div class="s-field">
+                            <label class="s-label">{{ t('settings.mcp.oauthScopes') }}</label>
+                            <input
+                              v-model="mcpForm.scopesText"
+                              type="text"
+                              placeholder="space-separated, optional"
+                              class="s-input mono"
+                            />
+                          </div>
+                        </div>
+
+                        <div class="s-field">
+                          <label class="s-label">{{ t('settings.mcp.timeout') }}</label>
+                          <input
+                            v-model="mcpForm.timeout"
+                            type="number"
+                            placeholder="180"
+                            class="s-input"
+                            style="max-width: 120px"
+                          />
+                        </div>
+                      </template>
+
+                      <!-- Local fields -->
+                      <template v-else>
+                        <div class="s-field">
+                          <label class="s-label">{{ t('settings.mcp.command') }}</label>
+                          <input
+                            v-model="mcpForm.command"
+                            type="text"
+                            placeholder="npx"
+                            class="s-input mono"
+                          />
+                        </div>
+                        <div class="s-field">
+                          <label class="s-label">{{ t('settings.mcp.arguments') }}</label>
+                          <input
+                            v-model="mcpForm.argsText"
+                            type="text"
+                            placeholder="-y @some/mcp-server"
+                            class="s-input mono"
+                          />
+                        </div>
+                      </template>
+
+                      <div v-if="mcpFormError" class="s-error">{{ mcpFormError }}</div>
                     </div>
-
-                    <!-- HTTP / SSE fields -->
-                    <template v-if="mcpForm.transport !== 'local'">
-                      <div>
-                        <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.url') }}</div>
-                        <input
-                          v-model="mcpForm.url"
-                          type="text"
-                          placeholder="https://api.example.com/mcp"
-                          class="w-full px-2.5 py-1.5 text-xs font-mono rounded-md outline-none"
-                          style="background-color: var(--color-background); border: 1px solid var(--color-border); color: var(--color-foreground)"
-                        />
-                      </div>
-
-                      <div>
-                        <div class="flex items-center justify-between mb-1">
-                          <div class="text-[10px] uppercase tracking-wider font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.headers') }}</div>
-                          <button class="text-[11px] cursor-pointer" style="color: var(--color-primary)" @click="addHeaderRow">{{ t('settings.mcp.addHeader') }}</button>
-                        </div>
-                        <div v-for="(h, i) in mcpForm.headers" :key="i" class="flex gap-2 mb-1.5">
-                          <input v-model="h.key" type="text" :placeholder="t('settings.mcp.headerKey')" class="flex-1 px-2 py-1 text-[11px] font-mono rounded-md outline-none" style="background-color: var(--color-background); border: 1px solid var(--color-border); color: var(--color-foreground)" />
-                          <input v-model="h.value" type="text" :placeholder="t('settings.mcp.headerValue')" class="flex-1 px-2 py-1 text-[11px] font-mono rounded-md outline-none" style="background-color: var(--color-background); border: 1px solid var(--color-border); color: var(--color-foreground)" />
-                          <button class="px-2 text-xs cursor-pointer" style="color: var(--color-muted-foreground)" @click="removeHeaderRow(i)">✕</button>
-                        </div>
-                      </div>
-
-                      <label class="flex items-center gap-2 cursor-pointer">
-                        <input v-model="mcpForm.oauthEnabled" type="checkbox" />
-                        <span class="text-xs" style="color: var(--color-foreground)">{{ t('settings.mcp.useOauth') }}</span>
-                      </label>
-
-                      <div v-if="mcpForm.oauthEnabled" class="space-y-2 pl-1">
-                        <div>
-                          <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.oauthClientId') }}</div>
-                          <input
-                            v-model="mcpForm.clientId"
-                            type="text"
-                            placeholder="Optional — leave blank to auto-register"
-                            class="w-full px-2.5 py-1.5 text-xs font-mono rounded-md outline-none"
-                            style="background-color: var(--color-background); border: 1px solid var(--color-border); color: var(--color-foreground)"
-                          />
-                        </div>
-                        <div>
-                          <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.oauthClientSecret') }}</div>
-                          <input
-                            v-model="mcpForm.clientSecret"
-                            type="password"
-                            placeholder="Optional (confidential clients)"
-                            class="w-full px-2.5 py-1.5 text-xs font-mono rounded-md outline-none"
-                            style="background-color: var(--color-background); border: 1px solid var(--color-border); color: var(--color-foreground)"
-                          />
-                        </div>
-                        <div>
-                          <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.oauthScopes') }}</div>
-                          <input
-                            v-model="mcpForm.scopesText"
-                            type="text"
-                            placeholder="space-separated, optional"
-                            class="w-full px-2.5 py-1.5 text-xs font-mono rounded-md outline-none"
-                            style="background-color: var(--color-background); border: 1px solid var(--color-border); color: var(--color-foreground)"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.timeout') }}</div>
-                        <input
-                          v-model="mcpForm.timeout"
-                          type="number"
-                          placeholder="180"
-                          class="w-32 px-2.5 py-1.5 text-xs rounded-md outline-none"
-                          style="background-color: var(--color-background); border: 1px solid var(--color-border); color: var(--color-foreground)"
-                        />
-                      </div>
-                    </template>
-
-                    <!-- Local fields -->
-                    <template v-else>
-                      <div>
-                        <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.command') }}</div>
-                        <input
-                          v-model="mcpForm.command"
-                          type="text"
-                          placeholder="npx"
-                          class="w-full px-2.5 py-1.5 text-xs font-mono rounded-md outline-none"
-                          style="background-color: var(--color-background); border: 1px solid var(--color-border); color: var(--color-foreground)"
-                        />
-                      </div>
-                      <div>
-                        <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.arguments') }}</div>
-                        <input
-                          v-model="mcpForm.argsText"
-                          type="text"
-                          placeholder="-y @some/mcp-server"
-                          class="w-full px-2.5 py-1.5 text-xs font-mono rounded-md outline-none"
-                          style="background-color: var(--color-background); border: 1px solid var(--color-border); color: var(--color-foreground)"
-                        />
-                      </div>
-                    </template>
-
-                    <div v-if="mcpFormError" class="text-[11px]" style="color: var(--color-error-fg)">{{ mcpFormError }}</div>
-
-                    <div class="flex justify-end gap-2 pt-1">
-                      <button class="text-[11px] px-3 py-1.5 rounded-md cursor-pointer" style="border: 1px solid var(--color-border); color: var(--color-foreground)" @click="cancelMCPEdit">{{ t('common.cancel') }}</button>
+                    <div class="s-form-foot">
+                      <button class="s-btn s-btn-secondary" @click="cancelMCPEdit">{{ t('common.cancel') }}</button>
                       <button
-                        class="text-[11px] px-3 py-1.5 rounded-md cursor-pointer"
-                        style="background-color: var(--color-primary); color: var(--color-on-primary)"
+                        class="s-btn s-btn-primary"
                         :disabled="mcpSaving"
                         @click="saveMCP"
                       >{{ mcpSaving ? t('settings.providers.saving') : t('settings.mcp.save') }}</button>
@@ -1238,56 +1222,50 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     <div class="text-[13px] font-medium" style="color: var(--color-foreground)">{{ t('settings.mcp.noneConfigured') }}</div>
                     <div class="text-[11px] leading-relaxed max-w-[240px]" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.noneHint', { btn: t('settings.mcp.add') }) }}</div>
                   </div>
-                  <div v-else-if="mcpEditing === null" class="space-y-2">
+                  <div v-else-if="mcpEditing === null">
                     <div
                       v-for="(info, name) in mcpServers"
                       :key="name"
-                      class="px-3 py-2.5 rounded-md"
-                      :style="{
-                        border: '1px solid var(--color-border)',
-                        backgroundColor: info.enabled ? 'var(--color-surface)' : 'var(--color-muted)',
-                        opacity: info.enabled ? 1 : 0.6,
-                      }"
+                      class="s-row items-start"
+                      :data-muted="!info.enabled ? 'true' : 'false'"
+                      style="flex-direction: column; align-items: stretch"
                     >
-                      <div class="flex items-center gap-3">
-                        <component :is="serverIcon(info.type)" class="w-3.5 h-3.5" style="color: var(--color-muted-foreground)" />
-                        <div class="flex-1 min-w-0">
-                          <div class="flex items-center gap-2">
-                            <span class="text-xs font-medium" style="color: var(--color-foreground)">{{ name }}</span>
-                            <span class="text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wide" style="background-color: var(--color-muted); color: var(--color-muted-foreground)">{{ info.type || 'stdio' }}</span>
+                      <div class="flex items-center gap-3 w-full">
+                        <div class="s-row-icon"><component :is="serverIcon(info.type)" class="w-3.5 h-3.5" /></div>
+                        <div class="s-row-body">
+                          <div class="s-row-title" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+                            {{ name }}
+                            <span class="s-chip">{{ info.type || 'stdio' }}</span>
                             <span class="text-[10px]" :style="{ color: mcpStatusColor(info) }">● {{ mcpStatusLabel(info) }}</span>
                           </div>
-                          <div class="text-[10px] font-mono truncate" style="color: var(--color-muted-foreground)">
+                          <div class="s-row-sub" style="font-family: var(--font-mono)">
                             {{ info.type === 'sse' || info.type === 'http' ? info.url : info.command }}
                           </div>
                         </div>
-                        <button class="text-[11px] cursor-pointer px-1.5" style="color: var(--color-muted-foreground)" :title="t('common.edit')" @click="openEditMCP(info)">{{ t('common.edit') }}</button>
-                        <button class="text-[11px] cursor-pointer px-1.5" style="color: var(--color-error-fg)" :title="t('common.delete')" @click="deleteMCP(String(name))">{{ t('common.delete') }}</button>
-                        <button
-                          class="relative inline-flex h-5 w-9 items-center rounded-full cursor-pointer transition-colors shrink-0"
-                          :style="{ backgroundColor: info.enabled ? 'var(--color-primary)' : 'var(--color-border)' }"
-                          @click="toggleMCP(String(name), !info.enabled)"
-                          :title="info.enabled ? t('common.disable') : t('common.enable')"
-                        >
-                          <span
-                            class="inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform"
-                            :class="info.enabled ? 'translate-x-[20px]' : 'translate-x-[2px]'"
+                        <div class="s-row-actions">
+                          <button class="s-btn s-btn-ghost s-btn-xs" :title="t('common.edit')" @click="openEditMCP(info)">{{ t('common.edit') }}</button>
+                          <button class="s-btn s-btn-ghost s-btn-xs" style="color: var(--color-destructive)" :title="t('common.delete')" @click="deleteMCP(String(name))">{{ t('common.delete') }}</button>
+                          <button
+                            class="s-switch"
+                            :data-on="info.enabled ? 'true' : 'false'"
+                            :title="info.enabled ? t('common.disable') : t('common.enable')"
+                            :aria-pressed="info.enabled"
+                            @click="toggleMCP(String(name), !info.enabled)"
                           />
-                        </button>
+                        </div>
                       </div>
                       <!-- OAuth login row -->
-                      <div v-if="(info.type === 'http' || info.type === 'sse') && (info.oauth || info.status === 'needs_auth')" class="mt-2 flex items-center gap-2">
+                      <div v-if="(info.type === 'http' || info.type === 'sse') && (info.oauth || info.status === 'needs_auth')" class="mt-2 flex items-center gap-2 pl-10">
                         <button
-                          class="text-[11px] px-2.5 py-1 rounded-md cursor-pointer"
-                          style="border: 1px solid var(--color-primary); color: var(--color-primary)"
+                          class="s-btn s-btn-secondary s-btn-xs"
                           :disabled="mcpLoginBusy === name"
                           @click="loginMCP(String(name))"
                         >{{ mcpLoginBusy === name ? t('settings.mcp.waitingBrowser') : (info.has_auth ? t('settings.mcp.reauth') : t('settings.mcp.login')) }}</button>
-                        <span v-if="info.has_auth" class="text-[10px]" style="color: var(--color-success-fg)">{{ t('settings.mcp.authenticated') }}</span>
+                        <span v-if="info.has_auth" class="s-chip s-chip-success">{{ t('settings.mcp.authenticated') }}</span>
                       </div>
-                      <div v-if="mcpLoginBusy === name && mcpLoginMessage" class="mt-1 text-[10px]" style="color: var(--color-muted-foreground)">{{ mcpLoginMessage }}</div>
-                      <div v-else-if="mcpLoginMessageFor === name && mcpLoginMessage && !mcpLoginBusy" class="mt-1 text-[10px]" style="color: var(--color-warning-fg)">{{ mcpLoginMessage }}</div>
-                      <div v-if="info.error" class="mt-1 text-[10px] font-mono" style="color: var(--color-error-fg)">{{ info.error }}</div>
+                      <div v-if="mcpLoginBusy === name && mcpLoginMessage" class="mt-1 text-[10px] pl-10" style="color: var(--color-muted-foreground)">{{ mcpLoginMessage }}</div>
+                      <div v-else-if="mcpLoginMessageFor === name && mcpLoginMessage && !mcpLoginBusy" class="mt-1 text-[10px] pl-10" style="color: var(--color-warning-fg)">{{ mcpLoginMessage }}</div>
+                      <div v-if="info.error" class="mt-1 text-[10px] font-mono pl-10" style="color: var(--color-error-fg)">{{ info.error }}</div>
                     </div>
                   </div>
                 </div>
@@ -1296,17 +1274,15 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                 <div v-if="activeTab === 'skills'">
                   <div class="flex items-baseline gap-2 mb-4">
                     <h3 class="text-[13px] font-semibold tracking-tight" style="color: var(--color-foreground)">{{ t('settings.skills.title') }}</h3>
-                    <span class="text-[11px] font-mono" style="color: var(--color-muted-foreground)">{{ skills.length }}</span>
+                    <span class="s-section-count">{{ skills.length }}</span>
                   </div>
                   <div class="flex items-center gap-2 mb-3">
-                    <div class="inline-flex rounded-md overflow-hidden" style="border: 1px solid var(--color-border)">
+                    <div class="s-seg">
                       <button
                         v-for="f in (['all', 'local', 'builtin'] as const)"
                         :key="f"
-                        class="px-2.5 py-1 text-[11px] cursor-pointer transition-colors"
-                        :style="skillFilter === f
-                          ? { backgroundColor: 'var(--color-primary)', color: 'var(--color-on-primary)' }
-                          : { color: 'var(--color-muted-foreground)' }"
+                        class="s-seg-btn"
+                        :aria-pressed="skillFilter === f"
                         @click="skillFilter = f"
                       >{{ f === 'all' ? t('settings.skills.filterAll') : f === 'local' ? t('settings.skills.filterLocal') : t('settings.skills.filterBuiltin') }}</button>
                     </div>
@@ -1314,8 +1290,8 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       v-model="skillSearch"
                       type="text"
                       :placeholder="t('settings.skills.search')"
-                      class="flex-1 px-2.5 py-1 text-xs rounded-md outline-none"
-                      style="background-color: var(--color-background); border: 1px solid var(--color-border); color: var(--color-foreground)"
+                      class="s-input"
+                      style="flex: 1"
                     />
                   </div>
 
@@ -1327,35 +1303,29 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     <div class="text-[13px] font-medium" style="color: var(--color-foreground)">{{ t('settings.skills.none') }}</div>
                     <div class="text-[11px] leading-relaxed max-w-[240px]" style="color: var(--color-muted-foreground)">{{ t('settings.skills.noneHint') }}</div>
                   </div>
-                  <div v-else class="space-y-2">
+                  <div v-else>
                     <div
                       v-for="sk in filteredSkills"
                       :key="sk.name"
-                      class="flex items-center gap-3 px-3 py-2.5 rounded-md"
-                      :style="{
-                        border: '1px solid var(--color-border)',
-                        backgroundColor: sk.enabled ? 'var(--color-surface)' : 'var(--color-muted)',
-                        opacity: sk.enabled ? 1 : 0.6,
-                      }"
+                      class="s-row"
+                      :data-muted="!sk.enabled ? 'true' : 'false'"
                     >
-                      <div class="flex-1 min-w-0">
-                        <div class="flex items-center gap-2">
-                          <span class="text-xs font-medium" style="color: var(--color-foreground)">{{ sk.name }}</span>
-                          <span v-if="sk.builtin" class="text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wide" style="background-color: var(--color-muted); color: var(--color-muted-foreground)">{{ t('settings.skills.builtin') }}</span>
+                      <div class="s-row-body">
+                        <div class="s-row-title" style="display: flex; align-items: center; gap: 8px">
+                          {{ sk.name }}
+                          <span v-if="sk.builtin" class="s-chip">{{ t('settings.skills.builtin') }}</span>
                         </div>
-                        <div v-if="sk.description" class="text-[10px] truncate" style="color: var(--color-muted-foreground)">{{ sk.description }}</div>
+                        <div v-if="sk.description" class="s-row-sub">{{ sk.description }}</div>
                       </div>
-                      <button
-                        class="relative inline-flex h-5 w-9 items-center rounded-full cursor-pointer transition-colors shrink-0"
-                        :style="{ backgroundColor: sk.enabled ? 'var(--color-primary)' : 'var(--color-border)' }"
-                        @click="toggleSkill(sk.name, !sk.enabled)"
-                        :title="sk.enabled ? t('common.disable') : t('common.enable')"
-                      >
-                        <span
-                          class="inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform"
-                          :class="sk.enabled ? 'translate-x-[20px]' : 'translate-x-[2px]'"
+                      <div class="s-row-actions">
+                        <button
+                          class="s-switch"
+                          :data-on="sk.enabled ? 'true' : 'false'"
+                          @click="toggleSkill(sk.name, !sk.enabled)"
+                          :title="sk.enabled ? t('common.disable') : t('common.enable')"
+                          :aria-pressed="sk.enabled"
                         />
-                      </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1364,21 +1334,17 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                 <div v-if="activeTab === 'ssh'">
                   <div class="flex items-center justify-between mb-4">
                     <h3 class="text-[13px] font-semibold tracking-tight" style="color: var(--color-foreground)">{{ t('settings.ssh.title') }}</h3>
-                    <button
-                      class="inline-flex items-center gap-1.5 px-3 h-8 rounded-md text-[12.5px] font-medium cursor-pointer transition-colors hover:bg-[var(--color-secondary)]"
-                      style="border: 1px solid var(--color-border); color: var(--color-foreground)"
-                      @click="openRemoteWizard"
-                    >
+                    <button class="s-btn s-btn-secondary s-btn-sm" @click="openRemoteWizard">
                       <PlusIcon class="w-3.5 h-3.5" /> {{ t('settings.ssh.connect') }}
                     </button>
                   </div>
 
                   <div class="mb-3">
                     <div class="text-[11px] font-medium mb-1" style="color: var(--color-muted-foreground)">{{ t('settings.ssh.currentEnv') }}</div>
-                    <div class="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium" style="background-color: var(--accent-wash); color: var(--color-primary)">
-                      <span class="w-1.5 h-1.5 rounded-full" style="background-color: var(--color-primary)" />
+                    <span class="s-chip s-chip-accent">
+                      <span class="w-1.5 h-1.5 rounded-full" style="background-color: var(--color-accent-neutral)" />
                       {{ sshCurrent }}
-                    </div>
+                    </span>
                   </div>
 
                   <div v-if="sshAliases.length === 0" class="flex flex-col items-center justify-center text-center py-12 gap-2.5">
@@ -1390,31 +1356,26 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       {{ t('settings.ssh.noneHint', { btn: t('settings.ssh.connect'), config: '~/.jcode/config.json' }) }}
                     </div>
                   </div>
-                  <div v-else class="space-y-2">
+                  <div v-else>
                     <button
                       v-for="alias in sshAliases"
                       :key="alias.name"
-                      class="group w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-left cursor-pointer transition-colors hover:bg-[var(--color-secondary)]"
-                      style="border: 1px solid var(--color-border); background-color: var(--color-surface)"
+                      class="group s-row w-full text-left cursor-pointer transition-colors hover:bg-[var(--color-secondary)]"
                       :title="t('settings.ssh.connectTo', { name: alias.name })"
                       @click="connectToAlias(alias)"
                     >
-                      <ServerIcon class="w-3.5 h-3.5" style="color: var(--color-muted-foreground)" />
-                      <div class="flex-1 min-w-0">
-                        <div class="text-xs font-medium" style="color: var(--color-foreground)">{{ alias.name }}</div>
-                        <div class="text-[10px] font-mono truncate" style="color: var(--color-muted-foreground)">
+                      <div class="s-row-icon"><ServerIcon class="w-3.5 h-3.5" /></div>
+                      <div class="s-row-body">
+                        <div class="s-row-title">{{ alias.name }}</div>
+                        <div class="s-row-sub" style="font-family: var(--font-mono)">
                           {{ alias.addr }}
                           <template v-if="alias.path"> · {{ alias.path }}</template>
                         </div>
                       </div>
-                      <span
-                        v-if="sshCurrent === alias.name"
-                        class="text-[10px] px-1.5 py-0.5 rounded-full"
-                        style="background-color: var(--accent-wash); color: var(--color-primary)"
-                      >
-                        {{ t('common.active') }}
-                      </span>
-                      <ChevronRightIcon class="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" style="color: var(--color-muted-foreground)" />
+                      <div class="s-row-actions">
+                        <span v-if="sshCurrent === alias.name" class="s-chip s-chip-accent">{{ t('common.active') }}</span>
+                        <ChevronRightIcon class="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" style="color: var(--color-muted-foreground)" />
+                      </div>
                     </button>
                   </div>
                 </div>
@@ -1434,32 +1395,28 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                   </div>
 
                   <div v-else class="space-y-4">
-                    <div class="px-4 py-3 rounded-md" style="border: 1px solid var(--color-border); background-color: var(--color-surface)">
-                      <div class="flex items-center justify-between mb-3">
-                        <div class="flex items-center gap-2">
-                          <ChatBubbleLeftIcon class="w-4 h-4" style="color: var(--color-muted-foreground)" />
-                          <div>
-                            <div class="text-xs font-medium" style="color: var(--color-foreground)">{{ t('settings.channels.wechat') }}</div>
-                            <div class="text-[10px]" style="color: var(--color-muted-foreground)">{{ t('settings.channels.integration') }}</div>
+                    <div class="s-row items-start" style="flex-direction: column; align-items: stretch; padding: 14px 16px">
+                      <div class="flex items-center justify-between mb-3 w-full">
+                        <div class="flex items-center gap-3">
+                          <div class="s-row-icon"><ChatBubbleLeftIcon class="w-4 h-4" /></div>
+                          <div class="s-row-body">
+                            <div class="s-row-title">{{ t('settings.channels.wechat') }}</div>
+                            <div class="s-row-sub">{{ t('settings.channels.integration') }}</div>
                           </div>
                         </div>
-                        <div class="flex items-center gap-1.5">
+                        <span
+                          class="s-chip"
+                          :class="{
+                            's-chip-accent': channelState === 'enabled',
+                            's-chip-warning': channelState === 'disabled' || channelState === 'scanning',
+                          }"
+                        >
                           <span
                             class="w-1.5 h-1.5 rounded-full"
-                            :style="{
-                              backgroundColor: channelState === 'enabled' ? 'var(--color-primary)'
-                                : (channelState === 'disabled' || channelState === 'scanning') ? 'var(--color-warning-fg)'
-                                : 'var(--color-border)',
-                            }"
+                            :style="{ backgroundColor: 'currentColor' }"
                           />
-                          <span class="text-[10px] font-medium" :style="{
-                            color: channelState === 'enabled' ? 'var(--color-primary)'
-                              : (channelState === 'disabled' || channelState === 'scanning') ? 'var(--color-warning-fg)'
-                              : 'var(--color-muted-foreground)',
-                          }">
-                            {{ channelState === 'enabled' ? t('common.connected') : channelState === 'disabled' ? t('common.disconnected') : channelState === 'scanning' ? t('common.scanning') : t('common.notConfigured') }}
-                          </span>
-                        </div>
+                          {{ channelState === 'enabled' ? t('common.connected') : channelState === 'disabled' ? t('common.disconnected') : channelState === 'scanning' ? t('common.scanning') : t('common.notConfigured') }}
+                        </span>
                       </div>
 
                       <div v-if="channelQRContent" class="flex flex-col items-center py-3">
@@ -1471,8 +1428,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                         <button
                           v-if="channelState === 'none'"
                           :disabled="channelLoading"
-                          class="flex-1 px-3 py-1.5 text-xs rounded-md text-white disabled:opacity-50 cursor-pointer transition-colors font-medium"
-                          style="background-color: var(--color-primary)"
+                          class="s-btn s-btn-primary flex-1"
                           @click="channelLogin"
                         >
                           {{ channelLoading ? t('settings.channels.loadingHint') : t('settings.channels.connect') }}
@@ -1480,7 +1436,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                         <button
                           v-if="channelState === 'enabled' || channelState === 'disabled'"
                           :disabled="channelLoading"
-                          class="flex-1 px-3 py-1.5 text-xs rounded-md disabled:opacity-50 cursor-pointer transition-colors font-medium"
+                          class="s-btn s-btn-ghost flex-1"
                           style="color: var(--color-destructive)"
                           @click="channelLogout"
                         >
@@ -1498,12 +1454,12 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       <span class="text-sm shrink-0 mt-0.5">⚠️</span>
                       <div class="flex-1 min-w-0">
                         <div class="text-xs font-medium" style="color: var(--color-warning-fg)">{{ t('settings.channels.activate') }}</div>
-                        <div class="text-[10px] mt-0.5 leading-relaxed" style="color: var(--color-warning-fg); opacity: 0.8">
+                        <div class="text-[10px] mt-0.5 leading-relaxed" style="color: var(--color.warning-fg); opacity: 0.8">
                           {{ t('settings.channels.activateBody') }}
                         </div>
                       </div>
                       <button
-                        class="shrink-0 cursor-pointer"
+                        class="s-btn s-btn-ghost s-btn-xs shrink-0"
                         style="color: var(--color-warning-fg)"
                         @click="channelLoginReminder = false"
                       >✕</button>
@@ -1518,13 +1474,16 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                 <!-- Shortcuts tab -->
                 <div v-if="activeTab === 'shortcuts'">
                   <h3 class="text-[13px] font-semibold tracking-tight mb-4" style="color: var(--color-foreground)">{{ t('settings.shortcuts.title') }}</h3>
-                  <div class="space-y-1.5">
+                  <div>
                     <div
                       v-for="s in shortcuts"
                       :key="s.keys"
-                      class="flex items-center justify-between py-1.5 px-2 rounded"
+                      class="s-row"
+                      style="padding: 8px 12px"
                     >
-                      <span class="text-xs" style="color: var(--color-foreground)">{{ s.desc }}</span>
+                      <div class="s-row-body">
+                        <div class="s-row-title">{{ s.desc }}</div>
+                      </div>
                       <kbd class="px-2 py-0.5 text-[10px] font-mono rounded" style="background-color: var(--color-secondary); border: 1px solid var(--color-border); color: var(--color-muted-foreground)">{{ s.keys }}</kbd>
                     </div>
                   </div>
@@ -1599,7 +1558,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
 }
 .lang-trigger:hover {
   background-color: var(--color-surface);
-  border-color: var(--color-primary);
+  border-color: var(--color-accent-neutral);
 }
 .lang-trigger-label {
   white-space: nowrap;
@@ -1643,11 +1602,11 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
   background: var(--color-muted);
 }
 .lang-menu-item.current {
-  color: var(--color-primary);
+  color: var(--color-accent-neutral);
   font-weight: 600;
 }
 .lang-item-check {
-  color: var(--color-primary);
+  color: var(--color-accent-neutral);
   flex-shrink: 0;
 }
 .pop-enter-active,
@@ -1658,5 +1617,354 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
 .pop-leave-to {
   opacity: 0;
   transform: translateY(-4px);
+}
+
+/* ============================================================
+   Unified design atoms — collapses 20+ inline styles into 8
+   groups so every Settings tab reads as one product. Every value
+   references a design token; no hardcoded colors.
+   ============================================================ */
+
+/* Input — replaces ~20 inline <input> styles across tabs. */
+.s-input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-foreground);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  outline: none;
+  transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
+}
+.s-input::placeholder {
+  color: var(--color-muted-foreground);
+  opacity: 0.7;
+}
+.s-input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--accent-wash-soft);
+}
+.s-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.s-input.mono {
+  font-family: var(--font-mono);
+}
+
+/* Buttons — 4 variants × 3 sizes. primary = the one main action per row. */
+.s-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  transition: background var(--duration-fast), border-color var(--duration-fast), opacity var(--duration-fast);
+}
+.s-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.s-btn-primary {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+.s-btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-primary) 88%, #000);
+}
+.s-btn-secondary {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-foreground);
+}
+.s-btn-secondary:hover:not(:disabled) {
+  background: var(--color-secondary);
+}
+.s-btn-ghost {
+  background: transparent;
+  color: var(--color-foreground);
+}
+.s-btn-ghost:hover:not(:disabled) {
+  background: var(--color-secondary);
+}
+.s-btn-danger {
+  background: var(--color-destructive);
+  color: var(--color-on-destructive);
+}
+.s-btn-danger:hover:not(:disabled) {
+  filter: brightness(0.92);
+}
+.s-btn-sm {
+  height: 26px;
+  padding: 0 9px;
+  font-size: 11px;
+  border-radius: var(--radius-sm);
+}
+.s-btn-xs {
+  height: 22px;
+  padding: 0 7px;
+  font-size: 10px;
+  border-radius: var(--radius-sm);
+}
+
+/* Switch — single boolean toggle. Replaces the per-call inline toggles
+ * (autoApprove / BLE / MCP / Skill) AND the raw <input checkbox> in the
+ * MCP OAuth field, so a screen never shows two switch shapes. */
+.s-switch {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 20px;
+  flex-shrink: 0;
+  background: var(--color-border);
+  border-radius: var(--radius-pill);
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: background var(--duration-fast);
+}
+/* Kept on --color-accent-neutral (not --color-primary) to match the
+ * existing de-emphasis policy: primary orange is reserved for the hero +
+ * send button only. */
+.s-switch[data-on='true'] {
+  background: var(--color-accent-neutral);
+}
+.s-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+.s-switch[data-on='true']::after {
+  transform: translateX(14px);
+}
+.s-switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Row — unified list row for prefs / provider / mcp / skill / ssh /
+ * shortcuts. Collapses 5 structurally-similar but differently-written
+ * row containers into one. */
+.s-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+.s-row + .s-row {
+  margin-top: 8px;
+}
+.s-row[data-muted='true'] {
+  background: var(--color-muted);
+  opacity: 0.75;
+}
+.s-row-icon {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border-radius: var(--radius-md);
+  color: var(--color-muted-foreground);
+  flex-shrink: 0;
+}
+.s-row-body {
+  flex: 1;
+  min-width: 0;
+}
+.s-row-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-foreground);
+}
+.s-row-sub {
+  font-size: 11px;
+  color: var(--color-muted-foreground);
+  margin-top: 1px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.s-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Chips / badges — status + active markers. */
+.s-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: var(--radius-pill);
+  font-size: 10px;
+  font-weight: 500;
+  background: var(--color-muted);
+  color: var(--color-muted-foreground);
+  white-space: nowrap;
+}
+.s-chip-accent {
+  background: var(--neutral-wash);
+  color: var(--color-accent-neutral);
+}
+.s-chip-success {
+  background: var(--color-success-bg);
+  color: var(--color-success-fg);
+}
+.s-chip-warning {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-fg);
+}
+.s-chip-error {
+  background: var(--color-error-bg);
+  color: var(--color-error-fg);
+}
+
+/* Segmented control — transport picker + skill filter. */
+.s-seg {
+  display: inline-flex;
+  background: var(--color-muted);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  gap: 2px;
+}
+.s-seg-btn {
+  height: 24px;
+  padding: 0 10px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  transition: background var(--duration-fast), color var(--duration-fast);
+}
+.s-seg-btn[aria-pressed='true'] {
+  background: var(--color-surface);
+  color: var(--color-foreground);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Section count — small monospace number beside a section title. */
+.s-section-count {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--color-muted-foreground);
+}
+
+/* Field group: label → control → helper/error. Gives MCP / Provider
+ * forms a consistent vertical rhythm instead of ad-hoc label markup. */
+.s-field {
+  margin-bottom: 14px;
+}
+.s-field:last-child {
+  margin-bottom: 0;
+}
+.s-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-foreground);
+  margin-bottom: 5px;
+}
+.s-helper {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-muted-foreground);
+  margin-top: 5px;
+}
+.s-error {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-destructive);
+  margin-top: 5px;
+}
+
+/* Form card — MCP add/edit + Provider add. */
+.s-form {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.s-form-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--color-muted);
+  border-bottom: 1px solid var(--color-border);
+}
+.s-form-head-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.s-form-body {
+  padding: 16px;
+}
+.s-form-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--color-muted);
+  border-top: 1px solid var(--color-border);
+}
+
+/* Key-value rows — MCP headers. */
+.s-kv {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.s-kv .s-input {
+  height: 28px;
+  font-size: 11px;
+}
+.s-kv-rm {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--color-muted-foreground);
+  transition: background var(--duration-fast), color var(--duration-fast);
+}
+.s-kv-rm:hover {
+  background: var(--color-secondary);
+  color: var(--color-foreground);
 }
 </style>

@@ -17,34 +17,34 @@ package mode
 type SessionMode int
 
 const (
-	// Ask is step-by-step collaboration: the full tool set is available but
+	// Approval is step-by-step collaboration: the full tool set is available but
 	// non-trivial tool calls gate through the per-call approval dialog. This is
 	// jcode's historical default (normal tools + manual approval).
-	Ask SessionMode = iota
+	Approval SessionMode = iota
 	// Plan is read-only exploration: the agent gets the plan system prompt and a
 	// read-only tool subset, produces a structured plan, then executes on
 	// approval.
 	Plan
-	// Autopilot is end-to-end execution: the full tool set is available and every
+	// FullAccess is end-to-end execution: the full tool set is available and every
 	// tool call is auto-approved with no interruption.
-	Autopilot
+	FullAccess
 )
 
 // IsPlan reports whether this mode uses the read-only plan tool/prompt axis.
 func (m SessionMode) IsPlan() bool { return m == Plan }
 
 // AutoApprove reports whether this mode auto-approves every tool call.
-func (m SessionMode) AutoApprove() bool { return m == Autopilot }
+func (m SessionMode) AutoApprove() bool { return m == FullAccess }
 
 // String returns the canonical wire/persistence value.
 func (m SessionMode) String() string {
 	switch m {
 	case Plan:
 		return "plan"
-	case Autopilot:
-		return "autopilot"
+	case FullAccess:
+		return "full_access"
 	default:
-		return "ask"
+		return "approval"
 	}
 }
 
@@ -53,37 +53,37 @@ func (m SessionMode) Label() string {
 	switch m {
 	case Plan:
 		return "Plan"
-	case Autopilot:
-		return "Autopilot"
+	case FullAccess:
+		return "Full access"
 	default:
-		return "Ask"
+		return "Ask for approval"
 	}
 }
 
-// Next returns the next mode in the selector cycle: Ask → Plan → Autopilot → Ask.
+// Next returns the next mode in the selector cycle:
+// Ask for approval → Plan → Full access → Ask for approval.
 func (m SessionMode) Next() SessionMode {
 	switch m {
-	case Ask:
+	case Approval:
 		return Plan
 	case Plan:
-		return Autopilot
+		return FullAccess
 	default:
-		return Ask
+		return Approval
 	}
 }
 
-// Parse converts a persisted/wire string to a SessionMode, tolerating the legacy
-// values written before the unified selector existed so old sessions and old
-// clients round-trip sanely. Unknown values fall back to Ask (the safe default).
+// Parse converts a persisted/wire string to a SessionMode. Unknown and unset
+// values fall back to Approval, the safe default.
 func Parse(s string) SessionMode {
 	switch s {
-	case "plan", "planning":
+	case "plan":
 		return Plan
-	case "autopilot", "auto":
-		return Autopilot
-	case "ask", "agent", "build", "normal", "executing", "manual", "":
-		return Ask
+	case "full_access":
+		return FullAccess
+	case "approval", "":
+		return Approval
 	default:
-		return Ask
+		return Approval
 	}
 }

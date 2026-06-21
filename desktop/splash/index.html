@@ -4,20 +4,47 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>jcode</title>
+    <script>
+      // Mirror the SPA's pre-mount theme resolution (web/index.html +
+      // useTheme.ts) so the splash follows the saved setting instead of being a
+      // hardcoded dark screen. localStorage is shared with the main app because
+      // the splash and the SPA now share one origin (the Tauri shell).
+      (function () {
+        try {
+          var v = localStorage.getItem('jcode_theme');
+          var id;
+          if (!v || v === 'system')
+            id = matchMedia('(prefers-color-scheme: dark)').matches ? 'jcode-dark' : 'jcode-light';
+          else if (v === 'dark') id = 'jcode-dark';
+          else if (v === 'light') id = 'jcode-light';
+          else id = v;
+          // Light theme ids end in "-light" (enforced by internal/theme); the
+          // dark variants do not.
+          document.documentElement.classList.toggle('light', /-light$/.test(id));
+        } catch (e) {}
+      })();
+    </script>
     <style>
       :root {
-        color-scheme: dark;
         --accent: #ff8400;
       }
       * { margin: 0; padding: 0; box-sizing: border-box; }
       html, body {
         height: 100%;
-        background: radial-gradient(120% 120% at 50% 30%, #211d17 0%, #15120e 60%, #100e0b 100%);
         color: #f5f1ea;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         overflow: hidden;
         user-select: none;
         -webkit-user-select: none;
+      }
+      /* Dark (default): the original warm radial backdrop. */
+      body {
+        background: radial-gradient(120% 120% at 50% 30%, #211d17 0%, #15120e 60%, #100e0b 100%);
+      }
+      /* Light: a soft, paper-tinted backdrop matching the light themes. */
+      html.light body {
+        color: #1f2328;
+        background: radial-gradient(120% 120% at 50% 30%, #ffffff 0%, #f4f3ef 60%, #eceae4 100%);
       }
       /* Draggable strip under the macOS overlay title bar (the main window uses
          titleBarStyle:Overlay), so the splash window can be moved while the
@@ -61,6 +88,7 @@
         align-items: center;
         gap: 9px;
       }
+      html.light .status { color: #656d76; }
       .spinner {
         width: 13px;
         height: 13px;

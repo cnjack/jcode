@@ -4,7 +4,10 @@
   "version": "0.5.3",
   "identifier": "com.cnjack.jcode",
   "build": {
-    "frontendDist": "../splash"
+    "frontendDist": "../../internal/web/dist",
+    "beforeDevCommand": "pnpm --dir ../web dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "make build-web"
   },
   "app": {
     "withGlobalTauri": true,

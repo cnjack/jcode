@@ -14,15 +14,11 @@ func TestModeChangeRoundTrip(t *testing.T) {
 		entries []string // sequence of recorded mode strings
 		want    mode.SessionMode
 	}{
-		{[]string{"ask"}, mode.Ask},
+		{[]string{"approval"}, mode.Approval},
 		{[]string{"plan"}, mode.Plan},
-		{[]string{"autopilot"}, mode.Autopilot},
-		{[]string{"ask", "plan", "autopilot"}, mode.Autopilot}, // last wins
-		{[]string{"plan", "ask"}, mode.Ask},
-		// Legacy tool-axis strings written before the unified selector existed.
-		{[]string{"planning"}, mode.Plan},
-		{[]string{"normal"}, mode.Ask},
-		{[]string{"executing"}, mode.Ask},
+		{[]string{"full_access"}, mode.FullAccess},
+		{[]string{"approval", "plan", "full_access"}, mode.FullAccess}, // last wins
+		{[]string{"plan", "approval"}, mode.Approval},
 	}
 	for _, c := range cases {
 		entries := make([]Entry, 0, len(c.entries))

@@ -33,7 +33,7 @@ function isCurrent(panel: PanelType): boolean {
 // showed an orange "Running" dot but a "Connected" tooltip, and the 'Running'
 // label was effectively dead (running always implies connected).
 const statusColor = computed(() => {
-  if (props.isRunning) return 'var(--color-primary)'
+  if (props.isRunning) return 'var(--color-accent-neutral)'
   if (props.wsConnected) return 'var(--color-success)'
   return 'var(--color-muted-foreground)'
 })
@@ -228,7 +228,7 @@ watch(
 }
 
 .panel-menu-item.current .pmi-icon {
-  color: var(--color-primary);
+  color: var(--color-accent-neutral);
 }
 
 .pmi-label {

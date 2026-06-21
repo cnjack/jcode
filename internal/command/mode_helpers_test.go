@@ -18,14 +18,14 @@ func TestResolveStartupMode(t *testing.T) {
 		unsafe bool
 		want   mode.SessionMode
 	}{
-		{"unsafe forces autopilot over config", &config.Config{DefaultMode: "ask"}, true, mode.Autopilot},
-		{"unsafe with nil cfg", nil, true, mode.Autopilot},
+		{"unsafe forces full access over config", &config.Config{DefaultMode: "approval"}, true, mode.FullAccess},
+		{"unsafe with nil cfg", nil, true, mode.FullAccess},
 		{"default_mode plan", &config.Config{DefaultMode: "plan"}, false, mode.Plan},
-		{"default_mode autopilot", &config.Config{DefaultMode: "autopilot"}, false, mode.Autopilot},
-		{"default_mode wins over auto_approve", &config.Config{DefaultMode: "ask", AutoApprove: true}, false, mode.Ask},
-		{"legacy auto_approve fallback", &config.Config{AutoApprove: true}, false, mode.Autopilot},
-		{"empty defaults to ask", &config.Config{}, false, mode.Ask},
-		{"nil cfg defaults to ask", nil, false, mode.Ask},
+		{"default_mode full access", &config.Config{DefaultMode: "full_access"}, false, mode.FullAccess},
+		{"default_mode wins over auto_approve", &config.Config{DefaultMode: "approval", AutoApprove: true}, false, mode.Approval},
+		{"legacy auto_approve fallback", &config.Config{AutoApprove: true}, false, mode.FullAccess},
+		{"empty defaults to approval", &config.Config{}, false, mode.Approval},
+		{"nil cfg defaults to approval", nil, false, mode.Approval},
 	}
 	for _, c := range cases {
 		if got := resolveStartupMode(c.cfg, c.unsafe); got != c.want {
@@ -36,27 +36,23 @@ func TestResolveStartupMode(t *testing.T) {
 
 func TestACPModeID(t *testing.T) {
 	cases := map[mode.SessionMode]acp.SessionModeId{
-		mode.Ask:       acpModeAsk,
-		mode.Plan:      acpModePlan,
-		mode.Autopilot: acpModeAutopilot,
+		mode.Approval:   acpModeApproval,
+		mode.Plan:       acpModePlan,
+		mode.FullAccess: acpModeFullAccess,
 	}
 	for m, want := range cases {
 		if got := acpModeID(m); got != want {
 			t.Errorf("acpModeID(%v)=%q, want %q", m, got, want)
 		}
 	}
-	// Legacy "agent" wire id must normalize to the canonical "ask".
-	if got := acpModeID(mode.Parse(string(acpModeAgent))); got != acpModeAsk {
-		t.Errorf("legacy agent alias normalized to %q, want %q", got, acpModeAsk)
-	}
 }
 
 func TestACPAdvertisedModes(t *testing.T) {
-	st := acpModes(acpModeAsk)
-	if st.CurrentModeId != acpModeAsk {
-		t.Errorf("current=%q, want %q", st.CurrentModeId, acpModeAsk)
+	st := acpModes(acpModeApproval)
+	if st.CurrentModeId != acpModeApproval {
+		t.Errorf("current=%q, want %q", st.CurrentModeId, acpModeApproval)
 	}
-	want := []acp.SessionModeId{acpModeAsk, acpModePlan, acpModeAutopilot}
+	want := []acp.SessionModeId{acpModeApproval, acpModePlan, acpModeFullAccess}
 	if len(st.AvailableModes) != len(want) {
 		t.Fatalf("advertised %d modes, want %d", len(st.AvailableModes), len(want))
 	}
@@ -73,12 +69,12 @@ func TestSessionModeFrom(t *testing.T) {
 		apm  handler.ApprovalMode
 		want mode.SessionMode
 	}{
-		{tui.ModeNormal, handler.ModeManual, mode.Ask},
-		{tui.ModeNormal, handler.ModeAuto, mode.Autopilot},
-		{tui.ModeExecuting, handler.ModeManual, mode.Ask},     // transient exec, manual → Ask
-		{tui.ModeExecuting, handler.ModeAuto, mode.Autopilot}, // transient exec, auto → Autopilot
-		{tui.ModePlanning, handler.ModeManual, mode.Plan},     // plan determined by tool axis
-		{tui.ModePlanning, handler.ModeAuto, mode.Plan},       // plan wins regardless of approval
+		{tui.ModeNormal, handler.ModeManual, mode.Approval},
+		{tui.ModeNormal, handler.ModeAuto, mode.FullAccess},
+		{tui.ModeExecuting, handler.ModeManual, mode.Approval}, // transient exec, manual → Approval
+		{tui.ModeExecuting, handler.ModeAuto, mode.FullAccess}, // transient exec, auto → Full access
+		{tui.ModePlanning, handler.ModeManual, mode.Plan},      // plan determined by tool axis
+		{tui.ModePlanning, handler.ModeAuto, mode.Plan},        // plan wins regardless of approval
 	}
 	for _, c := range cases {
 		if got := sessionModeFrom(c.am, c.apm); got != c.want {

@@ -207,17 +207,6 @@ function relativeTime(ts: string): string {
     <div class="tree">
       <div class="tree-head">
         <span class="tree-label">{{ t('nav.workspace') }}</span>
-        <div class="tree-head-actions">
-          <button
-            class="tree-icon-btn"
-            :class="{ on: showArchived }"
-            :title="showArchived ? t('sidebar.hideArchived') : t('sidebar.showArchived')"
-            :aria-pressed="showArchived"
-            @click="showArchived = !showArchived"
-          >
-            <ArchiveBoxIcon class="w-3.5 h-3.5" />
-          </button>
-        </div>
       </div>
 
       <div v-if="projectNodes.length === 0" class="empty-state">{{ t('sidebar.noProjects') }}</div>
@@ -393,7 +382,7 @@ function relativeTime(ts: string): string {
   color: var(--color-foreground);
 }
 .tree-icon-btn.on {
-  color: var(--color-primary);
+  color: var(--color-accent-neutral);
 }
 
 .empty-state {
@@ -436,7 +425,7 @@ function relativeTime(ts: string): string {
   flex-shrink: 0;
 }
 .project-row.active .proj-icon {
-  color: var(--color-primary);
+  color: var(--color-accent-neutral);
 }
 .proj-name {
   flex: 1;
@@ -479,8 +468,8 @@ function relativeTime(ts: string): string {
   background: var(--color-muted);
 }
 .task-row.active {
-  background: var(--accent-wash-soft);
-  border-left-color: var(--color-primary);
+  background: var(--neutral-wash-soft);
+  border-left-color: var(--color-accent-neutral);
 }
 .task-row.archived {
   opacity: 0.55;
@@ -494,10 +483,10 @@ function relativeTime(ts: string): string {
   background: transparent;
 }
 .task-dot.unread {
-  background: var(--color-primary);
+  background: var(--color-accent-neutral);
 }
 .task-pin {
-  color: var(--color-primary);
+  color: var(--color-accent-neutral);
   flex-shrink: 0;
 }
 .task-title {
@@ -516,7 +505,7 @@ function relativeTime(ts: string): string {
   font-family: inherit;
   color: var(--color-foreground);
   background: var(--color-background);
-  border: 1px solid var(--color-primary);
+  border: 1px solid var(--color-accent-neutral);
   border-radius: var(--radius-sm);
   padding: 1px 5px;
   outline: none;

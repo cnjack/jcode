@@ -163,11 +163,11 @@ type Config struct {
 	// AutoApprove sets the default approval mode to auto on startup.
 	//
 	// Deprecated: superseded by DefaultMode; still honored as a fallback when
-	// DefaultMode is empty (true → "autopilot").
+	// DefaultMode is empty (true → "full_access").
 	AutoApprove bool `json:"auto_approve,omitempty"`
 
-	// DefaultMode is the unified session mode to start in: "ask" (default),
-	// "plan", or "autopilot". When empty, AutoApprove is used as a fallback.
+	// DefaultMode is the unified session mode to start in: "approval" (default),
+	// "plan", or "full_access". When empty, AutoApprove is used as a fallback.
 	DefaultMode string `json:"default_mode,omitempty"`
 
 	// Theme is the built-in color theme name for the terminal UI (e.g.

@@ -40,7 +40,7 @@ onBeforeUnmount(() => {
       <span
         v-if="todo.status === 'in_progress'"
         class="absolute left-0 top-0.5 bottom-0.5 w-0.5"
-        style="background-color: var(--color-primary); border-radius: var(--radius-pill)"
+        style="background-color: var(--color-accent-neutral); border-radius: var(--radius-pill)"
         aria-hidden="true"
       />
 
@@ -59,12 +59,12 @@ onBeforeUnmount(() => {
         <EllipsisHorizontalCircleIcon
           v-if="reduceMotion"
           class="w-3.5 h-3.5 shrink-0"
-          style="color: var(--color-primary)"
+          style="color: var(--color-accent-neutral)"
         />
         <ArrowPathIcon
           v-else
           class="w-3.5 h-3.5 shrink-0 animate-spin"
-          style="color: var(--color-primary)"
+          style="color: var(--color-accent-neutral)"
         />
       </template>
       <MinusCircleIcon

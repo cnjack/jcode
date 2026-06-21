@@ -284,7 +284,7 @@ function reset() {
   transition: background 0.15s, transform 0.06s ease;
 }
 .ws-pill-action .ws-pill-icon {
-  color: var(--color-primary);
+  color: var(--color-accent-neutral);
 }
 .ws-pill-action:hover:not(:disabled) {
   background: var(--color-muted);
@@ -415,7 +415,7 @@ function reset() {
   background: var(--color-muted);
 }
 .ws-row.active {
-  background: var(--accent-wash-soft);
+  background: var(--neutral-wash-soft);
 }
 .ws-row-icon,
 .ws-folder-icon {
@@ -423,7 +423,7 @@ function reset() {
   flex-shrink: 0;
 }
 .ws-row.active .ws-row-icon {
-  color: var(--color-primary);
+  color: var(--color-accent-neutral);
 }
 .ws-row-name {
   flex: 1;
@@ -437,7 +437,7 @@ function reset() {
   font-size: 12px;
 }
 .ws-check {
-  color: var(--color-primary);
+  color: var(--color-accent-neutral);
   flex-shrink: 0;
 }
 .ws-hint {
@@ -504,8 +504,8 @@ function reset() {
   padding: 5px 14px;
   border: none;
   border-radius: var(--radius-md);
-  background: var(--color-primary);
-  color: var(--color-on-primary);
+  background: var(--color-accent-neutral);
+  color: var(--color-surface);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;

@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Appearance settings tab** in the web UI: a System (follow-OS) option plus dark/light swatch grids that render a true mini-preview of each theme. Themes apply via `html[data-theme]`; the legacy light/dark/system localStorage values migrate automatically.
 
 ### Changed
+- Renamed the session modes to **Ask for approval / Plan / Full access** across the web UI, terminal UI, and ACP. Their canonical IDs are now `approval` / `plan` / `full_access`; the old `ask`, `agent`, and `autopilot` IDs are no longer accepted.
 - The terminal palette was de-frozen: the ~50 lipgloss styles that were baked in at import time are now rebuilt from the active theme by `ApplyTheme`, and previously-hardcoded colors (subagent purple, on-primary text, team-panel and context-bar colors) are now semantic tokens. Markdown (glamour) follows the theme's light/dark appearance.
 
 ### Fixed
