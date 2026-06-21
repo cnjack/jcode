@@ -2,6 +2,7 @@
 import { ref, computed, nextTick } from 'vue'
 import { Popover, PopoverButton, PopoverPanel } from '@headlessui/vue'
 import { CodeBracketIcon, MagnifyingGlassIcon, ChevronDownIcon, CheckIcon, PlusIcon } from '@heroicons/vue/24/outline'
+import { useI18n } from 'vue-i18n'
 import { useBranch } from '@/composables/useBranch'
 
 withDefaults(defineProps<{
@@ -10,6 +11,7 @@ withDefaults(defineProps<{
 }>(), { placement: 'top' })
 
 const { current, branches, switching, error, checkout } = useBranch()
+const { t } = useI18n()
 
 const query = ref('')
 const creating = ref(false)
@@ -65,7 +67,7 @@ function reset() {
   <div v-if="current" class="bp-bar">
     <Popover class="bp-popover" style="position: relative">
       <PopoverButton as="template" :disabled="switching">
-        <button class="bp-pill" :disabled="switching" :title="'Branch: ' + current">
+        <button class="bp-pill" :disabled="switching" :title="t('branches.current', { name: current })">
           <CodeBracketIcon class="w-3 h-3 bp-pill-icon" />
           <span class="bp-name">{{ current }}</span>
           <ChevronDownIcon class="w-3 h-3 bp-caret" />
@@ -85,12 +87,12 @@ function reset() {
         >
           <div class="bp-search">
             <MagnifyingGlassIcon class="w-3 h-3 bp-search-icon" />
-            <input v-model="query" class="bp-search-input" placeholder="Search branches" />
+            <input v-model="query" class="bp-search-input" :placeholder="t('branches.search')" />
           </div>
 
-          <div class="bp-section">Branches</div>
+          <div class="bp-section">{{ t('branches.title') }}</div>
           <div class="bp-list">
-            <div v-if="filtered.length === 0" class="bp-hint">No branches</div>
+            <div v-if="filtered.length === 0" class="bp-hint">{{ t('branches.none') }}</div>
             <button
               v-for="b in filtered"
               :key="b"
@@ -109,14 +111,14 @@ function reset() {
 
           <div class="bp-actions">
             <button v-if="!creating" class="bp-action" @click="startCreate">
-              <PlusIcon class="w-3.5 h-3.5" /> <span>Create &amp; checkout new branch</span>
+              <PlusIcon class="w-3.5 h-3.5" /> <span>{{ t('branches.create') }}</span>
             </button>
             <div v-else class="bp-create">
               <input
                 ref="newInput"
                 v-model="newName"
                 class="bp-create-input"
-                placeholder="new-branch-name"
+                :placeholder="t('branches.newName')"
                 @keydown.enter="confirmCreate(close)"
                 @keydown.esc="creating = false"
               />
@@ -125,7 +127,7 @@ function reset() {
                 :disabled="!newName.trim() || switching"
                 @click="confirmCreate(close)"
               >
-                Create
+                {{ t('branches.createBtn') }}
               </button>
             </div>
           </div>

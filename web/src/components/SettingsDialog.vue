@@ -11,6 +11,10 @@ import {
   DialogTitle,
   TransitionRoot,
   TransitionChild,
+  Menu as HMenu,
+  MenuButton,
+  MenuItems,
+  MenuItem,
 } from '@headlessui/vue'
 import {
   GlobeAltIcon,
@@ -32,8 +36,12 @@ import {
   BellAlertIcon,
   TrashIcon,
   ArrowLeftIcon,
+  ChevronDownIcon,
+  CheckIcon,
 } from '@heroicons/vue/24/outline'
 import { isTauri } from '@/composables/useDesktop'
+import { useI18n } from 'vue-i18n'
+import { SUPPORTED_LOCALES, LOCALE_LABELS, setLocale, i18n, type SupportedLocale } from '@/i18n'
 
 const props = defineProps<{
   open: boolean
@@ -44,6 +52,15 @@ const emit = defineEmits<{
 }>()
 
 const store = useChatStore()
+const { t } = useI18n()
+
+// Locale picker state. The active locale drives vue-i18n globally; setLocale()
+// persists the choice to localStorage and updates <html lang>.
+const currentLocale = computed(() => (i18n.global.locale as { value: string }).value as SupportedLocale)
+const supportedLocales = SUPPORTED_LOCALES
+async function chooseLocale(locale: SupportedLocale) {
+  await setLocale(locale)
+}
 
 // Launch the Remote-connect wizard from the SSH tab (provided by App). We close
 // Settings first so the wizard opens in the workspace context rather than
@@ -195,12 +212,12 @@ function serverIcon(type: string) {
 }
 
 function mcpStatusLabel(info: MCPServerInfo): string {
-  if (!info.enabled) return 'Disabled'
+  if (!info.enabled) return t('settings.mcp.status.disabled')
   switch (info.status) {
-    case 'connected': return 'Connected'
-    case 'needs_auth': return 'Login required'
-    case 'error': return 'Error'
-    default: return 'Configured'
+    case 'connected': return t('settings.mcp.status.connected')
+    case 'needs_auth': return t('settings.mcp.status.loginRequired')
+    case 'error': return t('settings.mcp.status.error')
+    default: return t('settings.mcp.status.configured')
   }
 }
 
@@ -426,16 +443,16 @@ async function toggleSkill(name: string, enabled: boolean) {
   }
 }
 
-const shortcuts = [
-  { keys: 'Enter', desc: 'Send message' },
-  { keys: 'Shift+Enter', desc: 'New line' },
-  { keys: 'Escape', desc: 'Stop agent' },
-  { keys: '/', desc: 'Slash commands' },
-  { keys: 'Ctrl+L', desc: 'Focus input' },
-  { keys: 'Ctrl+Shift+N', desc: 'New conversation' },
-  { keys: 'Ctrl+,', desc: 'Open settings' },
-  { keys: 'Ctrl+`', desc: 'Toggle terminal' },
-]
+const shortcuts = computed(() => [
+  { keys: 'Enter', desc: t('settings.shortcuts.items.sendMessage') },
+  { keys: 'Shift+Enter', desc: t('settings.shortcuts.items.newLine') },
+  { keys: 'Escape', desc: t('settings.shortcuts.items.stopAgent') },
+  { keys: '/', desc: t('settings.shortcuts.items.slashCommands') },
+  { keys: 'Ctrl+L', desc: t('settings.shortcuts.items.focusInput') },
+  { keys: 'Ctrl+Shift+N', desc: t('settings.shortcuts.items.newConversation') },
+  { keys: 'Ctrl+,', desc: t('settings.shortcuts.items.openSettings') },
+  { keys: 'Ctrl+`', desc: t('settings.shortcuts.items.toggleTerminal') },
+])
 
 // Draw the pending QR onto the canvas. The QR is rendered imperatively (not data-
 // bound), and the Channels tab is a v-if block, so the <canvas> is destroyed and
@@ -545,16 +562,16 @@ function pollChannelState() {
   channelPollTimeout = setTimeout(stopChannelPoll, 180000)
 }
 
-const tabLabel: Record<string, string> = {
-  general: 'General',
-  appearance: 'Appearance',
-  providers: 'Providers',
-  mcp: 'MCP Servers',
-  skills: 'Skills',
-  ssh: 'SSH',
-  channels: 'Channels',
-  shortcuts: 'Shortcuts',
-}
+const tabLabel = computed<Record<string, string>>(() => ({
+  general: t('settings.tabs.general'),
+  appearance: t('settings.tabs.appearance'),
+  providers: t('settings.tabs.providers'),
+  mcp: t('settings.tabs.mcp'),
+  skills: t('settings.tabs.skills'),
+  ssh: t('settings.tabs.ssh'),
+  channels: t('settings.tabs.channels'),
+  shortcuts: t('settings.tabs.shortcuts'),
+}))
 
 // Nav-rail + empty-state icons. One heroicons component per section (was a
 // v-html SVG-path map; switched to components to drop the v-html injection
@@ -699,7 +716,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                 @click="emit('close')"
               >
                 <ArrowLeftIcon class="w-4 h-4 transition-transform group-hover:-translate-x-0.5" />
-                Back to workspace
+                {{ t('settings.backToWorkspace') }}
               </button>
             </nav>
 
@@ -722,12 +739,12 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       :style="{ backgroundColor: store.wsConnected ? 'var(--color-primary)' : 'var(--color-border)' }"
                     />
                     <span class="text-xs font-medium" :style="{ color: store.wsConnected ? 'var(--color-primary)' : 'var(--color-muted-foreground)' }">
-                      Server {{ store.wsConnected ? 'Online' : 'Offline' }}
+                      {{ t('settings.general.serverState') }} {{ store.wsConnected ? t('settings.general.serverOnline') : t('settings.general.serverOffline') }}
                     </span>
                   </div>
 
                   <div v-if="store.tokenInfo">
-                    <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">Token Usage</div>
+                    <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.general.tokenUsage') }}</div>
                     <div class="flex items-center gap-2">
                       <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background-color: var(--color-muted)">
                         <div
@@ -744,21 +761,21 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
 
                   <!-- Preferences — configurable toggles with explanations. -->
                   <div class="space-y-2 pt-1">
-                    <div class="text-[10px] uppercase tracking-wider font-medium" style="color: var(--color-muted-foreground)">Preferences</div>
+                    <div class="text-[10px] uppercase tracking-wider font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.general.preferences') }}</div>
 
                     <!-- Default auto-approve -->
                     <div class="flex items-center gap-3 px-3 py-2.5 rounded-md" style="border: 1px solid var(--color-border); background-color: var(--color-surface)">
                       <ShieldCheckIcon class="w-4 h-4 shrink-0" style="color: var(--color-muted-foreground)" />
                       <div class="flex-1 min-w-0">
-                        <div class="text-xs font-medium" style="color: var(--color-foreground)">Default auto-approve</div>
+                        <div class="text-xs font-medium" style="color: var(--color-foreground)">{{ t('settings.general.autoApproveTitle') }}</div>
                         <div class="text-[10px] leading-relaxed" style="color: var(--color-muted-foreground)">
-                          Run tool calls — file edits and commands — automatically without asking for confirmation (same as Autopilot mode; Plan mode still asks). Saved as the default for new sessions.
+                          {{ t('settings.general.autoApproveDesc') }}
                         </div>
                       </div>
                       <button
                         class="relative inline-flex h-5 w-9 items-center rounded-full cursor-pointer transition-colors shrink-0"
                         :style="{ backgroundColor: store.autoApprove ? 'var(--color-primary)' : 'var(--color-border)' }"
-                        :title="store.autoApprove ? 'Disable' : 'Enable'"
+                        :title="store.autoApprove ? t('common.disable') : t('common.enable')"
                         @click="toggleAutoApprove"
                       >
                         <span
@@ -772,16 +789,16 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     <div v-if="isTauri" class="flex items-center gap-3 px-3 py-2.5 rounded-md" style="border: 1px solid var(--color-border); background-color: var(--color-surface)">
                       <SignalIcon class="w-4 h-4 shrink-0" style="color: var(--color-muted-foreground)" />
                       <div class="flex-1 min-w-0">
-                        <div class="text-xs font-medium" style="color: var(--color-foreground)">Bluetooth status notifications</div>
+                        <div class="text-xs font-medium" style="color: var(--color-foreground)">{{ t('settings.general.bleTitle') }}</div>
                         <div class="text-[10px] leading-relaxed" style="color: var(--color-muted-foreground)">
-                          Push agent status — working, needs approval, done — to a paired JCODE Bluetooth device. Takes effect after restarting the app.
+                          {{ t('settings.general.bleDesc') }}
                         </div>
                       </div>
                       <button
                         class="relative inline-flex h-5 w-9 items-center rounded-full cursor-pointer transition-colors shrink-0 disabled:opacity-50"
                         :style="{ backgroundColor: bleEnabled ? 'var(--color-primary)' : 'var(--color-border)' }"
                         :disabled="bleSaving"
-                        :title="bleEnabled ? 'Disable' : 'Enable'"
+                        :title="bleEnabled ? t('common.disable') : t('common.enable')"
                         @click="toggleBLE"
                       >
                         <span
@@ -790,12 +807,53 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                         />
                       </button>
                     </div>
+
+                    <!-- Language -->
+                    <div class="flex items-center gap-3 px-3 py-2.5 rounded-md" style="border: 1px solid var(--color-border); background-color: var(--color-surface)">
+                      <GlobeAltIcon class="w-4 h-4 shrink-0" style="color: var(--color-muted-foreground)" />
+                      <div class="flex-1 min-w-0">
+                        <div class="text-xs font-medium" style="color: var(--color-foreground)">{{ t('settings.general.languageTitle') }}</div>
+                        <div class="text-[10px] leading-relaxed" style="color: var(--color-muted-foreground)">
+                          {{ t('settings.general.languageDesc') }}
+                        </div>
+                      </div>
+                      <HMenu as="div" class="relative lang-menu" v-slot="{ open }">
+                        <MenuButton
+                          class="lang-trigger"
+                          :aria-label="t('settings.general.languageTitle')"
+                          :aria-expanded="open"
+                        >
+                          <span class="lang-trigger-label">{{ LOCALE_LABELS[currentLocale] }}</span>
+                          <ChevronDownIcon class="w-3 h-3 lang-trigger-caret" :class="{ open }" />
+                        </MenuButton>
+                        <transition
+                          enter-active-class="pop-enter-active"
+                          enter-from-class="pop-enter-from"
+                          leave-active-class="pop-leave-active"
+                          leave-to-class="pop-leave-to"
+                        >
+                          <MenuItems class="lang-menu-items">
+                            <MenuItem v-for="loc in supportedLocales" :key="loc" v-slot="{ active }">
+                              <button
+                                class="lang-menu-item"
+                                :class="{ highlight: active, current: loc === currentLocale }"
+                                :aria-current="loc === currentLocale ? 'true' : undefined"
+                                @click="chooseLocale(loc)"
+                              >
+                                <span class="lang-item-label">{{ LOCALE_LABELS[loc] }}</span>
+                                <CheckIcon v-if="loc === currentLocale" class="w-3.5 h-3.5 lang-item-check" />
+                              </button>
+                            </MenuItem>
+                          </MenuItems>
+                        </transition>
+                      </HMenu>
+                    </div>
                   </div>
                 </div>
 
                 <!-- Appearance tab -->
                 <div v-if="activeTab === 'appearance'" class="space-y-5">
-                  <h3 class="text-[13px] font-semibold tracking-tight" style="color: var(--color-foreground)">Theme</h3>
+                  <h3 class="text-[13px] font-semibold tracking-tight" style="color: var(--color-foreground)">{{ t('settings.appearance.theme') }}</h3>
 
                   <!-- System (follow OS) -->
                   <button
@@ -807,15 +865,15 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                   >
                       <ComputerDesktopIcon class="w-3.5 h-3.5" style="color: var(--color-muted-foreground)" />
                     <div class="flex-1 min-w-0">
-                      <div class="text-xs font-medium" style="color: var(--color-foreground)">System</div>
-                      <div class="text-[10px]" style="color: var(--color-muted-foreground)">Follow your OS light / dark setting</div>
+                      <div class="text-xs font-medium" style="color: var(--color-foreground)">{{ t('settings.appearance.system') }}</div>
+                      <div class="text-[10px]" style="color: var(--color-muted-foreground)">{{ t('settings.appearance.systemDesc') }}</div>
                     </div>
-                    <span v-if="themeChoice === 'system'" class="text-[10px] px-1.5 py-0.5 rounded-full shrink-0" style="background-color: var(--accent-wash); color: var(--color-primary)">active</span>
+                    <span v-if="themeChoice === 'system'" class="text-[10px] px-1.5 py-0.5 rounded-full shrink-0" style="background-color: var(--accent-wash); color: var(--color-primary)">{{ t('settings.appearance.active') }}</span>
                   </button>
 
                   <!-- Dark themes -->
                   <div>
-                    <div class="text-[10px] mb-2 font-medium" style="color: var(--color-muted-foreground)">Dark</div>
+                    <div class="text-[10px] mb-2 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.appearance.dark') }}</div>
                     <div class="grid grid-cols-2 gap-2">
                       <button
                         v-for="t in darkThemes"
@@ -846,7 +904,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
 
                   <!-- Light themes -->
                   <div>
-                    <div class="text-[10px] mb-2 font-medium" style="color: var(--color-muted-foreground)">Light</div>
+                    <div class="text-[10px] mb-2 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.appearance.light') }}</div>
                     <div class="grid grid-cols-2 gap-2">
                       <button
                         v-for="t in lightThemes"
@@ -876,7 +934,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                   </div>
 
                   <div class="text-[10px] leading-relaxed" style="color: var(--color-muted-foreground)">
-                    The terminal UI has its own themes — switch them there with the <span class="font-mono">/theme</span> command.
+                    {{ t('settings.appearance.terminalHint', { cmd: '/theme' }) }}
                   </div>
                 </div>
 
@@ -884,7 +942,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                 <div v-if="activeTab === 'providers'">
                   <div class="flex items-center justify-between mb-4">
                     <div class="flex items-baseline gap-2">
-                      <h3 class="text-[13px] font-semibold tracking-tight" style="color: var(--color-foreground)">Providers</h3>
+                      <h3 class="text-[13px] font-semibold tracking-tight" style="color: var(--color-foreground)">{{ t('settings.providers.title') }}</h3>
                       <span class="text-[11px] font-mono" style="color: var(--color-muted-foreground)">{{ configuredProviders.length }}</span>
                     </div>
                     <button
@@ -892,7 +950,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       style="color: var(--color-primary); background-color: var(--accent-wash)"
                       @click="startAddProvider"
                     >
-                      + Add provider
+                      {{ t('settings.providers.add') }}
                     </button>
                   </div>
 
@@ -900,14 +958,14 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                   <div v-if="showAddProvider" class="mb-4 rounded-md overflow-hidden" style="border: 1px solid var(--color-border)">
                     <div class="px-3 py-2 flex items-center justify-between" style="background-color: var(--color-muted); border-bottom: 1px solid var(--color-border)">
                       <span class="text-[10px] font-medium uppercase tracking-wider" style="color: var(--color-muted-foreground)">
-                        {{ addProviderStep === 'select' ? 'Select Provider' : addProviderStep === 'model' ? 'Select Model' : 'Enter API Key' }}
+                        {{ addProviderStep === 'select' ? t('settings.providers.selectProvider') : addProviderStep === 'model' ? t('settings.providers.selectModel') : t('settings.providers.enterApiKey') }}
                       </span>
                       <button class="cursor-pointer text-xs" style="color: var(--color-muted-foreground)" @click="showAddProvider = false">✕</button>
                     </div>
                     <div class="p-3 max-h-48 overflow-y-auto">
                       <!-- Select provider -->
                       <div v-if="addProviderStep === 'select'">
-                        <div v-if="addLoading" class="text-center py-4 text-xs animate-pulse" style="color: var(--color-muted-foreground)">Loading...</div>
+                        <div v-if="addLoading" class="text-center py-4 text-xs animate-pulse" style="color: var(--color-muted-foreground)">{{ t('settings.providers.loadingHint') }}</div>
                         <div v-else class="space-y-1">
                           <button
                             v-for="p in addProviderList.filter(x => !configuredProviders.some(c => c.id === x.id))"
@@ -920,7 +978,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                             <span class="ml-1.5 font-mono" style="color: var(--color-muted-foreground)">{{ p.id }}</span>
                           </button>
                           <div v-if="addProviderList.filter(x => !configuredProviders.some(c => c.id === x.id)).length === 0" class="text-center py-3 text-[10px]" style="color: var(--color-muted-foreground)">
-                            All providers configured
+                            {{ t('settings.providers.allConfigured') }}
                           </div>
                         </div>
                       </div>
@@ -932,7 +990,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                           </button>
                           <span class="text-[10px]" style="color: var(--color-muted-foreground)">{{ addProviderInfo()?.name }}</span>
                         </div>
-                        <div v-if="addLoading" class="text-center py-4 text-xs animate-pulse" style="color: var(--color-muted-foreground)">Loading...</div>
+                        <div v-if="addLoading" class="text-center py-4 text-xs animate-pulse" style="color: var(--color-muted-foreground)">{{ t('settings.providers.loadingHint') }}</div>
                         <div v-else class="space-y-1">
                           <button
                             v-for="m in addProviderModels"
@@ -953,11 +1011,11 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                           </button>
                           <span class="text-[10px] font-mono" style="color: var(--color-muted-foreground)">{{ addSelectedProvider }} / {{ addSelectedModel }}</span>
                         </div>
-                        <input v-model="addApiKey" type="password" placeholder="API Key" class="w-full px-2.5 py-1.5 text-xs font-mono rounded-md outline-none" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-foreground)' }" @keydown.enter="submitAddProvider" />
-                        <input v-model="addBaseURL" type="text" placeholder="Base URL (optional)" class="w-full px-2.5 py-1.5 text-xs font-mono rounded-md outline-none" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-foreground)' }" @keydown.enter="submitAddProvider" />
+                        <input v-model="addApiKey" type="password" :placeholder="t('settings.providers.apiKey')" class="w-full px-2.5 py-1.5 text-xs font-mono rounded-md outline-none" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-foreground)' }" @keydown.enter="submitAddProvider" />
+                        <input v-model="addBaseURL" type="text" :placeholder="t('settings.providers.baseUrl')" class="w-full px-2.5 py-1.5 text-xs font-mono rounded-md outline-none" :style="{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-foreground)' }" @keydown.enter="submitAddProvider" />
                         <div v-if="addError" class="text-[10px]" style="color: var(--color-destructive)">{{ addError }}</div>
                         <button :disabled="addLoading || !addApiKey" class="w-full px-2.5 py-1.5 text-xs text-white rounded-md cursor-pointer transition-colors font-medium disabled:opacity-50" style="background-color: var(--color-primary)" @click="submitAddProvider">
-                          {{ addLoading ? 'Saving...' : 'Add' }}
+                          {{ addLoading ? t('settings.providers.saving') : t('settings.providers.addBtn') }}
                         </button>
                       </div>
                     </div>
@@ -968,9 +1026,9 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     <div class="w-9 h-9 grid place-items-center rounded-lg" style="background-color: var(--color-secondary); color: var(--color-muted-foreground)">
                       <component :is="iconFor.providers" class="w-4 h-4" />
                     </div>
-                    <div class="text-[13px] font-medium" style="color: var(--color-foreground)">No providers configured</div>
+                    <div class="text-[13px] font-medium" style="color: var(--color-foreground)">{{ t('settings.providers.noneConfigured') }}</div>
                     <div class="text-[11px] leading-relaxed max-w-[240px]" style="color: var(--color-muted-foreground)">
-                      Add one with the <span class="font-mono">Add&nbsp;provider</span> button above to get started.
+                      {{ t('settings.providers.noneHint', { btn: t('settings.providers.add') }) }}
                     </div>
                   </div>
                   <div v-else class="space-y-2">
@@ -993,20 +1051,20 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                         class="text-[10px] px-1.5 py-0.5 rounded-full"
                         style="background-color: var(--accent-wash); color: var(--color-primary)"
                       >
-                        active
+                        {{ t('common.active') }}
                       </span>
                       <button
                         v-if="deleteConfirmId !== p.id"
                         class="cursor-pointer transition-colors"
                         style="color: var(--color-muted-foreground)"
-                        title="Remove provider"
+                        :title="t('settings.providers.remove')"
                         @click="deleteConfirmId = p.id"
                       >
                         <TrashIcon class="w-3.5 h-3.5" />
                       </button>
                       <div v-else class="flex items-center gap-1">
-                        <button class="text-[10px] px-1.5 py-0.5 text-white rounded cursor-pointer" style="background-color: var(--color-destructive)" @click="deleteProvider(p.id)">Delete</button>
-                        <button class="text-[10px] px-1.5 py-0.5 cursor-pointer" style="color: var(--color-muted-foreground)" @click="deleteConfirmId = ''">Cancel</button>
+                        <button class="text-[10px] px-1.5 py-0.5 text-white rounded cursor-pointer" style="background-color: var(--color-destructive)" @click="deleteProvider(p.id)">{{ t('common.delete') }}</button>
+                        <button class="text-[10px] px-1.5 py-0.5 cursor-pointer" style="color: var(--color-muted-foreground)" @click="deleteConfirmId = ''">{{ t('common.cancel') }}</button>
                       </div>
                     </div>
                   </div>
@@ -1016,7 +1074,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                 <div v-if="activeTab === 'mcp'">
                   <div class="flex items-center justify-between mb-4">
                     <div class="flex items-baseline gap-2">
-                      <h3 class="text-[13px] font-semibold tracking-tight" style="color: var(--color-foreground)">MCP Servers</h3>
+                      <h3 class="text-[13px] font-semibold tracking-tight" style="color: var(--color-foreground)">{{ t('settings.mcp.title') }}</h3>
                       <span class="text-[11px] font-mono" style="color: var(--color-muted-foreground)">{{ Object.keys(mcpServers).length }}</span>
                     </div>
                     <button
@@ -1024,15 +1082,15 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       class="h-7 px-2.5 text-[11px] font-medium rounded-md cursor-pointer transition-colors hover:bg-[var(--accent-wash-strong)]"
                       style="color: var(--color-primary); background-color: var(--accent-wash)"
                       @click="openAddMCP"
-                    >+ Add server</button>
+                    >{{ t('settings.mcp.add') }}</button>
                   </div>
 
                   <!-- Add / Edit form -->
                   <div v-if="mcpEditing !== null" class="space-y-3 mb-2 p-3 rounded-md" style="border: 1px solid var(--color-border)">
-                    <div class="text-xs font-medium" style="color: var(--color-foreground)">{{ mcpEditing ? 'Edit server' : 'Add server' }}</div>
+                    <div class="text-xs font-medium" style="color: var(--color-foreground)">{{ mcpEditing ? t('settings.mcp.editServer') : t('settings.mcp.addServer') }}</div>
 
                     <div>
-                      <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">Server name</div>
+                      <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.serverName') }}</div>
                       <input
                         v-model="mcpForm.name"
                         :disabled="!!mcpEditing"
@@ -1044,24 +1102,24 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     </div>
 
                     <div>
-                      <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">Transport</div>
+                      <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.transport') }}</div>
                       <div class="inline-flex rounded-md overflow-hidden" style="border: 1px solid var(--color-border)">
                         <button
-                          v-for="t in (['local', 'http', 'sse'] as const)"
-                          :key="t"
+                          v-for="transport in (['local', 'http', 'sse'] as const)"
+                          :key="transport"
                           class="px-3 py-1 text-[11px] cursor-pointer transition-colors"
-                          :style="mcpForm.transport === t
+                          :style="mcpForm.transport === transport
                             ? { backgroundColor: 'var(--color-primary)', color: 'var(--color-on-primary)' }
                             : { color: 'var(--color-muted-foreground)' }"
-                          @click="mcpForm.transport = t"
-                        >{{ t === 'local' ? 'Local' : t.toUpperCase() }}</button>
+                          @click="mcpForm.transport = transport"
+                        >{{ transport === 'local' ? t('settings.mcp.transportLocal') : transport.toUpperCase() }}</button>
                       </div>
                     </div>
 
                     <!-- HTTP / SSE fields -->
                     <template v-if="mcpForm.transport !== 'local'">
                       <div>
-                        <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">URL</div>
+                        <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.url') }}</div>
                         <input
                           v-model="mcpForm.url"
                           type="text"
@@ -1073,24 +1131,24 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
 
                       <div>
                         <div class="flex items-center justify-between mb-1">
-                          <div class="text-[10px] uppercase tracking-wider font-medium" style="color: var(--color-muted-foreground)">Headers</div>
-                          <button class="text-[11px] cursor-pointer" style="color: var(--color-primary)" @click="addHeaderRow">+ Add header</button>
+                          <div class="text-[10px] uppercase tracking-wider font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.headers') }}</div>
+                          <button class="text-[11px] cursor-pointer" style="color: var(--color-primary)" @click="addHeaderRow">{{ t('settings.mcp.addHeader') }}</button>
                         </div>
                         <div v-for="(h, i) in mcpForm.headers" :key="i" class="flex gap-2 mb-1.5">
-                          <input v-model="h.key" type="text" placeholder="Key" class="flex-1 px-2 py-1 text-[11px] font-mono rounded-md outline-none" style="background-color: var(--color-background); border: 1px solid var(--color-border); color: var(--color-foreground)" />
-                          <input v-model="h.value" type="text" placeholder="Value" class="flex-1 px-2 py-1 text-[11px] font-mono rounded-md outline-none" style="background-color: var(--color-background); border: 1px solid var(--color-border); color: var(--color-foreground)" />
+                          <input v-model="h.key" type="text" :placeholder="t('settings.mcp.headerKey')" class="flex-1 px-2 py-1 text-[11px] font-mono rounded-md outline-none" style="background-color: var(--color-background); border: 1px solid var(--color-border); color: var(--color-foreground)" />
+                          <input v-model="h.value" type="text" :placeholder="t('settings.mcp.headerValue')" class="flex-1 px-2 py-1 text-[11px] font-mono rounded-md outline-none" style="background-color: var(--color-background); border: 1px solid var(--color-border); color: var(--color-foreground)" />
                           <button class="px-2 text-xs cursor-pointer" style="color: var(--color-muted-foreground)" @click="removeHeaderRow(i)">✕</button>
                         </div>
                       </div>
 
                       <label class="flex items-center gap-2 cursor-pointer">
                         <input v-model="mcpForm.oauthEnabled" type="checkbox" />
-                        <span class="text-xs" style="color: var(--color-foreground)">Use OAuth (log in after saving)</span>
+                        <span class="text-xs" style="color: var(--color-foreground)">{{ t('settings.mcp.useOauth') }}</span>
                       </label>
 
                       <div v-if="mcpForm.oauthEnabled" class="space-y-2 pl-1">
                         <div>
-                          <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">OAuth Client ID</div>
+                          <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.oauthClientId') }}</div>
                           <input
                             v-model="mcpForm.clientId"
                             type="text"
@@ -1100,7 +1158,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                           />
                         </div>
                         <div>
-                          <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">OAuth Client Secret</div>
+                          <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.oauthClientSecret') }}</div>
                           <input
                             v-model="mcpForm.clientSecret"
                             type="password"
@@ -1110,7 +1168,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                           />
                         </div>
                         <div>
-                          <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">Scopes</div>
+                          <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.oauthScopes') }}</div>
                           <input
                             v-model="mcpForm.scopesText"
                             type="text"
@@ -1122,7 +1180,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       </div>
 
                       <div>
-                        <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">Timeout (seconds)</div>
+                        <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.timeout') }}</div>
                         <input
                           v-model="mcpForm.timeout"
                           type="number"
@@ -1136,7 +1194,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     <!-- Local fields -->
                     <template v-else>
                       <div>
-                        <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">Command</div>
+                        <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.command') }}</div>
                         <input
                           v-model="mcpForm.command"
                           type="text"
@@ -1146,7 +1204,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                         />
                       </div>
                       <div>
-                        <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">Arguments</div>
+                        <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.arguments') }}</div>
                         <input
                           v-model="mcpForm.argsText"
                           type="text"
@@ -1160,25 +1218,25 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     <div v-if="mcpFormError" class="text-[11px]" style="color: var(--color-error-fg)">{{ mcpFormError }}</div>
 
                     <div class="flex justify-end gap-2 pt-1">
-                      <button class="text-[11px] px-3 py-1.5 rounded-md cursor-pointer" style="border: 1px solid var(--color-border); color: var(--color-foreground)" @click="cancelMCPEdit">Cancel</button>
+                      <button class="text-[11px] px-3 py-1.5 rounded-md cursor-pointer" style="border: 1px solid var(--color-border); color: var(--color-foreground)" @click="cancelMCPEdit">{{ t('common.cancel') }}</button>
                       <button
                         class="text-[11px] px-3 py-1.5 rounded-md cursor-pointer"
                         style="background-color: var(--color-primary); color: var(--color-on-primary)"
                         :disabled="mcpSaving"
                         @click="saveMCP"
-                      >{{ mcpSaving ? 'Saving…' : 'Save' }}</button>
+                      >{{ mcpSaving ? t('settings.providers.saving') : t('settings.mcp.save') }}</button>
                     </div>
                   </div>
 
                   <div v-if="mcpLoading" class="text-center text-xs py-6 animate-pulse" style="color: var(--color-muted-foreground)">
-                    Loading...
+                    {{ t('settings.providers.loadingHint') }}
                   </div>
                   <div v-else-if="mcpEditing === null && Object.keys(mcpServers).length === 0" class="flex flex-col items-center justify-center text-center py-12 gap-2.5">
                     <div class="w-9 h-9 grid place-items-center rounded-lg" style="background-color: var(--color-secondary); color: var(--color-muted-foreground)">
                       <component :is="iconFor.mcp" class="w-4 h-4" />
                     </div>
-                    <div class="text-[13px] font-medium" style="color: var(--color-foreground)">No MCP servers configured</div>
-                    <div class="text-[11px] leading-relaxed max-w-[240px]" style="color: var(--color-muted-foreground)">Connect one with the <span class="font-mono">Add&nbsp;server</span> button above.</div>
+                    <div class="text-[13px] font-medium" style="color: var(--color-foreground)">{{ t('settings.mcp.noneConfigured') }}</div>
+                    <div class="text-[11px] leading-relaxed max-w-[240px]" style="color: var(--color-muted-foreground)">{{ t('settings.mcp.noneHint', { btn: t('settings.mcp.add') }) }}</div>
                   </div>
                   <div v-else-if="mcpEditing === null" class="space-y-2">
                     <div
@@ -1203,13 +1261,13 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                             {{ info.type === 'sse' || info.type === 'http' ? info.url : info.command }}
                           </div>
                         </div>
-                        <button class="text-[11px] cursor-pointer px-1.5" style="color: var(--color-muted-foreground)" title="Edit" @click="openEditMCP(info)">Edit</button>
-                        <button class="text-[11px] cursor-pointer px-1.5" style="color: var(--color-error-fg)" title="Delete" @click="deleteMCP(String(name))">Delete</button>
+                        <button class="text-[11px] cursor-pointer px-1.5" style="color: var(--color-muted-foreground)" :title="t('common.edit')" @click="openEditMCP(info)">{{ t('common.edit') }}</button>
+                        <button class="text-[11px] cursor-pointer px-1.5" style="color: var(--color-error-fg)" :title="t('common.delete')" @click="deleteMCP(String(name))">{{ t('common.delete') }}</button>
                         <button
                           class="relative inline-flex h-5 w-9 items-center rounded-full cursor-pointer transition-colors shrink-0"
                           :style="{ backgroundColor: info.enabled ? 'var(--color-primary)' : 'var(--color-border)' }"
                           @click="toggleMCP(String(name), !info.enabled)"
-                          :title="info.enabled ? 'Disable' : 'Enable'"
+                          :title="info.enabled ? t('common.disable') : t('common.enable')"
                         >
                           <span
                             class="inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform"
@@ -1224,8 +1282,8 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                           style="border: 1px solid var(--color-primary); color: var(--color-primary)"
                           :disabled="mcpLoginBusy === name"
                           @click="loginMCP(String(name))"
-                        >{{ mcpLoginBusy === name ? 'Waiting for browser…' : (info.has_auth ? 'Re-authenticate' : 'Log in') }}</button>
-                        <span v-if="info.has_auth" class="text-[10px]" style="color: var(--color-success-fg)">Authenticated</span>
+                        >{{ mcpLoginBusy === name ? t('settings.mcp.waitingBrowser') : (info.has_auth ? t('settings.mcp.reauth') : t('settings.mcp.login')) }}</button>
+                        <span v-if="info.has_auth" class="text-[10px]" style="color: var(--color-success-fg)">{{ t('settings.mcp.authenticated') }}</span>
                       </div>
                       <div v-if="mcpLoginBusy === name && mcpLoginMessage" class="mt-1 text-[10px]" style="color: var(--color-muted-foreground)">{{ mcpLoginMessage }}</div>
                       <div v-else-if="mcpLoginMessageFor === name && mcpLoginMessage && !mcpLoginBusy" class="mt-1 text-[10px]" style="color: var(--color-warning-fg)">{{ mcpLoginMessage }}</div>
@@ -1237,7 +1295,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                 <!-- Skills tab -->
                 <div v-if="activeTab === 'skills'">
                   <div class="flex items-baseline gap-2 mb-4">
-                    <h3 class="text-[13px] font-semibold tracking-tight" style="color: var(--color-foreground)">Skills</h3>
+                    <h3 class="text-[13px] font-semibold tracking-tight" style="color: var(--color-foreground)">{{ t('settings.skills.title') }}</h3>
                     <span class="text-[11px] font-mono" style="color: var(--color-muted-foreground)">{{ skills.length }}</span>
                   </div>
                   <div class="flex items-center gap-2 mb-3">
@@ -1250,24 +1308,24 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                           ? { backgroundColor: 'var(--color-primary)', color: 'var(--color-on-primary)' }
                           : { color: 'var(--color-muted-foreground)' }"
                         @click="skillFilter = f"
-                      >{{ f === 'all' ? 'All' : f === 'local' ? 'On this device' : 'Built-in' }}</button>
+                      >{{ f === 'all' ? t('settings.skills.filterAll') : f === 'local' ? t('settings.skills.filterLocal') : t('settings.skills.filterBuiltin') }}</button>
                     </div>
                     <input
                       v-model="skillSearch"
                       type="text"
-                      placeholder="Search skills…"
+                      :placeholder="t('settings.skills.search')"
                       class="flex-1 px-2.5 py-1 text-xs rounded-md outline-none"
                       style="background-color: var(--color-background); border: 1px solid var(--color-border); color: var(--color-foreground)"
                     />
                   </div>
 
-                  <div v-if="skillsLoading" class="text-center text-xs py-6 animate-pulse" style="color: var(--color-muted-foreground)">Loading...</div>
+                  <div v-if="skillsLoading" class="text-center text-xs py-6 animate-pulse" style="color: var(--color-muted-foreground)">{{ t('settings.skills.loadingHint') }}</div>
                   <div v-else-if="filteredSkills.length === 0" class="flex flex-col items-center justify-center text-center py-12 gap-2.5">
                     <div class="w-9 h-9 grid place-items-center rounded-lg" style="background-color: var(--color-secondary); color: var(--color-muted-foreground)">
                       <component :is="iconFor.skills" class="w-4 h-4" />
                     </div>
-                    <div class="text-[13px] font-medium" style="color: var(--color-foreground)">No skills found</div>
-                    <div class="text-[11px] leading-relaxed max-w-[240px]" style="color: var(--color-muted-foreground)">Try a different filter or search term.</div>
+                    <div class="text-[13px] font-medium" style="color: var(--color-foreground)">{{ t('settings.skills.none') }}</div>
+                    <div class="text-[11px] leading-relaxed max-w-[240px]" style="color: var(--color-muted-foreground)">{{ t('settings.skills.noneHint') }}</div>
                   </div>
                   <div v-else class="space-y-2">
                     <div
@@ -1283,7 +1341,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2">
                           <span class="text-xs font-medium" style="color: var(--color-foreground)">{{ sk.name }}</span>
-                          <span v-if="sk.builtin" class="text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wide" style="background-color: var(--color-muted); color: var(--color-muted-foreground)">Built-in</span>
+                          <span v-if="sk.builtin" class="text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wide" style="background-color: var(--color-muted); color: var(--color-muted-foreground)">{{ t('settings.skills.builtin') }}</span>
                         </div>
                         <div v-if="sk.description" class="text-[10px] truncate" style="color: var(--color-muted-foreground)">{{ sk.description }}</div>
                       </div>
@@ -1291,7 +1349,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                         class="relative inline-flex h-5 w-9 items-center rounded-full cursor-pointer transition-colors shrink-0"
                         :style="{ backgroundColor: sk.enabled ? 'var(--color-primary)' : 'var(--color-border)' }"
                         @click="toggleSkill(sk.name, !sk.enabled)"
-                        :title="sk.enabled ? 'Disable' : 'Enable'"
+                        :title="sk.enabled ? t('common.disable') : t('common.enable')"
                       >
                         <span
                           class="inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform"
@@ -1305,18 +1363,18 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                 <!-- SSH tab -->
                 <div v-if="activeTab === 'ssh'">
                   <div class="flex items-center justify-between mb-4">
-                    <h3 class="text-[13px] font-semibold tracking-tight" style="color: var(--color-foreground)">SSH Environments</h3>
+                    <h3 class="text-[13px] font-semibold tracking-tight" style="color: var(--color-foreground)">{{ t('settings.ssh.title') }}</h3>
                     <button
                       class="inline-flex items-center gap-1.5 px-3 h-8 rounded-md text-[12.5px] font-medium cursor-pointer transition-colors hover:bg-[var(--color-secondary)]"
                       style="border: 1px solid var(--color-border); color: var(--color-foreground)"
                       @click="openRemoteWizard"
                     >
-                      <PlusIcon class="w-3.5 h-3.5" /> Connect to remote host
+                      <PlusIcon class="w-3.5 h-3.5" /> {{ t('settings.ssh.connect') }}
                     </button>
                   </div>
 
                   <div class="mb-3">
-                    <div class="text-[11px] font-medium mb-1" style="color: var(--color-muted-foreground)">Current Environment</div>
+                    <div class="text-[11px] font-medium mb-1" style="color: var(--color-muted-foreground)">{{ t('settings.ssh.currentEnv') }}</div>
                     <div class="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium" style="background-color: var(--accent-wash); color: var(--color-primary)">
                       <span class="w-1.5 h-1.5 rounded-full" style="background-color: var(--color-primary)" />
                       {{ sshCurrent }}
@@ -1327,9 +1385,9 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     <div class="w-9 h-9 grid place-items-center rounded-lg" style="background-color: var(--color-secondary); color: var(--color-muted-foreground)">
                       <component :is="iconFor.ssh" class="w-4 h-4" />
                     </div>
-                    <div class="text-[13px] font-medium" style="color: var(--color-foreground)">No saved hosts</div>
+                    <div class="text-[13px] font-medium" style="color: var(--color-foreground)">{{ t('settings.ssh.noneConfigured') }}</div>
                     <div class="text-[11px] leading-relaxed max-w-[270px]" style="color: var(--color-muted-foreground)">
-                      Use <span style="color: var(--color-foreground)">Connect to remote host</span> to add one, or pre-configure hosts in <span class="font-mono">~/.jcode/config.json</span>.
+                      {{ t('settings.ssh.noneHint', { btn: t('settings.ssh.connect'), config: '~/.jcode/config.json' }) }}
                     </div>
                   </div>
                   <div v-else class="space-y-2">
@@ -1338,7 +1396,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       :key="alias.name"
                       class="group w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-left cursor-pointer transition-colors hover:bg-[var(--color-secondary)]"
                       style="border: 1px solid var(--color-border); background-color: var(--color-surface)"
-                      :title="`Connect to ${alias.name}`"
+                      :title="t('settings.ssh.connectTo', { name: alias.name })"
                       @click="connectToAlias(alias)"
                     >
                       <ServerIcon class="w-3.5 h-3.5" style="color: var(--color-muted-foreground)" />
@@ -1354,7 +1412,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                         class="text-[10px] px-1.5 py-0.5 rounded-full"
                         style="background-color: var(--accent-wash); color: var(--color-primary)"
                       >
-                        active
+                        {{ t('common.active') }}
                       </span>
                       <ChevronRightIcon class="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" style="color: var(--color-muted-foreground)" />
                     </button>
@@ -1363,15 +1421,15 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
 
                 <!-- Channels tab -->
                 <div v-if="activeTab === 'channels'">
-                  <h3 class="text-[13px] font-semibold tracking-tight mb-4" style="color: var(--color-foreground)">Notification Channels</h3>
+                  <h3 class="text-[13px] font-semibold tracking-tight mb-4" style="color: var(--color-foreground)">{{ t('settings.channels.title') }}</h3>
 
                   <div v-if="!channelAvailable" class="flex flex-col items-center justify-center text-center py-12 gap-2.5">
                     <div class="w-9 h-9 grid place-items-center rounded-lg" style="background-color: var(--color-secondary); color: var(--color-muted-foreground)">
                       <component :is="iconFor.channels" class="w-4 h-4" />
                     </div>
-                    <div class="text-[13px] font-medium" style="color: var(--color-foreground)">No channels configured</div>
+                    <div class="text-[13px] font-medium" style="color: var(--color-foreground)">{{ t('settings.channels.noneConfigured') }}</div>
                     <div class="text-[11px] leading-relaxed max-w-[260px]" style="color: var(--color-muted-foreground)">
-                      Set <span class="font-mono">channel.web_enabled: true</span> in <span class="font-mono">~/.jcode/config.json</span>.
+                      {{ t('settings.channels.noneHint', { flag: 'channel.web_enabled: true', config: '~/.jcode/config.json' }) }}
                     </div>
                   </div>
 
@@ -1381,8 +1439,8 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                         <div class="flex items-center gap-2">
                           <ChatBubbleLeftIcon class="w-4 h-4" style="color: var(--color-muted-foreground)" />
                           <div>
-                            <div class="text-xs font-medium" style="color: var(--color-foreground)">WeChat</div>
-                            <div class="text-[10px]" style="color: var(--color-muted-foreground)">iLink Bot integration</div>
+                            <div class="text-xs font-medium" style="color: var(--color-foreground)">{{ t('settings.channels.wechat') }}</div>
+                            <div class="text-[10px]" style="color: var(--color-muted-foreground)">{{ t('settings.channels.integration') }}</div>
                           </div>
                         </div>
                         <div class="flex items-center gap-1.5">
@@ -1399,14 +1457,14 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                               : (channelState === 'disabled' || channelState === 'scanning') ? 'var(--color-warning-fg)'
                               : 'var(--color-muted-foreground)',
                           }">
-                            {{ channelState === 'enabled' ? 'Connected' : channelState === 'disabled' ? 'Disconnected' : channelState === 'scanning' ? 'Scanning...' : 'Not configured' }}
+                            {{ channelState === 'enabled' ? t('common.connected') : channelState === 'disabled' ? t('common.disconnected') : channelState === 'scanning' ? t('common.scanning') : t('common.notConfigured') }}
                           </span>
                         </div>
                       </div>
 
                       <div v-if="channelQRContent" class="flex flex-col items-center py-3">
                         <canvas ref="qrCanvas" class="rounded-md" style="border: 1px solid var(--color-border)" />
-                        <div class="text-[10px] mt-2" style="color: var(--color-muted-foreground)">Scan with WeChat to connect</div>
+                        <div class="text-[10px] mt-2" style="color: var(--color-muted-foreground)">{{ t('settings.channels.scanQr') }}</div>
                       </div>
 
                       <div class="flex gap-2 mt-2">
@@ -1417,7 +1475,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                           style="background-color: var(--color-primary)"
                           @click="channelLogin"
                         >
-                          {{ channelLoading ? 'Loading...' : 'Connect' }}
+                          {{ channelLoading ? t('settings.channels.loadingHint') : t('settings.channels.connect') }}
                         </button>
                         <button
                           v-if="channelState === 'enabled' || channelState === 'disabled'"
@@ -1426,7 +1484,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                           style="color: var(--color-destructive)"
                           @click="channelLogout"
                         >
-                          Disconnect
+                          {{ t('settings.channels.disconnect') }}
                         </button>
                       </div>
                     </div>
@@ -1439,9 +1497,9 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     >
                       <span class="text-sm shrink-0 mt-0.5">⚠️</span>
                       <div class="flex-1 min-w-0">
-                        <div class="text-xs font-medium" style="color: var(--color-warning-fg)">Send a message to activate</div>
+                        <div class="text-xs font-medium" style="color: var(--color-warning-fg)">{{ t('settings.channels.activate') }}</div>
                         <div class="text-[10px] mt-0.5 leading-relaxed" style="color: var(--color-warning-fg); opacity: 0.8">
-                          Please send any message to the WeChat bot now to activate notifications. Once activated, you can receive notifications for 24 hours.
+                          {{ t('settings.channels.activateBody') }}
                         </div>
                       </div>
                       <button
@@ -1452,14 +1510,14 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     </div>
 
                     <div class="text-[10px] leading-relaxed" style="color: var(--color-muted-foreground)">
-                      When connected, jcode sends approval requests and task completion notifications to your WeChat.
+                      {{ t('settings.channels.whenConnected') }}
                     </div>
                   </div>
                 </div>
 
                 <!-- Shortcuts tab -->
                 <div v-if="activeTab === 'shortcuts'">
-                  <h3 class="text-[13px] font-semibold tracking-tight mb-4" style="color: var(--color-foreground)">Keyboard Shortcuts</h3>
+                  <h3 class="text-[13px] font-semibold tracking-tight mb-4" style="color: var(--color-foreground)">{{ t('settings.shortcuts.title') }}</h3>
                   <div class="space-y-1.5">
                     <div
                       v-for="s in shortcuts"
@@ -1516,5 +1574,89 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
   .settings-panel {
     margin: 2px 8px 8px;
   }
+}
+
+/* Language picker (General → Preferences). Mirrors the headlessui Menu pattern
+   used by TopBar's panel switcher, but sized to fit inside a preference row. */
+.lang-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+.lang-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-muted);
+  color: var(--color-foreground);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+.lang-trigger:hover {
+  background-color: var(--color-surface);
+  border-color: var(--color-primary);
+}
+.lang-trigger-label {
+  white-space: nowrap;
+}
+.lang-trigger-caret {
+  color: var(--color-muted-foreground);
+  transition: transform 0.12s ease;
+}
+.lang-trigger-caret.open {
+  transform: rotate(180deg);
+}
+.lang-menu-items {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  z-index: var(--z-dropdown);
+  outline: none;
+}
+.lang-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-md);
+  color: var(--color-foreground);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.lang-menu-item.highlight {
+  background: var(--color-muted);
+}
+.lang-menu-item.current {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+.lang-item-check {
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+.pop-enter-active,
+.pop-leave-active {
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+.pop-enter-from,
+.pop-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 </style>

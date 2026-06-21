@@ -11,6 +11,7 @@ import {
   MagnifyingGlassIcon,
   ArrowLeftIcon,
 } from '@heroicons/vue/24/outline'
+import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
 import { useProjectStore, isRemotePath, parseRemoteLabel } from '@/stores/project'
 import { useFolderBrowser } from '@/composables/useFolderBrowser'
@@ -25,6 +26,7 @@ withDefaults(defineProps<{
 
 const store = useChatStore()
 const projectStore = useProjectStore()
+const { t } = useI18n()
 
 // Provided by App: opens the SSH wizard, optionally prefilled for a reconnect.
 const openRemoteConnect = inject<(prefill?: RemoteMeta & { loadTaskUuid?: string }) => void>('openRemoteConnect')
@@ -43,7 +45,7 @@ const activePath = computed(() => projectStore.activeProject?.path || store.pwd)
 const activeIsRemote = computed(() => isRemotePath(activePath.value))
 const activeName = computed(() => {
   const p = activePath.value
-  if (!p) return 'No workspace'
+  if (!p) return t('workspace.none')
   return projectStore.nameForPath(p)
 })
 
@@ -81,7 +83,7 @@ async function applyLocalSwitch(path: string, close: () => void) {
   const ok = await projectStore.openProject(path)
   if (!ok) {
     // Keep the panel open and show why, instead of failing silently.
-    switchErr.value = projectStore.switchError || 'Failed to open workspace'
+    switchErr.value = projectStore.switchError || t('workspace.openError')
     return
   }
   // Route through the same post-switch handler the projects modal uses, so both
@@ -176,7 +178,7 @@ function reset() {
             <input
               v-model="pathInput"
               class="ws-path-input"
-              placeholder="/path/to/folder"
+              :placeholder="t('projectSwitcher.pathPlaceholder')"
               @keydown.enter="handlePathSubmit"
             />
           </div>
@@ -188,8 +190,8 @@ function reset() {
             >
               <span class="ws-folder-icon">..</span>
             </button>
-            <div v-if="browseLoading" class="ws-hint">Loading…</div>
-            <div v-else-if="browseFolders.length === 0" class="ws-hint">No folders</div>
+            <div v-if="browseLoading" class="ws-hint">{{ t('workspace.loading') }}</div>
+            <div v-else-if="browseFolders.length === 0" class="ws-hint">{{ t('workspace.noFolders') }}</div>
             <button
               v-for="folder in browseFolders"
               :key="folder.path"
@@ -203,7 +205,7 @@ function reset() {
           <div v-if="switchErr" class="ws-error">{{ switchErr }}</div>
           <div class="ws-browser-foot">
             <span class="ws-cur-path">{{ browsePath || '~' }}</span>
-            <button class="ws-open-btn" :disabled="!browsePath" @click="applyLocalSwitch(browsePath, close)">Open</button>
+            <button class="ws-open-btn" :disabled="!browsePath" @click="applyLocalSwitch(browsePath, close)">{{ t('workspace.open') }}</button>
           </div>
         </div>
 
@@ -211,11 +213,11 @@ function reset() {
         <div v-else class="ws-listview">
           <div class="ws-search">
             <MagnifyingGlassIcon class="w-3 h-3 ws-search-icon" />
-            <input v-model="query" class="ws-search-input" placeholder="Search workspaces" />
+            <input v-model="query" class="ws-search-input" :placeholder="t('workspace.search')" />
           </div>
 
           <div class="ws-list">
-            <div v-if="workspaces.length === 0" class="ws-hint">No workspaces</div>
+            <div v-if="workspaces.length === 0" class="ws-hint">{{ t('workspace.nonePlural') }}</div>
             <button
               v-for="node in workspaces"
               :key="node.path"
@@ -232,10 +234,10 @@ function reset() {
           <div v-if="switchErr" class="ws-error">{{ switchErr }}</div>
           <div class="ws-actions">
             <button class="ws-action" @click="openFolderAction(close)">
-              <PlusIcon class="w-3.5 h-3.5" /> <span>Open folder</span>
+              <PlusIcon class="w-3.5 h-3.5" /> <span>{{ t('workspace.openFolder') }}</span>
             </button>
             <button class="ws-action" @click="openRemote(close)">
-              <ServerIcon class="w-3.5 h-3.5" /> <span>Remote connect</span>
+              <ServerIcon class="w-3.5 h-3.5" /> <span>{{ t('nav.remoteConnect') }}</span>
             </button>
           </div>
         </div>

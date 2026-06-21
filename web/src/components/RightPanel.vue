@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { XMarkIcon } from '@heroicons/vue/24/outline'
+import { useI18n } from 'vue-i18n'
 import FileTreePanel from './FileTreePanel.vue'
 import DiffViewer from './DiffViewer.vue'
 import TaskList from './TaskList.vue'
@@ -16,6 +17,7 @@ const emit = defineEmits<{
 }>()
 
 const store = useChatStore()
+const { t } = useI18n()
 const total = computed(() => store.todos.length)
 const completed = computed(() => store.todos.filter((t) => t.status === 'completed').length)
 const progressPct = computed(() => (total.value ? Math.round((completed.value / total.value) * 100) : 0))
@@ -51,21 +53,21 @@ function startResize(e: MouseEvent) {
           :class="{ active: activeTab === 'plan' }"
           @click="emit('switch-tab', 'plan')"
         >
-          Plan
+          {{ t('rightPanel.plan') }}
         </button>
         <button
           class="tab-btn"
           :class="{ active: activeTab === 'files' }"
           @click="emit('switch-tab', 'files')"
         >
-          Files
+          {{ t('rightPanel.files') }}
         </button>
         <button
           class="tab-btn"
           :class="{ active: activeTab === 'changes' }"
           @click="emit('switch-tab', 'changes')"
         >
-          Changes
+          {{ t('rightPanel.changes') }}
         </button>
       </div>
       <button class="close-btn" @click="emit('close')">
@@ -80,13 +82,13 @@ function startResize(e: MouseEvent) {
       <DiffViewer v-else-if="activeTab === 'changes'" :key="store.pwd" />
       <div v-else class="plan-pane">
         <div class="plan-head">
-          <span class="plan-title">Plan</span>
+          <span class="plan-title">{{ t('rightPanel.plan') }}</span>
           <div class="plan-track"><div class="plan-fill" :style="{ width: progressPct + '%' }" /></div>
           <span class="plan-count">{{ completed }} / {{ total }}</span>
         </div>
         <div class="plan-list">
           <TaskList v-if="total" :todos="store.todos" />
-          <div v-else class="plan-empty">No tasks yet</div>
+          <div v-else class="plan-empty">{{ t('rightPanel.noTasks') }}</div>
         </div>
       </div>
     </div>

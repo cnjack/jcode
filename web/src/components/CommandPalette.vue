@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick, inject } from 'vue'
 import { Dialog, DialogPanel, TransitionRoot, TransitionChild } from '@headlessui/vue'
 import { PlusIcon, Cog6ToothIcon, FolderOpenIcon, SunIcon, ChatBubbleLeftIcon, MagnifyingGlassIcon } from '@heroicons/vue/24/outline'
+import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
 import { useProjectStore, isRemotePath, parseRemoteLabel } from '@/stores/project'
 import type { TaskItem, RemoteMeta } from '@/types/api'
@@ -14,6 +15,7 @@ const emit = defineEmits<{
 
 const store = useChatStore()
 const projectStore = useProjectStore()
+const { t } = useI18n()
 const openRemoteConnect = inject<(prefill?: RemoteMeta & { loadTaskUuid?: string }) => void>('openRemoteConnect')
 
 const query = ref('')
@@ -63,22 +65,22 @@ async function openTask(task: TaskItem) {
 }
 
 const actions = computed<PaletteItem[]>(() => [
-  { id: 'a-new', group: 'Actions', label: 'New task', icon: PlusIcon, run: () => { emit('close'); store.newSession() } },
-  { id: 'a-proj', group: 'Actions', label: 'Open project…', icon: FolderOpenIcon, run: () => { emit('close'); emit('action', 'projects') } },
-  { id: 'a-settings', group: 'Actions', label: 'Open settings', icon: Cog6ToothIcon, run: () => { emit('close'); emit('action', 'settings') } },
-  { id: 'a-theme', group: 'Actions', label: 'Toggle theme', icon: SunIcon, run: () => { emit('close'); emit('action', 'theme') } },
+  { id: 'a-new', group: t('commandPalette.groups.actions'), label: t('commandPalette.newTask'), icon: PlusIcon, run: () => { emit('close'); store.newSession() } },
+  { id: 'a-proj', group: t('commandPalette.groups.actions'), label: t('nav.openProject'), icon: FolderOpenIcon, run: () => { emit('close'); emit('action', 'projects') } },
+  { id: 'a-settings', group: t('commandPalette.groups.actions'), label: t('nav.openSettings'), icon: Cog6ToothIcon, run: () => { emit('close'); emit('action', 'settings') } },
+  { id: 'a-theme', group: t('commandPalette.groups.actions'), label: t('nav.toggleTheme'), icon: SunIcon, run: () => { emit('close'); emit('action', 'theme') } },
 ])
 
 const taskItems = computed<PaletteItem[]>(() =>
   projectStore.allTasks
-    .filter((t) => !t.archived)
-    .map((t) => ({
-      id: 't-' + t.uuid,
-      group: 'Tasks',
-      label: t.title || t.uuid.slice(0, 8) + '…',
-      hint: projectStore.nameForPath(t.project),
+    .filter((task) => !task.archived)
+    .map((task) => ({
+      id: 't-' + task.uuid,
+      group: t('commandPalette.groups.tasks'),
+      label: task.title || task.uuid.slice(0, 8) + '…',
+      hint: projectStore.nameForPath(task.project),
       icon: ChatBubbleLeftIcon,
-      run: () => openTask(t),
+      run: () => openTask(task),
     })),
 )
 
@@ -160,14 +162,14 @@ function onKeydown(e: KeyboardEvent) {
                 ref="inputEl"
                 v-model="query"
                 class="cp-input"
-                placeholder="Search tasks or run a command…"
+                :placeholder="t('commandPalette.placeholder')"
                 @keydown="onKeydown"
               />
               <kbd class="cp-esc">Esc</kbd>
             </div>
 
             <div ref="resultsEl" class="cp-results">
-              <div v-if="results.length === 0" class="cp-empty">No results</div>
+              <div v-if="results.length === 0" class="cp-empty">{{ t('commandPalette.noResults') }}</div>
               <template v-for="g in groups" :key="g.name">
                 <div class="cp-group-label">{{ g.name }}</div>
                 <button

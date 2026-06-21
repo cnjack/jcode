@@ -24,11 +24,13 @@ import {
   MoonIcon,
   Cog6ToothIcon,
 } from '@heroicons/vue/24/outline'
+import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
 import { useProjectStore, isRemotePath, parseRemoteLabel } from '@/stores/project'
 import type { TaskItem, RemoteMeta } from '@/types/api'
 
 const store = useChatStore()
+const { t } = useI18n()
 const projectStore = useProjectStore()
 const openRemoteConnect = inject<(prefill?: RemoteMeta & { loadTaskUuid?: string }) => void>('openRemoteConnect')
 
@@ -181,12 +183,12 @@ function relativeTime(ts: string): string {
   const then = new Date(ts).getTime()
   if (Number.isNaN(then)) return ''
   const mins = Math.floor((Date.now() - then) / 60000)
-  if (mins < 1) return 'now'
-  if (mins < 60) return `${mins}m`
+  if (mins < 1) return t('sidebar.relativeTime.now')
+  if (mins < 60) return t('sidebar.relativeTime.minutes', { n: mins })
   const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h`
+  if (hrs < 24) return t('sidebar.relativeTime.hours', { n: hrs })
   const days = Math.floor(hrs / 24)
-  if (days < 30) return `${days}d`
+  if (days < 30) return t('sidebar.relativeTime.days', { n: days })
   return new Date(ts).toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 </script>
@@ -197,19 +199,19 @@ function relativeTime(ts: string): string {
     <div class="sidebar-header">
       <button class="new-task-btn" @click="store.newSession()">
         <PlusIcon class="w-4 h-4" />
-        <span>New task</span>
+        <span>{{ t('nav.newTask') }}</span>
       </button>
     </div>
 
     <!-- Workspace tree -->
     <div class="tree">
       <div class="tree-head">
-        <span class="tree-label">Workspace</span>
+        <span class="tree-label">{{ t('nav.workspace') }}</span>
         <div class="tree-head-actions">
           <button
             class="tree-icon-btn"
             :class="{ on: showArchived }"
-            :title="showArchived ? 'Hide archived tasks' : 'Show archived tasks'"
+            :title="showArchived ? t('sidebar.hideArchived') : t('sidebar.showArchived')"
             :aria-pressed="showArchived"
             @click="showArchived = !showArchived"
           >
@@ -218,7 +220,7 @@ function relativeTime(ts: string): string {
         </div>
       </div>
 
-      <div v-if="projectNodes.length === 0" class="empty-state">No projects yet</div>
+      <div v-if="projectNodes.length === 0" class="empty-state">{{ t('sidebar.noProjects') }}</div>
 
       <div v-for="proj in projectNodes" :key="proj.path" class="project-group">
         <button class="project-row" :class="{ active: proj.path === activePath }" @click="toggle(proj.path)">
@@ -229,7 +231,7 @@ function relativeTime(ts: string): string {
         </button>
 
         <div v-show="isExpanded(proj.path)" class="task-list">
-          <div v-if="visibleCount(proj.path) === 0" class="task-empty">No tasks</div>
+          <div v-if="visibleCount(proj.path) === 0" class="task-empty">{{ t('sidebar.noTasks') }}</div>
           <div
             v-for="task in tasksFor(proj.path)"
             :key="task.uuid"
@@ -253,7 +255,7 @@ function relativeTime(ts: string): string {
             <span class="task-time">{{ relativeTime(task.created_at) }}</span>
 
             <HMenu as="div" class="task-menu" @click.stop>
-              <MenuButton class="task-menu-btn" title="Task actions" @click.stop="onTaskMenuClick($event, task.uuid)">
+              <MenuButton class="task-menu-btn" :title="t('sidebar.actions.taskActions')" @click.stop="onTaskMenuClick($event, task.uuid)">
                 <EllipsisHorizontalIcon class="w-3.5 h-3.5" />
               </MenuButton>
               <transition
@@ -265,28 +267,28 @@ function relativeTime(ts: string): string {
                 <MenuItems class="task-menu-items" :class="{ 'flip-up': flipUpMenus.has(task.uuid) }">
                   <MenuItem v-slot="{ active }">
                     <button class="tmi" :class="{ hl: active }" @click.stop="projectStore.updateTaskMeta(task.uuid, { pinned: !task.pinned })">
-                      <BookmarkIcon class="w-3.5 h-3.5" /> {{ task.pinned ? 'Unpin' : 'Pin' }}
+                      <BookmarkIcon class="w-3.5 h-3.5" /> {{ task.pinned ? t('sidebar.actions.unpin') : t('sidebar.actions.pin') }}
                     </button>
                   </MenuItem>
                   <MenuItem v-slot="{ active }">
                     <button class="tmi" :class="{ hl: active }" @click.stop="renameTask(task)">
-                      <PencilIcon class="w-3.5 h-3.5" /> Rename
+                      <PencilIcon class="w-3.5 h-3.5" /> {{ t('sidebar.actions.rename') }}
                     </button>
                   </MenuItem>
                   <MenuItem v-slot="{ active }">
                     <button class="tmi" :class="{ hl: active }" @click.stop="projectStore.updateTaskMeta(task.uuid, { archived: !task.archived })">
-                      <component :is="task.archived ? ArchiveBoxArrowDownIcon : ArchiveBoxIcon" class="w-3.5 h-3.5" /> {{ task.archived ? 'Unarchive' : 'Archive' }}
+                      <component :is="task.archived ? ArchiveBoxArrowDownIcon : ArchiveBoxIcon" class="w-3.5 h-3.5" /> {{ task.archived ? t('sidebar.actions.unarchive') : t('sidebar.actions.archive') }}
                     </button>
                   </MenuItem>
                   <MenuItem v-slot="{ active }">
                     <button class="tmi" :class="{ hl: active }" @click.stop="projectStore.updateTaskMeta(task.uuid, { unread: !task.unread })">
-                      <EnvelopeOpenIcon class="w-3.5 h-3.5" /> {{ task.unread ? 'Mark read' : 'Mark unread' }}
+                      <EnvelopeOpenIcon class="w-3.5 h-3.5" /> {{ task.unread ? t('sidebar.actions.markRead') : t('sidebar.actions.markUnread') }}
                     </button>
                   </MenuItem>
                   <div class="tmi-sep" />
                   <MenuItem v-slot="{ active }">
                     <button class="tmi danger" :class="{ hl: active }" @click.stop="handleDelete(task)">
-                      <TrashIcon class="w-3.5 h-3.5" /> Delete
+                      <TrashIcon class="w-3.5 h-3.5" /> {{ t('sidebar.actions.delete') }}
                     </button>
                   </MenuItem>
                 </MenuItems>
@@ -300,11 +302,11 @@ function relativeTime(ts: string): string {
     <!-- Footer -->
     <div class="sidebar-footer">
       <div class="footer-actions">
-        <button class="footer-btn" @click="emit('toggleTheme')" :title="resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'">
+        <button class="footer-btn" @click="emit('toggleTheme')" :title="resolvedTheme === 'dark' ? t('nav.switchToLight') : t('nav.switchToDark')">
           <SunIcon v-if="resolvedTheme === 'dark'" class="w-3.5 h-3.5" />
           <MoonIcon v-else class="w-3.5 h-3.5" />
         </button>
-        <button class="footer-btn" @click="emit('openSettings')" title="Settings (⌘,)">
+        <button class="footer-btn" @click="emit('openSettings')" :title="t('nav.settingsWithShortcut')">
           <Cog6ToothIcon class="w-3.5 h-3.5" />
         </button>
       </div>

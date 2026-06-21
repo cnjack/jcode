@@ -24,6 +24,26 @@
           html.setAttribute('data-theme', id);
           html.classList.toggle('dark', !/-light$/.test(id));
         } catch (e) {}
+
+        // Pre-mount <html lang> application to match the stored UI locale. i18n
+        // re-applies this after boot, but setting it early avoids a flash and
+        // keeps screen readers / translation prompts correct from first paint.
+        try {
+          var map = { en: 'en', 'zh-Hans': 'zh-Hans', 'zh-Hant': 'zh-Hant', ja: 'ja', ko: 'ko' };
+          var loc = localStorage.getItem('jcode_locale');
+          if (!loc && navigator.languages) {
+            for (var i = 0; i < navigator.languages.length; i++) {
+              var l = (navigator.languages[i] || '').toLowerCase();
+              if (l === 'zh' || l.indexOf('zh-cn') === 0 || l.indexOf('zh-sg') === 0 || l.indexOf('zh-hans') === 0) { loc = 'zh-Hans'; break; }
+              if (l.indexOf('zh-tw') === 0 || l.indexOf('zh-hk') === 0 || l.indexOf('zh-mo') === 0 || l.indexOf('zh-hant') === 0) { loc = 'zh-Hant'; break; }
+              var p = l.split('-')[0];
+              if (p === 'ja') { loc = 'ja'; break; }
+              if (p === 'ko') { loc = 'ko'; break; }
+              if (p === 'en') { loc = 'en'; break; }
+            }
+          }
+          if (loc && map[loc]) document.documentElement.lang = map[loc];
+        } catch (e) {}
       })();
     </script>
     <title>JCODE — Coding Assistant</title>

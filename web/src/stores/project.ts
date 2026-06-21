@@ -1,6 +1,7 @@
 // Project management store using localStorage
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { i18n } from '@/i18n'
 import type { Project, RemoteMeta, TaskItem, TaskMetaPatch } from '@/types/api'
 import { api } from '@/composables/api'
 
@@ -116,7 +117,7 @@ export const useProjectStore = defineStore('project', () => {
     // a project added from a task whose path is an ssh:// label may lack the
     // metadata, and must still not fall through to a doomed local switch.
     if (project.remote || isRemotePath(project.path)) {
-      switchError.value = 'Remote workspace — reconnect via the SSH wizard'
+      switchError.value = i18n.global.t('errors.remoteReconnect')
       return false
     }
 
@@ -127,7 +128,7 @@ export const useProjectStore = defineStore('project', () => {
       setActive(id)
       return true
     } catch (err: unknown) {
-      switchError.value = err instanceof Error ? err.message : 'Failed to switch project'
+      switchError.value = err instanceof Error ? err.message : i18n.global.t('errors.switchFailed')
       return false
     } finally {
       switching.value = false
@@ -139,7 +140,7 @@ export const useProjectStore = defineStore('project', () => {
     // persist it as a bare local project; signal the caller to use the SSH
     // wizard instead (matches ProjectSwitcher.selectProject's remote handling).
     if (isRemotePath(path)) {
-      switchError.value = 'Remote workspace — reconnect via the SSH wizard'
+      switchError.value = i18n.global.t('errors.remoteReconnect')
       return false
     }
     const proj = addProject(path)

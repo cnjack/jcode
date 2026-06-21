@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ChevronRightIcon, DocumentIcon, FolderIcon, ArrowLeftIcon } from '@heroicons/vue/24/outline'
+import { useI18n } from 'vue-i18n'
 import { api } from '@/composables/api'
 import type { FileItem } from '@/types/api'
 import hljs from 'highlight.js'
 
+const { t } = useI18n()
 const currentPath = ref('')
 const items = ref<FileItem[]>([])
 const loading = ref(false)
@@ -27,7 +29,7 @@ async function fetchDir(path: string) {
   } catch (err) {
     console.error('Failed to fetch files:', err)
     items.value = []
-    dirError.value = '无法加载此目录。'
+    dirError.value = t('fileTree.dirError')
   } finally {
     loading.value = false
   }
@@ -46,7 +48,7 @@ async function openItem(item: FileItem) {
     } catch (err) {
       console.error('Failed to fetch file content:', err)
       // Don't fail silently — tell the user the click didn't no-op.
-      fileError.value = `无法打开 ${item.name}（可能是二进制文件、过大或权限不足）。`
+      fileError.value = t('fileTree.fileError', { name: item.name })
     }
   }
 }
@@ -110,7 +112,7 @@ onMounted(() => fetchDir(''))
         <ArrowLeftIcon class="w-3.5 h-3.5" />
       </button>
       <div class="breadcrumb">
-        <button class="crumb" @click="navigateTo(-1)">root</button>
+        <button class="crumb" @click="navigateTo(-1)">{{ t('fileTree.root') }}</button>
         <template v-for="(seg, i) in breadcrumbs" :key="i">
           <ChevronRightIcon class="w-2.5 h-2.5 crumb-sep" />
           <button class="crumb" @click="navigateTo(i)">{{ seg }}</button>
@@ -129,7 +131,7 @@ onMounted(() => fetchDir(''))
 
     <!-- Directory listing -->
     <div v-else class="file-list">
-      <div v-if="loading" class="loading-state">Loading…</div>
+      <div v-if="loading" class="loading-state">{{ t('fileTree.loading') }}</div>
       <div v-else-if="dirError" class="error-state">{{ dirError }}</div>
       <template v-else>
         <div v-if="fileError" class="file-error">{{ fileError }}</div>
@@ -145,7 +147,7 @@ onMounted(() => fetchDir(''))
           <span v-if="!item.is_dir" class="item-size">{{ formatSize(item.size) }}</span>
         </button>
         <div v-if="items.length === 0" class="empty-state">
-          Empty directory
+          {{ t('fileTree.empty') }}
         </div>
       </template>
     </div>

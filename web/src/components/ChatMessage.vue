@@ -3,11 +3,14 @@ import { renderMarkdown } from '@/composables/markdown'
 import type { ChatMessage } from '@/types/api'
 import { ref, nextTick, computed } from 'vue'
 import { Square2StackIcon, CheckIcon, PencilSquareIcon } from '@heroicons/vue/24/outline'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{
   message: ChatMessage
   canEdit?: boolean
 }>()
+
+const { t } = useI18n()
 
 // System messages carry a level: 'error' (red), 'notice' (muted, e.g. Stopped),
 // or undefined (default warning styling).
@@ -16,7 +19,7 @@ const systemColor = computed(() => {
   if (props.message.level === 'notice') return 'var(--color-muted-foreground)'
   return 'var(--color-warning-fg)'
 })
-const systemLabel = computed(() => (props.message.level === 'error' ? 'Error' : 'System'))
+const systemLabel = computed(() => (props.message.level === 'error' ? t('chat.roles.error') : t('chat.roles.system')))
 
 // Human-readable elapsed time for the turn (assistant messages only). "45s" for
 // under a minute, "1m 23s" beyond. Empty when the message carries no duration.
@@ -24,10 +27,10 @@ const durationLabel = computed(() => {
   const ms = props.message.durationMs
   if (!ms || ms < 0) return ''
   const totalSec = Math.round(ms / 1000)
-  if (totalSec < 60) return `${totalSec}s`
+  if (totalSec < 60) return t('chat.durationSeconds', { n: totalSec })
   const m = Math.floor(totalSec / 60)
   const s = totalSec % 60
-  return s ? `${m}m ${s}s` : `${m}m`
+  return s ? t('chat.durationMinutes', { m, s }) : t('chat.durationMinutesOnly', { m })
 })
 
 const emit = defineEmits<{
@@ -108,7 +111,7 @@ function handleEditKeyDown(e: KeyboardEvent) {
                  'var(--color-foreground)'
         }"
       >
-        {{ message.role === 'user' ? (message.source === 'wechat' ? 'WeChat' : 'You') : message.role === 'assistant' ? '[J]CODE' : systemLabel }}
+        {{ message.role === 'user' ? (message.source === 'wechat' ? t('chat.roles.wechat') : t('chat.roles.you')) : message.role === 'assistant' ? t('chat.roles.assistant') : systemLabel }}
       </span>
     </div>
 
@@ -142,16 +145,16 @@ function handleEditKeyDown(e: KeyboardEvent) {
           :style="{ background: 'var(--color-primary)', color: 'var(--color-on-primary)', borderRadius: 'var(--radius-md)' }"
           @click="confirmEdit"
         >
-          Send
+          {{ t('common.save') }}
         </button>
         <button
           class="px-3 py-1 text-xs font-medium transition-all cursor-pointer active:scale-95"
           :style="{ background: 'var(--color-secondary)', color: 'var(--color-foreground)', borderRadius: 'var(--radius-md)' }"
           @click="cancelEdit"
         >
-          Cancel
+          {{ t('common.cancel') }}
         </button>
-        <span class="text-[10px]" style="color: var(--color-muted-foreground)">Enter to send · Shift+Enter for newline · Esc to cancel</span>
+        <span class="text-[10px]" style="color: var(--color-muted-foreground)">{{ t('chat.copilotHint') }}</span>
       </div>
     </div>
 
@@ -163,7 +166,7 @@ function handleEditKeyDown(e: KeyboardEvent) {
         v-if="durationLabel"
         class="text-[10px] tabular-nums"
         style="font-family: var(--font-mono); color: var(--color-muted-foreground); opacity: 0.7"
-        title="Time this turn took"
+        :title="t('chat.turnDuration')"
       >{{ durationLabel }}</span>
 
       <div class="flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 transition-opacity duration-150">
@@ -171,7 +174,7 @@ function handleEditKeyDown(e: KeyboardEvent) {
         <button
           class="w-5 h-5 flex items-center justify-center rounded-[var(--radius-sm)] transition-all cursor-pointer hover:bg-[var(--color-secondary)] active:scale-90"
           style="color: var(--color-muted-foreground)"
-          :title="copied ? 'Copied!' : 'Copy'"
+          :title="copied ? t('chat.actions.copied') : t('chat.actions.copy')"
           @click="copyContent"
         >
           <Square2StackIcon v-if="!copied" class="w-3 h-3" />
@@ -183,7 +186,7 @@ function handleEditKeyDown(e: KeyboardEvent) {
           v-if="canEdit"
           class="w-5 h-5 flex items-center justify-center rounded-[var(--radius-sm)] transition-all cursor-pointer hover:bg-[var(--color-secondary)] active:scale-90"
           style="color: var(--color-muted-foreground)"
-          title="Edit"
+          :title="t('common.edit')"
           @click="startEdit"
         >
           <PencilSquareIcon class="w-3 h-3" />
@@ -196,7 +199,7 @@ function handleEditKeyDown(e: KeyboardEvent) {
       v-if="message.role === 'system' && message.level === 'error' && message.detail"
       class="pl-9 mt-1"
     >
-      <summary class="text-[11px] cursor-pointer select-none" style="color: var(--color-muted-foreground)">Details</summary>
+      <summary class="text-[11px] cursor-pointer select-none" style="color: var(--color-muted-foreground)">{{ t('common.details') }}</summary>
       <pre class="text-[11px] font-mono whitespace-pre-wrap mt-1 px-2 py-1.5 overflow-x-auto" style="color: var(--color-muted-foreground); background: var(--color-muted); border-radius: var(--radius-md)">{{ message.detail }}</pre>
     </details>
   </div>

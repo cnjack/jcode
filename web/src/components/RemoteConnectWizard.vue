@@ -16,12 +16,15 @@ import {
   CheckIcon,
   ChevronRightIcon,
 } from '@heroicons/vue/24/outline'
+import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
 import { useProjectStore } from '@/stores/project'
 import { api } from '@/composables/api'
 import type { RemoteMeta, SSHAlias, RemoteAuthMethod } from '@/types/api'
 
 type Prefill = RemoteMeta & { loadTaskUuid?: string }
+
+const { t } = useI18n()
 
 const props = defineProps<{
   open: boolean
@@ -66,13 +69,13 @@ const dirLoading = ref(false)
 const saveAlias = ref(false)
 const aliasName = ref('')
 
-const steps: { key: Step; label: string }[] = [
-  { key: 'method', label: 'Choose method' },
-  { key: 'config', label: 'Configure' },
-  { key: 'connecting', label: 'Connecting' },
-  { key: 'dir', label: 'Select directory' },
-]
-const stepIndex = computed(() => steps.findIndex((s) => s.key === step.value))
+const steps = computed<{ key: Step; label: string }[]>(() => [
+  { key: 'method', label: t('wizard.steps.chooseMethod') },
+  { key: 'config', label: t('wizard.steps.configure') },
+  { key: 'connecting', label: t('wizard.steps.connecting') },
+  { key: 'dir', label: t('wizard.steps.selectDirectory') },
+])
+const stepIndex = computed(() => steps.value.findIndex((s) => s.key === step.value))
 
 watch(() => props.open, (isOpen) => {
   if (!isOpen) return
@@ -326,7 +329,7 @@ function close() {
           <DialogPanel class="rcw">
             <!-- Step rail -->
             <div class="rcw-rail">
-              <div class="rcw-rail-title">Remote connect</div>
+              <div class="rcw-rail-title">{{ t('wizard.title') }}</div>
               <ol class="rcw-steps">
                 <li
                   v-for="(s, i) in steps"
@@ -349,106 +352,106 @@ function close() {
 
               <!-- Step 1: method -->
               <template v-if="step === 'method'">
-                <h3 class="rcw-h">Choose a connection method</h3>
-                <p class="rcw-sub">Pick how to enter the remote workspace, then fill in the details.</p>
+                <h3 class="rcw-h">{{ t('wizard.chooseMethod') }}</h3>
+                <p class="rcw-sub">{{ t('wizard.pickMethodDesc') }}</p>
                 <div class="rcw-methods">
                   <button class="rcw-method" :class="{ active: method === 'ssh' }" @click="chooseMethod('ssh')">
                     <ServerIcon class="w-5 h-5" />
-                    <span class="rcw-method-name">SSH</span>
-                    <span class="rcw-method-desc">Remote host</span>
+                    <span class="rcw-method-name">{{ t('wizard.ssh') }}</span>
+                    <span class="rcw-method-desc">{{ t('wizard.remoteHost') }}</span>
                   </button>
-                  <button class="rcw-method disabled" disabled title="Coming soon">
+                  <button class="rcw-method disabled" disabled :title="t('wizard.comingSoon')">
                     <CubeIcon class="w-5 h-5" />
-                    <span class="rcw-method-name">Docker</span>
-                    <span class="rcw-method-desc">Coming soon</span>
+                    <span class="rcw-method-name">{{ t('wizard.docker') }}</span>
+                    <span class="rcw-method-desc">{{ t('wizard.comingSoon') }}</span>
                   </button>
                 </div>
                 <div class="rcw-foot">
                   <span />
-                  <button class="rcw-primary" @click="step = 'config'">Next <ChevronRightIcon class="w-3.5 h-3.5" /></button>
+                  <button class="rcw-primary" @click="step = 'config'">{{ t('wizard.next') }} <ChevronRightIcon class="w-3.5 h-3.5" /></button>
                 </div>
               </template>
 
               <!-- Step 2: config -->
               <template v-else-if="step === 'config' || step === 'connecting'">
-                <h3 class="rcw-h">SSH connection</h3>
-                <p class="rcw-sub">Key/agent auth uses your local SSH keys; password &amp; passphrase are supported.</p>
+                <h3 class="rcw-h">{{ t('wizard.sshConnection') }}</h3>
+                <p class="rcw-sub">{{ t('wizard.sshDesc') }}</p>
 
                 <div v-if="error" class="rcw-error">{{ error }}</div>
 
                 <div v-if="aliases.length > 0" class="rcw-field">
-                  <label>Saved alias (optional)</label>
+                  <label>{{ t('settings.ssh.savedAlias') }}</label>
                   <select :value="selectedAlias" class="rcw-input" @change="applyAlias(($event.target as HTMLSelectElement).value)">
-                    <option value="">Don't use an alias</option>
+                    <option value="">{{ t('settings.ssh.noAlias') }}</option>
                     <option v-for="a in aliases" :key="a.name" :value="a.name">{{ a.name }} — {{ a.addr }}</option>
                   </select>
                 </div>
 
                 <div class="rcw-row">
                   <div class="rcw-field grow">
-                    <label>Host</label>
-                    <input v-model="form.host" class="rcw-input" placeholder="1.2.3.4 or example.com" :disabled="step === 'connecting'" />
+                    <label>{{ t('settings.ssh.host') }}</label>
+                    <input v-model="form.host" class="rcw-input" :placeholder="t('wizard.hostPlaceholder')" :disabled="step === 'connecting'" />
                   </div>
                   <div class="rcw-field port">
-                    <label>Port</label>
+                    <label>{{ t('settings.ssh.port') }}</label>
                     <input v-model.number="form.port" type="number" class="rcw-input" :disabled="step === 'connecting'" />
                   </div>
                 </div>
 
                 <div class="rcw-row">
                   <div class="rcw-field grow">
-                    <label>User</label>
-                    <input v-model="form.user" class="rcw-input" placeholder="root" :disabled="step === 'connecting'" />
+                    <label>{{ t('settings.ssh.user') }}</label>
+                    <input v-model="form.user" class="rcw-input" :placeholder="t('wizard.userPlaceholder')" :disabled="step === 'connecting'" />
                   </div>
                   <div class="rcw-field">
-                    <label>Auth</label>
+                    <label>{{ t('wizard.auth') }}</label>
                     <div class="rcw-seg">
-                      <button :class="{ on: form.authMethod === 'password' }" :disabled="step === 'connecting'" @click="form.authMethod = 'password'">Password</button>
-                      <button :class="{ on: form.authMethod === 'key' }" :disabled="step === 'connecting'" @click="form.authMethod = 'key'">Key</button>
+                      <button :class="{ on: form.authMethod === 'password' }" :disabled="step === 'connecting'" @click="form.authMethod = 'password'">{{ t('settings.ssh.password') }}</button>
+                      <button :class="{ on: form.authMethod === 'key' }" :disabled="step === 'connecting'" @click="form.authMethod = 'key'">{{ t('settings.ssh.key') }}</button>
                     </div>
                   </div>
                 </div>
 
                 <template v-if="form.authMethod === 'password'">
                   <div class="rcw-field">
-                    <label>Password</label>
+                    <label>{{ t('settings.ssh.password') }}</label>
                     <input v-model="form.password" type="password" class="rcw-input" :disabled="step === 'connecting'" />
                   </div>
                 </template>
                 <template v-else>
                   <div class="rcw-field">
-                    <label>Private key path</label>
+                    <label>{{ t('settings.ssh.privateKeyPath') }}</label>
                     <input v-model="form.keyPath" class="rcw-input mono" placeholder="~/.ssh/id_rsa" :disabled="step === 'connecting'" />
                   </div>
                   <div class="rcw-field">
-                    <label>Passphrase (optional)</label>
+                    <label>{{ t('settings.ssh.passphrase') }}</label>
                     <input v-model="form.passphrase" type="password" class="rcw-input" :disabled="step === 'connecting'" />
                   </div>
                 </template>
 
                 <div class="rcw-foot">
-                  <button class="rcw-ghost" :disabled="step === 'connecting'" @click="step = 'method'">Back</button>
+                  <button class="rcw-ghost" :disabled="step === 'connecting'" @click="step = 'method'">{{ t('common.back') }}</button>
                   <button class="rcw-primary" :disabled="step === 'connecting'" @click="connect">
                     <ArrowPathIcon v-if="step === 'connecting'" class="w-3.5 h-3.5 spin" />
-                    {{ step === 'connecting' ? 'Connecting…' : 'Connect' }}
+                    {{ step === 'connecting' ? t('wizard.connecting') : t('wizard.connect') }}
                   </button>
                 </div>
               </template>
 
               <!-- Step 4: directory -->
               <template v-else-if="step === 'dir'">
-                <h3 class="rcw-h">Select a directory</h3>
-                <p class="rcw-sub">Choose the working directory for this remote workspace.</p>
+                <h3 class="rcw-h">{{ t('wizard.selectDirectory') }}</h3>
+                <p class="rcw-sub">{{ t('wizard.dirDesc') }}</p>
 
                 <div v-if="error" class="rcw-error">{{ error }}</div>
 
                 <div class="rcw-dirbar">
-                  <button class="rcw-back" title="Back to config" @click="backToConfig"><ArrowLeftIcon class="w-3.5 h-3.5" /></button>
+                  <button class="rcw-back" :title="t('wizard.backToConfig')" @click="backToConfig"><ArrowLeftIcon class="w-3.5 h-3.5" /></button>
                   <span class="rcw-dir-path">{{ currentDir || '/' }}</span>
                 </div>
 
                 <div class="rcw-dirlist">
-                  <div v-if="dirLoading" class="rcw-hint"><ArrowPathIcon class="w-3.5 h-3.5 spin" /> Loading…</div>
+                  <div v-if="dirLoading" class="rcw-hint"><ArrowPathIcon class="w-3.5 h-3.5 spin" /> {{ t('wizard.loading') }}</div>
                   <template v-else>
                     <button
                       v-for="d in dirs"
@@ -459,21 +462,21 @@ function close() {
                       <FolderIcon class="w-3.5 h-3.5" />
                       <span>{{ d }}</span>
                     </button>
-                    <div v-if="dirs.length === 0" class="rcw-hint">No sub-directories</div>
+                    <div v-if="dirs.length === 0" class="rcw-hint">{{ t('wizard.noSubDirs') }}</div>
                   </template>
                 </div>
 
                 <label class="rcw-save">
                   <input v-model="saveAlias" type="checkbox" />
-                  <span>Save as alias</span>
-                  <input v-if="saveAlias" v-model="aliasName" class="rcw-input mini" placeholder="name" />
+                  <span>{{ t('wizard.saveAlias') }}</span>
+                  <input v-if="saveAlias" v-model="aliasName" class="rcw-input mini" :placeholder="t('wizard.aliasNamePlaceholder')" />
                 </label>
 
                 <div class="rcw-foot">
-                  <button class="rcw-ghost" :disabled="binding" @click="close">Cancel</button>
+                  <button class="rcw-ghost" :disabled="binding" @click="close">{{ t('common.cancel') }}</button>
                   <button class="rcw-primary" :disabled="binding" @click="bindHere">
                     <ArrowPathIcon v-if="binding" class="w-3.5 h-3.5 spin" />
-                    Use this directory
+                    {{ t('wizard.useDirectory') }}
                   </button>
                 </div>
               </template>
