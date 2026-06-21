@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, watch } from 'vue'
 import { CommandLineIcon, ArrowsRightLeftIcon, FolderOpenIcon, ClipboardDocumentCheckIcon, ChevronDownIcon, RectangleStackIcon } from '@heroicons/vue/24/outline'
+import { useI18n } from 'vue-i18n'
 import { Menu as HMenu, MenuButton, MenuItems, MenuItem } from '@headlessui/vue'
 import { api } from '@/composables/api'
 
@@ -16,6 +17,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   'toggle-panel': [panel: PanelType]
 }>()
+
+const { t } = useI18n()
 
 // Terminal is a bottom panel and can be open alongside a right-panel tab, so it
 // is tracked separately from activePanel (which reflects the right panel only).
@@ -36,17 +39,17 @@ const statusColor = computed(() => {
 })
 
 const statusLabel = computed(() => {
-  if (props.isRunning) return 'Running'
-  if (props.wsConnected) return 'Connected'
-  return 'Disconnected'
+  if (props.isRunning) return t('topbar.status.running')
+  if (props.wsConnected) return t('topbar.status.connected')
+  return t('topbar.status.disconnected')
 })
 
-const panelButtons = [
-  { panel: 'plan' as PanelType, icon: ClipboardDocumentCheckIcon, label: 'Plan', shortcut: '⇧⌘P' },
-  { panel: 'files' as PanelType, icon: FolderOpenIcon, label: 'Files', shortcut: '⇧⌘E' },
-  { panel: 'changes' as PanelType, icon: ArrowsRightLeftIcon, label: 'Changes', shortcut: '⇧⌘G' },
-  { panel: 'terminal' as PanelType, icon: CommandLineIcon, label: 'Terminal', shortcut: '⌘`' },
-]
+const panelButtons = computed(() => [
+  { panel: 'plan' as PanelType, icon: ClipboardDocumentCheckIcon, label: t('topbar.plan'), shortcut: '⇧⌘P' },
+  { panel: 'files' as PanelType, icon: FolderOpenIcon, label: t('topbar.files'), shortcut: '⇧⌘E' },
+  { panel: 'changes' as PanelType, icon: ArrowsRightLeftIcon, label: t('topbar.changes'), shortcut: '⇧⌘G' },
+  { panel: 'terminal' as PanelType, icon: CommandLineIcon, label: t('topbar.terminal'), shortcut: '⌘`' },
+])
 
 // Working-tree diff stat, shown inline on the Changes item. Fetched from the
 // real /api/diff endpoint; never fabricated (null on failure / clean tree).
@@ -84,9 +87,9 @@ watch(
       <MenuButton
         class="panel-menu-btn"
         :class="{ open }"
-        :aria-label="`Panels menu · ${statusLabel}`"
+        :aria-label="t('topbar.panelsMenu', { status: statusLabel })"
         :aria-expanded="open"
-        :title="`Panels · ${statusLabel}  (⇧⌘P plan · ⇧⌘E files · ⇧⌘G changes · ⌘\` terminal)`"
+        :title="t('topbar.panelsHint', { status: statusLabel })"
         @click="loadDiffStat"
       >
         <RectangleStackIcon class="w-3.5 h-3.5" />

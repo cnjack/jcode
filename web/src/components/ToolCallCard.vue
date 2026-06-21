@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { ChevronDownIcon } from '@heroicons/vue/24/outline'
+import { useI18n } from 'vue-i18n'
 import type { ToolCall, TodoItem } from '@/types/api'
 import TaskList from './TaskList.vue'
 import AskUserCard from './AskUserCard.vue'
@@ -12,6 +13,7 @@ const props = defineProps<{
   depth?: number
 }>()
 
+const { t } = useI18n()
 const expanded = ref(false)
 const isSubagent = computed(() => props.tool.name === 'subagent')
 const isAskUser = computed(() => props.tool.name === 'ask_user')
@@ -291,10 +293,10 @@ function formatArgs(args: string): string {
         <template v-else-if="tool.status === 'done'">✓</template>
         <template v-else>✗</template>
       </span>
-      <span class="text-[10px] font-semibold uppercase tracking-wider" style="color: var(--color-muted-foreground)">subagent</span>
+      <span class="text-[10px] font-semibold uppercase tracking-wider" style="color: var(--color-muted-foreground)">{{ t('tool.subagentLabel') }}</span>
       <span class="text-[11px] font-mono" style="color: var(--color-foreground)">{{ subagentName() }}</span>
-      <span v-if="tool.status === 'running'" class="text-[10px] animate-pulse" style="color: var(--color-muted-foreground)">working…</span>
-      <span v-if="tool.children?.length" class="ml-auto text-[10px] tabular-nums" style="color: var(--color-muted-foreground)">{{ tool.children.length }} calls</span>
+      <span v-if="tool.status === 'running'" class="text-[10px] animate-pulse" style="color: var(--color-muted-foreground)">{{ t('tool.working') }}</span>
+      <span v-if="tool.children?.length" class="ml-auto text-[10px] tabular-nums" style="color: var(--color-muted-foreground)">{{ t('tool.calls', { n: tool.children.length }) }}</span>
       <ChevronDownIcon
         class="w-3 h-3 transition-transform shrink-0 ml-1"
         :class="{ 'rotate-180': subagentExpanded }"
@@ -313,7 +315,7 @@ function formatArgs(args: string): string {
         />
       </div>
       <div v-else-if="tool.status === 'running'" class="py-2 text-xs animate-pulse" style="color: var(--color-muted-foreground)">
-        Starting subagent…
+        {{ t('tool.starting') }}
       </div>
       <div
         v-if="tool.output"
@@ -396,7 +398,7 @@ function formatArgs(args: string): string {
         </div>
         <div v-if="tool.displayOutput || tool.output" class="mt-1 whitespace-pre-wrap break-all" style="color: var(--color-muted-foreground)">{{ truncate(tool.displayOutput || tool.output || '', 2000) }}</div>
         <div v-if="tool.error" class="mt-1 whitespace-pre-wrap" style="color: var(--color-error-fg)">{{ tool.error }}</div>
-        <div v-if="tool.status === 'running'" class="mt-1 animate-pulse" style="color: var(--color-muted-foreground)">running…</div>
+        <div v-if="tool.status === 'running'" class="mt-1 animate-pulse" style="color: var(--color-muted-foreground)">{{ t('tool.running') }}</div>
       </div>
 
       <!-- ═══════ File Viewer (read/write) ═══════ -->
@@ -408,8 +410,8 @@ function formatArgs(args: string): string {
           </tr>
         </table>
         <div v-else-if="tool.error" class="px-3 py-2 text-xs font-mono whitespace-pre-wrap" style="color: var(--color-destructive)">{{ tool.error }}</div>
-        <div v-else-if="tool.status === 'running'" class="px-3 py-3 text-xs animate-pulse" style="color: var(--color-muted-foreground)">Loading…</div>
-        <div v-else class="px-3 py-2 text-xs italic" style="color: var(--color-muted-foreground)">No content</div>
+        <div v-else-if="tool.status === 'running'" class="px-3 py-3 text-xs animate-pulse" style="color: var(--color-muted-foreground)">{{ t('tool.loading') }}</div>
+        <div v-else class="px-3 py-2 text-xs italic" style="color: var(--color-muted-foreground)">{{ t('tool.noContent') }}</div>
       </div>
 
       <!-- ═══════ Diff Viewer (edit/multi_edit) ═══════ -->
@@ -434,8 +436,8 @@ function formatArgs(args: string): string {
           </template>
         </table>
         <div v-else-if="tool.error" class="px-3 py-2 text-xs font-mono whitespace-pre-wrap" style="color: var(--color-destructive)">{{ tool.error }}</div>
-        <div v-else-if="tool.status === 'running'" class="px-3 py-3 text-xs animate-pulse" style="color: var(--color-muted-foreground)">Applying…</div>
-        <div v-else class="px-3 py-2 text-xs italic" style="color: var(--color-muted-foreground)">No changes</div>
+        <div v-else-if="tool.status === 'running'" class="px-3 py-3 text-xs animate-pulse" style="color: var(--color-muted-foreground)">{{ t('tool.applying') }}</div>
+        <div v-else class="px-3 py-2 text-xs italic" style="color: var(--color-muted-foreground)">{{ t('tool.noChanges') }}</div>
         <div v-if="tool.output && !tool.error" class="px-3 py-1 text-[10px] font-mono" style="background: var(--color-surface); color: var(--color-muted-foreground)">{{ truncate(tool.output, 200) }}</div>
       </div>
 
@@ -451,17 +453,17 @@ function formatArgs(args: string): string {
             <div class="text-xs font-mono whitespace-pre-wrap" style="color: var(--color-foreground)">{{ line.content }}</div>
           </div>
         </template>
-        <div v-else-if="tool.status === 'running'" class="py-1 text-xs animate-pulse" style="color: var(--color-muted-foreground)">Searching…</div>
+        <div v-else-if="tool.status === 'running'" class="py-1 text-xs animate-pulse" style="color: var(--color-muted-foreground)">{{ t('tool.searching') }}</div>
         <div v-else-if="tool.error" class="py-1 text-xs font-mono whitespace-pre-wrap" style="color: var(--color-destructive)">{{ tool.error }}</div>
-        <div v-else class="py-1 text-xs italic" style="color: var(--color-muted-foreground)">No results</div>
-        <div v-if="searchResults.count !== null" class="mt-1.5 text-[10px] font-mono" style="color: var(--color-muted-foreground)">({{ searchResults.count }} matches found)</div>
+        <div v-else class="py-1 text-xs italic" style="color: var(--color-muted-foreground)">{{ t('tool.noResults') }}</div>
+        <div v-if="searchResults.count !== null" class="mt-1.5 text-[10px] font-mono" style="color: var(--color-muted-foreground)">{{ t('tool.matchesFound', { n: searchResults.count }) }}</div>
       </div>
 
       <!-- ═══════ Todo List ═══════ -->
       <div v-else-if="renderType === 'todo'" class="px-3 py-2 max-h-64 overflow-y-auto" style="background: var(--color-surface)">
         <TaskList v-if="todoItems.length" :todos="todoItems" />
-        <div v-else-if="tool.status === 'running'" class="py-1 text-xs animate-pulse" style="color: var(--color-muted-foreground)">Loading…</div>
-        <div v-else class="py-1 text-xs italic" style="color: var(--color-muted-foreground)">No todos</div>
+        <div v-else-if="tool.status === 'running'" class="py-1 text-xs animate-pulse" style="color: var(--color-muted-foreground)">{{ t('tool.loading') }}</div>
+        <div v-else class="py-1 text-xs italic" style="color: var(--color-muted-foreground)">{{ t('tool.noTodos') }}</div>
         <div v-if="tool.error" class="mt-1.5 text-xs font-mono whitespace-pre-wrap" style="color: var(--color-destructive)">{{ tool.error }}</div>
       </div>
 
@@ -473,7 +475,7 @@ function formatArgs(args: string): string {
             v-if="tool.status === 'running'"
             class="text-[10px] animate-pulse"
             style="color: var(--color-muted-foreground)"
-          >loading…</span>
+          >{{ t('tool.loadingLower') }}</span>
         </div>
         <div
           v-if="skillData.description"
@@ -490,9 +492,9 @@ function formatArgs(args: string): string {
           class="flex items-center gap-2 mb-2 pb-1.5"
           style="border-bottom: 1px solid var(--color-border)"
         >
-          <span class="text-[10px] uppercase tracking-wider font-semibold" style="color: var(--color-muted-foreground)">team</span>
+          <span class="text-[10px] uppercase tracking-wider font-semibold" style="color: var(--color-muted-foreground)">{{ t('tool.teamLabel') }}</span>
           <span class="text-xs font-mono font-semibold" style="color: var(--color-foreground)">{{ teamListData.teamName }}</span>
-          <span class="ml-auto text-[10px] tabular-nums" style="color: var(--color-muted-foreground)">{{ teamListData.members.length }} members</span>
+          <span class="ml-auto text-[10px] tabular-nums" style="color: var(--color-muted-foreground)">{{ t('tool.members', { n: teamListData.members.length }) }}</span>
         </div>
         <div v-if="teamListData.members.length" class="space-y-0.5">
           <div v-for="(member, idx) in teamListData.members" :key="`${member.name}-${idx}`" class="flex items-center gap-2 py-0.5">
@@ -505,8 +507,8 @@ function formatArgs(args: string): string {
             <span v-if="member.type" class="text-[10px]" style="color: var(--color-muted-foreground)">{{ member.type }}</span>
           </div>
         </div>
-        <div v-else-if="tool.status === 'running'" class="py-1 text-xs animate-pulse" style="color: var(--color-muted-foreground)">Loading…</div>
-        <div v-else class="py-1 text-xs italic" style="color: var(--color-muted-foreground)">No teammates</div>
+        <div v-else-if="tool.status === 'running'" class="py-1 text-xs animate-pulse" style="color: var(--color-muted-foreground)">{{ t('tool.loading') }}</div>
+        <div v-else class="py-1 text-xs italic" style="color: var(--color-muted-foreground)">{{ t('tool.noTeammates') }}</div>
         <div v-if="tool.error" class="mt-1.5 text-xs font-mono" style="color: var(--color-destructive)">{{ tool.error }}</div>
       </div>
 
@@ -514,11 +516,11 @@ function formatArgs(args: string): string {
       <div v-else-if="renderType === 'team-create'" class="px-3 py-2.5" style="background: var(--color-surface)">
         <div class="flex items-center gap-2 mb-1">
           <span class="text-xs font-mono font-semibold" style="color: var(--color-foreground)">{{ teamCreateData.teamName }}</span>
-          <span v-if="tool.status === 'done' && !tool.error" class="ml-auto text-[10px] font-semibold" style="color: var(--color-primary)">✓ created</span>
-          <span v-else-if="tool.status === 'running'" class="ml-auto text-[10px] animate-pulse" style="color: var(--color-muted-foreground)">creating…</span>
+          <span v-if="tool.status === 'done' && !tool.error" class="ml-auto text-[10px] font-semibold" style="color: var(--color-primary)">{{ t('tool.created') }}</span>
+          <span v-else-if="tool.status === 'running'" class="ml-auto text-[10px] animate-pulse" style="color: var(--color-muted-foreground)">{{ t('tool.creating') }}</span>
         </div>
         <div v-if="teamCreateData.description" class="text-[11px] leading-snug" style="color: var(--color-muted-foreground)">{{ teamCreateData.description }}</div>
-        <div v-if="teamCreateData.lead" class="mt-1.5 text-[10px] font-mono" style="color: var(--color-muted-foreground)">lead: {{ teamCreateData.lead }}</div>
+        <div v-if="teamCreateData.lead" class="mt-1.5 text-[10px] font-mono" style="color: var(--color-muted-foreground)">{{ t('tool.lead') }} {{ teamCreateData.lead }}</div>
         <div v-if="tool.error" class="mt-1 text-xs font-mono" style="color: var(--color-destructive)">{{ tool.error }}</div>
       </div>
 
@@ -531,15 +533,15 @@ function formatArgs(args: string): string {
             class="text-[10px] px-1.5 py-0.5 rounded"
             style="background: var(--color-muted); color: var(--color-muted-foreground)"
           >{{ teamSpawnData.agentType }}</span>
-          <span v-if="tool.status === 'done' && !tool.error" class="ml-auto text-[10px] font-semibold" style="color: var(--color-primary)">✓ running</span>
-          <span v-else-if="tool.status === 'running'" class="ml-auto text-[10px] animate-pulse" style="color: var(--color-muted-foreground)">spawning…</span>
+          <span v-if="tool.status === 'done' && !tool.error" class="ml-auto text-[10px] font-semibold" style="color: var(--color-primary)">{{ t('tool.runningMark') }}</span>
+          <span v-else-if="tool.status === 'running'" class="ml-auto text-[10px] animate-pulse" style="color: var(--color-muted-foreground)">{{ t('tool.spawning') }}</span>
         </div>
         <div
           v-if="teamSpawnData.prompt"
           class="text-[11px] leading-snug"
           style="color: var(--color-muted-foreground); font-style: italic; white-space: pre-wrap"
         >{{ truncate(teamSpawnData.prompt, 150) }}</div>
-        <div v-if="teamSpawnData.id" class="mt-1.5 text-[10px] font-mono" style="color: var(--color-muted-foreground)">id: {{ teamSpawnData.id }}</div>
+        <div v-if="teamSpawnData.id" class="mt-1.5 text-[10px] font-mono" style="color: var(--color-muted-foreground)">{{ t('tool.id') }} {{ teamSpawnData.id }}</div>
         <div v-if="tool.error" class="mt-1 text-xs font-mono" style="color: var(--color-destructive)">{{ tool.error }}</div>
       </div>
 
@@ -549,18 +551,18 @@ function formatArgs(args: string): string {
         <div class="flex items-center gap-2 mb-1.5">
           <span class="text-[10px]" style="color: var(--color-muted-foreground)">→</span>
           <span class="text-xs font-mono font-semibold" style="color: var(--color-foreground)">
-            {{ teamMsgData.to === '*' ? 'all' : '@' + teamMsgData.to }}
+            {{ teamMsgData.to === '*' ? t('tool.all') : '@' + teamMsgData.to }}
           </span>
           <span
             v-if="tool.status === 'done' && !tool.error"
             class="ml-auto text-[10px] font-semibold"
             style="color: var(--color-primary)"
-          >✓ sent</span>
+          >{{ t('tool.sent') }}</span>
           <span
             v-else-if="tool.status === 'running'"
             class="ml-auto text-[10px] animate-pulse"
             style="color: var(--color-muted-foreground)"
-          >sending…</span>
+          >{{ t('tool.sending') }}</span>
         </div>
         <!-- Summary -->
         <div v-if="teamMsgData.summary" class="text-[11px] leading-snug font-medium mb-1" style="color: var(--color-foreground)">
@@ -580,15 +582,15 @@ function formatArgs(args: string): string {
         :style="'border-color: ' + (tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-border)')"
       >
         <div class="mb-1.5">
-          <span class="text-[10px] uppercase tracking-wider" style="color: var(--color-muted-foreground)">args</span>
+          <span class="text-[10px] uppercase tracking-wider" style="color: var(--color-muted-foreground)">{{ t('tool.args') }}</span>
           <div class="mt-0.5" style="color: var(--color-muted-foreground)">{{ formatArgs(tool.args) }}</div>
         </div>
         <div v-if="tool.output" class="mt-2">
-          <span class="text-[10px] uppercase tracking-wider" style="color: var(--color-muted-foreground)">output</span>
+          <span class="text-[10px] uppercase tracking-wider" style="color: var(--color-muted-foreground)">{{ t('tool.output') }}</span>
           <div class="whitespace-pre-wrap mt-0.5" style="color: var(--color-muted-foreground)">{{ truncate(tool.output, 500) }}</div>
         </div>
         <div v-if="tool.error" class="mt-2">
-          <span class="text-[10px] uppercase tracking-wider" style="color: var(--color-destructive)">error</span>
+          <span class="text-[10px] uppercase tracking-wider" style="color: var(--color-destructive)">{{ t('tool.error') }}</span>
           <div class="whitespace-pre-wrap mt-0.5" style="color: var(--color-destructive)">{{ tool.error }}</div>
         </div>
       </div>

@@ -12,6 +12,7 @@ import {
   TransitionChild,
 } from '@headlessui/vue'
 import { FolderIcon, TrashIcon } from '@heroicons/vue/24/outline'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{
   open: boolean
@@ -23,6 +24,7 @@ const emit = defineEmits<{
 }>()
 
 const projectStore = useProjectStore()
+const { t } = useI18n()
 const openRemoteConnect = inject<(prefill?: RemoteMeta) => void>('openRemoteConnect')
 
 const {
@@ -126,7 +128,7 @@ function deleteProject(id: string) {
             <!-- Header -->
             <div class="px-5 pt-4 pb-2">
               <DialogTitle class="text-sm font-semibold" style="font-family: var(--font-sans); color: var(--color-foreground)">
-                {{ showBrowser ? 'Open Folder' : 'Projects' }}
+                {{ showBrowser ? t('projectSwitcher.openFolder') : t('projectSwitcher.title') }}
               </DialogTitle>
             </div>
 
@@ -137,7 +139,7 @@ function deleteProject(id: string) {
                   v-model="pathInput"
                   type="text"
                   class="ps-input flex-1 px-3 py-1.5 text-sm font-mono rounded-md outline-none"
-                  placeholder="/path/to/folder"
+                  :placeholder="t('projectSwitcher.pathPlaceholder')"
                   @keydown.enter="handlePathSubmit"
                 />
                 <button
@@ -166,11 +168,11 @@ function deleteProject(id: string) {
                 </button>
 
                 <div v-if="browseLoading" class="px-3 py-6 text-center text-xs animate-pulse" style="color: var(--color-muted-foreground)">
-                  Loading...
+                  {{ t('projectSwitcher.loading') }}
                 </div>
 
                 <div v-else-if="browseFolders.length === 0" class="px-3 py-6 text-center text-xs" style="color: var(--color-muted-foreground)">
-                  No folders found
+                  {{ t('projectSwitcher.noFolders') }}
                 </div>
 
                 <button
@@ -194,7 +196,7 @@ function deleteProject(id: string) {
                   style="background: var(--color-primary); color: var(--color-on-primary)"
                   @click="selectCurrentPath"
                 >
-                  Open Folder
+                  {{ t('projectSwitcher.openFolder') }}
                 </button>
               </div>
             </div>
@@ -208,12 +210,12 @@ function deleteProject(id: string) {
               </div>
 
               <div v-if="projectStore.switching" class="px-3 py-6 text-center text-xs animate-pulse" style="color: var(--color-muted-foreground)">
-                Switching project...
+                {{ t('projectSwitcher.switching') }}
               </div>
 
               <div v-else class="px-3 pb-2 max-h-72 overflow-y-auto">
                 <div v-if="projectStore.projects.length === 0" class="text-xs py-6 text-center" style="color: var(--color-muted-foreground)">
-                  No projects yet
+                  {{ t('projectSwitcher.noProjects') }}
                 </div>
                 <div
                   v-for="p in projectStore.projects"
@@ -237,7 +239,7 @@ function deleteProject(id: string) {
                   <button
                     class="ps-delete opacity-0 group-hover:opacity-100 p-1 cursor-pointer transition-all"
                     @click.stop="deleteProject(p.id)"
-                    title="Remove project"
+                    :title="t('projectSwitcher.removeProject')"
                   >
                     <TrashIcon class="w-3.5 h-3.5" />
                   </button>
@@ -251,21 +253,21 @@ function deleteProject(id: string) {
                     style="color: var(--color-primary)"
                     @click="openFolderAction"
                   >
-                    + Open Folder
+                    {{ t('projectSwitcher.openFolderBtn') }}
                   </button>
                   <button
                     class="text-xs cursor-pointer transition-opacity hover:opacity-80 font-medium"
                     style="color: var(--color-primary)"
                     @click="openRemote"
                   >
-                    Remote connect
+                    {{ t('nav.remoteConnect') }}
                   </button>
                 </div>
                 <button
                   class="ps-muted-btn px-3 py-1 text-xs cursor-pointer transition-colors"
                   @click="emit('close')"
                 >
-                  Close
+                  {{ t('common.close') }}
                 </button>
               </div>
             </div>

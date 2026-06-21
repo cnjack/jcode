@@ -4,6 +4,7 @@
 // — shows up everywhere.
 import { ref } from 'vue'
 import { api } from '@/composables/api'
+import { i18n } from '@/i18n'
 
 const current = ref('')
 const branches = ref<string[]>([])
@@ -39,7 +40,7 @@ async function checkout(branch: string, create = false): Promise<boolean> {
     current.value = res.branch || branch
     return true
   } catch (e) {
-    error.value = (e as Error).message || 'Failed to switch branch'
+    error.value = (e as Error).message || i18n.global.t('errors.branchSwitch')
     return false
   } finally {
     switching.value = false
