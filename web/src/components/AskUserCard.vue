@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, watch, onUnmounted } from 'vue'
 import { ChevronDownIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import { useI18n } from 'vue-i18n'
 import type { ToolCall, AskUserQuestion, AskUserAnswer } from '@/types/api'
 import { useChatStore } from '@/stores/chat'
 
@@ -11,6 +12,7 @@ const props = defineProps<{
 }>()
 
 const store = useChatStore()
+const { t } = useI18n()
 const collapsed = ref(false)
 // Locally remembered answers, set on submit/skip so the resolved view shows the
 // choice immediately during the brief gap before the tool_result event lands.
@@ -42,7 +44,7 @@ const isPending = computed(() =>
   !!props.tool.askUserId && props.tool.status === 'running' && !props.tool.output,
 )
 
-const title = computed(() => questions.value[0]?.question || 'Asking')
+const title = computed(() => questions.value[0]?.question || t('approval.asking'))
 
 // ─── Answer state (per question index) ───
 const selections = reactive<Record<number, string[]>>({})
@@ -191,10 +193,10 @@ const resolvedAnswers = computed<string[]>(() => {
           :style="{ background: isPending ? 'var(--color-primary)' : 'var(--color-muted-foreground)' }"
         />
         <span class="text-sm font-medium flex-1 min-w-0 truncate" style="color: var(--color-foreground)">{{ title }}</span>
-        <button class="shrink-0 cursor-pointer hover:opacity-70" title="Collapse" @click="collapsed = true">
+        <button class="shrink-0 cursor-pointer hover:opacity-70" :title="t('askUser.collapse')" @click="collapsed = true">
           <ChevronDownIcon class="w-3.5 h-3.5 rotate-180" style="color: var(--color-muted-foreground)" />
         </button>
-        <button v-if="isPending" class="shrink-0 cursor-pointer hover:opacity-70" title="Skip" @click="skip">
+        <button v-if="isPending" class="shrink-0 cursor-pointer hover:opacity-70" :title="t('askUser.skip')" @click="skip">
           <XMarkIcon class="w-3.5 h-3.5" style="color: var(--color-muted-foreground)" />
         </button>
       </div>
@@ -238,11 +240,11 @@ const resolvedAnswers = computed<string[]>(() => {
 
           <!-- Free-form "Other" input -->
           <div class="mt-1 px-1">
-            <div v-if="q.options?.length" class="px-2 pt-1 pb-0.5 text-sm" style="color: var(--color-foreground)">Other</div>
+            <div v-if="q.options?.length" class="px-2 pt-1 pb-0.5 text-sm" style="color: var(--color-foreground)">{{ t('askUser.other') }}</div>
             <input
               v-model="freeText[qi]"
               type="text"
-              placeholder="Type your own answer here"
+              :placeholder="t('askUser.customPlaceholder')"
               class="w-full px-2.5 py-1.5 text-sm rounded-lg outline-none"
               :style="{ background: 'var(--color-background)', border: '1px solid var(--color-border)', color: 'var(--color-foreground)' }"
               @input="onFreeTextInput(qi, !!q.multi_select)"
@@ -257,7 +259,7 @@ const resolvedAnswers = computed<string[]>(() => {
             class="px-3 py-1.5 text-xs rounded-md cursor-pointer transition-colors"
             style="color: var(--color-muted-foreground)"
             @click="skip"
-          >Skip</button>
+          >{{ t('askUser.skip') }}</button>
           <button
             class="px-3.5 py-1.5 text-xs rounded-md font-medium transition-opacity flex items-center gap-1.5"
             :class="canSubmit ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'"
@@ -265,7 +267,7 @@ const resolvedAnswers = computed<string[]>(() => {
             :disabled="!canSubmit"
             @click="submit"
           >
-            <span>Submit</span>
+            <span>{{ t('askUser.submit') }}</span>
             <span class="text-[10px] opacity-80">↵</span>
           </button>
         </div>
@@ -282,7 +284,7 @@ const resolvedAnswers = computed<string[]>(() => {
             </div>
           </div>
         </template>
-        <div v-else class="text-xs italic" style="color: var(--color-muted-foreground)">No answer recorded</div>
+        <div v-else class="text-xs italic" style="color: var(--color-muted-foreground)">{{ t('askUser.noAnswer') }}</div>
       </div>
     </div>
   </div>

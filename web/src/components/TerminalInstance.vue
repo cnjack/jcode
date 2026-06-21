@@ -3,6 +3,7 @@ import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { useI18n } from 'vue-i18n'
 import { api } from '@/composables/api'
 import '@xterm/xterm/css/xterm.css'
 
@@ -15,6 +16,7 @@ const emit = defineEmits<{
   disconnected: []
 }>()
 
+const { t } = useI18n()
 const termEl = ref<HTMLDivElement | null>(null)
 const connected = ref(false)
 
@@ -115,7 +117,7 @@ async function init() {
     connectWS(result.id)
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
-    term.writeln(`\r\n\x1b[31mFailed to create terminal: ${msg}\x1b[0m`)
+    term.writeln(`\r\n\x1b[31m${t('terminal.failedCreate', { msg })}\x1b[0m`)
   }
 }
 
@@ -133,7 +135,7 @@ function connectWS(ptyId: string) {
   ws.onclose = () => {
     connected.value = false
     emit('disconnected')
-    term?.writeln('\r\n\x1b[33m[Session ended]\x1b[0m')
+    term?.writeln(`\r\n\x1b[33m${t('terminal.sessionEnded')}\x1b[0m`)
   }
   ws.onerror = () => {
     connected.value = false

@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { XMarkIcon, PlusIcon } from '@heroicons/vue/24/outline'
+import { useI18n } from 'vue-i18n'
 import TerminalInstance from './TerminalInstance.vue'
 
 const emit = defineEmits<{
   close: []
 }>()
+
+const { t } = useI18n()
 
 interface Tab {
   id: string
@@ -14,7 +17,7 @@ interface Tab {
 
 let nextId = 1
 function makeTab(): Tab {
-  return { id: String(nextId++), label: `Shell ${nextId - 1}` }
+  return { id: String(nextId++), label: t('terminal.shell', { n: nextId - 1 }) }
 }
 
 const initialTab = makeTab()
@@ -70,7 +73,7 @@ function closeTab(id: string) {
                revealed on focus-within so it's usable without a mouse. -->
           <button
             class="tab-close"
-            :aria-label="`Close ${tab.label}`"
+            :aria-label="t('terminal.closeTab', { label: tab.label })"
             @click.stop="closeTab(tab.id)"
             @keydown.enter.stop.prevent="closeTab(tab.id)"
             @keydown.space.stop.prevent="closeTab(tab.id)"
@@ -81,14 +84,14 @@ function closeTab(id: string) {
         </div>
 
         <!-- + New terminal after the last tab -->
-        <button class="ctrl-btn" title="New terminal" @click="addTab">
+        <button class="ctrl-btn" :title="t('terminal.newTerminal')" @click="addTab">
           <PlusIcon class="w-3 h-3" />
         </button>
       </div>
 
       <!-- Controls: close panel only -->
       <div class="flex items-center gap-0.5 shrink-0">
-        <button class="ctrl-btn" title="Close panel" @click="emit('close')">
+        <button class="ctrl-btn" :title="t('terminal.closePanel')" @click="emit('close')">
           <XMarkIcon class="w-3 h-3" />
         </button>
       </div>

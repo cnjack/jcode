@@ -8,6 +8,7 @@ import {
   EyeIcon,
   EyeSlashIcon,
 } from '@heroicons/vue/24/outline'
+import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
 import { api } from '@/composables/api'
 import type { SetupProvider, SetupModel } from '@/types/api'
@@ -17,6 +18,7 @@ const emit = defineEmits<{
 }>()
 
 const store = useChatStore()
+const { t } = useI18n()
 
 type Step = 'provider' | 'model' | 'apikey' | 'done'
 const step = ref<Step>('provider')
@@ -203,7 +205,7 @@ function finish() {
           <div class="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-5" style="background: var(--color-success-bg)">
             <CheckIcon class="w-8 h-8" style="color: var(--color-success-fg)" />
           </div>
-          <h2 class="text-xl font-semibold mb-2" style="font-family: var(--font-sans); color: var(--color-foreground)">You're all set!</h2>
+          <h2 class="text-xl font-semibold mb-2" style="font-family: var(--font-sans); color: var(--color-foreground)">{{ t('setup.allSet') }}</h2>
           <p class="text-sm mb-6" style="color: var(--color-muted-foreground)">
             Using <span class="font-mono" style="color: var(--color-foreground)">{{ selectedModel }}</span> via <span class="font-mono" style="color: var(--color-foreground)">{{ selectedProviderInfo?.name || selectedProvider }}</span>
           </p>
@@ -212,7 +214,7 @@ function finish() {
             style="background: var(--color-primary); color: var(--color-on-primary)"
             @click="finish"
           >
-            Start coding
+            {{ t('setup.startCoding') }}
           </button>
         </div>
 
@@ -231,28 +233,28 @@ function finish() {
               />
             </div>
             <span class="text-[10px] uppercase tracking-wider ml-auto" style="color: var(--color-muted-foreground)">
-              {{ step === 'provider' ? 'Step 1: Choose Provider' : step === 'model' ? 'Step 2: Choose Model' : 'Step 3: API Key' }}
+              {{ step === 'provider' ? t('setup.step', { n: 1, label: t('setup.chooseProvider') }) : step === 'model' ? t('setup.step', { n: 2, label: t('setup.chooseModel') }) : t('setup.step', { n: 3, label: t('setup.enterApiKey') }) }}
             </span>
           </div>
 
           <!-- Provider selection -->
           <div v-if="step === 'provider'" class="px-6 pb-5">
-            <h2 class="text-base font-semibold mb-1" style="font-family: var(--font-sans); color: var(--color-foreground)">Choose a Provider</h2>
-            <p class="text-xs mb-3" style="color: var(--color-muted-foreground)">Select the AI provider you'd like to use.</p>
+            <h2 class="text-base font-semibold mb-1" style="font-family: var(--font-sans); color: var(--color-foreground)">{{ t('setup.chooseProvider') }}</h2>
+            <p class="text-xs mb-3" style="color: var(--color-muted-foreground)">{{ t('setup.selectProviderDesc') }}</p>
 
             <input
               v-model="providerSearch"
               type="text"
-              placeholder="Search providers..."
+              :placeholder="t('setup.searchProviders')"
               class="setup-input w-full px-3 py-2 text-sm rounded-lg mb-3 outline-none"
             />
 
-            <div v-if="loading" class="text-center py-8 text-sm animate-pulse" style="color: var(--color-muted-foreground)">Loading providers...</div>
+            <div v-if="loading" class="text-center py-8 text-sm animate-pulse" style="color: var(--color-muted-foreground)">{{ t('setup.loadingProviders') }}</div>
             <div v-else-if="error" class="text-center py-8">
               <div class="text-sm mb-3" style="color: var(--color-error-fg)">{{ error }}</div>
-              <button class="setup-retry px-4 py-1.5 text-xs rounded-lg cursor-pointer font-medium" @click="loadProviders">Retry</button>
+              <button class="setup-retry px-4 py-1.5 text-xs rounded-lg cursor-pointer font-medium" @click="loadProviders">{{ t('setup.retry') }}</button>
             </div>
-            <div v-else-if="filteredProviders.length === 0" class="text-center py-8 text-sm" style="color: var(--color-muted-foreground)">No providers found</div>
+            <div v-else-if="filteredProviders.length === 0" class="text-center py-8 text-sm" style="color: var(--color-muted-foreground)">{{ t('setup.noProviders') }}</div>
             <div v-else class="space-y-1.5 max-h-72 overflow-y-auto pr-1">
               <button
                 v-for="p in filteredProviders"
@@ -267,9 +269,9 @@ function finish() {
                     <div v-if="p.doc" class="text-[10px] mt-0.5" style="color: var(--color-muted-foreground)">{{ p.doc }}</div>
                   </div>
                   <div class="flex items-center gap-2">
-                    <span v-if="p.tag === 'recommended'" class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--accent-wash); color: var(--color-primary)">Recommended</span>
-                    <span v-if="p.tag === 'local'" class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--color-info-bg); color: var(--color-info-fg)">Local</span>
-                    <span v-if="p.configured" class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--color-success-bg); color: var(--color-success-fg)">configured</span>
+                    <span v-if="p.tag === 'recommended'" class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--accent-wash); color: var(--color-primary)">{{ t('common.recommended') }}</span>
+                    <span v-if="p.tag === 'local'" class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--color-info-bg); color: var(--color-info-fg)">{{ t('common.local') }}</span>
+                    <span v-if="p.configured" class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--color-success-bg); color: var(--color-success-fg)">{{ t('common.configured') }}</span>
                     <ChevronLeftIcon class="setup-chevron w-4 h-4 transition-colors" />
                   </div>
                 </div>
@@ -283,23 +285,23 @@ function finish() {
               <button class="setup-back transition-colors cursor-pointer" @click="goBack">
                 <ChevronRightIcon class="w-4 h-4" />
               </button>
-              <h2 class="text-base font-semibold" style="font-family: var(--font-sans); color: var(--color-foreground)">Choose a Model</h2>
+              <h2 class="text-base font-semibold" style="font-family: var(--font-sans); color: var(--color-foreground)">{{ t('setup.chooseModel') }}</h2>
             </div>
-            <p class="text-xs mb-3 ml-6" style="color: var(--color-muted-foreground)">For <span class="font-mono">{{ selectedProviderInfo?.name }}</span></p>
+            <p class="text-xs mb-3 ml-6" style="color: var(--color-muted-foreground)">{{ t('setup.for') }} <span class="font-mono">{{ selectedProviderInfo?.name }}</span></p>
 
             <input
               v-model="modelSearch"
               type="text"
-              placeholder="Search models..."
+              :placeholder="t('setup.searchModels')"
               class="setup-input w-full px-3 py-2 text-sm rounded-lg mb-3 outline-none"
             />
 
-            <div v-if="loading" class="text-center py-8 text-sm animate-pulse" style="color: var(--color-muted-foreground)">Loading models...</div>
+            <div v-if="loading" class="text-center py-8 text-sm animate-pulse" style="color: var(--color-muted-foreground)">{{ t('setup.loadingModels') }}</div>
             <div v-else-if="error" class="text-center py-8">
               <div class="text-sm mb-3" style="color: var(--color-error-fg)">{{ error }}</div>
-              <button class="setup-retry px-4 py-1.5 text-xs rounded-lg cursor-pointer font-medium" @click="loadModels">Retry</button>
+              <button class="setup-retry px-4 py-1.5 text-xs rounded-lg cursor-pointer font-medium" @click="loadModels">{{ t('setup.retry') }}</button>
             </div>
-            <div v-else-if="filteredModels.length === 0" class="text-center py-8 text-sm" style="color: var(--color-muted-foreground)">No models found</div>
+            <div v-else-if="filteredModels.length === 0" class="text-center py-8 text-sm" style="color: var(--color-muted-foreground)">{{ t('setup.noModels') }}</div>
             <div v-else class="space-y-1 max-h-72 overflow-y-auto pr-1">
               <button
                 v-for="m in filteredModels"
@@ -329,25 +331,25 @@ function finish() {
               <button class="setup-back transition-colors cursor-pointer" @click="goBack">
                 <ChevronRightIcon class="w-4 h-4" />
               </button>
-              <h2 class="text-base font-semibold" style="font-family: var(--font-sans); color: var(--color-foreground)">Enter API Key</h2>
+              <h2 class="text-base font-semibold" style="font-family: var(--font-sans); color: var(--color-foreground)">{{ t('setup.enterApiKey') }}</h2>
             </div>
             <p class="text-xs mb-4 ml-6" style="color: var(--color-muted-foreground)">
-              For <span class="font-mono">{{ selectedProviderInfo?.name }}</span> · <span class="font-mono">{{ selectedModel }}</span>
+              {{ t('setup.for') }} <span class="font-mono">{{ selectedProviderInfo?.name }}</span> · <span class="font-mono">{{ selectedModel }}</span>
             </p>
 
             <div class="space-y-3 ml-6">
               <div v-if="selectedProviderInfo?.env?.length" class="px-3 py-2 rounded-md" style="background: var(--color-muted); border: 1px solid var(--color-border)">
-                <div class="text-[10px] mb-1" style="color: var(--color-muted-foreground)">Environment variable</div>
+                <div class="text-[10px] mb-1" style="color: var(--color-muted-foreground)">{{ t('setup.envVar') }}</div>
                 <div class="text-xs font-mono" style="color: var(--color-foreground)">{{ selectedProviderInfo.env[0] }}</div>
               </div>
 
               <div>
-                <label class="block text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">API Key</label>
+                <label class="block text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('setup.apiKey') }}</label>
                 <div class="relative">
                   <input
                     v-model="apiKey"
                     :type="showApiKey ? 'text' : 'password'"
-                    placeholder="sk-..."
+                    :placeholder="t('setup.apiKeyPlaceholder')"
                     class="setup-input w-full px-3 py-2 text-sm font-mono rounded-lg outline-none pr-10"
                     :class="{ valid: validationResult?.valid, invalid: validationResult?.valid === false }"
                     @keydown.enter="submitSetup"
@@ -363,7 +365,7 @@ function finish() {
               </div>
 
               <div>
-                <label class="block text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">Base URL <span class="normal-case">(optional)</span></label>
+                <label class="block text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('setup.baseUrl') }}</label>
                 <input
                   v-model="baseURL"
                   type="text"
@@ -380,11 +382,11 @@ function finish() {
                   class="setup-secondary px-3 py-1.5 text-xs rounded-lg disabled:opacity-50 cursor-pointer transition-colors"
                   @click="validateConnection"
                 >
-                  {{ validating ? 'Checking...' : 'Test Connection' }}
+                  {{ validating ? t('setup.checking') : t('setup.testConnection') }}
                 </button>
                 <span v-if="validationResult?.valid" class="text-xs flex items-center gap-1" style="color: var(--color-success-fg)">
                   <CheckCircleIcon class="w-3.5 h-3.5" />
-                  Connected
+                  {{ t('setup.connected') }}
                 </span>
                 <span v-if="validationResult?.valid === false" class="text-xs" style="color: var(--color-error-fg)">{{ validationResult.error }}</span>
               </div>
@@ -400,7 +402,7 @@ function finish() {
                 style="background: var(--color-primary); color: var(--color-on-primary)"
                 @click="submitSetup"
               >
-                {{ loading ? 'Setting up...' : 'Complete Setup' }}
+                {{ loading ? t('setup.settingUp') : t('setup.completeSetup') }}
               </button>
             </div>
           </div>
@@ -408,7 +410,7 @@ function finish() {
 
         <!-- Footer hint -->
         <p v-if="step !== 'done'" class="text-center text-[10px] mt-4" style="color: var(--color-muted-foreground)">
-          Configuration saved to <span class="font-mono">~/.jcode/config.json</span>
+          {{ t('setup.savedTo') }}
         </p>
       </div>
     </div>

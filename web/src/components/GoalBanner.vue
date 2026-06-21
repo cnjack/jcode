@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { BoltIcon } from '@heroicons/vue/24/outline'
+import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
 
 const store = useChatStore()
+const { t } = useI18n()
 
 const goal = computed(() => store.goal)
 
@@ -18,25 +20,30 @@ const statusColor = computed(() => {
   }
 })
 
-// Human-readable status — the raw enum (e.g. 'in_progress') would render with an
-// underscore. Falls back to a de-underscored form for any unmapped value.
+// Human-readable status — maps the GoalStatus enum ('active' | 'complete' |
+// 'blocked') to localized labels. Falls back to a de-underscored form for any
+// unmapped value.
 const statusLabel = computed(() => {
   const s = goal.value?.status || ''
-  const map: Record<string, string> = {
-    active: 'Active',
-    in_progress: 'In progress',
-    complete: 'Completed',
-    completed: 'Completed',
-    blocked: 'Blocked',
+  switch (s) {
+    case 'active':
+      return t('goal.status.active')
+    case 'complete':
+      return t('goal.status.completed')
+    case 'blocked':
+      return t('goal.status.blocked')
+    default:
+      return s.replace(/_/g, ' ')
   }
-  return map[s] || s.replace(/_/g, ' ')
 })
 
 const tokensLabel = computed(() => {
   if (!goal.value) return ''
   const used = goal.value.tokens_used ?? 0
   if (used <= 0) return ''
-  return used < 1000 ? `${used} tokens` : `${(used / 1000).toFixed(1)}k tokens`
+  return used < 1000
+    ? t('goal.tokens', { used })
+    : t('goal.tokensK', { k: (used / 1000).toFixed(1) })
 })
 </script>
 
@@ -65,10 +72,10 @@ const tokensLabel = computed(() => {
     <button
       class="goal-clear text-[10px] px-2 py-1 rounded shrink-0 cursor-pointer"
       style="background-color: var(--color-background); color: var(--color-muted-foreground)"
-      title="Clear goal"
+      :title="t('goal.clearGoal')"
       @click="store.clearGoal()"
     >
-      Clear
+      {{ t('goal.clear') }}
     </button>
   </div>
 </template>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick, watch, onUnmounted, provide } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ChevronDoubleDownIcon } from '@heroicons/vue/24/outline'
 import { normalizeMode } from '@/types/api'
 import type { RemoteMeta } from '@/types/api'
@@ -26,6 +27,7 @@ import { useNotifications } from '@/composables/notifications'
 
 const store = useChatStore()
 const projectStore = useProjectStore()
+const { t } = useI18n()
 const { resolvedTheme, toggleTheme } = useTheme()
 const { refresh: refreshBranch } = useBranch()
 const { ensurePermission, notify } = useNotifications()
@@ -110,13 +112,13 @@ const { connected } = useWebSocket({
   onTokenUpdate: (data) => { store.tokenInfo = data },
   onAgentDone: (data) => {
     store.agentDone(data?.error)
-    notify(data?.error ? 'jcode — task failed' : 'jcode — task finished', data?.error || 'The agent finished its run.')
+    notify(data?.error ? t('notifications.taskFailed') : t('notifications.taskFinished'), data?.error || t('notifications.finishedBody'))
   },
   onTodoUpdate: () => store.fetchTodos(),
   onGoalUpdate: (data) => { store.goal = data },
   onApprovalRequest: (data) => {
     store.addApprovalRequest(data)
-    notify('jcode — approval needed', 'The agent is waiting for your approval.')
+    notify(t('notifications.approvalNeeded'), t('notifications.approvalBody'))
   },
   onAskUserRequest: (data) => store.attachAskUserRequest(data.id, data.questions),
   onSessionReset: () => store.clearChat(),
@@ -432,10 +434,12 @@ function startResize(e: MouseEvent) {
               <span class="wl-dim">[</span><span class="wl-j">J</span><span class="wl-fg">CODE</span><span class="wl-dim">]</span>
             </div>
             <h2 class="welcome-title">
-              Start a new task in <span class="welcome-project">{{ store.projectName || 'jcode' }}</span>
+              {{ t('welcome.startIn', { project: store.projectName || 'jcode' }) }}
             </h2>
             <p class="welcome-sub">
-              Send a message to start. <kbd class="welcome-kbd">/</kbd> for commands.
+              <i18n-t keypath="welcome.subtitle" tag="span">
+                <template #kbd><kbd class="welcome-kbd">/</kbd></template>
+              </i18n-t>
             </p>
           </div>
 
@@ -486,14 +490,14 @@ function startResize(e: MouseEvent) {
                   class="flex items-center gap-2.5 py-3 pl-9 select-none"
                   role="status"
                   aria-live="polite"
-                  aria-label="Thinking"
+                  :aria-label="t('chat.thinking')"
                 >
                   <span class="flex gap-1" aria-hidden="true">
                     <span class="w-1.5 h-1.5 rounded-full animate-dot-pulse" style="background: var(--color-primary); animation-delay: 0ms" />
                     <span class="w-1.5 h-1.5 rounded-full animate-dot-pulse" style="background: var(--color-primary); animation-delay: 160ms" />
                     <span class="w-1.5 h-1.5 rounded-full animate-dot-pulse" style="background: var(--color-primary); animation-delay: 320ms" />
                   </span>
-                  <span class="thinking-label text-[13px]" style="font-family: var(--font-sans)">Thinking…</span>
+                  <span class="thinking-label text-[13px]" style="font-family: var(--font-sans)">{{ t('chat.thinking') }}</span>
                   <span
                     v-if="elapsed >= 2"
                     class="text-xs tabular-nums"
@@ -586,10 +590,10 @@ function startResize(e: MouseEvent) {
          shell. Retry re-runs the boot sequence. -->
     <div v-if="connectionError" class="conn-error-overlay">
       <div class="conn-error-card">
-        <div class="conn-error-title">无法连接到 jcode 服务</div>
-        <div class="conn-error-msg">本地服务可能尚未就绪或已停止。请稍候重试，或退出后重新启动。</div>
+        <div class="conn-error-title">{{ t('connection.errorTitle') }}</div>
+        <div class="conn-error-msg">{{ t('connection.errorBody') }}</div>
         <button class="conn-error-retry" :disabled="booting" @click="boot">
-          {{ booting ? '正在重试…' : '重试连接' }}
+          {{ booting ? t('connection.retrying') : t('connection.retry') }}
         </button>
       </div>
     </div>

@@ -6,6 +6,7 @@ import {
   LockClosedIcon,
   ChevronDownIcon,
 } from '@heroicons/vue/24/outline'
+import { useI18n } from 'vue-i18n'
 import type { PendingApproval } from '@/types/api'
 import { useChatStore } from '@/stores/chat'
 
@@ -14,6 +15,7 @@ defineProps<{
 }>()
 
 const store = useChatStore()
+const { t } = useI18n()
 const showArgs = ref(false)
 // Two-step confirm for the high-stakes "Allow all" action (auto-approves the
 // rest of the session). First click arms it; a second click on the now-red
@@ -53,8 +55,8 @@ function formatArgs(args: string): string {
       <span
         class="text-[10px] shrink-0"
         :style="{ color: approval.approved ? 'var(--color-success-fg)' : 'var(--color-error-fg)' }"
-      >{{ approval.approved ? 'Allowed' : 'Denied' }}</span>
-      <span v-if="approval.is_external" class="text-[10px] shrink-0" style="color: var(--color-muted-foreground)">· external</span>
+      >{{ approval.approved ? t('approval.allowed') : t('approval.denied') }}</span>
+      <span v-if="approval.is_external" class="text-[10px] shrink-0" style="color: var(--color-muted-foreground)">{{ t('approval.external') }}</span>
     </div>
   </div>
 
@@ -85,7 +87,7 @@ function formatArgs(args: string): string {
             style="color: var(--color-warning-fg)"
             aria-hidden="true"
           />
-          <span class="text-xs font-medium" style="color: var(--color-foreground)">Approval needed</span>
+          <span class="text-xs font-medium" style="color: var(--color-foreground)">{{ t('approval.needed') }}</span>
           <span
             v-if="approval.is_external"
             class="ml-1 px-1.5 py-0.5 text-[10px] font-medium shrink-0"
@@ -94,12 +96,12 @@ function formatArgs(args: string): string {
               background: 'color-mix(in srgb, var(--color-warning-fg) 14%, transparent)',
               color: 'var(--color-warning-fg)',
             }"
-          >external path</span>
+          >{{ t('approval.externalPath') }}</span>
           <button
             type="button"
             class="ml-auto shrink-0 inline-flex items-center cursor-pointer hover:opacity-70 transition-opacity"
             :aria-expanded="showArgs"
-            aria-label="Toggle arguments"
+            :aria-label="t('approval.toggleArgs')"
             @click="showArgs = !showArgs"
           >
             <ChevronDownIcon
@@ -131,7 +133,7 @@ function formatArgs(args: string): string {
           :disabled="approval.resolving"
           @click="store.resolveApproval(approval.id, true, false)"
         >
-          Allow once
+          {{ t('approval.allowOnce') }}
         </button>
         <button
           type="button"
@@ -139,14 +141,14 @@ function formatArgs(args: string): string {
           :style="armingAllowAll
             ? { backgroundColor: 'var(--color-destructive)', color: 'var(--color-on-destructive)' }
             : { backgroundColor: 'transparent', color: 'var(--color-foreground)', border: '1px solid var(--color-border)' }"
-          :title="armingAllowAll ? 'Click again to auto-approve the rest of the session' : 'Approve this and auto-approve the rest of the session'"
+          :title="armingAllowAll ? t('approval.confirmHint') : t('approval.allowAllTitle')"
           :disabled="approval.resolving"
           @click="armingAllowAll
             ? store.resolveApproval(approval.id, true, true)
             : (armingAllowAll = true)"
           @blur="armingAllowAll = false"
         >
-          {{ armingAllowAll ? 'Confirm?' : 'Allow all' }}
+          {{ armingAllowAll ? t('approval.confirm') : t('approval.allowAll') }}
         </button>
         <button
           type="button"
@@ -155,7 +157,7 @@ function formatArgs(args: string): string {
           :disabled="approval.resolving"
           @click="store.resolveApproval(approval.id, false)"
         >
-          Deny
+          {{ t('approval.deny') }}
         </button>
       </div>
     </div>

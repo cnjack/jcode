@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, nextTick, watch, computed, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
 import { api } from '@/composables/api'
 import type { SlashCommandInfo, ChatImage } from '@/types/api'
@@ -16,6 +17,7 @@ withDefaults(defineProps<{ pickerPlacement?: 'top' | 'bottom' }>(), {
 })
 
 const store = useChatStore()
+const { t } = useI18n()
 // Current git branch (singleton) — used to decide whether the composer's top row
 // is worth showing once the workspace picker is hidden mid-conversation.
 const { current: branchCurrent } = useBranch()
@@ -38,11 +40,11 @@ const pendingImages = ref<ChatImage[]>([])
 const pendingImagePreviews = ref<string[]>([])
 const fileInput = ref<HTMLInputElement | null>(null)
 
-const modes = [
-  { value: 'ask' as const, label: 'Ask', icon: ChatBubbleLeftIcon },
-  { value: 'plan' as const, label: 'Plan', icon: ClipboardDocumentListIcon },
-  { value: 'autopilot' as const, label: 'Autopilot', icon: BoltIcon },
-]
+const modes = computed(() => [
+  { value: 'ask' as const, label: t('chat.modes.ask'), icon: ChatBubbleLeftIcon },
+  { value: 'plan' as const, label: t('chat.modes.plan'), icon: ClipboardDocumentListIcon },
+  { value: 'autopilot' as const, label: t('chat.modes.autopilot'), icon: BoltIcon },
+])
 
 const filteredSlashCommands = computed(() => {
   const filter = slashFilter.value.toLowerCase()
@@ -254,7 +256,7 @@ function selectMode(mode: 'ask' | 'plan' | 'autopilot') {
 }
 
 function modeLabel(m: string): string {
-  return m === 'plan' ? 'Plan' : m === 'autopilot' ? 'Autopilot' : 'Ask'
+  return m === 'plan' ? t('chat.modes.plan') : m === 'autopilot' ? t('chat.modes.autopilot') : t('chat.modes.ask')
 }
 
 function handleClickOutside(e: MouseEvent) {
@@ -372,7 +374,7 @@ watch(() => store.imageSupport, (supported) => {
           <textarea
             ref="textarea"
             v-model="input"
-            :placeholder="store.isRunning ? 'Agent is working…' : store.goalArmed ? 'Describe the goal — the agent pursues it until verifiably complete' : 'Ask JCODE or type / for commands'"
+            :placeholder="store.isRunning ? t('chat.workingPlaceholder') : store.goalArmed ? t('chat.goalPlaceholder') : t('chat.placeholder')"
             rows="1"
             :disabled="store.isRunning"
             @keydown="handleKeyDown"
@@ -409,7 +411,7 @@ watch(() => store.imageSupport, (supported) => {
               <button
                 class="add-btn"
                 :class="{ open: showAddMenu }"
-                title="Add"
+                :title="t('chat.add')"
                 @click.stop="showAddMenu = !showAddMenu; showModelPicker = false; showModePicker = false"
               >
                 <PlusIcon class="w-4 h-4" />
@@ -419,22 +421,22 @@ watch(() => store.imageSupport, (supported) => {
                   class="dropdown-item"
                   :class="{ disabled: !store.imageSupport }"
                   :disabled="!store.imageSupport"
-                  :title="!store.imageSupport ? 'Current model does not support images' : ''"
+                  :title="!store.imageSupport ? t('chat.model.noImages') : ''"
                   @click="triggerImageUpload(); showAddMenu = false"
                 >
-                  <PaperClipIcon class="w-3.5 h-3.5 dmi-icon" /> <span>Attach files</span>
+                  <PaperClipIcon class="w-3.5 h-3.5 dmi-icon" /> <span>{{ t('chat.attachFiles') }}</span>
                   <span v-if="pendingImages.length > 0" class="dmi-badge">{{ pendingImages.length }}</span>
                 </button>
                 <button class="dropdown-item" @click="insertToken('/')">
-                  <span class="dmi-icon dmi-slash">/</span> <span>Command</span>
+                  <span class="dmi-icon dmi-slash">/</span> <span>{{ t('chat.command') }}</span>
                 </button>
                 <button
                   class="dropdown-item"
                   :class="{ active: store.goalArmed }"
-                  :title="store.goal ? 'Setting a new goal replaces the current one' : 'Next message becomes the session goal'"
+                  :title="store.goal ? t('chat.goalHint.replace') : t('chat.goalHint.next')"
                   @click="store.goalArmed = !store.goalArmed; showAddMenu = false"
                 >
-                  <BoltIcon class="w-3.5 h-3.5 dmi-icon" /> <span>Goal</span>
+                  <BoltIcon class="w-3.5 h-3.5 dmi-icon" /> <span>{{ t('chat.goal') }}</span>
                 </button>
               </div>
             </div>
@@ -466,8 +468,8 @@ watch(() => store.imageSupport, (supported) => {
                  disarms it. Mirrors the Codex "目标" pill. -->
             <template v-if="store.goalArmed">
               <span class="tb-divider" aria-hidden="true" />
-              <div class="goal-chip" :title="store.goal ? 'Next message replaces the current goal' : 'Next message becomes the session goal'">
-                <button class="goal-chip-x" title="Remove goal" @click="store.goalArmed = false">
+              <div class="goal-chip" :title="store.goal ? t('chat.goalHint.nextReplaces') : t('chat.goalHint.next')">
+                <button class="goal-chip-x" :title="t('chat.goalHint.remove')" @click="store.goalArmed = false">
                   <XMarkIcon class="w-2.5 h-2.5" />
                 </button>
                 <BoltIcon class="w-3 h-3" />
@@ -496,7 +498,7 @@ watch(() => store.imageSupport, (supported) => {
               >
                 <!-- Favorites section -->
                 <template v-if="store.recentModels.length > 0 && store.favoriteModels.size > 0">
-                  <div class="dropdown-section-title"><span>★</span> Favorites</div>
+                  <div class="dropdown-section-title"><span>★</span> {{ t('chat.model.favorites') }}</div>
                   <button
                     v-for="r in store.recentModels.filter(r => store.favoriteModels.has(`${r.provider}/${r.model}`) && !(store.providerName === r.provider && store.modelName === r.model))"
                     :key="'fav-'+r.provider+'-'+r.model"
@@ -509,7 +511,7 @@ watch(() => store.imageSupport, (supported) => {
 
                 <!-- Current Model -->
                 <template v-if="store.providerName && store.modelName">
-                  <div class="dropdown-section-title">Current</div>
+                  <div class="dropdown-section-title">{{ t('chat.model.current') }}</div>
                   <button class="dropdown-item active" @click="selectModel(store.providerName, store.modelName)">
                     ● {{ getModelDisplayName(store.providerName, store.modelName) }}
                   </button>
@@ -526,7 +528,7 @@ watch(() => store.imageSupport, (supported) => {
                     @click="selectModel(p.id, m.id)"
                   >
                     <span class="truncate">{{ m.name || m.id }}</span>
-                    <span v-if="m.recommended" class="recommend-badge">recommended</span>
+                    <span v-if="m.recommended" class="recommend-badge">{{ t('common.recommended') }}</span>
                     <button
                       class="fav-star"
                       :class="{ 'is-fav': store.isFavorite(p.id, m.id) }"
@@ -535,12 +537,12 @@ watch(() => store.imageSupport, (supported) => {
                   </button>
                 </template>
                 <div v-if="store.enabledProviders.length === 0" class="dropdown-item disabled">
-                  No models available
+                  {{ t('chat.model.none') }}
                 </div>
                 <!-- Manage models link -->
                 <div class="dropdown-footer">
                   <button @click.stop="showModelPicker = false; showManageModels = true">
-                    ⚙ Manage models…
+                    {{ t('chat.model.manage') }}
                   </button>
                 </div>
               </div>
@@ -551,7 +553,7 @@ watch(() => store.imageSupport, (supported) => {
               v-if="store.channelAvailable"
               class="channel-btn"
               :class="{ active: store.channelEnabled }"
-              :title="store.channelEnabled ? 'WeChat notifications ON' : 'WeChat notifications OFF'"
+              :title="store.channelEnabled ? t('chat.wechatOn') : t('chat.wechatOff')"
               @click="store.toggleChannel(!store.channelEnabled)"
             >
               <ChatBubbleLeftRightIcon class="w-3 h-3" />
@@ -560,21 +562,22 @@ watch(() => store.imageSupport, (supported) => {
             <button
               v-if="store.isRunning"
               class="stop-btn"
-              title="Stop agent (Esc)"
+              :title="t('chat.stopAgent')"
               @click="store.stopAgent()"
             >
               <StopIcon class="w-3.5 h-3.5" />
-              Stop
+              {{ t('chat.stop') }}
             </button>
             <!-- Send button -->
             <button
               v-else
               class="send-btn"
               :disabled="!input.trim() && pendingImages.length === 0"
+              :aria-label="t('chat.send')"
               @click="send"
             >
               <PaperAirplaneIcon class="w-3.5 h-3.5" />
-              Send
+              {{ t('chat.send') }}
             </button>
           </div>
         </div>
@@ -592,8 +595,8 @@ watch(() => store.imageSupport, (supported) => {
           <div class="px-4 py-3" style="border-bottom: 1px solid var(--color-border)">
             <div class="flex items-center justify-between mb-2">
               <div>
-                <h3 class="text-sm font-semibold" style="color: var(--color-foreground)">Manage Models</h3>
-                <p class="text-[11px]" style="color: var(--color-muted-foreground)">Toggle which models appear in the model selector</p>
+                <h3 class="text-sm font-semibold" style="color: var(--color-foreground)">{{ t('chat.model.manageTitle') }}</h3>
+                <p class="text-[11px]" style="color: var(--color-muted-foreground)">{{ t('chat.model.toggleVisibility') }}</p>
               </div>
               <button
                 class="cursor-pointer"
@@ -604,7 +607,7 @@ watch(() => store.imageSupport, (supported) => {
             <input
               v-model="modelFilter"
               type="text"
-              placeholder="Filter models..."
+              :placeholder="t('chat.model.filter')"
               class="w-full px-2 py-1.5 text-xs rounded focus:outline-none focus:ring-1"
               style="border: 1px solid var(--color-border); background: var(--color-muted); color: var(--color-foreground); --tw-ring-color: var(--color-primary)"
             />
