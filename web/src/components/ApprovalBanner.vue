@@ -1,5 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import {
+  ShieldCheckIcon,
+  ShieldExclamationIcon,
+  LockClosedIcon,
+  ChevronDownIcon,
+} from '@heroicons/vue/24/outline'
 import type { PendingApproval } from '@/types/api'
 import { useChatStore } from '@/stores/chat'
 
@@ -9,6 +15,10 @@ defineProps<{
 
 const store = useChatStore()
 const showArgs = ref(false)
+// Two-step confirm for the high-stakes "Allow all" action (auto-approves the
+// rest of the session). First click arms it; a second click on the now-red
+// button actually submits. Auto-resets if the approval resolves meanwhile.
+const armingAllowAll = ref(false)
 
 function formatArgs(args: string): string {
   try {
@@ -27,14 +37,18 @@ function formatArgs(args: string): string {
   >
     <div class="flex items-center gap-1.5 py-1">
       <!-- Shield glyph carries the resolved state (success / destructive) -->
-      <svg
+      <ShieldCheckIcon
+        v-if="approval.approved"
         class="w-3.5 h-3.5 shrink-0"
-        :style="{ color: approval.approved ? 'var(--color-success-fg)' : 'var(--color-destructive)' }"
-        viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"
-      >
-        <path v-if="approval.approved" fill-rule="evenodd" d="M10 1.5l6 2.2v4.8c0 4-2.6 7.6-6 8.5-3.4-.9-6-4.5-6-8.5V3.7l6-2.2zm2.78 6.16a.75.75 0 00-1.06-1.06L9 9.32 8.28 8.6a.75.75 0 10-1.06 1.06l1.25 1.25a.75.75 0 001.06 0l3.25-3.25z" clip-rule="evenodd" />
-        <path v-else fill-rule="evenodd" d="M10 1.5l6 2.2v4.8c0 4-2.6 7.6-6 8.5-3.4-.9-6-4.5-6-8.5V3.7l6-2.2zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clip-rule="evenodd" />
-      </svg>
+        style="color: var(--color-success-fg)"
+        aria-hidden="true"
+      />
+      <ShieldExclamationIcon
+        v-else
+        class="w-3.5 h-3.5 shrink-0"
+        style="color: var(--color-destructive)"
+        aria-hidden="true"
+      />
       <span class="text-xs font-mono truncate min-w-0" style="color: var(--color-muted-foreground)">{{ approval.tool_name }}</span>
       <span
         class="text-[10px] shrink-0"
@@ -66,13 +80,11 @@ function formatArgs(args: string): string {
       <div class="flex-1 min-w-0">
         <!-- Header: shield-lock glyph + label + external chip + args toggle -->
         <div class="flex items-center gap-1.5 mb-1.5">
-          <svg
+          <LockClosedIcon
             class="w-3.5 h-3.5 shrink-0"
             style="color: var(--color-warning-fg)"
-            viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"
-          >
-            <path fill-rule="evenodd" d="M10 1.5l6 2.2v4.8c0 4-2.6 7.6-6 8.5-3.4-.9-6-4.5-6-8.5V3.7l6-2.2zM9 9V6.5a1 1 0 112 0V9h.5a.75.75 0 01.75.75v3a.75.75 0 01-.75.75h-3a.75.75 0 01-.75-.75v-3A.75.75 0 018.5 9H9z" clip-rule="evenodd" />
-          </svg>
+            aria-hidden="true"
+          />
           <span class="text-xs font-medium" style="color: var(--color-foreground)">Approval needed</span>
           <span
             v-if="approval.is_external"
@@ -90,14 +102,11 @@ function formatArgs(args: string): string {
             aria-label="Toggle arguments"
             @click="showArgs = !showArgs"
           >
-            <svg
+            <ChevronDownIcon
               class="w-3.5 h-3.5 transition-transform"
               :class="{ 'rotate-180': showArgs }"
               style="color: var(--color-muted-foreground)"
-              viewBox="0 0 20 20" fill="currentColor"
-            >
-              <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-            </svg>
+            />
           </button>
         </div>
 
@@ -117,8 +126,8 @@ function formatArgs(args: string): string {
       <div class="flex gap-1.5 shrink-0 self-end" :class="{ 'approval-busy': approval.resolving }">
         <button
           type="button"
-          class="px-3.5 py-1.5 text-xs rounded-md text-white transition-colors cursor-pointer font-medium shadow-sm"
-          style="background-color: var(--color-primary)"
+          class="px-3.5 py-1.5 text-xs rounded-md transition-colors cursor-pointer font-medium shadow-sm"
+          style="background-color: var(--color-primary); color: var(--color-on-primary)"
           :disabled="approval.resolving"
           @click="store.resolveApproval(approval.id, true, false)"
         >
@@ -127,12 +136,17 @@ function formatArgs(args: string): string {
         <button
           type="button"
           class="px-3.5 py-1.5 text-xs rounded-md transition-colors cursor-pointer font-medium"
-          style="background-color: transparent; color: var(--color-foreground); border: 1px solid var(--color-border)"
-          title="Approve this and auto-approve the rest of the session"
+          :style="armingAllowAll
+            ? { backgroundColor: 'var(--color-destructive)', color: 'var(--color-on-destructive)' }
+            : { backgroundColor: 'transparent', color: 'var(--color-foreground)', border: '1px solid var(--color-border)' }"
+          :title="armingAllowAll ? 'Click again to auto-approve the rest of the session' : 'Approve this and auto-approve the rest of the session'"
           :disabled="approval.resolving"
-          @click="store.resolveApproval(approval.id, true, true)"
+          @click="armingAllowAll
+            ? store.resolveApproval(approval.id, true, true)
+            : (armingAllowAll = true)"
+          @blur="armingAllowAll = false"
         >
-          Allow all
+          {{ armingAllowAll ? 'Confirm?' : 'Allow all' }}
         </button>
         <button
           type="button"

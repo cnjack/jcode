@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Target } from 'lucide-vue-next'
+import { BoltIcon } from '@heroicons/vue/24/outline'
 import { useChatStore } from '@/stores/chat'
 
 const store = useChatStore()
@@ -48,7 +48,7 @@ const tokensLabel = computed(() => {
     class="mx-3 mt-2 rounded-md border px-3 py-2 flex items-start gap-2"
     :style="{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-secondary)' }"
   >
-    <Target :size="15" class="shrink-0 mt-0.5" :style="{ color: statusColor }" />
+    <BoltIcon class="w-3.5 h-3.5 shrink-0 mt-0.5" :style="{ color: statusColor }" />
     <div class="flex-1 min-w-0">
       <div class="flex items-center gap-2">
         <span class="text-[10px] uppercase tracking-wide font-semibold" :style="{ color: statusColor }">
@@ -63,7 +63,7 @@ const tokensLabel = computed(() => {
       </div>
     </div>
     <button
-      class="text-[10px] px-2 py-1 rounded shrink-0 cursor-pointer"
+      class="goal-clear text-[10px] px-2 py-1 rounded shrink-0 cursor-pointer"
       style="background-color: var(--color-background); color: var(--color-muted-foreground)"
       title="Clear goal"
       @click="store.clearGoal()"
@@ -72,3 +72,14 @@ const tokensLabel = computed(() => {
     </button>
   </div>
 </template>
+
+<style scoped>
+.goal-clear {
+  transition: background-color var(--duration-fast) var(--ease-out),
+              color var(--duration-fast) var(--ease-out);
+}
+.goal-clear:hover {
+  background-color: var(--color-muted);
+  color: var(--color-foreground);
+}
+</style>

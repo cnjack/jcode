@@ -25,27 +25,47 @@ let sessionId = ''
 let resizeObserver: ResizeObserver | null = null
 let themeObserver: MutationObserver | null = null
 
-const termBg = ref(isDarkMode() ? '#18181b' : '#fafafa')
+const termBg = ref(readToken('--term-bg', isDarkMode() ? '#18181b' : '#fafafa'))
 
 function isDarkMode(): boolean {
   return document.documentElement.classList.contains('dark')
 }
 
-const darkTheme = {
-  background: '#18181b', foreground: '#e4e4e7', cursor: '#10b981',
-  selectionBackground: '#3f3f4680', black: '#09090b', red: '#ef4444',
-  green: '#22c55e', yellow: '#eab308', blue: '#3b82f6', magenta: '#a855f7',
-  cyan: '#06b6d4', white: '#d4d4d8', brightBlack: '#71717a', brightRed: '#f87171',
-  brightGreen: '#4ade80', brightYellow: '#facc15', brightBlue: '#60a5fa',
-  brightMagenta: '#c084fc', brightCyan: '#22d3ee', brightWhite: '#fafafa',
+// Read a CSS custom property from :root and strip whitespace. Falls back to the
+// provided default when the token is unset (e.g. before tokens.css loads).
+function readToken(name: string, fallback: string): string {
+  if (typeof window === 'undefined') return fallback
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return v || fallback
 }
-const lightTheme = {
-  background: '#fafafa', foreground: '#27272a', cursor: '#10b981',
-  selectionBackground: '#d4d4d880', black: '#18181b', red: '#dc2626',
-  green: '#16a34a', yellow: '#ca8a04', blue: '#2563eb', magenta: '#9333ea',
-  cyan: '#0891b2', white: '#d4d4d8', brightBlack: '#71717a', brightRed: '#ef4444',
-  brightGreen: '#22c55e', brightYellow: '#eab308', brightBlue: '#3b82f6',
-  brightMagenta: '#a855f7', brightCyan: '#06b6d4', brightWhite: '#fafafa',
+
+// Build an xterm theme object from the --term-* tokens. xterm needs resolved
+// color strings (it can't read var(...)), so we resolve them at call time — both
+// on init and whenever the theme observer fires (light/dark switch). This is the
+// single source for terminal colors; the palette lives in tokens.css.
+function termTheme() {
+  return {
+    background: readToken('--term-bg', '#18181b'),
+    foreground: readToken('--term-fg', '#e4e4e7'),
+    cursor: readToken('--term-cursor', '#FF8400'),
+    selectionBackground: readToken('--term-selection', '#3f3f4680'),
+    black: readToken('--term-black', '#09090b'),
+    red: readToken('--term-red', '#ef4444'),
+    green: readToken('--term-green', '#22c55e'),
+    yellow: readToken('--term-yellow', '#eab308'),
+    blue: readToken('--term-blue', '#3b82f6'),
+    magenta: readToken('--term-magenta', '#a855f7'),
+    cyan: readToken('--term-cyan', '#06b6d4'),
+    white: readToken('--term-white', '#d4d4d8'),
+    brightBlack: readToken('--term-bright-black', '#71717a'),
+    brightRed: readToken('--term-bright-red', '#f87171'),
+    brightGreen: readToken('--term-bright-green', '#4ade80'),
+    brightYellow: readToken('--term-bright-yellow', '#facc15'),
+    brightBlue: readToken('--term-bright-blue', '#60a5fa'),
+    brightMagenta: readToken('--term-bright-magenta', '#c084fc'),
+    brightCyan: readToken('--term-bright-cyan', '#22d3ee'),
+    brightWhite: readToken('--term-bright-white', '#fafafa'),
+  }
 }
 
 function getWsUrl(ptyId: string): string {
@@ -66,7 +86,7 @@ async function init() {
     cursorBlink: true,
     fontSize: 13,
     fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, monospace",
-    theme: isDarkMode() ? darkTheme : lightTheme,
+    theme: termTheme(),
   })
 
   fitAddon = new FitAddon()
@@ -84,8 +104,8 @@ async function init() {
   resizeObserver.observe(termEl.value)
 
   themeObserver = new MutationObserver(() => {
-    if (term) term.options.theme = isDarkMode() ? darkTheme : lightTheme
-    termBg.value = isDarkMode() ? '#18181b' : '#fafafa'
+    if (term) term.options.theme = termTheme()
+    termBg.value = readToken('--term-bg', isDarkMode() ? '#18181b' : '#fafafa')
   })
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
 
@@ -110,13 +130,6 @@ function connectWS(ptyId: string) {
     emit('connected')
     sendResize()
   }
-  ws.onmessage = (event) => {
-    if (event.data instanceof ArrayBuffer) {
-      term!.write(new Uint8Array(event.data))
-    } else {
-      term!.write(event.data)
-    }
-  }
   ws.onclose = () => {
     connected.value = false
     emit('disconnected')
@@ -124,6 +137,18 @@ function connectWS(ptyId: string) {
   }
   ws.onerror = () => {
     connected.value = false
+  }
+
+  ws.onmessage = (event) => {
+    // Guard: the term may have been disposed by cleanup() (tab close / panel
+    // hidden) before an in-flight WS frame arrives. Writing to a disposed
+    // terminal throws, so check before writing.
+    if (!term) return
+    if (event.data instanceof ArrayBuffer) {
+      term.write(new Uint8Array(event.data))
+    } else {
+      term.write(event.data)
+    }
   }
 
   term.onData((data) => {
@@ -139,6 +164,11 @@ function cleanup() {
   themeObserver?.disconnect()
   themeObserver = null
   if (ws) {
+    // Detach handlers before closing so a frame racing in after close can't
+    // reach a disposed terminal.
+    ws.onmessage = null
+    ws.onclose = null
+    ws.onerror = null
     ws.close()
     ws = null
   }

@@ -6,7 +6,7 @@ import type { SlashCommandInfo, ChatImage } from '@/types/api'
 import WorkspacePicker from '@/components/WorkspacePicker.vue'
 import BranchPicker from '@/components/BranchPicker.vue'
 import { useBranch } from '@/composables/useBranch'
-import { MessageSquare, ClipboardList, Zap, Target, Plus, Paperclip, Slash, X } from 'lucide-vue-next'
+import { ChatBubbleLeftIcon, ClipboardDocumentListIcon, BoltIcon, PlusIcon, PaperClipIcon, XMarkIcon, ChevronDownIcon, ChatBubbleLeftRightIcon, StopIcon, PaperAirplaneIcon } from '@heroicons/vue/24/outline'
 
 // Which way the workspace/branch pickers open. The docked composer opens them
 // upward (default); the centered welcome composer has more empty room below, so
@@ -39,9 +39,9 @@ const pendingImagePreviews = ref<string[]>([])
 const fileInput = ref<HTMLInputElement | null>(null)
 
 const modes = [
-  { value: 'ask' as const, label: 'Ask', icon: MessageSquare },
-  { value: 'plan' as const, label: 'Plan', icon: ClipboardList },
-  { value: 'autopilot' as const, label: 'Autopilot', icon: Zap },
+  { value: 'ask' as const, label: 'Ask', icon: ChatBubbleLeftIcon },
+  { value: 'plan' as const, label: 'Plan', icon: ClipboardDocumentListIcon },
+  { value: 'autopilot' as const, label: 'Autopilot', icon: BoltIcon },
 ]
 
 const filteredSlashCommands = computed(() => {
@@ -369,14 +369,6 @@ watch(() => store.imageSupport, (supported) => {
         <div class="chat-input-inner">
         <!-- Textarea area -->
         <div class="textarea-area">
-          <!-- Image previews -->
-          <div v-if="pendingImagePreviews.length > 0" class="image-previews">
-            <div v-for="(preview, i) in pendingImagePreviews" :key="i" class="image-preview-item">
-              <img :src="preview" />
-              <button class="image-remove" @click="removeImage(i)">✕</button>
-            </div>
-          </div>
-
           <textarea
             ref="textarea"
             v-model="input"
@@ -387,6 +379,15 @@ watch(() => store.imageSupport, (supported) => {
             @input="handleInput"
             @paste="handlePaste"
           />
+
+          <!-- Image previews — sit BELOW the textarea so pasted attachments grow
+               downward into the toolbar gap instead of pushing the text down. -->
+          <div v-if="pendingImagePreviews.length > 0" class="image-previews">
+            <div v-for="(preview, i) in pendingImagePreviews" :key="i" class="image-preview-item">
+              <img :src="preview" />
+              <button class="image-remove" @click="removeImage(i)">✕</button>
+            </div>
+          </div>
 
           <!-- Hidden file input -->
           <input
@@ -411,7 +412,7 @@ watch(() => store.imageSupport, (supported) => {
                 title="Add"
                 @click.stop="showAddMenu = !showAddMenu; showModelPicker = false; showModePicker = false"
               >
-                <Plus :size="18" />
+                <PlusIcon class="w-4 h-4" />
               </button>
               <div v-if="showAddMenu" class="dropdown-menu add-menu">
                 <button
@@ -421,11 +422,11 @@ watch(() => store.imageSupport, (supported) => {
                   :title="!store.imageSupport ? 'Current model does not support images' : ''"
                   @click="triggerImageUpload(); showAddMenu = false"
                 >
-                  <Paperclip :size="15" class="dmi-icon" /> <span>Attach files</span>
+                  <PaperClipIcon class="w-3.5 h-3.5 dmi-icon" /> <span>Attach files</span>
                   <span v-if="pendingImages.length > 0" class="dmi-badge">{{ pendingImages.length }}</span>
                 </button>
                 <button class="dropdown-item" @click="insertToken('/')">
-                  <Slash :size="15" class="dmi-icon" /> <span>Command</span>
+                  <span class="dmi-icon dmi-slash">/</span> <span>Command</span>
                 </button>
                 <button
                   class="dropdown-item"
@@ -433,7 +434,7 @@ watch(() => store.imageSupport, (supported) => {
                   :title="store.goal ? 'Setting a new goal replaces the current one' : 'Next message becomes the session goal'"
                   @click="store.goalArmed = !store.goalArmed; showAddMenu = false"
                 >
-                  <Target :size="15" class="dmi-icon" /> <span>Goal</span>
+                  <BoltIcon class="w-3.5 h-3.5 dmi-icon" /> <span>Goal</span>
                 </button>
               </div>
             </div>
@@ -446,9 +447,7 @@ watch(() => store.imageSupport, (supported) => {
                 @click.stop="showModePicker = !showModePicker; showModelPicker = false; showAddMenu = false"
               >
                 {{ modeLabel(store.mode) }}
-                <svg class="w-3 h-3 opacity-60" viewBox="0 0 20 20" fill="currentColor">
-                  <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-                </svg>
+                <ChevronDownIcon class="w-3 h-3 opacity-60" />
               </button>
               <div v-if="showModePicker" class="dropdown-menu">
                 <button
@@ -458,7 +457,7 @@ watch(() => store.imageSupport, (supported) => {
                   :class="{ active: store.mode === m.value }"
                   @click="selectMode(m.value)"
                 >
-                  <component :is="m.icon" :size="14" /> {{ m.label }}
+                  <component :is="m.icon" class="w-3.5 h-3.5" /> {{ m.label }}
                 </button>
               </div>
             </div>
@@ -469,9 +468,9 @@ watch(() => store.imageSupport, (supported) => {
               <span class="tb-divider" aria-hidden="true" />
               <div class="goal-chip" :title="store.goal ? 'Next message replaces the current goal' : 'Next message becomes the session goal'">
                 <button class="goal-chip-x" title="Remove goal" @click="store.goalArmed = false">
-                  <X :size="11" />
+                  <XMarkIcon class="w-2.5 h-2.5" />
                 </button>
-                <Target :size="13" />
+                <BoltIcon class="w-3 h-3" />
                 <span>Goal</span>
               </div>
             </template>
@@ -489,9 +488,7 @@ watch(() => store.imageSupport, (supported) => {
                 @click.stop="showModelPicker = !showModelPicker; showModePicker = false; showAddMenu = false"
               >
                 {{ store.modelName ? getModelDisplayName(store.providerName, store.modelName) : 'model' }}
-                <svg class="w-3 h-3 opacity-60" viewBox="0 0 20 20" fill="currentColor">
-                  <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-                </svg>
+                <ChevronDownIcon class="w-3 h-3 opacity-60" />
               </button>
               <div
                 v-if="showModelPicker"
@@ -557,10 +554,7 @@ watch(() => store.imageSupport, (supported) => {
               :title="store.channelEnabled ? 'WeChat notifications ON' : 'WeChat notifications OFF'"
               @click="store.toggleChannel(!store.channelEnabled)"
             >
-              <svg class="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
-                <path d="M2 5a2 2 0 012-2h7a2 2 0 012 2v4a2 2 0 01-2 2H9l-3 3v-3H4a2 2 0 01-2-2V5z" />
-                <path d="M15 7v2a4 4 0 01-4 4H9.828l-1.766 1.767A2 2 0 0011 16h2l3 3v-3h1a2 2 0 002-2V9a2 2 0 00-2-2h-2z" />
-              </svg>
+              <ChatBubbleLeftRightIcon class="w-3 h-3" />
             </button>
             <!-- Stop button -->
             <button
@@ -569,9 +563,7 @@ watch(() => store.imageSupport, (supported) => {
               title="Stop agent (Esc)"
               @click="store.stopAgent()"
             >
-              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                <rect x="6" y="6" width="12" height="12" rx="2" />
-              </svg>
+              <StopIcon class="w-3.5 h-3.5" />
               Stop
             </button>
             <!-- Send button -->
@@ -581,9 +573,7 @@ watch(() => store.imageSupport, (supported) => {
               :disabled="!input.trim() && pendingImages.length === 0"
               @click="send"
             >
-              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                <path d="M5 12h14M12 5l7 7-7 7" />
-              </svg>
+              <PaperAirplaneIcon class="w-3.5 h-3.5" />
               Send
             </button>
           </div>
@@ -685,9 +675,7 @@ watch(() => store.imageSupport, (supported) => {
   border-radius: var(--radius-2xl);
   /* Tighter at the top (workspace row), a touch more white below the toolbar. */
   padding: 6px 12px 12px;
-  box-shadow:
-    0 1px 2px rgba(15, 18, 24, 0.04),
-    0 18px 44px -24px rgba(15, 18, 24, 0.28);
+  box-shadow: var(--shadow-xl);
 }
 .composer-elevated .composer-top {
   padding: 2px 4px 9px;
@@ -741,7 +729,9 @@ watch(() => store.imageSupport, (supported) => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 8px;
+  /* Rendered below the textarea now: separate from the text above, not the
+     toolbar below (the toolbar already owns the bottom padding). */
+  margin-top: 8px;
 }
 
 .image-preview-item {
@@ -764,7 +754,7 @@ watch(() => store.imageSupport, (supported) => {
   height: 16px;
   border-radius: 50%;
   background: var(--color-destructive);
-  color: white;
+  color: var(--color-on-destructive);
   font-size: 9px;
   display: flex;
   align-items: center;
@@ -847,7 +837,7 @@ watch(() => store.imageSupport, (supported) => {
   height: 14px;
   border-radius: 50%;
   background: var(--color-primary);
-  color: white;
+  color: var(--color-on-primary);
   font-size: 9px;
   display: flex;
   align-items: center;
@@ -950,6 +940,15 @@ watch(() => store.imageSupport, (supported) => {
 .dmi-icon {
   color: var(--color-muted-foreground);
   flex-shrink: 0;
+}
+/* The "/ Command" menu item uses a literal slash character instead of an icon
+   (heroicons has no slash glyph); size it to match the other menu icons. */
+.dmi-slash {
+  width: 15px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1;
 }
 .dropdown-item.active .dmi-icon {
   color: var(--color-primary);
@@ -1065,7 +1064,7 @@ watch(() => store.imageSupport, (supported) => {
   border: none;
   border-radius: var(--radius-lg);
   background: var(--color-primary);
-  color: var(--color-on-primary, #fff);
+  color: var(--color-on-primary);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -1074,7 +1073,7 @@ watch(() => store.imageSupport, (supported) => {
 }
 
 .send-btn:disabled {
-  opacity: 0.3;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
@@ -1094,7 +1093,7 @@ watch(() => store.imageSupport, (supported) => {
   border: none;
   border-radius: var(--radius-lg);
   background: var(--color-destructive);
-  color: white;
+  color: var(--color-on-destructive);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;

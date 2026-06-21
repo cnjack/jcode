@@ -2,15 +2,15 @@
 import { ref, computed, inject } from 'vue'
 import { Popover, PopoverButton, PopoverPanel } from '@headlessui/vue'
 import {
-  Folder,
-  FolderOpen,
-  Check,
-  Plus,
-  Server,
-  ChevronDown,
-  Search,
-  ArrowLeft,
-} from 'lucide-vue-next'
+  FolderIcon,
+  FolderOpenIcon,
+  CheckIcon,
+  PlusIcon,
+  ServerIcon,
+  ChevronDownIcon,
+  MagnifyingGlassIcon,
+  ArrowLeftIcon,
+} from '@heroicons/vue/24/outline'
 import { useChatStore } from '@/stores/chat'
 import { useProjectStore, isRemotePath, parseRemoteLabel } from '@/stores/project'
 import { useFolderBrowser } from '@/composables/useFolderBrowser'
@@ -152,9 +152,9 @@ function reset() {
   <Popover class="ws-popover" style="position: relative">
     <PopoverButton as="template" :disabled="store.isRunning">
       <button class="ws-pill ws-pill-action" :disabled="store.isRunning" :title="activePath">
-        <component :is="activeIsRemote ? Server : FolderOpen" :size="14" class="ws-pill-icon" />
+        <component :is="activeIsRemote ? ServerIcon : FolderOpenIcon" class="w-3.5 h-3.5 ws-pill-icon" />
         <span class="ws-name">{{ activeName }}</span>
-        <ChevronDown :size="13" class="ws-caret" />
+        <ChevronDownIcon class="w-3 h-3 ws-caret" />
       </button>
     </PopoverButton>
 
@@ -172,7 +172,7 @@ function reset() {
         <!-- Folder browser -->
         <div v-if="showBrowser" class="ws-browser">
           <div class="ws-browser-head">
-            <button class="ws-back" @click="showBrowser = false"><ArrowLeft :size="14" /></button>
+            <button class="ws-back" @click="showBrowser = false"><ArrowLeftIcon class="w-3.5 h-3.5" /></button>
             <input
               v-model="pathInput"
               class="ws-path-input"
@@ -196,7 +196,7 @@ function reset() {
               class="ws-row ws-folder"
               @click="loadFolders(folder.path)"
             >
-              <Folder :size="14" class="ws-folder-icon" />
+              <FolderIcon class="w-3.5 h-3.5 ws-folder-icon" />
               <span class="ws-row-name">{{ folder.name }}</span>
             </button>
           </div>
@@ -210,7 +210,7 @@ function reset() {
         <!-- Workspace list -->
         <div v-else class="ws-listview">
           <div class="ws-search">
-            <Search :size="13" class="ws-search-icon" />
+            <MagnifyingGlassIcon class="w-3 h-3 ws-search-icon" />
             <input v-model="query" class="ws-search-input" placeholder="Search workspaces" />
           </div>
 
@@ -223,19 +223,19 @@ function reset() {
               :class="{ active: isActive(node.path) }"
               @click="pickWorkspace(node, close)"
             >
-              <component :is="isRemotePath(node.path) ? Server : Folder" :size="14" class="ws-row-icon" />
+              <component :is="isRemotePath(node.path) ? ServerIcon : FolderIcon" class="w-3.5 h-3.5 ws-row-icon" />
               <span class="ws-row-name">{{ node.name }}</span>
-              <Check v-if="isActive(node.path)" :size="14" class="ws-check" />
+              <CheckIcon v-if="isActive(node.path)" class="w-3.5 h-3.5 ws-check" />
             </button>
           </div>
 
           <div v-if="switchErr" class="ws-error">{{ switchErr }}</div>
           <div class="ws-actions">
             <button class="ws-action" @click="openFolderAction(close)">
-              <Plus :size="14" /> <span>Open folder</span>
+              <PlusIcon class="w-3.5 h-3.5" /> <span>Open folder</span>
             </button>
             <button class="ws-action" @click="openRemote(close)">
-              <Server :size="14" /> <span>Remote connect</span>
+              <ServerIcon class="w-3.5 h-3.5" /> <span>Remote connect</span>
             </button>
           </div>
         </div>
@@ -503,7 +503,7 @@ function reset() {
   border: none;
   border-radius: var(--radius-md);
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-on-primary);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;

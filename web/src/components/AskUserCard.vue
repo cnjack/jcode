@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, reactive, watch, onUnmounted } from 'vue'
+import { ChevronDownIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import type { ToolCall, AskUserQuestion, AskUserAnswer } from '@/types/api'
 import { useChatStore } from '@/stores/chat'
 
@@ -173,9 +174,7 @@ const resolvedAnswers = computed<string[]>(() => {
       <span class="text-xs font-medium" style="color: var(--color-muted-foreground)">Asking</span>
       <span v-if="questions[0]?.header" class="text-xs font-mono" style="color: var(--color-primary)">{{ questions[0].header }}</span>
       <span class="text-xs font-mono truncate" style="color: var(--color-muted-foreground)">{{ title }}</span>
-      <svg class="w-3 h-3 shrink-0" style="color: var(--color-muted-foreground)" viewBox="0 0 20 20" fill="currentColor">
-        <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-      </svg>
+      <ChevronDownIcon class="w-3 h-3 shrink-0" style="color: var(--color-muted-foreground)" />
     </button>
 
     <!-- Expanded card -->
@@ -193,14 +192,10 @@ const resolvedAnswers = computed<string[]>(() => {
         />
         <span class="text-sm font-medium flex-1 min-w-0 truncate" style="color: var(--color-foreground)">{{ title }}</span>
         <button class="shrink-0 cursor-pointer hover:opacity-70" title="Collapse" @click="collapsed = true">
-          <svg class="w-3.5 h-3.5 rotate-180" style="color: var(--color-muted-foreground)" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-          </svg>
+          <ChevronDownIcon class="w-3.5 h-3.5 rotate-180" style="color: var(--color-muted-foreground)" />
         </button>
         <button v-if="isPending" class="shrink-0 cursor-pointer hover:opacity-70" title="Skip" @click="skip">
-          <svg class="w-3.5 h-3.5" style="color: var(--color-muted-foreground)" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-          </svg>
+          <XMarkIcon class="w-3.5 h-3.5" style="color: var(--color-muted-foreground)" />
         </button>
       </div>
 

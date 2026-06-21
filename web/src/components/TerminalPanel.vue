@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { XMarkIcon, PlusIcon } from '@heroicons/vue/24/outline'
 import TerminalInstance from './TerminalInstance.vue'
 
 const emit = defineEmits<{
@@ -74,27 +75,21 @@ function closeTab(id: string) {
             @keydown.enter.stop.prevent="closeTab(tab.id)"
             @keydown.space.stop.prevent="closeTab(tab.id)"
           >
-            <svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-              <path d="M18 6L6 18M6 6l12 12" />
-            </svg>
+            <XMarkIcon class="w-2.5 h-2.5" />
           </button>
           <span class="tab-label">{{ tab.label }}</span>
         </div>
 
         <!-- + New terminal after the last tab -->
         <button class="ctrl-btn" title="New terminal" @click="addTab">
-          <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
+          <PlusIcon class="w-3 h-3" />
         </button>
       </div>
 
       <!-- Controls: close panel only -->
       <div class="flex items-center gap-0.5 shrink-0">
         <button class="ctrl-btn" title="Close panel" @click="emit('close')">
-          <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <path d="M18 6L6 18M6 6l12 12" />
-          </svg>
+          <XMarkIcon class="w-3 h-3" />
         </button>
       </div>
     </div>
