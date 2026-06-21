@@ -28,8 +28,16 @@ const projectStore = useProjectStore()
 
 // Provided by App: opens the SSH wizard, optionally prefilled for a reconnect.
 const openRemoteConnect = inject<(prefill?: RemoteMeta & { loadTaskUuid?: string }) => void>('openRemoteConnect')
+// Provided by App: the unified post-switch handler (reload workspace state +
+// restore the target session). Used so this inline picker behaves identically to
+// the projects modal instead of landing on a blank welcome.
+const onWorkspaceSwitched = inject<() => Promise<void> | void>('onWorkspaceSwitched')
 
 const query = ref('')
+// Inline error surfaced when a workspace switch fails — without this the picker
+// would close (or do nothing) silently, unlike ProjectSwitcher which shows a
+// red error row. Cleared on every new attempt.
+const switchErr = ref('')
 
 const activePath = computed(() => projectStore.activeProject?.path || store.pwd)
 const activeIsRemote = computed(() => isRemotePath(activePath.value))
@@ -65,9 +73,21 @@ const {
 } = useFolderBrowser()
 
 async function applyLocalSwitch(path: string, close: () => void) {
+  // Guard empty path (browser may not have loaded a folder yet) — matches
+  // ProjectSwitcher's `if (!browsePath.value) return`; otherwise we'd open a
+  // bogus empty-path project.
+  if (!path) return
+  switchErr.value = ''
   const ok = await projectStore.openProject(path)
-  if (!ok) return
-  await store.resetToWelcomeAfterSwitch()
+  if (!ok) {
+    // Keep the panel open and show why, instead of failing silently.
+    switchErr.value = projectStore.switchError || 'Failed to open workspace'
+    return
+  }
+  // Route through the same post-switch handler the projects modal uses, so both
+  // entry points reload identically and restore the target workspace's session.
+  if (onWorkspaceSwitched) await onWorkspaceSwitched()
+  else await store.resetToWelcomeAfterSwitch()
   reset()
   close()
 }
@@ -95,8 +115,14 @@ async function pickWorkspace(node: { id: string; path: string }, close: () => vo
 // browser, fall back to the in-app folder browser sub-view.
 async function openFolderAction(close: () => void) {
   if (isTauri) {
-    const path = await pickFolder(activePath.value || undefined)
-    if (path) await applyLocalSwitch(path, close)
+    try {
+      const path = await pickFolder(activePath.value || undefined)
+      // null = user cancelled the native dialog → do nothing.
+      if (path) await applyLocalSwitch(path, close)
+    } catch {
+      // Native picker unavailable (e.g. dialog plugin missing) → in-app browser.
+      openBrowser()
+    }
     return
   }
   openBrowser()
@@ -111,6 +137,7 @@ function openRemote(close: () => void) {
 function reset() {
   resetBrowser()
   query.value = ''
+  switchErr.value = ''
 }
 
 </script>
@@ -173,9 +200,10 @@ function reset() {
               <span class="ws-row-name">{{ folder.name }}</span>
             </button>
           </div>
+          <div v-if="switchErr" class="ws-error">{{ switchErr }}</div>
           <div class="ws-browser-foot">
             <span class="ws-cur-path">{{ browsePath || '~' }}</span>
-            <button class="ws-open-btn" @click="applyLocalSwitch(browsePath, close)">Open</button>
+            <button class="ws-open-btn" :disabled="!browsePath" @click="applyLocalSwitch(browsePath, close)">Open</button>
           </div>
         </div>
 
@@ -201,6 +229,7 @@ function reset() {
             </button>
           </div>
 
+          <div v-if="switchErr" class="ws-error">{{ switchErr }}</div>
           <div class="ws-actions">
             <button class="ws-action" @click="openFolderAction(close)">
               <Plus :size="14" /> <span>Open folder</span>
@@ -480,8 +509,26 @@ function reset() {
   cursor: pointer;
   transition: opacity 0.15s;
 }
-.ws-open-btn:hover {
+.ws-open-btn:hover:not(:disabled) {
   opacity: 0.9;
+}
+.ws-open-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Inline switch-failure message — mirrors ProjectSwitcher's error row. */
+.ws-error {
+  flex-shrink: 0;
+  margin: 4px 2px 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-error-fg);
+  background: var(--color-error-bg);
+  color: var(--color-error-fg);
+  font-size: 11.5px;
+  line-height: 1.35;
+  word-break: break-word;
 }
 
 /* Panel transition */

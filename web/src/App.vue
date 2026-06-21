@@ -43,6 +43,12 @@ function openRemoteConnect(prefill?: RemoteMeta & { loadTaskUuid?: string }) {
   remoteWizardOpen.value = true
 }
 provide('openRemoteConnect', openRemoteConnect)
+// Single post-switch handler shared by every local-workspace entry point
+// (ProjectSwitcher via @project-switched, WorkspacePicker via inject) so they
+// can't drift: all reload the full workspace state and restore the target
+// workspace's session, instead of WorkspacePicker landing on a blank welcome
+// while the projects modal restored the session.
+provide('onWorkspaceSwitched', () => onProjectSwitched())
 
 // When the wizard is launched from Settings it stacks ON TOP of the Settings
 // overlay. headlessui treats a click inside the wizard as an "outside" click for
@@ -164,7 +170,16 @@ function handleGlobalKeydown(e: KeyboardEvent) {
     settingsOpen.value = !settingsOpen.value
     return
   }
-  if (e.key === 'Escape' && store.isRunning) {
+  // Esc stops the agent only when no overlay is open — otherwise pressing Esc to
+  // dismiss a dialog (Settings/Projects/Palette/Wizard) would also kill the run.
+  if (
+    e.key === 'Escape' &&
+    store.isRunning &&
+    !settingsOpen.value &&
+    !projectsOpen.value &&
+    !paletteOpen.value &&
+    !remoteWizardOpen.value
+  ) {
     e.preventDefault()
     store.stopAgent()
     return
@@ -191,15 +206,18 @@ function handleGlobalKeydown(e: KeyboardEvent) {
   }
 }
 
-onMounted(async () => {
-  document.addEventListener('keydown', handleGlobalKeydown)
-  ensurePermission()
-  const health = await store.fetchHealth()
-  // Check if setup is needed — health returns needs_setup status
-  if (health?.needs_setup) {
-    needsSetup.value = true
-    return
-  }
+// True when the very first /api/health probe failed — the backend/sidecar isn't
+// reachable yet (common on the desktop shell right after it navigates to the
+// sidecar port). Drives a visible "can't connect" overlay with a Retry button,
+// instead of silently falling through to an empty shell with console errors.
+const connectionError = ref(false)
+const booting = ref(false)
+
+// All the workspace-scoped state that must be (re)loaded on boot, after setup,
+// and on every project switch. Centralized so the three entry points can't drift
+// out of sync (they previously each fetched a different subset, leaving stale
+// models/approval-mode/channel/config after a switch).
+function loadWorkspaceState() {
   store.fetchConfig()
   store.fetchTodos()
   store.fetchGoal()
@@ -212,8 +230,36 @@ onMounted(async () => {
   if (store.pwd) {
     projectStore.ensureCurrentProject(store.pwd)
   }
-  // Restore the current session content if available
-  await store.restoreCurrentSession()
+}
+
+// Initial boot: probe health first. Distinguishes three outcomes —
+// unreachable (show connection error + Retry), needs setup (show wizard), or
+// ready (load everything + restore the session).
+async function boot() {
+  booting.value = true
+  try {
+    const health = await store.fetchHealth()
+    if (!health) {
+      connectionError.value = true
+      return
+    }
+    connectionError.value = false
+    if (health.needs_setup) {
+      needsSetup.value = true
+      return
+    }
+    needsSetup.value = false
+    loadWorkspaceState()
+    await store.restoreCurrentSession()
+  } finally {
+    booting.value = false
+  }
+}
+
+onMounted(async () => {
+  document.addEventListener('keydown', handleGlobalKeydown)
+  ensurePermission()
+  await boot()
 })
 
 onUnmounted(() => {
@@ -279,29 +325,19 @@ watch(() => store.todos.length, (len) => {
 async function onProjectSwitched() {
   await store.fetchHealth()
   store.clearChat()
-  store.fetchTodos()
-  store.fetchGoal()
-  refreshBranch()
-  store.fetchSessions()
+  // Reload the full workspace-scoped state (models/approval-mode/channel/config
+  // included) so switching projects doesn't leave controls on the old project's
+  // values.
+  loadWorkspaceState()
   // Restore the current session for the new project
   await store.restoreCurrentSession()
 }
 
 function onSetupComplete() {
   needsSetup.value = false
-  // Now load everything
-  store.fetchConfig()
-  store.fetchTodos()
-  store.fetchGoal()
-  refreshBranch()
-  store.fetchModels()
-  store.fetchModelState()
-  store.fetchSessions()
-  store.fetchApprovalMode()
-  store.fetchChannelState()
-  if (store.pwd) {
-    projectStore.ensureCurrentProject(store.pwd)
-  }
+  connectionError.value = false
+  // Now load everything (fresh setup → no prior session to restore).
+  loadWorkspaceState()
 }
 
 // Panel resize
@@ -543,12 +579,79 @@ function startResize(e: MouseEvent) {
 
     <!-- Setup overlay — shown when no providers are configured -->
     <SetupView v-if="needsSetup" @complete="onSetupComplete" />
+
+    <!-- Connection-error overlay — the first health probe failed, so the local
+         server isn't reachable. Replaces the old silent fall-through to an empty
+         shell. Retry re-runs the boot sequence. -->
+    <div v-if="connectionError" class="conn-error-overlay">
+      <div class="conn-error-card">
+        <div class="conn-error-title">无法连接到 jcode 服务</div>
+        <div class="conn-error-msg">本地服务可能尚未就绪或已停止。请稍候重试，或退出后重新启动。</div>
+        <button class="conn-error-retry" :disabled="booting" @click="boot">
+          {{ booting ? '正在重试…' : '重试连接' }}
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
 /* The titlebar-drag strip + macOS top inset live in the GLOBAL style.css
    (Vue's scoped compiler mangles `:global(...) .child` selectors). */
+
+/* Connection-error overlay — full-window, above everything, so a backend that
+   never came up shows an actionable message instead of an empty shell. */
+.conn-error-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--color-background);
+}
+.conn-error-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 420px;
+  text-align: center;
+  padding: 28px 32px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-lg);
+}
+.conn-error-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+.conn-error-msg {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-muted-foreground);
+}
+.conn-error-retry {
+  margin-top: 4px;
+  padding: 8px 22px;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.conn-error-retry:hover:not(:disabled) {
+  opacity: 0.9;
+}
+.conn-error-retry:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 
 /* The conversation + composer live in one inset surface panel so the chat
    canvas reads as distinct from the sidebar shell, wrapped with breathing room

@@ -91,6 +91,7 @@ watch(() => props.open, async (isOpen) => {
   if (isOpen) {
     mcpEditing.value = null
     mcpLoginMessage.value = ''
+    mcpLoginMessageFor.value = ''
     await loadMCP()
     loadSkills()
 
@@ -117,7 +118,22 @@ watch(() => props.open, async (isOpen) => {
     deleteConfirmId.value = ''
     mcpEditing.value = null
     stopLoginPoll()
+    stopChannelPoll()
   }
+})
+
+// Switching sections abandons any in-progress sub-flow on the previous tab —
+// otherwise a half-filled MCP/provider form, an open delete confirmation, or a
+// stale login/poll from one tab would linger when the user navigates to another.
+watch(activeTab, () => {
+  mcpEditing.value = null
+  showAddProvider.value = false
+  addError.value = ''
+  deleteConfirmId.value = ''
+  mcpLoginMessage.value = ''
+  mcpLoginMessageFor.value = ''
+  stopLoginPoll()
+  stopChannelPoll()
 })
 
 async function loadMCP() {
@@ -297,6 +313,7 @@ async function deleteMCP(name: string) {
 // --- MCP OAuth login ---
 const mcpLoginBusy = ref('')      // server name currently logging in
 const mcpLoginMessage = ref('')   // status text shown under the row
+const mcpLoginMessageFor = ref('') // which server the message belongs to
 let loginPollTimer: ReturnType<typeof setInterval> | null = null
 
 function stopLoginPoll() {
@@ -305,11 +322,13 @@ function stopLoginPoll() {
 
 async function loginMCP(name: string) {
   mcpLoginBusy.value = name
+  mcpLoginMessageFor.value = name
   mcpLoginMessage.value = 'Opening browser — complete authorization, then return here…'
   try {
     await api.mcpLogin(name)
   } catch (err) {
     mcpLoginMessage.value = err instanceof Error ? err.message : 'Login failed'
+    mcpLoginMessageFor.value = name
     mcpLoginBusy.value = ''
     return
   }
@@ -321,21 +340,24 @@ async function loginMCP(name: string) {
         stopLoginPoll()
         mcpLoginBusy.value = ''
         mcpLoginMessage.value = ''
+        mcpLoginMessageFor.value = ''
         await loadMCP()
       } else if (st.status === 'error') {
         stopLoginPoll()
         mcpLoginBusy.value = ''
+        mcpLoginMessageFor.value = name
         mcpLoginMessage.value = st.message || 'Login failed'
       } else if (st.status === 'needs_client_id') {
         stopLoginPoll()
         mcpLoginBusy.value = ''
+        mcpLoginMessageFor.value = name
         mcpLoginMessage.value = 'This server does not support automatic registration. Edit it and set an OAuth Client ID, then log in again.'
       }
     } catch { /* keep polling */ }
   }, 1500)
 }
 
-onUnmounted(stopLoginPoll)
+onUnmounted(() => { stopLoginPoll(); stopChannelPoll() })
 
 // --- Skills ---
 const skills = ref<SkillInfo[]>([])
@@ -420,9 +442,18 @@ async function channelLogout() {
   channelLoading.value = false
 }
 
+let channelPollInterval: ReturnType<typeof setInterval> | null = null
+let channelPollTimeout: ReturnType<typeof setTimeout> | null = null
+
+function stopChannelPoll() {
+  if (channelPollInterval) { clearInterval(channelPollInterval); channelPollInterval = null }
+  if (channelPollTimeout) { clearTimeout(channelPollTimeout); channelPollTimeout = null }
+}
+
 function pollChannelState() {
+  stopChannelPoll()
   const previousState = channelState.value
-  const interval = setInterval(async () => {
+  channelPollInterval = setInterval(async () => {
     try {
       const ch = await api.channelStatus()
       if (ch.state === 'enabled' || ch.state === 'disabled') {
@@ -434,11 +465,12 @@ function pollChannelState() {
         if (ch.state === 'enabled' && previousState === 'scanning') {
           channelLoginReminder.value = true
         }
-        clearInterval(interval)
+        stopChannelPoll()
       }
     } catch { /* ignore */ }
   }, 2000)
-  setTimeout(() => clearInterval(interval), 180000)
+  // Safety cap: stop after 3 min even if the state never resolves.
+  channelPollTimeout = setTimeout(stopChannelPoll, 180000)
 }
 
 const tabLabel: Record<string, string> = {
@@ -1098,7 +1130,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                         <span v-if="info.has_auth" class="text-[10px]" style="color: var(--color-success-fg)">Authenticated</span>
                       </div>
                       <div v-if="mcpLoginBusy === name && mcpLoginMessage" class="mt-1 text-[10px]" style="color: var(--color-muted-foreground)">{{ mcpLoginMessage }}</div>
-                      <div v-else-if="mcpLoginMessage && !mcpLoginBusy" class="mt-1 text-[10px]" style="color: var(--color-warning-fg)">{{ mcpLoginMessage }}</div>
+                      <div v-else-if="mcpLoginMessageFor === name && mcpLoginMessage && !mcpLoginBusy" class="mt-1 text-[10px]" style="color: var(--color-warning-fg)">{{ mcpLoginMessage }}</div>
                       <div v-if="info.error" class="mt-1 text-[10px] font-mono" style="color: var(--color-error-fg)">{{ info.error }}</div>
                     </div>
                   </div>

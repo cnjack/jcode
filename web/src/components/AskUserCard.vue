@@ -56,8 +56,10 @@ function toggleOption(qi: number, label: string, multi: boolean) {
   if (multi) {
     selections[qi] = cur.includes(label) ? cur.filter((l) => l !== label) : [...cur, label]
   } else {
-    // Single-select: replace, and clear any "Other" free text.
-    selections[qi] = cur.includes(label) ? [] : [label]
+    // Single-select: set this option (idempotent — re-selecting the current one
+    // keeps it, so a repeated keyboard digit or click never clears the choice
+    // and leaves Submit disabled), and clear any "Other" free text.
+    selections[qi] = [label]
     freeText[qi] = ''
   }
 }
@@ -160,6 +162,14 @@ const resolvedAnswers = computed<string[]>(() => {
       style="background: transparent"
       @click="collapsed = false"
     >
+      <!-- Pending indicator so a collapsed card still signals it's awaiting an
+           answer (Skip/Submit live in the expanded view). -->
+      <span
+        v-if="isPending"
+        class="w-1.5 h-1.5 rounded-full shrink-0 animate-pulse"
+        style="background: var(--color-primary)"
+        aria-hidden="true"
+      />
       <span class="text-xs font-medium" style="color: var(--color-muted-foreground)">Asking</span>
       <span v-if="questions[0]?.header" class="text-xs font-mono" style="color: var(--color-primary)">{{ questions[0].header }}</span>
       <span class="text-xs font-mono truncate" style="color: var(--color-muted-foreground)">{{ title }}</span>
@@ -222,7 +232,10 @@ const resolvedAnswers = computed<string[]>(() => {
               <div class="text-sm" style="color: var(--color-foreground)">{{ opt.label }}</div>
               <div v-if="opt.description" class="text-xs mt-0.5" style="color: var(--color-muted-foreground)">{{ opt.description }}</div>
             </div>
+            <!-- Digit hint only for 1–9, which are the keyboard-selectable ones;
+                 showing 10+ would imply a shortcut that doesn't exist. -->
             <span
+              v-if="oi < 9"
               class="shrink-0 text-[10px] font-mono tabular-nums w-4 text-center rounded"
               style="color: var(--color-muted-foreground)"
             >{{ oi + 1 }}</span>

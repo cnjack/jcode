@@ -112,8 +112,10 @@ export const useProjectStore = defineStore('project', () => {
     // Remote workspaces cannot be re-activated by a local path switch (the
     // backend would `stat` a path that only exists on the remote host, and we
     // never persist the SSH secret). Callers must route these through the SSH
-    // wizard instead.
-    if (project.remote) {
+    // wizard instead. Guard on the label too (not just the .remote metadata):
+    // a project added from a task whose path is an ssh:// label may lack the
+    // metadata, and must still not fall through to a doomed local switch.
+    if (project.remote || isRemotePath(project.path)) {
       switchError.value = 'Remote workspace — reconnect via the SSH wizard'
       return false
     }
@@ -133,6 +135,13 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   async function openProject(path: string): Promise<boolean> {
+    // A remote (ssh://) label can't be opened as a local workspace — don't even
+    // persist it as a bare local project; signal the caller to use the SSH
+    // wizard instead (matches ProjectSwitcher.selectProject's remote handling).
+    if (isRemotePath(path)) {
+      switchError.value = 'Remote workspace — reconnect via the SSH wizard'
+      return false
+    }
     const proj = addProject(path)
     return switchToProject(proj.id)
   }

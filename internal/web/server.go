@@ -285,6 +285,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/goal", s.handleSetGoal)
 	mux.HandleFunc("DELETE /api/goal", s.handleClearGoal)
 	mux.HandleFunc("POST /api/approval", s.handleApproval)
+	mux.HandleFunc("GET /api/approval/pending", s.handlePendingApproval)
 	mux.HandleFunc("POST /api/ask", s.handleAskUser)
 	mux.HandleFunc("GET /api/ask/pending", s.handlePendingAskUser)
 	mux.HandleFunc("GET /api/files", s.handleListFiles)
@@ -1265,6 +1266,14 @@ func (s *Server) handleApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handlePendingApproval returns approval requests still awaiting a decision.
+// The frontend pulls this after rebuilding the timeline (page reload / session
+// resume / WS reconnect) so an in-flight approval is re-attached as a card
+// instead of leaving the agent blocked forever.
+func (s *Server) handlePendingApproval(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, s.handler.PendingApprovalRequests())
 }
 
 // handleAskUser resolves a pending ask_user request with the user's answers,
