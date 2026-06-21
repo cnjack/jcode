@@ -41,11 +41,11 @@ var (
 	sidebarScrollIndicatorStyle lipgloss.Style
 
 	// ─── Mode pills styles ───
-	modePillPlanStyle  lipgloss.Style
-	modePillAskStyle   lipgloss.Style
-	modePillAutoStyle  lipgloss.Style
-	modeSeparatorStyle lipgloss.Style
-	modeFillStyle      lipgloss.Style
+	modePillPlanStyle     lipgloss.Style
+	modePillApprovalStyle lipgloss.Style
+	modePillAutoStyle     lipgloss.Style
+	modeSeparatorStyle    lipgloss.Style
+	modeFillStyle         lipgloss.Style
 
 	// ─── Minimal status bar style ───
 	minimalStatusBarStyle lipgloss.Style
@@ -130,7 +130,7 @@ func ApplyTheme(name string) {
 
 	// ─── Mode pills ───
 	modePillPlanStyle = lipgloss.NewStyle().Bold(true).Foreground(colorPlanMode)
-	modePillAskStyle = lipgloss.NewStyle().Bold(true).Foreground(colorMuted)
+	modePillApprovalStyle = lipgloss.NewStyle().Bold(true).Foreground(colorMuted)
 	modePillAutoStyle = lipgloss.NewStyle().Bold(true).Foreground(colorWarning)
 	modeSeparatorStyle = lipgloss.NewStyle().Foreground(colorMuted)
 	modeFillStyle = lipgloss.NewStyle().Foreground(colorMuted)

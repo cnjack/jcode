@@ -37,6 +37,15 @@ export type TimelineItem =
   | { kind: 'tool'; data: ToolCall; seq: number }
   | { kind: 'approval'; data: PendingApproval; seq: number }
 
+// A message the user composed while the agent was still running. Queued messages
+// are sent one at a time as each turn completes (terminal-style type-ahead) and
+// can be removed before they are sent.
+export interface QueuedMessage {
+  id: string
+  text: string
+  images?: ChatImage[]
+}
+
 export const useChatStore = defineStore('chat', () => {
   // --- State ---
   const timeline = ref<TimelineItem[]>([])
@@ -53,7 +62,7 @@ export const useChatStore = defineStore('chat', () => {
   const wsConnected = ref(false)
 
   // Mode & model
-  const mode = ref<AgentMode>('ask')
+  const mode = ref<AgentMode>('approval')
   const providerName = ref('')
   const modelName = ref('')
   const providers = ref<ProviderInfo[]>([])
@@ -77,6 +86,10 @@ export const useChatStore = defineStore('chat', () => {
 
   // Current session tracking
   const currentSessionId = ref('')
+
+  // Type-ahead queue: messages composed while a turn is running. Drained one at
+  // a time by flushQueue() as each turn ends. See enqueueMessage/flushQueue.
+  const queuedMessages = ref<QueuedMessage[]>([])
 
   // Current streaming text accumulator
   let streamingText = ''
@@ -308,8 +321,40 @@ export const useChatStore = defineStore('chat', () => {
     }
     // Refresh session list & current session ID (the recorder may have been
     // created lazily during this run).
-    fetchHealth()
     fetchSessions()
+    // Advance the type-ahead queue: start the next queued message now that the
+    // turn has ended. We deliberately skip fetchHealth in that case — flushQueue
+    // optimistically sets isRunning=true for the new turn, and an in-flight
+    // health response (running=false) would otherwise clobber it. With an empty
+    // queue, refresh health as before.
+    if (queuedMessages.value.length > 0) {
+      void flushQueue()
+    } else {
+      fetchHealth()
+    }
+  }
+
+  // Queue a message typed while the agent is running. It is sent automatically
+  // when the current turn (and any earlier queued messages) complete.
+  function enqueueMessage(text: string, images?: ChatImage[]) {
+    queuedMessages.value.push({ id: genId('q'), text, images })
+  }
+
+  // Remove a still-pending queued message (its × button) before it is sent.
+  function removeQueuedMessage(id: string) {
+    queuedMessages.value = queuedMessages.value.filter((q) => q.id !== id)
+  }
+
+  // Drain the queue while the agent is idle. Sends the next message and stops as
+  // soon as it starts a turn (isRunning flips true) — the remaining queue then
+  // advances on the next agentDone. Client-handled commands (e.g. "/goal status")
+  // that start no turn are skipped over so a later real message still goes out.
+  async function flushQueue() {
+    while (!isRunning.value && queuedMessages.value.length > 0) {
+      const next = queuedMessages.value.shift()
+      if (!next) break
+      await sendMessage(next.text, next.images)
+    }
   }
 
   function addApprovalRequest(data: PendingApproval) {
@@ -512,6 +557,10 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function stopAgent() {
+    // Stop interrupts the current turn; it does NOT clear the queue. When the
+    // turn ends (agent_done), agentDone flushes the next queued message — so Stop
+    // acts as "skip the current turn and send my next queued instruction now".
+    // To cancel pending messages, remove them individually via the × on each.
     try {
       await api.stop()
     } catch (err: unknown) {
@@ -621,7 +670,7 @@ export const useChatStore = defineStore('chat', () => {
       providerName.value = h.provider
       modelName.value = h.model
       mode.value = normalizeMode(h.mode)
-      autoApprove.value = mode.value === 'autopilot'
+      autoApprove.value = mode.value === 'full_access'
       currentSessionId.value = h.session_id || ''
       isRunning.value = h.running || false
       imageSupport.value = h.image_support || false
@@ -669,7 +718,7 @@ export const useChatStore = defineStore('chat', () => {
     try {
       await api.switchMode(newMode)
       mode.value = newMode
-      autoApprove.value = newMode === 'autopilot'
+      autoApprove.value = newMode === 'full_access'
     } catch (err: unknown) {
       console.error('Failed to switch mode:', err)
     }
@@ -681,6 +730,7 @@ export const useChatStore = defineStore('chat', () => {
     goal.value = null
     goalArmed.value = false
     tokenInfo.value = null
+    queuedMessages.value = []
     streamingText = ''
     streamingMsgId = ''
   }
@@ -696,12 +746,12 @@ export const useChatStore = defineStore('chat', () => {
 
   // Set the default auto-approve preference. The backend persists it as the
   // startup mode and applies it now (auto-approve maps onto the unified mode:
-  // Autopilot when on, Ask when off), so keep the local mode/flag in sync.
+  // Full access when on, Approval when off), so keep the local mode/flag in sync.
   async function setAutoApprove(enabled: boolean) {
     try {
       await api.setApprovalMode(enabled)
       autoApprove.value = enabled
-      mode.value = enabled ? 'autopilot' : 'ask'
+      mode.value = enabled ? 'full_access' : 'approval'
     } catch (err) {
       console.error('Failed to set auto-approve:', err)
     }
@@ -986,6 +1036,7 @@ export const useChatStore = defineStore('chat', () => {
     imageSupport,
     serverVersion,
     currentSessionId,
+    queuedMessages,
     // Getters
     messages,
     hasMessages,
@@ -1007,6 +1058,9 @@ export const useChatStore = defineStore('chat', () => {
     reconcileApprovals,
     resolveApproval,
     sendMessage,
+    enqueueMessage,
+    removeQueuedMessage,
+    flushQueue,
     stopAgent,
     fetchSessions,
     deleteSession,

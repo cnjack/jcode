@@ -1,10 +1,12 @@
-//! Launches the bundled `jcode` binary as a Tauri sidecar and points the main
-//! window at it once it is accepting connections.
+//! Launches the bundled `jcode` binary as a Tauri sidecar and exposes its
+//! loopback port to the frontend once it is accepting connections.
 //!
-//! The Go binary already embeds the entire web UI (frontend + REST + WebSocket),
-//! so the desktop app reuses that server verbatim: Rust just picks a free
-//! loopback port, spawns `jcode web` on it, waits until the port is live, then
-//! navigates the (initially hidden, splash-showing) window to the server.
+//! The desktop shell serves the page itself (Tauri's built-in frontend), while
+//! the Go binary owns the REST + WebSocket API. Rust picks a free loopback port,
+//! spawns `jcode web --headless` on it, waits until /api/health answers, stores
+//! the port in the managed `SidecarPort` state (so the frontend can resolve an
+//! absolute `http://127.0.0.1:<port>` API base via the `get_sidecar_port` IPC
+//! command), then reveals the window.
 
 use std::collections::VecDeque;
 use std::io::Write as _;
@@ -14,11 +16,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use tauri::{AppHandle, Manager, Url};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 
 use crate::SidecarHandle;
+
+/// Holds the dynamic loopback port the sidecar bound to, so the frontend can
+/// reach the API over an absolute `http://127.0.0.1:<port>` URL. The desktop
+/// shell serves the page itself (Tauri's built-in origin), so the page is no
+/// longer same-origin with the Go server — it needs this port to build request
+/// URLs. `None` until the port is picked / the sidecar is healthy.
+#[derive(Default)]
+pub struct SidecarPort(pub Mutex<Option<u16>>);
 
 /// How long we wait for the sidecar to answer /api/health before giving up.
 /// 400 × 150ms ≈ 60s — generous, since first launch may compile-cache, scan
@@ -53,7 +63,16 @@ fn sidecar_log_path(app: &AppHandle) -> PathBuf {
 
 pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let port = pick_free_port();
-    let url = format!("http://127.0.0.1:{port}");
+
+    // Publish the port to managed state immediately so a fast-rendering
+    // frontend's `get_sidecar_port` IPC call can resolve it without waiting for
+    // the health poll — the actual API won't answer until health passes, but
+    // the port itself is known as soon as we spawn.
+    if let Some(state) = app.try_state::<SidecarPort>() {
+        if let Ok(mut guard) = state.0.lock() {
+            *guard = Some(port);
+        }
+    }
 
     // Run the server from the user's home directory; the in-app workspace
     // picker takes over project selection from there.
@@ -84,10 +103,10 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // `ready` flips true once the window has navigated to a healthy server.
-    // Until then, the sidecar exiting is a fatal *startup* failure that we
-    // surface to the user — previously such a crash left the splash spinning
-    // forever, which is exactly the "stuck on 正在启动本地服务" symptom.
+    // `ready` flips true once the sidecar's /api/health answers. Until then, the
+    // sidecar exiting is a fatal *startup* failure that we surface to the user —
+    // previously such a crash left the splash spinning forever, which is exactly
+    // the "stuck on 正在启动本地服务" symptom.
     let ready = Arc::new(AtomicBool::new(false));
     // Ring buffer of the sidecar's most recent output lines, shown in the
     // failure dialog so the user (or a bug report) captures the real panic.
@@ -146,7 +165,10 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     // Health-poll the port on a background thread, then reveal the window. We
     // verify the /api/health response (not just a bare TCP connect) so that if
     // another process grabbed the port in the moment between pick_free_port and
-    // the sidecar binding it, we don't navigate the window to a foreign server.
+    // the sidecar binding it, the frontend won't be pointed at a foreign server.
+    // The window stays on Tauri's built-in page (the splash / app shell); it is
+    // NOT navigated to the sidecar — the page reaches the API via an absolute
+    // `http://127.0.0.1:<port>` URL resolved from `get_sidecar_port`.
     let app = app.clone();
     let addr: SocketAddr = ([127, 0, 0, 1], port).into();
     let poll_ready = ready.clone();
@@ -159,9 +181,6 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             if health_ok(&addr, port) {
                 poll_ready.store(true, Ordering::SeqCst);
                 if let Some(w) = app.get_webview_window("main") {
-                    if let Ok(parsed) = Url::parse(&url) {
-                        let _ = w.navigate(parsed);
-                    }
                     let _ = w.show();
                     let _ = w.set_focus();
                 }

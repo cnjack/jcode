@@ -16,7 +16,6 @@ use tauri_plugin_shell::process::CommandChild;
 /// own the lifecycle outright.
 #[derive(Default)]
 pub struct SidecarHandle(pub Mutex<Option<CommandChild>>);
-
 /// Cross-cutting desktop state. `tray` records whether the menu-bar tray was
 /// actually created — close-to-tray must only swallow the window's close when
 /// there is a tray to reopen from, or the user would be stranded (e.g. on a
@@ -64,6 +63,16 @@ fn kill_sidecar(app: &AppHandle) {
     }
 }
 
+/// IPC command the frontend calls to learn the sidecar's loopback port. The
+/// desktop shell serves the page itself (Tauri's built-in origin), so the page
+/// is cross-origin to the Go API server and must build request URLs against
+/// `http://127.0.0.1:<port>`. Returns the port once `sidecar::start` has picked
+/// it, or `None` if the sidecar hasn't initialized yet — the frontend polls.
+#[tauri::command]
+fn get_sidecar_port(port: tauri::State<'_, sidecar::SidecarPort>) -> Option<u16> {
+    port.0.lock().ok().and_then(|guard| *guard)
+}
+
 fn main() {
     let mut builder = tauri::Builder::default();
 
@@ -93,7 +102,9 @@ fn main() {
 
     let app = builder
         .manage(SidecarHandle::default())
+        .manage(sidecar::SidecarPort::default())
         .manage(DesktopState::default())
+        .invoke_handler(tauri::generate_handler![get_sidecar_port])
         .setup(|app| {
             // Start the backend FIRST so a (possibly cosmetic) tray failure can
             // never prevent the server — and thus the whole app — from coming up.

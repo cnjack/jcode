@@ -3,23 +3,20 @@ package mode
 import "testing"
 
 func TestStringRoundTrip(t *testing.T) {
-	for _, m := range []SessionMode{Ask, Plan, Autopilot} {
+	for _, m := range []SessionMode{Approval, Plan, FullAccess} {
 		if got := Parse(m.String()); got != m {
 			t.Errorf("round-trip %v: String()=%q Parse()=%v, want %v", m, m.String(), got, m)
 		}
 	}
 }
 
-func TestParseLegacy(t *testing.T) {
+func TestParse(t *testing.T) {
 	cases := map[string]SessionMode{
-		// canonical
-		"ask": Ask, "plan": Plan, "autopilot": Autopilot,
-		// legacy tool-axis strings written before the unified selector
-		"normal": Ask, "executing": Ask, "planning": Plan,
-		// legacy approval-axis / frontend aliases
-		"auto": Autopilot, "manual": Ask, "agent": Ask, "build": Ask,
-		// unknown / empty fall back to the safe default
-		"": Ask, "garbage": Ask,
+		"approval":    Approval,
+		"plan":        Plan,
+		"full_access": FullAccess,
+		"":            Approval,
+		"garbage":     Approval,
 	}
 	for in, want := range cases {
 		if got := Parse(in); got != want {
@@ -34,9 +31,9 @@ func TestDerivedAxes(t *testing.T) {
 		isPlan    bool
 		autoApprv bool
 	}{
-		{Ask, false, false},
+		{Approval, false, false},
 		{Plan, true, false},
-		{Autopilot, false, true},
+		{FullAccess, false, true},
 	}
 	for _, c := range cases {
 		if c.m.IsPlan() != c.isPlan {
@@ -49,8 +46,8 @@ func TestDerivedAxes(t *testing.T) {
 }
 
 func TestNextCycle(t *testing.T) {
-	want := []SessionMode{Plan, Autopilot, Ask}
-	cur := Ask
+	want := []SessionMode{Plan, FullAccess, Approval}
+	cur := Approval
 	for i, w := range want {
 		cur = cur.Next()
 		if cur != w {
@@ -60,7 +57,7 @@ func TestNextCycle(t *testing.T) {
 }
 
 func TestLabel(t *testing.T) {
-	cases := map[SessionMode]string{Ask: "Ask", Plan: "Plan", Autopilot: "Autopilot"}
+	cases := map[SessionMode]string{Approval: "Ask for approval", Plan: "Plan", FullAccess: "Full access"}
 	for m, want := range cases {
 		if got := m.Label(); got != want {
 			t.Errorf("%v.Label()=%q, want %q", m, got, want)

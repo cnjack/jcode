@@ -47,7 +47,7 @@ func (s *StatusBarComponent) View(state StatusBarState) string {
 	if state.AutoApprove {
 		rightParts = append(rightParts, "Approve: "+lipgloss.NewStyle().Foreground(colorWarning).Render("Auto"))
 	} else {
-		rightParts = append(rightParts, "Approve: "+lipgloss.NewStyle().Foreground(colorMuted).Render("Ask"))
+		rightParts = append(rightParts, "Approval: "+lipgloss.NewStyle().Foreground(colorMuted).Render("Required"))
 	}
 
 	if state.TotalTokens > 0 || state.ModelContextLimit > 0 {

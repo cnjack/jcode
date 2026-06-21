@@ -128,12 +128,12 @@ const { connected } = useWebSocket({
   },
   onModeChanged: (data) => {
     store.mode = normalizeMode(data.mode)
-    store.autoApprove = store.mode === 'autopilot'
+    store.autoApprove = store.mode === 'full_access'
   },
   onApprovalModeChanged: (data) => {
     store.autoApprove = data.auto_approve
-    if (data.auto_approve) store.mode = 'autopilot'
-    else if (store.mode === 'autopilot') store.mode = 'ask'
+    if (data.auto_approve) store.mode = 'full_access'
+    else if (store.mode === 'full_access') store.mode = 'approval'
   },
   onSubagentProgress: (data) => {
     store.addSubagentProgress(data.agent_name, data.event, data.tool_name, data.detail)
@@ -493,9 +493,9 @@ function startResize(e: MouseEvent) {
                   :aria-label="t('chat.thinking')"
                 >
                   <span class="flex gap-1" aria-hidden="true">
-                    <span class="w-1.5 h-1.5 rounded-full animate-dot-pulse" style="background: var(--color-primary); animation-delay: 0ms" />
-                    <span class="w-1.5 h-1.5 rounded-full animate-dot-pulse" style="background: var(--color-primary); animation-delay: 160ms" />
-                    <span class="w-1.5 h-1.5 rounded-full animate-dot-pulse" style="background: var(--color-primary); animation-delay: 320ms" />
+                    <span class="w-1.5 h-1.5 rounded-full animate-dot-pulse" style="background: var(--color-accent-neutral); animation-delay: 0ms" />
+                    <span class="w-1.5 h-1.5 rounded-full animate-dot-pulse" style="background: var(--color-accent-neutral); animation-delay: 160ms" />
+                    <span class="w-1.5 h-1.5 rounded-full animate-dot-pulse" style="background: var(--color-accent-neutral); animation-delay: 320ms" />
                   </span>
                   <span class="thinking-label text-[13px]" style="font-family: var(--font-sans)">{{ t('chat.thinking') }}</span>
                   <span
@@ -643,8 +643,8 @@ function startResize(e: MouseEvent) {
   padding: 8px 22px;
   border: none;
   border-radius: var(--radius-lg);
-  background: var(--color-primary);
-  color: var(--color-on-primary);
+  background: var(--color-accent-neutral);
+  color: var(--color-surface);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;

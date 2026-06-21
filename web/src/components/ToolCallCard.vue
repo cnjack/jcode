@@ -69,7 +69,7 @@ const teamListData = computed(() => {
 })
 
 function memberStatusColor(status: string): string {
-  if (status === 'running' || status === 'busy') return 'var(--color-primary)'
+  if (status === 'running' || status === 'busy') return 'var(--color-accent-neutral)'
   if (status === 'done' || status === 'finished') return 'var(--color-success-fg)'
   if (status === 'error') return 'var(--color-destructive)'
   return 'var(--color-muted-foreground)'
@@ -287,7 +287,7 @@ function formatArgs(args: string): string {
       <span
         class="text-[10px] shrink-0"
         :class="{ 'animate-pulse': tool.status === 'running' }"
-        :style="{ color: tool.status === 'done' ? 'var(--color-primary)' : tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-muted-foreground)' }"
+        :style="{ color: tool.status === 'done' ? 'var(--color-accent-neutral)' : tool.status === 'error' ? 'var(--color-destructive)' : 'var(--color-muted-foreground)' }"
       >
         <template v-if="tool.status === 'running'">◈</template>
         <template v-else-if="tool.status === 'done'">✓</template>
@@ -348,7 +348,7 @@ function formatArgs(args: string): string {
       <span
         v-if="displaySubtitle"
         class="text-xs font-mono truncate"
-        :style="isContextTool ? 'color: var(--color-muted-foreground)' : 'color: var(--color-primary)'"
+        :style="isContextTool ? 'color: var(--color-muted-foreground)' : 'color: var(--color-accent-neutral)'"
       >{{ displaySubtitle }}</span>
       <ChevronDownIcon class="w-3 h-3 shrink-0" style="color: var(--color-muted-foreground)" />
       <span v-if="renderType === 'diff' && diffData.added + diffData.deleted > 0" class="ml-auto text-[10px] font-mono tabular-nums shrink-0">
@@ -370,7 +370,7 @@ function formatArgs(args: string): string {
         <span
           v-if="displaySubtitle"
           class="text-xs font-mono truncate"
-          :style="isContextTool ? 'color: var(--color-muted-foreground)' : 'color: var(--color-primary)'"
+          :style="isContextTool ? 'color: var(--color-muted-foreground)' : 'color: var(--color-accent-neutral)'"
         >{{ displaySubtitle }}</span>
         <ChevronDownIcon class="w-3 h-3 shrink-0 rotate-180" style="color: var(--color-muted-foreground)" />
         <span v-if="renderType === 'diff' && diffData.added + diffData.deleted > 0" class="ml-auto text-[10px] font-mono tabular-nums shrink-0">
@@ -404,7 +404,7 @@ function formatArgs(args: string): string {
       <!-- ═══════ File Viewer (read/write) ═══════ -->
       <div v-else-if="renderType === 'file-viewer'" class="max-h-72 overflow-y-auto" style="background: var(--color-surface)">
         <table v-if="fileLines.length" class="w-full text-xs font-mono border-collapse">
-          <tr v-for="line in fileLines" :key="line.num" class="hover:bg-[var(--accent-wash-soft)]">
+          <tr v-for="line in fileLines" :key="line.num" class="hover:bg-[var(--neutral-wash-soft)]">
             <td class="text-right select-none pr-3 pl-2 py-0 w-1 align-top whitespace-nowrap" style="color: color-mix(in srgb, var(--color-muted-foreground), transparent 40%)">{{ line.num }}</td>
             <td class="pr-3 py-0 whitespace-pre-wrap break-all" style="color: var(--color-foreground)">{{ line.text }}</td>
           </tr>
@@ -447,7 +447,7 @@ function formatArgs(args: string): string {
         <template v-if="searchResults.lines.length">
           <div v-for="(line, i) in searchResults.lines" :key="i" class="py-0.5">
             <div v-if="line.isRef" class="flex items-baseline gap-1.5 text-[10px] font-mono">
-              <span style="color: var(--color-primary)">{{ line.file }}</span>
+              <span style="color: var(--color-accent-neutral)">{{ line.file }}</span>
               <span style="color: var(--color-muted-foreground)">:{{ line.lineNum }}</span>
             </div>
             <div class="text-xs font-mono whitespace-pre-wrap" style="color: var(--color-foreground)">{{ line.content }}</div>
@@ -516,7 +516,7 @@ function formatArgs(args: string): string {
       <div v-else-if="renderType === 'team-create'" class="px-3 py-2.5" style="background: var(--color-surface)">
         <div class="flex items-center gap-2 mb-1">
           <span class="text-xs font-mono font-semibold" style="color: var(--color-foreground)">{{ teamCreateData.teamName }}</span>
-          <span v-if="tool.status === 'done' && !tool.error" class="ml-auto text-[10px] font-semibold" style="color: var(--color-primary)">{{ t('tool.created') }}</span>
+          <span v-if="tool.status === 'done' && !tool.error" class="ml-auto text-[10px] font-semibold" style="color: var(--color-accent-neutral)">{{ t('tool.created') }}</span>
           <span v-else-if="tool.status === 'running'" class="ml-auto text-[10px] animate-pulse" style="color: var(--color-muted-foreground)">{{ t('tool.creating') }}</span>
         </div>
         <div v-if="teamCreateData.description" class="text-[11px] leading-snug" style="color: var(--color-muted-foreground)">{{ teamCreateData.description }}</div>
@@ -533,7 +533,7 @@ function formatArgs(args: string): string {
             class="text-[10px] px-1.5 py-0.5 rounded"
             style="background: var(--color-muted); color: var(--color-muted-foreground)"
           >{{ teamSpawnData.agentType }}</span>
-          <span v-if="tool.status === 'done' && !tool.error" class="ml-auto text-[10px] font-semibold" style="color: var(--color-primary)">{{ t('tool.runningMark') }}</span>
+          <span v-if="tool.status === 'done' && !tool.error" class="ml-auto text-[10px] font-semibold" style="color: var(--color-accent-neutral)">{{ t('tool.runningMark') }}</span>
           <span v-else-if="tool.status === 'running'" class="ml-auto text-[10px] animate-pulse" style="color: var(--color-muted-foreground)">{{ t('tool.spawning') }}</span>
         </div>
         <div
@@ -556,7 +556,7 @@ function formatArgs(args: string): string {
           <span
             v-if="tool.status === 'done' && !tool.error"
             class="ml-auto text-[10px] font-semibold"
-            style="color: var(--color-primary)"
+            style="color: var(--color-accent-neutral)"
           >{{ t('tool.sent') }}</span>
           <span
             v-else-if="tool.status === 'running'"

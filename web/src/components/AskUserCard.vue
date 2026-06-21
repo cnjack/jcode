@@ -170,11 +170,11 @@ const resolvedAnswers = computed<string[]>(() => {
       <span
         v-if="isPending"
         class="w-1.5 h-1.5 rounded-full shrink-0 animate-pulse"
-        style="background: var(--color-primary)"
+        style="background: var(--color-accent-neutral)"
         aria-hidden="true"
       />
       <span class="text-xs font-medium" style="color: var(--color-muted-foreground)">Asking</span>
-      <span v-if="questions[0]?.header" class="text-xs font-mono" style="color: var(--color-primary)">{{ questions[0].header }}</span>
+      <span v-if="questions[0]?.header" class="text-xs font-mono" style="color: var(--color-accent-neutral)">{{ questions[0].header }}</span>
       <span class="text-xs font-mono truncate" style="color: var(--color-muted-foreground)">{{ title }}</span>
       <ChevronDownIcon class="w-3 h-3 shrink-0" style="color: var(--color-muted-foreground)" />
     </button>
@@ -190,7 +190,7 @@ const resolvedAnswers = computed<string[]>(() => {
         <span
           class="w-1.5 h-1.5 rounded-full shrink-0"
           :class="{ 'animate-pulse': isPending }"
-          :style="{ background: isPending ? 'var(--color-primary)' : 'var(--color-muted-foreground)' }"
+          :style="{ background: isPending ? 'var(--color-accent-neutral)' : 'var(--color-muted-foreground)' }"
         />
         <span class="text-sm font-medium flex-1 min-w-0 truncate" style="color: var(--color-foreground)">{{ title }}</span>
         <button class="shrink-0 cursor-pointer hover:opacity-70" :title="t('askUser.collapse')" @click="collapsed = true">
@@ -213,16 +213,16 @@ const resolvedAnswers = computed<string[]>(() => {
             :key="oi"
             class="ask-opt w-full flex items-center gap-3 px-3 py-2 text-left cursor-pointer rounded-lg"
             :class="{ 'ask-opt-selected': isSelected(qi, opt.label) }"
-            :style="{ border: isSelected(qi, opt.label) ? '1px solid var(--color-primary)' : '1px solid transparent' }"
+            :style="{ border: isSelected(qi, opt.label) ? '1px solid var(--color-accent-neutral)' : '1px solid transparent' }"
             @click="toggleOption(qi, opt.label, !!q.multi_select)"
           >
             <span
               v-if="q.multi_select"
               class="w-4 h-4 rounded shrink-0 flex items-center justify-center text-[10px]"
               :style="{
-                border: '1.5px solid ' + (isSelected(qi, opt.label) ? 'var(--color-primary)' : 'var(--color-border)'),
-                background: isSelected(qi, opt.label) ? 'var(--color-primary)' : 'transparent',
-                color: 'white',
+                border: '1.5px solid ' + (isSelected(qi, opt.label) ? 'var(--color-accent-neutral)' : 'var(--color-border)'),
+                background: isSelected(qi, opt.label) ? 'var(--color-accent-neutral)' : 'transparent',
+                color: 'var(--color-surface)',
               }"
             >{{ isSelected(qi, opt.label) ? '✓' : '' }}</span>
             <div class="flex-1 min-w-0">
@@ -263,7 +263,7 @@ const resolvedAnswers = computed<string[]>(() => {
           <button
             class="px-3.5 py-1.5 text-xs rounded-md font-medium transition-opacity flex items-center gap-1.5"
             :class="canSubmit ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'"
-            :style="{ background: 'var(--color-primary)', color: 'white' }"
+            :style="{ background: 'var(--color-accent-neutral)', color: 'var(--color-surface)' }"
             :disabled="!canSubmit"
             @click="submit"
           >
@@ -279,7 +279,7 @@ const resolvedAnswers = computed<string[]>(() => {
           <div v-for="(q, qi) in questions" :key="qi">
             <div v-if="questions.length > 1" class="text-xs" style="color: var(--color-muted-foreground)">{{ q.question }}</div>
             <div class="text-sm flex items-baseline gap-1.5">
-              <span class="shrink-0 text-[10px]" style="color: var(--color-primary)">▸</span>
+              <span class="shrink-0 text-[10px]" style="color: var(--color-accent-neutral)">▸</span>
               <span style="color: var(--color-foreground)">{{ resolvedAnswers[qi] || '—' }}</span>
             </div>
           </div>
@@ -300,6 +300,6 @@ const resolvedAnswers = computed<string[]>(() => {
 }
 .ask-opt-selected,
 .ask-opt-selected:hover {
-  background: color-mix(in srgb, var(--color-primary), transparent 88%);
+  background: color-mix(in srgb, var(--color-accent-neutral), transparent 88%);
 }
 </style>

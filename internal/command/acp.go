@@ -33,13 +33,11 @@ import (
 )
 
 // acpSession bundles all per-session state created in NewSession.
-// ACP mode IDs. The wire ids match mode.SessionMode.String(); "agent" is kept
-// only as a legacy alias accepted by SetSessionMode for older clients.
+// ACP mode IDs match mode.SessionMode.String().
 const (
-	acpModeAsk       acp.SessionModeId = "ask"
-	acpModePlan      acp.SessionModeId = "plan"
-	acpModeAutopilot acp.SessionModeId = "autopilot"
-	acpModeAgent     acp.SessionModeId = "agent" // legacy alias for "ask"
+	acpModeApproval   acp.SessionModeId = "approval"
+	acpModePlan       acp.SessionModeId = "plan"
+	acpModeFullAccess acp.SessionModeId = "full_access"
 )
 
 // acpModeID maps a unified mode to its advertised ACP wire id.
@@ -52,9 +50,9 @@ func acpModes(current acp.SessionModeId) *acp.SessionModeState {
 	return &acp.SessionModeState{
 		CurrentModeId: current,
 		AvailableModes: []acp.SessionMode{
-			{Id: acpModeAsk, Name: "Ask", Description: acp.Ptr("Step-by-step: approve each tool call")},
+			{Id: acpModeApproval, Name: "Ask for approval", Description: acp.Ptr("Ask before each restricted tool call")},
 			{Id: acpModePlan, Name: "Plan", Description: acp.Ptr("Read-only planning mode for analysis")},
-			{Id: acpModeAutopilot, Name: "Autopilot", Description: acp.Ptr("End-to-end execution, auto-approved")},
+			{Id: acpModeFullAccess, Name: "Full access", Description: acp.Ptr("Unrestricted execution without approval prompts")},
 		},
 	}
 }
@@ -466,7 +464,7 @@ func (a *acpAgent) buildAgentSession(
 	handlers = append(handlers, reminderMw)
 
 	// Seed the initial agent from the resolved startup mode (Plan uses the
-	// read-only tool/prompt set; Ask/Autopilot share the full set and differ only
+	// read-only tool/prompt set; Approval/Full access share the full set and differ only
 	// on the approval axis, already seeded in approvalState above).
 	initialPrompt, initialTools := normalPrompt, allTools
 	if startupMode.IsPlan() {
@@ -503,7 +501,7 @@ func (a *acpAgent) buildAgentSession(
 	}
 
 	// Reconcile the session's advertised mode when the handler promotes to
-	// Autopilot via "Allow All", so sess.mode never drifts from the approval
+	// Full access via "Allow All", so sess.mode never drifts from the approval
 	// state's source of truth.
 	acpHandler.SetModeChangeCallback(func(m mode.SessionMode) {
 		sess.mu.Lock()
@@ -700,29 +698,28 @@ func (a *acpAgent) SetSessionMode(_ context.Context, params acp.SetSessionModeRe
 
 	sess.mu.Lock()
 
-	// Accept the three canonical ids plus the legacy "agent" alias; reject anything
-	// else. mode.Parse normalizes the accepted ids to the unified SessionMode.
+	// Accept only the three canonical ids.
 	switch params.ModeId {
-	case acpModeAsk, acpModePlan, acpModeAutopilot, acpModeAgent:
+	case acpModeApproval, acpModePlan, acpModeFullAccess:
 	default:
 		sess.mu.Unlock()
 		return acp.SetSessionModeResponse{}, fmt.Errorf("unknown mode: %s", params.ModeId)
 	}
 	sm := mode.Parse(string(params.ModeId))
-	newMode := acpModeID(sm) // canonical id ("agent" → "ask")
+	newMode := acpModeID(sm)
 	if newMode == sess.mode {
 		sess.mu.Unlock()
 		return acp.SetSessionModeResponse{}, nil
 	}
 
 	sess.mode = newMode
-	// Apply the approval axis: Autopilot flips to auto-approve, Ask/Plan to manual.
+	// Apply the approval axis: Full access flips to auto-approve; Approval and Plan use manual approval.
 	sess.approvalState.SetSessionMode(sm)
 	if sess.rec != nil {
 		sess.rec.RecordModeChange(sm.String())
 	}
 
-	// Apply the tool/prompt axis: Plan uses the read-only set; Ask and Autopilot
+	// Apply the tool/prompt axis: Plan uses the read-only set; Approval and Full access
 	// share the full set (they differ only on the approval axis above).
 	var sysPrompt string
 	var toolList []tool.BaseTool
@@ -915,16 +912,16 @@ func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRe
 	// Load history from disk so the agent has conversation context.
 	var history []*schema.Message
 	var goalSnap *session.GoalSnapshot
-	restoredMode := mode.Ask
+	restoredMode := mode.Approval
 	if entries, err := session.LoadSession(resumeUUID); err == nil {
 		resumeState := session.ReconstructState(entries)
 		history = session.PruneOldToolOutputs(resumeState.History, 2)
 		goalSnap = resumeState.Goal
-		// Restore the saved mode (Autopilot as-is; Plan normalized to Ask so the
+		// Restore the saved mode (Full access as-is; Plan normalized to Approval so the
 		// reloaded full-tool agent is not stranded in read-only plan tools).
 		restoredMode = mode.Parse(resumeState.Mode)
 		if restoredMode == mode.Plan {
-			restoredMode = mode.Ask
+			restoredMode = mode.Approval
 		}
 		config.Logger().Printf("[acp] ResumeSession: loaded %d history messages for %s", len(history), params.SessionId)
 	} else {
@@ -936,7 +933,7 @@ func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRe
 		return acp.ResumeSessionResponse{}, err
 	}
 	sess.env.GoalStore.RestoreFromSnapshot(goalSnap)
-	// Apply the restored approval axis; Ask/Autopilot both use the full-tool agent
+	// Apply the restored approval axis; Approval/Full access both use the full-tool agent
 	// already built above, so no rebuild is needed.
 	sess.approvalState.SetSessionMode(restoredMode)
 	sess.mode = acpModeID(restoredMode)

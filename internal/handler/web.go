@@ -431,7 +431,7 @@ func (h *WebHandler) RequestApproval(ctx context.Context, req ApprovalRequest) (
 // like the TUI's "Approve All" and ACP's "Allow Always") from a plain
 // "approve once" that leaves the session mode untouched. Previously every
 // approve was treated as auto, silently flipping the whole session to
-// Autopilot on a single Allow click.
+// Full access on a single Allow click.
 func (h *WebHandler) ResolveApproval(id string, approved, approveAll bool) error {
 	h.mu.Lock()
 	p, ok := h.pendingApproval[id]

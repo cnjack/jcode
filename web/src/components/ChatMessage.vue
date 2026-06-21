@@ -90,11 +90,11 @@ function handleEditKeyDown(e: KeyboardEvent) {
       <div
         class="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0"
         :style="{
-          background: message.role === 'assistant' ? 'var(--color-primary)' :
+          background: message.role === 'assistant' ? 'var(--color-accent-neutral)' :
                       message.role === 'user' && message.source === 'wechat' ? 'var(--color-info-fg)' :
                       message.role === 'system' ? systemColor :
                       'var(--color-foreground)',
-          color: 'var(--color-on-primary)'
+          color: 'var(--color-surface)'
         }"
       >
         <template v-if="message.role === 'assistant'">J</template>
@@ -105,7 +105,7 @@ function handleEditKeyDown(e: KeyboardEvent) {
       <span
         class="text-[11px] font-semibold"
         :style="{
-          color: message.role === 'assistant' ? 'var(--color-primary)' :
+          color: message.role === 'assistant' ? 'var(--color-accent-neutral)' :
                  message.role === 'user' && message.source === 'wechat' ? 'var(--color-info-fg)' :
                  message.role === 'system' ? systemColor :
                  'var(--color-foreground)'
@@ -142,7 +142,7 @@ function handleEditKeyDown(e: KeyboardEvent) {
       <div class="flex items-center gap-2 mt-2">
         <button
           class="px-3 py-1 text-xs font-semibold transition-all cursor-pointer active:scale-95"
-          :style="{ background: 'var(--color-primary)', color: 'var(--color-on-primary)', borderRadius: 'var(--radius-md)' }"
+          :style="{ background: 'var(--color-accent-neutral)', color: 'var(--color-surface)', borderRadius: 'var(--radius-md)' }"
           @click="confirmEdit"
         >
           {{ t('common.save') }}
@@ -178,7 +178,7 @@ function handleEditKeyDown(e: KeyboardEvent) {
           @click="copyContent"
         >
           <Square2StackIcon v-if="!copied" class="w-3 h-3" />
-          <CheckIcon v-else class="w-3 h-3" style="color: var(--color-primary)" />
+          <CheckIcon v-else class="w-3 h-3" style="color: var(--color-accent-neutral)" />
         </button>
 
         <!-- Edit button (user messages) -->

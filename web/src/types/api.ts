@@ -354,14 +354,13 @@ export interface AskUserAnswer {
 // UI message types
 export type MessageRole = 'user' | 'assistant' | 'system'
 
-export type AgentMode = 'ask' | 'plan' | 'autopilot'
+export type AgentMode = 'approval' | 'plan' | 'full_access'
 
-// normalizeMode maps any backend/legacy mode string to a unified AgentMode,
-// tolerating the old 'build'/'agent' aliases so older servers still work.
+// normalizeMode maps a backend mode string to the UI's unified AgentMode.
 export function normalizeMode(m?: string): AgentMode {
   if (m === 'plan') return 'plan'
-  if (m === 'autopilot' || m === 'auto') return 'autopilot'
-  return 'ask' // ask / agent / build / normal / executing / empty
+  if (m === 'full_access') return 'full_access'
+  return 'approval'
 }
 
 export interface ChatImage {

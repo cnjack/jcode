@@ -6,8 +6,8 @@ import { api } from '@/composables/api'
 import type { SlashCommandInfo, ChatImage } from '@/types/api'
 import WorkspacePicker from '@/components/WorkspacePicker.vue'
 import BranchPicker from '@/components/BranchPicker.vue'
-import { useBranch } from '@/composables/useBranch'
-import { ChatBubbleLeftIcon, ClipboardDocumentListIcon, BoltIcon, PlusIcon, PaperClipIcon, XMarkIcon, ChevronDownIcon, ChatBubbleLeftRightIcon, StopIcon, PaperAirplaneIcon } from '@heroicons/vue/24/outline'
+import { HandRaisedIcon, ShieldExclamationIcon, ClipboardDocumentListIcon, BoltIcon, PlusIcon, PaperClipIcon, XMarkIcon, ChevronDownIcon, StopIcon, PaperAirplaneIcon, MagnifyingGlassIcon, SquaresPlusIcon, PhotoIcon, WrenchScrewdriverIcon, CheckIcon, StarIcon, SparklesIcon } from '@heroicons/vue/24/outline'
+import { StarIcon as StarIconSolid, CheckCircleIcon } from '@heroicons/vue/24/solid'
 
 // Which way the workspace/branch pickers open. The docked composer opens them
 // upward (default); the centered welcome composer has more empty room below, so
@@ -18,9 +18,6 @@ withDefaults(defineProps<{ pickerPlacement?: 'top' | 'bottom' }>(), {
 
 const store = useChatStore()
 const { t } = useI18n()
-// Current git branch (singleton) — used to decide whether the composer's top row
-// is worth showing once the workspace picker is hidden mid-conversation.
-const { current: branchCurrent } = useBranch()
 const input = ref('')
 const textarea = ref<HTMLTextAreaElement | null>(null)
 const showModelPicker = ref(false)
@@ -41,9 +38,9 @@ const pendingImagePreviews = ref<string[]>([])
 const fileInput = ref<HTMLInputElement | null>(null)
 
 const modes = computed(() => [
-  { value: 'ask' as const, label: t('chat.modes.ask'), icon: ChatBubbleLeftIcon },
-  { value: 'plan' as const, label: t('chat.modes.plan'), icon: ClipboardDocumentListIcon },
-  { value: 'autopilot' as const, label: t('chat.modes.autopilot'), icon: BoltIcon },
+  { value: 'approval' as const, label: t('chat.modes.approval'), icon: HandRaisedIcon, sub: t('chat.modes.approvalSub'), risk: 'neutral' as const },
+  { value: 'plan' as const, label: t('chat.modes.plan'), icon: ClipboardDocumentListIcon, sub: t('chat.modes.planSub'), risk: 'plan' as const },
+  { value: 'full_access' as const, label: t('chat.modes.fullAccess'), icon: ShieldExclamationIcon, sub: t('chat.modes.fullAccessSub'), risk: 'danger' as const },
 ])
 
 const filteredSlashCommands = computed(() => {
@@ -68,6 +65,15 @@ const filteredProviders = computed(() => {
     .filter(p => p.models.length > 0)
 })
 
+// The picker lists only models the user has enabled ("opened"). Disabled models
+// stay hidden here but remain visible in the Manage dialog (which uses
+// filteredProviders directly) so they can be re-enabled.
+const pickerProviders = computed(() =>
+  filteredProviders.value
+    .map(p => ({ ...p, models: p.models.filter(m => m.enabled !== false) }))
+    .filter(p => p.models.length > 0),
+)
+
 // Get full display name for a model (e.g., "DeepSeek V4 Pro")
 function getModelDisplayName(providerId: string, modelId: string): string {
   for (const p of store.providers) {
@@ -78,6 +84,111 @@ function getModelDisplayName(providerId: string, modelId: string): string {
   }
   return modelId
 }
+
+// Provider identity tile — a tinted squircle with the provider's initial. The
+// single "identity primitive" reused across the selector, the Manage dialog,
+// and (conceptually) the approval card. Color is keyed off the provider id so
+// it's stable without a server-provided brand asset.
+const PROVIDER_COLORS: Record<string, string> = {
+  anthropic: '#D97757',
+  openai: '#10A37F',
+  google: '#4285F4',
+  deepseek: '#4D6BFE',
+  moonshot: '#1A1A1A',
+  zhipu: '#3B5BFE',
+}
+// Distinct fallbacks for providers without an explicit brand color (e.g. the
+// "ZHIPU AI Coding Plan" id, third-party gateways). All are saturated enough
+// for white initials and deliberately exclude washed/gray tones so the tile
+// never disappears into the surface. Keyed by a stable hash of the id so the
+// same provider always gets the same color.
+const PROVIDER_FALLBACK_COLORS = [
+  '#7C5CFC', // violet
+  '#E0567A', // rose
+  '#0EA5A4', // teal
+  '#E0922F', // amber
+  '#2E7D5B', // green
+  '#3D7DE0', // azure
+  '#C2410C', // burnt orange
+  '#6366F1', // indigo
+]
+function providerColor(id: string): string {
+  const explicit = PROVIDER_COLORS[id]
+  if (explicit) return explicit
+  let h = 0
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0
+  return PROVIDER_FALLBACK_COLORS[h % PROVIDER_FALLBACK_COLORS.length]!
+}
+function providerInitial(name: string): string {
+  const n = (name || '?').trim()
+  // Latin initial; for CJK names fall back to the first code point.
+  return /[A-Za-z]/.test(n) ? n[0]!.toLowerCase() : n[0] ?? '?'
+}
+
+// Compact context-limit label for the subline: 200000 → "200K", 1000000 → "1M".
+function formatContext(limit?: number): string | null {
+  if (!limit || limit <= 0) return null
+  if (limit >= 1_000_000) {
+    const m = limit / 1_000_000
+    return (Number.isInteger(m) ? m : m.toFixed(1)) + 'M'
+  }
+  if (limit >= 1000) return Math.round(limit / 1000) + 'K'
+  return String(limit)
+}
+
+// Subline under a model row: "claude-sonnet-4-5 · 200K".
+function modelSubline(providerId: string, m: { id: string; context_limit?: number } | undefined): string {
+  if (!m) return ''
+  const parts = [m.id]
+  const ctx = formatContext(m.context_limit)
+  if (ctx) parts.push(ctx)
+  return parts.join(' · ')
+}
+
+// Resolve a provider's display name from its id (the dropdown rows carry the
+// name, but recent/favorite refs only have the id).
+function providerDisplayName(id: string): string {
+  return store.providers.find((p) => p.id === id)?.name ?? id
+}
+
+// Look up the ModelInfo for a provider+model pair (used by recent/favorite refs
+// which only carry ids).
+function modelInfoFor(provider: string, model: string) {
+  const p = store.providers.find((x) => x.id === provider)
+  return p?.models.find((m) => m.id === model)
+}
+
+// The ModelInfo for the currently-active model — drives the pinned row subline
+// + capability dots.
+const currentModelInfo = computed(() => modelInfoFor(store.providerName, store.modelName))
+
+// Favorite recent models (recent keeps the recency order), filtered by the
+// search box and excluding the current model (it's pinned above).
+const favoriteModelRefs = computed(() => {
+  const q = modelFilter.value.trim().toLowerCase()
+  return store.recentModels.filter((r) => {
+    if (!store.favoriteModels.has(`${r.provider}/${r.model}`)) return false
+    if (store.providerName === r.provider && store.modelName === r.model) return false
+    if (!q) return true
+    const name = getModelDisplayName(r.provider, r.model).toLowerCase()
+    return name.includes(q) || r.provider.toLowerCase().includes(q)
+  })
+})
+
+// Enter in the filter selects the first visible model.
+function selectFirstFiltered() {
+  const p = pickerProviders.value[0]
+  const m = p?.models[0]
+  if (p && m) selectModel(p.id, m.id)
+}
+
+// Counts for the Manage dialog footer: visible (after filter) vs total models.
+const manageVisibleCount = computed(() =>
+  filteredProviders.value.reduce((n, p) => n + p.models.length, 0),
+)
+const manageTotalCount = computed(() =>
+  store.providers.reduce((n, p) => n + p.models.length, 0),
+)
 
 function autoResize() {
   const el = textarea.value
@@ -186,15 +297,23 @@ function applySlashCommand(cmd: SlashCommandInfo) {
 
 async function send() {
   const text = input.value.trim()
-  if ((!text && pendingImages.value.length === 0) || store.isRunning) return
+  if (!text && pendingImages.value.length === 0) return
   const images = pendingImages.value.length > 0 ? [...pendingImages.value] : undefined
+  // Capture the running state before clearing the box: while a turn is in
+  // flight we queue the message (terminal-style type-ahead) instead of sending
+  // it now; it goes out automatically when the current turn completes.
+  const queue = store.isRunning
   input.value = ''
   pendingImages.value = []
   pendingImagePreviews.value = []
   showSlashMenu.value = false
   await nextTick()
   autoResize()
-  store.sendMessage(text || '(see attached images)', images)
+  if (queue) {
+    store.enqueueMessage(text || '(see attached images)', images)
+  } else {
+    store.sendMessage(text || '(see attached images)', images)
+  }
 }
 
 function selectModel(provider: string, model: string) {
@@ -250,14 +369,17 @@ function removeImage(index: number) {
   pendingImagePreviews.value.splice(index, 1)
 }
 
-function selectMode(mode: 'ask' | 'plan' | 'autopilot') {
+function selectMode(mode: 'approval' | 'plan' | 'full_access') {
   showModePicker.value = false
   store.switchMode(mode)
 }
 
 function modeLabel(m: string): string {
-  return m === 'plan' ? t('chat.modes.plan') : m === 'autopilot' ? t('chat.modes.autopilot') : t('chat.modes.ask')
+  return m === 'plan' ? t('chat.modes.plan') : m === 'full_access' ? t('chat.modes.fullAccess') : t('chat.modes.approval')
 }
+
+// The icon shown on the mode trigger reflects the active mode.
+const currentModeIcon = computed(() => modes.value.find((m) => m.value === store.mode)?.icon ?? HandRaisedIcon)
 
 function handleClickOutside(e: MouseEvent) {
   if (containerRef.value && !containerRef.value.contains(e.target as Node)) {
@@ -337,6 +459,25 @@ watch(() => store.imageSupport, (supported) => {
 
 <template>
   <div ref="containerRef" class="chat-input-wrapper">
+    <!-- Type-ahead queue: messages composed while the agent is working. They are
+         sent one at a time as each turn completes; the × removes one early. -->
+    <div v-if="store.queuedMessages.length > 0" class="queued-list">
+      <div v-for="(q, i) in store.queuedMessages" :key="q.id" class="queued-item">
+        <span class="queued-index">{{ i + 1 }}</span>
+        <span class="queued-text">{{ q.text }}</span>
+        <span v-if="q.images && q.images.length > 0" class="queued-imgs">
+          <PaperClipIcon class="w-3 h-3" />{{ q.images.length }}
+        </span>
+        <button
+          class="queued-remove"
+          :title="t('chat.removeQueued')"
+          :aria-label="t('chat.removeQueued')"
+          @click="store.removeQueuedMessage(q.id)"
+        >
+          <XMarkIcon class="w-3 h-3" />
+        </button>
+      </div>
+    </div>
     <div class="chat-input-card" :class="{ 'composer-elevated': !store.hasMessages }">
       <!-- Slash command menu -->
       <div
@@ -356,15 +497,10 @@ watch(() => store.imageSupport, (supported) => {
           </button>
         </div>
 
-        <!-- Workspace selector — pick the workspace for this task directly on the
-             composer (replaces opening the projects modal from the sidebar). Only
-             on the new-task screen: once a conversation has started the workspace
-             is fixed for that task, so switching it here is meaningless. The
-             branch picker stays (switching branch mid-task is still useful). The
-             whole row is dropped when it would be empty (in a conversation with no
-             git branch) so it leaves no blank gap above the composer. -->
-        <div v-if="!store.hasMessages || branchCurrent" class="composer-top">
-          <WorkspacePicker v-if="!store.hasMessages" :placement="pickerPlacement" />
+        <!-- Workspace and branch are selected before a task starts. Once the
+             conversation begins, hide the entire row so its context stays fixed. -->
+        <div v-if="!store.hasMessages" class="composer-top">
+          <WorkspacePicker :placement="pickerPlacement" />
           <BranchPicker :placement="pickerPlacement" />
         </div>
 
@@ -374,9 +510,8 @@ watch(() => store.imageSupport, (supported) => {
           <textarea
             ref="textarea"
             v-model="input"
-            :placeholder="store.isRunning ? t('chat.workingPlaceholder') : store.goalArmed ? t('chat.goalPlaceholder') : t('chat.placeholder')"
+            :placeholder="store.isRunning ? t('chat.queuePlaceholder') : store.goalArmed ? t('chat.goalPlaceholder') : t('chat.placeholder')"
             rows="1"
-            :disabled="store.isRunning"
             @keydown="handleKeyDown"
             @input="handleInput"
             @paste="handlePaste"
@@ -441,25 +576,38 @@ watch(() => store.imageSupport, (supported) => {
               </div>
             </div>
 
-            <!-- Mode selector (Ask/Plan/Autopilot) — stays visible on the toolbar. -->
+            <!-- Mode selector (Ask for approval/Plan/Full access) — stays visible on the toolbar.
+                 Full access is the one destructive mode; its trigger + row tint red so the
+                 "agent can act without you" state is visible without opening the menu. -->
             <div class="relative">
               <button
-                class="tool-btn dropdown-btn"
-                :class="{ highlighted: store.mode !== 'ask' }"
+                class="mo-trigger"
+                :data-risk="store.mode === 'full_access' ? 'danger' : store.mode === 'plan' ? 'plan' : 'neutral'"
+                :aria-expanded="showModePicker"
                 @click.stop="showModePicker = !showModePicker; showModelPicker = false; showAddMenu = false"
               >
-                {{ modeLabel(store.mode) }}
-                <ChevronDownIcon class="w-3 h-3 opacity-60" />
+                <span class="mo-trigger-ic">
+                  <component :is="currentModeIcon" class="w-3.5 h-3.5" />
+                </span>
+                <span :class="{ 'mo-trigger-danger': store.mode === 'full_access', 'mo-trigger-plan': store.mode === 'plan' }">{{ modeLabel(store.mode) }}</span>
+                <ChevronDownIcon class="mo-trigger-chev" />
               </button>
-              <div v-if="showModePicker" class="dropdown-menu">
+              <div v-if="showModePicker" class="mo-panel">
                 <button
                   v-for="m in modes"
                   :key="m.value"
-                  class="dropdown-item"
+                  class="mo-row"
                   :class="{ active: store.mode === m.value }"
                   @click="selectMode(m.value)"
                 >
-                  <component :is="m.icon" class="w-3.5 h-3.5" /> {{ m.label }}
+                  <span class="mo-ic" :class="{ danger: m.risk === 'danger', plan: m.risk === 'plan' }">
+                    <component :is="m.icon" class="w-4 h-4" />
+                  </span>
+                  <span class="mo-body">
+                    <span class="mo-title" :class="{ 'mo-title-danger': m.risk === 'danger', 'mo-title-plan': m.risk === 'plan' }">{{ m.label }}</span>
+                    <span class="mo-sub">{{ m.sub }}</span>
+                  </span>
+                  <CheckIcon v-if="store.mode === m.value" class="w-3.5 h-3.5 mo-check" />
                 </button>
               </div>
             </div>
@@ -483,156 +631,231 @@ watch(() => store.imageSupport, (supported) => {
               {{ store.tokenInfo.total_tokens.toLocaleString() }} tokens
             </span>
 
-            <!-- Model selector (moved to the right, near Send) -->
+            <!-- Model selector (moved to the right, near Send). The trigger shows
+                 the active provider's identity tile so the brand is readable at rest. -->
             <div class="relative">
               <button
-                class="tool-btn dropdown-btn"
+                class="mm-trigger"
+                :aria-expanded="showModelPicker"
                 @click.stop="showModelPicker = !showModelPicker; showModePicker = false; showAddMenu = false"
               >
+                <span
+                  v-if="store.providerName"
+                  class="mm-trigger-mark"
+                  :style="{ backgroundColor: providerColor(store.providerName) }"
+                >{{ providerInitial(providerDisplayName(store.providerName)) }}</span>
                 {{ store.modelName ? getModelDisplayName(store.providerName, store.modelName) : 'model' }}
-                <ChevronDownIcon class="w-3 h-3 opacity-60" />
+                <ChevronDownIcon class="mm-trigger-chev" />
               </button>
               <div
                 v-if="showModelPicker"
-                class="dropdown-menu model-menu align-right"
+                class="mm-panel align-right"
               >
-                <!-- Favorites section -->
-                <template v-if="store.recentModels.length > 0 && store.favoriteModels.size > 0">
-                  <div class="dropdown-section-title"><span>★</span> {{ t('chat.model.favorites') }}</div>
-                  <button
-                    v-for="r in store.recentModels.filter(r => store.favoriteModels.has(`${r.provider}/${r.model}`) && !(store.providerName === r.provider && store.modelName === r.model))"
-                    :key="'fav-'+r.provider+'-'+r.model"
-                    class="dropdown-item"
-                    @click="selectModel(r.provider, r.model)"
-                  >
-                    <span class="mr-1" style="color: var(--color-primary)">★</span>{{ getModelDisplayName(r.provider, r.model) }}
-                  </button>
-                </template>
-
-                <!-- Current Model -->
-                <template v-if="store.providerName && store.modelName">
-                  <div class="dropdown-section-title">{{ t('chat.model.current') }}</div>
-                  <button class="dropdown-item active" @click="selectModel(store.providerName, store.modelName)">
-                    ● {{ getModelDisplayName(store.providerName, store.modelName) }}
-                  </button>
-                </template>
-
-                <!-- All providers (enabled only) -->
-                <template v-for="p in store.enabledProviders" :key="p.id">
-                  <div class="dropdown-section-title">{{ p.name }}</div>
-                  <button
-                    v-for="m in p.models"
-                    :key="m.id"
-                    class="dropdown-item group"
-                    :class="{ active: store.providerName === p.id && store.modelName === m.id }"
-                    @click="selectModel(p.id, m.id)"
-                  >
-                    <span class="truncate">{{ m.name || m.id }}</span>
-                    <span v-if="m.recommended" class="recommend-badge">{{ t('common.recommended') }}</span>
-                    <button
-                      class="fav-star"
-                      :class="{ 'is-fav': store.isFavorite(p.id, m.id) }"
-                      @click.stop="store.toggleFavorite(p.id, m.id)"
-                    >★</button>
-                  </button>
-                </template>
-                <div v-if="store.enabledProviders.length === 0" class="dropdown-item disabled">
-                  {{ t('chat.model.none') }}
+                <!-- Search — first-class, filters both the list and favorites. -->
+                <div class="mm-search">
+                  <MagnifyingGlassIcon class="w-3.5 h-3.5" />
+                  <input
+                    v-model="modelFilter"
+                    type="text"
+                    :placeholder="t('chat.model.filter')"
+                    @keydown.enter.prevent="selectFirstFiltered"
+                  />
+                  <kbd class="mm-search-kbd">/</kbd>
                 </div>
+
+                <!-- Pinned current row — never scrolls out of view. -->
+                <div v-if="store.providerName && store.modelName" class="mm-pinned">
+                  <CheckCircleIcon class="mm-pinned-pin" :title="t('chat.model.current')" />
+                  <span
+                    class="mm-mark"
+                    :style="{ backgroundColor: providerColor(store.providerName) }"
+                  >{{ providerInitial(providerDisplayName(store.providerName)) }}</span>
+                  <span class="mm-pinned-body">
+                    <span class="mm-name">{{ getModelDisplayName(store.providerName, store.modelName) }}</span>
+                    <span class="mm-id">{{ modelSubline(store.providerName, currentModelInfo) }}</span>
+                  </span>
+                  <span class="mm-caps">
+                    <SparklesIcon v-if="currentModelInfo?.reasoning" class="w-3 h-3" :title="t('chat.model.reasoning')" />
+                    <WrenchScrewdriverIcon v-if="currentModelInfo?.tool_call" class="w-3 h-3" :title="t('chat.model.tools')" />
+                    <PhotoIcon v-if="currentModelInfo?.image_support" class="w-3 h-3" :title="t('chat.model.images')" />
+                  </span>
+                </div>
+
+                <div class="mm-list">
+                  <!-- Favorites (filtered by the same search) -->
+                  <template v-if="favoriteModelRefs.length > 0">
+                    <div class="mm-group">{{ t('chat.model.favorites') }} <span class="mm-group-count">{{ favoriteModelRefs.length }}</span></div>
+                    <button
+                      v-for="r in favoriteModelRefs"
+                      :key="'fav-'+r.provider+'-'+r.model"
+                      class="mm-row"
+                      @click="selectModel(r.provider, r.model)"
+                    >
+                      <span class="mm-mark" :style="{ backgroundColor: providerColor(r.provider) }">{{ providerInitial(providerDisplayName(r.provider)) }}</span>
+                      <span class="mm-body">
+                        <span class="mm-name">{{ getModelDisplayName(r.provider, r.model) }}</span>
+                        <span class="mm-id">{{ modelSubline(r.provider, modelInfoFor(r.provider, r.model)) }}</span>
+                      </span>
+                      <span class="mm-caps">
+                        <SparklesIcon v-if="modelInfoFor(r.provider, r.model)?.reasoning" class="w-3 h-3" :title="t('chat.model.reasoning')" />
+                        <WrenchScrewdriverIcon v-if="modelInfoFor(r.provider, r.model)?.tool_call" class="w-3 h-3" :title="t('chat.model.tools')" />
+                        <PhotoIcon v-if="modelInfoFor(r.provider, r.model)?.image_support" class="w-3 h-3" :title="t('chat.model.images')" />
+                      </span>
+                      <StarIconSolid class="w-3.5 h-3.5 mm-fav on" @click.stop="store.toggleFavorite(r.provider, r.model)" />
+                    </button>
+                  </template>
+
+                  <!-- All providers (enabled models only), filtered by search. -->
+                  <template v-for="p in pickerProviders" :key="p.id">
+                    <div class="mm-group">{{ p.name }}</div>
+                    <div
+                      v-for="m in p.models"
+                      :key="m.id"
+                      class="mm-row"
+                      :class="{ active: store.providerName === p.id && store.modelName === m.id }"
+                      role="button"
+                      tabindex="0"
+                      @click="selectModel(p.id, m.id)"
+                      @keydown.enter.prevent="selectModel(p.id, m.id)"
+                      @keydown.space.prevent="selectModel(p.id, m.id)"
+                    >
+                      <span class="mm-mark" :style="{ backgroundColor: providerColor(p.id) }">{{ providerInitial(p.name) }}</span>
+                      <span class="mm-body">
+                        <span class="mm-name">{{ m.name || m.id }}</span>
+                        <span class="mm-id">{{ modelSubline(p.id, m) }}</span>
+                      </span>
+                      <span v-if="m.recommended" class="mm-recommend">{{ t('common.recommended') }}</span>
+                      <span class="mm-caps">
+                        <SparklesIcon v-if="m.reasoning" class="w-3 h-3" :title="t('chat.model.reasoning')" />
+                        <WrenchScrewdriverIcon v-if="m.tool_call" class="w-3 h-3" :title="t('chat.model.tools')" />
+                        <PhotoIcon v-if="m.image_support" class="w-3 h-3" :title="t('chat.model.images')" />
+                        <PhotoIcon v-else-if="m.image_support === false" class="w-3 h-3 mm-cap-warn" :title="t('chat.model.noImages')" />
+                      </span>
+                      <CheckIcon v-if="store.providerName === p.id && store.modelName === m.id" class="w-3.5 h-3.5 mm-check" />
+                      <StarIcon
+                        class="w-3.5 h-3.5 mm-fav"
+                        :class="{ on: store.isFavorite(p.id, m.id) }"
+                        @click.stop="store.toggleFavorite(p.id, m.id)"
+                      />
+                    </div>
+                  </template>
+                  <div v-if="pickerProviders.length === 0" class="mm-empty">
+                    {{ modelFilter ? t('chat.model.noMatch') : t('chat.model.none') }}
+                  </div>
+                </div>
+
                 <!-- Manage models link -->
-                <div class="dropdown-footer">
+                <div class="mm-foot">
                   <button @click.stop="showModelPicker = false; showManageModels = true">
+                    <SquaresPlusIcon class="w-3.5 h-3.5" />
                     {{ t('chat.model.manage') }}
                   </button>
                 </div>
               </div>
             </div>
 
-            <!-- Channel toggle (inline) -->
-            <button
-              v-if="store.channelAvailable"
-              class="channel-btn"
-              :class="{ active: store.channelEnabled }"
-              :title="store.channelEnabled ? t('chat.wechatOn') : t('chat.wechatOff')"
-              @click="store.toggleChannel(!store.channelEnabled)"
-            >
-              <ChatBubbleLeftRightIcon class="w-3 h-3" />
-            </button>
-            <!-- Stop button -->
+            <!-- Stop button — halts the current turn. With a non-empty queue it
+                 then sends the next queued message ("skip & continue"). -->
             <button
               v-if="store.isRunning"
               class="stop-btn"
-              :title="t('chat.stopAgent')"
+              :title="store.queuedMessages.length > 0 ? t('chat.stopAndNext') : t('chat.stopAgent')"
               @click="store.stopAgent()"
             >
               <StopIcon class="w-3.5 h-3.5" />
               {{ t('chat.stop') }}
             </button>
-            <!-- Send button -->
+            <!-- Send button. While a turn is running it stays available (only when
+                 there is content) and queues the message instead of sending now. -->
             <button
-              v-else
+              v-if="!store.isRunning || input.trim() || pendingImages.length > 0"
               class="send-btn"
               :disabled="!input.trim() && pendingImages.length === 0"
-              :aria-label="t('chat.send')"
+              :aria-label="store.isRunning ? t('chat.queue') : t('chat.send')"
               @click="send"
             >
               <PaperAirplaneIcon class="w-3.5 h-3.5" />
-              {{ t('chat.send') }}
+              {{ store.isRunning ? t('chat.queue') : t('chat.send') }}
             </button>
           </div>
         </div>
         </div><!-- /chat-input-inner -->
       </div>
 
-    <!-- Manage Models Dialog -->
+    <!-- Manage Models Dialog — same anatomy as SettingsDialog: scrim + header
+         with an icon tile + subtitle, a filter row, and a footer with a count
+         summary + actions. Rows reuse the selector's identity tile + subline. -->
     <Teleport to="body">
       <div
         v-if="showManageModels"
-        class="fixed inset-0 z-50 flex items-center justify-center bg-[var(--backdrop)] backdrop-blur-sm"
-        @click="showManageModels = false; modelFilter = ''"
+        class="manage-scrim"
+        @click="showManageModels = false; modelFilter = ''; store.fetchModels()"
       >
-        <div class="w-full max-w-lg max-h-[70vh] flex flex-col mx-4 rounded-lg shadow-xl" style="background: var(--color-surface); border: 1px solid var(--color-border)" @click.stop>
-          <div class="px-4 py-3" style="border-bottom: 1px solid var(--color-border)">
-            <div class="flex items-center justify-between mb-2">
-              <div>
-                <h3 class="text-sm font-semibold" style="color: var(--color-foreground)">{{ t('chat.model.manageTitle') }}</h3>
-                <p class="text-[11px]" style="color: var(--color-muted-foreground)">{{ t('chat.model.toggleVisibility') }}</p>
-              </div>
-              <button
-                class="cursor-pointer"
-                style="color: var(--color-muted-foreground)"
-                @click="showManageModels = false; modelFilter = ''; store.fetchModels()"
-              >✕</button>
+        <div class="manage-dlg" role="dialog" aria-modal="true" :aria-label="t('chat.model.manageTitle')" @click.stop>
+          <div class="manage-head">
+            <div class="manage-head-icon"><SquaresPlusIcon class="w-4 h-4" /></div>
+            <div class="manage-head-text">
+              <h3 class="manage-title">{{ t('chat.model.manageTitle') }}</h3>
+              <p class="manage-sub">{{ t('chat.model.toggleVisibility') }}</p>
             </div>
-            <input
-              v-model="modelFilter"
-              type="text"
-              :placeholder="t('chat.model.filter')"
-              class="w-full px-2 py-1.5 text-xs rounded focus:outline-none focus:ring-1"
-              style="border: 1px solid var(--color-border); background: var(--color-muted); color: var(--color-foreground); --tw-ring-color: var(--color-primary)"
-            />
+            <button
+              class="manage-close"
+              :aria-label="t('common.close')"
+              @click="showManageModels = false; modelFilter = ''; store.fetchModels()"
+            ><XMarkIcon class="w-4 h-4" /></button>
           </div>
-          <div class="overflow-y-auto flex-1 py-2">
+
+          <div class="manage-filter">
+            <div class="manage-filter-wrap">
+              <MagnifyingGlassIcon class="w-3.5 h-3.5" />
+              <input
+                v-model="modelFilter"
+                type="text"
+                :placeholder="t('chat.model.filter')"
+              />
+            </div>
+            <span class="manage-filter-count">{{ manageVisibleCount }} / {{ manageTotalCount }}</span>
+          </div>
+
+          <div class="manage-body">
             <template v-for="p in filteredProviders" :key="'mgr-'+p.id">
-              <div class="px-4 py-1.5 text-[10px] uppercase tracking-wider font-semibold sticky top-0" style="color: var(--color-muted-foreground); background: var(--color-surface)">
-                {{ p.name }}
+              <div class="manage-prov">
+                <span class="mm-mark mm-mark-sm" :style="{ backgroundColor: providerColor(p.id) }">{{ providerInitial(p.name) }}</span>
+                <span class="manage-prov-name">{{ p.name }}</span>
+                <span class="manage-prov-id">{{ p.id }}</span>
+                <span class="manage-prov-count">{{ p.models.length }}</span>
               </div>
-              <label
+              <div
                 v-for="m in p.models"
                 :key="'mgr-'+p.id+'-'+m.id"
-                class="flex items-center gap-2.5 px-4 py-2 cursor-pointer transition-colors hover:opacity-80"
+                class="manage-row"
+                :data-off="m.enabled === false ? 'true' : 'false'"
               >
-                <input
-                  type="checkbox"
-                  :checked="m.enabled !== false"
-                  class="w-4 h-4 rounded border-2 focus:ring-2 focus:ring-offset-0 cursor-pointer transition-all"
-                  style="accent-color: var(--color-primary); border-color: var(--color-border)"
-                  @change="store.toggleModelEnabled(p.id, m.id, ($event.target as HTMLInputElement).checked)"
+                <span class="mm-mark mm-mark-sm" :style="{ backgroundColor: providerColor(p.id) }">{{ providerInitial(p.name) }}</span>
+                <span class="manage-row-text">
+                  <span class="manage-row-name">{{ m.name || m.id }}</span>
+                  <span class="manage-row-id">{{ modelSubline(p.id, m) }}</span>
+                </span>
+                <span v-if="m.recommended" class="mm-recommend">{{ t('common.recommended') }}</span>
+                <button
+                  class="manage-switch"
+                  role="switch"
+                  :aria-checked="m.enabled !== false ? 'true' : 'false'"
+                  :aria-label="m.enabled !== false ? t('common.disable') : t('common.enable')"
+                  @click="store.toggleModelEnabled(p.id, m.id, m.enabled === false)"
                 />
-                <span class="text-xs flex-1 truncate" style="color: var(--color-foreground)">{{ m.name || m.id }}</span>
-                <span v-if="m.recommended" class="text-[9px] px-1.5 py-0.5 rounded font-medium shrink-0" style="background: var(--accent-wash); color: var(--color-primary)">recommended</span>
-              </label>
+              </div>
             </template>
+            <div v-if="filteredProviders.length === 0" class="manage-empty">
+              {{ modelFilter ? t('chat.model.noMatch') : t('chat.model.none') }}
+            </div>
+          </div>
+
+          <div class="manage-foot">
+            <span class="manage-foot-hint">{{ t('chat.model.visibleCount', { visible: manageVisibleCount, total: manageTotalCount }) }}</span>
+            <div class="manage-foot-actions">
+              <button class="manage-btn" @click="showManageModels = false; modelFilter = ''; store.fetchModels()">{{ t('common.done') }}</button>
+            </div>
           </div>
         </div>
       </div>
@@ -658,6 +881,79 @@ watch(() => store.imageSupport, (supported) => {
   position: relative;
   display: flex;
   flex-direction: column;
+}
+
+/* Type-ahead queue — pending messages stacked just above the composer, mirroring
+   a terminal's queued input. Each row is removable via its × button. */
+.queued-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 8px 6px;
+  margin: 0 auto;
+}
+
+.queued-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 10px;
+  border-radius: var(--radius-lg);
+  background: var(--color-muted);
+  border: 1px solid var(--color-border);
+  font-size: 12px;
+  color: var(--color-foreground);
+}
+
+.queued-index {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  background: var(--neutral-wash);
+  color: var(--color-accent-neutral);
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+.queued-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queued-imgs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  color: var(--color-muted-foreground);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+.queued-remove {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-md);
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.queued-remove:hover {
+  background: var(--color-secondary);
+  color: var(--color-foreground);
 }
 
 .composer-top {
@@ -779,6 +1075,10 @@ watch(() => store.imageSupport, (supported) => {
   justify-content: space-between;
   padding: 8px 0 12px;
   gap: 8px;
+  /* Softened red for the "Full access" mode — the stock error red read as
+     "太红"; lightened toward the surface so it warns without shouting. Inherits
+     down to the mode trigger and its dropdown panel. */
+  --color-danger-soft: color-mix(in srgb, var(--color-error-fg) 72%, var(--color-background));
 }
 
 .toolbar-left {
@@ -814,8 +1114,8 @@ watch(() => store.imageSupport, (supported) => {
 }
 
 .tool-btn.highlighted {
-  background: var(--accent-wash);
-  color: var(--color-primary);
+  background: var(--neutral-wash);
+  color: var(--color-accent-neutral);
 }
 
 .attach-btn {
@@ -829,7 +1129,7 @@ watch(() => store.imageSupport, (supported) => {
 }
 
 .attach-btn.has-images {
-  color: var(--color-primary);
+  color: var(--color-accent-neutral);
 }
 
 .attach-badge {
@@ -839,8 +1139,8 @@ watch(() => store.imageSupport, (supported) => {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: var(--color-primary);
-  color: var(--color-on-primary);
+  background: var(--color-accent-neutral);
+  color: var(--color-surface);
   font-size: 9px;
   display: flex;
   align-items: center;
@@ -889,8 +1189,8 @@ watch(() => store.imageSupport, (supported) => {
 }
 
 .dropdown-item.active {
-  color: var(--color-primary);
-  background: var(--accent-wash);
+  color: var(--color-accent-neutral);
+  background: var(--neutral-wash);
 }
 
 .dropdown-item.disabled {
@@ -921,7 +1221,7 @@ watch(() => store.imageSupport, (supported) => {
   width: 30px;
   height: 30px;
   border: none;
-  background: var(--color-muted);
+  background: transparent;
   border-radius: var(--radius-md);
   color: var(--color-muted-foreground);
   cursor: pointer;
@@ -954,13 +1254,13 @@ watch(() => store.imageSupport, (supported) => {
   line-height: 1;
 }
 .dropdown-item.active .dmi-icon {
-  color: var(--color-primary);
+  color: var(--color-accent-neutral);
 }
 .dmi-badge {
   margin-left: auto;
   font-size: 10px;
   font-family: var(--font-mono);
-  color: var(--color-primary);
+  color: var(--color-accent-neutral);
 }
 
 /* Right-anchored dropdown (the model picker now lives on the toolbar's right) */
@@ -984,8 +1284,8 @@ watch(() => store.imageSupport, (supported) => {
   height: 26px;
   padding: 0 9px 0 4px;
   border-radius: var(--radius-md);
-  background: var(--accent-wash);
-  color: var(--color-primary);
+  background: var(--neutral-wash);
+  color: var(--color-accent-neutral);
   font-size: 12px;
   font-weight: 500;
 }
@@ -996,13 +1296,13 @@ watch(() => store.imageSupport, (supported) => {
   height: 16px;
   border: none;
   border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--color-primary) 18%, transparent);
-  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-accent-neutral) 18%, transparent);
+  color: var(--color-accent-neutral);
   cursor: pointer;
   transition: background 0.15s;
 }
 .goal-chip-x:hover {
-  background: color-mix(in srgb, var(--color-primary) 34%, transparent);
+  background: color-mix(in srgb, var(--color-accent-neutral) 34%, transparent);
 }
 
 .dropdown-footer {
@@ -1025,8 +1325,8 @@ watch(() => store.imageSupport, (supported) => {
   font-size: 9px;
   padding: 1px 5px;
   border-radius: var(--radius-sm);
-  background: var(--accent-wash);
-  color: var(--color-primary);
+  background: var(--neutral-wash);
+  color: var(--color-accent-neutral);
   font-weight: 500;
   margin-left: 4px;
 }
@@ -1044,11 +1344,620 @@ watch(() => store.imageSupport, (supported) => {
 
 .fav-star.is-fav {
   opacity: 1;
-  color: var(--color-primary);
+  color: var(--color-accent-neutral);
 }
 
 .dropdown-item:hover .fav-star {
   opacity: 1;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * Mode selector — Ask for approval / Plan / Full access.
+ * Flat three-item list; the only chromatic signal is the destructive tint on
+ * Full access (the one mode that can act without you). Icons are stock
+ * heroicons: HandRaised / ClipboardDocumentList / ShieldExclamation.
+ * ─────────────────────────────────────────────────────────────────────────── */
+.mo-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 8px 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--color-foreground);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--duration-fast);
+}
+.mo-trigger:hover { background: var(--color-muted); }
+.mo-trigger-ic {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  background: transparent;
+  color: var(--color-accent-neutral);
+}
+.mo-trigger[data-risk='danger'] .mo-trigger-ic { color: var(--color-danger-soft); }
+.mo-trigger[data-risk='plan'] .mo-trigger-ic { color: var(--color-success); }
+/* The label tints to match the active mode so the state reads at rest:
+   soft red for Full access, green for Plan. */
+.mo-trigger-danger { color: var(--color-danger-soft); }
+.mo-trigger-plan { color: var(--color-success); }
+.mo-trigger-chev {
+  width: 12px;
+  height: 12px;
+  opacity: 0.55;
+  transition: transform var(--duration-normal);
+}
+.mo-trigger[aria-expanded='true'] .mo-trigger-chev { transform: rotate(180deg); }
+
+.mo-panel {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  z-index: var(--z-dropdown);
+  width: 264px;
+  padding: 4px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+}
+.mo-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 8px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-md);
+  color: var(--color-foreground);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--duration-fast);
+}
+.mo-row:hover { background: var(--color-muted); }
+.mo-row.active { background: var(--neutral-wash); }
+.mo-ic {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: var(--color-accent-neutral);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.mo-ic.danger { color: var(--color-danger-soft); }
+.mo-ic.plan { color: var(--color-success); }
+.mo-body {
+  flex: 1;
+  min-width: 0;
+  padding-top: 1px;
+}
+.mo-title {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-foreground);
+  letter-spacing: -0.005em;
+}
+.mo-row.active .mo-title { font-weight: 600; }
+.mo-title-danger { color: var(--color-danger-soft); }
+.mo-title-plan { color: var(--color-success); }
+.mo-sub {
+  display: block;
+  font-size: 10.5px;
+  color: var(--color-muted-foreground);
+  line-height: 1.4;
+  margin-top: 1px;
+}
+.mo-check {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--color-accent-neutral);
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * Model selector — identity tiles, capability dots, pinned current, search.
+ * ─────────────────────────────────────────────────────────────────────────── */
+.mm-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--color-foreground);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--duration-fast);
+}
+.mm-trigger:hover { background: var(--color-muted); }
+.mm-trigger-mark {
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: #fff;
+  flex-shrink: 0;
+}
+.mm-trigger-chev {
+  width: 12px;
+  height: 12px;
+  opacity: 0.55;
+  transition: transform var(--duration-normal);
+}
+.mm-trigger[aria-expanded='true'] .mm-trigger-chev { transform: rotate(180deg); }
+
+.mm-panel {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  z-index: var(--z-dropdown);
+  width: 290px;
+  max-height: 540px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+}
+.mm-panel.align-right { left: auto; right: 0; }
+
+.mm-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-foreground);
+}
+.mm-search input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--color-foreground);
+  font: inherit;
+  font-size: 13px;
+}
+.mm-search input::placeholder { color: var(--color-foreground); opacity: 1; }
+.mm-search-kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--color-muted);
+  border: 1px solid var(--color-border);
+  color: var(--color-muted-foreground);
+}
+
+/* Pinned current row. */
+.mm-pinned {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  background: transparent;
+  border-bottom: 1px solid var(--color-border);
+}
+.mm-pinned-pin {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  color: var(--color-accent-neutral);
+}
+.mm-pinned-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+/* The identity squircle — the one shape reused across selector + dialog. */
+.mm-mark {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: #fff;
+  flex-shrink: 0;
+}
+.mm-mark-sm { width: 18px; height: 18px; font-size: 9px; border-radius: 5px; }
+
+.mm-list {
+  overflow-y: auto;
+  padding: 4px;
+  flex: 1;
+}
+.mm-group {
+  padding: 8px 8px 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
+}
+.mm-group-count {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  opacity: 0.7;
+}
+.mm-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-md);
+  color: var(--color-foreground);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--duration-fast);
+}
+.mm-row:hover { background: var(--color-muted); }
+.mm-row.active { background: var(--neutral-wash); }
+.mm-row.active .mm-name { color: var(--color-accent-neutral); font-weight: 600; }
+.mm-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.mm-name {
+  font-size: 12.5px;
+  color: var(--color-foreground);
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mm-id {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-muted-foreground);
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Capability dots — mono-stroke, identical baseline. Darkened + sized up a
+ * touch so the icons stay legible against the active/pinned wash. */
+.mm-caps {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  color: var(--color-foreground);
+}
+.mm-caps svg { width: 15px; height: 15px; stroke-width: 1.9; }
+.mm-cap-warn { color: var(--color-warning-fg); }
+.mm-recommend {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--neutral-wash-strong);
+  border: 1px solid var(--color-border);
+  color: var(--color-foreground);
+  flex-shrink: 0;
+}
+.mm-check {
+  flex-shrink: 0;
+  color: var(--color-accent-neutral);
+  stroke-width: 2;
+}
+.mm-fav {
+  opacity: 0;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  transition: opacity var(--duration-fast), color var(--duration-fast);
+}
+.mm-row:hover .mm-fav,
+.mm-fav.on { opacity: 1; }
+.mm-fav.on { color: var(--color-primary); }
+.mm-fav:hover { color: var(--color-primary); }
+.mm-empty {
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-muted-foreground);
+  padding: 20px 0;
+}
+.mm-foot {
+  border-top: 1px solid var(--color-border);
+  padding: 6px;
+}
+.mm-foot button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: none;
+  background: transparent;
+  color: var(--color-foreground);
+  font: inherit;
+  font-size: 12px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--duration-fast), color var(--duration-fast);
+}
+.mm-foot button:hover {
+  background: var(--color-muted);
+  color: var(--color-foreground);
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * Manage Models dialog — SettingsDialog anatomy (scrim + header + filter +
+ * body + footer). Raw checkbox replaced by the s-switch shape.
+ * ─────────────────────────────────────────────────────────────────────────── */
+.manage-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--backdrop);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.manage-dlg {
+  width: min(560px, 94vw);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  margin: 0 16px;
+}
+.manage-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid var(--color-border);
+}
+.manage-head-icon {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: var(--neutral-wash);
+  color: var(--color-accent-neutral);
+  flex-shrink: 0;
+}
+.manage-head-text { flex: 1; min-width: 0; }
+.manage-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-foreground);
+  letter-spacing: -0.01em;
+}
+.manage-sub {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: var(--color-muted-foreground);
+  line-height: 1.45;
+}
+.manage-close {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-muted-foreground);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--duration-fast), color var(--duration-fast), border-color var(--duration-fast);
+}
+.manage-close:hover {
+  background: var(--color-muted);
+  color: var(--color-foreground);
+  border-color: var(--color-border);
+}
+.manage-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--color-border);
+}
+.manage-filter-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  height: 30px;
+  background: var(--color-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-muted-foreground);
+  transition: border-color var(--duration-fast);
+}
+.manage-filter-wrap:focus-within { border-color: var(--color-accent-neutral); }
+.manage-filter-wrap input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--color-foreground);
+  font: inherit;
+  font-size: 12.5px;
+}
+.manage-filter-wrap input::placeholder { color: var(--color-muted-foreground); }
+.manage-filter-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-muted-foreground);
+  flex-shrink: 0;
+}
+.manage-body {
+  overflow-y: auto;
+  flex: 1;
+  padding: 6px 10px 10px;
+}
+.manage-prov {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 8px 6px;
+  position: sticky;
+  top: 0;
+  background: var(--color-surface);
+  z-index: 1;
+}
+.manage-prov-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+.manage-prov-id {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-muted-foreground);
+}
+.manage-prov-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-muted-foreground);
+}
+.manage-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: var(--radius-md);
+  transition: background var(--duration-fast);
+}
+.manage-row:hover { background: var(--color-muted); }
+.manage-row[data-off='true'] { opacity: 0.5; }
+.manage-row[data-off='true'] .manage-row-name { color: var(--color-muted-foreground); }
+.manage-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.manage-row-name {
+  font-size: 12.5px;
+  color: var(--color-foreground);
+  line-height: 1.3;
+}
+.manage-row-id {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-muted-foreground);
+  margin-top: 1px;
+}
+.manage-switch {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  border: none;
+  background: var(--color-border);
+  cursor: pointer;
+  padding: 0;
+  transition: background var(--duration-fast);
+}
+.manage-switch[aria-checked='true'] { background: var(--color-accent-neutral); }
+.manage-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+.manage-switch[aria-checked='true']::after { transform: translateX(14px); }
+.manage-empty {
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-muted-foreground);
+  padding: 32px 0;
+}
+.manage-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 18px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-muted);
+}
+.manage-foot-hint {
+  font-size: 11px;
+  color: var(--color-muted-foreground);
+}
+.manage-foot-actions { display: flex; gap: 8px; }
+.manage-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: var(--color-accent-neutral);
+  color: var(--color-surface);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--duration-fast);
+}
+.manage-btn:hover {
+  background: color-mix(in srgb, var(--color-accent-neutral) 88%, var(--color-background));
 }
 
 /* Token count */
@@ -1141,7 +2050,7 @@ watch(() => store.imageSupport, (supported) => {
 .slash-cmd {
   font-size: 12px;
   font-family: var(--font-mono);
-  color: var(--color-primary);
+  color: var(--color-accent-neutral);
   flex-shrink: 0;
 }
 
@@ -1151,30 +2060,6 @@ watch(() => store.imageSupport, (supported) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* Channel button (inline in toolbar) */
-.channel-btn {
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  background: transparent;
-  border-radius: var(--radius-md);
-  color: var(--color-muted-foreground);
-  cursor: pointer;
-  transition: color 0.15s, background 0.15s;
-}
-
-.channel-btn:hover {
-  background: var(--color-muted);
-}
-
-.channel-btn.active {
-  color: var(--color-primary);
-  background: var(--accent-wash);
 }
 
 .hidden {
