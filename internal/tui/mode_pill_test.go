@@ -9,7 +9,7 @@ import (
 // TestSelectorModeRoundTrip verifies the unified pill maps cleanly to and from
 // the two low-level TUI fields (tool axis + approval axis).
 func TestSelectorModeRoundTrip(t *testing.T) {
-	for _, sm := range []mode.SessionMode{mode.Ask, mode.Plan, mode.Autopilot} {
+	for _, sm := range []mode.SessionMode{mode.Approval, mode.Plan, mode.FullAccess} {
 		var m Model
 		m.applySelectorMode(sm)
 		if got := m.selectorMode(); got != sm {
@@ -25,9 +25,9 @@ func TestApplySelectorModeFields(t *testing.T) {
 		wantAgnt AgentMode
 		wantAprv ApprovalMode
 	}{
-		{mode.Ask, ModeNormal, ModeManual},
+		{mode.Approval, ModeNormal, ModeManual},
 		{mode.Plan, ModePlanning, ModeManual},
-		{mode.Autopilot, ModeNormal, ModeAuto},
+		{mode.FullAccess, ModeNormal, ModeAuto},
 	}
 	for _, c := range cases {
 		var m Model
@@ -43,8 +43,8 @@ func TestApplySelectorModeFields(t *testing.T) {
 
 // TestSelectorCycleViaPill verifies Shift+Tab's cycle order through the pill.
 func TestSelectorCycleViaPill(t *testing.T) {
-	var m Model // zero value => Ask
-	want := []mode.SessionMode{mode.Plan, mode.Autopilot, mode.Ask}
+	var m Model // zero value => Approval
+	want := []mode.SessionMode{mode.Plan, mode.FullAccess, mode.Approval}
 	for i, w := range want {
 		next := m.selectorMode().Next()
 		m.applySelectorMode(next)

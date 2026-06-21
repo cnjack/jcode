@@ -302,7 +302,7 @@ func GetPlanResponseChannel() <-chan PlanResponse {
 	return planResponseCh
 }
 
-// modeSelectCh carries unified session-mode changes (Ask/Plan/Autopilot) from
+// modeSelectCh carries unified session-mode changes (Approval/Plan/Full access) from
 // the TUI to the main goroutine. It replaces the old agent-mode-only channel so
 // the single selector drives both the tool/prompt axis and the approval axis.
 var modeSelectCh = make(chan mode.SessionMode, 1)

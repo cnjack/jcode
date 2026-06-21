@@ -253,7 +253,7 @@ onMounted(() => fetchDir(''))
 }
 
 .item-icon.folder {
-  color: var(--color-primary);
+  color: var(--color-accent-neutral);
 }
 
 .item-icon.file {

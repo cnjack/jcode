@@ -81,7 +81,7 @@ func (m Model) inputAreaView() string {
 	// Determine sidebar visibility locally (width-only, consistent with View())
 	showSidebar := m.width >= minWidthForSidebar
 
-	// 1. Mode pills line (Agent/Plan + Ask/Auto)
+	// 1. Unified mode pill line
 	parts = append(parts, m.renderModePills())
 
 	// 1b. Active goal indicator (only while a goal exists).
@@ -384,7 +384,7 @@ func (m *Model) handleSkillSlashInput(skillName, userInput string, cmds []tea.Cm
 	return m, tea.Batch(cmds...)
 }
 
-// renderModePills renders the unified Ask/Plan/Autopilot mode selector line
+// renderModePills renders the unified Ask for approval/Plan/Full access mode selector line
 // above the input. The three states map onto distinct pill styles; Shift+Tab
 // cycles between them.
 func (m Model) renderModePills() string {
@@ -392,10 +392,10 @@ func (m Model) renderModePills() string {
 	switch m.selectorMode() {
 	case mode.Plan:
 		modePill = modePillPlanStyle.Render(" Plan ")
-	case mode.Autopilot:
-		modePill = modePillAutoStyle.Render(" Autopilot ")
-	default: // Ask
-		modePill = modePillAskStyle.Render(" Ask ")
+	case mode.FullAccess:
+		modePill = modePillAutoStyle.Render(" Full access ")
+	default: // Ask for approval
+		modePill = modePillApprovalStyle.Render(" Ask for approval ")
 	}
 
 	hint := modeSeparatorStyle.Render("shift+tab")

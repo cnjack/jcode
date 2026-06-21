@@ -175,7 +175,7 @@ function startResize(e: MouseEvent) {
 }
 
 .resize-handle:hover {
-  background: color-mix(in srgb, var(--color-primary) 40%, transparent);
+  background: color-mix(in srgb, var(--color-accent-neutral) 40%, transparent);
 }
 
 .panel-content {
@@ -214,7 +214,7 @@ function startResize(e: MouseEvent) {
 
 .plan-fill {
   height: 100%;
-  background: var(--color-primary);
+  background: var(--color-accent-neutral);
   border-radius: var(--radius-pill);
   transition: width var(--duration-slow) var(--ease-out);
 }

@@ -46,6 +46,18 @@
   --accent-fill: color-mix(in srgb, var(--color-primary) 45%, transparent);
   --accent-selection: color-mix(in srgb, var(--color-primary) 22%, transparent);
 
+  /* ─── Neutral accent ─── the "everything else" color. The brand orange
+   * (--color-primary) is now reserved for the welcome hero + send button only;
+   * every other control/selection/running-state uses this neutral foreground
+   * tint instead, so the UI reads as calm and monochrome rather than flooded
+   * with orange. It's a single alias so the whole de-emphasis can be retuned
+   * (e.g. to muted-foreground) by editing one line. */
+  --color-accent-neutral: var(--color-foreground);
+  --neutral-wash-soft: color-mix(in srgb, var(--color-foreground) 8%, transparent);
+  --neutral-wash: color-mix(in srgb, var(--color-foreground) 11%, transparent);
+  --neutral-wash-strong: color-mix(in srgb, var(--color-foreground) 16%, transparent);
+  --neutral-border: color-mix(in srgb, var(--color-foreground) 30%, transparent);
+
   /* Interactive conventions */
   --color-border-active: var(--color-primary);
   --icon-stroke: 2;

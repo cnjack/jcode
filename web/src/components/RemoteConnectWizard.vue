@@ -65,8 +65,7 @@ const currentDir = ref('')
 const dirs = ref<string[]>([])
 const dirLoading = ref(false)
 
-// Save-as-alias.
-const saveAlias = ref(false)
+// Optional custom name for the saved alias (defaults to user@host on bind).
 const aliasName = ref('')
 
 const steps = computed<{ key: Step; label: string }[]>(() => [
@@ -111,7 +110,6 @@ function resetState() {
   bound.value = false
   currentDir.value = ''
   dirs.value = []
-  saveAlias.value = false
   aliasName.value = ''
 }
 
@@ -278,13 +276,15 @@ async function bindHere() {
     bound.value = true
     connectionId.value = '' // ownership transferred; do not cancel on close
 
-    if (saveAlias.value && aliasName.value.trim()) {
-      const addr = `${res.user}@${res.host}`
-      try {
-        await api.remoteSaveAlias(aliasName.value.trim(), addr, res.remote_path)
-      } catch (e: unknown) {
-        console.error('Failed to save SSH alias:', e)
-      }
+    // Always persist the host to config so it returns for one-click reconnects
+    // next time — no opt-in needed. Use the custom name when given, otherwise
+    // derive a stable one from the address. Secrets are never stored.
+    const addr = `${res.user}@${res.host}`
+    const name = aliasName.value.trim() || addr
+    try {
+      await api.remoteSaveAlias(name, addr, res.remote_path)
+    } catch (e: unknown) {
+      console.error('Failed to save SSH alias:', e)
     }
 
     await store.resetToWelcomeAfterSwitch()
@@ -467,9 +467,8 @@ function close() {
                 </div>
 
                 <label class="rcw-save">
-                  <input v-model="saveAlias" type="checkbox" />
                   <span>{{ t('wizard.saveAlias') }}</span>
-                  <input v-if="saveAlias" v-model="aliasName" class="rcw-input mini" :placeholder="t('wizard.aliasNamePlaceholder')" />
+                  <input v-model="aliasName" class="rcw-input mini" :placeholder="t('wizard.aliasNamePlaceholder')" />
                 </label>
 
                 <div class="rcw-foot">
@@ -491,9 +490,9 @@ function close() {
 <style scoped>
 .rcw {
   display: flex;
-  width: 100%;
-  max-width: 760px;
-  height: 520px;
+  width: 900px;
+  max-width: calc(100vw - 32px);
+  height: 600px;
   max-height: 86vh;
   overflow: hidden;
   background: var(--color-surface);
@@ -555,7 +554,7 @@ function close() {
 .rcw-step.done .rcw-step-dot {
   background: var(--color-success);
   border-color: var(--color-success);
-  color: var(--color-on-primary);
+  color: var(--color-surface);
 }
 .rcw-step-label {
   font-size: 13px;
@@ -677,7 +676,7 @@ function close() {
   transition: border-color 0.15s;
 }
 .rcw-input:focus {
-  border-color: var(--color-primary);
+  border-color: var(--color-accent-neutral);
 }
 .rcw-input.mono {
   font-family: var(--font-mono);
@@ -800,8 +799,8 @@ function close() {
   padding: 9px 18px;
   border: none;
   border-radius: var(--radius-lg);
-  background: var(--color-primary);
-  color: var(--color-on-primary);
+  background: var(--color-accent-neutral);
+  color: var(--color-surface);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;

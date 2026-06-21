@@ -17,7 +17,7 @@ type ApprovalState struct {
 	mu          sync.Mutex
 	h           handler.AgentEventHandler
 	mode        handler.ApprovalMode // Current approval mode (derived from sessionMode)
-	sessionMode mode.SessionMode     // Unified selector mode (Ask/Plan/Autopilot)
+	sessionMode mode.SessionMode     // Unified selector mode (Approval/Plan/Full access)
 	workpath    string               // Current working directory for path detection
 }
 
@@ -44,9 +44,9 @@ func NewApprovalStateWithMode(workpath string, m mode.SessionMode) *ApprovalStat
 // sessionModeFor maps the legacy autoApprove bool to a unified mode.
 func sessionModeFor(autoApprove bool) mode.SessionMode {
 	if autoApprove {
-		return mode.Autopilot
+		return mode.FullAccess
 	}
-	return mode.Ask
+	return mode.Approval
 }
 
 // approvalModeFor derives the low-level approval axis from the unified mode.
@@ -107,10 +107,10 @@ func (s *ApprovalState) SetSessionApproval(enabled bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if enabled {
-		s.sessionMode = mode.Autopilot
+		s.sessionMode = mode.FullAccess
 		s.mode = handler.ModeAuto
 	} else {
-		s.sessionMode = mode.Ask
+		s.sessionMode = mode.Approval
 		s.mode = handler.ModeManual
 	}
 }
@@ -294,12 +294,12 @@ func (s *ApprovalState) requestUserApprovalWithWorker(ctx context.Context, toolN
 		return false, err
 	}
 
-	// State transition: "Approve All" promotes the session to Autopilot (both the
+	// State transition: "Approve All" promotes the session to Full access (both the
 	// unified mode and the derived approval axis). A plain single approve does
 	// not change the session mode.
 	if resp.Approved && resp.Mode == handler.ModeAuto {
 		s.mu.Lock()
-		s.sessionMode = mode.Autopilot
+		s.sessionMode = mode.FullAccess
 		s.mode = handler.ModeAuto
 		s.mu.Unlock()
 	}

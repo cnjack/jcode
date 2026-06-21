@@ -194,16 +194,16 @@ Multi-agent team settings.
 
 ### default_mode
 
-The session mode jcode starts in: `"ask"` (default), `"plan"`, or `"autopilot"`. Applies to the TUI, web, and ACP frontends. The `--unsafe` flag overrides this and forces `autopilot`.
+The session mode jcode starts in: `"approval"` (default), `"plan"`, or `"full_access"`. Applies to the TUI, web, and ACP frontends. The `--unsafe` flag overrides this and forces `full_access`.
 
 ```json
-{ "default_mode": "ask" }
+{ "default_mode": "approval" }
 ```
 
 ### auto_approve
 
 {: .note }
-Deprecated — superseded by [`default_mode`](#default_mode). Still honored as a fallback when `default_mode` is unset: `true` maps to `autopilot`.
+Deprecated — superseded by [`default_mode`](#default_mode). Still honored as a fallback when `default_mode` is unset: `true` maps to `full_access`.
 
 Set to `true` to auto-approve all tool calls. Equivalent to running with the `--unsafe` flag.
 
