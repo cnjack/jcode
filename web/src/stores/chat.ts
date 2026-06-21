@@ -1,6 +1,7 @@
 // Main chat store using Pinia
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { i18n } from '@/i18n'
 import type {
   ChatMessage,
   ChatImage,
@@ -216,8 +217,9 @@ export const useChatStore = defineStore('chat', () => {
     const e = raw.toLowerCase()
     // Phrase-based only: bare tokens like "eof" or a stray "401"/"500" in an
     // error body (e.g. "unexpected EOF", a line number) must not be misread.
+    const t = i18n.global.t.bind(i18n.global)
     if (e.includes('deadline exceeded') || e.includes('timed out') || e.includes('timeout'))
-      return 'The request timed out. Please try again.'
+      return t('errors.timeout')
     if (
       e.includes('connection refused') ||
       e.includes('no such host') ||
@@ -226,18 +228,18 @@ export const useChatStore = defineStore('chat', () => {
       e.includes('network is unreachable') ||
       e.includes('network error')
     )
-      return 'Network error. Check your connection and try again.'
+      return t('errors.network')
     if (e.includes('unauthorized') || e.includes('invalid api key') || e.includes('api key'))
-      return 'Authentication failed. Check your API key in settings.'
+      return t('errors.auth')
     if (e.includes('rate limit') || e.includes('too many requests'))
-      return 'Rate limited by the provider. Please wait and try again.'
+      return t('errors.rateLimit')
     if (
       e.includes('internal server error') ||
       e.includes('service unavailable') ||
       e.includes('bad gateway') ||
       e.includes('overloaded')
     )
-      return 'The model provider had a temporary error. Please try again.'
+      return t('errors.provider')
     // Otherwise strip internal framing noise (e.g. "[NodeRunError] … node path: […]").
     const cleaned = raw
       .replace(/^\[[A-Za-z]+Error\]\s*/, '')
@@ -293,11 +295,12 @@ export const useChatStore = defineStore('chat', () => {
         // cancellation signals (stopped-by-user, the in-flight "context
         // canceled", node errors); collapse them into a single calm notice.
         const last = timeline.value[timeline.value.length - 1]
+        const stoppedText = i18n.global.t('chat.stopped')
         const alreadyNoted =
           last?.kind === 'message' &&
           last.data.role === 'system' &&
-          last.data.content === 'Stopped'
-        if (!alreadyNoted) addMessage('system', 'Stopped', undefined, undefined, 'notice')
+          last.data.content === stoppedText
+        if (!alreadyNoted) addMessage('system', stoppedText, undefined, undefined, 'notice')
       } else {
         const friendly = friendlyError(error)
         addMessage('system', friendly, undefined, undefined, 'error', friendly !== error ? error : undefined)
@@ -409,7 +412,7 @@ export const useChatStore = defineStore('chat', () => {
     } catch (err: unknown) {
       addMessage(
         'system',
-        `Failed to submit answer: ${err instanceof Error ? err.message : String(err)}`,
+        i18n.global.t('errors.submitAnswer', { detail: err instanceof Error ? err.message : String(err) }),
         undefined, undefined, 'error',
       )
     }
@@ -446,13 +449,15 @@ export const useChatStore = defineStore('chat', () => {
         const g = goal.value
         addMessage(
           'system',
-          g ? `🎯 ${g.status} — ${g.objective}` : '🎯 No goal set. Use /goal <objective> to set one.',
+          g
+            ? i18n.global.t('goal.statusReport', { status: g.status, objective: g.objective })
+            : i18n.global.t('goal.noGoal'),
         )
         return
       }
       if (arg === 'clear') {
         await clearGoal()
-        addMessage('system', '🎯 Goal cleared.')
+        addMessage('system', i18n.global.t('goal.cleared'))
         return
       }
       addMessage('user', text)
@@ -500,7 +505,7 @@ export const useChatStore = defineStore('chat', () => {
       if (item && item.kind === 'approval') item.data.resolving = false
       addMessage(
         'system',
-        `Approval failed: ${err instanceof Error ? err.message : String(err)}`,
+        i18n.global.t('errors.approval', { detail: err instanceof Error ? err.message : String(err) }),
         undefined, undefined, 'error',
       )
     }
@@ -646,7 +651,7 @@ export const useChatStore = defineStore('chat', () => {
       // Update image support based on the new model's capabilities.
       updateImageSupport(provider, model)
     } catch (err: unknown) {
-      addMessage('system', `Failed to switch model: ${err instanceof Error ? err.message : String(err)}`)
+      addMessage('system', i18n.global.t('errors.switchModel', { detail: err instanceof Error ? err.message : String(err) }))
     }
   }
 
@@ -955,7 +960,7 @@ export const useChatStore = defineStore('chat', () => {
       await reconcileAskUser()
       await reconcileApprovals()
     } catch (err: unknown) {
-      addMessage('system', `Failed to load session: ${err instanceof Error ? err.message : String(err)}`)
+      addMessage('system', i18n.global.t('errors.loadSession', { detail: err instanceof Error ? err.message : String(err) }))
     }
   }
 

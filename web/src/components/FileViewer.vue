@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import hljs from 'highlight.js'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{
   path: string
@@ -9,6 +10,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: []
 }>()
+
+const { t } = useI18n()
 
 function ext(path: string): string {
   const parts = path.split('.')
@@ -29,7 +32,7 @@ function highlighted(): string {
     <div class="fv-modal">
       <div class="fv-head">
         <span class="fv-path">{{ path }}</span>
-        <button class="fv-close" @click="emit('close')">Close</button>
+        <button class="fv-close" @click="emit('close')">{{ t('fileViewer.close') }}</button>
       </div>
       <div class="fv-body">
         <pre class="fv-pre"><code class="hljs" v-html="highlighted()" /></pre>
