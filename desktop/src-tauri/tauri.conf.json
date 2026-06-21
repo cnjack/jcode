@@ -7,7 +7,7 @@
     "frontendDist": "../../internal/web/dist",
     "beforeDevCommand": "pnpm --dir ../web dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "make build-web"
+    "beforeBuildCommand": "make -C .. build-web"
   },
   "app": {
     "withGlobalTauri": true,
