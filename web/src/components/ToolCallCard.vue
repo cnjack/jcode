@@ -378,8 +378,13 @@ function formatArgs(args: string): string {
           <span v-if="diffData.deleted" style="color: var(--color-error-fg)">-{{ diffData.deleted }}</span>
         </span>
       </div>
-      <!-- Content box: only content gets the border -->
+      <!-- Content box: only content gets the border. data-selectable opts the
+           tool output (terminal/file/diff/search/generic) back into text
+           selection inside the desktop shell, where .app-shell sets
+           user-select:none — otherwise the most copy-worthy content (command
+           output, file contents, grep hits) couldn't be selected. -->
       <div
+        data-selectable
         class="overflow-hidden ml-0 mr-2 mt-1.5 mb-1.5"
         :style="{ borderRadius: 'var(--radius-xl)', border: tool.status === 'error' ? '1px solid var(--color-destructive)' : '1px solid var(--color-border)' }"
       >

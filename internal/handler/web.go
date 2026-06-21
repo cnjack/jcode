@@ -273,11 +273,21 @@ type WebHandler struct {
 
 	mu              sync.Mutex
 	approvalCounter int
-	pendingApproval map[string]chan ApprovalResponse
+	pendingApproval map[string]*webPendingApproval
 
 	askUserMu      sync.Mutex
 	askUserCounter int
 	pendingAskUser map[string]*pendingAskUser
+}
+
+// pendingApproval pairs an approval's response channel with the request payload
+// so the latter can be re-surfaced to a (re)connecting client via
+// /api/approval/pending — mirroring pendingAskUser. The WS approval_request event
+// is fire-once, so without retaining the data a reload/reconnect while an
+// approval is pending would leave the agent blocked with no card to act on.
+type webPendingApproval struct {
+	ch   chan ApprovalResponse
+	data WebApprovalRequestData
 }
 
 // pendingAskUser pairs a question's response channel with the request payload so
@@ -291,7 +301,7 @@ type pendingAskUser struct {
 func NewWebHandler() *WebHandler {
 	return &WebHandler{
 		eventCh:         make(chan WebEvent, 256),
-		pendingApproval: make(map[string]chan ApprovalResponse),
+		pendingApproval: make(map[string]*webPendingApproval),
 		pendingAskUser:  make(map[string]*pendingAskUser),
 	}
 }
@@ -391,7 +401,13 @@ func (h *WebHandler) RequestApproval(ctx context.Context, req ApprovalRequest) (
 	h.approvalCounter++
 	id := fmt.Sprintf("approval_%d", h.approvalCounter)
 	respCh := make(chan ApprovalResponse, 1)
-	h.pendingApproval[id] = respCh
+	data := WebApprovalRequestData{
+		ID:         id,
+		ToolName:   req.ToolName,
+		ToolArgs:   req.ToolArgs,
+		IsExternal: req.IsExternal,
+	}
+	h.pendingApproval[id] = &webPendingApproval{ch: respCh, data: data}
 	h.mu.Unlock()
 
 	defer func() {
@@ -400,12 +416,7 @@ func (h *WebHandler) RequestApproval(ctx context.Context, req ApprovalRequest) (
 		h.mu.Unlock()
 	}()
 
-	h.emit("approval_request", WebApprovalRequestData{
-		ID:         id,
-		ToolName:   req.ToolName,
-		ToolArgs:   req.ToolArgs,
-		IsExternal: req.IsExternal,
-	})
+	h.emit("approval_request", data)
 
 	select {
 	case resp := <-respCh:
@@ -423,7 +434,7 @@ func (h *WebHandler) RequestApproval(ctx context.Context, req ApprovalRequest) (
 // Autopilot on a single Allow click.
 func (h *WebHandler) ResolveApproval(id string, approved, approveAll bool) error {
 	h.mu.Lock()
-	ch, ok := h.pendingApproval[id]
+	p, ok := h.pendingApproval[id]
 	h.mu.Unlock()
 
 	if !ok {
@@ -436,11 +447,26 @@ func (h *WebHandler) ResolveApproval(id string, approved, approveAll bool) error
 	}
 
 	select {
-	case ch <- ApprovalResponse{Approved: approved, Mode: mode}:
+	case p.ch <- ApprovalResponse{Approved: approved, Mode: mode}:
 		return nil
 	default:
 		return fmt.Errorf("approval %q already resolved", id)
 	}
+}
+
+// PendingApprovalRequests returns the still-unanswered approval requests so a
+// reloaded/reconnecting client can re-surface the approval card (the
+// approval_request WS event is fire-once and ephemeral). Without this, a page
+// refresh or WS reconnect while an approval is pending would drop the card and
+// leave the agent blocked forever. Mirrors PendingAskUserRequests.
+func (h *WebHandler) PendingApprovalRequests() []WebApprovalRequestData {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]WebApprovalRequestData, 0, len(h.pendingApproval))
+	for _, p := range h.pendingApproval {
+		out = append(out, p.data)
+	}
+	return out
 }
 
 // --- Ask-user flow ---

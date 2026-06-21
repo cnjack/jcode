@@ -50,18 +50,26 @@ function closeTab(id: string) {
     >
       <!-- Tabs -->
       <div class="flex items-center gap-0.5 h-full flex-1 min-w-0 overflow-x-auto">
-        <button
+        <!-- Tab is a role=button div (not a <button>) so the close control can be
+             a real nested <button> without invalid button-in-button nesting. -->
+        <div
           v-for="tab in tabs"
           :key="tab.id"
           class="tab-btn"
           :class="{ 'tab-active': tab.id === activeId }"
+          role="button"
+          tabindex="0"
+          :aria-pressed="tab.id === activeId"
+          :aria-label="tab.label"
           @click="activeId = tab.id"
+          @keydown.enter="activeId = tab.id"
+          @keydown.space.prevent="activeId = tab.id"
         >
-          <!-- × on the left of the label, appears on hover -->
+          <!-- × on the left of the label; keyboard-reachable (no tabindex=-1) and
+               revealed on focus-within so it's usable without a mouse. -->
           <button
             class="tab-close"
             :aria-label="`Close ${tab.label}`"
-            tabindex="-1"
             @click.stop="closeTab(tab.id)"
             @keydown.enter.stop.prevent="closeTab(tab.id)"
             @keydown.space.stop.prevent="closeTab(tab.id)"
@@ -71,7 +79,7 @@ function closeTab(id: string) {
             </svg>
           </button>
           <span class="tab-label">{{ tab.label }}</span>
-        </button>
+        </div>
 
         <!-- + New terminal after the last tab -->
         <button class="ctrl-btn" title="New terminal" @click="addTab">
@@ -149,12 +157,15 @@ function closeTab(id: string) {
   pointer-events: none;
   transition: opacity 0.1s, background 0.1s;
 }
-/* Show × when hovering the tab or for the active tab */
-.tab-btn:hover .tab-close {
+/* Show × when hovering the tab, focusing within it (keyboard), or for the
+   active tab — so keyboard users can reach and trigger it. */
+.tab-btn:hover .tab-close,
+.tab-btn:focus-within .tab-close {
   opacity: 0.6;
   pointer-events: auto;
 }
-.tab-btn:hover .tab-close:hover {
+.tab-btn:hover .tab-close:hover,
+.tab-close:focus-visible {
   opacity: 1;
   background: color-mix(in srgb, var(--color-foreground) 15%, transparent);
 }

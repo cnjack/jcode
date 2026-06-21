@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, inject } from 'vue'
 import { Dialog, DialogPanel, TransitionRoot, TransitionChild } from '@headlessui/vue'
 import { Plus, Settings, FolderOpen, SunMoon, MessageSquare, CornerDownLeft } from 'lucide-vue-next'
 import { useChatStore } from '@/stores/chat'
-import { useProjectStore } from '@/stores/project'
-import type { TaskItem } from '@/types/api'
+import { useProjectStore, isRemotePath, parseRemoteLabel } from '@/stores/project'
+import type { TaskItem, RemoteMeta } from '@/types/api'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{
@@ -14,10 +14,12 @@ const emit = defineEmits<{
 
 const store = useChatStore()
 const projectStore = useProjectStore()
+const openRemoteConnect = inject<(prefill?: RemoteMeta & { loadTaskUuid?: string }) => void>('openRemoteConnect')
 
 const query = ref('')
 const selectedIdx = ref(0)
 const inputEl = ref<HTMLInputElement | null>(null)
+const resultsEl = ref<HTMLElement | null>(null)
 
 interface PaletteItem {
   id: string
@@ -28,23 +30,43 @@ interface PaletteItem {
   run: () => void | Promise<void>
 }
 
+let opening = false
 async function openTask(task: TaskItem) {
+  // Guard against a double-trigger (held Enter / rapid clicks) interleaving two
+  // project switches + session loads.
+  if (opening) return
+  opening = true
   emit('close')
-  if (task.unread) projectStore.updateTaskMeta(task.uuid, { unread: false })
-  const cur = projectStore.activeProject?.path || store.pwd
-  if (cur !== task.project) {
-    const ok = await projectStore.openProject(task.project)
-    if (!ok) return
-    await store.fetchHealth()
+  try {
+    if (task.unread) projectStore.updateTaskMeta(task.uuid, { unread: false })
+    const cur = projectStore.activeProject?.path || store.pwd
+    // Remote tasks must reconnect through the SSH wizard (mirrors the sidebar) —
+    // a local path switch to an ssh:// label would fail.
+    if (isRemotePath(task.project)) {
+      if (cur === task.project) {
+        await store.loadSession(task.uuid)
+      } else {
+        const meta = parseRemoteLabel(task.project)
+        if (meta) openRemoteConnect?.({ ...meta, loadTaskUuid: task.uuid })
+      }
+      return
+    }
+    if (cur !== task.project) {
+      const ok = await projectStore.openProject(task.project)
+      if (!ok) return
+      await store.fetchHealth()
+    }
+    await store.loadSession(task.uuid)
+  } finally {
+    opening = false
   }
-  await store.loadSession(task.uuid)
 }
 
 const actions = computed<PaletteItem[]>(() => [
   { id: 'a-new', group: 'Actions', label: 'New task', icon: Plus, run: () => { emit('close'); store.newSession() } },
   { id: 'a-proj', group: 'Actions', label: 'Open project…', icon: FolderOpen, run: () => { emit('close'); emit('action', 'projects') } },
   { id: 'a-settings', group: 'Actions', label: 'Open settings', icon: Settings, run: () => { emit('close'); emit('action', 'settings') } },
-  { id: 'a-theme', group: 'Actions', label: 'Toggle theme', icon: SunMoon, run: () => { emit('action', 'theme') } },
+  { id: 'a-theme', group: 'Actions', label: 'Toggle theme', icon: SunMoon, run: () => { emit('close'); emit('action', 'theme') } },
 ])
 
 const taskItems = computed<PaletteItem[]>(() =>
@@ -100,6 +122,11 @@ function move(delta: number) {
   const n = results.value.length
   if (n === 0) return
   selectedIdx.value = (selectedIdx.value + delta + n) % n
+  // Keep the highlighted row visible — the results list scrolls (max-height),
+  // so arrow-key navigation could otherwise move the selection out of view.
+  nextTick(() => {
+    resultsEl.value?.querySelector('.cp-item.sel')?.scrollIntoView({ block: 'nearest' })
+  })
 }
 function runSelected() {
   results.value[selectedIdx.value]?.run()
@@ -141,7 +168,7 @@ function onKeydown(e: KeyboardEvent) {
               <kbd class="cp-esc">Esc</kbd>
             </div>
 
-            <div class="cp-results">
+            <div ref="resultsEl" class="cp-results">
               <div v-if="results.length === 0" class="cp-empty">No results</div>
               <template v-for="g in groups" :key="g.name">
                 <div class="cp-group-label">{{ g.name }}</div>

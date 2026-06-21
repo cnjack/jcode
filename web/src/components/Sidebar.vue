@@ -1,6 +1,6 @@
 <!-- eslint-disable vue/multi-word-component-names -->
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, inject } from 'vue'
+import { ref, computed, onMounted, watch, nextTick, inject } from 'vue'
 import {
   Menu as HMenu,
   MenuButton,
@@ -142,11 +142,31 @@ async function handleDelete(task: TaskItem) {
   await refresh()
 }
 
+// Inline rename — window.prompt is unreliable in the Tauri webview (can return
+// null, silently no-op) and looks non-native, so edit the title in place.
+const renamingUuid = ref('')
+const renameValue = ref('')
+const renameInput = ref<HTMLInputElement | null>(null)
+
 async function renameTask(task: TaskItem) {
-  const title = window.prompt('Rename task', task.title || '')
-  if (title != null && title.trim()) {
-    await projectStore.updateTaskMeta(task.uuid, { title: title.trim() })
+  renamingUuid.value = task.uuid
+  renameValue.value = task.title || ''
+  await nextTick()
+  renameInput.value?.focus()
+  renameInput.value?.select()
+}
+
+async function commitRename(task: TaskItem) {
+  if (renamingUuid.value !== task.uuid) return
+  const title = renameValue.value.trim()
+  renamingUuid.value = ''
+  if (title && title !== (task.title || '')) {
+    await projectStore.updateTaskMeta(task.uuid, { title })
   }
+}
+
+function cancelRename() {
+  renamingUuid.value = ''
 }
 
 function taskTitle(t: TaskItem): string {
@@ -182,6 +202,17 @@ function relativeTime(ts: string): string {
     <div class="tree">
       <div class="tree-head">
         <span class="tree-label">Workspace</span>
+        <div class="tree-head-actions">
+          <button
+            class="tree-icon-btn"
+            :class="{ on: showArchived }"
+            :title="showArchived ? 'Hide archived tasks' : 'Show archived tasks'"
+            :aria-pressed="showArchived"
+            @click="showArchived = !showArchived"
+          >
+            <Archive :size="14" />
+          </button>
+        </div>
       </div>
 
       <div v-if="projectNodes.length === 0" class="empty-state">No projects yet</div>
@@ -205,7 +236,17 @@ function relativeTime(ts: string): string {
           >
             <span class="task-dot" :class="{ unread: task.unread }" aria-hidden="true" />
             <Pin v-if="task.pinned" :size="11" class="task-pin" />
-            <span class="task-title">{{ taskTitle(task) }}</span>
+            <input
+              v-if="renamingUuid === task.uuid"
+              :ref="el => { renameInput = el as HTMLInputElement | null }"
+              v-model="renameValue"
+              class="task-rename"
+              @click.stop
+              @keydown.enter.stop.prevent="commitRename(task)"
+              @keydown.esc.stop.prevent="cancelRename"
+              @blur="commitRename(task)"
+            />
+            <span v-else class="task-title">{{ taskTitle(task) }}</span>
             <span class="task-time">{{ relativeTime(task.created_at) }}</span>
 
             <HMenu as="div" class="task-menu" @click.stop>
@@ -468,6 +509,18 @@ function relativeTime(ts: string): string {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.task-rename {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--color-foreground);
+  background: var(--color-background);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+  outline: none;
 }
 .task-time {
   font-size: 10px;

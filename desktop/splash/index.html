@@ -19,6 +19,17 @@
         user-select: none;
         -webkit-user-select: none;
       }
+      /* Draggable strip under the macOS overlay title bar (the main window uses
+         titleBarStyle:Overlay), so the splash window can be moved while the
+         local server starts. Transparent and harmless on other platforms. */
+      .drag-strip {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 28px;
+        z-index: 10;
+      }
       .wrap {
         height: 100%;
         display: flex;
@@ -62,7 +73,8 @@
     </style>
   </head>
   <body>
-    <div class="wrap">
+    <div class="drag-strip" data-tauri-drag-region></div>
+    <div class="wrap" role="main" aria-label="jcode 正在启动">
       <svg class="mark" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <defs>
           <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -78,7 +90,7 @@
         <path fill="#ff8400" d="M 185 165 L 327 165 Q 347 165 347 185 Q 347 205 327 205 L 250 205 L 250 340 Q 250 385 222 408 Q 200 425 168 425 Q 140 425 122 412 Q 104 398 104 375 Q 104 360 114 350 Q 124 340 138 340 Q 152 340 160 349 Q 167 358 167 370 Q 167 380 162 387 Q 170 395 183 395 Q 198 395 208 382 Q 218 369 218 348 L 218 205 L 185 205 Q 165 205 165 185 Q 165 165 185 165 Z" />
       </svg>
       <div class="title"><b>j</b>code</div>
-      <div class="status"><span class="spinner"></span><span>正在启动本地服务…</span></div>
+      <div class="status" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span><span>正在启动本地服务…</span></div>
     </div>
   </body>
 </html>
