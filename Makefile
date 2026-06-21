@@ -35,7 +35,7 @@ generate:
 	go generate ./internal/model/...
 	go generate ./internal/theme/...
 
-build-web:
+build-web: generate
 	@echo "Building frontend..."
 	cd web && (pnpm install --frozen-lockfile 2>/dev/null || pnpm install)
 	cd web && npx vite build
