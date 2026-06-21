@@ -381,6 +381,10 @@ export interface ChatMessage {
   level?: 'error' | 'notice'
   // Optional raw detail (e.g. the unmapped error string) shown collapsed.
   detail?: string
+  // For assistant messages: how long the turn took (ms), from the user prompt
+  // until the agent finished. Set on the final assistant message of a turn so
+  // the elapsed time persists in the header after the live timer disappears.
+  durationMs?: number
 }
 
 export interface ToolCall {

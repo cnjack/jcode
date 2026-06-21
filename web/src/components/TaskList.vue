@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { Circle, LoaderCircle, CircleCheck, Ban, CircleDot } from 'lucide-vue-next'
+import { MinusCircleIcon, ArrowPathIcon, CheckCircleIcon, NoSymbolIcon, EllipsisHorizontalCircleIcon } from '@heroicons/vue/24/outline'
 import type { TodoItem } from '@/types/api'
 
 defineProps<{
@@ -45,29 +45,29 @@ onBeforeUnmount(() => {
       />
 
       <!-- Status icon -->
-      <CircleCheck
+      <CheckCircleIcon
         v-if="todo.status === 'completed'"
         class="w-3.5 h-3.5 shrink-0"
         style="color: var(--color-success-fg)"
       />
-      <Ban
+      <NoSymbolIcon
         v-else-if="todo.status === 'cancelled'"
         class="w-3.5 h-3.5 shrink-0"
         style="color: var(--color-destructive)"
       />
       <template v-else-if="todo.status === 'in_progress'">
-        <CircleDot
+        <EllipsisHorizontalCircleIcon
           v-if="reduceMotion"
           class="w-3.5 h-3.5 shrink-0"
           style="color: var(--color-primary)"
         />
-        <LoaderCircle
+        <ArrowPathIcon
           v-else
           class="w-3.5 h-3.5 shrink-0 animate-spin"
           style="color: var(--color-primary)"
         />
       </template>
-      <Circle
+      <MinusCircleIcon
         v-else
         class="w-3.5 h-3.5 shrink-0"
         style="color: var(--color-muted-foreground)"

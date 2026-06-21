@@ -2,10 +2,10 @@
 import { renderMarkdown } from '@/composables/markdown'
 import type { ChatMessage } from '@/types/api'
 import { ref, nextTick, computed } from 'vue'
+import { Square2StackIcon, CheckIcon, PencilSquareIcon } from '@heroicons/vue/24/outline'
 
 const props = defineProps<{
   message: ChatMessage
-  canRetry?: boolean
   canEdit?: boolean
 }>()
 
@@ -18,8 +18,19 @@ const systemColor = computed(() => {
 })
 const systemLabel = computed(() => (props.message.level === 'error' ? 'Error' : 'System'))
 
+// Human-readable elapsed time for the turn (assistant messages only). "45s" for
+// under a minute, "1m 23s" beyond. Empty when the message carries no duration.
+const durationLabel = computed(() => {
+  const ms = props.message.durationMs
+  if (!ms || ms < 0) return ''
+  const totalSec = Math.round(ms / 1000)
+  if (totalSec < 60) return `${totalSec}s`
+  const m = Math.floor(totalSec / 60)
+  const s = totalSec % 60
+  return s ? `${m}m ${s}s` : `${m}m`
+})
+
 const emit = defineEmits<{
-  retry: []
   edit: [newText: string]
 }>()
 
@@ -80,7 +91,7 @@ function handleEditKeyDown(e: KeyboardEvent) {
                       message.role === 'user' && message.source === 'wechat' ? 'var(--color-info-fg)' :
                       message.role === 'system' ? systemColor :
                       'var(--color-foreground)',
-          color: '#fff'
+          color: 'var(--color-on-primary)'
         }"
       >
         <template v-if="message.role === 'assistant'">J</template>
@@ -99,53 +110,6 @@ function handleEditKeyDown(e: KeyboardEvent) {
       >
         {{ message.role === 'user' ? (message.source === 'wechat' ? 'WeChat' : 'You') : message.role === 'assistant' ? '[J]CODE' : systemLabel }}
       </span>
-
-      <!-- Action buttons: visible on hover or keyboard focus-within -->
-      <div class="flex items-center gap-0.5 ml-1 opacity-0 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 transition-opacity duration-150">
-        <!-- Copy button -->
-        <button
-          class="w-5 h-5 flex items-center justify-center rounded-[var(--radius-sm)] transition-all cursor-pointer hover:bg-[var(--color-secondary)] active:scale-90"
-          style="color: var(--color-muted-foreground)"
-          :title="copied ? 'Copied!' : 'Copy'"
-          @click="copyContent"
-        >
-          <svg v-if="!copied" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="9" y="9" width="13" height="13" rx="2" />
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-          </svg>
-          <svg v-else class="w-3 h-3" style="color: var(--color-primary)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
-        </button>
-
-        <!-- Retry button (assistant messages) -->
-        <button
-          v-if="canRetry"
-          class="w-5 h-5 flex items-center justify-center rounded-[var(--radius-sm)] transition-all cursor-pointer hover:bg-[var(--color-secondary)] active:scale-90"
-          style="color: var(--color-muted-foreground)"
-          title="Retry"
-          @click="emit('retry')"
-        >
-          <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-            <path d="M3 3v5h5" />
-          </svg>
-        </button>
-
-        <!-- Edit button (user messages) -->
-        <button
-          v-if="canEdit && !editing"
-          class="w-5 h-5 flex items-center justify-center rounded-[var(--radius-sm)] transition-all cursor-pointer hover:bg-[var(--color-secondary)] active:scale-90"
-          style="color: var(--color-muted-foreground)"
-          title="Edit"
-          @click="startEdit"
-        >
-          <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z" />
-          </svg>
-        </button>
-      </div>
     </div>
 
     <!-- Images -->
@@ -175,7 +139,7 @@ function handleEditKeyDown(e: KeyboardEvent) {
       <div class="flex items-center gap-2 mt-2">
         <button
           class="px-3 py-1 text-xs font-semibold transition-all cursor-pointer active:scale-95"
-          :style="{ background: 'var(--color-primary)', color: 'var(--color-on-primary, #fff)', borderRadius: 'var(--radius-md)' }"
+          :style="{ background: 'var(--color-primary)', color: 'var(--color-on-primary)', borderRadius: 'var(--radius-md)' }"
           @click="confirmEdit"
         >
           Send
@@ -188,6 +152,42 @@ function handleEditKeyDown(e: KeyboardEvent) {
           Cancel
         </button>
         <span class="text-[10px]" style="color: var(--color-muted-foreground)">Enter to send · Shift+Enter for newline · Esc to cancel</span>
+      </div>
+    </div>
+
+    <!-- Action footer (below the content): turn time persists; copy/edit reveal on
+         hover or keyboard focus. Moved here from the role-label row. -->
+    <div v-if="!editing" class="flex items-center gap-2 mt-1.5 pl-9">
+      <!-- Turn elapsed time (assistant only) — persists after the live timer. -->
+      <span
+        v-if="durationLabel"
+        class="text-[10px] tabular-nums"
+        style="font-family: var(--font-mono); color: var(--color-muted-foreground); opacity: 0.7"
+        title="Time this turn took"
+      >{{ durationLabel }}</span>
+
+      <div class="flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100 transition-opacity duration-150">
+        <!-- Copy button -->
+        <button
+          class="w-5 h-5 flex items-center justify-center rounded-[var(--radius-sm)] transition-all cursor-pointer hover:bg-[var(--color-secondary)] active:scale-90"
+          style="color: var(--color-muted-foreground)"
+          :title="copied ? 'Copied!' : 'Copy'"
+          @click="copyContent"
+        >
+          <Square2StackIcon v-if="!copied" class="w-3 h-3" />
+          <CheckIcon v-else class="w-3 h-3" style="color: var(--color-primary)" />
+        </button>
+
+        <!-- Edit button (user messages) -->
+        <button
+          v-if="canEdit"
+          class="w-5 h-5 flex items-center justify-center rounded-[var(--radius-sm)] transition-all cursor-pointer hover:bg-[var(--color-secondary)] active:scale-90"
+          style="color: var(--color-muted-foreground)"
+          title="Edit"
+          @click="startEdit"
+        >
+          <PencilSquareIcon class="w-3 h-3" />
+        </button>
       </div>
     </div>
 

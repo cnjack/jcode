@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch, nextTick, onUnmounted, inject } from 'vue'
+import { ref, reactive, computed, watch, nextTick, onUnmounted, inject, type Component } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { useTheme } from '@/composables/useTheme'
 import { api } from '@/composables/api'
@@ -12,7 +12,28 @@ import {
   TransitionRoot,
   TransitionChild,
 } from '@headlessui/vue'
-import { Globe, Zap, MessageSquare, Monitor, Key, Server, ChevronRight, Plus } from 'lucide-vue-next'
+import {
+  GlobeAltIcon,
+  BoltIcon,
+  ChatBubbleLeftIcon,
+  ComputerDesktopIcon,
+  KeyIcon,
+  ServerIcon,
+  ChevronRightIcon,
+  PlusIcon,
+  SignalIcon,
+  ShieldCheckIcon,
+  AdjustmentsHorizontalIcon,
+  SwatchIcon,
+  CpuChipIcon,
+  ServerStackIcon,
+  SparklesIcon,
+  CommandLineIcon,
+  BellAlertIcon,
+  TrashIcon,
+  ArrowLeftIcon,
+} from '@heroicons/vue/24/outline'
+import { isTauri } from '@/composables/useDesktop'
 
 const props = defineProps<{
   open: boolean
@@ -73,6 +94,11 @@ const channelQRContent = ref('')
 const channelLoginReminder = ref(false)
 const qrCanvas = ref<HTMLCanvasElement | null>(null)
 
+// Bluetooth (BLE) status channel — desktop-only preference, persisted in config
+// and applied on the next app launch.
+const bleEnabled = ref(false)
+const bleSaving = ref(false)
+
 // Provider management state
 const configuredProviders = ref<ProviderDetail[]>([])
 const showAddProvider = ref(false)
@@ -106,6 +132,13 @@ watch(() => props.open, async (isOpen) => {
       channelAvailable.value = ch.available
       channelState.value = ch.state ?? 'none'
     } catch { /* ignore */ }
+
+    // Bluetooth status channel is desktop-only; skip the request in the browser.
+    if (isTauri) {
+      try {
+        bleEnabled.value = (await api.channelBLEStatus()).enabled
+      } catch { /* ignore */ }
+    }
 
     // Load configured providers
     try {
@@ -158,7 +191,7 @@ async function toggleMCP(name: string, enabled: boolean) {
 }
 
 function serverIcon(type: string) {
-  return type === 'sse' || type === 'http' ? Globe : Zap
+  return type === 'sse' || type === 'http' ? GlobeAltIcon : BoltIcon
 }
 
 function mcpStatusLabel(info: MCPServerInfo): string {
@@ -404,24 +437,63 @@ const shortcuts = [
   { keys: 'Ctrl+`', desc: 'Toggle terminal' },
 ]
 
+// Draw the pending QR onto the canvas. The QR is rendered imperatively (not data-
+// bound), and the Channels tab is a v-if block, so the <canvas> is destroyed and
+// recreated whenever the user navigates away and back — leaving it blank. This
+// helper is the single source of truth for drawing, called both right after login
+// and whenever the canvas remounts (see the activeTab watcher below).
+async function drawChannelQR() {
+  await nextTick()
+  if (!qrCanvas.value || !channelQRContent.value) return
+  // Resolve colors from the design tokens so the QR follows the active theme —
+  // the "dark" modules use the terminal foreground, the "light" modules the
+  // surface color. Both read via getComputedStyle (QRCode needs resolved strings).
+  const root = document.documentElement
+  const fg = getComputedStyle(root).getPropertyValue('--term-fg').trim() || '#18181b'
+  const bg = getComputedStyle(root).getPropertyValue('--color-surface').trim() || '#ffffff'
+  await QRCode.toCanvas(qrCanvas.value, channelQRContent.value, {
+    width: 200,
+    margin: 2,
+    color: { dark: fg, light: bg },
+  })
+}
+
+// Re-draw the QR (and resume polling) when the user returns to the Channels tab
+// mid-scan — the v-if remount would otherwise show an empty canvas.
+watch(activeTab, (tab) => {
+  if (tab === 'channels' && channelQRContent.value) {
+    drawChannelQR()
+    if (channelState.value === 'scanning') pollChannelState()
+  }
+})
+
+// Flip the persisted default auto-approve preference (store handles the API +
+// keeping the unified mode/flag in sync).
+async function toggleAutoApprove() {
+  await store.setAutoApprove(!store.autoApprove)
+}
+
+// Flip the persisted Bluetooth status-channel preference.
+async function toggleBLE() {
+  if (bleSaving.value) return
+  bleSaving.value = true
+  const next = !bleEnabled.value
+  try {
+    await api.setChannelBLE(next)
+    bleEnabled.value = next
+  } catch (err) {
+    console.error('Failed to toggle Bluetooth notifications:', err)
+  }
+  bleSaving.value = false
+}
+
 async function channelLogin() {
   channelLoading.value = true
   try {
     const result = await api.channelLogin()
     channelQRContent.value = result.qr_content
     channelState.value = 'scanning'
-    await nextTick()
-    if (qrCanvas.value && channelQRContent.value) {
-      const isDark = document.documentElement.classList.contains('dark')
-      await QRCode.toCanvas(qrCanvas.value, channelQRContent.value, {
-        width: 200,
-        margin: 2,
-        color: {
-          dark: isDark ? '#e4e4e7' : '#18181b',
-          light: isDark ? '#27272a' : '#ffffff',
-        },
-      })
-    }
+    await drawChannelQR()
     pollChannelState()
   } catch (err) {
     console.error('Channel login failed:', err)
@@ -484,19 +556,21 @@ const tabLabel: Record<string, string> = {
   shortcuts: 'Shortcuts',
 }
 
-// Monochrome 20×20 stroke icons (inner SVG only) for the nav rail + empty
-// states. Rendered via v-html into an <svg stroke="currentColor" fill="none">
-// so they inherit the element's color/weight.
-const iconFor: Record<string, string> = {
-  general: '<line x1="3" y1="6.5" x2="17" y2="6.5" stroke-linecap="round"/><line x1="3" y1="13.5" x2="17" y2="13.5" stroke-linecap="round"/><circle cx="13" cy="6.5" r="2.1"/><circle cx="7" cy="13.5" r="2.1"/>',
-  appearance: '<circle cx="10" cy="10" r="3.2"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.9 4.9l1.4 1.4M13.7 13.7l1.4 1.4M15.1 4.9l-1.4 1.4M6.3 13.7l-1.4 1.4" stroke-linecap="round"/>',
-  providers: '<rect x="6" y="6" width="8" height="8" rx="1.5"/><path d="M8.5 3v3M11.5 3v3M8.5 14v3M11.5 14v3M3 8.5h3M3 11.5h3M14 8.5h3M14 11.5h3" stroke-linecap="round"/>',
-  mcp: '<rect x="3.5" y="4" width="13" height="5" rx="1.5"/><rect x="3.5" y="11" width="13" height="5" rx="1.5"/><path d="M6 6.5h0M6 13.5h0" stroke-linecap="round" stroke-width="2"/>',
-  skills: '<path d="M10 3l1.6 4.4L16 9l-4.4 1.6L10 15l-1.6-4.4L4 9l4.4-1.6z" stroke-linejoin="round"/>',
-  ssh: '<rect x="3" y="4.5" width="14" height="11" rx="1.8"/><path d="M6.5 8.5l2 2-2 2M10.8 12.5h3" stroke-linecap="round" stroke-linejoin="round"/>',
-  channels: '<path d="M7 8.5a3 3 0 016 0c0 2.6 1.2 3.6 1.8 4.2H5.2C5.8 12.1 7 11.1 7 8.5z" stroke-linejoin="round"/><path d="M8.6 15a1.6 1.6 0 002.8 0" stroke-linecap="round"/>',
-  shortcuts: '<rect x="3" y="6" width="14" height="8" rx="1.8"/><path d="M6 9.2h0M9 9.2h0M12 9.2h0M6 11.6h6" stroke-linecap="round" stroke-width="2"/>',
+// Nav-rail + empty-state icons. One heroicons component per section (was a
+// v-html SVG-path map; switched to components to drop the v-html injection
+// surface and keep icons consistent with the rest of the app).
+const iconFor: Record<string, Component> = {
+  general: AdjustmentsHorizontalIcon,
+  appearance: SwatchIcon,
+  providers: CpuChipIcon,
+  mcp: ServerStackIcon,
+  skills: SparklesIcon,
+  ssh: CommandLineIcon,
+  channels: BellAlertIcon,
+  shortcuts: ComputerDesktopIcon,
 }
+
+
 
 async function startAddProvider() {
   showAddProvider.value = true
@@ -613,7 +687,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                   @click="activeTab = tab"
                 >
                   <span v-if="activeTab === tab" class="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-full" style="background-color: var(--color-primary)" />
-                  <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" v-html="iconFor[tab]" />
+                  <component :is="iconFor[tab]" class="w-3.5 h-3.5 shrink-0" />
                   <span class="truncate">{{ tabLabel[tab] }}</span>
                 </button>
               </div>
@@ -624,9 +698,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                 class="settings-back group mt-auto flex items-center gap-1.5 h-9 px-2.5 rounded-md text-[13px] font-medium transition-colors cursor-pointer"
                 @click="emit('close')"
               >
-                <svg class="w-4 h-4 transition-transform group-hover:-translate-x-0.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
-                  <path d="M11.5 5L6.5 10l5 5M6.5 10H16" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
+                <ArrowLeftIcon class="w-4 h-4 transition-transform group-hover:-translate-x-0.5" />
                 Back to workspace
               </button>
             </nav>
@@ -654,30 +726,6 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     </span>
                   </div>
 
-                  <div class="grid grid-cols-2 gap-4">
-                    <div>
-                      <div class="text-[10px] uppercase tracking-wider mb-0.5 font-medium" style="color: var(--color-muted-foreground)">Provider</div>
-                      <div class="text-xs font-mono" style="color: var(--color-foreground)">{{ store.providerName || '—' }}</div>
-                    </div>
-                    <div>
-                      <div class="text-[10px] uppercase tracking-wider mb-0.5 font-medium" style="color: var(--color-muted-foreground)">Model</div>
-                      <div class="text-xs font-mono" style="color: var(--color-foreground)">{{ store.modelName || '—' }}</div>
-                    </div>
-                    <div>
-                      <div class="text-[10px] uppercase tracking-wider mb-0.5 font-medium" style="color: var(--color-muted-foreground)">Mode</div>
-                      <div class="text-xs font-mono" style="color: var(--color-foreground)">{{ store.mode.charAt(0).toUpperCase() + store.mode.slice(1) }}</div>
-                    </div>
-                    <div>
-                      <div class="text-[10px] uppercase tracking-wider mb-0.5 font-medium" style="color: var(--color-muted-foreground)">Auto-approve</div>
-                      <div class="text-xs font-mono" style="color: var(--color-foreground)">{{ store.autoApprove ? 'On' : 'Off' }}</div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div class="text-[10px] uppercase tracking-wider mb-0.5 font-medium" style="color: var(--color-muted-foreground)">Workspace</div>
-                    <div class="text-xs font-mono break-all" style="color: var(--color-muted-foreground)">{{ store.pwd || '—' }}</div>
-                  </div>
-
                   <div v-if="store.tokenInfo">
                     <div class="text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">Token Usage</div>
                     <div class="flex items-center gap-2">
@@ -691,6 +739,56 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                         {{ store.tokenInfo.total_tokens.toLocaleString() }}
                         <span v-if="store.tokenInfo.model_context_limit"> / {{ store.tokenInfo.model_context_limit.toLocaleString() }}</span>
                       </span>
+                    </div>
+                  </div>
+
+                  <!-- Preferences — configurable toggles with explanations. -->
+                  <div class="space-y-2 pt-1">
+                    <div class="text-[10px] uppercase tracking-wider font-medium" style="color: var(--color-muted-foreground)">Preferences</div>
+
+                    <!-- Default auto-approve -->
+                    <div class="flex items-center gap-3 px-3 py-2.5 rounded-md" style="border: 1px solid var(--color-border); background-color: var(--color-surface)">
+                      <ShieldCheckIcon class="w-4 h-4 shrink-0" style="color: var(--color-muted-foreground)" />
+                      <div class="flex-1 min-w-0">
+                        <div class="text-xs font-medium" style="color: var(--color-foreground)">Default auto-approve</div>
+                        <div class="text-[10px] leading-relaxed" style="color: var(--color-muted-foreground)">
+                          Run tool calls — file edits and commands — automatically without asking for confirmation (same as Autopilot mode; Plan mode still asks). Saved as the default for new sessions.
+                        </div>
+                      </div>
+                      <button
+                        class="relative inline-flex h-5 w-9 items-center rounded-full cursor-pointer transition-colors shrink-0"
+                        :style="{ backgroundColor: store.autoApprove ? 'var(--color-primary)' : 'var(--color-border)' }"
+                        :title="store.autoApprove ? 'Disable' : 'Enable'"
+                        @click="toggleAutoApprove"
+                      >
+                        <span
+                          class="inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform"
+                          :class="store.autoApprove ? 'translate-x-[20px]' : 'translate-x-[2px]'"
+                        />
+                      </button>
+                    </div>
+
+                    <!-- Bluetooth status notifications (desktop only) -->
+                    <div v-if="isTauri" class="flex items-center gap-3 px-3 py-2.5 rounded-md" style="border: 1px solid var(--color-border); background-color: var(--color-surface)">
+                      <SignalIcon class="w-4 h-4 shrink-0" style="color: var(--color-muted-foreground)" />
+                      <div class="flex-1 min-w-0">
+                        <div class="text-xs font-medium" style="color: var(--color-foreground)">Bluetooth status notifications</div>
+                        <div class="text-[10px] leading-relaxed" style="color: var(--color-muted-foreground)">
+                          Push agent status — working, needs approval, done — to a paired JCODE Bluetooth device. Takes effect after restarting the app.
+                        </div>
+                      </div>
+                      <button
+                        class="relative inline-flex h-5 w-9 items-center rounded-full cursor-pointer transition-colors shrink-0 disabled:opacity-50"
+                        :style="{ backgroundColor: bleEnabled ? 'var(--color-primary)' : 'var(--color-border)' }"
+                        :disabled="bleSaving"
+                        :title="bleEnabled ? 'Disable' : 'Enable'"
+                        @click="toggleBLE"
+                      >
+                        <span
+                          class="inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform"
+                          :class="bleEnabled ? 'translate-x-[20px]' : 'translate-x-[2px]'"
+                        />
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -707,7 +805,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       : { border: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface)' }"
                     @click="setTheme('system')"
                   >
-                    <Monitor :size="15" style="color: var(--color-muted-foreground)" />
+                      <ComputerDesktopIcon class="w-3.5 h-3.5" style="color: var(--color-muted-foreground)" />
                     <div class="flex-1 min-w-0">
                       <div class="text-xs font-medium" style="color: var(--color-foreground)">System</div>
                       <div class="text-[10px]" style="color: var(--color-muted-foreground)">Follow your OS light / dark setting</div>
@@ -830,7 +928,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       <div v-if="addProviderStep === 'model'">
                         <div class="flex items-center gap-1 mb-2">
                           <button class="cursor-pointer" style="color: var(--color-muted-foreground)" @click="addProviderStep = 'select'">
-                            <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z" clip-rule="evenodd" /></svg>
+                            <ChevronRightIcon class="w-3.5 h-3.5" />
                           </button>
                           <span class="text-[10px]" style="color: var(--color-muted-foreground)">{{ addProviderInfo()?.name }}</span>
                         </div>
@@ -851,7 +949,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       <div v-if="addProviderStep === 'apikey'" class="space-y-2">
                         <div class="flex items-center gap-1 mb-1">
                           <button class="cursor-pointer" style="color: var(--color-muted-foreground)" @click="addProviderStep = 'model'">
-                            <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z" clip-rule="evenodd" /></svg>
+                            <ChevronRightIcon class="w-3.5 h-3.5" />
                           </button>
                           <span class="text-[10px] font-mono" style="color: var(--color-muted-foreground)">{{ addSelectedProvider }} / {{ addSelectedModel }}</span>
                         </div>
@@ -868,7 +966,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                   <!-- Provider list -->
                   <div v-if="configuredProviders.length === 0" class="flex flex-col items-center justify-center text-center py-12 gap-2.5">
                     <div class="w-9 h-9 grid place-items-center rounded-lg" style="background-color: var(--color-secondary); color: var(--color-muted-foreground)">
-                      <svg class="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" v-html="iconFor.providers" />
+                      <component :is="iconFor.providers" class="w-4 h-4" />
                     </div>
                     <div class="text-[13px] font-medium" style="color: var(--color-foreground)">No providers configured</div>
                     <div class="text-[11px] leading-relaxed max-w-[240px]" style="color: var(--color-muted-foreground)">
@@ -882,7 +980,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       class="flex items-center gap-3 px-3 py-2.5 rounded-md"
                       style="border: 1px solid var(--color-border); background-color: var(--color-surface)"
                     >
-                      <Key :size="15" style="color: var(--color-muted-foreground)" />
+                      <KeyIcon class="w-3.5 h-3.5" style="color: var(--color-muted-foreground)" />
                       <div class="flex-1 min-w-0">
                         <div class="text-xs font-medium font-mono" style="color: var(--color-foreground)">{{ p.id }}</div>
                         <div class="text-[10px] font-mono truncate" style="color: var(--color-muted-foreground)">
@@ -904,7 +1002,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                         title="Remove provider"
                         @click="deleteConfirmId = p.id"
                       >
-                        <svg class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 10.23 1.482l.149-.022.841 10.518A2.75 2.75 0 007.596 19h4.807a2.75 2.75 0 002.742-2.53l.841-10.519.149.023a.75.75 0 00.23-1.482A41.03 41.03 0 0014 4.193V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4zM8.58 7.72a.75.75 0 00-1.5.06l.3 7.5a.75.75 0 101.5-.06l-.3-7.5zm4.34.06a.75.75 0 10-1.5-.06l-.3 7.5a.75.75 0 101.5.06l.3-7.5z" clip-rule="evenodd" /></svg>
+                        <TrashIcon class="w-3.5 h-3.5" />
                       </button>
                       <div v-else class="flex items-center gap-1">
                         <button class="text-[10px] px-1.5 py-0.5 text-white rounded cursor-pointer" style="background-color: var(--color-destructive)" @click="deleteProvider(p.id)">Delete</button>
@@ -953,7 +1051,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                           :key="t"
                           class="px-3 py-1 text-[11px] cursor-pointer transition-colors"
                           :style="mcpForm.transport === t
-                            ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
+                            ? { backgroundColor: 'var(--color-primary)', color: 'var(--color-on-primary)' }
                             : { color: 'var(--color-muted-foreground)' }"
                           @click="mcpForm.transport = t"
                         >{{ t === 'local' ? 'Local' : t.toUpperCase() }}</button>
@@ -1065,7 +1163,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       <button class="text-[11px] px-3 py-1.5 rounded-md cursor-pointer" style="border: 1px solid var(--color-border); color: var(--color-foreground)" @click="cancelMCPEdit">Cancel</button>
                       <button
                         class="text-[11px] px-3 py-1.5 rounded-md cursor-pointer"
-                        style="background-color: var(--color-primary); color: #fff"
+                        style="background-color: var(--color-primary); color: var(--color-on-primary)"
                         :disabled="mcpSaving"
                         @click="saveMCP"
                       >{{ mcpSaving ? 'Saving…' : 'Save' }}</button>
@@ -1077,7 +1175,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                   </div>
                   <div v-else-if="mcpEditing === null && Object.keys(mcpServers).length === 0" class="flex flex-col items-center justify-center text-center py-12 gap-2.5">
                     <div class="w-9 h-9 grid place-items-center rounded-lg" style="background-color: var(--color-secondary); color: var(--color-muted-foreground)">
-                      <svg class="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" v-html="iconFor.mcp" />
+                      <component :is="iconFor.mcp" class="w-4 h-4" />
                     </div>
                     <div class="text-[13px] font-medium" style="color: var(--color-foreground)">No MCP servers configured</div>
                     <div class="text-[11px] leading-relaxed max-w-[240px]" style="color: var(--color-muted-foreground)">Connect one with the <span class="font-mono">Add&nbsp;server</span> button above.</div>
@@ -1094,7 +1192,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       }"
                     >
                       <div class="flex items-center gap-3">
-                        <component :is="serverIcon(info.type)" :size="15" style="color: var(--color-muted-foreground)" />
+                        <component :is="serverIcon(info.type)" class="w-3.5 h-3.5" style="color: var(--color-muted-foreground)" />
                         <div class="flex-1 min-w-0">
                           <div class="flex items-center gap-2">
                             <span class="text-xs font-medium" style="color: var(--color-foreground)">{{ name }}</span>
@@ -1115,7 +1213,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                         >
                           <span
                             class="inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform"
-                            :class="info.enabled ? 'translate-x-4.5' : 'translate-x-0.76'"
+                            :class="info.enabled ? 'translate-x-[20px]' : 'translate-x-[2px]'"
                           />
                         </button>
                       </div>
@@ -1149,7 +1247,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                         :key="f"
                         class="px-2.5 py-1 text-[11px] cursor-pointer transition-colors"
                         :style="skillFilter === f
-                          ? { backgroundColor: 'var(--color-primary)', color: '#fff' }
+                          ? { backgroundColor: 'var(--color-primary)', color: 'var(--color-on-primary)' }
                           : { color: 'var(--color-muted-foreground)' }"
                         @click="skillFilter = f"
                       >{{ f === 'all' ? 'All' : f === 'local' ? 'On this device' : 'Built-in' }}</button>
@@ -1166,7 +1264,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                   <div v-if="skillsLoading" class="text-center text-xs py-6 animate-pulse" style="color: var(--color-muted-foreground)">Loading...</div>
                   <div v-else-if="filteredSkills.length === 0" class="flex flex-col items-center justify-center text-center py-12 gap-2.5">
                     <div class="w-9 h-9 grid place-items-center rounded-lg" style="background-color: var(--color-secondary); color: var(--color-muted-foreground)">
-                      <svg class="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" v-html="iconFor.skills" />
+                      <component :is="iconFor.skills" class="w-4 h-4" />
                     </div>
                     <div class="text-[13px] font-medium" style="color: var(--color-foreground)">No skills found</div>
                     <div class="text-[11px] leading-relaxed max-w-[240px]" style="color: var(--color-muted-foreground)">Try a different filter or search term.</div>
@@ -1197,7 +1295,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       >
                         <span
                           class="inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform"
-                          :class="sk.enabled ? 'translate-x-4.5' : 'translate-x-0.76'"
+                          :class="sk.enabled ? 'translate-x-[20px]' : 'translate-x-[2px]'"
                         />
                       </button>
                     </div>
@@ -1213,7 +1311,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       style="border: 1px solid var(--color-border); color: var(--color-foreground)"
                       @click="openRemoteWizard"
                     >
-                      <Plus :size="14" /> Connect to remote host
+                      <PlusIcon class="w-3.5 h-3.5" /> Connect to remote host
                     </button>
                   </div>
 
@@ -1227,7 +1325,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
 
                   <div v-if="sshAliases.length === 0" class="flex flex-col items-center justify-center text-center py-12 gap-2.5">
                     <div class="w-9 h-9 grid place-items-center rounded-lg" style="background-color: var(--color-secondary); color: var(--color-muted-foreground)">
-                      <svg class="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" v-html="iconFor.ssh" />
+                      <component :is="iconFor.ssh" class="w-4 h-4" />
                     </div>
                     <div class="text-[13px] font-medium" style="color: var(--color-foreground)">No saved hosts</div>
                     <div class="text-[11px] leading-relaxed max-w-[270px]" style="color: var(--color-muted-foreground)">
@@ -1243,7 +1341,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       :title="`Connect to ${alias.name}`"
                       @click="connectToAlias(alias)"
                     >
-                      <Server :size="15" style="color: var(--color-muted-foreground)" />
+                      <ServerIcon class="w-3.5 h-3.5" style="color: var(--color-muted-foreground)" />
                       <div class="flex-1 min-w-0">
                         <div class="text-xs font-medium" style="color: var(--color-foreground)">{{ alias.name }}</div>
                         <div class="text-[10px] font-mono truncate" style="color: var(--color-muted-foreground)">
@@ -1258,7 +1356,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       >
                         active
                       </span>
-                      <ChevronRight :size="15" class="opacity-0 group-hover:opacity-100 transition-opacity" style="color: var(--color-muted-foreground)" />
+                      <ChevronRightIcon class="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" style="color: var(--color-muted-foreground)" />
                     </button>
                   </div>
                 </div>
@@ -1269,7 +1367,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
 
                   <div v-if="!channelAvailable" class="flex flex-col items-center justify-center text-center py-12 gap-2.5">
                     <div class="w-9 h-9 grid place-items-center rounded-lg" style="background-color: var(--color-secondary); color: var(--color-muted-foreground)">
-                      <svg class="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" v-html="iconFor.channels" />
+                      <component :is="iconFor.channels" class="w-4 h-4" />
                     </div>
                     <div class="text-[13px] font-medium" style="color: var(--color-foreground)">No channels configured</div>
                     <div class="text-[11px] leading-relaxed max-w-[260px]" style="color: var(--color-muted-foreground)">
@@ -1281,7 +1379,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     <div class="px-4 py-3 rounded-md" style="border: 1px solid var(--color-border); background-color: var(--color-surface)">
                       <div class="flex items-center justify-between mb-3">
                         <div class="flex items-center gap-2">
-                          <MessageSquare :size="16" style="color: var(--color-muted-foreground)" />
+                          <ChatBubbleLeftIcon class="w-4 h-4" style="color: var(--color-muted-foreground)" />
                           <div>
                             <div class="text-xs font-medium" style="color: var(--color-foreground)">WeChat</div>
                             <div class="text-[10px]" style="color: var(--color-muted-foreground)">iLink Bot integration</div>

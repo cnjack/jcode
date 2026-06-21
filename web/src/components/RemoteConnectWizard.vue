@@ -7,15 +7,15 @@ import {
   TransitionChild,
 } from '@headlessui/vue'
 import {
-  Server,
-  Container,
-  X,
-  ArrowLeft,
-  Folder,
-  Loader2,
-  Check,
-  ChevronRight,
-} from 'lucide-vue-next'
+  ServerIcon,
+  CubeIcon,
+  XMarkIcon,
+  ArrowLeftIcon,
+  FolderIcon,
+  ArrowPathIcon,
+  CheckIcon,
+  ChevronRightIcon,
+} from '@heroicons/vue/24/outline'
 import { useChatStore } from '@/stores/chat'
 import { useProjectStore } from '@/stores/project'
 import { api } from '@/composables/api'
@@ -335,7 +335,7 @@ function close() {
                   :class="{ done: i < stepIndex, current: i === stepIndex }"
                 >
                   <span class="rcw-step-dot">
-                    <Check v-if="i < stepIndex" :size="13" />
+                    <CheckIcon v-if="i < stepIndex" class="w-3 h-3" />
                     <span v-else>{{ i + 1 }}</span>
                   </span>
                   <span class="rcw-step-label">{{ s.label }}</span>
@@ -345,7 +345,7 @@ function close() {
 
             <!-- Content -->
             <div class="rcw-body">
-              <button class="rcw-close" @click="close"><X :size="18" /></button>
+              <button class="rcw-close" @click="close"><XMarkIcon class="w-4 h-4" /></button>
 
               <!-- Step 1: method -->
               <template v-if="step === 'method'">
@@ -353,19 +353,19 @@ function close() {
                 <p class="rcw-sub">Pick how to enter the remote workspace, then fill in the details.</p>
                 <div class="rcw-methods">
                   <button class="rcw-method" :class="{ active: method === 'ssh' }" @click="chooseMethod('ssh')">
-                    <Server :size="22" />
+                    <ServerIcon class="w-5 h-5" />
                     <span class="rcw-method-name">SSH</span>
                     <span class="rcw-method-desc">Remote host</span>
                   </button>
                   <button class="rcw-method disabled" disabled title="Coming soon">
-                    <Container :size="22" />
+                    <CubeIcon class="w-5 h-5" />
                     <span class="rcw-method-name">Docker</span>
                     <span class="rcw-method-desc">Coming soon</span>
                   </button>
                 </div>
                 <div class="rcw-foot">
                   <span />
-                  <button class="rcw-primary" @click="step = 'config'">Next <ChevronRight :size="15" /></button>
+                  <button class="rcw-primary" @click="step = 'config'">Next <ChevronRightIcon class="w-3.5 h-3.5" /></button>
                 </div>
               </template>
 
@@ -429,7 +429,7 @@ function close() {
                 <div class="rcw-foot">
                   <button class="rcw-ghost" :disabled="step === 'connecting'" @click="step = 'method'">Back</button>
                   <button class="rcw-primary" :disabled="step === 'connecting'" @click="connect">
-                    <Loader2 v-if="step === 'connecting'" :size="15" class="spin" />
+                    <ArrowPathIcon v-if="step === 'connecting'" class="w-3.5 h-3.5 spin" />
                     {{ step === 'connecting' ? 'Connecting…' : 'Connect' }}
                   </button>
                 </div>
@@ -443,12 +443,12 @@ function close() {
                 <div v-if="error" class="rcw-error">{{ error }}</div>
 
                 <div class="rcw-dirbar">
-                  <button class="rcw-back" title="Back to config" @click="backToConfig"><ArrowLeft :size="14" /></button>
+                  <button class="rcw-back" title="Back to config" @click="backToConfig"><ArrowLeftIcon class="w-3.5 h-3.5" /></button>
                   <span class="rcw-dir-path">{{ currentDir || '/' }}</span>
                 </div>
 
                 <div class="rcw-dirlist">
-                  <div v-if="dirLoading" class="rcw-hint"><Loader2 :size="15" class="spin" /> Loading…</div>
+                  <div v-if="dirLoading" class="rcw-hint"><ArrowPathIcon class="w-3.5 h-3.5 spin" /> Loading…</div>
                   <template v-else>
                     <button
                       v-for="d in dirs"
@@ -456,7 +456,7 @@ function close() {
                       class="rcw-dir-row"
                       @click="navigate(d)"
                     >
-                      <Folder :size="14" />
+                      <FolderIcon class="w-3.5 h-3.5" />
                       <span>{{ d }}</span>
                     </button>
                     <div v-if="dirs.length === 0" class="rcw-hint">No sub-directories</div>
@@ -472,7 +472,7 @@ function close() {
                 <div class="rcw-foot">
                   <button class="rcw-ghost" :disabled="binding" @click="close">Cancel</button>
                   <button class="rcw-primary" :disabled="binding" @click="bindHere">
-                    <Loader2 v-if="binding" :size="15" class="spin" />
+                    <ArrowPathIcon v-if="binding" class="w-3.5 h-3.5 spin" />
                     Use this directory
                   </button>
                 </div>
@@ -552,7 +552,7 @@ function close() {
 .rcw-step.done .rcw-step-dot {
   background: var(--color-success);
   border-color: var(--color-success);
-  color: #fff;
+  color: var(--color-on-primary);
 }
 .rcw-step-label {
   font-size: 13px;
@@ -798,7 +798,7 @@ function close() {
   border: none;
   border-radius: var(--radius-lg);
   background: var(--color-primary);
-  color: var(--color-on-primary, #fff);
+  color: var(--color-on-primary);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
