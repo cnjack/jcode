@@ -85,19 +85,18 @@ export async function openExternal(url: string): Promise<void> {
 
 // --- native folder picker --------------------------------------------------
 /**
- * Open the OS folder picker and return the chosen absolute path, or null if
- * cancelled / unavailable. Callers fall back to the in-app folder browser when
- * this returns null.
+ * Open the OS folder picker and return the chosen absolute path, or null if the
+ * user cancelled. Throws when the native picker is unavailable (not Tauri, plugin
+ * failed to load, or the dialog errored) so callers can tell "user cancelled"
+ * (null → do nothing) apart from "picker broken" (throw → fall back to the in-app
+ * folder browser). Conflating the two previously left desktop users stuck when
+ * the dialog plugin wasn't available.
  */
 export async function pickFolder(defaultPath?: string): Promise<string | null> {
-  if (!isTauri) return null
-  try {
-    const { open } = await import('@tauri-apps/plugin-dialog')
-    const res = await open({ directory: true, multiple: false, defaultPath })
-    return typeof res === 'string' ? res : null
-  } catch {
-    return null
-  }
+  if (!isTauri) throw new Error('native folder picker unavailable')
+  const { open } = await import('@tauri-apps/plugin-dialog')
+  const res = await open({ directory: true, multiple: false, defaultPath })
+  return typeof res === 'string' ? res : null
 }
 
 // --- one-time desktop init -------------------------------------------------
@@ -111,6 +110,11 @@ export function initDesktop(): void {
   const root = document.documentElement
   root.classList.add('is-tauri')
   const platform = navigator.platform || ''
+  // Only macOS uses an overlay title bar (titleBarStyle:Overlay in tauri.conf),
+  // so only `is-tauri-macos` currently drives CSS (the traffic-light inset +
+  // drag strips). Windows/Linux keep their native OS title bar and need no
+  // in-content inset; their classes are intentional forward-compat hooks, not
+  // dead code — keep them so per-platform tweaks have a selector to hang on.
   if (/Mac/i.test(platform)) root.classList.add('is-tauri-macos')
   else if (/Win/i.test(platform)) root.classList.add('is-tauri-windows')
   else root.classList.add('is-tauri-linux')

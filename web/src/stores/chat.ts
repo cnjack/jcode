@@ -242,15 +242,24 @@ export const useChatStore = defineStore('chat', () => {
     return cleaned || raw
   }
 
+  // Recursively mark a tool (and its subagent child tools) done if still
+  // running. Subagent children live in tool.children and were previously never
+  // cleaned, so interrupting a run mid-subagent left child tools spinning
+  // ("running…/Searching…") forever under an already-✓ parent.
+  function markToolTreeDone(tool: ToolCall) {
+    if (tool.status === 'running') tool.status = 'done'
+    if (tool.children) {
+      for (const child of tool.children) markToolTreeDone(child)
+    }
+  }
+
   function agentDone(error?: string) {
     isRunning.value = false
     streamingText = ''
     streamingMsgId = ''
     // Clean up any tool calls still in 'running' state — the agent has finished.
     for (const item of timeline.value) {
-      if (item.kind === 'tool' && item.data.status === 'running') {
-        item.data.status = 'done'
-      }
+      if (item.kind === 'tool') markToolTreeDone(item.data)
     }
     if (error) {
       // Match only the exact cancellation forms the backend emits, so a real
@@ -348,6 +357,25 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  /**
+   * Re-attach any server-side pending approval requests after the timeline is
+   * (re)built from a session — covers page reload / session resume / WS
+   * reconnect mid-approval, where the live approval_request event was already
+   * consumed and lost. Without this a pending approval card vanishes on switch
+   * and the agent stays blocked forever. Dedupes by id so re-pulls are safe.
+   */
+  async function reconcileApprovals() {
+    try {
+      const pending = await api.approvalPending()
+      for (const req of pending) {
+        const exists = timeline.value.some((i) => i.kind === 'approval' && i.data.id === req.id)
+        if (!exists) addApprovalRequest(req)
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   /** Submit answers for a pending ask_user request and collapse its card. */
   async function submitAskUser(id: string, answers: AskUserAnswer[]) {
     try {
@@ -437,11 +465,25 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function resolveApproval(id: string, approved: boolean, approveAll = false) {
+    const item = timeline.value.find((i) => i.kind === 'approval' && i.data.id === id)
+    if (item && item.kind === 'approval') {
+      // Block re-entry while a previous click is still in flight (or already
+      // resolved) — otherwise repeated clicks fire multiple POSTs.
+      if (item.data.resolving || item.data.resolved) return
+      item.data.resolving = true
+    }
     try {
       await api.approval(id, approved, approveAll)
       resolveApprovalLocal(id, approved)
     } catch (err: unknown) {
-      console.error('Approval error:', err)
+      // Re-enable the buttons and tell the user, instead of a silent
+      // console.error that leaves the card looking unresponsive.
+      if (item && item.kind === 'approval') item.data.resolving = false
+      addMessage(
+        'system',
+        `Approval failed: ${err instanceof Error ? err.message : String(err)}`,
+        undefined, undefined, 'error',
+      )
     }
   }
 
@@ -772,8 +814,9 @@ export const useChatStore = defineStore('chat', () => {
       for (const tc of pendingToolCalls.values()) {
         tc.status = 'done'
       }
-      // Re-attach any question still awaiting an answer on the server.
+      // Re-attach any question/approval still awaiting a response on the server.
       await reconcileAskUser()
+      await reconcileApprovals()
     } catch {
       // Session file may not exist yet (lazy creation), silently ignore
     }
@@ -921,8 +964,9 @@ export const useChatStore = defineStore('chat', () => {
       for (const tc of pendingToolCalls.values()) {
         tc.status = 'done'
       }
-      // Re-attach any question still awaiting an answer on the server.
+      // Re-attach any question/approval still awaiting a response on the server.
       await reconcileAskUser()
+      await reconcileApprovals()
     } catch (err: unknown) {
       addMessage('system', `Failed to load session: ${err instanceof Error ? err.message : String(err)}`)
     }
@@ -968,6 +1012,7 @@ export const useChatStore = defineStore('chat', () => {
     attachAskUserRequest,
     submitAskUser,
     reconcileAskUser,
+    reconcileApprovals,
     resolveApproval,
     sendMessage,
     stopAgent,

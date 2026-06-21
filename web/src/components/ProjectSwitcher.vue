@@ -2,6 +2,7 @@
 import { watch, computed, inject } from 'vue'
 import { useProjectStore, parseRemoteLabel } from '@/stores/project'
 import { useFolderBrowser } from '@/composables/useFolderBrowser'
+import { isTauri, pickFolder } from '@/composables/useDesktop'
 import type { RemoteMeta } from '@/types/api'
 import {
   Dialog,
@@ -53,6 +54,24 @@ function selectCurrentPath() {
       emit('projectSwitched')
     }
   })
+}
+
+// "Open Folder": on the desktop use the native OS picker (same as the composer's
+// WorkspacePicker); in the browser, or if the native picker is unavailable, fall
+// back to the in-app folder browser.
+async function openFolderAction() {
+  if (isTauri) {
+    try {
+      const path = await pickFolder()
+      if (!path) return // cancelled
+      const ok = await projectStore.openProject(path)
+      if (ok) { emit('close'); emit('projectSwitched') }
+      return
+    } catch {
+      /* native picker unavailable → in-app browser */
+    }
+  }
+  openBrowser()
 }
 
 async function selectProject(id: string) {
@@ -232,7 +251,7 @@ function deleteProject(id: string) {
                   <button
                     class="text-xs cursor-pointer transition-opacity hover:opacity-80 font-medium"
                     style="color: var(--color-primary)"
-                    @click="openBrowser"
+                    @click="openFolderAction"
                   >
                     + Open Folder
                   </button>

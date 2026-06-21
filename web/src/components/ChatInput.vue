@@ -5,6 +5,7 @@ import { api } from '@/composables/api'
 import type { SlashCommandInfo, ChatImage } from '@/types/api'
 import WorkspacePicker from '@/components/WorkspacePicker.vue'
 import BranchPicker from '@/components/BranchPicker.vue'
+import { useBranch } from '@/composables/useBranch'
 import { MessageSquare, ClipboardList, Zap, Target, Plus, Paperclip, Slash, X } from 'lucide-vue-next'
 
 // Which way the workspace/branch pickers open. The docked composer opens them
@@ -15,6 +16,9 @@ withDefaults(defineProps<{ pickerPlacement?: 'top' | 'bottom' }>(), {
 })
 
 const store = useChatStore()
+// Current git branch (singleton) — used to decide whether the composer's top row
+// is worth showing once the workspace picker is hidden mid-conversation.
+const { current: branchCurrent } = useBranch()
 const input = ref('')
 const textarea = ref<HTMLTextAreaElement | null>(null)
 const showModelPicker = ref(false)
@@ -303,6 +307,30 @@ onUnmounted(() => {
 watch(() => store.isRunning, (running) => {
   if (!running) nextTick(() => textarea.value?.focus())
 })
+
+// Reset all composer-local state when the active session changes (switching
+// sessions / projects). clearChat() only resets store-level state, so without
+// this a half-typed draft, attached images, or an open menu from session A
+// would leak into session B and risk being sent to the wrong conversation.
+watch(() => store.currentSessionId, () => {
+  input.value = ''
+  pendingImages.value = []
+  pendingImagePreviews.value = []
+  showSlashMenu.value = false
+  showModelPicker.value = false
+  showModePicker.value = false
+  showAddMenu.value = false
+  showManageModels.value = false
+})
+
+// If the newly-selected model can't accept images, drop any already-attached
+// ones so they aren't silently sent to (and rejected by) a text-only model.
+watch(() => store.imageSupport, (supported) => {
+  if (!supported && pendingImages.value.length > 0) {
+    pendingImages.value = []
+    pendingImagePreviews.value = []
+  }
+})
 </script>
 
 <template>
@@ -327,11 +355,14 @@ watch(() => store.isRunning, (running) => {
         </div>
 
         <!-- Workspace selector — pick the workspace for this task directly on the
-             composer (replaces opening the projects modal from the sidebar). On
-             the centered new-task screen its menu opens downward; once docked at
-             the bottom during a conversation it opens upward. -->
-        <div class="composer-top">
-          <WorkspacePicker :placement="pickerPlacement" />
+             composer (replaces opening the projects modal from the sidebar). Only
+             on the new-task screen: once a conversation has started the workspace
+             is fixed for that task, so switching it here is meaningless. The
+             branch picker stays (switching branch mid-task is still useful). The
+             whole row is dropped when it would be empty (in a conversation with no
+             git branch) so it leaves no blank gap above the composer. -->
+        <div v-if="!store.hasMessages || branchCurrent" class="composer-top">
+          <WorkspacePicker v-if="!store.hasMessages" :placement="pickerPlacement" />
           <BranchPicker :placement="pickerPlacement" />
         </div>
 
@@ -349,7 +380,7 @@ watch(() => store.isRunning, (running) => {
           <textarea
             ref="textarea"
             v-model="input"
-            :placeholder="store.isRunning ? 'Agent is working…' : store.goalArmed ? 'Describe the goal — the agent pursues it until verifiably complete' : 'Ask JCODE, @agent, or /command'"
+            :placeholder="store.isRunning ? 'Agent is working…' : store.goalArmed ? 'Describe the goal — the agent pursues it until verifiably complete' : 'Ask JCODE or type / for commands'"
             rows="1"
             :disabled="store.isRunning"
             @keydown="handleKeyDown"

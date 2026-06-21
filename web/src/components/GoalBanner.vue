@@ -18,6 +18,20 @@ const statusColor = computed(() => {
   }
 })
 
+// Human-readable status — the raw enum (e.g. 'in_progress') would render with an
+// underscore. Falls back to a de-underscored form for any unmapped value.
+const statusLabel = computed(() => {
+  const s = goal.value?.status || ''
+  const map: Record<string, string> = {
+    active: 'Active',
+    in_progress: 'In progress',
+    complete: 'Completed',
+    completed: 'Completed',
+    blocked: 'Blocked',
+  }
+  return map[s] || s.replace(/_/g, ' ')
+})
+
 const tokensLabel = computed(() => {
   if (!goal.value) return ''
   const used = goal.value.tokens_used ?? 0
@@ -38,7 +52,7 @@ const tokensLabel = computed(() => {
     <div class="flex-1 min-w-0">
       <div class="flex items-center gap-2">
         <span class="text-[10px] uppercase tracking-wide font-semibold" :style="{ color: statusColor }">
-          {{ goal.status }}
+          {{ statusLabel }}
         </span>
         <span v-if="tokensLabel" class="text-[10px]" style="color: var(--color-muted-foreground)">
           {{ tokensLabel }}

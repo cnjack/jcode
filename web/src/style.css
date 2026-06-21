@@ -31,6 +31,14 @@ html.is-tauri-macos .app-shell,
 html.is-tauri-macos .settings-shell {
   padding-top: 28px;
 }
+/* The setup overlay sits ABOVE .app-shell and covers the shell's own drag band,
+   so it needs its own top inset to keep first-run content clear of the floating
+   traffic-light buttons. Its .titlebar-drag child restores window dragging. The
+   SSH wizard is a centered modal (content isn't at the very top) so it only adds
+   a drag strip, no inset. */
+html.is-tauri-macos .setup-frame {
+  padding-top: 28px;
+}
 /* On desktop the 28px title-bar strip already lifts the surface below the
    floating control, so it needs far less of its own top margin than the
    browser (40px). 28 + 12 = 40 → consistent clearance either way. */

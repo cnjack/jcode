@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { api } from '@/composables/api'
 import type { SetupProvider, SetupModel } from '@/types/api'
@@ -50,39 +50,56 @@ const selectedProviderInfo = computed(() =>
   providers.value.find(p => p.id === selectedProvider.value)
 )
 
-onMounted(async () => {
+// Provider list loader — named so the provider step can offer a Retry when the
+// first attempt fails (e.g. the sidecar wasn't ready yet). Without a retry path,
+// a transient failure here would strand first-run setup until a full restart.
+async function loadProviders() {
   loading.value = true
+  error.value = ''
   try {
     providers.value = await api.setupProviders()
   } catch {
     error.value = 'Failed to load providers'
   }
   loading.value = false
-})
+}
+onMounted(loadProviders)
 
-async function selectProvider(id: string) {
-  selectedProvider.value = id
+// Model list loader for the currently-selected provider — retryable from the
+// model step.
+async function loadModels() {
   loading.value = true
   error.value = ''
+  models.value = []
   try {
-    models.value = await api.setupProviderModels(id)
-    step.value = 'model'
-    modelSearch.value = ''
+    models.value = await api.setupProviderModels(selectedProvider.value)
   } catch {
     error.value = 'Failed to load models'
   }
   loading.value = false
 }
 
+async function selectProvider(id: string) {
+  // Switching to a different provider invalidates any key/base-url/validation
+  // entered for the previous one — clear them so provider A's secret can't leak
+  // into provider B's form and get submitted to B's endpoint.
+  if (id !== selectedProvider.value) {
+    apiKey.value = ''
+    baseURL.value = ''
+    showApiKey.value = false
+    validationResult.value = null
+  }
+  selectedProvider.value = id
+  modelSearch.value = ''
+  // Advance to the model step regardless, so a load failure shows there with a
+  // Retry (instead of silently keeping the user on the provider step).
+  step.value = 'model'
+  await loadModels()
+}
+
 function selectModel(id: string) {
   selectedModel.value = id
   step.value = 'apikey'
-  // Auto-fill base URL from provider info if available
-  const prov = selectedProviderInfo.value
-  if (prov?.api && !baseURL.value) {
-    baseURL.value = ''
-    // Don't auto-fill, the backend will use the default
-  }
 }
 
 function goBack() {
@@ -92,11 +109,23 @@ function goBack() {
     step.value = 'provider'
     selectedProvider.value = ''
     models.value = []
+    // Also clear the api-key step fields so a different provider chosen next
+    // doesn't inherit the previous one's key/base URL.
+    apiKey.value = ''
+    baseURL.value = ''
+    showApiKey.value = false
   } else if (step.value === 'apikey') {
     step.value = 'model'
     selectedModel.value = ''
   }
 }
+
+// A validated "Connected" / "Failed" result only describes the key+base-URL that
+// were tested. Once the user edits either, drop the stale result so the UI never
+// shows a green "Connected" for a now-different (possibly broken) key.
+watch([apiKey, baseURL], () => {
+  validationResult.value = null
+})
 
 async function validateConnection() {
   if (!apiKey.value.trim()) return
@@ -149,6 +178,11 @@ function finish() {
   <!-- Onboarding is a full-page, framed window so first-run matches the app's
        enclosed look and brand palette (orange), not a one-off green theme. -->
   <div class="setup-viewport" style="z-index: var(--z-modal)">
+    <!-- Native title-bar drag strip — the setup overlay sits above .app-shell and
+         covers the shell's own drag band, so on the macOS desktop shell the window
+         would otherwise be undraggable during first-run. Rendered (via global CSS)
+         only inside is-tauri-macos; a no-op element elsewhere. -->
+    <div class="titlebar-drag" data-tauri-drag-region aria-hidden="true" />
     <div class="setup-frame">
       <div class="w-full max-w-lg mx-auto px-6">
         <!-- Logo -->
@@ -208,6 +242,10 @@ function finish() {
             />
 
             <div v-if="loading" class="text-center py-8 text-sm animate-pulse" style="color: var(--color-muted-foreground)">Loading providers...</div>
+            <div v-else-if="error" class="text-center py-8">
+              <div class="text-sm mb-3" style="color: var(--color-error-fg)">{{ error }}</div>
+              <button class="setup-retry px-4 py-1.5 text-xs rounded-lg cursor-pointer font-medium" @click="loadProviders">Retry</button>
+            </div>
             <div v-else-if="filteredProviders.length === 0" class="text-center py-8 text-sm" style="color: var(--color-muted-foreground)">No providers found</div>
             <div v-else class="space-y-1.5 max-h-72 overflow-y-auto pr-1">
               <button
@@ -255,6 +293,10 @@ function finish() {
             />
 
             <div v-if="loading" class="text-center py-8 text-sm animate-pulse" style="color: var(--color-muted-foreground)">Loading models...</div>
+            <div v-else-if="error" class="text-center py-8">
+              <div class="text-sm mb-3" style="color: var(--color-error-fg)">{{ error }}</div>
+              <button class="setup-retry px-4 py-1.5 text-xs rounded-lg cursor-pointer font-medium" @click="loadModels">Retry</button>
+            </div>
             <div v-else-if="filteredModels.length === 0" class="text-center py-8 text-sm" style="color: var(--color-muted-foreground)">No models found</div>
             <div v-else class="space-y-1 max-h-72 overflow-y-auto pr-1">
               <button
@@ -395,6 +437,15 @@ function finish() {
   align-items: center;
   justify-content: center;
   overflow: auto;
+}
+
+.setup-retry {
+  background: var(--color-primary);
+  color: var(--color-on-primary, #fff);
+  transition: opacity 0.15s;
+}
+.setup-retry:hover {
+  opacity: 0.9;
 }
 
 .setup-input {

@@ -36,12 +36,18 @@ pub fn show_main(app: &AppHandle) {
     }
 }
 
-/// Toggle window visibility — the tray icon's left-click behaviour.
+/// Toggle window visibility — the tray icon's left-click behaviour. A minimized
+/// window still reports `is_visible() == true`, so treat "visible but minimized"
+/// as "should be restored" rather than hiding it; otherwise a left-click on a
+/// minimized window would hide it instead of bringing it forward.
 pub fn toggle_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
-        if w.is_visible().unwrap_or(false) {
+        let visible = w.is_visible().unwrap_or(false);
+        let minimized = w.is_minimized().unwrap_or(false);
+        if visible && !minimized {
             let _ = w.hide();
         } else {
+            let _ = w.unminimize();
             let _ = w.show();
             let _ = w.set_focus();
         }

@@ -431,6 +431,9 @@ export interface PendingApproval {
   is_external: boolean
   resolved?: boolean
   approved?: boolean
+  // True while a resolve POST is in flight — disables the buttons so a slow/failed
+  // request can't be double-submitted.
+  resolving?: boolean
 }
 
 // Project management (localStorage)
