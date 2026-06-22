@@ -52,9 +52,28 @@ type AgentEventHandler interface {
 	RequestApproval(ctx context.Context, req ApprovalRequest) (ApprovalResponse, error)
 }
 
-// TokenUsage carries token usage info.
+// TokenUsage carries token usage info to the UI surfaces.
+//
+// TotalTokens is the LAST call's total — i.e. current context-window
+// occupancy, used to drive the context-usage bar. The remaining token counters
+// (Prompt/Completion/Cached/Reasoning/CacheWrite/CallCount) are CUMULATIVE for
+// the run's tracker, and CacheHitRate is the cumulative cached/prompt ratio.
+// CacheSupported is false when the provider never reported any cached tokens,
+// so the UI can show "—" instead of a misleading 0%.
+//
+// NOTE: the field order/types here must stay identical to WebTokenData
+// (internal/handler/web.go) so OnTokenUpdate's direct struct conversion keeps
+// compiling.
 type TokenUsage struct {
 	TotalTokens       int64
+	PromptTokens      int64
+	CompletionTokens  int64
+	CachedTokens      int64
+	ReasoningTokens   int64
+	CacheWriteTokens  int64
+	CallCount         int64
+	CacheHitRate      float64
+	CacheSupported    bool
 	ModelContextLimit int // 0 if unknown
 }
 

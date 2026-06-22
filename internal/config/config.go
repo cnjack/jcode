@@ -449,3 +449,22 @@ func SessionsIndexPath() (string, error) {
 	}
 	return filepath.Join(dir, "session.json"), nil
 }
+
+// UsageDir returns the path to the usage-statistics directory (~/.jcode/usage).
+func UsageDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get home directory: %w", err)
+	}
+	return filepath.Join(home, configDir, "usage"), nil
+}
+
+// UsageEventsPath returns the path to the append-only usage event log
+// (~/.jcode/usage/events.jsonl), one JSON line per recorded agent turn.
+func UsageEventsPath() (string, error) {
+	dir, err := UsageDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "events.jsonl"), nil
+}
