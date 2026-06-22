@@ -309,14 +309,89 @@ export interface ToolResultData {
 }
 
 export interface TokenUpdateData {
+  // total_tokens is current context occupancy (last call); the cumulative
+  // counters + cache_hit_rate cover the whole session.
+  total_tokens: number
   prompt_tokens: number
   completion_tokens: number
-  total_tokens: number
+  cached_tokens?: number
+  reasoning_tokens?: number
+  cache_write_tokens?: number
+  call_count?: number
+  cache_hit_rate?: number
+  cache_supported?: boolean
   model_context_limit: number
 }
 
 export interface AgentDoneData {
   error?: string
+}
+
+// --- Usage statistics ---
+
+export interface UsageDayBucket {
+  date: string // YYYY-MM-DD
+  tokens: number
+  turns: number
+  calls: number
+}
+
+export interface UsageShare {
+  name: string
+  tokens: number
+  share: number // 0-1 fraction of grand total
+}
+
+export interface UsageTotals {
+  total_tokens: number
+  prompt_tokens: number
+  completion_tokens: number
+  cached_tokens: number
+  reasoning_tokens: number
+  calls: number
+  turns: number
+  sessions: number
+}
+
+export interface TaskContextBreakdown {
+  context_limit: number
+  system_prompt_tokens: number
+  system_tools_tokens: number
+  mcp_tools_tokens: number
+  skills_tokens: number
+  messages_tokens: number
+}
+
+export interface TaskStats {
+  uuid: string
+  is_active: boolean
+  context?: TaskContextBreakdown
+  cache_hit_rate: number
+  cache_supported: boolean
+  tokens: {
+    total_tokens: number
+    prompt_tokens: number
+    completion_tokens: number
+    cached_tokens: number
+    reasoning_tokens: number
+    calls: number
+    turns?: number
+  }
+}
+
+export interface UsageStats {
+  range_days: number
+  totals: UsageTotals
+  active_days: number
+  current_streak: number
+  longest_streak: number
+  most_used_model: string
+  cache_hit_rate: number // 0-1
+  cache_supported: boolean
+  heatmap: UsageDayBucket[] // fixed ~365-day window
+  daily_trend: UsageDayBucket[] // selected range
+  by_model: UsageShare[]
+  by_project: UsageShare[]
 }
 
 export interface ApprovalRequestData {
