@@ -11,6 +11,7 @@ import {
 import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
 import { api } from '@/composables/api'
+import ProviderIcon from './ProviderIcon.vue'
 import type { SetupProvider, SetupModel } from '@/types/api'
 
 const emit = defineEmits<{
@@ -263,12 +264,15 @@ function finish() {
                 :class="{ selected: selectedProvider === p.id }"
                 @click="selectProvider(p.id)"
               >
-                <div class="flex items-center justify-between">
-                  <div>
-                    <div class="text-sm font-medium" style="color: var(--color-foreground)">{{ p.name }}</div>
-                    <div v-if="p.doc" class="text-[10px] mt-0.5" style="color: var(--color-muted-foreground)">{{ p.doc }}</div>
+                <div class="flex items-center justify-between gap-2">
+                  <div class="flex items-center gap-2.5 min-w-0">
+                    <ProviderIcon :provider="p.id" :size="22" />
+                    <div class="min-w-0">
+                      <div class="text-sm font-medium" style="color: var(--color-foreground)">{{ p.name }}</div>
+                      <div v-if="p.doc" class="text-[10px] mt-0.5 truncate" style="color: var(--color-muted-foreground)">{{ p.doc }}</div>
+                    </div>
                   </div>
-                  <div class="flex items-center gap-2">
+                  <div class="flex items-center gap-2 shrink-0">
                     <span v-if="p.tag === 'recommended'" class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--accent-wash); color: var(--color-primary)">{{ t('common.recommended') }}</span>
                     <span v-if="p.tag === 'local'" class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--color-info-bg); color: var(--color-info-fg)">{{ t('common.local') }}</span>
                     <span v-if="p.configured" class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--color-success-bg); color: var(--color-success-fg)">{{ t('common.configured') }}</span>

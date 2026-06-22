@@ -148,6 +148,14 @@ export interface GitBranchesResponse {
   branches: string[] // local branches, most-recently-committed first
 }
 
+export interface GitCheckoutResponse {
+  branch: string // new current branch on success; '' when blocked
+  blocked?: boolean // true when a plain switch was aborted by uncommitted changes
+  message?: string // git's raw (C-locale) message when blocked
+  files?: string[] // files that would be overwritten, parsed from git's output
+  stashed?: boolean // true when changes were stashed as part of this switch
+}
+
 // A task = a conversation, listed across all projects for the sidebar tree.
 export interface TaskItem {
   uuid: string

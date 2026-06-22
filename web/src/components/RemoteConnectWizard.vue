@@ -56,6 +56,12 @@ const form = reactive({
 const aliases = ref<SSHAlias[]>([])
 const selectedAlias = ref('')
 
+// Label shown on the alias Listbox button (mirrors the option text).
+const selectedAliasLabel = computed(() => {
+  const a = aliases.value.find((x) => x.name === selectedAlias.value)
+  return a ? `${a.name} — ${a.addr}` : t('settings.ssh.noAlias')
+})
+
 const error = ref('')
 const connectionId = ref('')
 const bound = ref(false)
@@ -381,10 +387,45 @@ function close() {
 
                 <div v-if="aliases.length > 0" class="rcw-field">
                   <label>{{ t('settings.ssh.savedAlias') }}</label>
-                  <select :value="selectedAlias" class="rcw-input" @change="applyAlias(($event.target as HTMLSelectElement).value)">
-                    <option value="">{{ t('settings.ssh.noAlias') }}</option>
-                    <option v-for="a in aliases" :key="a.name" :value="a.name">{{ a.name }} — {{ a.addr }}</option>
-                  </select>
+                  <Listbox
+                    :model-value="selectedAlias"
+                    :disabled="step === 'connecting'"
+                    @update:model-value="applyAlias"
+                  >
+                    <div class="rcw-listbox">
+                      <ListboxButton class="rcw-input rcw-select">
+                        <span class="rcw-select-label" :class="{ placeholder: !selectedAlias }">{{ selectedAliasLabel }}</span>
+                        <ChevronUpDownIcon class="rcw-select-chevron" />
+                      </ListboxButton>
+                      <transition
+                        enter-active-class="pop-enter-active"
+                        enter-from-class="pop-enter-from"
+                        leave-active-class="pop-leave-active"
+                        leave-to-class="pop-leave-to"
+                      >
+                        <ListboxOptions class="rcw-options">
+                          <ListboxOption v-slot="{ active, selected }" :value="''" as="template">
+                            <li class="rcw-option" :class="{ active }">
+                              <span class="rcw-option-text">{{ t('settings.ssh.noAlias') }}</span>
+                              <CheckIcon v-if="selected" class="rcw-option-check" />
+                            </li>
+                          </ListboxOption>
+                          <ListboxOption
+                            v-for="a in aliases"
+                            :key="a.name"
+                            v-slot="{ active, selected }"
+                            :value="a.name"
+                            as="template"
+                          >
+                            <li class="rcw-option" :class="{ active }">
+                              <span class="rcw-option-text">{{ a.name }} — {{ a.addr }}</span>
+                              <CheckIcon v-if="selected" class="rcw-option-check" />
+                            </li>
+                          </ListboxOption>
+                        </ListboxOptions>
+                      </transition>
+                    </div>
+                  </Listbox>
                 </div>
 
                 <div class="rcw-row">
@@ -686,6 +727,91 @@ function close() {
   width: 120px;
   padding: 5px 9px;
   font-size: 12px;
+}
+
+/* Alias picker — Headless UI Listbox styled to match .rcw-input fields. */
+.rcw-listbox {
+  position: relative;
+}
+.rcw-select {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+}
+.rcw-select:focus,
+.rcw-select:focus-visible {
+  border-color: var(--color-accent-neutral);
+}
+.rcw-select-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rcw-select-label.placeholder {
+  color: var(--color-muted-foreground);
+}
+.rcw-select-chevron {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--color-muted-foreground);
+}
+.rcw-options {
+  position: absolute;
+  z-index: var(--z-dropdown);
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  outline: none;
+}
+.rcw-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  color: var(--color-foreground);
+  cursor: pointer;
+}
+.rcw-option.active {
+  background: var(--color-secondary);
+}
+.rcw-option-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rcw-option-check {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  color: var(--color-accent);
+}
+.pop-enter-active,
+.pop-leave-active {
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+.pop-enter-from,
+.pop-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 .rcw-seg {
   display: flex;

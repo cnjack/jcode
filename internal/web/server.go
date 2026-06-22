@@ -282,6 +282,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/slash-commands", s.handleSlashCommands)
 	mux.HandleFunc("GET /api/browse", s.handleBrowse)
 	mux.HandleFunc("POST /api/project/switch", s.handleSwitchProject)
+	mux.HandleFunc("POST /api/project/validate", s.handleValidatePaths)
 	mux.HandleFunc("POST /api/pty", s.handleCreatePTY)
 	mux.HandleFunc("GET /api/pty", s.handleListPTY)
 	mux.HandleFunc("DELETE /api/pty/{id}", s.handleKillPTY)
@@ -2248,6 +2249,34 @@ func (s *Server) handleKillPTY(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePTYWebSocket(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	s.ptyMgr.serveWS(w, r, id)
+}
+
+// handleValidatePaths reports which of the given local paths no longer exist (or
+// are not directories). The web UI keeps its workspace list in localStorage and
+// can't stat the disk itself, so it calls this to prune dead workspaces from the
+// picker instead of letting the user click one and hit "path does not exist".
+// Callers send local paths only; ssh:// labels can't be stat'd here and would be
+// wrongly reported missing, so they must be filtered out client-side.
+func (s *Server) handleValidatePaths(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Paths []string `json:"paths"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	missing := []string{}
+	for _, p := range req.Paths {
+		if p == "" {
+			continue
+		}
+		if info, err := os.Stat(p); err != nil || !info.IsDir() {
+			missing = append(missing, p)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"missing": missing})
 }
 
 func (s *Server) handleSwitchProject(w http.ResponseWriter, r *http.Request) {
