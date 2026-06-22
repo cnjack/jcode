@@ -105,6 +105,7 @@ function scrollToBottom(smooth = true) {
 
 // WebSocket connection
 const { connected } = useWebSocket({
+  activeTaskId: () => store.currentSessionId,
   onAgentStart: () => { store.isRunning = true },
   onAgentText: (data) => store.appendAgentText(data.text),
   onToolCall: (data) => store.addToolCall(data.name, data.args, data.tool_call_id, data.display_info),

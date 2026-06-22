@@ -185,10 +185,8 @@ func (s *Server) handleRemoteListDir(w http.ResponseWriter, r *http.Request) {
 // remote executor at the chosen directory and rebuilds the agent (same path as
 // a local project switch).
 func (s *Server) handleRemoteBind(w http.ResponseWriter, r *http.Request) {
-	if cur := s.activeEngine(); cur != nil && cur.running.Load() {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is running, cannot switch workspace"})
-		return
-	}
+	// No running gate: binding a remote workspace builds a NEW engine; the
+	// previous task keeps running in the background.
 	if s.newRemoteEngine == nil {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "remote workspaces are not supported"})
 		return
