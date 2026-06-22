@@ -23,6 +23,7 @@ import (
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/telemetry"
+	"github.com/cnjack/jcode/internal/usage"
 )
 
 const (
@@ -55,6 +56,9 @@ type TeammateState struct {
 	AgentType   string
 	Permission  string
 	TokenUsage  *internalmodel.TokenUsage
+	// LastUsage snapshots the teammate's cumulative usage at the last global
+	// usage-log write, so each turn records only its delta.
+	LastUsage internalmodel.TokenUsageDetail
 }
 
 // ManagerDeps holds dependencies injected into the TeamManager.
@@ -748,6 +752,27 @@ func (m *Manager) runAgentTurn(ctx context.Context, state *TeammateState) (strin
 			AgentID:     state.Identity.AgentID,
 			TotalTokens: total,
 		})
+	}
+
+	// Roll this teammate's per-turn token delta into the global usage log under
+	// the leader's session so team work counts toward global stats.
+	if state.TokenUsage != nil && m.deps.LeaderSessionUUID != "" {
+		full := state.TokenUsage.GetFull()
+		delta := full.Minus(state.LastUsage)
+		state.LastUsage = full
+		if delta.TotalTokens > 0 {
+			usage.RecordEvent(usage.Event{
+				Session:    m.deps.LeaderSessionUUID,
+				Model:      state.Model,
+				Prompt:     delta.PromptTokens,
+				Completion: delta.CompletionTokens,
+				Cached:     delta.CachedTokens,
+				Reasoning:  delta.ReasoningTokens,
+				CacheWrite: delta.CacheWriteTokens,
+				Total:      delta.TotalTokens,
+				Calls:      delta.CallCount,
+			})
+		}
 	}
 
 	endTrace()

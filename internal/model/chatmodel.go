@@ -16,42 +16,89 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 )
 
-// TokenUsage tracks token consumption across all API calls
+// TokenUsage tracks token consumption across all API calls.
+//
+// CachedTokens is the cache-READ portion of the prompt (tokens served from the
+// provider's KV cache). CacheWriteTokens is the cache-CREATION portion; it is
+// 0 today because the shared go-openai transport does not surface
+// cache_creation_input_tokens, and is kept as a forward-compatible field.
+// ReasoningTokens is the reasoning/thinking subset of the completion.
 type TokenUsage struct {
 	PromptTokens     int64
 	CompletionTokens int64
 	TotalTokens      int64
 	CachedTokens     int64
+	ReasoningTokens  int64
+	CacheWriteTokens int64
+	CallCount        int64 // number of API calls recorded (averages denominator)
 	LastTotalTokens  int64
 	// Per-call "last" values for tracing/observability.
 	lastPrompt     int64
 	lastCompletion int64
 	lastCached     int64
+	lastReasoning  int64
+	lastCacheWrite int64
 	byModel        map[string]int64
 	mu             sync.RWMutex
 }
 
-// TokenUsageDetail holds per-call token usage details for tracing/observability.
+// AddParams carries one API call's token usage. Using a struct keeps the
+// growing set of token categories from turning Add into a long positional list.
+type AddParams struct {
+	Prompt     int
+	Completion int
+	Total      int
+	Cached     int
+	Reasoning  int
+	CacheWrite int
+}
+
+// TokenUsageDetail holds a token usage snapshot for tracing/observability and
+// for JSON transport to the UI. Reasoning/cache-write/call-count carry
+// omitempty so per-call telemetry stays compact while cumulative snapshots
+// (GetFull) carry the full breakdown.
 type TokenUsageDetail struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
 	CachedTokens     int `json:"cached_tokens"`
+	ReasoningTokens  int `json:"reasoning_tokens,omitempty"`
+	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
+	CallCount        int `json:"call_count,omitempty"`
+}
+
+// Minus returns the per-field difference d-prev, used to derive the token delta
+// of a single agent run from cumulative snapshots.
+func (d TokenUsageDetail) Minus(prev TokenUsageDetail) TokenUsageDetail {
+	return TokenUsageDetail{
+		PromptTokens:     d.PromptTokens - prev.PromptTokens,
+		CompletionTokens: d.CompletionTokens - prev.CompletionTokens,
+		TotalTokens:      d.TotalTokens - prev.TotalTokens,
+		CachedTokens:     d.CachedTokens - prev.CachedTokens,
+		ReasoningTokens:  d.ReasoningTokens - prev.ReasoningTokens,
+		CacheWriteTokens: d.CacheWriteTokens - prev.CacheWriteTokens,
+		CallCount:        d.CallCount - prev.CallCount,
+	}
 }
 
 // TokenTracker is a global token usage tracker
 var TokenTracker = &TokenUsage{}
 
-// Add adds token usage to the tracker
-func (t *TokenUsage) Add(prompt, completion, total, cached int) {
-	atomic.AddInt64(&t.PromptTokens, int64(prompt))
-	atomic.AddInt64(&t.CompletionTokens, int64(completion))
-	atomic.AddInt64(&t.TotalTokens, int64(total))
-	atomic.AddInt64(&t.CachedTokens, int64(cached))
-	atomic.StoreInt64(&t.LastTotalTokens, int64(total))
-	atomic.StoreInt64(&t.lastPrompt, int64(prompt))
-	atomic.StoreInt64(&t.lastCompletion, int64(completion))
-	atomic.StoreInt64(&t.lastCached, int64(cached))
+// Add records one API call's token usage.
+func (t *TokenUsage) Add(p AddParams) {
+	atomic.AddInt64(&t.PromptTokens, int64(p.Prompt))
+	atomic.AddInt64(&t.CompletionTokens, int64(p.Completion))
+	atomic.AddInt64(&t.TotalTokens, int64(p.Total))
+	atomic.AddInt64(&t.CachedTokens, int64(p.Cached))
+	atomic.AddInt64(&t.ReasoningTokens, int64(p.Reasoning))
+	atomic.AddInt64(&t.CacheWriteTokens, int64(p.CacheWrite))
+	atomic.AddInt64(&t.CallCount, 1)
+	atomic.StoreInt64(&t.LastTotalTokens, int64(p.Total))
+	atomic.StoreInt64(&t.lastPrompt, int64(p.Prompt))
+	atomic.StoreInt64(&t.lastCompletion, int64(p.Completion))
+	atomic.StoreInt64(&t.lastCached, int64(p.Cached))
+	atomic.StoreInt64(&t.lastReasoning, int64(p.Reasoning))
+	atomic.StoreInt64(&t.lastCacheWrite, int64(p.CacheWrite))
 }
 
 // Get returns the current token usage
@@ -73,7 +120,48 @@ func (t *TokenUsage) GetLastDetail() *TokenUsageDetail {
 		CompletionTokens: int(atomic.LoadInt64(&t.lastCompletion)),
 		TotalTokens:      int(atomic.LoadInt64(&t.LastTotalTokens)),
 		CachedTokens:     int(atomic.LoadInt64(&t.lastCached)),
+		ReasoningTokens:  int(atomic.LoadInt64(&t.lastReasoning)),
+		CacheWriteTokens: int(atomic.LoadInt64(&t.lastCacheWrite)),
 	}
+}
+
+// GetFull returns a cumulative snapshot of all tracked token usage.
+func (t *TokenUsage) GetFull() TokenUsageDetail {
+	return TokenUsageDetail{
+		PromptTokens:     int(atomic.LoadInt64(&t.PromptTokens)),
+		CompletionTokens: int(atomic.LoadInt64(&t.CompletionTokens)),
+		TotalTokens:      int(atomic.LoadInt64(&t.TotalTokens)),
+		CachedTokens:     int(atomic.LoadInt64(&t.CachedTokens)),
+		ReasoningTokens:  int(atomic.LoadInt64(&t.ReasoningTokens)),
+		CacheWriteTokens: int(atomic.LoadInt64(&t.CacheWriteTokens)),
+		CallCount:        int(atomic.LoadInt64(&t.CallCount)),
+	}
+}
+
+// CacheHitRate returns the cumulative KV cache hit rate, defined as
+// cached / prompt — the fraction of prompt tokens served from the provider's
+// cache. Returns 0 when no prompt tokens have been recorded. The result is
+// clamped to [0,1] to stay robust against provider quirks.
+func (t *TokenUsage) CacheHitRate() float64 {
+	prompt := atomic.LoadInt64(&t.PromptTokens)
+	if prompt <= 0 {
+		return 0
+	}
+	r := float64(atomic.LoadInt64(&t.CachedTokens)) / float64(prompt)
+	switch {
+	case r < 0:
+		return 0
+	case r > 1:
+		return 1
+	default:
+		return r
+	}
+}
+
+// CacheObserved reports whether any cache-read tokens have been seen, used to
+// distinguish "cache hit rate is 0%" from "this provider never reports caching".
+func (t *TokenUsage) CacheObserved() bool {
+	return atomic.LoadInt64(&t.CachedTokens) > 0
 }
 
 // Reset resets the token tracker
@@ -82,6 +170,15 @@ func (t *TokenUsage) Reset() {
 	atomic.StoreInt64(&t.CompletionTokens, 0)
 	atomic.StoreInt64(&t.TotalTokens, 0)
 	atomic.StoreInt64(&t.CachedTokens, 0)
+	atomic.StoreInt64(&t.ReasoningTokens, 0)
+	atomic.StoreInt64(&t.CacheWriteTokens, 0)
+	atomic.StoreInt64(&t.CallCount, 0)
+	atomic.StoreInt64(&t.LastTotalTokens, 0)
+	atomic.StoreInt64(&t.lastPrompt, 0)
+	atomic.StoreInt64(&t.lastCompletion, 0)
+	atomic.StoreInt64(&t.lastCached, 0)
+	atomic.StoreInt64(&t.lastReasoning, 0)
+	atomic.StoreInt64(&t.lastCacheWrite, 0)
 	t.mu.Lock()
 	t.byModel = nil
 	t.mu.Unlock()
@@ -180,6 +277,53 @@ func (m *chatModel) WithTools(tools []*schema.ToolInfo) (einomodel.ToolCallingCh
 	return &chatModel{client: m.client, model: m.model, tools: oaiTools}, nil
 }
 
+// extractUsage maps a go-openai Usage onto AddParams. cache_creation tokens are
+// not exposed by go-openai's schema, so CacheWrite is always 0 here; reasoning
+// and cache-read are picked up from the *TokensDetails sub-objects when present.
+func extractUsage(u openai.Usage) AddParams {
+	p := AddParams{
+		Prompt:     u.PromptTokens,
+		Completion: u.CompletionTokens,
+		Total:      u.TotalTokens,
+	}
+	if u.PromptTokensDetails != nil {
+		p.Cached = u.PromptTokensDetails.CachedTokens
+	}
+	if u.CompletionTokensDetails != nil {
+		p.Reasoning = u.CompletionTokensDetails.ReasoningTokens
+	}
+	// Some providers (e.g. some GLM/OpenAI-compatible gateways) omit total_tokens
+	// and only return prompt/completion. Derive it so the context indicator works.
+	if p.Total == 0 {
+		p.Total = p.Prompt + p.Completion
+	}
+	return p
+}
+
+// hasUsage reports whether a Usage object carries any token counts, tolerating
+// providers that populate prompt/completion but leave total_tokens at 0.
+func hasUsage(u openai.Usage) bool {
+	return u.PromptTokens > 0 || u.CompletionTokens > 0 || u.TotalTokens > 0
+}
+
+// recordUsage feeds one API call's usage into both the global tracker and the
+// per-agent tracker on the context (when present), preserving the dual-tracker
+// pattern.
+func (m *chatModel) recordUsage(ctx context.Context, u openai.Usage) {
+	p := extractUsage(u)
+	TokenTracker.Add(p)
+	TokenTracker.AddByModel(m.model, p.Prompt, p.Completion, p.Total)
+	if local := TokenTrackerFromContext(ctx); local != nil {
+		local.Add(p)
+		local.AddByModel(m.model, p.Prompt, p.Completion, p.Total)
+	}
+	// Real-time UI refresh: fire after the trackers are updated so the callback
+	// reads the just-recorded usage.
+	if notify := UsageNotifierFromContext(ctx); notify != nil {
+		notify()
+	}
+}
+
 func (m *chatModel) Generate(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.Message, error) {
 	req := m.buildRequest(input, false, opts...)
 	config.Logger().Printf("[chatmodel] Generate start (model: %s)", m.model)
@@ -190,17 +334,9 @@ func (m *chatModel) Generate(ctx context.Context, input []*schema.Message, opts 
 		return nil, err
 	}
 	// Track token usage
-	if resp.Usage.TotalTokens > 0 {
-		cached := 0
-		if resp.Usage.PromptTokensDetails != nil {
-			cached = resp.Usage.PromptTokensDetails.CachedTokens
-		}
-		TokenTracker.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens, cached)
-		TokenTracker.AddByModel(m.model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
-		if local := TokenTrackerFromContext(ctx); local != nil {
-			local.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens, cached)
-			local.AddByModel(m.model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
-		}
+	config.Logger().Printf("[chatmodel] Generate usage: prompt=%d completion=%d total=%d", resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
+	if hasUsage(resp.Usage) {
+		m.recordUsage(ctx, resp.Usage)
 	}
 	if len(resp.Choices) == 0 {
 		return nil, fmt.Errorf("empty response from model")
@@ -229,10 +365,12 @@ func (m *chatModel) Stream(ctx context.Context, input []*schema.Message, opts ..
 		defer func() { _ = stream.Close() }()
 		chunkCount := 0
 		toolCallSeen := false
+		usageSeen := false
+		var lastUsage *openai.Usage
 		for {
 			resp, err := stream.Recv()
 			if err == io.EOF {
-				config.Logger().Printf("[chatmodel] Stream EOF after %d chunks, toolCallSeen=%v", chunkCount, toolCallSeen)
+				config.Logger().Printf("[chatmodel] Stream EOF after %d chunks, toolCallSeen=%v usageSeen=%v", chunkCount, toolCallSeen, usageSeen)
 				break
 			}
 			if err != nil {
@@ -241,18 +379,15 @@ func (m *chatModel) Stream(ctx context.Context, input []*schema.Message, opts ..
 				break
 			}
 			chunkCount++
-			// Track token usage from stream response
-			if resp.Usage != nil && resp.Usage.TotalTokens > 0 {
-				cached := 0
-				if resp.Usage.PromptTokensDetails != nil {
-					cached = resp.Usage.PromptTokensDetails.CachedTokens
-				}
-				TokenTracker.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens, cached)
-				TokenTracker.AddByModel(m.model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
-				if local := TokenTrackerFromContext(ctx); local != nil {
-					local.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens, cached)
-					local.AddByModel(m.model, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
-				}
+			// Capture token usage from the stream. Some providers only send
+			// usage in a final chunk (requires stream_options.include_usage),
+			// and some omit total_tokens — hasUsage tolerates both. We record
+			// only the LAST usage once the stream ends, so providers that repeat
+			// (cumulative) usage per chunk aren't counted multiple times.
+			if resp.Usage != nil && hasUsage(*resp.Usage) {
+				u := *resp.Usage
+				lastUsage = &u
+				usageSeen = true
 			}
 			if len(resp.Choices) == 0 {
 				continue
@@ -271,6 +406,12 @@ func (m *chatModel) Stream(ctx context.Context, input []*schema.Message, opts ..
 				msg.ToolCalls = toEinoToolCalls(delta.ToolCalls)
 			}
 			sw.Send(msg, nil)
+		}
+		// Record once at stream end so the per-call notifier fires a single
+		// token_update for this call.
+		if lastUsage != nil {
+			config.Logger().Printf("[chatmodel] Stream usage: prompt=%d completion=%d total=%d", lastUsage.PromptTokens, lastUsage.CompletionTokens, lastUsage.TotalTokens)
+			m.recordUsage(ctx, *lastUsage)
 		}
 	}()
 

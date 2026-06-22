@@ -182,7 +182,8 @@ func (t *LangfuseTracer) buildMiddleware(useParentSpan bool) adk.AgentMiddleware
 						TotalTokens:      d.TotalTokens,
 					}
 					metadata = map[string]string{
-						"cached_tokens": fmt.Sprintf("%d", d.CachedTokens),
+						"cached_tokens":    fmt.Sprintf("%d", d.CachedTokens),
+						"reasoning_tokens": fmt.Sprintf("%d", d.ReasoningTokens),
 					}
 				}
 			}
