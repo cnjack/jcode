@@ -5,6 +5,10 @@ import {
   DialogPanel,
   TransitionRoot,
   TransitionChild,
+  Listbox,
+  ListboxButton,
+  ListboxOptions,
+  ListboxOption,
 } from '@headlessui/vue'
 import {
   ServerIcon,
@@ -15,6 +19,7 @@ import {
   ArrowPathIcon,
   CheckIcon,
   ChevronRightIcon,
+  ChevronUpDownIcon,
 } from '@heroicons/vue/24/outline'
 import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
