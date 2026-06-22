@@ -238,24 +238,27 @@ export interface SSHListResponse {
 
 // Remote connection wizard
 export type RemoteAuthMethod = 'password' | 'key'
+export type RemoteKind = 'ssh' | 'docker'
 
 export interface RemoteConnectRequest {
-  type?: 'ssh'
-  host: string
+  type?: RemoteKind
+  host?: string
   port?: number
   user?: string
   auth_method?: RemoteAuthMethod
   password?: string
   key_path?: string
   passphrase?: string
+  container?: string // docker: container id or name
 }
 
 export interface RemoteConnectResponse {
   connection_id: string
   remote_pwd: string
   platform: string
-  user: string
-  host: string
+  user?: string
+  host?: string
+  container?: string
 }
 
 export interface RemoteListDirResponse {
@@ -265,13 +268,28 @@ export interface RemoteListDirResponse {
 
 export interface RemoteBindResponse {
   status: string
+  kind?: RemoteKind
   pwd: string
   label: string
   name: string
   host: string
   user: string
   port: number
+  container?: string
   remote_path: string
+}
+
+export interface DockerContainer {
+  id: string
+  name: string
+  image: string
+  state: string
+  status: string
+  running: boolean
+}
+
+export interface DockerContainersResponse {
+  containers: DockerContainer[]
 }
 
 // Skill types (for slash commands)
@@ -528,10 +546,12 @@ export interface PendingApproval {
 
 // Project management (localStorage)
 export interface RemoteMeta {
-  host: string // host:port as dialed
+  kind?: RemoteKind // defaults to 'ssh' for back-compat
+  host: string // host:port as dialed (ssh)
   user: string
   port: number
   remotePath: string
+  container?: string // docker container name/id
 }
 
 export interface Project {

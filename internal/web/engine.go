@@ -338,8 +338,8 @@ func (s *Server) buildLocalEngine(taskID, pwd, modeStr string) (*Engine, error) 
 	return eng, nil
 }
 
-// buildRemoteEngine creates and registers a fresh remote (SSH) task engine.
-func (s *Server) buildRemoteEngine(taskID string, exec *tools.SSHExecutor, remotePwd, modeStr string) (*Engine, error) {
+// buildRemoteEngine creates and registers a fresh remote (SSH or Docker) task engine.
+func (s *Server) buildRemoteEngine(taskID string, exec tools.RemoteExecutor, remotePwd, modeStr string) (*Engine, error) {
 	if s.newRemoteEngine == nil {
 		return nil, fmt.Errorf("remote task creation is not supported")
 	}
@@ -420,6 +420,12 @@ func (e *Engine) teardown() {
 	}
 	if e.recorder != nil {
 		e.recorder.Close()
+	}
+	// Release the remote target, if any: closes the SSH connection or
+	// decrements the Docker container ref-count (stopping it on last release).
+	// No-op for local engines.
+	if e.env != nil {
+		_ = e.env.CloseRemote()
 	}
 }
 

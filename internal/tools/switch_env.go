@@ -18,11 +18,11 @@ type SwitchEnvInput struct {
 func (e *Env) NewSwitchEnvTool() tool.InvokableTool {
 	info := &schema.ToolInfo{
 		Name: "switch_env",
-		Desc: "Switch the execution environment between the local machine and SSH servers.",
+		Desc: "Switch the execution environment between the local machine, SSH servers, and Docker containers.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"target": {
 				Type:     schema.String,
-				Desc:     "The destination environment. Must be 'local' or an exact SSH alias name.",
+				Desc:     "The destination environment. Must be 'local', an exact SSH alias name, or an exact Docker alias name.",
 				Required: true,
 			},
 		}),
@@ -53,14 +53,13 @@ func (s *switchEnvTool) InvokableRun(ctx context.Context, argumentsInJSON string
 		return "", fmt.Errorf("target is required")
 	}
 
+	// Remember the outgoing executor so we can release its hold (SSH connection
+	// or Docker container ref-count) once the switch succeeds.
+	prev := s.env.Exec
+
 	if input.Target == "local" {
-		// Just reuse current locally stored if possible or prompt for reset.
-		// Since we don't have util imported, we'll avoid it. We can just keep existing platform/pwd if they were stored previously in initial creation.
-		// Wait, if we are remote, env pwd/platform are remote. We need original ones.
-		// Actually, Env doesn't have original local pwd/platform, but we can just use the tool's platform?
-		// No, `ResetToLocal` needs it. Let's add them to Env later or just use OS calls.
-		// For now, if we cannot cleanly switch to local without UI's help, let's keep it simple.
-		// But in MVP, let `OnEnvChange` handle UI resets, right? Yes.
+		s.env.ResetToLocal("", "")
+		closeIfRemote(prev)
 		if s.env.OnEnvChange != nil {
 			s.env.OnEnvChange("local", true, nil)
 		}
@@ -72,16 +71,42 @@ func (s *switchEnvTool) InvokableRun(ctx context.Context, argumentsInJSON string
 		return "", fmt.Errorf("failed to load config: %w", err)
 	}
 
+	// Docker alias?
+	for i := range cfg.DockerAliases {
+		if cfg.DockerAliases[i].Name != input.Target {
+			continue
+		}
+		da := cfg.DockerAliases[i]
+		dexec, derr := AcquireDockerContainer(ctx, da.Container)
+		if derr != nil {
+			if s.env.OnEnvChange != nil {
+				s.env.OnEnvChange("", false, fmt.Errorf("failed to connect to docker '%s': %v", input.Target, derr))
+			}
+			return "", fmt.Errorf("failed to connect to docker '%s': %v", input.Target, derr)
+		}
+		path := da.Path
+		if path == "" {
+			path = "/"
+		}
+		s.env.SetRemote(dexec, path)
+		closeIfRemote(prev)
+		label := dexec.Label()
+		if s.env.OnEnvChange != nil {
+			s.env.OnEnvChange(label, false, nil)
+		}
+		return fmt.Sprintf("Switched to '%s' (%s: %s).", input.Target, label, path), nil
+	}
+
+	// SSH alias?
 	var match *config.SSHAlias
-	for _, alias := range cfg.SSHAliases {
-		if alias.Name == input.Target {
-			match = &alias
+	for i := range cfg.SSHAliases {
+		if cfg.SSHAliases[i].Name == input.Target {
+			match = &cfg.SSHAliases[i]
 			break
 		}
 	}
-
 	if match == nil {
-		return "", fmt.Errorf("SSH alias '%s' not found locally. Switch to 'local' or valid alias", input.Target)
+		return "", fmt.Errorf("environment '%s' not found locally. Switch to 'local' or a valid SSH/Docker alias", input.Target)
 	}
 
 	authMethods := BuildSSHAuthMethods()
@@ -89,9 +114,6 @@ func (s *switchEnvTool) InvokableRun(ctx context.Context, argumentsInJSON string
 	addr := match.Addr
 	if idx := strings.Index(addr, "@"); idx > 0 {
 		user = addr[:idx]
-		// Don't modify addr, NewSSHExecutor expects "host:port" in addr?
-		// Wait, NewSSHExecutor expects "user@host" as addr? No, looking at env.go, it expects addr=host:port, user=user. Let's extract correctly.
-		// Wait, my env.go says NewSSHExecutor(addr, user string, authMethods []ssh.AuthMethod)
 		addr = addr[idx+1:]
 	}
 
@@ -104,6 +126,7 @@ func (s *switchEnvTool) InvokableRun(ctx context.Context, argumentsInJSON string
 	}
 
 	s.env.SetSSH(sshExec, match.Path)
+	closeIfRemote(prev)
 	label := sshExec.Label()
 
 	if s.env.OnEnvChange != nil {
@@ -111,4 +134,12 @@ func (s *switchEnvTool) InvokableRun(ctx context.Context, argumentsInJSON string
 	}
 
 	return fmt.Sprintf("Switched to '%s' (%s: %s).", input.Target, label, match.Path), nil
+}
+
+// closeIfRemote releases a remote executor's underlying hold (SSH connection or
+// Docker container ref-count). No-op for the local executor or nil.
+func closeIfRemote(e Executor) {
+	if re, ok := e.(RemoteExecutor); ok {
+		_ = re.Close()
+	}
 }

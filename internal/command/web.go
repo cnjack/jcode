@@ -28,7 +28,6 @@ import (
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	weixin "github.com/cnjack/jcode/internal/pkg/weixin"
 	"github.com/cnjack/jcode/internal/prompts"
-	"github.com/cnjack/jcode/internal/remote"
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/skills"
@@ -209,7 +208,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 	// approval state, plan store, and event handler — so concurrent tasks never
 	// share mutable execution state. exec != nil binds the task to a remote SSH
 	// target instead of a local pwd. taskID != "" resumes an existing session.
-	buildWebTask := func(taskID, taskPwd, modeStr string, exec *tools.SSHExecutor) (*web.EngineConfig, error) {
+	buildWebTask := func(taskID, taskPwd, modeStr string, exec tools.RemoteExecutor) (*web.EngineConfig, error) {
 		startMode := startupMode
 		if modeStr != "" {
 			startMode = mode.Parse(modeStr)
@@ -227,10 +226,10 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		// for the path-agnostic slash/list/toggle management UI.)
 		taskLoader := skills.NewLoaderWithDisabled(cfg.DisabledSkills)
 		if exec != nil {
-			tenv.SetSSH(exec, taskPwd)
+			tenv.SetRemote(exec, taskPwd)
 			promptPlatform = exec.Platform()
 			envLabel = fmt.Sprintf("%s (pwd: %s)", exec.Label(), taskPwd)
-			projectKey = remote.ProjectLabel(exec, taskPwd)
+			projectKey = exec.ProjectLabel(taskPwd)
 		} else {
 			taskLoader.ScanProjectSkills(taskPwd)
 			taskEnvInfo = util.CollectEnvInfo(taskPwd)
@@ -509,7 +508,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		NewEngine: func(taskID, taskPwd, modeStr string) (*web.EngineConfig, error) {
 			return buildWebTask(taskID, taskPwd, modeStr, nil)
 		},
-		NewRemoteEngine: func(taskID string, exec *tools.SSHExecutor, remotePwd, modeStr string) (*web.EngineConfig, error) {
+		NewRemoteEngine: func(taskID string, exec tools.RemoteExecutor, remotePwd, modeStr string) (*web.EngineConfig, error) {
 			return buildWebTask(taskID, remotePwd, modeStr, exec)
 		},
 		InitialMode:        startupMode.String(),

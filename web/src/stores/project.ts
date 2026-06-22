@@ -5,15 +5,22 @@ import { i18n } from '@/i18n'
 import type { Project, RemoteMeta, TaskItem, TaskMetaPatch } from '@/types/api'
 import { api } from '@/composables/api'
 
-// A remote workspace is identified by a host-qualified label:
-// ssh://user@host:port/remote/path
+// A remote workspace is identified by a scheme-qualified label:
+//   ssh://user@host:port/remote/path   or   docker://container/path
 export function isRemotePath(path: string): boolean {
-  return path.startsWith('ssh://')
+  return path.startsWith('ssh://') || path.startsWith('docker://')
 }
 
-// parseRemoteLabel decomposes a remote project label into the pieces the SSH
+// parseRemoteLabel decomposes a remote project label into the pieces the
 // wizard needs to reconnect. Returns null for non-remote paths.
 export function parseRemoteLabel(label: string): RemoteMeta | null {
+  if (label.startsWith('docker://')) {
+    const rest = label.slice('docker://'.length)
+    const slash = rest.indexOf('/')
+    const container = slash < 0 ? rest : rest.slice(0, slash)
+    const remotePath = slash < 0 ? '/' : rest.slice(slash)
+    return { kind: 'docker', host: '', user: '', port: 0, remotePath, container }
+  }
   if (!isRemotePath(label)) return null
   const rest = label.slice('ssh://'.length)
   const at = rest.indexOf('@')
@@ -25,7 +32,7 @@ export function parseRemoteLabel(label: string): RemoteMeta | null {
   const remotePath = slash < 0 ? '/' : afterUser.slice(slash)
   const colon = hostPort.lastIndexOf(':')
   const port = colon >= 0 ? parseInt(hostPort.slice(colon + 1), 10) || 22 : 22
-  return { host: hostPort, user, port, remotePath }
+  return { kind: 'ssh', host: hostPort, user, port, remotePath }
 }
 
 const STORAGE_KEY = 'jcode_projects'

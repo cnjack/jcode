@@ -21,13 +21,17 @@ import (
 // kept alive while the user works through the wizard's directory picker.
 const pendingConnTTL = 10 * time.Minute
 
-// pendingConn is an SSH connection created by the remote-connect wizard that has
-// not yet been bound to the live env.
+// pendingConn is a remote connection (SSH or Docker) created by the
+// remote-connect wizard that has not yet been bound to the live env.
 type pendingConn struct {
-	exec      *tools.SSHExecutor
-	host      string // host:port as dialed
-	user      string
-	port      int // originally requested port (for reconnect prefill)
+	exec tools.RemoteExecutor
+	kind string // "ssh" | "docker"
+	// SSH reconnect prefill.
+	host string // host:port as dialed
+	user string
+	port int // originally requested port
+	// Docker reconnect prefill.
+	container string // container name or id
 	createdAt time.Time
 }
 
@@ -99,7 +103,7 @@ func (s *Server) handleRemoteConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Type       string `json:"type"` // "ssh" (docker reserved for later)
+		Type       string `json:"type"` // "ssh" | "docker"
 		Host       string `json:"host"`
 		Port       int    `json:"port"`
 		User       string `json:"user"`
@@ -107,13 +111,19 @@ func (s *Server) handleRemoteConnect(w http.ResponseWriter, r *http.Request) {
 		Password   string `json:"password"`
 		KeyPath    string `json:"key_path"`
 		Passphrase string `json:"passphrase"`
+		Container  string `json:"container"` // docker: container id or name
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
+
+	if req.Type == "docker" {
+		s.connectDocker(w, r, strings.TrimSpace(req.Container))
+		return
+	}
 	if req.Type != "" && req.Type != "ssh" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "only ssh connections are supported"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported connection type"})
 		return
 	}
 	if strings.TrimSpace(req.Host) == "" {
@@ -138,6 +148,7 @@ func (s *Server) handleRemoteConnect(w http.ResponseWriter, r *http.Request) {
 	remotePwd := remote.DiscoverPwd(r.Context(), exec, "/root")
 	id := s.remoteConns.add(&pendingConn{
 		exec:      exec,
+		kind:      "ssh",
 		host:      exec.Host(),
 		user:      exec.User(),
 		port:      req.Port,
@@ -151,6 +162,47 @@ func (s *Server) handleRemoteConnect(w http.ResponseWriter, r *http.Request) {
 		"user":          exec.User(),
 		"host":          exec.Host(),
 	})
+}
+
+// connectDocker binds (starting if stopped) the named container and parks it in
+// the pending registry, mirroring the SSH connect flow.
+func (s *Server) connectDocker(w http.ResponseWriter, r *http.Request, containerRef string) {
+	if containerRef == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "container is required"})
+		return
+	}
+	exec, err := remote.ConnectDocker(r.Context(), containerRef)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	remotePwd := remote.DiscoverPwd(r.Context(), exec, "/")
+	id := s.remoteConns.add(&pendingConn{
+		exec:      exec,
+		kind:      "docker",
+		container: exec.Name(),
+		createdAt: time.Now(),
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"connection_id": id,
+		"remote_pwd":    remotePwd,
+		"platform":      exec.Platform(),
+		"container":     exec.Name(),
+	})
+}
+
+// handleListContainers returns the daemon's containers for the wizard picker.
+func (s *Server) handleListContainers(w http.ResponseWriter, r *http.Request) {
+	if s.needsSetup {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "setup required: please configure a provider first"})
+		return
+	}
+	containers, err := remote.ListContainers(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"containers": containers})
 }
 
 // handleRemoteListDir lists sub-directories of a path on a pending connection,
@@ -223,7 +275,7 @@ func (s *Server) handleRemoteBind(w http.ResponseWriter, r *http.Request) {
 	s.ptyMgr.closeForTask(prevTaskID) // outgoing task's PTYs only; others keep theirs
 	s.setActiveEngine(eng)
 
-	label := remote.ProjectLabel(pc.exec, remotePwd)
+	label := pc.exec.ProjectLabel(remotePwd)
 
 	if eng.todoStore != nil {
 		eng.todoStore.Update(nil)
@@ -240,12 +292,14 @@ func (s *Server) handleRemoteBind(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":      "ok",
+		"kind":        pc.kind,
 		"pwd":         remotePwd,
 		"label":       label,
 		"name":        pathpkg.Base(remotePwd),
 		"host":        pc.host,
 		"user":        pc.user,
 		"port":        pc.port,
+		"container":   pc.container,
 		"remote_path": remotePwd,
 	})
 }
@@ -301,6 +355,50 @@ func (s *Server) handleRemoteSaveAlias(w http.ResponseWriter, r *http.Request) {
 	}
 	if !updated {
 		s.cfg.SSHAliases = append(s.cfg.SSHAliases, config.SSHAlias{Name: req.Name, Addr: req.Addr, Path: req.Path})
+	}
+	err := config.SaveConfig(s.cfg)
+	s.mu.Unlock()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleRemoteSaveDockerAlias upserts a saved Docker alias (name/container/path)
+// into config so it appears for one-click reconnects and the switch_env tool.
+func (s *Server) handleRemoteSaveDockerAlias(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name      string `json:"name"`
+		Container string `json:"container"`
+		Path      string `json:"path"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Container) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name and container are required"})
+		return
+	}
+
+	s.mu.Lock()
+	if s.cfg == nil {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config unavailable"})
+		return
+	}
+	updated := false
+	for i := range s.cfg.DockerAliases {
+		if s.cfg.DockerAliases[i].Name == req.Name {
+			s.cfg.DockerAliases[i].Container = req.Container
+			s.cfg.DockerAliases[i].Path = req.Path
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		s.cfg.DockerAliases = append(s.cfg.DockerAliases, config.DockerAlias{Name: req.Name, Container: req.Container, Path: req.Path})
 	}
 	err := config.SaveConfig(s.cfg)
 	s.mu.Unlock()
