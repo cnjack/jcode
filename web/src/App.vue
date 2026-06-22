@@ -106,6 +106,12 @@ function scrollToBottom(smooth = true) {
 // WebSocket connection
 const { connected } = useWebSocket({
   activeTaskId: () => store.currentSessionId,
+  onTaskStatus: (taskId, running) => {
+    // Live sidebar running indicator for ANY task (incl. backgrounded ones).
+    projectStore.setTaskRunning(taskId, running)
+    // Re-sync persisted status + recency/order from the server.
+    projectStore.fetchAllTasks()
+  },
   onAgentStart: () => { store.isRunning = true },
   onAgentText: (data) => store.appendAgentText(data.text),
   onToolCall: (data) => store.addToolCall(data.name, data.args, data.tool_call_id, data.display_info),

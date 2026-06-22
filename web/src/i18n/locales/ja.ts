@@ -458,6 +458,7 @@ export default {
     showArchived: 'アーカイブ済みタスクを表示',
     noProjects: 'プロジェクトがまだありません',
     noTasks: 'タスクなし',
+    running: '実行中',
     actions: {
       pin: 'ピン留め',
       unpin: 'ピン留めを解除',

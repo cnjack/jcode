@@ -423,6 +423,32 @@ func (e *Engine) teardown() {
 	}
 }
 
+// setTaskStatus broadcasts a global task_status event (so every client's sidebar
+// can mark the task running/idle live) and best-effort persists Status +
+// UpdatedAt so recency survives a reload. The broadcast carries the task id in
+// its DATA (not the envelope TaskID) so it is delivered to all clients, not
+// filtered to the task's subscribers.
+func (s *Server) setTaskStatus(eng *Engine, running bool) {
+	if eng == nil || eng.taskID == "" {
+		return
+	}
+	status := "idle"
+	if running {
+		status = "running"
+	}
+	s.wsBroker.Broadcast(WSEvent{Type: "task_status", Data: map[string]any{
+		"task_id": eng.taskID,
+		"running": running,
+		"status":  status,
+	}})
+	go func(id, st string) {
+		_, _ = session.UpdateSessionMeta(id, func(m *session.SessionMeta) {
+			m.Status = st
+			m.UpdatedAt = time.Now().Format(time.RFC3339)
+		})
+	}(eng.taskID, status)
+}
+
 // CloseAllEngines tears down every live engine. Called on server shutdown.
 func (s *Server) CloseAllEngines() {
 	s.tasksMu.Lock()

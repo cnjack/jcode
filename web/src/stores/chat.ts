@@ -614,11 +614,13 @@ export const useChatStore = defineStore('chat', () => {
     // Already on the welcome screen — nothing to do.
     if (!currentSessionId.value && timeline.value.length === 0) return
     try {
-      // Reset backend state (history, old recorder) but don't create a new
-      // recorder yet — it will be created lazily on the first message.
-      await api.newSession()
-      currentSessionId.value = ''
+      // The backend creates a fresh engine for the new task and returns its id.
+      // Bind to it so a still-running PREVIOUS task's events (tagged with its own
+      // task_id) are filtered out of this new chat instead of leaking in.
+      const resp = await api.newSession()
       clearChat()
+      currentSessionId.value = resp.session_id || ''
+      isRunning.value = false // the new task starts idle
       await fetchSessions()
     } catch (err: unknown) {
       addMessage('system', err instanceof Error ? err.message : String(err))
@@ -629,8 +631,10 @@ export const useChatStore = defineStore('chat', () => {
   // workspace changed (local switch or remote bind) and lands on a fresh welcome
   // screen so the next message starts a new task in the chosen workspace.
   async function resetToWelcomeAfterSwitch() {
+    // fetchHealth binds currentSessionId + isRunning to the NEW active engine, so
+    // don't blank currentSessionId afterward (an empty id would let a backgrounded
+    // task's events leak into this view).
     await fetchHealth()
-    currentSessionId.value = ''
     clearChat()
     fetchTodos()
     fetchGoal()
@@ -977,6 +981,10 @@ export const useChatStore = defineStore('chat', () => {
       currentSessionId.value = resp.session_id || uuid
 
       clearChat()
+      // Resumed task is idle (its live run, if any, surfaces via task_status /
+      // its own events now that it's the active task). Clear any stale running
+      // state carried over from the task we switched away from.
+      isRunning.value = false
       // The backend restored the session's goal — refresh explicitly in case
       // the goal_update WS push is missed.
       fetchGoal()

@@ -153,6 +153,7 @@ export interface TaskItem {
   uuid: string
   project: string // project path
   created_at: string
+  updated_at?: string
   provider: string
   model: string
   title?: string
@@ -160,6 +161,7 @@ export interface TaskItem {
   archived: boolean
   unread: boolean
   status?: string
+  running?: boolean // a live engine for this task is currently running
 }
 
 export interface TaskMetaPatch {

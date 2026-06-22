@@ -225,10 +225,16 @@ function relativeTime(ts: string): string {
             v-for="task in tasksFor(proj.path)"
             :key="task.uuid"
             class="task-row"
-            :class="{ active: isActiveTask(task), archived: task.archived }"
+            :class="{ active: isActiveTask(task), archived: task.archived, running: task.running }"
             @click="openTask(task)"
           >
-            <span class="task-dot" :class="{ unread: task.unread }" aria-hidden="true" />
+            <span
+              v-if="task.running"
+              class="task-running-dot"
+              :title="t('sidebar.running')"
+              aria-hidden="true"
+            />
+            <span v-else class="task-dot" :class="{ unread: task.unread }" aria-hidden="true" />
             <BookmarkIcon v-if="task.pinned" class="w-2.5 h-2.5 task-pin" />
             <input
               v-if="renamingUuid === task.uuid"
@@ -241,7 +247,9 @@ function relativeTime(ts: string): string {
               @blur="commitRename(task)"
             />
             <span v-else class="task-title">{{ taskTitle(task) }}</span>
-            <span class="task-time">{{ relativeTime(task.created_at) }}</span>
+            <span class="task-time" :class="{ running: task.running }">
+              {{ task.running ? t('sidebar.running') : relativeTime(task.updated_at || task.created_at) }}
+            </span>
 
             <HMenu as="div" class="task-menu" @click.stop>
               <MenuButton class="task-menu-btn" :title="t('sidebar.actions.taskActions')" @click.stop="onTaskMenuClick($event, task.uuid)">
@@ -485,6 +493,27 @@ function relativeTime(ts: string): string {
 .task-dot.unread {
   background: var(--color-accent-neutral);
 }
+/* Pulsing dot marking a task whose agent is currently running. */
+.task-running-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  flex-shrink: 0;
+  background: var(--color-accent);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 60%, transparent);
+  animation: task-running-pulse 1.4s ease-out infinite;
+}
+@keyframes task-running-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 55%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-accent) 0%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 0%, transparent);
+  }
+}
 .task-pin {
   color: var(--color-accent-neutral);
   flex-shrink: 0;
@@ -515,6 +544,9 @@ function relativeTime(ts: string): string {
   font-family: var(--font-mono);
   color: var(--color-muted-foreground);
   flex-shrink: 0;
+}
+.task-time.running {
+  color: var(--color-accent);
 }
 
 /* ─── Task action menu ─── */
