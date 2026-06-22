@@ -120,7 +120,7 @@ const { connected } = useWebSocket({
     store.addApprovalRequest(data)
     notify(t('notifications.approvalNeeded'), t('notifications.approvalBody'))
   },
-  onAskUserRequest: (data) => store.attachAskUserRequest(data.id, data.questions),
+  onAskUserRequest: (data) => store.attachAskUserRequest(data.id, data.questions, data.task_id),
   onSessionReset: () => store.clearChat(),
   onModelChanged: (data) => {
     store.providerName = data.provider

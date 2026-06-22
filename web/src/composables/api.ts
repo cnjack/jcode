@@ -73,15 +73,15 @@ export const api = {
         images: images && images.length > 0 ? images : undefined,
       }),
     }),
-  approval: (id: string, approved: boolean, approveAll = false) =>
+  approval: (id: string, approved: boolean, approveAll = false, taskId?: string) =>
     request<{ status: string }>('/api/approval', {
       method: 'POST',
-      body: JSON.stringify({ id, approved, approve_all: approveAll }),
+      body: JSON.stringify({ id, approved, approve_all: approveAll, task_id: taskId }),
     }),
-  askUser: (id: string, answers: AskUserAnswer[]) =>
+  askUser: (id: string, answers: AskUserAnswer[], taskId?: string) =>
     request<{ status: string }>('/api/ask', {
       method: 'POST',
-      body: JSON.stringify({ id, answers }),
+      body: JSON.stringify({ id, answers, task_id: taskId }),
     }),
   askPending: () => request<AskUserRequestData[]>('/api/ask/pending'),
   approvalPending: () => request<ApprovalRequestData[]>('/api/approval/pending'),

@@ -179,11 +179,14 @@ func (m *compactionMiddleware) BeforeModelRewriteState(
 	state *adk.ChatModelAgentState,
 	mc *adk.ModelContext,
 ) (context.Context, *adk.ChatModelAgentState, error) {
-	// Estimate current token usage from the per-agent tracker.
+	// Estimate current context occupancy from the per-agent tracker. Use the LAST
+	// call's total (GetLastTotal), NOT the cumulative prompt sum: the agent
+	// re-sends the whole context on every tool-loop call, so cumulative prompt
+	// (e.g. 20k×5=100k) would trip compaction far too early while the real window
+	// is still ~20k.
 	var currentTokens int
 	if m.tokenUsage != nil {
-		promptTokens, _, _ := m.tokenUsage.Get()
-		currentTokens = int(promptTokens)
+		currentTokens = int(m.tokenUsage.GetLastTotal())
 	}
 
 	if !m.strategy.ShouldCompact(currentTokens, m.contextLimit) {

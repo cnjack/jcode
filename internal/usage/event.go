@@ -33,6 +33,12 @@ type Event struct {
 	CacheWrite int    `json:"cache_write,omitempty"`
 	Total      int    `json:"total"`
 	Calls      int    `json:"calls,omitempty"` // API calls in this turn
+	// CacheSeen is true when the provider reported a prompt_tokens_details object
+	// during the turn (caching supported), even if cached==0. Lets stats show "—"
+	// vs a real 0% without conflating "unsupported" with "supported, no hit".
+	// Absent in events written before this field existed (defaults to false, with
+	// a Cached>0 fallback in Aggregate).
+	CacheSeen bool `json:"cache_seen,omitempty"`
 }
 
 // RecordEvent stamps ev with the current time and appends it to the default

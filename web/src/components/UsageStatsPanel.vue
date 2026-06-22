@@ -249,6 +249,7 @@ function shortName(path: string): string {
             <div class="us-mini-value">{{ fmtCompact(stats.totals.reasoning_tokens) }}</div>
           </div>
         </div>
+        <div class="us-mini-hint">{{ t('settings.usageStats.tokenBreakdownHint') }}</div>
       </div>
 
       <!-- Activity heatmap -->
@@ -378,6 +379,12 @@ function shortName(path: string): string {
   font-weight: 600;
   color: var(--color-foreground);
   margin-top: 2px;
+}
+.us-mini-hint {
+  margin-top: 10px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--color-muted-foreground);
 }
 .us-bar-track {
   height: 6px;

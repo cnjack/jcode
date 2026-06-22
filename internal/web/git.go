@@ -15,7 +15,7 @@ import (
 func (s *Server) handleGitBranches(w http.ResponseWriter, r *http.Request) {
 	listCmd := exec.CommandContext(r.Context(), "git", "for-each-ref",
 		"--format=%(refname:short)", "--sort=-committerdate", "refs/heads")
-	listCmd.Dir = s.pwd
+	listCmd.Dir = s.activePwd()
 	out, err := listCmd.Output()
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"current": "", "branches": []string{}})
@@ -25,7 +25,7 @@ func (s *Server) handleGitBranches(w http.ResponseWriter, r *http.Request) {
 	// `branch --show-current` reports the unborn branch of a fresh repo (e.g.
 	// "main"), where `rev-parse --abbrev-ref HEAD` would just say "HEAD".
 	curCmd := exec.CommandContext(r.Context(), "git", "branch", "--show-current")
-	curCmd.Dir = s.pwd
+	curCmd.Dir = s.activePwd()
 	curOut, _ := curCmd.Output()
 	current := strings.TrimSpace(string(curOut))
 
@@ -62,7 +62,7 @@ func (s *Server) handleGitBranches(w http.ResponseWriter, r *http.Request) {
 // error verbatim (e.g. "Your local changes would be overwritten") rather than
 // forcing a destructive checkout — the user decides how to resolve a dirty tree.
 func (s *Server) handleGitCheckout(w http.ResponseWriter, r *http.Request) {
-	if s.running.Load() {
+	if cur := s.activeEngine(); cur != nil && cur.running.Load() {
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error": "agent is running — stop it before switching branch",
 		})
@@ -90,7 +90,7 @@ func (s *Server) handleGitCheckout(w http.ResponseWriter, r *http.Request) {
 	args = append(args, branch)
 
 	cmd := exec.CommandContext(r.Context(), "git", args...)
-	cmd.Dir = s.pwd
+	cmd.Dir = s.activePwd()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
@@ -102,7 +102,7 @@ func (s *Server) handleGitCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	curCmd := exec.CommandContext(r.Context(), "git", "branch", "--show-current")
-	curCmd.Dir = s.pwd
+	curCmd.Dir = s.activePwd()
 	curOut, _ := curCmd.Output()
 	writeJSON(w, http.StatusOK, map[string]any{"branch": strings.TrimSpace(string(curOut))})
 }

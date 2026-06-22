@@ -363,6 +363,7 @@ export default {
       activeDays: '活跃天数',
       streak: '连续 {n} 天',
       tokenBreakdown: 'Token 构成',
+      tokenBreakdownHint: '缓存包含于输入、推理包含于输出,各项不可直接相加',
       promptTokens: '输入',
       cachedTokens: '缓存',
       completionTokens: '输出',

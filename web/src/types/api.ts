@@ -399,6 +399,7 @@ export interface ApprovalRequestData {
   tool_name: string
   tool_args: string
   is_external: boolean
+  task_id?: string // the task (engine) the approval belongs to; echoed back on resolve
 }
 
 // ask_user types — an interactive question (or batch of questions) the agent
@@ -418,6 +419,7 @@ export interface AskUserQuestion {
 export interface AskUserRequestData {
   id: string
   questions: AskUserQuestion[]
+  task_id?: string // the task (engine) the question belongs to; echoed back on resolve
 }
 
 export interface AskUserAnswer {

@@ -84,25 +84,27 @@ func (s *Server) handleUsageStats(w http.ResponseWriter, r *http.Request) {
 // meaningful after the fact).
 func (s *Server) handleTaskStats(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-
-	s.mu.RLock()
-	activeUUID := ""
-	if s.recorder != nil {
-		activeUUID = s.recorder.UUID()
-	}
-	s.mu.RUnlock()
-
 	resp := map[string]any{"uuid": id}
 
-	if id != "" && id == activeUUID {
-		full := s.tokenUsage.GetFull()
-		last := s.tokenUsage.GetLastDetail()
+	// Resolve the live engine for this task id: by task id, or (covering a
+	// recorder swap) by the active engine's recorder UUID.
+	eng := s.resolveEngine(id)
+	if eng == nil {
+		if a := s.activeEngine(); a != nil && a.recUUID() == id {
+			eng = a
+		}
+	}
+
+	// Any LIVE task engine (not just the foreground one) reports live stats.
+	if id != "" && eng != nil {
+		full := eng.tokenUsage.GetFull()
+		last := eng.tokenUsage.GetLastDetail()
 
 		var bd usage.ContextBreakdown
-		if s.breakdownFn != nil {
-			bd = s.breakdownFn()
+		if eng.breakdownFn != nil {
+			bd = eng.breakdownFn()
 		}
-		bd.ContextLimit = s.currentModelContextLimit()
+		bd.ContextLimit = s.currentModelContextLimit(eng)
 		// Messages occupy whatever the last prompt held beyond the static
 		// assembly (system prompt + tools + MCP + skills).
 		if msg := last.PromptTokens - bd.StaticTotal(); msg > 0 {
@@ -111,8 +113,8 @@ func (s *Server) handleTaskStats(w http.ResponseWriter, r *http.Request) {
 
 		resp["is_active"] = true
 		resp["context"] = bd
-		resp["cache_hit_rate"] = s.tokenUsage.CacheHitRate()
-		resp["cache_supported"] = s.tokenUsage.CacheObserved()
+		resp["cache_hit_rate"] = eng.tokenUsage.CacheHitRate()
+		resp["cache_supported"] = eng.tokenUsage.CacheObserved()
 		resp["tokens"] = map[string]any{
 			"total_tokens":      full.TotalTokens,
 			"prompt_tokens":     full.PromptTokens,

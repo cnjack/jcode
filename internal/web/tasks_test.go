@@ -35,7 +35,7 @@ func seedIndex(t *testing.T, sessions map[string][]session.SessionMeta) {
 
 // P0-1: GET /api/workspace on a non-git directory returns empty branch + not dirty.
 func TestWorkspaceNonGit(t *testing.T) {
-	s := &Server{ctx: context.Background(), pwd: t.TempDir()}
+	s := &Server{Engine: &Engine{pwd: t.TempDir()}, ctx: context.Background()}
 	rec := httptest.NewRecorder()
 	s.handleWorkspace(rec, httptest.NewRequest(http.MethodGet, "/api/workspace", nil))
 	if rec.Code != http.StatusOK {
@@ -163,7 +163,7 @@ func TestDeleteTaskCrossProject(t *testing.T) {
 		"/work/other":  {{UUID: "oth-1", Project: "/work/other"}, {UUID: "oth-2", Project: "/work/other"}},
 	})
 	// Active project is /work/active; delete a task in /work/other.
-	s := &Server{pwd: "/work/active"}
+	s := &Server{Engine: &Engine{pwd: "/work/active"}}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/oth-1", nil)
 	req.SetPathValue("id", "oth-1")

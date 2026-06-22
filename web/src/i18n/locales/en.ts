@@ -374,6 +374,7 @@ export default {
       activeDays: 'Active days',
       streak: '{n}-day streak',
       tokenBreakdown: 'Token breakdown',
+      tokenBreakdownHint: 'Cached is part of Input and Reasoning is part of Output — these don’t sum.',
       promptTokens: 'Input',
       cachedTokens: 'Cached',
       completionTokens: 'Output',

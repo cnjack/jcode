@@ -363,6 +363,7 @@ export default {
       activeDays: 'アクティブ日数',
       streak: '連続 {n} 日',
       tokenBreakdown: 'トークン内訳',
+      tokenBreakdownHint: 'キャッシュは入力の一部、推論は出力の一部です。単純に合計はできません。',
       promptTokens: '入力',
       cachedTokens: 'キャッシュ',
       completionTokens: '出力',
