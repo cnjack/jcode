@@ -458,6 +458,7 @@ export default {
     showArchived: '显示已归档任务',
     noProjects: '暂无项目',
     noTasks: '暂无任务',
+    running: '运行中',
     actions: {
       pin: '置顶',
       unpin: '取消置顶',

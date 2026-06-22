@@ -697,11 +697,13 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 	eng.emu.Unlock()
 
 	go func() {
+		s.setTaskStatus(eng, true)
 		defer func() {
 			eng.running.Store(false)
 			eng.emu.Lock()
 			eng.runCancel = nil
 			eng.emu.Unlock()
+			s.setTaskStatus(eng, false)
 		}()
 
 		// Take a git snapshot before the agent run for session diff tracking.
@@ -727,10 +729,22 @@ func (s *Server) handleListAllTasks(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// Snapshot which task ids are currently running (live engines) so the sidebar
+	// can show a running indicator even on a fresh page load.
+	running := make(map[string]bool)
+	s.tasksMu.RLock()
+	for id, e := range s.tasks {
+		if e != nil && e.running.Load() {
+			running[id] = true
+		}
+	}
+	s.tasksMu.RUnlock()
+
 	type taskItem struct {
 		UUID      string `json:"uuid"`
 		Project   string `json:"project"`
 		CreatedAt string `json:"created_at"`
+		UpdatedAt string `json:"updated_at,omitempty"`
 		Provider  string `json:"provider"`
 		Model     string `json:"model"`
 		Title     string `json:"title,omitempty"`
@@ -738,6 +752,7 @@ func (s *Server) handleListAllTasks(w http.ResponseWriter, r *http.Request) {
 		Archived  bool   `json:"archived"`
 		Unread    bool   `json:"unread"`
 		Status    string `json:"status,omitempty"`
+		Running   bool   `json:"running"`
 	}
 	items := make([]taskItem, 0)
 	for project, metas := range all {
@@ -746,6 +761,7 @@ func (s *Server) handleListAllTasks(w http.ResponseWriter, r *http.Request) {
 				UUID:      m.UUID,
 				Project:   project,
 				CreatedAt: m.StartTime,
+				UpdatedAt: m.UpdatedAt,
 				Provider:  m.Provider,
 				Model:     m.Model,
 				Title:     m.Title,
@@ -753,6 +769,7 @@ func (s *Server) handleListAllTasks(w http.ResponseWriter, r *http.Request) {
 				Archived:  m.Archived,
 				Unread:    m.Unread,
 				Status:    m.Status,
+				Running:   running[m.UUID],
 			})
 		}
 	}

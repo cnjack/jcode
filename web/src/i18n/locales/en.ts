@@ -469,6 +469,7 @@ export default {
     showArchived: 'Show archived tasks',
     noProjects: 'No projects yet',
     noTasks: 'No tasks',
+    running: 'Running',
     actions: {
       pin: 'Pin',
       unpin: 'Unpin',

@@ -188,7 +188,10 @@ export const useProjectStore = defineStore('project', () => {
       if (!list) continue
       list.sort((a, b) => {
         if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
-        return (b.created_at || '').localeCompare(a.created_at || '')
+        // Newest activity first: running/recently-active tasks bubble up.
+        const at = a.updated_at || a.created_at || ''
+        const bt = b.updated_at || b.created_at || ''
+        return bt.localeCompare(at)
       })
     }
     return map
@@ -205,6 +208,17 @@ export const useProjectStore = defineStore('project', () => {
       return { id: known?.id ?? '', path, name: nameForPath(path) }
     })
   })
+
+  // setTaskRunning optimistically marks a task running/idle in the sidebar from a
+  // task_status WS event (the authoritative live state is re-synced by a
+  // following fetchAllTasks).
+  function setTaskRunning(uuid: string, running: boolean) {
+    const t = allTasks.value.find((x) => x.uuid === uuid)
+    if (t) {
+      t.running = running
+      if (running) t.updated_at = new Date().toISOString()
+    }
+  }
 
   async function updateTaskMeta(uuid: string, patch: TaskMetaPatch) {
     // Optimistic local update, then persist.
@@ -234,6 +248,7 @@ export const useProjectStore = defineStore('project', () => {
     nameForPath,
     allTasks,
     fetchAllTasks,
+    setTaskRunning,
     tasksByProject,
     projectsForTree,
     updateTaskMeta,

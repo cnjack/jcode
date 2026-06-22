@@ -32,6 +32,9 @@ type WSHandler = {
   onSubagentEvent?: (data: SubagentEventData) => void
   onSubagentProgress?: (data: SubagentProgressData) => void
   onUserMessage?: (data: { content: string; source: string }) => void
+  // onTaskStatus fires for ANY task (including backgrounded ones) when its run
+  // starts/stops, so the sidebar can show a live running indicator.
+  onTaskStatus?: (taskId: string, running: boolean) => void
   // activeTaskId returns the task currently shown in the foreground. Events
   // tagged with a DIFFERENT task id (a backgrounded task that keeps running after
   // you switch away) are dropped so they don't pollute the active view.
@@ -69,6 +72,7 @@ export function useWebSocket(handlers: WSHandler) {
     subagent_event: (d) => handlers.onSubagentEvent?.(d),
     subagent_progress: (d) => handlers.onSubagentProgress?.(d),
     user_message: (d) => handlers.onUserMessage?.(d),
+    task_status: (d) => handlers.onTaskStatus?.(d?.task_id, !!d?.running),
     pong: () => {}, // heartbeat response, no-op
   }
 

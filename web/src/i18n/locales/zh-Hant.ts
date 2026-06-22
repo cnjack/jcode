@@ -459,6 +459,7 @@ export default {
     showArchived: '顯示已封存工作',
     noProjects: '暫無專案',
     noTasks: '暫無工作',
+    running: '執行中',
     actions: {
       pin: '釘選',
       unpin: '取消釘選',
