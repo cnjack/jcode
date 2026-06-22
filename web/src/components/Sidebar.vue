@@ -212,13 +212,10 @@ const sidebarGroups = computed<SidebarGroup[]>(() => {
   // Group by project.
   const map = new Map<string, TaskItem[]>()
   for (const task of tasks) pushTask(map, task.project, task)
-  const paths = new Set(map.keys())
-  if (projectFilter.value) {
-    // A single-project filter shows only that folder (the active project is
-    // re-added below so the open conversation is never hidden).
-    for (const p of [...paths]) if (p !== projectFilter.value) paths.delete(p)
-    paths.add(projectFilter.value)
-  }
+  // Under a single-project filter the set is just that folder; otherwise every
+  // project with a (filtered) task. The active project is added below so the
+  // open conversation is never hidden.
+  const paths = projectFilter.value ? new Set([projectFilter.value]) : new Set(map.keys())
   // Keep the active project's folder so the place you're working never vanishes.
   // Under a narrowing filter only keep it when it has a visible task (which now
   // includes the always-kept open conversation), so we don't synthesize a
