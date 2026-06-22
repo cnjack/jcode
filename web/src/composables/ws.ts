@@ -32,6 +32,10 @@ type WSHandler = {
   onSubagentEvent?: (data: SubagentEventData) => void
   onSubagentProgress?: (data: SubagentProgressData) => void
   onUserMessage?: (data: { content: string; source: string }) => void
+  // activeTaskId returns the task currently shown in the foreground. Events
+  // tagged with a DIFFERENT task id (a backgrounded task that keeps running after
+  // you switch away) are dropped so they don't pollute the active view.
+  activeTaskId?: () => string | undefined
 }
 
 interface WSMessage {
@@ -91,6 +95,13 @@ export function useWebSocket(handlers: WSHandler) {
     ws.onmessage = (event) => {
       try {
         const msg: WSMessage = JSON.parse(event.data)
+        // Drop events from a different (backgrounded) task. Global events carry no
+        // task_id and always pass; while the foreground task id is still unknown
+        // (first message in flight) we also pass everything.
+        const active = handlers.activeTaskId?.()
+        if (msg.task_id && active && msg.task_id !== active) {
+          return
+        }
         const handler = handlerMap[msg.type]
         if (handler) {
           let data = msg.data

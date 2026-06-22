@@ -1116,10 +1116,9 @@ func (s *Server) handleSwitchModel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no active task"})
 		return
 	}
-	if eng.running.Load() {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is currently running"})
-		return
-	}
+	// No running gate: applyModelSwitch swaps eng.agent under eng.emu (the lock the
+	// run reads it under), so a mid-run switch is safe and takes effect next turn —
+	// consistent with mode/approval switching.
 
 	var req struct {
 		Provider string `json:"provider"`
@@ -2235,12 +2234,9 @@ func (s *Server) handlePTYWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSwitchProject(w http.ResponseWriter, r *http.Request) {
-	if cur := s.activeEngine(); cur != nil && cur.running.Load() {
-		writeJSON(w, http.StatusConflict, map[string]string{
-			"error": "agent is running, cannot switch project",
-		})
-		return
-	}
+	// No running gate: "switch project" builds a NEW independent engine and leaves
+	// the previous task running in the background — switching to another task while
+	// one is chatting is the whole point of concurrent tasks.
 	if s.newEngine == nil {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{
 			"error": "project switching is not supported",
