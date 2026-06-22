@@ -1,5 +1,5 @@
 // API client for jcode backend
-import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, TaskItem, TaskMetaPatch, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, UsageStats, TaskStats, TokenUpdateData } from '@/types/api'
+import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, UsageStats, TaskStats, TokenUpdateData } from '@/types/api'
 import { apiBase } from './apiBase'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -107,10 +107,10 @@ export const api = {
   },
   workspace: () => request<WorkspaceInfo>('/api/workspace'),
   gitBranches: () => request<GitBranchesResponse>('/api/git/branches'),
-  gitCheckout: (branch: string, create = false) =>
-    request<{ branch: string }>('/api/git/checkout', {
+  gitCheckout: (branch: string, create = false, strategy: '' | 'stash' | 'force' = '') =>
+    request<GitCheckoutResponse>('/api/git/checkout', {
       method: 'POST',
-      body: JSON.stringify({ branch, create }),
+      body: JSON.stringify({ branch, create, strategy }),
     }),
   tasks: () => request<TaskItem[]>('/api/tasks'),
   updateTask: (id: string, patch: TaskMetaPatch) =>
@@ -151,6 +151,14 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ path }),
     }),
+  // Returns the subset of the given local paths that no longer exist on disk, so
+  // the workspace picker can hide dead entries. Send local paths only — ssh://
+  // labels can't be stat'd server-side.
+  validatePaths: (paths: string[]) =>
+    request<{ missing: string[] }>('/api/project/validate', {
+      method: 'POST',
+      body: JSON.stringify({ paths }),
+    }),
   ptyCreate: () =>
     request<{ id: string }>('/api/pty', { method: 'POST' }),
   ptyList: () =>
@@ -164,8 +172,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ auto_approve: autoApprove }),
     }),
-  stop: () =>
-    request<{ status: string }>('/api/stop', { method: 'POST' }),
+  stop: (taskId?: string) =>
+    request<{ status: string }>('/api/stop', {
+      method: 'POST',
+      body: JSON.stringify({ task_id: taskId || '' }),
+    }),
   sshList: () =>
     request<SSHListResponse>('/api/ssh'),
 

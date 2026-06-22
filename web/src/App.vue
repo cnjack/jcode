@@ -52,6 +52,10 @@ provide('openRemoteConnect', openRemoteConnect)
 // workspace's session, instead of WorkspacePicker landing on a blank welcome
 // while the projects modal restored the session.
 provide('onWorkspaceSwitched', () => onProjectSwitched())
+// Sidebar "+" on a workspace row: switch to that workspace (full workspace-scoped
+// reload, like onProjectSwitched) but land on a fresh welcome screen so the next
+// message starts a brand-new task there — instead of restoring its last session.
+provide('onNewTaskInProject', (path: string) => startNewTaskInProject(path))
 
 // When the wizard is launched from Settings it stacks ON TOP of the Settings
 // overlay. headlessui treats a click inside the wizard as an "outside" click for
@@ -103,12 +107,25 @@ function scrollToBottom(smooth = true) {
   })
 }
 
+// Sending a message is an explicit action: snap to the latest even if the user
+// had scrolled up into history. Marking atBottom also re-arms the timeline watch
+// so the streaming reply keeps following.
+function onComposerSent() {
+  isAtBottom.value = true
+  nextTick(() => scrollToBottom())
+}
+
 // WebSocket connection
 const { connected } = useWebSocket({
   activeTaskId: () => store.currentSessionId,
   onTaskStatus: (taskId, running) => {
     // Live sidebar running indicator for ANY task (incl. backgrounded ones).
     projectStore.setTaskRunning(taskId, running)
+    // Keep the composer's Stop/Send button in sync with the *viewed* task, so a
+    // run that starts or stops while you're looking at it flips the button live
+    // (task_status is the one event that reaches us for the active task without
+    // a fresh agent_start/agent_done round-trip).
+    if (taskId === store.currentSessionId) store.isRunning = running
     // Re-sync persisted status + recency/order from the server.
     projectStore.fetchAllTasks()
   },
@@ -343,6 +360,22 @@ async function onProjectSwitched() {
   await store.restoreCurrentSession()
 }
 
+// Switch to a workspace (if not already active) and open a fresh welcome screen
+// there, so the next message starts a new task in it. Mirrors onProjectSwitched's
+// workspace-scoped reload but deliberately skips restoreCurrentSession — the
+// whole point is a blank composer, not the project's last conversation.
+async function startNewTaskInProject(path: string): Promise<boolean> {
+  const active = projectStore.activeProject?.path || store.pwd
+  if (path !== active) {
+    const ok = await projectStore.openProject(path)
+    if (!ok) return false
+    await store.fetchHealth()
+    loadWorkspaceState()
+  }
+  await store.newSession()
+  return true
+}
+
 function onSetupComplete() {
   needsSetup.value = false
   connectionError.value = false
@@ -453,7 +486,7 @@ function startResize(e: MouseEvent) {
           <!-- Composer sits on the vertical centerline. Its pickers open
                downward into the empty lower half (room above is tighter). -->
           <div class="welcome-composer w-full max-w-2xl">
-            <ChatInput picker-placement="bottom" />
+            <ChatInput picker-placement="bottom" @sent="onComposerSent" />
           </div>
 
           <!-- Bottom half balances the center. -->
@@ -464,7 +497,7 @@ function startResize(e: MouseEvent) {
         <div v-else key="convo" class="flex-1 flex flex-col min-h-0">
           <div
             ref="messagesEl"
-            class="flex-1 overflow-y-auto scroll-smooth rounded-t-[13px]"
+            class="messages-feather flex-1 overflow-y-auto scroll-smooth rounded-t-[13px]"
             @scroll="checkScrollPosition"
           >
             <div class="max-w-4xl mx-auto px-5 py-6 space-y-0.5">
@@ -538,8 +571,13 @@ function startResize(e: MouseEvent) {
             </transition>
           </div>
 
-          <GoalBanner />
-          <ChatInput />
+          <!-- Composer shares the messages' centered max-w-4xl column with the
+               same px-5 inset, so the input box's left edge lines up with the
+               message avatars (and its right edge with the content). -->
+          <div class="w-full max-w-4xl mx-auto">
+            <GoalBanner />
+            <ChatInput @sent="onComposerSent" />
+          </div>
         </div>
         </transition>
       </div>
@@ -663,6 +701,17 @@ function startResize(e: MouseEvent) {
 .conn-error-retry:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+/* Feather (羽化) the bottom edge of the timeline so messages softly dissolve
+   into the surface as they meet the composer, instead of being hard-cut. A mask
+   is background-agnostic (content goes transparent, revealing the panel behind)
+   so it adapts to light/dark with no color to maintain. The fade height tracks
+   the timeline's bottom padding (py-6 ≈ 24px) so the last message stays crisp at
+   rest and only fades while scrolling past the edge. */
+.messages-feather {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent 100%);
 }
 
 /* The conversation + composer live in one inset surface panel so the chat

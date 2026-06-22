@@ -21,7 +21,6 @@ import {
   BoltIcon,
   ChatBubbleLeftIcon,
   ComputerDesktopIcon,
-  KeyIcon,
   ServerIcon,
   ChevronRightIcon,
   PlusIcon,
@@ -42,6 +41,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import { isTauri } from '@/composables/useDesktop'
 import UsageStatsPanel from '@/components/UsageStatsPanel.vue'
+import ProviderIcon from '@/components/ProviderIcon.vue'
 import { useI18n } from 'vue-i18n'
 import { SUPPORTED_LOCALES, LOCALE_LABELS, setLocale, i18n, type SupportedLocale } from '@/i18n'
 
@@ -971,10 +971,11 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                           <button
                             v-for="p in addProviderList.filter(x => !configuredProviders.some(c => c.id === x.id))"
                             :key="p.id"
-                            class="w-full px-2.5 py-2 text-left rounded-md text-xs cursor-pointer transition-colors hover:bg-[var(--color-secondary)]"
+                            class="w-full px-2.5 py-2 text-left rounded-md text-xs cursor-pointer transition-colors hover:bg-[var(--color-secondary)] flex items-center gap-2"
                             style="color: var(--color-foreground)"
                             @click="selectAddProvider(p.id)"
                           >
+                            <ProviderIcon :provider="p.id" :size="16" />
                             <span class="font-medium">{{ p.name }}</span>
                             <span class="ml-1.5 font-mono" style="color: var(--color-muted-foreground)">{{ p.id }}</span>
                           </button>
@@ -1030,7 +1031,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                   </div>
                   <div v-else>
                     <div v-for="p in configuredProviders" :key="p.id" class="s-row">
-                      <div class="s-row-icon"><KeyIcon class="w-3.5 h-3.5" /></div>
+                      <div class="s-row-icon"><ProviderIcon :provider="p.id" :size="18" /></div>
                       <div class="s-row-body">
                         <div class="s-row-title" style="font-family: var(--font-mono)">{{ p.id }}</div>
                         <div class="s-row-sub" style="font-family: var(--font-mono)">

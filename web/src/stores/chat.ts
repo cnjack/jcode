@@ -21,6 +21,7 @@ import type {
 import { normalizeMode } from '@/types/api'
 import { api } from '@/composables/api'
 import { extractToolDisplayInfo } from '@/composables/toolInfo'
+import { useProjectStore } from '@/stores/project'
 
 let _seqId = 0
 function nextSeqId() {
@@ -580,8 +581,11 @@ export const useChatStore = defineStore('chat', () => {
     // turn ends (agent_done), agentDone flushes the next queued message — so Stop
     // acts as "skip the current turn and send my next queued instruction now".
     // To cancel pending messages, remove them individually via the × on each.
+    // Target the task currently in view so Stop interrupts exactly the run you
+    // are looking at, even if it's a backgrounded task that isn't the active
+    // engine (the backend falls back to the active task only when id is empty).
     try {
-      await api.stop()
+      await api.stop(currentSessionId.value || undefined)
     } catch (err: unknown) {
       console.error('Stop error:', err)
     }
@@ -935,6 +939,13 @@ export const useChatStore = defineStore('chat', () => {
       // Re-attach any question/approval still awaiting a response on the server.
       await reconcileAskUser()
       await reconcileApprovals()
+      // Restore the persisted plan/goal that clearChat() above blanked. boot()
+      // also fires these via loadWorkspaceState(), but that runs concurrently and
+      // un-awaited — its fetches race our clearChat(), and since api.session() is
+      // the heaviest call clearChat() tends to land last and win, dropping the
+      // plan on reload. Re-fetching here makes restore self-consistent regardless.
+      fetchGoal()
+      fetchTodos()
     } catch {
       // Session file may not exist yet (lazy creation), silently ignore
     }
@@ -981,13 +992,22 @@ export const useChatStore = defineStore('chat', () => {
       currentSessionId.value = resp.session_id || uuid
 
       clearChat()
-      // Resumed task is idle (its live run, if any, surfaces via task_status /
-      // its own events now that it's the active task). Clear any stale running
-      // state carried over from the task we switched away from.
-      isRunning.value = false
-      // The backend restored the session's goal — refresh explicitly in case
-      // the goal_update WS push is missed.
+      // Seed the Stop/Send button from this task's real live state: a task that
+      // is still running in the background must show Stop (so it can be
+      // interrupted) the instant you open it. The turn already started before we
+      // switched in, so no fresh agent_start arrives to flip the button — we'd
+      // otherwise be stuck showing Send over a live run. projectStore is kept
+      // current by task_status events (it's what drives the sidebar running
+      // indicator); agent_done, scoped to this task, flips it back to idle when
+      // the run ends.
+      const resumedId = resp.session_id || uuid
+      isRunning.value = !!useProjectStore().allTasks.find((t) => t.uuid === resumedId)?.running
+      // The backend restored the session's goal and todos — refresh both
+      // explicitly. clearChat() above blanked them, and no goal_update/todo_update
+      // WS push fires on a switch, so without this the Plan panel would show
+      // "no tasks" / 0/0 even though the resumed task has a live plan.
       fetchGoal()
+      fetchTodos()
 
       // Track pending tool calls by tool_call_id so we can match results
       const pendingToolCalls = new Map<string, ToolCall>()

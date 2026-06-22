@@ -10,8 +10,12 @@ withDefaults(defineProps<{
   placement?: 'top' | 'bottom'
 }>(), { placement: 'top' })
 
-const { current, branches, switching, error, checkout } = useBranch()
+const { current, branches, switching, error, pending, checkout, resolvePending, cancelPending } =
+  useBranch()
 const { t } = useI18n()
+
+// How many at-risk files to list before collapsing into a "+N more" line.
+const MAX_FILES = 8
 
 const query = ref('')
 const creating = ref(false)
@@ -35,7 +39,18 @@ async function pick(branch: string, close: () => void) {
     reset()
     close()
   }
-  // On failure keep the panel open so the error message stays visible.
+  // On failure keep the panel open: either an error message or — when git refused
+  // a dirty-tree switch — the confirmation dialog stays visible.
+}
+
+// Retry a blocked switch with the chosen strategy (stash keeps changes, force
+// discards them). Closes the panel on success.
+async function applyStrategy(strategy: 'stash' | 'force', close: () => void) {
+  const ok = await resolvePending(strategy)
+  if (ok) {
+    reset()
+    close()
+  }
 }
 
 function startCreate() {
@@ -59,6 +74,7 @@ function reset() {
   creating.value = false
   newName.value = ''
   error.value = ''
+  cancelPending()
 }
 </script>
 
@@ -67,7 +83,12 @@ function reset() {
   <div v-if="current" class="bp-bar">
     <Popover class="bp-popover" style="position: relative">
       <PopoverButton as="template" :disabled="switching">
-        <button class="bp-pill" :disabled="switching" :title="t('branches.current', { name: current })">
+        <button
+          class="bp-pill"
+          :disabled="switching"
+          :title="t('branches.current', { name: current })"
+          @click="reset"
+        >
           <CodeBracketIcon class="w-3 h-3 bp-pill-icon" />
           <span class="bp-name">{{ current }}</span>
           <ChevronDownIcon class="w-3 h-3 bp-caret" />
@@ -85,52 +106,84 @@ function reset() {
           class="bp-panel"
           :class="placement === 'top' ? 'place-top' : 'place-bottom'"
         >
-          <div class="bp-search">
-            <MagnifyingGlassIcon class="w-3 h-3 bp-search-icon" />
-            <input v-model="query" class="bp-search-input" :placeholder="t('branches.search')" />
-          </div>
+          <!-- Confirmation: git refused to switch because it would overwrite
+               uncommitted work. Offer to stash (safe) or discard (force). -->
+          <div v-if="pending" class="bp-confirm">
+            <div class="bp-confirm-title">{{ t('branches.confirmTitle') }}</div>
+            <div class="bp-confirm-intro">
+              {{ t('branches.confirmIntro', { branch: pending.branch }) }}
+            </div>
+            <ul v-if="pending.files.length" class="bp-confirm-files">
+              <li v-for="f in pending.files.slice(0, MAX_FILES)" :key="f">{{ f }}</li>
+              <li v-if="pending.files.length > MAX_FILES" class="bp-confirm-more">
+                {{ t('branches.confirmMore', { count: pending.files.length - MAX_FILES }) }}
+              </li>
+            </ul>
 
-          <div class="bp-section">{{ t('branches.title') }}</div>
-          <div class="bp-list">
-            <div v-if="filtered.length === 0" class="bp-hint">{{ t('branches.none') }}</div>
-            <button
-              v-for="b in filtered"
-              :key="b"
-              class="bp-row"
-              :class="{ active: b === current }"
-              :disabled="switching"
-              @click="pick(b, close)"
-            >
-              <CodeBracketIcon class="w-3 h-3 bp-row-icon" />
-              <span class="bp-row-name">{{ b }}</span>
-              <CheckIcon v-if="b === current" class="w-3.5 h-3.5 bp-check" />
-            </button>
-          </div>
+            <div v-if="error" class="bp-error">{{ error }}</div>
 
-          <div v-if="error" class="bp-error">{{ error }}</div>
-
-          <div class="bp-actions">
-            <button v-if="!creating" class="bp-action" @click="startCreate">
-              <PlusIcon class="w-3.5 h-3.5" /> <span>{{ t('branches.create') }}</span>
-            </button>
-            <div v-else class="bp-create">
-              <input
-                ref="newInput"
-                v-model="newName"
-                class="bp-create-input"
-                :placeholder="t('branches.newName')"
-                @keydown.enter="confirmCreate(close)"
-                @keydown.esc="creating = false"
-              />
-              <button
-                class="bp-create-btn"
-                :disabled="!newName.trim() || switching"
-                @click="confirmCreate(close)"
-              >
-                {{ t('branches.createBtn') }}
+            <div class="bp-confirm-actions">
+              <button class="bp-confirm-btn stash" :disabled="switching" @click="applyStrategy('stash', close)">
+                {{ t('branches.confirmStash') }}
+              </button>
+              <button class="bp-confirm-btn discard" :disabled="switching" @click="applyStrategy('force', close)">
+                {{ t('branches.confirmDiscard') }}
+              </button>
+              <button class="bp-confirm-btn cancel" :disabled="switching" @click="cancelPending">
+                {{ t('branches.confirmCancel') }}
               </button>
             </div>
+            <div class="bp-confirm-hint">{{ t('branches.confirmHint') }}</div>
           </div>
+
+          <template v-else>
+            <div class="bp-search">
+              <MagnifyingGlassIcon class="w-3 h-3 bp-search-icon" />
+              <input v-model="query" class="bp-search-input" :placeholder="t('branches.search')" />
+            </div>
+
+            <div class="bp-section">{{ t('branches.title') }}</div>
+            <div class="bp-list">
+              <div v-if="filtered.length === 0" class="bp-hint">{{ t('branches.none') }}</div>
+              <button
+                v-for="b in filtered"
+                :key="b"
+                class="bp-row"
+                :class="{ active: b === current }"
+                :disabled="switching"
+                @click="pick(b, close)"
+              >
+                <CodeBracketIcon class="w-3 h-3 bp-row-icon" />
+                <span class="bp-row-name">{{ b }}</span>
+                <CheckIcon v-if="b === current" class="w-3.5 h-3.5 bp-check" />
+              </button>
+            </div>
+
+            <div v-if="error" class="bp-error">{{ error }}</div>
+
+            <div class="bp-actions">
+              <button v-if="!creating" class="bp-action" @click="startCreate">
+                <PlusIcon class="w-3.5 h-3.5" /> <span>{{ t('branches.create') }}</span>
+              </button>
+              <div v-else class="bp-create">
+                <input
+                  ref="newInput"
+                  v-model="newName"
+                  class="bp-create-input"
+                  :placeholder="t('branches.newName')"
+                  @keydown.enter="confirmCreate(close)"
+                  @keydown.esc="creating = false"
+                />
+                <button
+                  class="bp-create-btn"
+                  :disabled="!newName.trim() || switching"
+                  @click="confirmCreate(close)"
+                >
+                  {{ t('branches.createBtn') }}
+                </button>
+              </div>
+            </div>
+          </template>
         </PopoverPanel>
       </transition>
     </Popover>
@@ -309,6 +362,92 @@ function reset() {
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.bp-confirm {
+  padding: 6px 6px 4px;
+}
+.bp-confirm-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+.bp-confirm-intro {
+  margin-top: 4px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--color-muted-foreground);
+}
+.bp-confirm-files {
+  margin: 8px 0 2px;
+  padding: 6px 8px;
+  max-height: 132px;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-background);
+}
+.bp-confirm-files li {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--color-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bp-confirm-files .bp-confirm-more {
+  font-family: inherit;
+  color: var(--color-muted-foreground);
+}
+.bp-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.bp-confirm-btn {
+  flex: 1 1 auto;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-foreground);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, opacity 0.15s;
+}
+.bp-confirm-btn:hover:not(:disabled) {
+  background: var(--color-muted);
+}
+.bp-confirm-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.bp-confirm-btn.stash {
+  border-color: transparent;
+  background: var(--color-accent-neutral);
+  color: var(--color-surface);
+}
+.bp-confirm-btn.stash:hover:not(:disabled) {
+  background: var(--color-accent-neutral);
+  opacity: 0.9;
+}
+.bp-confirm-btn.discard {
+  border-color: var(--color-error-fg);
+  color: var(--color-error-fg);
+}
+.bp-confirm-btn.discard:hover:not(:disabled) {
+  background: var(--color-error-bg);
+}
+.bp-confirm-hint {
+  margin-top: 8px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--color-muted-foreground);
 }
 
 .bp-actions {
