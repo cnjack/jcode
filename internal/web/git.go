@@ -62,12 +62,20 @@ func (s *Server) handleGitBranches(w http.ResponseWriter, r *http.Request) {
 // error verbatim (e.g. "Your local changes would be overwritten") rather than
 // forcing a destructive checkout — the user decides how to resolve a dirty tree.
 func (s *Server) handleGitCheckout(w http.ResponseWriter, r *http.Request) {
-	if cur := s.activeEngine(); cur != nil && cur.running.Load() {
+	// Capture the active engine ONCE so the running guard and the checkout target
+	// the same task's repo even if the active engine is swapped concurrently.
+	eng := s.activeEngine()
+	if eng == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no active task"})
+		return
+	}
+	if eng.running.Load() {
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error": "agent is running — stop it before switching branch",
 		})
 		return
 	}
+	dir := eng.pwd
 
 	var req struct {
 		Branch string `json:"branch"`
@@ -90,7 +98,7 @@ func (s *Server) handleGitCheckout(w http.ResponseWriter, r *http.Request) {
 	args = append(args, branch)
 
 	cmd := exec.CommandContext(r.Context(), "git", args...)
-	cmd.Dir = s.activePwd()
+	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
@@ -102,7 +110,7 @@ func (s *Server) handleGitCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	curCmd := exec.CommandContext(r.Context(), "git", "branch", "--show-current")
-	curCmd.Dir = s.activePwd()
+	curCmd.Dir = dir
 	curOut, _ := curCmd.Output()
 	writeJSON(w, http.StatusOK, map[string]any{"branch": strings.TrimSpace(string(curOut))})
 }

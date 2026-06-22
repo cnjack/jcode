@@ -337,7 +337,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		_ = os.MkdirAll(reductionRoot, 0o755)
 
 		makeAgent := func(cm model.ToolCallingChatModel, ctxLimit int, planMode bool) (*adk.ChatModelAgent, error) {
-			var middlewares []adk.AgentMiddleware
+			var middlewares []adk.AgentMiddleware //nolint:staticcheck // langfuseTracer.AgentMiddleware()/agent.NewAgent still use the deprecated type
 			if langfuseTracer != nil {
 				middlewares = append(middlewares, langfuseTracer.AgentMiddleware())
 			}
@@ -408,11 +408,17 @@ func runWebServer(port int, host string, openBrowser bool) error {
 				return nil, err
 			}
 			cmMu.Lock()
-			currentCM = cm
-			currentCtxLimit = ctxLimit
 			plan := currentPlanMode
 			cmMu.Unlock()
-			return makeAgent(cm, ctxLimit, plan)
+			ag, err := makeAgent(cm, ctxLimit, plan)
+			if err != nil {
+				return nil, err // don't poison the cache with a model whose agent failed to build
+			}
+			cmMu.Lock()
+			currentCM = cm
+			currentCtxLimit = ctxLimit
+			cmMu.Unlock()
+			return ag, nil
 		}
 
 		rebuildForMode := func(planMode bool) (*adk.ChatModelAgent, error) {

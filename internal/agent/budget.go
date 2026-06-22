@@ -166,21 +166,27 @@ func (m *budgetMiddleware) AfterModelRewriteState(
 	state *adk.ChatModelAgentState,
 	mc *adk.ModelContext,
 ) (context.Context, *adk.ChatModelAgentState, error) {
-	var promptTokens, completionTokens, cachedTokens int64
+	var promptTokens, completionTokens int64
+	var sessionPrompt, sessionCompletion, sessionCached int64
 	if m.tokenUsage != nil {
-		// Per-turn delta, NOT session-cumulative: max_tokens_per_turn is a
-		// per-agent-turn cap, and runner.BeginTurn sets the baseline at turn start.
-		// Reading cumulative Get() here made the "per turn" cap behave as a
-		// session total that compaction would silently reset.
-		promptTokens, completionTokens, cachedTokens = m.tokenUsage.TurnUsage()
+		// Per-turn delta for the per-agent-turn TOKEN cap (max_tokens_per_turn):
+		// runner.BeginTurn sets the baseline at turn start. Reading cumulative
+		// Get() here made the "per turn" cap behave as a session total.
+		promptTokens, completionTokens, _ = m.tokenUsage.TurnUsage()
+		// Session-cumulative for the COST cap (max_cost_per_session): cost must
+		// accumulate across turns, not reset each turn.
+		full := m.tokenUsage.GetFull()
+		sessionPrompt = int64(full.PromptTokens)
+		sessionCompletion = int64(full.CompletionTokens)
+		sessionCached = int64(full.CachedTokens)
 	}
 
-	// Sync budget manager with this turn's token usage, billing the cached subset
-	// of the prompt at the discounted cache-read rate when available.
+	// promptTokens/completionTokens drive the per-turn token cap; totalCost is the
+	// session-cumulative cost (cached subset billed at the cache-read rate).
 	m.manager.mu.Lock()
 	m.manager.promptTokens = promptTokens
 	m.manager.completionTokens = completionTokens
-	m.manager.totalCost = m.manager.costLocked(promptTokens, completionTokens, cachedTokens)
+	m.manager.totalCost = m.manager.costLocked(sessionPrompt, sessionCompletion, sessionCached)
 	m.manager.mu.Unlock()
 
 	status := m.manager.Status()

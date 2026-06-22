@@ -211,18 +211,18 @@ func (s *Server) handleRemoteBind(w http.ResponseWriter, r *http.Request) {
 		remotePwd = remote.DiscoverPwd(r.Context(), pc.exec, "/root")
 	}
 
-	// Tear down only the outgoing task's PTYs (other concurrent tasks keep theirs).
-	prevTaskID := ""
+	// Snapshot the outgoing task once, then build the new engine BEFORE tearing
+	// anything down — a failed bind must not disrupt the current task's PTYs.
+	prevTaskID, curMode := "", ""
 	if cur := s.activeEngine(); cur != nil {
-		prevTaskID = cur.taskID
+		prevTaskID, curMode = cur.taskID, cur.curMode()
 	}
-	s.ptyMgr.closeForTask(prevTaskID)
-
-	eng, err := s.buildRemoteEngine("", pc.exec, remotePwd, s.activeMode())
+	eng, err := s.buildRemoteEngine("", pc.exec, remotePwd, curMode)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to bind remote workspace: %v", err)})
 		return
 	}
+	s.ptyMgr.closeForTask(prevTaskID) // outgoing task's PTYs only; others keep theirs
 	s.setActiveEngine(eng)
 
 	label := remote.ProjectLabel(pc.exec, remotePwd)
