@@ -49,11 +49,26 @@ func NewEnv(pwd, platform string) *Env {
 	}
 }
 
-// SetSSH switches this Env to use a remote SSH executor.
-func (e *Env) SetSSH(executor *SSHExecutor, remotePwd string) {
+// SetRemote switches this Env to use a remote executor (SSH or Docker).
+func (e *Env) SetRemote(executor RemoteExecutor, remotePwd string) {
 	e.Exec = executor
 	e.pwd = remotePwd
 	e.platform = executor.Platform()
+}
+
+// SetSSH switches this Env to use a remote SSH executor. Thin wrapper kept for
+// existing callers; SetRemote is the general form.
+func (e *Env) SetSSH(executor *SSHExecutor, remotePwd string) {
+	e.SetRemote(executor, remotePwd)
+}
+
+// CloseRemote closes the executor if it is remote (SSH/Docker), releasing the
+// SSH connection or the Docker container hold (ref-count). No-op when local.
+func (e *Env) CloseRemote() error {
+	if re, ok := e.Exec.(RemoteExecutor); ok {
+		return re.Close()
+	}
+	return nil
 }
 
 // ResetToLocal restores this Env to use the original local executor.
@@ -108,10 +123,20 @@ func (e *Env) CanNest() bool {
 	return e.Depth < MaxSubagentDepth
 }
 
-// IsRemote returns true if operating over SSH.
+// IsRemote returns true if operating over a remote executor (SSH or Docker),
+// i.e. anything that is not the local executor.
 func (e *Env) IsRemote() bool {
-	_, ok := e.Exec.(*SSHExecutor)
-	return ok
+	_, ok := e.Exec.(*LocalExecutor)
+	return !ok
+}
+
+// RemoteExecutor is an Executor backed by a remote target (SSH host or Docker
+// container) that owns a connection/hold needing release and can produce a
+// stable, scheme-qualified session key.
+type RemoteExecutor interface {
+	Executor
+	Close() error
+	ProjectLabel(pwd string) string
 }
 
 // Executor abstracts file and command operations so tools can work
@@ -369,6 +394,12 @@ func (s *SSHExecutor) Host() string { return s.host }
 
 func (s *SSHExecutor) Label() string {
 	return fmt.Sprintf("%s@%s", s.user, s.host)
+}
+
+// ProjectLabel returns a stable, host-qualified session key of the form
+// ssh://user@host:port/remote/path.
+func (s *SSHExecutor) ProjectLabel(pwd string) string {
+	return fmt.Sprintf("ssh://%s@%s%s", s.user, s.host, normalizeAbs(pwd))
 }
 
 // run executes a command over SSH, respecting both the context and timeout.

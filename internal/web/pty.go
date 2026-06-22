@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,19 +9,31 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 
 	"github.com/creack/pty"
+	dockertypes "github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/client"
 	"github.com/gorilla/websocket"
 
 	"github.com/cnjack/jcode/internal/config"
 )
 
-// ptySession represents a running PTY session.
+// ptyBackend abstracts the transport behind a terminal session: a local PTY, or
+// a `docker exec` TTY stream into a bound container.
+type ptyBackend interface {
+	Read(p []byte) (int, error)
+	Write(p []byte) (int, error)
+	Resize(cols, rows uint16) error
+	Close() error
+}
+
+// ptySession represents a running terminal session.
 type ptySession struct {
 	id      string
 	ownerID string // task id that created it, so a project/remote switch only closes its own
-	cmd     *exec.Cmd
-	ptmx    *os.File
+	backend ptyBackend
 }
 
 // ptyManager manages PTY sessions.
@@ -40,7 +53,24 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-// create starts a new PTY session owned by ownerID and returns its ID.
+// register stores a backend under a fresh session id owned by ownerID.
+func (m *ptyManager) register(ownerID string, backend ptyBackend) string {
+	m.mu.Lock()
+	m.nextID++
+	id := fmt.Sprintf("pty_%d", m.nextID)
+	m.sessions[id] = &ptySession{id: id, ownerID: ownerID, backend: backend}
+	m.mu.Unlock()
+	return id
+}
+
+// remove drops a session from the map (without closing its backend).
+func (m *ptyManager) remove(id string) {
+	m.mu.Lock()
+	delete(m.sessions, id)
+	m.mu.Unlock()
+}
+
+// create starts a new local PTY session owned by ownerID and returns its ID.
 func (m *ptyManager) create(workDir, ownerID string) (string, error) {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
@@ -55,23 +85,59 @@ func (m *ptyManager) create(workDir, ownerID string) (string, error) {
 		return "", err
 	}
 
-	m.mu.Lock()
-	m.nextID++
-	id := fmt.Sprintf("pty_%d", m.nextID)
-	sess := &ptySession{id: id, ownerID: ownerID, cmd: cmd, ptmx: ptmx}
-	m.sessions[id] = sess
-	m.mu.Unlock()
+	backend := &localPTYBackend{cmd: cmd, ptmx: ptmx}
+	id := m.register(ownerID, backend)
 
-	// Clean up when shell exits.
+	// Clean up when the shell exits.
 	go func() {
 		_ = cmd.Wait()
-		m.mu.Lock()
-		delete(m.sessions, id)
-		m.mu.Unlock()
+		m.remove(id)
 		_ = ptmx.Close()
 	}()
 
-	config.Logger().Printf("[pty] created session %s (shell=%s, dir=%s)", id, shell, workDir)
+	config.Logger().Printf("[pty] created local session %s (shell=%s, dir=%s)", id, shell, workDir)
+	return id, nil
+}
+
+// createDocker starts a TTY `docker exec` session inside containerID and returns
+// its ID. The shell is bash if present, otherwise sh.
+func (m *ptyManager) createDocker(cli *client.Client, containerID, workDir, ownerID string) (string, error) {
+	ctx := context.Background()
+	resp, err := cli.ContainerExecCreate(ctx, containerID, container.ExecOptions{
+		Cmd:          []string{"sh", "-c", "exec bash 2>/dev/null || exec sh"},
+		WorkingDir:   workDir,
+		Env:          []string{"TERM=xterm-256color"},
+		Tty:          true,
+		AttachStdin:  true,
+		AttachStdout: true,
+		AttachStderr: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	att, err := cli.ContainerExecAttach(ctx, resp.ID, container.ExecAttachOptions{Tty: true})
+	if err != nil {
+		return "", err
+	}
+
+	backend := &dockerPTYBackend{cli: cli, execID: resp.ID, att: att}
+	id := m.register(ownerID, backend)
+
+	// Clean up when the exec process exits. Nothing else waits on it, so poll
+	// the exec state (mirrors the local cmd.Wait cleanup).
+	go func() {
+		for {
+			time.Sleep(time.Second)
+			insp, ierr := cli.ContainerExecInspect(context.Background(), resp.ID)
+			if ierr != nil || !insp.Running {
+				m.remove(id)
+				_ = backend.Close()
+				return
+			}
+		}
+	}()
+
+	config.Logger().Printf("[pty] created docker session %s (container=%s, dir=%s)", id, shortContainer(containerID), workDir)
 	return id, nil
 }
 
@@ -100,8 +166,7 @@ func (m *ptyManager) kill(id string) {
 	delete(m.sessions, id)
 	m.mu.Unlock()
 	if sess != nil {
-		_ = sess.cmd.Process.Kill()
-		_ = sess.ptmx.Close()
+		_ = sess.backend.Close()
 	}
 }
 
@@ -115,8 +180,7 @@ func (m *ptyManager) closeAll() {
 	m.sessions = make(map[string]*ptySession)
 	m.mu.Unlock()
 	for _, s := range sessions {
-		_ = s.cmd.Process.Kill()
-		_ = s.ptmx.Close()
+		_ = s.backend.Close()
 	}
 }
 
@@ -136,13 +200,12 @@ func (m *ptyManager) closeForTask(taskID string) {
 	}
 	m.mu.Unlock()
 	for _, s := range sessions {
-		_ = s.cmd.Process.Kill()
-		_ = s.ptmx.Close()
+		_ = s.backend.Close()
 	}
 }
 
 // serveWS handles the WebSocket connection for a PTY session.
-// Data flows: PTY stdout → WebSocket → client, client → WebSocket → PTY stdin.
+// Data flows: backend stdout → WebSocket → client, client → WebSocket → backend stdin.
 func (m *ptyManager) serveWS(w http.ResponseWriter, r *http.Request, id string) {
 	sess := m.get(id)
 	if sess == nil {
@@ -157,17 +220,18 @@ func (m *ptyManager) serveWS(w http.ResponseWriter, r *http.Request, id string) 
 	}
 	defer func() { _ = conn.Close() }()
 
-	// Handle resize messages from client.
-	// Client sends JSON: {"type":"resize","cols":80,"rows":24}
-	// or raw bytes for stdin input.
-
-	// PTY → WebSocket (read from PTY, send to client)
+	// backend → WebSocket (read from backend, send to client)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		buf := make([]byte, 4096)
 		for {
-			n, err := sess.ptmx.Read(buf)
+			n, err := sess.backend.Read(buf)
+			if n > 0 {
+				if werr := conn.WriteMessage(websocket.BinaryMessage, buf[:n]); werr != nil {
+					return
+				}
+			}
 			if err != nil {
 				if err != io.EOF {
 					config.Logger().Printf("[pty] read error: %v", err)
@@ -176,27 +240,23 @@ func (m *ptyManager) serveWS(w http.ResponseWriter, r *http.Request, id string) 
 					websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 				return
 			}
-			if err := conn.WriteMessage(websocket.BinaryMessage, buf[:n]); err != nil {
-				return
-			}
 		}
 	}()
 
-	// WebSocket → PTY (read from client, write to PTY)
+	// WebSocket → backend (read from client, write to backend stdin)
 	for {
 		msgType, msg, err := conn.ReadMessage()
 		if err != nil {
 			break
 		}
 		if msgType == websocket.TextMessage {
-			// Check for resize command
+			// Check for resize command: {"type":"resize","cols":80,"rows":24}
 			if len(msg) > 0 && msg[0] == '{' {
 				m.handleControlMessage(sess, msg)
 				continue
 			}
 		}
-		// Write input to PTY
-		if _, err := sess.ptmx.Write(msg); err != nil {
+		if _, err := sess.backend.Write(msg); err != nil {
 			break
 		}
 	}
@@ -215,9 +275,55 @@ func (m *ptyManager) handleControlMessage(sess *ptySession, msg []byte) {
 		return
 	}
 	if ctrl.Type == "resize" && ctrl.Cols > 0 && ctrl.Rows > 0 {
-		_ = pty.Setsize(sess.ptmx, &pty.Winsize{
-			Cols: ctrl.Cols,
-			Rows: ctrl.Rows,
-		})
+		_ = sess.backend.Resize(ctrl.Cols, ctrl.Rows)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Backends
+// ---------------------------------------------------------------------------
+
+// localPTYBackend is a PTY attached to a local shell process.
+type localPTYBackend struct {
+	cmd  *exec.Cmd
+	ptmx *os.File
+}
+
+func (b *localPTYBackend) Read(p []byte) (int, error)  { return b.ptmx.Read(p) }
+func (b *localPTYBackend) Write(p []byte) (int, error) { return b.ptmx.Write(p) }
+func (b *localPTYBackend) Resize(cols, rows uint16) error {
+	return pty.Setsize(b.ptmx, &pty.Winsize{Cols: cols, Rows: rows})
+}
+func (b *localPTYBackend) Close() error {
+	if b.cmd != nil && b.cmd.Process != nil {
+		_ = b.cmd.Process.Kill()
+	}
+	return b.ptmx.Close()
+}
+
+// dockerPTYBackend is a TTY `docker exec` stream into a container.
+type dockerPTYBackend struct {
+	cli    *client.Client
+	execID string
+	att    dockertypes.HijackedResponse
+}
+
+func (b *dockerPTYBackend) Read(p []byte) (int, error)  { return b.att.Reader.Read(p) }
+func (b *dockerPTYBackend) Write(p []byte) (int, error) { return b.att.Conn.Write(p) }
+func (b *dockerPTYBackend) Resize(cols, rows uint16) error {
+	return b.cli.ContainerExecResize(context.Background(), b.execID, container.ResizeOptions{
+		Height: uint(rows),
+		Width:  uint(cols),
+	})
+}
+func (b *dockerPTYBackend) Close() error {
+	b.att.Close()
+	return nil
+}
+
+func shortContainer(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
 }

@@ -25,7 +25,7 @@ import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
 import { useProjectStore } from '@/stores/project'
 import { api } from '@/composables/api'
-import type { RemoteMeta, SSHAlias, RemoteAuthMethod } from '@/types/api'
+import type { RemoteMeta, SSHAlias, RemoteAuthMethod, DockerContainer } from '@/types/api'
 
 type Prefill = RemoteMeta & { loadTaskUuid?: string }
 
@@ -44,7 +44,7 @@ const emit = defineEmits<{
 const store = useChatStore()
 const projectStore = useProjectStore()
 
-type Step = 'method' | 'config' | 'connecting' | 'dir'
+type Step = 'method' | 'config' | 'docker' | 'connecting' | 'dir'
 const step = ref<Step>('method')
 const method = ref<'ssh' | 'docker'>('ssh')
 
@@ -60,6 +60,11 @@ const form = reactive({
 
 const aliases = ref<SSHAlias[]>([])
 const selectedAlias = ref('')
+
+// Docker container picker state.
+const containers = ref<DockerContainer[]>([])
+const containersLoading = ref(false)
+const selectedContainer = ref('')
 
 // Label shown on the alias Listbox button (mirrors the option text).
 const selectedAliasLabel = computed(() => {
@@ -85,7 +90,11 @@ const steps = computed<{ key: Step; label: string }[]>(() => [
   { key: 'connecting', label: t('wizard.steps.connecting') },
   { key: 'dir', label: t('wizard.steps.selectDirectory') },
 ])
-const stepIndex = computed(() => steps.value.findIndex((s) => s.key === step.value))
+const stepIndex = computed(() => {
+  // The docker container picker occupies the same rail position as SSH config.
+  const key = step.value === 'docker' ? 'config' : step.value
+  return steps.value.findIndex((s) => s.key === key)
+})
 
 watch(() => props.open, (isOpen) => {
   if (!isOpen) return
@@ -97,7 +106,9 @@ watch(() => props.open, (isOpen) => {
     // the SSH secret, the link must be re-established — but for key/agent auth
     // (the common case) we can do it silently instead of making the user re-fill
     // the form. Fall back to the form only if the key isn't accepted.
-    if (props.prefill.remotePath) {
+    if (props.prefill.kind === 'docker') {
+      void autoReconnectDocker(props.prefill)
+    } else if (props.prefill.remotePath) {
       void autoReconnect(props.prefill)
     } else {
       applyPrefill(props.prefill)
@@ -116,6 +127,8 @@ function resetState() {
   form.keyPath = '~/.ssh/id_rsa'
   form.passphrase = ''
   selectedAlias.value = ''
+  containers.value = []
+  selectedContainer.value = ''
   error.value = ''
   connectionId.value = ''
   bound.value = false
@@ -197,8 +210,77 @@ function applyAlias(name: string) {
 }
 
 function chooseMethod(m: 'ssh' | 'docker') {
-  if (m === 'docker') return // disabled placeholder
   method.value = m
+}
+
+function proceedFromMethod() {
+  if (method.value === 'docker') {
+    step.value = 'docker'
+    void loadContainers()
+  } else {
+    step.value = 'config'
+  }
+}
+
+async function loadContainers() {
+  containersLoading.value = true
+  error.value = ''
+  try {
+    const res = await api.dockerContainers()
+    // Running containers first, then by name.
+    containers.value = (res.containers || []).slice().sort((a, b) => {
+      if (a.running !== b.running) return a.running ? -1 : 1
+      return (a.name || a.id).localeCompare(b.name || b.id)
+    })
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : 'Failed to list containers'
+    containers.value = []
+  } finally {
+    containersLoading.value = false
+  }
+}
+
+async function connectDocker(container: string) {
+  if (!container) return
+  await discardConnection()
+  selectedContainer.value = container
+  error.value = ''
+  step.value = 'connecting'
+  try {
+    const res = await api.remoteConnect({ type: 'docker', container })
+    connectionId.value = res.connection_id
+    await listDir(res.remote_pwd)
+    step.value = 'dir'
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : 'Connection failed'
+    step.value = 'docker'
+  }
+}
+
+// Seamless docker reconnect: re-attach to the known container and bind straight
+// to its previous path. Falls back to the container picker on any failure.
+async function autoReconnectDocker(p: Prefill) {
+  method.value = 'docker'
+  if (!p.container) {
+    step.value = 'docker'
+    void loadContainers()
+    return
+  }
+  step.value = 'connecting'
+  try {
+    const res = await api.remoteConnect({ type: 'docker', container: p.container })
+    connectionId.value = res.connection_id
+    currentDir.value = p.remotePath && p.remotePath !== '/' ? p.remotePath : res.remote_pwd
+    await bindHere()
+    if (!bound.value && connectionId.value) {
+      await listDir(currentDir.value)
+      step.value = 'dir'
+    }
+  } catch {
+    error.value = ''
+    step.value = 'docker'
+    void loadContainers()
+  }
 }
 
 // discardConnection releases an established-but-unbound SSH connection so it
@@ -277,25 +359,33 @@ async function bindHere() {
   error.value = ''
   try {
     const res = await api.remoteBind(connectionId.value, currentDir.value)
-    const proj = projectStore.upsertRemoteProject(res.label, {
-      host: res.host,
-      user: res.user,
-      port: res.port,
-      remotePath: res.remote_path,
-    })
+    const isDocker = res.kind === 'docker'
+    const proj = projectStore.upsertRemoteProject(res.label, isDocker
+      ? { kind: 'docker', host: '', user: '', port: 0, remotePath: res.remote_path, container: res.container }
+      : { kind: 'ssh', host: res.host, user: res.user, port: res.port, remotePath: res.remote_path })
     projectStore.setActive(proj.id)
     bound.value = true
     connectionId.value = '' // ownership transferred; do not cancel on close
 
-    // Always persist the host to config so it returns for one-click reconnects
+    // Always persist the target to config so it returns for one-click reconnects
     // next time — no opt-in needed. Use the custom name when given, otherwise
-    // derive a stable one from the address. Secrets are never stored.
-    const addr = `${res.user}@${res.host}`
-    const name = aliasName.value.trim() || addr
-    try {
-      await api.remoteSaveAlias(name, addr, res.remote_path)
-    } catch (e: unknown) {
-      console.error('Failed to save SSH alias:', e)
+    // derive a stable one. Secrets are never stored.
+    if (isDocker) {
+      const container = res.container || ''
+      const name = aliasName.value.trim() || container || 'container'
+      try {
+        await api.remoteSaveDockerAlias(name, container, res.remote_path)
+      } catch (e: unknown) {
+        console.error('Failed to save Docker alias:', e)
+      }
+    } else {
+      const addr = `${res.user}@${res.host}`
+      const name = aliasName.value.trim() || addr
+      try {
+        await api.remoteSaveAlias(name, addr, res.remote_path)
+      } catch (e: unknown) {
+        console.error('Failed to save SSH alias:', e)
+      }
     }
 
     await store.resetToWelcomeAfterSwitch()
@@ -371,20 +461,20 @@ function close() {
                     <span class="rcw-method-name">{{ t('wizard.ssh') }}</span>
                     <span class="rcw-method-desc">{{ t('wizard.remoteHost') }}</span>
                   </button>
-                  <button class="rcw-method disabled" disabled :title="t('wizard.comingSoon')">
+                  <button class="rcw-method" :class="{ active: method === 'docker' }" @click="chooseMethod('docker')">
                     <CubeIcon class="w-5 h-5" />
                     <span class="rcw-method-name">{{ t('wizard.docker') }}</span>
-                    <span class="rcw-method-desc">{{ t('wizard.comingSoon') }}</span>
+                    <span class="rcw-method-desc">{{ t('wizard.container') }}</span>
                   </button>
                 </div>
                 <div class="rcw-foot">
                   <span />
-                  <button class="rcw-primary" @click="step = 'config'">{{ t('wizard.next') }} <ChevronRightIcon class="w-3.5 h-3.5" /></button>
+                  <button class="rcw-primary" @click="proceedFromMethod">{{ t('wizard.next') }} <ChevronRightIcon class="w-3.5 h-3.5" /></button>
                 </div>
               </template>
 
-              <!-- Step 2: config -->
-              <template v-else-if="step === 'config' || step === 'connecting'">
+              <!-- Step 2: config (SSH) -->
+              <template v-else-if="step === 'config' || (step === 'connecting' && method !== 'docker')">
                 <h3 class="rcw-h">{{ t('wizard.sshConnection') }}</h3>
                 <p class="rcw-sub">{{ t('wizard.sshDesc') }}</p>
 
@@ -482,6 +572,49 @@ function close() {
                     {{ step === 'connecting' ? t('wizard.connecting') : t('wizard.connect') }}
                   </button>
                 </div>
+              </template>
+
+              <!-- Step 2b: docker container picker -->
+              <template v-else-if="step === 'docker' || (step === 'connecting' && method === 'docker')">
+                <h3 class="rcw-h">{{ t('wizard.dockerConnection') }}</h3>
+                <p class="rcw-sub">{{ t('wizard.dockerDesc') }}</p>
+
+                <div v-if="error" class="rcw-error">{{ error }}</div>
+
+                <div v-if="step === 'connecting'" class="rcw-hint">
+                  <ArrowPathIcon class="w-3.5 h-3.5 spin" /> {{ t('wizard.connecting') }}
+                </div>
+                <template v-else>
+                  <div class="rcw-dirbar">
+                    <span class="rcw-dir-path">{{ t('wizard.selectContainer') }}</span>
+                    <button class="rcw-back" style="margin-left:auto" :title="t('wizard.refresh')" @click="loadContainers">
+                      <ArrowPathIcon class="w-3.5 h-3.5" :class="{ spin: containersLoading }" />
+                    </button>
+                  </div>
+
+                  <div class="rcw-dirlist">
+                    <div v-if="containersLoading" class="rcw-hint"><ArrowPathIcon class="w-3.5 h-3.5 spin" /> {{ t('wizard.loading') }}</div>
+                    <template v-else>
+                      <button
+                        v-for="c in containers"
+                        :key="c.id"
+                        class="rcw-dir-row"
+                        @click="connectDocker(c.name || c.id)"
+                      >
+                        <CubeIcon class="w-3.5 h-3.5" />
+                        <span class="rcw-ctr-name">{{ c.name || c.id.slice(0, 12) }}</span>
+                        <span class="rcw-ctr-img">{{ c.image }}</span>
+                        <span class="rcw-ctr-state" :class="{ on: c.running }">{{ c.running ? t('wizard.running') : t('wizard.stopped') }}</span>
+                      </button>
+                      <div v-if="containers.length === 0" class="rcw-hint">{{ t('wizard.noContainers') }}</div>
+                    </template>
+                  </div>
+
+                  <div class="rcw-foot">
+                    <button class="rcw-ghost" @click="step = 'method'">{{ t('common.back') }}</button>
+                    <span />
+                  </div>
+                </template>
               </template>
 
               <!-- Step 4: directory -->
@@ -896,6 +1029,31 @@ function close() {
 .rcw-dir-row svg {
   color: var(--color-muted-foreground);
   flex-shrink: 0;
+}
+.rcw-ctr-name {
+  font-weight: 500;
+  flex-shrink: 0;
+}
+.rcw-ctr-img {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--color-muted-foreground);
+}
+.rcw-ctr-state {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--color-muted);
+  color: var(--color-muted-foreground);
+}
+.rcw-ctr-state.on {
+  background: color-mix(in srgb, var(--color-success) 18%, transparent);
+  color: var(--color-success);
 }
 .rcw-hint {
   display: flex;
