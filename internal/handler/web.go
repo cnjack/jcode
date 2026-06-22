@@ -224,10 +224,21 @@ type WebToolResultData struct {
 	ToolCallID    string `json:"tool_call_id,omitempty"`
 }
 
-// WebTokenData carries token usage.
+// WebTokenData carries token usage to the browser. Field order/types MUST match
+// handler.TokenUsage so OnTokenUpdate's WebTokenData(info) conversion compiles.
+// total_tokens is current context occupancy (last call); the rest are
+// cumulative for the session.
 type WebTokenData struct {
-	TotalTokens       int64 `json:"total_tokens"`
-	ModelContextLimit int   `json:"model_context_limit"`
+	TotalTokens       int64   `json:"total_tokens"`
+	PromptTokens      int64   `json:"prompt_tokens"`
+	CompletionTokens  int64   `json:"completion_tokens"`
+	CachedTokens      int64   `json:"cached_tokens"`
+	ReasoningTokens   int64   `json:"reasoning_tokens"`
+	CacheWriteTokens  int64   `json:"cache_write_tokens"`
+	CallCount         int64   `json:"call_count"`
+	CacheHitRate      float64 `json:"cache_hit_rate"`
+	CacheSupported    bool    `json:"cache_supported"`
+	ModelContextLimit int     `json:"model_context_limit"`
 }
 
 // WebSubagentData carries subagent lifecycle events.

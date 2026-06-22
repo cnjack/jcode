@@ -34,6 +34,7 @@ import (
 	"github.com/cnjack/jcode/internal/skills"
 	"github.com/cnjack/jcode/internal/telemetry"
 	"github.com/cnjack/jcode/internal/tools"
+	"github.com/cnjack/jcode/internal/usage"
 	utils "github.com/cnjack/jcode/internal/util"
 )
 
@@ -129,6 +130,13 @@ type Server struct {
 	// tokenUsage tracks per-call token totals for the agent runs, used for
 	// usage display (goal status, token updates).
 	tokenUsage *model.TokenUsage
+
+	// usageStore backs the global usage-statistics endpoint. nil falls back to
+	// usage.Default(); tests inject a temp-dir store.
+	usageStore *usage.Store
+
+	// breakdownFn computes the live context-window breakdown for the active task.
+	breakdownFn func() usage.ContextBreakdown
 }
 
 // ServerConfig holds the configuration for creating a new Server.
@@ -161,6 +169,7 @@ type ServerConfig struct {
 	EventHandler       handler.AgentEventHandler                                             // optional: handler for runner (e.g. NotifyingHandler)
 	NeedsSetup         bool                                                                  // true when no providers are configured (setup mode)
 	TokenUsage         *model.TokenUsage                                                     // optional: shared token tracker (created when nil)
+	ContextBreakdownFn func() usage.ContextBreakdown                                         // optional: live per-task context breakdown
 }
 
 // NewServer creates a new web server.
@@ -206,6 +215,7 @@ func NewServer(cfg *ServerConfig) *Server {
 		eventHandler:   eh,
 		needsSetup:     cfg.NeedsSetup,
 		tokenUsage:     cfg.TokenUsage,
+		breakdownFn:    cfg.ContextBreakdownFn,
 	}
 	if s.tokenUsage == nil {
 		s.tokenUsage = &model.TokenUsage{}
@@ -296,6 +306,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/git/checkout", s.handleGitCheckout)
 	mux.HandleFunc("GET /api/tasks", s.handleListAllTasks)
 	mux.HandleFunc("PATCH /api/tasks/{id}", s.handleUpdateTask)
+	mux.HandleFunc("GET /api/usage/stats", s.handleUsageStats)
+	mux.HandleFunc("GET /api/tasks/{id}/stats", s.handleTaskStats)
 	mux.HandleFunc("GET /api/models", s.handleListModels)
 	mux.HandleFunc("POST /api/model", s.handleSwitchModel)
 	mux.HandleFunc("POST /api/mode", s.handleSwitchMode)
@@ -466,6 +478,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	full := s.tokenUsage.GetFull()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"running":    s.running.Load(),
 		"ws_clients": s.wsBroker.ClientCount(),
@@ -473,7 +486,31 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"provider":   s.providerName,
 		"model":      s.modelName,
 		"mode":       s.mode,
+		// Live token snapshot so a client reconnecting between turns can render
+		// the context bar + cache hit rate without waiting for the next
+		// token_update WS event. total_tokens = current context occupancy.
+		"token": map[string]any{
+			"total_tokens":        s.tokenUsage.GetLastTotal(),
+			"prompt_tokens":       full.PromptTokens,
+			"completion_tokens":   full.CompletionTokens,
+			"cached_tokens":       full.CachedTokens,
+			"reasoning_tokens":    full.ReasoningTokens,
+			"cache_write_tokens":  full.CacheWriteTokens,
+			"call_count":          full.CallCount,
+			"cache_hit_rate":      s.tokenUsage.CacheHitRate(),
+			"cache_supported":     s.tokenUsage.CacheObserved(),
+			"model_context_limit": s.currentModelContextLimit(),
+		},
 	})
+}
+
+// currentModelContextLimit resolves the context window of the currently
+// selected model, or 0 if unknown.
+func (s *Server) currentModelContextLimit() int {
+	if s.registry == nil || s.cfg == nil {
+		return 0
+	}
+	return model.ResolveContextLimit(s.registry, s.cfg, s.providerName, s.modelName)
 }
 
 // handleWorkspace returns lightweight git workspace info (branch + dirty) for

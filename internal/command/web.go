@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/signal"
 	"path/filepath"
@@ -29,9 +30,28 @@ import (
 	"github.com/cnjack/jcode/internal/skills"
 	"github.com/cnjack/jcode/internal/telemetry"
 	"github.com/cnjack/jcode/internal/tools"
+	"github.com/cnjack/jcode/internal/usage"
 	util "github.com/cnjack/jcode/internal/util"
 	"github.com/cnjack/jcode/internal/web"
 )
+
+// estimateToolTokens approximates a tool's contribution to the context window
+// from its serialized schema (name + description + parameters). ToolInfo's
+// MarshalJSON includes the JSON-schema params, so one marshal captures it all.
+func estimateToolTokens(ctx context.Context, t tool.BaseTool) int {
+	if t == nil {
+		return 0
+	}
+	info, err := t.Info(ctx)
+	if err != nil || info == nil {
+		return 0
+	}
+	raw, err := json.Marshal(info)
+	if err != nil {
+		return usage.EstimateBytes(len(info.Name) + len(info.Desc))
+	}
+	return usage.EstimateBytes(len(raw))
+}
 
 func NewWebCmd() *cobra.Command {
 	var port int
@@ -421,6 +441,37 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		return newAg, newRec, nil
 	}
 
+	// breakdownFn estimates how the live agent's context window is partitioned
+	// across system prompt / built-in tools / MCP tools / skills. It reads the
+	// captured assembly variables (systemPrompt, mcpTools, currentCM, skillLoader)
+	// by reference, so project switches and MCP reloads are reflected without any
+	// cache to invalidate. Built-in tools = all tools minus MCP tools.
+	breakdownFn := func() usage.ContextBreakdown {
+		var b usage.ContextBreakdown
+		skillDesc := skillLoader.Descriptions()
+		b.SkillsTokens = usage.Estimate(skillDesc)
+		// Skills are injected into the system prompt, so subtract to avoid
+		// double-counting them in the system-prompt bucket.
+		b.SystemPromptTokens = usage.Estimate(systemPrompt) - b.SkillsTokens
+		if b.SystemPromptTokens < 0 {
+			b.SystemPromptTokens = 0
+		}
+		for _, mt := range mcpTools {
+			b.MCPToolsTokens += estimateToolTokens(ctx, mt)
+		}
+		if currentCM != nil {
+			total := 0
+			for _, at := range buildAllTools(currentCM) {
+				total += estimateToolTokens(ctx, at)
+			}
+			b.SystemToolsTokens = total - b.MCPToolsTokens
+			if b.SystemToolsTokens < 0 {
+				b.SystemToolsTokens = 0
+			}
+		}
+		return b
+	}
+
 	srv := web.NewServer(&web.ServerConfig{
 		Port:               port,
 		Host:               host,
@@ -450,6 +501,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		EventHandler:       finalHandler,
 		NeedsSetup:         needsSetup,
 		TokenUsage:         agentTokenUsage,
+		ContextBreakdownFn: breakdownFn,
 	})
 
 	// Set handler for approval routing.

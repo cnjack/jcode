@@ -1,5 +1,5 @@
 // API client for jcode backend
-import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, TaskItem, TaskMetaPatch, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse } from '@/types/api'
+import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, TaskItem, TaskMetaPatch, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, UsageStats, TaskStats, TokenUpdateData } from '@/types/api'
 import { apiBase } from './apiBase'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -35,8 +35,11 @@ export const api = {
       provider: string
       model: string
       mode: string
+      token?: TokenUpdateData
     }>('/api/status'),
   config: () => request<{ provider: string; model: string; max_iterations: number }>('/api/config'),
+  usageStats: (days = 30) => request<UsageStats>(`/api/usage/stats?days=${days}`),
+  taskStats: (id: string) => request<TaskStats>(`/api/tasks/${encodeURIComponent(id)}/stats`),
   todos: () => request<TodoItem[]>('/api/todos'),
   goal: () => request<Goal | null>('/api/goal'),
   setGoal: (objective: string, start = true) =>

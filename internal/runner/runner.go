@@ -15,6 +15,7 @@ import (
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/telemetry"
 	"github.com/cnjack/jcode/internal/tools"
+	"github.com/cnjack/jcode/internal/usage"
 )
 
 // Run executes the agent for a single turn, wrapping the response with a
@@ -36,6 +37,21 @@ func Run(
 	}
 	if tokenUsage != nil {
 		ctx = internalmodel.WithTokenTracker(ctx, tokenUsage)
+	}
+	// Snapshot cumulative usage so we can record this turn's delta on completion.
+	var startSnap internalmodel.TokenUsageDetail
+	if tokenUsage != nil {
+		startSnap = tokenUsage.GetFull()
+	}
+	// Resolve the context limit once (config + registry lookup) and reuse it for
+	// every live update below.
+	ctxLimit := modelContextLimit()
+	// Real-time token display: push a fresh snapshot after every LLM call (not
+	// just at turn end) so the UI's context indicator ticks up live during a run.
+	if tokenUsage != nil {
+		ctx = internalmodel.WithUsageNotifier(ctx, func() {
+			h.OnTokenUpdate(buildTokenUsage(tokenUsage, ctxLimit))
+		})
 	}
 	h.OnAgentStart()
 
@@ -117,18 +133,16 @@ todoLoop:
 		}
 	}
 
-	// Send token usage update before signalling done.
-	var lastTotalTokens int64
-	if tokenUsage != nil {
-		lastTotalTokens = tokenUsage.GetLastTotal()
-	}
+	// Send a final token usage update before signalling done. Prefer the
+	// context-local tracker (per-agent) and fall back to the passed-in one.
+	tracker := tokenUsage
 	if local := internalmodel.TokenTrackerFromContext(ctx); local != nil {
-		lastTotalTokens = local.GetLastTotal()
+		tracker = local
 	}
-	h.OnTokenUpdate(handler.TokenUsage{
-		TotalTokens:       lastTotalTokens,
-		ModelContextLimit: modelContextLimit(),
-	})
+	h.OnTokenUpdate(buildTokenUsage(tracker, ctxLimit))
+
+	// Persist this turn's token delta to the global usage log for stats.
+	recordUsageTurn(tokenUsage, startSnap, rec)
 
 	h.OnAgentDone(nil)
 	return resp
@@ -321,6 +335,26 @@ func runInner(
 	return assistantText.String(), false
 }
 
+// buildTokenUsage snapshots a tracker into a handler.TokenUsage. TotalTokens is
+// the last call's total (current context occupancy); the rest are cumulative.
+// Safe to call from any goroutine (the tracker uses atomics).
+func buildTokenUsage(tracker *internalmodel.TokenUsage, ctxLimit int) handler.TokenUsage {
+	tu := handler.TokenUsage{ModelContextLimit: ctxLimit}
+	if tracker != nil {
+		full := tracker.GetFull()
+		tu.TotalTokens = tracker.GetLastTotal()
+		tu.PromptTokens = int64(full.PromptTokens)
+		tu.CompletionTokens = int64(full.CompletionTokens)
+		tu.CachedTokens = int64(full.CachedTokens)
+		tu.ReasoningTokens = int64(full.ReasoningTokens)
+		tu.CacheWriteTokens = int64(full.CacheWriteTokens)
+		tu.CallCount = int64(full.CallCount)
+		tu.CacheHitRate = tracker.CacheHitRate()
+		tu.CacheSupported = tracker.CacheObserved()
+	}
+	return tu
+}
+
 func modelContextLimit() int {
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -329,4 +363,32 @@ func modelContextLimit() int {
 	provider, modelName := cfg.GetProviderModel()
 	registry := internalmodel.NewModelRegistryWithConfig(cfg)
 	return internalmodel.ResolveContextLimit(registry, cfg, provider, modelName)
+}
+
+// recordUsageTurn appends this turn's token delta (cumulative-now minus the
+// start-of-turn snapshot) to the global usage log. Best-effort: a nil tracker,
+// an empty delta, or a write error never affects the run.
+func recordUsageTurn(tracker *internalmodel.TokenUsage, start internalmodel.TokenUsageDetail, rec *session.Recorder) {
+	if tracker == nil {
+		return
+	}
+	delta := tracker.GetFull().Minus(start)
+	if delta.TotalTokens <= 0 && delta.PromptTokens <= 0 {
+		return
+	}
+	ev := usage.Event{
+		Prompt:     delta.PromptTokens,
+		Completion: delta.CompletionTokens,
+		Cached:     delta.CachedTokens,
+		Reasoning:  delta.ReasoningTokens,
+		CacheWrite: delta.CacheWriteTokens,
+		Total:      delta.TotalTokens,
+		Calls:      delta.CallCount,
+	}
+	if rec != nil {
+		ev.Session = rec.UUID()
+		ev.Project = rec.Project()
+		ev.Model = rec.Model()
+	}
+	usage.RecordEvent(ev)
 }

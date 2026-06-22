@@ -18,6 +18,7 @@ import (
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/telemetry"
+	"github.com/cnjack/jcode/internal/usage"
 )
 
 const (
@@ -341,6 +342,27 @@ func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, 
 				assistantText.WriteString(mo.Message.Content)
 			}
 			reportTokens()
+		}
+	}
+
+	// Roll this subagent's tokens into the global usage log under the leader's
+	// session so subagent-heavy work isn't undercounted. The tracker is fresh
+	// per run, so its cumulative snapshot IS this run's delta.
+	if s.deps.Recorder != nil {
+		d := tokenUsage.GetFull()
+		if d.TotalTokens > 0 {
+			usage.RecordEvent(usage.Event{
+				Session:    s.deps.Recorder.UUID(),
+				Project:    s.deps.Recorder.Project(),
+				Model:      s.deps.Recorder.Model(),
+				Prompt:     d.PromptTokens,
+				Completion: d.CompletionTokens,
+				Cached:     d.CachedTokens,
+				Reasoning:  d.ReasoningTokens,
+				CacheWrite: d.CacheWriteTokens,
+				Total:      d.TotalTokens,
+				Calls:      d.CallCount,
+			})
 		}
 	}
 

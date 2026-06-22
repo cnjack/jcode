@@ -6,6 +6,7 @@ import { api } from '@/composables/api'
 import type { SlashCommandInfo, ChatImage } from '@/types/api'
 import WorkspacePicker from '@/components/WorkspacePicker.vue'
 import BranchPicker from '@/components/BranchPicker.vue'
+import ContextCapacityPopup from '@/components/ContextCapacityPopup.vue'
 import { HandRaisedIcon, ShieldExclamationIcon, ClipboardDocumentListIcon, BoltIcon, PlusIcon, PaperClipIcon, XMarkIcon, ChevronDownIcon, StopIcon, PaperAirplaneIcon, MagnifyingGlassIcon, SquaresPlusIcon, PhotoIcon, WrenchScrewdriverIcon, CheckIcon, StarIcon, SparklesIcon } from '@heroicons/vue/24/outline'
 import { StarIcon as StarIconSolid, CheckCircleIcon } from '@heroicons/vue/24/solid'
 
@@ -23,6 +24,16 @@ const textarea = ref<HTMLTextAreaElement | null>(null)
 const showModelPicker = ref(false)
 const showModePicker = ref(false)
 const showAddMenu = ref(false)
+const showContextPopup = ref(false)
+
+// Context-fill ring on the composer: the orange arc fills with the % of the
+// context window in use, turning red as it approaches the limit.
+const ctxRingCirc = 2 * Math.PI * 6.4
+const ctxRingOffset = computed(() => {
+  const p = Math.min(100, Math.max(0, store.tokenPercentage))
+  return ctxRingCirc * (1 - p / 100)
+})
+const ctxRingColor = computed(() => (store.tokenPercentage >= 90 ? '#E24B4A' : 'var(--color-primary)'))
 const showManageModels = ref(false)
 const modelFilter = ref('')
 const containerRef = ref<HTMLDivElement | null>(null)
@@ -387,6 +398,7 @@ function handleClickOutside(e: MouseEvent) {
     showModePicker.value = false
     showAddMenu.value = false
     showSlashMenu.value = false
+    showContextPopup.value = false
     if (showManageModels.value) {
       showManageModels.value = false
       modelFilter.value = ''
@@ -410,6 +422,11 @@ function handleGlobalKey(e: KeyboardEvent) {
     if (showModelPicker.value) {
       e.preventDefault()
       showModelPicker.value = false
+      return
+    }
+    if (showContextPopup.value) {
+      e.preventDefault()
+      showContextPopup.value = false
       return
     }
   }
@@ -444,6 +461,7 @@ watch(() => store.currentSessionId, () => {
   showModelPicker.value = false
   showModePicker.value = false
   showAddMenu.value = false
+  showContextPopup.value = false
   showManageModels.value = false
 })
 
@@ -627,9 +645,26 @@ watch(() => store.imageSupport, (supported) => {
           </div>
 
           <div class="toolbar-right">
-            <span v-if="store.tokenInfo" class="token-count">
-              {{ store.tokenInfo.total_tokens.toLocaleString() }} tokens
-            </span>
+            <div v-if="store.tokenInfo && store.tokenInfo.total_tokens > 0 && store.hasMessages" class="relative">
+              <button
+                type="button"
+                class="token-count token-count-btn ctx-trigger"
+                :title="t('contextCapacity.title')"
+                @click.stop="showContextPopup = !showContextPopup; showModelPicker = false; showModePicker = false; showAddMenu = false"
+              >
+                <svg class="ctx-ring" width="17" height="17" viewBox="0 0 16 16" aria-hidden="true">
+                  <circle cx="8" cy="8" r="6.4" fill="none" stroke="color-mix(in srgb, var(--color-foreground) 20%, transparent)" stroke-width="2.2" />
+                  <circle
+                    cx="8" cy="8" r="6.4" fill="none"
+                    :stroke="ctxRingColor" stroke-width="2.2" stroke-linecap="round"
+                    :stroke-dasharray="ctxRingCirc" :stroke-dashoffset="ctxRingOffset"
+                    transform="rotate(-90 8 8)"
+                  />
+                </svg>
+                <span class="tabular-nums">{{ store.tokenPercentage }}%</span>
+              </button>
+              <ContextCapacityPopup v-if="showContextPopup" class="absolute bottom-full right-0 mb-2 z-50" />
+            </div>
 
             <!-- Model selector (moved to the right, near Send). The trigger shows
                  the active provider's identity tile so the brand is readable at rest. -->
@@ -1965,6 +2000,32 @@ watch(() => store.imageSupport, (supported) => {
   font-size: 10px;
   font-family: var(--font-mono);
   color: var(--color-muted-foreground);
+}
+/* Clickable variant: opens the context-capacity popup. */
+.token-count-btn {
+  background: none;
+  border: none;
+  padding: 2px 5px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--duration-fast), color var(--duration-fast);
+}
+.token-count-btn:hover {
+  background: var(--color-secondary);
+  color: var(--color-foreground);
+}
+/* Context-fill ring + percentage. */
+.ctx-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.ctx-ring {
+  display: block;
+  transition: stroke-dashoffset var(--duration-normal, 0.3s) ease;
+}
+.ctx-ring circle:last-child {
+  transition: stroke-dashoffset var(--duration-normal, 0.3s) ease;
 }
 
 /* Send & Stop buttons */

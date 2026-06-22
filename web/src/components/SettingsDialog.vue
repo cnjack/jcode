@@ -38,8 +38,10 @@ import {
   ArrowLeftIcon,
   ChevronDownIcon,
   CheckIcon,
+  ChartBarIcon,
 } from '@heroicons/vue/24/outline'
 import { isTauri } from '@/composables/useDesktop'
+import UsageStatsPanel from '@/components/UsageStatsPanel.vue'
 import { useI18n } from 'vue-i18n'
 import { SUPPORTED_LOCALES, LOCALE_LABELS, setLocale, i18n, type SupportedLocale } from '@/i18n'
 
@@ -98,7 +100,7 @@ function connectToAlias(alias: SSHAlias) {
 const { themeChoice, setTheme, themes } = useTheme()
 const darkThemes = computed(() => themes.filter((t) => t.appearance === 'dark'))
 const lightThemes = computed(() => themes.filter((t) => t.appearance === 'light'))
-const activeTab = ref<'general' | 'appearance' | 'providers' | 'mcp' | 'skills' | 'ssh' | 'channels' | 'shortcuts'>('general')
+const activeTab = ref<'general' | 'appearance' | 'providers' | 'mcp' | 'skills' | 'ssh' | 'channels' | 'shortcuts' | 'usage'>('general')
 const mcpServers = ref<Record<string, MCPServerInfo>>({})
 const sshAliases = ref<SSHAlias[]>([])
 const sshCurrent = ref('local')
@@ -571,6 +573,7 @@ const tabLabel = computed<Record<string, string>>(() => ({
   ssh: t('settings.tabs.ssh'),
   channels: t('settings.tabs.channels'),
   shortcuts: t('settings.tabs.shortcuts'),
+  usage: t('settings.tabs.usage'),
 }))
 
 // Nav-rail + empty-state icons. One heroicons component per section (was a
@@ -585,6 +588,7 @@ const iconFor: Record<string, Component> = {
   ssh: CommandLineIcon,
   channels: BellAlertIcon,
   shortcuts: ComputerDesktopIcon,
+  usage: ChartBarIcon,
 }
 
 
@@ -695,7 +699,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
             <nav class="settings-rail shrink-0 flex flex-col">
               <div class="flex flex-col gap-0.5">
                 <button
-                  v-for="tab in (['general', 'appearance', 'providers', 'mcp', 'skills', 'ssh', 'channels', 'shortcuts'] as const)"
+                  v-for="tab in (['general', 'appearance', 'providers', 'mcp', 'skills', 'ssh', 'channels', 'shortcuts', 'usage'] as const)"
                   :key="tab"
                   class="group relative w-full flex items-center gap-2.5 h-8 pl-2.5 pr-2 text-left text-[13px] cursor-pointer transition-colors duration-[var(--duration-fast)] hover:bg-[var(--color-secondary)]"
                   :style="activeTab === tab
@@ -1488,6 +1492,9 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     </div>
                   </div>
                 </div>
+
+                <!-- Usage statistics (lazily rendered: the panel fetches on mount) -->
+                <UsageStatsPanel v-if="activeTab === 'usage'" />
                 </div>
               </div>
             </div>

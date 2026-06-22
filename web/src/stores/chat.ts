@@ -111,6 +111,14 @@ export const useChatStore = defineStore('chat', () => {
     if (!tokenInfo.value || !tokenInfo.value.model_context_limit) return 0
     return Math.round((tokenInfo.value.total_tokens / tokenInfo.value.model_context_limit) * 100)
   })
+  // Aggregate KV cache hit rate (0-100), or null when the provider never
+  // reported caching so the UI can render "—" instead of a misleading 0%.
+  const cacheHitPercentage = computed<number | null>(() => {
+    const t = tokenInfo.value
+    if (!t || t.cache_supported === false) return null
+    if (t.cache_hit_rate == null) return null
+    return Math.round(t.cache_hit_rate * 100)
+  })
   const projectName = computed(() => {
     const p = pwd.value
     if (!p) return ''
@@ -675,6 +683,14 @@ export const useChatStore = defineStore('chat', () => {
       isRunning.value = h.running || false
       imageSupport.value = h.image_support || false
       serverVersion.value = h.version || ''
+      // Seed the live context indicator so it's visible at rest / after a page
+      // reload, not only after the first turn completes. Fire-and-forget.
+      api
+        .status()
+        .then((s) => {
+          if (s.token) tokenInfo.value = s.token
+        })
+        .catch(() => {})
       return h
     } catch (err) {
       console.error('Failed to fetch health:', err)
@@ -1009,6 +1025,36 @@ export const useChatStore = defineStore('chat', () => {
       // Re-attach any question/approval still awaiting a response on the server.
       await reconcileAskUser()
       await reconcileApprovals()
+
+      // Seed the context indicator so the ring shows immediately on resume.
+      // total = the live static buckets (system prompt + tools + MCP + skills)
+      // plus a ~4-bytes/token estimate of the loaded history. The next real turn
+      // replaces this with the exact prompt token count from token_update.
+      try {
+        let chars = 0
+        for (const e of entries) {
+          chars += (e.content?.length || 0) + (e.args?.length || 0) + (e.output?.length || 0)
+        }
+        const msgTokens = Math.ceil(chars / 4)
+        const ts = await api.taskStats(currentSessionId.value)
+        const c = ts.context
+        const staticTokens = c
+          ? c.system_prompt_tokens + c.system_tools_tokens + c.mcp_tools_tokens + c.skills_tokens
+          : 0
+        const limit = c?.context_limit || tokenInfo.value?.model_context_limit || 0
+        const total = staticTokens + msgTokens
+        if (limit > 0 && total > 0) {
+          tokenInfo.value = {
+            total_tokens: total,
+            prompt_tokens: total,
+            completion_tokens: 0,
+            model_context_limit: limit,
+            cache_supported: false,
+          }
+        }
+      } catch {
+        // Best-effort: leave the ring hidden until the next turn populates it.
+      }
     } catch (err: unknown) {
       addMessage('system', i18n.global.t('errors.loadSession', { detail: err instanceof Error ? err.message : String(err) }))
     }
@@ -1042,6 +1088,7 @@ export const useChatStore = defineStore('chat', () => {
     hasMessages,
     activeTodos,
     tokenPercentage,
+    cacheHitPercentage,
     projectName,
     // Actions
     addMessage,

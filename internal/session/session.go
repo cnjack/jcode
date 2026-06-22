@@ -164,6 +164,15 @@ func NewRecorder(project, provider, model string) (*Recorder, error) {
 // UUID returns the session identifier.
 func (r *Recorder) UUID() string { return r.uuid }
 
+// Project returns the workspace path this recorder is scoped to.
+func (r *Recorder) Project() string { return r.project }
+
+// Provider returns the provider the session was opened with.
+func (r *Recorder) Provider() string { return r.provider }
+
+// Model returns the model the session was opened with.
+func (r *Recorder) Model() string { return r.model }
+
 // ValidateSessionID checks that a session ID is safe for use as a filename.
 // It rejects empty IDs, path traversal sequences, and path separators.
 func ValidateSessionID(id string) error {
