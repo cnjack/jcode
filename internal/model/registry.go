@@ -239,6 +239,16 @@ func (r *ModelRegistry) GetModelCost(providerID, modelID string) (inputPer1M, ou
 	return m.Cost.Input, m.Cost.Output
 }
 
+// GetModelCacheCost returns the cache-read and cache-write prices (USD per 1M
+// tokens) for a model, or 0 when the registry has no cache pricing for it.
+func (r *ModelRegistry) GetModelCacheCost(providerID, modelID string) (cacheReadPer1M, cacheWritePer1M float64) {
+	_, m, ok := r.LookupModel(providerID, modelID)
+	if !ok || m == nil || m.Cost == nil {
+		return 0, 0
+	}
+	return m.Cost.CacheRead, m.Cost.CacheWrite
+}
+
 // GetProviderAPI returns the API base URL for a provider from the registry.
 func (r *ModelRegistry) GetProviderAPI(providerID string) string {
 	prov := r.GetProvider(providerID)

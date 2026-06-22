@@ -36,6 +36,7 @@ type WSHandler = {
 
 interface WSMessage {
   type: string
+  task_id?: string
   data?: unknown
 }
 
@@ -92,7 +93,18 @@ export function useWebSocket(handlers: WSHandler) {
         const msg: WSMessage = JSON.parse(event.data)
         const handler = handlerMap[msg.type]
         if (handler) {
-          handler(msg.data)
+          let data = msg.data
+          // Carry the task id onto approval/ask cards so the resolve can echo it
+          // back and route to the correct task's engine.
+          if (
+            msg.task_id &&
+            (msg.type === 'approval_request' || msg.type === 'ask_user_request') &&
+            data &&
+            typeof data === 'object'
+          ) {
+            data = { ...(data as Record<string, unknown>), task_id: msg.task_id }
+          }
+          handler(data)
         }
       } catch (err) {
         console.error('WS parse error:', err)
@@ -120,8 +132,8 @@ export function useWebSocket(handlers: WSHandler) {
     }
   }
 
-  function sendApproval(id: string, approved: boolean, approveAll = false) {
-    send({ type: 'approval', data: { id, approved, approve_all: approveAll } })
+  function sendApproval(id: string, approved: boolean, approveAll = false, taskId?: string) {
+    send({ type: 'approval', data: { id, approved, approve_all: approveAll, task_id: taskId } })
   }
 
   function disconnect() {

@@ -15,13 +15,58 @@ type WSClient struct {
 	sendCh  chan []byte
 	mu      sync.Mutex
 	closeCh sync.Once
+
+	// subMu guards the task subscription set. subAll is true until the client
+	// sends its first `subscribe` (so legacy clients that never subscribe keep
+	// receiving every task's events). Once subscribed, only the listed task ids
+	// (plus global events, TaskID=="") are delivered, preventing a busy task from
+	// flooding a client that is only viewing a quiet one.
+	subMu  sync.Mutex
+	subs   map[string]bool
+	subAll bool
 }
 
 func newWSClient(conn *websocket.Conn) *WSClient {
 	return &WSClient{
 		conn:   conn,
 		sendCh: make(chan []byte, 256),
+		subs:   make(map[string]bool),
+		subAll: true,
 	}
+}
+
+// subscribe replaces the client's subscription set with the given task ids
+// (additive across calls). After the first call the client stops receiving
+// every task and only gets its subscribed ids + global events.
+func (c *WSClient) subscribe(taskIDs []string) {
+	c.subMu.Lock()
+	defer c.subMu.Unlock()
+	c.subAll = false
+	for _, id := range taskIDs {
+		if id != "" {
+			c.subs[id] = true
+		}
+	}
+}
+
+// unsubscribe drops task ids from the client's subscription set.
+func (c *WSClient) unsubscribe(taskIDs []string) {
+	c.subMu.Lock()
+	defer c.subMu.Unlock()
+	for _, id := range taskIDs {
+		delete(c.subs, id)
+	}
+}
+
+// wants reports whether this client should receive an event for taskID. Global
+// events (empty taskID) always pass.
+func (c *WSClient) wants(taskID string) bool {
+	if taskID == "" {
+		return true
+	}
+	c.subMu.Lock()
+	defer c.subMu.Unlock()
+	return c.subAll || c.subs[taskID]
 }
 
 func (c *WSClient) writePump() {
@@ -93,6 +138,9 @@ func (b *WSBroker) Broadcast(event WSEvent) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	for _, client := range b.clients {
+		if !client.wants(event.TaskID) {
+			continue
+		}
 		client.send(data)
 	}
 }
@@ -118,7 +166,12 @@ func (b *WSBroker) ClientCount() int {
 // WSEvent is a WebSocket message envelope.
 type WSEvent struct {
 	Type string `json:"type"`
-	Data any    `json:"data,omitempty"`
+	// TaskID tags the event with the task (engine) it came from so the client can
+	// route it to the right task view, and so the broker can deliver it only to
+	// clients subscribed to that task. Empty for global/server-wide events
+	// (mcp_changed, model_changed, pong, …), which every client receives.
+	TaskID string `json:"task_id,omitempty"`
+	Data   any    `json:"data,omitempty"`
 }
 
 // WSIncoming represents a message from the client over WebSocket.

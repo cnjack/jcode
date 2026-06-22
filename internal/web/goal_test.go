@@ -15,8 +15,10 @@ import (
 // (no network listener, no agent), so the HTTP layer can be tested in-process.
 func newGoalTestServer() *Server {
 	return &Server{
-		env:     tools.NewEnv("/tmp", "darwin/arm64"),
-		handler: handler.NewWebHandler(),
+		Engine: &Engine{
+			env:     tools.NewEnv("/tmp", "darwin/arm64"),
+			handler: handler.NewWebHandler(),
+		},
 	}
 }
 

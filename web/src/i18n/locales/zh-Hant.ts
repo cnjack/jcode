@@ -364,6 +364,7 @@ export default {
       activeDays: '活躍天數',
       streak: '連續 {n} 天',
       tokenBreakdown: 'Token 構成',
+      tokenBreakdownHint: '快取包含於輸入、推理包含於輸出,各項不可直接相加',
       promptTokens: '輸入',
       cachedTokens: '快取',
       completionTokens: '輸出',

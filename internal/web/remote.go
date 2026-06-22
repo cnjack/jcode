@@ -185,11 +185,11 @@ func (s *Server) handleRemoteListDir(w http.ResponseWriter, r *http.Request) {
 // remote executor at the chosen directory and rebuilds the agent (same path as
 // a local project switch).
 func (s *Server) handleRemoteBind(w http.ResponseWriter, r *http.Request) {
-	if s.running.Load() {
+	if cur := s.activeEngine(); cur != nil && cur.running.Load() {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is running, cannot switch workspace"})
 		return
 	}
-	if s.switchToRemote == nil {
+	if s.newRemoteEngine == nil {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "remote workspaces are not supported"})
 		return
 	}
@@ -211,25 +211,25 @@ func (s *Server) handleRemoteBind(w http.ResponseWriter, r *http.Request) {
 		remotePwd = remote.DiscoverPwd(r.Context(), pc.exec, "/root")
 	}
 
-	// Tear down local PTYs (they belonged to the previous workspace).
-	s.ptyMgr.closeAll()
+	// Tear down only the outgoing task's PTYs (other concurrent tasks keep theirs).
+	prevTaskID := ""
+	if cur := s.activeEngine(); cur != nil {
+		prevTaskID = cur.taskID
+	}
+	s.ptyMgr.closeForTask(prevTaskID)
 
-	ag, rec, err := s.switchToRemote(pc.exec, remotePwd)
+	eng, err := s.buildRemoteEngine("", pc.exec, remotePwd, s.activeMode())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to bind remote workspace: %v", err)})
 		return
 	}
+	s.setActiveEngine(eng)
 
 	label := remote.ProjectLabel(pc.exec, remotePwd)
 
-	s.mu.Lock()
-	s.pwd = remotePwd
-	s.agent = ag
-	s.recorder = rec
-	s.history = nil
-	s.mu.Unlock()
-
-	s.todoStore.Update(nil)
+	if eng.todoStore != nil {
+		eng.todoStore.Update(nil)
+	}
 
 	// Ownership of the executor has transferred to the live env; remove the
 	// pending entry WITHOUT closing it.

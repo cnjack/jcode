@@ -38,8 +38,19 @@ type TokenUsage struct {
 	lastCached     int64
 	lastReasoning  int64
 	lastCacheWrite int64
-	byModel        map[string]int64
-	mu             sync.RWMutex
+	// cacheSeen is set (sticky) once the provider returns a prompt_tokens_details
+	// object, so CacheObserved can report "caching supported" even on a 0-hit
+	// turn. Cleared by Reset (a session boundary), never by ResetContext.
+	cacheSeen int64
+	// turnBase* snapshot the cumulative counters at the start of an agent turn
+	// (BeginTurn) so per-turn budgets measure THIS turn's consumption, not the
+	// whole session's. ResetContext deliberately leaves these untouched so a
+	// mid-turn compaction does not corrupt the per-turn measurement.
+	turnBasePrompt     int64
+	turnBaseCompletion int64
+	turnBaseCached     int64
+	byModel            map[string]int64
+	mu                 sync.RWMutex
 }
 
 // AddParams carries one API call's token usage. Using a struct keeps the
@@ -51,6 +62,11 @@ type AddParams struct {
 	Cached     int
 	Reasoning  int
 	CacheWrite int
+	// CacheDetailsPresent is true when the provider returned a
+	// prompt_tokens_details object at all (even with cached_tokens:0), letting
+	// CacheObserved tell "supports caching, 0 hits" apart from "never reports
+	// caching". See https://platform.openai.com/docs/guides/prompt-caching.
+	CacheDetailsPresent bool
 }
 
 // TokenUsageDetail holds a token usage snapshot for tracing/observability and
@@ -99,6 +115,9 @@ func (t *TokenUsage) Add(p AddParams) {
 	atomic.StoreInt64(&t.lastCached, int64(p.Cached))
 	atomic.StoreInt64(&t.lastReasoning, int64(p.Reasoning))
 	atomic.StoreInt64(&t.lastCacheWrite, int64(p.CacheWrite))
+	if p.CacheDetailsPresent || p.Cached > 0 {
+		atomic.StoreInt64(&t.cacheSeen, 1)
+	}
 }
 
 // Get returns the current token usage
@@ -158,10 +177,14 @@ func (t *TokenUsage) CacheHitRate() float64 {
 	}
 }
 
-// CacheObserved reports whether any cache-read tokens have been seen, used to
-// distinguish "cache hit rate is 0%" from "this provider never reports caching".
+// CacheObserved reports whether the provider has reported cache details (a
+// prompt_tokens_details object) — used to distinguish "cache hit rate is 0%"
+// from "this provider never reports caching". It is true on the first turn that
+// carries cache details even when cached_tokens is 0, and stays true for the
+// session (cleared only by Reset). The CachedTokens>0 fallback keeps it correct
+// for older snapshots recorded before the presence flag existed.
 func (t *TokenUsage) CacheObserved() bool {
-	return atomic.LoadInt64(&t.CachedTokens) > 0
+	return atomic.LoadInt64(&t.cacheSeen) > 0 || atomic.LoadInt64(&t.CachedTokens) > 0
 }
 
 // Reset resets the token tracker
@@ -179,9 +202,57 @@ func (t *TokenUsage) Reset() {
 	atomic.StoreInt64(&t.lastCached, 0)
 	atomic.StoreInt64(&t.lastReasoning, 0)
 	atomic.StoreInt64(&t.lastCacheWrite, 0)
+	atomic.StoreInt64(&t.cacheSeen, 0)
+	atomic.StoreInt64(&t.turnBasePrompt, 0)
+	atomic.StoreInt64(&t.turnBaseCompletion, 0)
+	atomic.StoreInt64(&t.turnBaseCached, 0)
 	t.mu.Lock()
 	t.byModel = nil
 	t.mu.Unlock()
+}
+
+// ResetContext clears only the "current context occupancy" snapshot (the last
+// API call's per-call values), leaving the cumulative consumption ledger, the
+// cache-support flag, the per-model breakdown, and the per-turn baseline
+// intact. Call this after a compaction/summarization shrinks the live context:
+// the context indicator should reflect the smaller window, but the session's
+// accumulated spend must NOT be lost — it feeds budgets, the usage log, and
+// cross-session stats. (Full Reset is for a genuine session boundary.)
+func (t *TokenUsage) ResetContext() {
+	atomic.StoreInt64(&t.LastTotalTokens, 0)
+	atomic.StoreInt64(&t.lastPrompt, 0)
+	atomic.StoreInt64(&t.lastCompletion, 0)
+	atomic.StoreInt64(&t.lastCached, 0)
+	atomic.StoreInt64(&t.lastReasoning, 0)
+	atomic.StoreInt64(&t.lastCacheWrite, 0)
+}
+
+// BeginTurn snapshots the cumulative counters as the baseline for the current
+// agent turn so TurnUsage reports only this turn's delta. Called at the start of
+// every runner turn.
+func (t *TokenUsage) BeginTurn() {
+	atomic.StoreInt64(&t.turnBasePrompt, atomic.LoadInt64(&t.PromptTokens))
+	atomic.StoreInt64(&t.turnBaseCompletion, atomic.LoadInt64(&t.CompletionTokens))
+	atomic.StoreInt64(&t.turnBaseCached, atomic.LoadInt64(&t.CachedTokens))
+}
+
+// TurnUsage returns this turn's consumption (cumulative minus the BeginTurn
+// baseline). Each value is clamped at 0 so a mid-turn Reset (which zeroes the
+// cumulative and the baseline together) can never yield a negative delta.
+func (t *TokenUsage) TurnUsage() (prompt, completion, cached int64) {
+	prompt = atomic.LoadInt64(&t.PromptTokens) - atomic.LoadInt64(&t.turnBasePrompt)
+	completion = atomic.LoadInt64(&t.CompletionTokens) - atomic.LoadInt64(&t.turnBaseCompletion)
+	cached = atomic.LoadInt64(&t.CachedTokens) - atomic.LoadInt64(&t.turnBaseCached)
+	if prompt < 0 {
+		prompt = 0
+	}
+	if completion < 0 {
+		completion = 0
+	}
+	if cached < 0 {
+		cached = 0
+	}
+	return
 }
 
 // AddByModel adds token usage attributed to a specific model name.
@@ -213,8 +284,9 @@ func (t *TokenUsage) GetByModel() map[string]int64 {
 
 // ModelPricing contains cost information for a model.
 type ModelPricing struct {
-	InputPer1M  float64 // cost per 1M input tokens
-	OutputPer1M float64 // cost per 1M output tokens
+	InputPer1M     float64 // cost per 1M input tokens
+	OutputPer1M    float64 // cost per 1M output tokens
+	CacheReadPer1M float64 // cost per 1M cache-read (cached input) tokens; 0 ⇒ no discount data, fall back to InputPer1M
 }
 
 // ModelInfo contains information about a model
@@ -288,6 +360,7 @@ func extractUsage(u openai.Usage) AddParams {
 	}
 	if u.PromptTokensDetails != nil {
 		p.Cached = u.PromptTokensDetails.CachedTokens
+		p.CacheDetailsPresent = true
 	}
 	if u.CompletionTokensDetails != nil {
 		p.Reasoning = u.CompletionTokensDetails.ReasoningTokens

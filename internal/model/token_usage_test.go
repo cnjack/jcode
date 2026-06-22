@@ -70,6 +70,68 @@ func TestTokenUsageDetail_Minus(t *testing.T) {
 	}
 }
 
+func TestTokenUsage_ResetContext_PreservesLedger(t *testing.T) {
+	u := &TokenUsage{}
+	u.Add(AddParams{Prompt: 1000, Completion: 200, Total: 1200, Cached: 800, CacheDetailsPresent: true})
+	u.Add(AddParams{Prompt: 500, Completion: 100, Total: 600})
+	u.AddByModel("m", 1500, 300, 1800)
+
+	u.ResetContext()
+
+	// Cumulative ledger must survive a context reset (the compaction case).
+	if got := u.GetFull(); got.PromptTokens != 1500 || got.CompletionTokens != 300 || got.TotalTokens != 1800 || got.CallCount != 2 {
+		t.Errorf("ResetContext wiped the cumulative ledger: %+v", got)
+	}
+	if !u.CacheObserved() {
+		t.Errorf("ResetContext should not clear the cache-support flag")
+	}
+	if u.GetByModel() == nil {
+		t.Errorf("ResetContext should not clear the per-model breakdown")
+	}
+	// Only the current-occupancy snapshot is cleared.
+	if got := u.GetLastTotal(); got != 0 {
+		t.Errorf("GetLastTotal after ResetContext = %d, want 0", got)
+	}
+	if got := u.GetLastDetail(); got.PromptTokens != 0 || got.CompletionTokens != 0 {
+		t.Errorf("GetLastDetail after ResetContext = %+v, want zero", got)
+	}
+}
+
+func TestTokenUsage_TurnUsage(t *testing.T) {
+	u := &TokenUsage{}
+	u.Add(AddParams{Prompt: 1000, Completion: 200, Cached: 100})
+
+	u.BeginTurn() // baseline at turn start
+
+	u.Add(AddParams{Prompt: 2000, Completion: 300, Cached: 500})
+	u.Add(AddParams{Prompt: 2000, Completion: 100, Cached: 500})
+
+	p, c, cached := u.TurnUsage()
+	if p != 4000 || c != 400 || cached != 1000 {
+		t.Errorf("TurnUsage() = (%d,%d,%d), want (4000,400,1000)", p, c, cached)
+	}
+
+	// A mid-turn Reset zeroes cumulative AND baseline together; the delta must
+	// clamp to >=0, never go negative.
+	u.Reset()
+	u.Add(AddParams{Prompt: 50, Completion: 10})
+	if p, c, _ := u.TurnUsage(); p < 0 || c < 0 {
+		t.Errorf("TurnUsage() after Reset = (%d,%d), must not be negative", p, c)
+	}
+}
+
+func TestTokenUsage_CacheObserved_DetailsButZeroHit(t *testing.T) {
+	u := &TokenUsage{}
+	// Provider reported a details object but served 0 cached tokens (cold cache).
+	u.Add(AddParams{Prompt: 1000, Completion: 100, Cached: 0, CacheDetailsPresent: true})
+	if !u.CacheObserved() {
+		t.Errorf("CacheObserved() = false, want true when details present even at 0 hits")
+	}
+	if got := u.CacheHitRate(); got != 0 {
+		t.Errorf("CacheHitRate() = %v, want 0", got)
+	}
+}
+
 func TestTokenUsage_Reset(t *testing.T) {
 	u := &TokenUsage{}
 	u.Add(AddParams{Prompt: 100, Completion: 20, Total: 120, Cached: 80, Reasoning: 5})

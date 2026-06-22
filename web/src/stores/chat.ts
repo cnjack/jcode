@@ -376,7 +376,7 @@ export const useChatStore = defineStore('chat', () => {
    * An item already armed with a *different* id is skipped, so two concurrent
    * ask_user calls in one turn each bind to a distinct item.
    */
-  function armAskItem(id: string, questions: AskUserQuestion[]): boolean {
+  function armAskItem(id: string, questions: AskUserQuestion[], taskId?: string): boolean {
     for (let i = timeline.value.length - 1; i >= 0; i--) {
       const item = timeline.value[i]
       if (!item || item.kind !== 'tool' || item.data.name !== 'ask_user') continue
@@ -386,6 +386,7 @@ export const useChatStore = defineStore('chat', () => {
         item.data.status = 'running'
         item.data.askUserId = id
         item.data.askUserQuestions = questions
+        ;(item.data as { askUserTaskId?: string }).askUserTaskId = taskId
         return true
       }
     }
@@ -398,23 +399,21 @@ export const useChatStore = defineStore('chat', () => {
    * was dropped (full event buffer), a rare but unrecoverable case — synthesize
    * one so the question still renders instead of silently hanging the run.
    */
-  function attachAskUserRequest(id: string, questions: AskUserQuestion[]) {
-    if (armAskItem(id, questions)) return
+  function attachAskUserRequest(id: string, questions: AskUserQuestion[], taskId?: string) {
+    if (armAskItem(id, questions, taskId)) return
     const args = JSON.stringify({ questions })
-    timeline.value.push({
-      kind: 'tool',
-      data: {
-        id: genId('tc'),
-        name: 'ask_user',
-        args,
-        status: 'running',
-        timestamp: Date.now(),
-        displayInfo: extractToolDisplayInfo('ask_user', args),
-        askUserId: id,
-        askUserQuestions: questions,
-      },
-      seq: nextSeqId(),
-    })
+    const data = {
+      id: genId('tc'),
+      name: 'ask_user',
+      args,
+      status: 'running' as const,
+      timestamp: Date.now(),
+      displayInfo: extractToolDisplayInfo('ask_user', args),
+      askUserId: id,
+      askUserQuestions: questions,
+    }
+    ;(data as { askUserTaskId?: string }).askUserTaskId = taskId
+    timeline.value.push({ kind: 'tool', data, seq: nextSeqId() })
   }
 
   /**
@@ -453,7 +452,16 @@ export const useChatStore = defineStore('chat', () => {
   /** Submit answers for a pending ask_user request and collapse its card. */
   async function submitAskUser(id: string, answers: AskUserAnswer[]) {
     try {
-      await api.askUser(id, answers)
+      // Echo the task id (stored when the question was armed) so the answer routes
+      // to the requesting task's engine.
+      let taskId: string | undefined
+      for (const item of timeline.value) {
+        if (item.kind === 'tool' && item.data.askUserId === id) {
+          taskId = (item.data as { askUserTaskId?: string }).askUserTaskId
+          break
+        }
+      }
+      await api.askUser(id, answers, taskId)
       // Clear the pending state only after the answer is delivered, so a failed
       // POST leaves the card interactive (the agent is still blocked waiting).
       for (const item of timeline.value) {
@@ -543,14 +551,17 @@ export const useChatStore = defineStore('chat', () => {
 
   async function resolveApproval(id: string, approved: boolean, approveAll = false) {
     const item = timeline.value.find((i) => i.kind === 'approval' && i.data.id === id)
+    let taskId: string | undefined
     if (item && item.kind === 'approval') {
       // Block re-entry while a previous click is still in flight (or already
       // resolved) — otherwise repeated clicks fire multiple POSTs.
       if (item.data.resolving || item.data.resolved) return
       item.data.resolving = true
+      taskId = (item.data as { task_id?: string }).task_id
     }
     try {
-      await api.approval(id, approved, approveAll)
+      // Echo the task id so the resolve routes to the requesting task's engine.
+      await api.approval(id, approved, approveAll, taskId)
       resolveApprovalLocal(id, approved)
     } catch (err: unknown) {
       // Re-enable the buttons and tell the user, instead of a silent

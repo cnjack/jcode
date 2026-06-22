@@ -363,6 +363,7 @@ export default {
       activeDays: '활동 일수',
       streak: '{n}일 연속',
       tokenBreakdown: '토큰 구성',
+      tokenBreakdownHint: '캐시는 입력의 일부이고 추론은 출력의 일부이므로 단순히 합산할 수 없습니다.',
       promptTokens: '입력',
       cachedTokens: '캐시',
       completionTokens: '출력',
