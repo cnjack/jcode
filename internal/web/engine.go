@@ -285,7 +285,7 @@ func (s *Server) registerEngine(eng *Engine) error {
 	s.tasks[eng.taskID] = eng
 	s.tasksMu.Unlock()
 	if pumpCtx != nil {
-		s.startPump(eng, pumpCtx)
+		s.startPump(pumpCtx, eng)
 	}
 	return nil
 }
@@ -294,7 +294,7 @@ func (s *Server) registerEngine(eng *Engine) error {
 // engine's task id, until ctx is cancelled (teardown) or the channel closes.
 // Each engine gets its own pump so concurrent tasks never serialize on one
 // forwarding goroutine.
-func (s *Server) startPump(eng *Engine, ctx context.Context) {
+func (s *Server) startPump(ctx context.Context, eng *Engine) {
 	events := eng.handler.Events()
 	go func() {
 		for {

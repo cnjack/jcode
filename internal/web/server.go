@@ -858,6 +858,12 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		if eng != s.activeEngine() {
 			s.deleteEngine(id)
 		} else {
+			// Active task: wait for the cancelled run to drain so its final
+			// RecordAssistant/usage writes land before we close + reset the recorder
+			// (a post-close write would re-create and truncate the file).
+			for i := 0; i < 200 && eng.running.Load(); i++ {
+				time.Sleep(5 * time.Millisecond)
+			}
 			eng.emu.Lock()
 			if eng.recorder != nil && eng.recorder.UUID() == id {
 				eng.recorder.Close()
@@ -955,7 +961,12 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 		SessionID string `json:"session_id,omitempty"`
 		Pwd       string `json:"pwd,omitempty"`
 	}
-	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req)
+	// The body is optional (empty = brand-new task → EOF), but a non-empty
+	// malformed body should be rejected rather than creating a zero-value task.
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil && err != io.EOF {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
 
 	// Already-live task: just focus it (do not disturb its run).
 	if req.SessionID != "" {
@@ -987,7 +998,14 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 
 	// Resume: hydrate the fresh engine with the persisted conversation/todos/goal.
 	if req.SessionID != "" {
-		entries, _ := session.LoadSession(req.SessionID)
+		entries, lerr := session.LoadSession(req.SessionID)
+		if lerr != nil {
+			// Stale/nonexistent session id: don't silently register a phantom empty
+			// engine under it — tear the just-built engine down and report not-found.
+			s.deleteEngine(eng.taskID)
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+			return
+		}
 		st := session.ReconstructState(entries)
 		eng.emu.Lock()
 		eng.history = st.History
@@ -1165,19 +1183,21 @@ func (s *Server) handleSwitchMode(w http.ResponseWriter, r *http.Request) {
 	// lock submitMessage reads it under, so a mid-run switch is safe and simply
 	// takes effect on the next turn (matching TUI/ACP and the "Allow all" path).
 
-	// Approval axis (Full access → auto) on this task's approval state, then
-	// rebuild this task's agent for the new tool/prompt axis and swap it in under
-	// eng.emu. Takes effect on the next run, like TUI/ACP.
-	if eng.approvalState != nil {
-		eng.approvalState.SetSessionMode(sm)
-	}
+	// Rebuild this task's agent FIRST. If the rebuild fails, abort without
+	// changing the mode/approval axis — otherwise plan mode could be reported while
+	// a write-capable agent stays live.
 	var newAg *adk.ChatModelAgent
 	if eng.rebuildForMode != nil {
-		if ag, err := eng.rebuildForMode(sm.IsPlan()); err == nil {
-			newAg = ag
-		} else {
+		ag, err := eng.rebuildForMode(sm.IsPlan())
+		if err != nil {
 			config.Logger().Printf("[web] mode switch agent rebuild error: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to switch mode"})
+			return
 		}
+		newAg = ag
+	}
+	if eng.approvalState != nil {
+		eng.approvalState.SetSessionMode(sm) // approval axis (Full access → auto)
 	}
 	eng.applyModeSwitch(sm.String(), newAg)
 
@@ -1275,17 +1295,16 @@ func (s *Server) handleApproval(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	// Route the resolve to the requesting task's handler (fall back to active).
+	// Route the resolve to the requesting task's handler. resolveEngine maps an
+	// empty task_id to the active task (legacy clients) but a NON-empty unknown id
+	// to nil — so a stray id can't resolve against the active task's handler-local
+	// approval ids.
 	reng := s.resolveEngine(req.TaskID)
-	h := s.activeHandler()
-	if reng != nil {
-		h = reng.handler
-	}
-	if h == nil {
+	if reng == nil || reng.handler == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such task"})
 		return
 	}
-	if err := h.ResolveApproval(req.ID, req.Approved, req.ApproveAll); err != nil {
+	if err := reng.handler.ResolveApproval(req.ID, req.Approved, req.ApproveAll); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
@@ -1316,15 +1335,14 @@ func (s *Server) syncModeAfterApproval(eng *Engine, approved, approveAll bool) {
 // resume / WS reconnect) so an in-flight approval is re-attached as a card
 // instead of leaving the agent blocked forever.
 func (s *Server) handlePendingApproval(w http.ResponseWriter, r *http.Request) {
-	h := s.activeHandler()
-	if eng := s.resolveEngine(r.URL.Query().Get("task_id")); eng != nil {
-		h = eng.handler
-	}
-	if h == nil {
+	// Empty task_id → active task; non-empty unknown → empty (don't leak another
+	// task's pending requests under a stray id).
+	eng := s.resolveEngine(r.URL.Query().Get("task_id"))
+	if eng == nil || eng.handler == nil {
 		writeJSON(w, http.StatusOK, []handler.WebApprovalRequestData{})
 		return
 	}
-	writeJSON(w, http.StatusOK, h.PendingApprovalRequests())
+	writeJSON(w, http.StatusOK, eng.handler.PendingApprovalRequests())
 }
 
 // handleAskUser resolves a pending ask_user request with the user's answers,
@@ -1356,16 +1374,14 @@ func (s *Server) handleAskUser(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Route the answer to the requesting task's handler (fall back to active).
-	h := s.activeHandler()
-	if eng := s.resolveEngine(req.TaskID); eng != nil {
-		h = eng.handler
-	}
-	if h == nil {
+	// Route the answer to the requesting task's handler. Empty task_id → active;
+	// non-empty unknown → reject (ids are handler-local).
+	eng := s.resolveEngine(req.TaskID)
+	if eng == nil || eng.handler == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such task"})
 		return
 	}
-	if err := h.ResolveAskUser(req.ID, resp); err != nil {
+	if err := eng.handler.ResolveAskUser(req.ID, resp); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
@@ -1377,28 +1393,40 @@ func (s *Server) handleAskUser(w http.ResponseWriter, r *http.Request) {
 // resume) so an in-flight question is re-attached to its tool card instead of
 // leaving the agent blocked forever.
 func (s *Server) handlePendingAskUser(w http.ResponseWriter, r *http.Request) {
-	h := s.activeHandler()
-	if eng := s.resolveEngine(r.URL.Query().Get("task_id")); eng != nil {
-		h = eng.handler
-	}
-	if h == nil {
+	eng := s.resolveEngine(r.URL.Query().Get("task_id"))
+	if eng == nil || eng.handler == nil {
 		writeJSON(w, http.StatusOK, []handler.WebAskUserRequestData{})
 		return
 	}
-	writeJSON(w, http.StatusOK, h.PendingAskUserRequests())
+	writeJSON(w, http.StatusOK, eng.handler.PendingAskUserRequests())
+}
+
+// withinWorkspace reports whether abs is the workspace root or strictly inside
+// it. Uses filepath.Rel rather than strings.HasPrefix so a sibling like /repo2
+// can't escape /repo, and an empty root rejects everything.
+func withinWorkspace(root, abs string) bool {
+	if root == "" {
+		return false
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
+	pwd := s.activePwd()
 	dir := r.URL.Query().Get("path")
 	if dir == "" {
-		dir = s.activePwd()
+		dir = pwd
 	} else if !filepath.IsAbs(dir) {
-		dir = filepath.Join(s.activePwd(), dir)
+		dir = filepath.Join(pwd, dir)
 	}
 
-	// Prevent path traversal.
+	// Prevent path traversal / sibling escape.
 	abs := filepath.Clean(dir)
-	if !strings.HasPrefix(abs, s.activePwd()) {
+	if !withinWorkspace(pwd, abs) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
 		return
 	}
@@ -1438,14 +1466,15 @@ func (s *Server) handleReadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	pwd := s.activePwd()
 	abs := path
 	if !filepath.IsAbs(abs) {
-		abs = filepath.Join(s.activePwd(), abs)
+		abs = filepath.Join(pwd, abs)
 	}
 
-	// Prevent path traversal.
+	// Prevent path traversal / sibling escape.
 	abs = filepath.Clean(abs)
-	if !strings.HasPrefix(abs, s.activePwd()) {
+	if !withinWorkspace(pwd, abs) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path outside workspace"})
 		return
 	}
@@ -2238,18 +2267,16 @@ func (s *Server) handleSwitchProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Kill only the outgoing task's PTYs (they were in the old directory); other
-	// concurrent tasks' terminals are left alone.
-	prevTaskID := ""
+	// Snapshot the outgoing task once, build the new engine BEFORE tearing down its
+	// PTYs — a failed build must not kill the current task's terminals.
+	prevTaskID, curMode := "", ""
 	if cur := s.activeEngine(); cur != nil {
-		prevTaskID = cur.taskID
+		prevTaskID, curMode = cur.taskID, cur.curMode()
 	}
-	s.ptyMgr.closeForTask(prevTaskID)
 
 	// "Switch project" = build a fresh engine rooted at the new path and make it
 	// active. This replaces in-place env mutation, so no other live task's
 	// execution context is disturbed.
-	curMode := s.activeMode()
 	eng, err := s.buildLocalEngine("", req.Path, curMode)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -2257,6 +2284,7 @@ func (s *Server) handleSwitchProject(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	s.ptyMgr.closeForTask(prevTaskID) // outgoing task's PTYs only
 	s.setActiveEngine(eng)
 
 	// Reset todos for the (now empty) active task view.
@@ -2307,16 +2335,20 @@ func (s *Server) handleSetApprovalMode(w http.ResponseWriter, r *http.Request) {
 	if req.AutoApprove {
 		sm = mode.FullAccess
 	}
-	if eng.approvalState != nil {
-		eng.approvalState.SetSessionMode(sm)
-	}
+	// Rebuild first; abort the toggle if the rebuild fails (don't desync the
+	// reported mode from the live agent).
 	var newAg *adk.ChatModelAgent
 	if eng.rebuildForMode != nil {
-		if ag, err := eng.rebuildForMode(false); err == nil {
-			newAg = ag
-		} else {
+		ag, err := eng.rebuildForMode(false)
+		if err != nil {
 			config.Logger().Printf("[web] approval mode agent rebuild error: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to set approval mode"})
+			return
 		}
+		newAg = ag
+	}
+	if eng.approvalState != nil {
+		eng.approvalState.SetSessionMode(sm)
 	}
 	eng.applyModeSwitch(sm.String(), newAg)
 	// Persist as the default startup mode so the preference survives restarts —
@@ -2414,17 +2446,13 @@ func (s *Server) handleWSMessage(client *WSClient, msg WSIncoming) {
 		if err := json.Unmarshal(msg.Data, &data); err != nil {
 			return
 		}
-		// Route the resolve to the task that requested it; fall back to the active
-		// task's handler for legacy (no task_id) clients.
+		// Empty task_id → active task (legacy); non-empty unknown → drop (ids are
+		// handler-local and could collide with another task's).
 		reng := s.resolveEngine(data.TaskID)
-		h := s.activeHandler()
-		if reng != nil {
-			h = reng.handler
-		}
-		if h == nil {
+		if reng == nil || reng.handler == nil {
 			return
 		}
-		if err := h.ResolveApproval(data.ID, data.Approved, data.ApproveAll); err != nil {
+		if err := reng.handler.ResolveApproval(data.ID, data.Approved, data.ApproveAll); err != nil {
 			config.Logger().Printf("[ws] resolve approval failed for id=%q: %v", data.ID, err)
 			return
 		}
@@ -2556,7 +2584,10 @@ func (s *Server) handleToggleSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.mu.Lock()
+	// cfgMu (not s.mu) serializes the cfg read-modify-write+save, so concurrent
+	// approval-mode / MCP / skill saves can't clobber each other in memory or on
+	// disk.
+	s.cfgMu.Lock()
 	// Rebuild the disabled set from config.
 	disabled := make(map[string]bool, len(s.cfg.DisabledSkills))
 	for _, n := range s.cfg.DisabledSkills {
@@ -2574,11 +2605,11 @@ func (s *Server) handleToggleSkill(w http.ResponseWriter, r *http.Request) {
 	sort.Strings(list)
 	s.cfg.DisabledSkills = list
 	if err := config.SaveConfig(s.cfg); err != nil {
-		s.mu.Unlock()
+		s.cfgMu.Unlock()
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	s.mu.Unlock()
+	s.cfgMu.Unlock()
 
 	s.skillLoader.SetDisabled(list)
 	// Rebuild the foreground task's agent so the system prompt (skill descriptions)
@@ -2832,6 +2863,13 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	eng.applyModelSwitch(ag, req.Provider, req.Model)
+	// Publish the new config + registry to the live server so endpoints
+	// (/api/models, context-limit, etc.) reflect the just-configured provider
+	// without a restart.
+	s.cfgMu.Lock()
+	s.cfg = cfg
+	s.registry = model.NewModelRegistryWithConfig(cfg)
+	s.cfgMu.Unlock()
 	s.mu.Lock()
 	s.needsSetup = false
 	s.mu.Unlock()

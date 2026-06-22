@@ -109,7 +109,7 @@ func TestEnginePumpStampsTaskID(t *testing.T) {
 	s.wsBroker.clients[1] = client
 	s.wsBroker.mu.Unlock()
 
-	s.registerEngine(eng) // starts the per-engine pump
+	_ = s.registerEngine(eng) // starts the per-engine pump
 	h.OnAgentText("hello from task 1")
 
 	deadline := time.After(2 * time.Second)
