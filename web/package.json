@@ -18,6 +18,7 @@
     "@headlessui/tailwindcss": "^0.2.2",
     "@headlessui/vue": "^1.7.23",
     "@heroicons/vue": "^2.2.0",
+    "@lobehub/icons-static-svg": "^1.91.0",
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.2.2",
     "@tauri-apps/api": "^2.9.0",

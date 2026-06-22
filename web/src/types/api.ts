@@ -148,11 +148,20 @@ export interface GitBranchesResponse {
   branches: string[] // local branches, most-recently-committed first
 }
 
+export interface GitCheckoutResponse {
+  branch: string // new current branch on success; '' when blocked
+  blocked?: boolean // true when a plain switch was aborted by uncommitted changes
+  message?: string // git's raw (C-locale) message when blocked
+  files?: string[] // files that would be overwritten, parsed from git's output
+  stashed?: boolean // true when changes were stashed as part of this switch
+}
+
 // A task = a conversation, listed across all projects for the sidebar tree.
 export interface TaskItem {
   uuid: string
   project: string // project path
   created_at: string
+  updated_at?: string
   provider: string
   model: string
   title?: string
@@ -160,6 +169,7 @@ export interface TaskItem {
   archived: boolean
   unread: boolean
   status?: string
+  running?: boolean // a live engine for this task is currently running
 }
 
 export interface TaskMetaPatch {
@@ -399,6 +409,7 @@ export interface ApprovalRequestData {
   tool_name: string
   tool_args: string
   is_external: boolean
+  task_id?: string // the task (engine) the approval belongs to; echoed back on resolve
 }
 
 // ask_user types — an interactive question (or batch of questions) the agent
@@ -418,6 +429,7 @@ export interface AskUserQuestion {
 export interface AskUserRequestData {
   id: string
   questions: AskUserQuestion[]
+  task_id?: string // the task (engine) the question belongs to; echoed back on resolve
 }
 
 export interface AskUserAnswer {

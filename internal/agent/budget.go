@@ -66,12 +66,29 @@ func (b *BudgetManager) Track(promptTokens, completionTokens int64) BudgetStatus
 
 	b.promptTokens += promptTokens
 	b.completionTokens += completionTokens
-
-	inputCost := float64(promptTokens) * b.pricing.InputPer1M / 1_000_000
-	outputCost := float64(completionTokens) * b.pricing.OutputPer1M / 1_000_000
-	b.totalCost += inputCost + outputCost
+	b.totalCost += b.costLocked(promptTokens, completionTokens, 0)
 
 	return b.statusLocked()
+}
+
+// costLocked computes the USD cost of the given token counts, charging the
+// cached (cache-read) subset of the prompt at the discounted CacheRead rate when
+// the registry has it (else at the full input rate). Caller must hold the lock.
+func (b *BudgetManager) costLocked(promptTokens, completionTokens, cachedTokens int64) float64 {
+	if cachedTokens < 0 {
+		cachedTokens = 0
+	}
+	if cachedTokens > promptTokens {
+		cachedTokens = promptTokens
+	}
+	cacheRate := b.pricing.CacheReadPer1M
+	if cacheRate <= 0 {
+		cacheRate = b.pricing.InputPer1M // no discount data: bill cached at full price
+	}
+	inputCost := float64(promptTokens-cachedTokens)*b.pricing.InputPer1M/1_000_000 +
+		float64(cachedTokens)*cacheRate/1_000_000
+	outputCost := float64(completionTokens) * b.pricing.OutputPer1M / 1_000_000
+	return inputCost + outputCost
 }
 
 // Check returns the current budget status and whether the budget has been exceeded.
@@ -150,17 +167,26 @@ func (m *budgetMiddleware) AfterModelRewriteState(
 	mc *adk.ModelContext,
 ) (context.Context, *adk.ChatModelAgentState, error) {
 	var promptTokens, completionTokens int64
+	var sessionPrompt, sessionCompletion, sessionCached int64
 	if m.tokenUsage != nil {
-		promptTokens, completionTokens, _ = m.tokenUsage.Get()
+		// Per-turn delta for the per-agent-turn TOKEN cap (max_tokens_per_turn):
+		// runner.BeginTurn sets the baseline at turn start. Reading cumulative
+		// Get() here made the "per turn" cap behave as a session total.
+		promptTokens, completionTokens, _ = m.tokenUsage.TurnUsage()
+		// Session-cumulative for the COST cap (max_cost_per_session): cost must
+		// accumulate across turns, not reset each turn.
+		full := m.tokenUsage.GetFull()
+		sessionPrompt = int64(full.PromptTokens)
+		sessionCompletion = int64(full.CompletionTokens)
+		sessionCached = int64(full.CachedTokens)
 	}
 
-	// Sync budget manager with per-agent token tracker values.
+	// promptTokens/completionTokens drive the per-turn token cap; totalCost is the
+	// session-cumulative cost (cached subset billed at the cache-read rate).
 	m.manager.mu.Lock()
 	m.manager.promptTokens = promptTokens
 	m.manager.completionTokens = completionTokens
-	inputCost := float64(promptTokens) * m.manager.pricing.InputPer1M / 1_000_000
-	outputCost := float64(completionTokens) * m.manager.pricing.OutputPer1M / 1_000_000
-	m.manager.totalCost = inputCost + outputCost
+	m.manager.totalCost = m.manager.costLocked(sessionPrompt, sessionCompletion, sessionCached)
 	m.manager.mu.Unlock()
 
 	status := m.manager.Status()

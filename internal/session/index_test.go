@@ -1,6 +1,10 @@
 package session
 
-import "testing"
+import (
+	"fmt"
+	"sync"
+	"testing"
+)
 
 // TestRecorderIndexingRequiresContent locks the contract the web server's
 // todo/goal OnUpdate guard relies on: a recorder that has written nothing is
@@ -38,4 +42,34 @@ func TestRecorderIndexingRequiresContent(t *testing.T) {
 		t.Fatalf("expected the session indexed after a user message, got %+v", metas)
 	}
 	rec.Close()
+}
+
+// TestConcurrentIndexWritesNoLostUpdate guards the indexMu serialization: many
+// goroutines adding distinct sessions concurrently must ALL survive in the
+// index. Without the lock, the read-modify-rename writers lose updates (and
+// corrupt the shared .tmp), so the final index would hold far fewer than N.
+// Run with -race to also catch the data race.
+func TestConcurrentIndexWritesNoLostUpdate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	const project = "/proj/concurrent"
+	const n = 50
+
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_ = addToIndex(project, SessionMeta{UUID: fmt.Sprintf("uuid-%d", i), Project: project})
+		}(i)
+	}
+	wg.Wait()
+
+	metas, err := ListSessions(project)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(metas) != n {
+		t.Fatalf("lost updates: got %d sessions, want %d (concurrent addToIndex without serialization)", len(metas), n)
+	}
 }

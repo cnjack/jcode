@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, inject } from 'vue'
+import { ref, computed, inject, onMounted } from 'vue'
 import { Popover, PopoverButton, PopoverPanel } from '@headlessui/vue'
 import {
   FolderIcon,
@@ -51,10 +51,23 @@ const activeName = computed(() => {
 
 const workspaces = computed(() => {
   const q = query.value.trim().toLowerCase()
-  const nodes = projectStore.projectsForTree
+  // Drop local workspaces whose folder no longer exists on disk — selecting one
+  // would only surface "path does not exist or is not a directory". Remote
+  // (ssh://) labels are never validated locally, so they always stay listed.
+  const nodes = projectStore.projectsForTree.filter(
+    (n) => isRemotePath(n.path) || !projectStore.missingPaths.has(n.path),
+  )
   if (!q) return nodes
   return nodes.filter((n) => n.name.toLowerCase().includes(q) || n.path.toLowerCase().includes(q))
 })
+
+// Re-stat the known workspaces whenever the picker is shown, so a folder deleted
+// while the app was open disappears from the list. Runs on mount (the pill is
+// always mounted) and again each time the panel is opened.
+onMounted(() => projectStore.validateProjectPaths())
+function onOpen() {
+  projectStore.validateProjectPaths()
+}
 
 function isActive(path: string): boolean {
   return path === activePath.value
@@ -153,7 +166,7 @@ function reset() {
        reliable way to make the panel sit right next to its trigger. -->
   <Popover class="ws-popover" style="position: relative">
     <PopoverButton as="template" :disabled="store.isRunning">
-      <button class="ws-pill ws-pill-action" :disabled="store.isRunning" :title="activePath">
+      <button class="ws-pill ws-pill-action" :disabled="store.isRunning" :title="activePath" @click="onOpen">
         <component :is="activeIsRemote ? ServerIcon : FolderOpenIcon" class="w-3.5 h-3.5 ws-pill-icon" />
         <span class="ws-name">{{ activeName }}</span>
         <ChevronDownIcon class="w-3 h-3 ws-caret" />

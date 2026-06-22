@@ -38,11 +38,18 @@ func Run(
 	if tokenUsage != nil {
 		ctx = internalmodel.WithTokenTracker(ctx, tokenUsage)
 	}
-	// Snapshot cumulative usage so we can record this turn's delta on completion.
+	// Snapshot cumulative usage so we can record this turn's delta on completion,
+	// and mark the per-turn baseline so the budget middleware measures THIS turn.
 	var startSnap internalmodel.TokenUsageDetail
 	if tokenUsage != nil {
 		startSnap = tokenUsage.GetFull()
+		tokenUsage.BeginTurn()
 	}
+	// Persist this turn's token delta on EVERY exit path — success, user
+	// cancellation, or a model error — so a turn that already made billable calls
+	// before stopping is not dropped from the usage log. recordUsageTurn is
+	// nil-tracker and zero-delta guarded, so a no-op turn records nothing.
+	defer recordUsageTurn(tokenUsage, startSnap, rec)
 	// Resolve the context limit once (config + registry lookup) and reuse it for
 	// every live update below.
 	ctxLimit := modelContextLimit()
@@ -141,9 +148,8 @@ todoLoop:
 	}
 	h.OnTokenUpdate(buildTokenUsage(tracker, ctxLimit))
 
-	// Persist this turn's token delta to the global usage log for stats.
-	recordUsageTurn(tokenUsage, startSnap, rec)
-
+	// This turn's token delta is persisted by the deferred recordUsageTurn, which
+	// also covers the early-return (cancel/error) paths above.
 	h.OnAgentDone(nil)
 	return resp
 }
@@ -384,6 +390,9 @@ func recordUsageTurn(tracker *internalmodel.TokenUsage, start internalmodel.Toke
 		CacheWrite: delta.CacheWriteTokens,
 		Total:      delta.TotalTokens,
 		Calls:      delta.CallCount,
+		// Record cache *support* (details object seen), not just a positive hit, so
+		// the stats page can show "—" vs a real 0% even on a cold-cache turn.
+		CacheSeen: tracker.CacheObserved(),
 	}
 	if rec != nil {
 		ev.Session = rec.UUID()

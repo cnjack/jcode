@@ -161,8 +161,13 @@ func NewRecorder(project, provider, model string) (*Recorder, error) {
 	}, nil
 }
 
-// UUID returns the session identifier.
-func (r *Recorder) UUID() string { return r.uuid }
+// UUID returns the session identifier. Locked because SetUUID can update it
+// concurrently (a resumed web task swaps the recorder's UUID under r.mu).
+func (r *Recorder) UUID() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.uuid
+}
 
 // Project returns the workspace path this recorder is scoped to.
 func (r *Recorder) Project() string { return r.project }
@@ -170,8 +175,23 @@ func (r *Recorder) Project() string { return r.project }
 // Provider returns the provider the session was opened with.
 func (r *Recorder) Provider() string { return r.provider }
 
-// Model returns the model the session was opened with.
-func (r *Recorder) Model() string { return r.model }
+// Model returns the model currently attributed to recorded usage. It is the
+// model the session was opened with unless SetModel updated it after a switch.
+func (r *Recorder) Model() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.model
+}
+
+// SetModel updates the model attributed to subsequently recorded usage so a
+// mid-session model switch attributes new turns to the new model rather than
+// the one the session was opened with. The session-start header is unchanged
+// (it records the opening model).
+func (r *Recorder) SetModel(model string) {
+	r.mu.Lock()
+	r.model = model
+	r.mu.Unlock()
+}
 
 // ValidateSessionID checks that a session ID is safe for use as a filename.
 // It rejects empty IDs, path traversal sequences, and path separators.
@@ -569,8 +589,19 @@ func (r *Recorder) writeEntry(e Entry) error {
 	return r.file.Sync()
 }
 
+// indexMu serializes the read-modify-rename writers of the shared session index
+// (session.json). Atomic rename prevents torn files but NOT lost updates: two
+// concurrent writers each read the same old index, mutate, and rename — last one
+// wins — and they also race on the shared "<index>.tmp" path. Once multiple web
+// task Engines create/title/update/delete sessions in parallel this is a real
+// lost-update + tmp-corruption hazard, so every writer takes this lock. Readers
+// (ListSessions/ListAllSessions) rely on rename atomicity and stay lock-free.
+var indexMu sync.Mutex
+
 // addToIndex adds a SessionMeta to the shared index file.
 func addToIndex(project string, meta SessionMeta) error {
+	indexMu.Lock()
+	defer indexMu.Unlock()
 	indexPath, err := config.SessionsIndexPath()
 	if err != nil {
 		return err
@@ -624,6 +655,8 @@ func generateTitle(content string) string {
 
 // updateIndexTitle updates the title of a session in the shared index file.
 func updateIndexTitle(project, uuid, title string) error {
+	indexMu.Lock()
+	defer indexMu.Unlock()
 	indexPath, err := config.SessionsIndexPath()
 	if err != nil {
 		return err
@@ -680,6 +713,8 @@ func DeleteSession(project, uuid string) error {
 // removed when the uuid was actually found in the index, which also prevents a
 // crafted uuid from deleting an arbitrary file.
 func DeleteSessionByUUID(uuid string) (bool, error) {
+	indexMu.Lock()
+	defer indexMu.Unlock()
 	indexPath, err := config.SessionsIndexPath()
 	if err != nil {
 		return false, err
@@ -732,6 +767,8 @@ func DeleteSessionByUUID(uuid string) (bool, error) {
 }
 
 func removeFromIndex(project, uuid string) error {
+	indexMu.Lock()
+	defer indexMu.Unlock()
 	indexPath, err := config.SessionsIndexPath()
 	if err != nil {
 		return err
@@ -791,6 +828,8 @@ func ListSessions(project string) ([]SessionMeta, error) {
 // or (nil, nil) if no session with that uuid exists. uuid is only compared in
 // memory (never used as a path), so no path validation is required here.
 func UpdateSessionMeta(uuid string, mutate func(*SessionMeta)) (*SessionMeta, error) {
+	indexMu.Lock()
+	defer indexMu.Unlock()
 	indexPath, err := config.SessionsIndexPath()
 	if err != nil {
 		return nil, err

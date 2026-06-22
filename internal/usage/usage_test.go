@@ -156,6 +156,20 @@ func TestAggregate_NoCacheSupport(t *testing.T) {
 	}
 }
 
+func TestAggregate_CacheSeenZeroHit(t *testing.T) {
+	// Provider reported cache details but served 0 cached tokens: caching IS
+	// supported, so the stats page should not claim it isn't.
+	e := ev("2026-06-21", "m", "/p", 100, 80, 0)
+	e.CacheSeen = true
+	a := Aggregate([]Event{e}, "2026-06-21")
+	if !a.CacheSupported {
+		t.Error("CacheSupported = false, want true when CacheSeen even with 0 cached")
+	}
+	if a.CacheHitRate != 0 {
+		t.Errorf("CacheHitRate = %v, want 0", a.CacheHitRate)
+	}
+}
+
 func TestAggregate_Trend(t *testing.T) {
 	a := Aggregate([]Event{
 		ev("2026-06-21", "m", "/p", 100, 80, 40),

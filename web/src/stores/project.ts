@@ -30,6 +30,39 @@ export function parseRemoteLabel(label: string): RemoteMeta | null {
 
 const STORAGE_KEY = 'jcode_projects'
 const ACTIVE_KEY = 'jcode_active_project'
+const FILTERS_KEY = 'jcode_sidebar_filters'
+
+// Sidebar filter / grouping / sorting preferences (driven by the filter menu).
+export type StatusFilter = 'active' | 'archived' | 'all'
+export type LastActivityFilter = 'all' | 'today' | 'week' | 'month'
+export type GroupByMode = 'project' | 'date'
+export type SortByMode = 'recency' | 'name' | 'created'
+
+export interface SidebarFilters {
+  status: StatusFilter
+  project: string // '' = all projects, otherwise a project path
+  lastActivity: LastActivityFilter
+  groupBy: GroupByMode
+  sortBy: SortByMode
+}
+
+export const DEFAULT_FILTERS: SidebarFilters = {
+  status: 'active',
+  project: '',
+  lastActivity: 'all',
+  groupBy: 'project',
+  sortBy: 'recency',
+}
+
+function loadFilters(): SidebarFilters {
+  try {
+    const raw = localStorage.getItem(FILTERS_KEY)
+    // Spread over defaults so a newly-added key is filled in for old installs.
+    return raw ? { ...DEFAULT_FILTERS, ...JSON.parse(raw) } : { ...DEFAULT_FILTERS }
+  } catch {
+    return { ...DEFAULT_FILTERS }
+  }
+}
 
 function loadProjects(): Project[] {
   try {
@@ -47,6 +80,16 @@ function saveProjects(projects: Project[]) {
 export const useProjectStore = defineStore('project', () => {
   const projects = ref<Project[]>(loadProjects())
   const activeId = ref<string>(localStorage.getItem(ACTIVE_KEY) || '')
+
+  // Sidebar filter/sort/group prefs — persisted so they survive reloads.
+  const filters = ref<SidebarFilters>(loadFilters())
+  function setFilters(patch: Partial<SidebarFilters>) {
+    filters.value = { ...filters.value, ...patch }
+    localStorage.setItem(FILTERS_KEY, JSON.stringify(filters.value))
+  }
+  function resetFilters() {
+    setFilters({ ...DEFAULT_FILTERS })
+  }
 
   const activeProject = computed(() =>
     projects.value.find((p) => p.id === activeId.value) || null,
@@ -88,12 +131,26 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function removeProject(id: string) {
+    const removed = projects.value.find((p) => p.id === id)
     projects.value = projects.value.filter((p) => p.id !== id)
     saveProjects(projects.value)
     if (activeId.value === id) {
       activeId.value = ''
       localStorage.removeItem(ACTIVE_KEY)
     }
+    // Drop a single-project filter pointing at the project we just removed, so a
+    // stale path can't silently reactivate when that path later reappears.
+    if (removed && filters.value.project === removed.path) {
+      setFilters({ project: '' })
+    }
+  }
+
+  // removeProjectByPath drops a workspace by its path (used when its last
+  // conversation is deleted). No-op if the path isn't a tracked project — paths
+  // that only existed because they had tasks fall out of the tree on their own.
+  function removeProjectByPath(path: string) {
+    const proj = projects.value.find((p) => p.path === path)
+    if (proj) removeProject(proj.id)
   }
 
   function setActive(id: string) {
@@ -177,7 +234,35 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
-  // Tasks grouped by project path, sorted newest-first, pinned on top.
+  // Local workspace paths that no longer exist on disk. Populated by
+  // validateProjectPaths and used to hide dead entries from the picker, so the
+  // user never clicks one and hits "path does not exist or is not a directory".
+  const missingPaths = ref<Set<string>>(new Set())
+
+  async function validateProjectPaths() {
+    // Gather every known local workspace path (localStorage projects + paths that
+    // have tasks). Remote (ssh://) labels can't be stat'd locally, so they're
+    // never validated and never marked missing.
+    const paths = new Set<string>()
+    for (const p of projects.value) if (!isRemotePath(p.path)) paths.add(p.path)
+    for (const t of allTasks.value) if (!isRemotePath(t.project)) paths.add(t.project)
+    if (paths.size === 0) {
+      missingPaths.value = new Set()
+      return
+    }
+    try {
+      const { missing } = await api.validatePaths([...paths])
+      missingPaths.value = new Set(missing)
+    } catch {
+      // If the check itself fails, hide nothing — a stale-but-visible workspace
+      // is far less surprising than an entire list vanishing on a network blip.
+      missingPaths.value = new Set()
+    }
+  }
+
+  // Tasks grouped by project path, ordered: live work first, then pinned, then
+  // newest activity. Putting running tasks above pinned ones means whatever is
+  // actively generating is always the top row of its workspace.
   const tasksByProject = computed(() => {
     const map: Record<string, TaskItem[]> = {}
     for (const t of allTasks.value) {
@@ -187,8 +272,12 @@ export const useProjectStore = defineStore('project', () => {
       const list = map[path]
       if (!list) continue
       list.sort((a, b) => {
+        if (!!a.running !== !!b.running) return a.running ? -1 : 1
         if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
-        return (b.created_at || '').localeCompare(a.created_at || '')
+        // Newest activity first.
+        const at = a.updated_at || a.created_at || ''
+        const bt = b.updated_at || b.created_at || ''
+        return bt.localeCompare(at)
       })
     }
     return map
@@ -205,6 +294,17 @@ export const useProjectStore = defineStore('project', () => {
       return { id: known?.id ?? '', path, name: nameForPath(path) }
     })
   })
+
+  // setTaskRunning optimistically marks a task running/idle in the sidebar from a
+  // task_status WS event (the authoritative live state is re-synced by a
+  // following fetchAllTasks).
+  function setTaskRunning(uuid: string, running: boolean) {
+    const t = allTasks.value.find((x) => x.uuid === uuid)
+    if (t) {
+      t.running = running
+      if (running) t.updated_at = new Date().toISOString()
+    }
+  }
 
   async function updateTaskMeta(uuid: string, patch: TaskMetaPatch) {
     // Optimistic local update, then persist.
@@ -226,6 +326,7 @@ export const useProjectStore = defineStore('project', () => {
     addProject,
     upsertRemoteProject,
     removeProject,
+    removeProjectByPath,
     setActive,
     switchToProject,
     openProject,
@@ -234,8 +335,14 @@ export const useProjectStore = defineStore('project', () => {
     nameForPath,
     allTasks,
     fetchAllTasks,
+    missingPaths,
+    validateProjectPaths,
+    setTaskRunning,
     tasksByProject,
     projectsForTree,
     updateTaskMeta,
+    filters,
+    setFilters,
+    resetFilters,
   }
 })

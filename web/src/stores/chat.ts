@@ -21,6 +21,7 @@ import type {
 import { normalizeMode } from '@/types/api'
 import { api } from '@/composables/api'
 import { extractToolDisplayInfo } from '@/composables/toolInfo'
+import { useProjectStore } from '@/stores/project'
 
 let _seqId = 0
 function nextSeqId() {
@@ -376,7 +377,7 @@ export const useChatStore = defineStore('chat', () => {
    * An item already armed with a *different* id is skipped, so two concurrent
    * ask_user calls in one turn each bind to a distinct item.
    */
-  function armAskItem(id: string, questions: AskUserQuestion[]): boolean {
+  function armAskItem(id: string, questions: AskUserQuestion[], taskId?: string): boolean {
     for (let i = timeline.value.length - 1; i >= 0; i--) {
       const item = timeline.value[i]
       if (!item || item.kind !== 'tool' || item.data.name !== 'ask_user') continue
@@ -386,6 +387,7 @@ export const useChatStore = defineStore('chat', () => {
         item.data.status = 'running'
         item.data.askUserId = id
         item.data.askUserQuestions = questions
+        ;(item.data as { askUserTaskId?: string }).askUserTaskId = taskId
         return true
       }
     }
@@ -398,23 +400,21 @@ export const useChatStore = defineStore('chat', () => {
    * was dropped (full event buffer), a rare but unrecoverable case — synthesize
    * one so the question still renders instead of silently hanging the run.
    */
-  function attachAskUserRequest(id: string, questions: AskUserQuestion[]) {
-    if (armAskItem(id, questions)) return
+  function attachAskUserRequest(id: string, questions: AskUserQuestion[], taskId?: string) {
+    if (armAskItem(id, questions, taskId)) return
     const args = JSON.stringify({ questions })
-    timeline.value.push({
-      kind: 'tool',
-      data: {
-        id: genId('tc'),
-        name: 'ask_user',
-        args,
-        status: 'running',
-        timestamp: Date.now(),
-        displayInfo: extractToolDisplayInfo('ask_user', args),
-        askUserId: id,
-        askUserQuestions: questions,
-      },
-      seq: nextSeqId(),
-    })
+    const data = {
+      id: genId('tc'),
+      name: 'ask_user',
+      args,
+      status: 'running' as const,
+      timestamp: Date.now(),
+      displayInfo: extractToolDisplayInfo('ask_user', args),
+      askUserId: id,
+      askUserQuestions: questions,
+    }
+    ;(data as { askUserTaskId?: string }).askUserTaskId = taskId
+    timeline.value.push({ kind: 'tool', data, seq: nextSeqId() })
   }
 
   /**
@@ -453,7 +453,16 @@ export const useChatStore = defineStore('chat', () => {
   /** Submit answers for a pending ask_user request and collapse its card. */
   async function submitAskUser(id: string, answers: AskUserAnswer[]) {
     try {
-      await api.askUser(id, answers)
+      // Echo the task id (stored when the question was armed) so the answer routes
+      // to the requesting task's engine.
+      let taskId: string | undefined
+      for (const item of timeline.value) {
+        if (item.kind === 'tool' && item.data.askUserId === id) {
+          taskId = (item.data as { askUserTaskId?: string }).askUserTaskId
+          break
+        }
+      }
+      await api.askUser(id, answers, taskId)
       // Clear the pending state only after the answer is delivered, so a failed
       // POST leaves the card interactive (the agent is still blocked waiting).
       for (const item of timeline.value) {
@@ -543,14 +552,17 @@ export const useChatStore = defineStore('chat', () => {
 
   async function resolveApproval(id: string, approved: boolean, approveAll = false) {
     const item = timeline.value.find((i) => i.kind === 'approval' && i.data.id === id)
+    let taskId: string | undefined
     if (item && item.kind === 'approval') {
       // Block re-entry while a previous click is still in flight (or already
       // resolved) — otherwise repeated clicks fire multiple POSTs.
       if (item.data.resolving || item.data.resolved) return
       item.data.resolving = true
+      taskId = (item.data as { task_id?: string }).task_id
     }
     try {
-      await api.approval(id, approved, approveAll)
+      // Echo the task id so the resolve routes to the requesting task's engine.
+      await api.approval(id, approved, approveAll, taskId)
       resolveApprovalLocal(id, approved)
     } catch (err: unknown) {
       // Re-enable the buttons and tell the user, instead of a silent
@@ -569,8 +581,11 @@ export const useChatStore = defineStore('chat', () => {
     // turn ends (agent_done), agentDone flushes the next queued message — so Stop
     // acts as "skip the current turn and send my next queued instruction now".
     // To cancel pending messages, remove them individually via the × on each.
+    // Target the task currently in view so Stop interrupts exactly the run you
+    // are looking at, even if it's a backgrounded task that isn't the active
+    // engine (the backend falls back to the active task only when id is empty).
     try {
-      await api.stop()
+      await api.stop(currentSessionId.value || undefined)
     } catch (err: unknown) {
       console.error('Stop error:', err)
     }
@@ -603,11 +618,13 @@ export const useChatStore = defineStore('chat', () => {
     // Already on the welcome screen — nothing to do.
     if (!currentSessionId.value && timeline.value.length === 0) return
     try {
-      // Reset backend state (history, old recorder) but don't create a new
-      // recorder yet — it will be created lazily on the first message.
-      await api.newSession()
-      currentSessionId.value = ''
+      // The backend creates a fresh engine for the new task and returns its id.
+      // Bind to it so a still-running PREVIOUS task's events (tagged with its own
+      // task_id) are filtered out of this new chat instead of leaking in.
+      const resp = await api.newSession()
       clearChat()
+      currentSessionId.value = resp.session_id || ''
+      isRunning.value = false // the new task starts idle
       await fetchSessions()
     } catch (err: unknown) {
       addMessage('system', err instanceof Error ? err.message : String(err))
@@ -618,8 +635,10 @@ export const useChatStore = defineStore('chat', () => {
   // workspace changed (local switch or remote bind) and lands on a fresh welcome
   // screen so the next message starts a new task in the chosen workspace.
   async function resetToWelcomeAfterSwitch() {
+    // fetchHealth binds currentSessionId + isRunning to the NEW active engine, so
+    // don't blank currentSessionId afterward (an empty id would let a backgrounded
+    // task's events leak into this view).
     await fetchHealth()
-    currentSessionId.value = ''
     clearChat()
     fetchTodos()
     fetchGoal()
@@ -920,6 +939,13 @@ export const useChatStore = defineStore('chat', () => {
       // Re-attach any question/approval still awaiting a response on the server.
       await reconcileAskUser()
       await reconcileApprovals()
+      // Restore the persisted plan/goal that clearChat() above blanked. boot()
+      // also fires these via loadWorkspaceState(), but that runs concurrently and
+      // un-awaited — its fetches race our clearChat(), and since api.session() is
+      // the heaviest call clearChat() tends to land last and win, dropping the
+      // plan on reload. Re-fetching here makes restore self-consistent regardless.
+      fetchGoal()
+      fetchTodos()
     } catch {
       // Session file may not exist yet (lazy creation), silently ignore
     }
@@ -966,9 +992,22 @@ export const useChatStore = defineStore('chat', () => {
       currentSessionId.value = resp.session_id || uuid
 
       clearChat()
-      // The backend restored the session's goal — refresh explicitly in case
-      // the goal_update WS push is missed.
+      // Seed the Stop/Send button from this task's real live state: a task that
+      // is still running in the background must show Stop (so it can be
+      // interrupted) the instant you open it. The turn already started before we
+      // switched in, so no fresh agent_start arrives to flip the button — we'd
+      // otherwise be stuck showing Send over a live run. projectStore is kept
+      // current by task_status events (it's what drives the sidebar running
+      // indicator); agent_done, scoped to this task, flips it back to idle when
+      // the run ends.
+      const resumedId = resp.session_id || uuid
+      isRunning.value = !!useProjectStore().allTasks.find((t) => t.uuid === resumedId)?.running
+      // The backend restored the session's goal and todos — refresh both
+      // explicitly. clearChat() above blanked them, and no goal_update/todo_update
+      // WS push fires on a switch, so without this the Plan panel would show
+      // "no tasks" / 0/0 even though the resumed task has a live plan.
       fetchGoal()
+      fetchTodos()
 
       // Track pending tool calls by tool_call_id so we can match results
       const pendingToolCalls = new Map<string, ToolCall>()
