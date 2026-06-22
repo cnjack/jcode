@@ -129,10 +129,12 @@ func TestTaskStatsActive(t *testing.T) {
 	tu.Add(model.AddParams{Prompt: 1000, Completion: 200, Total: 1200, Cached: 800})
 
 	s := &Server{
-		recorder:   rec,
-		tokenUsage: tu,
-		breakdownFn: func() usage.ContextBreakdown {
-			return usage.ContextBreakdown{SystemPromptTokens: 100, SystemToolsTokens: 200, MCPToolsTokens: 50, SkillsTokens: 30}
+		Engine: &Engine{
+			recorder:   rec,
+			tokenUsage: tu,
+			breakdownFn: func() usage.ContextBreakdown {
+				return usage.ContextBreakdown{SystemPromptTokens: 100, SystemToolsTokens: 200, MCPToolsTokens: 50, SkillsTokens: 30}
+			},
 		},
 	}
 	rr := httptest.NewRecorder()
@@ -177,7 +179,7 @@ func TestTaskStatsHistorical(t *testing.T) {
 	mustRecord(t, store, usage.Event{Date: today, Session: "sess-B", Model: "m", Prompt: 999, Cached: 0, Completion: 9, Total: 1008, Calls: 1})
 
 	// No recorder → every query is treated as historical.
-	s := &Server{usageStore: store}
+	s := &Server{Engine: &Engine{}, usageStore: store}
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/tasks/sess-A/stats", nil)
 	req.SetPathValue("id", "sess-A")

@@ -59,8 +59,12 @@ func Aggregate(events []Event, today string) Aggregated {
 	agg := Aggregated{Days: make(map[string]*DayBucket)}
 	byModel := map[string]int64{}
 	byProject := map[string]int64{}
+	anyCacheSeen := false
 
 	for _, ev := range events {
+		if ev.CacheSeen {
+			anyCacheSeen = true
+		}
 		agg.Totals.Total += int64(ev.Total)
 		agg.Totals.Prompt += int64(ev.Prompt)
 		agg.Totals.Completion += int64(ev.Completion)
@@ -90,7 +94,10 @@ func Aggregate(events []Event, today string) Aggregated {
 	agg.ActiveDays = len(agg.Days)
 	agg.CurrentStreak = currentStreak(agg.Days, today)
 	agg.LongestStreak = longestStreak(agg.Days)
-	agg.CacheSupported = agg.Totals.Cached > 0
+	// A turn that reported cache details (CacheSeen) means the provider supports
+	// caching even if no tokens were served from cache; the Cached>0 fallback
+	// keeps older events (written before CacheSeen existed) correct.
+	agg.CacheSupported = anyCacheSeen || agg.Totals.Cached > 0
 	if agg.Totals.Prompt > 0 {
 		r := float64(agg.Totals.Cached) / float64(agg.Totals.Prompt)
 		switch {

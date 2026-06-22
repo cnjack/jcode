@@ -1,6 +1,6 @@
 <!-- eslint-disable vue/multi-word-component-names -->
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick, inject } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, inject } from 'vue'
 import {
   Menu as HMenu,
   MenuButton,
@@ -28,11 +28,13 @@ import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
 import { useProjectStore, isRemotePath, parseRemoteLabel } from '@/stores/project'
 import type { TaskItem, RemoteMeta } from '@/types/api'
+import SidebarFilterMenu from '@/components/SidebarFilterMenu.vue'
 
 const store = useChatStore()
 const { t } = useI18n()
 const projectStore = useProjectStore()
 const openRemoteConnect = inject<(prefill?: RemoteMeta & { loadTaskUuid?: string }) => void>('openRemoteConnect')
+const startNewTaskInProject = inject<(path: string) => Promise<boolean>>('onNewTaskInProject')
 
 defineProps<{
   resolvedTheme: 'light' | 'dark'
@@ -47,7 +49,13 @@ const emit = defineEmits<{
 
 // Expanded project paths. The active project is auto-expanded.
 const expanded = ref<Set<string>>(new Set())
-const showArchived = ref(false)
+
+// A coarse reactive clock so time-based filtering/grouping (last-activity window,
+// date buckets) re-evaluate as the wall clock advances — Date.now()/new Date()
+// alone aren't reactive deps, so without this rows would go stale until an
+// unrelated refresh.
+const now = ref(Date.now())
+let clockTimer: ReturnType<typeof setInterval> | null = null
 
 // The task "⋯" menu opens downward by default; for rows near the bottom of the
 // sidebar that clips it, so flip it upward when there isn't room below.
@@ -72,23 +80,186 @@ function toggle(path: string) {
   expanded.value = next
 }
 
-// Project nodes sorted with the active project first, then alphabetically.
-const projectNodes = computed(() => {
-  const nodes = [...projectStore.projectsForTree]
-  return nodes.sort((a, b) => {
+// ── Filter → group → sort pipeline (driven by projectStore.filters) ──
+
+// Status: active hides archived, archived shows only archived, all = both.
+function passesStatus(task: TaskItem): boolean {
+  const s = projectStore.filters.status
+  if (s === 'active') return !task.archived
+  if (s === 'archived') return task.archived
+  return true
+}
+
+// Last-activity window against updated_at (fallback created_at).
+function withinActivity(ts: string): boolean {
+  const f = projectStore.filters.lastActivity
+  if (f === 'all') return true
+  const then = new Date(ts).getTime()
+  if (Number.isNaN(then)) return false
+  const day = 86400000
+  const span = f === 'today' ? day : f === 'week' ? 7 * day : 30 * day
+  return now.value - then <= span
+}
+
+// The single-project filter, ignored if it points at a project that no longer
+// exists (e.g. it was just deleted) so the list is never stranded empty.
+const projectFilter = computed(() => {
+  const p = projectStore.filters.project
+  if (!p) return ''
+  return projectStore.projectsForTree.some((n) => n.path === p) ? p : ''
+})
+
+const filteredTasks = computed(() =>
+  projectStore.allTasks.filter((task) => {
+    // The conversation you currently have open always stays visible & selectable,
+    // regardless of filters — otherwise archiving (or a narrowing window) would
+    // strand the open task with no row anywhere in the tree.
+    if (task.uuid === store.currentSessionId && task.project === activePath.value) return true
+    if (!passesStatus(task)) return false
+    if (projectFilter.value && task.project !== projectFilter.value) return false
+    if (!withinActivity(task.updated_at || task.created_at || '')) return false
+    return true
+  }),
+)
+
+// Within a group: live work first, then pinned, then the chosen sort key.
+function taskComparator(a: TaskItem, b: TaskItem): number {
+  if (!!a.running !== !!b.running) return a.running ? -1 : 1
+  if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
+  const f = projectStore.filters.sortBy
+  if (f === 'name') return taskTitle(a).localeCompare(taskTitle(b))
+  if (f === 'created') return (b.created_at || '').localeCompare(a.created_at || '')
+  const at = a.updated_at || a.created_at || ''
+  const bt = b.updated_at || b.created_at || ''
+  return bt.localeCompare(at)
+}
+
+// Date-bucket assignment for "group by date" (calendar-day based for today /
+// yesterday, then rolling windows).
+const DATE_BUCKETS = ['today', 'yesterday', 'week', 'month', 'older'] as const
+function bucketFor(ts: string): string {
+  const then = new Date(ts).getTime()
+  if (Number.isNaN(then)) return 'older'
+  const today = new Date(now.value)
+  const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()
+  const day = 86400000
+  if (then >= startToday) return 'today'
+  if (then >= startToday - day) return 'yesterday'
+  if (then >= startToday - 7 * day) return 'week'
+  if (then >= startToday - 30 * day) return 'month'
+  return 'older'
+}
+
+function pushTask(map: Map<string, TaskItem[]>, key: string, task: TaskItem) {
+  const arr = map.get(key)
+  if (arr) arr.push(task)
+  else map.set(key, [task])
+}
+
+// "+" on a workspace row: switch to that workspace and open a fresh welcome
+// screen, so the next message starts a new task there. Remote workspaces must
+// reconnect through the SSH wizard first (it lands on a fresh session too).
+async function newTaskInProject(proj: { path: string }) {
+  if (isRemotePath(proj.path)) {
+    const meta = parseRemoteLabel(proj.path)
+    if (meta) openRemoteConnect?.(meta)
+    return
+  }
+  const ok = await startNewTaskInProject?.(proj.path)
+  if (ok === false) return
+  if (!expanded.value.has(proj.path)) toggle(proj.path)
+}
+
+interface SidebarGroup {
+  kind: 'project' | 'date'
+  key: string
+  label: string
+  path?: string // project kind only
+  tasks: TaskItem[]
+}
+
+// Per-group ordering signals: surface live work, unread, then recency.
+function aggregate(tasks: TaskItem[]) {
+  let running = false
+  let unread = false
+  let lastTs = ''
+  for (const task of tasks) {
+    if (task.running) running = true
+    if (task.unread) unread = true
+    const ts = task.updated_at || task.created_at || ''
+    if (ts > lastTs) lastTs = ts
+  }
+  return { running, unread, lastTs }
+}
+
+// The rendered list: filtered tasks bucketed by project or date, each group
+// internally sorted. Project groups keep the active-first → running → unread →
+// recency → name order; date groups run newest bucket first.
+const sidebarGroups = computed<SidebarGroup[]>(() => {
+  const tasks = filteredTasks.value
+
+  if (projectStore.filters.groupBy === 'date') {
+    const map = new Map<string, TaskItem[]>()
+    for (const task of tasks) pushTask(map, bucketFor(task.updated_at || task.created_at || ''), task)
+    return DATE_BUCKETS.filter((k) => map.has(k)).map((k) => ({
+      kind: 'date' as const,
+      key: k,
+      label: t(`sidebar.dateBucket.${k}`),
+      tasks: map.get(k)!.sort(taskComparator),
+    }))
+  }
+
+  // Group by project.
+  const map = new Map<string, TaskItem[]>()
+  for (const task of tasks) pushTask(map, task.project, task)
+  // Under a single-project filter the set is just that folder; otherwise every
+  // project with a (filtered) task. The active project is added below so the
+  // open conversation is never hidden.
+  const paths = projectFilter.value ? new Set([projectFilter.value]) : new Set(map.keys())
+  // Keep the active project's folder so the place you're working never vanishes.
+  // Under a narrowing filter only keep it when it has a visible task (which now
+  // includes the always-kept open conversation), so we don't synthesize a
+  // misleading empty "No tasks" folder.
+  const narrowing =
+    !!projectFilter.value ||
+    projectStore.filters.status === 'archived' ||
+    projectStore.filters.lastActivity !== 'all'
+  if (activePath.value && (map.has(activePath.value) || !narrowing)) {
+    paths.add(activePath.value)
+  }
+  const groups: SidebarGroup[] = [...paths].map((path) => ({
+    kind: 'project',
+    key: path,
+    path,
+    label: projectStore.nameForPath(path),
+    tasks: (map.get(path) || []).sort(taskComparator),
+  }))
+  return groups.sort((a, b) => {
     if (a.path === activePath.value) return -1
     if (b.path === activePath.value) return 1
-    return a.name.localeCompare(b.name)
+    const A = aggregate(a.tasks)
+    const B = aggregate(b.tasks)
+    if (A.running !== B.running) return A.running ? -1 : 1
+    if (A.unread !== B.unread) return A.unread ? -1 : 1
+    if (A.lastTs !== B.lastTs) return B.lastTs.localeCompare(A.lastTs)
+    return a.label.localeCompare(b.label)
   })
 })
 
-function tasksFor(path: string): TaskItem[] {
-  const list = projectStore.tasksByProject[path] || []
-  return showArchived.value ? list : list.filter((t) => !t.archived)
-}
-
-function visibleCount(path: string): number {
-  return tasksFor(path).length
+// When two project groups share a basename (e.g. ~/work/jack and ~/srv/jack),
+// show the parent directory so they're tellable apart at a glance.
+const duplicateNames = computed(() => {
+  const counts = new Map<string, number>()
+  for (const g of sidebarGroups.value) {
+    if (g.kind === 'project') counts.set(g.label, (counts.get(g.label) || 0) + 1)
+  }
+  return new Set([...counts].filter(([, c]) => c > 1).map(([name]) => name))
+})
+function projHint(group: SidebarGroup): string {
+  if (group.kind !== 'project' || !group.path) return ''
+  if (!duplicateNames.value.has(group.label) || isRemotePath(group.path)) return ''
+  const segs = group.path.split('/').filter(Boolean)
+  return segs.length >= 2 ? segs[segs.length - 2] ?? '' : ''
 }
 
 async function refresh() {
@@ -98,6 +269,13 @@ async function refresh() {
 onMounted(() => {
   refresh()
   if (activePath.value) expanded.value = new Set([activePath.value])
+  // Tick the clock once a minute so last-activity windows and date buckets
+  // re-evaluate as time passes (incl. the midnight today→yesterday rollover).
+  clockTimer = setInterval(() => { now.value = Date.now() }, 60000)
+})
+
+onUnmounted(() => {
+  if (clockTimer) clearInterval(clockTimer)
 })
 
 // Keep the active project expanded and the tree fresh as the active session /
@@ -143,8 +321,15 @@ function isActiveTask(task: TaskItem): boolean {
 }
 
 async function handleDelete(task: TaskItem) {
+  const path = task.project
   await store.deleteSession(task.uuid)
   await refresh()
+  // If that was the workspace's last conversation, drop the now-empty folder from
+  // the tree too. Archived chats still count (tasksByProject keeps them), so a
+  // folder with only archived conversations is preserved.
+  if (!projectStore.tasksByProject[path]?.length) {
+    projectStore.removeProjectByPath(path)
+  }
 }
 
 // Inline rename — window.prompt is unreliable in the Tauri webview (can return
@@ -207,28 +392,72 @@ function relativeTime(ts: string): string {
     <div class="tree">
       <div class="tree-head">
         <span class="tree-label">{{ t('nav.workspace') }}</span>
+        <SidebarFilterMenu />
       </div>
 
-      <div v-if="projectNodes.length === 0" class="empty-state">{{ t('sidebar.noProjects') }}</div>
+      <div v-if="sidebarGroups.length === 0" class="empty-state">{{ t('sidebar.noProjects') }}</div>
 
-      <div v-for="proj in projectNodes" :key="proj.path" class="project-group">
-        <button class="project-row" :class="{ active: proj.path === activePath }" @click="toggle(proj.path)">
-          <ChevronRightIcon class="w-3.5 h-3.5 proj-chevron" :class="{ open: isExpanded(proj.path) }" />
-          <component :is="projIcon(proj.path)" class="w-3.5 h-3.5 proj-icon" />
-          <span class="proj-name">{{ proj.name }}</span>
-          <span v-if="visibleCount(proj.path) > 0" class="proj-count">{{ visibleCount(proj.path) }}</span>
-        </button>
+      <div v-for="group in sidebarGroups" :key="group.kind + ':' + group.key" class="project-group">
+        <!-- Project group → folder row (collapsible, with new-task + running cue). -->
+        <div
+          v-if="group.kind === 'project'"
+          class="project-row"
+          :class="{ active: group.path === activePath }"
+          :title="group.path"
+          role="button"
+          tabindex="0"
+          @click="toggle(group.key)"
+          @keydown.enter.prevent="toggle(group.key)"
+          @keydown.space.prevent="toggle(group.key)"
+        >
+          <ChevronRightIcon class="w-3.5 h-3.5 proj-chevron" :class="{ open: isExpanded(group.key) }" />
+          <component :is="projIcon(group.path!)" class="w-3.5 h-3.5 proj-icon" />
+          <span class="proj-name">{{ group.label }}</span>
+          <span v-if="projHint(group)" class="proj-hint">{{ projHint(group) }}</span>
+          <span
+            v-if="!isExpanded(group.key) && group.tasks.some((tk) => tk.running)"
+            class="task-running-ring proj-running-ring"
+            :title="t('sidebar.running')"
+            aria-hidden="true"
+          />
+          <button
+            class="proj-add"
+            :title="t('sidebar.newTaskHere')"
+            :aria-label="t('sidebar.newTaskHere')"
+            @click.stop="newTaskInProject({ path: group.path! })"
+            @keydown.stop
+          >
+            <PlusIcon class="w-3.5 h-3.5" />
+          </button>
+          <span v-if="group.tasks.length > 0" class="proj-count">{{ group.tasks.length }}</span>
+        </div>
 
-        <div v-show="isExpanded(proj.path)" class="task-list">
-          <div v-if="visibleCount(proj.path) === 0" class="task-empty">{{ t('sidebar.noTasks') }}</div>
+        <!-- Date group → static bucket header (no folder affordances). -->
+        <div v-else class="date-row">
+          <span class="date-label">{{ group.label }}</span>
+          <span class="proj-count">{{ group.tasks.length }}</span>
+        </div>
+
+        <div
+          v-show="group.kind === 'date' || isExpanded(group.key)"
+          class="task-list"
+          :class="{ 'date-list': group.kind === 'date' }"
+        >
+          <div v-if="group.kind === 'project' && group.tasks.length === 0" class="task-empty">{{ t('sidebar.noTasks') }}</div>
           <div
-            v-for="task in tasksFor(proj.path)"
+            v-for="task in group.tasks"
             :key="task.uuid"
             class="task-row"
-            :class="{ active: isActiveTask(task), archived: task.archived }"
+            :class="{ active: isActiveTask(task), archived: task.archived, running: task.running }"
             @click="openTask(task)"
           >
-            <span class="task-dot" :class="{ unread: task.unread }" aria-hidden="true" />
+            <span
+              v-if="task.running"
+              class="task-running-ring"
+              :title="t('sidebar.running')"
+              aria-hidden="true"
+            />
+            <span v-else class="task-dot" :class="{ unread: task.unread }" aria-hidden="true" />
             <BookmarkIcon v-if="task.pinned" class="w-2.5 h-2.5 task-pin" />
             <input
               v-if="renamingUuid === task.uuid"
@@ -241,7 +470,14 @@ function relativeTime(ts: string): string {
               @blur="commitRename(task)"
             />
             <span v-else class="task-title">{{ taskTitle(task) }}</span>
-            <span class="task-time">{{ relativeTime(task.created_at) }}</span>
+            <span
+              v-if="group.kind === 'date'"
+              class="task-proj"
+              :title="task.project"
+            >{{ projectStore.nameForPath(task.project) }}</span>
+            <span class="task-time" :class="{ running: task.running }">
+              {{ task.running ? t('sidebar.running') : relativeTime(task.updated_at || task.created_at) }}
+            </span>
 
             <HMenu as="div" class="task-menu" @click.stop>
               <MenuButton class="task-menu-btn" :title="t('sidebar.actions.taskActions')" @click.stop="onTaskMenuClick($event, task.uuid)">
@@ -361,29 +597,6 @@ function relativeTime(ts: string): string {
   text-transform: uppercase;
   color: var(--color-muted-foreground);
 }
-.tree-head-actions {
-  display: flex;
-  gap: 2px;
-}
-.tree-icon-btn {
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border: none;
-  background: transparent;
-  border-radius: var(--radius-sm);
-  color: var(--color-muted-foreground);
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-.tree-icon-btn:hover {
-  background: var(--color-muted);
-  color: var(--color-foreground);
-}
-.tree-icon-btn.on {
-  color: var(--color-accent-neutral);
-}
 
 .empty-state {
   text-align: center;
@@ -437,6 +650,16 @@ function relativeTime(ts: string): string {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.proj-hint {
+  font-size: 10px;
+  color: var(--color-muted-foreground);
+  flex-shrink: 0;
+  opacity: 0.7;
+  max-width: 80px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .proj-count {
   font-size: 10px;
   font-family: var(--font-mono);
@@ -444,13 +667,58 @@ function relativeTime(ts: string): string {
   flex-shrink: 0;
 }
 
+/* "+" new-task affordance — hidden until the row is hovered/focused, mirroring
+   the task row's ⋯ menu button so the tree stays calm at rest. */
+.proj-add {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+.project-row:hover .proj-add,
+.project-row:focus-within .proj-add {
+  opacity: 1;
+}
+.proj-add:hover {
+  background: var(--color-secondary);
+  color: var(--color-foreground);
+}
+
 .task-list {
   padding-left: 14px;
+}
+/* Date grouping is a flat chronological feed — drop the folder indent + rail. */
+.task-list.date-list {
+  padding-left: 0;
 }
 .task-empty {
   font-size: 11px;
   color: var(--color-muted-foreground);
   padding: 5px 8px;
+}
+
+/* Date-bucket header (Today / Yesterday / …) — a quiet label, not a folder. */
+.date-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 6px 4px;
+}
+.date-label {
+  flex: 1;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
 }
 
 .task-row {
@@ -485,6 +753,45 @@ function relativeTime(ts: string): string {
 .task-dot.unread {
   background: var(--color-accent-neutral);
 }
+/* Running indicator: a thin accent ring that breathes (scale + opacity) — a calm
+   "working" cue matched to a clean ring aesthetic. */
+.task-running-ring {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  border: 1.6px solid var(--color-accent);
+  animation: task-ring-breathe 1.6s ease-in-out infinite;
+}
+.proj-running-ring {
+  width: 9px;
+  height: 9px;
+  margin-left: auto;
+}
+@keyframes task-ring-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.78);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+/* A running task row gets a faint accent rail so live work reads at a glance. */
+.task-row.running {
+  border-left-color: color-mix(in srgb, var(--color-accent) 50%, var(--color-border));
+}
+/* Without motion the ring sits static at full opacity so it still clearly
+   means "running". */
+@media (prefers-reduced-motion: reduce) {
+  .task-running-ring {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
 .task-pin {
   color: var(--color-accent-neutral);
   flex-shrink: 0;
@@ -515,6 +822,27 @@ function relativeTime(ts: string): string {
   font-family: var(--font-mono);
   color: var(--color-muted-foreground);
   flex-shrink: 0;
+}
+.task-time.running {
+  color: var(--color-accent);
+}
+
+/* In date grouping the rows aren't under a folder, so drop the tree rail/indent
+   and show which project each task belongs to. */
+.date-list .task-row {
+  margin-left: 0;
+  border-left: none;
+  padding-left: 6px;
+}
+.task-proj {
+  flex-shrink: 0;
+  max-width: 90px;
+  font-size: 10px;
+  color: var(--color-muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.75;
 }
 
 /* ─── Task action menu ─── */
@@ -623,12 +951,10 @@ function relativeTime(ts: string): string {
 }
 .footer-btn:hover {
   background: var(--color-muted);
+  color: var(--color-foreground);
 }
 .footer-btn svg {
   width: 18px;
   height: 18px;
-}
-.footer-btn:hover {
-  color: var(--color-foreground);
 }
 </style>

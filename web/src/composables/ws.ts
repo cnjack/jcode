@@ -32,10 +32,18 @@ type WSHandler = {
   onSubagentEvent?: (data: SubagentEventData) => void
   onSubagentProgress?: (data: SubagentProgressData) => void
   onUserMessage?: (data: { content: string; source: string }) => void
+  // onTaskStatus fires for ANY task (including backgrounded ones) when its run
+  // starts/stops, so the sidebar can show a live running indicator.
+  onTaskStatus?: (taskId: string, running: boolean) => void
+  // activeTaskId returns the task currently shown in the foreground. Events
+  // tagged with a DIFFERENT task id (a backgrounded task that keeps running after
+  // you switch away) are dropped so they don't pollute the active view.
+  activeTaskId?: () => string | undefined
 }
 
 interface WSMessage {
   type: string
+  task_id?: string
   data?: unknown
 }
 
@@ -64,6 +72,7 @@ export function useWebSocket(handlers: WSHandler) {
     subagent_event: (d) => handlers.onSubagentEvent?.(d),
     subagent_progress: (d) => handlers.onSubagentProgress?.(d),
     user_message: (d) => handlers.onUserMessage?.(d),
+    task_status: (d) => handlers.onTaskStatus?.(d?.task_id, !!d?.running),
     pong: () => {}, // heartbeat response, no-op
   }
 
@@ -90,9 +99,27 @@ export function useWebSocket(handlers: WSHandler) {
     ws.onmessage = (event) => {
       try {
         const msg: WSMessage = JSON.parse(event.data)
+        // Drop events from a different (backgrounded) task. Global events carry no
+        // task_id and always pass; while the foreground task id is still unknown
+        // (first message in flight) we also pass everything.
+        const active = handlers.activeTaskId?.()
+        if (msg.task_id && active && msg.task_id !== active) {
+          return
+        }
         const handler = handlerMap[msg.type]
         if (handler) {
-          handler(msg.data)
+          let data = msg.data
+          // Carry the task id onto approval/ask cards so the resolve can echo it
+          // back and route to the correct task's engine.
+          if (
+            msg.task_id &&
+            (msg.type === 'approval_request' || msg.type === 'ask_user_request') &&
+            data &&
+            typeof data === 'object'
+          ) {
+            data = { ...(data as Record<string, unknown>), task_id: msg.task_id }
+          }
+          handler(data)
         }
       } catch (err) {
         console.error('WS parse error:', err)
@@ -120,8 +147,8 @@ export function useWebSocket(handlers: WSHandler) {
     }
   }
 
-  function sendApproval(id: string, approved: boolean, approveAll = false) {
-    send({ type: 'approval', data: { id, approved, approve_all: approveAll } })
+  function sendApproval(id: string, approved: boolean, approveAll = false, taskId?: string) {
+    send({ type: 'approval', data: { id, approved, approve_all: approveAll, task_id: taskId } })
   }
 
   function disconnect() {

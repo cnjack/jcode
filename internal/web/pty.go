@@ -17,9 +17,10 @@ import (
 
 // ptySession represents a running PTY session.
 type ptySession struct {
-	id   string
-	cmd  *exec.Cmd
-	ptmx *os.File
+	id      string
+	ownerID string // task id that created it, so a project/remote switch only closes its own
+	cmd     *exec.Cmd
+	ptmx    *os.File
 }
 
 // ptyManager manages PTY sessions.
@@ -39,8 +40,8 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-// create starts a new PTY session and returns its ID.
-func (m *ptyManager) create(workDir string) (string, error) {
+// create starts a new PTY session owned by ownerID and returns its ID.
+func (m *ptyManager) create(workDir, ownerID string) (string, error) {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
@@ -57,7 +58,7 @@ func (m *ptyManager) create(workDir string) (string, error) {
 	m.mu.Lock()
 	m.nextID++
 	id := fmt.Sprintf("pty_%d", m.nextID)
-	sess := &ptySession{id: id, cmd: cmd, ptmx: ptmx}
+	sess := &ptySession{id: id, ownerID: ownerID, cmd: cmd, ptmx: ptmx}
 	m.sessions[id] = sess
 	m.mu.Unlock()
 
@@ -104,7 +105,7 @@ func (m *ptyManager) kill(id string) {
 	}
 }
 
-// closeAll terminates all PTY sessions.
+// closeAll terminates all PTY sessions (server shutdown).
 func (m *ptyManager) closeAll() {
 	m.mu.Lock()
 	sessions := make([]*ptySession, 0, len(m.sessions))
@@ -112,6 +113,27 @@ func (m *ptyManager) closeAll() {
 		sessions = append(sessions, s)
 	}
 	m.sessions = make(map[string]*ptySession)
+	m.mu.Unlock()
+	for _, s := range sessions {
+		_ = s.cmd.Process.Kill()
+		_ = s.ptmx.Close()
+	}
+}
+
+// closeForTask terminates only the PTY sessions owned by taskID, leaving other
+// concurrent tasks' terminals alive. An empty taskID matches nothing.
+func (m *ptyManager) closeForTask(taskID string) {
+	if taskID == "" {
+		return
+	}
+	m.mu.Lock()
+	var sessions []*ptySession
+	for id, s := range m.sessions {
+		if s.ownerID == taskID {
+			sessions = append(sessions, s)
+			delete(m.sessions, id)
+		}
+	}
 	m.mu.Unlock()
 	for _, s := range sessions {
 		_ = s.cmd.Process.Kill()

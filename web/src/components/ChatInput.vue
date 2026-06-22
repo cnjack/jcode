@@ -7,6 +7,7 @@ import type { SlashCommandInfo, ChatImage } from '@/types/api'
 import WorkspacePicker from '@/components/WorkspacePicker.vue'
 import BranchPicker from '@/components/BranchPicker.vue'
 import ContextCapacityPopup from '@/components/ContextCapacityPopup.vue'
+import ProviderIcon from '@/components/ProviderIcon.vue'
 import { HandRaisedIcon, ShieldExclamationIcon, ClipboardDocumentListIcon, BoltIcon, PlusIcon, PaperClipIcon, XMarkIcon, ChevronDownIcon, StopIcon, PaperAirplaneIcon, MagnifyingGlassIcon, SquaresPlusIcon, PhotoIcon, WrenchScrewdriverIcon, CheckIcon, StarIcon, SparklesIcon } from '@heroicons/vue/24/outline'
 import { StarIcon as StarIconSolid, CheckCircleIcon } from '@heroicons/vue/24/solid'
 
@@ -16,6 +17,11 @@ import { StarIcon as StarIconSolid, CheckCircleIcon } from '@heroicons/vue/24/so
 withDefaults(defineProps<{ pickerPlacement?: 'top' | 'bottom' }>(), {
   pickerPlacement: 'top',
 })
+
+// Fired when the user dispatches a message (sent now or queued while a turn is
+// in flight). The parent uses it to snap the timeline to the bottom so you see
+// your message land even if you'd scrolled up into history.
+const emit = defineEmits<{ sent: [] }>()
 
 const store = useChatStore()
 const { t } = useI18n()
@@ -96,46 +102,6 @@ function getModelDisplayName(providerId: string, modelId: string): string {
   return modelId
 }
 
-// Provider identity tile — a tinted squircle with the provider's initial. The
-// single "identity primitive" reused across the selector, the Manage dialog,
-// and (conceptually) the approval card. Color is keyed off the provider id so
-// it's stable without a server-provided brand asset.
-const PROVIDER_COLORS: Record<string, string> = {
-  anthropic: '#D97757',
-  openai: '#10A37F',
-  google: '#4285F4',
-  deepseek: '#4D6BFE',
-  moonshot: '#1A1A1A',
-  zhipu: '#3B5BFE',
-}
-// Distinct fallbacks for providers without an explicit brand color (e.g. the
-// "ZHIPU AI Coding Plan" id, third-party gateways). All are saturated enough
-// for white initials and deliberately exclude washed/gray tones so the tile
-// never disappears into the surface. Keyed by a stable hash of the id so the
-// same provider always gets the same color.
-const PROVIDER_FALLBACK_COLORS = [
-  '#7C5CFC', // violet
-  '#E0567A', // rose
-  '#0EA5A4', // teal
-  '#E0922F', // amber
-  '#2E7D5B', // green
-  '#3D7DE0', // azure
-  '#C2410C', // burnt orange
-  '#6366F1', // indigo
-]
-function providerColor(id: string): string {
-  const explicit = PROVIDER_COLORS[id]
-  if (explicit) return explicit
-  let h = 0
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0
-  return PROVIDER_FALLBACK_COLORS[h % PROVIDER_FALLBACK_COLORS.length]!
-}
-function providerInitial(name: string): string {
-  const n = (name || '?').trim()
-  // Latin initial; for CJK names fall back to the first code point.
-  return /[A-Za-z]/.test(n) ? n[0]!.toLowerCase() : n[0] ?? '?'
-}
-
 // Compact context-limit label for the subline: 200000 → "200K", 1000000 → "1M".
 function formatContext(limit?: number): string | null {
   if (!limit || limit <= 0) return null
@@ -154,12 +120,6 @@ function modelSubline(providerId: string, m: { id: string; context_limit?: numbe
   const ctx = formatContext(m.context_limit)
   if (ctx) parts.push(ctx)
   return parts.join(' · ')
-}
-
-// Resolve a provider's display name from its id (the dropdown rows carry the
-// name, but recent/favorite refs only have the id).
-function providerDisplayName(id: string): string {
-  return store.providers.find((p) => p.id === id)?.name ?? id
 }
 
 // Look up the ModelInfo for a provider+model pair (used by recent/favorite refs
@@ -325,6 +285,7 @@ async function send() {
   } else {
     store.sendMessage(text || '(see attached images)', images)
   }
+  emit('sent')
 }
 
 function selectModel(provider: string, model: string) {
@@ -674,11 +635,11 @@ watch(() => store.imageSupport, (supported) => {
                 :aria-expanded="showModelPicker"
                 @click.stop="showModelPicker = !showModelPicker; showModePicker = false; showAddMenu = false"
               >
-                <span
+                <ProviderIcon
                   v-if="store.providerName"
-                  class="mm-trigger-mark"
-                  :style="{ backgroundColor: providerColor(store.providerName) }"
-                >{{ providerInitial(providerDisplayName(store.providerName)) }}</span>
+                  :provider="store.providerName"
+                  :size="16"
+                />
                 {{ store.modelName ? getModelDisplayName(store.providerName, store.modelName) : 'model' }}
                 <ChevronDownIcon class="mm-trigger-chev" />
               </button>
@@ -701,10 +662,7 @@ watch(() => store.imageSupport, (supported) => {
                 <!-- Pinned current row — never scrolls out of view. -->
                 <div v-if="store.providerName && store.modelName" class="mm-pinned">
                   <CheckCircleIcon class="mm-pinned-pin" :title="t('chat.model.current')" />
-                  <span
-                    class="mm-mark"
-                    :style="{ backgroundColor: providerColor(store.providerName) }"
-                  >{{ providerInitial(providerDisplayName(store.providerName)) }}</span>
+                  <ProviderIcon :provider="store.providerName" :size="22" />
                   <span class="mm-pinned-body">
                     <span class="mm-name">{{ getModelDisplayName(store.providerName, store.modelName) }}</span>
                     <span class="mm-id">{{ modelSubline(store.providerName, currentModelInfo) }}</span>
@@ -726,7 +684,7 @@ watch(() => store.imageSupport, (supported) => {
                       class="mm-row"
                       @click="selectModel(r.provider, r.model)"
                     >
-                      <span class="mm-mark" :style="{ backgroundColor: providerColor(r.provider) }">{{ providerInitial(providerDisplayName(r.provider)) }}</span>
+                      <ProviderIcon :provider="r.provider" :size="22" />
                       <span class="mm-body">
                         <span class="mm-name">{{ getModelDisplayName(r.provider, r.model) }}</span>
                         <span class="mm-id">{{ modelSubline(r.provider, modelInfoFor(r.provider, r.model)) }}</span>
@@ -754,7 +712,7 @@ watch(() => store.imageSupport, (supported) => {
                       @keydown.enter.prevent="selectModel(p.id, m.id)"
                       @keydown.space.prevent="selectModel(p.id, m.id)"
                     >
-                      <span class="mm-mark" :style="{ backgroundColor: providerColor(p.id) }">{{ providerInitial(p.name) }}</span>
+                      <ProviderIcon :provider="p.id" :size="22" />
                       <span class="mm-body">
                         <span class="mm-name">{{ m.name || m.id }}</span>
                         <span class="mm-id">{{ modelSubline(p.id, m) }}</span>
@@ -855,7 +813,7 @@ watch(() => store.imageSupport, (supported) => {
           <div class="manage-body">
             <template v-for="p in filteredProviders" :key="'mgr-'+p.id">
               <div class="manage-prov">
-                <span class="mm-mark mm-mark-sm" :style="{ backgroundColor: providerColor(p.id) }">{{ providerInitial(p.name) }}</span>
+                <ProviderIcon :provider="p.id" :size="18" />
                 <span class="manage-prov-name">{{ p.name }}</span>
                 <span class="manage-prov-id">{{ p.id }}</span>
                 <span class="manage-prov-count">{{ p.models.length }}</span>
@@ -866,7 +824,7 @@ watch(() => store.imageSupport, (supported) => {
                 class="manage-row"
                 :data-off="m.enabled === false ? 'true' : 'false'"
               >
-                <span class="mm-mark mm-mark-sm" :style="{ backgroundColor: providerColor(p.id) }">{{ providerInitial(p.name) }}</span>
+                <ProviderIcon :provider="p.id" :size="18" />
                 <span class="manage-row-text">
                   <span class="manage-row-name">{{ m.name || m.id }}</span>
                   <span class="manage-row-id">{{ modelSubline(p.id, m) }}</span>
@@ -902,7 +860,9 @@ watch(() => store.imageSupport, (supported) => {
 
 <style scoped>
 .chat-input-wrapper {
-  padding: 8px 16px 14px;
+  /* 20px horizontal matches the messages column's px-5 so the input box
+     sits flush with the conversation content. */
+  padding: 8px 20px 14px;
   /* Sits inside the surface chat panel — transparent so it blends with it. */
   background: transparent;
   position: relative;
@@ -1520,18 +1480,6 @@ watch(() => store.imageSupport, (supported) => {
   transition: background var(--duration-fast);
 }
 .mm-trigger:hover { background: var(--color-muted); }
-.mm-trigger-mark {
-  width: 16px;
-  height: 16px;
-  display: grid;
-  place-items: center;
-  border-radius: 4px;
-  font-size: 9px;
-  font-weight: 700;
-  font-family: var(--font-mono);
-  color: #fff;
-  flex-shrink: 0;
-}
 .mm-trigger-chev {
   width: 12px;
   height: 12px;
@@ -1607,21 +1555,6 @@ watch(() => store.imageSupport, (supported) => {
   flex: 1;
   min-width: 0;
 }
-
-/* The identity squircle — the one shape reused across selector + dialog. */
-.mm-mark {
-  width: 22px;
-  height: 22px;
-  display: grid;
-  place-items: center;
-  border-radius: 6px;
-  font-size: 10px;
-  font-weight: 700;
-  font-family: var(--font-mono);
-  color: #fff;
-  flex-shrink: 0;
-}
-.mm-mark-sm { width: 18px; height: 18px; font-size: 9px; border-radius: 5px; }
 
 .mm-list {
   overflow-y: auto;

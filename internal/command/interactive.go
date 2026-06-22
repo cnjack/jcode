@@ -185,7 +185,7 @@ func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
 			s.summCapture.Capture(summary.Content, contextN)
 			config.Logger().Printf("[summarization] Finalize: compacted %d context messages", contextN)
 			if s.agentTokenUsage != nil {
-				s.agentTokenUsage.Reset()
+				s.agentTokenUsage.ResetContext()
 			}
 			return append(systemMsgs, summary), nil
 		},
@@ -228,7 +228,8 @@ func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
 	if s.cfg.Budget != nil {
 		providerName, modelName := s.cfg.GetProviderModel()
 		inputPer1M, outputPer1M := s.registry.GetModelCost(providerName, modelName)
-		pricing := internalmodel.ModelPricing{InputPer1M: inputPer1M, OutputPer1M: outputPer1M}
+		cacheReadPer1M, _ := s.registry.GetModelCacheCost(providerName, modelName)
+		pricing := internalmodel.ModelPricing{InputPer1M: inputPer1M, OutputPer1M: outputPer1M, CacheReadPer1M: cacheReadPer1M}
 		budgetManager := agent.NewBudgetManager(s.cfg.Budget, pricing)
 		budgetMw := agent.NewBudgetMiddleware(budgetManager, s.agentTokenUsage, func(status agent.BudgetStatus) {
 			config.Logger().Printf("[budget] warning level=%d cost=%.4f", status.WarningLevel, status.EstimatedCost)
@@ -240,7 +241,7 @@ func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
 	compactionStrategy := agent.NewThresholdCompactionStrategy(compactThreshold, s.chatModel, 6)
 	compactionMw := agent.NewCompactionMiddleware(compactionStrategy, contextLimit, s.agentTokenUsage, func(savedTokens int) {
 		if s.agentTokenUsage != nil {
-			s.agentTokenUsage.Reset()
+			s.agentTokenUsage.ResetContext()
 		}
 		if s.p != nil {
 			s.p.Send(tui.CompactDoneMsg{OldTokens: 0, NewTokens: 0})
@@ -318,7 +319,7 @@ func (s *interactiveState) applyModeSwitch(newMode tui.AgentMode) {
 		config.Logger().Printf("[plan] agent creation failed: %v", err)
 	}
 	if s.agentTokenUsage != nil {
-		s.agentTokenUsage.Reset()
+		s.agentTokenUsage.ResetContext()
 	}
 	// Sync the TUI mode pill with the resulting unified mode (covers the
 	// plan-completion revert to Normal, which the user did not trigger directly).
@@ -592,6 +593,10 @@ func (s *interactiveState) handleConfig(cfgMsg *config.Config) {
 		return
 	}
 	s.chatModel = newChatModel
+	// Attribute subsequent usage to the newly selected model.
+	if s.rec != nil {
+		s.rec.SetModel(newModelName)
+	}
 
 	// Rebuild system prompt and tools to reflect config changes (e.g., SSH aliases)
 	if s.agentMode == tui.ModePlanning {
@@ -622,7 +627,7 @@ func (s *interactiveState) handleCompact() {
 		s.rec.RecordCompact(s.history[0].Content, oldLen-len(s.history))
 	}
 	if s.agentTokenUsage != nil {
-		s.agentTokenUsage.Reset()
+		s.agentTokenUsage.ResetContext()
 	}
 	s.p.Send(tui.CompactDoneMsg{
 		OldTokens: oldTokens,
@@ -665,6 +670,9 @@ func (s *interactiveState) handleAddModel() {
 		return
 	}
 	s.chatModel = newChatModel
+	if s.rec != nil {
+		s.rec.SetModel(newModelName)
+	}
 	if newAg, agErr := s.createAgent(); agErr == nil {
 		s.ag = newAg
 	}

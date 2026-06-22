@@ -185,11 +185,9 @@ func (s *Server) handleRemoteListDir(w http.ResponseWriter, r *http.Request) {
 // remote executor at the chosen directory and rebuilds the agent (same path as
 // a local project switch).
 func (s *Server) handleRemoteBind(w http.ResponseWriter, r *http.Request) {
-	if s.running.Load() {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is running, cannot switch workspace"})
-		return
-	}
-	if s.switchToRemote == nil {
+	// No running gate: binding a remote workspace builds a NEW engine; the
+	// previous task keeps running in the background.
+	if s.newRemoteEngine == nil {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "remote workspaces are not supported"})
 		return
 	}
@@ -211,25 +209,25 @@ func (s *Server) handleRemoteBind(w http.ResponseWriter, r *http.Request) {
 		remotePwd = remote.DiscoverPwd(r.Context(), pc.exec, "/root")
 	}
 
-	// Tear down local PTYs (they belonged to the previous workspace).
-	s.ptyMgr.closeAll()
-
-	ag, rec, err := s.switchToRemote(pc.exec, remotePwd)
+	// Snapshot the outgoing task once, then build the new engine BEFORE tearing
+	// anything down — a failed bind must not disrupt the current task's PTYs.
+	prevTaskID, curMode := "", ""
+	if cur := s.activeEngine(); cur != nil {
+		prevTaskID, curMode = cur.taskID, cur.curMode()
+	}
+	eng, err := s.buildRemoteEngine("", pc.exec, remotePwd, curMode)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to bind remote workspace: %v", err)})
 		return
 	}
+	s.ptyMgr.closeForTask(prevTaskID) // outgoing task's PTYs only; others keep theirs
+	s.setActiveEngine(eng)
 
 	label := remote.ProjectLabel(pc.exec, remotePwd)
 
-	s.mu.Lock()
-	s.pwd = remotePwd
-	s.agent = ag
-	s.recorder = rec
-	s.history = nil
-	s.mu.Unlock()
-
-	s.todoStore.Update(nil)
+	if eng.todoStore != nil {
+		eng.todoStore.Update(nil)
+	}
 
 	// Ownership of the executor has transferred to the live env; remove the
 	// pending entry WITHOUT closing it.

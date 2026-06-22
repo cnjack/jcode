@@ -19,13 +19,15 @@ import (
 // recording the planMode flag every agent rebuild is asked for.
 func newModeTestServer(rebuilt *[]bool) *Server {
 	return &Server{
-		wsBroker:      NewWSBroker(),
-		approvalState: runner.NewApprovalStateWithMode("/tmp", mode.Approval),
-		mode:          "approval",
-		rebuildForMode: func(planMode bool) (*adk.ChatModelAgent, error) {
-			*rebuilt = append(*rebuilt, planMode)
-			return nil, nil
+		Engine: &Engine{
+			approvalState: runner.NewApprovalStateWithMode("/tmp", mode.Approval),
+			mode:          "approval",
+			rebuildForMode: func(planMode bool) (*adk.ChatModelAgent, error) {
+				*rebuilt = append(*rebuilt, planMode)
+				return nil, nil
+			},
 		},
+		wsBroker: NewWSBroker(),
 	}
 }
 

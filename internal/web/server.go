@@ -17,7 +17,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
@@ -40,51 +39,48 @@ import (
 
 // Server is the jcode web server.
 type Server struct {
+	// Engine is the bootstrap/active task's run state. Its fields (agent, history,
+	// recorder, pwd, env, tokenUsage, approvalState, handler, …) are PROMOTED onto
+	// Server, so existing s.<field> accesses resolve to s.Engine.<field> while
+	// there is a single active task. Per-task routing (Server.tasks) supersedes
+	// this promotion in a later increment. Always non-nil after NewServer.
+	*Engine
+
+	// tasks holds every live task engine keyed by task id (session UUID). Wired in
+	// the routing increment; the bootstrap Engine above is the current de-facto
+	// entry until then.
+	tasks   map[string]*Engine
+	tasksMu sync.RWMutex
+
 	port        int
 	host        string
 	openBrowser bool
-	pwd         string
-	handler     *handler.WebHandler
 	wsBroker    *WSBroker
 
-	mu      sync.RWMutex
-	agent   *adk.ChatModelAgent
-	history []adk.Message
-	running atomic.Bool
-
-	// Cancel function for the currently running agent, protected by mu.
-	runCancel context.CancelFunc
+	// mu guards the shared-server maps and, during the single-active transition,
+	// the bootstrap Engine's run state (the role that moves to a per-Engine lock
+	// once tasks truly run in parallel).
+	mu sync.RWMutex
 
 	// Server-level context (from Start), used for background agent work.
 	ctx context.Context
 
-	// Active model info.
-	providerName string
-	modelName    string
-	mode         string // "build" or "plan"
-
 	// Dependencies set during initialization.
-	todoStore *tools.TodoStore
-	recorder  *session.Recorder
-	tracer    *telemetry.LangfuseTracer
-	env       *tools.Env
-	cfg       *config.Config
-	registry  *model.ModelRegistry
+	tracer   *telemetry.LangfuseTracer
+	cfg      *config.Config
+	cfgMu    sync.Mutex // serializes read-modify-write SaveConfig from concurrent handlers
+	registry *model.ModelRegistry
 
-	// createAgent rebuilds the agent (after config changes).
-	// Accepts provider and model names so the caller can switch models.
-	createAgent func(providerName, modelName string) (*adk.ChatModelAgent, error)
+	// newEngine builds a fresh, fully-isolated task engine (its own env, agent,
+	// recorder, handler, approval state) at the given pwd/mode. This is how a new
+	// concurrent task — or a "switch project" — gets its run state without
+	// mutating any other task's. taskID is non-empty when resuming an existing
+	// session. nil in setup mode.
+	newEngine func(taskID, pwd, mode string) (*EngineConfig, error)
 
-	// rebuildForMode re-assembles the agent for a session-mode change, swapping
-	// the tool/prompt axis (Plan = read-only) while reusing the live chat model.
-	rebuildForMode func(planMode bool) (*adk.ChatModelAgent, error)
-
-	// switchProject changes the working directory and rebuilds the agent.
-	switchProject func(newPwd string) (*adk.ChatModelAgent, *session.Recorder, error)
-
-	// switchToRemote binds the shared env to a remote SSH executor and rebuilds
-	// the agent (mirrors switchProject for remote targets).
-	switchToRemote func(executor *tools.SSHExecutor, remotePwd string) (*adk.ChatModelAgent, *session.Recorder, error)
+	// newRemoteEngine is newEngine's remote sibling: it builds a task engine bound
+	// to an SSH executor instead of a local pwd.
+	newRemoteEngine func(taskID string, executor *tools.SSHExecutor, remotePwd, mode string) (*EngineConfig, error)
 
 	// remoteConns holds SSH connections established by the remote-connect wizard
 	// that have not yet been bound to the live env (keyed by connection id).
@@ -92,9 +88,6 @@ type Server struct {
 
 	// PTY manager for terminal sessions.
 	ptyMgr *ptyManager
-
-	// approvalState controls whether tool calls require approval.
-	approvalState *runner.ApprovalState
 
 	// skillLoader provides skill listing for slash commands.
 	skillLoader *skills.Loader
@@ -111,32 +104,17 @@ type Server struct {
 	// mcpLogins tracks in-progress/finished OAuth logins per server name. Guarded by mu.
 	mcpLogins map[string]*mcpLoginState
 
-	// sessionSnapshot holds the git tree hash at the start of an agent run,
-	// used to compute session-scoped diffs (agent changes only).
-	sessionSnapshot string
-
 	// wechatClient is the optional WeChat channel client.
 	wechatClient channel.Channel
-
-	// eventHandler is the handler passed to the runner — may be a NotifyingHandler
-	// wrapping the WebHandler, or the WebHandler itself.
-	eventHandler handler.AgentEventHandler
 
 	// needsSetup is true when no providers are configured. The server starts in
 	// setup mode and exposes setup API endpoints while blocking chat operations.
 	needsSetup bool
 	version    string
 
-	// tokenUsage tracks per-call token totals for the agent runs, used for
-	// usage display (goal status, token updates).
-	tokenUsage *model.TokenUsage
-
 	// usageStore backs the global usage-statistics endpoint. nil falls back to
 	// usage.Default(); tests inject a temp-dir store.
 	usageStore *usage.Store
-
-	// breakdownFn computes the live context-window breakdown for the active task.
-	breakdownFn func() usage.ContextBreakdown
 }
 
 // ServerConfig holds the configuration for creating a new Server.
@@ -149,9 +127,9 @@ type ServerConfig struct {
 	Agent              *adk.ChatModelAgent
 	CreateAgent        func(providerName, modelName string) (*adk.ChatModelAgent, error)
 	RebuildForMode     func(planMode bool) (*adk.ChatModelAgent, error)
-	InitialMode        string // unified startup mode string ("approval"/"plan"/"full_access")
-	SwitchProject      func(newPwd string) (*adk.ChatModelAgent, *session.Recorder, error)
-	SwitchToRemote     func(executor *tools.SSHExecutor, remotePwd string) (*adk.ChatModelAgent, *session.Recorder, error)
+	NewEngine          func(taskID, pwd, mode string) (*EngineConfig, error)                                           // factory for new concurrent task engines (local)
+	NewRemoteEngine    func(taskID string, executor *tools.SSHExecutor, remotePwd, mode string) (*EngineConfig, error) // remote sibling of NewEngine
+	InitialMode        string                                                                                          // unified startup mode string ("approval"/"plan"/"full_access")
 	TodoStore          *tools.TodoStore
 	Recorder           *session.Recorder
 	Tracer             *telemetry.LangfuseTracer
@@ -182,97 +160,70 @@ func NewServer(cfg *ServerConfig) *Server {
 	if cfg.EventHandler != nil {
 		eh = cfg.EventHandler
 	}
-	s := &Server{
-		port:           cfg.Port,
-		host:           cfg.Host,
-		openBrowser:    cfg.OpenBrowser,
+	// The bootstrap Engine carries the per-task run state of the initial session.
+	boot := &Engine{
 		pwd:            cfg.Pwd,
-		version:        cfg.Version,
 		handler:        h,
-		wsBroker:       NewWSBroker(),
 		agent:          cfg.Agent,
-		createAgent:    cfg.CreateAgent,
-		rebuildForMode: cfg.RebuildForMode,
-		switchProject:  cfg.SwitchProject,
-		switchToRemote: cfg.SwitchToRemote,
-		remoteConns:    newRemoteConnRegistry(),
 		todoStore:      cfg.TodoStore,
 		recorder:       cfg.Recorder,
-		tracer:         cfg.Tracer,
 		env:            cfg.Env,
 		providerName:   cfg.ProviderName,
 		modelName:      cfg.ModelName,
 		mode:           mode.Parse(cfg.InitialMode).String(),
-		cfg:            cfg.Config,
-		registry:       cfg.Registry,
-		ptyMgr:         newPTYManager(),
 		approvalState:  cfg.ApprovalState,
-		skillLoader:    cfg.SkillLoader,
-		reloadMCP:      cfg.ReloadMCP,
-		mcpStatuses:    make(map[string]tools.MCPStatus),
-		mcpLogins:      make(map[string]*mcpLoginState),
-		wechatClient:   cfg.WechatClient,
 		eventHandler:   eh,
-		needsSetup:     cfg.NeedsSetup,
 		tokenUsage:     cfg.TokenUsage,
 		breakdownFn:    cfg.ContextBreakdownFn,
+		createAgent:    cfg.CreateAgent,
+		rebuildForMode: cfg.RebuildForMode,
 	}
-	if s.tokenUsage == nil {
-		s.tokenUsage = &model.TokenUsage{}
+	if boot.tokenUsage == nil {
+		boot.tokenUsage = &model.TokenUsage{}
 	}
+	// The engine's identity is its recorder's session UUID; this is the task_id
+	// stamped on its events and the key in the tasks map.
+	if boot.taskID == "" && boot.recorder != nil {
+		boot.taskID = boot.recorder.UUID()
+	}
+	s := &Server{
+		Engine:          boot,
+		tasks:           make(map[string]*Engine),
+		port:            cfg.Port,
+		host:            cfg.Host,
+		openBrowser:     cfg.OpenBrowser,
+		version:         cfg.Version,
+		wsBroker:        NewWSBroker(),
+		newEngine:       cfg.NewEngine,
+		newRemoteEngine: cfg.NewRemoteEngine,
+		remoteConns:     newRemoteConnRegistry(),
+		tracer:          cfg.Tracer,
+		cfg:             cfg.Config,
+		registry:        cfg.Registry,
+		ptyMgr:          newPTYManager(),
+		skillLoader:     cfg.SkillLoader,
+		reloadMCP:       cfg.ReloadMCP,
+		mcpStatuses:     make(map[string]tools.MCPStatus),
+		mcpLogins:       make(map[string]*mcpLoginState),
+		wechatClient:    cfg.WechatClient,
+		needsSetup:      cfg.NeedsSetup,
+	}
+	// The bootstrap engine is registered (and its pump started) in Start, once
+	// s.ctx exists.
 	for _, st := range cfg.InitialMCPStatuses {
 		s.mcpStatuses[st.Name] = st
 	}
 
-	// Wire TodoStore → session recording.
-	// The callback always accesses s.recorder (protected by s.mu) so that
-	// handleNewSession / handleSwitchProject correctly use the latest recorder.
-	if cfg.TodoStore != nil {
-		cfg.TodoStore.OnUpdate = func(items []tools.TodoItem) {
-			s.mu.RLock()
-			r := s.recorder
-			s.mu.RUnlock()
-			// Only record into a session that already has real content (a user
-			// message created the file). Otherwise an ambient todo reset — e.g.
-			// clearing the previous session's todos when starting fresh — would
-			// be the first write, creating + indexing a phantom empty session.
-			if r != nil && r.HasRecording() {
-				snapItems := make([]session.TodoSnapshotItem, len(items))
-				for i, it := range items {
-					snapItems[i] = session.TodoSnapshotItem{
-						ID: it.ID, Title: it.Title, Status: string(it.Status),
-					}
-				}
-				r.RecordTodoSnapshot(snapItems)
-			}
-		}
-	}
-
-	// Wire GoalStore → session recording, mirroring the TodoStore wiring above.
-	if cfg.Env != nil && cfg.Env.GoalStore != nil {
-		cfg.Env.GoalStore.OnUpdate = func(g *tools.Goal) {
-			s.mu.RLock()
-			r := s.recorder
-			s.mu.RUnlock()
-			// Same guard as the todo hook: a goal change must not be the first
-			// write that creates + indexes an otherwise-empty session (e.g.
-			// clearing the previous session's goal on reset). Always emit to the
-			// UI, but only persist once the session has real content.
-			if r != nil && r.HasRecording() {
-				tools.GoalRecorderHook(r)(g)
-			}
-			if s.handler != nil {
-				s.handler.Emit("goal_update", g)
-			}
-		}
-	}
+	// TodoStore/GoalStore → recorder/handler wiring is done PER TASK in the engine
+	// factory (command.buildWebTask), so each engine binds its OWN recorder and
+	// handler. (The bootstrap engine is built by that same factory.)
 
 	return s
 }
 
 // Handler returns the underlying WebHandler for external wiring (e.g. approval routing).
 func (s *Server) Handler() *handler.WebHandler {
-	return s.handler
+	return s.activeHandler()
 }
 
 // Start starts the web server. Blocks until context is cancelled.
@@ -331,6 +282,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/slash-commands", s.handleSlashCommands)
 	mux.HandleFunc("GET /api/browse", s.handleBrowse)
 	mux.HandleFunc("POST /api/project/switch", s.handleSwitchProject)
+	mux.HandleFunc("POST /api/project/validate", s.handleValidatePaths)
 	mux.HandleFunc("POST /api/pty", s.handleCreatePTY)
 	mux.HandleFunc("GET /api/pty", s.handleListPTY)
 	mux.HandleFunc("DELETE /api/pty/{id}", s.handleKillPTY)
@@ -378,8 +330,11 @@ func (s *Server) Start(ctx context.Context) error {
 		Handler: corsHandler,
 	}
 
-	// Forward WebHandler events to WebSocket clients.
-	go s.forwardEvents()
+	// Register the bootstrap engine (adds it to the tasks map + starts its event
+	// pump). New task engines register themselves on creation.
+	if s.Engine != nil {
+		_ = s.registerEngine(s.Engine)
+	}
 
 	// Graceful shutdown on context cancellation.
 	go func() {
@@ -412,24 +367,16 @@ func (s *Server) Start(ctx context.Context) error {
 	return nil
 }
 
-// forwardEvents reads from the WebHandler event channel and broadcasts to WebSocket clients.
-func (s *Server) forwardEvents() {
-	for ev := range s.handler.Events() {
-		s.wsBroker.Broadcast(WSEvent{
-			Type: ev.Event,
-			Data: ev.Data,
-		})
-	}
-}
-
 // --- API Handlers ---
 
-// currentModelSupportsImage checks if the currently selected model supports image input.
-func (s *Server) currentModelSupportsImage() bool {
-	if s.registry == nil {
+// currentModelSupportsImage checks if the given engine's selected model supports
+// image input.
+func (s *Server) currentModelSupportsImage(eng *Engine) bool {
+	if s.registry == nil || eng == nil {
 		return false
 	}
-	_, m, ok := s.registry.LookupModel(s.providerName, s.modelName)
+	provider, mdl, _ := eng.modelSnapshot()
+	_, m, ok := s.registry.LookupModel(provider, mdl)
 	if !ok || m == nil || m.Modalities == nil {
 		return false
 	}
@@ -442,18 +389,17 @@ func (s *Server) currentModelSupportsImage() bool {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	s.mu.RLock()
-	sessionID := ""
-	if s.recorder != nil {
-		sessionID = s.recorder.UUID()
-	}
-	s.mu.RUnlock()
+	eng := s.activeEngine()
 
-	if s.needsSetup {
+	if s.needsSetup || eng == nil {
+		pwd := ""
+		if eng != nil {
+			pwd = eng.pwd
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status":      "needs_setup",
 			"version":     s.version,
-			"pwd":         s.pwd,
+			"pwd":         pwd,
 			"provider":    "",
 			"model":       "",
 			"mode":        "build",
@@ -464,53 +410,61 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	provider, mdl, modeStr := eng.modelSnapshot()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":        "ok",
 		"version":       s.version,
-		"pwd":           s.pwd,
-		"provider":      s.providerName,
-		"model":         s.modelName,
-		"mode":          s.mode,
-		"session_id":    sessionID,
-		"running":       s.running.Load(),
-		"image_support": s.currentModelSupportsImage(),
+		"pwd":           eng.pwd,
+		"provider":      provider,
+		"model":         mdl,
+		"mode":          modeStr,
+		"session_id":    eng.recUUID(),
+		"running":       eng.running.Load(),
+		"image_support": s.currentModelSupportsImage(eng),
 	})
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	full := s.tokenUsage.GetFull()
+	eng := s.activeEngine()
+	if eng == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no active task"})
+		return
+	}
+	full := eng.tokenUsage.GetFull()
+	provider, mdl, modeStr := eng.modelSnapshot()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"running":    s.running.Load(),
+		"running":    eng.running.Load(),
 		"ws_clients": s.wsBroker.ClientCount(),
-		"pwd":        s.pwd,
-		"provider":   s.providerName,
-		"model":      s.modelName,
-		"mode":       s.mode,
+		"pwd":        eng.pwd,
+		"provider":   provider,
+		"model":      mdl,
+		"mode":       modeStr,
 		// Live token snapshot so a client reconnecting between turns can render
 		// the context bar + cache hit rate without waiting for the next
 		// token_update WS event. total_tokens = current context occupancy.
 		"token": map[string]any{
-			"total_tokens":        s.tokenUsage.GetLastTotal(),
+			"total_tokens":        eng.tokenUsage.GetLastTotal(),
 			"prompt_tokens":       full.PromptTokens,
 			"completion_tokens":   full.CompletionTokens,
 			"cached_tokens":       full.CachedTokens,
 			"reasoning_tokens":    full.ReasoningTokens,
 			"cache_write_tokens":  full.CacheWriteTokens,
 			"call_count":          full.CallCount,
-			"cache_hit_rate":      s.tokenUsage.CacheHitRate(),
-			"cache_supported":     s.tokenUsage.CacheObserved(),
-			"model_context_limit": s.currentModelContextLimit(),
+			"cache_hit_rate":      eng.tokenUsage.CacheHitRate(),
+			"cache_supported":     eng.tokenUsage.CacheObserved(),
+			"model_context_limit": s.currentModelContextLimit(eng),
 		},
 	})
 }
 
-// currentModelContextLimit resolves the context window of the currently
+// currentModelContextLimit resolves the context window of the given engine's
 // selected model, or 0 if unknown.
-func (s *Server) currentModelContextLimit() int {
-	if s.registry == nil || s.cfg == nil {
+func (s *Server) currentModelContextLimit(eng *Engine) int {
+	if s.registry == nil || s.cfg == nil || eng == nil {
 		return 0
 	}
-	return model.ResolveContextLimit(s.registry, s.cfg, s.providerName, s.modelName)
+	provider, mdl, _ := eng.modelSnapshot()
+	return model.ResolveContextLimit(s.registry, s.cfg, provider, mdl)
 }
 
 // handleWorkspace returns lightweight git workspace info (branch + dirty) for
@@ -523,12 +477,12 @@ func (s *Server) handleWorkspace(w http.ResponseWriter, r *http.Request) {
 	// initialised repo with no commits still reports its unborn branch (e.g.
 	// "main") instead of the literal "HEAD".
 	branchCmd := exec.CommandContext(r.Context(), "git", "branch", "--show-current")
-	branchCmd.Dir = s.pwd
+	branchCmd.Dir = s.activePwd()
 	branchOut, _ := branchCmd.Output()
 	branch := strings.TrimSpace(string(branchOut))
 
 	statusCmd := exec.CommandContext(r.Context(), "git", "status", "--porcelain")
-	statusCmd.Dir = s.pwd
+	statusCmd.Dir = s.activePwd()
 	statusOut, _ := statusCmd.Output()
 	dirty := strings.TrimSpace(string(statusOut)) != ""
 
@@ -544,40 +498,58 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Use CompareAndSwap to atomically check and set running, preventing
-	// two concurrent requests from both entering submitMessage.
-	if !s.running.CompareAndSwap(false, true) {
-		writeJSON(w, http.StatusConflict, map[string]string{
-			"error": "agent is already processing a request",
-		})
-		return
-	}
-	// running is now true; submitMessage will proceed without re-setting it.
-
 	var req struct {
 		Message   string      `json:"message"`
 		Images    []chatImage `json:"images,omitempty"`     // optional: base64-encoded images
 		Mode      string      `json:"mode,omitempty"`       // "build" or "plan"
-		SessionID string      `json:"session_id,omitempty"` // optional: continue existing session
+		SessionID string      `json:"session_id,omitempty"` // optional: the task (session) to run
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 20<<20)).Decode(&req); err != nil {
-		s.running.Store(false)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
 	if strings.TrimSpace(req.Message) == "" {
-		s.running.Store(false)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "message is required"})
 		return
 	}
 
-	mode := req.Mode
-	if mode == "" {
-		mode = s.mode
+	modeStr := req.Mode
+	if modeStr == "" {
+		modeStr = s.activeMode()
 	}
 
-	sessionID := s.submitMessage(req.Message, mode, "", req.SessionID, req.Images)
+	// Resolve (or lazily create) the engine for this task. Different tasks run
+	// concurrently; the per-task running flag only blocks double-running the SAME
+	// task.
+	eng, err := s.engineForChat(req.SessionID, modeStr)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if !eng.running.CompareAndSwap(false, true) {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "this task is already processing a request",
+		})
+		return
+	}
+
+	sessionID := s.submitMessage(eng, req.Message, modeStr, "", req.SessionID, req.Images)
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "processing", "session_id": sessionID})
+}
+
+// engineForChat resolves the engine a chat request targets. An empty task id (or
+// one matching the active task) uses the active engine; a known live task uses
+// its engine; an unknown id lazily spins up a fresh engine for it (a new task or
+// the first message of a not-yet-live task), rooted at the active task's pwd.
+func (s *Server) engineForChat(taskID, modeStr string) (*Engine, error) {
+	if eng := s.resolveEngine(taskID); eng != nil {
+		return eng, nil
+	}
+	pwd := ""
+	if a := s.activeEngine(); a != nil {
+		pwd = a.pwd
+	}
+	return s.buildLocalEngine(taskID, pwd, modeStr)
 }
 
 // chatImage represents a base64-encoded image in a chat request.
@@ -589,10 +561,14 @@ type chatImage struct {
 // SubmitMessage submits a message for agent processing from an external source
 // (e.g. WeChat inbound message). Returns false if the agent is busy.
 func (s *Server) SubmitMessage(message, source string) bool {
-	if !s.running.CompareAndSwap(false, true) {
+	eng := s.activeEngine()
+	if eng == nil {
 		return false
 	}
-	s.submitMessage(message, s.mode, source, "", nil)
+	if !eng.running.CompareAndSwap(false, true) {
+		return false
+	}
+	s.submitMessage(eng, message, eng.curMode(), source, "", nil)
 	return true
 }
 
@@ -602,9 +578,9 @@ func (s *Server) SubmitMessage(message, source string) bool {
 // continuity — if the current recorder has a different UUID, resume the
 // correct session instead of creating a new one.
 // images is an optional list of base64-encoded images to include in the message.
-// The caller must have already set s.running to true (via CompareAndSwap).
+// The caller must have already set eng.running to true (via CompareAndSwap).
 // Returns the session_id of the recorder used.
-func (s *Server) submitMessage(message, mode, source, sessionID string, images []chatImage) string {
+func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID string, images []chatImage) string {
 	// Slash command rewrite: if the original message starts with "/", check for
 	// skill slash commands and rewrite to load_skill instruction (same pattern as
 	// ACP/TUI). This must happen BEFORE the plan-mode prefix is applied, otherwise
@@ -639,7 +615,7 @@ func (s *Server) submitMessage(message, mode, source, sessionID string, images [
 	// Emit user_message event for external sources (e.g. WeChat) so web clients see it.
 	// Web-originated messages are already added by the frontend's sendMessage().
 	if source != "" {
-		s.handler.Emit("user_message", map[string]string{
+		eng.handler.Emit("user_message", map[string]string{
 			"content": message,
 			"source":  source,
 		})
@@ -648,23 +624,23 @@ func (s *Server) submitMessage(message, mode, source, sessionID string, images [
 	// Ensure a recorder exists (lazy creation on first message).
 	// If the client provided a session_id and the current recorder differs,
 	// resume the client's session to prevent creating a duplicate.
-	s.mu.Lock()
-	if s.recorder == nil {
-		rec, _ := session.NewRecorder(s.pwd, s.providerName, s.modelName)
+	eng.emu.Lock()
+	if eng.recorder == nil {
+		rec, _ := session.NewRecorder(eng.pwd, eng.providerName, eng.modelName)
 		if sessionID != "" {
 			rec.SetUUID(sessionID)
 		}
-		s.recorder = rec
-	} else if sessionID != "" && s.recorder.UUID() != sessionID {
+		eng.recorder = rec
+	} else if sessionID != "" && eng.recorder.UUID() != sessionID {
 		// Client is continuing a session that doesn't match the current recorder.
 		// Resume the client's session to keep all messages together.
-		s.recorder.Close()
-		rec, _ := session.NewRecorder(s.pwd, s.providerName, s.modelName)
+		eng.recorder.Close()
+		rec, _ := session.NewRecorder(eng.pwd, eng.providerName, eng.modelName)
 		rec.SetUUID(sessionID)
-		s.recorder = rec
+		eng.recorder = rec
 	}
-	recorder := s.recorder
-	s.mu.Unlock()
+	recorder := eng.recorder
+	eng.emu.Unlock()
 
 	// Record user message.
 	if recorder != nil {
@@ -707,35 +683,38 @@ func (s *Server) submitMessage(message, mode, source, sessionID string, images [
 		userMsg = schema.UserMessage(agentMsg)
 	}
 
-	s.mu.Lock()
-	s.history = append(s.history, userMsg)
-	history := make([]adk.Message, len(s.history))
-	copy(history, s.history)
-	agent := s.agent
-	s.mu.Unlock()
+	eng.emu.Lock()
+	eng.history = append(eng.history, userMsg)
+	history := make([]adk.Message, len(eng.history))
+	copy(history, eng.history)
+	agent := eng.agent
+	eng.emu.Unlock()
 
-	// Stream response via WebSocket — run agent in background.
+	// Stream response via WebSocket — run agent in background. Each task derives
+	// its own cancellable context so /stop cancels only that task.
 	runCtx, runCancel := context.WithCancel(s.ctx)
-	s.mu.Lock()
-	s.runCancel = runCancel
-	s.mu.Unlock()
+	eng.emu.Lock()
+	eng.runCancel = runCancel
+	eng.emu.Unlock()
 
 	go func() {
+		s.setTaskStatus(eng, true)
 		defer func() {
-			s.running.Store(false)
-			s.mu.Lock()
-			s.runCancel = nil
-			s.mu.Unlock()
+			eng.running.Store(false)
+			eng.emu.Lock()
+			eng.runCancel = nil
+			eng.emu.Unlock()
+			s.setTaskStatus(eng, false)
 		}()
 
 		// Take a git snapshot before the agent run for session diff tracking.
-		s.takeSessionSnapshot()
+		s.takeSessionSnapshot(eng)
 
-		resp := runner.Run(runCtx, agent, history, s.eventHandler, recorder, s.todoStore, s.env.GoalStore, s.tracer, s.tokenUsage)
+		resp := runner.Run(runCtx, agent, history, eng.eventHandler, recorder, eng.todoStore, eng.env.GoalStore, s.tracer, eng.tokenUsage)
 		if resp != "" {
-			s.mu.Lock()
-			s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: resp})
-			s.mu.Unlock()
+			eng.emu.Lock()
+			eng.history = append(eng.history, &schema.Message{Role: schema.Assistant, Content: resp})
+			eng.emu.Unlock()
 		}
 	}()
 
@@ -751,10 +730,22 @@ func (s *Server) handleListAllTasks(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// Snapshot which task ids are currently running (live engines) so the sidebar
+	// can show a running indicator even on a fresh page load.
+	running := make(map[string]bool)
+	s.tasksMu.RLock()
+	for id, e := range s.tasks {
+		if e != nil && e.running.Load() {
+			running[id] = true
+		}
+	}
+	s.tasksMu.RUnlock()
+
 	type taskItem struct {
 		UUID      string `json:"uuid"`
 		Project   string `json:"project"`
 		CreatedAt string `json:"created_at"`
+		UpdatedAt string `json:"updated_at,omitempty"`
 		Provider  string `json:"provider"`
 		Model     string `json:"model"`
 		Title     string `json:"title,omitempty"`
@@ -762,6 +753,7 @@ func (s *Server) handleListAllTasks(w http.ResponseWriter, r *http.Request) {
 		Archived  bool   `json:"archived"`
 		Unread    bool   `json:"unread"`
 		Status    string `json:"status,omitempty"`
+		Running   bool   `json:"running"`
 	}
 	items := make([]taskItem, 0)
 	for project, metas := range all {
@@ -770,6 +762,7 @@ func (s *Server) handleListAllTasks(w http.ResponseWriter, r *http.Request) {
 				UUID:      m.UUID,
 				Project:   project,
 				CreatedAt: m.StartTime,
+				UpdatedAt: m.UpdatedAt,
 				Provider:  m.Provider,
 				Model:     m.Model,
 				Title:     m.Title,
@@ -777,6 +770,7 @@ func (s *Server) handleListAllTasks(w http.ResponseWriter, r *http.Request) {
 				Archived:  m.Archived,
 				Unread:    m.Unread,
 				Status:    m.Status,
+				Running:   running[m.UUID],
 			})
 		}
 	}
@@ -824,7 +818,7 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
-	metas, err := session.ListSessions(s.pwd)
+	metas, err := session.ListSessions(s.activePwd())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -868,8 +862,38 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "session id is required"})
 		return
 	}
+	// Tear down the live engine for this task (if any) so its run is cancelled and
+	// resources reclaimed. The active foreground engine is left in place — but its
+	// recorder is reset to a fresh session so post-delete writes don't land in the
+	// now-unlinked file (silent data loss).
+	if eng := s.resolveEngine(id); eng != nil {
+		eng.emu.Lock()
+		cancel := eng.runCancel
+		eng.emu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		if eng != s.activeEngine() {
+			s.deleteEngine(id)
+		} else {
+			// Active task: wait for the cancelled run to drain so its final
+			// RecordAssistant/usage writes land before we close + reset the recorder
+			// (a post-close write would re-create and truncate the file).
+			for i := 0; i < 200 && eng.running.Load(); i++ {
+				time.Sleep(5 * time.Millisecond)
+			}
+			eng.emu.Lock()
+			if eng.recorder != nil && eng.recorder.UUID() == id {
+				eng.recorder.Close()
+				eng.recorder = nil
+				eng.history = nil
+			}
+			eng.emu.Unlock()
+		}
+	}
+
 	// Resolve the owning project across all projects: a task deleted from the
-	// sidebar tree may not belong to the active project (s.pwd).
+	// sidebar tree may not belong to the active project.
 	if _, err := session.DeleteSessionByUUID(id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -878,7 +902,12 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTruncateHistory(w http.ResponseWriter, r *http.Request) {
-	if s.running.Load() {
+	eng := s.activeEngine()
+	if eng == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no active task"})
+		return
+	}
+	if eng.running.Load() {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is currently running"})
 		return
 	}
@@ -894,15 +923,15 @@ func (s *Server) handleTruncateHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Capture the recorder reference under the lock but do file I/O outside
-	// so we don't block other goroutines.
-	s.mu.Lock()
-	rec := s.recorder
+	// Capture the recorder under eng.emu (same lock submitMessage uses) but do
+	// file I/O outside the lock.
+	eng.emu.Lock()
+	rec := eng.recorder
+	eng.emu.Unlock()
 	sessionID := ""
 	if rec != nil {
 		sessionID = rec.UUID()
 	}
-	s.mu.Unlock()
 
 	// Persist first — if the file rewrite fails we abort without touching
 	// the in-memory history so state never diverges.
@@ -914,13 +943,13 @@ func (s *Server) handleTruncateHistory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Now truncate in-memory history.
-	s.mu.Lock()
+	// Now truncate in-memory history under eng.emu.
+	eng.emu.Lock()
 	truncAt := 0
 	if req.BeforeUserMessage > 0 {
 		userCount := 0
-		truncAt = len(s.history) // default: keep all
-		for i, msg := range s.history {
+		truncAt = len(eng.history) // default: keep all
+		for i, msg := range eng.history {
 			if msg.Role == schema.User {
 				if userCount == req.BeforeUserMessage {
 					truncAt = i
@@ -931,11 +960,11 @@ func (s *Server) handleTruncateHistory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if truncAt == 0 {
-		s.history = nil
+		eng.history = nil
 	} else {
-		s.history = s.history[:truncAt]
+		eng.history = eng.history[:truncAt]
 	}
-	s.mu.Unlock()
+	eng.emu.Unlock()
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":     "ok",
@@ -944,124 +973,94 @@ func (s *Server) handleTruncateHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
-	// Parse optional request body for resume session ID.
+	// Parse optional resume session ID + project. Creating a task no longer
+	// blocks on "is the agent running" — tasks run concurrently.
 	var req struct {
 		SessionID string `json:"session_id,omitempty"`
+		Pwd       string `json:"pwd,omitempty"`
 	}
-	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req)
-
-	// Only block creating a brand-new session while the agent is running.
-	// Resuming (loading) an existing session is always allowed — the web UI
-	// may refresh at any time and needs to restore its view.
-	if req.SessionID == "" && s.running.Load() {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is currently running"})
+	// The body is optional (empty = brand-new task → EOF), but a non-empty
+	// malformed body should be rejected rather than creating a zero-value task.
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil && err != io.EOF {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
 
-	// When resuming while running, skip recorder/history replacement — just
-	// return the requested session_id so the frontend can populate the UI
-	// from the session entries (which it already fetched via GET).
-	if req.SessionID != "" && s.running.Load() {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status":     "ok",
-			"session_id": req.SessionID,
-		})
-		return
-	}
-
-	s.mu.Lock()
-	// Close the old recorder.
-	if s.recorder != nil {
-		s.recorder.Close()
-		s.recorder = nil
-	}
-
-	// Only create a recorder when resuming an existing session.
-	// For brand-new conversations the recorder is created lazily in
-	// submitMessage on the first actual user message, which avoids
-	// persisting empty sessions.
+	// Already-live task: just focus it (do not disturb its run).
 	if req.SessionID != "" {
-		rec, _ := session.NewRecorder(s.pwd, s.providerName, s.modelName)
-		if rec != nil {
-			rec.SetUUID(req.SessionID)
-			s.recorder = rec
+		if eng := s.resolveEngine(req.SessionID); eng != nil {
+			s.setActiveEngine(eng)
+			writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "session_id": eng.taskID})
+			return
 		}
 	}
 
-	// Prepare todo items while holding the lock, but apply them after unlocking
-	// to avoid deadlock: todoStore.Update → OnUpdate → s.mu.RLock.
-	var updateTodos bool
-	var todoItems []tools.TodoItem
-	var resuming bool
-	var goalSnap *session.GoalSnapshot
+	if s.newEngine == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "task creation is not supported"})
+		return
+	}
+
+	// Each new/resumed task gets its OWN engine (env, agent, recorder, handler),
+	// so it runs independently of every other task.
+	pwd := req.Pwd
+	if pwd == "" {
+		if a := s.activeEngine(); a != nil {
+			pwd = a.pwd
+		}
+	}
+	eng, err := s.buildLocalEngine(req.SessionID, pwd, s.activeMode())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Resume: hydrate the fresh engine with the persisted conversation/todos/goal.
 	if req.SessionID != "" {
-		resuming = true
-		// Resuming: load prior conversation into history so the agent has context.
-		entries, _ := session.LoadSession(req.SessionID)
-		// Reconstruct full state (message history, todos, goal).
+		entries, lerr := session.LoadSession(req.SessionID)
+		if lerr != nil {
+			// Stale/nonexistent session id: don't silently register a phantom empty
+			// engine under it — tear the just-built engine down and report not-found.
+			s.deleteEngine(eng.taskID)
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+			return
+		}
 		st := session.ReconstructState(entries)
-		s.history = st.History
-		goalSnap = st.Goal
-		// Always update (an empty list clears leftovers from the previous session).
-		if s.todoStore != nil {
-			updateTodos = true
-			todoItems = make([]tools.TodoItem, len(st.Todos))
+		eng.emu.Lock()
+		eng.history = st.History
+		eng.emu.Unlock()
+		if eng.todoStore != nil {
+			items := make([]tools.TodoItem, len(st.Todos))
 			for i, t := range st.Todos {
-				todoItems[i] = tools.TodoItem{ID: t.ID, Title: t.Title, Status: tools.TodoStatus(t.Status)}
+				items[i] = tools.TodoItem{ID: t.ID, Title: t.Title, Status: tools.TodoStatus(t.Status)}
+			}
+			eng.todoStore.Update(items)
+		}
+		if eng.env != nil && eng.env.GoalStore != nil {
+			eng.env.GoalStore.RestoreFromSnapshot(st.Goal)
+			if eng.handler != nil {
+				eng.handler.Emit("goal_update", eng.env.GoalStore.Get())
 			}
 		}
-	} else {
-		s.history = nil
-		// Mark that todos should be reset.
-		if s.todoStore != nil {
-			updateTodos = true
-		}
-	}
-	s.mu.Unlock()
-
-	// Apply todo updates outside the lock to avoid deadlock with OnUpdate callback.
-	if updateTodos && s.todoStore != nil {
-		s.todoStore.Update(todoItems)
 	}
 
-	// Apply the session's goal state outside the lock. Restore is silent (no
-	// OnUpdate, so nothing is re-recorded into the session file); broadcast
-	// the new state to clients explicitly. A brand-new session always resets
-	// the store so a goal from the previous session does not leak across.
-	if s.env != nil && s.env.GoalStore != nil {
-		if resuming {
-			s.env.GoalStore.RestoreFromSnapshot(goalSnap)
-		} else {
-			s.env.GoalStore.Restore(nil)
-		}
-		if s.handler != nil {
-			s.handler.Emit("goal_update", s.env.GoalStore.Get())
-		}
-	}
+	s.setActiveEngine(eng)
 
-	// Notify clients. When resuming an existing session, do NOT broadcast session_reset
-	// (which would wipe the UI that the frontend is about to repopulate from history).
+	// Brand-new task: tell its view to start clean.
 	if req.SessionID == "" {
-		s.wsBroker.Broadcast(WSEvent{Type: "session_reset", Data: map[string]string{}})
+		s.wsBroker.Broadcast(WSEvent{TaskID: eng.taskID, Type: "session_reset", Data: map[string]string{}})
 	}
 
-	s.mu.RLock()
-	newSessionID := ""
-	if s.recorder != nil {
-		newSessionID = s.recorder.UUID()
-	}
-	s.mu.RUnlock()
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status":     "ok",
-		"session_id": newSessionID,
-	})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "session_id": eng.taskID})
 }
 
 func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
+	curProvider, curModel := "", ""
+	if eng := s.activeEngine(); eng != nil {
+		curProvider, curModel, _ = eng.modelSnapshot()
+	}
 	if s.registry == nil || s.cfg == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"current":   map[string]string{"provider": s.providerName, "model": s.modelName},
+			"current":   map[string]string{"provider": curProvider, "model": curModel},
 			"providers": []any{},
 		})
 		return
@@ -1124,16 +1123,20 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"current":   map[string]string{"provider": s.providerName, "model": s.modelName},
+		"current":   map[string]string{"provider": curProvider, "model": curModel},
 		"providers": result,
 	})
 }
 
 func (s *Server) handleSwitchModel(w http.ResponseWriter, r *http.Request) {
-	if s.running.Load() {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is currently running"})
+	eng := s.activeEngine()
+	if eng == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no active task"})
 		return
 	}
+	// No running gate: applyModelSwitch swaps eng.agent under eng.emu (the lock the
+	// run reads it under), so a mid-run switch is safe and takes effect next turn —
+	// consistent with mode/approval switching.
 
 	var req struct {
 		Provider string `json:"provider"`
@@ -1148,18 +1151,14 @@ func (s *Server) handleSwitchModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ag, err := s.createAgent(req.Provider, req.Model)
+	// Rebuild THIS task's agent for the new model and swap it in under eng.emu
+	// (the same lock submitMessage uses to read the agent). Keep history.
+	ag, err := eng.createAgent(req.Provider, req.Model)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-
-	s.mu.Lock()
-	s.agent = ag
-	s.providerName = req.Provider
-	s.modelName = req.Model
-	// Keep history — allow continuing the conversation with a different model.
-	s.mu.Unlock()
+	eng.applyModelSwitch(ag, req.Provider, req.Model)
 
 	// Track in recent models.
 	if state, err := config.LoadModelState(); err == nil {
@@ -1167,8 +1166,7 @@ func (s *Server) handleSwitchModel(w http.ResponseWriter, r *http.Request) {
 		_ = config.SaveModelState(state)
 	}
 
-	// Notify clients.
-	s.wsBroker.Broadcast(WSEvent{Type: "model_changed", Data: map[string]string{
+	s.wsBroker.Broadcast(WSEvent{Type: "model_changed", TaskID: eng.taskID, Data: map[string]string{
 		"provider": req.Provider,
 		"model":    req.Model,
 	}})
@@ -1193,24 +1191,34 @@ func (s *Server) handleSwitchMode(w http.ResponseWriter, r *http.Request) {
 	}
 	sm := mode.Parse(req.Mode)
 
-	// Lock around the agent rebuild + mode/approval mutation so we don't race an
-	// in-flight submitMessage that reads s.agent under the same lock. The new
-	// agent (and tool set) takes effect on the next run, like TUI/ACP.
-	s.mu.Lock()
-	s.mode = sm.String()
-	if s.approvalState != nil {
-		s.approvalState.SetSessionMode(sm) // approval axis (Full access → auto)
+	eng := s.activeEngine()
+	if eng == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no active task"})
+		return
 	}
-	if s.rebuildForMode != nil {
-		if ag, err := s.rebuildForMode(sm.IsPlan()); err == nil {
-			s.agent = ag // tool/prompt axis (Plan → read-only)
-		} else {
-			config.Logger().Printf("[web] mode switch agent rebuild error: %v", err)
-		}
-	}
-	s.mu.Unlock()
+	// No running gate: applyModeSwitch writes eng.agent under eng.emu, the same
+	// lock submitMessage reads it under, so a mid-run switch is safe and simply
+	// takes effect on the next turn (matching TUI/ACP and the "Allow all" path).
 
-	s.wsBroker.Broadcast(WSEvent{Type: "mode_changed", Data: map[string]string{
+	// Rebuild this task's agent FIRST. If the rebuild fails, abort without
+	// changing the mode/approval axis — otherwise plan mode could be reported while
+	// a write-capable agent stays live.
+	var newAg *adk.ChatModelAgent
+	if eng.rebuildForMode != nil {
+		ag, err := eng.rebuildForMode(sm.IsPlan())
+		if err != nil {
+			config.Logger().Printf("[web] mode switch agent rebuild error: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to switch mode"})
+			return
+		}
+		newAg = ag
+	}
+	if eng.approvalState != nil {
+		eng.approvalState.SetSessionMode(sm) // approval axis (Full access → auto)
+	}
+	eng.applyModeSwitch(sm.String(), newAg)
+
+	s.wsBroker.Broadcast(WSEvent{Type: "mode_changed", TaskID: eng.taskID, Data: map[string]string{
 		"mode": sm.String(),
 	}})
 
@@ -1233,27 +1241,29 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetTodos(w http.ResponseWriter, r *http.Request) {
-	if s.todoStore == nil {
+	eng := s.activeEngine()
+	if eng == nil || eng.todoStore == nil {
 		writeJSON(w, http.StatusOK, []any{})
 		return
 	}
-	items := s.todoStore.Items()
-	writeJSON(w, http.StatusOK, items)
+	writeJSON(w, http.StatusOK, eng.todoStore.Items())
 }
 
 // handleGetGoal returns the current session goal (or null when none is set).
 func (s *Server) handleGetGoal(w http.ResponseWriter, _ *http.Request) {
-	if s.env == nil || s.env.GoalStore == nil {
+	eng := s.activeEngine()
+	if eng == nil || eng.env == nil || eng.env.GoalStore == nil {
 		writeJSON(w, http.StatusOK, nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.env.GoalStore.Get())
+	writeJSON(w, http.StatusOK, eng.env.GoalStore.Get())
 }
 
 // handleSetGoal sets (or replaces) the session goal. Unless start=false, it also
 // kicks off an agent run so work begins immediately.
 func (s *Server) handleSetGoal(w http.ResponseWriter, r *http.Request) {
-	if s.env == nil || s.env.GoalStore == nil {
+	eng := s.activeEngine()
+	if eng == nil || eng.env == nil || eng.env.GoalStore == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "goals not available"})
 		return
 	}
@@ -1270,13 +1280,14 @@ func (s *Server) handleSetGoal(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	g := s.env.GoalStore.Set(objective)
+	g := eng.env.GoalStore.Set(objective)
 
 	if req.Start == nil || *req.Start {
 		// Start working immediately when idle; if busy, the continuation guard
-		// will pick the goal up after the current run finishes.
-		if s.running.CompareAndSwap(false, true) {
-			s.submitMessage(tools.GoalKickoffPrompt(objective), s.mode, "", "", nil)
+		// will pick the goal up after the current run finishes. Targets the active
+		// task.
+		if eng.running.CompareAndSwap(false, true) {
+			s.submitMessage(eng, tools.GoalKickoffPrompt(objective), eng.curMode(), "", "", nil)
 		}
 	}
 	writeJSON(w, http.StatusOK, g)
@@ -1284,8 +1295,8 @@ func (s *Server) handleSetGoal(w http.ResponseWriter, r *http.Request) {
 
 // handleClearGoal removes the session goal.
 func (s *Server) handleClearGoal(w http.ResponseWriter, _ *http.Request) {
-	if s.env != nil && s.env.GoalStore != nil {
-		s.env.GoalStore.Clear()
+	if eng := s.activeEngine(); eng != nil && eng.env != nil && eng.env.GoalStore != nil {
+		eng.env.GoalStore.Clear()
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "cleared"})
 }
@@ -1293,6 +1304,7 @@ func (s *Server) handleClearGoal(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleApproval(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ID         string `json:"id"`
+		TaskID     string `json:"task_id"`
 		Approved   bool   `json:"approved"`
 		ApproveAll bool   `json:"approve_all"`
 	}
@@ -1300,15 +1312,22 @@ func (s *Server) handleApproval(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	if err := s.handler.ResolveApproval(req.ID, req.Approved, req.ApproveAll); err != nil {
+	// Route the resolve to the requesting task's handler. resolveEngine maps an
+	// empty task_id to the active task (legacy clients) but a NON-empty unknown id
+	// to nil — so a stray id can't resolve against the active task's handler-local
+	// approval ids.
+	reng := s.resolveEngine(req.TaskID)
+	if reng == nil || reng.handler == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such task"})
+		return
+	}
+	if err := reng.handler.ResolveApproval(req.ID, req.Approved, req.ApproveAll); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
-	// "Allow all" promotes the session to auto-approve (the runner flips its
-	// ApprovalState on resolve). Mirror that into the user-facing selector: keep
-	// s.mode in sync (so /api/health reports it) and broadcast mode_changed so the
-	// chat composer's Ask-for-approval / Full-access pill updates to Full access.
-	s.syncModeAfterApproval(req.Approved, req.ApproveAll)
+	// "Allow all" promotes that task to auto-approve (the runner flips its
+	// ApprovalState on resolve). Mirror it onto that task's mode + selector.
+	s.syncModeAfterApproval(reng, req.Approved, req.ApproveAll)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -1317,15 +1336,13 @@ func (s *Server) handleApproval(w http.ResponseWriter, r *http.Request) {
 // (or a deny) leaves the mode untouched. The runner's ApprovalState is the
 // source of truth for the approval axis; this only projects it onto the unified
 // selector the frontend renders.
-func (s *Server) syncModeAfterApproval(approved, approveAll bool) {
-	if !approved || !approveAll {
+func (s *Server) syncModeAfterApproval(eng *Engine, approved, approveAll bool) {
+	if !approved || !approveAll || eng == nil {
 		return
 	}
 	sm := mode.FullAccess
-	s.mu.Lock()
-	s.mode = sm.String()
-	s.mu.Unlock()
-	s.wsBroker.Broadcast(WSEvent{Type: "mode_changed", Data: map[string]string{
+	eng.applyModeSwitch(sm.String(), nil)
+	s.wsBroker.Broadcast(WSEvent{Type: "mode_changed", TaskID: eng.taskID, Data: map[string]string{
 		"mode": sm.String(),
 	}})
 }
@@ -1334,8 +1351,15 @@ func (s *Server) syncModeAfterApproval(approved, approveAll bool) {
 // The frontend pulls this after rebuilding the timeline (page reload / session
 // resume / WS reconnect) so an in-flight approval is re-attached as a card
 // instead of leaving the agent blocked forever.
-func (s *Server) handlePendingApproval(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.handler.PendingApprovalRequests())
+func (s *Server) handlePendingApproval(w http.ResponseWriter, r *http.Request) {
+	// Empty task_id → active task; non-empty unknown → empty (don't leak another
+	// task's pending requests under a stray id).
+	eng := s.resolveEngine(r.URL.Query().Get("task_id"))
+	if eng == nil || eng.handler == nil {
+		writeJSON(w, http.StatusOK, []handler.WebApprovalRequestData{})
+		return
+	}
+	writeJSON(w, http.StatusOK, eng.handler.PendingApprovalRequests())
 }
 
 // handleAskUser resolves a pending ask_user request with the user's answers,
@@ -1346,6 +1370,7 @@ func (s *Server) handlePendingApproval(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleAskUser(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ID      string `json:"id"`
+		TaskID  string `json:"task_id"`
 		Answers []struct {
 			QuestionHeader string   `json:"question_header"`
 			Answer         string   `json:"answer"`
@@ -1366,7 +1391,14 @@ func (s *Server) handleAskUser(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	if err := s.handler.ResolveAskUser(req.ID, resp); err != nil {
+	// Route the answer to the requesting task's handler. Empty task_id → active;
+	// non-empty unknown → reject (ids are handler-local).
+	eng := s.resolveEngine(req.TaskID)
+	if eng == nil || eng.handler == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such task"})
+		return
+	}
+	if err := eng.handler.ResolveAskUser(req.ID, resp); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
@@ -1377,21 +1409,41 @@ func (s *Server) handleAskUser(w http.ResponseWriter, r *http.Request) {
 // The frontend pulls this after rebuilding the timeline (page reload / session
 // resume) so an in-flight question is re-attached to its tool card instead of
 // leaving the agent blocked forever.
-func (s *Server) handlePendingAskUser(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.handler.PendingAskUserRequests())
+func (s *Server) handlePendingAskUser(w http.ResponseWriter, r *http.Request) {
+	eng := s.resolveEngine(r.URL.Query().Get("task_id"))
+	if eng == nil || eng.handler == nil {
+		writeJSON(w, http.StatusOK, []handler.WebAskUserRequestData{})
+		return
+	}
+	writeJSON(w, http.StatusOK, eng.handler.PendingAskUserRequests())
+}
+
+// withinWorkspace reports whether abs is the workspace root or strictly inside
+// it. Uses filepath.Rel rather than strings.HasPrefix so a sibling like /repo2
+// can't escape /repo, and an empty root rejects everything.
+func withinWorkspace(root, abs string) bool {
+	if root == "" {
+		return false
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
+	pwd := s.activePwd()
 	dir := r.URL.Query().Get("path")
 	if dir == "" {
-		dir = s.pwd
+		dir = pwd
 	} else if !filepath.IsAbs(dir) {
-		dir = filepath.Join(s.pwd, dir)
+		dir = filepath.Join(pwd, dir)
 	}
 
-	// Prevent path traversal.
+	// Prevent path traversal / sibling escape.
 	abs := filepath.Clean(dir)
-	if !strings.HasPrefix(abs, s.pwd) {
+	if !withinWorkspace(pwd, abs) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
 		return
 	}
@@ -1431,14 +1483,15 @@ func (s *Server) handleReadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	pwd := s.activePwd()
 	abs := path
 	if !filepath.IsAbs(abs) {
-		abs = filepath.Join(s.pwd, abs)
+		abs = filepath.Join(pwd, abs)
 	}
 
-	// Prevent path traversal.
+	// Prevent path traversal / sibling escape.
 	abs = filepath.Clean(abs)
-	if !strings.HasPrefix(abs, s.pwd) {
+	if !withinWorkspace(pwd, abs) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path outside workspace"})
 		return
 	}
@@ -1480,7 +1533,7 @@ func (s *Server) handleExec(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", req.Command)
-	cmd.Dir = s.pwd
+	cmd.Dir = s.activePwd()
 
 	output, err := cmd.CombinedOutput()
 	exitCode := 0
@@ -1528,7 +1581,7 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cmd := exec.CommandContext(s.ctx, "git", args...)
-	cmd.Dir = s.pwd
+	cmd.Dir = s.activePwd()
 	output, _ := cmd.CombinedOutput()
 
 	// Parse diff into structured entries
@@ -1551,7 +1604,7 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 	case "branch":
 		statCmd = exec.CommandContext(s.ctx, "git", "diff", "HEAD~1", "--stat", "--no-color")
 	}
-	statCmd.Dir = s.pwd
+	statCmd.Dir = s.activePwd()
 	_, _ = statCmd.CombinedOutput()
 
 	// Parse unified diff into per-file entries
@@ -1635,30 +1688,36 @@ func countDiffLines(patch string) (adds, dels int) {
 
 // takeSessionSnapshot records the current git working tree state
 // so that session-scoped diffs can be computed later.
-func (s *Server) takeSessionSnapshot() {
+func (s *Server) takeSessionSnapshot(eng *Engine) {
+	if eng == nil {
+		return
+	}
 	// Use "git stash create" to get a tree-ish of the current state without
 	// actually stashing. If there are no changes, use HEAD.
 	cmd := exec.CommandContext(s.ctx, "git", "stash", "create")
-	cmd.Dir = s.pwd
+	cmd.Dir = eng.pwd
 	out, err := cmd.Output()
 	snapshot := strings.TrimSpace(string(out))
 	if err != nil || snapshot == "" {
 		// No local changes — use HEAD as baseline
 		cmd2 := exec.CommandContext(s.ctx, "git", "rev-parse", "HEAD")
-		cmd2.Dir = s.pwd
+		cmd2.Dir = eng.pwd
 		out2, _ := cmd2.Output()
 		snapshot = strings.TrimSpace(string(out2))
 	}
-	s.mu.Lock()
-	s.sessionSnapshot = snapshot
-	s.mu.Unlock()
+	eng.emu.Lock()
+	eng.sessionSnapshot = snapshot
+	eng.emu.Unlock()
 }
 
 // handleSessionDiff computes the diff between the session start snapshot and current state.
 func (s *Server) handleSessionDiff(w http.ResponseWriter, _ *http.Request) {
-	s.mu.RLock()
-	snapshot := s.sessionSnapshot
-	s.mu.RUnlock()
+	snapshot := ""
+	if eng := s.activeEngine(); eng != nil {
+		eng.emu.Lock()
+		snapshot = eng.sessionSnapshot
+		eng.emu.Unlock()
+	}
 
 	type diffEntry struct {
 		File      string `json:"file"`
@@ -1678,7 +1737,7 @@ func (s *Server) handleSessionDiff(w http.ResponseWriter, _ *http.Request) {
 
 	// Diff from snapshot to current working tree
 	cmd := exec.CommandContext(s.ctx, "git", "diff", snapshot, "--no-color")
-	cmd.Dir = s.pwd
+	cmd.Dir = s.activePwd()
 	output, _ := cmd.CombinedOutput()
 
 	var entries []diffEntry
@@ -1805,17 +1864,16 @@ func (s *Server) reloadMCPAndRebuild() error {
 		}
 		s.mu.Unlock()
 	}
-	if s.createAgent != nil && !s.needsSetup {
-		s.mu.RLock()
-		prov, mod := s.providerName, s.modelName
-		s.mu.RUnlock()
-		ag, err := s.createAgent(prov, mod)
-		if err != nil {
-			return err
+	if !s.needsSetup {
+		// Rebuild the foreground task's agent so the new MCP tools take effect.
+		if eng := s.activeEngine(); eng != nil && eng.createAgent != nil {
+			prov, mod, _ := eng.modelSnapshot()
+			ag, err := eng.createAgent(prov, mod)
+			if err != nil {
+				return err
+			}
+			eng.setAgent(ag)
 		}
-		s.mu.Lock()
-		s.agent = ag
-		s.mu.Unlock()
 	}
 	return nil
 }
@@ -2166,7 +2224,11 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreatePTY(w http.ResponseWriter, r *http.Request) {
-	id, err := s.ptyMgr.create(s.pwd)
+	pwd, owner := "", ""
+	if eng := s.activeEngine(); eng != nil {
+		pwd, owner = eng.pwd, eng.taskID
+	}
+	id, err := s.ptyMgr.create(pwd, owner)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -2189,14 +2251,39 @@ func (s *Server) handlePTYWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.ptyMgr.serveWS(w, r, id)
 }
 
-func (s *Server) handleSwitchProject(w http.ResponseWriter, r *http.Request) {
-	if s.running.Load() {
-		writeJSON(w, http.StatusConflict, map[string]string{
-			"error": "agent is running, cannot switch project",
-		})
+// handleValidatePaths reports which of the given local paths no longer exist (or
+// are not directories). The web UI keeps its workspace list in localStorage and
+// can't stat the disk itself, so it calls this to prune dead workspaces from the
+// picker instead of letting the user click one and hit "path does not exist".
+// Callers send local paths only; ssh:// labels can't be stat'd here and would be
+// wrongly reported missing, so they must be filtered out client-side.
+func (s *Server) handleValidatePaths(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Paths []string `json:"paths"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
-	if s.switchProject == nil {
+
+	missing := []string{}
+	for _, p := range req.Paths {
+		if p == "" {
+			continue
+		}
+		if info, err := os.Stat(p); err != nil || !info.IsDir() {
+			missing = append(missing, p)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"missing": missing})
+}
+
+func (s *Server) handleSwitchProject(w http.ResponseWriter, r *http.Request) {
+	// No running gate: "switch project" builds a NEW independent engine and leaves
+	// the previous task running in the background — switching to another task while
+	// one is chatting is the whole point of concurrent tasks.
+	if s.newEngine == nil {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{
 			"error": "project switching is not supported",
 		})
@@ -2222,27 +2309,30 @@ func (s *Server) handleSwitchProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Kill all PTY sessions (they were in the old directory).
-	s.ptyMgr.closeAll()
+	// Snapshot the outgoing task once, build the new engine BEFORE tearing down its
+	// PTYs — a failed build must not kill the current task's terminals.
+	prevTaskID, curMode := "", ""
+	if cur := s.activeEngine(); cur != nil {
+		prevTaskID, curMode = cur.taskID, cur.curMode()
+	}
 
-	// Call the switchProject callback to rebuild env, prompt, agent.
-	ag, rec, err := s.switchProject(req.Path)
+	// "Switch project" = build a fresh engine rooted at the new path and make it
+	// active. This replaces in-place env mutation, so no other live task's
+	// execution context is disturbed.
+	eng, err := s.buildLocalEngine("", req.Path, curMode)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": fmt.Sprintf("failed to switch project: %v", err),
 		})
 		return
 	}
+	s.ptyMgr.closeForTask(prevTaskID) // outgoing task's PTYs only
+	s.setActiveEngine(eng)
 
-	s.mu.Lock()
-	s.pwd = req.Path
-	s.agent = ag
-	s.recorder = rec
-	s.history = nil
-	s.mu.Unlock()
-
-	// Reset todos.
-	s.todoStore.Update(nil)
+	// Reset todos for the (now empty) active task view.
+	if eng.todoStore != nil {
+		eng.todoStore.Update(nil)
+	}
 
 	// Broadcast project change to clients.
 	s.wsBroker.Broadcast(WSEvent{
@@ -2260,13 +2350,20 @@ func (s *Server) handleSwitchProject(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetApprovalMode(w http.ResponseWriter, r *http.Request) {
 	autoApprove := false
-	if s.approvalState != nil {
-		autoApprove = s.approvalState.GetMode() == handler.ModeAuto
+	if eng := s.activeEngine(); eng != nil && eng.approvalState != nil {
+		autoApprove = eng.approvalState.GetMode() == handler.ModeAuto
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"auto_approve": autoApprove})
 }
 
 func (s *Server) handleSetApprovalMode(w http.ResponseWriter, r *http.Request) {
+	eng := s.activeEngine()
+	if eng == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no active task"})
+		return
+	}
+	// No running gate: the rebuild is emu-safe and applies next turn, consistent
+	// with the "Allow all" approval path which also flips full_access mid-run.
 	var req struct {
 		AutoApprove bool `json:"auto_approve"`
 	}
@@ -2280,35 +2377,40 @@ func (s *Server) handleSetApprovalMode(w http.ResponseWriter, r *http.Request) {
 	if req.AutoApprove {
 		sm = mode.FullAccess
 	}
-	s.mu.Lock()
-	s.mode = sm.String()
-	if s.approvalState != nil {
-		s.approvalState.SetSessionMode(sm)
-	}
-	if s.rebuildForMode != nil {
-		if ag, err := s.rebuildForMode(false); err == nil {
-			s.agent = ag
-		} else {
+	// Rebuild first; abort the toggle if the rebuild fails (don't desync the
+	// reported mode from the live agent).
+	var newAg *adk.ChatModelAgent
+	if eng.rebuildForMode != nil {
+		ag, err := eng.rebuildForMode(false)
+		if err != nil {
 			config.Logger().Printf("[web] approval mode agent rebuild error: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to set approval mode"})
+			return
 		}
+		newAg = ag
 	}
+	if eng.approvalState != nil {
+		eng.approvalState.SetSessionMode(sm)
+	}
+	eng.applyModeSwitch(sm.String(), newAg)
 	// Persist as the default startup mode so the preference survives restarts —
-	// resolveStartupMode reads cfg.DefaultMode. This makes the Settings toggle a
-	// true "default", not just a one-off runtime flip.
+	// resolveStartupMode reads cfg.DefaultMode. cfgMu serializes the config RMW.
+	s.cfgMu.Lock()
 	if s.cfg != nil {
 		s.cfg.DefaultMode = sm.String()
 		if err := config.SaveConfig(s.cfg); err != nil {
 			config.Logger().Printf("[web] approval mode save config failed: %v", err)
 		}
 	}
-	s.mu.Unlock()
+	s.cfgMu.Unlock()
 
 	s.wsBroker.Broadcast(WSEvent{
-		Type: "approval_mode_changed",
-		Data: map[string]any{"auto_approve": req.AutoApprove},
+		Type:   "approval_mode_changed",
+		TaskID: eng.taskID,
+		Data:   map[string]any{"auto_approve": req.AutoApprove},
 	})
 	// Also emit the unified mode event so updated clients keep their selector synced.
-	s.wsBroker.Broadcast(WSEvent{Type: "mode_changed", Data: map[string]string{"mode": sm.String()}})
+	s.wsBroker.Broadcast(WSEvent{Type: "mode_changed", TaskID: eng.taskID, Data: map[string]string{"mode": sm.String()}})
 	writeJSON(w, http.StatusOK, map[string]any{"auto_approve": req.AutoApprove})
 }
 
@@ -2350,51 +2452,87 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		if err := json.Unmarshal(msg, &incoming); err != nil {
 			continue
 		}
-		s.handleWSMessage(incoming)
+		s.handleWSMessage(client, incoming)
 	}
 }
 
-func (s *Server) handleWSMessage(msg WSIncoming) {
+func (s *Server) handleWSMessage(client *WSClient, msg WSIncoming) {
 	switch msg.Type {
 	case "ping":
-		s.wsBroker.Broadcast(WSEvent{Type: "pong"})
+		// Unicast the pong to the pinging client (broadcasting it woke every
+		// client unnecessarily).
+		if data, err := json.Marshal(WSEvent{Type: "pong"}); err == nil {
+			client.send(data)
+		}
+	case "subscribe":
+		var data struct {
+			TaskIDs []string `json:"task_ids"`
+		}
+		if json.Unmarshal(msg.Data, &data) == nil {
+			client.subscribe(data.TaskIDs)
+		}
+	case "unsubscribe":
+		var data struct {
+			TaskIDs []string `json:"task_ids"`
+		}
+		if json.Unmarshal(msg.Data, &data) == nil {
+			client.unsubscribe(data.TaskIDs)
+		}
 	case "approval":
 		var data struct {
 			ID         string `json:"id"`
+			TaskID     string `json:"task_id"`
 			Approved   bool   `json:"approved"`
 			ApproveAll bool   `json:"approve_all"`
 		}
 		if err := json.Unmarshal(msg.Data, &data); err != nil {
 			return
 		}
-		if err := s.handler.ResolveApproval(data.ID, data.Approved, data.ApproveAll); err != nil {
+		// Empty task_id → active task (legacy); non-empty unknown → drop (ids are
+		// handler-local and could collide with another task's).
+		reng := s.resolveEngine(data.TaskID)
+		if reng == nil || reng.handler == nil {
+			return
+		}
+		if err := reng.handler.ResolveApproval(data.ID, data.Approved, data.ApproveAll); err != nil {
 			config.Logger().Printf("[ws] resolve approval failed for id=%q: %v", data.ID, err)
 			return
 		}
 		// Same mode-sync as the POST path: an "allow all" over WS must also
 		// update the selector pill the user is looking at.
-		s.syncModeAfterApproval(data.Approved, data.ApproveAll)
+		s.syncModeAfterApproval(reng, data.Approved, data.ApproveAll)
 	}
 }
 
 // --- Stop handler ---
 
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
-	if !s.running.Load() {
+	// Cancel only the targeted task. task_id comes via query or JSON body; absent,
+	// fall back to the active task (legacy clients).
+	taskID := r.URL.Query().Get("task_id")
+	if taskID == "" {
+		var req struct {
+			TaskID string `json:"task_id"`
+		}
+		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req)
+		taskID = req.TaskID
+	}
+
+	eng := s.resolveEngine(taskID)
+	if eng == nil || !eng.running.Load() {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "not_running"})
 		return
 	}
 
-	s.mu.RLock()
-	cancel := s.runCancel
-	s.mu.RUnlock()
-
+	eng.emu.Lock()
+	cancel := eng.runCancel
+	eng.emu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
 
-	// Notify clients.
-	s.handler.OnAgentDone(fmt.Errorf("stopped by user"))
+	// Notify clients on that task's channel.
+	eng.handler.OnAgentDone(fmt.Errorf("stopped by user"))
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
 }
@@ -2423,7 +2561,7 @@ func (s *Server) handleListSSH(w http.ResponseWriter, r *http.Request) {
 	}
 
 	current := "local"
-	if s.env != nil && s.env.IsRemote() {
+	if eng := s.activeEngine(); eng != nil && eng.env != nil && eng.env.IsRemote() {
 		current = "ssh"
 	}
 
@@ -2488,7 +2626,10 @@ func (s *Server) handleToggleSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.mu.Lock()
+	// cfgMu (not s.mu) serializes the cfg read-modify-write+save, so concurrent
+	// approval-mode / MCP / skill saves can't clobber each other in memory or on
+	// disk.
+	s.cfgMu.Lock()
 	// Rebuild the disabled set from config.
 	disabled := make(map[string]bool, len(s.cfg.DisabledSkills))
 	for _, n := range s.cfg.DisabledSkills {
@@ -2506,23 +2647,21 @@ func (s *Server) handleToggleSkill(w http.ResponseWriter, r *http.Request) {
 	sort.Strings(list)
 	s.cfg.DisabledSkills = list
 	if err := config.SaveConfig(s.cfg); err != nil {
-		s.mu.Unlock()
+		s.cfgMu.Unlock()
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	s.mu.Unlock()
+	s.cfgMu.Unlock()
 
 	s.skillLoader.SetDisabled(list)
-	// Rebuild the agent so the system prompt (skill descriptions) and load_skill
-	// tool reflect the change on the next run.
-	if s.createAgent != nil && !s.needsSetup {
-		s.mu.RLock()
-		prov, mod := s.providerName, s.modelName
-		s.mu.RUnlock()
-		if ag, err := s.createAgent(prov, mod); err == nil {
-			s.mu.Lock()
-			s.agent = ag
-			s.mu.Unlock()
+	// Rebuild the foreground task's agent so the system prompt (skill descriptions)
+	// and load_skill tool reflect the change on the next run.
+	if !s.needsSetup {
+		if eng := s.activeEngine(); eng != nil && eng.createAgent != nil {
+			prov, mod, _ := eng.modelSnapshot()
+			if ag, err := eng.createAgent(prov, mod); err == nil {
+				eng.setAgent(ag)
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "name": name, "enabled": req.Enabled})
@@ -2754,22 +2893,31 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create the agent with the new config.
-	ag, err := s.createAgent(req.Provider, req.Model)
+	// Create the foreground task's agent with the new config.
+	eng := s.activeEngine()
+	if eng == nil || eng.createAgent == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no active task to configure"})
+		return
+	}
+	ag, err := eng.createAgent(req.Provider, req.Model)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create agent: " + err.Error()})
 		return
 	}
-
+	eng.applyModelSwitch(ag, req.Provider, req.Model)
+	// Publish the new config + registry to the live server so endpoints
+	// (/api/models, context-limit, etc.) reflect the just-configured provider
+	// without a restart.
+	s.cfgMu.Lock()
+	s.cfg = cfg
+	s.registry = model.NewModelRegistryWithConfig(cfg)
+	s.cfgMu.Unlock()
 	s.mu.Lock()
-	s.agent = ag
-	s.providerName = req.Provider
-	s.modelName = req.Model
 	s.needsSetup = false
 	s.mu.Unlock()
 
 	// Notify clients that setup is complete.
-	s.wsBroker.Broadcast(WSEvent{Type: "model_changed", Data: map[string]string{
+	s.wsBroker.Broadcast(WSEvent{Type: "model_changed", TaskID: eng.taskID, Data: map[string]string{
 		"provider": req.Provider,
 		"model":    req.Model,
 	}})
