@@ -280,7 +280,7 @@ func (s *Server) registerEngine(eng *Engine) error {
 	}
 	var pumpCtx context.Context
 	if !existed {
-		base := s.ctx
+		base := s.rootCtx()
 		if base == nil {
 			base = context.Background()
 		}

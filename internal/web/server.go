@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
@@ -63,8 +64,11 @@ type Server struct {
 	// once tasks truly run in parallel).
 	mu sync.RWMutex
 
-	// Server-level context (from Start), used for background agent work.
-	ctx context.Context
+	// ctxPtr holds the server-level context (set in Start), used for background
+	// agent work. Stored atomically because the automation scheduler/manual-run
+	// goroutines (launched by command.runWebServer before Start) may read it
+	// concurrently with Start's write. Read via rootCtx.
+	ctxPtr atomic.Pointer[context.Context]
 
 	// Dependencies set during initialization.
 	tracer   *telemetry.LangfuseTracer
@@ -121,6 +125,13 @@ type Server struct {
 	// Run execution reuses the Engine via automationRunner; the periodic
 	// scheduler is owned by command.runWebServer.
 	automations *automation.Store
+
+	// autoRunMu guards autoRunInflight, the set of automation ids with a manual
+	// run currently in flight on this server. It is the manual-run analogue of the
+	// scheduler's own inflight guard: without it a double-click (or two clients)
+	// would launch parallel agent sessions mutating the same project directory.
+	autoRunMu       sync.Mutex
+	autoRunInflight map[string]bool
 }
 
 // ServerConfig holds the configuration for creating a new Server.
@@ -215,9 +226,10 @@ func NewServer(cfg *ServerConfig) *Server {
 		wechatClient:    cfg.WechatClient,
 		needsSetup:      cfg.NeedsSetup,
 		automations:     cfg.Automations,
+		autoRunInflight: make(map[string]bool),
 	}
 	// The bootstrap engine is registered (and its pump started) in Start, once
-	// s.ctx exists.
+	// the root context exists.
 	for _, st := range cfg.InitialMCPStatuses {
 		s.mcpStatuses[st.Name] = st
 	}
@@ -234,9 +246,19 @@ func (s *Server) Handler() *handler.WebHandler {
 	return s.activeHandler()
 }
 
+// rootCtx returns the server-level context set by Start, or nil before Start
+// has run. Background goroutines (the automation scheduler/manual runs) must
+// tolerate a nil result, which means the server has not started serving yet.
+func (s *Server) rootCtx() context.Context {
+	if p := s.ctxPtr.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
+
 // Start starts the web server. Blocks until context is cancelled.
 func (s *Server) Start(ctx context.Context) error {
-	s.ctx = ctx
+	s.ctxPtr.Store(&ctx)
 	mux := http.NewServeMux()
 
 	// API routes
@@ -709,8 +731,13 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 	eng.emu.Unlock()
 
 	// Stream response via WebSocket — run agent in background. Each task derives
-	// its own cancellable context so /stop cancels only that task.
-	runCtx, runCancel := context.WithCancel(s.ctx)
+	// its own cancellable context so /stop cancels only that task. Fall back to
+	// Background if a run is somehow submitted before Start set the root context.
+	base := s.rootCtx()
+	if base == nil {
+		base = context.Background()
+	}
+	runCtx, runCancel := context.WithCancel(base)
 	eng.emu.Lock()
 	eng.runGen++
 	gen := eng.runGen
@@ -1566,7 +1593,7 @@ func (s *Server) handleExec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(s.ctx, 30*1e9) // 30 seconds
+	ctx, cancel := context.WithTimeout(s.rootCtx(), 30*1e9) // 30 seconds
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", req.Command)
@@ -1617,7 +1644,7 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 		args = []string{"diff", "--no-color"}
 	}
 
-	cmd := exec.CommandContext(s.ctx, "git", args...)
+	cmd := exec.CommandContext(s.rootCtx(), "git", args...)
 	cmd.Dir = s.activePwd()
 	output, _ := cmd.CombinedOutput()
 
@@ -1634,12 +1661,12 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 	rawDiff := string(output)
 
 	// Also get changed file list for status
-	statCmd := exec.CommandContext(s.ctx, "git", "diff", "--stat", "--no-color")
+	statCmd := exec.CommandContext(s.rootCtx(), "git", "diff", "--stat", "--no-color")
 	switch mode {
 	case "staged":
-		statCmd = exec.CommandContext(s.ctx, "git", "diff", "--cached", "--stat", "--no-color")
+		statCmd = exec.CommandContext(s.rootCtx(), "git", "diff", "--cached", "--stat", "--no-color")
 	case "branch":
-		statCmd = exec.CommandContext(s.ctx, "git", "diff", "HEAD~1", "--stat", "--no-color")
+		statCmd = exec.CommandContext(s.rootCtx(), "git", "diff", "HEAD~1", "--stat", "--no-color")
 	}
 	statCmd.Dir = s.activePwd()
 	_, _ = statCmd.CombinedOutput()
@@ -1731,13 +1758,13 @@ func (s *Server) takeSessionSnapshot(eng *Engine) {
 	}
 	// Use "git stash create" to get a tree-ish of the current state without
 	// actually stashing. If there are no changes, use HEAD.
-	cmd := exec.CommandContext(s.ctx, "git", "stash", "create")
+	cmd := exec.CommandContext(s.rootCtx(), "git", "stash", "create")
 	cmd.Dir = eng.pwd
 	out, err := cmd.Output()
 	snapshot := strings.TrimSpace(string(out))
 	if err != nil || snapshot == "" {
 		// No local changes — use HEAD as baseline
-		cmd2 := exec.CommandContext(s.ctx, "git", "rev-parse", "HEAD")
+		cmd2 := exec.CommandContext(s.rootCtx(), "git", "rev-parse", "HEAD")
 		cmd2.Dir = eng.pwd
 		out2, _ := cmd2.Output()
 		snapshot = strings.TrimSpace(string(out2))
@@ -1780,7 +1807,7 @@ func (s *Server) handleSessionDiff(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	// Diff from snapshot to current working tree
-	cmd := exec.CommandContext(s.ctx, "git", "diff", snapshot, "--no-color")
+	cmd := exec.CommandContext(s.rootCtx(), "git", "diff", snapshot, "--no-color")
 	cmd.Dir = pwd
 	output, _ := cmd.CombinedOutput()
 
@@ -2159,7 +2186,7 @@ func (s *Server) setMCPLogin(name, status, msg string) {
 }
 
 func (s *Server) runMCPLogin(name string) {
-	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Minute)
+	ctx, cancel := context.WithTimeout(s.rootCtx(), 5*time.Minute)
 	defer cancel()
 
 	s.mu.RLock()

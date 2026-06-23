@@ -35,6 +35,8 @@ func TestValidateAutomation_Rejections(t *testing.T) {
 		{"empty project", func(a *Automation) { a.ProjectPath = "" }},
 		{"remote ssh project", func(a *Automation) { a.ProjectPath = "ssh://user@host/path" }},
 		{"remote docker project", func(a *Automation) { a.ProjectPath = "docker://c/path" }},
+		{"relative project", func(a *Automation) { a.ProjectPath = "relative/dir" }},
+		{"dot project", func(a *Automation) { a.ProjectPath = "." }},
 		{"bad mode", func(a *Automation) { a.Mode = "yolo" }},
 		{"bad trigger type", func(a *Automation) { a.Trigger.Type = "weird" }},
 		{"bad cadence", func(a *Automation) { a.Trigger.Cadence = "fortnightly" }},

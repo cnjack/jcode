@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +17,10 @@ import (
 )
 
 const storeVersion = 1
+
+// ErrNotFound is returned (wrapped) when an operation targets an automation id
+// that does not exist, so HTTP handlers can map it to 404 rather than 400.
+var ErrNotFound = errors.New("automation not found")
 
 // defsFile is the user-edited definitions; stateFile is the volatile scheduler
 // bookkeeping; lockFile is the cross-process advisory write lock guarding both.
@@ -236,13 +241,20 @@ func (s *Store) Create(a Automation) (*Automation, error) {
 
 // Update applies a mutation to an existing automation under lock, re-validating
 // the result. The mutate callback receives a pointer it may modify in place.
+//
+// Re-enabling (Enabled false -> true) also clears ConsecutiveFails so a
+// recovered automation isn't immediately re-disabled by the next single
+// failure. Centralizing the reset here means EVERY enable path gets it — the
+// web UI's partial-patch PUT (handleUpdateAutomation), the CLI's SetEnabled, and
+// any future caller — not just SetEnabled.
 func (s *Store) Update(id string, mutate func(*Automation)) (*Automation, error) {
 	var out *Automation
-	err := s.withLock(true, false, func() error {
+	err := s.withLock(true, true, func() error {
 		a, ok := s.defs[id]
 		if !ok {
-			return fmt.Errorf("automation %q not found", id)
+			return fmt.Errorf("automation %q: %w", id, ErrNotFound)
 		}
+		wasEnabled := a.Enabled
 		cp := *a
 		mutate(&cp)
 		cp.ID = id // immutable
@@ -252,6 +264,17 @@ func (s *Store) Update(id string, mutate func(*Automation)) (*Automation, error)
 		}
 		s.defs[id] = &cp
 		out = &cp
+		if !wasEnabled && cp.Enabled {
+			st := s.state[id]
+			if st == nil {
+				st = &RunState{}
+			} else {
+				c := *st
+				st = &c
+			}
+			st.ConsecutiveFails = 0
+			s.state[id] = st
+		}
 		return nil
 	})
 	if err != nil {
@@ -261,7 +284,9 @@ func (s *Store) Update(id string, mutate func(*Automation)) (*Automation, error)
 	return &c, nil
 }
 
-// SetEnabled flips the enabled flag.
+// SetEnabled flips the enabled flag (re-enabling clears ConsecutiveFails via
+// Update's shared reset, so a recovered automation isn't immediately
+// re-disabled by the next single failure).
 func (s *Store) SetEnabled(id string, enabled bool) (*Automation, error) {
 	return s.Update(id, func(a *Automation) { a.Enabled = enabled })
 }
@@ -270,7 +295,7 @@ func (s *Store) SetEnabled(id string, enabled bool) (*Automation, error) {
 func (s *Store) Delete(id string) error {
 	return s.withLock(true, true, func() error {
 		if _, ok := s.defs[id]; !ok {
-			return fmt.Errorf("automation %q not found", id)
+			return fmt.Errorf("automation %q: %w", id, ErrNotFound)
 		}
 		delete(s.defs, id)
 		delete(s.state, id)
@@ -293,6 +318,69 @@ func (s *Store) UpdateState(id string, mutate func(*RunState)) error {
 		s.state[id] = st
 		return nil
 	})
+}
+
+// TryMarkRunning atomically claims a run for id: it sets LastStatus=running
+// (clearing LastError, stamping LastRunAt) only if a run is not ALREADY in
+// progress, returning whether the claim succeeded. This is the single
+// authoritative guard against overlapping runs across the scheduler, manual
+// "Run Now", and other processes — the local in-flight maps are only fast-path
+// hints that can't see each other or another process. A crashed run left at
+// "running" is cleared by the scheduler's reconcileStale on the next election.
+func (s *Store) TryMarkRunning(id string) (bool, error) {
+	claimed := false
+	err := s.withLock(false, true, func() error {
+		st := s.state[id]
+		if st != nil && st.LastStatus == StatusRunning {
+			return nil // already running; do not clobber the live run's state
+		}
+		if st == nil {
+			st = &RunState{}
+		} else {
+			cp := *st
+			st = &cp
+		}
+		st.LastStatus = StatusRunning
+		st.LastError = ""
+		st.LastRunAt = nowFunc().Format(time.RFC3339)
+		s.state[id] = st
+		claimed = true
+		return nil
+	})
+	return claimed, err
+}
+
+// UpdateStateAndMaybeDisable mutates the run-state (e.g. recording a failure and
+// bumping ConsecutiveFails) and, in the SAME lock scope, disables the definition
+// when ConsecutiveFails has reached AutoDisableThreshold. Folding the disable
+// into the run-state mutation closes the TOCTOU window that exists when the
+// disable is a separate SetEnabled(false) call: a concurrent successful run can
+// no longer reset ConsecutiveFails between the threshold check and the disable.
+// Returns whether the definition was disabled by this call.
+func (s *Store) UpdateStateAndMaybeDisable(id string, mutate func(*RunState)) (bool, error) {
+	disabled := false
+	err := s.withLock(true, true, func() error {
+		st := s.state[id]
+		if st == nil {
+			st = &RunState{}
+		} else {
+			cp := *st
+			st = &cp
+		}
+		mutate(st)
+		s.state[id] = st
+		if st.ConsecutiveFails >= AutoDisableThreshold {
+			if a, ok := s.defs[id]; ok && a.Enabled {
+				cp := *a
+				cp.Enabled = false
+				cp.UpdatedAt = nowFunc().Format(time.RFC3339)
+				s.defs[id] = &cp
+				disabled = true
+			}
+		}
+		return nil
+	})
+	return disabled, err
 }
 
 // ---- helpers ----

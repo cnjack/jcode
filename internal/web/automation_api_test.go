@@ -125,6 +125,60 @@ func TestAutomationAPI_CreateValidationError(t *testing.T) {
 	}
 }
 
+// Updating a non-existent automation must return 404, not 400, so clients can
+// distinguish a missing resource from a validation error.
+func TestAutomationAPI_UpdateNotFound(t *testing.T) {
+	s := newAutomationTestServer(t)
+	body := `{"name":"x"}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/automations/nope", strings.NewReader(body))
+	req.SetPathValue("id", "nope")
+	s.handleUpdateAutomation(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+// A manual "Run Now" must be rejected with 409 while a run for the same
+// automation is already in flight (scheduled run recorded as running, or a
+// manual run already claimed), so a double-click can't spawn parallel sessions.
+func TestAutomationAPI_RunNowConflict(t *testing.T) {
+	s := newAutomationTestServer(t)
+	proj := t.TempDir()
+	a, err := s.automations.Create(automation.Automation{
+		Name: "n", Prompt: "p", ProjectPath: proj, Trigger: automation.Trigger{Type: automation.TriggerManual},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Case 1: a scheduled (or prior) run is recorded as running.
+	_ = s.automations.UpdateState(a.ID, func(rs *automation.RunState) { rs.LastStatus = automation.StatusRunning })
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/automations/"+a.ID+"/run", nil)
+	req.SetPathValue("id", a.ID)
+	s.handleRunAutomation(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("want 409 (run in progress), got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	// Case 2: state clear, but a manual run already holds the in-flight slot.
+	_ = s.automations.UpdateState(a.ID, func(rs *automation.RunState) { rs.LastStatus = "" })
+	s.autoRunMu.Lock()
+	if s.autoRunInflight == nil {
+		s.autoRunInflight = map[string]bool{}
+	}
+	s.autoRunInflight[a.ID] = true
+	s.autoRunMu.Unlock()
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/automations/"+a.ID+"/run", nil)
+	req.SetPathValue("id", a.ID)
+	s.handleRunAutomation(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("want 409 (already claimed), got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAutomationAPI_Templates(t *testing.T) {
 	s := newAutomationTestServer(t)
 	rec := httptest.NewRecorder()

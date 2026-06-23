@@ -69,9 +69,16 @@ func (t *automationCreateTool) InvokableRun(_ context.Context, argumentsInJSON s
 		project = t.env.Pwd()
 	}
 
-	store, err := automation.NewStore()
-	if err != nil {
-		return "", fmt.Errorf("automation store unavailable: %w", err)
+	// Write through the server's live store so the new automation is immediately
+	// visible to the REST API and scheduler (a throwaway store would only touch
+	// disk, leaving the server's in-memory cache stale). Fall back to a fresh
+	// store in contexts with no live server (CLI/ACP).
+	store := t.env.AutomationStore
+	if store == nil {
+		var err error
+		if store, err = automation.NewStore(); err != nil {
+			return "", fmt.Errorf("automation store unavailable: %w", err)
+		}
 	}
 	created, err := store.Create(automation.Automation{
 		Name:        in.Name,

@@ -50,14 +50,14 @@ func newAutomationListCmd() *cobra.Command {
 				return nil
 			}
 			w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tNAME\tSCHEDULE\tENABLED\tLAST\tPROJECT")
+			_, _ = fmt.Fprintln(w, "ID\tNAME\tSCHEDULE\tENABLED\tLAST\tPROJECT")
 			for _, a := range list {
 				state := st.State(a.ID)
 				last := state.LastStatus
 				if last == "" {
 					last = "-"
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%v\t%s\t%s\n",
+				_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%v\t%s\t%s\n",
 					a.ID, a.Name, automation.HumanSchedule(a.Trigger), a.Enabled, last, a.ProjectPath)
 			}
 			return w.Flush()
@@ -98,9 +98,9 @@ func newAutomationTemplatesCmd() *cobra.Command {
 		Short: "List built-in automation templates",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tNAME\tBADGE\tDESCRIPTION")
+			_, _ = fmt.Fprintln(w, "ID\tNAME\tBADGE\tDESCRIPTION")
 			for _, t := range automation.BuiltinTemplates() {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", t.ID, t.Name, t.Badge, t.Description)
+				_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", t.ID, t.Name, t.Badge, t.Description)
 			}
 			return w.Flush()
 		},

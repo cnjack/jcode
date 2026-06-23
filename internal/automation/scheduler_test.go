@@ -63,6 +63,32 @@ func TestExecuteRun_SuccessThenError_AutoDisable(t *testing.T) {
 	}
 }
 
+// ExecuteRun must refuse to start a second run while one is already in progress
+// (atomic claim), so a scheduled fire racing a manual "Run Now" can't launch two
+// agent sessions against the same project.
+func TestExecuteRun_RefusesConcurrent(t *testing.T) {
+	s, _ := NewStoreDir(t.TempDir())
+	a, _ := s.Create(Automation{Name: "n", Prompt: "p", ProjectPath: t.TempDir(),
+		Trigger: Trigger{Type: TriggerSchedule, Cadence: CadenceDaily, Hour: 9}, Enabled: true})
+
+	// Simulate a run already in flight.
+	if ok, _ := s.TryMarkRunning(a.ID); !ok {
+		t.Fatal("setup claim failed")
+	}
+
+	r := &fakeRunner{sid: "sess"}
+	if _, err := ExecuteRun(context.Background(), s, r, a, KindScheduled); err == nil {
+		t.Fatal("expected ExecuteRun to refuse a concurrent run")
+	}
+	if r.count() != 0 {
+		t.Fatal("runner must not be invoked when a run is already in progress")
+	}
+	// The live run's status must be untouched (not clobbered to error).
+	if s.State(a.ID).LastStatus != StatusRunning {
+		t.Fatalf("refused run clobbered the live status: %s", s.State(a.ID).LastStatus)
+	}
+}
+
 type panicRunner struct{}
 
 func (panicRunner) StartRun(_ context.Context, _ *Automation, _ string) (string, error) {
@@ -171,5 +197,42 @@ func TestSchedulerTick_SkipWhenInflight(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if r.count() != 0 {
 		t.Fatal("overlap guard failed: fired while a run was in flight")
+	}
+}
+
+// reconcileStale must reset scheduled zombies unconditionally, reset only
+// clearly-stale manual zombies (older than manualRunStaleWindow), and leave a
+// fresh manual run — which may be live in another process — untouched.
+func TestReconcileStale_ManualHeuristic(t *testing.T) {
+	s, _ := NewStoreDir(t.TempDir())
+	sch := NewScheduler(s, &fakeRunner{})
+
+	sched, _ := s.Create(Automation{Name: "sched", Prompt: "p", ProjectPath: t.TempDir(),
+		Trigger: Trigger{Type: TriggerSchedule, Cadence: CadenceDaily, Hour: 9}, Enabled: true})
+	staleManual, _ := s.Create(Automation{Name: "stale", Prompt: "p", ProjectPath: t.TempDir(),
+		Trigger: Trigger{Type: TriggerManual}})
+	freshManual, _ := s.Create(Automation{Name: "fresh", Prompt: "p", ProjectPath: t.TempDir(),
+		Trigger: Trigger{Type: TriggerManual}})
+
+	_ = s.UpdateState(sched.ID, func(rs *RunState) { rs.LastStatus = StatusRunning })
+	_ = s.UpdateState(staleManual.ID, func(rs *RunState) {
+		rs.LastStatus = StatusRunning
+		rs.LastRunAt = time.Now().Add(-3 * time.Hour).Format(time.RFC3339)
+	})
+	_ = s.UpdateState(freshManual.ID, func(rs *RunState) {
+		rs.LastStatus = StatusRunning
+		rs.LastRunAt = time.Now().Format(time.RFC3339)
+	})
+
+	sch.reconcileStale()
+
+	if got := s.State(sched.ID).LastStatus; got != StatusInterrupted {
+		t.Fatalf("scheduled zombie not reset: %s", got)
+	}
+	if got := s.State(staleManual.ID).LastStatus; got != StatusInterrupted {
+		t.Fatalf("stale manual zombie not reset: %s", got)
+	}
+	if got := s.State(freshManual.ID).LastStatus; got != StatusRunning {
+		t.Fatalf("fresh manual run was reset (may be live in another process): %s", got)
 	}
 }

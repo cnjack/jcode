@@ -99,7 +99,9 @@ func TestBrokerDeliversByTaskID(t *testing.T) {
 // TestEnginePumpStampsTaskID is the end-to-end pump test: an engine's handler
 // event reaches a subscribed client tagged with that engine's task id.
 func TestEnginePumpStampsTaskID(t *testing.T) {
-	s := &Server{Engine: &Engine{}, tasks: make(map[string]*Engine), wsBroker: NewWSBroker(), ctx: context.Background()}
+	s := &Server{Engine: &Engine{}, tasks: make(map[string]*Engine), wsBroker: NewWSBroker()}
+	bg := context.Background()
+	s.ctxPtr.Store(&bg)
 	h := handler.NewWebHandler()
 	eng := &Engine{taskID: "task-1", handler: h}
 
@@ -136,7 +138,9 @@ func TestEnginePumpStampsTaskID(t *testing.T) {
 func stubFactoryServer(t *testing.T) *Server {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	s := &Server{Engine: &Engine{}, tasks: make(map[string]*Engine), wsBroker: NewWSBroker(), ctx: context.Background()}
+	s := &Server{Engine: &Engine{}, tasks: make(map[string]*Engine), wsBroker: NewWSBroker()}
+	bg := context.Background()
+	s.ctxPtr.Store(&bg)
 	s.newEngine = func(taskID, pwd, modeStr string) (*EngineConfig, error) {
 		rec, _ := session.NewRecorder(pwd, "prov", "model")
 		if taskID != "" && rec != nil {

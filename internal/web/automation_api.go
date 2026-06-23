@@ -2,12 +2,18 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
+	"strconv"
 
 	"github.com/cnjack/jcode/internal/automation"
 	"github.com/cnjack/jcode/internal/session"
 )
+
+// defaultRunsLimit bounds how many automation runs handleListAutomationRuns
+// returns when the client does not pass an explicit ?limit.
+const defaultRunsLimit = 100
 
 // automationItem is an automation definition plus derived display fields and its
 // volatile run-state, as returned to the web UI.
@@ -83,6 +89,8 @@ func (s *Server) handleCreateAutomation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if req.RunNow {
+		// A freshly-created automation has a brand-new id, so the claim always
+		// succeeds; ignore the result.
 		s.runAutomationAsync(created)
 	}
 	writeJSON(w, http.StatusOK, toItem(st, created))
@@ -138,7 +146,11 @@ func (s *Server) handleUpdateAutomation(w http.ResponseWriter, r *http.Request) 
 		}
 	})
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		status := http.StatusBadRequest
+		if errors.Is(err, automation.ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		writeJSON(w, status, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, toItem(st, updated))
@@ -166,20 +178,46 @@ func (s *Server) handleRunAutomation(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "automation not found"})
 		return
 	}
-	s.runAutomationAsync(a)
+	// Reject a manual run if one is already in flight (this server's manual guard)
+	// or a scheduled run is currently executing (shared run-state), so a
+	// double-click or a run-now racing a scheduled fire can't spawn parallel
+	// sessions mutating the same project.
+	if st.State(a.ID).LastStatus == automation.StatusRunning || !s.runAutomationAsync(a) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "a run is already in progress for this automation"})
+		return
+	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
 }
 
 // runAutomationAsync fires a manual run in the background, recording terminal
-// state via the shared ExecuteRun bookkeeping.
-func (s *Server) runAutomationAsync(a *automation.Automation) {
+// state via the shared ExecuteRun bookkeeping. It claims a per-automation
+// in-flight slot first and returns false without starting if one is already
+// held (concurrency guard); the slot is released when the run completes.
+func (s *Server) runAutomationAsync(a *automation.Automation) bool {
+	s.autoRunMu.Lock()
+	if s.autoRunInflight == nil {
+		s.autoRunInflight = make(map[string]bool)
+	}
+	if s.autoRunInflight[a.ID] {
+		s.autoRunMu.Unlock()
+		return false
+	}
+	s.autoRunInflight[a.ID] = true
+	s.autoRunMu.Unlock()
+
 	go func() {
-		ctx := s.ctx
+		defer func() {
+			s.autoRunMu.Lock()
+			delete(s.autoRunInflight, a.ID)
+			s.autoRunMu.Unlock()
+		}()
+		ctx := s.rootCtx()
 		if ctx == nil {
 			return
 		}
 		_, _ = automation.ExecuteRun(ctx, s.automations, s.AutomationRunner(), a, automation.KindManual)
 	}()
+	return true
 }
 
 func (s *Server) handleAutomationTemplates(w http.ResponseWriter, r *http.Request) {
@@ -201,7 +239,15 @@ type automationRun struct {
 }
 
 func (s *Server) handleListAutomationRuns(w http.ResponseWriter, r *http.Request) {
-	filter := r.URL.Query().Get("automation_id")
+	q := r.URL.Query()
+	filter := q.Get("automation_id")
+	before := q.Get("before") // RFC3339 cursor: only runs that started strictly before
+	limit := defaultRunsLimit
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
 	all, err := session.ListAllSessions()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -214,6 +260,9 @@ func (s *Server) handleListAutomationRuns(w http.ResponseWriter, r *http.Request
 				continue
 			}
 			if filter != "" && m.AutomationID != filter {
+				continue
+			}
+			if before != "" && m.StartTime >= before {
 				continue
 			}
 			runs = append(runs, automationRun{
@@ -231,5 +280,10 @@ func (s *Server) handleListAutomationRuns(w http.ResponseWriter, r *http.Request
 		}
 	}
 	sort.Slice(runs, func(i, j int) bool { return runs[i].StartTime > runs[j].StartTime })
+	// Bound the response (newest first). The underlying scan is still O(total
+	// sessions); a dedicated automation-runs index is a documented follow-up.
+	if len(runs) > limit {
+		runs = runs[:limit]
+	}
 	writeJSON(w, http.StatusOK, runs)
 }

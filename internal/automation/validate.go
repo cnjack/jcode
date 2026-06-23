@@ -2,6 +2,7 @@ package automation
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
@@ -53,6 +54,11 @@ func validateProjectPath(p string) error {
 	}
 	if strings.Contains(p, "://") {
 		return fmt.Errorf("remote workspaces (ssh:// / docker://) are not supported for automations yet")
+	}
+	// A relative path would fire against whatever cwd the scheduling process
+	// happens to have, not the user's intended project. Require an absolute path.
+	if !filepath.IsAbs(p) {
+		return fmt.Errorf("project must be an absolute path (got %q)", p)
 	}
 	return nil
 }
