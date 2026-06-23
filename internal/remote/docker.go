@@ -42,9 +42,9 @@ func ListContainers(ctx context.Context) ([]ContainerInfo, error) {
 			ID:      s.ID,
 			Name:    name,
 			Image:   s.Image,
-			State:   string(s.State),
+			State:   s.State,
 			Status:  s.Status,
-			Running: string(s.State) == "running",
+			Running: s.State == "running",
 		})
 	}
 	return out, nil
