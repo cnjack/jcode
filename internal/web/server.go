@@ -23,6 +23,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/gorilla/websocket"
 
+	"github.com/cnjack/jcode/internal/automation"
 	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
@@ -115,6 +116,11 @@ type Server struct {
 	// usageStore backs the global usage-statistics endpoint. nil falls back to
 	// usage.Default(); tests inject a temp-dir store.
 	usageStore *usage.Store
+
+	// automations is the automation definition/run store (nil in setup mode).
+	// Run execution reuses the Engine via automationRunner; the periodic
+	// scheduler is owned by command.runWebServer.
+	automations *automation.Store
 }
 
 // ServerConfig holds the configuration for creating a new Server.
@@ -148,6 +154,7 @@ type ServerConfig struct {
 	NeedsSetup         bool                                                                  // true when no providers are configured (setup mode)
 	TokenUsage         *model.TokenUsage                                                     // optional: shared token tracker (created when nil)
 	ContextBreakdownFn func() usage.ContextBreakdown                                         // optional: live per-task context breakdown
+	Automations        *automation.Store                                                     // optional: automation store (nil in setup mode)
 }
 
 // NewServer creates a new web server.
@@ -207,6 +214,7 @@ func NewServer(cfg *ServerConfig) *Server {
 		mcpLogins:       make(map[string]*mcpLoginState),
 		wechatClient:    cfg.WechatClient,
 		needsSetup:      cfg.NeedsSetup,
+		automations:     cfg.Automations,
 	}
 	// The bootstrap engine is registered (and its pump started) in Start, once
 	// s.ctx exists.
@@ -279,6 +287,14 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/remote/save-alias", s.handleRemoteSaveAlias)
 	mux.HandleFunc("GET /api/docker/containers", s.handleListContainers)
 	mux.HandleFunc("POST /api/remote/save-docker-alias", s.handleRemoteSaveDockerAlias)
+	mux.HandleFunc("GET /api/automations", s.handleListAutomations)
+	mux.HandleFunc("POST /api/automations", s.handleCreateAutomation)
+	mux.HandleFunc("GET /api/automations/runs", s.handleListAutomationRuns)
+	mux.HandleFunc("GET /api/automations/{id}", s.handleGetAutomation)
+	mux.HandleFunc("PUT /api/automations/{id}", s.handleUpdateAutomation)
+	mux.HandleFunc("DELETE /api/automations/{id}", s.handleDeleteAutomation)
+	mux.HandleFunc("POST /api/automations/{id}/run", s.handleRunAutomation)
+	mux.HandleFunc("GET /api/automation-templates", s.handleAutomationTemplates)
 	mux.HandleFunc("GET /api/skills", s.handleListSkills)
 	mux.HandleFunc("POST /api/skills/{name}/toggle", s.handleToggleSkill)
 	mux.HandleFunc("GET /api/slash-commands", s.handleSlashCommands)
@@ -773,6 +789,12 @@ func (s *Server) handleListAllTasks(w http.ResponseWriter, r *http.Request) {
 	items := make([]taskItem, 0)
 	for project, metas := range all {
 		for _, m := range metas {
+			// Automation runs are surfaced on the Automations page ("Recent
+			// runs"), not the main task list — exclude them here so a nightly
+			// automation doesn't bury the sidebar.
+			if m.AutomationID != "" {
+				continue
+			}
 			items = append(items, taskItem{
 				UUID:      m.UUID,
 				Project:   project,

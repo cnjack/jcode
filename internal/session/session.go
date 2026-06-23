@@ -114,6 +114,17 @@ type SessionMeta struct {
 	Unread    bool   `json:"unread,omitempty"`
 	Status    string `json:"status,omitempty"`     // idle/running/done/error (set by the web layer)
 	UpdatedAt string `json:"updated_at,omitempty"` // RFC3339
+	// Automation metadata. A run launched by an automation is a normal session
+	// tagged here: AutomationID is the correlation key for the "Recent runs"
+	// list, and the main task list excludes any session with AutomationID set so
+	// nightly runs don't pollute the sidebar. TerminalStatus/EndTime/ErrorReason
+	// are the run-outcome audit fields (success|error|interrupted) that back the
+	// Status filter — Status alone is only idle/running.
+	AutomationID   string `json:"automation_id,omitempty"`
+	TriggerKind    string `json:"trigger_kind,omitempty"` // scheduled|manual
+	TerminalStatus string `json:"terminal_status,omitempty"`
+	EndTime        string `json:"end_time,omitempty"`
+	ErrorReason    string `json:"error_reason,omitempty"`
 }
 
 // sessionIndex is the on-disk structure of session.json.

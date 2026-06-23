@@ -85,6 +85,7 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 		s.env.NewExecuteTool(s.bgManager), s.env.NewGrepTool(),
 		s.env.NewTodoWriteTool(), s.env.NewTodoReadTool(),
 		s.env.NewGoalSetTool(), s.env.NewGoalGetTool(), s.env.NewGoalUpdateTool(),
+		s.env.NewAutomationCreateTool(),
 		s.env.NewCheckBackgroundTool(s.bgManager),
 		s.env.NewSubagentTool(&tools.SubagentDeps{
 			ChatModel:  s.chatModel,

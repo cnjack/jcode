@@ -33,6 +33,7 @@ export default {
 
   nav: {
     newTask: '새 작업',
+    automations: '자동화',
     workspace: '워크스페이스',
     projects: '프로젝트',
     openFolder: '폴더 열기',

@@ -34,6 +34,7 @@ export default {
 
   nav: {
     newTask: '新增工作',
+    automations: '自動化',
     workspace: '工作區',
     projects: '專案',
     openFolder: '開啟資料夾',
