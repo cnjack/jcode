@@ -23,6 +23,7 @@ import {
   SunIcon,
   MoonIcon,
   Cog6ToothIcon,
+  BoltIcon,
 } from '@heroicons/vue/24/outline'
 import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
@@ -44,6 +45,7 @@ const emit = defineEmits<{
   openFile: [path: string, content: string]
   openSettings: []
   openProjects: []
+  openAutomations: []
   toggleTheme: []
 }>()
 
@@ -397,6 +399,10 @@ function relativeTime(ts: string): string {
         <PlusIcon class="w-4 h-4" />
         <span>{{ t('nav.newTask') }}</span>
       </button>
+      <button class="nav-link-btn" @click="emit('openAutomations')" :title="t('nav.automations')">
+        <BoltIcon class="w-4 h-4" />
+        <span>{{ t('nav.automations') }}</span>
+      </button>
     </div>
 
     <!-- Workspace tree -->
@@ -586,6 +592,26 @@ function relativeTime(ts: string): string {
 }
 .new-task-btn:active {
   transform: translateY(0.5px);
+}
+.nav-link-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 6px;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-lg);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.nav-link-btn:hover {
+  background: var(--color-muted);
+  color: var(--color-foreground);
 }
 
 /* ─── Tree ─── */

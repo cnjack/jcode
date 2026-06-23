@@ -35,6 +35,7 @@ func main() {
 		command.NewMCPCmd(),
 		command.NewACPCmd(),
 		command.NewWebCmd(),
+		command.NewAutomationCmd(),
 		command.NewVersionCmd(),
 		command.NewDoctorCmd(),
 		command.NewSessionsCmd(),

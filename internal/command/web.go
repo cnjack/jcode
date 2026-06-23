@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/cnjack/jcode/internal/agent"
+	"github.com/cnjack/jcode/internal/automation"
 	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/channel/ble"
 	"github.com/cnjack/jcode/internal/config"
@@ -289,6 +290,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 				tenv.NewExecuteTool(tbg), tenv.NewGrepTool(),
 				tenv.NewTodoWriteTool(), tenv.NewTodoReadTool(),
 				tenv.NewGoalSetTool(), tenv.NewGoalGetTool(), tenv.NewGoalUpdateTool(),
+				tenv.NewAutomationCreateTool(),
 				tenv.NewSwitchEnvTool(),
 				tenv.NewCheckBackgroundTool(tbg),
 				tenv.NewSubagentTool(&tools.SubagentDeps{
@@ -496,6 +498,16 @@ func runWebServer(port int, host string, openBrowser bool) error {
 	}
 	bootNotifying, _ := bootEC.EventHandler.(*handler.NotifyingHandler)
 
+	// Automation store (definitions + scheduler state). Skipped in setup mode.
+	var autoStore *automation.Store
+	if !needsSetup {
+		var aerr error
+		if autoStore, aerr = automation.NewStore(); aerr != nil {
+			config.Logger().Printf("[automation] store unavailable: %v", aerr)
+			autoStore = nil
+		}
+	}
+
 	srv := web.NewServer(&web.ServerConfig{
 		Port:           port,
 		Host:           host,
@@ -530,7 +542,17 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		NeedsSetup:         needsSetup,
 		TokenUsage:         bootEC.TokenUsage,
 		ContextBreakdownFn: bootEC.BreakdownFn,
+		Automations:        autoStore,
 	})
+
+	// Start the periodic automation scheduler. A single process owns periodic
+	// firing (elected via flock); others return immediately. Manual runs work in
+	// any process regardless of ownership. The flock is OS-released on exit, so a
+	// crashed owner never deadlocks the election.
+	if autoStore != nil {
+		sched := automation.NewScheduler(autoStore, srv.AutomationRunner())
+		go sched.Run(ctx)
+	}
 
 	// Set up inbound WeChat message handler now that srv exists. Always register
 	// regardless of WebEnabled — the user can enable via the UI. Inbound messages

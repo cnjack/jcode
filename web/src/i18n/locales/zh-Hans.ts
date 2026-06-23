@@ -33,6 +33,7 @@ export default {
 
   nav: {
     newTask: '新建任务',
+    automations: '自动化',
     workspace: '工作区',
     projects: '项目',
     openFolder: '打开文件夹',

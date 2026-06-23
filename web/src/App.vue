@@ -23,6 +23,7 @@ import RightPanel from '@/components/RightPanel.vue'
 import SetupView from '@/components/SetupView.vue'
 import TopBar from '@/components/TopBar.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
+import AutomationsView from '@/components/AutomationsView.vue'
 import { useNotifications } from '@/composables/notifications'
 
 const store = useChatStore()
@@ -35,6 +36,7 @@ const messagesEl = ref<HTMLDivElement | null>(null)
 const settingsOpen = ref(false)
 const projectsOpen = ref(false)
 const paletteOpen = ref(false)
+const automationsOpen = ref(false)
 
 // Remote-connect (SSH) wizard. `openRemoteConnect` is provided to descendants
 // (WorkspacePicker, ProjectSwitcher, Sidebar) so any of them can launch or
@@ -429,6 +431,7 @@ function startResize(e: MouseEvent) {
       @open-file="openFile"
       @open-settings="settingsOpen = true"
       @open-projects="projectsOpen = true"
+      @open-automations="automationsOpen = true"
       @toggle-theme="toggleTheme"
       :resolved-theme="resolvedTheme"
     />
@@ -626,6 +629,7 @@ function startResize(e: MouseEvent) {
       @bound="remoteWizardOpen = false; settingsOpen = false"
     />
     <CommandPalette :open="paletteOpen" @close="paletteOpen = false" @action="onPaletteAction" />
+    <AutomationsView :open="automationsOpen" @close="automationsOpen = false" />
 
     <!-- Setup overlay — shown when no providers are configured -->
     <SetupView v-if="needsSetup" @complete="onSetupComplete" />

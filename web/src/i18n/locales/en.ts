@@ -38,6 +38,7 @@ export default {
 
   nav: {
     newTask: 'New task',
+    automations: 'Automations',
     workspace: 'Workspace',
     projects: 'Projects',
     openFolder: 'Open Folder',
