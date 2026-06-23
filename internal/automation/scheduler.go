@@ -24,6 +24,12 @@ const schedulerLockFile = "automation-scheduler.lock"
 // an unbounded run would hold an engine forever. Manual runs are not capped.
 const ScheduledRunCeiling = 30 * time.Minute
 
+// manualRunStaleWindow bounds how long a manual run may sit in "running" before
+// reconciliation treats it as a zombie. Manual runs are uncapped and bypass the
+// scheduler election, so on restart we can't prove one is dead the way we can a
+// scheduled run; we only reset clearly-stale ones (older than this window).
+const manualRunStaleWindow = 2 * time.Hour
+
 // Runner executes one automation run to completion. Implementations (internal/web)
 // reuse the Engine: build a headless engine for the automation's project + mode,
 // inject the prompt, and block until the agent is done. The returned sessionID
@@ -104,23 +110,34 @@ func (s *Scheduler) Run(ctx context.Context) {
 	}
 }
 
-// reconcileStale resets scheduled run-state left in "running" by a crashed
-// owner. It is scoped to TriggerSchedule automations only: a manual run may be
-// executing right now in a DIFFERENT process (manual runs bypass the election),
-// and winning the election lock proves only that the prior SCHEDULER owner is
-// gone — not that someone's manual run died. Resetting those would briefly show
-// a bogus "interrupted" for a live cross-process run.
+// reconcileStale resets run-state left in "running" by a crashed owner so
+// skip-if-running and the UI recover. Scheduled runs are reset unconditionally:
+// winning the election lock proves the prior SCHEDULER owner is gone. Manual
+// runs need a time heuristic instead — one may be executing right now in a
+// DIFFERENT process (manual runs bypass the election), so resetting a fresh one
+// would briefly show a bogus "interrupted" for a live cross-process run; only
+// runs older than manualRunStaleWindow are treated as zombies.
 func (s *Scheduler) reconcileStale() {
+	now := nowFunc()
 	for _, a := range s.store.List() {
-		if a.Trigger.Type != TriggerSchedule {
+		st := s.store.State(a.ID)
+		if st.LastStatus != StatusRunning {
 			continue
 		}
-		if s.store.State(a.ID).LastStatus == StatusRunning {
-			_ = s.store.UpdateState(a.ID, func(st *RunState) {
-				st.LastStatus = StatusInterrupted
-				st.LastError = "previous run interrupted (process restart)"
-			})
+		if a.Trigger.Type != TriggerSchedule {
+			// Manual (or non-scheduled) run: a live one in another process has a
+			// recent, valid LastRunAt (ExecuteRun stamps it atomically when it
+			// claims the run). Leave those alone; reset only runs older than the
+			// window — and also an empty/garbled LastRunAt, which can't be a live
+			// run and would otherwise stay stuck at "running" forever.
+			if t, err := time.Parse(time.RFC3339, st.LastRunAt); err == nil && now.Sub(t) < manualRunStaleWindow {
+				continue
+			}
 		}
+		_ = s.store.UpdateState(a.ID, func(st *RunState) {
+			st.LastStatus = StatusInterrupted
+			st.LastError = "previous run interrupted (process restart)"
+		})
 	}
 }
 
@@ -156,8 +173,12 @@ func (s *Scheduler) tick(ctx context.Context) {
 		s.mu.Lock()
 		busy := s.inflight[a.ID]
 		s.mu.Unlock()
-		if busy {
-			continue // overlap: previous run still in flight, skip this tick
+		// Skip if a scheduled run is still in flight (s.inflight) OR a manual run
+		// is currently executing (LastStatus), so a scheduled fire can't overlap a
+		// manual "Run Now" that races it. A crashed-run zombie left at "running" is
+		// cleared by reconcileStale on the next owner election.
+		if busy || st.LastStatus == StatusRunning {
+			continue
 		}
 
 		// Fire-time precheck: the bound project must still exist locally.
@@ -196,19 +217,14 @@ func (s *Scheduler) fire(ctx context.Context, a *Automation, slot string, now ti
 }
 
 func (s *Scheduler) skipAndMaybeDisable(a *Automation, reason string) {
-	disabled := false
-	_ = s.store.UpdateState(a.ID, func(rs *RunState) {
+	// State mutation and the conditional auto-disable happen in one lock scope so
+	// a concurrent successful run can't reset ConsecutiveFails between them.
+	_, _ = s.store.UpdateStateAndMaybeDisable(a.ID, func(rs *RunState) {
 		rs.LastStatus = StatusSkipped
 		rs.LastError = reason
 		rs.LastRunAt = nowFunc().Format(time.RFC3339)
 		rs.ConsecutiveFails++
-		if rs.ConsecutiveFails >= AutoDisableThreshold {
-			disabled = true
-		}
 	})
-	if disabled {
-		_, _ = s.store.SetEnabled(a.ID, false)
-	}
 	if s.onSkip != nil {
 		s.onSkip(a, reason)
 	}
@@ -219,35 +235,44 @@ func (s *Scheduler) skipAndMaybeDisable(a *Automation, reason string) {
 // manual ▶ path so state bookkeeping is identical. For scheduled runs, repeated
 // errors increment ConsecutiveFails and auto-disable past the threshold.
 func ExecuteRun(ctx context.Context, store *Store, runner Runner, a *Automation, kind string) (string, error) {
-	_ = store.UpdateState(a.ID, func(rs *RunState) {
-		rs.LastStatus = StatusRunning
-		rs.LastError = ""
-		rs.LastRunAt = nowFunc().Format(time.RFC3339)
-	})
+	// Atomically claim the run. If a run for this automation is already in
+	// progress (a scheduled fire racing a manual "Run Now", or another process),
+	// refuse rather than start a second agent session against the same project.
+	// Returning before writing any terminal state preserves the live run's
+	// status.
+	claimed, _ := store.TryMarkRunning(a.ID)
+	if !claimed {
+		return "", fmt.Errorf("a run is already in progress for automation %q", a.ID)
+	}
 
 	sessionID, err := safeStartRun(ctx, runner, a, kind)
 
-	disable := false
+	if err != nil && kind == KindScheduled {
+		// Scheduled failure: increment ConsecutiveFails and auto-disable past the
+		// threshold atomically (single lock scope) so a concurrent success can't
+		// race the disable.
+		_, _ = store.UpdateStateAndMaybeDisable(a.ID, func(rs *RunState) {
+			rs.LastSessionID = sessionID
+			rs.LastStatus = StatusError
+			rs.LastError = truncate(err.Error(), 300)
+			rs.ConsecutiveFails++
+		})
+		return sessionID, err
+	}
+
 	_ = store.UpdateState(a.ID, func(rs *RunState) {
 		rs.LastSessionID = sessionID
 		if err != nil {
+			// Manual failure: record the error but never auto-disable (manual runs
+			// don't increment the failure counter).
 			rs.LastStatus = StatusError
 			rs.LastError = truncate(err.Error(), 300)
-			if kind == KindScheduled {
-				rs.ConsecutiveFails++
-				if rs.ConsecutiveFails >= AutoDisableThreshold {
-					disable = true
-				}
-			}
 		} else {
 			rs.LastStatus = StatusSuccess
 			rs.LastError = ""
 			rs.ConsecutiveFails = 0
 		}
 	})
-	if disable {
-		_, _ = store.SetEnabled(a.ID, false)
-	}
 	return sessionID, err
 }
 

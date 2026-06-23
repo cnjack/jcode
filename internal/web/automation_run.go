@@ -59,10 +59,22 @@ func (s *Server) runAutomation(ctx context.Context, a *automation.Automation, ki
 		mode = "full_access" // headless: Ask/Plan would block forever on approvals
 	}
 
+	// buildLocalEngine registers the engine exactly once, under its (factory)
+	// recorder's UUID, and starts its event pump. Use that UUID as the stable
+	// session id for tagging, watching, and teardown.
+	//
+	// The previous version built the engine with an empty id, then minted a fresh
+	// recorder, reassigned eng.taskID, and called registerEngine a SECOND time —
+	// inserting the same engine under two keys. deleteEngine(sid) only reclaimed
+	// one, so every run leaked a tasks-map entry and the engine pool exhausted
+	// (errTooManyTasks) after maxLiveEngines runs. Reusing the factory recorder
+	// also keeps the conversation and todo/goal snapshots in one session file
+	// (they were previously split across two recorders).
 	eng, err := s.buildLocalEngine("", a.ProjectPath, mode)
 	if err != nil {
 		return "", err
 	}
+	sid := eng.taskID
 
 	// Provider/model override (otherwise inherits the foreground/startup model).
 	if a.Provider != "" && eng.createAgent != nil {
@@ -76,26 +88,12 @@ func (s *Server) runAutomation(ctx context.Context, a *automation.Automation, ki
 		}
 	}
 
-	// Pre-create the recorder so the run has a stable id we can register, tag,
-	// and (on completion) tear down. Wrap the event handler to capture the
-	// terminal error without disturbing the existing notifier chain.
-	prov, mdl, _ := eng.modelSnapshot()
-	rec, _ := session.NewRecorder(a.ProjectPath, prov, mdl)
-	sid := rec.UUID()
+	// Wrap the event handler to capture the run's terminal error without
+	// disturbing the existing notifier chain.
 	done := make(chan error, 1)
 	eng.emu.Lock()
-	eng.recorder = rec
-	eng.taskID = sid
 	eng.eventHandler = &doneCapture{AgentEventHandler: eng.eventHandler, done: done}
 	eng.emu.Unlock()
-	// Register so the pump starts (a watching client sees live output). On the
-	// cap-exceeded error the engine is NOT in the map, so tear it down here
-	// (closing the pre-created recorder) instead of leaking it — mirrors
-	// buildLocalEngine's error handling.
-	if err := s.registerEngine(eng); err != nil {
-		eng.teardown()
-		return "", err
-	}
 
 	if !eng.running.CompareAndSwap(false, true) {
 		s.deleteEngine(sid)

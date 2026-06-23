@@ -204,6 +204,19 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		return cm, ctxLimit, nil
 	}
 
+	// Automation store (definitions + scheduler state). Skipped in setup mode.
+	// Created before buildWebTask so every per-task Env shares this one live
+	// store — the automation_create tool must write through it (not a throwaway)
+	// so created automations are visible to the REST API and scheduler.
+	var autoStore *automation.Store
+	if !needsSetup {
+		var aerr error
+		if autoStore, aerr = automation.NewStore(); aerr != nil {
+			config.Logger().Printf("[automation] store unavailable: %v", aerr)
+			autoStore = nil
+		}
+	}
+
 	// buildWebTask is the per-task engine factory. It produces a fully ISOLATED
 	// set of run state — its own env, background manager, recorder, token tracker,
 	// approval state, plan store, and event handler — so concurrent tasks never
@@ -217,6 +230,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 
 		// Fresh execution environment for this task only.
 		tenv := tools.NewEnv(taskPwd, platform)
+		tenv.AutomationStore = autoStore
 		promptPlatform := platform
 		envLabel := "local"
 		projectKey := taskPwd
@@ -497,16 +511,6 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		return err
 	}
 	bootNotifying, _ := bootEC.EventHandler.(*handler.NotifyingHandler)
-
-	// Automation store (definitions + scheduler state). Skipped in setup mode.
-	var autoStore *automation.Store
-	if !needsSetup {
-		var aerr error
-		if autoStore, aerr = automation.NewStore(); aerr != nil {
-			config.Logger().Printf("[automation] store unavailable: %v", aerr)
-			autoStore = nil
-		}
-	}
 
 	srv := web.NewServer(&web.ServerConfig{
 		Port:           port,
