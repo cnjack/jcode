@@ -101,6 +101,17 @@ func (s *Server) handleGitCheckout(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "branch is required"})
 		return
 	}
+	// A leading dash would be parsed by git as a flag rather than a ref — e.g.
+	// branch "-f" turns `git checkout <branch>` into `git checkout -f`, silently
+	// force-switching and discarding all uncommitted work (and returning 200).
+	// Reject it outright; valid git refs never begin with "-" (git
+	// check-ref-format forbids it), so this rejects nothing legitimate. Note a
+	// "--" separator is NOT a fix here: `git checkout -- <ref>` treats <ref> as a
+	// pathspec and breaks branch switching.
+	if strings.HasPrefix(branch, "-") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid branch name"})
+		return
+	}
 
 	// Force stable English git output so the block detection below doesn't depend
 	// on the host locale. We present our own UI copy, so this C-locale text is
@@ -147,14 +158,35 @@ func (s *Server) handleGitCheckout(w http.ResponseWriter, r *http.Request) {
 		}
 		// A plain switch aborted by uncommitted work is recoverable: report it as
 		// such (the working tree is untouched) so the UI can offer stash/discard.
+		// `kind` tells the UI whether the at-risk files are tracked modifications
+		// (force = discard edits) or untracked files (force = irrecoverable
+		// deletion), so it can pick safe recovery options and accurate copy.
 		if req.Strategy == "" && checkoutBlockedByLocalChanges(msg) {
 			writeJSON(w, http.StatusOK, map[string]any{
 				"branch":  "",
 				"blocked": true,
+				"kind":    blockKind(msg),
 				"message": msg,
 				"files":   parseOverwriteFiles(msg),
 			})
 			return
+		}
+		// The checkout failed after we stashed the user's work (stash strategy).
+		// Restore the pre-switch tree so nothing is silently orphaned in the stash.
+		// After `stash push -u` the tree is clean, so pop normally applies cleanly;
+		// if it doesn't, name the stash so the user can recover it by hand.
+		if stashed {
+			popCmd := exec.CommandContext(r.Context(), "git", "stash", "pop")
+			popCmd.Dir = dir
+			popCmd.Env = env
+			if popOut, popErr := popCmd.CombinedOutput(); popErr != nil {
+				writeJSON(w, http.StatusConflict, map[string]string{
+					"error": msg + "\n\nYour changes were stashed but could not be restored " +
+						"automatically; recover them with `git stash pop` (see `git stash list`): " +
+						strings.TrimSpace(string(popOut)),
+				})
+				return
+			}
 		}
 		writeJSON(w, http.StatusConflict, map[string]string{"error": msg})
 		return
@@ -178,6 +210,20 @@ func checkoutBlockedByLocalChanges(msg string) bool {
 	return strings.Contains(m, "would be overwritten by checkout") ||
 		strings.Contains(m, "would be overwritten by merge") ||
 		strings.Contains(m, "please commit your changes or stash them")
+}
+
+// blockKind classifies a blocked checkout so the UI can offer safe recovery
+// options and accurate copy. "untracked" means new files would be clobbered
+// (force = irrecoverable deletion); "tracked" means committed-file
+// modifications (force = discard edits). Both remain recoverable via
+// `git stash push -u`. Matched against C-locale git output. The untracked
+// check is first and specific so a mixed message is classified as the more
+// dangerous case.
+func blockKind(msg string) string {
+	if strings.Contains(strings.ToLower(msg), "untracked working tree files would be overwritten") {
+		return "untracked"
+	}
+	return "tracked"
 }
 
 // parseOverwriteFiles pulls the tab-indented paths git lists between the

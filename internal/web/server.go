@@ -696,17 +696,30 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 	// its own cancellable context so /stop cancels only that task.
 	runCtx, runCancel := context.WithCancel(s.ctx)
 	eng.emu.Lock()
+	eng.runGen++
+	gen := eng.runGen
 	eng.runCancel = runCancel
 	eng.emu.Unlock()
 
 	go func() {
 		s.setTaskStatus(eng, true)
 		defer func() {
-			eng.running.Store(false)
+			// Tear down only if this run is still the current one. If a newer turn
+			// on the same engine has already taken over (runGen advanced) it now
+			// owns running/runCancel — leave them so /stop still reaches the live
+			// run and we don't broadcast a spurious idle for it. Releasing running
+			// inside the same emu section that clears runCancel also closes the
+			// gate↔cancel interleave window the run-start CAS relies on.
 			eng.emu.Lock()
-			eng.runCancel = nil
+			superseded := eng.runGen != gen
+			if !superseded {
+				eng.runCancel = nil
+				eng.running.Store(false)
+			}
 			eng.emu.Unlock()
-			s.setTaskStatus(eng, false)
+			if !superseded {
+				s.setTaskStatus(eng, false)
+			}
 		}()
 
 		// Take a git snapshot before the agent run for session diff tracking.
@@ -1714,11 +1727,18 @@ func (s *Server) takeSessionSnapshot(eng *Engine) {
 
 // handleSessionDiff computes the diff between the session start snapshot and current state.
 func (s *Server) handleSessionDiff(w http.ResponseWriter, _ *http.Request) {
+	// Capture the active engine ONCE so the snapshot and the working dir come
+	// from the same task's repo even if the active engine is swapped between the
+	// two reads (otherwise we could diff engine A's snapshot against engine B's
+	// tree). eng.pwd is immutable after creation, so reading it bare is safe.
+	eng := s.activeEngine()
 	snapshot := ""
-	if eng := s.activeEngine(); eng != nil {
+	pwd := ""
+	if eng != nil {
 		eng.emu.Lock()
 		snapshot = eng.sessionSnapshot
 		eng.emu.Unlock()
+		pwd = eng.pwd
 	}
 
 	type diffEntry struct {
@@ -1739,7 +1759,7 @@ func (s *Server) handleSessionDiff(w http.ResponseWriter, _ *http.Request) {
 
 	// Diff from snapshot to current working tree
 	cmd := exec.CommandContext(s.ctx, "git", "diff", snapshot, "--no-color")
-	cmd.Dir = s.activePwd()
+	cmd.Dir = pwd
 	output, _ := cmd.CombinedOutput()
 
 	var entries []diffEntry
@@ -2295,7 +2315,17 @@ func (s *Server) handleValidatePaths(w http.ResponseWriter, r *http.Request) {
 		if p == "" {
 			continue
 		}
-		if info, err := os.Stat(p); err != nil || !info.IsDir() {
+		info, err := os.Stat(p)
+		if err != nil {
+			// Only a confirmed not-exist means the workspace is gone. Transient
+			// errors (permission, NFS hiccup) are inconclusive — keep the path
+			// rather than silently dropping a still-valid workspace from the picker.
+			if os.IsNotExist(err) {
+				missing = append(missing, p)
+			}
+			continue
+		}
+		if !info.IsDir() {
 			missing = append(missing, p)
 		}
 	}
