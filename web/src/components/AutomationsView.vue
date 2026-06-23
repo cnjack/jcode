@@ -199,6 +199,12 @@ function isRunning(item: AutomationItem) {
   justify-content: space-between;
   padding: 18px 28px 14px;
   padding-top: max(18px, env(safe-area-inset-top));
+  /* Match the scroll content's centered column so the title/buttons line up with
+     the body (section text, cards, Recent runs) instead of hugging the window
+     edges on wide screens. */
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
 }
 .auto-top-left { display: flex; align-items: center; gap: 18px; }
 .auto-top h1 { font-size: 19px; font-weight: 600; }
