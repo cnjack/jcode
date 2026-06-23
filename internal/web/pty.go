@@ -18,6 +18,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/tools"
 )
 
 // ptyBackend abstracts the transport behind a terminal session: a local PTY, or
@@ -99,10 +100,26 @@ func (m *ptyManager) create(workDir, ownerID string) (string, error) {
 	return id, nil
 }
 
-// createDocker starts a TTY `docker exec` session inside containerID and returns
-// its ID. The shell is bash if present, otherwise sh.
-func (m *ptyManager) createDocker(cli *client.Client, containerID, workDir, ownerID string) (string, error) {
+// createDocker starts a TTY `docker exec` session inside the container and
+// returns its ID. The shell is bash if present, otherwise sh.
+//
+// The terminal holds its OWN container reference for its lifetime (via
+// AcquireDockerContainer): a concurrent env switch releases the engine's
+// reference, and without an independent one the last release would stop the
+// container out from under a live terminal. For a container the user already had
+// running this takes no reference and the matching Close() is a harmless no-op.
+func (m *ptyManager) createDocker(containerRef, workDir, ownerID string) (string, error) {
 	ctx := context.Background()
+	exec, err := tools.AcquireDockerContainer(ctx, containerRef)
+	if err != nil {
+		return "", err
+	}
+	cli, err := tools.DockerClient()
+	if err != nil {
+		_ = exec.Close()
+		return "", err
+	}
+	containerID := exec.ContainerID()
 	resp, err := cli.ContainerExecCreate(ctx, containerID, container.ExecOptions{
 		Cmd:          []string{"sh", "-c", "exec bash 2>/dev/null || exec sh"},
 		WorkingDir:   workDir,
@@ -113,14 +130,16 @@ func (m *ptyManager) createDocker(cli *client.Client, containerID, workDir, owne
 		AttachStderr: true,
 	})
 	if err != nil {
+		_ = exec.Close()
 		return "", err
 	}
 	att, err := cli.ContainerExecAttach(ctx, resp.ID, container.ExecAttachOptions{Tty: true})
 	if err != nil {
+		_ = exec.Close()
 		return "", err
 	}
 
-	backend := &dockerPTYBackend{cli: cli, execID: resp.ID, att: att}
+	backend := &dockerPTYBackend{cli: cli, execID: resp.ID, att: att, exec: exec}
 	id := m.register(ownerID, backend)
 
 	// Clean up when the exec process exits. Nothing else waits on it, so poll
@@ -306,6 +325,7 @@ type dockerPTYBackend struct {
 	cli    *client.Client
 	execID string
 	att    dockertypes.HijackedResponse
+	exec   *tools.DockerExecutor // owns a container ref for the terminal's lifetime
 }
 
 func (b *dockerPTYBackend) Read(p []byte) (int, error)  { return b.att.Reader.Read(p) }
@@ -318,6 +338,11 @@ func (b *dockerPTYBackend) Resize(cols, rows uint16) error {
 }
 func (b *dockerPTYBackend) Close() error {
 	b.att.Close()
+	if b.exec != nil {
+		// Release this terminal's container ref; on the last release of a
+		// container we started, this stops it.
+		_ = b.exec.Close()
+	}
 	return nil
 }
 
