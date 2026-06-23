@@ -1,5 +1,5 @@
 // API client for jcode backend
-import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, UsageStats, TaskStats, TokenUpdateData } from '@/types/api'
+import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData } from '@/types/api'
 import { apiBase } from './apiBase'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -179,6 +179,8 @@ export const api = {
     }),
   sshList: () =>
     request<SSHListResponse>('/api/ssh'),
+  dockerContainers: () =>
+    request<DockerContainersResponse>('/api/docker/containers'),
 
   // Remote connection wizard (SSH)
   remoteConnect: (data: RemoteConnectRequest) =>
@@ -205,6 +207,11 @@ export const api = {
     request<{ status: string }>('/api/remote/save-alias', {
       method: 'POST',
       body: JSON.stringify({ name, addr, path }),
+    }),
+  remoteSaveDockerAlias: (name: string, container: string, path: string) =>
+    request<{ status: string }>('/api/remote/save-docker-alias', {
+      method: 'POST',
+      body: JSON.stringify({ name, container, path }),
     }),
   skillsList: () =>
     request<SkillInfo[]>('/api/skills'),

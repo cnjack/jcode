@@ -79,8 +79,8 @@ type Server struct {
 	newEngine func(taskID, pwd, mode string) (*EngineConfig, error)
 
 	// newRemoteEngine is newEngine's remote sibling: it builds a task engine bound
-	// to an SSH executor instead of a local pwd.
-	newRemoteEngine func(taskID string, executor *tools.SSHExecutor, remotePwd, mode string) (*EngineConfig, error)
+	// to a remote executor (SSH or Docker) instead of a local pwd.
+	newRemoteEngine func(taskID string, executor tools.RemoteExecutor, remotePwd, mode string) (*EngineConfig, error)
 
 	// remoteConns holds SSH connections established by the remote-connect wizard
 	// that have not yet been bound to the live env (keyed by connection id).
@@ -127,9 +127,9 @@ type ServerConfig struct {
 	Agent              *adk.ChatModelAgent
 	CreateAgent        func(providerName, modelName string) (*adk.ChatModelAgent, error)
 	RebuildForMode     func(planMode bool) (*adk.ChatModelAgent, error)
-	NewEngine          func(taskID, pwd, mode string) (*EngineConfig, error)                                           // factory for new concurrent task engines (local)
-	NewRemoteEngine    func(taskID string, executor *tools.SSHExecutor, remotePwd, mode string) (*EngineConfig, error) // remote sibling of NewEngine
-	InitialMode        string                                                                                          // unified startup mode string ("approval"/"plan"/"full_access")
+	NewEngine          func(taskID, pwd, mode string) (*EngineConfig, error)                                             // factory for new concurrent task engines (local)
+	NewRemoteEngine    func(taskID string, executor tools.RemoteExecutor, remotePwd, mode string) (*EngineConfig, error) // remote sibling of NewEngine (SSH or Docker)
+	InitialMode        string                                                                                            // unified startup mode string ("approval"/"plan"/"full_access")
 	TodoStore          *tools.TodoStore
 	Recorder           *session.Recorder
 	Tracer             *telemetry.LangfuseTracer
@@ -277,6 +277,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/remote/bind", s.handleRemoteBind)
 	mux.HandleFunc("POST /api/remote/cancel", s.handleRemoteCancel)
 	mux.HandleFunc("POST /api/remote/save-alias", s.handleRemoteSaveAlias)
+	mux.HandleFunc("GET /api/docker/containers", s.handleListContainers)
+	mux.HandleFunc("POST /api/remote/save-docker-alias", s.handleRemoteSaveDockerAlias)
 	mux.HandleFunc("GET /api/skills", s.handleListSkills)
 	mux.HandleFunc("POST /api/skills/{name}/toggle", s.handleToggleSkill)
 	mux.HandleFunc("GET /api/slash-commands", s.handleSlashCommands)
@@ -2225,10 +2227,32 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreatePTY(w http.ResponseWriter, r *http.Request) {
 	pwd, owner := "", ""
+	var dockerExec *tools.DockerExecutor
 	if eng := s.activeEngine(); eng != nil {
 		pwd, owner = eng.pwd, eng.taskID
+		// A container-bound engine gets a terminal INSIDE the container; SSH and
+		// local engines keep a local shell (SSH-in-terminal remains a known gap).
+		if eng.env != nil {
+			if de, ok := eng.env.Exec.(*tools.DockerExecutor); ok {
+				dockerExec = de
+			}
+		}
 	}
-	id, err := s.ptyMgr.create(pwd, owner)
+
+	var (
+		id  string
+		err error
+	)
+	if dockerExec != nil {
+		cli, derr := tools.DockerClient()
+		if derr != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": derr.Error()})
+			return
+		}
+		id, err = s.ptyMgr.createDocker(cli, dockerExec.ContainerID(), pwd, owner)
+	} else {
+		id, err = s.ptyMgr.create(pwd, owner)
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
