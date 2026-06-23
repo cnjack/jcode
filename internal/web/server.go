@@ -2264,12 +2264,9 @@ func (s *Server) handleCreatePTY(w http.ResponseWriter, r *http.Request) {
 		err error
 	)
 	if dockerExec != nil {
-		cli, derr := tools.DockerClient()
-		if derr != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": derr.Error()})
-			return
-		}
-		id, err = s.ptyMgr.createDocker(cli, dockerExec.ContainerID(), pwd, owner)
+		// createDocker acquires its own container ref (so an env switch can't stop
+		// the container under a live terminal) and resolves the shared client itself.
+		id, err = s.ptyMgr.createDocker(dockerExec.ContainerID(), pwd, owner)
 	} else {
 		id, err = s.ptyMgr.create(pwd, owner)
 	}
