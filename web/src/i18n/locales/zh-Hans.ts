@@ -551,13 +551,13 @@ export default {
     search: '搜索分支',
     newName: '新分支名',
     current: '分支：{name}',
-    confirmTitle: '有未提交的修改',
-    confirmIntro: '切换到“{branch}”会覆盖你对以下文件的修改：',
+    confirmTitle: '有未提交的改动',
+    confirmIntro: '切换到“{branch}”会覆盖以下本地文件：',
     confirmMore: '其余 {count} 项',
     confirmStash: '暂存并切换',
     confirmDiscard: '丢弃并切换',
     confirmCancel: '取消',
-    confirmHint: '暂存会保存你的修改（可用 git stash pop 恢复）；丢弃将永久删除这些修改。',
+    confirmHint: '暂存会保存你的改动（可用 git stash pop 恢复）；丢弃将永久删除这些文件，包括未跟踪的文件。',
   },
 
   projectSwitcher: {

@@ -55,6 +55,12 @@ type Engine struct {
 	history   []adk.Message
 	running   atomic.Bool // per-task busy flag (was the global Server.running gate)
 	runCancel context.CancelFunc
+	// runGen is bumped (under emu) each time a run installs its runCancel. A run
+	// goroutine captures its generation at start and only tears down (clears
+	// runCancel, releases running, broadcasts idle) if it is still current — so a
+	// finishing run that has already been superseded by the next turn on the same
+	// engine does not clobber the new run's cancel and leave the task unstoppable.
+	runGen uint64
 
 	// --- per-task model / mode axis ---
 	providerName string
@@ -370,10 +376,15 @@ func (s *Server) setActiveEngine(eng *Engine) {
 	prev := s.Engine
 	s.Engine = eng
 	s.mu.Unlock()
-	if prev != nil && prev != eng && !prev.running.Load() {
+	if prev != nil && prev != eng {
+		// Re-check running INSIDE emu, together with the recorder check, rather
+		// than via an unlocked pre-check: a run starting on prev concurrently
+		// (running flips true, runCancel set under emu) must not be torn down. The
+		// folded check only ever makes reclaim more conservative — at worst it
+		// leaks an idle throwaway engine, never cancels a live run.
 		reclaim := false
 		prev.emu.Lock()
-		if prev.recorder == nil || !prev.recorder.HasRecording() {
+		if !prev.running.Load() && (prev.recorder == nil || !prev.recorder.HasRecording()) {
 			reclaim = true
 		}
 		prev.emu.Unlock()

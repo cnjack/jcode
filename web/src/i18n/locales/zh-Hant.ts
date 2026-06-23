@@ -552,13 +552,13 @@ export default {
     search: '搜尋分支',
     newName: '新分支名稱',
     current: '分支：{name}',
-    confirmTitle: '有未提交的修改',
-    confirmIntro: '切換到「{branch}」會覆蓋你對以下檔案的修改：',
+    confirmTitle: '有未提交的變更',
+    confirmIntro: '切換到「{branch}」會覆蓋以下本機檔案：',
     confirmMore: '其餘 {count} 項',
     confirmStash: '暫存並切換',
     confirmDiscard: '丟棄並切換',
     confirmCancel: '取消',
-    confirmHint: '暫存會保存你的修改（可用 git stash pop 還原）；丟棄將永久刪除這些修改。',
+    confirmHint: '暫存會保存你的變更（可用 git stash pop 還原）；丟棄將永久刪除這些檔案，包括未追蹤的檔案。',
   },
 
   projectSwitcher: {

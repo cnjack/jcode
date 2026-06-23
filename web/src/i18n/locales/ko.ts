@@ -551,13 +551,13 @@ export default {
     search: '브랜치 검색',
     newName: '새-브랜치-이름',
     current: '브랜치: {name}',
-    confirmTitle: '커밋되지 않은 변경 사항',
-    confirmIntro: '"{branch}"(으)로 전환하면 다음 파일의 변경 사항을 덮어씁니다:',
+    confirmTitle: '커밋되지 않은 작업',
+    confirmIntro: '"{branch}"(으)로 전환하면 다음 로컬 파일을 덮어씁니다:',
     confirmMore: '외 {count}개',
     confirmStash: '스태시하고 전환',
     confirmDiscard: '버리고 전환',
     confirmCancel: '취소',
-    confirmHint: '스태시는 변경 사항을 저장합니다(git stash pop 으로 복구). 버리면 변경 사항이 영구 삭제됩니다.',
+    confirmHint: '스태시는 작업을 저장합니다(git stash pop 으로 복구). 버리면 이 파일들이 영구 삭제됩니다(추적되지 않는 파일 포함).',
   },
 
   projectSwitcher: {
