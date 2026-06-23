@@ -296,19 +296,29 @@ func (d *DockerExecutor) run(ctx context.Context, command string, timeout time.D
 		copyDone <- e
 	}()
 
+	var copyErr error
 	select {
-	case <-copyDone:
+	case copyErr = <-copyDone:
 		// stream drained: command finished
 	case <-ctx.Done():
 		att.Close() // unblock the StdCopy goroutine
 		<-copyDone
 		return stdout.String(), stderr.String(), fmt.Errorf("command timed out or cancelled: %w", ctx.Err())
 	}
+	// A non-nil StdCopy error means the stream broke (daemon error frame, short
+	// write, decode failure). Surface it instead of returning a truncated result
+	// as success — callers (ReadFile/Exec → edit) would otherwise persist it.
+	if copyErr != nil {
+		return stdout.String(), stderr.String(), fmt.Errorf("docker exec stream copy: %w", copyErr)
+	}
 
 	// Use a fresh context for the inspect: the exec ctx may already be at its
 	// deadline, but the exec itself completed and its exit code is available.
 	inspect, ierr := d.cli.ContainerExecInspect(context.Background(), resp.ID)
-	if ierr == nil && inspect.ExitCode != 0 {
+	if ierr != nil {
+		return stdout.String(), stderr.String(), fmt.Errorf("docker exec inspect: %w", ierr)
+	}
+	if inspect.ExitCode != 0 {
 		return stdout.String(), stderr.String(), fmt.Errorf("command exited with code %d", inspect.ExitCode)
 	}
 	return stdout.String(), stderr.String(), nil
