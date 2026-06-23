@@ -187,6 +187,10 @@ function isRunning(item: AutomationItem) {
 .auto-shell {
   position: fixed;
   inset: 0;
+  /* Cover only the main content area, not the whole window, so the left sidebar
+     stays visible (Automations reads as a page within the shell rather than a
+     full-screen takeover). The sidebar is a fixed-width column at the left. */
+  left: var(--sidebar-width);
   z-index: var(--z-modal, 50);
   display: flex;
   flex-direction: column;
