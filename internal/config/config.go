@@ -41,6 +41,13 @@ type SSHAlias struct {
 	Path string `json:"path,omitempty"` // remote working directory
 }
 
+// DockerAlias represents a saved Docker container alias
+type DockerAlias struct {
+	Name      string `json:"name"`
+	Container string `json:"container"`      // container name or id
+	Path      string `json:"path,omitempty"` // working directory inside the container
+}
+
 // MCPServer represents a configured MCP server connection
 type MCPServer struct {
 	Type    string            `json:"type,omitempty"`
@@ -151,6 +158,7 @@ type Config struct {
 
 	MaxIterations int                   `json:"max_iterations,omitempty"`
 	SSHAliases    []SSHAlias            `json:"ssh_aliases,omitempty"`
+	DockerAliases []DockerAlias         `json:"docker_aliases,omitempty"`
 	MCPServers    map[string]*MCPServer `json:"mcp_servers,omitempty"`
 	Telemetry     *TelemetryConfig      `json:"telemetry,omitempty"`
 	Budget        *BudgetConfig         `json:"budget,omitempty"`
