@@ -322,8 +322,19 @@ function isActiveTask(task: TaskItem): boolean {
 
 async function handleDelete(task: TaskItem) {
   const path = task.project
+  // Capture before mutating: deleting the conversation you're currently viewing
+  // must also reset the chat view, otherwise the timeline stays rendered and
+  // currentSessionId keeps pointing at the now-dead session (the next message
+  // would be sent to it). Guarded so deleting a background task never disturbs
+  // the open chat.
+  const wasActive = isActiveTask(task)
   await store.deleteSession(task.uuid)
   await refresh()
+  if (wasActive) {
+    store.clearChat()
+    store.currentSessionId = ''
+    store.isRunning = false
+  }
   // If that was the workspace's last conversation, drop the now-empty folder from
   // the tree too. Archived chats still count (tasksByProject keeps them), so a
   // folder with only archived conversations is preserved.

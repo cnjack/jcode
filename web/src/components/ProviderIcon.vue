@@ -11,7 +11,7 @@ const svg = computed(() => iconForProvider(props.provider))
 
 // First alphanumeric character, shown when the provider has no brand icon.
 const initial = computed(
-  () => (props.provider || '').replace(/[^a-z0-9]/i, '').charAt(0).toUpperCase() || '?',
+  () => (props.provider || '').replace(/[^a-z0-9]/gi, '').charAt(0).toUpperCase() || '?',
 )
 </script>
 

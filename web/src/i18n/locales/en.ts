@@ -571,13 +571,13 @@ export default {
     search: 'Search branches',
     newName: 'new-branch-name',
     current: 'Branch: {name}',
-    confirmTitle: 'Uncommitted changes',
-    confirmIntro: 'Switching to "{branch}" would overwrite your changes to:',
+    confirmTitle: 'Uncommitted work',
+    confirmIntro: 'Switching to "{branch}" would overwrite local files at:',
     confirmMore: '+{count} more',
     confirmStash: 'Stash & switch',
     confirmDiscard: 'Discard & switch',
     confirmCancel: 'Cancel',
-    confirmHint: 'Stash saves your changes (recover with git stash pop). Discard deletes them permanently.',
+    confirmHint: 'Stash saves your work (recover with git stash pop). Discard permanently deletes these files, including untracked ones.',
   },
 
   projectSwitcher: {

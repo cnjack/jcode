@@ -551,13 +551,13 @@ export default {
     search: 'ブランチを検索',
     newName: '新しいブランチ名',
     current: 'ブランチ：{name}',
-    confirmTitle: '未コミットの変更があります',
-    confirmIntro: '「{branch}」に切り替えると、次のファイルの変更が上書きされます：',
+    confirmTitle: '未コミットの作業があります',
+    confirmIntro: '「{branch}」に切り替えると、次のローカルファイルが上書きされます：',
     confirmMore: '他 {count} 件',
     confirmStash: 'スタッシュして切り替え',
     confirmDiscard: '破棄して切り替え',
     confirmCancel: 'キャンセル',
-    confirmHint: 'スタッシュは変更を保存します（git stash pop で復元可能）。破棄すると変更は完全に削除されます。',
+    confirmHint: 'スタッシュは作業を保存します（git stash pop で復元可能）。破棄するとこれらのファイルは完全に削除されます（追跡対象外のファイルを含む）。',
   },
 
   projectSwitcher: {

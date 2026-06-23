@@ -129,7 +129,7 @@ function reset() {
               <button class="bp-confirm-btn discard" :disabled="switching" @click="applyStrategy('force', close)">
                 {{ t('branches.confirmDiscard') }}
               </button>
-              <button class="bp-confirm-btn cancel" :disabled="switching" @click="cancelPending">
+              <button class="bp-confirm-btn cancel" :disabled="switching" @click="reset">
                 {{ t('branches.confirmCancel') }}
               </button>
             </div>
