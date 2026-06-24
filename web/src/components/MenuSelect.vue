@@ -99,7 +99,8 @@ function typeAhead(key: string, close: () => void) {
   let hit = -1
   for (let i = 0; i < props.options.length; i++) {
     const idx = (from + i) % props.options.length
-    if (props.options[idx].label.toLowerCase().startsWith(lower)) { hit = idx; break }
+    const opt = props.options[idx]
+    if (opt && opt.label.toLowerCase().startsWith(lower)) { hit = idx; break }
   }
   if (hit >= 0) activeIndex.value = hit
   // Space/Enter on a type-ahead hit selects; a printable char only moves focus.
