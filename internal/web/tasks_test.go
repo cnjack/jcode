@@ -35,7 +35,9 @@ func seedIndex(t *testing.T, sessions map[string][]session.SessionMeta) {
 
 // P0-1: GET /api/workspace on a non-git directory returns empty branch + not dirty.
 func TestWorkspaceNonGit(t *testing.T) {
-	s := &Server{Engine: &Engine{pwd: t.TempDir()}, ctx: context.Background()}
+	s := &Server{Engine: &Engine{pwd: t.TempDir()}}
+	bg := context.Background()
+	s.ctxPtr.Store(&bg)
 	rec := httptest.NewRecorder()
 	s.handleWorkspace(rec, httptest.NewRequest(http.MethodGet, "/api/workspace", nil))
 	if rec.Code != http.StatusOK {

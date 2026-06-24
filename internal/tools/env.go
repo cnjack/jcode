@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cnjack/jcode/internal/automation"
 	appconfig "github.com/cnjack/jcode/internal/config"
 	"golang.org/x/crypto/ssh"
 )
@@ -28,6 +29,13 @@ type Env struct {
 	FileTracker *FileTracker
 	OnEnvChange func(envLabel string, isLocal bool, err error)
 	Depth       int // subagent nesting depth, 0 for top-level
+
+	// AutomationStore is the process-wide automation store shared with the web
+	// server and its scheduler. The automation_create tool MUST write through it
+	// (not a throwaway automation.NewStore()) so a created automation is visible
+	// to the server's in-memory cache, its REST API, and the scheduler. nil falls
+	// back to opening a fresh store (CLI/ACP contexts with no live server).
+	AutomationStore *automation.Store
 
 	// origExec and origPwd remember the initial executor state so that
 	// ResetToLocal can restore the correct local executor after SSH.

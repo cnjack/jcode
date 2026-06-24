@@ -358,6 +358,7 @@ func (a *acpAgent) buildAgentSession(
 		env.NewExecuteTool(bgManager), env.NewGrepTool(),
 		env.NewTodoWriteTool(), env.NewTodoReadTool(),
 		env.NewGoalSetTool(), env.NewGoalGetTool(), env.NewGoalUpdateTool(),
+		env.NewAutomationCreateTool(),
 		env.NewSwitchEnvTool(),
 		env.NewCheckBackgroundTool(bgManager),
 	}

@@ -23,10 +23,16 @@ import RightPanel from '@/components/RightPanel.vue'
 import SetupView from '@/components/SetupView.vue'
 import TopBar from '@/components/TopBar.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
+import AutomationsView from '@/components/AutomationsView.vue'
+import AutomationRunView from '@/components/AutomationRunView.vue'
+import ChannelsView from '@/components/ChannelsView.vue'
 import { useNotifications } from '@/composables/notifications'
+import { useAutomationStore } from '@/stores/automation'
+import type { AutomationRun } from '@/types/automation'
 
 const store = useChatStore()
 const projectStore = useProjectStore()
+const automationStore = useAutomationStore()
 const { t } = useI18n()
 const { resolvedTheme, toggleTheme } = useTheme()
 const { refresh: refreshBranch } = useBranch()
@@ -35,6 +41,16 @@ const messagesEl = ref<HTMLDivElement | null>(null)
 const settingsOpen = ref(false)
 const projectsOpen = ref(false)
 const paletteOpen = ref(false)
+// View switch inside the shell: the main column shows either the chat canvas,
+// the Automations page, the Channels page, or an automation run detail page.
+// Unlike the dialog overlays (Settings/Projects), this is a real page change —
+// each renders as a wrapped inset surface that shares <main>'s geometry with
+// the chat panel, not a full-bleed takeover.
+const activeView = ref<'chat' | 'automations' | 'channels' | 'automation-run'>('chat')
+// The run drilled into from the Automations page (clicking a run row, or Run
+// again from a card). Resolved against the automation it belongs to so the
+// detail header can show the name + schedule.
+const activeRun = ref<AutomationRun | null>(null)
 
 // Remote-connect (SSH) wizard. `openRemoteConnect` is provided to descendants
 // (WorkspacePicker, ProjectSwitcher, Sidebar) so any of them can launch or
@@ -56,6 +72,10 @@ provide('onWorkspaceSwitched', () => onProjectSwitched())
 // reload, like onProjectSwitched) but land on a fresh welcome screen so the next
 // message starts a brand-new task there — instead of restoring its last session.
 provide('onNewTaskInProject', (path: string) => startNewTaskInProject(path))
+// Switch the shell back to the chat page. Provided to the sidebar so the
+// "New task" button (and any other chat-bound nav) returns from the Automations
+// page to a fresh chat instead of doing nothing behind the overlay.
+provide('goToChat', () => { activeView.value = 'chat' })
 
 // When the wizard is launched from Settings it stacks ON TOP of the Settings
 // overlay. headlessui treats a click inside the wizard as an "outside" click for
@@ -79,6 +99,18 @@ function onPaletteAction(name: 'settings' | 'projects' | 'theme') {
   if (name === 'settings') settingsOpen.value = true
   else if (name === 'projects') projectsOpen.value = true
   else if (name === 'theme') toggleTheme()
+}
+
+// Drill into an automation run detail page from the Automations list. Resolves
+// the parent automation (for the header name + schedule) from the store.
+function openAutomationRun(run: AutomationRun) {
+  activeRun.value = run
+  activeView.value = 'automation-run'
+}
+// The automation backing the active run detail view (best-effort lookup by id).
+function automationForRun(run: AutomationRun | null) {
+  if (!run) return null
+  return automationStore.items.find((a) => a.id === run.automation_id) ?? null
 }
 
 const bottomPanel = ref<'none' | 'terminal'>('none')
@@ -187,7 +219,12 @@ function handleGlobalKeydown(e: KeyboardEvent) {
     paletteOpen.value = !paletteOpen.value
     return
   }
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'N') {
+  // ⌘N — New task. (Used to be ⌘⇧N; ⌘N is the conventional "new" binding.) The
+  // other app shortcuts keep a Shift modifier, so ⌘N alone never collides with
+  // ⌘⇧K / ⌘⇧E etc. Ignored while the user is typing in a field only if it would
+  // conflict with the browser's native "new window" — but in the Tauri shell
+  // there's no such binding, and on web the preventDefault keeps it ours.
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'n' || e.key === 'N')) {
     e.preventDefault()
     store.newSession()
     return
@@ -197,6 +234,9 @@ function handleGlobalKeydown(e: KeyboardEvent) {
     settingsOpen.value = !settingsOpen.value
     return
   }
+  // Automations / Channels are reached only via the nav buttons — they no longer
+  // have keyboard shortcuts (the ⌘⇧A / ⌘⇧C bindings were removed). Esc still
+  // steps back from these pages to chat.
   // Esc stops the agent only when no overlay is open — otherwise pressing Esc to
   // dismiss a dialog (Settings/Projects/Palette/Wizard) would also kill the run.
   if (
@@ -205,10 +245,28 @@ function handleGlobalKeydown(e: KeyboardEvent) {
     !settingsOpen.value &&
     !projectsOpen.value &&
     !paletteOpen.value &&
-    !remoteWizardOpen.value
+    !remoteWizardOpen.value &&
+    activeView.value === 'chat'
   ) {
     e.preventDefault()
     store.stopAgent()
+    return
+  }
+  // On a non-chat page (Automations/Channels/automation-run, no overlay open)
+  // Esc steps back one level: from a run detail → the Automations page, and
+  // from Automations/Channels → chat. It should not also kill a running agent,
+  // mirroring the overlay-dismissal guard above.
+  if (
+    e.key === 'Escape' &&
+    !settingsOpen.value &&
+    !projectsOpen.value &&
+    !paletteOpen.value &&
+    !remoteWizardOpen.value &&
+    activeView.value !== 'chat'
+  ) {
+    e.preventDefault()
+    if (activeView.value === 'automation-run') activeView.value = 'automations'
+    else activeView.value = 'chat'
     return
   }
   if ((e.ctrlKey || e.metaKey) && e.key === '`') {
@@ -415,8 +473,12 @@ function startResize(e: MouseEvent) {
     <div class="titlebar-drag" data-tauri-drag-region aria-hidden="true" />
 
     <!-- The single top-right control (panel menu + connection dot), floated into
-         the title-bar zone — there is no separate top bar anymore. -->
+         the title-bar zone — there is no separate top bar anymore. It carries the
+         chat-context panels (Plan/Files/Changes/Terminal), so it's hidden on the
+         Automations page: those panels don't apply there and the chip would
+         crowd the page's own header controls in the top-right corner. -->
     <TopBar
+      v-if="activeView === 'chat'"
       :is-running="store.isRunning"
       :ws-connected="store.wsConnected"
       :active-panel="rightPanelOpen ? rightPanelTab : 'none'"
@@ -426,9 +488,13 @@ function startResize(e: MouseEvent) {
 
     <!-- Sidebar — always visible (no collapse toggle on the desktop shell). -->
     <Sidebar
+      :active-view="activeView"
       @open-file="openFile"
       @open-settings="settingsOpen = true"
       @open-projects="projectsOpen = true"
+      @open-automations="activeView = 'automations'"
+      @open-channels="activeView = 'channels'"
+      @show-chat="activeView = 'chat'"
       @toggle-theme="toggleTheme"
       :resolved-theme="resolvedTheme"
     />
@@ -438,9 +504,12 @@ function startResize(e: MouseEvent) {
          wraps a distinct chat canvas (包裹感). -->
     <main class="flex-1 flex flex-col min-w-0 relative">
       <!-- Chat area — inset surface panel: distinct tone, rounded, wrapped with
-           breathing room so it reads as a distinct chat canvas (包裹感). -->
+           breathing room so it reads as a distinct chat canvas (包裹感).
+           v-show (not v-if): when the user navigates to the Automations page we
+           keep the chat DOM mounted so its scroll position and streaming state
+           survive the round-trip. -->
 
-      <div class="chat-panel flex-1 flex flex-col min-h-0 relative">
+      <div v-show="activeView === 'chat'" class="chat-panel flex-1 flex flex-col min-h-0 relative">
         <!-- Smoothly hand off between the centered new-task composer and the
              docked conversation composer: the welcome slides down + fades out and
              the conversation rises + fades in, so the composer reads as settling
@@ -581,6 +650,39 @@ function startResize(e: MouseEvent) {
         </div>
         </transition>
       </div>
+
+      <!-- Automations page — renders inside <main> as a sibling of the chat
+           canvas, wrapped in the same inset-surface geometry so it reads as a
+           page within the shell (包裹感), not a full-bleed overlay. Only mounted
+           while active so its data fetch fires on entry and tears down on exit.
+           open-run hands a clicked run up so the shell can swap to the run
+           detail page. -->
+      <AutomationsView
+        v-if="activeView === 'automations'"
+        class="flex-1 flex flex-col min-h-0"
+        @open-run="openAutomationRun"
+      />
+
+      <!-- Automation run detail — the "content page" for a run: replays the
+           run's session as a read-only timeline (same ChatMessage + ToolCallCard
+           vocabulary as the chat canvas), framed by a run-summary header and a
+           Run-again/Stop footer. -->
+      <AutomationRunView
+        v-if="activeView === 'automation-run' && activeRun"
+        class="flex-1 flex flex-col min-h-0"
+        :run="activeRun"
+        :automation="automationForRun(activeRun)"
+        @back="activeView = 'automations'"
+      />
+
+      <!-- Channels page — same inset-surface geometry as Automations (both use
+           the shared PageSurface); mounted only while active so its
+           channel-status fetch + WeChat scan poll run on entry and tear down on
+           exit. -->
+      <ChannelsView
+        v-if="activeView === 'channels'"
+        class="flex-1 flex flex-col min-h-0"
+      />
 
       <!-- Bottom panel -->
       <div
@@ -724,8 +826,9 @@ function startResize(e: MouseEvent) {
   /* Top margin clears the floating panel control at the top-right, so it sits
      in a band above the surface instead of overlapping its corner. On the
      desktop shell the 28px title-bar strip already provides most of it (see the
-     is-tauri-macos override in style.css). */
-  margin: 40px 14px 14px;
+     is-tauri-macos override in style.css). A bit of extra band leaves the
+     floating chip in open space instead of touching the panel's top corner. */
+  margin: 48px 14px 14px;
   /* NOT overflow:hidden — that would clip the composer's upward model/slash
      menus on short viewports. The scroll area rounds its own top corners
      (rounded-t) and the composer is inset, so the panel corners stay clean. */

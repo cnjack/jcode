@@ -33,6 +33,8 @@ export default {
 
   nav: {
     newTask: '新しいタスク',
+    automations: '自動化',
+    channels: 'チャネル',
     workspace: 'ワークスペース',
     projects: 'プロジェクト',
     openFolder: 'フォルダーを開く',
@@ -49,6 +51,28 @@ export default {
   welcome: {
     startIn: '{project} で新しいタスクを開始',
     subtitle: 'メッセージを送信して開始します。{kbd} でコマンドを表示。',
+  },
+
+  channels: {
+    connected: '接続済み',
+    promo: {
+      title: '<span class="accent">スマホから</span>承認・監視',
+      lede: 'WeChat に一度だけ連携すれば、jcode はすべての承認要求とタスク完了通知をチャットに直接転送します。長時間のエージェント実行をデスクで待つ必要はありません。',
+    },
+    features: {
+      approvals: { title: 'ワンタップ承認', desc: 'WeChat メッセージから直接ツール呼び出しを承認・拒否できます。アプリを開く必要はありません。' },
+      notifications: { title: '完了通知', desc: 'スケジュールされた自動化やバックグラウンドタスクが完了した瞬間に通知します。' },
+      scan: { title: 'スキャンで接続', desc: 'QR コードで数秒でペアリング。設定 → チャネルからいつでも切断できます。' },
+    },
+    mock: {
+      now: 'たった今',
+      approvalTitle: '承認が必要です',
+      run: '実行',
+      approve: '承認',
+      deny: '拒否',
+      done: '夜間自動化が完了しました',
+      summary: '3 タスク · 0 失敗',
+    },
   },
 
   connection: {
