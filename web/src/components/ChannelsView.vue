@@ -133,7 +133,7 @@ const features = computed(() => [
 </script>
 
 <template>
-  <PageSurface :title="t('nav.channels')">
+  <PageSurface :title="t('nav.channels')" col-width="56rem">
       <div class="chan-stage">
         <!-- LEFT: promo / connection card -->
         <div class="promo-card">

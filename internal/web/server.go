@@ -87,6 +87,11 @@ type Server struct {
 	// to a remote executor (SSH or Docker) instead of a local pwd.
 	newRemoteEngine func(taskID string, executor tools.RemoteExecutor, remotePwd, mode string) (*EngineConfig, error)
 
+	// newAutomationEngine builds a headless task engine for automation runs: like
+	// newEngine but drops interactive tools (ask_user) so an unattended run can't
+	// stall waiting on a human. Falls back to newEngine when unset (back-compat).
+	newAutomationEngine func(taskID, pwd, mode string) (*EngineConfig, error)
+
 	// remoteConns holds SSH connections established by the remote-connect wizard
 	// that have not yet been bound to the live env (keyed by connection id).
 	remoteConns *remoteConnRegistry
@@ -136,36 +141,37 @@ type Server struct {
 
 // ServerConfig holds the configuration for creating a new Server.
 type ServerConfig struct {
-	Port               int
-	Host               string
-	OpenBrowser        bool
-	Pwd                string
-	Version            string
-	Agent              *adk.ChatModelAgent
-	CreateAgent        func(providerName, modelName string) (*adk.ChatModelAgent, error)
-	RebuildForMode     func(planMode bool) (*adk.ChatModelAgent, error)
-	NewEngine          func(taskID, pwd, mode string) (*EngineConfig, error)                                             // factory for new concurrent task engines (local)
-	NewRemoteEngine    func(taskID string, executor tools.RemoteExecutor, remotePwd, mode string) (*EngineConfig, error) // remote sibling of NewEngine (SSH or Docker)
-	InitialMode        string                                                                                            // unified startup mode string ("approval"/"plan"/"full_access")
-	TodoStore          *tools.TodoStore
-	Recorder           *session.Recorder
-	Tracer             *telemetry.LangfuseTracer
-	Env                *tools.Env
-	ProviderName       string
-	ModelName          string
-	Config             *config.Config
-	Registry           *model.ModelRegistry
-	ApprovalState      *runner.ApprovalState
-	SkillLoader        *skills.Loader
-	ReloadMCP          func(servers map[string]*config.MCPServer) ([]tools.MCPStatus, error) // optional: hot-reload MCP tools
-	InitialMCPStatuses []tools.MCPStatus                                                     // statuses from the startup MCP load
-	WechatClient       channel.Channel                                                       // optional WeChat channel
-	WebHandler         *handler.WebHandler                                                   // optional: pre-created handler for sharing with tools
-	EventHandler       handler.AgentEventHandler                                             // optional: handler for runner (e.g. NotifyingHandler)
-	NeedsSetup         bool                                                                  // true when no providers are configured (setup mode)
-	TokenUsage         *model.TokenUsage                                                     // optional: shared token tracker (created when nil)
-	ContextBreakdownFn func() usage.ContextBreakdown                                         // optional: live per-task context breakdown
-	Automations        *automation.Store                                                     // optional: automation store (nil in setup mode)
+	Port                int
+	Host                string
+	OpenBrowser         bool
+	Pwd                 string
+	Version             string
+	Agent               *adk.ChatModelAgent
+	CreateAgent         func(providerName, modelName string) (*adk.ChatModelAgent, error)
+	RebuildForMode      func(planMode bool) (*adk.ChatModelAgent, error)
+	NewEngine           func(taskID, pwd, mode string) (*EngineConfig, error)                                             // factory for new concurrent task engines (local)
+	NewRemoteEngine     func(taskID string, executor tools.RemoteExecutor, remotePwd, mode string) (*EngineConfig, error) // remote sibling of NewEngine (SSH or Docker)
+	NewAutomationEngine func(taskID, pwd, mode string) (*EngineConfig, error)                                             // headless sibling of NewEngine for automation runs (drops interactive tools)
+	InitialMode         string                                                                                            // unified startup mode string ("approval"/"plan"/"full_access")
+	TodoStore           *tools.TodoStore
+	Recorder            *session.Recorder
+	Tracer              *telemetry.LangfuseTracer
+	Env                 *tools.Env
+	ProviderName        string
+	ModelName           string
+	Config              *config.Config
+	Registry            *model.ModelRegistry
+	ApprovalState       *runner.ApprovalState
+	SkillLoader         *skills.Loader
+	ReloadMCP           func(servers map[string]*config.MCPServer) ([]tools.MCPStatus, error) // optional: hot-reload MCP tools
+	InitialMCPStatuses  []tools.MCPStatus                                                     // statuses from the startup MCP load
+	WechatClient        channel.Channel                                                       // optional WeChat channel
+	WebHandler          *handler.WebHandler                                                   // optional: pre-created handler for sharing with tools
+	EventHandler        handler.AgentEventHandler                                             // optional: handler for runner (e.g. NotifyingHandler)
+	NeedsSetup          bool                                                                  // true when no providers are configured (setup mode)
+	TokenUsage          *model.TokenUsage                                                     // optional: shared token tracker (created when nil)
+	ContextBreakdownFn  func() usage.ContextBreakdown                                         // optional: live per-task context breakdown
+	Automations         *automation.Store                                                     // optional: automation store (nil in setup mode)
 }
 
 // NewServer creates a new web server.
@@ -205,28 +211,29 @@ func NewServer(cfg *ServerConfig) *Server {
 		boot.taskID = boot.recorder.UUID()
 	}
 	s := &Server{
-		Engine:          boot,
-		tasks:           make(map[string]*Engine),
-		port:            cfg.Port,
-		host:            cfg.Host,
-		openBrowser:     cfg.OpenBrowser,
-		version:         cfg.Version,
-		wsBroker:        NewWSBroker(),
-		newEngine:       cfg.NewEngine,
-		newRemoteEngine: cfg.NewRemoteEngine,
-		remoteConns:     newRemoteConnRegistry(),
-		tracer:          cfg.Tracer,
-		cfg:             cfg.Config,
-		registry:        cfg.Registry,
-		ptyMgr:          newPTYManager(),
-		skillLoader:     cfg.SkillLoader,
-		reloadMCP:       cfg.ReloadMCP,
-		mcpStatuses:     make(map[string]tools.MCPStatus),
-		mcpLogins:       make(map[string]*mcpLoginState),
-		wechatClient:    cfg.WechatClient,
-		needsSetup:      cfg.NeedsSetup,
-		automations:     cfg.Automations,
-		autoRunInflight: make(map[string]bool),
+		Engine:              boot,
+		tasks:               make(map[string]*Engine),
+		port:                cfg.Port,
+		host:                cfg.Host,
+		openBrowser:         cfg.OpenBrowser,
+		version:             cfg.Version,
+		wsBroker:            NewWSBroker(),
+		newEngine:           cfg.NewEngine,
+		newRemoteEngine:     cfg.NewRemoteEngine,
+		newAutomationEngine: cfg.NewAutomationEngine,
+		remoteConns:         newRemoteConnRegistry(),
+		tracer:              cfg.Tracer,
+		cfg:                 cfg.Config,
+		registry:            cfg.Registry,
+		ptyMgr:              newPTYManager(),
+		skillLoader:         cfg.SkillLoader,
+		reloadMCP:           cfg.ReloadMCP,
+		mcpStatuses:         make(map[string]tools.MCPStatus),
+		mcpLogins:           make(map[string]*mcpLoginState),
+		wechatClient:        cfg.WechatClient,
+		needsSetup:          cfg.NeedsSetup,
+		automations:         cfg.Automations,
+		autoRunInflight:     make(map[string]bool),
 	}
 	// The bootstrap engine is registered (and its pump started) in Start, once
 	// the root context exists.

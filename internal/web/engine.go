@@ -322,7 +322,15 @@ func (s *Server) buildLocalEngine(taskID, pwd, modeStr string) (*Engine, error) 
 	if s.newEngine == nil {
 		return nil, fmt.Errorf("task creation is not supported")
 	}
-	ec, err := s.newEngine(taskID, pwd, modeStr)
+	return s.buildLocalEngineWith(taskID, pwd, modeStr, s.newEngine)
+}
+
+// buildLocalEngineWith assembles, model-inherits, and registers a local task
+// engine using the supplied factory. The factory is a parameter so automation
+// runs can pass the headless factory (which drops interactive tools) while
+// sharing all the registration/model-inheritance plumbing with normal tasks.
+func (s *Server) buildLocalEngineWith(taskID, pwd, modeStr string, factory func(taskID, pwd, mode string) (*EngineConfig, error)) (*Engine, error) {
+	ec, err := factory(taskID, pwd, modeStr)
 	if err != nil {
 		return nil, err
 	}

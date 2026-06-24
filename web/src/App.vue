@@ -24,11 +24,15 @@ import SetupView from '@/components/SetupView.vue'
 import TopBar from '@/components/TopBar.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
 import AutomationsView from '@/components/AutomationsView.vue'
+import AutomationRunView from '@/components/AutomationRunView.vue'
 import ChannelsView from '@/components/ChannelsView.vue'
 import { useNotifications } from '@/composables/notifications'
+import { useAutomationStore } from '@/stores/automation'
+import type { AutomationRun } from '@/types/automation'
 
 const store = useChatStore()
 const projectStore = useProjectStore()
+const automationStore = useAutomationStore()
 const { t } = useI18n()
 const { resolvedTheme, toggleTheme } = useTheme()
 const { refresh: refreshBranch } = useBranch()
@@ -38,11 +42,15 @@ const settingsOpen = ref(false)
 const projectsOpen = ref(false)
 const paletteOpen = ref(false)
 // View switch inside the shell: the main column shows either the chat canvas,
-// the Automations page, or the Channels page. Unlike the dialog overlays
-// (Settings/Projects), this is a real page change — each renders as a wrapped
-// inset surface that shares <main>'s geometry with the chat panel, not a
-// full-bleed takeover.
-const activeView = ref<'chat' | 'automations' | 'channels'>('chat')
+// the Automations page, the Channels page, or an automation run detail page.
+// Unlike the dialog overlays (Settings/Projects), this is a real page change —
+// each renders as a wrapped inset surface that shares <main>'s geometry with
+// the chat panel, not a full-bleed takeover.
+const activeView = ref<'chat' | 'automations' | 'channels' | 'automation-run'>('chat')
+// The run drilled into from the Automations page (clicking a run row, or Run
+// again from a card). Resolved against the automation it belongs to so the
+// detail header can show the name + schedule.
+const activeRun = ref<AutomationRun | null>(null)
 
 // Remote-connect (SSH) wizard. `openRemoteConnect` is provided to descendants
 // (WorkspacePicker, ProjectSwitcher, Sidebar) so any of them can launch or
@@ -91,6 +99,18 @@ function onPaletteAction(name: 'settings' | 'projects' | 'theme') {
   if (name === 'settings') settingsOpen.value = true
   else if (name === 'projects') projectsOpen.value = true
   else if (name === 'theme') toggleTheme()
+}
+
+// Drill into an automation run detail page from the Automations list. Resolves
+// the parent automation (for the header name + schedule) from the store.
+function openAutomationRun(run: AutomationRun) {
+  activeRun.value = run
+  activeView.value = 'automation-run'
+}
+// The automation backing the active run detail view (best-effort lookup by id).
+function automationForRun(run: AutomationRun | null) {
+  if (!run) return null
+  return automationStore.items.find((a) => a.id === run.automation_id) ?? null
 }
 
 const bottomPanel = ref<'none' | 'terminal'>('none')
@@ -239,9 +259,10 @@ function handleGlobalKeydown(e: KeyboardEvent) {
     store.stopAgent()
     return
   }
-  // On a non-chat page (Automations/Channels, no overlay open) Esc returns to
-  // chat — it should not also kill a running agent, mirroring the overlay-
-  // dismissal guard above.
+  // On a non-chat page (Automations/Channels/automation-run, no overlay open)
+  // Esc steps back one level: from a run detail → the Automations page, and
+  // from Automations/Channels → chat. It should not also kill a running agent,
+  // mirroring the overlay-dismissal guard above.
   if (
     e.key === 'Escape' &&
     !settingsOpen.value &&
@@ -251,7 +272,8 @@ function handleGlobalKeydown(e: KeyboardEvent) {
     activeView.value !== 'chat'
   ) {
     e.preventDefault()
-    activeView.value = 'chat'
+    if (activeView.value === 'automation-run') activeView.value = 'automations'
+    else activeView.value = 'chat'
     return
   }
   if ((e.ctrlKey || e.metaKey) && e.key === '`') {
@@ -639,10 +661,25 @@ function startResize(e: MouseEvent) {
       <!-- Automations page — renders inside <main> as a sibling of the chat
            canvas, wrapped in the same inset-surface geometry so it reads as a
            page within the shell (包裹感), not a full-bleed overlay. Only mounted
-           while active so its data fetch fires on entry and tears down on exit. -->
+           while active so its data fetch fires on entry and tears down on exit.
+           open-run hands a clicked run up so the shell can swap to the run
+           detail page. -->
       <AutomationsView
         v-if="activeView === 'automations'"
         class="flex-1 flex flex-col min-h-0"
+        @open-run="openAutomationRun"
+      />
+
+      <!-- Automation run detail — the "content page" for a run: replays the
+           run's session as a read-only timeline (same ChatMessage + ToolCallCard
+           vocabulary as the chat canvas), framed by a run-summary header and a
+           Run-again/Stop footer. -->
+      <AutomationRunView
+        v-if="activeView === 'automation-run' && activeRun"
+        class="flex-1 flex flex-col min-h-0"
+        :run="activeRun"
+        :automation="automationForRun(activeRun)"
+        @back="activeView = 'automations'"
       />
 
       <!-- Channels page — same inset-surface geometry as Automations (both use
