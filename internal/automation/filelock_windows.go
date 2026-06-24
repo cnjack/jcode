@@ -13,7 +13,11 @@ import (
 // owner does not deadlock the lock.
 type fileLock struct{ f *os.File }
 
-func lockFile(f *os.File, flags uint32) error {
+// lockFileEx wraps LockFileEx. Named …Ex (not lockFile) to avoid clashing with
+// the `lockFile` string constant in store.go that names the on-disk lock file —
+// both live in package automation, so on Windows a shared identifier would be a
+// redeclaration (the cross-build CI caught this).
+func lockFileEx(f *os.File, flags uint32) error {
 	ol := new(windows.Overlapped)
 	// Lock the first byte; that is sufficient for advisory whole-file locking
 	// when every participant locks the same byte range.
@@ -25,7 +29,7 @@ func acquireLock(path string) (*fileLock, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := lockFile(f, windows.LOCKFILE_EXCLUSIVE_LOCK); err != nil {
+	if err := lockFileEx(f, windows.LOCKFILE_EXCLUSIVE_LOCK); err != nil {
 		_ = f.Close()
 		return nil, err
 	}
@@ -37,7 +41,7 @@ func tryAcquireLock(path string) (lock *fileLock, ok bool, err error) {
 	if err != nil {
 		return nil, false, err
 	}
-	if err := lockFile(f, windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY); err != nil {
+	if err := lockFileEx(f, windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY); err != nil {
 		_ = f.Close()
 		if err == windows.ERROR_LOCK_VIOLATION {
 			return nil, false, nil
