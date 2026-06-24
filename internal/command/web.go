@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/cnjack/jcode/internal/agent"
+	"github.com/cnjack/jcode/internal/automation"
 	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/channel/ble"
 	"github.com/cnjack/jcode/internal/config"
@@ -72,6 +73,28 @@ func NewWebCmd() *cobra.Command {
 	cmd.Flags().StringVar(&host, "host", "127.0.0.1", "HTTP server host")
 	cmd.Flags().BoolVar(&openBrowser, "open", true, "Open browser after server starts")
 	return cmd
+}
+
+// interactiveToolNames are the tools that require a live human to answer — they
+// cannot run unattended. Automation runs (scheduled, and manual runs that may be
+// headless) drop them via dropInteractiveTools so an agent calling ask_user in a
+// run with no watching client can't block on the WS channel forever, stalling
+// the run until the liveness ceiling cancels it.
+var interactiveToolNames = map[string]struct{}{"ask_user": {}}
+
+// dropInteractiveTools returns tools minus any whose name is in
+// interactiveToolNames. Tools whose Info() can't be read are kept (best-effort).
+func dropInteractiveTools(tools []tool.BaseTool) []tool.BaseTool {
+	out := make([]tool.BaseTool, 0, len(tools))
+	for _, t := range tools {
+		if info, err := t.Info(context.Background()); err == nil {
+			if _, drop := interactiveToolNames[info.Name]; drop {
+				continue
+			}
+		}
+		out = append(out, t)
+	}
+	return out
 }
 
 func runWebServer(port int, host string, openBrowser bool) error {
@@ -203,12 +226,30 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		return cm, ctxLimit, nil
 	}
 
+	// Automation store (definitions + scheduler state). Skipped in setup mode.
+	// Created before buildWebTask so every per-task Env shares this one live
+	// store — the automation_create tool must write through it (not a throwaway)
+	// so created automations are visible to the REST API and scheduler.
+	var autoStore *automation.Store
+	if !needsSetup {
+		var aerr error
+		if autoStore, aerr = automation.NewStore(); aerr != nil {
+			config.Logger().Printf("[automation] store unavailable: %v", aerr)
+			autoStore = nil
+		}
+	}
+
 	// buildWebTask is the per-task engine factory. It produces a fully ISOLATED
 	// set of run state — its own env, background manager, recorder, token tracker,
 	// approval state, plan store, and event handler — so concurrent tasks never
 	// share mutable execution state. exec != nil binds the task to a remote SSH
 	// target instead of a local pwd. taskID != "" resumes an existing session.
-	buildWebTask := func(taskID, taskPwd, modeStr string, exec tools.RemoteExecutor) (*web.EngineConfig, error) {
+	// interactiveTools are the tool names that require a live human to answer —
+	// they cannot run unattended, so automation runs (scheduled, and manual runs
+	// that may be headless) exclude them. An agent in an automation run that calls
+	// ask_user would otherwise block on the WS channel forever (no client resolves
+	// it) and stall the run until the liveness ceiling cancels it.
+	buildWebTask := func(taskID, taskPwd, modeStr string, exec tools.RemoteExecutor, excludeInteractive bool) (*web.EngineConfig, error) {
 		startMode := startupMode
 		if modeStr != "" {
 			startMode = mode.Parse(modeStr)
@@ -216,6 +257,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 
 		// Fresh execution environment for this task only.
 		tenv := tools.NewEnv(taskPwd, platform)
+		tenv.AutomationStore = autoStore
 		promptPlatform := platform
 		envLabel := "local"
 		projectKey := taskPwd
@@ -289,6 +331,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 				tenv.NewExecuteTool(tbg), tenv.NewGrepTool(),
 				tenv.NewTodoWriteTool(), tenv.NewTodoReadTool(),
 				tenv.NewGoalSetTool(), tenv.NewGoalGetTool(), tenv.NewGoalUpdateTool(),
+				tenv.NewAutomationCreateTool(),
 				tenv.NewSwitchEnvTool(),
 				tenv.NewCheckBackgroundTool(tbg),
 				tenv.NewSubagentTool(&tools.SubagentDeps{
@@ -308,6 +351,11 @@ func runWebServer(port int, host string, openBrowser bool) error {
 			}
 			if mt := mcpToolsPtr.Load(); mt != nil {
 				all = append(all, (*mt)...)
+			}
+			// Automation runs are unattended — drop interactive tools that would
+			// otherwise block on a human who isn't there (see dropInteractiveTools).
+			if excludeInteractive {
+				all = dropInteractiveTools(all)
 			}
 			return all
 		}
@@ -490,7 +538,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 	}
 
 	// Bootstrap engine for the initial task.
-	bootEC, err := buildWebTask("", pwd, startupMode.String(), nil)
+	bootEC, err := buildWebTask("", pwd, startupMode.String(), nil, false)
 	if err != nil {
 		return err
 	}
@@ -506,10 +554,16 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		CreateAgent:    bootEC.CreateAgent,
 		RebuildForMode: bootEC.RebuildForMode,
 		NewEngine: func(taskID, taskPwd, modeStr string) (*web.EngineConfig, error) {
-			return buildWebTask(taskID, taskPwd, modeStr, nil)
+			return buildWebTask(taskID, taskPwd, modeStr, nil, false)
 		},
 		NewRemoteEngine: func(taskID string, exec tools.RemoteExecutor, remotePwd, modeStr string) (*web.EngineConfig, error) {
-			return buildWebTask(taskID, remotePwd, modeStr, exec)
+			return buildWebTask(taskID, remotePwd, modeStr, exec, false)
+		},
+		// NewAutomationEngine builds a headless task engine for automation runs.
+		// Same as NewEngine but drops interactive tools (ask_user) so an unattended
+		// run can't stall waiting for a human to answer a question no one is watching.
+		NewAutomationEngine: func(taskID, taskPwd, modeStr string) (*web.EngineConfig, error) {
+			return buildWebTask(taskID, taskPwd, modeStr, nil, true)
 		},
 		InitialMode:        startupMode.String(),
 		TodoStore:          bootEC.TodoStore,
@@ -530,7 +584,17 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		NeedsSetup:         needsSetup,
 		TokenUsage:         bootEC.TokenUsage,
 		ContextBreakdownFn: bootEC.BreakdownFn,
+		Automations:        autoStore,
 	})
+
+	// Start the periodic automation scheduler. A single process owns periodic
+	// firing (elected via flock); others return immediately. Manual runs work in
+	// any process regardless of ownership. The flock is OS-released on exit, so a
+	// crashed owner never deadlocks the election.
+	if autoStore != nil {
+		sched := automation.NewScheduler(autoStore, srv.AutomationRunner())
+		go sched.Run(ctx)
+	}
 
 	// Set up inbound WeChat message handler now that srv exists. Always register
 	// regardless of WebEnabled — the user can enable via the UI. Inbound messages

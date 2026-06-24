@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>jcode</title>
+
+<!--
+  Full-screen application mock. Decisions locked from the design rounds:
+    • Sidebar header uses C2 — No lines, just air: the equal trio
+      (New task / Automations / Channels) floats on pure whitespace, rows gain
+      a rounded pill body only on hover/active. Icon + name + shortcut only.
+    • Automations icon = Sparkles (lightning removed).
+    • Main canvas renders the Channels promo landing — the standalone "what is
+      Channels" pitch with a phone remote-control mock.
+  Token-faithful (web/src/styles/tokens.css). Icons = heroicons/24/outline.
+-->
+
+<style>
+  :root{
+    --font-sans:'Geist',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    --font-mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+    --radius-sm:4px;--radius-md:6px;--radius-lg:8px;--radius-xl:12px;--radius-2xl:16px;--radius-pill:9999px;
+    --shadow-sm:0 1px 2px rgba(24,20,16,.06);--shadow-md:0 4px 14px -4px rgba(24,20,16,.12);
+    --shadow-lg:0 14px 36px -14px rgba(24,20,16,.20);
+    --shadow-xl:0 1px 2px rgba(24,20,16,.04),0 24px 56px -28px rgba(24,20,16,.26);
+    --color-primary:#FF8400;
+    --color-background:#F2F3F0;--color-surface:#FFFFFF;--color-foreground:#111111;
+    --color-muted-foreground:#666666;--color-border:#CBCCC9;--color-muted:#F2F3F0;--color-secondary:#E7E8E5;
+    --color-success:#16A34A;--color-destructive:#D93C15;
+    --color-accent-neutral:var(--color-foreground);
+    --neutral-wash-soft:color-mix(in srgb,var(--color-foreground) 8%,transparent);
+    --neutral-wash:color-mix(in srgb,var(--color-foreground) 11%,transparent);
+    --neutral-border:color-mix(in srgb,var(--color-foreground) 30%,transparent);
+    --accent-wash-soft:color-mix(in srgb,var(--color-primary) 8%,transparent);
+    --accent-wash:color-mix(in srgb,var(--color-primary) 13%,transparent);
+    --accent-border:color-mix(in srgb,var(--color-primary) 35%,transparent);
+    --ease-out:cubic-bezier(0.16,1,0.3,1);
+    --duration-fast:100ms;--duration-normal:150ms;
+    --sidebar-width:20rem;
+    --icon-stroke:2;
+  }
+  [data-theme='dark']{
+    --color-background:#111111;--color-surface:#1A1A1A;--color-foreground:#FFFFFF;
+    --color-muted-foreground:#B8B9B6;--color-border:#2E2E2E;--color-muted:#2E2E2E;--color-secondary:#2E2E2E;
+    --color-success:#22C55E;--color-destructive:#FF5C33;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;background:var(--color-background);color:var(--color-foreground);
+    font-family:var(--font-sans);-webkit-font-smoothing:antialiased;overflow:hidden;}
+  svg{display:block;}
+
+  /* ── Window shell (no outer frame — fills the screen like the real app) ── */
+  .win{
+    display:flex;flex-direction:column;height:100vh;background:var(--color-background);
+  }
+  .titlebar{
+    height:28px;flex-shrink:0;display:flex;align-items:center;padding-left:12px;gap:8px;
+  }
+  .traffic i{width:12px;height:12px;border-radius:50%;display:block;}
+  .traffic{display:flex;gap:8px;}
+  .traffic .r{background:#ff5f57}.traffic .y{background:#febc2e}.traffic .g{background:#28c840}
+  .tb-title{margin-left:12px;font-size:12px;font-weight:600;color:var(--color-muted-foreground);}
+
+  .body{flex:1;display:flex;min-height:0;}
+
+  /* ════════════════════════════════════════════════════════════════════════
+   * SIDEBAR — full rail: C2 nav header + workspace tree + footer
+   * ═══════════════════════════════════════════════════════════════════════ */
+  .sidebar{width:var(--sidebar-width);flex-shrink:0;display:flex;flex-direction:column;
+    background:var(--color-background);border-right:1px solid var(--color-border);}
+  .sidebar-header{padding:12px 12px 8px;}
+
+  /* C2 — No lines, just air */
+  .nav-list{display:flex;flex-direction:column;gap:6px;}
+  .nav-row{
+    display:flex;align-items:center;gap:12px;padding:9px 12px;cursor:pointer;position:relative;
+    border-radius:var(--radius-lg);border:1px solid transparent;
+    transition:background var(--duration-normal),color var(--duration-normal),border-color var(--duration-normal);
+  }
+  .nav-row .ic{width:18px;height:18px;color:var(--color-muted-foreground);flex-shrink:0;
+    transition:color var(--duration-normal);}
+  .nav-row .name{flex:1;font-size:13.5px;font-weight:500;color:var(--color-foreground);min-width:0;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .nav-row .dot{width:7px;height:7px;border-radius:50%;background:var(--color-success);flex-shrink:0;}
+  .nav-row .kbd{font-family:var(--font-mono);font-size:10px;line-height:1;padding:2px 5px;
+    border-radius:var(--radius-sm);background:var(--color-muted);border:1px solid var(--color-border);
+    color:var(--color-muted-foreground);white-space:nowrap;}
+  .nav-row:hover{background:var(--color-muted);}
+  .nav-row:hover .ic{color:var(--color-foreground);}
+  .nav-row.active{background:var(--accent-wash-soft);}
+  .nav-row.active .ic{color:var(--color-primary);}
+  .nav-row.active .name{color:var(--color-primary);font-weight:600;}
+
+  /* tree */
+  .tree{flex:1;overflow-y:auto;padding:6px 8px 8px;}
+  .tree-head{display:flex;align-items:center;justify-content:space-between;padding:12px 6px 6px;}
+  .tree-label{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--color-muted-foreground);}
+  .tree-filterbtn{display:grid;place-items:center;width:22px;height:22px;border:none;background:transparent;
+    border-radius:var(--radius-sm);color:var(--color-muted-foreground);cursor:pointer;}
+  .tree-filterbtn:hover{background:var(--color-muted);color:var(--color-foreground);}
+  .tree-filterbtn svg{width:16px;height:16px;}
+
+  .project-group{margin-bottom:2px;}
+  .project-row{display:flex;align-items:center;gap:6px;width:100%;padding:8px 6px;border:none;
+    background:transparent;border-radius:var(--radius-md);cursor:pointer;text-align:left;
+    transition:background .15s;}
+  .project-row:hover{background:var(--color-muted);}
+  .project-row .chev{width:14px;height:14px;color:var(--color-muted-foreground);flex-shrink:0;transition:transform .15s;}
+  .project-row .chev.open{transform:rotate(90deg);}
+  .project-row .fic{width:14px;height:14px;color:var(--color-muted-foreground);flex-shrink:0;}
+  .project-row.active .fic{color:var(--color-accent-neutral);}
+  .project-row .pname{flex:1;min-width:0;font-size:13px;font-weight:500;color:var(--color-foreground);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .project-row .pcount{font-size:10px;font-family:var(--font-mono);color:var(--color-muted-foreground);flex-shrink:0;}
+
+  .task-list{padding-left:14px;}
+  .task-row{display:flex;align-items:center;gap:6px;padding:8px 8px;margin-left:6px;
+    border-left:1px solid var(--color-border);cursor:pointer;transition:background .15s;position:relative;}
+  .task-row:hover{background:var(--color-muted);}
+  .task-row.active{background:var(--neutral-wash-soft);border-left-color:var(--color-accent-neutral);}
+  .task-row.running{border-left-color:color-mix(in srgb,var(--color-primary) 50%,var(--color-border));}
+  .task-dot{width:6px;height:6px;border-radius:var(--radius-pill);flex-shrink:0;background:transparent;}
+  .task-dot.unread{background:var(--color-accent-neutral);}
+  .task-ring{width:11px;height:11px;flex-shrink:0;border-radius:var(--radius-pill);
+    border:1.6px solid var(--color-primary);animation:ring 1.6s ease-in-out infinite;}
+  @keyframes ring{0%,100%{opacity:.35;transform:scale(.78)}50%{opacity:1;transform:scale(1)}}
+  @media(prefers-reduced-motion:reduce){.task-ring{animation:none;opacity:1;transform:none;}}
+  .task-pin{width:10px;height:10px;color:var(--color-accent-neutral);flex-shrink:0;}
+  .task-title{flex:1;min-width:0;font-size:13px;color:var(--color-foreground);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .task-time{font-size:10px;font-family:var(--font-mono);color:var(--color-muted-foreground);flex-shrink:0;}
+  .task-time.running{color:var(--color-primary);}
+  .task-menu-btn{display:grid;place-items:center;width:20px;height:20px;border:none;background:transparent;
+    border-radius:var(--radius-sm);color:var(--color-muted-foreground);cursor:pointer;opacity:0;
+    transition:opacity .15s;}
+  .task-row:hover .task-menu-btn{opacity:1;}
+  .task-menu-btn svg{width:14px;height:14px;}
+
+  /* footer */
+  .sidebar-footer{padding:8px 10px;display:flex;align-items:center;justify-content:flex-end;
+    border-top:1px solid var(--color-border);}
+  .footer-actions{display:flex;align-items:center;gap:2px;}
+  .footer-btn{width:32px;height:32px;display:flex;align-items:center;justify-content:center;
+    border-radius:var(--radius-md);border:none;background:transparent;color:var(--color-muted-foreground);cursor:pointer;
+    transition:background .15s,color .15s;}
+  .footer-btn:hover{background:var(--color-muted);color:var(--color-foreground);}
+  .footer-btn svg{width:17px;height:17px;}
+
+  /* ════════════════════════════════════════════════════════════════════════
+   * MAIN — Channels promo landing (left-anchored card + phone mock)
+   * ═══════════════════════════════════════════════════════════════════════ */
+  .main{flex:1;min-width:0;overflow-y:auto;background:var(--color-background);
+    background-image:
+      radial-gradient(60% 50% at 88% 8%, var(--accent-wash-soft), transparent 70%);
+  }
+  .main-inner{max-width:880px;margin:0 auto;padding:48px 48px 72px;display:flex;
+    align-items:flex-start;gap:48px;}
+
+  .promo-card{
+    flex:1;min-width:0;background:var(--color-surface);border:1px solid var(--color-border);
+    border-radius:var(--radius-2xl);overflow:hidden;position:relative;box-shadow:var(--shadow-lg);
+  }
+  .promo-glow{position:absolute;top:-90px;left:-60px;width:280px;height:280px;border-radius:50%;
+    background:var(--accent-wash);filter:blur(46px);opacity:.8;pointer-events:none;}
+  .promo-inner{position:relative;padding:40px 40px 36px;display:flex;flex-direction:column;}
+  .promo-eyebrow{display:inline-flex;align-items:center;gap:7px;align-self:flex-start;
+    font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--color-primary);
+    padding:5px 11px;border-radius:var(--radius-pill);background:var(--accent-wash-soft);
+    border:1px solid var(--accent-border);}
+  .promo-eyebrow svg{width:13px;height:13px;}
+  .promo-title{font-size:30px;font-weight:600;letter-spacing:-.022em;margin:18px 0 0;line-height:1.12;}
+  .promo-title .accent{color:var(--color-primary);}
+  .promo-lede{font-size:14px;color:var(--color-muted-foreground);line-height:1.6;margin:14px 0 0;max-width:44ch;}
+
+  .promo-features{display:flex;flex-direction:column;gap:16px;margin:26px 0 0;}
+  .promo-feat{display:flex;gap:13px;align-items:flex-start;}
+  .promo-feat .fic{display:grid;place-items:center;width:36px;height:36px;flex-shrink:0;
+    border-radius:var(--radius-lg);background:var(--neutral-wash-soft);border:1px solid var(--neutral-border);
+    color:var(--color-foreground);}
+  .promo-feat .fic svg{width:18px;height:18px;}
+  .promo-feat h4{font-size:13.5px;font-weight:600;margin:3px 0 3px;}
+  .promo-feat p{font-size:12.5px;color:var(--color-muted-foreground);line-height:1.5;margin:0;max-width:42ch;}
+
+  .promo-cta{display:flex;align-items:center;gap:14px;margin-top:28px;}
+  .promo-btn{display:inline-flex;align-items:center;gap:8px;padding:11px 20px;
+    background:var(--color-primary);color:#fff;border:none;border-radius:var(--radius-pill);
+    font-size:13.5px;font-weight:600;cursor:pointer;
+    box-shadow:0 4px 16px -4px color-mix(in srgb,var(--color-primary) 60%,transparent);
+    transition:box-shadow .15s,transform .08s var(--ease-out);}
+  .promo-btn:hover{box-shadow:0 6px 22px -5px color-mix(in srgb,var(--color-primary) 70%,transparent);}
+  .promo-btn:active{transform:translateY(.5px);}
+  .promo-btn svg{width:16px;height:16px;}
+  .promo-hint{font-size:11.5px;color:var(--color-muted-foreground);}
+  .promo-hint .kbd{margin-left:5px;}
+
+  /* ── page switcher: only the active nav target renders ── */
+  .page{display:none;}
+  .page.on{display:flex;}
+
+  /* placeholder pages for New task / Automations (not the focus — just so the
+     switch feels real). Quiet, centered, no promo theatrics. */
+  .page-empty{flex-direction:column;align-items:center;justify-content:center;
+    width:100%;min-height:60vh;text-align:center;gap:14px;}
+  .page-empty .pe-ic{display:grid;place-items:center;width:56px;height:56px;border-radius:var(--radius-2xl);
+    background:var(--neutral-wash-soft);border:1px solid var(--neutral-border);color:var(--color-muted-foreground);}
+  .page-empty .pe-ic svg{width:26px;height:26px;}
+  .page-empty h2{font-size:18px;font-weight:600;margin:0;}
+  .page-empty p{font-size:13px;color:var(--color-muted-foreground);line-height:1.6;margin:0;max-width:38ch;}
+
+  /* phone */
+  .phone-col{flex:0 0 auto;display:flex;align-items:center;padding-top:28px;}
+  .phone{width:248px;border:2px solid var(--color-foreground);border-radius:32px;padding:10px;
+    background:var(--color-background);box-shadow:var(--shadow-xl);position:relative;}
+  .phone-notch{position:absolute;top:10px;left:50%;transform:translateX(-50%);width:74px;height:18px;
+    background:var(--color-foreground);border-radius:0 0 12px 12px;}
+  .phone-screen{border-radius:24px;overflow:hidden;background:var(--color-muted);height:420px;
+    padding:32px 12px 14px;display:flex;flex-direction:column;gap:11px;}
+  .phone-status{display:flex;align-items:center;justify-content:space-between;font-size:9px;
+    color:var(--color-muted-foreground);padding:0 6px;}
+  .phone-status .bat{width:16px;height:8px;border:1px solid currentColor;border-radius:2px;position:relative;}
+  .phone-status .bat::after{content:'';position:absolute;inset:1px;background:currentColor;border-radius:1px;}
+
+  .wc-msg{background:var(--color-surface);border-radius:12px;padding:12px 13px;
+    box-shadow:var(--shadow-sm);border:1px solid var(--color-border);}
+  .wc-msg-head{display:flex;align-items:center;gap:7px;margin-bottom:8px;}
+  .wc-avatar{width:22px;height:22px;border-radius:6px;background:var(--color-primary);display:grid;place-items:center;
+    color:#fff;font-size:10px;font-weight:700;font-family:var(--font-mono);}
+  .wc-name{font-size:11.5px;font-weight:600;}
+  .wc-time{margin-left:auto;font-size:9px;color:var(--color-muted-foreground);}
+  .wc-body{font-size:11.5px;line-height:1.5;color:var(--color-foreground);}
+  .wc-body .muted{color:var(--color-muted-foreground);}
+  .wc-body code{font-family:var(--font-mono);font-size:10px;background:var(--color-muted);
+    padding:1px 4px;border-radius:3px;}
+  .wc-actions{display:flex;gap:8px;margin-top:10px;}
+  .wc-btn{flex:1;padding:8px 0;border-radius:8px;font-size:11px;font-weight:600;border:none;cursor:pointer;text-align:center;}
+  .wc-btn.approve{background:#07C160;color:#fff;}
+  .wc-btn.deny{background:var(--color-muted);color:var(--color-foreground);border:1px solid var(--color-border);}
+  .wc-msg-2{background:var(--color-surface);border-radius:12px;padding:10px 13px;border:1px solid var(--color-border);}
+  .wc-msg-2 .t{font-size:10px;color:var(--color-muted-foreground);margin-bottom:3px;}
+  .wc-msg-2 .b{font-size:11.5px;font-weight:500;}
+  .wc-pill{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:#07C160;
+    background:color-mix(in srgb,#07C160 12%,transparent);padding:2px 8px;border-radius:var(--radius-pill);margin-top:7px;}
+  .wc-pill svg{width:10px;height:10px;}
+</style>
+</head>
+<body>
+
+<!-- icon sprite — heroicons/24/outline -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5v15m7.5-7.5h-15"/></symbol>
+    <symbol id="i-sparkles" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z"/></symbol>
+    <symbol id="i-signal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17.5v-2M9 17.5v-5M15 17.5v-9M21 17.5V4"/></symbol>
+    <symbol id="i-adjust" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"/></symbol>
+    <symbol id="i-chev-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m8.25 4.5 7.5 7.5-7.5 7.5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"/></symbol>
+    <symbol id="i-folder-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 0 0-1.883 2.542l.857 6a2.25 2.25 0 0 0 2.227 1.932H19.05a2.25 2.25 0 0 0 2.227-1.932l.857-6a2.25 2.25 0 0 0-1.883-2.542m-16.5 0V6A2.25 2.25 0 0 1 6 3.75h3.879a1.5 1.5 0 0 1 1.06.44l2.122 2.12a1.5 1.5 0 0 0 1.06.44H18A2.25 2.25 0 0 1 20.25 9v.776"/></symbol>
+    <symbol id="i-server" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.25 14.25h13.5m-13.5 0a3 3 0 0 1-3-3m3 3a3 3 0 1 0 0 6h13.5a3 3 0 1 0 0-6m-16.5-3a3 3 0 0 1 3-3h13.5a3 3 0 0 1 3 3m-19.5 0a4.5 4.5 0 0 1 .9-2.7L5.737 5.1a3.375 3.375 0 0 1 2.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 0 1 .9 2.7m0 0a3 3 0 0 1-3 3m0 3h.008v.008h-.008v-.008Zm0-6h.008v.008h-.008v-.008Zm-3 6h.008v.008h-.008v-.008Zm0-6h.008v.008h-.008v-.008Z"/></symbol>
+    <symbol id="i-bookmark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z"/></symbol>
+    <symbol id="i-ellipsis" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z"/></symbol>
+    <symbol id="i-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></symbol>
+    <!-- promo icons -->
+    <symbol id="i-cursor-ray" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.04 5.27a9 9 0 1 1-6.09 6.09M7.5 7.5l5.3 12.1 2.2-5.3 5.3-2.2L7.5 7.5Z"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.85 5.5a4.5 4.5 0 0 0-5.7 0M18 16a3 3 0 0 0-.5-1.6c-.6-.9-1-1.9-1-3V9a4.5 4.5 0 0 0-9 0v2.4c0 1.1-.4 2.1-1 3A3 3 0 0 0 6 16Zm-7 3a2 2 0 0 0 4 0"/></symbol>
+    <symbol id="i-qr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 3.75 9.375v-4.5ZM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 0 1-1.125-1.125v-4.5ZM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0 1 13.5 9.375v-4.5Z"/><path d="M6.75 6.75h.75v.75h-.75v-.75ZM6.75 16.5h.75v.75h-.75v-.75ZM16.5 6.75h.75v.75h-.75v-.75ZM13.5 13.5h1.5v1.5h-1.5zM18 13.5h1.5v1.5H18zM13.5 18h1.5v1.5h-1.5zM18 18h1.5v1.5H18z"/></symbol>
+    <symbol id="i-check-badge" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12.75 11.25 15 15 9.75m-3.97 7.78.83 2.09.83-2.09 2.09-.83-2.09-.83-.83-2.09-.83 2.09-2.09.83 2.09.83Z"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3"/></symbol>
+  </defs>
+</svg>
+
+<div class="win">
+  <!-- Tauri titlebar -->
+  <div class="titlebar">
+    <div class="traffic"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+    <span class="tb-title">jcode</span>
+  </div>
+
+  <div class="body">
+
+    <!-- ════════ SIDEBAR ════════ -->
+    <aside class="sidebar">
+      <!-- C2 nav header: no lines, just air -->
+      <div class="sidebar-header">
+        <div class="nav-list">
+          <div class="nav-row" data-page="new">
+            <svg class="ic"><use href="#i-plus"/></svg>
+            <span class="name">New task</span>
+            <span class="kbd">⌘⇧N</span>
+          </div>
+          <div class="nav-row" data-page="auto">
+            <svg class="ic"><use href="#i-sparkles"/></svg>
+            <span class="name">Automations</span>
+            <span class="kbd">⌘⇧A</span>
+          </div>
+          <div class="nav-row active" data-page="channels">
+            <span class="dot"></span>
+            <svg class="ic"><use href="#i-signal"/></svg>
+            <span class="name">Channels</span>
+            <span class="kbd">⌘⇧C</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- workspace tree -->
+      <div class="tree">
+        <div class="tree-head">
+          <span class="tree-label">Workspace</span>
+          <button class="tree-filterbtn" title="Filter"><svg><use href="#i-adjust"/></svg></button>
+        </div>
+
+        <!-- active project, expanded -->
+        <div class="project-group">
+          <div class="project-row active">
+            <svg class="chev open"><use href="#i-chev-right"/></svg>
+            <svg class="fic"><use href="#i-folder-open"/></svg>
+            <span class="pname">jcode</span>
+            <span class="pcount">3</span>
+          </div>
+          <div class="task-list">
+            <div class="task-row running">
+              <span class="task-ring"></span>
+              <span class="task-title">Refactor approval middleware</span>
+              <span class="task-time running">running</span>
+              <button class="task-menu-btn"><svg><use href="#i-ellipsis"/></svg></button>
+            </div>
+            <div class="task-row active">
+              <span class="task-dot"></span>
+              <svg class="task-pin"><use href="#i-bookmark"/></svg>
+              <span class="task-title">Sidebar redesign mockup</span>
+              <span class="task-time">now</span>
+              <button class="task-menu-btn"><svg><use href="#i-ellipsis"/></svg></button>
+            </div>
+            <div class="task-row">
+              <span class="task-dot unread"></span>
+              <span class="task-title">Fix docker PTY ref exec</span>
+              <span class="task-time">2h</span>
+              <button class="task-menu-btn"><svg><use href="#i-ellipsis"/></svg></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- collapsed -->
+        <div class="project-group">
+          <div class="project-row">
+            <svg class="chev"><use href="#i-chev-right"/></svg>
+            <svg class="fic"><use href="#i-folder"/></svg>
+            <span class="pname">lnx</span>
+            <span class="pcount">2</span>
+          </div>
+        </div>
+
+        <!-- remote -->
+        <div class="project-group">
+          <div class="project-row">
+            <svg class="chev"><use href="#i-chev-right"/></svg>
+            <svg class="fic"><use href="#i-server"/></svg>
+            <span class="pname">prod</span>
+            <span class="pcount">1</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- footer -->
+      <div class="sidebar-footer">
+        <div class="footer-actions">
+          <button class="footer-btn" title="Switch to light"><svg><use href="#i-sun"/></svg></button>
+          <button class="footer-btn" title="Settings"><svg><use href="#i-cog"/></svg></button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ════════ MAIN — switches with the active nav target ════════ -->
+    <main class="main">
+
+      <!-- page: Channels (promo) — shows when Channels is active -->
+      <div class="page on page-channels main-inner">
+
+        <!-- promo card (left-anchored) -->
+        <div class="promo-card">
+          <div class="promo-glow"></div>
+          <div class="promo-inner">
+            <span class="promo-eyebrow">
+              <svg><use href="#i-signal"/></svg> Channels
+            </span>
+            <h1 class="promo-title">Approve and monitor from <span class="accent">your phone</span></h1>
+            <p class="promo-lede">
+              Link WeChat once. jcode forwards every approval request and
+              task-completion notice straight to your chat — so a long-running
+              agent never waits on you being at the desk.
+            </p>
+
+            <div class="promo-features">
+              <div class="promo-feat">
+                <span class="fic"><svg><use href="#i-cursor-ray"/></svg></span>
+                <div>
+                  <h4>One-tap approvals</h4>
+                  <p>Approve or deny a tool call right from the WeChat message — no need to open the app.</p>
+                </div>
+              </div>
+              <div class="promo-feat">
+                <span class="fic"><svg><use href="#i-bell"/></svg></span>
+                <div>
+                  <h4>Done notifications</h4>
+                  <p>Get pinged the moment a scheduled automation or background task finishes.</p>
+                </div>
+              </div>
+              <div class="promo-feat">
+                <span class="fic"><svg><use href="#i-qr"/></svg></span>
+                <div>
+                  <h4>Scan to connect</h4>
+                  <p>Pair in seconds with a QR code. Disconnect any time from Settings → Channels.</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="promo-cta">
+              <button class="promo-btn">
+                <svg><use href="#i-phone"/></svg>
+                Connect WeChat
+              </button>
+              <span class="promo-hint">or press<span class="kbd">⌘⇧C</span></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- phone mock -->
+        <div class="phone-col">
+          <div class="phone">
+            <div class="phone-notch"></div>
+            <div class="phone-screen">
+              <div class="phone-status">
+                <span>9:41</span>
+                <span class="bat"></span>
+              </div>
+
+              <!-- approval request -->
+              <div class="wc-msg">
+                <div class="wc-msg-head">
+                  <span class="wc-avatar">j</span>
+                  <span class="wc-name">jcode</span>
+                  <span class="wc-time">now</span>
+                </div>
+                <div class="wc-body">
+                  <b>Approval needed</b><br>
+                  <span class="muted">Run</span> <code>git push origin</code><span class="muted">?</span>
+                </div>
+                <div class="wc-actions">
+                  <button class="wc-btn approve">Approve</button>
+                  <button class="wc-btn deny">Deny</button>
+                </div>
+              </div>
+
+              <!-- completion -->
+              <div class="wc-msg-2">
+                <div class="t">jcode · just now</div>
+                <div class="b">✓ Nightly automations finished</div>
+                <span class="wc-pill"><svg><use href="#i-check-badge"/></svg> 3 tasks · 0 failed</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- page: New task — quiet placeholder -->
+      <div class="page page-new main-inner page-empty">
+        <span class="pe-ic"><svg><use href="#i-plus"/></svg></span>
+        <h2>Start a new task</h2>
+        <p>Begin a fresh conversation. Your previous sessions stay in the workspace tree.</p>
+      </div>
+
+      <!-- page: Automations — quiet placeholder -->
+      <div class="page page-auto main-inner page-empty">
+        <span class="pe-ic"><svg><use href="#i-sparkles"/></svg></span>
+        <h2>Automations</h2>
+        <p>Scheduled and manual agent tasks. Runs and history live here.</p>
+      </div>
+
+    </main>
+
+  </div>
+</div>
+
+<script>
+  // Click a nav row → switch the active target + the page that shows.
+  (function () {
+    var rows = document.querySelectorAll('.nav-row[data-page]');
+    var pages = {
+      new: document.querySelector('.page-new'),
+      auto: document.querySelector('.page-auto'),
+      channels: document.querySelector('.page-channels'),
+    };
+    rows.forEach(function (row) {
+      row.addEventListener('click', function () {
+        var key = row.getAttribute('data-page');
+        rows.forEach(function (r) { r.classList.toggle('active', r === row); });
+        Object.keys(pages).forEach(function (k) {
+          if (pages[k]) pages[k].classList.toggle('on', k === key);
+        });
+      });
+    });
+  })();
+</script>
+
+</body>
+</html>

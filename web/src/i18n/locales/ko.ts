@@ -33,6 +33,8 @@ export default {
 
   nav: {
     newTask: '새 작업',
+    automations: '자동화',
+    channels: '채널',
     workspace: '워크스페이스',
     projects: '프로젝트',
     openFolder: '폴더 열기',
@@ -49,6 +51,28 @@ export default {
   welcome: {
     startIn: '{project}에서 새 작업 시작',
     subtitle: '메시지를 보내 시작하세요. {kbd}로 명령어를 확인하세요.',
+  },
+
+  channels: {
+    connected: '연결됨',
+    promo: {
+      title: '<span class="accent">휴대폰에서</span> 승인하고 모니터링하세요',
+      lede: 'WeChat에 한 번만 연결하세요. jcode가 모든 승인 요청과 작업 완료 알림을 채팅으로 바로 전달합니다 — 오래 실행되는 에이전트를 책상에서 기다릴 필요가 없습니다.',
+    },
+    features: {
+      approvals: { title: '원탭 승인', desc: 'WeChat 메시지에서 바로 도구 호출을 승인하거나 거부하세요 — 앱을 열 필요가 없습니다.' },
+      notifications: { title: '완료 알림', desc: '예약된 자동화나 백그라운드 작업이 완료되는 즉시 알림을 받습니다.' },
+      scan: { title: '스캔하여 연결', desc: 'QR 코드로 몇 초 만에 페어링하세요. 설정 → 채널에서 언제든 연결을 끊을 수 있습니다.' },
+    },
+    mock: {
+      now: '방금',
+      approvalTitle: '승인이 필요합니다',
+      run: '실행',
+      approve: '승인',
+      deny: '거부',
+      done: '야간 자동화가 완료되었습니다',
+      summary: '3 작업 · 0 실패',
+    },
   },
 
   connection: {

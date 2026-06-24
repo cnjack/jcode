@@ -1,5 +1,6 @@
 // API client for jcode backend
 import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData } from '@/types/api'
+import type { AutomationItem, AutomationRun, AutomationTemplate, AutomationCreate, Automation } from '@/types/automation'
 import { apiBase } from './apiBase'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -282,4 +283,23 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ provider, model, enabled }),
     }),
+
+  // Automations
+  automations: () => request<AutomationItem[]>('/api/automations'),
+  automationCreate: (data: AutomationCreate) =>
+    request<AutomationItem>('/api/automations', { method: 'POST', body: JSON.stringify(data) }),
+  automationUpdate: (id: string, data: Partial<Automation>) =>
+    request<AutomationItem>(`/api/automations/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  automationDelete: (id: string) =>
+    request<{ status: string }>(`/api/automations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  automationRunNow: (id: string) =>
+    request<{ status: string }>(`/api/automations/${encodeURIComponent(id)}/run`, { method: 'POST' }),
+  automationRuns: (automationId?: string) => {
+    const q = automationId ? `?automation_id=${encodeURIComponent(automationId)}` : ''
+    return request<AutomationRun[]>(`/api/automations/runs${q}`)
+  },
+  automationTemplates: () => request<AutomationTemplate[]>('/api/automation-templates'),
 }

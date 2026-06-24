@@ -17,12 +17,14 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 	"github.com/gorilla/websocket"
 
+	"github.com/cnjack/jcode/internal/automation"
 	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
@@ -62,8 +64,11 @@ type Server struct {
 	// once tasks truly run in parallel).
 	mu sync.RWMutex
 
-	// Server-level context (from Start), used for background agent work.
-	ctx context.Context
+	// ctxPtr holds the server-level context (set in Start), used for background
+	// agent work. Stored atomically because the automation scheduler/manual-run
+	// goroutines (launched by command.runWebServer before Start) may read it
+	// concurrently with Start's write. Read via rootCtx.
+	ctxPtr atomic.Pointer[context.Context]
 
 	// Dependencies set during initialization.
 	tracer   *telemetry.LangfuseTracer
@@ -81,6 +86,11 @@ type Server struct {
 	// newRemoteEngine is newEngine's remote sibling: it builds a task engine bound
 	// to a remote executor (SSH or Docker) instead of a local pwd.
 	newRemoteEngine func(taskID string, executor tools.RemoteExecutor, remotePwd, mode string) (*EngineConfig, error)
+
+	// newAutomationEngine builds a headless task engine for automation runs: like
+	// newEngine but drops interactive tools (ask_user) so an unattended run can't
+	// stall waiting on a human. Falls back to newEngine when unset (back-compat).
+	newAutomationEngine func(taskID, pwd, mode string) (*EngineConfig, error)
 
 	// remoteConns holds SSH connections established by the remote-connect wizard
 	// that have not yet been bound to the live env (keyed by connection id).
@@ -115,39 +125,53 @@ type Server struct {
 	// usageStore backs the global usage-statistics endpoint. nil falls back to
 	// usage.Default(); tests inject a temp-dir store.
 	usageStore *usage.Store
+
+	// automations is the automation definition/run store (nil in setup mode).
+	// Run execution reuses the Engine via automationRunner; the periodic
+	// scheduler is owned by command.runWebServer.
+	automations *automation.Store
+
+	// autoRunMu guards autoRunInflight, the set of automation ids with a manual
+	// run currently in flight on this server. It is the manual-run analogue of the
+	// scheduler's own inflight guard: without it a double-click (or two clients)
+	// would launch parallel agent sessions mutating the same project directory.
+	autoRunMu       sync.Mutex
+	autoRunInflight map[string]bool
 }
 
 // ServerConfig holds the configuration for creating a new Server.
 type ServerConfig struct {
-	Port               int
-	Host               string
-	OpenBrowser        bool
-	Pwd                string
-	Version            string
-	Agent              *adk.ChatModelAgent
-	CreateAgent        func(providerName, modelName string) (*adk.ChatModelAgent, error)
-	RebuildForMode     func(planMode bool) (*adk.ChatModelAgent, error)
-	NewEngine          func(taskID, pwd, mode string) (*EngineConfig, error)                                             // factory for new concurrent task engines (local)
-	NewRemoteEngine    func(taskID string, executor tools.RemoteExecutor, remotePwd, mode string) (*EngineConfig, error) // remote sibling of NewEngine (SSH or Docker)
-	InitialMode        string                                                                                            // unified startup mode string ("approval"/"plan"/"full_access")
-	TodoStore          *tools.TodoStore
-	Recorder           *session.Recorder
-	Tracer             *telemetry.LangfuseTracer
-	Env                *tools.Env
-	ProviderName       string
-	ModelName          string
-	Config             *config.Config
-	Registry           *model.ModelRegistry
-	ApprovalState      *runner.ApprovalState
-	SkillLoader        *skills.Loader
-	ReloadMCP          func(servers map[string]*config.MCPServer) ([]tools.MCPStatus, error) // optional: hot-reload MCP tools
-	InitialMCPStatuses []tools.MCPStatus                                                     // statuses from the startup MCP load
-	WechatClient       channel.Channel                                                       // optional WeChat channel
-	WebHandler         *handler.WebHandler                                                   // optional: pre-created handler for sharing with tools
-	EventHandler       handler.AgentEventHandler                                             // optional: handler for runner (e.g. NotifyingHandler)
-	NeedsSetup         bool                                                                  // true when no providers are configured (setup mode)
-	TokenUsage         *model.TokenUsage                                                     // optional: shared token tracker (created when nil)
-	ContextBreakdownFn func() usage.ContextBreakdown                                         // optional: live per-task context breakdown
+	Port                int
+	Host                string
+	OpenBrowser         bool
+	Pwd                 string
+	Version             string
+	Agent               *adk.ChatModelAgent
+	CreateAgent         func(providerName, modelName string) (*adk.ChatModelAgent, error)
+	RebuildForMode      func(planMode bool) (*adk.ChatModelAgent, error)
+	NewEngine           func(taskID, pwd, mode string) (*EngineConfig, error)                                             // factory for new concurrent task engines (local)
+	NewRemoteEngine     func(taskID string, executor tools.RemoteExecutor, remotePwd, mode string) (*EngineConfig, error) // remote sibling of NewEngine (SSH or Docker)
+	NewAutomationEngine func(taskID, pwd, mode string) (*EngineConfig, error)                                             // headless sibling of NewEngine for automation runs (drops interactive tools)
+	InitialMode         string                                                                                            // unified startup mode string ("approval"/"plan"/"full_access")
+	TodoStore           *tools.TodoStore
+	Recorder            *session.Recorder
+	Tracer              *telemetry.LangfuseTracer
+	Env                 *tools.Env
+	ProviderName        string
+	ModelName           string
+	Config              *config.Config
+	Registry            *model.ModelRegistry
+	ApprovalState       *runner.ApprovalState
+	SkillLoader         *skills.Loader
+	ReloadMCP           func(servers map[string]*config.MCPServer) ([]tools.MCPStatus, error) // optional: hot-reload MCP tools
+	InitialMCPStatuses  []tools.MCPStatus                                                     // statuses from the startup MCP load
+	WechatClient        channel.Channel                                                       // optional WeChat channel
+	WebHandler          *handler.WebHandler                                                   // optional: pre-created handler for sharing with tools
+	EventHandler        handler.AgentEventHandler                                             // optional: handler for runner (e.g. NotifyingHandler)
+	NeedsSetup          bool                                                                  // true when no providers are configured (setup mode)
+	TokenUsage          *model.TokenUsage                                                     // optional: shared token tracker (created when nil)
+	ContextBreakdownFn  func() usage.ContextBreakdown                                         // optional: live per-task context breakdown
+	Automations         *automation.Store                                                     // optional: automation store (nil in setup mode)
 }
 
 // NewServer creates a new web server.
@@ -187,29 +211,32 @@ func NewServer(cfg *ServerConfig) *Server {
 		boot.taskID = boot.recorder.UUID()
 	}
 	s := &Server{
-		Engine:          boot,
-		tasks:           make(map[string]*Engine),
-		port:            cfg.Port,
-		host:            cfg.Host,
-		openBrowser:     cfg.OpenBrowser,
-		version:         cfg.Version,
-		wsBroker:        NewWSBroker(),
-		newEngine:       cfg.NewEngine,
-		newRemoteEngine: cfg.NewRemoteEngine,
-		remoteConns:     newRemoteConnRegistry(),
-		tracer:          cfg.Tracer,
-		cfg:             cfg.Config,
-		registry:        cfg.Registry,
-		ptyMgr:          newPTYManager(),
-		skillLoader:     cfg.SkillLoader,
-		reloadMCP:       cfg.ReloadMCP,
-		mcpStatuses:     make(map[string]tools.MCPStatus),
-		mcpLogins:       make(map[string]*mcpLoginState),
-		wechatClient:    cfg.WechatClient,
-		needsSetup:      cfg.NeedsSetup,
+		Engine:              boot,
+		tasks:               make(map[string]*Engine),
+		port:                cfg.Port,
+		host:                cfg.Host,
+		openBrowser:         cfg.OpenBrowser,
+		version:             cfg.Version,
+		wsBroker:            NewWSBroker(),
+		newEngine:           cfg.NewEngine,
+		newRemoteEngine:     cfg.NewRemoteEngine,
+		newAutomationEngine: cfg.NewAutomationEngine,
+		remoteConns:         newRemoteConnRegistry(),
+		tracer:              cfg.Tracer,
+		cfg:                 cfg.Config,
+		registry:            cfg.Registry,
+		ptyMgr:              newPTYManager(),
+		skillLoader:         cfg.SkillLoader,
+		reloadMCP:           cfg.ReloadMCP,
+		mcpStatuses:         make(map[string]tools.MCPStatus),
+		mcpLogins:           make(map[string]*mcpLoginState),
+		wechatClient:        cfg.WechatClient,
+		needsSetup:          cfg.NeedsSetup,
+		automations:         cfg.Automations,
+		autoRunInflight:     make(map[string]bool),
 	}
 	// The bootstrap engine is registered (and its pump started) in Start, once
-	// s.ctx exists.
+	// the root context exists.
 	for _, st := range cfg.InitialMCPStatuses {
 		s.mcpStatuses[st.Name] = st
 	}
@@ -226,9 +253,19 @@ func (s *Server) Handler() *handler.WebHandler {
 	return s.activeHandler()
 }
 
+// rootCtx returns the server-level context set by Start, or nil before Start
+// has run. Background goroutines (the automation scheduler/manual runs) must
+// tolerate a nil result, which means the server has not started serving yet.
+func (s *Server) rootCtx() context.Context {
+	if p := s.ctxPtr.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
+
 // Start starts the web server. Blocks until context is cancelled.
 func (s *Server) Start(ctx context.Context) error {
-	s.ctx = ctx
+	s.ctxPtr.Store(&ctx)
 	mux := http.NewServeMux()
 
 	// API routes
@@ -279,6 +316,14 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/remote/save-alias", s.handleRemoteSaveAlias)
 	mux.HandleFunc("GET /api/docker/containers", s.handleListContainers)
 	mux.HandleFunc("POST /api/remote/save-docker-alias", s.handleRemoteSaveDockerAlias)
+	mux.HandleFunc("GET /api/automations", s.handleListAutomations)
+	mux.HandleFunc("POST /api/automations", s.handleCreateAutomation)
+	mux.HandleFunc("GET /api/automations/runs", s.handleListAutomationRuns)
+	mux.HandleFunc("GET /api/automations/{id}", s.handleGetAutomation)
+	mux.HandleFunc("PUT /api/automations/{id}", s.handleUpdateAutomation)
+	mux.HandleFunc("DELETE /api/automations/{id}", s.handleDeleteAutomation)
+	mux.HandleFunc("POST /api/automations/{id}/run", s.handleRunAutomation)
+	mux.HandleFunc("GET /api/automation-templates", s.handleAutomationTemplates)
 	mux.HandleFunc("GET /api/skills", s.handleListSkills)
 	mux.HandleFunc("POST /api/skills/{name}/toggle", s.handleToggleSkill)
 	mux.HandleFunc("GET /api/slash-commands", s.handleSlashCommands)
@@ -693,8 +738,13 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 	eng.emu.Unlock()
 
 	// Stream response via WebSocket — run agent in background. Each task derives
-	// its own cancellable context so /stop cancels only that task.
-	runCtx, runCancel := context.WithCancel(s.ctx)
+	// its own cancellable context so /stop cancels only that task. Fall back to
+	// Background if a run is somehow submitted before Start set the root context.
+	base := s.rootCtx()
+	if base == nil {
+		base = context.Background()
+	}
+	runCtx, runCancel := context.WithCancel(base)
 	eng.emu.Lock()
 	eng.runGen++
 	gen := eng.runGen
@@ -773,6 +823,12 @@ func (s *Server) handleListAllTasks(w http.ResponseWriter, r *http.Request) {
 	items := make([]taskItem, 0)
 	for project, metas := range all {
 		for _, m := range metas {
+			// Automation runs are surfaced on the Automations page ("Recent
+			// runs"), not the main task list — exclude them here so a nightly
+			// automation doesn't bury the sidebar.
+			if m.AutomationID != "" {
+				continue
+			}
 			items = append(items, taskItem{
 				UUID:      m.UUID,
 				Project:   project,
@@ -1544,7 +1600,7 @@ func (s *Server) handleExec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(s.ctx, 30*1e9) // 30 seconds
+	ctx, cancel := context.WithTimeout(s.rootCtx(), 30*1e9) // 30 seconds
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", req.Command)
@@ -1595,7 +1651,7 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 		args = []string{"diff", "--no-color"}
 	}
 
-	cmd := exec.CommandContext(s.ctx, "git", args...)
+	cmd := exec.CommandContext(s.rootCtx(), "git", args...)
 	cmd.Dir = s.activePwd()
 	output, _ := cmd.CombinedOutput()
 
@@ -1612,12 +1668,12 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 	rawDiff := string(output)
 
 	// Also get changed file list for status
-	statCmd := exec.CommandContext(s.ctx, "git", "diff", "--stat", "--no-color")
+	statCmd := exec.CommandContext(s.rootCtx(), "git", "diff", "--stat", "--no-color")
 	switch mode {
 	case "staged":
-		statCmd = exec.CommandContext(s.ctx, "git", "diff", "--cached", "--stat", "--no-color")
+		statCmd = exec.CommandContext(s.rootCtx(), "git", "diff", "--cached", "--stat", "--no-color")
 	case "branch":
-		statCmd = exec.CommandContext(s.ctx, "git", "diff", "HEAD~1", "--stat", "--no-color")
+		statCmd = exec.CommandContext(s.rootCtx(), "git", "diff", "HEAD~1", "--stat", "--no-color")
 	}
 	statCmd.Dir = s.activePwd()
 	_, _ = statCmd.CombinedOutput()
@@ -1709,13 +1765,13 @@ func (s *Server) takeSessionSnapshot(eng *Engine) {
 	}
 	// Use "git stash create" to get a tree-ish of the current state without
 	// actually stashing. If there are no changes, use HEAD.
-	cmd := exec.CommandContext(s.ctx, "git", "stash", "create")
+	cmd := exec.CommandContext(s.rootCtx(), "git", "stash", "create")
 	cmd.Dir = eng.pwd
 	out, err := cmd.Output()
 	snapshot := strings.TrimSpace(string(out))
 	if err != nil || snapshot == "" {
 		// No local changes — use HEAD as baseline
-		cmd2 := exec.CommandContext(s.ctx, "git", "rev-parse", "HEAD")
+		cmd2 := exec.CommandContext(s.rootCtx(), "git", "rev-parse", "HEAD")
 		cmd2.Dir = eng.pwd
 		out2, _ := cmd2.Output()
 		snapshot = strings.TrimSpace(string(out2))
@@ -1758,7 +1814,7 @@ func (s *Server) handleSessionDiff(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	// Diff from snapshot to current working tree
-	cmd := exec.CommandContext(s.ctx, "git", "diff", snapshot, "--no-color")
+	cmd := exec.CommandContext(s.rootCtx(), "git", "diff", snapshot, "--no-color")
 	cmd.Dir = pwd
 	output, _ := cmd.CombinedOutput()
 
@@ -2137,7 +2193,7 @@ func (s *Server) setMCPLogin(name, status, msg string) {
 }
 
 func (s *Server) runMCPLogin(name string) {
-	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Minute)
+	ctx, cancel := context.WithTimeout(s.rootCtx(), 5*time.Minute)
 	defer cancel()
 
 	s.mu.RLock()

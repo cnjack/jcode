@@ -49,7 +49,9 @@ func TestGitCheckoutRejectsDashBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := &Server{Engine: &Engine{pwd: repo}, ctx: context.Background()}
+	s := &Server{Engine: &Engine{pwd: repo}}
+	bg := context.Background()
+	s.ctxPtr.Store(&bg)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/git/checkout", strings.NewReader(`{"branch":"-f"}`))
 	s.handleGitCheckout(rec, req)
