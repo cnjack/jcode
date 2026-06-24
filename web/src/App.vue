@@ -219,7 +219,12 @@ function handleGlobalKeydown(e: KeyboardEvent) {
     paletteOpen.value = !paletteOpen.value
     return
   }
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'N') {
+  // ⌘N — New task. (Used to be ⌘⇧N; ⌘N is the conventional "new" binding.) The
+  // other app shortcuts keep a Shift modifier, so ⌘N alone never collides with
+  // ⌘⇧K / ⌘⇧E etc. Ignored while the user is typing in a field only if it would
+  // conflict with the browser's native "new window" — but in the Tauri shell
+  // there's no such binding, and on web the preventDefault keeps it ours.
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'n' || e.key === 'N')) {
     e.preventDefault()
     store.newSession()
     return
@@ -229,21 +234,9 @@ function handleGlobalKeydown(e: KeyboardEvent) {
     settingsOpen.value = !settingsOpen.value
     return
   }
-  // ⌘⇧A / ⌘⇧C — switch to the Automations / Channels pages. Mirrors the nav
-  // header buttons. Ignored while an overlay is open so the shortcut can't
-  // dismiss a dialog behind the user's back.
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && !settingsOpen.value && !projectsOpen.value && !paletteOpen.value && !remoteWizardOpen.value) {
-    if (e.key === 'A' || e.key === 'a') {
-      e.preventDefault()
-      activeView.value = 'automations'
-      return
-    }
-    if (e.key === 'C' || e.key === 'c') {
-      e.preventDefault()
-      activeView.value = 'channels'
-      return
-    }
-  }
+  // Automations / Channels are reached only via the nav buttons — they no longer
+  // have keyboard shortcuts (the ⌘⇧A / ⌘⇧C bindings were removed). Esc still
+  // steps back from these pages to chat.
   // Esc stops the agent only when no overlay is open — otherwise pressing Esc to
   // dismiss a dialog (Settings/Projects/Palette/Wizard) would also kill the run.
   if (

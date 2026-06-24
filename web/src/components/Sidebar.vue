@@ -56,12 +56,12 @@ const emit = defineEmits<{
   toggleTheme: []
 }>()
 
-// Shortcut prefix for the nav kbd hints: ⌘ on macOS, Ctrl+ elsewhere. The app
-// is macOS-first (Tauri overlay title bar) but the hints shouldn't lie on
-// other platforms.
-const platformMod = (() => {
-  if (typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)) return '⌘⇧'
-  return 'Ctrl+⇧'
+// Shortcut prefix for the New Task nav kbd hint: ⌘ on macOS, Ctrl+ elsewhere.
+// The app is macOS-first (Tauri overlay title bar) but the hint shouldn't lie
+// on other platforms. (Automations/Channels no longer have shortcuts.)
+const platformModPlain = (() => {
+  if (typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)) return '⌘'
+  return 'Ctrl+'
 })()
 
 // Expanded project paths. The active project is auto-expanded.
@@ -425,15 +425,15 @@ function relativeTime(ts: string): string {
   <aside class="sidebar">
     <!-- Nav header — a whitespace index (the "C2" design: no lines, just air).
          Three equal controls float on the sidebar background; a row only gains
-         a body on hover/active, so at rest there's no cage of borders. Each
-         carries its shortcut so it's discoverable without a tooltip. "New task"
-         returns to chat (and starts a session); the other two are page views. -->
+         a body on hover/active, so at rest there's no cage of borders. Only
+         "New task" carries a shortcut (⌘N); the other two are page views with
+         no binding. -->
     <div class="sidebar-header">
       <div class="nav-list">
         <button class="nav-row" @click="newTask">
           <PlusIcon class="nav-ic" />
           <span class="nav-name">{{ t('nav.newTask') }}</span>
-          <span class="nav-kbd">{{ platformMod }}N</span>
+          <span class="nav-kbd">{{ platformModPlain }} N</span>
         </button>
         <button
           class="nav-row"
@@ -443,7 +443,6 @@ function relativeTime(ts: string): string {
         >
           <SparklesIcon class="nav-ic" />
           <span class="nav-name">{{ t('nav.automations') }}</span>
-          <span class="nav-kbd">{{ platformMod }}A</span>
         </button>
         <button
           class="nav-row"
@@ -453,7 +452,6 @@ function relativeTime(ts: string): string {
         >
           <SignalIcon class="nav-ic" />
           <span class="nav-name">{{ t('nav.channels') }}</span>
-          <span class="nav-kbd">{{ platformMod }}C</span>
         </button>
       </div>
     </div>
@@ -659,16 +657,18 @@ html.is-tauri-macos .sidebar-header {
 .nav-row:hover .nav-ic {
   color: var(--color-foreground);
 }
-/* Active page: a soft accent wash, no border (the "no cage" principle). Icon +
-   label shift to the accent so the current target reads without an outline. */
+/* Active page: a quiet gray wash + full-saturation foreground, no border (the
+   "no cage" principle). The current target reads without an outline and without
+   a brand colour — the pages aren't primary actions, so accent (yellow) here
+   would shout. Icon + label keep weight but stay neutral. */
 .nav-row.active {
-  background: var(--accent-wash-soft);
+  background: var(--color-muted);
 }
 .nav-row.active .nav-ic {
-  color: var(--color-primary);
+  color: var(--color-foreground);
 }
 .nav-row.active .nav-name {
-  color: var(--color-primary);
+  color: var(--color-foreground);
   font-weight: 600;
 }
 .nav-ic {
@@ -688,15 +688,15 @@ html.is-tauri-macos .sidebar-header {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Kbd hint — plain text, no chip: no border, no background, no padding. Uses the
+   app's sans face (not mono) so the ⌘ symbol and the letter N render at the
+   same visual size — mono fonts draw ⌘ thinner/smaller than letters. Foreground
+   (not muted) so the hint reads clearly without a keycap. */
 .nav-kbd {
-  font-family: var(--font-mono);
-  font-size: 10px;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
   line-height: 1;
-  padding: 2px 5px;
-  border-radius: var(--radius-sm);
-  background: var(--color-muted);
-  border: 1px solid var(--color-border);
-  color: var(--color-muted-foreground);
+  color: var(--color-foreground);
   white-space: nowrap;
   flex-shrink: 0;
 }
