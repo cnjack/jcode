@@ -92,7 +92,7 @@ watch(
         :title="t('topbar.panelsHint', { status: statusLabel })"
         @click="loadDiffStat"
       >
-        <RectangleStackIcon class="w-3.5 h-3.5" />
+        <RectangleStackIcon class="w-4 h-4" />
         <ChevronDownIcon class="w-3 h-3 panel-menu-caret" />
         <span class="status-dot panel-status-dot" :style="{ backgroundColor: statusColor }" />
       </MenuButton>
@@ -127,10 +127,12 @@ watch(
 
 <style scoped>
 /* Floated into the top-right of the window's title-bar zone (anchored to the
-   position:relative .app-shell). z above the drag strip so it stays clickable. */
+   position:relative .app-shell). z above the drag strip so it stays clickable.
+   Sized larger now: this is the single window-wide panels menu, so it should
+   read as a real affordance rather than a 28px chip. */
 .topbar-control {
   position: absolute;
-  top: 7px;
+  top: 6px;
   right: 14px;
   /* Above the title-bar drag strip (45) so it stays clickable, but below
      --z-modal (50) so the Settings overlay covers it. */
@@ -147,9 +149,9 @@ watch(
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  height: 28px;
-  padding: 0 7px;
+  gap: 3px;
+  height: 34px;
+  padding: 0 9px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-background);
