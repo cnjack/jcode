@@ -9,11 +9,15 @@
 // #actions (e.g. the Automations segmented control + primary button); the
 // surface owns no close button — page dismissal is via Esc / the nav header /
 // clicking a task, not an in-page X.
-defineProps<{ title: string }>()
+// colWidth lets each page set its own content-column width (e.g. 48rem for
+// Automations, 56rem for Channels). The head aligns to the same column so the
+// title + actions line up with the body content rather than hugging the panel
+// edges. Exposed as the --page-col custom property below.
+defineProps<{ title: string; colWidth?: string }>()
 </script>
 
 <template>
-  <div class="page-surface">
+  <div class="page-surface" :style="colWidth ? { '--page-col': colWidth } : undefined">
     <header class="page-head">
       <h1>{{ title }}</h1>
       <div v-if="$slots.actions" class="page-actions">
@@ -47,6 +51,12 @@ defineProps<{ title: string }>()
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  /* Collapse the head into the same centered column as the body content
+     (:deep(.page-body) > * in each page) so the title + actions align with the
+     cards/runs below instead of stretching to the panel edges. */
+  width: 100%;
+  max-width: var(--page-col, 48rem);
+  margin-inline: auto;
   padding: 16px 20px 12px;
   flex-shrink: 0;
 }
@@ -63,5 +73,10 @@ defineProps<{ title: string }>()
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* Flex column so a page's empty-state can fill the body height and centre its
+     hero vertically (see .col.center-empty in AutomationsView). Pages with real
+     content still stack from the top since their children default to auto. */
+  display: flex;
+  flex-direction: column;
 }
 </style>

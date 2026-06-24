@@ -59,18 +59,19 @@ func (s *Server) runAutomation(ctx context.Context, a *automation.Automation, ki
 		mode = "full_access" // headless: Ask/Plan would block forever on approvals
 	}
 
-	// buildLocalEngine registers the engine exactly once, under its (factory)
-	// recorder's UUID, and starts its event pump. Use that UUID as the stable
-	// session id for tagging, watching, and teardown.
-	//
-	// The previous version built the engine with an empty id, then minted a fresh
-	// recorder, reassigned eng.taskID, and called registerEngine a SECOND time —
-	// inserting the same engine under two keys. deleteEngine(sid) only reclaimed
-	// one, so every run leaked a tasks-map entry and the engine pool exhausted
-	// (errTooManyTasks) after maxLiveEngines runs. Reusing the factory recorder
-	// also keeps the conversation and todo/goal snapshots in one session file
-	// (they were previously split across two recorders).
-	eng, err := s.buildLocalEngine("", a.ProjectPath, mode)
+	// Automation runs are unattended, so they must use a headless engine that
+	// drops interactive tools (ask_user). An agent calling ask_user in a run with
+	// no watching client would otherwise block on the WS channel forever, stalling
+	// the run until the liveness ceiling cancels it. Falls back to the regular
+	// local-engine factory when the dedicated headless one isn't wired (setup mode).
+	eng, err := s.buildLocalEngineWith("", a.ProjectPath, mode,
+		func(taskID, pwd, modeStr string) (*EngineConfig, error) {
+			factory := s.newAutomationEngine
+			if factory == nil {
+				factory = s.newEngine
+			}
+			return factory(taskID, pwd, modeStr)
+		})
 	if err != nil {
 		return "", err
 	}

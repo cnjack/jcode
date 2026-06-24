@@ -75,6 +75,28 @@ func NewWebCmd() *cobra.Command {
 	return cmd
 }
 
+// interactiveToolNames are the tools that require a live human to answer — they
+// cannot run unattended. Automation runs (scheduled, and manual runs that may be
+// headless) drop them via dropInteractiveTools so an agent calling ask_user in a
+// run with no watching client can't block on the WS channel forever, stalling
+// the run until the liveness ceiling cancels it.
+var interactiveToolNames = map[string]struct{}{"ask_user": {}}
+
+// dropInteractiveTools returns tools minus any whose name is in
+// interactiveToolNames. Tools whose Info() can't be read are kept (best-effort).
+func dropInteractiveTools(tools []tool.BaseTool) []tool.BaseTool {
+	out := make([]tool.BaseTool, 0, len(tools))
+	for _, t := range tools {
+		if info, err := t.Info(context.Background()); err == nil {
+			if _, drop := interactiveToolNames[info.Name]; drop {
+				continue
+			}
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
 func runWebServer(port int, host string, openBrowser bool) error {
 	// Check if we need setup (no providers configured).
 	needsSetup := config.NeedsSetup()
@@ -222,7 +244,12 @@ func runWebServer(port int, host string, openBrowser bool) error {
 	// approval state, plan store, and event handler — so concurrent tasks never
 	// share mutable execution state. exec != nil binds the task to a remote SSH
 	// target instead of a local pwd. taskID != "" resumes an existing session.
-	buildWebTask := func(taskID, taskPwd, modeStr string, exec tools.RemoteExecutor) (*web.EngineConfig, error) {
+	// interactiveTools are the tool names that require a live human to answer —
+	// they cannot run unattended, so automation runs (scheduled, and manual runs
+	// that may be headless) exclude them. An agent in an automation run that calls
+	// ask_user would otherwise block on the WS channel forever (no client resolves
+	// it) and stall the run until the liveness ceiling cancels it.
+	buildWebTask := func(taskID, taskPwd, modeStr string, exec tools.RemoteExecutor, excludeInteractive bool) (*web.EngineConfig, error) {
 		startMode := startupMode
 		if modeStr != "" {
 			startMode = mode.Parse(modeStr)
@@ -324,6 +351,11 @@ func runWebServer(port int, host string, openBrowser bool) error {
 			}
 			if mt := mcpToolsPtr.Load(); mt != nil {
 				all = append(all, (*mt)...)
+			}
+			// Automation runs are unattended — drop interactive tools that would
+			// otherwise block on a human who isn't there (see dropInteractiveTools).
+			if excludeInteractive {
+				all = dropInteractiveTools(all)
 			}
 			return all
 		}
@@ -506,7 +538,7 @@ func runWebServer(port int, host string, openBrowser bool) error {
 	}
 
 	// Bootstrap engine for the initial task.
-	bootEC, err := buildWebTask("", pwd, startupMode.String(), nil)
+	bootEC, err := buildWebTask("", pwd, startupMode.String(), nil, false)
 	if err != nil {
 		return err
 	}
@@ -522,10 +554,16 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		CreateAgent:    bootEC.CreateAgent,
 		RebuildForMode: bootEC.RebuildForMode,
 		NewEngine: func(taskID, taskPwd, modeStr string) (*web.EngineConfig, error) {
-			return buildWebTask(taskID, taskPwd, modeStr, nil)
+			return buildWebTask(taskID, taskPwd, modeStr, nil, false)
 		},
 		NewRemoteEngine: func(taskID string, exec tools.RemoteExecutor, remotePwd, modeStr string) (*web.EngineConfig, error) {
-			return buildWebTask(taskID, remotePwd, modeStr, exec)
+			return buildWebTask(taskID, remotePwd, modeStr, exec, false)
+		},
+		// NewAutomationEngine builds a headless task engine for automation runs.
+		// Same as NewEngine but drops interactive tools (ask_user) so an unattended
+		// run can't stall waiting for a human to answer a question no one is watching.
+		NewAutomationEngine: func(taskID, taskPwd, modeStr string) (*web.EngineConfig, error) {
+			return buildWebTask(taskID, taskPwd, modeStr, nil, true)
 		},
 		InitialMode:        startupMode.String(),
 		TodoStore:          bootEC.TodoStore,
