@@ -43,7 +43,10 @@ const goToChat = inject<() => void>('goToChat')
 
 defineProps<{
   resolvedTheme: 'light' | 'dark'
-  activeView?: 'chat' | 'automations' | 'channels'
+  // Mirrors App.vue's activeView union. 'automation-run' is included even though
+  // the sidebar only highlights chat/automations/channels — omitting it would
+  // make the :active-view binding in App.vue fail type-check (the ref holds it).
+  activeView?: 'chat' | 'automations' | 'channels' | 'automation-run'
 }>()
 
 const emit = defineEmits<{
