@@ -44,9 +44,11 @@ const triggerOptions: MenuSelectOption<FormTrigger>[] = [
   { value: 'manual', label: 'Manual' },
 ]
 const weekdayOptions: MenuSelectOption[] = weekdays.map((d, i) => ({ value: i, label: d }))
+// Hour shows the hour only — minutes have their own field beside it. The old
+// "09:00" label read as a full time and duplicated the Minute column.
 const hourOptions: MenuSelectOption[] = Array.from({ length: 24 }, (_, h) => ({
   value: h,
-  label: `${String(h).padStart(2, '0')}:00`,
+  label: `${String(h).padStart(2, '0')}`,
 }))
 const minuteOptions: MenuSelectOption[] = Array.from({ length: 60 }, (_, m) => ({
   value: m,

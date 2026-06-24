@@ -44,11 +44,26 @@ const emit = defineEmits<{
 const projectStore = useProjectStore()
 const { t } = useI18n()
 
+// Show the full project path (not just its last segment) so same-named folders
+// are distinguishable. When the path is long we collapse the middle — the
+// leading and trailing segments are the most identifiable parts, and the
+// uncut path is always reachable via the trigger's title tooltip.
 const selectedLabel = computed(() => {
   const p = props.modelValue
   if (!p) return t('projectSwitcher.pathPlaceholder')
-  return projectStore.nameForPath(p) || p
+  return collapsePathMiddle(p)
 })
+
+// collapsePathMiddle trims a long path to ~max chars by hiding the middle,
+// keeping a bit more of the tail (it ends in the project name, the highest-
+// signal segment). A single … marks the cut.
+function collapsePathMiddle(path: string, max = 44): string {
+  if (path.length <= max) return path
+  const budget = max - 1 // leave room for the ellipsis
+  const head = Math.floor(budget * 0.42)
+  const tail = budget - head
+  return path.slice(0, head) + '…' + path.slice(path.length - tail)
+}
 
 const selectedIsRemote = computed(() => isRemotePath(props.modelValue))
 
@@ -144,10 +159,11 @@ function pickPath(path: string) {
             type="button"
             class="ppp-option"
             :class="{ selected: node.path === modelValue }"
+            :title="node.path"
             @click="pickWorkspace(node.path, close)"
           >
             <component :is="isRemotePath(node.path) ? ServerIcon : FolderIcon" class="w-3.5 h-3.5 ppp-opt-icon" />
-            <span class="ppp-opt-name">{{ node.name }}</span>
+            <span class="ppp-opt-name">{{ collapsePathMiddle(node.path) }}</span>
             <CheckIcon v-if="node.path === modelValue" class="w-3.5 h-3.5 ppp-check" />
           </button>
 
