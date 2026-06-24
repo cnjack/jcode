@@ -41,9 +41,13 @@ html.is-tauri-macos .setup-frame {
 }
 /* On desktop the 28px title-bar strip already lifts the surface below the
    floating control, so it needs far less of its own top margin than the
-   browser (40px). 28 + 12 = 40 → consistent clearance either way. */
-html.is-tauri-macos .chat-panel {
-  margin-top: 12px;
+   browser (48px). 28 + 20 = 48 → consistent clearance either way, leaving a
+   clear gap below the floating chip. The Automations page shares the chat
+   canvas's inset-surface geometry, so it gets the same override so both pages
+   align. */
+html.is-tauri-macos .chat-panel,
+	html.is-tauri-macos .page-surface {
+  margin-top: 20px;
 }
 html.is-tauri-macos .titlebar-drag {
   display: block;

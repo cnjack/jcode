@@ -23,7 +23,8 @@ import {
   SunIcon,
   MoonIcon,
   Cog6ToothIcon,
-  BoltIcon,
+  SparklesIcon,
+  SignalIcon,
 } from '@heroicons/vue/24/outline'
 import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
@@ -36,9 +37,13 @@ const { t } = useI18n()
 const projectStore = useProjectStore()
 const openRemoteConnect = inject<(prefill?: RemoteMeta & { loadTaskUuid?: string }) => void>('openRemoteConnect')
 const startNewTaskInProject = inject<(path: string) => Promise<boolean>>('onNewTaskInProject')
+// Provided by App: switch the shell back to the chat page. Used by the "New
+// task" button so starting a task from the Automations page returns to chat.
+const goToChat = inject<() => void>('goToChat')
 
 defineProps<{
   resolvedTheme: 'light' | 'dark'
+  activeView?: 'chat' | 'automations' | 'channels'
 }>()
 
 const emit = defineEmits<{
@@ -46,8 +51,18 @@ const emit = defineEmits<{
   openSettings: []
   openProjects: []
   openAutomations: []
+  openChannels: []
+  showChat: []
   toggleTheme: []
 }>()
+
+// Shortcut prefix for the nav kbd hints: ⌘ on macOS, Ctrl+ elsewhere. The app
+// is macOS-first (Tauri overlay title bar) but the hints shouldn't lie on
+// other platforms.
+const platformMod = (() => {
+  if (typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)) return '⌘⇧'
+  return 'Ctrl+⇧'
+})()
 
 // Expanded project paths. The active project is auto-expanded.
 const expanded = ref<Set<string>>(new Set())
@@ -156,6 +171,16 @@ function pushTask(map: Map<string, TaskItem[]>, key: string, task: TaskItem) {
   const arr = map.get(key)
   if (arr) arr.push(task)
   else map.set(key, [task])
+}
+
+// "New task" header button: always return to the chat page first (so the
+// Automations page is dismissed) then start a fresh session. Without the
+// goToChat() hop, starting a task from the Automations page left the new chat
+// hidden behind the page — it looked like the button did nothing.
+async function newTask() {
+  goToChat?.()
+  emit('showChat')
+  await store.newSession()
 }
 
 // "+" on a workspace row: switch to that workspace and open a fresh welcome
@@ -291,6 +316,11 @@ watch(() => store.currentSessionId, refresh)
 async function openTask(task: TaskItem) {
   if (task.unread) projectStore.updateTaskMeta(task.uuid, { unread: false })
 
+  // Return to the chat page first — otherwise loading a task from the
+  // Automations/Channels page leaves it hidden behind that page (chat-panel is
+  // v-show-gated on activeView === 'chat'). Mirrors the newTask() hop.
+  goToChat?.()
+
   // Remote tasks: if their workspace is already the active connection just load
   // the transcript; otherwise reconnect via the SSH wizard (it loads the task
   // after binding). We never persist the SSH secret, so a fresh connect is
@@ -393,16 +423,39 @@ function relativeTime(ts: string): string {
 
 <template>
   <aside class="sidebar">
-    <!-- New task -->
+    <!-- Nav header — a whitespace index (the "C2" design: no lines, just air).
+         Three equal controls float on the sidebar background; a row only gains
+         a body on hover/active, so at rest there's no cage of borders. Each
+         carries its shortcut so it's discoverable without a tooltip. "New task"
+         returns to chat (and starts a session); the other two are page views. -->
     <div class="sidebar-header">
-      <button class="new-task-btn" @click="store.newSession()">
-        <PlusIcon class="w-4 h-4" />
-        <span>{{ t('nav.newTask') }}</span>
-      </button>
-      <button class="nav-link-btn" @click="emit('openAutomations')" :title="t('nav.automations')">
-        <BoltIcon class="w-4 h-4" />
-        <span>{{ t('nav.automations') }}</span>
-      </button>
+      <div class="nav-list">
+        <button class="nav-row" @click="newTask">
+          <PlusIcon class="nav-ic" />
+          <span class="nav-name">{{ t('nav.newTask') }}</span>
+          <span class="nav-kbd">{{ platformMod }}N</span>
+        </button>
+        <button
+          class="nav-row"
+          :class="{ active: activeView === 'automations' }"
+          @click="emit('openAutomations')"
+          :aria-current="activeView === 'automations' ? 'page' : undefined"
+        >
+          <SparklesIcon class="nav-ic" />
+          <span class="nav-name">{{ t('nav.automations') }}</span>
+          <span class="nav-kbd">{{ platformMod }}A</span>
+        </button>
+        <button
+          class="nav-row"
+          :class="{ active: activeView === 'channels' }"
+          @click="emit('openChannels')"
+          :aria-current="activeView === 'channels' ? 'page' : undefined"
+        >
+          <SignalIcon class="nav-ic" />
+          <span class="nav-name">{{ t('nav.channels') }}</span>
+          <span class="nav-kbd">{{ platformMod }}C</span>
+        </button>
+      </div>
     </div>
 
     <!-- Workspace tree -->
@@ -566,52 +619,86 @@ function relativeTime(ts: string): string {
   background: var(--color-background);
 }
 
+/* The header sits in the same top band as the chat canvas. The chat panel uses
+ * margin-top: 48px (browser) / 20px (tauri, on top of the 28px title bar) — the
+ * sidebar header mirrors that so "New task"/"Automations" line up with the top
+ * of the chat surface instead of starting higher up at the window edge. */
 .sidebar-header {
-  padding: 8px 12px 6px;
+  padding: 48px 12px 6px;
+}
+html.is-tauri-macos .sidebar-header {
+  padding-top: 20px;
 }
 
-.new-task-btn {
+/* Nav header — "C2" whitespace index: no lines, just air. Three equal controls
+ * float on the sidebar background; a row gains a rounded body only on
+ * hover/active, so at rest there's no cage of borders separating them. Each row
+ * is icon + name + shortcut. Active = accent wash (borderless), mirroring the
+ * de-emphasized accent used elsewhere (not the brand orange flood). */
+.nav-list {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
   gap: 6px;
-  width: 100%;
-  padding: 9px 0;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
-  border-radius: var(--radius-lg);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--color-foreground);
-  cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s, transform 0.08s var(--ease-out);
 }
-.new-task-btn:hover {
-  border-color: color-mix(in srgb, var(--color-foreground) 32%, var(--color-border));
-  box-shadow: var(--shadow-sm);
-}
-.new-task-btn:active {
-  transform: translateY(0.5px);
-}
-.nav-link-btn {
+.nav-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   width: 100%;
-  margin-top: 6px;
-  padding: 7px 10px;
-  border: none;
+  padding: 9px 12px;
+  border: 1px solid transparent;
   background: transparent;
   border-radius: var(--radius-lg);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--color-muted-foreground);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  text-align: left;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
-.nav-link-btn:hover {
+.nav-row:hover {
   background: var(--color-muted);
+}
+.nav-row:hover .nav-ic {
   color: var(--color-foreground);
+}
+/* Active page: a soft accent wash, no border (the "no cage" principle). Icon +
+   label shift to the accent so the current target reads without an outline. */
+.nav-row.active {
+  background: var(--accent-wash-soft);
+}
+.nav-row.active .nav-ic {
+  color: var(--color-primary);
+}
+.nav-row.active .nav-name {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+.nav-ic {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--color-muted-foreground);
+  transition: color 0.15s;
+}
+.nav-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--color-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nav-kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--color-muted);
+  border: 1px solid var(--color-border);
+  color: var(--color-muted-foreground);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* ─── Tree ─── */

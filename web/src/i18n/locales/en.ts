@@ -39,6 +39,7 @@ export default {
   nav: {
     newTask: 'New task',
     automations: 'Automations',
+    channels: 'Channels',
     workspace: 'Workspace',
     projects: 'Projects',
     openFolder: 'Open Folder',
@@ -55,6 +56,31 @@ export default {
   welcome: {
     startIn: 'Start a new task in {project}',
     subtitle: 'Send a message to start. {kbd} for commands.',
+  },
+
+  // Channels page (ChannelsView.vue) — the remote-control landing. Distinct
+  // from settings.channels.* (the WeChat config tab); this is the promo + mock.
+  channels: {
+    connected: 'Connected',
+    promo: {
+      // {accent}...</accent> wraps the emphasized span (rendered via v-html).
+      title: 'Approve and monitor from <span class="accent">your phone</span>',
+      lede: 'Link WeChat once. jcode forwards every approval request and task-completion notice straight to your chat — so a long-running agent never waits on you being at the desk.',
+    },
+    features: {
+      approvals: { title: 'One-tap approvals', desc: 'Approve or deny a tool call right from the WeChat message — no need to open the app.' },
+      notifications: { title: 'Done notifications', desc: 'Get pinged the moment a scheduled automation or background task finishes.' },
+      scan: { title: 'Scan to connect', desc: 'Pair in seconds with a QR code. Disconnect any time from Settings → Channels.' },
+    },
+    mock: {
+      now: 'now',
+      approvalTitle: 'Approval needed',
+      run: 'Run',
+      approve: 'Approve',
+      deny: 'Deny',
+      done: 'Nightly automations finished',
+      summary: '3 tasks · 0 failed',
+    },
   },
 
   // Connection-error overlay (App.vue). Currently hardcoded Chinese in the

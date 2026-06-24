@@ -35,6 +35,7 @@ export default {
   nav: {
     newTask: '新增工作',
     automations: '自動化',
+    channels: '通道',
     workspace: '工作區',
     projects: '專案',
     openFolder: '開啟資料夾',
@@ -51,6 +52,28 @@ export default {
   welcome: {
     startIn: '在 {project} 中開始一項新工作',
     subtitle: '傳送訊息即可開始。{kbd} 查看指令。',
+  },
+
+  channels: {
+    connected: '已連接',
+    promo: {
+      title: '在<span class="accent">手機上</span>審批與監控',
+      lede: '只需連接一次微信。jcode 會把每一次審批請求和工作完成通知直接轉發到你的聊天中——長時間執行的 agent 不再需要你守在電腦前。',
+    },
+    features: {
+      approvals: { title: '一鍵審批', desc: '直接在微信訊息裡批准或拒絕一次工具呼叫——無需開啟應用。' },
+      notifications: { title: '完成通知', desc: '當排程自動化或背景工作完成時，立刻收到提醒。' },
+      scan: { title: '掃碼連接', desc: '用 QR Code 幾秒配對。隨時可在 設定 → 通道 斷開。' },
+    },
+    mock: {
+      now: '剛剛',
+      approvalTitle: '需要審批',
+      run: '執行',
+      approve: '批准',
+      deny: '拒絕',
+      done: '夜間自動化已完成',
+      summary: '3 個工作 · 0 失敗',
+    },
   },
 
   connection: {

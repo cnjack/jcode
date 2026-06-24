@@ -34,6 +34,7 @@ export default {
   nav: {
     newTask: '新建任务',
     automations: '自动化',
+    channels: '通道',
     workspace: '工作区',
     projects: '项目',
     openFolder: '打开文件夹',
@@ -50,6 +51,28 @@ export default {
   welcome: {
     startIn: '在 {project} 中开始一个新任务',
     subtitle: '发送消息即可开始。{kbd} 查看命令。',
+  },
+
+  channels: {
+    connected: '已连接',
+    promo: {
+      title: '在<span class="accent">手机上</span>审批与监控',
+      lede: '只需连接一次微信。jcode 会把每一次审批请求和任务完成通知直接转发到你的聊天中——长时间运行的 agent 不再需要你守在电脑前。',
+    },
+    features: {
+      approvals: { title: '一键审批', desc: '直接在微信消息里批准或拒绝一次工具调用——无需打开应用。' },
+      notifications: { title: '完成通知', desc: '当定时自动化或后台任务完成时，立刻收到提醒。' },
+      scan: { title: '扫码连接', desc: '用二维码几秒配对。随时可在 设置 → 通道 断开。' },
+    },
+    mock: {
+      now: '刚刚',
+      approvalTitle: '需要审批',
+      run: '执行',
+      approve: '批准',
+      deny: '拒绝',
+      done: '夜间自动化已完成',
+      summary: '3 个任务 · 0 失败',
+    },
   },
 
   connection: {

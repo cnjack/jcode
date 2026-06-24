@@ -1,32 +1,38 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
-import { PlayIcon, XMarkIcon, TrashIcon, PencilSquareIcon, CheckCircleIcon, ExclamationCircleIcon } from '@heroicons/vue/24/outline'
+import { ref, computed, onMounted } from 'vue'
+import { PlayIcon, TrashIcon, PencilSquareIcon, CheckCircleIcon, ExclamationCircleIcon, BoltIcon } from '@heroicons/vue/24/outline'
 import { useAutomationStore } from '@/stores/automation'
 import AutomationEditorDialog from '@/components/AutomationEditorDialog.vue'
+import PageSurface from '@/components/PageSurface.vue'
+import MenuSelect, { type MenuSelectOption } from '@/components/MenuSelect.vue'
 import type { AutomationItem, AutomationCreate, AutomationTemplate, AutomationRun } from '@/types/automation'
 
-const props = defineProps<{ open: boolean }>()
-const emit = defineEmits<{ (e: 'close'): void }>()
-
+// Automations is a *page* inside the shell, not a fixed overlay. The parent
+// (<main> in App.vue) mounts this component when it's the active view, so there
+// is no `open` prop to guard against — fetching happens on mount below. The
+// page surface (inset chrome + title head) is provided by PageSurface; this
+// component owns only its content.
 const store = useAutomationStore()
 
 const view = ref<'list' | 'templates'>('list')
 const statusFilter = ref<'all' | 'success' | 'failed'>('all')
+const statusOptions: MenuSelectOption[] = [
+  { value: 'all', label: 'All' },
+  { value: 'success', label: 'Success' },
+  { value: 'failed', label: 'Failed' },
+]
 const search = ref('')
 const editorOpen = ref(false)
 const editing = ref<AutomationItem | null>(null)
 const prefill = ref<Partial<AutomationCreate> | null>(null)
 
-watch(
-  () => props.open,
-  (open) => {
-    if (open) {
-      void store.fetchAll()
-      void store.fetchTemplates()
-      view.value = 'list'
-    }
-  },
-)
+// Fetch on mount. The component is v-if'd by the parent, so this fires exactly
+// when the page becomes active (and tears down on exit) — replacing the old
+// watch(props.open) that assumed a persistent overlay.
+onMounted(() => {
+  void store.fetchAll()
+  void store.fetchTemplates()
+})
 
 const filteredRuns = computed(() => {
   const q = search.value.trim().toLowerCase()
@@ -68,39 +74,39 @@ function isRunning(item: AutomationItem) {
 </script>
 
 <template>
-  <transition
-    enter-active-class="transition-opacity duration-150"
-    enter-from-class="opacity-0"
-    leave-active-class="transition-opacity duration-100"
-    leave-to-class="opacity-0"
-  >
-    <div v-if="open" class="auto-shell">
-      <header class="auto-top">
-        <div class="auto-top-left">
-          <h1>Automations</h1>
-          <div class="seg">
-            <button :class="['seg-btn', { on: view === 'list' }]" @click="view = 'list'">Your automations</button>
-            <button :class="['seg-btn', { on: view === 'templates' }]" @click="view = 'templates'">Templates</button>
+  <!-- The page surface (inset chrome + title head) is provided by PageSurface;
+       this component owns only the content and the header actions (segmented
+       toggle + New automation). No close button — dismissal is via Esc / the
+       nav header / clicking a task. -->
+  <PageSurface title="Automations">
+    <template #actions>
+      <div class="seg">
+        <button :class="['seg-btn', { on: view === 'list' }]" @click="view = 'list'">Your automations</button>
+        <button :class="['seg-btn', { on: view === 'templates' }]" @click="view = 'templates'">Templates</button>
+      </div>
+      <button class="btn-primary" @click="newAutomation">New automation</button>
+    </template>
+
+      <!-- ── Your automations ── -->
+      <template v-if="view === 'list'">
+        <div v-if="store.loading && !store.items.length" class="empty">Loading…</div>
+
+        <!-- Empty state — a real designed panel (icon + heading + actions) rather
+             than two stray lines of text floating on the canvas. -->
+        <div v-else-if="!store.items.length" class="empty-hero">
+          <div class="empty-hero-icon"><BoltIcon class="w-6 h-6" /></div>
+          <h2 class="empty-hero-title">No automations yet</h2>
+          <p class="empty-hero-sub">Use agents to handle recurring work on a cadence you choose.</p>
+          <div class="empty-hero-actions">
+            <button class="btn-primary" @click="newAutomation">New automation</button>
+            <button class="btn-ghost" @click="view = 'templates'">Browse templates</button>
           </div>
         </div>
-        <div class="auto-top-right">
-          <button class="btn-primary" @click="newAutomation">New automation</button>
-          <button class="icon-btn" aria-label="Close" @click="emit('close')"><XMarkIcon class="w-5 h-5" /></button>
-        </div>
-      </header>
 
-      <div class="auto-scroll">
-        <!-- ── Your automations ── -->
-        <template v-if="view === 'list'">
+        <template v-else>
           <p class="section-sub">Use agents to handle recurring work on a cadence you choose.</p>
 
-          <div v-if="store.loading && !store.items.length" class="empty">Loading…</div>
-          <div v-else-if="!store.items.length" class="empty">
-            No automations yet. Click <strong>New automation</strong> or pick a
-            <button class="link" @click="view = 'templates'">template</button>.
-          </div>
-
-          <div v-else class="cards">
+          <div class="cards">
             <div v-for="a in store.items" :key="a.id" class="card" :class="{ disabled: !a.enabled }">
               <div class="card-head">
                 <span class="card-name">{{ a.name }}</span>
@@ -128,15 +134,18 @@ function isRunning(item: AutomationItem) {
             </div>
           </div>
 
-          <!-- ── Recent runs ── -->
+          <!-- ── Recent runs ── The filter + search only appear once there are
+               runs to act on, so an empty list never shows a stray, misaligned
+               toolbar. -->
           <div class="runs-head">
             <h2>Recent runs</h2>
-            <div class="runs-tools">
-              <select v-model="statusFilter" class="status-filter">
-                <option value="all">All</option>
-                <option value="success">Success</option>
-                <option value="failed">Failed</option>
-              </select>
+            <div v-if="store.runs.length" class="runs-tools">
+              <MenuSelect
+                v-model="statusFilter"
+                :options="statusOptions"
+                placement="bottom"
+                title="Filter runs"
+              />
               <input v-model="search" class="run-search" :placeholder="`Search ${store.runs.length} runs…`" />
             </div>
           </div>
@@ -156,78 +165,86 @@ function isRunning(item: AutomationItem) {
             </div>
           </div>
         </template>
+      </template>
 
-        <!-- ── Templates ── -->
-        <template v-else>
-          <p class="section-sub">Start from a template — pick a project and confirm.</p>
-          <div class="tpl-grid">
-            <button v-for="t in store.templates" :key="t.id" class="tpl-card" @click="fromTemplate(t)">
-              <div class="card-head">
-                <span class="card-name">{{ t.name }}</span>
-                <span class="badge">{{ t.badge }}</span>
-              </div>
-              <p class="card-prompt">{{ t.description }}</p>
-            </button>
-          </div>
-        </template>
-      </div>
+      <!-- ── Templates ── -->
+      <template v-else>
+        <p class="section-sub">Start from a template — pick a project and confirm.</p>
+        <div class="tpl-grid">
+          <button v-for="t in store.templates" :key="t.id" class="tpl-card" @click="fromTemplate(t)">
+            <div class="card-head">
+              <span class="card-name">{{ t.name }}</span>
+              <span class="badge">{{ t.badge }}</span>
+            </div>
+            <p class="card-prompt">{{ t.description }}</p>
+          </button>
+        </div>
+      </template>
 
-      <AutomationEditorDialog
-        :open="editorOpen"
-        :editing="editing"
-        :prefill="prefill"
-        @close="editorOpen = false"
-        @saved="store.fetchAll()"
-      />
-    </div>
-  </transition>
+    <AutomationEditorDialog
+      :open="editorOpen"
+      :editing="editing"
+      :prefill="prefill"
+      @close="editorOpen = false"
+      @saved="store.fetchAll()"
+    />
+  </PageSurface>
 </template>
 
 <style scoped>
-.auto-shell {
-  position: fixed;
-  inset: 0;
-  /* Cover only the main content area, not the whole window, so the left sidebar
-     stays visible (Automations reads as a page within the shell rather than a
-     full-screen takeover). The sidebar is a fixed-width column at the left. */
-  left: var(--sidebar-width);
-  z-index: var(--z-modal, 50);
-  display: flex;
-  flex-direction: column;
-  background: var(--color-background);
-  color: var(--color-foreground);
-}
-.auto-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 18px 28px 14px;
-  padding-top: max(18px, env(safe-area-inset-top));
-  /* Match the scroll content's centered column so the title/buttons line up with
-     the body (section text, cards, Recent runs) instead of hugging the window
-     edges on wide screens. */
-  width: 100%;
-  max-width: 1100px;
-  margin: 0 auto;
-}
-.auto-top-left { display: flex; align-items: center; gap: 18px; }
-.auto-top h1 { font-size: 19px; font-weight: 600; }
-.auto-top-right { display: flex; align-items: center; gap: 10px; }
+/* The page surface (inset chrome + title head + scroll body) is owned by
+ * PageSurface. This component styles only its own content + the header actions
+ * (segmented toggle + primary button). The .icon-btn below is reused by the
+ * per-card edit/delete actions (not a close button). */
 .seg { display: flex; gap: 2px; background: var(--color-muted); padding: 2px; border-radius: 999px; }
 .seg-btn {
-  padding: 5px 12px; font-size: 12.5px; border-radius: 999px; color: var(--color-muted-foreground); cursor: pointer;
+  padding: 4px 11px; font-size: 12px; border-radius: 999px; color: var(--color-muted-foreground); cursor: pointer;
+  transition: background 0.15s, color 0.15s;
 }
 .seg-btn.on { background: var(--color-surface); color: var(--color-foreground); box-shadow: var(--shadow-sm); }
-.auto-scroll { flex: 1; overflow-y: auto; padding: 6px 28px 40px; max-width: 1100px; width: 100%; margin: 0 auto; }
-.section-sub { font-size: 13px; color: var(--color-muted-foreground); margin-bottom: 18px; }
+/* Content column matches the chat timeline's centered max-w-4xl + px-5 inset so
+ * the cards/runs line up with the chat content rather than hugging the edges.
+ * Scoped to the PageSurface body (the default slot's scroll container). */
+:deep(.page-body) > * { max-width: 48rem; margin-left: auto; margin-right: auto; padding-left: 20px; padding-right: 20px; }
+.section-sub { font-size: 13px; color: var(--color-muted-foreground); padding-top: 18px; padding-bottom: 18px; }
 .empty { padding: 28px 0; color: var(--color-muted-foreground); font-size: 13.5px; }
 .empty.sm { padding: 14px 0; font-size: 13px; }
-.link { color: var(--color-primary); cursor: pointer; }
 
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+/* Empty state — a centered, designed panel so the page never reads as "blank". */
+.empty-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  max-width: 380px;
+  padding-top: 72px;
+  padding-bottom: 56px;
+}
+.empty-hero-icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 6px;
+  border-radius: 50%;
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+.empty-hero-title { font-size: 16px; font-weight: 600; color: var(--color-foreground); }
+.empty-hero-sub { font-size: 13px; line-height: 1.55; color: var(--color-muted-foreground); }
+.empty-hero-actions { display: flex; gap: 8px; margin-top: 14px; }
+.btn-ghost {
+  padding: 6px 12px; font-size: 12.5px; font-weight: 500; border-radius: var(--radius-lg, 10px);
+  border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-foreground);
+  cursor: pointer; transition: background 0.15s;
+}
+.btn-ghost:hover { background: var(--color-muted); }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; padding-bottom: 6px; }
 .card {
   display: flex; flex-direction: column; gap: 8px; padding: 14px;
-  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl, 14px);
+  background: var(--color-background); border: 1px solid var(--color-border); border-radius: var(--radius-xl, 14px);
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .card:hover { box-shadow: var(--shadow-sm); }
@@ -245,18 +262,24 @@ function isRunning(item: AutomationItem) {
 .card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 2px; }
 .card-meta { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--color-muted-foreground); }
 .card-actions { display: flex; align-items: center; gap: 4px; }
-.ok { color: #16a34a; }
-.err { color: var(--color-danger, #dc2626); }
+.ok { color: var(--color-success); }
+.err { color: var(--color-danger, var(--color-destructive)); }
 
-.icon-btn { color: var(--color-muted-foreground); padding: 5px; border-radius: 8px; cursor: pointer; }
-.icon-btn:hover { background: var(--color-muted); }
+.icon-btn { color: var(--color-muted-foreground); padding: 5px; border-radius: 8px; cursor: pointer; transition: background 0.15s, color 0.15s; }
+.icon-btn:hover { background: var(--color-muted); color: var(--color-foreground); }
 .icon-btn.sm { padding: 4px; }
 .run-btn {
   display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
-  border-radius: 999px; background: var(--color-primary); color: #fff; cursor: pointer;
+  border-radius: 999px; background: var(--color-primary); color: var(--color-on-primary); cursor: pointer;
+  transition: opacity 0.15s;
 }
+.run-btn:hover:not(:disabled) { opacity: 0.9; }
 .run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-primary { padding: 7px 14px; font-size: 13px; font-weight: 500; border-radius: var(--radius-lg, 10px); border: none; background: var(--color-primary); color: #fff; cursor: pointer; }
+.btn-primary {
+  padding: 6px 12px; font-size: 12.5px; font-weight: 500; border-radius: var(--radius-lg, 10px);
+  border: none; background: var(--color-primary); color: var(--color-on-primary); cursor: pointer; transition: opacity 0.15s;
+}
+.btn-primary:hover { opacity: 0.9; }
 
 .switch { display: inline-flex; cursor: pointer; }
 .switch input { display: none; }
@@ -267,25 +290,25 @@ function isRunning(item: AutomationItem) {
 
 .runs-head { display: flex; align-items: center; justify-content: space-between; margin: 30px 0 12px; }
 .runs-head h2 { font-size: 15px; font-weight: 600; }
-.runs-tools { display: flex; gap: 8px; }
-.status-filter, .run-search {
-  padding: 6px 10px; font-size: 12.5px; border: 1px solid var(--color-border); border-radius: var(--radius-lg, 10px);
-  background: var(--color-surface); color: var(--color-foreground); outline: none;
+.runs-tools { display: flex; gap: 8px; align-items: center; }
+.run-search {
+  height: 32px; padding: 0 10px; font-size: 12.5px; border: 1px solid var(--color-border); border-radius: var(--radius-lg, 10px);
+  background: var(--color-background); color: var(--color-foreground); outline: none; min-width: 220px;
 }
-.run-search { min-width: 220px; }
-.runs { border: 1px solid var(--color-border); border-radius: var(--radius-xl, 14px); overflow: hidden; background: var(--color-surface); }
+.run-search:focus { border-color: var(--color-primary); }
+.runs { border: 1px solid var(--color-border); border-radius: var(--radius-xl, 14px); overflow: hidden; background: var(--color-background); margin-bottom: 24px; }
 .run-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--color-border); }
 .run-row:last-child { border-bottom: none; }
 .run-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .run-title { font-size: 13.5px; font-weight: 500; }
 .run-time { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--color-muted-foreground); }
 .run-time .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-primary); }
-.run-err { font-size: 11.5px; color: var(--color-danger, #dc2626); max-width: 50%; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-err { font-size: 11.5px; color: var(--color-danger, var(--color-destructive)); max-width: 50%; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; padding-bottom: 24px; }
 .tpl-card {
   display: flex; flex-direction: column; gap: 8px; padding: 16px; text-align: left;
-  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl, 14px); cursor: pointer;
+  background: var(--color-background); border: 1px solid var(--color-border); border-radius: var(--radius-xl, 14px); cursor: pointer;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .tpl-card:hover { border-color: var(--color-primary); box-shadow: var(--shadow-sm); }
