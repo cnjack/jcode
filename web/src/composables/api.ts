@@ -1,5 +1,5 @@
 // API client for jcode backend
-import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData } from '@/types/api'
+import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData } from '@/types/api'
 import type { AutomationItem, AutomationRun, AutomationTemplate, AutomationCreate, Automation } from '@/types/automation'
 import { apiBase } from './apiBase'
 
@@ -246,14 +246,14 @@ export const api = {
     request<SetupProvider[]>('/api/setup/providers'),
   setupProviderModels: (providerId: string) =>
     request<SetupModel[]>(`/api/setup/providers/${encodeURIComponent(providerId)}/models`),
-  setupComplete: (data: { provider: string; model: string; api_key: string; base_url?: string }) =>
+  setupComplete: (data: { provider: string; api_key: string; model?: string; model_reasoning?: boolean; base_url?: string; name?: string; headers?: Record<string, string> }) =>
     request<{ status: string; provider: string; model: string }>('/api/setup/complete', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
   setupStatus: () =>
     request<{ needs_setup: boolean }>('/api/setup/status'),
-  setupValidate: (data: { provider: string; api_key: string; base_url?: string }) =>
+  setupValidate: (data: { provider: string; api_key: string; base_url?: string; headers?: Record<string, string> }) =>
     request<{ valid: boolean; error?: string }>('/api/setup/validate', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -262,9 +262,14 @@ export const api = {
   // Provider management
   listProviders: () =>
     request<ProviderDetail[]>('/api/providers'),
-  addProvider: (data: { id: string; api_key: string; base_url?: string }) =>
+  addProvider: (data: { id: string; api_key: string; name?: string; model?: string; model_reasoning?: boolean } & ProviderAdvanced) =>
     request<{ status: string }>('/api/providers', {
       method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateProvider: (id: string, data: { api_key?: string; name?: string } & ProviderAdvanced) =>
+    request<{ status: string }>(`/api/providers/${encodeURIComponent(id)}`, {
+      method: 'PUT',
       body: JSON.stringify(data),
     }),
   deleteProvider: (id: string) =>
@@ -282,6 +287,11 @@ export const api = {
     request<{ enabled: boolean }>('/api/model-state/enabled', {
       method: 'POST',
       body: JSON.stringify({ provider, model, enabled }),
+    }),
+  setModelEffort: (provider: string, model: string, effort: string) =>
+    request<{ effort: string }>('/api/model-state/effort', {
+      method: 'POST',
+      body: JSON.stringify({ provider, model, effort }),
     }),
 
   // Automations

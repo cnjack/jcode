@@ -354,6 +354,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// Provider management API — add/remove providers after initial setup.
 	mux.HandleFunc("GET /api/providers", s.handleListProviders)
 	mux.HandleFunc("POST /api/providers", s.handleAddProvider)
+	mux.HandleFunc("PUT /api/providers/{id}", s.handleUpdateProvider)
 	mux.HandleFunc("DELETE /api/providers/{id}", s.handleDeleteProvider)
 
 	// History management.
@@ -363,6 +364,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/model-state", s.handleGetModelState)
 	mux.HandleFunc("POST /api/model-state/favorite", s.handleToggleFavorite)
 	mux.HandleFunc("POST /api/model-state/enabled", s.handleToggleModelEnabled)
+	mux.HandleFunc("POST /api/model-state/effort", s.handleSetModelEffort)
 
 	// Serve embedded frontend (SPA with fallback to index.html)
 	mux.Handle("GET /", newSPAHandler())
@@ -1138,15 +1140,16 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type modelInfo struct {
-		ID             string `json:"id"`
-		Name           string `json:"name"`
-		ToolCall       bool   `json:"tool_call"`
-		ContextLimit   int    `json:"context_limit,omitempty"`
-		Reasoning      bool   `json:"reasoning,omitempty"`
-		Recommended    bool   `json:"recommended,omitempty"`
-		DefaultEnabled bool   `json:"default_enabled,omitempty"`
-		Enabled        bool   `json:"enabled"`
-		ImageSupport   bool   `json:"image_support,omitempty"`
+		ID               string                  `json:"id"`
+		Name             string                  `json:"name"`
+		ToolCall         bool                    `json:"tool_call"`
+		ContextLimit     int                     `json:"context_limit,omitempty"`
+		Reasoning        bool                    `json:"reasoning,omitempty"`
+		Recommended      bool                    `json:"recommended,omitempty"`
+		DefaultEnabled   bool                    `json:"default_enabled,omitempty"`
+		Enabled          bool                    `json:"enabled"`
+		ImageSupport     bool                    `json:"image_support,omitempty"`
+		ReasoningOptions []model.ReasoningOption `json:"reasoning_options,omitempty"`
 	}
 	type providerInfo struct {
 		ID     string      `json:"id"`
@@ -1187,7 +1190,8 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 				ID: m.ID, Name: m.Name, ToolCall: m.ToolCall, ContextLimit: ctx,
 				Reasoning: m.Reasoning, Recommended: m.Recommended,
 				DefaultEnabled: m.DefaultEnabled, Enabled: enabled,
-				ImageSupport: imageSupport,
+				ImageSupport:     imageSupport,
+				ReasoningOptions: m.ReasoningOptions,
 			})
 		}
 		result = append(result, pi)
@@ -2819,9 +2823,10 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 // handleSetupValidate tests connectivity to a provider with the given API key.
 func (s *Server) handleSetupValidate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Provider string `json:"provider"`
-		APIKey   string `json:"api_key"`
-		BaseURL  string `json:"base_url,omitempty"`
+		Provider string            `json:"provider"`
+		APIKey   string            `json:"api_key"`
+		BaseURL  string            `json:"base_url,omitempty"`
+		Headers  map[string]string `json:"headers,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -2841,7 +2846,7 @@ func (s *Server) handleSetupValidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := model.ValidateProvider(r.Context(), req.APIKey, baseURL); err != nil {
+	if err := model.ValidateProvider(r.Context(), req.APIKey, baseURL, req.Headers); err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"valid": false,
 			"error": err.Error(),
@@ -2933,11 +2938,13 @@ func (s *Server) handleSetupProviderModels(w http.ResponseWriter, r *http.Reques
 
 	models := s.registry.ListProviderModels(providerID, true)
 	type modelItem struct {
-		ID           string `json:"id"`
-		Name         string `json:"name"`
-		ToolCall     bool   `json:"tool_call"`
-		ContextLimit int    `json:"context_limit,omitempty"`
-		Reasoning    bool   `json:"reasoning,omitempty"`
+		ID               string                  `json:"id"`
+		Name             string                  `json:"name"`
+		ToolCall         bool                    `json:"tool_call"`
+		ContextLimit     int                     `json:"context_limit,omitempty"`
+		Reasoning        bool                    `json:"reasoning,omitempty"`
+		Attachment       bool                    `json:"attachment,omitempty"`
+		ReasoningOptions []model.ReasoningOption `json:"reasoning_options,omitempty"`
 	}
 
 	result := make([]modelItem, 0, len(models))
@@ -2947,11 +2954,13 @@ func (s *Server) handleSetupProviderModels(w http.ResponseWriter, r *http.Reques
 			ctx = m.Limit.Context
 		}
 		result = append(result, modelItem{
-			ID:           m.ID,
-			Name:         m.Name,
-			ToolCall:     m.ToolCall,
-			ContextLimit: ctx,
-			Reasoning:    m.Reasoning,
+			ID:               m.ID,
+			Name:             m.Name,
+			ToolCall:         m.ToolCall,
+			ContextLimit:     ctx,
+			Reasoning:        m.Reasoning,
+			Attachment:       m.Attachment,
+			ReasoningOptions: m.ReasoningOptions,
 		})
 	}
 
@@ -2960,19 +2969,53 @@ func (s *Server) handleSetupProviderModels(w http.ResponseWriter, r *http.Reques
 
 // handleSetupComplete handles the initial setup submission.
 // It saves the provider config and creates the agent.
+//
+// The wizard no longer forces a model selection: for registry providers, a
+// default model is auto-picked (DefaultEnabled → Recommended → first). A
+// caller-supplied model always wins. Custom (non-registry) providers must send
+// a model explicitly since none can be inferred.
 func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Provider string `json:"provider"`
-		Model    string `json:"model"`
-		APIKey   string `json:"api_key"`
-		BaseURL  string `json:"base_url,omitempty"`
+		Provider        string            `json:"provider"`
+		Model           string            `json:"model,omitempty"`
+		ModelReasoning  bool              `json:"model_reasoning,omitempty"`
+		APIKey          string            `json:"api_key"`
+		BaseURL         string            `json:"base_url,omitempty"`
+		Name            string            `json:"name,omitempty"` // custom provider display name
+		Headers         map[string]string `json:"headers,omitempty"`
+		Vision          *bool             `json:"vision,omitempty"`
+		Thinking        *bool             `json:"thinking,omitempty"`
+		ReasoningEffort string            `json:"reasoning_effort,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	if req.Provider == "" || req.Model == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and model are required"})
+	if req.Provider == "" || req.APIKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and api_key are required"})
+		return
+	}
+	if !validReasoningEffort(req.ReasoningEffort) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid reasoning_effort"})
+		return
+	}
+
+	// Resolve the active model. An explicit model always wins; otherwise try to
+	// auto-pick a default for registry providers. Custom providers (not in the
+	// registry) cannot infer a model and require one from the caller.
+	resolvedModel := req.Model
+	isCustom := s.registry == nil || !s.registry.HasProvider(req.Provider)
+	if resolvedModel == "" {
+		if isCustom {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "model is required for custom providers"})
+			return
+		}
+		if s.registry != nil {
+			resolvedModel = s.registry.PickDefaultModel(req.Provider)
+		}
+	}
+	if resolvedModel == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no default model available for this provider; please choose one"})
 		return
 	}
 
@@ -2989,11 +3032,28 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	if cfg.Providers == nil {
 		cfg.Providers = make(map[string]*config.ProviderConfig)
 	}
-	cfg.Providers[req.Provider] = &config.ProviderConfig{
-		APIKey:  req.APIKey,
-		BaseURL: req.BaseURL,
+	setupPC := &config.ProviderConfig{
+		APIKey:          req.APIKey,
+		BaseURL:         req.BaseURL,
+		Name:            req.Name,
+		Headers:         cleanHeaders(req.Headers),
+		Vision:          req.Vision,
+		Thinking:        req.Thinking,
+		ReasoningEffort: req.ReasoningEffort,
 	}
-	cfg.Model = req.Provider + "/" + req.Model
+	// For a custom provider, persist the model as a custom model so it survives
+	// a model switch (otherwise it exists only as the active-model string and
+	// vanishes from the picker once changed).
+	if isCustom && resolvedModel != "" {
+		setupPC.CustomModels = []config.CustomModelConfig{{
+			ID:        resolvedModel,
+			Name:      resolvedModel,
+			ToolCall:  true,
+			Reasoning: req.ModelReasoning,
+		}}
+	}
+	cfg.Providers[req.Provider] = setupPC
+	cfg.Model = req.Provider + "/" + resolvedModel
 
 	if err := config.SaveConfig(cfg); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config: " + err.Error()})
@@ -3006,12 +3066,12 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no active task to configure"})
 		return
 	}
-	ag, err := eng.createAgent(req.Provider, req.Model)
+	ag, err := eng.createAgent(req.Provider, resolvedModel)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create agent: " + err.Error()})
 		return
 	}
-	eng.applyModelSwitch(ag, req.Provider, req.Model)
+	eng.applyModelSwitch(ag, req.Provider, resolvedModel)
 	// Publish the new config + registry to the live server so endpoints
 	// (/api/models, context-limit, etc.) reflect the just-configured provider
 	// without a restart.
@@ -3026,14 +3086,27 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	// Notify clients that setup is complete.
 	s.wsBroker.Broadcast(WSEvent{Type: "model_changed", TaskID: eng.taskID, Data: map[string]string{
 		"provider": req.Provider,
-		"model":    req.Model,
+		"model":    resolvedModel,
 	}})
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":   "ok",
 		"provider": req.Provider,
-		"model":    req.Model,
+		"model":    resolvedModel,
 	})
+}
+
+// maskSecret hides a secret for display: first 4 and last 4 chars for longer
+// values, "****" for short ones. Used for API keys and header values so the
+// list endpoint never returns plaintext credentials.
+func maskSecret(s string) string {
+	if s == "" {
+		return ""
+	}
+	if len(s) > 8 {
+		return s[:4] + "..." + s[len(s)-4:]
+	}
+	return "****"
 }
 
 // handleListProviders returns all configured providers (key masked).
@@ -3045,27 +3118,46 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type providerDetail struct {
-		ID        string `json:"id"`
-		APIKeySet bool   `json:"api_key_set"`
-		APIKey    string `json:"api_key,omitempty"` // masked
-		BaseURL   string `json:"base_url,omitempty"`
+		ID              string            `json:"id"`
+		Name            string            `json:"name,omitempty"` // display name for custom providers
+		Custom          bool              `json:"custom,omitempty"`
+		APIKeySet       bool              `json:"api_key_set"`
+		APIKey          string            `json:"api_key,omitempty"` // masked
+		BaseURL         string            `json:"base_url,omitempty"`
+		Headers         map[string]string `json:"headers,omitempty"` // values masked
+		Vision          *bool             `json:"vision,omitempty"`
+		Thinking        *bool             `json:"thinking,omitempty"`
+		ReasoningEffort string            `json:"reasoning_effort,omitempty"`
 	}
 
 	result := make([]providerDetail, 0)
 	for id, pc := range cfg.GetProviders() {
 		detail := providerDetail{
-			ID:        id,
-			APIKeySet: pc.APIKey != "",
-			BaseURL:   pc.BaseURL,
+			ID:              id,
+			Name:            pc.Name,
+			APIKeySet:       pc.APIKey != "",
+			BaseURL:         pc.BaseURL,
+			Vision:          pc.Vision,
+			Thinking:        pc.Thinking,
+			ReasoningEffort: pc.ReasoningEffort,
+		}
+		// A provider is "custom" if it isn't in the registry. The registry may
+		// be nil in setup mode; treat that as custom only when it also has a
+		// non-registry-style id (name set) to avoid mislabeling during setup.
+		if s.registry != nil {
+			detail.Custom = !s.registry.HasProvider(id)
+		} else if pc.Name != "" {
+			detail.Custom = true
 		}
 		if pc.APIKey != "" {
-			// Mask API key: show first 4 and last 4 chars.
-			key := pc.APIKey
-			if len(key) > 8 {
-				detail.APIKey = key[:4] + "..." + key[len(key)-4:]
-			} else {
-				detail.APIKey = "****"
+			detail.APIKey = maskSecret(pc.APIKey)
+		}
+		if len(pc.Headers) > 0 {
+			masked := make(map[string]string, len(pc.Headers))
+			for k, v := range pc.Headers {
+				masked[k] = maskSecret(v)
 			}
+			detail.Headers = masked
 		}
 		result = append(result, detail)
 	}
@@ -3074,12 +3166,21 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-// handleAddProvider adds a new provider to the config.
+// handleAddProvider adds a new provider to the config. For custom
+// (non-registry) providers the caller should also send a name and at least one
+// model so the provider is usable as an active model.
 func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ID      string `json:"id"`
-		APIKey  string `json:"api_key"`
-		BaseURL string `json:"base_url,omitempty"`
+		ID              string            `json:"id"`
+		APIKey          string            `json:"api_key"`
+		BaseURL         string            `json:"base_url,omitempty"`
+		Name            string            `json:"name,omitempty"`
+		Model           string            `json:"model,omitempty"`
+		ModelReasoning  bool              `json:"model_reasoning,omitempty"`
+		Headers         map[string]string `json:"headers,omitempty"`
+		Vision          *bool             `json:"vision,omitempty"`
+		Thinking        *bool             `json:"thinking,omitempty"`
+		ReasoningEffort string            `json:"reasoning_effort,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -3087,6 +3188,10 @@ func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ID == "" || req.APIKey == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id and api_key are required"})
+		return
+	}
+	if !validReasoningEffort(req.ReasoningEffort) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid reasoning_effort"})
 		return
 	}
 
@@ -3097,10 +3202,159 @@ func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	if cfg.Providers == nil {
 		cfg.Providers = make(map[string]*config.ProviderConfig)
 	}
-	cfg.Providers[req.ID] = &config.ProviderConfig{
-		APIKey:  req.APIKey,
-		BaseURL: req.BaseURL,
+
+	// A custom provider (not in the registry) needs a base URL so requests can
+	// be routed, and at least one model id to be usable.
+	isCustom := s.registry == nil || !s.registry.HasProvider(req.ID)
+	if isCustom && req.BaseURL == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "base_url is required for custom providers"})
+		return
 	}
+
+	pc := &config.ProviderConfig{
+		APIKey:          req.APIKey,
+		BaseURL:         req.BaseURL,
+		Name:            req.Name,
+		Headers:         cleanHeaders(req.Headers),
+		Vision:          req.Vision,
+		Thinking:        req.Thinking,
+		ReasoningEffort: req.ReasoningEffort,
+	}
+	if isCustom && req.Model != "" {
+		pc.CustomModels = []config.CustomModelConfig{{
+			ID:        req.Model,
+			Name:      req.Model,
+			ToolCall:  true,
+			Reasoning: req.ModelReasoning,
+		}}
+	}
+	cfg.Providers[req.ID] = pc
+
+	// If there is no active model yet and this is a custom provider with an
+	// explicit model, adopt it as the active model so the app can boot.
+	if cfg.Model == "" && isCustom && req.Model != "" {
+		cfg.Model = req.ID + "/" + req.Model
+	}
+
+	if err := config.SaveConfig(cfg); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config: " + err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// validReasoningEffort whitelists the thinking-depth values accepted from
+// clients. The set mirrors the effort levels models.dev publishes under
+// reasoning_options (see internal/model registry). Empty means "unset / omit
+// the parameter".
+func validReasoningEffort(v string) bool {
+	switch v {
+	case "", "none", "minimal", "low", "medium", "high", "xhigh", "max":
+		return true
+	}
+	return false
+}
+
+// cleanHeaders drops rows with an empty key and trims whitespace, so blank
+// editor rows from the UI never reach the saved config.
+func cleanHeaders(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		out[k] = v
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// handleUpdateProvider edits an existing provider, merging secret fields so the
+// client may omit unchanged credentials. An empty api_key keeps the stored key;
+// a header value left empty keeps the stored value for that key (the list
+// endpoint returns masked secrets, so the UI sends blanks for untouched ones).
+func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider id is required"})
+		return
+	}
+	var req struct {
+		APIKey          string            `json:"api_key,omitempty"`
+		BaseURL         string            `json:"base_url,omitempty"`
+		Name            string            `json:"name,omitempty"`
+		Headers         map[string]string `json:"headers,omitempty"`
+		Vision          *bool             `json:"vision,omitempty"`
+		Thinking        *bool             `json:"thinking,omitempty"`
+		ReasoningEffort string            `json:"reasoning_effort,omitempty"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if !validReasoningEffort(req.ReasoningEffort) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid reasoning_effort"})
+		return
+	}
+
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	pc := cfg.GetProviders()[id]
+	if pc == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "provider not found"})
+		return
+	}
+
+	// Mutate in place so fields not exposed by this endpoint (display name,
+	// custom models, deprecated lists) are preserved untouched.
+	prevHeaders := pc.Headers
+	// base_url uses keep-on-empty semantics (like api_key): the list endpoint
+	// masks secrets but returns base_url verbatim, yet a client that doesn't
+	// touch the endpoint may still submit an empty value. Overwriting
+	// unconditionally would wipe a stored custom endpoint, so only adopt a
+	// non-empty incoming value.
+	if req.BaseURL != "" {
+		pc.BaseURL = req.BaseURL
+	}
+	pc.Vision = req.Vision
+	pc.Thinking = req.Thinking
+	pc.ReasoningEffort = req.ReasoningEffort
+	if req.Name != "" {
+		pc.Name = req.Name
+	}
+	if req.APIKey != "" {
+		pc.APIKey = req.APIKey
+	}
+	// Merge headers: empty incoming value ⇒ keep the stored secret for that key.
+	pc.Headers = nil
+	if cleaned := cleanHeaders(req.Headers); len(cleaned) > 0 {
+		merged := make(map[string]string, len(cleaned))
+		for k, v := range cleaned {
+			if v == "" {
+				if ov, ok := prevHeaders[k]; ok {
+					merged[k] = ov
+					continue
+				}
+			}
+			merged[k] = v
+		}
+		pc.Headers = merged
+	}
+
+	if cfg.Providers == nil {
+		cfg.Providers = make(map[string]*config.ProviderConfig)
+	}
+	cfg.Providers[id] = pc
 	if err := config.SaveConfig(cfg); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config: " + err.Error()})
 		return
@@ -3182,10 +3436,11 @@ func (s *Server) handleGetModelState(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"recent":          recent,
-		"favorite":        favorites,
-		"enabled_models":  enabledModels,
-		"disabled_models": disabledModels,
+		"recent":           recent,
+		"favorite":         favorites,
+		"enabled_models":   enabledModels,
+		"disabled_models":  disabledModels,
+		"effort_overrides": state.EffortOverrides,
 	})
 }
 
@@ -3247,6 +3502,44 @@ func (s *Server) handleToggleModelEnabled(w http.ResponseWriter, r *http.Request
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"enabled": req.Enabled,
+	})
+}
+
+// handleSetModelEffort records the user's reasoning-effort choice for a single
+// model (set from the chat model picker). An empty effort clears the override,
+// restoring the provider-level default. The agent is rebuilt so the change
+// takes effect on the next turn.
+func (s *Server) handleSetModelEffort(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+		Effort   string `json:"effort"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if req.Provider == "" || req.Model == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and model are required"})
+		return
+	}
+	if req.Effort != "" && !validReasoningEffort(req.Effort) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid effort"})
+		return
+	}
+
+	state, err := config.LoadModelState()
+	if err != nil {
+		state = &config.ModelState{}
+	}
+	state.SetEffortOverride(config.ModelRef{Provider: req.Provider, Model: req.Model}, req.Effort)
+	if err := config.SaveModelState(state); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"effort": req.Effort,
 	})
 }
 

@@ -105,6 +105,9 @@ export interface ModelInfo {
   default_enabled?: boolean
   enabled?: boolean
   image_support?: boolean
+  // How this model exposes its reasoning/thinking controls (from models.dev).
+  // Absent/empty ⇒ no reasoning controls to render.
+  reasoning_options?: ReasoningOption[]
 }
 
 export interface ProviderInfo {
@@ -586,19 +589,41 @@ export interface SetupProvider {
   tag?: string // "recommended", "local", etc.
 }
 
+// ReasoningOption mirrors models.dev's reasoning_options: how a model exposes
+// its thinking controls. type is 'effort' | 'toggle' | 'budget_tokens'.
+export interface ReasoningOption {
+  type: string
+  values?: string[]
+  min?: number
+  max?: number
+}
+
 export interface SetupModel {
   id: string
   name: string
   tool_call: boolean
   context_limit?: number
   reasoning?: boolean
+  attachment?: boolean
+  reasoning_options?: ReasoningOption[]
 }
 
 export interface ProviderDetail {
   id: string
+  name?: string // display name for custom (non-registry) providers
+  custom?: boolean // true if this provider is not in the registry
   api_key_set: boolean
   api_key?: string
   base_url?: string
+  headers?: Record<string, string> // values masked
+}
+
+// Advanced provider settings shared by the add/update payloads. Capabilities
+// (vision/thinking/reasoning_effort) are model-level, so they're not part of
+// provider configuration.
+export interface ProviderAdvanced {
+  base_url?: string
+  headers?: Record<string, string>
 }
 
 // Model state types
@@ -612,4 +637,6 @@ export interface ModelStateResponse {
   favorite: ModelRef[]
   enabled_models: ModelRef[]
   disabled_models: ModelRef[]
+  // Per-"provider/model" reasoning-effort choices made from the chat picker.
+  effort_overrides?: Record<string, string>
 }

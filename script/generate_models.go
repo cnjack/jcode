@@ -71,11 +71,20 @@ type RegistryModel struct {
 	Knowledge        string           `json:"knowledge,omitempty"`
 	ReleaseDate      string           `json:"release_date,omitempty"`
 	LastUpdated      string           `json:"last_updated,omitempty"`
-	Modalities       *ModelModalities `json:"modalities,omitempty"`
-	OpenWeights      bool             `json:"open_weights,omitempty"`
-	Cost             *ModelCost       `json:"cost,omitempty"`
-	Limit            *ModelLimit      `json:"limit,omitempty"`
-	Status           string           `json:"status,omitempty"`
+	Modalities       *ModelModalities  `json:"modalities,omitempty"`
+	OpenWeights      bool              `json:"open_weights,omitempty"`
+	Cost             *ModelCost        `json:"cost,omitempty"`
+	Limit            *ModelLimit       `json:"limit,omitempty"`
+	Status           string            `json:"status,omitempty"`
+	ReasoningOptions []ReasoningOption `json:"reasoning_options,omitempty"`
+}
+
+// ReasoningOption mirrors models.dev's reasoning_options entries.
+type ReasoningOption struct {
+	Type   string   `json:"type"`
+	Values []string `json:"values,omitempty"`
+	Min    *int     `json:"min,omitempty"`
+	Max    *int     `json:"max,omitempty"`
 }
 
 // ModelModalities describes input/output modalities.
@@ -305,6 +314,10 @@ func run() error {
 					b.WriteString("\t\t\t\t},\n")
 				}
 
+				if opts := emitReasoningOptions(model.ReasoningOptions); opts != "" {
+					b.WriteString(opts)
+				}
+
 				b.WriteString("\t\t\t},\n")
 			}
 
@@ -323,6 +336,50 @@ func run() error {
 
 	fmt.Printf("Successfully generated %s\n", outputFile)
 	return nil
+}
+
+// emitReasoningOptions renders a model's reasoning_options as a Go literal. It
+// returns "" when there are no usable options. JSON nulls in effort value lists
+// (which decode to "") are dropped, and Min/Max are emitted via the intPtr
+// helper so nil bounds stay nil.
+func emitReasoningOptions(opts []ReasoningOption) string {
+	if len(opts) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\t\t\t\tReasoningOptions: []ReasoningOption{\n")
+	for _, ro := range opts {
+		if ro.Type == "" {
+			continue
+		}
+		b.WriteString("\t\t\t\t\t{")
+		fmt.Fprintf(&b, "Type: %q", ro.Type)
+		vals := make([]string, 0, len(ro.Values))
+		for _, v := range ro.Values {
+			if v != "" {
+				vals = append(vals, v)
+			}
+		}
+		if len(vals) > 0 {
+			b.WriteString(", Values: []string{")
+			for i, v := range vals {
+				if i > 0 {
+					b.WriteString(", ")
+				}
+				fmt.Fprintf(&b, "%q", v)
+			}
+			b.WriteString("}")
+		}
+		if ro.Min != nil {
+			fmt.Fprintf(&b, ", Min: intPtr(%d)", *ro.Min)
+		}
+		if ro.Max != nil {
+			fmt.Fprintf(&b, ", Max: intPtr(%d)", *ro.Max)
+		}
+		b.WriteString("},\n")
+	}
+	b.WriteString("\t\t\t\t},\n")
+	return b.String()
 }
 
 func escapeString(s string) string {

@@ -3,7 +3,7 @@ import { ref, reactive, computed, watch, nextTick, onUnmounted, inject, type Com
 import { useChatStore } from '@/stores/chat'
 import { useTheme } from '@/composables/useTheme'
 import { api } from '@/composables/api'
-import type { MCPServerInfo, MCPServerRequest, SkillInfo, SSHAlias, SetupProvider, SetupModel, ProviderDetail, RemoteMeta } from '@/types/api'
+import type { MCPServerInfo, MCPServerRequest, SkillInfo, SSHAlias, SetupProvider, ProviderDetail, RemoteMeta } from '@/types/api'
 import QRCode from 'qrcode'
 import {
   Dialog,
@@ -23,6 +23,7 @@ import {
   ComputerDesktopIcon,
   ServerIcon,
   ChevronRightIcon,
+  PencilSquareIcon,
   PlusIcon,
   SignalIcon,
   ShieldCheckIcon,
@@ -121,16 +122,32 @@ const bleSaving = ref(false)
 // Provider management state
 const configuredProviders = ref<ProviderDetail[]>([])
 const showAddProvider = ref(false)
-const addProviderStep = ref<'select' | 'model' | 'apikey'>('select')
+const addProviderStep = ref<'select' | 'apikey'>('select')
 const addProviderList = ref<SetupProvider[]>([])
-const addProviderModels = ref<SetupModel[]>([])
 const addSelectedProvider = ref('')
-const addSelectedModel = ref('')
 const addApiKey = ref('')
 const addBaseURL = ref('')
 const addLoading = ref(false)
 const addError = ref('')
 const deleteConfirmId = ref('')
+
+// Custom provider fields (when adding a non-registry provider).
+const addIsCustom = ref(false)
+const addCustomId = ref('')
+const addCustomName = ref('')
+const addCustomModelId = ref('')
+const addCustomReasoning = ref(false)
+
+// Provider advanced settings (shared by add + edit flows).
+interface ProviderHeaderRow { key: string; value: string; ph?: string }
+const editingProviderId = ref('') // '' = add mode, otherwise editing this provider
+const addAdvancedOpen = ref(false)
+const addHeaders = ref<ProviderHeaderRow[]>([])
+const addValidating = ref(false)
+const addValidationResult = ref<{ valid: boolean; error?: string } | null>(null)
+
+// Any edit to the credentials invalidates a prior test-connection result.
+watch([addApiKey, addBaseURL, addHeaders], () => { addValidationResult.value = null }, { deep: true })
 
 watch(() => props.open, async (isOpen) => {
   if (isOpen) {
@@ -593,14 +610,27 @@ const iconFor: Record<string, Component> = {
 
 
 
-async function startAddProvider() {
-  showAddProvider.value = true
-  addProviderStep.value = 'select'
+function resetProviderForm() {
+  editingProviderId.value = ''
   addSelectedProvider.value = ''
-  addSelectedModel.value = ''
   addApiKey.value = ''
   addBaseURL.value = ''
   addError.value = ''
+  addAdvancedOpen.value = false
+  addHeaders.value = []
+  addValidating.value = false
+  addValidationResult.value = null
+  addIsCustom.value = false
+  addCustomId.value = ''
+  addCustomName.value = ''
+  addCustomModelId.value = ''
+  addCustomReasoning.value = false
+}
+
+async function startAddProvider() {
+  showAddProvider.value = true
+  resetProviderForm()
+  addProviderStep.value = 'select'
   addLoading.value = true
   try {
     addProviderList.value = await api.setupProviders()
@@ -608,33 +638,128 @@ async function startAddProvider() {
   addLoading.value = false
 }
 
-async function selectAddProvider(id: string) {
-  addSelectedProvider.value = id
-  addLoading.value = true
-  addError.value = ''
-  try {
-    addProviderModels.value = await api.setupProviderModels(id)
-    addProviderStep.value = 'model'
-  } catch {
-    addError.value = 'Failed to load models'
+// Open the form pre-filled to edit an already configured provider. Secrets are
+// returned masked by the API, so api_key is left blank (placeholder shows the
+// mask) and each header value starts empty — blanks mean "keep existing".
+function startEditProvider(p: ProviderDetail) {
+  showAddProvider.value = true
+  resetProviderForm()
+  editingProviderId.value = p.id
+  addSelectedProvider.value = p.id
+  addProviderStep.value = 'apikey'
+  addBaseURL.value = p.base_url || ''
+  addHeaders.value = Object.entries(p.headers ?? {}).map(([key, value]) => ({ key, value: '', ph: value }))
+  addIsCustom.value = !!p.custom
+  addCustomName.value = p.name || ''
+  if (addHeaders.value.length || p.base_url) {
+    addAdvancedOpen.value = true
   }
-  addLoading.value = false
 }
 
-function selectAddModel(id: string) {
-  addSelectedModel.value = id
+function addProviderHeaderRow() {
+  addHeaders.value.push({ key: '', value: '' })
+}
+
+function removeProviderHeaderRow(i: number) {
+  addHeaders.value.splice(i, 1)
+}
+
+// Build the advanced payload shared by add + update. Header rows with a blank
+// key are dropped; blank values are kept so the server can preserve the stored
+// secret on edit.
+function collectProviderAdvanced() {
+  const headers: Record<string, string> = {}
+  for (const h of addHeaders.value) {
+    const k = h.key.trim()
+    if (k) headers[k] = h.value
+  }
+  return {
+    base_url: addBaseURL.value || undefined,
+    headers: Object.keys(headers).length ? headers : undefined,
+  }
+}
+
+async function validateProviderConnection() {
+  addValidating.value = true
+  addValidationResult.value = null
+  const headers: Record<string, string> = {}
+  for (const h of addHeaders.value) {
+    const k = h.key.trim()
+    if (k && h.value) headers[k] = h.value
+  }
+  try {
+    addValidationResult.value = await api.setupValidate({
+      provider: editingProviderId.value || addSelectedProvider.value || 'openai-compatible',
+      api_key: addApiKey.value,
+      base_url: addBaseURL.value || undefined,
+      headers: Object.keys(headers).length ? headers : undefined,
+    })
+  } catch (err: unknown) {
+    addValidationResult.value = { valid: false, error: err instanceof Error ? err.message : 'failed' }
+  }
+  addValidating.value = false
+}
+
+// Select a registry provider from the list → go straight to the api-key step
+// (no model step: the server picks a default).
+function selectAddProvider(id: string) {
+  addSelectedProvider.value = id
+  addIsCustom.value = false
+  addProviderStep.value = 'apikey'
+}
+
+// Choose the custom-provider entry from the list.
+function selectAddCustomProvider() {
+  addSelectedProvider.value = ''
+  addIsCustom.value = true
+  addBaseURL.value = ''
+  addCustomReasoning.value = false
+  addAdvancedOpen.value = true
   addProviderStep.value = 'apikey'
 }
 
 async function submitAddProvider() {
-  addLoading.value = true
   addError.value = ''
+  // Validate custom-provider required fields before hitting the API.
+  if (!editingProviderId.value && addIsCustom.value) {
+    if (!addCustomId.value.trim()) {
+      addError.value = t('settings.providers.customIdRequired')
+      return
+    }
+    if (!addBaseURL.value.trim()) {
+      addError.value = t('settings.providers.customUrlRequired')
+      return
+    }
+    if (!addCustomModelId.value.trim()) {
+      addError.value = t('settings.providers.customModelRequired')
+      return
+    }
+  }
+  addLoading.value = true
   try {
-    await api.addProvider({
-      id: addSelectedProvider.value,
-      api_key: addApiKey.value,
-      base_url: addBaseURL.value || undefined,
-    })
+    const advanced = collectProviderAdvanced()
+    if (editingProviderId.value) {
+      await api.updateProvider(editingProviderId.value, {
+        api_key: addApiKey.value || undefined,
+        name: addIsCustom.value ? (addCustomName.value || undefined) : undefined,
+        ...advanced,
+      })
+    } else if (addIsCustom.value) {
+      await api.addProvider({
+        id: addCustomId.value.trim(),
+        api_key: addApiKey.value,
+        name: addCustomName.value.trim() || undefined,
+        model: addCustomModelId.value.trim(),
+        model_reasoning: addCustomReasoning.value,
+        ...advanced,
+      })
+    } else {
+      await api.addProvider({
+        id: addSelectedProvider.value,
+        api_key: addApiKey.value,
+        ...advanced,
+      })
+    }
     // Refresh provider list
     configuredProviders.value = await api.listProviders()
     showAddProvider.value = false
@@ -658,6 +783,7 @@ async function deleteProvider(id: string) {
 }
 
 const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelectedProvider.value)
+
 </script>
 
 <template>
@@ -959,11 +1085,11 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                   <div v-if="showAddProvider" class="s-form mb-4">
                     <div class="s-form-head">
                       <span class="s-form-head-title">
-                        {{ addProviderStep === 'select' ? t('settings.providers.selectProvider') : addProviderStep === 'model' ? t('settings.providers.selectModel') : t('settings.providers.enterApiKey') }}
+                        {{ editingProviderId ? t('settings.providers.editProvider') : addProviderStep === 'select' ? t('settings.providers.selectProvider') : t('settings.providers.enterApiKey') }}
                       </span>
                       <button class="s-btn s-btn-ghost s-btn-xs" @click="showAddProvider = false">✕</button>
                     </div>
-                    <div class="s-form-body" style="max-height: 220px; overflow-y: auto; padding: 12px">
+                    <div class="s-form-body" style="max-height: 240px; overflow-y: auto; padding: 12px">
                       <!-- Select provider -->
                       <div v-if="addProviderStep === 'select'">
                         <div v-if="addLoading" class="text-center py-4 text-xs animate-pulse" style="color: var(--color-muted-foreground)">{{ t('settings.providers.loadingHint') }}</div>
@@ -979,42 +1105,97 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                             <span class="font-medium">{{ p.name }}</span>
                             <span class="ml-1.5 font-mono" style="color: var(--color-muted-foreground)">{{ p.id }}</span>
                           </button>
+                          <!-- Custom provider entry -->
+                          <button
+                            class="w-full px-2.5 py-2 text-left rounded-md text-xs cursor-pointer transition-colors hover:bg-[var(--color-secondary)] flex items-center gap-2"
+                            style="color: var(--color-foreground)"
+                            @click="selectAddCustomProvider"
+                          >
+                            <span class="w-4 h-4 grid place-items-center font-mono shrink-0" style="color: var(--color-muted-foreground)">{ }</span>
+                            <span class="font-medium">{{ t('settings.providers.customProvider') }}</span>
+                            <span class="ml-1.5" style="color: var(--color-muted-foreground)">{{ t('settings.providers.customProviderDesc') }}</span>
+                          </button>
                           <div v-if="addProviderList.filter(x => !configuredProviders.some(c => c.id === x.id)).length === 0" class="text-center py-3 text-[10px]" style="color: var(--color-muted-foreground)">
                             {{ t('settings.providers.allConfigured') }}
                           </div>
                         </div>
                       </div>
-                      <!-- Select model -->
-                      <div v-if="addProviderStep === 'model'">
-                        <div class="flex items-center gap-1 mb-2">
-                          <button class="s-btn s-btn-ghost s-btn-xs" @click="addProviderStep = 'select'">‹</button>
-                          <span class="text-[10px]" style="color: var(--color-muted-foreground)">{{ addProviderInfo()?.name }}</span>
-                        </div>
-                        <div v-if="addLoading" class="text-center py-4 text-xs animate-pulse" style="color: var(--color-muted-foreground)">{{ t('settings.providers.loadingHint') }}</div>
-                        <div v-else class="space-y-1">
-                          <button
-                            v-for="m in addProviderModels"
-                            :key="m.id"
-                            class="w-full px-2.5 py-1.5 text-left rounded-md text-xs cursor-pointer transition-colors hover:bg-[var(--color-secondary)] font-mono"
-                            style="color: var(--color-foreground)"
-                            @click="selectAddModel(m.id)"
-                          >
-                            {{ m.id }}
-                          </button>
-                        </div>
-                      </div>
-                      <!-- Enter API key -->
+                      <!-- Enter API key + advanced settings -->
                       <div v-if="addProviderStep === 'apikey'" class="space-y-2">
                         <div class="flex items-center gap-1 mb-1">
-                          <button class="s-btn s-btn-ghost s-btn-xs" @click="addProviderStep = 'model'">‹</button>
-                          <span class="text-[10px] font-mono" style="color: var(--color-muted-foreground)">{{ addSelectedProvider }} / {{ addSelectedModel }}</span>
+                          <button v-if="!editingProviderId" class="s-btn s-btn-ghost s-btn-xs" @click="addProviderStep = 'select'">‹</button>
+                          <span class="text-[10px] font-mono" style="color: var(--color-muted-foreground)">
+                            {{ addIsCustom ? (addCustomName || addCustomId || t('settings.providers.customProvider')) : addSelectedProvider }}
+                          </span>
                         </div>
-                        <input v-model="addApiKey" type="password" :placeholder="t('settings.providers.apiKey')" class="s-input mono" @keydown.enter="submitAddProvider" />
-                        <input v-model="addBaseURL" type="text" :placeholder="t('settings.providers.baseUrl')" class="s-input mono" @keydown.enter="submitAddProvider" />
-                        <div v-if="addError" class="s-error">{{ addError }}</div>
-                        <button :disabled="addLoading || !addApiKey" class="s-btn s-btn-primary w-full" @click="submitAddProvider">
-                          {{ addLoading ? t('settings.providers.saving') : t('settings.providers.addBtn') }}
+
+                        <!-- Custom provider identity fields -->
+                        <template v-if="addIsCustom && !editingProviderId">
+                          <div>
+                            <label class="s-label">{{ t('settings.providers.customId') }}</label>
+                            <input v-model="addCustomId" type="text" :placeholder="t('settings.providers.customIdPlaceholder')" class="s-input mono" />
+                          </div>
+                          <div>
+                            <label class="s-label">{{ t('settings.providers.customName') }}</label>
+                            <input v-model="addCustomName" type="text" :placeholder="t('settings.providers.customNamePlaceholder')" class="s-input" />
+                          </div>
+                          <div>
+                            <label class="s-label">{{ t('settings.providers.customModelId') }}</label>
+                            <input v-model="addCustomModelId" type="text" :placeholder="t('settings.providers.customModelPlaceholder')" class="s-input mono" />
+                          </div>
+                          <div class="s-row" style="padding: 6px 10px">
+                            <div class="s-row-body">
+                              <div class="s-row-title">{{ t('settings.providers.customReasoning') }}</div>
+                              <div class="s-row-sub">{{ t('settings.providers.customReasoningDesc') }}</div>
+                            </div>
+                            <div class="s-row-actions">
+                              <button class="s-switch" :data-on="addCustomReasoning ? 'true' : 'false'" :aria-pressed="addCustomReasoning" @click="addCustomReasoning = !addCustomReasoning" />
+                            </div>
+                          </div>
+                        </template>
+
+                        <input v-model="addApiKey" type="password" :placeholder="editingProviderId ? t('settings.providers.apiKeyUnchanged') : t('settings.providers.apiKey')" class="s-input mono" @keydown.enter="submitAddProvider" />
+
+                        <!-- Advanced toggle -->
+                        <button class="s-adv-toggle" :aria-expanded="addAdvancedOpen" @click="addAdvancedOpen = !addAdvancedOpen">
+                          <ChevronRightIcon class="w-3 h-3 transition-transform" :style="{ transform: addAdvancedOpen ? 'rotate(90deg)' : 'none' }" />
+                          {{ t('settings.providers.advanced') }}
                         </button>
+
+                        <div v-if="addAdvancedOpen" class="space-y-3 pt-1">
+                          <!-- Custom endpoint -->
+                          <div class="s-field">
+                            <label class="s-label">{{ t('settings.providers.endpoint') }}</label>
+                            <input v-model="addBaseURL" type="text" :placeholder="addProviderInfo()?.api || t('settings.providers.endpointPlaceholder')" class="s-input mono" />
+                          </div>
+
+                          <!-- Custom headers -->
+                          <div class="s-field">
+                            <div class="flex items-center justify-between mb-1">
+                              <label class="s-label" style="margin: 0">{{ t('settings.providers.headers') }}</label>
+                              <button class="s-btn s-btn-ghost s-btn-xs" @click="addProviderHeaderRow">+ {{ t('settings.providers.addHeader') }}</button>
+                            </div>
+                            <div v-for="(h, i) in addHeaders" :key="i" class="s-kv">
+                              <input v-model="h.key" type="text" :placeholder="t('settings.providers.headerKey')" class="s-input mono" />
+                              <input v-model="h.value" type="text" :placeholder="h.ph || t('settings.providers.headerValue')" class="s-input mono" />
+                              <button class="s-kv-rm" @click="removeProviderHeaderRow(i)">✕</button>
+                            </div>
+                            <div v-if="addHeaders.length" class="text-[10px] mt-1" style="color: var(--color-muted-foreground)">{{ t('settings.providers.headersHint') }}</div>
+                          </div>
+                        </div>
+
+                        <div v-if="addError" class="s-error">{{ addError }}</div>
+                        <div v-if="addValidationResult" class="text-[11px]" :style="{ color: addValidationResult.valid ? 'var(--color-success-fg)' : 'var(--color-destructive)' }">
+                          {{ addValidationResult.valid ? '✓ ' + t('settings.providers.connected') : (addValidationResult.error || t('settings.providers.connectFailed')) }}
+                        </div>
+                        <div class="flex gap-2">
+                          <button :disabled="addValidating || !addApiKey" class="s-btn s-btn-secondary" @click="validateProviderConnection">
+                            {{ addValidating ? t('settings.providers.testing') : t('settings.providers.testConnection') }}
+                          </button>
+                          <button :disabled="addLoading || (!editingProviderId && !addApiKey)" class="s-btn s-btn-primary flex-1" @click="submitAddProvider">
+                            {{ addLoading ? t('settings.providers.saving') : editingProviderId ? t('common.save') : t('settings.providers.addBtn') }}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1033,14 +1214,28 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     <div v-for="p in configuredProviders" :key="p.id" class="s-row">
                       <div class="s-row-icon"><ProviderIcon :provider="p.id" :size="18" /></div>
                       <div class="s-row-body">
-                        <div class="s-row-title" style="font-family: var(--font-mono)">{{ p.id }}</div>
+                        <div class="s-row-title" style="font-family: var(--font-mono)">
+                          {{ p.id }}
+                          <span v-if="p.custom" class="s-chip">{{ t('settings.providers.custom') }}</span>
+                        </div>
                         <div class="s-row-sub" style="font-family: var(--font-mono)">
                           {{ p.api_key || '—' }}
                           <template v-if="p.base_url"> · {{ p.base_url }}</template>
                         </div>
+                        <div v-if="p.headers" class="flex flex-wrap gap-1 mt-1">
+                          <span class="s-chip">{{ Object.keys(p.headers).length }} {{ t('settings.providers.headers').toLowerCase() }}</span>
+                        </div>
                       </div>
                       <div class="s-row-actions">
                         <span v-if="store.providerName === p.id" class="s-chip s-chip-accent">{{ t('common.active') }}</span>
+                        <button
+                          v-if="deleteConfirmId !== p.id"
+                          class="s-btn s-btn-ghost s-btn-xs"
+                          :title="t('settings.providers.edit')"
+                          @click="startEditProvider(p)"
+                        >
+                          <PencilSquareIcon class="w-3.5 h-3.5" />
+                        </button>
                         <button
                           v-if="deleteConfirmId !== p.id"
                           class="s-btn s-btn-ghost s-btn-xs"
@@ -1766,6 +1961,24 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
 .s-switch:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Advanced disclosure toggle in the provider form. */
+.s-adv-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--color-muted-foreground);
+  padding: 2px 0;
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+.s-adv-toggle:hover {
+  color: var(--color-foreground);
 }
 
 /* Row — unified list row for prefs / provider / mcp / skill / ssh /

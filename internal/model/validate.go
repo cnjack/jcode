@@ -8,8 +8,10 @@ import (
 )
 
 // ValidateProvider tests connectivity to a provider by making a lightweight
-// GET /models request. Returns nil on success, or a descriptive error.
-func ValidateProvider(ctx context.Context, apiKey, baseURL string) error {
+// GET /models request. Custom headers (if any) are applied last so they can
+// override the default Authorization for gateways. Returns nil on success, or
+// a descriptive error.
+func ValidateProvider(ctx context.Context, apiKey, baseURL string, headers map[string]string) error {
 	if baseURL == "" {
 		return fmt.Errorf("base URL is empty")
 	}
@@ -22,6 +24,9 @@ func ValidateProvider(ctx context.Context, apiKey, baseURL string) error {
 	}
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 
 	resp, err := client.Do(req)
