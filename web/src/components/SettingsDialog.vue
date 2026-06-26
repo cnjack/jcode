@@ -143,6 +143,9 @@ interface ProviderHeaderRow { key: string; value: string; ph?: string }
 const editingProviderId = ref('') // '' = add mode, otherwise editing this provider
 const addAdvancedOpen = ref(false)
 const addHeaders = ref<ProviderHeaderRow[]>([])
+// Custom models attached to the provider, editable only in edit mode.
+interface CustomModelRow { id: string; name: string; reasoning: boolean }
+const addCustomModels = ref<CustomModelRow[]>([])
 const addValidating = ref(false)
 const addValidationResult = ref<{ valid: boolean; error?: string } | null>(null)
 
@@ -618,6 +621,7 @@ function resetProviderForm() {
   addError.value = ''
   addAdvancedOpen.value = false
   addHeaders.value = []
+  addCustomModels.value = []
   addValidating.value = false
   addValidationResult.value = null
   addIsCustom.value = false
@@ -649,6 +653,7 @@ function startEditProvider(p: ProviderDetail) {
   addProviderStep.value = 'apikey'
   addBaseURL.value = p.base_url || ''
   addHeaders.value = Object.entries(p.headers ?? {}).map(([key, value]) => ({ key, value: '', ph: value }))
+  addCustomModels.value = (p.custom_models ?? []).map((m) => ({ id: m.id, name: m.name ?? '', reasoning: !!m.reasoning }))
   addIsCustom.value = !!p.custom
   addCustomName.value = p.name || ''
   if (addHeaders.value.length || p.base_url) {
@@ -662,6 +667,14 @@ function addProviderHeaderRow() {
 
 function removeProviderHeaderRow(i: number) {
   addHeaders.value.splice(i, 1)
+}
+
+function addCustomModelRow() {
+  addCustomModels.value.push({ id: '', name: '', reasoning: false })
+}
+
+function removeCustomModelRow(i: number) {
+  addCustomModels.value.splice(i, 1)
 }
 
 // Build the advanced payload shared by add + update. Header rows with a blank
@@ -739,9 +752,15 @@ async function submitAddProvider() {
   try {
     const advanced = collectProviderAdvanced()
     if (editingProviderId.value) {
+      // Send custom_models on every edit (even empty) so removals persist; the
+      // server keeps a model's stored context by merging on id.
+      const customModels = addCustomModels.value
+        .map((m) => ({ id: m.id.trim(), name: m.name.trim() || undefined, reasoning: m.reasoning }))
+        .filter((m) => m.id)
       await api.updateProvider(editingProviderId.value, {
         api_key: addApiKey.value || undefined,
         name: addIsCustom.value ? (addCustomName.value || undefined) : undefined,
+        custom_models: customModels,
         ...advanced,
       })
     } else if (addIsCustom.value) {
@@ -1156,6 +1175,26 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
 
                         <input v-model="addApiKey" type="password" :placeholder="editingProviderId ? t('settings.providers.apiKeyUnchanged') : t('settings.providers.apiKey')" class="s-input mono" @keydown.enter="submitAddProvider" />
 
+                        <!-- Custom models (edit mode): manage the provider's routable models -->
+                        <div v-if="editingProviderId" class="s-field">
+                          <div class="flex items-center justify-between mb-1">
+                            <label class="s-label" style="margin: 0">{{ t('settings.providers.customModels') }}</label>
+                            <button class="s-btn s-btn-ghost s-btn-xs" @click="addCustomModelRow">+ {{ t('settings.providers.addModel') }}</button>
+                          </div>
+                          <div v-for="(m, i) in addCustomModels" :key="i" class="s-cm">
+                            <div class="s-kv" style="margin-bottom: 6px">
+                              <input v-model="m.id" type="text" :placeholder="t('settings.providers.customModelPlaceholder')" class="s-input mono" />
+                              <input v-model="m.name" type="text" :placeholder="t('settings.providers.customModelNamePlaceholder')" class="s-input" />
+                              <button class="s-kv-rm" @click="removeCustomModelRow(i)">✕</button>
+                            </div>
+                            <div class="s-cm-toggle">
+                              <span>{{ t('settings.providers.customReasoning') }}</span>
+                              <button class="s-switch" :data-on="m.reasoning ? 'true' : 'false'" :aria-pressed="m.reasoning" @click="m.reasoning = !m.reasoning" />
+                            </div>
+                          </div>
+                          <div v-if="addCustomModels.length" class="text-[10px] mt-1" style="color: var(--color-muted-foreground)">{{ t('settings.providers.customModelsHint') }}</div>
+                        </div>
+
                         <!-- Advanced toggle -->
                         <button class="s-adv-toggle" :aria-expanded="addAdvancedOpen" @click="addAdvancedOpen = !addAdvancedOpen">
                           <ChevronRightIcon class="w-3 h-3 transition-transform" :style="{ transform: addAdvancedOpen ? 'rotate(90deg)' : 'none' }" />
@@ -1212,7 +1251,7 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                   </div>
                   <div v-else>
                     <div v-for="p in configuredProviders" :key="p.id" class="s-row">
-                      <div class="s-row-icon"><ProviderIcon :provider="p.id" :size="18" /></div>
+                      <div class="s-row-icon"><ProviderIcon :provider="p.id" :custom="p.custom" :size="18" /></div>
                       <div class="s-row-body">
                         <div class="s-row-title" style="font-family: var(--font-mono)">
                           {{ p.id }}
@@ -2166,6 +2205,20 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
   display: flex;
   gap: 8px;
   margin-bottom: 8px;
+}
+.s-cm {
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+}
+.s-cm-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--color-muted-foreground);
 }
 .s-kv .s-input {
   height: 28px;

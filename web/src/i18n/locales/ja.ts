@@ -300,6 +300,10 @@ export default {
       customUrlRequired: 'カスタムプロバイダーには Base URL が必要です',
       customReasoning: '推論モデル',
       customReasoningDesc: 'このモデルに推論強度コントロールを表示',
+      customModels: 'カスタムモデル',
+      customModelsHint: 'このプロバイダーでルーティングできるモデル。',
+      addModel: 'モデルを追加',
+      customModelNamePlaceholder: '表示名（任意）',
     },
     mcp: {
       title: 'MCP サーバー',

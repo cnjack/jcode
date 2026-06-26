@@ -65,16 +65,6 @@ func NewScheduler(store *Store, runner Runner) *Scheduler {
 	}
 }
 
-// SetInterval overrides the tick interval (used in tests).
-func (s *Scheduler) SetInterval(d time.Duration) {
-	if d > 0 {
-		s.interval = d
-	}
-}
-
-// SetSkipNotifier registers a callback for skipped fires.
-func (s *Scheduler) SetSkipNotifier(fn SkipNotifier) { s.onSkip = fn }
-
 // Run blocks until ctx is cancelled. It first contends for the election lock; if
 // another process owns it, Run returns immediately (this process won't fire
 // scheduled runs, but manual runs still work). The flock is released by the OS

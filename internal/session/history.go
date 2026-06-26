@@ -39,73 +39,6 @@ func entryToUserMessage(e Entry) *schema.Message {
 	}
 }
 
-// ReconstructHistory converts a slice of recorded session entries back into
-// LLM history messages suitable for resuming a conversation.
-// It reconstructs tool call and tool result messages so that resumed sessions
-// retain full context.
-//
-// Subagent-internal entries (tool_call / tool_result / assistant recorded
-// between subagent_start and subagent_result) are skipped — only the main
-// agent's own messages are included.
-//
-// Because the runner records assistant text AFTER tool calls in the JSONL,
-// an EntryAssistant that follows tool-call entries is merged back into the
-// preceding assistant message as its Content field.
-func ReconstructHistory(entries []Entry) []adk.Message {
-	var msgs []adk.Message
-	var subagentDepth int
-	for _, e := range entries {
-		switch e.Type {
-		case EntrySubagentStart:
-			subagentDepth++
-			continue
-		case EntrySubagentResult:
-			if subagentDepth > 0 {
-				subagentDepth--
-			}
-			continue
-		}
-		// Skip entries that belong to a running subagent.
-		if subagentDepth > 0 {
-			continue
-		}
-
-		switch e.Type {
-		case EntryUser:
-			msgs = append(msgs, entryToUserMessage(e))
-		case EntryAssistant:
-			if e.Content != "" {
-				// The runner records assistant text after tool calls, so the
-				// preceding message may already be an assistant with ToolCalls
-				// but empty Content. Merge into it when possible.
-				if n := len(msgs); n > 0 {
-					if last := msgs[n-1]; last.Role == schema.Assistant && last.Content == "" && len(last.ToolCalls) > 0 {
-						last.Content = e.Content
-						continue
-					}
-				}
-				msgs = append(msgs, &schema.Message{Role: schema.Assistant, Content: e.Content})
-			}
-		case EntryToolCall:
-			tc := schema.ToolCall{
-				ID:       e.ToolCallID,
-				Function: schema.FunctionCall{Name: e.Name, Arguments: e.Args},
-			}
-			// Merge into preceding assistant message if it exists, otherwise create one.
-			if n := len(msgs); n > 0 {
-				if last := msgs[n-1]; last.Role == schema.Assistant {
-					last.ToolCalls = append(last.ToolCalls, tc)
-					continue
-				}
-			}
-			msgs = append(msgs, &schema.Message{Role: schema.Assistant, ToolCalls: []schema.ToolCall{tc}})
-		case EntryToolResult:
-			msgs = append(msgs, schema.ToolMessage(e.Output, e.ToolCallID, schema.WithToolName(e.Name)))
-		}
-	}
-	return msgs
-}
-
 // toolPlaceholders maps tool names to actionable placeholder messages.
 // These tell the model what happened and how to recover the data.
 var toolPlaceholders = map[string]string{
@@ -200,7 +133,7 @@ type SessionState struct {
 // It is compact-aware: if a compact entry is found, messages before it are
 // replaced with the compact summary.
 //
-// Subagent-internal entries are skipped (same logic as ReconstructHistory).
+// Subagent-internal entries are skipped.
 func ReconstructState(entries []Entry) *SessionState {
 	state := &SessionState{
 		EnvTarget: "local",
@@ -326,29 +259,4 @@ func ReconstructState(entries []Entry) *SessionState {
 
 	state.History = msgs
 	return state
-}
-
-// GetLastEnvironment scans the session entries to find the last successful switch_env call,
-// and returns the target environment alias. If none is found, it returns "local".
-func GetLastEnvironment(entries []Entry) string {
-	lastEnv := "local"
-	var lastTarget string
-
-	for _, e := range entries {
-		if e.Type == EntryToolCall && e.Name == "switch_env" {
-			// Extract target from args
-			type args struct {
-				Target string `json:"target"`
-			}
-			var a args
-			if err := json.Unmarshal([]byte(e.Args), &a); err == nil {
-				lastTarget = a.Target
-			}
-		} else if e.Type == EntryToolResult && e.Name == "switch_env" {
-			if e.Error == "" && lastTarget != "" {
-				lastEnv = lastTarget
-			}
-		}
-	}
-	return lastEnv
 }

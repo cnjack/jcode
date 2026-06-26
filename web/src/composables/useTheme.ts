@@ -6,7 +6,6 @@ import { ref, watch, onMounted } from 'vue'
 import { THEMES, type ThemeDef } from './themes.generated'
 
 export type { ThemeDef }
-export { THEMES }
 
 // A choice is either a built-in theme id or the special 'system' value, which
 // follows the OS light/dark preference.

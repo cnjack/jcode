@@ -49,12 +49,13 @@ const RULES: ReadonlyArray<readonly [RegExp, string]> = [
 ]
 
 // Returns the raw SVG markup for a provider id, or null when no brand icon is
-// known (e.g. a custom OpenAI-compatible endpoint). Callers render a monogram
-// fallback in that case.
-export function iconForProvider(id: string): string | null {
+// known. Callers render a monogram fallback in that case — except for custom
+// (OpenAI-compatible) providers, where passing fallbackOpenai shows the OpenAI
+// mark since that's the wire protocol they speak.
+export function iconForProvider(id: string, fallbackOpenai = false): string | null {
   const key = (id || '').toLowerCase()
   for (const [re, svg] of RULES) {
     if (re.test(key)) return svg
   }
-  return null
+  return fallbackOpenai ? openai : null
 }

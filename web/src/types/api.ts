@@ -113,6 +113,7 @@ export interface ModelInfo {
 export interface ProviderInfo {
   id: string
   name: string
+  custom?: boolean // true for user-configured OpenAI-compatible providers
   models: ModelInfo[]
 }
 
@@ -608,6 +609,14 @@ export interface SetupModel {
   reasoning_options?: ReasoningOption[]
 }
 
+// A model attached to a provider via config (custom providers always have at
+// least one; registry providers may add extras not yet in the registry).
+export interface CustomModelDetail {
+  id: string
+  name?: string
+  reasoning?: boolean
+}
+
 export interface ProviderDetail {
   id: string
   name?: string // display name for custom (non-registry) providers
@@ -616,6 +625,7 @@ export interface ProviderDetail {
   api_key?: string
   base_url?: string
   headers?: Record<string, string> // values masked
+  custom_models?: CustomModelDetail[]
 }
 
 // Advanced provider settings shared by the add/update payloads. Capabilities

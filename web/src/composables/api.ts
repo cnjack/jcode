@@ -1,5 +1,5 @@
 // API client for jcode backend
-import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData } from '@/types/api'
+import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, CustomModelDetail, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData } from '@/types/api'
 import type { AutomationItem, AutomationRun, AutomationTemplate, AutomationCreate, Automation } from '@/types/automation'
 import { apiBase } from './apiBase'
 
@@ -267,7 +267,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  updateProvider: (id: string, data: { api_key?: string; name?: string } & ProviderAdvanced) =>
+  updateProvider: (id: string, data: { api_key?: string; name?: string; custom_models?: CustomModelDetail[] } & ProviderAdvanced) =>
     request<{ status: string }>(`/api/providers/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify(data),

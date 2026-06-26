@@ -130,6 +130,13 @@ function modelInfoFor(provider: string, model: string) {
   return p?.models.find((m) => m.id === model)
 }
 
+// Custom (OpenAI-compatible) provider ids, so their icon falls back to the
+// OpenAI mark instead of a monogram.
+const customProviderIds = computed(() => new Set(store.providers.filter((p) => p.custom).map((p) => p.id)))
+function isCustomProvider(id: string) {
+  return customProviderIds.value.has(id)
+}
+
 // The ModelInfo for the currently-active model — drives the pinned row subline
 // + capability dots.
 const currentModelInfo = computed(() => modelInfoFor(store.providerName, store.modelName))
@@ -666,6 +673,7 @@ watch(() => store.imageSupport, (supported) => {
                 <ProviderIcon
                   v-if="store.providerName"
                   :provider="store.providerName"
+                  :custom="isCustomProvider(store.providerName)"
                   :size="16"
                 />
                 {{ store.modelName ? getModelDisplayName(store.providerName, store.modelName) : 'model' }}
@@ -727,7 +735,7 @@ watch(() => store.imageSupport, (supported) => {
                 <!-- Pinned current row — never scrolls out of view. -->
                 <div v-if="store.providerName && store.modelName" class="mm-pinned">
                   <CheckCircleIcon class="mm-pinned-pin" :title="t('chat.model.current')" />
-                  <ProviderIcon :provider="store.providerName" :size="22" />
+                  <ProviderIcon :provider="store.providerName" :custom="isCustomProvider(store.providerName)" :size="22" />
                   <span class="mm-pinned-body">
                     <span class="mm-name">{{ getModelDisplayName(store.providerName, store.modelName) }}</span>
                     <span class="mm-id">{{ modelSubline(store.providerName, currentModelInfo) }}</span>
@@ -749,7 +757,7 @@ watch(() => store.imageSupport, (supported) => {
                       class="mm-row"
                       @click="selectModel(r.provider, r.model)"
                     >
-                      <ProviderIcon :provider="r.provider" :size="22" />
+                      <ProviderIcon :provider="r.provider" :custom="isCustomProvider(r.provider)" :size="22" />
                       <span class="mm-body">
                         <span class="mm-name">{{ getModelDisplayName(r.provider, r.model) }}</span>
                         <span class="mm-id">{{ modelSubline(r.provider, modelInfoFor(r.provider, r.model)) }}</span>
@@ -777,7 +785,7 @@ watch(() => store.imageSupport, (supported) => {
                       @keydown.enter.prevent="selectModel(p.id, m.id)"
                       @keydown.space.prevent="selectModel(p.id, m.id)"
                     >
-                      <ProviderIcon :provider="p.id" :size="22" />
+                      <ProviderIcon :provider="p.id" :custom="p.custom" :size="22" />
                       <span class="mm-body">
                         <span class="mm-name">{{ m.name || m.id }}</span>
                         <span class="mm-id">{{ modelSubline(p.id, m) }}</span>

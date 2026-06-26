@@ -1154,6 +1154,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	type providerInfo struct {
 		ID     string      `json:"id"`
 		Name   string      `json:"name"`
+		Custom bool        `json:"custom,omitempty"`
 		Models []modelInfo `json:"models"`
 	}
 
@@ -1169,7 +1170,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		if len(models) == 0 {
 			continue
 		}
-		pi := providerInfo{ID: rp.ID, Name: rp.Name}
+		pi := providerInfo{ID: rp.ID, Name: rp.Name, Custom: rp.Custom}
 		for _, m := range models {
 			ctx := 0
 			if m.Limit != nil {
@@ -3117,6 +3118,11 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	type customModelView struct {
+		ID        string `json:"id"`
+		Name      string `json:"name,omitempty"`
+		Reasoning bool   `json:"reasoning,omitempty"`
+	}
 	type providerDetail struct {
 		ID              string            `json:"id"`
 		Name            string            `json:"name,omitempty"` // display name for custom providers
@@ -3125,6 +3131,7 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		APIKey          string            `json:"api_key,omitempty"` // masked
 		BaseURL         string            `json:"base_url,omitempty"`
 		Headers         map[string]string `json:"headers,omitempty"` // values masked
+		CustomModels    []customModelView `json:"custom_models,omitempty"`
 		Vision          *bool             `json:"vision,omitempty"`
 		Thinking        *bool             `json:"thinking,omitempty"`
 		ReasoningEffort string            `json:"reasoning_effort,omitempty"`
@@ -3141,11 +3148,17 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 			Thinking:        pc.Thinking,
 			ReasoningEffort: pc.ReasoningEffort,
 		}
-		// A provider is "custom" if it isn't in the registry. The registry may
-		// be nil in setup mode; treat that as custom only when it also has a
-		// non-registry-style id (name set) to avoid mislabeling during setup.
+		// A provider is "custom" when it exists only because the user configured
+		// it (an OpenAI-compatible endpoint), not as a built-in registry brand.
+		// MergeConfigProviders flags those on the registry entry; a configured id
+		// with no registry entry at all is custom too. The registry may be nil in
+		// setup mode — fall back to "has a display name" as the custom signal.
 		if s.registry != nil {
-			detail.Custom = !s.registry.HasProvider(id)
+			if prov := s.registry.GetProvider(id); prov != nil {
+				detail.Custom = prov.Custom
+			} else {
+				detail.Custom = true
+			}
 		} else if pc.Name != "" {
 			detail.Custom = true
 		}
@@ -3158,6 +3171,13 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 				masked[k] = maskSecret(v)
 			}
 			detail.Headers = masked
+		}
+		if len(pc.CustomModels) > 0 {
+			cms := make([]customModelView, 0, len(pc.CustomModels))
+			for _, m := range pc.CustomModels {
+				cms = append(cms, customModelView{ID: m.ID, Name: m.Name, Reasoning: m.Reasoning})
+			}
+			detail.CustomModels = cms
 		}
 		result = append(result, detail)
 	}
@@ -3210,6 +3230,10 @@ func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "base_url is required for custom providers"})
 		return
 	}
+	if isCustom && strings.TrimSpace(req.Model) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "model is required for custom providers"})
+		return
+	}
 
 	pc := &config.ProviderConfig{
 		APIKey:          req.APIKey,
@@ -3256,8 +3280,9 @@ func validReasoningEffort(v string) bool {
 	return false
 }
 
-// cleanHeaders drops rows with an empty key and trims whitespace, so blank
-// editor rows from the UI never reach the saved config.
+// cleanHeaders drops rows with an empty key and trims whitespace from both key
+// and value, so blank editor rows never reach the saved config and a pasted
+// token with a stray trailing space does not silently break auth.
 func cleanHeaders(in map[string]string) map[string]string {
 	if len(in) == 0 {
 		return nil
@@ -3268,7 +3293,7 @@ func cleanHeaders(in map[string]string) map[string]string {
 		if k == "" {
 			continue
 		}
-		out[k] = v
+		out[k] = strings.TrimSpace(v)
 	}
 	if len(out) == 0 {
 		return nil
@@ -3287,13 +3312,18 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		APIKey          string            `json:"api_key,omitempty"`
-		BaseURL         string            `json:"base_url,omitempty"`
-		Name            string            `json:"name,omitempty"`
-		Headers         map[string]string `json:"headers,omitempty"`
-		Vision          *bool             `json:"vision,omitempty"`
-		Thinking        *bool             `json:"thinking,omitempty"`
-		ReasoningEffort string            `json:"reasoning_effort,omitempty"`
+		APIKey       string            `json:"api_key,omitempty"`
+		BaseURL      string            `json:"base_url,omitempty"`
+		Name         string            `json:"name,omitempty"`
+		Headers      map[string]string `json:"headers,omitempty"`
+		CustomModels *[]struct {
+			ID        string `json:"id"`
+			Name      string `json:"name,omitempty"`
+			Reasoning bool   `json:"reasoning,omitempty"`
+		} `json:"custom_models,omitempty"`
+		Vision          *bool  `json:"vision,omitempty"`
+		Thinking        *bool  `json:"thinking,omitempty"`
+		ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -3349,6 +3379,44 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 			merged[k] = v
 		}
 		pc.Headers = merged
+	}
+
+	// Replace the provider's custom models when the client sends the list (nil ⇒
+	// keep existing). Each model's stored Context is preserved by merging on id,
+	// ToolCall stays true (matching the add path), and the model currently set as
+	// active cannot be dropped so a save can't strand the running app.
+	if req.CustomModels != nil {
+		prev := make(map[string]config.CustomModelConfig, len(pc.CustomModels))
+		for _, m := range pc.CustomModels {
+			prev[m.ID] = m
+		}
+		next := make([]config.CustomModelConfig, 0, len(*req.CustomModels))
+		seen := make(map[string]bool, len(*req.CustomModels))
+		for _, m := range *req.CustomModels {
+			mid := strings.TrimSpace(m.ID)
+			if mid == "" || seen[mid] {
+				continue
+			}
+			seen[mid] = true
+			cm := config.CustomModelConfig{ID: mid, Name: strings.TrimSpace(m.Name), ToolCall: true, Reasoning: m.Reasoning}
+			if old, ok := prev[mid]; ok {
+				cm.Context = old.Context
+			}
+			next = append(next, cm)
+		}
+		if strings.HasPrefix(cfg.Model, id+"/") {
+			active := strings.TrimPrefix(cfg.Model, id+"/")
+			if _, wasThere := prev[active]; wasThere && !seen[active] {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot remove the active model; switch to another model first"})
+				return
+			}
+		}
+		isCustom := s.registry == nil || !s.registry.HasProvider(id)
+		if isCustom && len(next) == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "custom providers need at least one model"})
+			return
+		}
+		pc.CustomModels = next
 	}
 
 	if cfg.Providers == nil {

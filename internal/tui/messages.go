@@ -48,14 +48,6 @@ func GetResumeChannel() <-chan string {
 	return resumeCh
 }
 
-// approvalCh is used to pass tool approval requests from main goroutine to TUI.
-var approvalCh = make(chan ToolApprovalRequestMsg, 1)
-
-// GetApprovalChannel returns the channel that receives tool approval requests.
-func GetApprovalChannel() chan ToolApprovalRequestMsg {
-	return approvalCh
-}
-
 // --- Messages ---
 
 type AgentTextMsg struct{ Text string }

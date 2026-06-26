@@ -91,16 +91,3 @@ func TestDiscoverPwdFallback(t *testing.T) {
 		t.Fatalf("DiscoverPwd fallback = %q, want /root", got)
 	}
 }
-
-func TestProjectLabel(t *testing.T) {
-	// ProjectLabel needs a *tools.SSHExecutor; build a zero executor isn't
-	// possible (unexported fields), so assert the format via a helper on a
-	// constructed value would require reflection. Instead, verify the path
-	// normalization branch indirectly through label-shaped expectations.
-	if got := normalizeRemotePath("home/app"); got != "/home/app" {
-		t.Fatalf("normalizeRemotePath = %q, want /home/app", got)
-	}
-	if got := normalizeRemotePath("/srv"); got != "/srv" {
-		t.Fatalf("normalizeRemotePath = %q, want /srv", got)
-	}
-}

@@ -834,16 +834,6 @@ func containsModelPattern(model, pattern string) bool {
 			(len(model) > len(pattern) && (model[:len(pattern)] == pattern || model[len(model)-len(pattern):] == pattern)))
 }
 
-// GetTokenUsage returns the current token usage statistics
-func GetTokenUsage() (prompt, completion, total int64) {
-	return TokenTracker.Get()
-}
-
-// ResetTokenUsage resets the token usage tracker
-func ResetTokenUsage() {
-	TokenTracker.Reset()
-}
-
 // GetModelContextLimit returns the known context limit for a given model name.
 // Returns 0 if the model is not in the known list.
 func GetModelContextLimit(modelName string) int {

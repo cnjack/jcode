@@ -300,9 +300,6 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case m.selectedProvider.NeedURL || m.selectedProvider.BaseURL == "":
 					m.state = StateURL
 					m.urlIn.Focus()
-				case m.selectedProvider.NeedURL:
-					m.state = StateCustomModel
-					m.customModelIn.Focus()
 				default:
 					m.state = StateProvider
 				}

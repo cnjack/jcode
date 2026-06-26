@@ -315,6 +315,10 @@ export default {
       customUrlRequired: 'Base URL is required for custom providers',
       customReasoning: 'Reasoning model',
       customReasoningDesc: 'Expose reasoning-effort control for this model',
+      customModels: 'Custom Models',
+      customModelsHint: 'Models you can route to on this provider.',
+      addModel: 'Add model',
+      customModelNamePlaceholder: 'Display name (optional)',
     },
     mcp: {
       title: 'MCP Servers',

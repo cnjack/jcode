@@ -16,6 +16,10 @@ type RegistryProvider struct {
 	API    string                    `json:"api"`
 	Doc    string                    `json:"doc,omitempty"`
 	Models map[string]*RegistryModel `json:"models"`
+	// Custom is true for providers that exist only because the user configured
+	// them (an OpenAI-compatible endpoint not in models.dev), as opposed to a
+	// built-in registry brand. Set during MergeConfigProviders.
+	Custom bool `json:"custom,omitempty"`
 }
 
 // RegistryModel represents a model from models.dev API.
@@ -186,6 +190,7 @@ func (r *ModelRegistry) MergeConfigProviders(providers map[string]*config.Provid
 				API:    provCfg.BaseURL,
 				Env:    []string{envKey},
 				Models: make(map[string]*RegistryModel),
+				Custom: true,
 			}
 			r.providers[provID] = prov
 			r.providerOrder = append(r.providerOrder, provID)
