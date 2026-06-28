@@ -5,6 +5,7 @@
 export default {
   common: {
     ok: '確定',
+    add: '添加',
     cancel: '取消',
     close: '關閉',
     back: '返回',

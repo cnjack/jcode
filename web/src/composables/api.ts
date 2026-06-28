@@ -1,5 +1,5 @@
 // API client for jcode backend
-import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, CustomModelDetail, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData } from '@/types/api'
+import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, CustomModelDetail, ValidateResult, CatalogModel, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData } from '@/types/api'
 import type { AutomationItem, AutomationRun, AutomationTemplate, AutomationCreate, Automation } from '@/types/automation'
 import { apiBase } from './apiBase'
 
@@ -254,7 +254,7 @@ export const api = {
   setupStatus: () =>
     request<{ needs_setup: boolean }>('/api/setup/status'),
   setupValidate: (data: { provider: string; api_key: string; base_url?: string; headers?: Record<string, string> }) =>
-    request<{ valid: boolean; error?: string }>('/api/setup/validate', {
+    request<ValidateResult>('/api/setup/validate', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
@@ -262,18 +262,23 @@ export const api = {
   // Provider management
   listProviders: () =>
     request<ProviderDetail[]>('/api/providers'),
-  addProvider: (data: { id: string; api_key: string; name?: string; model?: string; model_reasoning?: boolean } & ProviderAdvanced) =>
+  addProvider: (data: { id: string; api_key: string; name?: string; model?: string; model_reasoning?: boolean; vision?: boolean; thinking?: boolean; reasoning_effort?: string } & ProviderAdvanced) =>
     request<{ status: string }>('/api/providers', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  updateProvider: (id: string, data: { api_key?: string; name?: string; custom_models?: CustomModelDetail[] } & ProviderAdvanced) =>
+  updateProvider: (id: string, data: { api_key?: string; name?: string; custom_models?: CustomModelDetail[]; vision?: boolean; thinking?: boolean; reasoning_effort?: string } & ProviderAdvanced) =>
     request<{ status: string }>(`/api/providers/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
   deleteProvider: (id: string) =>
     request<{ status: string }>(`/api/providers/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // Browse a provider's model catalog (built-in for registry providers, live
+  // /models for custom endpoints). Each entry is flagged added=true when already
+  // configured, so the UI renders "+ add" / "✓ added" toggles.
+  providerCatalog: (id: string) =>
+    request<CatalogModel[]>(`/api/providers/${encodeURIComponent(id)}/models`),
 
   // Model state
   modelState: () =>

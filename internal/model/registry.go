@@ -209,14 +209,21 @@ func (r *ModelRegistry) MergeConfigProviders(providers map[string]*config.Provid
 				Name:           name,
 				ToolCall:       cm.ToolCall,
 				Reasoning:      cm.Reasoning,
+				Attachment:     cm.Attachment,
 				DefaultEnabled: true,
 			}
 			// A custom model flagged as reasoning gets the standard OpenAI-compatible
 			// effort levels, so the chat picker's effort control can render for it.
 			// Custom models not flagged reasoning stay without reasoning_options —
 			// the effort control is hidden for them, matching "not specified ⇒ none".
+			// When EffortTiers is provided, it replaces the standard set so users can
+			// configure exactly which effort levels (e.g. high/max) a model offers.
 			if cm.Reasoning {
-				rm.ReasoningOptions = standardEffortOptions()
+				if len(cm.EffortTiers) > 0 {
+					rm.ReasoningOptions = []ReasoningOption{{Type: "effort", Values: cm.EffortTiers}}
+				} else {
+					rm.ReasoningOptions = standardEffortOptions()
+				}
 			}
 			if cm.Context > 0 {
 				rm.Limit = &ModelLimit{Context: cm.Context}

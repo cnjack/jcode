@@ -356,6 +356,10 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/providers", s.handleAddProvider)
 	mux.HandleFunc("PUT /api/providers/{id}", s.handleUpdateProvider)
 	mux.HandleFunc("DELETE /api/providers/{id}", s.handleDeleteProvider)
+	// Browse a provider's model catalog. For registry providers this returns the
+	// built-in model list; for custom endpoints it queries the live /models
+	// endpoint. Each entry is flagged added=true when already configured.
+	mux.HandleFunc("GET /api/providers/{id}/models", s.handleProviderCatalog)
 
 	// History management.
 	mux.HandleFunc("POST /api/history/truncate", s.handleTruncateHistory)
@@ -1160,13 +1164,19 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 
 	modelState, _ := config.LoadModelState()
 
+	// Rebuild the registry from the live config so models added at runtime
+	// (custom models saved via the providers API) appear immediately in the chat
+	// model picker. The startup registry (s.registry) is a snapshot and would not
+	// reflect these additions until a restart.
+	registry := model.NewModelRegistryWithConfig(s.cfg)
+
 	var result []providerInfo
 	configuredProviders := s.cfg.GetProviders()
-	for _, rp := range s.registry.ListProviders() {
+	for _, rp := range registry.ListProviders() {
 		if _, configured := configuredProviders[rp.ID]; !configured {
 			continue
 		}
-		models := s.registry.ListProviderModels(rp.ID, true)
+		models := registry.ListProviderModels(rp.ID, true)
 		if len(models) == 0 {
 			continue
 		}
@@ -2847,16 +2857,20 @@ func (s *Server) handleSetupValidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := model.ValidateProvider(r.Context(), req.APIKey, baseURL, req.Headers); err != nil {
+	res := model.ValidateProviderDetailed(r.Context(), req.APIKey, baseURL, req.Headers)
+	if !res.OK {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"valid": false,
-			"error": err.Error(),
+			"valid":      false,
+			"error":      res.Error,
+			"error_type": res.ErrorType,
 		})
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"valid": true,
+		"valid":       true,
+		"latency_ms":  res.LatencyMS,
+		"model_count": res.ModelCount,
 	})
 }
 
@@ -2968,7 +2982,185 @@ func (s *Server) handleSetupProviderModels(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, result)
 }
 
-// handleSetupComplete handles the initial setup submission.
+// handleProviderCatalog returns a provider's browsable model catalog for the
+// "browse directory" UI. For registry providers it lists the built-in models
+// (the official /models endpoint is not reliably complete); for custom
+// (OpenAI-compatible) endpoints it queries the live /models endpoint. Each
+// entry is flagged added=true when the model is already in the provider's
+// config (either as a CustomModelConfig or a registry model that's enabled).
+func (s *Server) handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
+	providerID := r.PathValue("id")
+	if providerID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider id is required"})
+		return
+	}
+
+	type catalogEntry struct {
+		ID          string   `json:"id"`
+		Name        string   `json:"name,omitempty"`
+		Added       bool     `json:"added"`
+		Context     int      `json:"context,omitempty"`
+		Reasoning   bool     `json:"reasoning,omitempty"`
+		Attachment  bool     `json:"attachment,omitempty"`
+		EffortTiers []string `json:"effort_tiers,omitempty"`
+		// Custom marks a user-defined model (editable/removable) vs a built-in
+		// registry model (toggled via model_state). Surfaced so the catalog row can
+		// show edit/remove affordances only on user custom models.
+		Custom bool `json:"custom,omitempty"`
+	}
+
+	// Collect the set of already-configured model ids for this provider, so each
+	// catalog entry can be flagged added/可移除. Custom models come from config;
+	// for registry providers, MergeConfigProviders has already merged custom
+	// models into the registry, so registry membership is the source of truth.
+	configured := make(map[string]bool)
+	customSet := make(map[string]*config.CustomModelConfig) // user-defined models by id
+	var apiKey, baseURL string
+	var headers map[string]string
+	cfg, _ := config.LoadConfig()
+	if cfg != nil {
+		if pc := cfg.GetProviders()[providerID]; pc != nil {
+			apiKey, baseURL, headers = pc.APIKey, pc.BaseURL, pc.Headers
+			for _, m := range pc.CustomModels {
+				configured[m.ID] = true
+				cm := m // copy for map value
+				customSet[m.ID] = &cm
+			}
+		}
+	}
+
+	// customEntry builds a catalogEntry from a user-defined CustomModelConfig.
+	customEntry := func(id string) catalogEntry {
+		m := customSet[id]
+		e := catalogEntry{ID: id, Added: true, Custom: true}
+		if m != nil {
+			e.Name = m.Name
+			e.Context = m.Context
+			e.Reasoning = m.Reasoning
+			e.Attachment = m.Attachment
+			e.EffortTiers = m.EffortTiers
+		}
+		return e
+	}
+
+	// resolveRegistryBrand finds a registry provider whose brand keyword appears
+	// in the given id/url — so a custom endpoint pointing at, say, zhipu's API
+	// still surfaces zhipu's models.dev catalog rather than a fragile live
+	// /models probe. Returns "" when no brand matches.
+	resolveRegistryBrand := func(hint string) string {
+		if s.registry == nil {
+			return ""
+		}
+		hint = strings.ToLower(hint)
+		for _, rp := range s.registry.ListProviders() {
+			// Use the registry id as the brand keyword (e.g. "zhipuai", "openai",
+			// "deepseek"); these already encode the brand and are stable.
+			brand := strings.ToLower(rp.ID)
+			if brand != "" && strings.Contains(hint, brand) {
+				return rp.ID
+			}
+		}
+		return ""
+	}
+
+	// The catalog defaults to the built-in (models.dev) catalog — this is the
+	// reliable source, since many endpoints either lack a /models route or
+	// return an incomplete list. Exact id match first; otherwise a brand match
+	// on the provider id or base URL (so a custom zhipu endpoint still shows the
+	// zhipu catalog).
+	registryID := providerID
+	if s.registry == nil || !s.registry.HasProvider(registryID) {
+		if hint := resolveRegistryBrand(providerID + " " + baseURL); hint != "" {
+			registryID = hint
+		}
+	}
+	if s.registry != nil && s.registry.HasProvider(registryID) {
+		models := s.registry.ListProviderModels(registryID, true)
+		result := make([]catalogEntry, 0, len(models))
+		for _, m := range models {
+			// A user-defined custom model is merged into the registry by
+			// MergeConfigProviders, so it appears here too. For those, build the
+			// entry from the stored CustomModelConfig (which carries the
+			// user-set name/context/tiers) rather than the derived registry view —
+			// otherwise effort tiers and other authored fields are lost.
+			if cm := customSet[m.ID]; cm != nil {
+				result = append(result, catalogEntry{
+					ID:          m.ID,
+					Name:        cm.Name,
+					Added:       true,
+					Context:     cm.Context,
+					Reasoning:   cm.Reasoning,
+					Attachment:  cm.Attachment,
+					EffortTiers: cm.EffortTiers,
+					Custom:      true,
+				})
+				continue
+			}
+			ctx := 0
+			if m.Limit != nil {
+				ctx = m.Limit.Context
+			}
+			result = append(result, catalogEntry{
+				ID:         m.ID,
+				Name:       m.Name,
+				Added:      configured[m.ID] || m.DefaultEnabled,
+				Context:    ctx,
+				Reasoning:  m.Reasoning,
+				Attachment: m.Attachment,
+				Custom:     false,
+			})
+		}
+		// Also surface any user-added custom models not in the brand catalog, so
+		// the catalog isn't missing models the user explicitly configured.
+		for id := range configured {
+			found := false
+			for _, e := range result {
+				if e.ID == id {
+					found = true
+					break
+				}
+			}
+			if !found {
+				result = append(result, customEntry(id))
+			}
+		}
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+
+	// Truly custom endpoint with no brand match: probe the live /models endpoint
+	// as a last resort. Many gateways support the OpenAI-compatible /models list;
+	// on any failure we fall back to just the configured models so the catalog is
+	// never empty/erroring.
+	if baseURL != "" {
+		if ids := model.ListProviderModelsLive(r.Context(), apiKey, baseURL, headers); len(ids) > 0 {
+			result := make([]catalogEntry, 0, len(ids))
+			seen := make(map[string]bool, len(ids))
+			for _, id := range ids {
+				if seen[id] {
+					continue
+				}
+				seen[id] = true
+				if c := customSet[id]; c != nil {
+					result = append(result, customEntry(id))
+				} else {
+					result = append(result, catalogEntry{ID: id, Added: configured[id]})
+				}
+			}
+			writeJSON(w, http.StatusOK, result)
+			return
+		}
+	}
+
+	// No registry brand and no live /models: show the configured custom models
+	// (added=true, custom=true) so the catalog reflects what's actually usable.
+	result := make([]catalogEntry, 0, len(configured))
+	for id := range configured {
+		result = append(result, customEntry(id))
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 // It saves the provider config and creates the agent.
 //
 // The wizard no longer forces a model selection: for registry providers, a
@@ -3119,9 +3311,16 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type customModelView struct {
-		ID        string `json:"id"`
-		Name      string `json:"name,omitempty"`
-		Reasoning bool   `json:"reasoning,omitempty"`
+		ID          string   `json:"id"`
+		Name        string   `json:"name,omitempty"`
+		Reasoning   bool     `json:"reasoning,omitempty"`
+		Context     int      `json:"context,omitempty"`
+		Attachment  bool     `json:"attachment,omitempty"`
+		EffortTiers []string `json:"effort_tiers,omitempty"`
+		// Custom marks a user-defined model (editable) vs a built-in registry
+		// model surfaced for display (read-only). Omitted/zero ⇒ treated as a
+		// user custom model for backward compatibility, but we always set it.
+		Custom bool `json:"custom,omitempty"`
 	}
 	type providerDetail struct {
 		ID              string            `json:"id"`
@@ -3172,11 +3371,63 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 			}
 			detail.Headers = masked
 		}
-		if len(pc.CustomModels) > 0 {
-			cms := make([]customModelView, 0, len(pc.CustomModels))
-			for _, m := range pc.CustomModels {
-				cms = append(cms, customModelView{ID: m.ID, Name: m.Name, Reasoning: m.Reasoning})
+		// Build the card's unified model list. For registry providers this is the
+		// built-in (models.dev) models the user has enabled, each marked read-only
+		// (Custom=false); the user's CustomModels are then appended and marked
+		// editable (Custom=true). The card renders them identically and only
+		// surfaces edit/delete affordances on editable rows.
+		cms := make([]customModelView, 0)
+		seen := make(map[string]bool)
+		// Track which ids are user-defined custom models so the registry loop can
+		// skip them (they're merged into the registry by MergeConfigProviders but
+		// must surface with their authored fields from CustomModelConfig, handled
+		// in the custom loop below).
+		customIDs := make(map[string]bool, len(pc.CustomModels))
+		for _, m := range pc.CustomModels {
+			customIDs[m.ID] = true
+		}
+		if !detail.Custom && s.registry != nil && s.registry.HasProvider(id) {
+			for _, m := range s.registry.ListProviderModels(id, true) {
+				if !m.DefaultEnabled {
+					continue
+				}
+				if customIDs[m.ID] {
+					continue // user custom model — emitted below with authored fields
+				}
+				if seen[m.ID] {
+					continue
+				}
+				seen[m.ID] = true
+				ctx := 0
+				if m.Limit != nil {
+					ctx = m.Limit.Context
+				}
+				cms = append(cms, customModelView{
+					ID:         m.ID,
+					Name:       m.Name,
+					Reasoning:  m.Reasoning,
+					Context:    ctx,
+					Attachment: m.Attachment,
+					Custom:     false,
+				})
 			}
+		}
+		for _, m := range pc.CustomModels {
+			if seen[m.ID] {
+				continue
+			}
+			seen[m.ID] = true
+			cms = append(cms, customModelView{
+				ID:          m.ID,
+				Name:        m.Name,
+				Reasoning:   m.Reasoning,
+				Context:     m.Context,
+				Attachment:  m.Attachment,
+				EffortTiers: m.EffortTiers,
+				Custom:      true,
+			})
+		}
+		if len(cms) > 0 {
 			detail.CustomModels = cms
 		}
 		result = append(result, detail)
@@ -3187,8 +3438,9 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAddProvider adds a new provider to the config. For custom
-// (non-registry) providers the caller should also send a name and at least one
-// model so the provider is usable as an active model.
+// (non-registry) providers the caller should also send a name; models are
+// optional here and are added afterward from the provider card (the dialog only
+// captures the connection).
 func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ID              string            `json:"id"`
@@ -3224,14 +3476,12 @@ func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// A custom provider (not in the registry) needs a base URL so requests can
-	// be routed, and at least one model id to be usable.
+	// be routed. Models are optional at creation time: the provider is created
+	// connection-only and models are added afterward from its card, so a brand
+	// new custom endpoint can be saved before its model list is known.
 	isCustom := s.registry == nil || !s.registry.HasProvider(req.ID)
 	if isCustom && req.BaseURL == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "base_url is required for custom providers"})
-		return
-	}
-	if isCustom && strings.TrimSpace(req.Model) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "model is required for custom providers"})
 		return
 	}
 
@@ -3317,9 +3567,12 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		Name         string            `json:"name,omitempty"`
 		Headers      map[string]string `json:"headers,omitempty"`
 		CustomModels *[]struct {
-			ID        string `json:"id"`
-			Name      string `json:"name,omitempty"`
-			Reasoning bool   `json:"reasoning,omitempty"`
+			ID          string   `json:"id"`
+			Name        string   `json:"name,omitempty"`
+			Reasoning   bool     `json:"reasoning,omitempty"`
+			Context     int      `json:"context,omitempty"`
+			Attachment  bool     `json:"attachment,omitempty"`
+			EffortTiers []string `json:"effort_tiers,omitempty"`
 		} `json:"custom_models,omitempty"`
 		Vision          *bool  `json:"vision,omitempty"`
 		Thinking        *bool  `json:"thinking,omitempty"`
@@ -3399,10 +3652,51 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 			}
 			seen[mid] = true
 			cm := config.CustomModelConfig{ID: mid, Name: strings.TrimSpace(m.Name), ToolCall: true, Reasoning: m.Reasoning}
+			// Adopt the incoming per-model capability fields when provided;
+			// otherwise carry over the previously stored values so an edit that
+			// only renames a model doesn't silently drop its context window,
+			// vision flag, or configured effort tiers.
 			if old, ok := prev[mid]; ok {
-				cm.Context = old.Context
+				if cm.Context == 0 {
+					cm.Context = old.Context
+				}
+				if !cm.Attachment {
+					cm.Attachment = old.Attachment
+				}
+				if len(cm.EffortTiers) == 0 {
+					cm.EffortTiers = old.EffortTiers
+				}
+			}
+			if m.Context > 0 {
+				cm.Context = m.Context
+			}
+			if m.Attachment {
+				cm.Attachment = true
+			}
+			if len(m.EffortTiers) > 0 {
+				cm.EffortTiers = m.EffortTiers
 			}
 			next = append(next, cm)
+		}
+		// Reject custom model ids that collide with the provider's built-in
+		// (registry) models. A duplicate id would shadow or be shadowed by the
+		// registry entry, confusing the model picker and catalog. Custom ids
+		// may still be edited to their own value (handled by seen dedup above).
+		if s.registry != nil {
+			if regProv := s.registry.GetProvider(id); regProv != nil {
+				for _, cm := range next {
+					if _, ok := regProv.Models[cm.ID]; ok {
+						// Allow it only if it was already a custom model with this id
+						// (editing an existing custom entry in place).
+						if _, wasCustom := prev[cm.ID]; !wasCustom {
+							writeJSON(w, http.StatusBadRequest, map[string]string{
+								"error": "model id '" + cm.ID + "' duplicates a built-in model; choose another id",
+							})
+							return
+						}
+					}
+				}
+			}
 		}
 		if strings.HasPrefix(cfg.Model, id+"/") {
 			active := strings.TrimPrefix(cfg.Model, id+"/")
@@ -3427,6 +3721,14 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config: " + err.Error()})
 		return
 	}
+
+	// Publish the updated config + registry to the live server so the chat model
+	// picker (/api/models) and catalog reflect added/edited/removed models
+	// without a restart — matching handleSetupComplete's publish step.
+	s.cfgMu.Lock()
+	s.cfg = cfg
+	s.registry = model.NewModelRegistryWithConfig(cfg)
+	s.cfgMu.Unlock()
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

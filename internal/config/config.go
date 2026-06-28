@@ -47,6 +47,15 @@ type CustomModelConfig struct {
 	ToolCall  bool   `json:"tool_call,omitempty"`
 	Reasoning bool   `json:"reasoning,omitempty"`
 	Context   int    `json:"context,omitempty"`
+	// Attachment marks the model as accepting image inputs. When false (the
+	// default) the model inherits the provider-level Vision override (if set) or
+	// the registry default (allow images).
+	Attachment bool `json:"attachment,omitempty"`
+	// EffortTiers are the selectable reasoning-effort levels for a reasoning
+	// model, e.g. ["minimal","low","medium","high","max"]. When Reasoning is true
+	// and this is non-empty, it overrides the default standard effort options;
+	// when empty the standard set (minimal/low/medium/high) is used.
+	EffortTiers []string `json:"effort_tiers,omitempty"`
 }
 
 // SSHAlias represents a saved SSH connection alias

@@ -60,17 +60,17 @@ type RegistryProvider struct {
 
 // RegistryModel represents a model from models.dev API.
 type RegistryModel struct {
-	ID               string           `json:"id"`
-	Name             string           `json:"name"`
-	Family           string           `json:"family,omitempty"`
-	Attachment       bool             `json:"attachment,omitempty"`
-	Reasoning        bool             `json:"reasoning,omitempty"`
-	ToolCall         bool             `json:"tool_call,omitempty"`
-	StructuredOutput bool             `json:"structured_output,omitempty"`
-	Temperature      bool             `json:"temperature,omitempty"`
-	Knowledge        string           `json:"knowledge,omitempty"`
-	ReleaseDate      string           `json:"release_date,omitempty"`
-	LastUpdated      string           `json:"last_updated,omitempty"`
+	ID               string            `json:"id"`
+	Name             string            `json:"name"`
+	Family           string            `json:"family,omitempty"`
+	Attachment       bool              `json:"attachment,omitempty"`
+	Reasoning        bool              `json:"reasoning,omitempty"`
+	ToolCall         bool              `json:"tool_call,omitempty"`
+	StructuredOutput bool              `json:"structured_output,omitempty"`
+	Temperature      bool              `json:"temperature,omitempty"`
+	Knowledge        string            `json:"knowledge,omitempty"`
+	ReleaseDate      string            `json:"release_date,omitempty"`
+	LastUpdated      string            `json:"last_updated,omitempty"`
 	Modalities       *ModelModalities  `json:"modalities,omitempty"`
 	OpenWeights      bool              `json:"open_weights,omitempty"`
 	Cost             *ModelCost        `json:"cost,omitempty"`

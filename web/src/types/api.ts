@@ -615,6 +615,10 @@ export interface CustomModelDetail {
   id: string
   name?: string
   reasoning?: boolean
+  context?: number // context window in tokens
+  attachment?: boolean // accepts image inputs (vision)
+  effort_tiers?: string[] // selectable reasoning-effort levels, e.g. ['low','medium','high']
+  custom?: boolean // true = user-defined (editable); false/undefined = built-in registry (read-only)
 }
 
 export interface ProviderDetail {
@@ -626,6 +630,9 @@ export interface ProviderDetail {
   base_url?: string
   headers?: Record<string, string> // values masked
   custom_models?: CustomModelDetail[]
+  vision?: boolean // provider-level image-input override (null ⇒ registry default)
+  thinking?: boolean // provider-level extended-reasoning toggle
+  reasoning_effort?: string // provider-level default effort
 }
 
 // Advanced provider settings shared by the add/update payloads. Capabilities
@@ -634,6 +641,32 @@ export interface ProviderDetail {
 export interface ProviderAdvanced {
   base_url?: string
   headers?: Record<string, string>
+}
+
+// Result of a connection test against a provider's /models endpoint. On success
+// it carries the measured latency and the number of advertised models; on
+// failure the error is classified (auth | network | server) so the UI can show
+// a targeted message.
+export interface ValidateResult {
+  valid: boolean
+  latency_ms?: number
+  model_count?: number
+  error?: string
+  error_type?: 'auth' | 'network' | 'server' | ''
+}
+
+// A model entry in a provider's browsable catalog (the "browse directory" UI).
+// `added` reflects whether the model is already configured for this provider,
+// so each row renders as "+ add" or "✓ added" (toggle to remove).
+export interface CatalogModel {
+  id: string
+  name?: string
+  added?: boolean
+  context?: number
+  reasoning?: boolean
+  attachment?: boolean
+  effort_tiers?: string[] // selectable reasoning-effort levels (custom models)
+  custom?: boolean // true = user-defined (editable/removable); false/undefined = registry model
 }
 
 // Model state types
