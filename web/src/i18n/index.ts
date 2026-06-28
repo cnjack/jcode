@@ -51,7 +51,7 @@ function isSupported(value: string | null | undefined): value is SupportedLocale
 
 // localStorage first, then the browser language (matching only the primary
 // subtag — `zh-TW` maps to `zh-Hant`, `en-GB` maps to `en`), then English.
-export function getDefaultLocale(): SupportedLocale {
+function getDefaultLocale(): SupportedLocale {
   if (typeof window === 'undefined') return FALLBACK
   const stored = localStorage.getItem(STORAGE_KEY)
   if (isSupported(stored)) return stored

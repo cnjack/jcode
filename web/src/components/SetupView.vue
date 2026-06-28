@@ -12,7 +12,7 @@ import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
 import { api } from '@/composables/api'
 import ProviderIcon from './ProviderIcon.vue'
-import type { SetupProvider, SetupModel } from '@/types/api'
+import type { SetupProvider } from '@/types/api'
 
 const emit = defineEmits<{
   complete: []
@@ -21,7 +21,10 @@ const emit = defineEmits<{
 const store = useChatStore()
 const { t } = useI18n()
 
-type Step = 'provider' | 'model' | 'apikey' | 'done'
+// The wizard no longer has a model-selection step: a default model is picked
+// server-side for registry providers. Custom (OpenAI-compatible) providers
+// must supply a model id, name and base URL.
+type Step = 'provider' | 'apikey' | 'done'
 const step = ref<Step>('provider')
 const loading = ref(false)
 const error = ref('')
@@ -30,30 +33,31 @@ const error = ref('')
 const providers = ref<SetupProvider[]>([])
 const selectedProvider = ref('')
 const providerSearch = ref('')
+const isCustom = ref(false) // chose "Custom" entry instead of a registry provider
 
-// Step 2: Model selection
-const models = ref<SetupModel[]>([])
-const selectedModel = ref('')
-const modelSearch = ref('')
-
-// Step 3: API Key
+// Step 2: API key + advanced
 const apiKey = ref('')
 const baseURL = ref('')
 const showApiKey = ref(false)
 const validating = ref(false)
 const validationResult = ref<{ valid: boolean; error?: string } | null>(null)
 
+// Custom provider fields (only when isCustom)
+const customName = ref('')
+const customId = ref('')
+const customModelId = ref('')
+const customReasoning = ref(false)
+
+// Advanced settings (custom endpoint + headers). Capabilities (vision/thinking/
+// reasoning_effort) are model-level, not provider-level, so they're not exposed
+// here — they're driven by each model's registry metadata.
+const advancedOpen = ref(false)
+const headers = ref<{ key: string; value: string }[]>([])
+
 const filteredProviders = computed(() => {
   const q = providerSearch.value.toLowerCase()
   return providers.value.filter(p =>
     p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q)
-  )
-})
-
-const filteredModels = computed(() => {
-  const q = modelSearch.value.toLowerCase()
-  return models.value.filter(m =>
-    m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)
   )
 })
 
@@ -76,59 +80,69 @@ async function loadProviders() {
 }
 onMounted(loadProviders)
 
-// Model list loader for the currently-selected provider — retryable from the
-// model step.
-async function loadModels() {
-  loading.value = true
-  error.value = ''
-  models.value = []
-  try {
-    models.value = await api.setupProviderModels(selectedProvider.value)
-  } catch {
-    error.value = 'Failed to load models'
-  }
-  loading.value = false
+function resetProviderState() {
+  apiKey.value = ''
+  baseURL.value = ''
+  showApiKey.value = false
+  validationResult.value = null
 }
 
 async function selectProvider(id: string) {
   // Switching to a different provider invalidates any key/base-url/validation
   // entered for the previous one — clear them so provider A's secret can't leak
   // into provider B's form and get submitted to B's endpoint.
-  if (id !== selectedProvider.value) {
-    apiKey.value = ''
-    baseURL.value = ''
-    showApiKey.value = false
-    validationResult.value = null
-  }
+  resetProviderState()
   selectedProvider.value = id
-  modelSearch.value = ''
-  // Advance to the model step regardless, so a load failure shows there with a
-  // Retry (instead of silently keeping the user on the provider step).
-  step.value = 'model'
-  await loadModels()
+  isCustom.value = false
+  customName.value = ''
+  customId.value = ''
+  customModelId.value = ''
+  customReasoning.value = false
+  headers.value = []
+  advancedOpen.value = false
+  step.value = 'apikey'
 }
 
-function selectModel(id: string) {
-  selectedModel.value = id
+function selectCustomProvider() {
+  resetProviderState()
+  selectedProvider.value = ''
+  isCustom.value = true
+  customName.value = ''
+  customId.value = ''
+  customModelId.value = ''
+  customReasoning.value = false
+  // Custom providers always need a base URL — surface the advanced panel.
+  baseURL.value = ''
+  headers.value = []
+  advancedOpen.value = true
   step.value = 'apikey'
 }
 
 function goBack() {
   error.value = ''
   validationResult.value = null
-  if (step.value === 'model') {
-    step.value = 'provider'
-    selectedProvider.value = ''
-    models.value = []
-    // Also clear the api-key step fields so a different provider chosen next
-    // doesn't inherit the previous one's key/base URL.
-    apiKey.value = ''
-    baseURL.value = ''
-    showApiKey.value = false
-  } else if (step.value === 'apikey') {
-    step.value = 'model'
-    selectedModel.value = ''
+  step.value = 'provider'
+  selectedProvider.value = ''
+  isCustom.value = false
+  resetProviderState()
+}
+
+function addHeaderRow() {
+  headers.value.push({ key: '', value: '' })
+}
+
+function removeHeaderRow(i: number) {
+  headers.value.splice(i, 1)
+}
+
+// Build the headers payload: drop rows with a blank key.
+function collectHeaders(): Record<string, string> | undefined {
+  const out: Record<string, string> = {}
+  for (const h of headers.value) {
+    const k = h.key.trim()
+    if (k) out[k] = h.value
   }
+  return Object.keys(out).length ? out : undefined
 }
 
 // A validated "Connected" / "Failed" result only describes the key+base-URL that
@@ -144,9 +158,10 @@ async function validateConnection() {
   validationResult.value = null
   try {
     validationResult.value = await api.setupValidate({
-      provider: selectedProvider.value,
+      provider: selectedProvider.value || 'openai-compatible',
       api_key: apiKey.value.trim(),
       base_url: baseURL.value.trim() || undefined,
+      headers: collectHeaders(),
     })
   } catch (err: unknown) {
     validationResult.value = { valid: false, error: err instanceof Error ? err.message : 'Validation failed' }
@@ -154,24 +169,47 @@ async function validateConnection() {
   validating.value = false
 }
 
+// The model the server picked (registry default, or the custom model id). Shown
+// on the done screen.
+const resolvedModel = ref('')
+
 async function submitSetup() {
   if (!apiKey.value.trim()) {
-    error.value = 'API Key is required'
+    error.value = t('setup.apiKeyRequired')
     return
+  }
+  if (isCustom.value) {
+    if (!customId.value.trim()) {
+      error.value = t('setup.customIdRequired')
+      return
+    }
+    if (!baseURL.value.trim()) {
+      error.value = t('setup.customUrlRequired')
+      return
+    }
+    if (!customModelId.value.trim()) {
+      error.value = t('setup.customModelRequired')
+      return
+    }
   }
   loading.value = true
   error.value = ''
   try {
-    await api.setupComplete({
-      provider: selectedProvider.value,
-      model: selectedModel.value,
+    const provider = isCustom.value ? customId.value.trim() : selectedProvider.value
+    const res = await api.setupComplete({
+      provider,
       api_key: apiKey.value.trim(),
+      model: isCustom.value ? customModelId.value.trim() : undefined,
+      model_reasoning: isCustom.value ? customReasoning.value : undefined,
       base_url: baseURL.value.trim() || undefined,
+      name: isCustom.value ? (customName.value.trim() || customId.value.trim()) : undefined,
+      headers: collectHeaders(),
     })
+    resolvedModel.value = res.model
     step.value = 'done'
     // Update store state
-    store.providerName = selectedProvider.value
-    store.modelName = selectedModel.value
+    store.providerName = provider
+    store.modelName = res.model
     // Refresh models list
     store.fetchModels()
   } catch (err: unknown) {
@@ -208,7 +246,7 @@ function finish() {
           </div>
           <h2 class="text-xl font-semibold mb-2" style="font-family: var(--font-sans); color: var(--color-foreground)">{{ t('setup.allSet') }}</h2>
           <p class="text-sm mb-6" style="color: var(--color-muted-foreground)">
-            Using <span class="font-mono" style="color: var(--color-foreground)">{{ selectedModel }}</span> via <span class="font-mono" style="color: var(--color-foreground)">{{ selectedProviderInfo?.name || selectedProvider }}</span>
+            {{ t('setup.usingModel', { model: resolvedModel, provider: isCustom ? (customName || customId) : (selectedProviderInfo?.name || selectedProvider) }) }}
           </p>
           <button
             class="px-6 py-2.5 rounded-lg text-sm font-medium transition-opacity cursor-pointer shadow-sm hover:opacity-90"
@@ -225,16 +263,16 @@ function finish() {
           <div class="flex items-center gap-2 px-6 pt-5 pb-3">
             <div class="flex items-center gap-1.5">
               <div
-                v-for="s in (['provider', 'model', 'apikey'] as const)"
+                v-for="s in (['provider', 'apikey'] as const)"
                 :key="s"
                 class="w-2 h-2 rounded-full transition-colors"
                 :style="{ backgroundColor: step === s
                   ? 'var(--color-primary)'
-                  : (['provider', 'model', 'apikey'].indexOf(step) > ['provider', 'model', 'apikey'].indexOf(s) ? 'var(--accent-fill)' : 'var(--color-border)') }"
+                  : (['provider', 'apikey'].indexOf(step) > ['provider', 'apikey'].indexOf(s) ? 'var(--accent-fill)' : 'var(--color-border)') }"
               />
             </div>
             <span class="text-[10px] uppercase tracking-wider ml-auto" style="color: var(--color-muted-foreground)">
-              {{ step === 'provider' ? t('setup.step', { n: 1, label: t('setup.chooseProvider') }) : step === 'model' ? t('setup.step', { n: 2, label: t('setup.chooseModel') }) : t('setup.step', { n: 3, label: t('setup.enterApiKey') }) }}
+              {{ step === 'provider' ? t('setup.step', { n: 1, label: t('setup.chooseProvider') }) : t('setup.step', { n: 2, label: t('setup.enterApiKey') }) }}
             </span>
           </div>
 
@@ -280,56 +318,30 @@ function finish() {
                   </div>
                 </div>
               </button>
-            </div>
-          </div>
 
-          <!-- Model selection -->
-          <div v-if="step === 'model'" class="px-6 pb-5">
-            <div class="flex items-center gap-2 mb-1">
-              <button class="setup-back transition-colors cursor-pointer" @click="goBack">
-                <ChevronRightIcon class="w-4 h-4" />
-              </button>
-              <h2 class="text-base font-semibold" style="font-family: var(--font-sans); color: var(--color-foreground)">{{ t('setup.chooseModel') }}</h2>
-            </div>
-            <p class="text-xs mb-3 ml-6" style="color: var(--color-muted-foreground)">{{ t('setup.for') }} <span class="font-mono">{{ selectedProviderInfo?.name }}</span></p>
-
-            <input
-              v-model="modelSearch"
-              type="text"
-              :placeholder="t('setup.searchModels')"
-              class="setup-input w-full px-3 py-2 text-sm rounded-lg mb-3 outline-none"
-            />
-
-            <div v-if="loading" class="text-center py-8 text-sm animate-pulse" style="color: var(--color-muted-foreground)">{{ t('setup.loadingModels') }}</div>
-            <div v-else-if="error" class="text-center py-8">
-              <div class="text-sm mb-3" style="color: var(--color-error-fg)">{{ error }}</div>
-              <button class="setup-retry px-4 py-1.5 text-xs rounded-lg cursor-pointer font-medium" @click="loadModels">{{ t('setup.retry') }}</button>
-            </div>
-            <div v-else-if="filteredModels.length === 0" class="text-center py-8 text-sm" style="color: var(--color-muted-foreground)">{{ t('setup.noModels') }}</div>
-            <div v-else class="space-y-1 max-h-72 overflow-y-auto pr-1">
+              <!-- Custom provider entry -->
               <button
-                v-for="m in filteredModels"
-                :key="m.id"
-                class="setup-option w-full px-4 py-2.5 text-left rounded-lg cursor-pointer"
-                :class="{ selected: selectedModel === m.id }"
-                @click="selectModel(m.id)"
+                class="setup-option w-full px-4 py-3 text-left rounded-lg cursor-pointer group"
+                :class="{ selected: isCustom }"
+                @click="selectCustomProvider"
               >
-                <div class="flex items-center justify-between">
-                  <div>
-                    <div class="text-sm font-medium font-mono" style="color: var(--color-foreground)">{{ m.id }}</div>
-                    <div v-if="m.name && m.name !== m.id" class="text-[10px] mt-0.5" style="color: var(--color-muted-foreground)">{{ m.name }}</div>
+                <div class="flex items-center justify-between gap-2">
+                  <div class="flex items-center gap-2.5 min-w-0">
+                    <div class="w-[22px] h-[22px] rounded-md grid place-items-center shrink-0" style="background: var(--color-muted)">
+                      <span class="text-[11px] font-mono" style="color: var(--color-muted-foreground)">{ }</span>
+                    </div>
+                    <div class="min-w-0">
+                      <div class="text-sm font-medium" style="color: var(--color-foreground)">{{ t('setup.customProvider') }}</div>
+                      <div class="text-[10px] mt-0.5 truncate" style="color: var(--color-muted-foreground)">{{ t('setup.customProviderDesc') }}</div>
+                    </div>
                   </div>
-                  <div class="flex items-center gap-2">
-                    <span v-if="m.context_limit" class="text-[10px]" style="color: var(--color-muted-foreground)">{{ (m.context_limit / 1000).toFixed(0) }}k ctx</span>
-                    <span v-if="m.reasoning" class="text-[10px] px-1.5 py-0.5 rounded-full" style="background: var(--color-info-bg); color: var(--color-info-fg)">reasoning</span>
-                    <ChevronLeftIcon class="setup-chevron w-4 h-4 transition-colors" />
-                  </div>
+                  <ChevronLeftIcon class="setup-chevron w-4 h-4 transition-colors" />
                 </div>
               </button>
             </div>
           </div>
 
-          <!-- API Key input -->
+          <!-- API Key + advanced settings -->
           <div v-if="step === 'apikey'" class="px-6 pb-5">
             <div class="flex items-center gap-2 mb-1">
               <button class="setup-back transition-colors cursor-pointer" @click="goBack">
@@ -338,14 +350,49 @@ function finish() {
               <h2 class="text-base font-semibold" style="font-family: var(--font-sans); color: var(--color-foreground)">{{ t('setup.enterApiKey') }}</h2>
             </div>
             <p class="text-xs mb-4 ml-6" style="color: var(--color-muted-foreground)">
-              {{ t('setup.for') }} <span class="font-mono">{{ selectedProviderInfo?.name }}</span> · <span class="font-mono">{{ selectedModel }}</span>
+              {{ isCustom ? t('setup.customProvider') : t('setup.for') }} <span class="font-mono">{{ isCustom ? (customName || customId || t('setup.customProvider')) : selectedProviderInfo?.name }}</span>
             </p>
 
             <div class="space-y-3 ml-6">
-              <div v-if="selectedProviderInfo?.env?.length" class="px-3 py-2 rounded-md" style="background: var(--color-muted); border: 1px solid var(--color-border)">
+              <div v-if="!isCustom && selectedProviderInfo?.env?.length" class="px-3 py-2 rounded-md" style="background: var(--color-muted); border: 1px solid var(--color-border)">
                 <div class="text-[10px] mb-1" style="color: var(--color-muted-foreground)">{{ t('setup.envVar') }}</div>
                 <div class="text-xs font-mono" style="color: var(--color-foreground)">{{ selectedProviderInfo.env[0] }}</div>
               </div>
+
+              <!-- Custom provider identity fields -->
+              <template v-if="isCustom">
+                <div>
+                  <label class="block text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('setup.customId') }}</label>
+                  <input
+                    v-model="customId"
+                    type="text"
+                    :placeholder="t('setup.customIdPlaceholder')"
+                    class="setup-input w-full px-3 py-2 text-sm font-mono rounded-lg outline-none"
+                  />
+                </div>
+                <div>
+                  <label class="block text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('setup.customName') }}</label>
+                  <input
+                    v-model="customName"
+                    type="text"
+                    :placeholder="t('setup.customNamePlaceholder')"
+                    class="setup-input w-full px-3 py-2 text-sm rounded-lg outline-none"
+                  />
+                </div>
+                <div>
+                  <label class="block text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('setup.customModelId') }}</label>
+                  <input
+                    v-model="customModelId"
+                    type="text"
+                    :placeholder="t('setup.customModelPlaceholder')"
+                    class="setup-input w-full px-3 py-2 text-sm font-mono rounded-lg outline-none"
+                  />
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="text-[11px]" style="color: var(--color-foreground)">{{ t('setup.customReasoning') }}</span>
+                  <button class="setup-switch" :data-on="customReasoning ? 'true' : 'false'" :aria-pressed="customReasoning" @click="customReasoning = !customReasoning" />
+                </div>
+              </template>
 
               <div>
                 <label class="block text-[10px] uppercase tracking-wider mb-1 font-medium" style="color: var(--color-muted-foreground)">{{ t('setup.apiKey') }}</label>
@@ -373,10 +420,31 @@ function finish() {
                 <input
                   v-model="baseURL"
                   type="text"
-                  :placeholder="selectedProviderInfo?.api || 'https://api.example.com/v1'"
+                  :placeholder="isCustom ? 'https://your-endpoint/v1' : (selectedProviderInfo?.api || 'https://api.example.com/v1')"
                   class="setup-input w-full px-3 py-2 text-sm font-mono rounded-lg outline-none"
                   @keydown.enter="submitSetup"
                 />
+              </div>
+
+              <!-- Advanced toggle -->
+              <button class="setup-adv-toggle" :aria-expanded="advancedOpen" @click="advancedOpen = !advancedOpen">
+                <ChevronRightIcon class="w-3 h-3 transition-transform" :style="{ transform: advancedOpen ? 'rotate(90deg)' : 'none' }" />
+                {{ t('setup.advanced') }}
+              </button>
+
+              <div v-if="advancedOpen" class="space-y-3 pt-1">
+                <!-- Custom headers -->
+                <div>
+                  <div class="flex items-center justify-between mb-1">
+                    <label class="text-[10px] uppercase tracking-wider font-medium" style="color: var(--color-muted-foreground)">{{ t('setup.headers') }}</label>
+                    <button class="setup-secondary px-2 py-0.5 text-[10px] rounded cursor-pointer" @click="addHeaderRow">+ {{ t('setup.addHeader') }}</button>
+                  </div>
+                  <div v-for="(h, i) in headers" :key="i" class="flex items-center gap-1.5 mb-1">
+                    <input v-model="h.key" type="text" :placeholder="t('setup.headerKey')" class="setup-input flex-1 px-2 py-1.5 text-xs font-mono rounded outline-none" />
+                    <input v-model="h.value" type="text" :placeholder="t('setup.headerValue')" class="setup-input flex-1 px-2 py-1.5 text-xs font-mono rounded outline-none" />
+                    <button class="setup-back cursor-pointer px-1" @click="removeHeaderRow(i)">✕</button>
+                  </div>
+                </div>
               </div>
 
               <!-- Validate connection -->
@@ -500,5 +568,50 @@ function finish() {
 .setup-secondary:hover {
   background: var(--color-muted);
   color: var(--color-foreground);
+}
+
+.setup-adv-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 11px;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+.setup-adv-toggle:hover {
+  color: var(--color-foreground);
+}
+
+.setup-switch {
+  width: 28px;
+  height: 16px;
+  border-radius: 9999px;
+  background: var(--color-muted);
+  border: 1px solid var(--color-border);
+  position: relative;
+  cursor: pointer;
+  transition: background-color 0.15s;
+  flex-shrink: 0;
+}
+.setup-switch::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-foreground);
+  transition: transform 0.15s;
+}
+.setup-switch[data-on='true'] {
+  background: var(--color-primary);
+}
+.setup-switch[data-on='true']::after {
+  transform: translateX(12px);
+  background: var(--color-on-primary);
 }
 </style>

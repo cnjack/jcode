@@ -587,9 +587,11 @@ func (s *interactiveState) handleConfig(cfgMsg *config.Config) {
 	if newBaseURL == "" {
 		newBaseURL = s.registry.GetProviderAPI(newProvName)
 	}
-	newChatModel, err := internalmodel.NewChatModel(s.ctx, &internalmodel.ChatModelConfig{
-		Model: newModelName, APIKey: newProvCfg.APIKey, BaseURL: newBaseURL,
-	})
+	// Apply a per-model reasoning-effort override (set from the chat picker)
+	// over the provider-level default before constructing the model.
+	newEffortCfg := *newProvCfg
+	newEffortCfg.ReasoningEffort = config.ResolveEffort(newProvName, newModelName, newProvCfg.ReasoningEffort)
+	newChatModel, err := internalmodel.NewChatModelFromProvider(s.ctx, newModelName, newBaseURL, &newEffortCfg)
 	if err != nil {
 		return
 	}
@@ -664,9 +666,9 @@ func (s *interactiveState) handleAddModel() {
 	if newBaseURL == "" {
 		newBaseURL = s.registry.GetProviderAPI(newProvName)
 	}
-	newChatModel, cmErr := internalmodel.NewChatModel(s.ctx, &internalmodel.ChatModelConfig{
-		Model: newModelName, APIKey: newProvCfg.APIKey, BaseURL: newBaseURL,
-	})
+	newEffortCfg2 := *newProvCfg
+	newEffortCfg2.ReasoningEffort = config.ResolveEffort(newProvName, newModelName, newProvCfg.ReasoningEffort)
+	newChatModel, cmErr := internalmodel.NewChatModelFromProvider(s.ctx, newModelName, newBaseURL, &newEffortCfg2)
 	if cmErr != nil {
 		return
 	}
@@ -918,9 +920,9 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		baseURL = registry.GetProviderAPI(providerName)
 	}
 
-	chatModel, err := internalmodel.NewChatModel(ctx, &internalmodel.ChatModelConfig{
-		Model: modelName, APIKey: providerCfg.APIKey, BaseURL: baseURL,
-	})
+	effortCfg := *providerCfg
+	effortCfg.ReasoningEffort = config.ResolveEffort(providerName, modelName, providerCfg.ReasoningEffort)
+	chatModel, err := internalmodel.NewChatModelFromProvider(ctx, modelName, baseURL, &effortCfg)
 	if err != nil {
 		return fmt.Errorf("error creating model: %w", err)
 	}
@@ -1045,9 +1047,9 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 			if bURL == "" {
 				bURL = registry.GetProviderAPI(pName)
 			}
-			return internalmodel.NewChatModel(mCtx, &internalmodel.ChatModelConfig{
-				Model: modelID, APIKey: pCfg.APIKey, BaseURL: bURL,
-			})
+			pEffortCfg := *pCfg
+			pEffortCfg.ReasoningEffort = config.ResolveEffort(pName, modelID, pCfg.ReasoningEffort)
+			return internalmodel.NewChatModelFromProvider(mCtx, modelID, bURL, &pEffortCfg)
 		},
 		PromptBuilder: func(agentType, agentPwd, agentPlatform string) string {
 			return prompts.GetSystemPrompt(agentPlatform, agentPwd, "local", nil, "")

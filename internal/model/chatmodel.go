@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"sync"
 	"sync/atomic"
 
@@ -300,12 +301,43 @@ type ChatModelConfig struct {
 	Model   string
 	APIKey  string
 	BaseURL string
+	// Headers are extra HTTP headers injected into every request to the
+	// provider endpoint (custom gateways, auth proxies). Empty ⇒ none.
+	Headers map[string]string
+	// ReasoningEffort sets thinking depth via the "reasoning_effort" parameter:
+	// "", "low", "medium", or "high". Empty ⇒ parameter omitted.
+	ReasoningEffort string
+	// Thinking, when non-nil, sends chat_template_kwargs {"enable_thinking": v}
+	// to explicitly toggle extended reasoning on compatible gateways.
+	Thinking *bool
+	// Vision controls whether image parts are forwarded to the model. When
+	// false, multimodal image content is stripped to text before sending.
+	Vision bool
 }
 
 type chatModel struct {
-	client *openai.Client
-	model  string
-	tools  []openai.Tool
+	client          *openai.Client
+	model           string
+	tools           []openai.Tool
+	reasoningEffort string
+	thinking        *bool
+	vision          bool
+}
+
+// headerDoer wraps an http.Client to inject a fixed set of headers into every
+// outgoing request. It satisfies go-openai's HTTPDoer interface so a provider's
+// configured Headers reach the API. Set unconditionally so callers may override
+// transport headers (including Authorization) for custom gateways.
+type headerDoer struct {
+	base    *http.Client
+	headers map[string]string
+}
+
+func (h *headerDoer) Do(req *http.Request) (*http.Response, error) {
+	for k, v := range h.headers {
+		req.Header.Set(k, v)
+	}
+	return h.base.Do(req)
 }
 
 func NewChatModel(_ context.Context, cfg *ChatModelConfig) (einomodel.ToolCallingChatModel, error) {
@@ -316,10 +348,38 @@ func NewChatModel(_ context.Context, cfg *ChatModelConfig) (einomodel.ToolCallin
 	if cfg.BaseURL != "" {
 		config.BaseURL = cfg.BaseURL
 	}
+	if len(cfg.Headers) > 0 {
+		config.HTTPClient = &headerDoer{base: &http.Client{}, headers: cfg.Headers}
+	}
 	return &chatModel{
-		client: openai.NewClientWithConfig(config),
-		model:  cfg.Model,
+		client:          openai.NewClientWithConfig(config),
+		model:           cfg.Model,
+		reasoningEffort: cfg.ReasoningEffort,
+		thinking:        cfg.Thinking,
+		vision:          cfg.Vision,
 	}, nil
+}
+
+// NewChatModelFromProvider builds a ChatModel from a provider config, applying
+// its advanced settings (custom headers, thinking depth, explicit thinking
+// toggle, and the vision capability — which defaults to enabled). baseURL is the
+// already-resolved endpoint (config override or registry default). This is the
+// single place that maps ProviderConfig → ChatModelConfig so every entrypoint
+// (web, TUI, ACP, subagents) honors the same settings.
+func NewChatModelFromProvider(ctx context.Context, modelName, baseURL string, pc *config.ProviderConfig) (einomodel.ToolCallingChatModel, error) {
+	vision := true
+	if pc.Vision != nil {
+		vision = *pc.Vision
+	}
+	return NewChatModel(ctx, &ChatModelConfig{
+		Model:           modelName,
+		APIKey:          pc.APIKey,
+		BaseURL:         baseURL,
+		Headers:         pc.Headers,
+		ReasoningEffort: pc.ReasoningEffort,
+		Thinking:        pc.Thinking,
+		Vision:          vision,
+	})
 }
 
 func (m *chatModel) WithTools(tools []*schema.ToolInfo) (einomodel.ToolCallingChatModel, error) {
@@ -346,7 +406,14 @@ func (m *chatModel) WithTools(tools []*schema.ToolInfo) (einomodel.ToolCallingCh
 	for _, t := range oaiTools {
 		config.Logger().Printf("[chatmodel]   tool: %s", t.Function.Name)
 	}
-	return &chatModel{client: m.client, model: m.model, tools: oaiTools}, nil
+	return &chatModel{
+		client:          m.client,
+		model:           m.model,
+		tools:           oaiTools,
+		reasoningEffort: m.reasoningEffort,
+		thinking:        m.thinking,
+		vision:          m.vision,
+	}, nil
 }
 
 // extractUsage maps a go-openai Usage onto AddParams. cache_creation tokens are
@@ -494,12 +561,23 @@ func (m *chatModel) Stream(ctx context.Context, input []*schema.Message, opts ..
 func (m *chatModel) buildRequest(input []*schema.Message, stream bool, opts ...einomodel.Option) openai.ChatCompletionRequest {
 	msgs := make([]openai.ChatCompletionMessage, 0, len(input))
 	for _, msg := range input {
-		msgs = append(msgs, toOpenAIMessage(msg))
+		msgs = append(msgs, toOpenAIMessage(msg, m.vision))
 	}
 	req := openai.ChatCompletionRequest{
 		Model:    m.model,
 		Messages: msgs,
 		Stream:   stream,
+	}
+
+	// Thinking depth: forward reasoning_effort when configured. Sent for all
+	// models — reasoning models honor it; others ignore it (OpenAI-compatible).
+	if m.reasoningEffort != "" {
+		req.ReasoningEffort = m.reasoningEffort
+	}
+	// Explicit thinking toggle for gateways that gate reasoning behind
+	// chat_template_kwargs {"enable_thinking": <bool>} (e.g. qwen3).
+	if m.thinking != nil {
+		req.ChatTemplateKwargs = map[string]any{"enable_thinking": *m.thinking}
 	}
 
 	// Apply call-time options (e.g. model.WithTools from Eino framework).
@@ -533,7 +611,7 @@ func (m *chatModel) buildRequest(input []*schema.Message, stream bool, opts ...e
 	return req
 }
 
-func toOpenAIMessage(msg *schema.Message) openai.ChatCompletionMessage {
+func toOpenAIMessage(msg *schema.Message, vision bool) openai.ChatCompletionMessage {
 	m := openai.ChatCompletionMessage{
 		Role:             string(msg.Role),
 		Content:          msg.Content,
@@ -546,6 +624,18 @@ func toOpenAIMessage(msg *schema.Message) openai.ChatCompletionMessage {
 	}
 	// Convert multimodal content (text + images) to OpenAI MultiContent format.
 	if len(msg.UserInputMultiContent) > 0 {
+		// Vision disabled: collapse to text-only so a non-vision endpoint
+		// doesn't 400 on image parts. Text segments are preserved.
+		if !vision {
+			var text string
+			for _, p := range msg.UserInputMultiContent {
+				if p.Type == schema.ChatMessagePartTypeText {
+					text += p.Text
+				}
+			}
+			m.Content = text
+			return m
+		}
 		m.Content = ""
 		parts := make([]openai.ChatMessagePart, 0, len(msg.UserInputMultiContent))
 		for _, p := range msg.UserInputMultiContent {
@@ -742,16 +832,6 @@ func containsModelPattern(model, pattern string) bool {
 	return len(model) >= len(pattern) &&
 		(model == pattern ||
 			(len(model) > len(pattern) && (model[:len(pattern)] == pattern || model[len(model)-len(pattern):] == pattern)))
-}
-
-// GetTokenUsage returns the current token usage statistics
-func GetTokenUsage() (prompt, completion, total int64) {
-	return TokenTracker.Get()
-}
-
-// ResetTokenUsage resets the token usage tracker
-func ResetTokenUsage() {
-	TokenTracker.Reset()
 }
 
 // GetModelContextLimit returns the known context limit for a given model name.

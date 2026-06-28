@@ -544,8 +544,3 @@ func (h *WebHandler) PendingAskUserRequests() []WebAskUserRequestData {
 	}
 	return out
 }
-
-// MarshalEvent marshals a WebEvent to JSON bytes.
-func MarshalEvent(ev WebEvent) ([]byte, error) {
-	return json.Marshal(ev)
-}

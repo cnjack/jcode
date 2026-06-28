@@ -70,15 +70,3 @@ export function extractToolDisplayInfo(name: string, argsJSON: string): ToolDisp
       return { title: name, icon: 'tool', category: '' }
   }
 }
-
-/** Map tool icon identifiers to SVG symbols or emoji for display. */
-export const TOOL_ICONS: Record<string, string> = {
-  file: '📄',
-  'file-edit': '✏️',
-  search: '🔍',
-  terminal: '⚡',
-  checklist: '☑️',
-  agent: '🤖',
-  question: '❓',
-  tool: '🔧',
-}

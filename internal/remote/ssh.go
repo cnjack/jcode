@@ -140,23 +140,6 @@ func ListDirs(ctx context.Context, exec tools.Executor, path string) ([]string, 
 	return dirs, nil
 }
 
-// ProjectLabel returns a stable, host-qualified identifier for a remote working
-// directory. It is used as the session "project" key so remote sessions are
-// grouped separately from local paths of the same name. Form:
-// ssh://user@host:port/remote/path
-func ProjectLabel(exec *tools.SSHExecutor, remotePwd string) string {
-	return fmt.Sprintf("ssh://%s@%s%s", exec.User(), exec.Host(), normalizeRemotePath(remotePwd))
-}
-
-// normalizeRemotePath ensures the path is absolute (leading slash) for use in a
-// project label.
-func normalizeRemotePath(p string) string {
-	if !strings.HasPrefix(p, "/") {
-		return "/" + p
-	}
-	return p
-}
-
 // expandHome expands a leading ~ or ~/ to the current user's home directory.
 func expandHome(path string) string {
 	if path == "~" {

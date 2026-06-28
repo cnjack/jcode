@@ -216,9 +216,12 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		if bURL == "" {
 			bURL = registry.GetProviderAPI(prov)
 		}
-		cm, err := internalmodel.NewChatModel(ctx, &internalmodel.ChatModelConfig{
-			Model: mod, APIKey: provCfg.APIKey, BaseURL: bURL,
-		})
+		// Apply a per-model reasoning-effort override (set from the chat picker)
+		// over the provider-level default before constructing the model.
+		pcEffort := config.ResolveEffort(prov, mod, provCfg.ReasoningEffort)
+		effortCfg := *provCfg
+		effortCfg.ReasoningEffort = pcEffort
+		cm, err := internalmodel.NewChatModelFromProvider(ctx, mod, bURL, &effortCfg)
 		if err != nil {
 			return nil, 0, fmt.Errorf("create model %s/%s: %w", prov, mod, err)
 		}

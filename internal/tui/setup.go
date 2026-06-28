@@ -51,21 +51,11 @@ func (i providerItem) Description() string {
 }
 func (i providerItem) FilterValue() string { return i.profile.Name + " " + i.profile.ID }
 
-type modelListItem struct {
-	name string
-	desc string
-}
-
-func (i modelListItem) Title() string       { return i.name }
-func (i modelListItem) Description() string { return i.desc }
-func (i modelListItem) FilterValue() string { return i.name }
-
 type SetupState int
 
 const (
-	StateProvider SetupState = iota
-	StateModel
-	StateCustomModel
+	StateProvider    SetupState = iota
+	StateCustomModel            // only for custom/OpenAI-compatible providers (model id required)
 	StateURL
 	StateAPIKey
 )
@@ -73,14 +63,13 @@ const (
 type SetupModel struct {
 	state         SetupState
 	providerList  list.Model
-	modelList     list.Model
 	customModelIn textinput.Model
 	urlIn         textinput.Model
 	keyIn         textinput.Model
 
 	registry         *model.ModelRegistry
 	selectedProvider *ProviderProfile
-	selectedModel    string
+	selectedModel    string // only set for custom providers
 	finalURL         string
 	finalKey         string
 
@@ -154,13 +143,9 @@ func NewSetupModel() SetupModel {
 	pl.SetShowHelp(false)
 	m.providerList = pl
 
-	ml := list.New([]list.Item{}, del, 60, 15)
-	ml.SetShowHelp(false)
-	m.modelList = ml
-
 	m.customModelIn = textinput.New()
-	m.customModelIn.Placeholder = "Enter custom model name..."
-	m.customModelIn.Prompt = "Model Name: "
+	m.customModelIn.Placeholder = "Enter model id (e.g. gpt-4o)..."
+	m.customModelIn.Prompt = "Model ID: "
 	m.customModelIn.SetWidth(50)
 
 	m.urlIn = textinput.New()
@@ -251,57 +236,11 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if sel != nil {
 					p := sel.(providerItem).profile
 					m.selectedProvider = &p
-
-					var mItems []list.Item
-					// Always try to load models from registry, regardless of initial FromRegistry flag.
-					// This handles cases where registry was temporarily unavailable during init.
-					models := m.registry.ListProviderModels(p.ID, false)
-					if len(models) > 0 {
-						for _, rm := range models {
-							desc := modelDescription(rm)
-							mItems = append(mItems, modelListItem{name: rm.ID, desc: desc})
-						}
-					}
-					// Always offer "Custom..." as the last option
-					mItems = append(mItems, modelListItem{name: "Custom...", desc: "Enter a custom model name"})
-					m.modelList.SetItems(mItems)
-					m.modelList.Title = "Select Model (" + p.Name + ")"
-
-					m.state = StateModel
-					return m, nil
+					return m.advanceAfterProvider()
 				}
 			}
 			var cmd tea.Cmd
 			m.providerList, cmd = m.providerList.Update(msg)
-			cmds = append(cmds, cmd)
-
-		case StateModel:
-			// When filtering, let keys pass through to the list
-			if m.modelList.FilterState() == list.Filtering {
-				var cmd tea.Cmd
-				m.modelList, cmd = m.modelList.Update(msg)
-				cmds = append(cmds, cmd)
-				return m, tea.Batch(cmds...)
-			}
-			if msg.String() == "enter" {
-				sel := m.modelList.SelectedItem()
-				if sel != nil {
-					name := sel.(modelListItem).name
-					if name == "Custom..." {
-						m.state = StateCustomModel
-						m.customModelIn.Focus()
-					} else {
-						m.selectedModel = name
-						return m.advanceAfterModel()
-					}
-					return m, nil
-				}
-			} else if msg.String() == "esc" {
-				m.state = StateProvider
-				return m, nil
-			}
-			var cmd tea.Cmd
-			m.modelList, cmd = m.modelList.Update(msg)
 			cmds = append(cmds, cmd)
 
 		case StateCustomModel:
@@ -309,10 +248,13 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				val := strings.TrimSpace(m.customModelIn.Value())
 				if val != "" {
 					m.selectedModel = val
-					return m.advanceAfterModel()
+					// Custom providers always need a base URL next.
+					m.state = StateURL
+					m.urlIn.Focus()
+					return m, nil
 				}
 			} else if msg.String() == "esc" {
-				m.state = StateModel
+				m.state = StateProvider
 				return m, nil
 			}
 			var cmd tea.Cmd
@@ -330,10 +272,13 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m.advanceAfterURL()
 				}
 			} else if msg.String() == "esc" {
-				if m.selectedModel == "Custom..." {
+				// Back to custom-model step if this is a custom provider, else
+				// straight to the provider list.
+				if m.selectedProvider.NeedURL {
 					m.state = StateCustomModel
+					m.customModelIn.Focus()
 				} else {
-					m.state = StateModel
+					m.state = StateProvider
 				}
 				return m, nil
 			}
@@ -355,11 +300,8 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case m.selectedProvider.NeedURL || m.selectedProvider.BaseURL == "":
 					m.state = StateURL
 					m.urlIn.Focus()
-				case m.selectedModel == "Custom...":
-					m.state = StateCustomModel
-					m.customModelIn.Focus()
 				default:
-					m.state = StateModel
+					m.state = StateProvider
 				}
 				return m, nil
 			}
@@ -372,20 +314,15 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.providerList.SetSize(msg.Width-4, 15)
-		m.modelList.SetSize(msg.Width-4, 15)
 	}
 
-	// Forward non-key/non-mouse messages (e.g. list.FilterMatchesMsg) to active list
+	// Forward non-key/non-mouse messages (e.g. list.FilterMatchesMsg) to the
+	// active list (only the provider list remains now).
 	if _, isKey := msg.(tea.KeyPressMsg); !isKey {
 		if _, isMouse := msg.(tea.MouseMsg); !isMouse {
-			switch m.state {
-			case StateProvider:
+			if m.state == StateProvider {
 				var cmd tea.Cmd
 				m.providerList, cmd = m.providerList.Update(msg)
-				cmds = append(cmds, cmd)
-			case StateModel:
-				var cmd tea.Cmd
-				m.modelList, cmd = m.modelList.Update(msg)
 				cmds = append(cmds, cmd)
 			}
 		}
@@ -394,16 +331,27 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m SetupModel) advanceAfterModel() (tea.Model, tea.Cmd) {
-	if m.selectedProvider.NeedURL || m.selectedProvider.BaseURL == "" {
+// advanceAfterProvider routes the wizard after a provider is picked. Registry
+// providers don't need a model selection (a default is auto-picked on submit),
+// so they go straight to URL/Key. Custom (OpenAI-compatible) providers need a
+// model id and a base URL, so they start at the custom-model step.
+func (m SetupModel) advanceAfterProvider() (tea.Model, tea.Cmd) {
+	p := m.selectedProvider
+	// Custom providers need a model id before anything else.
+	if p.NeedURL && m.selectedModel == "" {
+		m.state = StateCustomModel
+		m.customModelIn.Focus()
+		return m, nil
+	}
+	if p.NeedURL || p.BaseURL == "" {
 		m.state = StateURL
-		if m.selectedProvider.BaseURL != "" {
-			m.urlIn.Placeholder = m.selectedProvider.BaseURL
+		if p.BaseURL != "" {
+			m.urlIn.Placeholder = p.BaseURL
 		}
 		m.urlIn.Focus()
 		return m, nil
 	}
-	m.finalURL = m.selectedProvider.BaseURL
+	m.finalURL = p.BaseURL
 	return m.advanceAfterURL()
 }
 
@@ -445,6 +393,17 @@ func (m SetupModel) findProviderAPIKey() string {
 	return ""
 }
 
+// containsCustomModel reports whether a model id is already registered on the
+// provider config, used to avoid duplicate custom-model entries on re-setup.
+func containsCustomModel(models []config.CustomModelConfig, id string) bool {
+	for _, cm := range models {
+		if cm.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 func (m SetupModel) submit() (tea.Model, tea.Cmd) {
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -474,8 +433,30 @@ func (m SetupModel) submit() (tea.Model, tea.Cmd) {
 	pCfg.APIKey = m.finalKey
 	pCfg.BaseURL = m.finalURL
 
-	// Set model in "provider/model" format
-	cfg.Model = pID + "/" + m.selectedModel
+	// Resolve the active model. For custom (OpenAI-compatible) providers the
+	// user entered a model id; for registry providers a default is auto-picked.
+	modelID := m.selectedModel
+	if modelID == "" && m.registry != nil {
+		modelID = m.registry.PickDefaultModel(pID)
+	}
+	if modelID == "" {
+		m.err = "No default model available for " + pID + "; please select a model in Settings"
+		return m, nil
+	}
+	// For custom providers, register the model so it's selectable afterwards.
+	if m.selectedProvider.NeedURL {
+		if pCfg.Name == "" {
+			pCfg.Name = m.selectedProvider.Name
+		}
+		if !containsCustomModel(pCfg.CustomModels, modelID) {
+			pCfg.CustomModels = append(pCfg.CustomModels, config.CustomModelConfig{
+				ID:       modelID,
+				Name:     modelID,
+				ToolCall: true,
+			})
+		}
+	}
+	cfg.Model = pID + "/" + modelID
 
 	if err := config.SaveConfig(cfg); err != nil {
 		m.err = fmt.Sprintf("Failed to save config: %v", err)
@@ -484,27 +465,6 @@ func (m SetupModel) submit() (tea.Model, tea.Cmd) {
 
 	m.done = true
 	return m, tea.Quit
-}
-
-// modelDescription builds a short description for a registry model.
-func modelDescription(rm *model.RegistryModel) string {
-	var parts []string
-	if rm.Limit != nil && rm.Limit.Context > 0 {
-		parts = append(parts, fmt.Sprintf("%dk ctx", rm.Limit.Context/1000))
-	}
-	if rm.ToolCall {
-		parts = append(parts, "tool_call")
-	}
-	if rm.Reasoning {
-		parts = append(parts, "reasoning")
-	}
-	if rm.Cost != nil && rm.Cost.Input > 0 {
-		parts = append(parts, fmt.Sprintf("$%.2f/1M in", rm.Cost.Input))
-	}
-	if len(parts) == 0 {
-		return rm.ID
-	}
-	return strings.Join(parts, " · ")
 }
 
 func (m SetupModel) View() tea.View {
@@ -522,10 +482,11 @@ func (m SetupModel) View() tea.View {
 	switch m.state {
 	case StateProvider:
 		content = m.providerList.View()
-	case StateModel:
-		content = m.modelList.View()
 	case StateCustomModel:
 		content = m.customModelIn.View()
+		if m.selectedProvider != nil {
+			content += "\n  " + lipgloss.NewStyle().Foreground(colorMuted).Render("Model id for "+m.selectedProvider.Name)
+		}
 	case StateURL:
 		content = m.urlIn.View()
 		if m.selectedProvider.BaseURL != "" {
@@ -535,7 +496,7 @@ func (m SetupModel) View() tea.View {
 		content = m.keyIn.View()
 	}
 
-	if m.state != StateProvider && m.state != StateModel {
+	if m.state != StateProvider {
 		var helpText string
 		if m.state == StateAPIKey {
 			helpText = "  Press Enter to submit, Esc to go back. Paste: Ctrl+Shift+V (Win/Linux) or Cmd+V (Mac)"

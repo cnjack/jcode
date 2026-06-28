@@ -21,12 +21,6 @@ func GetTeammateIdentity(ctx context.Context) (TeammateIdentity, bool) {
 	return id, ok
 }
 
-// IsTeammate returns true if the context belongs to a teammate (not the leader).
-func IsTeammate(ctx context.Context) bool {
-	_, ok := GetTeammateIdentity(ctx)
-	return ok
-}
-
 // GetAgentName returns the agent name from the context, or TeamLeadName if not a teammate.
 func GetAgentName(ctx context.Context) string {
 	if id, ok := GetTeammateIdentity(ctx); ok {

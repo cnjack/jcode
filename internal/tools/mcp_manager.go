@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
-	"strings"
 	"sync"
 	"time"
 
@@ -55,14 +54,6 @@ type MCPServerStatus struct {
 	State     MCPServerState `json:"state"`
 	ToolCount int            `json:"tool_count"`
 	Error     string         `json:"error,omitempty"`
-}
-
-// MCPResource describes a resource exposed by an MCP server.
-type MCPResource struct {
-	URI         string `json:"uri"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	MimeType    string `json:"mimeType,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -311,11 +302,6 @@ func (m *MCPManager) AddServer(ctx context.Context, name string, cfg *config.MCP
 	return m.Connect(ctx, name, cfg)
 }
 
-// RemoveServer disconnects and removes a server.
-func (m *MCPManager) RemoveServer(name string) error {
-	return m.Disconnect(name)
-}
-
 // GetAllTools returns tools from all connected servers.
 func (m *MCPManager) GetAllTools() []MCPToolInfo {
 	m.mu.RLock()
@@ -352,199 +338,6 @@ func (m *MCPManager) GetServerStatus() []MCPServerStatus {
 		out = append(out, s)
 	}
 	return out
-}
-
-// InvokeMCPTool calls a tool on the named server. If the call fails it
-// attempts one reconnection before returning an error.
-func (m *MCPManager) InvokeMCPTool(ctx context.Context, serverName, toolName string, args json.RawMessage) (string, error) {
-	conn, err := m.getConnection(serverName)
-	if err != nil {
-		return "", err
-	}
-
-	result, err := m.callTool(ctx, conn, toolName, args)
-	if err == nil {
-		return result, nil
-	}
-
-	// Attempt one reconnection and retry.
-	config.Logger().Printf("mcp_manager: tool %q on %q failed, reconnecting: %v", toolName, serverName, err)
-
-	if reconnErr := m.reconnectOnce(ctx, conn); reconnErr != nil {
-		return "", fmt.Errorf("mcp_manager: reconnect %q failed: %w (original: %v)", serverName, reconnErr, err)
-	}
-
-	return m.callTool(ctx, conn, toolName, args)
-}
-
-func (m *MCPManager) callTool(ctx context.Context, conn *MCPConnection, toolName string, args json.RawMessage) (string, error) {
-	conn.mu.RLock()
-	cli := conn.Client
-	state := conn.State
-	conn.mu.RUnlock()
-
-	if cli == nil || state != MCPConnected {
-		return "", fmt.Errorf("server %q not connected (state=%s)", conn.Name, state)
-	}
-
-	var arguments any
-	if len(args) > 0 {
-		var m map[string]any
-		if err := json.Unmarshal(args, &m); err != nil {
-			return "", fmt.Errorf("invalid arguments JSON: %w", err)
-		}
-		arguments = m
-	}
-
-	req := mcp.CallToolRequest{}
-	req.Params.Name = toolName
-	req.Params.Arguments = arguments
-
-	result, err := cli.CallTool(ctx, req)
-	if err != nil {
-		return "", err
-	}
-
-	if result.IsError {
-		return "", fmt.Errorf("tool %q returned error: %s", toolName, contentToString(result.Content))
-	}
-
-	return contentToString(result.Content), nil
-}
-
-// contentToString serialises MCP Content slices to a single string.
-func contentToString(contents []mcp.Content) string {
-	var parts []string
-	for _, c := range contents {
-		switch v := c.(type) {
-		case mcp.TextContent:
-			parts = append(parts, v.Text)
-		default:
-			b, _ := json.Marshal(c)
-			parts = append(parts, string(b))
-		}
-	}
-	return strings.Join(parts, "\n")
-}
-
-// reconnectOnce performs a single reconnection attempt for a connection.
-func (m *MCPManager) reconnectOnce(ctx context.Context, conn *MCPConnection) error {
-	conn.mu.Lock()
-	if conn.Client != nil {
-		_ = conn.Client.Close()
-		conn.Client = nil
-	}
-	conn.setState(MCPReconnecting)
-	conn.mu.Unlock()
-	m.notifyState(conn.Name, MCPReconnecting)
-
-	if err := m.doConnect(ctx, conn); err != nil {
-		conn.mu.Lock()
-		conn.LastError = err
-		conn.setState(MCPDisconnected)
-		conn.mu.Unlock()
-		m.notifyState(conn.Name, MCPDisconnected)
-		return err
-	}
-
-	conn.mu.Lock()
-	conn.setState(MCPConnected)
-	conn.LastConnected = time.Now()
-	conn.RetryCount = 0
-	conn.LastError = nil
-	conn.mu.Unlock()
-	m.notifyState(conn.Name, MCPConnected)
-	return nil
-}
-
-// getConnection looks up a connection by name.
-func (m *MCPManager) getConnection(name string) (*MCPConnection, error) {
-	m.mu.RLock()
-	conn, ok := m.connections[name]
-	m.mu.RUnlock()
-	if !ok {
-		return nil, fmt.Errorf("mcp_manager: server %q not found", name)
-	}
-	return conn, nil
-}
-
-// ---------------------------------------------------------------------------
-// Resource Discovery
-// ---------------------------------------------------------------------------
-
-// ListResources returns the resources advertised by the named server.
-func (m *MCPManager) ListResources(ctx context.Context, serverName string) ([]MCPResource, error) {
-	conn, err := m.getConnection(serverName)
-	if err != nil {
-		return nil, err
-	}
-
-	conn.mu.RLock()
-	cli := conn.Client
-	caps := conn.Capabilities
-	conn.mu.RUnlock()
-
-	if caps == nil || !caps.Resources {
-		return nil, fmt.Errorf("server %q does not support resources", serverName)
-	}
-	if cli == nil {
-		return nil, fmt.Errorf("server %q not connected", serverName)
-	}
-
-	result, err := cli.ListResources(ctx, mcp.ListResourcesRequest{})
-	if err != nil {
-		return nil, fmt.Errorf("list resources on %q: %w", serverName, err)
-	}
-
-	out := make([]MCPResource, 0, len(result.Resources))
-	for _, r := range result.Resources {
-		out = append(out, MCPResource{
-			URI:         r.URI,
-			Name:        r.Name,
-			Description: r.Description,
-			MimeType:    r.MIMEType,
-		})
-	}
-	return out, nil
-}
-
-// ReadResource reads a single resource from the named server.
-func (m *MCPManager) ReadResource(ctx context.Context, serverName, uri string) (string, error) {
-	conn, err := m.getConnection(serverName)
-	if err != nil {
-		return "", err
-	}
-
-	conn.mu.RLock()
-	cli := conn.Client
-	caps := conn.Capabilities
-	conn.mu.RUnlock()
-
-	if caps == nil || !caps.Resources {
-		return "", fmt.Errorf("server %q does not support resources", serverName)
-	}
-	if cli == nil {
-		return "", fmt.Errorf("server %q not connected", serverName)
-	}
-
-	req := mcp.ReadResourceRequest{}
-	req.Params.URI = uri
-
-	result, err := cli.ReadResource(ctx, req)
-	if err != nil {
-		return "", fmt.Errorf("read resource %q on %q: %w", uri, serverName, err)
-	}
-
-	var parts []string
-	for _, c := range result.Contents {
-		switch v := c.(type) {
-		case mcp.TextResourceContents:
-			parts = append(parts, v.Text)
-		case mcp.BlobResourceContents:
-			parts = append(parts, v.Blob)
-		}
-	}
-	return strings.Join(parts, "\n"), nil
 }
 
 // ---------------------------------------------------------------------------

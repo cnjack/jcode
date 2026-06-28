@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch, nextTick, onUnmounted, inject, type Component } from 'vue'
+import { ref, reactive, computed, watch, onUnmounted, inject, nextTick, type Component } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { useTheme } from '@/composables/useTheme'
 import { api } from '@/composables/api'
-import type { MCPServerInfo, MCPServerRequest, SkillInfo, SSHAlias, SetupProvider, SetupModel, ProviderDetail, RemoteMeta } from '@/types/api'
+import type { MCPServerInfo, MCPServerRequest, SkillInfo, SSHAlias, SetupProvider, ProviderDetail, RemoteMeta, CatalogModel, CustomModelDetail } from '@/types/api'
 import QRCode from 'qrcode'
 import {
   Dialog,
@@ -23,6 +23,7 @@ import {
   ComputerDesktopIcon,
   ServerIcon,
   ChevronRightIcon,
+  PencilSquareIcon,
   PlusIcon,
   SignalIcon,
   ShieldCheckIcon,
@@ -42,6 +43,8 @@ import {
 import { isTauri } from '@/composables/useDesktop'
 import UsageStatsPanel from '@/components/UsageStatsPanel.vue'
 import ProviderIcon from '@/components/ProviderIcon.vue'
+import ProviderEditDialog from '@/components/ProviderEditDialog.vue'
+import ModelEditDialog from '@/components/ModelEditDialog.vue'
 import { useI18n } from 'vue-i18n'
 import { SUPPORTED_LOCALES, LOCALE_LABELS, setLocale, i18n, type SupportedLocale } from '@/i18n'
 
@@ -120,17 +123,33 @@ const bleSaving = ref(false)
 
 // Provider management state
 const configuredProviders = ref<ProviderDetail[]>([])
+// Edit/add-model dialog: opens in its own modal window (not inline) so the
+// providers tab reads as a clean list of cards. `editingProviderTarget` is null
+// for add mode, or the provider being edited.
+const showProviderDialog = ref(false)
+const editingProviderTarget = ref<ProviderDetail | null>(null)
+// Add/edit-model dialog: a separate modal for authoring a single custom model.
+// `modelDialogTarget` is null for add, or the model being edited.
+const showModelDialog = ref(false)
+const modelDialogProvider = ref('')
+const modelDialogTarget = ref<CustomModelDetail | null>(null)
+// Validation error surfaced in the model dialog (e.g. duplicate id). Cleared
+// when the dialog closes or the user edits the id.
+const modelSaveError = ref('')
 const showAddProvider = ref(false)
-const addProviderStep = ref<'select' | 'model' | 'apikey'>('select')
-const addProviderList = ref<SetupProvider[]>([])
-const addProviderModels = ref<SetupModel[]>([])
-const addSelectedProvider = ref('')
-const addSelectedModel = ref('')
-const addApiKey = ref('')
-const addBaseURL = ref('')
+const addProviderList = ref<SetupProvider[]>([]) // registry list, passed to the dialog
 const addLoading = ref(false)
-const addError = ref('')
 const deleteConfirmId = ref('')
+
+
+// Catalog (browse directory) state, keyed by provider id so each card tracks its
+// own open/search/refresh state independently. The edit/add flow lives in
+// ProviderEditDialog; this tab only owns the inline catalog expansion.
+const catalogOpen = ref<string>('') // provider id whose catalog is expanded, '' = none
+const catalogLoading = ref<string>('') // provider id currently fetching
+const catalogModels = ref<Record<string, CatalogModel[]>>({})
+const catalogSearch = ref<string>('')
+
 
 watch(() => props.open, async (isOpen) => {
   if (isOpen) {
@@ -159,14 +178,22 @@ watch(() => props.open, async (isOpen) => {
       } catch { /* ignore */ }
     }
 
-    // Load configured providers
+    // Load configured providers, then pre-fetch each one's model catalog so the
+    // "Browse Models" panel (default-open on each card) shows models immediately.
     try {
       configuredProviders.value = await api.listProviders()
+      await Promise.all(configuredProviders.value.map(async (p) => {
+        if (!catalogModels.value[p.id]) {
+          try { catalogModels.value[p.id] = await api.providerCatalog(p.id) }
+          catch { catalogModels.value[p.id] = [] }
+        }
+      }))
+      // Catalogs are pre-loaded; keep them visible (not collapsed) by default.
+      catalogOpen.value = configuredProviders.value[0]?.id ?? ''
     } catch { /* ignore */ }
   } else {
     channelQRContent.value = ''
     showAddProvider.value = false
-    addError.value = ''
     deleteConfirmId.value = ''
     mcpEditing.value = null
     stopLoginPoll()
@@ -180,7 +207,6 @@ watch(() => props.open, async (isOpen) => {
 watch(activeTab, () => {
   mcpEditing.value = null
   showAddProvider.value = false
-  addError.value = ''
   deleteConfirmId.value = ''
   mcpLoginMessage.value = ''
   mcpLoginMessageFor.value = ''
@@ -593,57 +619,27 @@ const iconFor: Record<string, Component> = {
 
 
 
+// Open the edit/add dialog. For add, editingProviderTarget stays null and the
+// dialog shows its "select type" step. For edit, it seeds from the provider.
 async function startAddProvider() {
-  showAddProvider.value = true
-  addProviderStep.value = 'select'
-  addSelectedProvider.value = ''
-  addSelectedModel.value = ''
-  addApiKey.value = ''
-  addBaseURL.value = ''
-  addError.value = ''
+  editingProviderTarget.value = null
   addLoading.value = true
   try {
     addProviderList.value = await api.setupProviders()
   } catch { /* ignore */ }
   addLoading.value = false
+  showProviderDialog.value = true
 }
 
-async function selectAddProvider(id: string) {
-  addSelectedProvider.value = id
-  addLoading.value = true
-  addError.value = ''
-  try {
-    addProviderModels.value = await api.setupProviderModels(id)
-    addProviderStep.value = 'model'
-  } catch {
-    addError.value = 'Failed to load models'
-  }
-  addLoading.value = false
+function startEditProvider(p: ProviderDetail) {
+  editingProviderTarget.value = p
+  showProviderDialog.value = true
 }
 
-function selectAddModel(id: string) {
-  addSelectedModel.value = id
-  addProviderStep.value = 'apikey'
-}
-
-async function submitAddProvider() {
-  addLoading.value = true
-  addError.value = ''
-  try {
-    await api.addProvider({
-      id: addSelectedProvider.value,
-      api_key: addApiKey.value,
-      base_url: addBaseURL.value || undefined,
-    })
-    // Refresh provider list
-    configuredProviders.value = await api.listProviders()
-    showAddProvider.value = false
-    // Also refresh models in the chat store
-    store.fetchModels()
-  } catch (err: unknown) {
-    addError.value = err instanceof Error ? err.message : 'Failed to add provider'
-  }
-  addLoading.value = false
+// After the dialog saves, refresh the provider list + chat models, then close.
+async function onProviderSaved() {
+  configuredProviders.value = await api.listProviders()
+  store.fetchModels()
 }
 
 async function deleteProvider(id: string) {
@@ -657,7 +653,195 @@ async function deleteProvider(id: string) {
   }
 }
 
-const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelectedProvider.value)
+// ── Add / edit custom model (separate modal) ──
+// The card lists registry + custom models uniformly; only custom models are
+// editable (registry models are read-only and have no stored per-model fields).
+function startAddModel(providerId: string) {
+  modelSaveError.value = ''
+  modelDialogProvider.value = providerId
+  modelDialogTarget.value = null
+  showModelDialog.value = true
+}
+
+function startEditModel(providerId: string, model: CustomModelDetail) {
+  modelSaveError.value = ''
+  modelDialogProvider.value = providerId
+  modelDialogTarget.value = model
+  showModelDialog.value = true
+}
+
+// Save a model from the dialog: rebuild the provider's custom_models (edit =
+// replace the matching id, add = append) and persist via updateProvider.
+async function onModelSave(payload: { id: string; name?: string; reasoning: boolean; context: number; attachment: boolean; effortTiers: string[]; isEdit: boolean; originalId?: string }) {
+  const providerId = modelDialogProvider.value
+  const p = configuredProviders.value.find(x => x.id === providerId)
+  if (!p) return
+  // Reject duplicate model ids — including collisions with built-in (registry)
+  // models. The provider's custom_models already lists both registry and custom
+  // models, so a single membership check covers both. When editing, the model's
+  // own original id is allowed (renaming to itself is a no-op).
+  const newId = payload.id.trim()
+  const isSelf = payload.isEdit && payload.originalId === newId
+  if (!isSelf) {
+    const clash = (p.custom_models ?? []).some(m => m.id === newId)
+    if (clash) {
+      modelSaveError.value = t('settings.providers.customModelConflict')
+      return
+    }
+  }
+  modelSaveError.value = ''
+  // Only user-defined models are persisted; registry models are excluded from
+  // the saved list (they're read-only and derived from models.dev).
+  const next = (p.custom_models ?? []).filter(m => m.custom).map(m => ({
+    id: m.id, name: m.name, reasoning: m.reasoning, context: m.context,
+    attachment: m.attachment, effort_tiers: m.effort_tiers,
+  }))
+  const built = { id: payload.id, name: payload.name, reasoning: payload.reasoning, context: payload.context || undefined, attachment: payload.attachment || undefined, effort_tiers: payload.effortTiers.length ? payload.effortTiers : undefined }
+  if (payload.isEdit && payload.originalId) {
+    const i = next.findIndex(m => m.id === payload.originalId)
+    if (i >= 0) {
+      next[i] = built
+    } else {
+      next.push(built)
+    }
+  } else {
+    next.push(built)
+  }
+  try {
+    await api.updateProvider(providerId, { custom_models: next })
+    configuredProviders.value = await api.listProviders()
+    await refreshCatalog(providerId)
+    store.fetchModels()
+    showModelDialog.value = false
+  } catch (err: unknown) {
+    console.error('Failed to save model:', err)
+  }
+}
+
+// ── Browse directory (catalog) ── Each provider card can expand an inline
+// catalog of its models. For registry providers this is the built-in list;
+// for custom endpoints it queries the live /models endpoint. A row's "added"
+// flag is a toggle: click "✓ 已添加" to remove, "+ 添加" to add (then save).
+// toggleCatalog below is the entry point used by the card's "Browse Models" button.
+
+
+// Coerce a catalog model row into a CustomModelDetail for the edit dialog.
+function cmToDetail(cm: CatalogModel): CustomModelDetail {
+  return {
+    id: cm.id,
+    name: cm.name,
+    reasoning: cm.reasoning,
+    context: cm.context,
+    attachment: cm.attachment,
+    effort_tiers: cm.effort_tiers ? [...cm.effort_tiers] : [],
+    custom: true,
+  }
+}
+
+// Format a context-window size compactly: < 1000 tokens shows the raw number,
+// >= 1000 shows K (e.g. 200000 → "200K"), so small/unset values don't render as
+// a cluttered "0K".
+function formatContext(ctx: number | undefined): string {
+  if (!ctx || ctx <= 0) return ''
+  if (ctx < 1000) return String(ctx)
+  const k = Math.round(ctx / 1000)
+  return k + 'K'
+}
+
+// Remove a user-defined custom model by id (registry models can't be removed
+// this way). Used by the catalog row's remove button.
+async function removeCustomModelById(providerId: string, modelId: string) {
+  const p = configuredProviders.value.find(x => x.id === providerId)
+  if (!p) return
+  const next = (p.custom_models ?? []).filter(m => m.custom && m.id !== modelId).map(m => ({
+    id: m.id, name: m.name, reasoning: m.reasoning, context: m.context,
+    attachment: m.attachment, effort_tiers: m.effort_tiers,
+  }))
+  try {
+    await api.updateProvider(providerId, { custom_models: next })
+    configuredProviders.value = await api.listProviders()
+    await refreshCatalog(providerId)
+    store.fetchModels()
+  } catch (err: unknown) {
+    console.error('Failed to remove model:', err)
+  }
+}
+
+async function refreshCatalog(providerId: string) {
+  catalogLoading.value = providerId
+  try {
+    catalogModels.value[providerId] = await api.providerCatalog(providerId)
+  } catch {
+    catalogModels.value[providerId] = []
+  }
+  catalogLoading.value = ''
+}
+
+function filteredCatalog(providerId: string): CatalogModel[] {
+  const list = catalogModels.value[providerId] ?? []
+  const q = catalogSearch.value.trim().toLowerCase()
+  if (!q) return list
+  return list.filter(m => m.id.toLowerCase().includes(q) || (m.name ?? '').toLowerCase().includes(q))
+}
+
+function addedCount(providerId: string): number {
+  return (catalogModels.value[providerId] ?? []).filter(m => m.added).length
+}
+
+function totalCount(providerId: string): number {
+  return (catalogModels.value[providerId] ?? []).length
+}
+
+// Toggle a catalog row's added state locally (optimistic); the new model set is
+// persisted by calling saveCatalogModels, which rebuilds the provider's
+// custom_models from the "added" registry models + existing custom models.
+// For registry providers toggling only affects the model-state (enabled), so we
+// keep this purely a visual affordance here and rely on the model picker for the
+// real enable/disable. For custom endpoints, an "added" id becomes a custom model.
+// Toggle a catalog row's added state and persist it. For registry models this
+// enables/disables them in model_state (so they appear in / disappear from the
+// chat model picker); for custom models it's handled by add/remove instead.
+async function toggleCatalogModel(providerId: string, modelId: string) {
+  const list = catalogModels.value[providerId]
+  if (!list) return
+  const m = list.find(x => x.id === modelId)
+  if (!m) return
+  const next = !m.added
+  m.added = next
+  try {
+    await api.toggleModelEnabled(providerId, modelId, next)
+    store.fetchModels()
+  } catch (err: unknown) {
+    // revert on failure
+    m.added = !next
+    console.error('Failed to toggle model:', err)
+  }
+}
+
+// startAddModel / startEditModel / onModelSave / removeCustomModel live above
+// (declared with the provider-dialog handlers). The card's "+ 添加自定义模型"
+// button opens the ModelEditDialog modal rather than an inline form.
+
+// ── Delete guard ── If the provider hosts the currently active model, guide
+// the user to switch models instead of failing outright.
+function activeModelOnProvider(providerId: string): string {
+  // store.providerName / store.modelName hold the active provider + model ids.
+  // We surface the active model id when it belongs to the provider being deleted.
+  if (store.providerName === providerId && store.modelName) return store.modelName
+  return ''
+}
+
+// Close the delete-confirm popover and open the model picker so the user can
+// move off an in-use model before deleting its provider.
+function closeAndSwitchModel() {
+  deleteConfirmId.value = ''
+  emit('close')
+  // The model picker is opened from the chat composer; there's no direct store
+  // action here, so we rely on the user re-opening it. Closing settings returns
+  // them to the chat where the picker is one click away.
+}
+
+
 </script>
 
 <template>
@@ -955,70 +1139,6 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                     </button>
                   </div>
 
-                  <!-- Add provider flow -->
-                  <div v-if="showAddProvider" class="s-form mb-4">
-                    <div class="s-form-head">
-                      <span class="s-form-head-title">
-                        {{ addProviderStep === 'select' ? t('settings.providers.selectProvider') : addProviderStep === 'model' ? t('settings.providers.selectModel') : t('settings.providers.enterApiKey') }}
-                      </span>
-                      <button class="s-btn s-btn-ghost s-btn-xs" @click="showAddProvider = false">✕</button>
-                    </div>
-                    <div class="s-form-body" style="max-height: 220px; overflow-y: auto; padding: 12px">
-                      <!-- Select provider -->
-                      <div v-if="addProviderStep === 'select'">
-                        <div v-if="addLoading" class="text-center py-4 text-xs animate-pulse" style="color: var(--color-muted-foreground)">{{ t('settings.providers.loadingHint') }}</div>
-                        <div v-else class="space-y-1">
-                          <button
-                            v-for="p in addProviderList.filter(x => !configuredProviders.some(c => c.id === x.id))"
-                            :key="p.id"
-                            class="w-full px-2.5 py-2 text-left rounded-md text-xs cursor-pointer transition-colors hover:bg-[var(--color-secondary)] flex items-center gap-2"
-                            style="color: var(--color-foreground)"
-                            @click="selectAddProvider(p.id)"
-                          >
-                            <ProviderIcon :provider="p.id" :size="16" />
-                            <span class="font-medium">{{ p.name }}</span>
-                            <span class="ml-1.5 font-mono" style="color: var(--color-muted-foreground)">{{ p.id }}</span>
-                          </button>
-                          <div v-if="addProviderList.filter(x => !configuredProviders.some(c => c.id === x.id)).length === 0" class="text-center py-3 text-[10px]" style="color: var(--color-muted-foreground)">
-                            {{ t('settings.providers.allConfigured') }}
-                          </div>
-                        </div>
-                      </div>
-                      <!-- Select model -->
-                      <div v-if="addProviderStep === 'model'">
-                        <div class="flex items-center gap-1 mb-2">
-                          <button class="s-btn s-btn-ghost s-btn-xs" @click="addProviderStep = 'select'">‹</button>
-                          <span class="text-[10px]" style="color: var(--color-muted-foreground)">{{ addProviderInfo()?.name }}</span>
-                        </div>
-                        <div v-if="addLoading" class="text-center py-4 text-xs animate-pulse" style="color: var(--color-muted-foreground)">{{ t('settings.providers.loadingHint') }}</div>
-                        <div v-else class="space-y-1">
-                          <button
-                            v-for="m in addProviderModels"
-                            :key="m.id"
-                            class="w-full px-2.5 py-1.5 text-left rounded-md text-xs cursor-pointer transition-colors hover:bg-[var(--color-secondary)] font-mono"
-                            style="color: var(--color-foreground)"
-                            @click="selectAddModel(m.id)"
-                          >
-                            {{ m.id }}
-                          </button>
-                        </div>
-                      </div>
-                      <!-- Enter API key -->
-                      <div v-if="addProviderStep === 'apikey'" class="space-y-2">
-                        <div class="flex items-center gap-1 mb-1">
-                          <button class="s-btn s-btn-ghost s-btn-xs" @click="addProviderStep = 'model'">‹</button>
-                          <span class="text-[10px] font-mono" style="color: var(--color-muted-foreground)">{{ addSelectedProvider }} / {{ addSelectedModel }}</span>
-                        </div>
-                        <input v-model="addApiKey" type="password" :placeholder="t('settings.providers.apiKey')" class="s-input mono" @keydown.enter="submitAddProvider" />
-                        <input v-model="addBaseURL" type="text" :placeholder="t('settings.providers.baseUrl')" class="s-input mono" @keydown.enter="submitAddProvider" />
-                        <div v-if="addError" class="s-error">{{ addError }}</div>
-                        <button :disabled="addLoading || !addApiKey" class="s-btn s-btn-primary w-full" @click="submitAddProvider">
-                          {{ addLoading ? t('settings.providers.saving') : t('settings.providers.addBtn') }}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
                   <!-- Provider list -->
                   <div v-if="configuredProviders.length === 0" class="flex flex-col items-center justify-center text-center py-12 gap-2.5">
                     <div class="w-9 h-9 grid place-items-center rounded-lg" style="background-color: var(--color-secondary); color: var(--color-muted-foreground)">
@@ -1029,30 +1149,98 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                       {{ t('settings.providers.noneHint', { btn: t('settings.providers.add') }) }}
                     </div>
                   </div>
-                  <div v-else>
-                    <div v-for="p in configuredProviders" :key="p.id" class="s-row">
-                      <div class="s-row-icon"><ProviderIcon :provider="p.id" :size="18" /></div>
-                      <div class="s-row-body">
-                        <div class="s-row-title" style="font-family: var(--font-mono)">{{ p.id }}</div>
-                        <div class="s-row-sub" style="font-family: var(--font-mono)">
-                          {{ p.api_key || '—' }}
-                          <template v-if="p.base_url"> · {{ p.base_url }}</template>
+                  <div v-else class="space-y-2.5">
+                    <div v-for="p in configuredProviders" :key="p.id" class="p-card">
+                      <!-- Card head: brand · name · url · actions -->
+                      <div class="p-card-head">
+                        <div class="p-card-brand"><ProviderIcon :provider="p.id" :custom="p.custom" :size="18" /></div>
+                        <div class="p-card-meta">
+                          <div class="p-card-name">
+                            <span>{{ p.name || p.id }}</span>
+                            <span v-if="store.providerName === p.id" class="s-chip s-chip-accent">{{ t('common.active') }}</span>
+                            <span v-if="p.custom" class="s-chip">{{ t('settings.providers.custom') }}</span>
+                          </div>
+                          <div class="p-card-url">
+                            {{ p.base_url || (p.custom ? '' : (p.api_key ? p.api_key : '—')) }}
+                            <template v-if="p.api_key && !p.base_url"> · {{ p.api_key }}</template>
+                          </div>
+                        </div>
+                        <div class="p-card-actions">
+                          <!-- Delete-in-use guide: when this provider hosts the active model,
+                               deleting would strand the session — guide a switch first. -->
+                          <template v-if="deleteConfirmId === p.id">
+                            <div v-if="activeModelOnProvider(p.id)" class="p-card-guide">
+                              <div>
+                                <div class="text-[12px] font-semibold" style="color: var(--color-warning-fg)">{{ t('settings.providers.deleteInUseTitle') }}</div>
+                                <div class="text-[10.5px] mt-0.5" style="color: var(--color-muted-foreground)">{{ t('settings.providers.deleteInUseBody', { model: activeModelOnProvider(p.id) }) }}</div>
+                              </div>
+                              <div class="flex gap-1.5 flex-wrap justify-end">
+                                <button class="s-btn s-btn-ghost s-btn-xs" @click="deleteConfirmId = ''">{{ t('common.cancel') }}</button>
+                                <button class="s-btn s-btn-primary s-btn-xs" @click="closeAndSwitchModel">{{ t('settings.providers.switchModel') }}</button>
+                              </div>
+                            </div>
+                            <template v-else>
+                              <button class="s-btn s-btn-danger s-btn-xs" @click="deleteProvider(p.id)">{{ t('common.delete') }}</button>
+                              <button class="s-btn s-btn-ghost s-btn-xs" @click="deleteConfirmId = ''">{{ t('common.cancel') }}</button>
+                            </template>
+                          </template>
+                          <template v-else>
+                            <button class="s-btn s-btn-ghost s-btn-xs" :title="t('settings.providers.edit')" @click="startEditProvider(p)"><PencilSquareIcon class="w-3.5 h-3.5" /></button>
+                            <button class="s-btn s-btn-ghost s-btn-xs" :title="t('settings.providers.remove')" @click="deleteConfirmId = p.id"><TrashIcon class="w-3.5 h-3.5" /></button>
+                          </template>
                         </div>
                       </div>
-                      <div class="s-row-actions">
-                        <span v-if="store.providerName === p.id" class="s-chip s-chip-accent">{{ t('common.active') }}</span>
-                        <button
-                          v-if="deleteConfirmId !== p.id"
-                          class="s-btn s-btn-ghost s-btn-xs"
-                          :title="t('settings.providers.remove')"
-                          @click="deleteConfirmId = p.id"
-                        >
-                          <TrashIcon class="w-3.5 h-3.5" />
-                        </button>
-                        <template v-else>
-                          <button class="s-btn s-btn-danger s-btn-xs" @click="deleteProvider(p.id)">{{ t('common.delete') }}</button>
-                          <button class="s-btn s-btn-ghost s-btn-xs" @click="deleteConfirmId = ''">{{ t('common.cancel') }}</button>
-                        </template>
+
+                      <!-- Models sub-area. Models are shown only inside the
+                           "Browse Models" catalog (kept expanded by default),
+                           not duplicated inline. Custom models get inline
+                           edit/remove; registry models toggle add/added. -->
+                      <div class="p-card-models">
+                        <div class="p-card-bar">
+                          <span class="text-[10.5px]" style="color: var(--color-muted-foreground)"><b style="color: var(--color-foreground)">{{ addedCount(p.id) }}</b>/{{ totalCount(p.id) }} {{ t('settings.providers.models') }}</span>
+                          <button class="s-btn s-btn-secondary s-btn-xs ml-auto" @click="startAddModel(p.id)"><PlusIcon class="w-3.5 h-3.5" />{{ t('settings.providers.addCustomModel') }}</button>
+                        </div>
+
+                        <!-- Inline model catalog — always expanded (the card's
+                             purpose is to show this provider's models). -->
+                        <div class="p-catalog">
+                          <div v-if="catalogLoading === p.id && !(catalogModels[p.id]?.length)" class="text-center py-3 text-[10px] animate-pulse" style="color: var(--color-muted-foreground)">{{ t('settings.providers.loadingHint') }}</div>
+                          <template v-else>
+                            <div class="p-catalog-search">
+                              <input v-model="catalogSearch" type="text" :placeholder="t('settings.providers.catalogSearch')" class="s-input" />
+                            </div>
+                            <div v-if="filteredCatalog(p.id).length === 0" class="text-center py-3 text-[10px]" style="color: var(--color-muted-foreground)">
+                              {{ p.custom ? t('settings.providers.noCatalog') : t('settings.providers.allConfigured') }}
+                            </div>
+                            <div v-else class="p-catalog-list">
+                              <div v-for="cm in filteredCatalog(p.id)" :key="cm.id" class="p-cat-row">
+                                <div class="p-cat-meta">
+                                  <div class="p-cat-id">{{ cm.id }}</div>
+                                  <div class="p-cat-sub">
+                                    {{ cm.name || cm.id }}
+                                    <template v-if="cm.context"> · {{ formatContext(cm.context) }}</template>
+                                    <template v-if="cm.reasoning"> · {{ t('settings.providers.customReasoning') }}</template>
+                                    <template v-if="cm.attachment"> · {{ t('settings.providers.supportImage') }}</template>
+                                  </div>
+                                </div>
+                                <!-- Custom (user-defined) model: edit/remove inline -->
+                                <div v-if="cm.added && cm.custom" class="flex items-center gap-1">
+                                  <button class="s-btn s-btn-ghost s-btn-xs" :title="t('settings.providers.editModel')" @click="startEditModel(p.id, cmToDetail(cm))"><PencilSquareIcon class="w-3.5 h-3.5" /></button>
+                                  <button class="s-btn s-btn-ghost s-btn-xs p-model-rm" :title="t('settings.providers.remove')" @click="removeCustomModelById(p.id, cm.id)"><TrashIcon class="w-3.5 h-3.5" /></button>
+                                </div>
+                                <!-- Registry model: show/hide toggle (a switch). -->
+                                <button
+                                  v-else
+                                  class="s-switch"
+                                  :data-on="cm.added ? 'true' : 'false'"
+                                  :aria-pressed="cm.added"
+                                  :title="cm.added ? t('settings.providers.hideModel') : t('settings.providers.showModel')"
+                                  @click="toggleCatalogModel(p.id, cm.id)"
+                                />
+                              </div>
+                            </div>
+                          </template>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1499,6 +1687,32 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
                 </div>
               </div>
             </div>
+
+            <!-- Provider edit/add-model dialog: a separate modal, not an inline
+                 expansion, so the providers tab stays a clean list of cards.
+                 Must render INSIDE DialogPanel — headlessui's Dialog treats any
+                 click outside the panel as a dismiss, so a sibling-of-panel
+                 placement made every button in this nested dialog close Settings
+                 and drop the user back to the welcome screen. -->
+      <ProviderEditDialog
+        :open="showProviderDialog"
+        :editing-provider="editingProviderTarget"
+        :setup-providers="addProviderList"
+        :configured-ids="configuredProviders.map(p => p.id)"
+        @close="showProviderDialog = false"
+        @saved="onProviderSaved"
+      />
+      <!-- Add/edit custom-model dialog: a separate modal for authoring a single
+           model (ID/name/context/image/reasoning tiers). -->
+      <ModelEditDialog
+        :open="showModelDialog"
+        :provider-id="modelDialogProvider"
+        :model="modelDialogTarget"
+        :server-error="modelSaveError"
+        @close="showModelDialog = false; modelSaveError = ''"
+        @save="onModelSave"
+        @clear-error="modelSaveError = ''"
+      />
           </DialogPanel>
         </TransitionChild>
       </div>
@@ -1713,6 +1927,15 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
 .s-btn-danger:hover:not(:disabled) {
   filter: brightness(0.92);
 }
+/* Success-tinted action (the catalog "✓ added" toggle, distinct from primary). */
+.s-btn-success {
+  background: var(--color-success-bg);
+  color: var(--color-success-fg);
+  border: 1px solid transparent;
+}
+.s-btn-success:hover:not(:disabled) {
+  filter: brightness(0.96);
+}
 .s-btn-sm {
   height: 26px;
   padding: 0 9px;
@@ -1766,6 +1989,24 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
 .s-switch:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Advanced disclosure toggle in the provider form. */
+.s-adv-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--color-muted-foreground);
+  padding: 2px 0;
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+.s-adv-toggle:hover {
+  color: var(--color-foreground);
 }
 
 /* Row — unified list row for prefs / provider / mcp / skill / ssh /
@@ -1954,6 +2195,20 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
   gap: 8px;
   margin-bottom: 8px;
 }
+.s-cm {
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+}
+.s-cm-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--color-muted-foreground);
+}
 .s-kv .s-input {
   height: 28px;
   font-size: 11px;
@@ -1974,5 +2229,321 @@ const addProviderInfo = () => addProviderList.value.find(p => p.id === addSelect
 .s-kv-rm:hover {
   background: var(--color-secondary);
   color: var(--color-foreground);
+}
+
+/* ── Provider card (providers tab) ── Replaces the flat .s-row with a two-zone
+ * card: a head (brand · name · url · actions) and a models sub-area (count +
+ * browse/add entries + model rows with capability badges + inline catalog).
+ * Mirrors design/provider-redesign.html's .pcard structure. */
+.p-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  overflow: hidden;
+}
+.p-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--color-border);
+}
+.p-card-brand {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-secondary);
+  color: var(--color-foreground);
+}
+.p-card-meta {
+  flex: 1;
+  min-width: 0;
+}
+.p-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-foreground);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.p-card-url {
+  font-size: 11px;
+  color: var(--color-muted-foreground);
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.p-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+/* Delete-in-use guide popover: spans under the head when the active model
+ * blocks deletion. */
+.p-card-guide {
+  margin-left: auto;
+  max-width: 280px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--color-warning-bg);
+  border: 1px solid color-mix(in srgb, var(--color-warning-fg) 30%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.p-card-models {
+  padding: 8px 13px 12px;
+}
+.p-card-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0 8px;
+  flex-wrap: wrap;
+}
+.p-card-count {
+  font-size: 11.5px;
+  color: var(--color-muted-foreground);
+}
+.p-card-count b {
+  color: var(--color-foreground);
+  font-weight: 600;
+}
+.p-model-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border-radius: var(--radius-md);
+}
+.p-model-row:hover {
+  background: var(--color-muted);
+}
+.p-model-main {
+  flex: 1;
+  min-width: 0;
+}
+.p-model-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.p-model-id {
+  font-size: 10.5px;
+  color: var(--color-muted-foreground);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.p-model-badges {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+/* Hover affordances (edit/remove) only show on user-defined models. Registry
+ * models have no .p-model-hover, so they render cleanly read-only. */
+.p-model-hover {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.p-model-row.p-model-editable:hover .p-model-hover {
+  display: flex;
+}
+.p-model-rm {
+  flex-shrink: 0;
+  color: var(--color-muted-foreground);
+}
+.p-model-rm:hover {
+  color: var(--color-destructive);
+}
+
+/* Inline catalog (browse directory) — expands in place, not an overlay. */
+.p-catalog {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--color-border);
+}
+.p-catalog-search {
+  margin-bottom: 6px;
+}
+.p-catalog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-background);
+}
+.p-cat-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+}
+.p-cat-row:hover {
+  background: var(--color-secondary);
+}
+.p-cat-meta {
+  flex: 1;
+  min-width: 0;
+}
+.p-cat-id {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--color-foreground);
+}
+.p-cat-sub {
+  font-size: 10px;
+  color: var(--color-muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Inline custom-model form (.p-cm-form) — a model draft surface that opens on
+ * a provider card, distinct from the full edit dialog. Neutral background (not
+ * accent-tinted) per design review. */
+.p-cm-form {
+  margin-top: 8px;
+  padding: 11px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.p-cm-title {
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.p-cm-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.p-cm-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+/* Effort-tier editor (chips you can add/remove). */
+.p-tiers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.p-tier {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 4px 0 9px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--color-foreground);
+}
+.p-tier-x {
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: none;
+  border-radius: 50%;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+}
+.p-tier-x:hover {
+  background: var(--color-error-bg);
+  color: var(--color-error-fg);
+}
+.p-tier-add {
+  height: 24px;
+  padding: 0 10px;
+  background: transparent;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+}
+.p-tier-add:hover {
+  border-color: var(--color-border-active);
+  color: var(--color-foreground);
+}
+.p-tier-input-wrap {
+  display: inline-flex;
+  align-items: center;
+}
+.p-tier-input {
+  height: 24px;
+  padding: 0 10px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-active);
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--color-foreground);
+  outline: none;
+  width: 96px;
+}
+.p-tier-input:focus {
+  box-shadow: 0 0 0 3px var(--accent-wash-soft);
+}
+
+/* Stateful test-connection banner (add/edit form). */
+.p-test-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  border-radius: var(--radius-md);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.p-test-ic {
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.p-test-ok {
+  background: var(--color-success-bg);
+  color: var(--color-success-fg);
+}
+.p-test-auth {
+  background: var(--color-error-bg);
+  color: var(--color-error-fg);
+}
+.p-test-net {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-fg);
 }
 </style>

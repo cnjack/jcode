@@ -141,32 +141,6 @@ func RichIdle(t time.Time) string {
 	}
 }
 
-// RichDone returns a varied "task finished" message.
-func RichDone(summary string, err error, t time.Time) string {
-	if err != nil {
-		return "❌ Task hit an error\n" +
-			"————————————————\n" +
-			err.Error()
-	}
-	s := summary
-	if len(s) > 500 {
-		s = s[:500] + "..."
-	}
-	if s == "" {
-		s = "(no details)"
-	}
-	prefixes := []string{
-		"✅ Done!",
-		"✅ All finished!",
-		"✅ Task wrapped up!",
-		"✅ Completed!",
-	}
-	prefix := prefixes[t.Second()%len(prefixes)]
-	return prefix + "\n" +
-		"————————————————\n" +
-		s
-}
-
 func isWeekend(t time.Time) bool {
 	d := t.Weekday()
 	return d == time.Saturday || d == time.Sunday

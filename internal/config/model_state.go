@@ -18,6 +18,11 @@ type ModelState struct {
 	EnabledModels []ModelRef `json:"enabled_models,omitempty"`
 	// DisabledModels lists models explicitly disabled by the user (hidden from model selector).
 	DisabledModels []ModelRef `json:"disabled_models,omitempty"`
+	// EffortOverrides holds per-"provider/model" reasoning-effort choices made
+	// from the chat model picker. An empty value ("") means "use the model's
+	// default / unset" and clears any earlier override. This takes precedence
+	// over the provider-level ProviderConfig.ReasoningEffort when present.
+	EffortOverrides map[string]string `json:"effort_overrides,omitempty"`
 }
 
 // ModelRef uniquely identifies a model in "provider/model" format.
@@ -152,4 +157,44 @@ func removeModelRef(refs []ModelRef, ref ModelRef) []ModelRef {
 		}
 	}
 	return result
+}
+
+// effortKey is the lookup key for per-model effort overrides: "provider/model".
+func effortKey(ref ModelRef) string { return ref.Provider + "/" + ref.Model }
+
+// GetEffortOverride returns the user's per-model reasoning-effort choice, or ""
+// when none is set (callers then fall back to the provider-level setting).
+func (s *ModelState) GetEffortOverride(ref ModelRef) string {
+	if s == nil || s.EffortOverrides == nil {
+		return ""
+	}
+	return s.EffortOverrides[effortKey(ref)]
+}
+
+// SetEffortOverride records the user's reasoning-effort choice for a model.
+// An empty effort clears the override, restoring the default behavior.
+func (s *ModelState) SetEffortOverride(ref ModelRef, effort string) {
+	if s.EffortOverrides == nil {
+		s.EffortOverrides = make(map[string]string)
+	}
+	key := effortKey(ref)
+	if effort == "" {
+		delete(s.EffortOverrides, key)
+		return
+	}
+	s.EffortOverrides[key] = effort
+}
+
+// ResolveEffort returns the effective reasoning effort for a model: the
+// per-model override (from the chat picker) if set, otherwise the provider-level
+// fallback from ProviderConfig. Empty ("") means "send no effort parameter".
+// This is the single place that defines override precedence so every
+// entrypoint (web/TUI/ACP) applies the same value.
+func ResolveEffort(prov, mod, providerEffort string) string {
+	if state, err := LoadModelState(); err == nil && state != nil {
+		if v := state.GetEffortOverride(ModelRef{Provider: prov, Model: mod}); v != "" {
+			return v
+		}
+	}
+	return providerEffort
 }
