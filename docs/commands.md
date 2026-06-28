@@ -20,6 +20,16 @@ nav_order: 8
 | `jcode sessions` | List recorded sessions for this project |
 | `jcode mcp add <name> <url>` | Add an MCP server |
 | `jcode mcp list` | List configured MCP servers |
+| `jcode mcp login <name>` | Authenticate an existing http/sse MCP server via OAuth |
+| `jcode automation list` | List all automations |
+| `jcode automation show <id>` | Show an automation's definition and last run state |
+| `jcode automation templates` | List built-in automation templates |
+| `jcode automation enable <id>` | Enable an automation |
+| `jcode automation disable <id>` | Disable an automation |
+| `jcode automation delete <id>` | Delete an automation |
+
+{: .note }
+> `jcode automation` is also available as `jcode automations` or `jcode auto`. Definition management works standalone; periodic firing is owned by a running `jcode web` process.
 
 ### Flags
 
@@ -28,8 +38,6 @@ nav_order: 8
 | `--prompt <text>` | `-p` | One-shot mode: run a single prompt and exit |
 | `--resume <UUID>` | | Resume a previous session |
 | `--unsafe` | | Auto-approve all tool calls |
-| `--doctor` | | Run system health check |
-| `--version` | | Print version info |
 
 ### Web Server Flags
 
@@ -37,6 +45,7 @@ nav_order: 8
 |---|---|---|
 | `--port` | 8080 | HTTP port for web interface |
 | `--host` | 127.0.0.1 | Server bind address |
+| `--open` | true | Open browser after server starts |
 
 ### MCP Add Flags
 
@@ -45,6 +54,11 @@ nav_order: 8
 | `--type` | `-t` | Server type: `sse`, `http`, or `stdio` (auto-detected) |
 | `--header` | | HTTP header in `Key: Value` format (repeatable) |
 | `--env` | | Environment variable in `KEY=VALUE` format (repeatable) |
+| `--scope` | `-s` | Config scope (`user`) |
+| `--oauth` | | Authenticate via OAuth after adding (http/sse only) |
+| `--client-id` | | OAuth client id (manual fallback when dynamic registration is unsupported) |
+| `--client-secret` | | OAuth client secret (confidential clients) |
+| `--scope-oauth` | | OAuth scope to request (repeatable) |
 
 ## Keyboard Shortcuts (TUI)
 
@@ -77,9 +91,13 @@ Type these in the TUI input area:
 | `/compact` | Compact conversation context |
 | `/goal` | Set a persistent objective the agent works toward ([Goals](goal.html)) |
 | `/bg` | Show background tasks |
+| `/channel` | Open the channel management panel (WeChat push/messaging) |
+| `/mcp` | List MCP servers and status; `/mcp login <name>` to authenticate via OAuth |
+| `/help` | Show keyboard shortcuts help |
 | `/review-pr` | Run PR review skill |
 | `/pr-comments` | Fetch PR comments |
 | `/security-review` | Run security review |
+| `/submit-pr` | Commit, push the branch, and open a GitHub pull request |
 | `/<custom-skill>` | Any skill with a slash command |
 
 ## One-Shot Mode

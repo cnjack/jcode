@@ -17,7 +17,7 @@ Skills use a **two-layer** loading system:
 
 ## Built-in Skills
 
-jcode includes three built-in skills:
+jcode includes four built-in skills:
 
 ### PR Review (`/review-pr`)
 
@@ -41,6 +41,17 @@ Performs a security-focused code review of pending changes on the current branch
 - Hardcoded credentials
 - Remote code execution
 - Data exposure
+
+### Submit PR (`/submit-pr`)
+
+Commits the current working changes, pushes the branch, and opens a GitHub pull request. It:
+
+- Checks for changes to submit and stops if there are none
+- Creates a feature branch first if you are on the default branch (`main`/`master`)
+- Commits with a Conventional Commit message and pushes the branch
+- Opens the PR with `gh pr create` and reports the PR URL
+
+It never force-pushes or pushes directly to the default branch.
 
 {: .note }
 The PR-related skills require the `gh` CLI tool to be installed and authenticated. Run `gh auth login` if you haven't already.

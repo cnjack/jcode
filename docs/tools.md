@@ -34,12 +34,12 @@ Not all tool calls require your approval. jcode categorizes tools by risk:
 | Category | Tools | Approval |
 |---|---|---|
 | **Read-only** | `read`, `grep`, `glob` | Auto-approved (within project) |
-| **Safe commands** | `ls`, `pwd`, `git status`, `git log` | Auto-approved |
+| **Safe commands** | `ls`, `pwd`, `cat`, `echo`, `which`, bare `env`, `git status`, `git log`, `git diff`, `git show` | Auto-approved (foreground only, no shell operators) |
 | **Management** | `todowrite`, `todoread`, `ask_user` | Auto-approved |
-| **Delegation** | `subagent`, `check_background` | Auto-approved |
+| **Delegation** | `subagent`, `check_background`, `webfetch` | Auto-approved |
 | **Team** | `team_create`, `team_spawn`, `team_send_message`, `team_list`, `team_delete` | Auto-approved |
 | **File edits** | `edit`, `write` | **Require approval** |
-| **Commands** | `execute` (non-safe) | **Require approval** |
+| **Commands** | `execute` (non-safe, or any [background]({% link tools/execute.md %}) command) | **Require approval** |
 | **Environment** | `switch_env` | **Require approval** |
 
 When a tool requires approval (in **Ask for approval** mode), you see a dialog with the tool name and arguments. You can:

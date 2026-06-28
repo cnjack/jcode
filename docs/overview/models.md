@@ -78,9 +78,45 @@ jcode supports different models for different purposes:
 }
 ```
 
+## Reasoning & Extended Thinking
+
+For reasoning-capable models, jcode can control thinking depth via the OpenAI-compatible `reasoning_effort` parameter. Set it per provider in `~/.jcode/config.json`:
+
+```json
+{
+  "providers": {
+    "openai": {
+      "api_key": "sk-...",
+      "reasoning_effort": "medium"
+    }
+  }
+}
+```
+
+Accepted values are `"low"`, `"medium"`, and `"high"`. An empty string (or omitting the key) sends no effort parameter. The value is forwarded on every request; reasoning models honor it and others ignore it.
+
+For gateways that gate reasoning behind a chat-template flag (for example qwen3), set `thinking` to explicitly toggle extended reasoning. It is sent as the `chat_template_kwargs` `{"enable_thinking": <bool>}` extension:
+
+```json
+{
+  "providers": {
+    "my-gateway": {
+      "api_key": "...",
+      "base_url": "https://gateway.example.com/v1",
+      "thinking": true
+    }
+  }
+}
+```
+
+{: .note }
+Reasoning effort can also be chosen **per model** from the chat model picker. That choice is stored in `~/.jcode/model_state.json` (`effort_overrides`) and takes precedence over the provider-level `reasoning_effort`. It is applied consistently across the TUI, web, and ACP.
+
 ## Add a Provider at Runtime
 
 jcode includes a setup wizard. Run it from the TUI with `/setting` → "Add Model", or press Ctrl+L and select "Add new provider".
+
+In the web UI, providers and models are managed from a card-based **Settings** view: each provider is a card showing its brand, name, base URL, and a catalog of its models (built-in registry models toggle show/hide; custom models are editable or removable). Editing a provider or authoring a custom model opens a dedicated dialog. A custom model's editor exposes its ID, display name, context window, image-input toggle, and a reasoning-effort tier editor — when a custom model is flagged as reasoning, the standard `minimal` / `low` / `medium` / `high` effort levels are offered, or you can define your own tiers. Models advertising effort levels then expose the per-model reasoning-effort control in the chat input.
 
 ## Verify Model Connectivity
 

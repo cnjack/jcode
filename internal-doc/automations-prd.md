@@ -2,7 +2,7 @@
 
 > 状态：草案 **v2**（2026-06-23，关键决策已定，待实现）
 > 对标形态：Anthropic Claude Code 的 **Automations** —— 用 agent 处理「按节奏 / 手动触发」的重复性工作。
-> 关联：[[web 任务化架构]]（`docs/web-task-architecture.md`）、Goal（`docs/goal.md`）、Mode 选择器（Ask/Plan/Autopilot）、Skills、MCP。
+> 关联：[[web 任务化架构]]（`internal-doc/web-task-architecture.md`）、Goal（`docs/goal.md`）、Mode 选择器（Ask/Plan/Autopilot）、Skills、MCP。
 >
 > v1→v2 变更：①去掉事件/GitHub 触发（先不碰 gh）②去掉 Effort/推理力度 ③新增 agent 可调用的 `automation_create` 工具 + 渲染卡片 ④调度器定为「文件锁选主」⑤存储定为「flock 写锁 + 易变态分离」⑥运行时不加护栏（沿用既有哲学）。
 
