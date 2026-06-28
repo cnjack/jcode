@@ -12,9 +12,15 @@ Run shell commands on your machine (or remote SSH host).
 
 | Command Type | Approval |
 |---|---|
-| Safe commands (`ls`, `pwd`, `env`, `cat`, `echo`, `which`, `git status`, `git log`) | Auto-approved |
-| Background tasks | Auto-approved |
+| Safe commands (`ls`, `pwd`, `cat`, `echo`, `which`, bare `env`, `git status`, `git log`, `git diff`, `git show`) | Auto-approved |
+| Background tasks | **Requires approval** |
 | All other commands | **Requires approval** |
+
+{: .note }
+Safe commands are matched on the whole command word with no shell operators (`;`, `&`, `|`, `<`, `>`, `` ` ``, `$()`, `${}`, `()`). A "safe" prefix cannot smuggle a payload — e.g. `git status && rm -rf /` is **not** auto-approved. Bare `env` (printing the environment) is safe, but `env CMD ...` runs `CMD` and is **not** safe.
+
+{: .warning }
+Background tasks always require approval. The `background` flag is agent-controlled, so auto-approving it would let any command bypass the gate by setting `background=true`.
 
 ## Basic Usage
 

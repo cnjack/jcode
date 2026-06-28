@@ -36,6 +36,29 @@ Read the current task list.
 
 Returns the current todos with a summary count.
 
+## Goals
+
+A goal is a persistent, cross-turn objective. Once set, the agent keeps working
+toward it across turns — when it would otherwise stop, it is automatically
+reminded to continue until the objective is verifiably complete or it hits the
+continuation cap. See [Goals]({% link goal.md %}) for the full workflow and the
+`/goal` command.
+
+These tools back the goal feature in every frontend (TUI, web, ACP):
+
+| Tool | What It Does |
+|---|---|
+| `goal_set` | Set or replace the session goal. Takes `objective` (a clear, self-contained description of the desired end state, max 4000 chars). Replacing a goal resets accounting. |
+| `goal_get` | Read the current goal — its objective, status, and token usage. Takes no parameters. Returns `No goal set.` when none exists. |
+| `goal_update` | Mark the goal `complete` (objective verifiably done) or `blocked` (cannot proceed). Takes `status`. Either value stops the automatic continuation. |
+
+**Approval:** Require approval (in **Ask for approval** mode).
+
+A goal carries one of three statuses: `active` (the agent keeps working),
+`complete`, or `blocked`. The agent is instructed to mark `complete` only when
+the objective is verified against the real state of files, command output, or
+tests — not its intent.
+
 ## Ask User
 
 The agent can ask you questions when it needs clarification or a decision.

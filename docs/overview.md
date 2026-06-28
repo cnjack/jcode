@@ -26,6 +26,7 @@ jcode is an AI-powered coding agent that runs in your terminal. You describe tas
 | **Interactive Questions** | The agent can ask you for clarification mid-task |
 | **Plan Mode** | Explore read-only and present a plan before making changes |
 | **SSH Remote** | Work on any machine over SSH — same tools, same experience |
+| **Docker Workspaces** | Work inside a Docker container with the same tool coverage |
 | **Agent Teams** | Spawn parallel AI teammates for complex tasks |
 | **Subagents** | Delegate subtasks to independent child agents |
 | **MCP Integration** | Connect any MCP-compatible server for extended capabilities |
@@ -34,6 +35,7 @@ jcode is an AI-powered coding agent that runs in your terminal. You describe tas
 | **Channels** | Push notifications to WeChat when approval is needed or tasks complete |
 | **JCode Buddy** | Physical desktop companion with pixel cat that reacts to your coding activity |
 | **Skills** | Domain-specific skill packs loaded on demand |
+| **Color Themes** | 7 built-in themes (4 dark / 3 light) with live preview via `/theme` |
 
 ## Design Philosophy
 
