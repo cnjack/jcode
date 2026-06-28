@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/cnjack/jcode/internal/config"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // ---------------------------------------------------------------------------
@@ -434,28 +433,6 @@ func TestAddServer_Duplicate(t *testing.T) {
 	err := mgr.AddServer(context.Background(), "dup", configStub())
 	if err == nil {
 		t.Fatal("expected error for duplicate server")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// contentToString
-// ---------------------------------------------------------------------------
-
-func TestContentToString(t *testing.T) {
-	contents := []mcp.Content{
-		mcp.TextContent{Type: "text", Text: "hello"},
-		mcp.TextContent{Type: "text", Text: "world"},
-	}
-	got := contentToString(contents)
-	if got != "hello\nworld" {
-		t.Errorf("contentToString = %q, want %q", got, "hello\nworld")
-	}
-}
-
-func TestContentToString_Empty(t *testing.T) {
-	got := contentToString(nil)
-	if got != "" {
-		t.Errorf("contentToString(nil) = %q, want empty", got)
 	}
 }
 

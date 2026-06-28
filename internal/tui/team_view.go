@@ -224,19 +224,6 @@ func RenderTeamStatusPill(count int) string {
 	return style.Render(fmt.Sprintf("%d teammates", count))
 }
 
-// RenderTeammateMessage renders a message from a teammate with color and identity.
-func RenderTeammateMessage(from, content, color, summary string) string {
-	nameStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(color))
-
-	summaryStyle := lipgloss.NewStyle().
-		Faint(true)
-
-	header := nameStyle.Render("@"+from) + " " + summaryStyle.Render(summary)
-	return header + "\n" + content
-}
-
 // --- Model methods for team view switching ---
 
 // switchTeamView switches the agent view by delta (-1 = prev, +1 = next).

@@ -84,6 +84,8 @@ export const useChatStore = defineStore('chat', () => {
   // Model favorites & recent
   const favoriteModels = ref<Set<string>>(new Set())
   const recentModels = ref<ModelRef[]>([])
+  // Per-"provider/model" reasoning-effort overrides set from the chat picker.
+  const effortOverrides = ref<Record<string, string>>({})
 
   // Current session tracking
   const currentSessionId = ref('')
@@ -826,9 +828,34 @@ export const useChatStore = defineStore('chat', () => {
         favs.add(`${r.provider}/${r.model}`)
       }
       favoriteModels.value = favs
+      effortOverrides.value = data.effort_overrides || {}
     } catch {
       /* ignore */
     }
+  }
+
+  // setModelEffort records a per-model reasoning-effort choice and updates the
+  // local override map immediately. An empty effort clears it.
+  async function setModelEffort(provider: string, model: string, effort: string) {
+    const key = `${provider}/${model}`
+    const next = { ...effortOverrides.value }
+    if (effort) {
+      next[key] = effort
+    } else {
+      delete next[key]
+    }
+    effortOverrides.value = next
+    try {
+      await api.setModelEffort(provider, model, effort)
+    } catch {
+      // Revert on failure so the UI doesn't lie about what was applied.
+      effortOverrides.value = effortOverrides.value === next ? { ...effortOverrides.value } : effortOverrides.value
+    }
+  }
+
+  // getEffortOverride returns the user's per-model effort choice, or '' if none.
+  function getEffortOverride(provider: string, model: string): string {
+    return effortOverrides.value[`${provider}/${model}`] || ''
   }
 
   async function toggleFavorite(provider: string, model: string) {
@@ -1174,6 +1201,8 @@ export const useChatStore = defineStore('chat', () => {
     isFavorite,
     recentModels,
     favoriteModels,
+    setModelEffort,
+    getEffortOverride,
     enabledProviders,
     editAndResend,
   }

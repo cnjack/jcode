@@ -72,11 +72,11 @@ func (f *ModelFactory) GetModel(ctx context.Context, providerModel string) (eino
 		baseURL = f.registry.GetProviderAPI(provider)
 	}
 
-	m, err := NewChatModel(ctx, &ChatModelConfig{
-		Model:   modelName,
-		APIKey:  providerCfg.APIKey,
-		BaseURL: baseURL,
-	})
+	// Apply a per-model reasoning-effort override (set from the chat picker)
+	// over the provider-level default before constructing the model.
+	facEffortCfg := *providerCfg
+	facEffortCfg.ReasoningEffort = config.ResolveEffort(provider, modelName, providerCfg.ReasoningEffort)
+	m, err := NewChatModelFromProvider(ctx, modelName, baseURL, &facEffortCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create model %q: %w", providerModel, err)
 	}

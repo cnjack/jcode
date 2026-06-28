@@ -58,7 +58,16 @@ jobs:
           # Gate regressions without forcing a flag-day cleanup of the existing
           # lint debt (mostly upstream adk.AgentMiddleware deprecations). New
           # issues introduced by a PR still fail.
-          only-new-issues: true
+          #
+          # We compute "new issues" locally with --new-from-rev instead of the
+          # action's only-new-issues flag: the latter fetches the PR diff from
+          # GitHub's API, which rejects diffs over 20k lines (this repo's
+          # generated registry + frontend churn exceed that). --new-from-rev
+          # diffs against the local origin/main checkout (fetch-depth: 0), so it
+          # has no line limit. On pushes to main, new-from-rev is empty ⇒ a full
+          # run; that path doesn't run because pushes target main directly and
+          # the gate is meant for PRs.
+          args: ${{ github.event_name == 'pull_request' && '--new-from-rev=origin/main' || '' }}
 
   web:
     name: Web (type-check · build)

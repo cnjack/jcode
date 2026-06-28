@@ -332,9 +332,11 @@ func (a *acpAgent) buildAgentSession(
 		baseURL = registry.GetProviderAPI(providerName)
 	}
 
-	chatModel, err := internalmodel.NewChatModel(ctx, &internalmodel.ChatModelConfig{
-		Model: modelName, APIKey: providerCfg.APIKey, BaseURL: baseURL,
-	})
+	// Apply a per-model reasoning-effort override (set from the chat picker)
+	// over the provider-level default before constructing the model.
+	acpEffortCfg := *providerCfg
+	acpEffortCfg.ReasoningEffort = config.ResolveEffort(providerName, modelName, providerCfg.ReasoningEffort)
+	chatModel, err := internalmodel.NewChatModelFromProvider(ctx, modelName, baseURL, &acpEffortCfg)
 	if err != nil {
 		return nil, fmt.Errorf("error creating model: %w", err)
 	}

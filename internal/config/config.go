@@ -17,6 +17,21 @@ type ProviderConfig struct {
 	BaseURL string `json:"base_url,omitempty"`
 	// Name is an optional display name for custom providers not in the registry.
 	Name string `json:"name,omitempty"`
+	// Headers are extra HTTP headers injected into every request to this
+	// provider's endpoint (e.g. a gateway's "X-Api-Key" or "X-Org-Id"). Values
+	// may be secrets — they are masked by the API and never logged.
+	Headers map[string]string `json:"headers,omitempty"`
+	// Vision, when non-nil, overrides registry detection of image-input support
+	// for this provider. nil ⇒ defer to registry metadata (default: allow images).
+	Vision *bool `json:"vision,omitempty"`
+	// Thinking, when non-nil, explicitly toggles extended reasoning for this
+	// provider. It is sent as the OpenAI-compatible chat_template_kwargs
+	// {"enable_thinking": <bool>} extension (e.g. qwen3 gateways). nil ⇒ omit.
+	Thinking *bool `json:"thinking,omitempty"`
+	// ReasoningEffort controls thinking depth via the OpenAI-compatible
+	// "reasoning_effort" parameter. One of "", "low", "medium", "high".
+	// Empty ⇒ omit the parameter.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	// Deprecated: model lists are now sourced from the models.dev registry.
 	// Preserved for backward compatibility with existing config files.
 	Models []string `json:"models,omitempty"`
@@ -32,6 +47,15 @@ type CustomModelConfig struct {
 	ToolCall  bool   `json:"tool_call,omitempty"`
 	Reasoning bool   `json:"reasoning,omitempty"`
 	Context   int    `json:"context,omitempty"`
+	// Attachment marks the model as accepting image inputs. When false (the
+	// default) the model inherits the provider-level Vision override (if set) or
+	// the registry default (allow images).
+	Attachment bool `json:"attachment,omitempty"`
+	// EffortTiers are the selectable reasoning-effort levels for a reasoning
+	// model, e.g. ["minimal","low","medium","high","max"]. When Reasoning is true
+	// and this is non-empty, it overrides the default standard effort options;
+	// when empty the standard set (minimal/low/medium/high) is used.
+	EffortTiers []string `json:"effort_tiers,omitempty"`
 }
 
 // SSHAlias represents a saved SSH connection alias
@@ -327,9 +351,14 @@ func LoadConfig() (*Config, error) {
 		cfg.Model = cfg.Provider + "/" + cfg.Model
 	}
 
-	// Validate Model field is set
+	// Validate Model field is set. This is no longer a hard error: setup no
+	// longer forces a model selection, and some agent-construction paths can
+	// pick a default at runtime. We only warn so a stale/legacy config with
+	// providers but no active model doesn't prevent the app from booting — the
+	// caller resolves a concrete model (or surfaces a clearer error) when it
+	// actually builds an agent.
 	if cfg.Model == "" {
-		return nil, fmt.Errorf("model not configured: set 'model' field in 'provider/model' format in %s", cfgPath)
+		Logger().Printf("[config] warning: no active model set in %s; it will be resolved on first use", cfgPath)
 	}
 
 	if cfg.MaxIterations <= 0 {

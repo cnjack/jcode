@@ -27,29 +27,6 @@ type StorageManager struct {
 	writeQueue *WriteQueue
 }
 
-// NewStorageManager creates the storage root and all subdirectories.
-func NewStorageManager(sessionID string) (*StorageManager, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
-	base := filepath.Join(home, ".jcode", "storage")
-
-	subdirs := []string{"file-history", "tool-results", "todos", "plans", "tasks", "oauth"}
-	for _, sub := range subdirs {
-		if err := os.MkdirAll(filepath.Join(base, sub), 0o700); err != nil {
-			return nil, err
-		}
-	}
-
-	sm := &StorageManager{
-		baseDir:    base,
-		sessionID:  sessionID,
-		writeQueue: NewWriteQueue(100 * time.Millisecond),
-	}
-	return sm, nil
-}
-
 // Write synchronously writes data to path, creating parent directories.
 func (sm *StorageManager) Write(path string, data []byte, mode os.FileMode) error {
 	sm.mu.Lock()
@@ -674,19 +651,6 @@ func (tl *TaskLog) Write(data []byte) (int, error) {
 	n, err := tl.file.Write(data)
 	tl.written += int64(n)
 	return n, err
-}
-
-// ReadAll reads the entire task log from disk.
-func (tl *TaskLog) ReadAll() (string, error) {
-	tl.mu.Lock()
-	path := tl.file.Name()
-	tl.mu.Unlock()
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
 }
 
 // Close closes the underlying file.

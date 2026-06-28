@@ -71,9 +71,11 @@ func runDoctorMode() {
 	}
 
 	fmt.Println("\n  [1] Model Connection")
-	chatModel, err := internalmodel.NewChatModel(context.Background(), &internalmodel.ChatModelConfig{
-		Model: modelName, APIKey: providerCfg.APIKey, BaseURL: baseURL,
-	})
+	// Apply a per-model reasoning-effort override (set from the chat picker)
+	// over the provider-level default before constructing the model.
+	docEffortCfg := *providerCfg
+	docEffortCfg.ReasoningEffort = config.ResolveEffort(providerName, modelName, providerCfg.ReasoningEffort)
+	chatModel, err := internalmodel.NewChatModelFromProvider(context.Background(), modelName, baseURL, &docEffortCfg)
 	if err != nil {
 		fmt.Printf("      ✗ Failed to initialize: %v\n", err)
 	} else {

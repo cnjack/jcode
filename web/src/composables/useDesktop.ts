@@ -66,23 +66,6 @@ export async function nativeNotify(title: string, body?: string): Promise<boolea
   }
 }
 
-// --- open external links in the system browser -----------------------------
-/** Open a URL in the user's default browser (system browser on desktop). */
-export async function openExternal(url: string): Promise<void> {
-  if (isTauri) {
-    try {
-      const { openUrl } = await import('@tauri-apps/plugin-opener')
-      await openUrl(url)
-      return
-    } catch {
-      /* fall through to web */
-    }
-  }
-  if (typeof window !== 'undefined') {
-    window.open(url, '_blank', 'noopener,noreferrer')
-  }
-}
-
 // --- native folder picker --------------------------------------------------
 /**
  * Open the OS folder picker and return the chosen absolute path, or null if the

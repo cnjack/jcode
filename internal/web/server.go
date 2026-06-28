@@ -354,7 +354,12 @@ func (s *Server) Start(ctx context.Context) error {
 	// Provider management API — add/remove providers after initial setup.
 	mux.HandleFunc("GET /api/providers", s.handleListProviders)
 	mux.HandleFunc("POST /api/providers", s.handleAddProvider)
+	mux.HandleFunc("PUT /api/providers/{id}", s.handleUpdateProvider)
 	mux.HandleFunc("DELETE /api/providers/{id}", s.handleDeleteProvider)
+	// Browse a provider's model catalog. For registry providers this returns the
+	// built-in model list; for custom endpoints it queries the live /models
+	// endpoint. Each entry is flagged added=true when already configured.
+	mux.HandleFunc("GET /api/providers/{id}/models", s.handleProviderCatalog)
 
 	// History management.
 	mux.HandleFunc("POST /api/history/truncate", s.handleTruncateHistory)
@@ -363,6 +368,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/model-state", s.handleGetModelState)
 	mux.HandleFunc("POST /api/model-state/favorite", s.handleToggleFavorite)
 	mux.HandleFunc("POST /api/model-state/enabled", s.handleToggleModelEnabled)
+	mux.HandleFunc("POST /api/model-state/effort", s.handleSetModelEffort)
 
 	// Serve embedded frontend (SPA with fallback to index.html)
 	mux.Handle("GET /", newSPAHandler())
@@ -1138,35 +1144,43 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type modelInfo struct {
-		ID             string `json:"id"`
-		Name           string `json:"name"`
-		ToolCall       bool   `json:"tool_call"`
-		ContextLimit   int    `json:"context_limit,omitempty"`
-		Reasoning      bool   `json:"reasoning,omitempty"`
-		Recommended    bool   `json:"recommended,omitempty"`
-		DefaultEnabled bool   `json:"default_enabled,omitempty"`
-		Enabled        bool   `json:"enabled"`
-		ImageSupport   bool   `json:"image_support,omitempty"`
+		ID               string                  `json:"id"`
+		Name             string                  `json:"name"`
+		ToolCall         bool                    `json:"tool_call"`
+		ContextLimit     int                     `json:"context_limit,omitempty"`
+		Reasoning        bool                    `json:"reasoning,omitempty"`
+		Recommended      bool                    `json:"recommended,omitempty"`
+		DefaultEnabled   bool                    `json:"default_enabled,omitempty"`
+		Enabled          bool                    `json:"enabled"`
+		ImageSupport     bool                    `json:"image_support,omitempty"`
+		ReasoningOptions []model.ReasoningOption `json:"reasoning_options,omitempty"`
 	}
 	type providerInfo struct {
 		ID     string      `json:"id"`
 		Name   string      `json:"name"`
+		Custom bool        `json:"custom,omitempty"`
 		Models []modelInfo `json:"models"`
 	}
 
 	modelState, _ := config.LoadModelState()
 
+	// Rebuild the registry from the live config so models added at runtime
+	// (custom models saved via the providers API) appear immediately in the chat
+	// model picker. The startup registry (s.registry) is a snapshot and would not
+	// reflect these additions until a restart.
+	registry := model.NewModelRegistryWithConfig(s.cfg)
+
 	var result []providerInfo
 	configuredProviders := s.cfg.GetProviders()
-	for _, rp := range s.registry.ListProviders() {
+	for _, rp := range registry.ListProviders() {
 		if _, configured := configuredProviders[rp.ID]; !configured {
 			continue
 		}
-		models := s.registry.ListProviderModels(rp.ID, true)
+		models := registry.ListProviderModels(rp.ID, true)
 		if len(models) == 0 {
 			continue
 		}
-		pi := providerInfo{ID: rp.ID, Name: rp.Name}
+		pi := providerInfo{ID: rp.ID, Name: rp.Name, Custom: rp.Custom}
 		for _, m := range models {
 			ctx := 0
 			if m.Limit != nil {
@@ -1187,7 +1201,8 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 				ID: m.ID, Name: m.Name, ToolCall: m.ToolCall, ContextLimit: ctx,
 				Reasoning: m.Reasoning, Recommended: m.Recommended,
 				DefaultEnabled: m.DefaultEnabled, Enabled: enabled,
-				ImageSupport: imageSupport,
+				ImageSupport:     imageSupport,
+				ReasoningOptions: m.ReasoningOptions,
 			})
 		}
 		result = append(result, pi)
@@ -2819,9 +2834,10 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 // handleSetupValidate tests connectivity to a provider with the given API key.
 func (s *Server) handleSetupValidate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Provider string `json:"provider"`
-		APIKey   string `json:"api_key"`
-		BaseURL  string `json:"base_url,omitempty"`
+		Provider string            `json:"provider"`
+		APIKey   string            `json:"api_key"`
+		BaseURL  string            `json:"base_url,omitempty"`
+		Headers  map[string]string `json:"headers,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -2841,16 +2857,20 @@ func (s *Server) handleSetupValidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := model.ValidateProvider(r.Context(), req.APIKey, baseURL); err != nil {
+	res := model.ValidateProviderDetailed(r.Context(), req.APIKey, baseURL, req.Headers)
+	if !res.OK {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"valid": false,
-			"error": err.Error(),
+			"valid":      false,
+			"error":      res.Error,
+			"error_type": res.ErrorType,
 		})
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"valid": true,
+		"valid":       true,
+		"latency_ms":  res.LatencyMS,
+		"model_count": res.ModelCount,
 	})
 }
 
@@ -2933,11 +2953,13 @@ func (s *Server) handleSetupProviderModels(w http.ResponseWriter, r *http.Reques
 
 	models := s.registry.ListProviderModels(providerID, true)
 	type modelItem struct {
-		ID           string `json:"id"`
-		Name         string `json:"name"`
-		ToolCall     bool   `json:"tool_call"`
-		ContextLimit int    `json:"context_limit,omitempty"`
-		Reasoning    bool   `json:"reasoning,omitempty"`
+		ID               string                  `json:"id"`
+		Name             string                  `json:"name"`
+		ToolCall         bool                    `json:"tool_call"`
+		ContextLimit     int                     `json:"context_limit,omitempty"`
+		Reasoning        bool                    `json:"reasoning,omitempty"`
+		Attachment       bool                    `json:"attachment,omitempty"`
+		ReasoningOptions []model.ReasoningOption `json:"reasoning_options,omitempty"`
 	}
 
 	result := make([]modelItem, 0, len(models))
@@ -2947,32 +2969,246 @@ func (s *Server) handleSetupProviderModels(w http.ResponseWriter, r *http.Reques
 			ctx = m.Limit.Context
 		}
 		result = append(result, modelItem{
-			ID:           m.ID,
-			Name:         m.Name,
-			ToolCall:     m.ToolCall,
-			ContextLimit: ctx,
-			Reasoning:    m.Reasoning,
+			ID:               m.ID,
+			Name:             m.Name,
+			ToolCall:         m.ToolCall,
+			ContextLimit:     ctx,
+			Reasoning:        m.Reasoning,
+			Attachment:       m.Attachment,
+			ReasoningOptions: m.ReasoningOptions,
 		})
 	}
 
 	writeJSON(w, http.StatusOK, result)
 }
 
-// handleSetupComplete handles the initial setup submission.
+// handleProviderCatalog returns a provider's browsable model catalog for the
+// "browse directory" UI. For registry providers it lists the built-in models
+// (the official /models endpoint is not reliably complete); for custom
+// (OpenAI-compatible) endpoints it queries the live /models endpoint. Each
+// entry is flagged added=true when the model is already in the provider's
+// config (either as a CustomModelConfig or a registry model that's enabled).
+func (s *Server) handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
+	providerID := r.PathValue("id")
+	if providerID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider id is required"})
+		return
+	}
+
+	type catalogEntry struct {
+		ID          string   `json:"id"`
+		Name        string   `json:"name,omitempty"`
+		Added       bool     `json:"added"`
+		Context     int      `json:"context,omitempty"`
+		Reasoning   bool     `json:"reasoning,omitempty"`
+		Attachment  bool     `json:"attachment,omitempty"`
+		EffortTiers []string `json:"effort_tiers,omitempty"`
+		// Custom marks a user-defined model (editable/removable) vs a built-in
+		// registry model (toggled via model_state). Surfaced so the catalog row can
+		// show edit/remove affordances only on user custom models.
+		Custom bool `json:"custom,omitempty"`
+	}
+
+	// Collect the set of already-configured model ids for this provider, so each
+	// catalog entry can be flagged added/可移除. Custom models come from config;
+	// for registry providers, MergeConfigProviders has already merged custom
+	// models into the registry, so registry membership is the source of truth.
+	configured := make(map[string]bool)
+	customSet := make(map[string]*config.CustomModelConfig) // user-defined models by id
+	var apiKey, baseURL string
+	var headers map[string]string
+	cfg, _ := config.LoadConfig()
+	if cfg != nil {
+		if pc := cfg.GetProviders()[providerID]; pc != nil {
+			apiKey, baseURL, headers = pc.APIKey, pc.BaseURL, pc.Headers
+			for _, m := range pc.CustomModels {
+				configured[m.ID] = true
+				cm := m // copy for map value
+				customSet[m.ID] = &cm
+			}
+		}
+	}
+
+	// customEntry builds a catalogEntry from a user-defined CustomModelConfig.
+	customEntry := func(id string) catalogEntry {
+		m := customSet[id]
+		e := catalogEntry{ID: id, Added: true, Custom: true}
+		if m != nil {
+			e.Name = m.Name
+			e.Context = m.Context
+			e.Reasoning = m.Reasoning
+			e.Attachment = m.Attachment
+			e.EffortTiers = m.EffortTiers
+		}
+		return e
+	}
+
+	// resolveRegistryBrand finds a registry provider whose brand keyword appears
+	// in the given id/url — so a custom endpoint pointing at, say, zhipu's API
+	// still surfaces zhipu's models.dev catalog rather than a fragile live
+	// /models probe. Returns "" when no brand matches.
+	resolveRegistryBrand := func(hint string) string {
+		if s.registry == nil {
+			return ""
+		}
+		hint = strings.ToLower(hint)
+		for _, rp := range s.registry.ListProviders() {
+			// Use the registry id as the brand keyword (e.g. "zhipuai", "openai",
+			// "deepseek"); these already encode the brand and are stable.
+			brand := strings.ToLower(rp.ID)
+			if brand != "" && strings.Contains(hint, brand) {
+				return rp.ID
+			}
+		}
+		return ""
+	}
+
+	// The catalog defaults to the built-in (models.dev) catalog — this is the
+	// reliable source, since many endpoints either lack a /models route or
+	// return an incomplete list. Exact id match first; otherwise a brand match
+	// on the provider id or base URL (so a custom zhipu endpoint still shows the
+	// zhipu catalog).
+	registryID := providerID
+	if s.registry == nil || !s.registry.HasProvider(registryID) {
+		if hint := resolveRegistryBrand(providerID + " " + baseURL); hint != "" {
+			registryID = hint
+		}
+	}
+	if s.registry != nil && s.registry.HasProvider(registryID) {
+		models := s.registry.ListProviderModels(registryID, true)
+		result := make([]catalogEntry, 0, len(models))
+		for _, m := range models {
+			// A user-defined custom model is merged into the registry by
+			// MergeConfigProviders, so it appears here too. For those, build the
+			// entry from the stored CustomModelConfig (which carries the
+			// user-set name/context/tiers) rather than the derived registry view —
+			// otherwise effort tiers and other authored fields are lost.
+			if cm := customSet[m.ID]; cm != nil {
+				result = append(result, catalogEntry{
+					ID:          m.ID,
+					Name:        cm.Name,
+					Added:       true,
+					Context:     cm.Context,
+					Reasoning:   cm.Reasoning,
+					Attachment:  cm.Attachment,
+					EffortTiers: cm.EffortTiers,
+					Custom:      true,
+				})
+				continue
+			}
+			ctx := 0
+			if m.Limit != nil {
+				ctx = m.Limit.Context
+			}
+			result = append(result, catalogEntry{
+				ID:         m.ID,
+				Name:       m.Name,
+				Added:      configured[m.ID] || m.DefaultEnabled,
+				Context:    ctx,
+				Reasoning:  m.Reasoning,
+				Attachment: m.Attachment,
+				Custom:     false,
+			})
+		}
+		// Also surface any user-added custom models not in the brand catalog, so
+		// the catalog isn't missing models the user explicitly configured.
+		for id := range configured {
+			found := false
+			for _, e := range result {
+				if e.ID == id {
+					found = true
+					break
+				}
+			}
+			if !found {
+				result = append(result, customEntry(id))
+			}
+		}
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+
+	// Truly custom endpoint with no brand match: probe the live /models endpoint
+	// as a last resort. Many gateways support the OpenAI-compatible /models list;
+	// on any failure we fall back to just the configured models so the catalog is
+	// never empty/erroring.
+	if baseURL != "" {
+		if ids := model.ListProviderModelsLive(r.Context(), apiKey, baseURL, headers); len(ids) > 0 {
+			result := make([]catalogEntry, 0, len(ids))
+			seen := make(map[string]bool, len(ids))
+			for _, id := range ids {
+				if seen[id] {
+					continue
+				}
+				seen[id] = true
+				if c := customSet[id]; c != nil {
+					result = append(result, customEntry(id))
+				} else {
+					result = append(result, catalogEntry{ID: id, Added: configured[id]})
+				}
+			}
+			writeJSON(w, http.StatusOK, result)
+			return
+		}
+	}
+
+	// No registry brand and no live /models: show the configured custom models
+	// (added=true, custom=true) so the catalog reflects what's actually usable.
+	result := make([]catalogEntry, 0, len(configured))
+	for id := range configured {
+		result = append(result, customEntry(id))
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 // It saves the provider config and creates the agent.
+//
+// The wizard no longer forces a model selection: for registry providers, a
+// default model is auto-picked (DefaultEnabled → Recommended → first). A
+// caller-supplied model always wins. Custom (non-registry) providers must send
+// a model explicitly since none can be inferred.
 func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Provider string `json:"provider"`
-		Model    string `json:"model"`
-		APIKey   string `json:"api_key"`
-		BaseURL  string `json:"base_url,omitempty"`
+		Provider        string            `json:"provider"`
+		Model           string            `json:"model,omitempty"`
+		ModelReasoning  bool              `json:"model_reasoning,omitempty"`
+		APIKey          string            `json:"api_key"`
+		BaseURL         string            `json:"base_url,omitempty"`
+		Name            string            `json:"name,omitempty"` // custom provider display name
+		Headers         map[string]string `json:"headers,omitempty"`
+		Vision          *bool             `json:"vision,omitempty"`
+		Thinking        *bool             `json:"thinking,omitempty"`
+		ReasoningEffort string            `json:"reasoning_effort,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	if req.Provider == "" || req.Model == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and model are required"})
+	if req.Provider == "" || req.APIKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and api_key are required"})
+		return
+	}
+	if !validReasoningEffort(req.ReasoningEffort) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid reasoning_effort"})
+		return
+	}
+
+	// Resolve the active model. An explicit model always wins; otherwise try to
+	// auto-pick a default for registry providers. Custom providers (not in the
+	// registry) cannot infer a model and require one from the caller.
+	resolvedModel := req.Model
+	isCustom := s.registry == nil || !s.registry.HasProvider(req.Provider)
+	if resolvedModel == "" {
+		if isCustom {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "model is required for custom providers"})
+			return
+		}
+		if s.registry != nil {
+			resolvedModel = s.registry.PickDefaultModel(req.Provider)
+		}
+	}
+	if resolvedModel == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no default model available for this provider; please choose one"})
 		return
 	}
 
@@ -2989,11 +3225,28 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	if cfg.Providers == nil {
 		cfg.Providers = make(map[string]*config.ProviderConfig)
 	}
-	cfg.Providers[req.Provider] = &config.ProviderConfig{
-		APIKey:  req.APIKey,
-		BaseURL: req.BaseURL,
+	setupPC := &config.ProviderConfig{
+		APIKey:          req.APIKey,
+		BaseURL:         req.BaseURL,
+		Name:            req.Name,
+		Headers:         cleanHeaders(req.Headers),
+		Vision:          req.Vision,
+		Thinking:        req.Thinking,
+		ReasoningEffort: req.ReasoningEffort,
 	}
-	cfg.Model = req.Provider + "/" + req.Model
+	// For a custom provider, persist the model as a custom model so it survives
+	// a model switch (otherwise it exists only as the active-model string and
+	// vanishes from the picker once changed).
+	if isCustom && resolvedModel != "" {
+		setupPC.CustomModels = []config.CustomModelConfig{{
+			ID:        resolvedModel,
+			Name:      resolvedModel,
+			ToolCall:  true,
+			Reasoning: req.ModelReasoning,
+		}}
+	}
+	cfg.Providers[req.Provider] = setupPC
+	cfg.Model = req.Provider + "/" + resolvedModel
 
 	if err := config.SaveConfig(cfg); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config: " + err.Error()})
@@ -3006,12 +3259,12 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no active task to configure"})
 		return
 	}
-	ag, err := eng.createAgent(req.Provider, req.Model)
+	ag, err := eng.createAgent(req.Provider, resolvedModel)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create agent: " + err.Error()})
 		return
 	}
-	eng.applyModelSwitch(ag, req.Provider, req.Model)
+	eng.applyModelSwitch(ag, req.Provider, resolvedModel)
 	// Publish the new config + registry to the live server so endpoints
 	// (/api/models, context-limit, etc.) reflect the just-configured provider
 	// without a restart.
@@ -3026,14 +3279,27 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	// Notify clients that setup is complete.
 	s.wsBroker.Broadcast(WSEvent{Type: "model_changed", TaskID: eng.taskID, Data: map[string]string{
 		"provider": req.Provider,
-		"model":    req.Model,
+		"model":    resolvedModel,
 	}})
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":   "ok",
 		"provider": req.Provider,
-		"model":    req.Model,
+		"model":    resolvedModel,
 	})
+}
+
+// maskSecret hides a secret for display: first 4 and last 4 chars for longer
+// values, "****" for short ones. Used for API keys and header values so the
+// list endpoint never returns plaintext credentials.
+func maskSecret(s string) string {
+	if s == "" {
+		return ""
+	}
+	if len(s) > 8 {
+		return s[:4] + "..." + s[len(s)-4:]
+	}
+	return "****"
 }
 
 // handleListProviders returns all configured providers (key masked).
@@ -3044,28 +3310,125 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	type customModelView struct {
+		ID          string   `json:"id"`
+		Name        string   `json:"name,omitempty"`
+		Reasoning   bool     `json:"reasoning,omitempty"`
+		Context     int      `json:"context,omitempty"`
+		Attachment  bool     `json:"attachment,omitempty"`
+		EffortTiers []string `json:"effort_tiers,omitempty"`
+		// Custom marks a user-defined model (editable) vs a built-in registry
+		// model surfaced for display (read-only). Omitted/zero ⇒ treated as a
+		// user custom model for backward compatibility, but we always set it.
+		Custom bool `json:"custom,omitempty"`
+	}
 	type providerDetail struct {
-		ID        string `json:"id"`
-		APIKeySet bool   `json:"api_key_set"`
-		APIKey    string `json:"api_key,omitempty"` // masked
-		BaseURL   string `json:"base_url,omitempty"`
+		ID              string            `json:"id"`
+		Name            string            `json:"name,omitempty"` // display name for custom providers
+		Custom          bool              `json:"custom,omitempty"`
+		APIKeySet       bool              `json:"api_key_set"`
+		APIKey          string            `json:"api_key,omitempty"` // masked
+		BaseURL         string            `json:"base_url,omitempty"`
+		Headers         map[string]string `json:"headers,omitempty"` // values masked
+		CustomModels    []customModelView `json:"custom_models,omitempty"`
+		Vision          *bool             `json:"vision,omitempty"`
+		Thinking        *bool             `json:"thinking,omitempty"`
+		ReasoningEffort string            `json:"reasoning_effort,omitempty"`
 	}
 
 	result := make([]providerDetail, 0)
 	for id, pc := range cfg.GetProviders() {
 		detail := providerDetail{
-			ID:        id,
-			APIKeySet: pc.APIKey != "",
-			BaseURL:   pc.BaseURL,
+			ID:              id,
+			Name:            pc.Name,
+			APIKeySet:       pc.APIKey != "",
+			BaseURL:         pc.BaseURL,
+			Vision:          pc.Vision,
+			Thinking:        pc.Thinking,
+			ReasoningEffort: pc.ReasoningEffort,
+		}
+		// A provider is "custom" when it exists only because the user configured
+		// it (an OpenAI-compatible endpoint), not as a built-in registry brand.
+		// MergeConfigProviders flags those on the registry entry; a configured id
+		// with no registry entry at all is custom too. The registry may be nil in
+		// setup mode — fall back to "has a display name" as the custom signal.
+		if s.registry != nil {
+			if prov := s.registry.GetProvider(id); prov != nil {
+				detail.Custom = prov.Custom
+			} else {
+				detail.Custom = true
+			}
+		} else if pc.Name != "" {
+			detail.Custom = true
 		}
 		if pc.APIKey != "" {
-			// Mask API key: show first 4 and last 4 chars.
-			key := pc.APIKey
-			if len(key) > 8 {
-				detail.APIKey = key[:4] + "..." + key[len(key)-4:]
-			} else {
-				detail.APIKey = "****"
+			detail.APIKey = maskSecret(pc.APIKey)
+		}
+		if len(pc.Headers) > 0 {
+			masked := make(map[string]string, len(pc.Headers))
+			for k, v := range pc.Headers {
+				masked[k] = maskSecret(v)
 			}
+			detail.Headers = masked
+		}
+		// Build the card's unified model list. For registry providers this is the
+		// built-in (models.dev) models the user has enabled, each marked read-only
+		// (Custom=false); the user's CustomModels are then appended and marked
+		// editable (Custom=true). The card renders them identically and only
+		// surfaces edit/delete affordances on editable rows.
+		cms := make([]customModelView, 0)
+		seen := make(map[string]bool)
+		// Track which ids are user-defined custom models so the registry loop can
+		// skip them (they're merged into the registry by MergeConfigProviders but
+		// must surface with their authored fields from CustomModelConfig, handled
+		// in the custom loop below).
+		customIDs := make(map[string]bool, len(pc.CustomModels))
+		for _, m := range pc.CustomModels {
+			customIDs[m.ID] = true
+		}
+		if !detail.Custom && s.registry != nil && s.registry.HasProvider(id) {
+			for _, m := range s.registry.ListProviderModels(id, true) {
+				if !m.DefaultEnabled {
+					continue
+				}
+				if customIDs[m.ID] {
+					continue // user custom model — emitted below with authored fields
+				}
+				if seen[m.ID] {
+					continue
+				}
+				seen[m.ID] = true
+				ctx := 0
+				if m.Limit != nil {
+					ctx = m.Limit.Context
+				}
+				cms = append(cms, customModelView{
+					ID:         m.ID,
+					Name:       m.Name,
+					Reasoning:  m.Reasoning,
+					Context:    ctx,
+					Attachment: m.Attachment,
+					Custom:     false,
+				})
+			}
+		}
+		for _, m := range pc.CustomModels {
+			if seen[m.ID] {
+				continue
+			}
+			seen[m.ID] = true
+			cms = append(cms, customModelView{
+				ID:          m.ID,
+				Name:        m.Name,
+				Reasoning:   m.Reasoning,
+				Context:     m.Context,
+				Attachment:  m.Attachment,
+				EffortTiers: m.EffortTiers,
+				Custom:      true,
+			})
+		}
+		if len(cms) > 0 {
+			detail.CustomModels = cms
 		}
 		result = append(result, detail)
 	}
@@ -3074,12 +3437,22 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-// handleAddProvider adds a new provider to the config.
+// handleAddProvider adds a new provider to the config. For custom
+// (non-registry) providers the caller should also send a name; models are
+// optional here and are added afterward from the provider card (the dialog only
+// captures the connection).
 func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ID      string `json:"id"`
-		APIKey  string `json:"api_key"`
-		BaseURL string `json:"base_url,omitempty"`
+		ID              string            `json:"id"`
+		APIKey          string            `json:"api_key"`
+		BaseURL         string            `json:"base_url,omitempty"`
+		Name            string            `json:"name,omitempty"`
+		Model           string            `json:"model,omitempty"`
+		ModelReasoning  bool              `json:"model_reasoning,omitempty"`
+		Headers         map[string]string `json:"headers,omitempty"`
+		Vision          *bool             `json:"vision,omitempty"`
+		Thinking        *bool             `json:"thinking,omitempty"`
+		ReasoningEffort string            `json:"reasoning_effort,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -3087,6 +3460,10 @@ func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ID == "" || req.APIKey == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id and api_key are required"})
+		return
+	}
+	if !validReasoningEffort(req.ReasoningEffort) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid reasoning_effort"})
 		return
 	}
 
@@ -3097,14 +3474,261 @@ func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	if cfg.Providers == nil {
 		cfg.Providers = make(map[string]*config.ProviderConfig)
 	}
-	cfg.Providers[req.ID] = &config.ProviderConfig{
-		APIKey:  req.APIKey,
-		BaseURL: req.BaseURL,
+
+	// A custom provider (not in the registry) needs a base URL so requests can
+	// be routed. Models are optional at creation time: the provider is created
+	// connection-only and models are added afterward from its card, so a brand
+	// new custom endpoint can be saved before its model list is known.
+	isCustom := s.registry == nil || !s.registry.HasProvider(req.ID)
+	if isCustom && req.BaseURL == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "base_url is required for custom providers"})
+		return
 	}
+
+	pc := &config.ProviderConfig{
+		APIKey:          req.APIKey,
+		BaseURL:         req.BaseURL,
+		Name:            req.Name,
+		Headers:         cleanHeaders(req.Headers),
+		Vision:          req.Vision,
+		Thinking:        req.Thinking,
+		ReasoningEffort: req.ReasoningEffort,
+	}
+	if isCustom && req.Model != "" {
+		pc.CustomModels = []config.CustomModelConfig{{
+			ID:        req.Model,
+			Name:      req.Model,
+			ToolCall:  true,
+			Reasoning: req.ModelReasoning,
+		}}
+	}
+	cfg.Providers[req.ID] = pc
+
+	// If there is no active model yet and this is a custom provider with an
+	// explicit model, adopt it as the active model so the app can boot.
+	if cfg.Model == "" && isCustom && req.Model != "" {
+		cfg.Model = req.ID + "/" + req.Model
+	}
+
 	if err := config.SaveConfig(cfg); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config: " + err.Error()})
 		return
 	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// validReasoningEffort whitelists the thinking-depth values accepted from
+// clients. The set mirrors the effort levels models.dev publishes under
+// reasoning_options (see internal/model registry). Empty means "unset / omit
+// the parameter".
+func validReasoningEffort(v string) bool {
+	switch v {
+	case "", "none", "minimal", "low", "medium", "high", "xhigh", "max":
+		return true
+	}
+	return false
+}
+
+// cleanHeaders drops rows with an empty key and trims whitespace from both key
+// and value, so blank editor rows never reach the saved config and a pasted
+// token with a stray trailing space does not silently break auth.
+func cleanHeaders(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		out[k] = strings.TrimSpace(v)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// handleUpdateProvider edits an existing provider, merging secret fields so the
+// client may omit unchanged credentials. An empty api_key keeps the stored key;
+// a header value left empty keeps the stored value for that key (the list
+// endpoint returns masked secrets, so the UI sends blanks for untouched ones).
+func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider id is required"})
+		return
+	}
+	var req struct {
+		APIKey       string            `json:"api_key,omitempty"`
+		BaseURL      string            `json:"base_url,omitempty"`
+		Name         string            `json:"name,omitempty"`
+		Headers      map[string]string `json:"headers,omitempty"`
+		CustomModels *[]struct {
+			ID          string   `json:"id"`
+			Name        string   `json:"name,omitempty"`
+			Reasoning   bool     `json:"reasoning,omitempty"`
+			Context     int      `json:"context,omitempty"`
+			Attachment  bool     `json:"attachment,omitempty"`
+			EffortTiers []string `json:"effort_tiers,omitempty"`
+		} `json:"custom_models,omitempty"`
+		Vision          *bool  `json:"vision,omitempty"`
+		Thinking        *bool  `json:"thinking,omitempty"`
+		ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if !validReasoningEffort(req.ReasoningEffort) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid reasoning_effort"})
+		return
+	}
+
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	pc := cfg.GetProviders()[id]
+	if pc == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "provider not found"})
+		return
+	}
+
+	// Mutate in place so fields not exposed by this endpoint (display name,
+	// custom models, deprecated lists) are preserved untouched.
+	prevHeaders := pc.Headers
+	// base_url uses keep-on-empty semantics (like api_key): the list endpoint
+	// masks secrets but returns base_url verbatim, yet a client that doesn't
+	// touch the endpoint may still submit an empty value. Overwriting
+	// unconditionally would wipe a stored custom endpoint, so only adopt a
+	// non-empty incoming value.
+	if req.BaseURL != "" {
+		pc.BaseURL = req.BaseURL
+	}
+	pc.Vision = req.Vision
+	pc.Thinking = req.Thinking
+	pc.ReasoningEffort = req.ReasoningEffort
+	if req.Name != "" {
+		pc.Name = req.Name
+	}
+	if req.APIKey != "" {
+		pc.APIKey = req.APIKey
+	}
+	// Merge headers: empty incoming value ⇒ keep the stored secret for that key.
+	pc.Headers = nil
+	if cleaned := cleanHeaders(req.Headers); len(cleaned) > 0 {
+		merged := make(map[string]string, len(cleaned))
+		for k, v := range cleaned {
+			if v == "" {
+				if ov, ok := prevHeaders[k]; ok {
+					merged[k] = ov
+					continue
+				}
+			}
+			merged[k] = v
+		}
+		pc.Headers = merged
+	}
+
+	// Replace the provider's custom models when the client sends the list (nil ⇒
+	// keep existing). Each model's stored Context is preserved by merging on id,
+	// ToolCall stays true (matching the add path), and the model currently set as
+	// active cannot be dropped so a save can't strand the running app.
+	if req.CustomModels != nil {
+		prev := make(map[string]config.CustomModelConfig, len(pc.CustomModels))
+		for _, m := range pc.CustomModels {
+			prev[m.ID] = m
+		}
+		next := make([]config.CustomModelConfig, 0, len(*req.CustomModels))
+		seen := make(map[string]bool, len(*req.CustomModels))
+		for _, m := range *req.CustomModels {
+			mid := strings.TrimSpace(m.ID)
+			if mid == "" || seen[mid] {
+				continue
+			}
+			seen[mid] = true
+			cm := config.CustomModelConfig{ID: mid, Name: strings.TrimSpace(m.Name), ToolCall: true, Reasoning: m.Reasoning}
+			// Adopt the incoming per-model capability fields when provided;
+			// otherwise carry over the previously stored values so an edit that
+			// only renames a model doesn't silently drop its context window,
+			// vision flag, or configured effort tiers.
+			if old, ok := prev[mid]; ok {
+				if cm.Context == 0 {
+					cm.Context = old.Context
+				}
+				if !cm.Attachment {
+					cm.Attachment = old.Attachment
+				}
+				if len(cm.EffortTiers) == 0 {
+					cm.EffortTiers = old.EffortTiers
+				}
+			}
+			if m.Context > 0 {
+				cm.Context = m.Context
+			}
+			if m.Attachment {
+				cm.Attachment = true
+			}
+			if len(m.EffortTiers) > 0 {
+				cm.EffortTiers = m.EffortTiers
+			}
+			next = append(next, cm)
+		}
+		// Reject custom model ids that collide with the provider's built-in
+		// (registry) models. A duplicate id would shadow or be shadowed by the
+		// registry entry, confusing the model picker and catalog. Custom ids
+		// may still be edited to their own value (handled by seen dedup above).
+		if s.registry != nil {
+			if regProv := s.registry.GetProvider(id); regProv != nil {
+				for _, cm := range next {
+					if _, ok := regProv.Models[cm.ID]; ok {
+						// Allow it only if it was already a custom model with this id
+						// (editing an existing custom entry in place).
+						if _, wasCustom := prev[cm.ID]; !wasCustom {
+							writeJSON(w, http.StatusBadRequest, map[string]string{
+								"error": "model id '" + cm.ID + "' duplicates a built-in model; choose another id",
+							})
+							return
+						}
+					}
+				}
+			}
+		}
+		if strings.HasPrefix(cfg.Model, id+"/") {
+			active := strings.TrimPrefix(cfg.Model, id+"/")
+			if _, wasThere := prev[active]; wasThere && !seen[active] {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot remove the active model; switch to another model first"})
+				return
+			}
+		}
+		isCustom := s.registry == nil || !s.registry.HasProvider(id)
+		if isCustom && len(next) == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "custom providers need at least one model"})
+			return
+		}
+		pc.CustomModels = next
+	}
+
+	if cfg.Providers == nil {
+		cfg.Providers = make(map[string]*config.ProviderConfig)
+	}
+	cfg.Providers[id] = pc
+	if err := config.SaveConfig(cfg); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config: " + err.Error()})
+		return
+	}
+
+	// Publish the updated config + registry to the live server so the chat model
+	// picker (/api/models) and catalog reflect added/edited/removed models
+	// without a restart — matching handleSetupComplete's publish step.
+	s.cfgMu.Lock()
+	s.cfg = cfg
+	s.registry = model.NewModelRegistryWithConfig(cfg)
+	s.cfgMu.Unlock()
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -3182,10 +3806,11 @@ func (s *Server) handleGetModelState(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"recent":          recent,
-		"favorite":        favorites,
-		"enabled_models":  enabledModels,
-		"disabled_models": disabledModels,
+		"recent":           recent,
+		"favorite":         favorites,
+		"enabled_models":   enabledModels,
+		"disabled_models":  disabledModels,
+		"effort_overrides": state.EffortOverrides,
 	})
 }
 
@@ -3247,6 +3872,44 @@ func (s *Server) handleToggleModelEnabled(w http.ResponseWriter, r *http.Request
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"enabled": req.Enabled,
+	})
+}
+
+// handleSetModelEffort records the user's reasoning-effort choice for a single
+// model (set from the chat model picker). An empty effort clears the override,
+// restoring the provider-level default. The agent is rebuilt so the change
+// takes effect on the next turn.
+func (s *Server) handleSetModelEffort(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+		Effort   string `json:"effort"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if req.Provider == "" || req.Model == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and model are required"})
+		return
+	}
+	if req.Effort != "" && !validReasoningEffort(req.Effort) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid effort"})
+		return
+	}
+
+	state, err := config.LoadModelState()
+	if err != nil {
+		state = &config.ModelState{}
+	}
+	state.SetEffortOverride(config.ModelRef{Provider: req.Provider, Model: req.Model}, req.Effort)
+	if err := config.SaveModelState(state); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"effort": req.Effort,
 	})
 }
 

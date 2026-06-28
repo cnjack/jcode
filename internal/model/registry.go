@@ -16,6 +16,10 @@ type RegistryProvider struct {
 	API    string                    `json:"api"`
 	Doc    string                    `json:"doc,omitempty"`
 	Models map[string]*RegistryModel `json:"models"`
+	// Custom is true for providers that exist only because the user configured
+	// them (an OpenAI-compatible endpoint not in models.dev), as opposed to a
+	// built-in registry brand. Set during MergeConfigProviders.
+	Custom bool `json:"custom,omitempty"`
 }
 
 // RegistryModel represents a model from models.dev API.
@@ -38,7 +42,26 @@ type RegistryModel struct {
 	Status           string           `json:"status,omitempty"`
 	Recommended      bool             `json:"recommended,omitempty"`
 	DefaultEnabled   bool             `json:"default_enabled,omitempty"`
+	// ReasoningOptions describes how this model exposes its thinking controls,
+	// mirroring models.dev's reasoning_options. Empty ⇒ no reasoning controls.
+	ReasoningOptions []ReasoningOption `json:"reasoning_options,omitempty"`
 }
+
+// ReasoningOption is one reasoning/thinking control a model supports, from
+// models.dev's reasoning_options. Type is one of:
+//   - "effort"        — Values lists the supported effort levels (e.g. low/medium/high/xhigh/max)
+//   - "toggle"        — reasoning can be switched on/off, no extra parameters
+//   - "budget_tokens" — a thinking token budget bounded by Min/Max (nil ⇒ open-ended)
+type ReasoningOption struct {
+	Type   string   `json:"type"`
+	Values []string `json:"values,omitempty"`
+	Min    *int     `json:"min,omitempty"`
+	Max    *int     `json:"max,omitempty"`
+}
+
+// intPtr returns a pointer to i. Used by the generated registry to carry
+// nullable reasoning_options bounds (Min/Max).
+func intPtr(i int) *int { return &i }
 
 // ModelModalities describes input/output modalities.
 type ModelModalities struct {
@@ -167,6 +190,7 @@ func (r *ModelRegistry) MergeConfigProviders(providers map[string]*config.Provid
 				API:    provCfg.BaseURL,
 				Env:    []string{envKey},
 				Models: make(map[string]*RegistryModel),
+				Custom: true,
 			}
 			r.providers[provID] = prov
 			r.providerOrder = append(r.providerOrder, provID)
@@ -185,7 +209,21 @@ func (r *ModelRegistry) MergeConfigProviders(providers map[string]*config.Provid
 				Name:           name,
 				ToolCall:       cm.ToolCall,
 				Reasoning:      cm.Reasoning,
+				Attachment:     cm.Attachment,
 				DefaultEnabled: true,
+			}
+			// A custom model flagged as reasoning gets the standard OpenAI-compatible
+			// effort levels, so the chat picker's effort control can render for it.
+			// Custom models not flagged reasoning stay without reasoning_options —
+			// the effort control is hidden for them, matching "not specified ⇒ none".
+			// When EffortTiers is provided, it replaces the standard set so users can
+			// configure exactly which effort levels (e.g. high/max) a model offers.
+			if cm.Reasoning {
+				if len(cm.EffortTiers) > 0 {
+					rm.ReasoningOptions = []ReasoningOption{{Type: "effort", Values: cm.EffortTiers}}
+				} else {
+					rm.ReasoningOptions = standardEffortOptions()
+				}
 			}
 			if cm.Context > 0 {
 				rm.Limit = &ModelLimit{Context: cm.Context}
@@ -295,6 +333,30 @@ func (r *ModelRegistry) ListProviderModels(providerID string, toolCallOnly bool)
 // HasProvider returns whether the given provider ID exists in the registry.
 func (r *ModelRegistry) HasProvider(providerID string) bool {
 	return r.GetProvider(providerID) != nil
+}
+
+// PickDefaultModel returns the best default model id for a provider, used when
+// setup completes without an explicit model selection (the wizard no longer
+// forces a model pick). Selection order: first DefaultEnabled model, then the
+// first Recommended model, then simply the first model. Returns "" when the
+// provider is unknown or has no models (e.g. a custom OpenAI-compatible
+// provider) — callers must then require an explicit model id.
+func (r *ModelRegistry) PickDefaultModel(providerID string) string {
+	models := r.ListProviderModels(providerID, false)
+	for _, m := range models {
+		if m.DefaultEnabled {
+			return m.ID
+		}
+	}
+	for _, m := range models {
+		if m.Recommended {
+			return m.ID
+		}
+	}
+	if len(models) > 0 {
+		return models[0].ID
+	}
+	return ""
 }
 
 // ListProviders returns all providers in the curated display order.
@@ -577,4 +639,14 @@ func applyRecommendedModels() {
 			}
 		}
 	}
+}
+
+// standardEffortOptions is the reasoning_options applied to custom models the
+// user flags as reasoning-capable. These are the effort levels the
+// OpenAI-compatible "reasoning_effort" parameter conventionally accepts.
+func standardEffortOptions() []ReasoningOption {
+	return []ReasoningOption{{
+		Type:   "effort",
+		Values: []string{"minimal", "low", "medium", "high"},
+	}}
 }

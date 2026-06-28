@@ -2,12 +2,14 @@
 import { computed } from 'vue'
 import { iconForProvider } from '@/utils/providerIcons'
 
-const props = withDefaults(defineProps<{ provider: string; size?: number }>(), {
+const props = withDefaults(defineProps<{ provider: string; size?: number; custom?: boolean }>(), {
   size: 18,
+  custom: false,
 })
 
 // Trusted, build-time bundled SVG strings (not user input), so v-html is safe.
-const svg = computed(() => iconForProvider(props.provider))
+// Custom providers fall back to the OpenAI mark (they're OpenAI-compatible).
+const svg = computed(() => iconForProvider(props.provider, props.custom))
 
 // First alphanumeric character, shown when the provider has no brand icon.
 const initial = computed(

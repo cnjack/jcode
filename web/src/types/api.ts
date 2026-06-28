@@ -105,11 +105,15 @@ export interface ModelInfo {
   default_enabled?: boolean
   enabled?: boolean
   image_support?: boolean
+  // How this model exposes its reasoning/thinking controls (from models.dev).
+  // Absent/empty ⇒ no reasoning controls to render.
+  reasoning_options?: ReasoningOption[]
 }
 
 export interface ProviderInfo {
   id: string
   name: string
+  custom?: boolean // true for user-configured OpenAI-compatible providers
   models: ModelInfo[]
 }
 
@@ -586,19 +590,83 @@ export interface SetupProvider {
   tag?: string // "recommended", "local", etc.
 }
 
+// ReasoningOption mirrors models.dev's reasoning_options: how a model exposes
+// its thinking controls. type is 'effort' | 'toggle' | 'budget_tokens'.
+export interface ReasoningOption {
+  type: string
+  values?: string[]
+  min?: number
+  max?: number
+}
+
 export interface SetupModel {
   id: string
   name: string
   tool_call: boolean
   context_limit?: number
   reasoning?: boolean
+  attachment?: boolean
+  reasoning_options?: ReasoningOption[]
+}
+
+// A model attached to a provider via config (custom providers always have at
+// least one; registry providers may add extras not yet in the registry).
+export interface CustomModelDetail {
+  id: string
+  name?: string
+  reasoning?: boolean
+  context?: number // context window in tokens
+  attachment?: boolean // accepts image inputs (vision)
+  effort_tiers?: string[] // selectable reasoning-effort levels, e.g. ['low','medium','high']
+  custom?: boolean // true = user-defined (editable); false/undefined = built-in registry (read-only)
 }
 
 export interface ProviderDetail {
   id: string
+  name?: string // display name for custom (non-registry) providers
+  custom?: boolean // true if this provider is not in the registry
   api_key_set: boolean
   api_key?: string
   base_url?: string
+  headers?: Record<string, string> // values masked
+  custom_models?: CustomModelDetail[]
+  vision?: boolean // provider-level image-input override (null ⇒ registry default)
+  thinking?: boolean // provider-level extended-reasoning toggle
+  reasoning_effort?: string // provider-level default effort
+}
+
+// Advanced provider settings shared by the add/update payloads. Capabilities
+// (vision/thinking/reasoning_effort) are model-level, so they're not part of
+// provider configuration.
+export interface ProviderAdvanced {
+  base_url?: string
+  headers?: Record<string, string>
+}
+
+// Result of a connection test against a provider's /models endpoint. On success
+// it carries the measured latency and the number of advertised models; on
+// failure the error is classified (auth | network | server) so the UI can show
+// a targeted message.
+export interface ValidateResult {
+  valid: boolean
+  latency_ms?: number
+  model_count?: number
+  error?: string
+  error_type?: 'auth' | 'network' | 'server' | ''
+}
+
+// A model entry in a provider's browsable catalog (the "browse directory" UI).
+// `added` reflects whether the model is already configured for this provider,
+// so each row renders as "+ add" or "✓ added" (toggle to remove).
+export interface CatalogModel {
+  id: string
+  name?: string
+  added?: boolean
+  context?: number
+  reasoning?: boolean
+  attachment?: boolean
+  effort_tiers?: string[] // selectable reasoning-effort levels (custom models)
+  custom?: boolean // true = user-defined (editable/removable); false/undefined = registry model
 }
 
 // Model state types
@@ -612,4 +680,6 @@ export interface ModelStateResponse {
   favorite: ModelRef[]
   enabled_models: ModelRef[]
   disabled_models: ModelRef[]
+  // Per-"provider/model" reasoning-effort choices made from the chat picker.
+  effort_overrides?: Record<string, string>
 }

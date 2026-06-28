@@ -28,6 +28,7 @@ const { t } = useI18n()
 const input = ref('')
 const textarea = ref<HTMLTextAreaElement | null>(null)
 const showModelPicker = ref(false)
+const showEffortPicker = ref(false)
 const showModePicker = ref(false)
 const showAddMenu = ref(false)
 const showContextPopup = ref(false)
@@ -129,9 +130,41 @@ function modelInfoFor(provider: string, model: string) {
   return p?.models.find((m) => m.id === model)
 }
 
+// Custom (OpenAI-compatible) provider ids, so their icon falls back to the
+// OpenAI mark instead of a monogram.
+const customProviderIds = computed(() => new Set(store.providers.filter((p) => p.custom).map((p) => p.id)))
+function isCustomProvider(id: string) {
+  return customProviderIds.value.has(id)
+}
+
 // The ModelInfo for the currently-active model — drives the pinned row subline
 // + capability dots.
 const currentModelInfo = computed(() => modelInfoFor(store.providerName, store.modelName))
+
+// The reasoning-effort levels the current model accepts, taken from its
+// models.dev reasoning_options (type === 'effort'). Empty when the model has
+// no effort control — in which case the effort control is hidden entirely.
+const currentEffortOptions = computed<string[]>(() => {
+  const info = currentModelInfo.value
+  if (!info?.reasoning_options) return []
+  for (const o of info.reasoning_options) {
+    if (o.type === 'effort' && o.values?.length) return o.values
+  }
+  return []
+})
+
+// Whether to show the per-model effort control: only when the active model
+// advertises effort levels. A "" (off) option is always prepended so the user
+// can clear the override.
+const showEffortControl = computed(() => currentEffortOptions.value.length > 0)
+
+// The user's saved effort choice for the current model ('' = unset/default).
+const currentEffort = computed(() => store.getEffortOverride(store.providerName, store.modelName))
+
+async function pickEffort(effort: string) {
+  // Empty means "clear override" → send '' so the provider default is restored.
+  await store.setModelEffort(store.providerName, store.modelName, effort)
+}
 
 // Favorite recent models (recent keeps the recency order), filtered by the
 // search box and excluding the current model (it's pinned above).
@@ -290,6 +323,7 @@ async function send() {
 
 function selectModel(provider: string, model: string) {
   showModelPicker.value = false
+  showEffortPicker.value = false
   store.switchModel(provider, model)
 }
 
@@ -360,6 +394,7 @@ function handleClickOutside(e: MouseEvent) {
     showAddMenu.value = false
     showSlashMenu.value = false
     showContextPopup.value = false
+    showEffortPicker.value = false
     if (showManageModels.value) {
       showManageModels.value = false
       modelFilter.value = ''
@@ -629,20 +664,58 @@ watch(() => store.imageSupport, (supported) => {
 
             <!-- Model selector (moved to the right, near Send). The trigger shows
                  the active provider's identity tile so the brand is readable at rest. -->
-            <div class="relative">
+            <div class="relative flex items-center gap-1">
               <button
                 class="mm-trigger"
                 :aria-expanded="showModelPicker"
-                @click.stop="showModelPicker = !showModelPicker; showModePicker = false; showAddMenu = false"
+                @click.stop="showModelPicker = !showModelPicker; showModePicker = false; showAddMenu = false; showEffortPicker = false"
               >
                 <ProviderIcon
                   v-if="store.providerName"
                   :provider="store.providerName"
+                  :custom="isCustomProvider(store.providerName)"
                   :size="16"
                 />
                 {{ store.modelName ? getModelDisplayName(store.providerName, store.modelName) : 'model' }}
                 <ChevronDownIcon class="mm-trigger-chev" />
               </button>
+
+              <!-- Per-model reasoning-effort control. Only shown when the active
+                   model advertises effort levels (reasoning_options type=effort). -->
+              <button
+                v-if="showEffortControl"
+                class="effort-trigger"
+                :class="{ on: currentEffort }"
+                :aria-expanded="showEffortPicker"
+                :title="t('chat.model.effortTitle')"
+                @click.stop="showEffortPicker = !showEffortPicker; showModelPicker = false; showModePicker = false; showAddMenu = false"
+              >
+                <SparklesIcon class="w-3 h-3" />
+                <span v-if="currentEffort">{{ currentEffort }}</span>
+                <span v-else>{{ t('chat.model.effort') }}</span>
+                <ChevronDownIcon class="w-3 h-3 effort-chev" />
+              </button>
+              <div v-if="showEffortControl && showEffortPicker" class="effort-panel">
+                <button
+                  class="effort-row"
+                  :class="{ active: !currentEffort }"
+                  @click.stop="pickEffort(''); showEffortPicker = false"
+                >
+                  <span>{{ t('chat.model.effortDefault') }}</span>
+                  <CheckIcon v-if="!currentEffort" class="w-3.5 h-3.5" />
+                </button>
+                <button
+                  v-for="opt in currentEffortOptions"
+                  :key="opt"
+                  class="effort-row"
+                  :class="{ active: currentEffort === opt }"
+                  @click.stop="pickEffort(opt); showEffortPicker = false"
+                >
+                  <span class="font-mono">{{ opt }}</span>
+                  <CheckIcon v-if="currentEffort === opt" class="w-3.5 h-3.5" />
+                </button>
+              </div>
+
               <div
                 v-if="showModelPicker"
                 class="mm-panel align-right"
@@ -662,7 +735,7 @@ watch(() => store.imageSupport, (supported) => {
                 <!-- Pinned current row — never scrolls out of view. -->
                 <div v-if="store.providerName && store.modelName" class="mm-pinned">
                   <CheckCircleIcon class="mm-pinned-pin" :title="t('chat.model.current')" />
-                  <ProviderIcon :provider="store.providerName" :size="22" />
+                  <ProviderIcon :provider="store.providerName" :custom="isCustomProvider(store.providerName)" :size="22" />
                   <span class="mm-pinned-body">
                     <span class="mm-name">{{ getModelDisplayName(store.providerName, store.modelName) }}</span>
                     <span class="mm-id">{{ modelSubline(store.providerName, currentModelInfo) }}</span>
@@ -684,7 +757,7 @@ watch(() => store.imageSupport, (supported) => {
                       class="mm-row"
                       @click="selectModel(r.provider, r.model)"
                     >
-                      <ProviderIcon :provider="r.provider" :size="22" />
+                      <ProviderIcon :provider="r.provider" :custom="isCustomProvider(r.provider)" :size="22" />
                       <span class="mm-body">
                         <span class="mm-name">{{ getModelDisplayName(r.provider, r.model) }}</span>
                         <span class="mm-id">{{ modelSubline(r.provider, modelInfoFor(r.provider, r.model)) }}</span>
@@ -712,7 +785,7 @@ watch(() => store.imageSupport, (supported) => {
                       @keydown.enter.prevent="selectModel(p.id, m.id)"
                       @keydown.space.prevent="selectModel(p.id, m.id)"
                     >
-                      <ProviderIcon :provider="p.id" :size="22" />
+                      <ProviderIcon :provider="p.id" :custom="p.custom" :size="22" />
                       <span class="mm-body">
                         <span class="mm-name">{{ m.name || m.id }}</span>
                         <span class="mm-id">{{ modelSubline(p.id, m) }}</span>
@@ -1487,6 +1560,64 @@ watch(() => store.imageSupport, (supported) => {
   transition: transform var(--duration-normal);
 }
 .mm-trigger[aria-expanded='true'] .mm-trigger-chev { transform: rotate(180deg); }
+
+/* Per-model reasoning-effort control — visually matches the model picker
+   trigger (transparent border, no background; muted bg only on hover). */
+.effort-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--color-foreground);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--duration-fast);
+}
+.effort-trigger:hover { background: var(--color-muted); }
+/* When an effort is selected, tint only the text (no chip fill/border), so the
+   trigger stays visually consistent with the adjacent model picker. */
+.effort-trigger.on { color: var(--color-primary); }
+.effort-chev { opacity: 0.55; transition: transform var(--duration-normal); }
+.effort-trigger[aria-expanded='true'] .effort-chev { transform: rotate(180deg); }
+.effort-panel {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: 4px;
+  z-index: var(--z-dropdown);
+  min-width: 140px;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.effort-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-foreground);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--duration-fast);
+}
+.effort-row:hover { background: var(--color-muted); }
+.effort-row.active { color: var(--color-primary); font-weight: 600; }
+.effort-row .heroicon { color: var(--color-primary); }
 
 .mm-panel {
   position: absolute;

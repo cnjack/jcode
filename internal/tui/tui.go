@@ -456,15 +456,3 @@ func RunTUI(hasPrompt bool, pwd string, todoStore *tools.TodoStore, opts ...Mode
 	p := tea.NewProgram(&m)
 	return p, m
 }
-
-func HeaderView() string {
-	bracketStyle := lipgloss.NewStyle().Foreground(colorMuted).Bold(true)
-	jStyle := lipgloss.NewStyle().Foreground(colorLogoJ).Bold(true)
-	codeStyle := lipgloss.NewStyle().Foreground(colorText).Bold(true)
-	return lipgloss.JoinHorizontal(lipgloss.Left,
-		bracketStyle.Render("["),
-		jStyle.Render("J"),
-		codeStyle.Render("CODE"),
-		bracketStyle.Render("]"),
-	)
-}

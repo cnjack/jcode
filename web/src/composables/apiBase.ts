@@ -55,13 +55,7 @@ export async function initApiBase(): Promise<void> {
   const port = await waitForPort(invoke)
   apiBase = `http://127.0.0.1:${port}`
   await waitForHealth()
-  resolved = true
 }
-
-// resolved flips true once initApiBase has produced a healthy base. Callers that
-// want to short-circuit redundant re-inits can check it; mount blocks on the
-// returned promise regardless.
-export let resolved = false
 
 // Poll the IPC command until it returns a port (or time out). The window can
 // mount and reach this code before sidecar::start has stored the port, so a

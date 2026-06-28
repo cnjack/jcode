@@ -1,0 +1,1135 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>jcode · 模型 Provider 设计稿</title>
+<style>
+/* ════════════════════════════════════════════════════════════════════
+   Design Tokens — verbatim copy of web/src/styles/tokens.css
+   (light + dark). All color/radius/shadow/motion values come from here;
+   the prototype never hardcodes a color.
+   ════════════════════════════════════════════════════════════════════ */
+:root {
+  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius-xs: 3px; --radius-sm: 4px; --radius-md: 6px;
+  --radius-lg: 8px; --radius-xl: 12px; --radius-2xl: 16px; --radius-pill: 9999px;
+  --shadow-sm: 0 1px 2px rgba(24,20,16,.06);
+  --shadow-md: 0 4px 14px -4px rgba(24,20,16,.12);
+  --shadow-lg: 0 14px 36px -14px rgba(24,20,16,.20);
+  --shadow-xl: 0 1px 2px rgba(24,20,16,.04), 0 24px 56px -28px rgba(24,20,16,.26);
+  --backdrop: rgba(20,18,16,.5);
+  --accent-wash-soft: color-mix(in srgb, var(--color-primary) 8%, transparent);
+  --accent-wash: color-mix(in srgb, var(--color-primary) 11%, transparent);
+  --accent-wash-strong: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  --accent-border: color-mix(in srgb, var(--color-primary) 30%, transparent);
+  --color-accent-neutral: var(--color-foreground);
+  --neutral-wash-soft: color-mix(in srgb, var(--color-foreground) 8%, transparent);
+  --neutral-wash: color-mix(in srgb, var(--color-foreground) 11%, transparent);
+  --neutral-wash-strong: color-mix(in srgb, var(--color-foreground) 16%, transparent);
+  --neutral-border: color-mix(in srgb, var(--color-foreground) 30%, transparent);
+  --color-border-active: var(--color-primary);
+  --icon-stroke: 2;
+  --color-success: #16A34A;
+  --z-sidebar:30; --z-header:20; --z-dropdown:40; --z-modal:50; --z-toast:60;
+  --ease-out: cubic-bezier(.16,1,.3,1);
+  --ease-in: cubic-bezier(.7,0,.84,0);
+  --ease-spring: cubic-bezier(.34,1.56,.64,1);
+  --duration-fast:100ms; --duration-normal:150ms; --duration-slow:300ms; --duration-slower:500ms;
+  --sidebar-width:20rem; --sidebar-collapsed-width:0px; --header-height:3.25rem;
+  /* light */
+  --color-primary:#FF8400; --color-background:#F2F3F0; --color-surface:#FFFFFF;
+  --color-foreground:#111111; --color-muted-foreground:#666666; --color-border:#CBCCC9;
+  --color-muted:#F2F3F0; --color-secondary:#E7E8E5; --color-secondary-foreground:#111111;
+  --color-success-bg:#DFE6E1; --color-success-fg:#004D1A;
+  --color-error-bg:#E5DCDA; --color-error-fg:#8C1C00;
+  --color-warning-bg:#E9E3D8; --color-warning-fg:#804200;
+  --color-info-bg:#DFDFE6; --color-info-fg:#000066;
+  --color-destructive:#D93C15; --color-sidebar-bg:#FAFAF8;
+  --color-on-primary:#FFFFFF; --color-on-destructive:#FFFFFF;
+  --code-bg:#f6f8fa; --code-border:#d0d7de;
+}
+.dark {
+  --color-primary:#FF8400; --color-background:#111111; --color-surface:#1A1A1A;
+  --color-foreground:#FFFFFF; --color-muted-foreground:#B8B9B6; --color-border:#2E2E2E;
+  --color-muted:#2E2E2E; --color-secondary:#2E2E2E; --color-secondary-foreground:#FFFFFF;
+  --color-success-bg:#222924; --color-success-fg:#B6FFCE;
+  --color-error-bg:#24100B; --color-error-fg:#FF5C33;
+  --color-warning-bg:#291C0F; --color-warning-fg:#FF8400;
+  --color-info-bg:#222229; --color-info-fg:#B2B2FF;
+  --color-destructive:#FF5C33; --color-sidebar-bg:#1A1A1A; --color-success:#22C55E;
+  --color-on-primary:#FFFFFF; --color-on-destructive:#FFFFFF;
+  --code-bg:#1A1A1A; --code-border:var(--color-border);
+}
+
+/* ── Page chrome ── */
+*{box-sizing:border-box}
+html{background:var(--color-background);transition:background var(--duration-normal)}
+body{margin:0;font-family:var(--font-sans);color:var(--color-foreground);
+  -webkit-font-smoothing:antialiased;min-height:100vh;padding:48px 0 120px;
+  display:flex;justify-content:center}
+.stage{width:100%;max-width:680px;padding:0 14px}
+
+/* Inset panel geometry — mirrors PageSurface (border/radius/shadow + the
+   wrapped “包裹感” margin so the surface reads as inset within the page). */
+.panel{background:var(--color-surface);border:1px solid var(--color-border);
+  border-radius:var(--radius-2xl);box-shadow:var(--shadow-sm);overflow:hidden;
+  min-height:520px;display:flex;flex-direction:column}
+.panel-head{display:flex;align-items:flex-start;justify-content:space-between;
+  gap:12px;width:100%;max-width:56rem;margin-inline:auto;padding:16px 20px 12px;
+  flex-shrink:0}
+.panel-head-main{min-width:0}
+.panel-title{font-size:17px;font-weight:600;letter-spacing:-.01em;
+  display:flex;align-items:baseline;gap:8px}
+.panel-count{font-size:11px;font-family:var(--font-mono);color:var(--color-muted-foreground)}
+.panel-sub{font-size:11.5px;color:var(--color-muted-foreground);margin-top:5px;
+  line-height:1.45;max-width:52ch;display:flex;align-items:center;gap:6px}
+.panel-body{flex:1;min-height:0;display:flex;flex-direction:column;
+  width:100%;max-width:56rem;margin-inline:auto;padding:0 20px 24px}
+.scene{display:none}.scene.active{display:contents}
+
+/* ════════════════════════════════════════════════════════════════════
+   Component primitives — visual clones of SettingsDialog's .s-* classes
+   ════════════════════════════════════════════════════════════════════ */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  height:32px;padding:0 12px;border-radius:var(--radius-md);font-size:12px;
+  font-weight:500;font-family:var(--font-sans);cursor:pointer;border:1px solid transparent;
+  white-space:nowrap;transition:background var(--duration-fast),border-color var(--duration-fast),opacity var(--duration-fast);
+  min-height:32px}
+.btn:focus-visible{outline:none;border-color:var(--color-primary);
+  box-shadow:0 0 0 3px var(--accent-wash-soft)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-primary{background:var(--color-foreground);color:var(--color-surface)}
+.btn-primary:hover:not(:disabled){background:color-mix(in srgb,var(--color-foreground) 85%,transparent)}
+.btn-secondary{background:var(--color-surface);border-color:var(--color-border);color:var(--color-foreground)}
+.btn-secondary:hover:not(:disabled){background:var(--color-secondary)}
+.btn-ghost{background:transparent;color:var(--color-foreground)}
+.btn-ghost:hover:not(:disabled){background:var(--color-secondary)}
+.btn-danger{background:var(--color-destructive);color:var(--color-on-destructive)}
+.btn-danger:hover:not(:disabled){filter:brightness(.92)}
+.btn-sm{height:26px;min-height:26px;padding:0 9px;font-size:11px;border-radius:var(--radius-sm)}
+.btn-xs{height:22px;min-height:22px;padding:0 7px;font-size:10px;border-radius:var(--radius-sm)}
+.icon-btn{width:28px;height:28px;min-height:28px;padding:0;display:grid;place-items:center;border-radius:var(--radius-md)}
+
+.inp{width:100%;height:32px;padding:0 10px;background:var(--color-surface);
+  border:1px solid var(--color-border);border-radius:var(--radius-md);
+  color:var(--color-foreground);font-size:12px;font-family:var(--font-sans);
+  outline:none;transition:border-color var(--duration-fast),box-shadow var(--duration-fast)}
+.inp::placeholder{color:var(--color-muted-foreground);opacity:.7}
+.inp:focus{border-color:var(--color-primary);box-shadow:0 0 0 3px var(--accent-wash-soft)}
+.inp.mono{font-family:var(--font-mono)}
+.lab{display:block;font-size:11px;font-weight:500;color:var(--color-foreground);margin-bottom:5px}
+.helper{font-size:11px;line-height:1.45;color:var(--color-muted-foreground);margin-top:5px}
+
+.chip{display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 7px;
+  border-radius:var(--radius-pill);font-size:10px;font-weight:500;
+  background:var(--color-muted);color:var(--color-muted-foreground);white-space:nowrap}
+.chip-accent{background:var(--accent-wash);color:var(--color-primary)}
+.chip-neutral{background:var(--neutral-wash);color:var(--color-accent-neutral)}
+.chip-success{background:var(--color-success-bg);color:var(--color-success-fg)}
+.chip-warning{background:var(--color-warning-bg);color:var(--color-warning-fg)}
+.chip-error{background:var(--color-error-bg);color:var(--color-error-fg)}
+
+/* switch */
+.switch{position:relative;display:inline-block;width:34px;height:20px;flex-shrink:0;
+  background:var(--color-border);border-radius:var(--radius-pill);border:none;cursor:pointer;padding:0;
+  transition:background var(--duration-fast)}
+.switch[data-on='true']{background:var(--color-accent-neutral)}
+.switch:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent-wash-soft)}
+.switch::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;
+  border-radius:50%;background:var(--color-surface);box-shadow:var(--shadow-sm);
+  transition:transform var(--duration-fast) var(--ease-out)}
+.switch[data-on='true']::after{transform:translateX(14px)}
+
+/* segmented control (transport / tri-state) */
+.seg{display:inline-flex;background:var(--color-muted);border-radius:var(--radius-md);padding:2px;gap:2px}
+.seg-btn{height:24px;padding:0 10px;border:none;background:transparent;
+  border-radius:var(--radius-sm);font-size:11px;font-weight:500;
+  color:var(--color-muted-foreground);cursor:pointer;
+  transition:background var(--duration-fast),color var(--duration-fast)}
+.seg-btn:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent-wash-soft)}
+.seg-btn[aria-pressed='true']{background:var(--color-surface);color:var(--color-foreground);box-shadow:var(--shadow-sm)}
+
+/* tri-state: Auto · On · Off */
+.tri{display:inline-flex;background:var(--color-muted);border-radius:var(--radius-md);padding:2px;gap:2px}
+.tri-btn{height:24px;padding:0 8px;border:none;background:transparent;
+  border-radius:var(--radius-sm);font-size:10.5px;font-weight:500;
+  color:var(--color-muted-foreground);cursor:pointer;
+  transition:background var(--duration-fast),color var(--duration-fast)}
+.tri-btn:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent-wash-soft)}
+/* selected tint depends on which option: auto=neutral, on=success, off=error */
+.tri-btn[aria-pressed='true'][data-val='auto']{background:var(--color-surface);color:var(--color-foreground);box-shadow:var(--shadow-sm)}
+.tri-btn[aria-pressed='true'][data-val='on']{background:var(--color-success-bg);color:var(--color-success-fg)}
+.tri-btn[aria-pressed='true'][data-val='off']{background:var(--color-error-bg);color:var(--color-error-fg)}
+
+/* advanced toggle */
+.adv-toggle{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:500;
+  letter-spacing:.02em;color:var(--color-muted-foreground);padding:2px 0;cursor:pointer;background:none;border:none}
+.adv-toggle:hover{color:var(--color-foreground)}
+.adv-toggle .chev{transition:transform var(--duration-fast)}
+.adv-toggle[aria-expanded='true'] .chev{transform:rotate(90deg)}
+
+/* form card */
+.form-card{background:var(--color-surface);border:1px solid var(--color-border);
+  border-radius:var(--radius-lg);overflow:hidden}
+.form-head{display:flex;align-items:center;justify-content:space-between;
+  padding:10px 14px;background:var(--color-muted);border-bottom:1px solid var(--color-border)}
+.form-head-title{font-size:11px;font-weight:600;color:var(--color-muted-foreground);
+  text-transform:uppercase;letter-spacing:.06em}
+.form-body{padding:16px;display:flex;flex-direction:column;gap:14px}
+.form-foot{display:flex;justify-content:flex-end;gap:8px;padding:12px 14px;
+  background:var(--color-muted);border-top:1px solid var(--color-border)}
+.field{display:flex;flex-direction:column}
+.field:last-child{margin-bottom:0}
+
+/* key/value row (headers) */
+.kv{display:flex;gap:8px}
+
+/* ════════════════════════════════════════════════════════════════════
+   Provider card + model rows
+   ════════════════════════════════════════════════════════════════════ */
+.pcard{background:var(--color-surface);border:1px solid var(--color-border);
+  border-radius:var(--radius-lg);overflow:hidden}
+.pcard+.pcard{margin-top:10px}
+
+.pcard-head{display:flex;align-items:center;gap:12px;padding:12px 14px;
+  border-bottom:1px solid var(--color-border)}
+.pcard-brand{width:32px;height:32px;display:grid;place-items:center;flex-shrink:0;
+  border-radius:var(--radius-md);background:var(--color-secondary);color:var(--color-foreground)}
+.pcard-brand svg{width:18px;height:18px;display:block}
+.pcard-brand.fallback{font-family:var(--font-mono);font-weight:700;font-size:13px;color:var(--color-muted-foreground)}
+.pcard-meta{flex:1;min-width:0}
+.pcard-name{font-size:13px;font-weight:600;color:var(--color-foreground);
+  display:flex;align-items:center;gap:7px}
+.pcard-url{font-size:11px;color:var(--color-muted-foreground);margin-top:2px;
+  font-family:var(--font-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pcard-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
+
+.pcard-models{padding:0 14px 12px}
+.models-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:10px 0;flex-wrap:wrap}
+.models-bar-left{display:flex;align-items:center;gap:8px;font-size:11.5px;
+  color:var(--color-muted-foreground)}
+.models-bar-left b{color:var(--color-foreground);font-weight:600}
+.models-bar-right{display:flex;align-items:center;gap:6px}
+
+.model-row{display:flex;align-items:center;gap:10px;padding:8px 10px;
+  border:1px solid transparent;border-radius:var(--radius-md);position:relative}
+.model-row:hover{background:var(--color-muted)}
+.model-row-main{flex:1;min-width:0}
+.model-row-name{font-size:12px;font-weight:500;color:var(--color-foreground);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.model-row-id{font-size:10.5px;color:var(--color-muted-foreground);
+  font-family:var(--font-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.model-row-badges{display:flex;align-items:center;gap:5px;flex-shrink:0;flex-wrap:wrap}
+.model-row-hover{display:none;align-items:center;gap:4px;flex-shrink:0}
+.model-row:hover .model-row-hover{display:flex}
+
+/* tiny menu select (default effort) */
+.mselect{position:relative}
+.mselect-btn{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 6px 0 8px;
+  background:var(--color-secondary);border:1px solid transparent;border-radius:var(--radius-sm);
+  font-size:10px;font-weight:500;color:var(--color-foreground);cursor:pointer}
+.mselect-btn:hover{background:var(--color-muted)}
+.mselect-btn:focus-visible{outline:none;border-color:var(--color-primary);box-shadow:0 0 0 3px var(--accent-wash-soft)}
+.mselect-btn .lbl{color:var(--color-muted-foreground)}
+.mselect-panel{position:absolute;top:calc(100% + 4px);right:0;z-index:var(--z-dropdown);
+  min-width:118px;background:var(--color-surface);border:1px solid var(--color-border);
+  border-radius:var(--radius-md);box-shadow:var(--shadow-md);padding:4px}
+.mselect-opt{display:block;width:100%;text-align:left;padding:6px 10px;border:none;background:none;
+  font-size:11px;font-family:var(--font-sans);color:var(--color-foreground);cursor:pointer;
+  border-radius:var(--radius-sm)}
+.mselect-opt:hover,.mselect-opt[data-active='true']{background:var(--color-secondary)}
+.mselect-opt[data-selected='true']{font-weight:600}
+.mselect-opt .dot{color:var(--color-primary)}
+
+/* catalog (inline) */
+.catalog{border-top:1px dashed var(--color-border);margin-top:6px;padding-top:8px}
+.catalog-search{position:relative;margin-bottom:6px}
+.catalog-list{display:flex;flex-direction:column;gap:2px;max-height:240px;overflow-y:auto;
+  padding:2px;border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-background)}
+.cat-row{display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:var(--radius-sm)}
+.cat-row:hover{background:var(--color-secondary)}
+.cat-meta{flex:1;min-width:0}
+.cat-id{font-size:11px;font-family:var(--font-mono);color:var(--color-foreground)}
+.cat-sub{font-size:10px;color:var(--color-muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.catalog-foot{display:flex;justify-content:flex-end;padding-top:8px}
+/* catalog toggle: added (success tint, click to remove) vs not-added (+ 添加) */
+.cat-toggle[data-added='true']{background:var(--color-success-bg);color:var(--color-success-fg);border-color:transparent}
+
+/* status banners */
+.banner{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--radius-md);
+  font-size:11.5px;line-height:1.4;margin-top:10px}
+.banner-ok{background:var(--color-success-bg);color:var(--color-success-fg);border:1px solid color-mix(in srgb,var(--color-success) 30%,transparent)}
+.banner-err{background:var(--color-error-bg);color:var(--color-error-fg);border:1px solid color-mix(in srgb,var(--color-destructive) 30%,transparent)}
+.banner-warn{background:var(--color-warning-bg);color:var(--color-warning-fg);border:1px solid color-mix(in srgb,var(--color-warning-fg) 30%,transparent)}
+.banner-main{flex:1}
+.banner-actions{display:flex;gap:6px;flex-shrink:0}
+.banner b{font-weight:600}
+.banner .mono{font-family:var(--font-mono)}
+
+/* reasoning effort tiers — chips you can add/remove */
+.tiers{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.tier{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 4px 0 10px;
+  background:var(--color-surface);border:1px solid var(--color-border);
+  border-radius:var(--radius-pill);font-size:11px;font-family:var(--font-mono);color:var(--color-foreground)}
+.tier .tier-x{width:18px;height:18px;display:grid;place-items:center;border:none;background:none;
+  border-radius:50%;color:var(--color-muted-foreground);cursor:pointer}
+.tier .tier-x:hover{background:var(--color-error-bg);color:var(--color-error-fg)}
+.tier-add{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px;
+  background:transparent;border:1px dashed var(--color-border);
+  border-radius:var(--radius-pill);font-size:11px;color:var(--color-muted-foreground);cursor:pointer}
+.tier-add:hover{border-color:var(--color-border-active);color:var(--color-foreground)}
+.tier-add:focus-visible{outline:none;border-color:var(--color-primary);box-shadow:0 0 0 3px var(--accent-wash-soft)}
+.tier-input{height:26px;padding:0 10px;background:var(--color-surface);
+  border:1px solid var(--color-border-active);border-radius:var(--radius-pill);
+  font-size:11px;font-family:var(--font-mono);color:var(--color-foreground);outline:none;width:96px}
+.tier-input:focus{box-shadow:0 0 0 3px var(--accent-wash-soft)}
+.tier-input.confirm{height:26px;padding:0 8px;border:1px solid var(--color-border-active);
+  border-radius:var(--radius-pill);background:var(--color-foreground);color:var(--color-surface);
+  font-size:11px;cursor:pointer}
+
+/* inline custom-model form */
+.cm-form{border:1px solid var(--color-border);border-radius:var(--radius-md);
+  background:var(--color-muted);padding:12px;display:flex;flex-direction:column;gap:10px;margin-top:8px}
+.cm-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.narrow .cm-fields{grid-template-columns:1fr}
+
+/* key masked display */
+.key-mask{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;
+  background:var(--color-muted);border:1px solid var(--color-border);border-radius:var(--radius-md);
+  font-family:var(--font-mono);font-size:12px;color:var(--color-muted-foreground)}
+.key-mask code{color:var(--color-foreground)}
+
+/* empty state */
+.empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;gap:12px;padding:48px 20px}
+.empty-ic{width:44px;height:44px;display:grid;place-items:center;border-radius:var(--radius-lg);
+  background:var(--color-secondary);color:var(--color-muted-foreground)}
+.empty-ic svg{width:20px;height:20px}
+.empty-title{font-size:13px;font-weight:600;color:var(--color-foreground)}
+.empty-desc{font-size:11.5px;line-height:1.5;color:var(--color-muted-foreground);max-width:280px}
+
+/* skeleton */
+.sk{background:var(--color-secondary);border-radius:var(--radius-md)}
+.sk-card{border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:14px;display:flex;flex-direction:column;gap:10px}
+.sk-card+.sk-card{margin-top:10px}
+.sk-bar{height:12px}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.pulse{animation:pulse 1.6s var(--ease-in-out) infinite}
+
+/* loading spinner */
+.spin{width:13px;height:13px;border:2px solid var(--accent-wash-strong);border-top-color:var(--color-primary);
+  border-radius:50%;animation:rot .7s linear infinite;display:inline-block}
+@keyframes rot{to{transform:rotate(360deg)}}
+
+/* delete guide */
+.guide{background:var(--color-warning-bg);border:1px solid color-mix(in srgb,var(--color-warning-fg) 30%,transparent);
+  border-radius:var(--radius-lg);padding:16px;display:flex;flex-direction:column;gap:12px}
+
+/* ════════════════════════════════════════════════════════════════════
+   Floating control bar (scenario / theme / width)
+   ════════════════════════════════════════════════════════════════════ */
+.controls{position:fixed;right:18px;bottom:18px;z-index:var(--z-toast);
+  display:flex;flex-direction:column;gap:8px;background:var(--color-surface);
+  border:1px solid var(--color-border);border-radius:var(--radius-xl);
+  box-shadow:var(--shadow-lg);padding:12px;width:232px}
+.ctrl-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--color-muted-foreground);display:flex;align-items:center;gap:6px}
+.ctrl-row{display:flex;flex-direction:column;gap:5px}
+.ctrl-label{font-size:10.5px;color:var(--color-muted-foreground)}
+.ctrl-select{width:100%;height:30px;padding:0 8px;background:var(--color-surface);
+  border:1px solid var(--color-border);border-radius:var(--radius-md);color:var(--color-foreground);
+  font-size:11.5px;font-family:var(--font-sans);cursor:pointer;outline:none}
+.ctrl-select:focus{border-color:var(--color-primary);box-shadow:0 0 0 3px var(--accent-wash-soft)}
+.ctrl-seg{display:flex;background:var(--color-muted);border-radius:var(--radius-md);padding:2px;gap:2px}
+.ctrl-seg button{flex:1;height:26px;border:none;background:transparent;
+  border-radius:var(--radius-sm);font-size:11px;font-weight:500;
+  color:var(--color-muted-foreground);cursor:pointer;
+  transition:background var(--duration-fast),color var(--duration-fast)}
+.ctrl-seg button[data-on='true']{background:var(--color-surface);color:var(--color-foreground);box-shadow:var(--shadow-sm)}
+.ctrl-seg button:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent-wash-soft)}
+
+/* ── narrow (responsive) ── */
+.narrow .stage{max-width:380px}
+.narrow .panel-head,.narrow .panel-body{padding-left:16px;padding-right:16px}
+.narrow .pcard-head{flex-wrap:wrap;gap:8px}
+.narrow .pcard-actions{margin-left:auto}
+.narrow .model-row{flex-wrap:wrap}
+.narrow .model-row-badges{width:100%}
+.narrow .models-bar{flex-direction:column;align-items:stretch}
+.narrow .models-bar-right{flex-wrap:wrap}
+/* touch targets ≥ 44px in narrow: lift buttons + icon buttons, and let the
+   header's primary action grow out of its -sm size. */
+.narrow .btn{height:40px;min-height:40px;font-size:12.5px}
+.narrow .btn-sm{height:38px;min-height:38px;font-size:11.5px}
+.narrow .btn-xs{height:30px;min-height:30px}
+.narrow .panel-head .btn-primary{height:40px;min-height:40px;font-size:12.5px}
+.narrow .icon-btn{width:40px;height:40px;min-height:40px}
+.narrow .model-row{padding:12px 10px}
+.narrow .pcard-brand{width:36px;height:36px}
+.narrow body{padding-top:24px}
+
+/* utility */
+.row-gap{display:flex;flex-direction:column;gap:14px}
+.muted{color:var(--color-muted-foreground)}
+.mono{font-family:var(--font-mono)}
+.hidden{display:none!important}
+.flex{display:flex}.between{justify-content:space-between;align-items:center}
+.center{align-items:center}.gap6{gap:6px}.gap8{gap:8px}.gap10{gap:10px}.grow{flex:1;min-width:0}
+hr.div{border:none;border-top:1px solid var(--color-border);margin:4px 0}
+.note-key{font-size:10.5px;color:var(--color-muted-foreground);display:flex;align-items:center;gap:5px;margin-top:6px}
+</style>
+</head>
+<body>
+<div class="stage">
+
+<!-- ══════════ PANEL ══════════ -->
+<div class="panel">
+  <header class="panel-head">
+    <div class="panel-head-main">
+      <div class="panel-title">模型 Provider<span class="panel-count" id="hd-count">3</span></div>
+      <div class="panel-sub">
+        <svg class="w3.5 h3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path d="M12 2 4 5v6c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10V5l-8-3Z"/></svg>
+        在此配置的连接直接使用你提供的 API Key 与端点，密钥仅存储在本地
+      </div>
+    </div>
+    <div class="page-actions" style="display:flex;gap:8px;flex-shrink:0">
+      <button class="btn btn-secondary btn-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>刷新</button>
+      <button class="btn btn-primary btn-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" style="width:14px;height:14px"><path d="M12 5v14M5 12h14"/></svg>添加 Provider</button>
+    </div>
+  </header>
+
+  <div class="panel-body">
+
+  <!-- ───────────────── SCENE 1: LIST (default) ───────────────── -->
+  <section class="scene active" data-scene="list">
+
+    <!-- Provider card: OpenAI (reasoning + vision model) -->
+    <article class="pcard">
+      <div class="pcard-head">
+        <div class="pcard-brand">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M22.28 9.82a5.98 5.98 0 0 0-.51-4.91 6.04 6.04 0 0 0-6.5-2.9A6.02 6.02 0 0 0 4.98 4.18a5.98 5.98 0 0 0-4 2.9 6.04 6.04 0 0 0 .74 7.1 5.98 5.98 0 0 0 .51 4.91 6.04 6.04 0 0 0 6.5 2.9 5.98 5.98 0 0 0 9.77-2.16 5.98 5.98 0 0 0 4-2.9 6.04 6.04 0 0 0-.74-7.1ZM13.05 21.02a4.48 4.48 0 0 1-2.87-1.04l.14-.08 4.76-2.75a.77.77 0 0 0 .39-.67v-6.72l2.01 1.17c.02.01.03.03.04.05v5.55a4.49 4.49 0 0 1-4.47 4.49ZM3.85 17.9a4.48 4.48 0 0 1-.53-3.02l.14.08 4.77 2.75a.78.78 0 0 0 .78 0l5.83-3.36v2.32a.08.08 0 0 1-.03.07l-4.82 2.78a4.49 4.49 0 0 1-6.14-1.62ZM2.6 7.62a4.47 4.47 0 0 1 2.34-1.98v5.66c0 .28.15.53.39.67l5.8 3.35-2.01 1.16a.08.08 0 0 1-.07 0L4.2 13.71A4.49 4.49 0 0 1 2.6 7.62Zm15.83 3.68-5.82-3.37 2-1.16a.08.08 0 0 1 .08 0l4.81 2.78a4.49 4.49 0 0 1-.68 8.1V11.97a.78.78 0 0 0-.4-.67Zm2-3.02-.14-.09L17.5 5.45a.77.77 0 0 0-.78 0l-5.82 3.36V6.49a.07.07 0 0 1 .03-.06L15.74 3.6a4.49 4.49 0 0 1 6.68 4.64ZM9.52 12.55l-2.01-1.16a.08.08 0 0 1-.04-.05V5.89a4.49 4.49 0 0 1 7.37-3.44l-.14.08L9.95 5.28a.78.78 0 0 0-.4.67l-.03 6.6Zm1.09-2.36L12 9.14l1.4.81v1.62L12 12.37l-1.4-.81V10.2Z"/></svg>
+        </div>
+        <div class="pcard-meta">
+          <div class="pcard-name">OpenAI <span class="chip chip-accent">当前活跃</span></div>
+          <div class="pcard-url">https://api.openai.com/v1 · ••••3a9f</div>
+        </div>
+        <div class="pcard-actions">
+          <button class="btn btn-ghost btn-xs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path d="M20 6 9 17l-5-5"/></svg>已验证</button>
+          <button class="btn btn-ghost btn-xs" title="测试">测试</button>
+          <button class="icon-btn btn btn-ghost" title="编辑"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+          <button class="icon-btn btn btn-ghost" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></button>
+        </div>
+      </div>
+      <div class="pcard-models">
+        <div class="models-bar">
+          <div class="models-bar-left"><b>4</b> 个已配置模型</div>
+          <div class="models-bar-right">
+            <button class="btn btn-ghost btn-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>浏览目录</button>
+            <button class="btn btn-secondary btn-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" style="width:13px;height:13px"><path d="M12 5v14M5 12h14"/></svg>自定义模型</button>
+          </div>
+        </div>
+
+        <div class="model-row">
+          <div class="model-row-main">
+            <div class="model-row-name">GPT-4o</div>
+            <div class="model-row-id">gpt-4o-2024-11-20</div>
+          </div>
+          <div class="model-row-badges">
+            <span class="chip chip-neutral">128K</span>
+            <span class="chip chip-neutral">👁 视觉</span>
+          </div>
+          <div class="model-row-hover">
+            <button class="icon-btn btn btn-ghost" title="编辑"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+            <button class="icon-btn btn btn-ghost" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+          </div>
+        </div>
+
+        <div class="model-row">
+          <div class="model-row-main">
+            <div class="model-row-name">o3</div>
+            <div class="model-row-id">o3-2025-04-16</div>
+          </div>
+          <div class="model-row-badges">
+            <span class="chip chip-neutral">🧠 推理</span>
+            <span class="chip chip-neutral">200K</span>
+          </div>
+          <div class="mselect" data-mselect>
+            <button class="mselect-btn"><span class="lbl">强度</span> medium <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:10px;height:10px"><path d="m6 9 6 6 6-6"/></svg></button>
+            <div class="mselect-panel hidden">
+              <button class="mselect-opt" data-val="minimal">minimal</button>
+              <button class="mselect-opt" data-val="low">low</button>
+              <button class="mselect-opt" data-selected="true" data-val="medium"><span class="dot">✓</span> medium</button>
+              <button class="mselect-opt" data-val="high">high</button>
+              <button class="mselect-opt" data-val="max">max</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="model-row">
+          <div class="model-row-main">
+            <div class="model-row-name">o4-mini</div>
+            <div class="model-row-id">o4-mini-2025-04-16</div>
+          </div>
+          <div class="model-row-badges">
+            <span class="chip chip-neutral">🧠 推理</span>
+            <span class="chip chip-neutral">200K</span>
+            <span class="chip chip-neutral">👁 视觉</span>
+          </div>
+          <div class="mselect" data-mselect>
+            <button class="mselect-btn"><span class="lbl">强度</span> high <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:10px;height:10px"><path d="m6 9 6 6 6-6"/></svg></button>
+            <div class="mselect-panel hidden">
+              <button class="mselect-opt" data-val="minimal">minimal</button>
+              <button class="mselect-opt" data-val="low">low</button>
+              <button class="mselect-opt" data-val="medium">medium</button>
+              <button class="mselect-opt" data-selected="true" data-val="high"><span class="dot">✓</span> high</button>
+              <button class="mselect-opt" data-val="max">max</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- Provider card: Anthropic -->
+    <article class="pcard">
+      <div class="pcard-head">
+        <div class="pcard-brand">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7.31 4.56 13.7 19.44H10.3L8.3 14.44H4l.92-2.3h2.45L4.96 4.56h2.35zm9.38 0 2.35 6.05L17 14.45l-.93-2.32-1.5 3.84-.6 1.47h-2.9L13.7 19.44 17.31 4.56h-.62z"/></svg>
+        </div>
+        <div class="pcard-meta">
+          <div class="pcard-name">Anthropic</div>
+          <div class="pcard-url">https://api.anthropic.com · ••••7c2e</div>
+        </div>
+        <div class="pcard-actions">
+          <button class="btn btn-ghost btn-xs">测试</button>
+          <button class="icon-btn btn btn-ghost" title="编辑"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+          <button class="icon-btn btn btn-ghost" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+        </div>
+      </div>
+      <div class="pcard-models">
+        <div class="models-bar">
+          <div class="models-bar-left"><b>2</b> 个已配置模型</div>
+          <div class="models-bar-right">
+            <button class="btn btn-ghost btn-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>浏览目录</button>
+            <button class="btn btn-secondary btn-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" style="width:13px;height:13px"><path d="M12 5v14M5 12h14"/></svg>自定义模型</button>
+          </div>
+        </div>
+        <div class="model-row">
+          <div class="model-row-main">
+            <div class="model-row-name">Claude Sonnet 4.5</div>
+            <div class="model-row-id">claude-sonnet-4-5</div>
+          </div>
+          <div class="model-row-badges">
+            <span class="chip chip-neutral">🧠 推理</span>
+            <span class="chip chip-neutral">200K</span>
+            <span class="chip chip-neutral">👁 视觉</span>
+          </div>
+          <div class="mselect" data-mselect>
+            <button class="mselect-btn"><span class="lbl">强度</span> medium <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:10px;height:10px"><path d="m6 9 6 6 6-6"/></svg></button>
+            <div class="mselect-panel hidden">
+              <button class="mselect-opt" data-val="minimal">minimal</button>
+              <button class="mselect-opt" data-val="low">low</button>
+              <button class="mselect-opt" data-selected="true" data-val="medium"><span class="dot">✓</span> medium</button>
+              <button class="mselect-opt" data-val="high">high</button>
+              <button class="mselect-opt" data-val="max">max</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- Provider card: Ollama (local) -->
+    <article class="pcard">
+      <div class="pcard-head">
+        <div class="pcard-brand">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8 2 5 4.8 5 8.3c0 1.9.9 3.6 2.3 4.8-.3.6-.5 1.3-.5 2 0 .7.2 1.3.5 1.9-.6.6-1 1.4-1 2.3 0 1.7 1.3 3 3 3 .9 0 1.7-.4 2.2-1 .6.3 1.3.5 2 .5s1.4-.2 2-.5c.5.6 1.3 1 2.2 1 1.7 0 3-1.3 3-3 0-.9-.4-1.7-1-2.3.3-.6.5-1.2.5-1.9 0-.7-.2-1.4-.5-2C18.1 11.9 19 10.2 19 8.3 19 4.8 16 2 12 2zm-3 6.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm6 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3z"/></svg>
+        </div>
+        <div class="pcard-meta">
+          <div class="pcard-name">Ollama <span class="chip chip-neutral">本地</span></div>
+          <div class="pcard-url">http://localhost:11434 · 无需密钥</div>
+        </div>
+        <div class="pcard-actions">
+          <button class="btn btn-ghost btn-xs">测试</button>
+          <button class="icon-btn btn btn-ghost" title="编辑"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+          <button class="icon-btn btn btn-ghost" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+        </div>
+      </div>
+      <div class="pcard-models">
+        <div class="models-bar">
+          <div class="models-bar-left"><b>1</b> 个已配置模型</div>
+          <div class="models-bar-right">
+            <button class="btn btn-ghost btn-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>浏览目录</button>
+            <button class="btn btn-secondary btn-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" style="width:13px;height:13px"><path d="M12 5v14M5 12h14"/></svg>自定义模型</button>
+          </div>
+        </div>
+        <div class="model-row">
+          <div class="model-row-main">
+            <div class="model-row-name">Qwen3 32B</div>
+            <div class="model-row-id">qwen3:32b</div>
+          </div>
+          <div class="model-row-badges">
+            <span class="chip chip-neutral">🧠 推理</span>
+            <span class="chip chip-neutral">40K</span>
+          </div>
+          <div class="mselect" data-mselect>
+            <button class="mselect-btn"><span class="lbl">强度</span> low <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:10px;height:10px"><path d="m6 9 6 6 6-6"/></svg></button>
+            <div class="mselect-panel hidden">
+              <button class="mselect-opt" data-val="minimal">minimal</button>
+              <button class="mselect-opt" data-selected="true" data-val="low"><span class="dot">✓</span> low</button>
+              <button class="mselect-opt" data-val="medium">medium</button>
+              <button class="mselect-opt" data-val="high">high</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- Custom endpoint card (no catalog) -->
+    <article class="pcard">
+      <div class="pcard-head">
+        <div class="pcard-brand">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M22.28 9.82a5.98 5.98 0 0 0-.51-4.91 6.04 6.04 0 0 0-6.5-2.9A6.02 6.02 0 0 0 4.98 4.18a5.98 5.98 0 0 0-4 2.9 6.04 6.04 0 0 0 .74 7.1 5.98 5.98 0 0 0 .51 4.91 6.04 6.04 0 0 0 6.5 2.9 5.98 5.98 0 0 0 9.77-2.16 5.98 5.98 0 0 0 4-2.9 6.04 6.04 0 0 0-.74-7.1Z"/></svg>
+        </div>
+        <div class="pcard-meta">
+          <div class="pcard-name">公司内部网关 <span class="chip">自定义</span></div>
+          <div class="pcard-url">https://llm-gateway.corp.internal/v1 · 2 headers</div>
+        </div>
+        <div class="pcard-actions">
+          <button class="btn btn-ghost btn-xs">测试</button>
+          <button class="icon-btn btn btn-ghost" title="编辑"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+          <button class="icon-btn btn btn-ghost" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+        </div>
+      </div>
+      <div class="pcard-models">
+        <div class="models-bar">
+          <div class="models-bar-left"><b>1</b> 个已配置模型</div>
+          <div class="models-bar-right">
+            <button class="btn btn-ghost btn-sm" disabled title="该端点无目录，请手动添加"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>浏览目录</button>
+            <button class="btn btn-secondary btn-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" style="width:13px;height:13px"><path d="M12 5v14M5 12h14"/></svg>自定义模型</button>
+          </div>
+        </div>
+        <div class="model-row">
+          <div class="model-row-main">
+            <div class="model-row-name">内部 DeepSeek</div>
+            <div class="model-row-id">deepseek-v3.1-corp</div>
+          </div>
+          <div class="model-row-badges">
+            <span class="chip chip-neutral">64K</span>
+          </div>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <!-- ───────────────── SCENE 2: EMPTY ───────────────── -->
+  <section class="scene" data-scene="empty">
+    <div class="empty">
+      <div class="empty-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2 4 5v6c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10V5l-8-3Z"/></svg></div>
+      <div class="empty-title">还没有配置任何 Provider</div>
+      <div class="empty-desc">添加你的第一个模型连接 —— 用 API Key 直连 OpenAI、Anthropic、Ollama 或任意兼容端点，密钥仅存储在本地。</div>
+      <button class="btn btn-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" style="width:14px;height:14px"><path d="M12 5v14M5 12h14"/></svg>添加 Provider</button>
+    </div>
+  </section>
+
+  <!-- ───────────────── SCENE 3: LOADING ───────────────── -->
+  <section class="scene" data-scene="loading">
+    <div class="sk-card pulse">
+      <div class="flex center gap10"><div class="sk sk-bar" style="width:32px;height:32px;border-radius:6px"></div><div class="grow"><div class="sk sk-bar" style="width:46%"></div><div class="sk sk-bar" style="width:64%;margin-top:6px;height:9px"></div></div></div>
+      <hr class="div"><div class="sk sk-bar" style="width:70%;height:9px"></div><div class="sk sk-bar" style="width:55%;height:9px"></div>
+    </div>
+    <div class="sk-card pulse">
+      <div class="flex center gap10"><div class="sk sk-bar" style="width:32px;height:32px;border-radius:6px"></div><div class="grow"><div class="sk sk-bar" style="width:38%"></div><div class="sk sk-bar" style="width:60%;margin-top:6px;height:9px"></div></div></div>
+      <hr class="div"><div class="sk sk-bar" style="width:66%;height:9px"></div>
+    </div>
+    <div class="sk-card pulse">
+      <div class="flex center gap10"><div class="sk sk-bar" style="width:32px;height:32px;border-radius:6px"></div><div class="grow"><div class="sk sk-bar" style="width:52%"></div><div class="sk sk-bar" style="width:48%;margin-top:6px;height:9px"></div></div></div>
+    </div>
+  </section>
+
+  <!-- ───────────────── SCENE 4: ADD — STEP 1 (select type) ───────────────── -->
+  <section class="scene" data-scene="add-step1">
+    <div class="form-card">
+      <div class="form-head">
+        <span class="form-head-title">添加 Provider · 第 1 / 2 步 · 选择类型</span>
+        <button class="btn btn-ghost btn-xs">✕</button>
+      </div>
+      <div class="form-body">
+        <div class="field">
+          <label class="lab">搜索类型或品牌</label>
+          <div style="position:relative">
+            <input class="inp" placeholder="openai, anthropic, ollama…" style="padding-left:30px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;position:absolute;left:9px;top:9px;color:var(--color-muted-foreground)"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          </div>
+        </div>
+        <div class="field">
+          <label class="lab">连接类型</label>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <button class="model-row" style="border:1px solid var(--color-border);background:var(--color-surface);text-align:left;width:100%">
+              <div class="pcard-brand" style="width:28px;height:28px"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M22.28 9.82a5.98 5.98 0 0 0-.51-4.91 6.04 6.04 0 0 0-6.5-2.9A6.02 6.02 0 0 0 4.98 4.18a5.98 5.98 0 0 0-4 2.9 6.04 6.04 0 0 0 .74 7.1 5.98 5.98 0 0 0 .51 4.91 6.04 6.04 0 0 0 6.5 2.9 5.98 5.98 0 0 0 9.77-2.16 5.98 5.98 0 0 0 4-2.9 6.04 6.04 0 0 0-.74-7.1Z"/></svg></div>
+              <div class="grow">
+                <div style="font-size:12px;font-weight:600;display:flex;align-items:center;gap:7px">OpenAI 兼容 <span class="chip chip-accent">推荐</span></div>
+                <div style="font-size:10.5px;color:var(--color-muted-foreground);margin-top:2px">标准 <code class="mono">/chat/completions</code> 协议 · 适用于 OpenAI、DeepSeek、通义、Moonshot 及任意兼容端点（可自定义 Base URL）</div>
+              </div>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;color:var(--color-muted-foreground)"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+            <button class="model-row" style="border:1px solid var(--color-border);background:var(--color-surface);text-align:left;width:100%">
+              <div class="pcard-brand" style="width:28px;height:28px"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7.31 4.56 13.7 19.44H10.3L8.3 14.44H4l.92-2.3h2.45L4.96 4.56h2.35zm9.38 0 2.35 6.05L17 14.45l-.93-2.32-1.5 3.84-.6 1.47h-2.9L13.7 19.44 17.31 4.56h-.62z"/></svg></div>
+              <div class="grow">
+                <div style="font-size:12px;font-weight:600">Anthropic Messages</div>
+                <div style="font-size:10.5px;color:var(--color-muted-foreground);margin-top:2px"><code class="mono">/v1/messages</code> 协议 · Claude 系列</div>
+              </div>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;color:var(--color-muted-foreground)"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+            <button class="model-row" style="border:1px solid var(--color-border);background:var(--color-surface);text-align:left;width:100%">
+              <div class="pcard-brand" style="width:28px;height:28px"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8 2 5 4.8 5 8.3c0 1.9.9 3.6 2.3 4.8-.3.6-.5 1.3-.5 2 0 .7.2 1.3.5 1.9-.6.6-1 1.4-1 2.3 0 1.7 1.3 3 3 3 .9 0 1.7-.4 2.2-1 .6.3 1.3.5 2 .5s1.4-.2 2-.5c.5.6 1.3 1 2.2 1 1.7 0 3-1.3 3-3 0-.9-.4-1.7-1-2.3.3-.6.5-1.2.5-1.9 0-.7-.2-1.4-.5-2C18.1 11.9 19 10.2 19 8.3 19 4.8 16 2 12 2z"/></svg></div>
+              <div class="grow">
+                <div style="font-size:12px;font-weight:600;display:flex;align-items:center;gap:7px">Ollama 本地 <span class="chip chip-neutral">本地</span></div>
+                <div style="font-size:10.5px;color:var(--color-muted-foreground);margin-top:2px">连接本机或局域网内的 Ollama 服务 · 无需 API key</div>
+              </div>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;color:var(--color-muted-foreground)"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="form-foot">
+        <button class="btn btn-ghost">取消</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────────── SCENE 5: ADD — STEP 2 (credentials) ───────────────── -->
+  <section class="scene" data-scene="add-step2">
+    <div class="form-card">
+      <div class="form-head">
+        <span class="form-head-title">添加 Provider · 第 2 / 2 步 · 填写连接</span>
+        <button class="btn btn-ghost btn-xs">✕</button>
+      </div>
+      <div class="form-body">
+        <div style="display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--color-muted-foreground)">
+          <button class="btn btn-ghost btn-xs">‹</button><span class="mono">OpenAI 兼容</span>
+        </div>
+        <div class="field"><label class="lab">显示名</label><input class="inp" placeholder="例如 我的 OpenAI"></div>
+        <div class="field"><label class="lab">Base URL</label><input class="inp mono" value="https://api.openai.com/v1"></div>
+        <div class="field"><label class="lab">API Key</label><input class="inp mono" type="password" placeholder="sk-…"></div>
+        <div class="field">
+          <div class="flex between" style="margin-bottom:5px"><label class="lab" style="margin:0">自定义 Headers</label><button class="btn btn-ghost btn-xs">+ 添加</button></div>
+          <div class="kv"><input class="inp mono" placeholder="X-Org-Id"><input class="inp mono" placeholder="value"></div>
+        </div>
+
+        <div class="banner banner-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;flex-shrink:0"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg><span>密钥明文存于本地配置（<code class="mono">~/.jcode/config.json</code>），不会上传</span></div>
+      </div>
+      <div class="form-foot">
+        <button class="btn btn-secondary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path d="M20 6 9 17l-5-5"/></svg>测试连接</button>
+        <button class="btn btn-primary">添加</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────────── SCENE 6: BROWSE CATALOG (inline) ───────────────── -->
+  <section class="scene" data-scene="catalog">
+    <article class="pcard">
+      <div class="pcard-head">
+        <div class="pcard-brand"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M22.28 9.82a5.98 5.98 0 0 0-.51-4.91 6.04 6.04 0 0 0-6.5-2.9A6.02 6.02 0 0 0 4.98 4.18a5.98 5.98 0 0 0-4 2.9 6.04 6.04 0 0 0 .74 7.1 5.98 5.98 0 0 0 .51 4.91 6.04 6.04 0 0 0 6.5 2.9 5.98 5.98 0 0 0 9.77-2.16 5.98 5.98 0 0 0 4-2.9 6.04 6.04 0 0 0-.74-7.1Z"/></svg></div>
+        <div class="pcard-meta">
+          <div class="pcard-name">OpenAI <span class="chip chip-accent">当前活跃</span></div>
+          <div class="pcard-url">https://api.openai.com/v1</div>
+        </div>
+        <div class="pcard-actions"><button class="btn btn-ghost btn-xs">收起 ▴</button></div>
+      </div>
+      <div class="pcard-models">
+        <div class="catalog">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <div style="font-size:11.5px;color:var(--color-muted-foreground)">浏览模型目录 · <b style="color:var(--color-foreground)">3</b>/12 已添加</div>
+            <button class="btn btn-ghost btn-xs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>刷新目录</button>
+          </div>
+          <div style="position:relative;margin-bottom:6px">
+            <input class="inp" placeholder="搜索模型…" style="padding-left:30px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;position:absolute;left:9px;top:9px;color:var(--color-muted-foreground)"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          </div>
+          <div class="catalog-list">
+            <div class="cat-row">
+              <div class="cat-meta"><div class="cat-id">gpt-4o-2024-11-20</div><div class="cat-sub">GPT-4o · 128K · 视觉</div></div>
+              <div class="model-row-badges"><span class="chip chip-neutral">👁</span></div>
+              <button class="btn btn-secondary btn-xs cat-toggle" data-added="true">✓ 已添加</button>
+            </div>
+            <div class="cat-row">
+              <div class="cat-meta"><div class="cat-id">o3-2025-04-16</div><div class="cat-sub">o3 · 200K · 推理</div></div>
+              <div class="model-row-badges"><span class="chip chip-neutral">🧠</span></div>
+              <button class="btn btn-secondary btn-xs cat-toggle" data-added="true">✓ 已添加</button>
+            </div>
+            <div class="cat-row">
+              <div class="cat-meta"><div class="cat-id">gpt-4.1-2025-04-14</div><div class="cat-sub">GPT-4.1 · 1M · 视觉</div></div>
+              <div class="model-row-badges"><span class="chip chip-neutral">👁</span></div>
+              <button class="btn btn-secondary btn-xs">+ 添加</button>
+            </div>
+            <div class="cat-row">
+              <div class="cat-meta"><div class="cat-id">o1-pro-2025-03-31</div><div class="cat-sub">o1-pro · 200K · 推理</div></div>
+              <div class="model-row-badges"><span class="chip chip-neutral">🧠</span></div>
+              <button class="btn btn-secondary btn-xs">+ 添加</button>
+            </div>
+            <div class="cat-row">
+              <div class="cat-meta"><div class="cat-id">gpt-4o-mini-2024-07-18</div><div class="cat-sub">GPT-4o mini · 128K · 视觉</div></div>
+              <div class="model-row-badges"><span class="chip chip-neutral">👁</span></div>
+              <button class="btn btn-secondary btn-xs">+ 添加</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <!-- ───────────────── SCENE 7: ADD CUSTOM MODEL (inline form) ───────────────── -->
+  <section class="scene" data-scene="custom-model">
+    <article class="pcard">
+      <div class="pcard-head">
+        <div class="pcard-brand"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M22.28 9.82a5.98 5.98 0 0 0-.51-4.91 6.04 6.04 0 0 0-6.5-2.9A6.02 6.02 0 0 0 4.98 4.18a5.98 5.98 0 0 0-4 2.9 6.04 6.04 0 0 0 .74 7.1 5.98 5.98 0 0 0 .51 4.91 6.04 6.04 0 0 0 6.5 2.9 5.98 5.98 0 0 0 9.77-2.16 5.98 5.98 0 0 0 4-2.9 6.04 6.04 0 0 0-.74-7.1Z"/></svg></div>
+        <div class="pcard-meta"><div class="pcard-name">OpenAI</div><div class="pcard-url">https://api.openai.com/v1</div></div>
+      </div>
+      <div class="pcard-models">
+        <div class="models-bar"><div class="models-bar-left"><b>2</b> 个已配置模型</div></div>
+        <div class="model-row"><div class="model-row-main"><div class="model-row-name">o3</div><div class="model-row-id">o3-2025-04-16</div></div><div class="model-row-badges"><span class="chip chip-neutral">🧠 推理</span><span class="chip chip-neutral">200K</span></div></div>
+
+        <div class="cm-form">
+          <div style="font-size:11.5px;font-weight:600;display:flex;align-items:center;gap:6px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path d="M12 5v14M5 12h14"/></svg>添加自定义模型</div>
+          <div class="cm-fields">
+            <div class="field"><label class="lab">Model ID <span style="color:var(--color-destructive)">*</span></label><input class="inp mono" placeholder="my-model-v2"></div>
+            <div class="field"><label class="lab">显示名（选填）</label><input class="inp" placeholder="我的模型"></div>
+          </div>
+          <div class="field"><label class="lab">上下文窗口（tokens）</label><input class="inp mono" type="number" placeholder="200000" style="max-width:180px"></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0">
+            <div><div style="font-size:12px;font-weight:500">支持图片</div><div style="font-size:10.5px;color:var(--color-muted-foreground)">允许传入图像附件</div></div>
+            <button class="switch" data-on="false" data-switch></button>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0">
+            <div><div style="font-size:12px;font-weight:500">支持推理强度</div><div style="font-size:10.5px;color:var(--color-muted-foreground)">开启后可定义可选的强度档位</div></div>
+            <button class="switch" data-on="true" data-switch data-controls="tiers"></button>
+          </div>
+          <div class="field cm-tiers-wrap">
+            <label class="lab">强度档位</label>
+            <div class="tiers" data-tiers>
+              <span class="tier">minimal<button class="tier-x" aria-label="移除">✕</button></span>
+              <span class="tier">low<button class="tier-x" aria-label="移除">✕</button></span>
+              <span class="tier">medium<button class="tier-x" aria-label="移除">✕</button></span>
+              <button class="tier-add" data-tier-add>+ 添加档位</button>
+            </div>
+            <div class="helper">每个档位即模型选择器里可选的一项，例如 minimal / low / medium / high / max</div>
+          </div>
+          <div class="flex" style="gap:8px;justify-content:flex-end"><button class="btn btn-ghost">取消</button><button class="btn btn-primary">添加</button></div>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <!-- ───────────────── SCENE 8: EDIT PROVIDER (masked key) ───────────────── -->
+  <section class="scene" data-scene="edit">
+    <div class="form-card">
+      <div class="form-head">
+        <span class="form-head-title">编辑 Provider · OpenAI</span>
+        <button class="btn btn-ghost btn-xs">✕</button>
+      </div>
+      <div class="form-body">
+        <div class="field"><label class="lab">显示名</label><input class="inp" value="OpenAI"></div>
+        <div class="field"><label class="lab">Base URL</label><input class="inp mono" value="https://api.openai.com/v1"></div>
+        <div class="field">
+          <label class="lab">API Key</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <div class="key-mask grow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;flex-shrink:0"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><code>••••••••••••3a9f</code></div>
+            <button class="btn btn-secondary btn-sm">替换…</button>
+          </div>
+          <div class="helper">留空则保持原值不变</div>
+        </div>
+        <div class="field">
+          <div class="flex between" style="margin-bottom:5px"><label class="lab" style="margin:0">自定义 Headers</label><button class="btn btn-ghost btn-xs">+ 添加</button></div>
+          <div class="kv" style="margin-bottom:6px"><input class="inp mono" value="X-Org-Id"><input class="inp mono" value="••••••••"><button class="icon-btn btn btn-ghost">✕</button></div>
+        </div>
+        <div class="note-key"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>密钥明文存于本地配置（<code class="mono">~/.jcode/config.json</code>）</div>
+      </div>
+      <div class="form-foot"><button class="btn btn-ghost">取消</button><button class="btn btn-primary">保存</button></div>
+    </div>
+  </section>
+
+  <!-- ───────────────── SCENE 9: TEST — SUCCESS ───────────────── -->
+  <section class="scene" data-scene="test-ok">
+    <article class="pcard">
+      <div class="pcard-head">
+        <div class="pcard-brand"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M22.28 9.82a5.98 5.98 0 0 0-.51-4.91 6.04 6.04 0 0 0-6.5-2.9A6.02 6.02 0 0 0 4.98 4.18a5.98 5.98 0 0 0-4 2.9 6.04 6.04 0 0 0 .74 7.1 5.98 5.98 0 0 0 .51 4.91 6.04 6.04 0 0 0 6.5 2.9 5.98 5.98 0 0 0 9.77-2.16 5.98 5.98 0 0 0 4-2.9 6.04 6.04 0 0 0-.74-7.1Z"/></svg></div>
+        <div class="pcard-meta"><div class="pcard-name">OpenAI</div><div class="pcard-url">https://api.openai.com/v1</div></div>
+        <div class="pcard-actions"><button class="btn btn-ghost btn-xs"><span class="spin"></span>测试中…</button></div>
+      </div>
+      <div class="pcard-models">
+        <div class="models-bar"><div class="models-bar-left"><b>4</b> 个已配置模型</div></div>
+        <div class="banner banner-ok">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" style="width:16px;height:16px;flex-shrink:0"><path d="M20 6 9 17l-5-5"/></svg>
+          <div class="banner-main"><b>连接成功</b> · 延迟 <span class="mono">240ms</span> · 命中 <span class="mono">12</span> 个可用模型</div>
+          <div class="banner-actions"><button class="btn btn-secondary btn-xs">重新测试</button></div>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <!-- ───────────────── SCENE 10: TEST — FAIL (401) ───────────────── -->
+  <section class="scene" data-scene="test-fail">
+    <article class="pcard">
+      <div class="pcard-head">
+        <div class="pcard-brand"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M22.28 9.82a5.98 5.98 0 0 0-.51-4.91 6.04 6.04 0 0 0-6.5-2.9A6.02 6.02 0 0 0 4.98 4.18a5.98 5.98 0 0 0-4 2.9 6.04 6.04 0 0 0 .74 7.1 5.98 5.98 0 0 0 .51 4.91 6.04 6.04 0 0 0 6.5 2.9 5.98 5.98 0 0 0 9.77-2.16 5.98 5.98 0 0 0 4-2.9 6.04 6.04 0 0 0-.74-7.1Z"/></svg></div>
+        <div class="pcard-meta"><div class="pcard-name">OpenAI</div><div class="pcard-url">https://api.openai.com/v1</div></div>
+      </div>
+      <div class="pcard-models">
+        <div class="banner banner-err">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+          <div class="banner-main"><b>认证失败（401）</b> · API key 无效或已过期。请检查密钥是否正确，或重新生成一个。</div>
+          <div class="banner-actions"><button class="btn btn-secondary btn-xs">替换密钥</button><button class="btn btn-secondary btn-xs">重试</button></div>
+        </div>
+        <div class="banner banner-err" style="margin-top:8px;background:var(--color-error-bg)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+          <div class="banner-main"><b>网络错误</b> · 无法连接到 <span class="mono">api.openai.com</span>。请检查网络、代理或 Base URL 是否可达。</div>
+          <div class="banner-actions"><button class="btn btn-secondary btn-xs">重试</button></div>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <!-- ───────────────── SCENE 11: DELETE — IN USE (guide) ───────────────── -->
+  <section class="scene" data-scene="delete-inuse">
+    <article class="pcard" style="opacity:.92">
+      <div class="pcard-head">
+        <div class="pcard-brand"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M22.28 9.82a5.98 5.98 0 0 0-.51-4.91 6.04 6.04 0 0 0-6.5-2.9A6.02 6.02 0 0 0 4.98 4.18a5.98 5.98 0 0 0-4 2.9 6.04 6.04 0 0 0 .74 7.1 5.98 5.98 0 0 0 .51 4.91 6.04 6.04 0 0 0 6.5 2.9 5.98 5.98 0 0 0 9.77-2.16 5.98 5.98 0 0 0 4-2.9 6.04 6.04 0 0 0-.74-7.1Z"/></svg></div>
+        <div class="pcard-meta"><div class="pcard-name">OpenAI <span class="chip chip-accent">当前活跃</span></div><div class="pcard-url">https://api.openai.com/v1</div></div>
+      </div>
+      <div class="pcard-models">
+        <div class="guide">
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0;margin-top:1px"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
+            <div>
+              <div style="font-size:12.5px;font-weight:600">无法删除：该 Provider 下有模型正在使用</div>
+              <div style="font-size:11.5px;line-height:1.5;margin-top:4px">当前会话正在使用 <code class="mono">o3</code>。请先切换到其他 Provider 的模型，再删除此连接。</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+            <button class="btn btn-ghost">取消</button>
+            <button class="btn btn-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px"><path d="M8 6 21 6M8 12 21 12M8 18 21 18"/><path d="m3 6 1 1M3 12h.01M3 18h.01"/></svg>切换模型</button>
+          </div>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  </div><!-- /panel-body -->
+</div><!-- /panel -->
+
+</div><!-- /stage -->
+
+<!-- ══════════ FLOATING CONTROLS ══════════ -->
+<div class="controls" role="group" aria-label="设计稿控制">
+  <div class="ctrl-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>设计稿导航</div>
+
+  <div class="ctrl-row">
+    <label class="ctrl-label" for="scn">场景 / 状态</label>
+    <select class="ctrl-select" id="scn">
+      <optgroup label="主状态">
+        <option value="list">① 默认列表</option>
+        <option value="empty">② 空状态（引导卡）</option>
+        <option value="loading">③ 加载中（骨架屏）</option>
+      </optgroup>
+      <optgroup label="添加流程">
+        <option value="add-step1">④ 添加 · 选类型</option>
+        <option value="add-step2">⑤ 添加 · 填连接</option>
+        <option value="catalog">⑥ 浏览目录（就地展开）</option>
+        <option value="custom-model">⑦ 添加自定义模型</option>
+      </optgroup>
+      <optgroup label="编辑与状态">
+        <option value="edit">⑧ 编辑 Provider（掩码 key）</option>
+        <option value="test-ok">⑨ 测试 · 成功</option>
+        <option value="test-fail">⑩ 测试 · 失败（401 / 网络）</option>
+        <option value="delete-inuse">⑪ 删除 · 引导切换</option>
+      </optgroup>
+    </select>
+  </div>
+
+  <div class="ctrl-row">
+    <label class="ctrl-label">主题</label>
+    <div class="ctrl-seg" id="theme-seg">
+      <button data-on="true" data-val="light">☀ 亮</button>
+      <button data-on="false" data-val="dark">◑ 暗</button>
+    </div>
+  </div>
+
+  <div class="ctrl-row">
+    <label class="ctrl-label">宽度</label>
+    <div class="ctrl-seg" id="width-seg">
+      <button data-on="true" data-val="desktop">桌面</button>
+      <button data-on="false" data-val="narrow">窄屏 380</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  // ── scene switching ──
+  var scn = document.getElementById('scn');
+  var scenes = document.querySelectorAll('.scene');
+  function showScene(v){
+    scenes.forEach(function(s){
+      s.classList.toggle('active', s.getAttribute('data-scene') === v);
+    });
+  }
+  scn.addEventListener('change', function(){ showScene(scn.value); });
+  showScene('list');
+
+  // ── theme ──
+  var themeSeg = document.getElementById('theme-seg');
+  themeSeg.addEventListener('click', function(e){
+    var b = e.target.closest('button'); if(!b) return;
+    themeSeg.querySelectorAll('button').forEach(function(x){x.setAttribute('data-on','false')});
+    b.setAttribute('data-on','true');
+    document.documentElement.classList.toggle('dark', b.getAttribute('data-val')==='dark');
+  });
+
+  // ── width ──
+  var widthSeg = document.getElementById('width-seg');
+  widthSeg.addEventListener('click', function(e){
+    var b = e.target.closest('button'); if(!b) return;
+    widthSeg.querySelectorAll('button').forEach(function(x){x.setAttribute('data-on','false')});
+    b.setAttribute('data-on','true');
+    document.body.classList.toggle('narrow', b.getAttribute('data-val')==='narrow');
+  });
+
+  // ── switch toggles ──
+  document.querySelectorAll('[data-switch]').forEach(function(sw){
+    sw.addEventListener('click', function(){
+      sw.setAttribute('data-on', sw.getAttribute('data-on')==='true'?'false':'true');
+    });
+  });
+
+  // ── tri-state controls (auto/on/off) ── single-select within the group;
+  // the active button gets aria-pressed='true', CSS tints it per its data-val.
+  document.querySelectorAll('.tri').forEach(function(tri){
+    tri.querySelectorAll('.tri-btn').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        tri.querySelectorAll('.tri-btn').forEach(function(x){x.setAttribute('aria-pressed','false')});
+        btn.setAttribute('aria-pressed','true');
+      });
+    });
+  });
+
+  // ── mini menu selects (reasoning effort) ── Each button carries its
+  // current value in a data-cur attr; selecting an option updates that and
+  // re-renders the option check marks without rebuilding button markup.
+  document.querySelectorAll('[data-mselect]').forEach(function(ms){
+    var btn = ms.querySelector('.mselect-btn');
+    var panel = ms.querySelector('.mselect-panel');
+    if(!panel) return; // some selects are display-only (e.g. the add-form default)
+    var valSpan = btn.querySelector('.ms-val') || btn; // where the value text lives
+    var chev = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:10px;height:10px"><path d="m6 9 6 6 6-6"/></svg>';
+    function renderOpts(){
+      panel.querySelectorAll('.mselect-opt').forEach(function(o){
+        var v = o.getAttribute('data-val');
+        var sel = o.getAttribute('data-selected')==='true';
+        o.innerHTML = (sel?'<span class="dot">✓</span> ':'') + v;
+      });
+    }
+    btn.addEventListener('click', function(e){
+      e.stopPropagation();
+      document.querySelectorAll('.mselect-panel').forEach(function(p){
+        if(p!==panel) p.classList.add('hidden');
+      });
+      panel.classList.toggle('hidden');
+    });
+    panel.querySelectorAll('.mselect-opt').forEach(function(opt){
+      opt.addEventListener('click', function(){
+        panel.querySelectorAll('.mselect-opt').forEach(function(o){o.setAttribute('data-selected','false')});
+        opt.setAttribute('data-selected','true');
+        var v = opt.getAttribute('data-val');
+        // update the trigger's value span only (keep any .lbl prefix + chevron)
+        if(valSpan !== btn){ valSpan.textContent = v; }
+        else {
+          var lbl = btn.querySelector('.lbl');
+          btn.innerHTML = '';
+          if(lbl) btn.appendChild(lbl);
+          btn.insertAdjacentText('beforeend',' '+v+' ');
+          btn.insertAdjacentHTML('beforeend', chev);
+        }
+        renderOpts();
+        panel.classList.add('hidden');
+      });
+    });
+  });
+  document.addEventListener('click', function(){
+    document.querySelectorAll('.mselect-panel').forEach(function(p){p.classList.add('hidden')});
+  });
+
+  // ── advanced toggle ──
+  document.querySelectorAll('.adv-toggle').forEach(function(t){
+    t.addEventListener('click', function(){
+      var open = t.getAttribute('aria-expanded')==='true';
+      t.setAttribute('aria-expanded', open?'false':'true');
+      var next = t.nextElementSibling;
+      if(next) next.style.display = open?'none':'';
+    });
+  });
+
+  // ── catalog toggle: "✓ 已添加" ⇄ "+ 添加" (click to add or remove) ──
+  document.querySelectorAll('.cat-toggle').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var added = btn.getAttribute('data-added')==='true';
+      btn.setAttribute('data-added', added?'false':'true');
+      btn.textContent = added ? '+ 添加' : '✓ 已添加';
+      // keep the running count in sync if present
+      var counter = btn.closest('.catalog')?.querySelector('b');
+      if(counter){
+        var list = btn.closest('.catalog-list');
+        var n = list ? list.querySelectorAll('.cat-toggle[data-added="true"]').length : 0;
+        counter.textContent = n;
+      }
+    });
+  });
+
+  // ── reasoning effort tiers: add a new tier inline, remove a tier ──
+  function makeTier(label){
+    var span = document.createElement('span');
+    span.className = 'tier';
+    span.textContent = label;
+    var x = document.createElement('button');
+    x.className = 'tier-x'; x.setAttribute('aria-label','移除'); x.textContent = '✕';
+    x.addEventListener('click', function(){ span.remove(); });
+    span.appendChild(x);
+    return span;
+  }
+  // wire existing remove buttons
+  document.querySelectorAll('.tier .tier-x').forEach(function(x){
+    x.addEventListener('click', function(){ x.closest('.tier').remove(); });
+  });
+  // "+ 添加档位" → inline input + confirm
+  document.querySelectorAll('[data-tier-add]').forEach(function(addBtn){
+    addBtn.addEventListener('click', function(){
+      if(addBtn.previousElementSibling && addBtn.previousElementSibling.classList.contains('tier-input-wrap')) return;
+      var wrap = document.createElement('span');
+      wrap.className = 'tier-input-wrap'; wrap.style.display='inline-flex'; wrap.style.gap='4px'; wrap.style.alignItems='center';
+      var inp = document.createElement('input');
+      inp.className = 'tier-input'; inp.placeholder = '档位名'; inp.setAttribute('aria-label','新档位名');
+      var ok = document.createElement('button');
+      ok.className = 'tier-input confirm'; ok.textContent = '添加';
+      function commit(){
+        var v = inp.value.trim(); if(v){ addBtn.parentNode.insertBefore(makeTier(v), addBtn); }
+        wrap.remove(); addBtn.style.display='';
+      }
+      ok.addEventListener('click', commit);
+      inp.addEventListener('keydown', function(e){ if(e.key==='Enter'){e.preventDefault();commit();} if(e.key==='Escape'){wrap.remove();addBtn.style.display='';} });
+      wrap.appendChild(inp); wrap.appendChild(ok);
+      addBtn.parentNode.insertBefore(wrap, addBtn);
+      addBtn.style.display='none';
+      inp.focus();
+    });
+  });
+  // switch that controls a tier group visibility
+  document.querySelectorAll('[data-switch][data-controls]').forEach(function(sw){
+    var wrap = sw.closest('.cm-form').querySelector('.cm-tiers-wrap');
+    function sync(){ if(wrap) wrap.style.display = sw.getAttribute('data-on')==='true' ? '' : 'none'; }
+    sw.addEventListener('click', sync); sync();
+  });
+})();
+</script>
+</body>
+</html>
