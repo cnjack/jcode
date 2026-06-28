@@ -12,8 +12,19 @@ For the **full changelog**, see [CHANGELOG.md](../CHANGELOG.md) in the repositor
 ## Unreleased
 
 #### Added
-- **CI quality gate** (`.github/workflows/ci.yml`): Go `build`/`vet`/`test` + golangci-lint (new-issue gating) and web type-check/lint/build run on every push to `main` and every pull request.
-- **Desktop bundles in the release pipeline.** `release.yml` now builds the Tauri desktop app for **macOS (Intel + Apple Silicon), Windows, and Linux** on native runners and attaches the `.dmg` / `.msi` / `.exe` / `.deb` / `.AppImage` installers (with checksums) to each GitHub Release alongside the CLI binaries. macOS code-signing/notarization is wired through optional `APPLE_*` secrets (unset → unsigned build). See [Release & CI](release.html).
+- **Built-in color themes, unified across terminal and web.** A new single source of truth (`internal/theme`) defines 7 themes — 4 dark (jcode Dark, Midnight, Dracula, Nord) and 3 light (jcode Light, GitHub Light, Solarized Light) — as a typed semantic palette. `go generate` emits the web CSS (`[data-theme]` blocks) and the picker registry from that one Go file, so the two renderers can never drift.
+- **`/theme` command** in the TUI opens a live-preview selector: arrow keys repaint the whole UI, Enter applies and persists to `config.theme`, Esc reverts. When no theme is persisted, the startup default is auto-selected from the terminal background. New `theme` config field.
+- **Appearance settings tab** in the web UI: a System (follow-OS) option plus dark/light swatch grids that render a true mini-preview of each theme. Themes apply via `html[data-theme]`; the legacy light/dark/system localStorage values migrate automatically.
+- **Docker container workspaces (web).** The remote-connect wizard can now bind a task to a Docker container, alongside SSH. A new `DockerExecutor` (Docker Go SDK, `client.FromEnv` → honors `DOCKER_HOST`) runs all agent file/command operations inside the container via `docker exec`, mirroring the SSH executor. A stopped container is started on connect and stopped again (ref-counted) once no task is using it; a one-shot container that exits immediately is reported with its logs rather than failing silently. The embedded terminal opens a real TTY *inside* the bound container (`docker exec`, bash→sh). Container-bound tasks are keyed `docker://<container>/<path>`, and the `switch_env` tool plus saved Docker aliases (`docker_aliases` in config) cover reconnects.
+
+#### Changed
+- Renamed the session modes to **Ask for approval / Plan / Full access** across the web UI, terminal UI, and ACP. Their canonical IDs are now `approval` / `plan` / `full_access`; the old `ask`, `agent`, and `autopilot` IDs are no longer accepted.
+- The terminal palette was de-frozen: the ~50 lipgloss styles that were baked in at import time are now rebuilt from the active theme by `ApplyTheme`, and previously-hardcoded colors (subagent purple, on-primary text, team-panel and context-bar colors) are now semantic tokens. Markdown (glamour) follows the theme's light/dark appearance.
+
+#### Fixed
+- TUI: pressing **Esc** while viewing a teammate now returns to the leader (the handler matched a key string that bubbletea never emits, so it was dead code).
+- TUI: the Cancel-agent confirmation now defaults to the non-destructive **Wait** button, matching the Quit dialog — `Ctrl+C` then `Enter` no longer aborts a running agent by reflex.
+- TUI: **`?`** opens the keyboard-shortcuts help when the input is empty, and the help panel's slash-command list is now generated from the command registry (so `/goal`, skill commands, and `/theme` always appear).
 
 ---
 
@@ -589,4 +600,4 @@ All releases maintain backward compatibility with existing configurations and wo
 
 ---
 
-*Last updated: May 23, 2026*
+*Last updated: June 13, 2026*

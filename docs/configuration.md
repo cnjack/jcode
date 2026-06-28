@@ -55,10 +55,20 @@ jcode stores all configuration in a single JSON file at `~/.jcode/config.json`. 
   "small_model": "openai/gpt-4o-mini",
   "fallback_model": "anthropic/claude-3-5-sonnet",
   "max_iterations": 1000,
-  "auto_approve": false,
+  "default_mode": "approval",
+
+  "context_limits": {
+    "openai/gpt-4o": 128000,
+    "my-custom-model": 256000
+  },
+  "default_context_limit": 200000,
 
   "ssh_aliases": [
     { "name": "prod", "addr": "deploy@10.0.1.5", "path": "/var/www/app" }
+  ],
+
+  "docker_aliases": [
+    { "name": "devbox", "container": "my-dev-container", "path": "/workspace" }
   ],
 
   "mcp_servers": {
@@ -137,6 +147,36 @@ Active model in `"provider/model"` format.
 | `fallback_model` | Used when the primary model fails |
 | `max_iterations` | Maximum agent iterations per turn (default: 1000) |
 
+### context_limits
+
+Per-model overrides for the context window size (in tokens). Use this to teach
+jcode the window of a brand-new or custom model the registry doesn't know yet.
+Keys may be `"provider/model"` (preferred) or a bare model id; the
+`"provider/model"` form is checked first.
+
+```json
+{
+  "context_limits": {
+    "openai/gpt-4o": 128000,
+    "my-custom-model": 256000
+  }
+}
+```
+
+An explicit `context_limits` entry takes precedence over the models.dev registry
+and built-in tables. When no override matches and the limit is still unknown,
+jcode falls back to [`default_context_limit`](#default_context_limit).
+
+### default_context_limit
+
+Fallback context window (in tokens) assumed when a model's limit can't be
+determined from `context_limits`, the models.dev registry, or the built-in
+tables. Default: `200000`.
+
+```json
+{ "default_context_limit": 200000 }
+```
+
 ### ssh_aliases
 
 Named SSH connections for quick access.
@@ -146,6 +186,17 @@ Named SSH connections for quick access.
 | `name` | Alias name shown in the `/ssh` picker |
 | `addr` | Connection address (`user@host[:port]`) |
 | `path` | Remote working directory |
+
+### docker_aliases
+
+Named Docker container workspaces for quick access. Fields mirror
+[`ssh_aliases`](#ssh_aliases).
+
+| Field | Description |
+|---|---|
+| `name` | Alias name shown in the picker |
+| `container` | Container name or id |
+| `path` | Working directory inside the container |
 
 ### mcp_servers
 
@@ -200,10 +251,13 @@ The session mode jcode starts in: `"approval"` (default), `"plan"`, or `"full_ac
 { "default_mode": "approval" }
 ```
 
+{: .note }
+**Migration:** the old mode IDs `ask`, `agent`, and `autopilot` are no longer accepted — use `approval`, `plan`, and `full_access` respectively. An unrecognized value falls back to `approval`.
+
 ### auto_approve
 
-{: .note }
-Deprecated — superseded by [`default_mode`](#default_mode). Still honored as a fallback when `default_mode` is unset: `true` maps to `full_access`.
+{: .warning }
+Deprecated — superseded by [`default_mode`](#default_mode) (`approval` / `plan` / `full_access`). Still honored only as a fallback when `default_mode` is unset: `true` maps to `full_access`. The old mode IDs `ask` / `agent` / `autopilot` are no longer accepted.
 
 Set to `true` to auto-approve all tool calls. Equivalent to running with the `--unsafe` flag.
 
