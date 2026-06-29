@@ -77,6 +77,18 @@ export default {
     },
   },
 
+  auth: {
+    title: '需要存取權杖',
+    body: '此服務可透過網路存取，因此需要權杖。請貼上伺服器啟動時顯示的權杖。',
+    placeholder: '貼上存取權杖',
+    show: '顯示',
+    hide: '隱藏',
+    submit: '進入',
+    verifying: '驗證中…',
+    required: '請輸入權杖',
+    invalid: '權杖無效',
+  },
+
   connection: {
     errorTitle: '無法連線到 jcode 服務',
     errorBody: '本機服務可能尚未就緒或已停止。請稍候重試，或結束後重新啟動。',

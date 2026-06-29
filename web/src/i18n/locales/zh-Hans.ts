@@ -76,6 +76,18 @@ export default {
     },
   },
 
+  auth: {
+    title: '需要访问令牌',
+    body: '此服务可通过网络访问，因此需要令牌。请粘贴服务器启动时打印的令牌。',
+    placeholder: '粘贴访问令牌',
+    show: '显示',
+    hide: '隐藏',
+    submit: '进入',
+    verifying: '验证中…',
+    required: '请输入令牌',
+    invalid: '令牌无效',
+  },
+
   connection: {
     errorTitle: '无法连接到 jcode 服务',
     errorBody: '本地服务可能尚未就绪或已停止。请稍候重试，或退出后重新启动。',

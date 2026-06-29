@@ -76,6 +76,18 @@ export default {
     },
   },
 
+  auth: {
+    title: '액세스 토큰이 필요합니다',
+    body: '이 서버는 네트워크로 접근할 수 있어 토큰이 필요합니다. 서버 시작 시 표시된 토큰을 붙여넣으세요.',
+    placeholder: '액세스 토큰 붙여넣기',
+    show: '표시',
+    hide: '숨기기',
+    submit: '계속',
+    verifying: '확인 중…',
+    required: '토큰을 입력하세요',
+    invalid: '유효하지 않은 토큰',
+  },
+
   connection: {
     errorTitle: 'jcode 서비스에 연결할 수 없습니다',
     errorBody: '로컬 서비스가 아직 준비되지 않았거나 중지되었을 수 있습니다. 잠시 후 다시 시도하거나, 앱을 종료하고 다시 시작하세요.',
