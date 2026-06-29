@@ -52,7 +52,41 @@ func extractToken(r *http.Request) string {
 			}
 		}
 	}
-	return r.URL.Query().Get("token")
+	// The ?token= fallback exists only for non-browser WebSocket clients that can
+	// set neither a header nor a subprotocol. Restrict it to the WS endpoints so
+	// bearer tokens for normal HTTP APIs never land in access/proxy logs, the
+	// Referer header, or browser history.
+	if acceptsQueryToken(r.URL.Path) {
+		return r.URL.Query().Get("token")
+	}
+	return ""
+}
+
+// acceptsQueryToken reports whether the ?token= fallback is allowed for a path —
+// only the WebSocket endpoints (the main event stream and the PTY sockets).
+func acceptsQueryToken(path string) bool {
+	return path == "/api/ws" || (strings.HasPrefix(path, "/api/pty/") && strings.HasSuffix(path, "/ws"))
+}
+
+// IsValidWSSubprotocolToken reports whether s is usable as a WebSocket
+// subprotocol value (RFC 6455 / RFC 7230 token): non-empty, printable ASCII with
+// no spaces or separators. The frontend sends the token as the second WS
+// subprotocol, so an explicit token containing such characters would make the
+// browser's WebSocket constructor throw and break the connection at startup.
+func IsValidWSSubprotocolToken(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < 0x21 || r > 0x7e {
+			return false // control chars, space, and non-ASCII
+		}
+		switch r {
+		case '(', ')', '<', '>', '@', ',', ';', ':', '\\', '"', '/', '[', ']', '?', '=', '{', '}':
+			return false // RFC 7230 separators
+		}
+	}
+	return true
 }
 
 // validToken compares the provided token against the expected one in constant

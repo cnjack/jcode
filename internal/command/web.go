@@ -117,6 +117,9 @@ func resolveWebToken(host, flagToken string) (token string, requireAuth bool, er
 	}
 	// Explicit token (flag/env): enforce auth, never touch disk (session-scoped).
 	if explicit != "" {
+		if !web.IsValidWSSubprotocolToken(explicit) {
+			return "", true, fmt.Errorf("auth token must be printable ASCII with no spaces or separators (it is sent as a WebSocket subprotocol)")
+		}
 		return explicit, true, nil
 	}
 	// Loopback bind with no explicit token: keep the existing no-auth behaviour.
@@ -124,7 +127,8 @@ func resolveWebToken(host, flagToken string) (token string, requireAuth bool, er
 		return "", false, nil
 	}
 	// Exposed bind, no explicit token: reuse a persisted token or generate one.
-	path := filepath.Join(config.ConfigDir(), "web_token")
+	dir := config.ConfigDir()
+	path := filepath.Join(dir, "web_token")
 	if b, rerr := os.ReadFile(path); rerr == nil {
 		if t := strings.TrimSpace(string(b)); t != "" {
 			return t, true, nil
@@ -134,7 +138,11 @@ func resolveWebToken(host, flagToken string) (token string, requireAuth bool, er
 	if gerr != nil {
 		return "", true, fmt.Errorf("generate web token: %w", gerr)
 	}
-	if werr := os.WriteFile(path, []byte(gen), 0o600); werr != nil {
+	// Ensure ~/.jcode exists before writing, otherwise a first remote start would
+	// fail with ENOENT and silently fall back to a session-scoped token.
+	if merr := os.MkdirAll(dir, 0o700); merr != nil {
+		config.Logger().Printf("[web] could not create config dir %s: %v", dir, merr)
+	} else if werr := os.WriteFile(path, []byte(gen), 0o600); werr != nil {
 		// Non-fatal: fall back to a session-scoped token (auth still enforced).
 		config.Logger().Printf("[web] could not persist web token to %s: %v", path, werr)
 	}

@@ -86,6 +86,7 @@ export default {
     verifying: '验证中…',
     required: '请输入令牌',
     invalid: '令牌无效',
+    serverError: '无法验证令牌，请检查连接后重试。',
   },
 
   connection: {

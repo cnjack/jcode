@@ -27,8 +27,10 @@ async function submit() {
     await api.authVerify(candidate) // skipAuth: a 401 surfaces here, not as expiry
     setAuthToken(candidate)
     emit('authed')
-  } catch {
-    error.value = t('auth.invalid')
+  } catch (e) {
+    // Only a 401 means the token is wrong; transport/5xx is a server problem and
+    // should not be reported as bad credentials.
+    error.value = (e as { status?: number })?.status === 401 ? t('auth.invalid') : t('auth.serverError')
   } finally {
     submitting.value = false
   }
@@ -147,7 +149,7 @@ async function submit() {
 }
 .auth-error {
   font-size: 12px;
-  color: var(--color-danger-fg, #dc2626);
+  color: var(--color-error-fg);
   text-align: left;
 }
 .auth-submit {

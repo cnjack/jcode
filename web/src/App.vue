@@ -337,9 +337,19 @@ async function boot() {
     // Auth gate must run BEFORE the setup gate: /api/setup/* is itself protected,
     // so without a valid token the wizard's own calls would 401.
     if (health.auth_required) {
-      const ok = authToken.value ? await verifyToken(authToken.value) : false
-      if (!ok) {
+      if (!authToken.value) {
         needsAuth.value = true
+        return
+      }
+      const res = await verifyToken(authToken.value)
+      if (res === 'invalid') {
+        needsAuth.value = true
+        return
+      }
+      if (res === 'error') {
+        // Transport/5xx: the stored token may still be valid — surface as a
+        // connection error (retryable) rather than forcing the login gate.
+        connectionError.value = true
         return
       }
     }
@@ -457,12 +467,14 @@ async function startNewTaskInProject(path: string): Promise<boolean> {
   return true
 }
 
-async function verifyToken(candidate: string): Promise<boolean> {
+// 'ok' = token valid; 'invalid' = server returned 401; 'error' = transport/5xx,
+// so the stored token may still be good and we should not force the login gate.
+async function verifyToken(candidate: string): Promise<'ok' | 'invalid' | 'error'> {
   try {
     await api.authVerify(candidate)
-    return true
-  } catch {
-    return false
+    return 'ok'
+  } catch (e) {
+    return (e as { status?: number })?.status === 401 ? 'invalid' : 'error'
   }
 }
 

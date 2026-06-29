@@ -62,6 +62,18 @@ func TestExtractToken(t *testing.T) {
 			t.Fatalf("got %q, want empty", got)
 		}
 	})
+	t.Run("query ignored on non-ws endpoint", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/api/chat?token=qq", nil)
+		if got := extractToken(r); got != "" {
+			t.Fatalf("got %q, want empty (query token only allowed on ws endpoints)", got)
+		}
+	})
+	t.Run("query allowed on pty ws", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/api/pty/pty_1/ws?token=pp", nil)
+		if got := extractToken(r); got != "pp" {
+			t.Fatalf("got %q, want pp", got)
+		}
+	})
 }
 
 func TestValidToken(t *testing.T) {
@@ -76,6 +88,21 @@ func TestValidToken(t *testing.T) {
 	}
 	if validToken("x", "") {
 		t.Error("empty expected token must not validate")
+	}
+}
+
+func TestIsValidWSSubprotocolToken(t *testing.T) {
+	valid := []string{"abc123", "aZ0-_", "Zm9vYmFy", "x"} // base64url-style tokens
+	for _, s := range valid {
+		if !IsValidWSSubprotocolToken(s) {
+			t.Errorf("IsValidWSSubprotocolToken(%q) = false, want true", s)
+		}
+	}
+	invalid := []string{"", "has space", "has,comma", "semi;colon", "a/b", "quote\"x", "ctrl\tx", "ünïcode"}
+	for _, s := range invalid {
+		if IsValidWSSubprotocolToken(s) {
+			t.Errorf("IsValidWSSubprotocolToken(%q) = true, want false", s)
+		}
 	}
 }
 

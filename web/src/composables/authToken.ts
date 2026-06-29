@@ -8,7 +8,7 @@
 // Only relevant when the server is bound to a non-loopback host (it reports
 // `auth_required` from /api/health). On loopback / desktop the token stays empty
 // and nothing here has any effect.
-import { ref } from 'vue'
+import { readonly, ref } from 'vue'
 
 const STORAGE_KEY = 'jcode_web_token'
 
@@ -30,9 +30,13 @@ export function clearAuthToken(): void {
   setAuthToken('')
 }
 
-/** Reactive ref for components (login gate) that need to watch the token. */
+/**
+ * Read-only reactive ref for components (login gate) that need to watch the
+ * token. Returned readonly so callers can't bypass setAuthToken() and leave
+ * localStorage out of sync with the in-memory value.
+ */
 export function useAuthToken() {
-  return token
+  return readonly(token)
 }
 
 // --- expiry notification ---------------------------------------------------

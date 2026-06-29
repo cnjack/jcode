@@ -15,20 +15,24 @@ interface RequestOptions extends RequestInit {
 
 async function request<T>(path: string, options?: RequestOptions): Promise<T> {
   const token = getAuthToken()
-  const resp = await fetch(`${apiBase}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token && !options?.skipAuth ? { Authorization: `Bearer ${token}` } : {}),
-      ...options?.headers,
-    },
-  })
+  // Normalize to a Headers instance so every HeadersInit form (plain object,
+  // Headers, tuple array) is preserved rather than silently dropped.
+  const headers = new Headers(options?.headers)
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
+  if (token && !options?.skipAuth && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+  const resp = await fetch(`${apiBase}${path}`, { ...options, headers })
   if (resp.status === 401 && !options?.skipAuth) {
     notifyAuthExpired()
   }
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({ error: resp.statusText }))
-    throw new Error(body.error || `HTTP ${resp.status}`)
+    // Attach the status so callers can distinguish 401 (bad token) from
+    // transport/5xx failures and react differently.
+    const err = new Error(body.error || `HTTP ${resp.status}`) as Error & { status?: number }
+    err.status = resp.status
+    throw err
   }
   return resp.json()
 }

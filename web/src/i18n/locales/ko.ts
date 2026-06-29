@@ -86,6 +86,7 @@ export default {
     verifying: '확인 중…',
     required: '토큰을 입력하세요',
     invalid: '유효하지 않은 토큰',
+    serverError: '토큰을 확인할 수 없습니다. 연결을 확인한 후 다시 시도하세요.',
   },
 
   connection: {

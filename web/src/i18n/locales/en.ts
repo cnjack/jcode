@@ -97,6 +97,7 @@ export default {
     verifying: 'Verifying…',
     required: 'Please enter the token',
     invalid: 'Invalid token',
+    serverError: 'Could not verify the token. Check the connection and try again.',
   },
 
   connection: {

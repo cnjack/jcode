@@ -86,6 +86,7 @@ export default {
     verifying: '検証中…',
     required: 'トークンを入力してください',
     invalid: 'トークンが無効です',
+    serverError: 'トークンを検証できませんでした。接続を確認して再試行してください。',
   },
 
   connection: {

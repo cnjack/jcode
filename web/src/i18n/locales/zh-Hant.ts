@@ -87,6 +87,7 @@ export default {
     verifying: '驗證中…',
     required: '請輸入權杖',
     invalid: '權杖無效',
+    serverError: '無法驗證權杖，請檢查連線後重試。',
   },
 
   connection: {
