@@ -2,18 +2,37 @@
 import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, CustomModelDetail, ValidateResult, CatalogModel, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData } from '@/types/api'
 import type { AutomationItem, AutomationRun, AutomationTemplate, AutomationCreate, Automation } from '@/types/automation'
 import { apiBase } from './apiBase'
+import { getAuthToken, notifyAuthExpired } from './authToken'
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const resp = await fetch(`${apiBase}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-  })
+interface RequestOptions extends RequestInit {
+  /**
+   * Skip auto Authorization injection AND the global 401 handler. Used by
+   * authVerify, where a 401 means "wrong token typed in the login page" and must
+   * surface as an error in that form — not clear the token / re-trigger the gate.
+   */
+  skipAuth?: boolean
+}
+
+async function request<T>(path: string, options?: RequestOptions): Promise<T> {
+  const token = getAuthToken()
+  // Normalize to a Headers instance so every HeadersInit form (plain object,
+  // Headers, tuple array) is preserved rather than silently dropped.
+  const headers = new Headers(options?.headers)
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
+  if (token && !options?.skipAuth && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+  const resp = await fetch(`${apiBase}${path}`, { ...options, headers })
+  if (resp.status === 401 && !options?.skipAuth) {
+    notifyAuthExpired()
+  }
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({ error: resp.statusText }))
-    throw new Error(body.error || `HTTP ${resp.status}`)
+    // Attach the status so callers can distinguish 401 (bad token) from
+    // transport/5xx failures and react differently.
+    const err = new Error(body.error || `HTTP ${resp.status}`) as Error & { status?: number }
+    err.status = resp.status
+    throw err
   }
   return resp.json()
 }
@@ -25,9 +44,17 @@ export const api = {
       body: JSON.stringify({ before_user_message: beforeUserMessage }),
     }),
   health: () =>
-    request<{ status: string; version: string; pwd: string; provider: string; model: string; mode: string; session_id: string; running: boolean; image_support?: boolean; needs_setup?: boolean }>(
+    request<{ status: string; version: string; pwd: string; provider: string; model: string; mode: string; session_id: string; running: boolean; image_support?: boolean; needs_setup?: boolean; auth_required?: boolean }>(
       '/api/health',
     ),
+  // authVerify validates a token typed into the login gate. skipAuth keeps a 401
+  // (wrong token) from tripping the global expiry handler — the gate shows it.
+  authVerify: (token: string) =>
+    request<{ ok: boolean }>('/api/auth/verify', {
+      method: 'POST',
+      skipAuth: true,
+      headers: { Authorization: `Bearer ${token}` },
+    }),
   status: () =>
     request<{
       running: boolean

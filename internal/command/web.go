@@ -2,11 +2,14 @@ package command
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -61,17 +64,19 @@ func NewWebCmd() *cobra.Command {
 	var port int
 	var host string
 	var openBrowser bool
+	var authToken string
 	cmd := &cobra.Command{
 		Use:          "web",
 		Short:        "Start the web server",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWebServer(port, host, openBrowser)
+			return runWebServer(port, host, openBrowser, authToken)
 		},
 	}
 	cmd.Flags().IntVar(&port, "port", 8080, "HTTP server port")
 	cmd.Flags().StringVar(&host, "host", "127.0.0.1", "HTTP server host")
 	cmd.Flags().BoolVar(&openBrowser, "open", true, "Open browser after server starts")
+	cmd.Flags().StringVar(&authToken, "auth-token", "", "Bearer token required when bound to a non-loopback host (auto-generated if empty). Can also be set via JCODE_WEB_TOKEN.")
 	return cmd
 }
 
@@ -97,7 +102,64 @@ func dropInteractiveTools(tools []tool.BaseTool) []tool.BaseTool {
 	return out
 }
 
-func runWebServer(port int, host string, openBrowser bool) error {
+// resolveWebToken decides the web auth token and whether auth must be enforced.
+//
+// Auth is required when the bind host is non-loopback (exposed to the network),
+// or when a token was explicitly supplied. Token source priority:
+//  1. --auth-token flag / JCODE_WEB_TOKEN env — session-scoped, never written to disk
+//  2. ~/.jcode/web_token — persisted (0600), reused across restarts
+//  3. auto-generated (32 random bytes, base64url) when exposed and none of the
+//     above; persisted to ~/.jcode/web_token so the token is stable across restarts
+func resolveWebToken(host, flagToken string) (token string, requireAuth bool, err error) {
+	explicit := flagToken
+	if explicit == "" {
+		explicit = os.Getenv("JCODE_WEB_TOKEN")
+	}
+	// Explicit token (flag/env): enforce auth, never touch disk (session-scoped).
+	if explicit != "" {
+		if !web.IsValidWSSubprotocolToken(explicit) {
+			return "", true, fmt.Errorf("auth token must be printable ASCII with no spaces or separators (it is sent as a WebSocket subprotocol)")
+		}
+		return explicit, true, nil
+	}
+	// Loopback bind with no explicit token: keep the existing no-auth behaviour.
+	if web.IsLoopbackBind(host) {
+		return "", false, nil
+	}
+	// Exposed bind, no explicit token: reuse a persisted token or generate one.
+	dir := config.ConfigDir()
+	path := filepath.Join(dir, "web_token")
+	if b, rerr := os.ReadFile(path); rerr == nil {
+		if t := strings.TrimSpace(string(b)); t != "" {
+			return t, true, nil
+		}
+	}
+	gen, gerr := generateWebToken()
+	if gerr != nil {
+		return "", true, fmt.Errorf("generate web token: %w", gerr)
+	}
+	// Ensure ~/.jcode exists before writing, otherwise a first remote start would
+	// fail with ENOENT and silently fall back to a session-scoped token.
+	if merr := os.MkdirAll(dir, 0o700); merr != nil {
+		config.Logger().Printf("[web] could not create config dir %s: %v", dir, merr)
+	} else if werr := os.WriteFile(path, []byte(gen), 0o600); werr != nil {
+		// Non-fatal: fall back to a session-scoped token (auth still enforced).
+		config.Logger().Printf("[web] could not persist web token to %s: %v", path, werr)
+	}
+	return gen, true, nil
+}
+
+// generateWebToken returns 32 cryptographically-random bytes as a URL-safe
+// base64 string (no padding).
+func generateWebToken() (string, error) {
+	var b [32]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b[:]), nil
+}
+
+func runWebServer(port int, host string, openBrowser bool, authToken string) error {
 	// Check if we need setup (no providers configured).
 	needsSetup := config.NeedsSetup()
 
@@ -540,6 +602,18 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		}, nil
 	}
 
+	// Resolve the web auth token. Auth is enforced when bound to a non-loopback
+	// host (exposed to the network) or when a token was explicitly provided.
+	webToken, requireAuth, err := resolveWebToken(host, authToken)
+	if err != nil {
+		return err
+	}
+	if requireAuth {
+		fmt.Printf("\n🔐 Web access token (required when reaching %s):\n   %s\n", host, webToken)
+		fmt.Printf("   Open http://%s:%d/ and paste this token to sign in.\n\n", host, port)
+		config.Logger().Printf("[web] token auth enabled for non-loopback bind %q", host)
+	}
+
 	// Bootstrap engine for the initial task.
 	bootEC, err := buildWebTask("", pwd, startupMode.String(), nil, false)
 	if err != nil {
@@ -588,6 +662,8 @@ func runWebServer(port int, host string, openBrowser bool) error {
 		TokenUsage:         bootEC.TokenUsage,
 		ContextBreakdownFn: bootEC.BreakdownFn,
 		Automations:        autoStore,
+		AuthToken:          webToken,
+		RequireAuth:        requireAuth,
 	})
 
 	// Start the periodic automation scheduler. A single process owns periodic

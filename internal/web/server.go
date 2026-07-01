@@ -59,6 +59,12 @@ type Server struct {
 	openBrowser bool
 	wsBroker    *WSBroker
 
+	// authToken, when requireAuth is set, must be presented as a bearer token on
+	// every non-exempt request (see authMiddleware in auth.go). requireAuth is
+	// enabled when the server binds to a non-loopback host.
+	authToken   string
+	requireAuth bool
+
 	// mu guards the shared-server maps and, during the single-active transition,
 	// the bootstrap Engine's run state (the role that moves to a per-Engine lock
 	// once tasks truly run in parallel).
@@ -172,6 +178,8 @@ type ServerConfig struct {
 	TokenUsage          *model.TokenUsage                                                     // optional: shared token tracker (created when nil)
 	ContextBreakdownFn  func() usage.ContextBreakdown                                         // optional: live per-task context breakdown
 	Automations         *automation.Store                                                     // optional: automation store (nil in setup mode)
+	AuthToken           string                                                                // bearer token required on non-exempt requests when RequireAuth is set
+	RequireAuth         bool                                                                  // enforce token auth (set when bound to a non-loopback host)
 }
 
 // NewServer creates a new web server.
@@ -234,6 +242,8 @@ func NewServer(cfg *ServerConfig) *Server {
 		needsSetup:          cfg.NeedsSetup,
 		automations:         cfg.Automations,
 		autoRunInflight:     make(map[string]bool),
+		authToken:           cfg.AuthToken,
+		requireAuth:         cfg.RequireAuth,
 	}
 	// The bootstrap engine is registered (and its pump started) in Start, once
 	// the root context exists.
@@ -270,6 +280,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// API routes
 	mux.HandleFunc("GET /api/health", s.handleHealth)
+	mux.HandleFunc("POST /api/auth/verify", s.handleAuthVerify)
 	mux.HandleFunc("GET /api/ws", s.handleWebSocket)
 	mux.HandleFunc("POST /api/chat", s.handleChat)
 	mux.HandleFunc("POST /api/stop", s.handleStop)
@@ -373,8 +384,11 @@ func (s *Server) Start(ctx context.Context) error {
 	// Serve embedded frontend (SPA with fallback to index.html)
 	mux.Handle("GET /", newSPAHandler())
 
-	// CORS middleware
-	corsHandler := corsMiddleware(mux)
+	// Auth (token) then CORS. corsMiddleware MUST stay the outer wrapper so
+	// OPTIONS preflights are answered there and never reach authMiddleware
+	// without an Authorization header. authMiddleware is a no-op unless
+	// requireAuth is set (i.e. bound to a non-loopback host).
+	corsHandler := corsMiddleware(s.authMiddleware(mux))
 
 	addr := fmt.Sprintf("%s:%d", s.host, s.port)
 
@@ -450,15 +464,16 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			pwd = eng.pwd
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"status":      "needs_setup",
-			"version":     s.version,
-			"pwd":         pwd,
-			"provider":    "",
-			"model":       "",
-			"mode":        "build",
-			"session_id":  "",
-			"running":     false,
-			"needs_setup": true,
+			"status":        "needs_setup",
+			"version":       s.version,
+			"pwd":           pwd,
+			"provider":      "",
+			"model":         "",
+			"mode":          "build",
+			"session_id":    "",
+			"running":       false,
+			"needs_setup":   true,
+			"auth_required": s.requireAuth,
 		})
 		return
 	}
@@ -474,6 +489,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"session_id":    eng.recUUID(),
 		"running":       eng.running.Load(),
 		"image_support": s.currentModelSupportsImage(eng),
+		"auth_required": s.requireAuth,
 	})
 }
 
@@ -2543,6 +2559,11 @@ func (s *Server) handleSetApprovalMode(w http.ResponseWriter, r *http.Request) {
 // to the loopback server and read the agent's live event stream.
 var wsUpgrader = websocket.Upgrader{
 	CheckOrigin: isAllowedWebOrigin,
+	// Advertise the auth subprotocol so gorilla echoes it back on the handshake
+	// response; browsers send ["jcode-auth", "<token>"] and expect the server to
+	// confirm a subprotocol, otherwise some reject the connection. The token (the
+	// second value) is never echoed.
+	Subprotocols: []string{wsAuthSubprotocol},
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {

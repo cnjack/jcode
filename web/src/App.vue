@@ -7,6 +7,8 @@ import type { RemoteMeta } from '@/types/api'
 import { useChatStore } from '@/stores/chat'
 import { useProjectStore } from '@/stores/project'
 import { useWebSocket } from '@/composables/ws'
+import { api } from '@/composables/api'
+import { useAuthToken, clearAuthToken, setAuthExpiredHandler } from '@/composables/authToken'
 import { useTheme } from '@/composables/useTheme'
 import { useBranch } from '@/composables/useBranch'
 import ChatMessageVue from '@/components/ChatMessage.vue'
@@ -21,6 +23,7 @@ import RemoteConnectWizard from '@/components/RemoteConnectWizard.vue'
 import TerminalPanel from '@/components/TerminalPanel.vue'
 import RightPanel from '@/components/RightPanel.vue'
 import SetupView from '@/components/SetupView.vue'
+import TokenGate from '@/components/TokenGate.vue'
 import TopBar from '@/components/TopBar.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
 import AutomationsView from '@/components/AutomationsView.vue'
@@ -87,6 +90,8 @@ function onSettingsClose() {
   settingsOpen.value = false
 }
 const needsSetup = ref(false)
+const needsAuth = ref(false)
+const authToken = useAuthToken()
 
 // Honor reduced-motion for the new-task ↔ conversation composer transition.
 const reduceMotion = ref(
@@ -329,6 +334,26 @@ async function boot() {
       return
     }
     connectionError.value = false
+    // Auth gate must run BEFORE the setup gate: /api/setup/* is itself protected,
+    // so without a valid token the wizard's own calls would 401.
+    if (health.auth_required) {
+      if (!authToken.value) {
+        needsAuth.value = true
+        return
+      }
+      const res = await verifyToken(authToken.value)
+      if (res === 'invalid') {
+        needsAuth.value = true
+        return
+      }
+      if (res === 'error') {
+        // Transport/5xx: the stored token may still be valid — surface as a
+        // connection error (retryable) rather than forcing the login gate.
+        connectionError.value = true
+        return
+      }
+    }
+    needsAuth.value = false
     if (health.needs_setup) {
       needsSetup.value = true
       return
@@ -343,12 +368,20 @@ async function boot() {
 
 onMounted(async () => {
   document.addEventListener('keydown', handleGlobalKeydown)
+  // A 401 from any request (e.g. a token that expired mid-session) routes here.
+  // Idempotent: only clear when we actually hold a token, so boot-time parallel
+  // 401s (the fire-and-forget status() before the gate) don't loop the gate.
+  setAuthExpiredHandler(() => {
+    if (authToken.value) clearAuthToken()
+    needsAuth.value = true
+  })
   ensurePermission()
   await boot()
 })
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleGlobalKeydown)
+  setAuthExpiredHandler(null)
   if (runTimer) clearInterval(runTimer)
 })
 
@@ -432,6 +465,24 @@ async function startNewTaskInProject(path: string): Promise<boolean> {
   }
   await store.newSession()
   return true
+}
+
+// 'ok' = token valid; 'invalid' = server returned 401; 'error' = transport/5xx,
+// so the stored token may still be good and we should not force the login gate.
+async function verifyToken(candidate: string): Promise<'ok' | 'invalid' | 'error'> {
+  try {
+    await api.authVerify(candidate)
+    return 'ok'
+  } catch (e) {
+    return (e as { status?: number })?.status === 401 ? 'invalid' : 'error'
+  }
+}
+
+// TokenGate already persisted the token; re-run boot so health/setup/workspace
+// all load with the token in place.
+function onAuthed() {
+  needsAuth.value = false
+  boot()
 }
 
 function onSetupComplete() {
@@ -728,6 +779,11 @@ function startResize(e: MouseEvent) {
       @bound="remoteWizardOpen = false; settingsOpen = false"
     />
     <CommandPalette :open="paletteOpen" @close="paletteOpen = false" @action="onPaletteAction" />
+
+    <!-- Auth gate — shown when the server requires a token (non-loopback bind)
+         and we don't yet have a valid one. Sits above setup because the setup
+         endpoints are themselves token-protected. -->
+    <TokenGate v-if="needsAuth" @authed="onAuthed" />
 
     <!-- Setup overlay — shown when no providers are configured -->
     <SetupView v-if="needsSetup" @complete="onSetupComplete" />

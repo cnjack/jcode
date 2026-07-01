@@ -1,6 +1,7 @@
 // WebSocket client composable for jcode web
 import { ref, onUnmounted } from 'vue'
 import { wsBase } from './apiBase'
+import { getAuthToken } from './authToken'
 import type {
   AgentTextData,
   ToolCallData,
@@ -85,7 +86,13 @@ export function useWebSocket(handlers: WSHandler) {
     // Build the WS URL from the resolved base: relative in browser mode (the
     // page is served by the API server), absolute in desktop mode (the page is
     // cross-origin to the Go server). See composables/apiBase.ts.
-    ws = new WebSocket(`${wsBase()}/api/ws`)
+    // Token (when the server requires auth) rides as the second WebSocket
+    // subprotocol — browsers can't set headers on a WS handshake. Read fresh on
+    // every (re)connect so a token entered after a drop is picked up. See auth.go.
+    const token = getAuthToken()
+    ws = token
+      ? new WebSocket(`${wsBase()}/api/ws`, ['jcode-auth', token])
+      : new WebSocket(`${wsBase()}/api/ws`)
 
     ws.onopen = () => {
       connected.value = true

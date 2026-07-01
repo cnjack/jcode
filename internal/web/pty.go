@@ -51,7 +51,13 @@ func newPTYManager() *ptyManager {
 }
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+	// Same cross-origin gate as the main event WebSocket. authMiddleware (auth.go)
+	// runs first and enforces the token before this upgrade is reached; this is
+	// the second line of defence. It previously returned true unconditionally,
+	// which let any web page open a PTY (interactive shell) over the loopback /
+	// exposed port — a direct RCE on a non-loopback bind.
+	CheckOrigin:  isAllowedWebOrigin,
+	Subprotocols: []string{wsAuthSubprotocol},
 }
 
 // register stores a backend under a fresh session id owned by ownerID.
