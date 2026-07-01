@@ -87,6 +87,19 @@ export default {
   // Connection-error overlay (App.vue). Currently hardcoded Chinese in the
   // source — English is the canonical source here; the zh-* files carry the
   // original Chinese wording.
+  auth: {
+    title: 'Access token required',
+    body: 'This server is reachable over the network, so it needs a token. Paste the token shown in the server startup banner.',
+    placeholder: 'Paste access token',
+    show: 'Show',
+    hide: 'Hide',
+    submit: 'Continue',
+    verifying: 'Verifying…',
+    required: 'Please enter the token',
+    invalid: 'Invalid token',
+    serverError: 'Could not verify the token. Check the connection and try again.',
+  },
+
   connection: {
     errorTitle: "Can't connect to the jcode service",
     errorBody: 'The local service may not be ready yet, or it has stopped. Please retry shortly, or restart the app.',

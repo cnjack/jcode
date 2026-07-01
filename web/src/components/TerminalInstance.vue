@@ -6,6 +6,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { useI18n } from 'vue-i18n'
 import { api } from '@/composables/api'
 import { wsBase } from '@/composables/apiBase'
+import { getAuthToken } from '@/composables/authToken'
 import '@xterm/xterm/css/xterm.css'
 
 const props = defineProps<{
@@ -126,7 +127,10 @@ async function init() {
 function connectWS(ptyId: string) {
   if (!term) return
   const url = getWsUrl(ptyId)
-  ws = new WebSocket(url)
+  // Token (when the server requires auth) rides as the second WS subprotocol —
+  // browsers can't set headers on a WS handshake. See auth.go.
+  const token = getAuthToken()
+  ws = token ? new WebSocket(url, ['jcode-auth', token]) : new WebSocket(url)
   ws.binaryType = 'arraybuffer'
 
   ws.onopen = () => {
