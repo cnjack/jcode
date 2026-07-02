@@ -12,3 +12,5 @@ docs/.jekyll-cache/
 docs/.jekyll-metadata
 .vite/
 .claude
+site/dist
+site/node_modules

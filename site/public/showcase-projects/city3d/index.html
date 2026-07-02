@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Neon Metropolis</title>
+    <link rel="stylesheet" href="./css/style.css" />
+    <!-- Import map: "three" resolves to the locally vendored module.
+         No external network requests are made at runtime. -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three.module.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <!-- Loading overlay (plain CSS, shown immediately before module import) -->
+    <div id="loading" class="loading">
+      <div class="loading-box">
+        <div class="loading-logo">NEON METROPOLIS</div>
+        <div class="loading-bar"><span></span></div>
+        <div class="loading-status">generating city…</div>
+        <div class="loading-sub">procedural skyline · three.js</div>
+      </div>
+    </div>
+
+    <!-- Title card (bottom-center) -->
+    <div class="titlecard" id="titlecard">
+      <span class="tc-main">NEON METROPOLIS</span>
+      <span class="tc-sub">procedural city</span>
+      <button id="helpBtn" class="help-btn" type="button" aria-label="Show help">?</button>
+    </div>
+
+    <!-- Help panel -->
+    <div class="help-panel" id="helpPanel" role="dialog" aria-label="Controls help">
+      <div class="help-head">
+        <span>Controls</span>
+        <button id="helpClose" type="button" aria-label="Close help">&times;</button>
+      </div>
+      <table class="help-table">
+        <tbody>
+          <tr><td><kbd>Drag</kbd></td><td>Orbit camera</td></tr>
+          <tr><td><kbd>Scroll</kbd> / pinch</td><td>Zoom in / out</td></tr>
+          <tr><td><kbd>Right-drag</kbd> / two-finger</td><td>Pan</td></tr>
+          <tr><td><kbd>C</kbd></td><td>Toggle cinematic flythrough</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Exit flythrough</td></tr>
+          <tr><td><kbd>?</kbd></td><td>Toggle this help</td></tr>
+        </tbody>
+      </table>
+      <div class="help-note">Time, density, traffic, seed and quality live in the panel (top-left). Auto-rotate stops on first interaction.</div>
+    </div>
+
+    <!-- Control panel (top-left, collapsible) -->
+    <div class="hud panel" id="panel" role="region" aria-label="City controls">
+      <div class="panel-head">
+        <span class="title">NEON METROPOLIS</span>
+        <button
+          id="collapseBtn"
+          type="button"
+          class="collapse"
+          aria-expanded="true"
+          aria-controls="panelBody"
+          aria-label="Collapse panel"
+        >
+          &minus;
+        </button>
+      </div>
+
+      <div class="panel-body" id="panelBody">
+        <!-- TIME -->
+        <div class="section">
+          <div class="section-label">Time of day</div>
+          <div class="time-row">
+            <input id="timeSlider" type="range" min="0" max="24" step="0.1" value="13" aria-label="Time of day" />
+            <span class="value mono" id="timeVal">13:00</span>
+          </div>
+          <label class="check"><input id="autoCycle" type="checkbox" checked /> Auto-cycle</label>
+          <label class="field">Cycle speed
+            <input id="cycleSpeed" type="range" min="0.1" max="3" step="0.1" value="1" />
+          </label>
+        </div>
+
+        <!-- CITY -->
+        <div class="section">
+          <div class="section-label">City</div>
+          <label class="field">Building density
+            <input id="densitySlider" type="range" min="0.4" max="1.5" step="0.05" value="1" />
+          </label>
+          <label class="field">Traffic density
+            <input id="trafficSlider" type="range" min="0" max="1" step="0.05" value="0.6" />
+          </label>
+          <button id="cineBtn" type="button" class="cine-btn" aria-pressed="false">&#9658; Cinematic</button>
+        </div>
+
+        <!-- SEED -->
+        <div class="section">
+          <div class="section-label">Seed</div>
+          <div class="seed-row">
+            <input id="seedInput" type="text" inputmode="numeric" aria-label="Seed value" />
+            <button id="regen" type="button">Regenerate</button>
+          </div>
+          <div class="row"><span class="label">Seed</span><span class="value accent" id="seedVal">—</span></div>
+          <div class="row"><span class="label">Buildings</span><span class="value" id="count">—</span></div>
+          <div class="row"><span class="label">Cars</span><span class="value" id="carVal">—</span></div>
+          <div class="row"><span class="label">FPS</span><span class="value fps good" id="fps">—</span></div>
+        </div>
+
+        <!-- QUALITY -->
+        <div class="section">
+          <div class="section-label">Quality</div>
+          <select id="qualityToggle" aria-label="Quality preset">
+            <option value="high" selected>High</option>
+            <option value="low">Low</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Credit note -->
+    <div class="credit">Built autonomously by jcode</div>
+
+    <script type="module" src="./js/main.js"></script>
+    <!-- Help panel open/close (inline so it works even if module is slow) -->
+    <script>
+      (function () {
+        var help = document.getElementById('helpPanel');
+        var btn = document.getElementById('helpBtn');
+        var close = document.getElementById('helpClose');
+        function toggle(force) {
+          if (!help) return;
+          var open = force === undefined ? !help.classList.contains('open') : force;
+          help.classList.toggle('open', open);
+        }
+        if (btn) btn.addEventListener('click', function () { toggle(); });
+        if (close) close.addEventListener('click', function () { toggle(false); });
+        if (help) help.addEventListener('click', function (e) { if (e.target === help) toggle(false); });
+        window.addEventListener('keydown', function (e) {
+          if (e.key === 'Escape') toggle(false);
+        });
+      })();
+    </script>
+  </body>
+</html>
