@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>jcode Agent Evaluation — Unattended Execution Report</title>
+  <meta name="description" content="A fully unattended evaluation of the jcode coding agent across ACP, deterministic oracles, and generated frontend projects." />
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230d0d0d'/%3E%3Ctext x='50' y='68' font-size='52' fill='%23f6f3ec' text-anchor='middle' font-family='Georgia'%3Ej%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+  <nav class="nav">
+    <div class="nav-inner">
+      <a class="logo" href="index.html">
+        <span class="logo-mark">j</span>
+        jcode Agent Eval
+      </a>
+      <ul class="nav-links">
+        <li><a href="showcase.html">Showcase</a></li>
+        <li><a href="report.html">Report</a></li>
+        <li><a href="findings.html">Findings</a></li>
+        <li><a href="roundtable.html">Round-table</a></li>
+        <li><a href="docs.html">Docs</a></li>
+      </ul>
+      <a class="nav-cta" href="showcase.html">View Projects</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <span class="hero-label">Unattended Evaluation Suite</span>
+    <h1>Can jcode run <em>on its own?</em></h1>
+    <p>
+      A fully-automated test harness built around the ACP headless protocol.
+      65 isolated runs against deterministic oracles, six real defects found,
+      and six generated frontend projects that demonstrate what the agent can ship.
+    </p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="showcase.html">Explore the Showcase</a>
+      <a class="btn btn-secondary" href="report.html">Read the Full Report</a>
+    </div>
+  </header>
+
+  <section>
+    <div class="section-header">
+      <span class="section-number">01 — Results at a glance</span>
+      <h2>What the unattended matrix produced</h2>
+      <p class="lead">
+        Every run used a throwaway HOME and sandbox. Pass/fail came from
+        filesystem state, exit codes, and ACP contract checks — never from the
+        agent saying it was done.
+      </p>
+    </div>
+    <div class="stats-grid">
+      <div class="stat"><div class="value">65</div><div class="label">Protocol-level runs</div></div>
+      <div class="stat"><div class="value">62</div><div class="label">Tasks passed</div></div>
+      <div class="stat"><div class="value">95%</div><div class="label">Pass rate (core/smoke/safety 100%)</div></div>
+      <div class="stat"><div class="value">6</div><div class="label">Defects surfaced</div></div>
+      <div class="stat"><div class="value">18</div><div class="label">Frontend runs</div></div>
+      <div class="stat"><div class="value">17</div><div class="label">Generated projects passed</div></div>
+    </div>
+  </section>
+
+  <section class="compact">
+    <div class="section-header">
+      <span class="section-number">02 — Methodology</span>
+      <h2>Designed by a round-table, executed by machines</h2>
+      <p class="lead">
+        Five expert agents independently shaped the test design before a single
+        prompt was sent to jcode.
+      </p>
+    </div>
+    <div class="card">
+      <h3>Drive the ACP surface, not the TTY</h3>
+      <p>
+        <code>jcode acp</code> speaks JSON-RPC over stdio — the exact headless
+        surface a future SDK sits on. The harness is a real ACP client that
+        records every event, auto-approves permissions, and grades the turn.
+      </p>
+    </div>
+    <div class="card">
+      <h3>Double isolation per run</h3>
+      <p>
+        Each run gets a throwaway HOME (copied config with pinned model, so the
+        agent never touches real API keys) and a throwaway sandbox cwd with
+        fixtures and a canary just outside it to detect filesystem escape.
+      </p>
+    </div>
+    <div class="card">
+      <h3>Deterministic oracles + contract checks</h3>
+      <p>
+        File bytes, subprocess exit codes, grep-over-tree, mutation checks,
+        read-only discipline — plus per-run assertions for terminal StopReason,
+        no orphan tool calls, pure-protocol stdout, and usage reporting.
+      </p>
+    </div>
+    <div class="text-center" style="margin-top: 24px;">
+      <a class="btn btn-secondary" href="roundtable.html">Read the full round-table synthesis →</a>
+    </div>
+  </section>
+
+  <section class="compact">
+    <div class="section-header">
+      <span class="section-number">03 — Defects</span>
+      <h2>Real issues surfaced by the pipeline</h2>
+      <p class="lead">
+        Two are critical or high severity, two are medium, and all of them matter
+        for an unattended SDK.
+      </p>
+    </div>
+    <div class="findings">
+      <div class="finding critical">
+        <div class="finding-id">F1</div>
+        <div>
+          <span class="sev">Critical</span>
+          <h4>CGO build aborts (SIGABRT) on subprocess fork (macOS 26)</h4>
+          <p>A default cgo-enabled build crashes the moment it forks a child process. Every entry mode — jcode -p, jcode acp, the TUI — dies at startup before any work happens.</p>
+        </div>
+      </div>
+      <div class="finding high">
+        <div class="finding-id">F2</div>
+        <div>
+          <span class="sev">High</span>
+          <h4>Model/API errors are reported as a successful end_turn</h4>
+          <p>When the model call fails, the ACP turn still returns stop_reason=end_turn with empty output. A client cannot distinguish success from a silent model failure.</p>
+        </div>
+      </div>
+      <div class="finding high">
+        <div class="finding-id">F3</div>
+        <div>
+          <span class="sev">High</span>
+          <h4>No runner-level timeout — the agent can hang indefinitely</h4>
+          <p>The impossible task triggered a full-disk find / scan that never returned. Only the harness's external wall-clock guard stopped it.</p>
+        </div>
+      </div>
+    </div>
+    <div class="text-center" style="margin-top: 24px;">
+      <a class="btn btn-secondary" href="findings.html">See all six findings →</a>
+    </div>
+  </section>
+
+  <section class="compact">
+    <div class="section-header">
+      <span class="section-number">04 — Frontend showcase</span>
+      <h2>Six apps generated by the agent</h2>
+      <p class="lead">
+        Single-file, self-contained HTML apps — no CDN, no external assets.
+        They render offline and are embedded live in the next page.
+      </p>
+    </div>
+    <div class="card">
+      <h3>17 / 18 passed (94%)</h3>
+      <p>
+        The new frontend batch asked for a landing page, analytics dashboard,
+        to-do app, pricing calculator, canvas particle field, and SVG donut
+        chart. glm-5.1 went 12/12; the only miss was the donut chart on glm-5.2.
+      </p>
+    </div>
+    <div class="text-center" style="margin-top: 24px;">
+      <a class="btn btn-primary" href="showcase.html">Open the live showcase →</a>
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      Built by the jcode agent evaluation pipeline ·
+      <a href="https://claude.com/claude-code">Claude Code</a>
+    </p>
+  </footer>
+
+  <script src="js/site.js"></script>
+</body>
+</html>

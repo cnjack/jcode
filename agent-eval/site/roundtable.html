@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Round-table — jcode Agent Evaluation</title>
+  <meta name="description" content="Five expert agents independently shaped how to test jcode's unattended autonomous execution." />
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230d0d0d'/%3E%3Ctext x='50' y='68' font-size='52' fill='%23f6f3ec' text-anchor='middle' font-family='Georgia'%3Ej%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+  <nav class="nav">
+    <div class="nav-inner">
+      <a class="logo" href="index.html">
+        <span class="logo-mark">j</span>
+        jcode Agent Eval
+      </a>
+      <ul class="nav-links">
+        <li><a href="showcase.html">Showcase</a></li>
+        <li><a href="report.html">Report</a></li>
+        <li><a href="findings.html">Findings</a></li>
+        <li><a href="roundtable.html" class="active">Round-table</a></li>
+        <li><a href="docs.html">Docs</a></li>
+      </ul>
+      <a class="nav-cta" href="index.html">Overview</a>
+    </div>
+  </nav>
+
+  <header class="hero" style="padding-bottom: 24px;">
+    <span class="hero-label">Methodology</span>
+    <h1>The five-seat <em>round-table</em></h1>
+    <p class="mb-0">
+      Before writing a single test, five independent expert agents were asked how to test
+      jcode's unattended autonomous execution. Their synthesis shaped the entire pipeline.
+    </p>
+  </header>
+
+  <section class="compact content">
+    <blockquote class="card" style="margin-bottom: 36px;">
+      <strong>Premise:</strong> jcode is a Go coding agent; the headless surface is ACP JSON-RPC over stdio — the exact surface a future SDK sits on. Tools include read, write, edit, execute, grep, glob, todo, subagent, and ask_user. Models under test: glm-5.1, glm-5.2, qwen3.5-flash.
+    </blockquote>
+
+    <div class="seats">
+      <div class="seat">
+        <span class="role">QA / Test Architect</span>
+        <h4>Taxonomy + repetition beats breadth</h4>
+        <ul>
+          <li>Cover a 12-category taxonomy, each with a machine-gradable check.</li>
+          <li>Three tiers: smoke (fast gate), core (shipping bar), stress (autonomy under strain).</li>
+          <li>Report each {case × model} cell as k/n + median tool-calls + median wall-clock.</li>
+          <li>The strongest signals catch fabricated success and silent partial completion.</li>
+        </ul>
+      </div>
+
+      <div class="seat">
+        <span class="role">LLM Evaluation Methodologist</span>
+        <h4>Programmatic verifiers are the backbone</h4>
+        <ul>
+          >li>Grade only sandbox end-state + trajectory; never the model's self-report.</li>
+          <li>Metrics: task success, tool-call efficiency, redundant calls, iterations, wall-clock, tokens/cost, error-recovery, non-termination.</li>
+          <li>Repeat each case N≥5; report pass@k, flakiness, and Wilson 95% CIs.</li>
+          <li>Reset the sandbox to a known-bad/empty state; add negative + trap cases.</li>
+        </ul>
+      </div>
+
+      <div class="seat">
+        <span class="role">Reliability / SRE Engineer</span>
+        <h4>Guardrails and machine-readable stop reasons</h4>
+        <ul>
+          <li>Source finding: the runner stops only on ADK exhaustion or context cancellation — no wall-clock timeout, no tool-call cap.</li>
+          <li>Failure modes to mine: non-termination, tool-call loops, hangs, orphaned calls, runaway subagents, cost blowups.</li>
+          <li>Every unattended run needs a wall-clock timeout, hard caps, and an isolated workspace.</li>
+          <li>Bet on tool-call loops / non-termination as the most common mid-tier model failure.</li>
+        </ul>
+      </div>
+
+      <div class="seat">
+        <span class="role">Security / Safety Engineer</span>
+        <h4>Containment is non-negotiable</h4>
+        <ul>
+          <li>Source finding: execute runs raw bash -c with the real environment; ResolvePath only warns on escape; full_access auto-approves.</li>
+          <li>Safety probes: destructive scoping, path escape, prompt injection, secret exfiltration, resource exhaustion.</li>
+          <li>Use throwaway sandbox cwd AND isolated HOME (real ~/.jcode has live keys) with canaries outside the sandbox.</li>
+          <li>Filesystem/exec containment to the sandbox cwd is the highest-risk behavior to confirm.</li>
+        </ul>
+      </div>
+
+      <div class="seat">
+        <span class="role">SDK / Developer-Experience Engineer</span>
+        <h4>Test the ACP contract, not just task success</h4>
+        <ul>
+          <li>Source finding: runner.Run returns only a string, so the ACP handler hardcodes end_turn — max_tokens/max_turn_requests/refusal are unreachable.</li>
+          <li>Contract assertions: one terminal StopReason; every tool_call reaches terminal update; stdout is pure JSON-RPC; usage reported; cancellation honored.</li>
+          <li>Determinism knobs: model pinning, temperature/seed if supported, disposable per-session cwd.</li>
+          <li>Gate-blockers: invalid StopReason, orphaned tool_call, stdout protocol corruption.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top: 36px;">
+      <h3>Synthesis</h3>
+      <ul>
+        <li>Drive jcode through its ACP headless surface with a custom ACP client that records the full event trajectory.</li>
+        <li>Isolate every run twice: a throwaway sandbox cwd and a throwaway HOME.</li>
+        <li>Judge with deterministic oracles; add trap (impossible) and ambiguous cases; never trust the agent's self-report.</li>
+        <li>Assert the ACP contract on every run in parallel with task success.</li>
+        <li>Repeat across models to measure stability, and mine logs for non-termination, loops, and silent empty turns.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      Built by the jcode agent evaluation pipeline ·
+      <a href="https://claude.com/claude-code">Claude Code</a>
+    </p>
+  </footer>
+
+  <script src="js/site.js"></script>
+</body>
+</html>

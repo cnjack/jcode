@@ -37,7 +37,20 @@ agent-eval/
   roundtable/      the five expert perspectives that shaped the design
   runs/            per-run artifacts (git-ignored; regenerated)
   report/          the generated report.html
+  site/            **new styled website** — open `site/index.html` to browse everything
+  showcase/        legacy landing page + data generator; projects also mirrored under site/
 ```
+
+## Browse the results
+
+The easiest way to read everything is to open **`site/index.html`** in a browser.
+It is a self-contained, warm-cream website (inspired by open-design.ai) that links to:
+
+- the full Phase 1 report (`site/report.html`)
+- the six discovered defects (`site/findings.html`)
+- the five-seat round-table methodology (`site/roundtable.html`)
+- the running docs (`site/docs.html`)
+- the live frontend showcase with **large, usable iframes** (`site/showcase.html`)
 
 ## Run it
 
