@@ -3,6 +3,7 @@ import { ref, reactive, computed, watch, onUnmounted, inject, nextTick, type Com
 import { useChatStore } from '@/stores/chat'
 import { useTheme } from '@/composables/useTheme'
 import { api } from '@/composables/api'
+import type { BrowserConfig, BrowserStatusResponse } from '@/composables/api'
 import type { MCPServerInfo, MCPServerRequest, SkillInfo, SSHAlias, SetupProvider, ProviderDetail, RemoteMeta, CatalogModel, CustomModelDetail } from '@/types/api'
 import QRCode from 'qrcode'
 import {
@@ -103,7 +104,7 @@ function connectToAlias(alias: SSHAlias) {
 const { themeChoice, setTheme, themes } = useTheme()
 const darkThemes = computed(() => themes.filter((t) => t.appearance === 'dark'))
 const lightThemes = computed(() => themes.filter((t) => t.appearance === 'light'))
-const activeTab = ref<'general' | 'appearance' | 'providers' | 'mcp' | 'skills' | 'ssh' | 'channels' | 'shortcuts' | 'usage'>('general')
+const activeTab = ref<'general' | 'appearance' | 'providers' | 'mcp' | 'skills' | 'browser' | 'ssh' | 'channels' | 'shortcuts' | 'usage'>('general')
 const mcpServers = ref<Record<string, MCPServerInfo>>({})
 const sshAliases = ref<SSHAlias[]>([])
 const sshCurrent = ref('local')
@@ -512,6 +513,69 @@ watch(activeTab, (tab) => {
   }
 })
 
+// --- Browser use ---
+const browserStatus = ref<BrowserStatusResponse | null>(null)
+const browserCfg = ref<BrowserConfig>({ enabled: false, backend: 'auto', site_permissions: [], approval: {}, dev_mode: false })
+let browserSaveTimer: ReturnType<typeof setTimeout> | null = null
+
+async function loadBrowser() {
+  try {
+    const st = await api.browserStatus()
+    browserStatus.value = st
+    if (st.status) {
+      browserCfg.value = {
+        enabled: st.status.enabled,
+        backend: st.status.backend || 'auto',
+        chrome_path: st.status.chrome_path,
+        dev_mode: st.status.dev_mode,
+        approval: st.approval || {},
+        site_permissions: st.site_permissions || [],
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load browser status:', err)
+  }
+}
+
+async function saveBrowser() {
+  if (browserSaveTimer) clearTimeout(browserSaveTimer)
+  browserSaveTimer = setTimeout(async () => {
+    try {
+      await api.browserSaveConfig(browserCfg.value)
+      await loadBrowser()
+    } catch (err) {
+      console.error('Failed to save browser config:', err)
+    }
+  }, 250)
+}
+
+function browserApproval(cls: string): string {
+  return browserCfg.value.approval?.[cls] || 'ask'
+}
+function setApproval(cls: string, val: string) {
+  if (!browserCfg.value.approval) browserCfg.value.approval = {}
+  browserCfg.value.approval[cls] = val
+  saveBrowser()
+}
+function addSitePerm() {
+  if (!browserCfg.value.site_permissions) browserCfg.value.site_permissions = []
+  browserCfg.value.site_permissions.push({ origin: '', navigate: 'allow', interact: 'allow' })
+}
+function removeSitePerm(i: number) {
+  browserCfg.value.site_permissions?.splice(i, 1)
+  saveBrowser()
+}
+// Load browser status when entering the tab; poll so the connected badge and
+// the extension's online state update live.
+let browserPoll: ReturnType<typeof setInterval> | null = null
+watch(activeTab, (tab) => {
+  if (browserPoll) { clearInterval(browserPoll); browserPoll = null }
+  if (tab === 'browser') {
+    loadBrowser()
+    browserPoll = setInterval(loadBrowser, 3000)
+  }
+})
+
 // Flip the persisted default auto-approve preference (store handles the API +
 // keeping the unified mode/flag in sync).
 async function toggleAutoApprove() {
@@ -596,6 +660,7 @@ const tabLabel = computed<Record<string, string>>(() => ({
   providers: t('settings.tabs.providers'),
   mcp: t('settings.tabs.mcp'),
   skills: t('settings.tabs.skills'),
+  browser: t('settings.tabs.browser'),
   ssh: t('settings.tabs.ssh'),
   channels: t('settings.tabs.channels'),
   shortcuts: t('settings.tabs.shortcuts'),
@@ -611,6 +676,7 @@ const iconFor: Record<string, Component> = {
   providers: CpuChipIcon,
   mcp: ServerStackIcon,
   skills: SparklesIcon,
+  browser: GlobeAltIcon,
   ssh: CommandLineIcon,
   channels: BellAlertIcon,
   shortcuts: ComputerDesktopIcon,
@@ -883,7 +949,7 @@ function closeAndSwitchModel() {
             <nav class="settings-rail shrink-0 flex flex-col">
               <div class="flex flex-col gap-0.5">
                 <button
-                  v-for="tab in (['general', 'appearance', 'providers', 'mcp', 'skills', 'ssh', 'channels', 'shortcuts', 'usage'] as const)"
+                  v-for="tab in (['general', 'appearance', 'providers', 'mcp', 'skills', 'browser', 'ssh', 'channels', 'shortcuts', 'usage'] as const)"
                   :key="tab"
                   class="group relative w-full flex items-center gap-2.5 h-8 pl-2.5 pr-2 text-left text-[13px] cursor-pointer transition-colors duration-[var(--duration-fast)] hover:bg-[var(--color-secondary)]"
                   :style="activeTab === tab
@@ -1521,6 +1587,119 @@ function closeAndSwitchModel() {
                       </div>
                     </div>
                   </div>
+                </div>
+
+                <!-- Browser tab -->
+                <div v-if="activeTab === 'browser'">
+                  <div class="mb-4">
+                    <h3 class="text-[13px] font-semibold tracking-tight" style="color: var(--color-foreground)">{{ t('settings.browser.title') }}</h3>
+                    <p class="text-[12px] mt-0.5" style="color: var(--color-muted-foreground)">{{ t('settings.browser.subtitle') }}</p>
+                  </div>
+
+                  <!-- Master enable -->
+                  <div class="s-row">
+                    <div class="s-row-icon"><GlobeAltIcon class="w-4 h-4" /></div>
+                    <div class="s-row-body">
+                      <div class="s-row-title">{{ t('settings.browser.enableTitle') }}</div>
+                      <div class="s-row-sub">{{ t('settings.browser.enableDesc') }}</div>
+                    </div>
+                    <div class="s-row-actions">
+                      <button class="s-switch" :data-on="browserCfg.enabled ? 'true' : 'false'" :aria-pressed="browserCfg.enabled" @click="browserCfg.enabled = !browserCfg.enabled; saveBrowser()" />
+                    </div>
+                  </div>
+
+                  <template v-if="browserCfg.enabled">
+                    <!-- Control: managed + extension -->
+                    <div class="mt-5 mb-2 text-[11px] font-medium uppercase tracking-wide" style="color: var(--color-muted-foreground)">{{ t('settings.browser.control') }}</div>
+                    <div class="s-row">
+                      <div class="s-row-icon"><ComputerDesktopIcon class="w-4 h-4" /></div>
+                      <div class="s-row-body">
+                        <div class="s-row-title">{{ t('settings.browser.managed') }}</div>
+                        <div class="s-row-sub">
+                          <template v-if="browserStatus?.status?.chrome_found">{{ browserStatus.status.chrome_version || browserStatus.status.chrome_path }}</template>
+                          <template v-else>{{ t('settings.browser.noChrome') }}</template>
+                        </div>
+                      </div>
+                      <div class="s-row-actions">
+                        <select v-model="browserCfg.backend" class="s-input s-input-sm" style="width: 8rem" @change="saveBrowser()">
+                          <option value="auto">Auto</option>
+                          <option value="managed">Managed</option>
+                          <option value="extension">Extension</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="s-row">
+                      <div class="s-row-icon"><GlobeAltIcon class="w-4 h-4" /></div>
+                      <div class="s-row-body">
+                        <div class="s-row-title">{{ t('settings.browser.extension') }}</div>
+                        <div class="s-row-sub flex items-center gap-1.5">
+                          <span class="w-1.5 h-1.5 rounded-full shrink-0" :style="{ backgroundColor: browserStatus?.status?.extension_online ? 'var(--color-success-fg)' : 'var(--color-border)' }" />
+                          {{ browserStatus?.status?.extension_online ? t('settings.browser.connected') : t('settings.browser.notConnected') }}
+                        </div>
+                      </div>
+                      <div class="s-row-actions">
+                        <span v-if="browserStatus?.status?.extension_online" class="s-chip s-chip-success">{{ t('settings.browser.online') }}</span>
+                      </div>
+                    </div>
+                    <p v-if="!browserStatus?.status?.extension_online" class="text-[11px] mt-1.5 px-1" style="color: var(--color-muted-foreground)">
+                      {{ t('settings.browser.connectHint') }}
+                    </p>
+
+                    <!-- Chrome path (when not found) -->
+                    <div v-if="!browserStatus?.status?.chrome_found" class="mt-3">
+                      <label class="text-[11px] font-medium" style="color: var(--color-muted-foreground)">{{ t('settings.browser.chromePath') }}</label>
+                      <input v-model="browserCfg.chrome_path" class="s-input mt-1" style="width: 100%" placeholder="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" @change="saveBrowser()" />
+                    </div>
+
+                    <!-- Approval -->
+                    <div class="mt-5 mb-2 text-[11px] font-medium uppercase tracking-wide" style="color: var(--color-muted-foreground)">{{ t('settings.browser.approval') }}</div>
+                    <div class="s-row">
+                      <div class="s-row-body"><div class="s-row-title">{{ t('settings.browser.navigate') }}</div></div>
+                      <div class="s-row-actions">
+                        <select :value="browserApproval('navigate')" class="s-input s-input-sm" style="width: 10rem" @change="setApproval('navigate', ($event.target as HTMLSelectElement).value)">
+                          <option value="ask">{{ t('settings.browser.askEachSite') }}</option>
+                          <option value="always_allow">{{ t('settings.browser.alwaysAllow') }}</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="s-row">
+                      <div class="s-row-body"><div class="s-row-title">{{ t('settings.browser.interact') }}</div></div>
+                      <div class="s-row-actions">
+                        <select :value="browserApproval('interact')" class="s-input s-input-sm" style="width: 10rem" @change="setApproval('interact', ($event.target as HTMLSelectElement).value)">
+                          <option value="ask">{{ t('settings.browser.askEachSite') }}</option>
+                          <option value="always_allow">{{ t('settings.browser.alwaysAllow') }}</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <!-- Site permissions -->
+                    <div class="mt-5 mb-2 flex items-center justify-between">
+                      <div class="text-[11px] font-medium uppercase tracking-wide" style="color: var(--color-muted-foreground)">{{ t('settings.browser.sitePermissions') }}</div>
+                      <button class="s-btn s-btn-secondary s-btn-sm" @click="addSitePerm()"><PlusIcon class="w-3.5 h-3.5" /> {{ t('settings.browser.add') }}</button>
+                    </div>
+                    <div v-if="!browserCfg.site_permissions?.length" class="s-row">
+                      <div class="s-row-body"><div class="s-row-sub">{{ t('settings.browser.noSitePermissions') }}</div></div>
+                    </div>
+                    <div v-for="(sp, i) in browserCfg.site_permissions" :key="i" class="s-row">
+                      <input v-model="sp.origin" class="s-input s-input-sm flex-1" placeholder="https://github.com" @change="saveBrowser()" />
+                      <select v-model="sp.navigate" class="s-input s-input-sm" style="width: 7rem" @change="saveBrowser()"><option value="ask">nav: ask</option><option value="allow">nav: allow</option></select>
+                      <select v-model="sp.interact" class="s-input s-input-sm" style="width: 7rem" @change="saveBrowser()"><option value="ask">act: ask</option><option value="allow">act: allow</option></select>
+                      <button class="s-btn s-btn-ghost s-btn-sm" @click="removeSitePerm(i)"><TrashIcon class="w-3.5 h-3.5" /></button>
+                    </div>
+
+                    <!-- Developer mode -->
+                    <div class="mt-5 mb-2 text-[11px] font-medium uppercase tracking-wide" style="color: var(--color-muted-foreground)">{{ t('settings.browser.developerMode') }}</div>
+                    <div class="s-row">
+                      <div class="s-row-body">
+                        <div class="text-[11px] font-semibold mb-0.5" style="color: var(--color-warning-fg)">⚠ {{ t('settings.browser.elevatedRisk') }}</div>
+                        <div class="s-row-title">{{ t('settings.browser.devModeTitle') }}</div>
+                        <div class="s-row-sub" style="white-space: normal">{{ t('settings.browser.devModeDesc') }}</div>
+                      </div>
+                      <div class="s-row-actions">
+                        <button class="s-switch" :data-on="browserCfg.dev_mode ? 'true' : 'false'" :aria-pressed="browserCfg.dev_mode" @click="browserCfg.dev_mode = !browserCfg.dev_mode; saveBrowser()" />
+                      </div>
+                    </div>
+                  </template>
                 </div>
 
                 <!-- SSH tab -->

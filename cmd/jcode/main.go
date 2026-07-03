@@ -6,10 +6,19 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/cnjack/jcode/internal/browser"
 	"github.com/cnjack/jcode/internal/command"
 )
 
 func main() {
+	// Native-messaging launch: Chrome/Edge start `jcode chrome-extension://<id>/`
+	// when the browser extension calls connectNative. Handle it before cobra —
+	// this mode speaks the stdio native-messaging protocol and must not print
+	// anything else to stdout.
+	if browser.MaybeRunNativeHost(os.Args[1:]) {
+		return
+	}
+
 	var (
 		prompt     string
 		resumeUUID string

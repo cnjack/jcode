@@ -113,6 +113,9 @@ func isAuthExempt(r *http.Request) bool {
 	if r.Method == http.MethodPost && p == "/api/auth/verify" {
 		return true // the endpoint the login page calls to validate a typed token
 	}
+	if r.Method == http.MethodGet && p == "/api/browser/ext/ws" {
+		return true // the Chrome extension authenticates via its own pairing/token
+	}
 	// Everything outside /api/ is the SPA shell + embedded static assets: the
 	// login page itself must load before the user has a token.
 	return !strings.HasPrefix(p, "/api/")
