@@ -20,6 +20,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/cnjack/jcode/internal/agent"
+	"github.com/cnjack/jcode/internal/browser"
 	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/channel/ble"
 	"github.com/cnjack/jcode/internal/config"
@@ -107,17 +108,19 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 	if s.cfg != nil && len(s.cfg.SSHAliases) > 0 {
 		all = append(all, s.env.NewSwitchEnvTool())
 	}
+	all = append(all, s.env.NewBrowserTools()...)
 	return append(all, s.mcpTools...)
 }
 
 func (s *interactiveState) buildPlanTools() []tool.BaseTool {
-	return []tool.BaseTool{
+	plan := []tool.BaseTool{
 		s.env.NewReadTool(),
 		s.env.NewExecuteTool(nil),
 		s.env.NewGrepTool(),
 		s.env.NewTodoWriteTool(), s.env.NewTodoReadTool(),
 		tools.NewAskUserTool(s.askUserDeps),
 	}
+	return append(plan, s.env.NewBrowserPlanTools()...)
 }
 
 func (s *interactiveState) subagentNotifier(name, agentType string, done bool, result string, err error) {
@@ -930,6 +933,13 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	env := tools.NewEnv(pwd, platform)
 	bgManager := tools.NewBackgroundManager(env)
 
+	// Browser-use manager (managed Chrome backend; the extension backend needs a
+	// server and is unavailable in the pure TUI). Shared with this session's env
+	// so the browser_* tools work in the terminal.
+	browserMgr := browser.NewManager(browserManagerConfig(cfg))
+	env.Browser = browserMgr
+	defer func() { _ = browserMgr.Close() }()
+
 	var mcpTools []tool.BaseTool
 	var mcpStatuses []tui.MCPStatusItem
 	if len(cfg.MCPServers) > 0 {
@@ -1065,6 +1075,10 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	// legacy AutoApprove bool (true → Full access) when DefaultMode is unset.
 	startupMode := resolveStartupMode(cfg, unsafe)
 	approvalState := runner.NewApprovalStateWithMode(pwd, startupMode)
+	approvalState.SetBrowserPermFunc(func(origin, class string) bool {
+		return browserSitePreapproved(cfg, origin, class)
+	})
+	approvalState.SetBrowserOriginFunc(env.CurrentBrowserOrigin)
 	st.approvalState = approvalState
 
 	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore, tui.WithVersion(Version), tui.WithGoalStore(env.GoalStore), tui.WithStartupMode(startupMode), tui.WithTheme(cfg.Theme), tui.WithApprovalModeChange(func(enabled bool) {

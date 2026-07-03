@@ -241,6 +241,7 @@ export default {
       providers: '프로바이더',
       mcp: 'MCP 서버',
       skills: '스킬',
+      browser: '브라우저',
       ssh: 'SSH',
       channels: '채널',
       shortcuts: '단축키',

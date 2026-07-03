@@ -242,6 +242,7 @@ export default {
       providers: '服務商',
       mcp: 'MCP 伺服器',
       skills: '技能',
+      browser: '瀏覽器',
       ssh: 'SSH',
       channels: '頻道',
       shortcuts: '快捷鍵',

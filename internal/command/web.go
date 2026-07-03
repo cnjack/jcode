@@ -24,6 +24,7 @@ import (
 
 	"github.com/cnjack/jcode/internal/agent"
 	"github.com/cnjack/jcode/internal/automation"
+	"github.com/cnjack/jcode/internal/browser"
 	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/channel/ble"
 	"github.com/cnjack/jcode/internal/config"
@@ -100,6 +101,56 @@ func dropInteractiveTools(tools []tool.BaseTool) []tool.BaseTool {
 		out = append(out, t)
 	}
 	return out
+}
+
+// browserSitePreapproved reports whether an origin is pre-authorized for a
+// browser action class ("navigate"/"interact") via config.browser.approval
+// defaults or a per-site override. Empty origin never pre-approves.
+func browserSitePreapproved(cfg *config.Config, origin, class string) bool {
+	if cfg == nil || cfg.Browser == nil || origin == "" {
+		return false
+	}
+	bc := cfg.Browser
+	// Per-site override wins over the class default.
+	for _, sp := range bc.SitePermissions {
+		if sp.Origin != origin {
+			continue
+		}
+		val := sp.Navigate
+		if class == "interact" {
+			val = sp.Interact
+		}
+		return val == "allow"
+	}
+	if bc.Approval != nil && bc.Approval[class] == "always_allow" {
+		return true
+	}
+	return false
+}
+
+// browserManagerConfig maps persisted config into the browser manager's Config,
+// applying defaults (backend=auto, viewport=1280x720) when unset.
+func browserManagerConfig(cfg *config.Config) browser.Config {
+	bc := cfg.Browser
+	if bc == nil {
+		return browser.Config{Backend: "auto", Viewport: "1280x720"}
+	}
+	backend := bc.Backend
+	if backend == "" {
+		backend = "auto"
+	}
+	viewport := bc.Viewport
+	if viewport == "" {
+		viewport = "1280x720"
+	}
+	return browser.Config{
+		Enabled:    bc.Enabled,
+		Backend:    backend,
+		ChromePath: bc.ChromePath,
+		Headless:   bc.Headless,
+		Viewport:   viewport,
+		DevMode:    bc.DevMode,
+	}
 }
 
 // resolveWebToken decides the web auth token and whether auth must be enforced.
@@ -291,6 +342,12 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		return cm, ctxLimit, nil
 	}
 
+	// Browser-use manager (extension bridge + managed Chrome), process-wide and
+	// shared with every per-task Env so the settings UI and the agent's browser_*
+	// tools operate the same Chrome. Created regardless of needsSetup so the
+	// settings page works before providers are configured.
+	browserMgr := browser.NewManager(browserManagerConfig(cfg))
+
 	// Automation store (definitions + scheduler state). Skipped in setup mode.
 	// Created before buildWebTask so every per-task Env shares this one live
 	// store — the automation_create tool must write through it (not a throwaway)
@@ -323,6 +380,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		// Fresh execution environment for this task only.
 		tenv := tools.NewEnv(taskPwd, platform)
 		tenv.AutomationStore = autoStore
+		tenv.Browser = browserMgr
 		promptPlatform := platform
 		envLabel := "local"
 		projectKey := taskPwd
@@ -353,6 +411,15 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		twh := handler.NewWebHandler()
 		tnotify := makeNotifyingHandler(twh)
 		tappr.SetHandler(tnotify)
+		// Site-permission lookup for browser tools: an origin marked "allow" for a
+		// class (navigate/interact) is auto-approved. Reads the live config each
+		// call so settings changes take effect without rebuilding the task.
+		tappr.SetBrowserPermFunc(func(origin, class string) bool {
+			return browserSitePreapproved(cfg, origin, class)
+		})
+		// browser_act's args carry no URL, so its per-site permission check needs
+		// the active tab's origin from THIS task's session.
+		tappr.SetBrowserOriginFunc(tenv.CurrentBrowserOrigin)
 
 		// Wire THIS task's todo/goal stores to THIS task's recorder + handler, so
 		// todos persist on resume and goal changes reach the task's UI and session
@@ -414,6 +481,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 				}),
 				skills.NewLoadSkillTool(taskLoader),
 			}
+			all = append(all, tenv.NewBrowserTools()...)
 			if mt := mcpToolsPtr.Load(); mt != nil {
 				all = append(all, (*mt)...)
 			}
@@ -426,7 +494,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		}
 
 		buildPlanTools := func() []tool.BaseTool {
-			return []tool.BaseTool{
+			plan := []tool.BaseTool{
 				tenv.NewReadTool(),
 				tenv.NewExecuteTool(nil),
 				tenv.NewGrepTool(),
@@ -435,6 +503,9 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 					BatchRequestFn: twh.RequestAskUser,
 				}),
 			}
+			// Plan mode gets the read-only browser subset (look, don't change).
+			plan = append(plan, tenv.NewBrowserPlanTools()...)
+			return plan
 		}
 
 		// Per-task compaction paths — transcript + reduction must be task-scoped or
@@ -664,6 +735,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		Automations:        autoStore,
 		AuthToken:          webToken,
 		RequireAuth:        requireAuth,
+		BrowserManager:     browserMgr,
 	})
 
 	// Start the periodic automation scheduler. A single process owns periodic
@@ -702,11 +774,20 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		}
 	}()
 
+	// Wire native-messaging auto-connect: write the endpoint discovery file and
+	// install the browser native-host manifest (best-effort, only when browser
+	// use is enabled). Lets the extension connect with zero manual steps.
+	srv.SetupNativeMessaging()
+
 	if err := srv.Start(ctx); err != nil {
 		return fmt.Errorf("server error: %w", err)
 	}
 
 	srv.CloseAllEngines()
+	// The managed Chrome is owned by the Manager and persists across tasks (task
+	// teardown only releases per-task tabs), so it must be torn down here on
+	// server exit or it leaks as an orphan process holding the profile lock.
+	_ = browserMgr.Close()
 	if langfuseTracer != nil {
 		langfuseTracer.Flush()
 	}

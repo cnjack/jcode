@@ -159,6 +159,37 @@ func extractToolDisplayInfo(name, argsJSON string) *ToolDisplayInfo {
 		info.Title = "Delete Team"
 		info.Icon = "agent"
 		info.Category = "mutation"
+	case "browser_open":
+		info.Title = "Browser Open"
+		info.Icon = "browser"
+		info.Category = "execution"
+		info.Subtitle = getString("url")
+	case "browser_snapshot":
+		info.Title = "Page Snapshot"
+		info.Icon = "browser"
+		info.Category = "context"
+	case "browser_screenshot":
+		info.Title = "Screenshot"
+		info.Icon = "browser"
+		info.Category = "context"
+	case "browser_act":
+		info.Title = "Browser Action"
+		info.Icon = "browser"
+		info.Category = "execution"
+		info.Subtitle = strings.TrimSpace(getString("action") + " " + getString("uid"))
+	case "browser_read":
+		info.Title = "Read Page"
+		info.Icon = "browser"
+		info.Category = "context"
+	case "browser_tabs":
+		info.Title = "Browser Tabs"
+		info.Icon = "browser"
+		info.Category = "context"
+		info.Subtitle = getString("op")
+	case "browser_eval":
+		info.Title = "Browser Eval"
+		info.Icon = "browser"
+		info.Category = "execution"
 	default:
 		// MCP or unknown tools
 		info.Title = name

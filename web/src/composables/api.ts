@@ -344,4 +344,41 @@ export const api = {
     return request<AutomationRun[]>(`/api/automations/runs${q}`)
   },
   automationTemplates: () => request<AutomationTemplate[]>('/api/automation-templates'),
+
+  // Browser use
+  browserStatus: () => request<BrowserStatusResponse>('/api/browser/status'),
+  browserSaveConfig: (data: BrowserConfig) =>
+    request<{ status: string }>('/api/browser/config', { method: 'POST', body: JSON.stringify(data) }),
+}
+
+export interface BrowserSitePermission {
+  origin: string
+  navigate?: string
+  interact?: string
+}
+
+export interface BrowserConfig {
+  enabled: boolean
+  backend: string
+  chrome_path?: string
+  headless?: boolean
+  viewport?: string
+  approval?: Record<string, string>
+  site_permissions?: BrowserSitePermission[]
+  dev_mode?: boolean
+}
+
+export interface BrowserStatusResponse {
+  available: boolean
+  status?: {
+    enabled: boolean
+    backend: string
+    chrome_found: boolean
+    chrome_path?: string
+    chrome_version?: string
+    extension_online: boolean
+    dev_mode: boolean
+  }
+  site_permissions?: BrowserSitePermission[]
+  approval?: Record<string, string>
 }

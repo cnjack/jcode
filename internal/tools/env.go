@@ -9,9 +9,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cnjack/jcode/internal/automation"
+	"github.com/cnjack/jcode/internal/browser"
 	appconfig "github.com/cnjack/jcode/internal/config"
 	"golang.org/x/crypto/ssh"
 )
@@ -36,6 +38,16 @@ type Env struct {
 	// to the server's in-memory cache, its REST API, and the scheduler. nil falls
 	// back to opening a fresh store (CLI/ACP contexts with no live server).
 	AutomationStore *automation.Store
+
+	// Browser is the process-wide browser-use manager shared with the web server
+	// (its extension bridge and /api/browser routes) so the agent's browser_*
+	// tools and the settings UI operate the same Chrome. nil disables the tools.
+	Browser *browser.Manager
+
+	// browserSession is the lazily-opened per-task browser session (one per Env),
+	// closed when the task ends. Guarded by browserMu.
+	browserMu      sync.Mutex
+	browserSession *browser.Session
 
 	// origExec and origPwd remember the initial executor state so that
 	// ResetToLocal can restore the correct local executor after SSH.
@@ -123,6 +135,51 @@ func (e *Env) CloneForSubagent() *Env {
 		TodoStore:   NewTodoStore(),
 		FileTracker: e.FileTracker,
 		Depth:       e.Depth + 1,
+		Browser:     e.Browser,
+	}
+}
+
+// BrowserSession returns this task's browser session, opening one on first use.
+// It requires a configured, enabled Browser manager.
+func (e *Env) BrowserSession(ctx context.Context) (*browser.Session, error) {
+	if e.Browser == nil {
+		return nil, fmt.Errorf("browser use is not available in this context")
+	}
+	e.browserMu.Lock()
+	defer e.browserMu.Unlock()
+	if e.browserSession != nil {
+		return e.browserSession, nil
+	}
+	sess, err := e.Browser.OpenSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	e.browserSession = sess
+	return sess, nil
+}
+
+// CurrentBrowserOrigin returns the origin (scheme://host) of this task's active
+// browser tab, or "" when no session is open yet. The approval layer uses it to
+// scope per-site permissions for browser actions whose args carry no URL (e.g.
+// clicks and fills), which otherwise could never match a site rule.
+func (e *Env) CurrentBrowserOrigin() string {
+	e.browserMu.Lock()
+	sess := e.browserSession
+	e.browserMu.Unlock()
+	if sess == nil {
+		return ""
+	}
+	return sess.CurrentOrigin()
+}
+
+// CloseBrowser closes this task's browser session if one was opened.
+func (e *Env) CloseBrowser() {
+	e.browserMu.Lock()
+	sess := e.browserSession
+	e.browserSession = nil
+	e.browserMu.Unlock()
+	if sess != nil {
+		_ = sess.Close()
 	}
 }
 

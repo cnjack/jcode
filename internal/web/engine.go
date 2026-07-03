@@ -445,6 +445,9 @@ func (e *Engine) teardown() {
 	// No-op for local engines.
 	if e.env != nil {
 		_ = e.env.CloseRemote()
+		// Close this task's browser session (managed tabs close; extension tabs
+		// are detached back to the user). No-op if the task never used browser.
+		e.env.CloseBrowser()
 	}
 }
 
