@@ -1,0 +1,44 @@
+/* Circuit Defense — styles */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: #04070a;
+  /* subtle vignette behind the letterbox */
+  background-image: radial-gradient(circle at 50% 45%, #0a1418 0%, #04070a 70%);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  /* touch: kill selection / callout / tap-flash so the canvas feels native */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#game-wrap {
+  position: relative;
+  line-height: 0;
+}
+
+canvas#game {
+  display: block;
+  background: #07100f;
+  box-shadow: 0 0 60px rgba(0, 0, 0, 0.85), 0 0 1px rgba(80, 255, 220, 0.25);
+  border-radius: 2px;
+  /* all gesture handling done in JS; prevent browser panning/zoom over the canvas */
+  touch-action: none;
+}
+
+/* On very small/landscape phones, drop the heavy shadow so the canvas reads cleanly. */
+@media (max-width: 560px) {
+  canvas#game { box-shadow: none; }
+}
+

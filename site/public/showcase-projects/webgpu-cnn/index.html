@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NeuraLab — Train a CNN in your browser</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">◆</div>
+      <div>
+        <h1>NeuraLab</h1>
+        <p class="tagline">Train a convolutional neural network, live, in pure JavaScript.</p>
+      </div>
+    </div>
+    <div class="badges">
+      <span class="badge badge-cpu" id="backend-badge">CPU</span>
+      <span class="badge ghost">no libraries</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- Dataset panel -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>1 · Dataset explorer</h2>
+        <div class="seed-controls">
+          <label for="seed-input">seed</label>
+          <input id="seed-input" type="number" value="42" />
+          <button id="btn-regenerate" class="btn ghost">Regenerate</button>
+        </div>
+      </div>
+      <div class="gen-row">
+        <div class="gen-track"><div id="gen-bar" class="gen-fill"></div></div>
+        <span id="gen-pct" class="gen-pct">0%</span>
+      </div>
+      <p class="muted">Procedurally rendered 16×16 digits (4 font stacks, rotation, scale, shift, noise). 3000 train / 600 test, balanced.</p>
+      <div id="explorer" class="explorer"></div>
+    </section>
+
+    <!-- Training panel -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>2 · Train the network</h2>
+        <div class="controls">
+          <button id="btn-start" class="btn primary">Start</button>
+          <button id="btn-pause" class="btn">Pause</button>
+          <button id="btn-reset" class="btn ghost">Reset</button>
+        </div>
+      </div>
+      <div id="train-status" class="status">Generating dataset…</div>
+      <div class="backend-control">
+        <span class="backend-label">compute backend</span>
+        <div class="segmented">
+          <label class="seg"><input type="radio" name="backend-radio" value="auto" checked /><span>Auto</span></label>
+          <label class="seg"><input type="radio" name="backend-radio" value="cpu" /><span>CPU</span></label>
+          <label class="seg" id="backend-radio-webgpu-wrap"><input type="radio" id="backend-radio-webgpu" name="backend-radio" value="webgpu" /><span>WebGPU</span></label>
+        </div>
+        <span class="muted backend-applied">applied on Reset</span>
+      </div>
+      <div class="stat-grid">
+        <div class="stat"><span class="stat-label">epoch</span><span id="stat-epoch" class="stat-value">0</span></div>
+        <div class="stat"><span class="stat-label">batch</span><span id="stat-batch" class="stat-value">0</span></div>
+        <div class="stat"><span class="stat-label">loss</span><span id="stat-loss" class="stat-value">—</span></div>
+        <div class="stat"><span class="stat-label">train acc</span><span id="stat-train-acc" class="stat-value">—</span></div>
+        <div class="stat"><span class="stat-label">test acc</span><span id="stat-test-acc" class="stat-value">—</span></div>
+        <div class="stat"><span class="stat-label">best test acc</span><span id="stat-best-acc" class="stat-value">—</span></div>
+        <div class="stat"><span class="stat-label">samples/s</span><span id="stat-sps" class="stat-value">—</span></div>
+        <div class="stat"><span class="stat-label">learn rate</span><span id="stat-lr" class="stat-value">—</span></div>
+      </div>
+      <div class="charts">
+        <div class="chart-wrap">
+          <div class="chart-title">Training loss</div>
+          <canvas id="loss-chart" class="chart"></canvas>
+        </div>
+        <div class="chart-wrap">
+          <div class="chart-title">Accuracy (train vs test)</div>
+          <canvas id="acc-chart" class="chart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Try-it playground panel -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>3 · Try it — draw a digit</h2>
+        <div class="controls">
+          <button id="btn-clear" class="btn">Clear</button>
+          <button id="btn-surprise" class="btn primary">Surprise me</button>
+        </div>
+      </div>
+      <p class="muted">Draw with mouse or touch. Each stroke is cropped to its ink box, scaled so the longest side is ~11.5 grid cells, and recentered on the ink centroid — the same centering the dataset generator applies — before being fed to the network at 16×16.</p>
+      <div class="playground">
+        <div class="play-col">
+          <canvas id="draw-pad" class="draw-pad"></canvas>
+          <div class="pad-hint">draw here · soft white on black · 16px brush</div>
+        </div>
+        <div class="play-col">
+          <div class="play-sub">
+            <div class="chart-title">model input (16×16)</div>
+            <canvas id="model-input" class="model-input" data-cell="9"></canvas>
+          </div>
+          <div class="play-sub">
+            <div class="chart-title" id="infer-pred">prediction: —</div>
+            <div id="prob-bars" class="prob-bars"></div>
+          </div>
+        </div>
+      </div>
+      <details class="explainer">
+        <summary>What a convolution learns</summary>
+        <p>A 3×3 conv filter is a tiny pattern detector: it slides over the image and lights up wherever that pattern appears. The eight first-layer filters below (in the Visualizations panel) each learn a different edge or blob. Blue weights suppress ink, orange weights excite it; after ReLU only the positive responses survive, which is what the activation maps show.</p>
+      </details>
+    </section>
+
+    <!-- Hyperparameters + architecture panel -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>4 · Hyperparameters &amp; architecture</h2>
+      </div>
+      <div class="hyper-row">
+        <label>learning rate <input id="hyper-lr" type="number" step="0.005" min="0.0001" max="1" value="0.05" /></label>
+        <label>momentum <input id="hyper-momentum" type="number" step="0.05" min="0" max="0.999" value="0.9" /></label>
+        <label>batch size
+          <select id="hyper-batch">
+            <option>8</option><option>16</option><option selected>32</option><option>64</option>
+          </select>
+        </label>
+        <span class="muted">applied on Reset · lr decays ×0.5 every 1200 batches (min ×0.1)</span>
+      </div>
+      <div class="arch" aria-label="network architecture">
+        <div class="arch-stage"><div class="arch-box">input</div><div class="arch-shape">1×16×16</div></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-stage"><div class="arch-box arch-conv">conv 3×3×8</div><div class="arch-shape">8×16×16</div><div class="arch-fn">+ReLU</div></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-stage"><div class="arch-box arch-pool">maxpool 2</div><div class="arch-shape">8×8×8</div></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-stage"><div class="arch-box arch-conv">conv 3×3×16</div><div class="arch-shape">16×8×8</div><div class="arch-fn">+ReLU</div></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-stage"><div class="arch-box arch-pool">maxpool 2</div><div class="arch-shape">16×4×4</div></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-stage"><div class="arch-box arch-dense">flatten</div><div class="arch-shape">256</div></div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-stage"><div class="arch-box arch-dense">dense 10</div><div class="arch-shape">10</div><div class="arch-fn">+softmax</div></div>
+        <div class="arch-backend"><span class="arch-dot"></span><span id="arch-backend-tag">executing on CPU</span></div>
+      </div>
+      <details class="explainer">
+        <summary>Why WebGPU makes this fast</summary>
+        <p>Every output pixel of a convolution is independent, so a GPU can compute thousands of them in parallel threads; that is what the WebGPU compute shaders here do. This model is tiny and also trains fine on CPU, but the same kernels scale to much larger nets where the per-thread parallelism is the whole point. The badge in the header reports which backend is actually running.</p>
+      </details>
+    </section>
+
+    <!-- Visualizations panel -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>5 · Visualizations</h2>
+        <div class="controls">
+          <button id="btn-confusion" class="btn primary">Compute confusion matrix</button>
+        </div>
+      </div>
+
+      <div class="viz-block">
+        <div class="chart-title">first-layer filters (conv1 · 8× 3×3, per-filter normalized)</div>
+        <div id="filter-tiles" class="tile-grid"></div>
+      </div>
+
+      <div class="viz-block">
+        <div class="chart-title">conv1 activations · 8 maps · 16×16 (post-ReLU, for your drawing)</div>
+        <div id="conv1-acts" class="act-grid act-grid-8"></div>
+      </div>
+
+      <div class="viz-block">
+        <div class="chart-title">conv2 activations · 16 maps · 8×8 (post-ReLU, for your drawing)</div>
+        <div id="conv2-acts" class="act-grid act-grid-16"></div>
+      </div>
+      <details class="explainer">
+        <summary>Reading the activation maps</summary>
+        <p>Each tile is one filter's response to whatever you drew. Bright pixels mean that filter's pattern fired strongly there. As training progresses, some filters specialize — a vertical-edge detector lights up on the stem of a 1, a curve detector on the bowl of a 0. Maps that stay dark mean that filter rarely activates for this kind of input.</p>
+      </details>
+
+      <div class="viz-block">
+        <div class="chart-title">confusion matrix (test set)</div>
+        <canvas id="confusion-canvas"></canvas>
+        <div id="confusion-status" class="muted">Press the button to evaluate all 600 test samples (runs in the worker, chunked, so the UI stays live).</div>
+      </div>
+    </section>
+
+    <!-- Gradient check panel -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>6 · Gradient check &amp; parity</h2>
+        <div class="controls">
+          <button id="btn-gradcheck" class="btn primary">Run gradient check</button>
+          <button id="btn-parity" class="btn">Backend parity test</button>
+        </div>
+      </div>
+      <p class="muted">Central-difference vs analytic gradients across conv1/conv2/dense weights &amp; biases (eps 1e-3, batch of 8). The parity test runs one forward+backward on a fixed batch of 16 on BOTH backends and reports the max abs diff (PASS &lt; 1e-3); needs WebGPU to be available.</p>
+      <div id="gradcheck-result" class="gradcheck-result"></div>
+      <div id="parity-result" class="gradcheck-result"></div>
+    </section>
+  </main>
+
+  <footer class="footer">Built autonomously by jcode</footer>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>
