@@ -25,6 +25,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/cnjack/jcode/internal/automation"
+	"github.com/cnjack/jcode/internal/browser"
 	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
@@ -143,6 +144,11 @@ type Server struct {
 	// would launch parallel agent sessions mutating the same project directory.
 	autoRunMu       sync.Mutex
 	autoRunInflight map[string]bool
+
+	// browserMgr is the process-wide browser-use manager (extension bridge +
+	// managed Chrome). Shared with per-task Envs so the settings UI and the
+	// agent's browser_* tools drive the same Chrome. nil disables browser use.
+	browserMgr *browser.Manager
 }
 
 // ServerConfig holds the configuration for creating a new Server.
@@ -180,6 +186,7 @@ type ServerConfig struct {
 	Automations         *automation.Store                                                     // optional: automation store (nil in setup mode)
 	AuthToken           string                                                                // bearer token required on non-exempt requests when RequireAuth is set
 	RequireAuth         bool                                                                  // enforce token auth (set when bound to a non-loopback host)
+	BrowserManager      *browser.Manager                                                      // optional: process-wide browser-use manager shared with per-task Envs
 }
 
 // NewServer creates a new web server.
@@ -244,6 +251,7 @@ func NewServer(cfg *ServerConfig) *Server {
 		autoRunInflight:     make(map[string]bool),
 		authToken:           cfg.AuthToken,
 		requireAuth:         cfg.RequireAuth,
+		browserMgr:          cfg.BrowserManager,
 	}
 	// The bootstrap engine is registered (and its pump started) in Start, once
 	// the root context exists.
@@ -335,6 +343,10 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("DELETE /api/automations/{id}", s.handleDeleteAutomation)
 	mux.HandleFunc("POST /api/automations/{id}/run", s.handleRunAutomation)
 	mux.HandleFunc("GET /api/automation-templates", s.handleAutomationTemplates)
+	mux.HandleFunc("GET /api/browser/status", s.handleBrowserStatus)
+	mux.HandleFunc("POST /api/browser/config", s.handleBrowserConfig)
+	mux.HandleFunc("GET /api/browser/ext/ws", s.handleBrowserExtWS)
+	mux.HandleFunc("GET /api/browser/shots/{id}", s.handleBrowserShot)
 	mux.HandleFunc("GET /api/skills", s.handleListSkills)
 	mux.HandleFunc("POST /api/skills/{name}/toggle", s.handleToggleSkill)
 	mux.HandleFunc("GET /api/slash-commands", s.handleSlashCommands)

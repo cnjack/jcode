@@ -216,6 +216,33 @@ type Config struct {
 	// DisabledSkills lists skill names to exclude from the agent (slash commands,
 	// system-prompt descriptions, and the load_skill tool).
 	DisabledSkills []string `json:"disabled_skills,omitempty"`
+
+	// Browser controls the browser-use capability (CDP-driven page control).
+	Browser *BrowserConfig `json:"browser,omitempty"`
+}
+
+// BrowserConfig controls the browser-use capability. See
+// internal-doc/browser-use-design.md.
+type BrowserConfig struct {
+	Enabled    bool   `json:"enabled,omitempty"`
+	Backend    string `json:"backend,omitempty"`     // auto | managed | extension (default auto)
+	ChromePath string `json:"chrome_path,omitempty"` // empty → auto-discover
+	Headless   bool   `json:"headless,omitempty"`    // managed backend
+	Viewport   string `json:"viewport,omitempty"`    // e.g. "1280x720"
+	// Approval holds per-class defaults: "navigate" and "interact" map to
+	// "ask" (default) or "always_allow".
+	Approval map[string]string `json:"approval,omitempty"`
+	// SitePermissions overrides Approval defaults per origin.
+	SitePermissions []BrowserSitePermission `json:"site_permissions,omitempty"`
+	// DevMode unlocks browser_eval / raw CDP (high-risk). Off by default.
+	DevMode bool `json:"dev_mode,omitempty"`
+}
+
+// BrowserSitePermission is a per-origin approval override.
+type BrowserSitePermission struct {
+	Origin   string `json:"origin"`
+	Navigate string `json:"navigate,omitempty"` // ask | allow
+	Interact string `json:"interact,omitempty"` // ask | allow
 }
 
 // TeamConfig controls agent team behavior.

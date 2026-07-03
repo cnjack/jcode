@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -19,6 +20,33 @@ type ApprovalState struct {
 	mode        handler.ApprovalMode // Current approval mode (derived from sessionMode)
 	sessionMode mode.SessionMode     // Unified selector mode (Approval/Plan/Full access)
 	workpath    string               // Current working directory for path detection
+
+	// browserPerm reports whether a browser action class ("navigate"/"interact")
+	// on the given origin is pre-authorized ("always allow" site permission). nil
+	// means "always prompt". Set by the frontend from config so approval.go stays
+	// decoupled from the config layout.
+	browserPerm func(origin, class string) bool
+
+	// browserOrigin reports the origin (scheme://host) of the active browser tab.
+	// Interaction actions (browser_act) carry no URL in their args, so the origin
+	// for a per-site permission check must come from the live session, not the
+	// args. nil means "unknown origin" (→ prompt). Set by the frontend.
+	browserOrigin func() string
+}
+
+// SetBrowserPermFunc installs the site-permission lookup for browser tools.
+func (s *ApprovalState) SetBrowserPermFunc(fn func(origin, class string) bool) {
+	s.mu.Lock()
+	s.browserPerm = fn
+	s.mu.Unlock()
+}
+
+// SetBrowserOriginFunc installs the active-tab origin provider used to scope
+// per-site permissions for browser_act (whose args carry no URL).
+func (s *ApprovalState) SetBrowserOriginFunc(fn func() string) {
+	s.mu.Lock()
+	s.browserOrigin = fn
+	s.mu.Unlock()
 }
 
 type toolProgressNotifier interface {
@@ -132,6 +160,10 @@ var noApprovalNeeded = map[string]bool{
 	"team_send_message": true,
 	"team_list":         true,
 	"team_delete":       true,
+	// Browser read-only tier: inspection never mutates external state.
+	"browser_snapshot":   true,
+	"browser_screenshot": true,
+	"browser_read":       true,
 }
 
 // approvalDecision is the outcome of evaluating a tool call in MANUAL mode.
@@ -208,6 +240,10 @@ func (s *ApprovalState) decide(toolName, toolArgs string) approvalDecision {
 		return decisionAutoApprove
 	}
 
+	if d, ok := s.decideBrowser(toolName, toolArgs); ok {
+		return d
+	}
+
 	switch toolName {
 	case "read":
 		var input struct {
@@ -240,6 +276,81 @@ func (s *ApprovalState) decide(toolName, toolArgs string) approvalDecision {
 	}
 
 	return decisionPrompt
+}
+
+// decideBrowser applies the browser-use approval tiers (see design §3.4). It
+// returns (decision, true) when toolName is a browser tool, else (_, false).
+// The read-only tier (snapshot/screenshot/read) is handled earlier via
+// noApprovalNeeded, so this covers navigate / interact / high-risk.
+func (s *ApprovalState) decideBrowser(toolName, toolArgs string) (approvalDecision, bool) {
+	switch toolName {
+	case "browser_eval":
+		// High-risk: always prompt, never pre-authorized by a site permission.
+		return decisionPrompt, true
+	case "browser_open":
+		origin := originFromArgs(toolArgs, "url")
+		if s.browserPreapproved(origin, "navigate") {
+			return decisionAutoApprove, true
+		}
+		return decisionPrompt, true
+	case "browser_act":
+		// Interaction. The origin comes from the live session (the active tab),
+		// not the args — a click/fill carries no URL — so per-site interact=allow
+		// and the interact class default can actually take effect.
+		if s.browserPreapproved(s.browserActiveOrigin(), "interact") {
+			return decisionAutoApprove, true
+		}
+		return decisionPrompt, true
+	case "browser_tabs":
+		var in struct {
+			Op string `json:"op"`
+		}
+		_ = json.Unmarshal([]byte(toolArgs), &in)
+		switch in.Op {
+		case "", "list", "select":
+			return decisionAutoApprove, true // read-only tab ops
+		default: // new/claim/close mutate the controlled set
+			return decisionPrompt, true
+		}
+	}
+	return decisionPrompt, false
+}
+
+// browserPreapproved consults the site-permission hook (nil → always prompt).
+func (s *ApprovalState) browserPreapproved(origin, class string) bool {
+	s.mu.Lock()
+	fn := s.browserPerm
+	s.mu.Unlock()
+	if fn == nil {
+		return false
+	}
+	return fn(origin, class)
+}
+
+// browserActiveOrigin returns the active browser tab's origin (or "" when no
+// provider is set or no tab is open).
+func (s *ApprovalState) browserActiveOrigin() string {
+	s.mu.Lock()
+	fn := s.browserOrigin
+	s.mu.Unlock()
+	if fn == nil {
+		return ""
+	}
+	return fn()
+}
+
+// originFromArgs extracts scheme://host from a URL arg for origin-scoped rules.
+func originFromArgs(toolArgs, key string) string {
+	var m map[string]any
+	if json.Unmarshal([]byte(toolArgs), &m) != nil {
+		return ""
+	}
+	raw, _ := m[key].(string)
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 // RequestApproval is the agent.ApprovalFunc implementation.

@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { ChevronDownIcon } from '@heroicons/vue/24/outline'
 import { useI18n } from 'vue-i18n'
 import type { ToolCall, TodoItem } from '@/types/api'
+import { apiBase } from '@/composables/apiBase'
 import TaskList from './TaskList.vue'
 import AskUserCard from './AskUserCard.vue'
 
@@ -38,7 +39,16 @@ const renderType = computed(() => {
   if (name === 'team_send_message') return 'team-message'
   if (name === 'team_create') return 'team-create'
   if (name === 'team_spawn') return 'team-spawn'
+  if (name === 'browser_screenshot' && screenshotRef.value) return 'browser-shot'
   return 'generic'
+})
+
+// Extract the image_ref emitted by browser_screenshot so the shot renders
+// inline (fetched over HTTP; the WS frame never carries the bytes).
+const screenshotRef = computed(() => {
+  const output = props.tool.output || ''
+  const m = output.match(/image_ref=(\/api\/browser\/shots\/[\w-]+\.png)/)
+  return m ? apiBase + m[1] : ''
 })
 
 // ─── Skill renderer helpers ───
@@ -575,6 +585,13 @@ function formatArgs(args: string): string {
           style="color: var(--color-muted-foreground); font-style: italic; white-space: pre-wrap"
         >{{ truncate(teamMsgData.message, 200) }}</div>
         <div v-if="tool.error" class="mt-1.5 text-xs font-mono" style="color: var(--color-destructive)">{{ tool.error }}</div>
+      </div>
+
+      <!-- ═══════ Browser screenshot ═══════ -->
+      <div v-else-if="renderType === 'browser-shot'" class="px-3 py-2" style="background: var(--color-surface)">
+        <a :href="screenshotRef" target="_blank" rel="noopener">
+          <img :src="screenshotRef" alt="page screenshot" class="max-w-full rounded-md border" style="border-color: var(--color-border); max-height: 320px" />
+        </a>
       </div>
 
       <!-- ═══════ Generic fallback ═══════ -->
