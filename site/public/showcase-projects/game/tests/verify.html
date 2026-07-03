@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8" /><title>VERIFY</title></head>
+<body>
+<div id="r">running</div>
+<iframe id="f" src="../index.html" style="width:1280px;height:720px;border:0"></iframe>
+<script>
+  const f = document.getElementById('f');
+  const errors = [];
+  f.addEventListener('load', () => {
+    const w = f.contentWindow;
+    w.addEventListener('error', (e) => errors.push('error: ' + (e.message || (e.error && e.error.message) || 'unknown')));
+    w.addEventListener('unhandledrejection', (e) => errors.push('rejection: ' + (e.reason && e.reason.message)));
+    const oe = w.console.error.bind(w.console);
+    const ow = w.console.warn.bind(w.console);
+    w.console.error = (...a) => { errors.push('console.error: ' + a.map(String).join(' ')); oe(...a); };
+    w.console.warn  = (...a) => { errors.push('console.warn: '  + a.map(String).join(' ')); ow(...a); };
+  });
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  async function run() {
+    let w = null;
+    for (let i = 0; i < 60; i++) { w = f.contentWindow; if (w && w.__game) break; await wait(100); }
+    const g = w && w.__game;
+    if (!g) { finish(false, ['NO __GAME EXPOSED']); return; }
+    const s = [];
+    s.push('init phase=' + g.state.phase + ' gold=' + g.state.gold + ' lives=' + g.state.lives);
+    g.spawnWave();
+    s.push('spawnWave -> phase=' + g.state.phase + ' wave=' + g.state.wave);
+    const pad = g.pads.find((p) => !p.occupied);
+    const placed = g.place('pulse', pad.gx, pad.gy);
+    s.push('place=' + placed + ' gold=' + g.state.gold + ' towers=' + g.towers.length);
+    const goldBefore = g.state.gold;
+    g.fastForward(40);
+    s.push('ff40 -> phase=' + g.state.phase + ' gold=' + g.state.gold + ' score=' + g.state.score + ' enemies=' + g.enemies.length);
+    const killed = g.state.score > 0 && g.state.gold > goldBefore;
+    finish(placed && killed, s);
+  }
+  function finish(ok, steps) {
+    const msg = (ok ? 'CDVERIFY_OK' : 'CDVERIFY_FAIL') + ' :: ' + steps.join(' | ') + ' :: ERRORS=[' + errors.join(' ; ') + ']';
+    document.getElementById('r').textContent = msg;
+    document.title = ok ? 'CDVERIFY_OK' : 'CDVERIFY_FAIL';
+    console.log(msg); // surfaces in Chrome --enable-logging=stderr
+    window.__done = true;
+  }
+  setTimeout(run, 600);
+</script>
+</body>
+</html>

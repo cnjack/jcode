@@ -1,0 +1,1991 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Jui — a zero-dependency UI component library. Design tokens and accessible components in pure HTML, CSS and vanilla JS." />
+  <title>Jui — UI component library</title>
+
+  <!-- Inline data-URI favicon (Jui "J" mark) so no /favicon.ico request is made. -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%236d5cf0'/%3E%3Cpath d='M7 5v6a5 5 0 0 0 10 0' fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round'/%3E%3Cpath d='M7 19h10' stroke='%23fff' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E" />
+
+  <!-- Apply persisted/system theme BEFORE first paint to avoid flash. -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("jui-theme");
+        if (!t) {
+          t = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+        var r = document.documentElement;
+        r.setAttribute("data-theme", t);
+        /* Restore theme-customizer choices (accent hue / radius / density) before first paint. */
+        var c = JSON.parse(localStorage.getItem("jui-customizer") || "{}");
+        if (c.hue != null) r.style.setProperty("--jui-accent-h", c.hue);
+        if (c.radius != null) r.style.setProperty("--jui-radius-scale", c.radius);
+        if (c.density != null) r.setAttribute("data-density", c.density);
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "light");
+      }
+    })();
+  </script>
+
+  <link rel="stylesheet" href="./css/jui.css" />
+  <link rel="stylesheet" href="./css/docs.css" />
+</head>
+<body class="docs-shell">
+
+  <!-- ============================ TOP BAR ============================ -->
+  <header class="docs-topbar">
+    <button id="navToggle" class="docs-iconbtn docs-hamburger" aria-label="Toggle navigation" aria-expanded="false" aria-controls="docsSidebar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+
+    <a class="docs-brand" href="#introduction">
+      <span class="docs-brand__mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v7a6 6 0 0 0 12 0"/><path d="M6 20h12"/></svg>
+      </span>
+      Jui
+      <span class="docs-brand__tagline">UI components, zero deps</span>
+    </a>
+
+    <div class="docs-topbar__spacer"></div>
+
+    <button id="cmdkBtn" class="docs-cmdk-btn" data-jui="command-palette" aria-label="Open command palette">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <span class="docs-cmdk-btn__label">Search</span>
+      <span class="docs-cmdk-btn__kbd">⌘K</span>
+    </button>
+
+    <div class="jui-popover-anchor">
+      <button id="themeCustomizerBtn" class="docs-iconbtn" data-jui="popover" aria-expanded="false" data-target="#themeCustomizer" aria-label="Customize theme" title="Customize theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </button>
+      <div class="jui-popover" id="themeCustomizer" hidden>
+        <div class="docs-customizer">
+          <div class="docs-customizer__row">
+            <span class="docs-customizer__label">Accent hue</span>
+            <div class="docs-customizer__hue-row">
+              <input id="tcHue" class="docs-hue" type="range" min="0" max="360" step="1" value="245" aria-label="Accent hue" />
+              <span id="tcHueVal" class="docs-hue-val">245°</span>
+            </div>
+          </div>
+          <div class="docs-customizer__row">
+            <span class="docs-customizer__label">Radius</span>
+            <div class="docs-segmented">
+              <button type="button" data-tc-radius="0.35">Sharp</button>
+              <button type="button" data-tc-radius="1" class="is-active">Default</button>
+              <button type="button" data-tc-radius="1.7">Round</button>
+            </div>
+          </div>
+          <div class="docs-customizer__row">
+            <span class="docs-customizer__label">Density</span>
+            <div class="docs-segmented">
+              <button type="button" data-tc-density="comfortable" class="is-active">Comfortable</button>
+              <button type="button" data-tc-density="compact">Compact</button>
+            </div>
+          </div>
+          <div class="docs-customizer__row" style="display:flex;justify-content:flex-end">
+            <button type="button" id="tcReset" class="jui-btn jui-btn--ghost jui-btn--sm">Reset</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <button id="themeToggle" class="docs-iconbtn" aria-label="Toggle color theme" title="Toggle theme">
+      <svg class="docs-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <svg class="docs-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+  </header>
+
+  <div id="docsBackdrop" class="docs-backdrop" aria-hidden="true"></div>
+
+  <div class="docs-body">
+
+    <!-- ============================ SIDEBAR =========================== -->
+    <aside id="docsSidebar" class="docs-sidebar" aria-label="Documentation navigation">
+      <div class="docs-search-wrap">
+        <span class="docs-search-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        </span>
+        <input id="navFilter" class="docs-search" type="search" placeholder="Filter components…" autocomplete="off" aria-label="Filter navigation" />
+      </div>
+
+      <nav id="docsNav">
+        <div class="docs-nav__group">
+          <p class="docs-nav__title">Getting started</p>
+          <ul class="docs-nav__list">
+            <li><a class="docs-nav__link" href="#introduction">Introduction</a></li>
+            <li><a class="docs-nav__link" href="#theming">Theming</a></li>
+            <li><a class="docs-nav__link" href="#tokens">Tokens</a></li>
+          </ul>
+        </div>
+        <div class="docs-nav__group">
+          <p class="docs-nav__title">Forms</p>
+          <ul class="docs-nav__list">
+            <li><a class="docs-nav__link" href="#button">Button</a></li>
+            <li><a class="docs-nav__link" href="#input">Input</a></li>
+            <li><a class="docs-nav__link" href="#textarea">Textarea</a></li>
+            <li><a class="docs-nav__link" href="#select">Select</a></li>
+            <li><a class="docs-nav__link" href="#checkbox">Checkbox</a></li>
+            <li><a class="docs-nav__link" href="#radio">Radio</a></li>
+            <li><a class="docs-nav__link" href="#switch">Switch</a></li>
+            <li><a class="docs-nav__link" href="#slider">Slider</a></li>
+          </ul>
+        </div>
+        <div class="docs-nav__group">
+          <p class="docs-nav__title">Data display</p>
+          <ul class="docs-nav__list">
+            <li><a class="docs-nav__link" href="#badge">Badge</a></li>
+            <li><a class="docs-nav__link" href="#tag">Tag</a></li>
+            <li><a class="docs-nav__link" href="#card">Card</a></li>
+            <li><a class="docs-nav__link" href="#avatar">Avatar</a></li>
+            <li><a class="docs-nav__link" href="#kbd">Kbd</a></li>
+            <li><a class="docs-nav__link" href="#accordion">Accordion</a></li>
+          </ul>
+        </div>
+        <div class="docs-nav__group">
+          <p class="docs-nav__title">Data</p>
+          <ul class="docs-nav__list">
+            <li><a class="docs-nav__link" href="#table">Table</a></li>
+            <li><a class="docs-nav__link" href="#pagination">Pagination</a></li>
+            <li><a class="docs-nav__link" href="#stat">Stat</a></li>
+            <li><a class="docs-nav__link" href="#progress">Progress</a></li>
+            <li><a class="docs-nav__link" href="#skeleton">Skeleton</a></li>
+            <li><a class="docs-nav__link" href="#spinner">Spinner</a></li>
+            <li><a class="docs-nav__link" href="#empty">Empty state</a></li>
+          </ul>
+        </div>
+        <div class="docs-nav__group">
+          <p class="docs-nav__title">Navigation</p>
+          <ul class="docs-nav__list">
+            <li><a class="docs-nav__link" href="#tabs">Tabs</a></li>
+            <li><a class="docs-nav__link" href="#breadcrumbs">Breadcrumbs</a></li>
+            <li><a class="docs-nav__link" href="#stepper">Stepper</a></li>
+            <li><a class="docs-nav__link" href="#command-palette">Command palette</a></li>
+          </ul>
+        </div>
+        <div class="docs-nav__group">
+          <p class="docs-nav__title">Overlay</p>
+          <ul class="docs-nav__list">
+            <li><a class="docs-nav__link" href="#modal">Modal</a></li>
+            <li><a class="docs-nav__link" href="#drawer">Drawer</a></li>
+            <li><a class="docs-nav__link" href="#dropdown">Dropdown</a></li>
+            <li><a class="docs-nav__link" href="#tooltip">Tooltip</a></li>
+            <li><a class="docs-nav__link" href="#popover">Popover</a></li>
+          </ul>
+        </div>
+        <div class="docs-nav__group">
+          <p class="docs-nav__title">Feedback</p>
+          <ul class="docs-nav__list">
+            <li><a class="docs-nav__link" href="#alert">Alert</a></li>
+            <li><a class="docs-nav__link" href="#toast">Toast</a></li>
+          </ul>
+        </div>
+        <div class="docs-nav__group">
+          <p class="docs-nav__title">Examples</p>
+          <ul class="docs-nav__list">
+            <li><a class="docs-nav__link" href="#dashboard">Dashboard</a></li>
+          </ul>
+        </div>
+        <p class="docs-nav__empty">No matches</p>
+      </nav>
+    </aside>
+
+    <!-- ============================= MAIN ============================= -->
+    <main class="docs-main">
+
+      <!-- ------------------------ INTRODUCTION ---------------------- -->
+      <section id="introduction" class="docs-section">
+        <div class="docs-hero">
+          <span class="docs-hero__eyebrow">v3.0 · Round 3</span>
+          <h1 class="docs-hero__title">Build interfaces with Jui</h1>
+          <p class="docs-hero__text">A tiny, opinionated component library and design-token system written in plain HTML, CSS and vanilla JavaScript. No build step, no frameworks, no dependencies.</p>
+          <div class="docs-hero__actions">
+            <a class="jui-btn" href="#button">Get started
+              <span class="jui-btn__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg></span>
+            </a>
+            <a class="jui-btn jui-btn--soft" href="#theming">Explore tokens</a>
+          </div>
+        </div>
+
+        <p class="docs-lead" style="margin-top:24px">Jui ships a token-driven theming engine and thirty-plus production-ready components — from form controls to focus-trapping overlays — all keyboard accessible with correct ARIA wiring. Everything you see on this page — the sidebar, the code blocks, the modals — is rendered with Jui itself.</p>
+
+        <div class="docs-features">
+          <div class="docs-feature"><div class="docs-feature__t">Zero dependencies</div><div class="docs-feature__d">One CSS file, one JS file. Drop it in and go.</div></div>
+          <div class="docs-feature"><div class="docs-feature__t">Token theming</div><div class="docs-feature__d">Accent, neutrals &amp; semantics as CSS custom properties.</div></div>
+          <div class="docs-feature"><div class="docs-feature__t">Light &amp; dark</div><div class="docs-feature__d">A genuinely designed dark theme, not an inversion.</div></div>
+          <div class="docs-feature"><div class="docs-feature__t">Accessible</div><div class="docs-feature__d">Focus-visible rings, reduced-motion and ARIA wiring.</div></div>
+        </div>
+
+        <h3 class="docs-subhead">Quick start</h3>
+        <p class="docs-prose">Include the two files and you're done. No bundler required — open the page over a static server and it just works. Tip: press <span class="jui-kbd">/</span> to filter the sidebar, or <span class="jui-kbd">Ctrl</span> + <span class="jui-kbd">K</span> anywhere to open the command palette.</p>
+
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;link rel="stylesheet" href="./css/jui.css"&gt;
+&lt;script src="./js/jui.js"&gt;&lt;/script&gt;
+
+&lt;!-- a button --&gt;
+&lt;button class="jui-btn"&gt;Click me&lt;/button&gt;</code></pre>
+        </div>
+      </section>
+
+      <!-- ---------------------------- THEMING ----------------------- -->
+      <section id="theming" class="docs-section">
+        <div class="docs-anchor"><h2>Theming</h2><a class="docs-hash" href="#theming" aria-label="Link to Theming">#</a></div>
+        <p class="docs-lead">Jui reads its theme from the <code>data-theme</code> attribute on the <code>&lt;html&gt;</code> element (<code>light</code> or <code>dark</code>). The entire palette flows from CSS custom properties, so you can re-skin the library by overriding a handful of tokens.</p>
+
+        <h3 class="docs-subhead">Recolor the accent live</h3>
+        <p class="docs-prose">The accent is composed from H/S/L pieces, so changing <code>--jui-accent-h</code> recolors every accent surface on the page. Try it:</p>
+
+        <div class="docs-swatches">
+          <button class="docs-swatch" data-h="221" data-s="83%" data-l="56%" aria-label="Blue accent"><span class="docs-swatch__chip" style="background:hsl(221 83% 56%)"></span><span class="docs-swatch__label">Blue</span></button>
+          <button class="docs-swatch is-active" data-h="245" data-s="75%" data-l="56%" aria-label="Violet accent"><span class="docs-swatch__chip" style="background:hsl(245 75% 59%)"></span><span class="docs-swatch__label">Violet</span></button>
+          <button class="docs-swatch" data-h="152" data-s="56%" data-l="45%" aria-label="Green accent"><span class="docs-swatch__chip" style="background:hsl(152 56% 45%)"></span><span class="docs-swatch__label">Green</span></button>
+          <button class="docs-swatch" data-h="28" data-s="90%" data-l="52%" aria-label="Orange accent"><span class="docs-swatch__chip" style="background:hsl(28 90% 52%)"></span><span class="docs-swatch__label">Orange</span></button>
+        </div>
+
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">CSS</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>:root {
+  --jui-accent-h: 152;   /* hue   */
+  --jui-accent-s: 56%;   /* saturation */
+  --jui-accent-l: 45%;   /* lightness  */
+}
+/* --jui-accent, hover/active/soft/contrast derive automatically */</code></pre>
+        </div>
+
+        <h3 class="docs-subhead">Dark mode</h3>
+        <p class="docs-prose">Flip <code>data-theme="dark"</code> on <code>&lt;html&gt;</code> — surfaces desaturate, borders soften, shadows recede and the accent lightens for contrast. Use the sun/moon button in the top bar to try it now.</p>
+      </section>
+
+      <!-- ---------------------------- TOKENS ------------------------ -->
+      <section id="tokens" class="docs-section">
+        <div class="docs-anchor"><h2>Tokens</h2><a class="docs-hash" href="#tokens" aria-label="Link to Tokens">#</a></div>
+        <p class="docs-lead">A reference of the core design tokens. All values are CSS custom properties scoped to <code>:root</code> and switch automatically in dark mode.</p>
+
+        <div class="docs-table-wrap">
+          <table class="docs-table">
+            <thead><tr><th>Token</th><th>Value</th><th>Purpose</th></tr></thead>
+            <tbody>
+              <tr><td><span class="docs-swatch-inline" style="background:var(--jui-accent)"></span><code>--jui-accent</code></td><td>Accent</td><td>Primary actions &amp; focus</td></tr>
+              <tr><td><span class="docs-swatch-inline" style="background:var(--jui-success)"></span><code>--jui-success</code></td><td>Status</td><td>Confirmations &amp; positive states</td></tr>
+              <tr><td><span class="docs-swatch-inline" style="background:var(--jui-warning)"></span><code>--jui-warning</code></td><td>Status</td><td>Cautions &amp; pending states</td></tr>
+              <tr><td><span class="docs-swatch-inline" style="background:var(--jui-danger)"></span><code>--jui-danger</code></td><td>Status</td><td>Errors &amp; destructive actions</td></tr>
+              <tr><td><span class="docs-swatch-inline" style="background:var(--jui-info)"></span><code>--jui-info</code></td><td>Status</td><td>Neutral informational cues</td></tr>
+              <tr><td><span class="docs-swatch-inline" style="background:var(--jui-bg)"></span><code>--jui-bg</code></td><td>Surface</td><td>Page background</td></tr>
+              <tr><td><span class="docs-swatch-inline" style="background:var(--jui-surface)"></span><code>--jui-surface</code></td><td>Surface</td><td>Cards, inputs &amp; panels</td></tr>
+              <tr><td><span class="docs-swatch-inline" style="background:var(--jui-border)"></span><code>--jui-border</code></td><td>Border</td><td>Default hairline borders</td></tr>
+              <tr><td><span class="docs-swatch-inline" style="background:var(--jui-text)"></span><code>--jui-text</code></td><td>Text</td><td>Primary copy color</td></tr>
+              <tr><td><code>--jui-sp-4</code></td><td>16px</td><td>Spacing unit (scale 1–8)</td></tr>
+              <tr><td><code>--jui-r-md</code></td><td>8px</td><td>Default radius (sm/md/lg/full)</td></tr>
+              <tr><td><code>--jui-shadow-md</code></td><td>Shadow</td><td>Elevation (sm/md/lg)</td></tr>
+              <tr><td><code>--jui-transition</code></td><td>150ms</td><td>Default motion duration</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ---------------------------- BUTTON ------------------------ -->
+      <section id="button" class="docs-section">
+        <div class="docs-anchor"><h2>Button</h2><a class="docs-hash" href="#button" aria-label="Link to Button">#</a></div>
+        <p class="docs-lead">A versatile action trigger with four variants, three color schemes, three sizes, plus disabled and loading states and icon slots.</p>
+
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Variants</span>
+            <div class="docs-demo__row">
+              <button class="jui-btn">Solid</button>
+              <button class="jui-btn jui-btn--outline">Outline</button>
+              <button class="jui-btn jui-btn--ghost">Ghost</button>
+              <button class="jui-btn jui-btn--soft">Soft</button>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Color schemes</span>
+            <div class="docs-demo__row">
+              <button class="jui-btn">Accent</button>
+              <button class="jui-btn jui-btn--neutral">Neutral</button>
+              <button class="jui-btn jui-btn--danger">Danger</button>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Sizes</span>
+            <div class="docs-demo__row">
+              <button class="jui-btn jui-btn--sm">Small</button>
+              <button class="jui-btn">Medium</button>
+              <button class="jui-btn jui-btn--lg">Large</button>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">With icons</span>
+            <div class="docs-demo__row">
+              <button class="jui-btn"><span class="jui-btn__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>Add</button>
+              <button class="jui-btn jui-btn--outline">Download<span class="jui-btn__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg></span></button>
+              <button class="jui-btn jui-btn--danger"><span class="jui-btn__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></span>Delete</button>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">States</span>
+            <div class="docs-demo__row">
+              <button class="jui-btn" disabled>Disabled</button>
+              <button class="jui-btn jui-btn--outline" data-loading>Loading</button>
+              <button class="jui-btn" data-jui="loading-toggle">Click to load</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;button class="jui-btn"&gt;Solid&lt;/button&gt;
+&lt;button class="jui-btn jui-btn--outline jui-btn--sm"&gt;Outline&lt;/button&gt;
+&lt;button class="jui-btn jui-btn--soft jui-btn--danger"&gt;Soft danger&lt;/button&gt;
+
+&lt;!-- loading: set data-loading, or use data-jui="loading-toggle" --&gt;
+&lt;button class="jui-btn" data-loading&gt;Saving…&lt;/button&gt;</code></pre>
+        </div>
+      </section>
+
+      <!-- ----------------------------- INPUT ------------------------ -->
+      <section id="input" class="docs-section">
+        <div class="docs-anchor"><h2>Input</h2><a class="docs-hash" href="#input" aria-label="Link to Input">#</a></div>
+        <p class="docs-lead">A field wrapper with label, help text, validation, prefix/suffix adornments and three sizes.</p>
+
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Basic</span>
+            <div class="docs-demo__col">
+              <div class="jui-field">
+                <label class="jui-field__label" for="i1">Full name</label>
+                <div class="jui-control"><input id="i1" class="jui-input" type="text" placeholder="Ada Lovelace" /></div>
+                <p class="jui-field__help">As it appears on your account.</p>
+              </div>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">With prefix / suffix icons</span>
+            <div class="docs-demo__col">
+              <div class="jui-field">
+                <label class="jui-field__label" for="i2">Email</label>
+                <div class="jui-control">
+                  <span class="jui-control__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></span>
+                  <input id="i2" class="jui-input" type="email" placeholder="you@example.com" />
+                </div>
+              </div>
+              <div class="jui-field">
+                <label class="jui-field__label" for="i3">Budget</label>
+                <div class="jui-control">
+                  <span class="jui-control__adornment">$</span>
+                  <input id="i3" class="jui-input" type="text" value="1,200" />
+                  <span class="jui-control__adornment">USD</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">States &amp; sizes</span>
+            <div class="docs-demo__col">
+              <div class="jui-field jui-field--error">
+                <label class="jui-field__label" for="i4">Username</label>
+                <div class="jui-control"><input id="i4" class="jui-input" type="text" value="a" /></div>
+                <p class="jui-field__error"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>That username is too short.</p>
+              </div>
+              <div class="jui-field jui-field--sm">
+                <label class="jui-field__label" for="i5">Small</label>
+                <div class="jui-control"><input id="i5" class="jui-input" type="text" placeholder="Small input" /></div>
+              </div>
+              <div class="jui-field jui-field--disabled">
+                <label class="jui-field__label" for="i6">Disabled</label>
+                <div class="jui-control"><input id="i6" class="jui-input" type="text" value="Read-only" disabled /></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;div class="jui-field"&gt;
+  &lt;label class="jui-field__label" for="email"&gt;Email&lt;/label&gt;
+  &lt;div class="jui-control"&gt;
+    &lt;span class="jui-control__icon"&gt;…&lt;/span&gt;
+    &lt;input id="email" class="jui-input" type="email" /&gt;
+  &lt;/div&gt;
+  &lt;p class="jui-field__help"&gt;We never share it.&lt;/p&gt;
+&lt;/div&gt;
+
+&lt;!-- error state --&gt;
+&lt;div class="jui-field jui-field--error"&gt; … &lt;/div&gt;</code></pre>
+        </div>
+      </section>
+
+      <!-- --------------------------- TEXTAREA ----------------------- -->
+      <section id="textarea" class="docs-section">
+        <div class="docs-anchor"><h2>Textarea</h2><a class="docs-hash" href="#textarea" aria-label="Link to Textarea">#</a></div>
+        <p class="docs-lead">Same wrapper pattern as Input, with auto-growing height. Type below — the box expands to fit.</p>
+
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Auto-grow</span>
+            <div class="docs-demo__col">
+              <div class="jui-field">
+                <label class="jui-field__label" for="t1">Bio</label>
+                <textarea id="t1" class="jui-textarea" data-jui="autogrow" placeholder="Tell us about yourself…">Jui is a tiny component library.</textarea>
+                <p class="jui-field__help">Add a few lines and watch it grow.</p>
+              </div>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">States</span>
+            <div class="docs-demo__col">
+              <div class="jui-field jui-field--error">
+                <label class="jui-field__label" for="t2">Feedback</label>
+                <textarea id="t2" class="jui-textarea">x</textarea>
+                <p class="jui-field__error">Please write at least 10 characters.</p>
+              </div>
+              <div class="jui-field jui-field--disabled">
+                <label class="jui-field__label" for="t3">Notes</label>
+                <textarea id="t3" class="jui-textarea" disabled>Disabled content</textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;div class="jui-field"&gt;
+  &lt;label class="jui-field__label" for="bio"&gt;Bio&lt;/label&gt;
+  &lt;textarea id="bio" class="jui-textarea" data-jui="autogrow"&gt;&lt;/textarea&gt;
+&lt;/div&gt;</code></pre>
+        </div>
+      </section>
+
+      <!-- ----------------------------- BADGE ------------------------ -->
+      <section id="badge" class="docs-section">
+        <div class="docs-anchor"><h2>Badge</h2><a class="docs-hash" href="#badge" aria-label="Link to Badge">#</a></div>
+        <p class="docs-lead">Compact status labels. Solid and soft styles across every semantic color, with an optional leading dot.</p>
+
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Solid</span>
+            <div class="docs-demo__row docs-demo__row--tight">
+              <span class="jui-badge">Accent</span>
+              <span class="jui-badge jui-badge--neutral">Neutral</span>
+              <span class="jui-badge jui-badge--success">Success</span>
+              <span class="jui-badge jui-badge--warning">Warning</span>
+              <span class="jui-badge jui-badge--danger">Danger</span>
+              <span class="jui-badge jui-badge--info">Info</span>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Soft</span>
+            <div class="docs-demo__row docs-demo__row--tight">
+              <span class="jui-badge jui-badge--soft">Accent</span>
+              <span class="jui-badge jui-badge--soft jui-badge--neutral">Neutral</span>
+              <span class="jui-badge jui-badge--soft jui-badge--success">Success</span>
+              <span class="jui-badge jui-badge--soft jui-badge--warning">Warning</span>
+              <span class="jui-badge jui-badge--soft jui-badge--danger">Danger</span>
+              <span class="jui-badge jui-badge--soft jui-badge--info">Info</span>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Dot &amp; sizes</span>
+            <div class="docs-demo__row docs-demo__row--tight">
+              <span class="jui-badge jui-badge--soft jui-badge--success"><span class="jui-badge__dot"></span>Online</span>
+              <span class="jui-badge jui-badge--sm">Small</span>
+              <span class="jui-badge">Medium</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;span class="jui-badge jui-badge--success"&gt;Success&lt;/span&gt;
+&lt;span class="jui-badge jui-badge--soft jui-badge--info"&gt;Info&lt;/span&gt;
+&lt;span class="jui-badge jui-badge--sm jui-badge--neutral"&gt;
+  &lt;span class="jui-badge__dot"&gt;&lt;/span&gt;New
+&lt;/span&gt;</code></pre>
+        </div>
+      </section>
+
+      <!-- ------------------------------ TAG ------------------------- -->
+      <section id="tag" class="docs-section">
+        <div class="docs-anchor"><h2>Tag / Chip</h2><a class="docs-hash" href="#tag" aria-label="Link to Tag">#</a></div>
+        <p class="docs-lead">Filterable chips with optional leading icon and a dismiss button. Click an × to remove a tag.</p>
+
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Tints</span>
+            <div class="docs-demo__row docs-demo__row--tight">
+              <span class="jui-tag">Neutral</span>
+              <span class="jui-tag jui-tag--accent">Accent</span>
+              <span class="jui-tag jui-tag--success">Success</span>
+              <span class="jui-tag jui-tag--warning">Warning</span>
+              <span class="jui-tag jui-tag--danger">Danger</span>
+              <span class="jui-tag jui-tag--info">Info</span>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">With icon</span>
+            <div class="docs-demo__row docs-demo__row--tight">
+              <span class="jui-tag jui-tag--accent"><span class="jui-tag__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m5 12 5 5L20 7"/></svg></span>Verified</span>
+              <span class="jui-tag"><span class="jui-tag__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></span>Layer</span>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Dismissable — click ×</span>
+            <div class="docs-demo__row docs-demo__row--tight" data-jui-tag-host>
+              <span class="jui-tag" data-jui-dismissible>React<span class="jui-tag__dismiss" data-jui-dismiss role="button" tabindex="0" aria-label="Remove"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></span></span>
+              <span class="jui-tag" data-jui-dismissible>TypeScript<span class="jui-tag__dismiss" data-jui-dismiss role="button" tabindex="0" aria-label="Remove"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></span></span>
+              <span class="jui-tag jui-tag--accent" data-jui-dismissible>Jui<span class="jui-tag__dismiss" data-jui-dismiss role="button" tabindex="0" aria-label="Remove"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></span></span>
+              <span class="jui-tag jui-tag--success" data-jui-dismissible>CSS<span class="jui-tag__dismiss" data-jui-dismiss role="button" tabindex="0" aria-label="Remove"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></span></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;span class="jui-tag jui-tag--accent" data-jui-dismissible&gt;
+  Verified
+  &lt;button class="jui-tag__dismiss" data-jui-dismiss aria-label="Remove"&gt;
+    &lt;svg&gt;…&lt;/svg&gt;
+  &lt;/button&gt;
+&lt;/span&gt;</code></pre>
+        </div>
+      </section>
+
+      <!-- ----------------------------- CARD ------------------------- -->
+      <section id="card" class="docs-section">
+        <div class="docs-anchor"><h2>Card</h2><a class="docs-hash" href="#card" aria-label="Link to Card">#</a></div>
+        <p class="docs-lead">A flexible container with header, body and footer sections. Hoverable, clickable and horizontal-media variants included.</p>
+
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Variants</span>
+            <div class="docs-demo__row" style="align-items:stretch">
+              <article class="jui-card" style="flex:1 1 220px; max-width:260px">
+                <div class="jui-card__body">
+                  <h3 class="jui-card__title">Base card</h3>
+                  <p class="jui-card__subtitle">A clean surface for grouping content.</p>
+                </div>
+              </article>
+              <article class="jui-card jui-card--hoverable" style="flex:1 1 220px; max-width:260px">
+                <div class="jui-card__body">
+                  <h3 class="jui-card__title">Hoverable</h3>
+                  <p class="jui-card__subtitle">Lifts and gains a shadow on hover.</p>
+                </div>
+              </article>
+              <article class="jui-card jui-card--clickable" tabindex="0" style="flex:1 1 220px; max-width:260px">
+                <div class="jui-card__body">
+                  <h3 class="jui-card__title">Clickable</h3>
+                  <p class="jui-card__subtitle">Whole-card focus &amp; lift.</p>
+                </div>
+              </article>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">With header &amp; footer</span>
+            <div class="docs-demo__row">
+              <article class="jui-card" style="flex:1 1 280px; max-width:340px">
+                <div class="jui-card__header">
+                  <h3 class="jui-card__title">Subscription</h3>
+                  <p class="jui-card__subtitle">Manage your plan</p>
+                </div>
+                <div class="jui-card__body">
+                  <p style="margin:0;color:var(--jui-text-muted);font-size:var(--jui-fs-sm)">You are on the <strong>Pro</strong> plan, renewing monthly.</p>
+                </div>
+                <div class="jui-card__footer">
+                  <button class="jui-btn jui-btn--sm jui-btn--soft">Manage</button>
+                  <button class="jui-btn jui-btn--sm jui-btn--ghost jui-btn--danger">Cancel</button>
+                </div>
+              </article>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Horizontal media</span>
+            <div class="docs-demo__row">
+              <article class="jui-card jui-card--horizontal" style="flex:1 1 320px; max-width:420px">
+                <div class="jui-card__media">
+                  <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="12" width="48" height="40" rx="6"/><path d="M8 24h48"/><circle cx="16" cy="18" r="1.6"/><path d="m24 36 6 6 10-12"/></svg>
+                </div>
+                <div class="jui-card__body">
+                  <h3 class="jui-card__title">Analytics</h3>
+                  <p class="jui-card__subtitle">Track adoption in real time.</p>
+                </div>
+              </article>
+            </div>
+          </div>
+        </div>
+
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;article class="jui-card jui-card--hoverable"&gt;
+  &lt;div class="jui-card__header"&gt;
+    &lt;h3 class="jui-card__title"&gt;Title&lt;/h3&gt;
+  &lt;/div&gt;
+  &lt;div class="jui-card__body"&gt; … &lt;/div&gt;
+  &lt;div class="jui-card__footer"&gt; … &lt;/div&gt;
+&lt;/article&gt;</code></pre>
+        </div>
+      </section>
+
+      <!-- ---------------------------- AVATAR ------------------------ -->
+      <section id="avatar" class="docs-section">
+        <div class="docs-anchor"><h2>Avatar</h2><a class="docs-hash" href="#avatar" aria-label="Link to Avatar">#</a></div>
+        <p class="docs-lead">Image or initials avatars with deterministic gradient backgrounds, sizes, shapes, status dots and an overlapping group.</p>
+
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Image &amp; initials</span>
+            <div class="docs-demo__row docs-demo__row--tight">
+              <span class="jui-avatar jui-avatar--circle" aria-label="User avatar">
+                <svg viewBox="0 0 48 48" role="img" aria-hidden="true"><rect width="48" height="48" fill="hsl(245 70% 60%)"/><circle cx="24" cy="19" r="8" fill="#fff" opacity="0.9"/><path d="M9 44c0-9 7-14 15-14s15 5 15 14" fill="#fff" opacity="0.9"/></svg>
+              </span>
+              <span class="jui-avatar jui-avatar--circle" data-name="Ada Lovelace"></span>
+              <span class="jui-avatar jui-avatar--circle" data-name="Grace Hopper"></span>
+              <span class="jui-avatar" data-name="Linus Torvalds"></span>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Sizes</span>
+            <div class="docs-demo__row docs-demo__row--tight" style="align-items:flex-end">
+              <span class="jui-avatar jui-avatar--xs jui-avatar--circle" data-name="Min"></span>
+              <span class="jui-avatar jui-avatar--sm jui-avatar--circle" data-name="Sam Lee"></span>
+              <span class="jui-avatar jui-avatar--md jui-avatar--circle" data-name="Pat Ng"></span>
+              <span class="jui-avatar jui-avatar--lg jui-avatar--circle" data-name="River Cole"></span>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Status dots</span>
+            <div class="docs-demo__row docs-demo__row--tight">
+              <span class="jui-avatar jui-avatar--md jui-avatar--circle" data-name="Online User"><span class="jui-avatar__status"></span></span>
+              <span class="jui-avatar jui-avatar--md jui-avatar--circle" data-name="Away User"><span class="jui-avatar__status jui-avatar__status--away"></span></span>
+              <span class="jui-avatar jui-avatar--md jui-avatar--circle" data-name="Busy User"><span class="jui-avatar__status jui-avatar__status--busy"></span></span>
+              <span class="jui-avatar jui-avatar--md jui-avatar--circle" data-name="Offline User"><span class="jui-avatar__status jui-avatar__status--offline"></span></span>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Group</span>
+            <div class="docs-demo__row">
+              <div class="jui-avatar-group">
+                <span class="jui-avatar jui-avatar--md jui-avatar--circle" data-name="Ada Lovelace"></span>
+                <span class="jui-avatar jui-avatar--md jui-avatar--circle" data-name="Grace Hopper"></span>
+                <span class="jui-avatar jui-avatar--md jui-avatar--circle" data-name="Linus Torvalds"></span>
+                <span class="jui-avatar jui-avatar--md jui-avatar--circle jui-avatar__more">+3</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;!-- initials + deterministic hue (no &lt;img&gt; needed) --&gt;
+&lt;span class="jui-avatar jui-avatar--md jui-avatar--circle" data-name="Ada Lovelace"&gt;&lt;/span&gt;
+
+&lt;!-- image --&gt;
+&lt;span class="jui-avatar"&gt;&lt;img src="…" alt="…" /&gt;&lt;/span&gt;
+
+&lt;!-- group with overflow --&gt;
+&lt;div class="jui-avatar-group"&gt;
+  &lt;span class="jui-avatar" data-name="…"&gt;&lt;/span&gt;
+  &lt;span class="jui-avatar jui-avatar__more"&gt;+3&lt;/span&gt;
+&lt;/div&gt;</code></pre>
+        </div>
+      </section>
+
+      <!-- ----------------------------- KBD -------------------------- -->
+      <section id="kbd" class="docs-section">
+        <div class="docs-anchor"><h2>Kbd</h2><a class="docs-hash" href="#kbd" aria-label="Link to Kbd">#</a></div>
+        <p class="docs-lead">Keyboard-key styling for documenting shortcuts. Compose multiple keys for combinations.</p>
+
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Single keys</span>
+            <div class="docs-demo__row docs-demo__row--tight">
+              <span class="jui-kbd">Enter</span>
+              <span class="jui-kbd">Esc</span>
+              <span class="jui-kbd">Tab</span>
+              <span class="jui-kbd">↑</span>
+              <span class="jui-kbd">↓</span>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Combinations</span>
+            <div class="docs-demo__row docs-demo__row--tight">
+              <span><span class="jui-kbd">Ctrl</span> + <span class="jui-kbd">K</span></span>
+              <span><span class="jui-kbd">Shift</span> + <span class="jui-kbd">⌘</span> + <span class="jui-kbd">P</span></span>
+              <span><span class="jui-kbd">Alt</span> + <span class="jui-kbd">F4</span></span>
+            </div>
+          </div>
+        </div>
+        <p class="docs-prose">In prose it composes naturally: press <span class="jui-kbd">Ctrl</span> + <span class="jui-kbd">K</span> to open the command palette.</p>
+
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;span class="jui-kbd"&gt;Ctrl&lt;/span&gt; + &lt;span class="jui-kbd"&gt;K&lt;/span&gt;</code></pre>
+        </div>
+      </section>
+
+      <!-- ---------------------------- ALERT ------------------------- -->
+      <section id="alert" class="docs-section">
+        <div class="docs-anchor"><h2>Alert</h2><a class="docs-hash" href="#alert" aria-label="Link to Alert">#</a></div>
+        <p class="docs-lead">Contextual messages with an icon, title, body and an optional dismiss button. Soft backgrounds read cleanly in both themes.</p>
+
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Variants</span>
+            <div class="docs-demo__col" style="max-width:none">
+              <div class="jui-alert jui-alert--success">
+                <span class="jui-alert__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg></span>
+                <div class="jui-alert__body"><div class="jui-alert__title">Payment received</div><div class="jui-alert__text">Your subscription is now active until next month.</div></div>
+              </div>
+              <div class="jui-alert jui-alert--info">
+                <span class="jui-alert__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg></span>
+                <div class="jui-alert__body"><div class="jui-alert__title">Heads up</div><div class="jui-alert__text">A new version of Jui is available.</div></div>
+              </div>
+              <div class="jui-alert jui-alert--warning">
+                <span class="jui-alert__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17h.01"/></svg></span>
+                <div class="jui-alert__body"><div class="jui-alert__title">Storage almost full</div><div class="jui-alert__text">You have used 92% of your quota.</div></div>
+              </div>
+              <div class="jui-alert jui-alert--danger">
+                <span class="jui-alert__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/></svg></span>
+                <div class="jui-alert__body"><div class="jui-alert__title">Could not save</div><div class="jui-alert__text">Check your connection and try again.</div></div>
+              </div>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Dismissable — click ×</span>
+            <div class="jui-alert jui-alert--info" data-jui-dismissible>
+              <span class="jui-alert__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg></span>
+              <div class="jui-alert__body"><div class="jui-alert__title">Welcome to Jui</div><div class="jui-alert__text">Dismiss me and I'll fade away.</div></div>
+              <button class="jui-alert__dismiss" data-jui-dismiss aria-label="Dismiss"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+            </div>
+          </div>
+        </div>
+
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;div class="jui-alert jui-alert--success" data-jui-dismissible&gt;
+  &lt;span class="jui-alert__icon"&gt;&lt;svg&gt;…&lt;/svg&gt;&lt;/span&gt;
+  &lt;div class="jui-alert__body"&gt;
+    &lt;div class="jui-alert__title"&gt;Title&lt;/div&gt;
+    &lt;div class="jui-alert__text"&gt;Message body.&lt;/div&gt;
+  &lt;/div&gt;
+  &lt;button class="jui-alert__dismiss" data-jui-dismiss&gt;…&lt;/button&gt;
+&lt;/div&gt;</code></pre>
+        </div>
+      </section>
+
+      <!-- ---------------------------- SELECT ------------------------ -->
+      <section id="select" class="docs-section">
+        <div class="docs-anchor"><h2>Select</h2><a class="docs-hash" href="#select" aria-label="Link to Select">#</a></div>
+        <p class="docs-lead">An accessible custom dropdown: a combobox trigger drives a floating listbox with full keyboard support (type-ahead, Home/End, arrows) and mirrors the chosen value to a hidden input for forms.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Choose a fruit</span>
+            <div class="docs-demo__col">
+              <div class="jui-select" data-jui="select" data-placeholder="Select a fruit…">
+                <button type="button" class="jui-select__trigger" id="sel1" aria-expanded="false">
+                  <span class="jui-select__value">Select a fruit…</span>
+                  <span class="jui-select__chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
+                </button>
+                <ul class="jui-select__list" role="listbox" id="sel1-list" aria-labelledby="sel1" hidden>
+                  <li role="option" data-value="apple">Apple</li>
+                  <li role="option" data-value="banana">Banana</li>
+                  <li role="option" data-value="grape" aria-selected="true">Grape</li>
+                  <li role="option" data-value="mango" aria-disabled="true">Mango (sold out)</li>
+                  <li role="option" data-value="orange">Orange</li>
+                  <li role="option" data-value="peach">Peach</li>
+                  <li role="option" data-value="pear">Pear</li>
+                </ul>
+                <input type="hidden" name="fruit" value="grape" />
+              </div>
+              <p class="jui-field__help">Open it and type <span class="jui-kbd">gr</span> to jump straight to Grape.</p>
+            </div>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;div class="jui-select" data-jui="select"&gt;
+  &lt;button class="jui-select__trigger" aria-expanded="false"&gt;
+    &lt;span class="jui-select__value"&gt;Select…&lt;/span&gt;
+    &lt;span class="jui-select__chevron"&gt;…&lt;/span&gt;
+  &lt;/button&gt;
+  &lt;ul class="jui-select__list" role="listbox" hidden&gt;
+    &lt;li role="option" data-value="grape" aria-selected="true"&gt;Grape&lt;/li&gt;
+    &lt;li role="option" data-value="mango" aria-disabled="true"&gt;Mango&lt;/li&gt;
+  &lt;/ul&gt;
+  &lt;input type="hidden" name="fruit" /&gt;
+&lt;/div&gt;</code></pre>
+        </div>
+        <div class="docs-table-wrap"><table class="docs-table">
+          <thead><tr><th>Attribute / key</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td><code>data-jui="select"</code></td><td>Initializes the component on the wrapper.</td></tr>
+            <tr><td><code>role="option"</code></td><td>Each item; supports <code>aria-selected</code> &amp; <code>aria-disabled</code>.</td></tr>
+            <tr><td><code>aria-expanded</code> / <code>aria-activedescendant</code></td><td>On the trigger; reflect open state &amp; highlighted option.</td></tr>
+            <tr><td>keyboard</td><td>Enter/Space/↓ open · ↑↓ move · Home/End · type-ahead · Enter selects · Esc closes.</td></tr>
+            <tr><td><code>jui:select</code></td><td>Event fired on selection with <code>{ value }</code>.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- --------------------------- CHECKBOX ----------------------- -->
+      <section id="checkbox" class="docs-section">
+        <div class="docs-anchor"><h2>Checkbox</h2><a class="docs-hash" href="#checkbox" aria-label="Link to Checkbox">#</a></div>
+        <p class="docs-lead">A styled checkbox built on a real <code>&lt;input type="checkbox"&gt;</code>, so it is accessible by default. Includes a working indeterminate "select all" pattern.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">States</span>
+            <div class="docs-demo__col">
+              <label class="jui-checkbox"><input type="checkbox" checked /><span class="jui-checkbox__box"></span> Email notifications</label>
+              <label class="jui-checkbox"><input type="checkbox" /><span class="jui-checkbox__box"></span> Weekly digest</label>
+              <label class="jui-checkbox"><input type="checkbox" disabled /><span class="jui-checkbox__box"></span> SMS alerts (disabled)</label>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Select all — becomes indeterminate when partially checked</span>
+            <div class="docs-demo__col" data-jui="checkbox-group">
+              <label class="jui-checkbox"><input type="checkbox" data-checkbox-master /><span class="jui-checkbox__box"></span> All permissions</label>
+              <label class="jui-checkbox" style="margin-left:22px"><input type="checkbox" data-checkbox-item checked /><span class="jui-checkbox__box"></span> Read</label>
+              <label class="jui-checkbox" style="margin-left:22px"><input type="checkbox" data-checkbox-item /><span class="jui-checkbox__box"></span> Write</label>
+              <label class="jui-checkbox" style="margin-left:22px"><input type="checkbox" data-checkbox-item checked /><span class="jui-checkbox__box"></span> Delete</label>
+            </div>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;label class="jui-checkbox"&gt;
+  &lt;input type="checkbox" checked /&gt;
+  &lt;span class="jui-checkbox__box"&gt;&lt;/span&gt; Email notifications
+&lt;/label&gt;
+
+&lt;!-- select-all group --&gt;
+&lt;div data-jui="checkbox-group"&gt;
+  &lt;label class="jui-checkbox"&gt;&lt;input data-checkbox-master /&gt;…&lt;/label&gt;
+  &lt;label class="jui-checkbox"&gt;&lt;input data-checkbox-item /&gt;…&lt;/label&gt;
+&lt;/div&gt;</code></pre>
+        </div>
+        <div class="docs-table-wrap"><table class="docs-table">
+          <thead><tr><th>Attribute / key</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td><code>.jui-checkbox</code></td><td>Label wrapper; native input stays focusable.</td></tr>
+            <tr><td><code>data-jui="checkbox-group"</code></td><td>Wires a master + items for select-all/indeterminate.</td></tr>
+            <tr><td><code>data-checkbox-master</code></td><td>The "select all" control; reflects indeterminate automatically.</td></tr>
+            <tr><td><code>data-checkbox-item</code></td><td>Child controls toggled by the master.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- ---------------------------- RADIO ------------------------- -->
+      <section id="radio" class="docs-section">
+        <div class="docs-anchor"><h2>Radio</h2><a class="docs-hash" href="#radio" aria-label="Link to Radio">#</a></div>
+        <p class="docs-lead">Styled radio buttons over real inputs. Because they are native, arrow-key movement between options in a group works out of the box.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Billing plan</span>
+            <div class="docs-demo__col">
+              <label class="jui-radio"><input type="radio" name="plan" checked /><span class="jui-radio__dot"></span> Starter — $0/mo</label>
+              <label class="jui-radio"><input type="radio" name="plan" /><span class="jui-radio__dot"></span> Pro — $12/mo</label>
+              <label class="jui-radio"><input type="radio" name="plan" /><span class="jui-radio__dot"></span> Team — $29/mo</label>
+              <label class="jui-radio"><input type="radio" name="plan" disabled /><span class="jui-radio__dot"></span> Enterprise (contact sales)</label>
+            </div>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;label class="jui-radio"&gt;
+  &lt;input type="radio" name="plan" checked /&gt;
+  &lt;span class="jui-radio__dot"&gt;&lt;/span&gt; Pro
+&lt;/label&gt;</code></pre>
+        </div>
+        <div class="docs-table-wrap"><table class="docs-table">
+          <thead><tr><th>Attribute / key</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td><code>.jui-radio</code></td><td>Label wrapper; shares a <code>name</code> to form a group.</td></tr>
+            <tr><td>native</td><td>Arrow-key movement + selection handled by the browser — no JS needed.</td></tr>
+            <tr><td><code>:disabled</code></td><td>Visually &amp; functionally disables the option.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- ---------------------------- SWITCH ------------------------ -->
+      <section id="switch" class="docs-section">
+        <div class="docs-anchor"><h2>Switch</h2><a class="docs-hash" href="#switch" aria-label="Link to Switch">#</a></div>
+        <p class="docs-lead">A toggle built on a real checkbox with <code>role="switch"</code> semantics. Click the label or the control to flip it; <code>aria-checked</code> is kept in sync automatically.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Sizes &amp; states</span>
+            <div class="docs-demo__col">
+              <label style="display:inline-flex;align-items:center;gap:10px;font-size:var(--jui-fs-sm)"><input type="checkbox" role="switch" class="jui-switch jui-switch--sm" checked /><span>Compact mode</span></label>
+              <label style="display:inline-flex;align-items:center;gap:10px;font-size:var(--jui-fs-sm)"><input type="checkbox" role="switch" class="jui-switch" checked /><span>Two-factor authentication</span></label>
+              <label style="display:inline-flex;align-items:center;gap:10px;font-size:var(--jui-fs-sm)"><input type="checkbox" role="switch" class="jui-switch" /><span>Public profile</span></label>
+              <label style="display:inline-flex;align-items:center;gap:10px;font-size:var(--jui-fs-sm)"><input type="checkbox" role="switch" class="jui-switch" disabled /><span>Disabled toggle</span></label>
+            </div>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;label&gt;
+  &lt;input type="checkbox" role="switch" class="jui-switch" checked /&gt;
+  &lt;span&gt;Two-factor authentication&lt;/span&gt;
+&lt;/label&gt;</code></pre>
+        </div>
+        <div class="docs-table-wrap"><table class="docs-table">
+          <thead><tr><th>Attribute / key</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td><code>.jui-switch</code></td><td>Initializes; <code>aria-checked</code> synced on change.</td></tr>
+            <tr><td><code>role="switch"</code></td><td>Exposes switch semantics to assistive tech.</td></tr>
+            <tr><td><code>.jui-switch--sm</code></td><td>Small size variant.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- ---------------------------- SLIDER ------------------------ -->
+      <section id="slider" class="docs-section">
+        <div class="docs-anchor"><h2>Slider</h2><a class="docs-hash" href="#slider" aria-label="Link to Slider">#</a></div>
+        <p class="docs-lead">A styled range input with a filled track and a value bubble that follows the thumb. Supports <code>min</code>/<code>max</code>/<code>step</code> and a disabled variant.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Storage quota (GB)</span>
+            <div class="jui-slider"><input type="range" data-jui="slider" min="0" max="500" step="10" value="180" aria-label="Storage quota in gigabytes" /></div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Volume — step of 5</span>
+            <div class="jui-slider"><input type="range" data-jui="slider" min="0" max="100" step="5" value="40" aria-label="Volume" /></div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Disabled</span>
+            <div class="jui-slider"><input type="range" data-jui="slider" min="0" max="100" value="70" disabled aria-label="Disabled slider" /></div>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;div class="jui-slider"&gt;
+  &lt;input type="range" data-jui="slider" min="0" max="500" step="10" value="180" /&gt;
+&lt;/div&gt;</code></pre>
+        </div>
+        <div class="docs-table-wrap"><table class="docs-table">
+          <thead><tr><th>Attribute / key</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td><code>data-jui="slider"</code></td><td>Initializes the bubble + filled track on a range input.</td></tr>
+            <tr><td><code>min</code> / <code>max</code> / <code>step</code></td><td>Standard; the bubble reflects the live value.</td></tr>
+            <tr><td>CSS var</td><td><code>--jui-slider-pct</code> drives the filled portion (set by JS).</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- --------------------------- ACCORDION ---------------------- -->
+      <section id="accordion" class="docs-section">
+        <div class="docs-anchor"><h2>Accordion</h2><a class="docs-hash" href="#accordion" aria-label="Link to Accordion">#</a></div>
+        <p class="docs-lead">Collapsible disclosure panels with animated height, rotating chevrons and full keyboard support. Single-open by default; add <code>data-multiple</code> to allow several open at once.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Single open (default)</span>
+            <div class="docs-demo__col" style="max-width:none">
+              <div class="jui-accordion" data-jui="accordion">
+                <div class="jui-accordion__item">
+                  <button class="jui-accordion__header" id="ah1" aria-expanded="true" aria-controls="ap1"><span class="jui-accordion__title">What's included in Pro?</span><span class="jui-accordion__chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></button>
+                  <div class="jui-accordion__panel is-open" id="ap1" role="region" aria-labelledby="ah1"><div class="jui-accordion__content"><div class="jui-accordion__content-inner">Unlimited workspaces, 1&nbsp;TB of storage, version history and priority email support.</div></div></div>
+                </div>
+                <div class="jui-accordion__item">
+                  <button class="jui-accordion__header" id="ah2" aria-expanded="false" aria-controls="ap2"><span class="jui-accordion__title">Can I cancel anytime?</span><span class="jui-accordion__chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></button>
+                  <div class="jui-accordion__panel" id="ap2" role="region" aria-labelledby="ah2"><div class="jui-accordion__content"><div class="jui-accordion__content-inner">Yes — downgrade or cancel from billing and you keep access until the period ends.</div></div></div>
+                </div>
+                <div class="jui-accordion__item">
+                  <button class="jui-accordion__header" id="ah3" aria-expanded="false" aria-controls="ap3"><span class="jui-accordion__title">Do you offer education pricing?</span><span class="jui-accordion__chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></button>
+                  <div class="jui-accordion__panel" id="ap3" role="region" aria-labelledby="ah3"><div class="jui-accordion__content"><div class="jui-accordion__content-inner">Verified students and educators get 50% off — reach out from your school email.</div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Multiple open</span>
+            <div class="docs-demo__col" style="max-width:none">
+              <div class="jui-accordion" data-jui="accordion" data-multiple>
+                <div class="jui-accordion__item">
+                  <button class="jui-accordion__header" id="ah4" aria-expanded="false" aria-controls="ap4"><span class="jui-accordion__title">Shipping</span><span class="jui-accordion__chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></button>
+                  <div class="jui-accordion__panel" id="ap4" role="region" aria-labelledby="ah4"><div class="jui-accordion__content"><div class="jui-accordion__content-inner">Free express shipping on orders over $50.</div></div></div>
+                </div>
+                <div class="jui-accordion__item">
+                  <button class="jui-accordion__header" id="ah5" aria-expanded="false" aria-controls="ap5"><span class="jui-accordion__title">Returns</span><span class="jui-accordion__chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></button>
+                  <div class="jui-accordion__panel" id="ap5" role="region" aria-labelledby="ah5"><div class="jui-accordion__content"><div class="jui-accordion__content-inner">30-day no-questions-asked returns.</div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;div class="jui-accordion" data-jui="accordion"&gt;        &lt;!-- add data-multiple --&gt;
+  &lt;div class="jui-accordion__item"&gt;
+    &lt;button class="jui-accordion__header" aria-expanded="false" aria-controls="ap1"&gt;
+      Title
+    &lt;/button&gt;
+    &lt;div class="jui-accordion__panel" id="ap1" role="region"&gt;
+      &lt;div class="jui-accordion__content"&gt;…&lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+&lt;/div&gt;</code></pre>
+        </div>
+        <div class="docs-table-wrap"><table class="docs-table">
+          <thead><tr><th>Attribute / key</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td><code>data-jui="accordion"</code></td><td>Initializes; default is single-open mode.</td></tr>
+            <tr><td><code>data-multiple</code></td><td>Allows more than one panel open at a time.</td></tr>
+            <tr><td><code>aria-expanded</code> / <code>aria-controls</code></td><td>On each header; toggled as panels open/close.</td></tr>
+            <tr><td>keyboard</td><td>↑/↓ move between headers · Home/End jump.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- ----------------------------- TABS ------------------------- -->
+      <section id="tabs" class="docs-section">
+        <div class="docs-anchor"><h2>Tabs</h2><a class="docs-hash" href="#tabs" aria-label="Link to Tabs">#</a></div>
+        <p class="docs-lead">A tabbed panel group with roving-tabindex keyboard control and an animated active-tab indicator that slides between tabs. Underline (default) and pill variants included.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Underline</span>
+            <div class="jui-tabs" data-jui="tabs">
+              <div class="jui-tabs__list" role="tablist">
+                <button class="jui-tabs__tab is-active" role="tab" id="t1" aria-selected="true" aria-controls="tp1" tabindex="0">General</button>
+                <button class="jui-tabs__tab" role="tab" id="t2" aria-selected="false" aria-controls="tp2" tabindex="-1">Security</button>
+                <button class="jui-tabs__tab" role="tab" id="t3" aria-selected="false" aria-controls="tp3" tabindex="-1">Billing</button>
+                <span class="jui-tabs__indicator" aria-hidden="true"></span>
+              </div>
+              <div class="jui-tabs__panel" role="tabpanel" id="tp1" aria-labelledby="t1" tabindex="0">Manage your workspace name, default region and timezone from general settings.</div>
+              <div class="jui-tabs__panel" role="tabpanel" id="tp2" aria-labelledby="t2" tabindex="0" hidden>Enable two-factor auth, review active sessions and rotate your API keys.</div>
+              <div class="jui-tabs__panel" role="tabpanel" id="tp3" aria-labelledby="t3" tabindex="0" hidden>Your Pro plan renews on the 14th. Update your payment method or download invoices.</div>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Pill</span>
+            <div class="jui-tabs jui-tabs--pill" data-jui="tabs">
+              <div class="jui-tabs__list" role="tablist">
+                <button class="jui-tabs__tab is-active" role="tab" id="t4" aria-selected="true" aria-controls="tp4" tabindex="0">Day</button>
+                <button class="jui-tabs__tab" role="tab" id="t5" aria-selected="false" aria-controls="tp5" tabindex="-1">Week</button>
+                <button class="jui-tabs__tab" role="tab" id="t6" aria-selected="false" aria-controls="tp6" tabindex="-1">Month</button>
+                <span class="jui-tabs__indicator" aria-hidden="true"></span>
+              </div>
+              <div class="jui-tabs__panel" role="tabpanel" id="tp4" aria-labelledby="t4" tabindex="0">Showing activity for today.</div>
+              <div class="jui-tabs__panel" role="tabpanel" id="tp5" aria-labelledby="t5" tabindex="0" hidden>Showing activity for this week.</div>
+              <div class="jui-tabs__panel" role="tabpanel" id="tp6" aria-labelledby="t6" tabindex="0" hidden>Showing activity for this month.</div>
+            </div>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;div class="jui-tabs" data-jui="tabs"&gt;
+  &lt;div class="jui-tabs__list" role="tablist"&gt;
+    &lt;button class="jui-tabs__tab" role="tab" aria-selected="true" aria-controls="tp1"&gt;General&lt;/button&gt;
+    &lt;span class="jui-tabs__indicator" aria-hidden="true"&gt;&lt;/span&gt;
+  &lt;/div&gt;
+  &lt;div class="jui-tabs__panel" role="tabpanel" id="tp1"&gt;…&lt;/div&gt;
+&lt;/div&gt;
+&lt;!-- add class "jui-tabs--pill" for the pill variant --&gt;</code></pre>
+        </div>
+        <div class="docs-table-wrap"><table class="docs-table">
+          <thead><tr><th>Attribute / key</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td><code>data-jui="tabs"</code></td><td>Initializes roving focus + sliding indicator.</td></tr>
+            <tr><td><code>aria-selected</code> / <code>tabindex</code></td><td>Managed per tab for roving-tabindex pattern.</td></tr>
+            <tr><td>keyboard</td><td>←/→ move &amp; activate · Home/End jump to ends.</td></tr>
+            <tr><td><code>.jui-tabs--pill</code></td><td>Switches to the pill visual variant.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- ---------------------------- TOAST ------------------------- -->
+      <section id="toast" class="docs-section">
+        <div class="docs-anchor"><h2>Toast</h2><a class="docs-hash" href="#toast" aria-label="Link to Toast">#</a></div>
+        <p class="docs-lead">Transient notifications stacked bottom-right in a polite live region. Four variants, auto-dismiss with a progress bar (hover to pause), an optional action button, and a queue capped at five.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Fire a toast</span>
+            <div class="docs-demo__row">
+              <button class="jui-btn jui-btn--soft" onclick="Jui.toast({title:'Saved',message:'Your profile changes are live.',variant:'success'})">Success</button>
+              <button class="jui-btn jui-btn--soft" onclick="Jui.toast({title:'Storage almost full',message:'You have used 92% of your quota.',variant:'warning'})">Warning</button>
+              <button class="jui-btn jui-btn--soft" onclick="Jui.toast({title:'Could not publish',message:'Check your connection and retry.',variant:'danger'})">Danger</button>
+              <button class="jui-btn jui-btn--soft" onclick="Jui.toast({title:'New comment',message:'Ada replied to your thread.',variant:'info'})">Info</button>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">With an action button</span>
+            <div class="docs-demo__row">
+              <button class="jui-btn" onclick="Jui.toast({title:'Discard draft?',message:'This action cannot be undone.',variant:'warning',action:{label:'Discard',onClick:function(){Jui.toast({title:'Draft discarded',variant:'info'})}}})">Discard draft</button>
+            </div>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">JS</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>Jui.toast({
+  title: "Saved",
+  message: "Your changes are live.",
+  variant: "success",          // success | warning | danger | info
+  action: { label: "Undo", onClick: undo }
+});</code></pre>
+        </div>
+        <div class="docs-table-wrap"><table class="docs-table">
+          <thead><tr><th>Key</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td><code>title</code> / <code>message</code></td><td>Heading and optional body copy.</td></tr>
+            <tr><td><code>variant</code></td><td><code>success</code> · <code>warning</code> · <code>danger</code> · <code>info</code>.</td></tr>
+            <tr><td><code>action</code></td><td><code>{ label, onClick }</code> renders a button.</td></tr>
+            <tr><td><code>duration</code></td><td>Auto-dismiss ms (default 4500); hover pauses.</td></tr>
+            <tr><td>region</td><td><code>role="status"</code> <code>aria-live="polite"</code>; queue capped at 5.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- ---------------------------- MODAL ------------------------- -->
+      <section id="modal" class="docs-section">
+        <div class="docs-anchor"><h2>Modal</h2><a class="docs-hash" href="#modal" aria-label="Link to Modal">#</a></div>
+        <p class="docs-lead">A centered dialog with a focus trap, ESC &amp; overlay-click close, body-scroll lock and focus return to the trigger. Three sizes and a subtle scale+fade transition.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Sizes</span>
+            <div class="docs-demo__row">
+              <button class="jui-btn jui-btn--sm" data-jui="modal-trigger" data-target="#demoModalSm">Small</button>
+              <button class="jui-btn" data-jui="modal-trigger" data-target="#demoModal">Default</button>
+              <button class="jui-btn jui-btn--lg" data-jui="modal-trigger" data-target="#demoModalLg">Large</button>
+            </div>
+          </div>
+        </div>
+        <div class="jui-modal jui-modal--sm" id="demoModalSm" role="dialog" aria-modal="true" aria-labelledby="demoModalSmTitle" aria-hidden="true">
+          <div class="jui-modal__panel">
+            <div class="jui-modal__header"><h3 class="jui-modal__title" id="demoModalSmTitle">Upgrade to Pro</h3><button class="jui-modal__close" data-jui-close aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+            <div class="jui-modal__body">Unlock unlimited workspaces and priority support. You can cancel anytime from billing.</div>
+            <div class="jui-modal__footer"><button class="jui-btn jui-btn--ghost" data-jui-close>Maybe later</button><button class="jui-btn" data-jui-close>Upgrade now</button></div>
+          </div>
+        </div>
+        <div class="jui-modal" id="demoModal" role="dialog" aria-modal="true" aria-labelledby="demoModalTitle" aria-hidden="true">
+          <div class="jui-modal__panel">
+            <div class="jui-modal__header"><h3 class="jui-modal__title" id="demoModalTitle">Invite teammates</h3><button class="jui-modal__close" data-jui-close aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+            <div class="jui-modal__body">Add up to 10 teammates to your workspace. They'll get an email invitation to join.</div>
+            <div class="jui-modal__footer"><button class="jui-btn jui-btn--ghost" data-jui-close>Cancel</button><button class="jui-btn" data-jui-close>Send invites</button></div>
+          </div>
+        </div>
+        <div class="jui-modal jui-modal--lg" id="demoModalLg" role="dialog" aria-modal="true" aria-labelledby="demoModalLgTitle" aria-hidden="true">
+          <div class="jui-modal__panel">
+            <div class="jui-modal__header"><h3 class="jui-modal__title" id="demoModalLgTitle">Release notes — v2.0</h3><button class="jui-modal__close" data-jui-close aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+            <div class="jui-modal__body">This release adds thirteen new interactive components — Select, Checkbox, Switch, Slider, Modal, Drawer, Dropdown, Tooltip, Popover, Tabs, Accordion and Toast — all keyboard accessible with correct ARIA wiring.</div>
+            <div class="jui-modal__footer"><button class="jui-btn" data-jui-close>Got it</button></div>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;button data-jui="modal-trigger" data-target="#myDialog"&gt;Open&lt;/button&gt;
+
+&lt;div class="jui-modal" id="myDialog" role="dialog" aria-modal="true" aria-hidden="true"&gt;
+  &lt;div class="jui-modal__panel"&gt;
+    &lt;div class="jui-modal__header"&gt;…&lt;button data-jui-close&gt;×&lt;/button&gt;&lt;/div&gt;
+    &lt;div class="jui-modal__body"&gt;…&lt;/div&gt;
+    &lt;div class="jui-modal__footer"&gt;…&lt;/div&gt;
+  &lt;/div&gt;
+&lt;/div&gt;
+&lt;!-- sizes: jui-modal--sm | (default) | jui-modal--lg --&gt;</code></pre>
+        </div>
+        <div class="docs-table-wrap"><table class="docs-table">
+          <thead><tr><th>Attribute / key</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td><code>data-jui="modal-trigger"</code></td><td>Opens the dialog named by <code>data-target</code>.</td></tr>
+            <tr><td><code>data-jui-close</code></td><td>Any button that closes the nearest dialog.</td></tr>
+            <tr><td>a11y</td><td><code>role="dialog"</code> <code>aria-modal</code> · Tab trap · ESC &amp; overlay close · scroll lock · focus return.</td></tr>
+            <tr><td><code>Jui.openOverlay(el)</code></td><td>Open imperatively; <code>Jui.closeOverlay(el)</code> closes.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- ---------------------------- DRAWER ------------------------ -->
+      <section id="drawer" class="docs-section">
+        <div class="docs-anchor"><h2>Drawer</h2><a class="docs-hash" href="#drawer" aria-label="Link to Drawer">#</a></div>
+        <p class="docs-lead">A side panel that slides in from the right (or left). Same accessibility contract as the modal: trap, ESC, overlay click, scroll lock and focus return.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Open from</span>
+            <div class="docs-demo__row">
+              <button class="jui-btn" data-jui="drawer-trigger" data-target="#demoDrawerRight">Right edge</button>
+              <button class="jui-btn jui-btn--outline" data-jui="drawer-trigger" data-target="#demoDrawerLeft">Left edge</button>
+            </div>
+          </div>
+        </div>
+        <div class="jui-drawer" id="demoDrawerRight" role="dialog" aria-modal="true" aria-labelledby="demoDrawerRightTitle" aria-hidden="true">
+          <div class="jui-drawer__panel">
+            <div class="jui-drawer__header"><h3 class="jui-drawer__title" id="demoDrawerRightTitle">Filters</h3><button class="jui-drawer__close" data-jui-close aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+            <div class="jui-drawer__body">Refine results by status, owner and date range. Your filter choices apply instantly.</div>
+            <div class="jui-drawer__footer"><button class="jui-btn jui-btn--ghost" data-jui-close>Reset</button><button class="jui-btn" data-jui-close>Apply</button></div>
+          </div>
+        </div>
+        <div class="jui-drawer jui-drawer--left" id="demoDrawerLeft" role="dialog" aria-modal="true" aria-labelledby="demoDrawerLeftTitle" aria-hidden="true">
+          <div class="jui-drawer__panel">
+            <div class="jui-drawer__header"><h3 class="jui-drawer__title" id="demoDrawerLeftTitle">Navigation</h3><button class="jui-drawer__close" data-jui-close aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+            <div class="jui-drawer__body">A left-edge drawer is ideal for navigation menus and quick-switcher panels.</div>
+            <div class="jui-drawer__footer"><button class="jui-btn" data-jui-close>Done</button></div>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;button data-jui="drawer-trigger" data-target="#myDrawer"&gt;Open&lt;/button&gt;
+
+&lt;div class="jui-drawer" id="myDrawer" role="dialog" aria-modal="true"&gt;
+  &lt;div class="jui-drawer__panel"&gt; … &lt;/div&gt;
+&lt;/div&gt;
+&lt;!-- add class "jui-drawer--left" to slide from the left --&gt;</code></pre>
+        </div>
+        <div class="docs-table-wrap"><table class="docs-table">
+          <thead><tr><th>Attribute / key</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td><code>data-jui="drawer-trigger"</code></td><td>Opens the drawer named by <code>data-target</code>.</td></tr>
+            <tr><td><code>.jui-drawer--left</code></td><td>Slides the panel in from the left edge.</td></tr>
+            <tr><td>a11y</td><td>Same as Modal: trap, ESC, overlay, scroll lock, focus return.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- --------------------------- DROPDOWN ----------------------- -->
+      <section id="dropdown" class="docs-section">
+        <div class="docs-anchor"><h2>Dropdown</h2><a class="docs-hash" href="#dropdown" aria-label="Link to Dropdown">#</a></div>
+        <p class="docs-lead">A menu of actions with arrow-key navigation, separators, disabled items and automatic flip when there is no room below. The chosen item is reported as an event and can drive an output element.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Row actions</span>
+            <div class="docs-demo__row">
+              <div class="jui-dropdown" data-jui="dropdown" data-dropdown-output="ddOut">
+                <button class="jui-btn jui-btn--outline" data-dropdown-trigger>Actions <span class="jui-btn__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span></button>
+                <div class="jui-dropdown__menu" role="menu" hidden>
+                  <button role="menuitem" data-value="Edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Edit</button>
+                  <button role="menuitem" data-value="Duplicate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Duplicate</button>
+                  <div class="jui-dropdown__sep" role="separator"></div>
+                  <button role="menuitem" data-value="Archive"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v12h14V8M10 12h4"/></svg>Archive</button>
+                  <button role="menuitem" data-value="Delete" aria-disabled="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>Delete</button>
+                </div>
+              </div>
+              <span id="ddOut" class="docs-demo__label">Last action: —</span>
+            </div>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;div class="jui-dropdown" data-jui="dropdown" data-dropdown-output="out"&gt;
+  &lt;button data-dropdown-trigger&gt;Actions&lt;/button&gt;
+  &lt;div class="jui-dropdown__menu" role="menu" hidden&gt;
+    &lt;button role="menuitem" data-value="Edit"&gt;Edit&lt;/button&gt;
+    &lt;div class="jui-dropdown__sep" role="separator"&gt;&lt;/div&gt;
+    &lt;button role="menuitem" aria-disabled="true"&gt;Delete&lt;/button&gt;
+  &lt;/div&gt;
+&lt;/div&gt;</code></pre>
+        </div>
+        <div class="docs-table-wrap"><table class="docs-table">
+          <thead><tr><th>Attribute / key</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td><code>data-jui="dropdown"</code></td><td>Initializes; <code>data-dropdown-output</code> targets an output element.</td></tr>
+            <tr><td><code>role="menuitem"</code></td><td><code>data-value</code> becomes the selection; <code>aria-disabled</code> supported.</td></tr>
+            <tr><td>keyboard</td><td>↓/↑ move · Home/End · Enter activates · Esc/Tab-out closes.</td></tr>
+            <tr><td><code>jui:dropdown</code></td><td>Event with <code>{ value }</code> on activation.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- --------------------------- TOOLTIP ------------------------ -->
+      <section id="tooltip" class="docs-section">
+        <div class="docs-anchor"><h2>Tooltip</h2><a class="docs-hash" href="#tooltip" aria-label="Link to Tooltip">#</a></div>
+        <p class="docs-lead">Short contextual hints that appear after a ~400ms hover delay or instantly on keyboard focus. Four placements, each clamped to stay within the viewport.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Placements — hover or focus each button</span>
+            <div class="docs-demo__row" style="padding:40px 0">
+              <button class="jui-btn jui-btn--soft" data-jui-tooltip="Appears above" data-placement="top">Top</button>
+              <button class="jui-btn jui-btn--soft" data-jui-tooltip="Appears to the right" data-placement="right">Right</button>
+              <button class="jui-btn jui-btn--soft" data-jui-tooltip="Appears below" data-placement="bottom">Bottom</button>
+              <button class="jui-btn jui-btn--soft" data-jui-tooltip="Appears to the left" data-placement="left">Left</button>
+            </div>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;!-- text shorthand --&gt;
+&lt;button data-jui-tooltip="Appears above" data-placement="top"&gt;Top&lt;/button&gt;
+
+&lt;!-- richer content via data-jui="tooltip" + child --&gt;
+&lt;span data-jui="tooltip"&gt;Hover
+  &lt;span class="jui-tooltip"&gt;Supports &lt;strong&gt;formatted&lt;/strong&gt; text&lt;/span&gt;
+&lt;/span&gt;</code></pre>
+        </div>
+        <div class="docs-table-wrap"><table class="docs-table">
+          <thead><tr><th>Attribute / key</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td><code>data-jui-tooltip="…"</code></td><td>Text shorthand; tooltip is created &amp; <code>aria-describedby</code> wired.</td></tr>
+            <tr><td><code>data-jui="tooltip"</code></td><td>Uses a child <code>.jui-tooltip</code> for richer content.</td></tr>
+            <tr><td><code>data-placement</code></td><td><code>top</code> · <code>right</code> · <code>bottom</code> · <code>left</code> (default <code>top</code>).</td></tr>
+            <tr><td>show/hide</td><td>400ms hover delay; instant on focus; hides on blur/Esc.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- --------------------------- POPOVER ------------------------ -->
+      <section id="popover" class="docs-section">
+        <div class="docs-anchor"><h2>Popover</h2><a class="docs-hash" href="#popover" aria-label="Link to Popover">#</a></div>
+        <p class="docs-lead">A click-toggled floating card that can hold arbitrary content (including buttons). Focus moves in on open and returns to the trigger on close; closes on outside click or ESC.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Toggle a popover</span>
+            <div class="docs-demo__row">
+              <div class="jui-popover-anchor">
+                <button class="jui-btn" data-jui="popover" aria-expanded="false" data-target="#demoPop1">Filters</button>
+                <div class="jui-popover" id="demoPop1" hidden>
+                  <div class="jui-popover__title">Filter results</div>
+                  <div class="jui-popover__text">Narrow your search by status, owner or last-updated date.</div>
+                  <div style="margin-top:10px; display:flex; gap:8px;"><button class="jui-btn jui-btn--sm jui-btn--ghost">Reset</button><button class="jui-btn jui-btn--sm">Apply</button></div>
+                </div>
+              </div>
+              <div class="jui-popover-anchor">
+                <button class="jui-btn jui-btn--outline" data-jui="popover" aria-expanded="false" data-target="#demoPop2">Share</button>
+                <div class="jui-popover" id="demoPop2" hidden>
+                  <div class="jui-popover__title">Share this document</div>
+                  <div class="jui-popover__text">Anyone with the link can view. Link expires in 7 days.</div>
+                  <div style="margin-top:10px; display:flex; gap:8px;"><button class="jui-btn jui-btn--sm">Copy link</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar">
+            <span class="docs-code__lang">HTML</span>
+            <button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button>
+          </div>
+<pre><code>&lt;div class="jui-popover-anchor"&gt;
+  &lt;button data-jui="popover" data-target="#pop1"&gt;Open&lt;/button&gt;
+  &lt;div class="jui-popover" id="pop1" hidden&gt;
+    &lt;div class="jui-popover__title"&gt;Title&lt;/div&gt;
+    &lt;div class="jui-popover__text"&gt;Body…&lt;/div&gt;
+  &lt;/div&gt;
+&lt;/div&gt;</code></pre>
+        </div>
+        <div class="docs-table-wrap"><table class="docs-table">
+          <thead><tr><th>Attribute / key</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td><code>data-jui="popover"</code></td><td>Click-toggles the popover named by <code>data-target</code>.</td></tr>
+            <tr><td><code>aria-expanded</code> / <code>aria-controls</code></td><td>On the trigger; reflect &amp; reference the popover.</td></tr>
+            <tr><td>a11y</td><td>Focus moves into the popover on open; returns to trigger on close; ESC &amp; outside-click close.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- ---------------------------- TABLE ------------------------- -->
+      <section id="table" class="docs-section">
+        <div class="docs-anchor"><h2>Table</h2><a class="docs-hash" href="#table" aria-label="Link to Table">#</a></div>
+        <p class="docs-lead">A clean data table with striped, hover and compact variants, a sticky header inside a scroll container, and sortable columns. Click a column header to toggle ascending / descending; the type (numeric vs string) is inferred or set with <code>data-sort-type</code>, and <code>aria-sort</code> is kept in sync.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Sortable · striped · hover · sticky header (click a header)</span>
+            <div class="jui-table-scroll">
+              <table class="jui-table jui-table--striped jui-table--hover" data-jui="table-sort">
+                <thead><tr>
+                  <th data-sort-key="name">Name</th>
+                  <th data-sort-key="role">Role</th>
+                  <th data-sort-key="tickets" data-sort-type="number" class="numeric">Tickets</th>
+                  <th data-sort-key="active">Last active</th>
+                  <th>Status</th>
+                </tr></thead>
+                <tbody>
+                  <tr><td>Ada Lovelace</td><td>Engineering Lead</td><td class="numeric">128</td><td>2025-06-29</td><td><span class="jui-badge jui-badge--soft jui-badge--success">Active</span></td></tr>
+                  <tr><td>Grace Hopper</td><td>QA Engineer</td><td class="numeric">97</td><td>2025-06-28</td><td><span class="jui-badge jui-badge--soft jui-badge--success">Active</span></td></tr>
+                  <tr><td>Linus Torvalds</td><td>Backend</td><td class="numeric">154</td><td>2025-06-30</td><td><span class="jui-badge jui-badge--soft jui-badge--warning">Away</span></td></tr>
+                  <tr><td>Margaret Hamilton</td><td>Architect</td><td class="numeric">76</td><td>2025-06-27</td><td><span class="jui-badge jui-badge--soft jui-badge--success">Active</span></td></tr>
+                  <tr><td>Katherine Johnson</td><td>Data Analyst</td><td class="numeric">203</td><td>2025-06-30</td><td><span class="jui-badge jui-badge--soft jui-badge--success">Active</span></td></tr>
+                  <tr><td>Alan Turing</td><td>Security</td><td class="numeric">41</td><td>2025-06-21</td><td><span class="jui-badge jui-badge--soft jui-badge--neutral">Offline</span></td></tr>
+                  <tr><td>Hedy Lamarr</td><td>Platform</td><td class="numeric">112</td><td>2025-06-29</td><td><span class="jui-badge jui-badge--soft jui-badge--success">Active</span></td></tr>
+                  <tr><td>Tim Berners-Lee</td><td>Frontend</td><td class="numeric">89</td><td>2025-06-26</td><td><span class="jui-badge jui-badge--soft jui-badge--success">Active</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Compact default</span>
+            <div class="jui-table-scroll" style="max-height:none">
+              <table class="jui-table jui-table--compact">
+                <thead><tr><th>Plan</th><th class="numeric">Seats</th><th class="numeric">Price</th></tr></thead>
+                <tbody>
+                  <tr><td>Starter</td><td class="numeric">3</td><td class="numeric">$0</td></tr>
+                  <tr><td>Pro</td><td class="numeric">10</td><td class="numeric">$12</td></tr>
+                  <tr><td>Team</td><td class="numeric">25</td><td class="numeric">$29</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar"><span class="docs-code__lang">HTML</span><button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button></div>
+<pre><code>&lt;div class="jui-table-scroll"&gt;
+  &lt;table class="jui-table jui-table--striped jui-table--hover" data-jui="table-sort"&gt;
+    &lt;thead&gt;&lt;tr&gt;
+      &lt;th data-sort-key="name"&gt;Name&lt;/th&gt;
+      &lt;th data-sort-key="qty" data-sort-type="number"&gt;Qty&lt;/th&gt;
+    &lt;/tr&gt;&lt;/thead&gt;
+    &lt;tbody&gt; … &lt;/tbody&gt;
+  &lt;/table&gt;
+&lt;/div&gt;
+&lt;!-- variants: jui-table--striped · jui-table--hover · jui-table--compact --&gt;</code></pre>
+        </div>
+        <div class="docs-table-wrap"><table class="docs-table">
+          <thead><tr><th>Attribute / key</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td><code>data-jui="table-sort"</code></td><td>Wires <code>th[data-sort-key]</code> headers as clickable sorters.</td></tr>
+            <tr><td><code>data-sort-type="number"</code></td><td>Force numeric sort; otherwise inferred from cell contents.</td></tr>
+            <tr><td><code>aria-sort</code></td><td>Set to <code>ascending</code> / <code>descending</code> / <code>none</code>; arrow reflects it.</td></tr>
+            <tr><td><code>.jui-table-scroll</code></td><td>Wraps a table to give it a sticky header + scroll container.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- -------------------------- PAGINATION ----------------------- -->
+      <section id="pagination" class="docs-section">
+        <div class="docs-anchor"><h2>Pagination</h2><a class="docs-hash" href="#pagination" aria-label="Link to Pagination">#</a></div>
+        <p class="docs-lead">Previous / next controls with numbered pages and an ellipsis for long ranges. The current page carries <code>aria-current="page"</code>, edges disable at the bounds, and a <code>data-pagination-output</code> target mirrors the selection.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label" id="pgOut">Page 1 of 12</span>
+            <nav class="jui-pagination" data-jui="pagination" data-pages="12" data-pagination-output="#pgOut" aria-label="Pagination"></nav>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Small</span>
+            <nav class="jui-pagination jui-pagination--sm" data-jui="pagination" data-pages="5" aria-label="Pagination small"></nav>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar"><span class="docs-code__lang">HTML</span><button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button></div>
+<pre><code>&lt;span id="pgOut"&gt;Page 1 of 12&lt;/span&gt;
+&lt;nav class="jui-pagination" data-jui="pagination"
+     data-pages="12" data-pagination-output="#pgOut"&gt;&lt;/nav&gt;
+&lt;!-- add jui-pagination--sm for the small size --&gt;</code></pre>
+        </div>
+        <div class="docs-table-wrap"><table class="docs-table">
+          <thead><tr><th>Attribute / key</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td><code>data-jui="pagination"</code></td><td>Renders prev/next + numbered pages from <code>data-pages</code>.</td></tr>
+            <tr><td><code>data-pagination-output</code></td><td>Selector for an element updated with “Page X of N”.</td></tr>
+            <tr><td><code>jui:pagination</code></td><td>Event with <code>{ page, pages }</code> on change.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- --------------------------- STAT --------------------------- -->
+      <section id="stat" class="docs-section">
+        <div class="docs-anchor"><h2>Stat card</h2><a class="docs-hash" href="#stat" aria-label="Link to Stat">#</a></div>
+        <p class="docs-lead">A KPI tile: label, a big value, a delta indicator (green up / red down with an arrow), an optional icon and an inline sparkline. Composes nicely into a responsive grid.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__grid">
+            <div class="jui-stat">
+              <div class="jui-stat__top"><span class="jui-stat__label">Revenue</span><span class="jui-stat__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span></div>
+              <div class="jui-stat__value">$48,290</div>
+              <div class="jui-stat__foot"><span class="jui-stat__delta jui-stat__delta--up"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15 6-6 6 6"/></svg>12.4%</span><span class="jui-stat__spark"><svg viewBox="0 0 88 32"><polyline points="0,26 12,22 24,24 36,16 48,18 60,10 72,12 88,4"/></svg></span></div>
+            </div>
+            <div class="jui-stat">
+              <div class="jui-stat__top"><span class="jui-stat__label">Active users</span><span class="jui-stat__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/><circle cx="9" cy="7" r="4"/></svg></span></div>
+              <div class="jui-stat__value">8,412</div>
+              <div class="jui-stat__foot"><span class="jui-stat__delta jui-stat__delta--up"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15 6-6 6 6"/></svg>3.1%</span><span class="jui-stat__spark"><svg viewBox="0 0 88 32"><polyline points="0,20 12,18 24,14 36,16 48,12 60,14 72,8 88,10"/></svg></span></div>
+            </div>
+            <div class="jui-stat">
+              <div class="jui-stat__top"><span class="jui-stat__label">Churn</span><span class="jui-stat__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></span></div>
+              <div class="jui-stat__value">1.8%</div>
+              <div class="jui-stat__foot"><span class="jui-stat__delta jui-stat__delta--down"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>0.4%</span><span class="jui-stat__spark"><svg viewBox="0 0 88 32"><polyline points="0,8 12,12 24,10 36,16 48,14 60,20 72,18 88,24"/></svg></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar"><span class="docs-code__lang">HTML</span><button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button></div>
+<pre><code>&lt;div class="jui-stat"&gt;
+  &lt;div class="jui-stat__top"&gt;
+    &lt;span class="jui-stat__label"&gt;Revenue&lt;/span&gt;
+    &lt;span class="jui-stat__icon"&gt;…&lt;/span&gt;
+  &lt;/div&gt;
+  &lt;div class="jui-stat__value"&gt;$48,290&lt;/div&gt;
+  &lt;div class="jui-stat__foot"&gt;
+    &lt;span class="jui-stat__delta jui-stat__delta--up"&gt;▲ 12.4%&lt;/span&gt;
+    &lt;span class="jui-stat__spark"&gt;&lt;svg&gt;&lt;polyline points="…"/&gt;&lt;/svg&gt;&lt;/span&gt;
+  &lt;/div&gt;
+&lt;/div&gt;</code></pre>
+        </div>
+      </section>
+
+      <!-- -------------------------- PROGRESS ------------------------ -->
+      <section id="progress" class="docs-section">
+        <div class="docs-anchor"><h2>Progress</h2><a class="docs-hash" href="#progress" aria-label="Link to Progress">#</a></div>
+        <p class="docs-lead">Linear bars with label + percent, semantic and striped-animated variants, and a circular ring driven by an SVG stroke-dashoffset. Both expose <code>role="progressbar"</code> and read their value from a <code>--value</code> custom property or <code>data-value</code>.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Linear</span>
+            <div class="docs-demo__col" style="max-width:420px">
+              <div class="jui-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="68" style="--value:68">
+                <div class="jui-progress__header"><span class="jui-progress__label">Storage</span><span class="jui-progress__pct">68%</span></div>
+                <div class="jui-progress__track"><div class="jui-progress__bar"></div></div>
+              </div>
+              <div class="jui-progress jui-progress--success" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="92" style="--value:92"><div class="jui-progress__track"><div class="jui-progress__bar"></div></div></div>
+              <div class="jui-progress jui-progress--warning jui-progress--striped" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="45" style="--value:45"><div class="jui-progress__track"><div class="jui-progress__bar"></div></div></div>
+              <div class="jui-progress jui-progress--danger" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="18" style="--value:18"><div class="jui-progress__track"><div class="jui-progress__bar"></div></div></div>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Ring</span>
+            <div class="docs-demo__row">
+              <div class="jui-progress-ring jui-progress-ring--sm" data-value="40" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="40"><svg viewBox="0 0 64 64"><circle class="jui-progress-ring__track" cx="32" cy="32" r="28"/><circle class="jui-progress-ring__fill" cx="32" cy="32" r="28"/></svg><span class="jui-progress-ring__label">40%</span></div>
+              <div class="jui-progress-ring" data-value="72" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="72"><svg viewBox="0 0 64 64"><circle class="jui-progress-ring__track" cx="32" cy="32" r="28"/><circle class="jui-progress-ring__fill" cx="32" cy="32" r="28"/></svg><span class="jui-progress-ring__label">72%</span></div>
+              <div class="jui-progress-ring jui-progress-ring--lg" data-value="86" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="86"><svg viewBox="0 0 64 64"><circle class="jui-progress-ring__track" cx="32" cy="32" r="28"/><circle class="jui-progress-ring__fill" cx="32" cy="32" r="28"/></svg><span class="jui-progress-ring__label">86%</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar"><span class="docs-code__lang">HTML</span><button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button></div>
+<pre><code>&lt;div class="jui-progress" role="progressbar" aria-valuenow="68"
+     aria-valuemin="0" aria-valuemax="100" style="--value:68"&gt;
+  &lt;div class="jui-progress__track"&gt;&lt;div class="jui-progress__bar"&gt;&lt;/div&gt;&lt;/div&gt;
+&lt;/div&gt;
+
+&lt;div class="jui-progress-ring" data-value="72" role="progressbar" …&gt;
+  &lt;svg viewBox="0 0 64 64"&gt;
+    &lt;circle class="jui-progress-ring__track" cx="32" cy="32" r="28"/&gt;
+    &lt;circle class="jui-progress-ring__fill" cx="32" cy="32" r="28"/&gt;
+  &lt;/svg&gt;
+  &lt;span class="jui-progress-ring__label"&gt;72%&lt;/span&gt;
+&lt;/div&gt;</code></pre>
+        </div>
+        <div class="docs-table-wrap"><table class="docs-table">
+          <thead><tr><th>Attribute / key</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td><code>style="--value:N"</code> / <code>data-value</code></td><td>Sets the fill (0–100) for bar and ring.</td></tr>
+            <tr><td>variants</td><td>linear: <code>--success/--warning/--danger/--striped</code>; ring: <code>--sm/--lg</code>.</td></tr>
+            <tr><td>a11y</td><td><code>role="progressbar"</code> with <code>aria-valuenow/min/max</code>.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- -------------------------- SKELETON ------------------------ -->
+      <section id="skeleton" class="docs-section">
+        <div class="docs-anchor"><h2>Skeleton</h2><a class="docs-hash" href="#skeleton" aria-label="Link to Skeleton">#</a></div>
+        <p class="docs-lead">Shimmering placeholder blocks for loading states — text lines, an avatar circle, and a card outline. The shimmer pauses automatically under <code>prefers-reduced-motion</code>.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__row" style="align-items:stretch;gap:var(--jui-sp-4)">
+            <div class="jui-card" style="flex:1 1 220px;max-width:260px">
+              <div class="jui-card__body">
+                <span class="jui-skeleton jui-skeleton--circle" style="margin-bottom:12px"></span>
+                <span class="jui-skeleton jui-skeleton--title"></span>
+                <span class="jui-skeleton jui-skeleton--text" style="width:90%"></span>
+                <span class="jui-skeleton jui-skeleton--text" style="width:70%"></span>
+              </div>
+            </div>
+            <div class="jui-card" style="flex:1 1 220px;max-width:260px">
+              <div class="jui-card__body">
+                <span class="jui-avatar jui-avatar--circle" data-name="Iris Vega"></span>
+                <h3 class="jui-card__title" style="margin-top:8px">Iris Vega</h3>
+                <p class="jui-card__subtitle">Senior designer · joined 2023</p>
+              </div>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Block placeholder</span>
+            <span class="jui-skeleton jui-skeleton--rect" style="max-width:320px"></span>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar"><span class="docs-code__lang">HTML</span><button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button></div>
+<pre><code>&lt;span class="jui-skeleton jui-skeleton--text"&gt;&lt;/span&gt;
+&lt;span class="jui-skeleton jui-skeleton--circle"&gt;&lt;/span&gt;
+&lt;span class="jui-skeleton jui-skeleton--rect"&gt;&lt;/span&gt;</code></pre>
+        </div>
+      </section>
+
+      <!-- -------------------------- SPINNER ------------------------- -->
+      <section id="spinner" class="docs-section">
+        <div class="docs-anchor"><h2>Spinner</h2><a class="docs-hash" href="#spinner" aria-label="Link to Spinner">#</a></div>
+        <p class="docs-lead">A standalone loading indicator in three sizes and several colors, plus an inline variant for text and a button-internal use.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Sizes</span>
+            <div class="docs-demo__row">
+              <span class="jui-spinner jui-spinner--sm"></span>
+              <span class="jui-spinner"></span>
+              <span class="jui-spinner jui-spinner--lg"></span>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Colors · inline · in button</span>
+            <div class="docs-demo__row">
+              <span class="jui-spinner jui-spinner--success"></span>
+              <span class="jui-spinner jui-spinner--danger"></span>
+              <span class="jui-spinner jui-spinner--neutral"></span>
+              <span style="font-size:var(--jui-fs-sm);display:inline-flex;align-items:center;gap:8px">Loading<span class="jui-spinner jui-spinner--inline"></span></span>
+              <button class="jui-btn" disabled><span class="jui-spinner jui-spinner--inline"></span>Saving</button>
+            </div>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar"><span class="docs-code__lang">HTML</span><button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button></div>
+<pre><code>&lt;span class="jui-spinner jui-spinner--lg"&gt;&lt;/span&gt;
+&lt;span class="jui-spinner jui-spinner--inline"&gt;&lt;/span&gt;
+&lt;button class="jui-btn" disabled&gt;
+  &lt;span class="jui-spinner jui-spinner--inline"&gt;&lt;/span&gt; Saving
+&lt;/button&gt;</code></pre>
+        </div>
+      </section>
+
+      <!-- --------------------------- EMPTY -------------------------- -->
+      <section id="empty" class="docs-section">
+        <div class="docs-anchor"><h2>Empty state</h2><a class="docs-hash" href="#empty" aria-label="Link to Empty state">#</a></div>
+        <p class="docs-lead">A friendly placeholder for empty or zero-data views, with a hand-drawn inline illustration that recolors with the theme, a title, supporting copy and an action slot. A compact variant sits inline in a row.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Default</span>
+            <div class="jui-empty">
+              <div class="jui-empty__icon"><svg viewBox="0 0 64 48" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="10" width="52" height="34" rx="5"/><path d="M6 20h52"/><circle cx="12" cy="15" r="1.2"/><circle cx="16.5" cy="15" r="1.2"/><path d="M28 33l-5-5 5-5"/><path d="M42 23l5 5-5 5" opacity="0.6"/></svg></div>
+              <div class="jui-empty__title">No results found</div>
+              <p class="jui-empty__text">Try adjusting your filters or search terms to find what you’re looking for.</p>
+              <div class="jui-empty__action"><button class="jui-btn jui-btn--soft">Clear filters</button></div>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Compact</span>
+            <div class="jui-empty jui-empty--compact">
+              <div class="jui-empty__icon"><svg viewBox="0 0 64 48" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="10" width="52" height="34" rx="5"/><path d="M6 20h52"/><circle cx="12" cy="15" r="1.2"/></svg></div>
+              <div><div class="jui-empty__title">Inbox zero</div><p class="jui-empty__text">You’re all caught up.</p></div>
+              <div class="jui-empty__action"><button class="jui-btn jui-btn--sm">Compose</button></div>
+            </div>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar"><span class="docs-code__lang">HTML</span><button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button></div>
+<pre><code>&lt;div class="jui-empty"&gt;
+  &lt;div class="jui-empty__icon"&gt;&lt;svg&gt;…&lt;/svg&gt;&lt;/div&gt;
+  &lt;div class="jui-empty__title"&gt;No results&lt;/div&gt;
+  &lt;p class="jui-empty__text"&gt;…&lt;/p&gt;
+  &lt;div class="jui-empty__action"&gt;&lt;button class="jui-btn"&gt;…&lt;/button&gt;&lt;/div&gt;
+&lt;/div&gt;
+&lt;!-- add .jui-empty--compact for the inline row variant --&gt;</code></pre>
+        </div>
+      </section>
+
+      <!-- ------------------------- BREADCRUMBS ---------------------- -->
+      <section id="breadcrumbs" class="docs-section">
+        <div class="docs-anchor"><h2>Breadcrumbs</h2><a class="docs-hash" href="#breadcrumbs" aria-label="Link to Breadcrumbs">#</a></div>
+        <p class="docs-lead">A breadcrumb trail with chevron separators. The final item carries <code>aria-current="page"</code>; a collapsed variant collapses the middle into an ellipsis.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Default</span>
+            <nav class="jui-breadcrumbs" aria-label="Breadcrumb">
+              <ol class="jui-breadcrumbs__list">
+                <li class="jui-breadcrumbs__item"><a class="jui-breadcrumbs__link" href="#dashboard">Home</a><span class="jui-breadcrumbs__sep"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></span></li>
+                <li class="jui-breadcrumbs__item"><a class="jui-breadcrumbs__link" href="#dashboard">Settings</a><span class="jui-breadcrumbs__sep"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></span></li>
+                <li class="jui-breadcrumbs__item"><span class="jui-breadcrumbs__current" aria-current="page">Team</span></li>
+              </ol>
+            </nav>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Collapsed</span>
+            <nav class="jui-breadcrumbs" aria-label="Breadcrumb collapsed">
+              <ol class="jui-breadcrumbs__list">
+                <li class="jui-breadcrumbs__item"><a class="jui-breadcrumbs__link" href="#dashboard">Home</a><span class="jui-breadcrumbs__sep"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></span></li>
+                <li class="jui-breadcrumbs__item"><button class="jui-breadcrumbs__ellipsis" aria-label="Show hidden breadcrumbs">…</button><span class="jui-breadcrumbs__sep"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></span></li>
+                <li class="jui-breadcrumbs__item"><a class="jui-breadcrumbs__link" href="#dashboard">Projects</a><span class="jui-breadcrumbs__sep"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></span></li>
+                <li class="jui-breadcrumbs__item"><span class="jui-breadcrumbs__current" aria-current="page">Acme migration</span></li>
+              </ol>
+            </nav>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar"><span class="docs-code__lang">HTML</span><button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button></div>
+<pre><code>&lt;nav class="jui-breadcrumbs" aria-label="Breadcrumb"&gt;
+  &lt;ol class="jui-breadcrumbs__list"&gt;
+    &lt;li class="jui-breadcrumbs__item"&gt;
+      &lt;a class="jui-breadcrumbs__link" href="…"&gt;Home&lt;/a&gt;
+      &lt;span class="jui-breadcrumbs__sep"&gt;…chevron svg…&lt;/span&gt;
+    &lt;/li&gt;
+    &lt;li class="jui-breadcrumbs__item"&gt;
+      &lt;span class="jui-breadcrumbs__current" aria-current="page"&gt;Team&lt;/span&gt;
+    &lt;/li&gt;
+  &lt;/ol&gt;
+&lt;/nav&gt;</code></pre>
+        </div>
+      </section>
+
+      <!-- --------------------------- STEPPER ------------------------ -->
+      <section id="stepper" class="docs-section">
+        <div class="docs-anchor"><h2>Stepper</h2><a class="docs-hash" href="#stepper" aria-label="Link to Stepper">#</a></div>
+        <p class="docs-lead">A horizontal progress indicator with done / current / upcoming states, colored connector lines, and a check on completed steps. Use the Back / Next buttons to move the current step; a vertical variant is included.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Horizontal — try the buttons</span>
+            <div data-jui="stepper">
+              <ol class="jui-stepper" style="margin-bottom:var(--jui-sp-4)">
+                <li class="jui-stepper__step is-current"><span class="jui-stepper__circle">1</span><span class="jui-stepper__label">Account</span></li>
+                <li class="jui-stepper__step is-upcoming"><span class="jui-stepper__circle">2</span><span class="jui-stepper__label">Workspace</span></li>
+                <li class="jui-stepper__step is-upcoming"><span class="jui-stepper__circle">3</span><span class="jui-stepper__label">Team</span></li>
+                <li class="jui-stepper__step is-upcoming"><span class="jui-stepper__circle">4</span><span class="jui-stepper__label">Billing</span></li>
+              </ol>
+              <div class="docs-flex-between">
+                <button class="jui-btn jui-btn--outline" data-stepper-back>Back</button>
+                <button class="jui-btn" data-stepper-next>Next</button>
+              </div>
+            </div>
+          </div>
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Vertical</span>
+            <ol class="jui-stepper jui-stepper--vertical" style="max-width:280px">
+              <li class="jui-stepper__step is-done"><span class="jui-stepper__circle">1</span><span class="jui-stepper__label">Create account</span></li>
+              <li class="jui-stepper__step is-done"><span class="jui-stepper__circle">2</span><span class="jui-stepper__label">Verify email</span></li>
+              <li class="jui-stepper__step is-current"><span class="jui-stepper__circle">3</span><span class="jui-stepper__label">Set up workspace</span></li>
+              <li class="jui-stepper__step is-upcoming"><span class="jui-stepper__circle">4</span><span class="jui-stepper__label">Invite teammates</span></li>
+            </ol>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar"><span class="docs-code__lang">HTML</span><button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button></div>
+<pre><code>&lt;div data-jui="stepper"&gt;
+  &lt;ol class="jui-stepper"&gt;
+    &lt;li class="jui-stepper__step is-current"&gt;
+      &lt;span class="jui-stepper__circle"&gt;1&lt;/span&gt;
+      &lt;span class="jui-stepper__label"&gt;Account&lt;/span&gt;
+    &lt;/li&gt;
+    &lt;!-- is-done · is-current · is-upcoming --&gt;
+  &lt;/ol&gt;
+  &lt;button data-stepper-back&gt;Back&lt;/button&gt;
+  &lt;button data-stepper-next&gt;Next&lt;/button&gt;
+&lt;/div&gt;
+&lt;!-- add .jui-stepper--vertical --&gt;</code></pre>
+        </div>
+        <div class="docs-table-wrap"><table class="docs-table">
+          <thead><tr><th>Attribute / key</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td><code>data-jui="stepper"</code></td><td>Host; <code>data-stepper-next</code> / <code>data-stepper-back</code> move the current step.</td></tr>
+            <tr><td>states</td><td><code>.is-done</code> · <code>.is-current</code> (gets <code>aria-current="step"</code>) · <code>.is-upcoming</code>.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- ----------------------- COMMAND PALETTE -------------------- -->
+      <section id="command-palette" class="docs-section">
+        <div class="docs-anchor"><h2>Command palette</h2><a class="docs-hash" href="#command-palette" aria-label="Link to Command palette">#</a></div>
+        <p class="docs-lead">An instant fuzzy launcher over every component and getting-started section. Press <span class="jui-kbd">Ctrl</span> + <span class="jui-kbd">K</span> (or <span class="jui-kbd">⌘</span> + <span class="jui-kbd">K</span>) to open it. Arrow keys move the selection, Enter jumps to the section, and your last three jumps are remembered at the top.</p>
+        <div class="docs-demo">
+          <div class="docs-demo__group">
+            <span class="docs-demo__label">Open it</span>
+            <div class="docs-demo__row">
+              <button class="jui-btn" data-jui="command-palette">Open command palette</button>
+              <span style="font-size:var(--jui-fs-sm);color:var(--jui-text-muted)">or press <span class="jui-kbd">⌘</span> <span class="jui-kbd">K</span></span>
+            </div>
+          </div>
+        </div>
+        <div class="docs-code">
+          <div class="docs-code__bar"><span class="docs-code__lang">HTML</span><button class="docs-copy" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span class="docs-copy__label">Copy</span></button></div>
+<pre><code>&lt;!-- any element can be a trigger --&gt;
+&lt;button data-jui="command-palette"&gt;Search&lt;/button&gt;
+
+&lt;!-- Ctrl/⌘+K opens the palette anywhere once a trigger exists --&gt;
+&lt;script&gt; Jui.commandPalette({ items: […], onSelect: fn }); &lt;/script&gt;</code></pre>
+        </div>
+        <div class="docs-table-wrap"><table class="docs-table">
+          <thead><tr><th>Attribute / key</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td><code>data-jui="command-palette"</code></td><td>Opens the palette on click; index is built from the sidebar links.</td></tr>
+            <tr><td><code>Ctrl</code>/<code>⌘</code> + <code>K</code></td><td>Global shortcut to open the palette.</td></tr>
+            <tr><td>keyboard</td><td>↑/↓ move · Enter jump · Esc close · fuzzy match with highlighted chars.</td></tr>
+            <tr><td>recent</td><td>Last three jumps are pinned under “Recent” (localStorage).</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- -------------------------- DASHBOARD ----------------------- -->
+      <section id="dashboard" class="docs-section">
+        <div class="docs-anchor"><h2>Examples — Dashboard</h2><a class="docs-hash" href="#dashboard" aria-label="Link to Dashboard">#</a></div>
+        <p class="docs-lead">A credible SaaS overview composed entirely from Jui components: a breadcrumb header, four KPI stat cards, a tabbed panel with a sortable team table and pagination, a circular progress card and an empty-state panel — wired to real toasts and an invite modal.</p>
+        <div class="docs-dashboard">
+          <nav class="jui-breadcrumbs" aria-label="Breadcrumb">
+            <ol class="jui-breadcrumbs__list">
+              <li class="jui-breadcrumbs__item"><span class="jui-breadcrumbs__link" style="cursor:default">Acme Inc.</span><span class="jui-breadcrumbs__sep"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></span></li>
+              <li class="jui-breadcrumbs__item"><span class="jui-breadcrumbs__current" aria-current="page">Workspace overview</span></li>
+            </ol>
+          </nav>
+
+          <div class="docs-page-head">
+            <div>
+              <div class="docs-page-head__title">Workspace overview</div>
+              <div class="docs-page-head__sub">Performance for the Acme Inc. workspace · last 30 days</div>
+            </div>
+            <div class="docs-page-head__actions">
+              <button class="jui-btn jui-btn--outline" onclick="Jui.toast({title:'Export started',message:'We’ll email a download link when it’s ready.',variant:'success'})"><span class="jui-btn__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg></span>Export</button>
+              <button class="jui-btn" data-jui="modal-trigger" data-target="#inviteModal"><span class="jui-btn__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>Invite member</button>
+            </div>
+          </div>
+
+          <div class="docs-stat-grid">
+            <div class="jui-stat">
+              <div class="jui-stat__top"><span class="jui-stat__label">Monthly revenue</span><span class="jui-stat__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span></div>
+              <div class="jui-stat__value">$48,290</div>
+              <div class="jui-stat__foot"><span class="jui-stat__delta jui-stat__delta--up"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15 6-6 6 6"/></svg>12.4%</span><span class="jui-stat__spark"><svg viewBox="0 0 88 32"><polyline points="0,26 12,22 24,24 36,16 48,18 60,10 72,12 88,4"/></svg></span></div>
+            </div>
+            <div class="jui-stat">
+              <div class="jui-stat__top"><span class="jui-stat__label">Active members</span><span class="jui-stat__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="7" r="4"/><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/></svg></span></div>
+              <div class="jui-stat__value">1,204</div>
+              <div class="jui-stat__foot"><span class="jui-stat__delta jui-stat__delta--up"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15 6-6 6 6"/></svg>5.2%</span><span class="jui-stat__spark"><svg viewBox="0 0 88 32"><polyline points="0,22 12,20 24,16 36,18 48,12 60,14 72,8 88,9"/></svg></span></div>
+            </div>
+            <div class="jui-stat">
+              <div class="jui-stat__top"><span class="jui-stat__label">Open tickets</span><span class="jui-stat__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4L3 21l1.1-4.5A8.4 8.4 0 1 1 21 11.5z"/></svg></span></div>
+              <div class="jui-stat__value">37</div>
+              <div class="jui-stat__foot"><span class="jui-stat__delta jui-stat__delta--down"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>2</span><span class="jui-stat__spark"><svg viewBox="0 0 88 32"><polyline points="0,10 12,14 24,12 36,16 48,15 60,20 72,19 88,24"/></svg></span></div>
+            </div>
+            <div class="jui-stat">
+              <div class="jui-stat__top"><span class="jui-stat__label">Uptime</span><span class="jui-stat__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span></div>
+              <div class="jui-stat__value">99.98%</div>
+              <div class="jui-stat__foot"><span class="jui-stat__delta jui-stat__delta--up"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15 6-6 6 6"/></svg>0.03%</span><span class="jui-stat__spark"><svg viewBox="0 0 88 32"><polyline points="0,8 12,10 24,8 36,9 48,7 60,8 72,6 88,7"/></svg></span></div>
+            </div>
+          </div>
+
+          <div class="docs-panel-grid">
+            <div class="docs-panel">
+              <div class="jui-tabs" data-jui="tabs" style="display:block">
+                <div class="jui-tabs__list" role="tablist">
+                  <button class="jui-tabs__tab is-active" role="tab" id="dt1" aria-selected="true" aria-controls="dp1" tabindex="0">Overview</button>
+                  <button class="jui-tabs__tab" role="tab" id="dt2" aria-selected="false" aria-controls="dp2" tabindex="-1">Reports</button>
+                  <span class="jui-tabs__indicator" aria-hidden="true"></span>
+                </div>
+                <div class="jui-tabs__panel" role="tabpanel" id="dp1" aria-labelledby="dt1" tabindex="0" style="padding:0">
+                  <div class="jui-table-scroll" style="max-height:none;border:none;border-radius:0">
+                    <table class="jui-table jui-table--hover" data-jui="table-sort">
+                      <thead><tr>
+                        <th data-sort-key="name">Member</th>
+                        <th data-sort-key="role">Role</th>
+                        <th data-sort-key="tickets" data-sort-type="number" class="numeric">Tickets</th>
+                        <th data-sort-key="active">Last active</th>
+                        <th>Status</th>
+                      </tr></thead>
+                      <tbody>
+                        <tr><td>Ada Lovelace</td><td>Engineering Lead</td><td class="numeric">128</td><td>2025-06-29</td><td><span class="jui-badge jui-badge--soft jui-badge--success">Active</span></td></tr>
+                        <tr><td>Katherine Johnson</td><td>Data Analyst</td><td class="numeric">203</td><td>2025-06-30</td><td><span class="jui-badge jui-badge--soft jui-badge--success">Active</span></td></tr>
+                        <tr><td>Linus Torvalds</td><td>Backend</td><td class="numeric">154</td><td>2025-06-30</td><td><span class="jui-badge jui-badge--soft jui-badge--warning">Away</span></td></tr>
+                        <tr><td>Hedy Lamarr</td><td>Platform</td><td class="numeric">112</td><td>2025-06-29</td><td><span class="jui-badge jui-badge--soft jui-badge--success">Active</span></td></tr>
+                        <tr><td>Tim Berners-Lee</td><td>Frontend</td><td class="numeric">89</td><td>2025-06-26</td><td><span class="jui-badge jui-badge--soft jui-badge--success">Active</span></td></tr>
+                        <tr><td>Alan Turing</td><td>Security</td><td class="numeric">41</td><td>2025-06-21</td><td><span class="jui-badge jui-badge--soft jui-badge--neutral">Offline</span></td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div class="docs-flex-between" style="padding:var(--jui-sp-3) var(--jui-sp-5);border-top:1px solid var(--jui-border)">
+                    <span id="dashPgOut" style="font-size:var(--jui-fs-sm);color:var(--jui-text-muted)">Page 1 of 12</span>
+                    <nav class="jui-pagination jui-pagination--sm" data-jui="pagination" data-pages="12" data-pagination-output="#dashPgOut" aria-label="Dashboard pagination"></nav>
+                  </div>
+                </div>
+                <div class="jui-tabs__panel" role="tabpanel" id="dp2" aria-labelledby="dt2" tabindex="0" hidden>
+                  <div class="docs-panel__body">
+                    <div class="jui-empty"><div class="jui-empty__icon"><svg viewBox="0 0 64 48" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="10" width="52" height="34" rx="5"/><path d="M6 20h52"/><circle cx="12" cy="15" r="1.2"/></svg></div><div class="jui-empty__title">No reports yet</div><p class="jui-empty__text">Schedule your first report and it will appear here.</p><div class="jui-empty__action"><button class="jui-btn jui-btn--soft" onclick="Jui.toast({title:'Report scheduled',message:'A weekly summary will arrive every Monday.',variant:'success'})">Schedule report</button></div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="docs-panel">
+              <div class="docs-panel__head"><span style="font-size:var(--jui-fs-md);font-weight:var(--jui-fw-semibold)">Storage</span><span class="jui-badge jui-badge--soft jui-badge--info">Pro</span></div>
+              <div class="docs-mono-center">
+                <div class="jui-progress-ring jui-progress-ring--lg" data-value="68" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="68"><svg viewBox="0 0 64 64"><circle class="jui-progress-ring__track" cx="32" cy="32" r="28"/><circle class="jui-progress-ring__fill" cx="32" cy="32" r="28"/></svg><span class="jui-progress-ring__label">68%</span></div>
+                <div style="text-align:center"><div style="font-weight:var(--jui-fw-semibold);color:var(--jui-text)">680 GB of 1 TB</div><div style="font-size:var(--jui-fs-sm);color:var(--jui-text-muted)">Used this billing cycle</div></div>
+                <button class="jui-btn jui-btn--soft jui-btn--sm" onclick="Jui.toast({title:'Upgrade prompted',variant:'info'})">Buy more storage</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Invite member modal (dashboard) -->
+      <div class="jui-modal jui-modal--sm" id="inviteModal" role="dialog" aria-modal="true" aria-labelledby="inviteModalTitle" aria-hidden="true">
+        <div class="jui-modal__panel">
+          <div class="jui-modal__header"><h3 class="jui-modal__title" id="inviteModalTitle">Invite a member</h3><button class="jui-modal__close" data-jui-close aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+          <div class="jui-modal__body">
+            <div class="jui-field">
+              <label class="jui-field__label" for="inviteEmail">Email address</label>
+              <div class="jui-control"><span class="jui-control__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></span><input id="inviteEmail" class="jui-input" type="email" placeholder="teammate@acme.com" /></div>
+              <p class="jui-field__help">They’ll receive an email invitation to join this workspace.</p>
+            </div>
+          </div>
+          <div class="jui-modal__footer"><button class="jui-btn jui-btn--ghost" data-jui-close>Cancel</button><button class="jui-btn" data-jui-close onclick="Jui.toast({title:'Invitation sent',message:'We’ve emailed the invite link.',variant:'success'})">Send invite</button></div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ============================ FOOTER ============================ -->
+  <div class="docs-footernote" role="contentinfo">
+    <span class="docs-footernote__dot" aria-hidden="true"></span>
+    Built autonomously by jcode
+  </div>
+
+  <script src="./js/jui.js"></script>
+  <script src="./js/docs.js"></script>
+</body>
+</html>
