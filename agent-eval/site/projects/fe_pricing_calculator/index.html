@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pricing Calculator</title>
+<style>
+  :root {
+    --brand: #6366f1;
+    --brand-dark: #4f46e5;
+    --annual: #10b981;
+    --ink: #1e293b;
+    --muted: #64748b;
+    --line: #e2e8f0;
+    --card: #ffffff;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
+  }
+
+  .card {
+    width: 100%;
+    max-width: 480px;
+    background: var(--card);
+    border-radius: 22px;
+    padding: 36px 32px 32px;
+    box-shadow: 0 30px 60px -15px rgba(0, 0, 0, 0.35);
+  }
+
+  h1 {
+    margin: 0 0 4px;
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .subtitle {
+    margin: 0 0 28px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  /* Seats control */
+  .seats-label {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+
+  .seats-label .name {
+    font-weight: 600;
+    font-size: 15px;
+  }
+
+  .seats-count {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--brand-dark);
+    font-variant-numeric: tabular-nums;
+  }
+
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--line);
+    outline: none;
+    margin: 6px 0 4px;
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--brand);
+    border: 4px solid #fff;
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.5);
+    cursor: pointer;
+    transition: transform 0.12s ease;
+  }
+
+  input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
+
+  input[type="range"]::-moz-range-thumb {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--brand);
+    border: 4px solid #fff;
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.5);
+    cursor: pointer;
+  }
+
+  .range-scale {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  /* Billing toggle */
+  .billing {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 30px;
+    padding: 16px 18px;
+    background: #f8fafc;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+  }
+
+  .billing-text .title {
+    font-weight: 600;
+    font-size: 15px;
+  }
+
+  .billing-text .desc {
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 54px;
+    height: 30px;
+    flex-shrink: 0;
+  }
+
+  .switch input { opacity: 0; width: 0; height: 0; }
+
+  .slider-toggle {
+    position: absolute;
+    cursor: pointer;
+    inset: 0;
+    background: #cbd5e1;
+    border-radius: 999px;
+    transition: background 0.2s ease;
+  }
+
+  .slider-toggle::before {
+    content: "";
+    position: absolute;
+    height: 22px;
+    width: 22px;
+    left: 4px;
+    top: 4px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  }
+
+  .switch input:checked + .slider-toggle { background: var(--annual); }
+  .switch input:checked + .slider-toggle::before { transform: translateX(24px); }
+
+  .badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+    background: var(--annual);
+    border-radius: 999px;
+    vertical-align: middle;
+  }
+
+  /* Price summary */
+  .summary {
+    margin-top: 28px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  .per-seat {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 14px;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+
+  .per-seat .value {
+    color: var(--ink);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .total {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  .total .currency {
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--muted);
+  }
+
+  .total .amount {
+    font-size: 48px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .total .cycle {
+    font-size: 15px;
+    color: var(--muted);
+    font-weight: 500;
+  }
+
+  .savings {
+    margin-top: 12px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--annual);
+    min-height: 16px;
+  }
+</style>
+</head>
+<body>
+  <main class="card">
+    <h1>Choose your plan</h1>
+    <p class="subtitle">Drag the slider and toggle billing to see your price.</p>
+
+    <div class="seats-label">
+      <span class="name">Number of seats</span>
+      <span class="seats-count" id="seatsCount">5</span>
+    </div>
+
+    <input type="range" id="seats" min="1" max="100" value="5" aria-label="Number of seats">
+    <div class="range-scale"><span>1</span><span>100</span></div>
+
+    <div class="billing">
+      <div class="billing-text">
+        <div class="title">Annual billing<span class="badge">Save 20%</span></div>
+        <div class="desc">Billed once per year</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="annual" aria-label="Toggle annual billing">
+        <span class="slider-toggle"></span>
+      </label>
+    </div>
+
+    <div class="summary">
+      <div class="per-seat">
+        <span>Price per seat</span>
+        <span class="value" id="perSeat">$20.00</span>
+      </div>
+      <div class="total">
+        <span class="currency">$</span>
+        <span class="amount" id="amount">100.00</span>
+        <span class="cycle" id="cycle">/ month</span>
+      </div>
+      <div class="savings" id="savings"></div>
+    </div>
+  </main>
+
+<script>
+  (function () {
+    "use strict";
+
+    var seatsInput = document.getElementById("seats");
+    var annualInput = document.getElementById("annual");
+    var seatsCountEl = document.getElementById("seatsCount");
+    var perSeatEl = document.getElementById("perSeat");
+    var amountEl = document.getElementById("amount");
+    var cycleEl = document.getElementById("cycle");
+    var savingsEl = document.getElementById("savings");
+
+    // Tiered volume pricing: per-seat price gets cheaper at higher tiers.
+    // [maxSeatsInclusive, pricePerSeatPerMonth]
+    var tiers = [
+      { max: 10, price: 20 },
+      { max: 25, price: 18 },
+      { max: 50, price: 15 },
+      { max: 100, price: 12 }
+    ];
+
+    function perSeatPrice(seats) {
+      for (var i = 0; i < tiers.length; i++) {
+        if (seats <= tiers[i].max) return tiers[i].price;
+      }
+      return tiers[tiers.length - 1].price;
+    }
+
+    function money(n) {
+      return n.toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+    }
+
+    function update() {
+      var seats = parseInt(seatsInput.value, 10) || 1;
+      var annual = annualInput.checked;
+      var seatPrice = perSeatPrice(seats);
+
+      var monthlySubtotal = seatPrice * seats;
+      var discounted = annual ? monthlySubtotal * 0.8 : monthlySubtotal;
+
+      seatsCountEl.textContent = seats;
+      perSeatEl.textContent = "$" + seatPrice.toFixed(2) + " / seat";
+
+      if (annual) {
+        var yearly = discounted * 12;
+        amountEl.textContent = money(yearly);
+        cycleEl.textContent = "/ year";
+        savingsEl.textContent =
+          "You save $" + money(monthlySubtotal * 12 - yearly) + " per year";
+      } else {
+        amountEl.textContent = money(discounted);
+        cycleEl.textContent = "/ month";
+        savingsEl.textContent =
+          "Switch to annual to save $" +
+          money(monthlySubtotal * 12 * 0.2) + " / year";
+      }
+    }
+
+    seatsInput.addEventListener("input", update);
+    annualInput.addEventListener("change", update);
+
+    update();
+  })();
+</script>
+</body>
+</html>
