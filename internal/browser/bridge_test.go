@@ -33,7 +33,7 @@ func dialExtension(t *testing.T, wsURL string, hello map[string]any) (*fakeExten
 		t.Fatalf("read welcome: %v", err)
 	}
 	if resp["type"] == "error" {
-		conn.Close()
+		_ = conn.Close()
 		return nil, false
 	}
 	tok, _ := resp["token"].(string)
@@ -81,7 +81,7 @@ func TestBridgeTokenAuth(t *testing.T) {
 	if !b.Connected() {
 		t.Fatal("bridge should report connected")
 	}
-	fe.conn.Close()
+	_ = fe.conn.Close()
 
 	// The token persists and re-authenticates after reconnect.
 	waitUntil(t, func() bool { return !b.Connected() })
@@ -89,7 +89,7 @@ func TestBridgeTokenAuth(t *testing.T) {
 	if !ok {
 		t.Fatal("issued token should re-authenticate")
 	}
-	fe2.conn.Close()
+	_ = fe2.conn.Close()
 }
 
 func TestBridgeCDPForwarding(t *testing.T) {

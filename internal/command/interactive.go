@@ -938,7 +938,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	// so the browser_* tools work in the terminal.
 	browserMgr := browser.NewManager(browserManagerConfig(cfg))
 	env.Browser = browserMgr
-	defer browserMgr.Close()
+	defer func() { _ = browserMgr.Close() }()
 
 	var mcpTools []tool.BaseTool
 	var mcpStatuses []tui.MCPStatusItem

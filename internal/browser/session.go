@@ -78,18 +78,17 @@ func (s *Session) Close() error {
 }
 
 // ensureActive returns the active tab, creating one if the session has none.
-func (s *Session) ensureActive(ctx context.Context) (*sessionTab, string, error) {
+func (s *Session) ensureActive(ctx context.Context) (*sessionTab, error) {
 	if s.active != "" {
 		if t, ok := s.tabs[s.active]; ok {
-			return t, s.active, nil
+			return t, nil
 		}
 	}
 	conn, err := s.backend.NewTab(ctx, "about:blank")
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	t := s.registerTab(conn, true)
-	return t, conn.ID(), nil
+	return s.registerTab(conn, true), nil
 }
 
 // registerTab wires event handling and enables the domains we rely on.
@@ -150,7 +149,7 @@ func (s *Session) Open(ctx context.Context, url string, newTab bool) (string, er
 		t = s.registerTab(conn, true)
 	} else {
 		var err error
-		t, _, err = s.ensureActive(ctx)
+		t, err = s.ensureActive(ctx)
 		if err != nil {
 			return "", err
 		}
@@ -193,7 +192,7 @@ func (s *Session) waitForLoad(ctx context.Context, t *sessionTab) {
 func (s *Session) Reload(ctx context.Context) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	t, _, err := s.ensureActive(ctx)
+	t, err := s.ensureActive(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -228,7 +227,7 @@ func (s *Session) CurrentOrigin() string {
 func (s *Session) Snapshot(ctx context.Context, filter string, maxLines int) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	t, _, err := s.ensureActive(ctx)
+	t, err := s.ensureActive(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -297,7 +296,7 @@ func (s *Session) titleURL(ctx context.Context, t *sessionTab) (string, string) 
 func (s *Session) Screenshot(ctx context.Context, fullPage bool) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	t, _, err := s.ensureActive(ctx)
+	t, err := s.ensureActive(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +323,7 @@ func (s *Session) Screenshot(ctx context.Context, fullPage bool) ([]byte, error)
 func (s *Session) PageText(ctx context.Context, limit int) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	t, _, err := s.ensureActive(ctx)
+	t, err := s.ensureActive(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -354,7 +353,7 @@ func (s *Session) PageText(ctx context.Context, limit int) (string, error) {
 func (s *Session) Eval(ctx context.Context, expr string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	t, _, err := s.ensureActive(ctx)
+	t, err := s.ensureActive(ctx)
 	if err != nil {
 		return "", err
 	}

@@ -24,7 +24,7 @@ func (s *Session) Act(ctx context.Context, req ActRequest) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	t, _, err := s.ensureActive(ctx)
+	t, err := s.ensureActive(ctx)
 	if err != nil {
 		return "", err
 	}

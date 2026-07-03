@@ -75,14 +75,14 @@ func (b *Bridge) HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = conn.SetReadDeadline(time.Now().Add(15 * time.Second))
 	if err := conn.ReadJSON(&hello); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return
 	}
 	_ = conn.SetReadDeadline(time.Time{})
 
 	if hello.Token == "" || !b.validToken(hello.Token) {
 		_ = conn.WriteJSON(map[string]any{"type": "error", "message": "authentication required"})
-		conn.Close()
+		_ = conn.Close()
 		return
 	}
 	token := hello.Token

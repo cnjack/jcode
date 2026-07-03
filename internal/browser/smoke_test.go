@@ -25,7 +25,7 @@ func TestSmokeManagedChrome(t *testing.T) {
 		t.Fatalf("Launch: %v", err)
 	}
 	sess := NewSession(backend)
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 
 	page := "data:text/html," +
 		"<title>Smoke</title><h1>Hello</h1>" +

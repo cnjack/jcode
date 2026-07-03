@@ -75,10 +75,10 @@ func axTreeJSON() json.RawMessage {
 	return b
 }
 
-func scriptedSession(t *testing.T) (*Session, *scriptedTab) {
+func scriptedSession() (*Session, *scriptedTab) {
 	tab := newScriptedTab("TARGET-abcdef123456")
 	tab.resp["Accessibility.getFullAXTree"] = func(any) json.RawMessage { return axTreeJSON() }
-	tab.resp["Runtime.evaluate"] = func(params any) json.RawMessage {
+	tab.resp["Runtime.evaluate"] = func(any) json.RawMessage {
 		// titleURL and readyState both go through evaluate; return a value that
 		// satisfies both parsers.
 		return json.RawMessage(`{"result":{"value":"{\"t\":\"Doc\",\"u\":\"https://x/\"}"}}`)
@@ -91,7 +91,7 @@ func scriptedSession(t *testing.T) (*Session, *scriptedTab) {
 }
 
 func TestSessionReloadIssuesPageReload(t *testing.T) {
-	sess, tab := scriptedSession(t)
+	sess, tab := scriptedSession()
 	// waitForLoad polls readyState (the scripted value never reads as "complete"),
 	// so cancel up front to make it return on the first poll instead of the 6s
 	// deadline — the mock ignores ctx for the actual Sends.
@@ -114,7 +114,7 @@ func TestSessionReloadIssuesPageReload(t *testing.T) {
 }
 
 func TestSessionCurrentOrigin(t *testing.T) {
-	sess, _ := scriptedSession(t)
+	sess, _ := scriptedSession()
 	// No active tab yet → no origin.
 	if got := sess.CurrentOrigin(); got != "" {
 		t.Errorf("origin before snapshot: got %q want empty", got)
@@ -129,7 +129,7 @@ func TestSessionCurrentOrigin(t *testing.T) {
 }
 
 func TestSessionSnapshotAndActFlow(t *testing.T) {
-	sess, tab := scriptedSession(t)
+	sess, tab := scriptedSession()
 	ctx := context.Background()
 
 	out, err := sess.Snapshot(ctx, "interactive", 100)
@@ -164,7 +164,7 @@ func TestSessionSnapshotAndActFlow(t *testing.T) {
 }
 
 func TestSessionRejectsStaleUID(t *testing.T) {
-	sess, _ := scriptedSession(t)
+	sess, _ := scriptedSession()
 	ctx := context.Background()
 
 	// Act before any snapshot → clear error.
@@ -214,7 +214,7 @@ func TestSessionFillDispatchesInsertText(t *testing.T) {
 }
 
 func TestSessionListTabsMarksControlled(t *testing.T) {
-	sess, tab := scriptedSession(t)
+	sess, tab := scriptedSession()
 	ctx := context.Background()
 	// Create the active tab first.
 	if _, err := sess.Snapshot(ctx, "interactive", 100); err != nil {

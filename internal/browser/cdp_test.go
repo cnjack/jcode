@@ -28,7 +28,7 @@ func newFakeChrome(t *testing.T, handler func(method string, params json.RawMess
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		for {
 			var msg cdpMessage
 			if err := conn.ReadJSON(&msg); err != nil {
@@ -67,7 +67,7 @@ func TestManagedBackendNewTabAndSend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer backend.Close()
+	defer func() { _ = backend.Close() }()
 
 	tab, err := backend.NewTab(ctx, "https://example.com")
 	if err != nil {
@@ -97,7 +97,7 @@ func TestManagedBackendErrorPropagation(t *testing.T) {
 		_ = conn.ReadJSON(&msg)
 		// Reply with a CDP error frame.
 		_ = conn.WriteJSON(cdpMessage{ID: msg.ID, Error: &cdpError{Code: -32000, Message: "boom"}})
-		conn.Close()
+		_ = conn.Close()
 	}))
 	defer srv.Close()
 
@@ -106,7 +106,7 @@ func TestManagedBackendErrorPropagation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer backend.Close()
+	defer func() { _ = backend.Close() }()
 	_, err = backend.cdp.send(ctx, "", "Target.getTargets", nil)
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("expected boom error, got %v", err)
@@ -121,7 +121,7 @@ func TestSendRespectsContextCancel(t *testing.T) {
 		var msg cdpMessage
 		_ = conn.ReadJSON(&msg)
 		time.Sleep(2 * time.Second)
-		conn.Close()
+		_ = conn.Close()
 	}))
 	defer srv.Close()
 
@@ -129,7 +129,7 @@ func TestSendRespectsContextCancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer backend.Close()
+	defer func() { _ = backend.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
