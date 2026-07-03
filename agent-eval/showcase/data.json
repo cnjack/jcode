@@ -1,0 +1,79 @@
+{
+  "runs": 18,
+  "pass": 17,
+  "rate": "94%",
+  "projects": [
+    {
+      "id": "fe_landing_hero",
+      "title": "Product Landing Page",
+      "description": "Marketing hero for a fictional dev tool \u2014 nav, CTAs, feature cards.",
+      "model": "glm-5.1",
+      "passed": true,
+      "wall_s": 131.2,
+      "tokens": 42354,
+      "bytes": 17603,
+      "run_id": "fe_landing_hero__glm-5.1__r1",
+      "artifact_copied": true
+    },
+    {
+      "id": "fe_analytics_dashboard",
+      "title": "Analytics Dashboard",
+      "description": "Dark KPI dashboard with inline-SVG bar and line charts.",
+      "model": "glm-5.1",
+      "passed": true,
+      "wall_s": 256.2,
+      "tokens": 70774,
+      "bytes": 36211,
+      "run_id": "fe_analytics_dashboard__glm-5.1__r2",
+      "artifact_copied": true
+    },
+    {
+      "id": "fe_todo_app",
+      "title": "To-Do App",
+      "description": "Vanilla-JS task list with filters and localStorage persistence.",
+      "model": "glm-5.1",
+      "passed": true,
+      "wall_s": 59.9,
+      "tokens": 14970,
+      "bytes": 10232,
+      "run_id": "fe_todo_app__glm-5.1__r1",
+      "artifact_copied": true
+    },
+    {
+      "id": "fe_pricing_calculator",
+      "title": "Pricing Calculator",
+      "description": "Live seat slider + monthly/annual toggle with reactive totals.",
+      "model": "glm-5.1",
+      "passed": true,
+      "wall_s": 62.3,
+      "tokens": 14659,
+      "bytes": 8222,
+      "run_id": "fe_pricing_calculator__glm-5.1__r1",
+      "artifact_copied": true
+    },
+    {
+      "id": "fe_canvas_particles",
+      "title": "Canvas Particle Hero",
+      "description": "Animated particle network on <canvas> with requestAnimationFrame.",
+      "model": "glm-5.1",
+      "passed": true,
+      "wall_s": 47.6,
+      "tokens": 12451,
+      "bytes": 5628,
+      "run_id": "fe_canvas_particles__glm-5.1__r1",
+      "artifact_copied": true
+    },
+    {
+      "id": "fe_svg_dataviz",
+      "title": "SVG Donut Chart",
+      "description": "Browser-share donut chart with legend, drawn as inline SVG.",
+      "model": "glm-5.1",
+      "passed": true,
+      "wall_s": 192.4,
+      "tokens": 80101,
+      "bytes": 7381,
+      "run_id": "fe_svg_dataviz__glm-5.1__r2",
+      "artifact_copied": true
+    }
+  ]
+}

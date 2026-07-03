@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pulse · Analytics Dashboard</title>
+<style>
+  :root{
+    --bg:#0b0e14;
+    --bg-2:#0f1320;
+    --panel:#141a28;
+    --panel-2:#1a2132;
+    --stroke:#222b40;
+    --stroke-soft:#1c2436;
+    --txt:#e6ebf5;
+    --txt-mut:#8b95ab;
+    --txt-dim:#5d677e;
+    --brand:#6c8cff;
+    --brand-2:#8a6cff;
+    --green:#3fd07f;
+    --red:#ff6b6b;
+    --amber:#f5b042;
+    --cyan:#36d6e3;
+    --shadow:0 10px 30px -12px rgba(0,0,0,.65);
+    --radius:16px;
+    --sidebar-w:248px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(108,140,255,.10), transparent 60%),
+      radial-gradient(900px 500px at -10% 10%, rgba(138,108,255,.08), transparent 55%),
+      var(--bg);
+    color:var(--txt);
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  a{color:inherit;text-decoration:none}
+  .app{display:grid;grid-template-columns:var(--sidebar-w) 1fr;min-height:100vh}
+
+  /* ---------- Sidebar ---------- */
+  .sidebar{
+    background:linear-gradient(180deg,var(--bg-2),#0c0f18);
+    border-right:1px solid var(--stroke-soft);
+    padding:22px 16px;
+    display:flex;flex-direction:column;gap:6px;
+    position:sticky;top:0;height:100vh;
+  }
+  .brand{display:flex;align-items:center;gap:11px;padding:6px 8px 18px}
+  .brand .logo{
+    width:34px;height:34px;border-radius:10px;flex:none;
+    background:conic-gradient(from 140deg,var(--brand),var(--brand-2),var(--cyan),var(--brand));
+    box-shadow:0 0 0 1px rgba(255,255,255,.06) inset,0 6px 18px -6px rgba(108,140,255,.6);
+    position:relative;
+  }
+  .brand .logo::after{
+    content:"";position:absolute;inset:8px;border-radius:6px;background:var(--bg-2);
+  }
+  .brand .name{font-weight:700;font-size:17px;letter-spacing:.2px}
+  .brand .name span{color:var(--brand)}
+  .brand .ver{font-size:10px;color:var(--txt-dim);margin-top:1px;letter-spacing:.5px;text-transform:uppercase}
+
+  .nav-label{font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;color:var(--txt-dim);
+    padding:14px 10px 7px;font-weight:700}
+  .nav a{
+    display:flex;align-items:center;gap:12px;
+    padding:10px 11px;border-radius:11px;color:var(--txt-mut);
+    font-size:14px;font-weight:500;cursor:pointer;transition:.15s;position:relative;
+  }
+  .nav a:hover{background:var(--panel);color:var(--txt)}
+  .nav a.active{background:linear-gradient(90deg,rgba(108,140,255,.18),rgba(108,140,255,.04));color:var(--txt)}
+  .nav a.active::before{content:"";position:absolute;left:-16px;top:8px;bottom:8px;width:3px;border-radius:3px;background:var(--brand)}
+  .nav a svg{width:18px;height:18px;flex:none;opacity:.9}
+  .nav a .badge{margin-left:auto;font-size:10.5px;background:var(--brand);color:#0b0e14;font-weight:700;padding:2px 7px;border-radius:20px}
+
+  .side-card{
+    margin-top:auto;background:var(--panel);border:1px solid var(--stroke);
+    border-radius:14px;padding:15px;display:flex;gap:11px;align-items:center;
+  }
+  .side-card .ring{width:40px;height:40px;flex:none}
+  .side-card b{font-size:13px}
+  .side-card small{color:var(--txt-mut);font-size:11.5px;display:block;margin-top:2px}
+  .side-card .btn{
+    margin-top:11px;display:block;text-align:center;font-size:12px;font-weight:600;
+    background:var(--brand);color:#0b0e14;padding:8px;border-radius:9px;cursor:pointer;width:100%;
+  }
+  .side-card .btn:hover{filter:brightness(1.07)}
+
+  /* ---------- Main ---------- */
+  .main{min-width:0;display:flex;flex-direction:column}
+  header.top{
+    position:sticky;top:0;z-index:20;
+    display:flex;align-items:center;gap:18px;
+    padding:16px 28px;
+    background:rgba(11,14,20,.72);
+    backdrop-filter:blur(12px);
+    border-bottom:1px solid var(--stroke-soft);
+  }
+  .top .titles h1{font-size:19px;font-weight:700;letter-spacing:-.2px}
+  .top .titles p{color:var(--txt-mut);font-size:12.5px;margin-top:2px}
+  .search{
+    margin-left:auto;display:flex;align-items:center;gap:9px;
+    background:var(--panel);border:1px solid var(--stroke);
+    border-radius:11px;padding:9px 13px;min-width:240px;
+  }
+  .search input{background:none;border:0;outline:0;color:var(--txt);font-size:13.5px;width:100%}
+  .search input::placeholder{color:var(--txt-dim)}
+  .search svg{width:16px;height:16px;color:var(--txt-dim);flex:none}
+  .kbd{font-size:10.5px;color:var(--txt-dim);border:1px solid var(--stroke);padding:1px 6px;border-radius:6px}
+
+  .iconbtn{
+    width:40px;height:40px;border-radius:11px;display:grid;place-items:center;cursor:pointer;
+    background:var(--panel);border:1px solid var(--stroke);color:var(--txt-mut);position:relative;
+  }
+  .iconbtn:hover{color:var(--txt)}
+  .iconbtn svg{width:18px;height:18px}
+  .iconbtn .dot{position:absolute;top:9px;right:10px;width:7px;height:7px;border-radius:50%;background:var(--red);border:2px solid var(--panel)}
+  .user{display:flex;align-items:center;gap:10px;cursor:pointer}
+  .avatar{
+    width:38px;height:38px;border-radius:11px;flex:none;
+    background:linear-gradient(135deg,var(--brand-2),var(--cyan));
+    display:grid;place-items:center;font-weight:700;font-size:14px;color:#0b0e14;
+  }
+  .user .meta b{font-size:13px;font-weight:600;display:block}
+  .user .meta small{color:var(--txt-mut);font-size:11.5px}
+  .user .chev{color:var(--txt-dim)}
+
+  .content{padding:26px 28px 40px;display:flex;flex-direction:column;gap:22px}
+
+  .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .seg{display:flex;background:var(--panel);border:1px solid var(--stroke);border-radius:11px;padding:4px}
+  .seg button{
+    background:none;border:0;color:var(--txt-mut);cursor:pointer;font-size:12.5px;font-weight:600;
+    padding:7px 14px;border-radius:8px;transition:.15s;font-family:inherit;
+  }
+  .seg button.on{background:var(--panel-2);color:var(--txt);box-shadow:0 1px 0 rgba(255,255,255,.04) inset}
+  .toolbar .spacer{flex:1}
+  .ghost{background:var(--panel);border:1px solid var(--stroke);color:var(--txt-mut);
+    border-radius:10px;padding:9px 13px;font-size:12.5px;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:7px}
+  .ghost:hover{color:var(--txt)}
+  .ghost svg{width:15px;height:15px}
+  .primary{background:var(--brand);border:0;color:#0b0e14;border-radius:10px;padding:9px 15px;
+    font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:7px}
+  .primary:hover{filter:brightness(1.07)}
+  .primary svg{width:15px;height:15px}
+
+  /* ---------- KPI cards ---------- */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+  .card{
+    background:linear-gradient(180deg,var(--panel),#11172280);
+    border:1px solid var(--stroke);border-radius:var(--radius);padding:19px 20px;
+    box-shadow:var(--shadow);position:relative;overflow:hidden;
+  }
+  .card::after{content:"";position:absolute;right:-30px;top:-30px;width:120px;height:120px;border-radius:50%;
+    background:radial-gradient(closest-side,rgba(108,140,255,.12),transparent);pointer-events:none}
+  .kpi-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .kpi-label{color:var(--txt-mut);font-size:12.5px;font-weight:600;letter-spacing:.2px}
+  .kpi-ico{width:34px;height:34px;border-radius:10px;display:grid;place-items:center}
+  .kpi-ico svg{width:17px;height:17px}
+  .ic-brand{background:rgba(108,140,255,.15);color:var(--brand)}
+  .ic-green{background:rgba(63,208,127,.15);color:var(--green)}
+  .ic-amber{background:rgba(245,176,66,.15);color:var(--amber)}
+  .ic-cyan{background:rgba(54,214,227,.15);color:var(--cyan)}
+  .kpi-val{font-size:30px;font-weight:700;letter-spacing:-.6px;line-height:1}
+  .kpi-sub{display:flex;align-items:center;gap:9px;margin-top:11px;font-size:12px}
+  .delta{display:inline-flex;align-items:center;gap:3px;font-weight:700;padding:2px 7px;border-radius:7px;font-size:11.5px}
+  .delta svg{width:11px;height:11px}
+  .delta.up{color:var(--green);background:rgba(63,208,127,.12)}
+  .delta.down{color:var(--red);background:rgba(255,107,107,.12)}
+  .kpi-vs{color:var(--txt-dim)}
+  .spark{position:absolute;right:14px;bottom:14px;width:88px;height:34px;opacity:.95}
+
+  /* ---------- Grid ---------- */
+  .grid2{display:grid;grid-template-columns:2fr 1fr;gap:18px}
+  .grid2b{display:grid;grid-template-columns:1.4fr 1fr;gap:18px}
+  .panel-card{
+    background:linear-gradient(180deg,var(--panel),#10162280);
+    border:1px solid var(--stroke);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:20px 22px;display:flex;flex-direction:column;min-height:340px;
+  }
+  .phead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:6px}
+  .phead h2{font-size:15.5px;font-weight:700;letter-spacing:-.1px}
+  .phead p{color:var(--txt-mut);font-size:12px;margin-top:3px}
+  .phead .right{display:flex;gap:8px;align-items:center}
+  .legend{display:flex;gap:14px;flex-wrap:wrap}
+  .legend span{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--txt-mut)}
+  .legend i{width:9px;height:9px;border-radius:3px;display:inline-block}
+
+  .chart{flex:1;width:100%;min-height:240px;margin-top:14px}
+  .chart svg{width:100%;height:100%;display:block;overflow:visible}
+
+  /* bar chart specifics */
+  .bars .axis text,.area .axis text{fill:var(--txt-dim);font-size:11px;font-family:inherit}
+  .bars .grid line,.area .grid line{stroke:var(--stroke-soft);stroke-dasharray:2 4}
+  .bars rect.bar{rx:5;ry:5;transition:filter .15s}
+  .bars rect.bar:hover{filter:brightness(1.18)}
+  .bars .xlab{fill:var(--txt-dim);font-size:10.5px;font-family:inherit}
+
+  /* area specifics */
+  .area .tooltip{font-size:11px;font-family:inherit}
+
+  /* donut specifics */
+  .donut-wrap{display:flex;align-items:center;gap:18px;flex-wrap:wrap;justify-content:center}
+  .donut-center{font-size:22px;font-weight:700}
+  .donut-center small{display:block;font-size:11px;color:var(--txt-mut);font-weight:600;margin-top:2px}
+  .donut-legend{display:flex;flex-direction:column;gap:9px;min-width:140px}
+  .donut-legend .row{display:flex;align-items:center;gap:9px;font-size:12.5px}
+  .donut-legend .row b{margin-left:auto;font-weight:700}
+  .donut-legend i{width:10px;height:10px;border-radius:3px}
+
+  /* ---------- Table ---------- */
+  .table-card{padding:8px 0 4px;min-height:auto}
+  .table-card .phead{padding:14px 22px 0;margin-bottom:0}
+  table{width:100%;border-collapse:collapse;margin-top:6px}
+  thead th{
+    text-align:left;font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:var(--txt-dim);
+    font-weight:700;padding:13px 22px;border-bottom:1px solid var(--stroke-soft);
+  }
+  thead th.num,tbody td.num{text-align:right}
+  tbody td{padding:14px 22px;border-bottom:1px solid var(--stroke-soft);font-size:13px}
+  tbody tr:last-child td{border-bottom:0}
+  tbody tr:hover{background:rgba(255,255,255,.018)}
+  .cust{display:flex;align-items:center;gap:11px}
+  .cust .av{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;font-weight:700;font-size:12px;color:#0b0e14;flex:none}
+  .cust b{font-weight:600;display:block}
+  .cust small{color:var(--txt-mut);font-size:11.5px}
+  .pill{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;display:inline-block}
+  .pill.ok{background:rgba(63,208,127,.14);color:var(--green)}
+  .pill.warn{background:rgba(245,176,66,.15);color:var(--amber)}
+  .pill.bad{background:rgba(255,107,107,.14);color:var(--red)}
+
+  .foot{color:var(--txt-dim);font-size:11.5px;text-align:center;padding:6px 0 0}
+
+  /* ---------- Responsive ---------- */
+  @media (max-width:1080px){
+    .grid2,.grid2b{grid-template-columns:1fr}
+    .kpis{grid-template-columns:repeat(2,1fr)}
+  }
+  @media (max-width:820px){
+    .app{grid-template-columns:1fr}
+    .sidebar{position:fixed;left:-260px;z-index:50;transition:.25s;width:var(--sidebar-w)}
+    .sidebar.open{left:0}
+    .search{display:none}
+    .content{padding:18px 16px 34px}
+    header.top{padding:14px 16px}
+    .hamb{display:grid !important}
+    .user .meta{display:none}
+  }
+  @media (max-width:520px){
+    .kpis{grid-template-columns:1fr}
+  }
+  .hamb{display:none;width:40px;height:40px;border-radius:11px;place-items:center;cursor:pointer;
+    background:var(--panel);border:1px solid var(--stroke);color:var(--txt)}
+  .hamb svg{width:18px;height:18px}
+  .scrim{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:40}
+  .scrim.show{display:block}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="logo"></div>
+      <div>
+        <div class="name">Pulse<span>.</span></div>
+        <div class="ver">Analytics · v4.2</div>
+      </div>
+    </div>
+    <nav class="nav">
+      <div class="nav-label">Overview</div>
+      <a class="active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+        Dashboard
+      </a>
+      <a>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l3-3 3 3 5-6"/></svg>
+        Reports
+      </a>
+      <a>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8M3.6 15h16.8M12 3c2.5 2.5 2.5 15 0 18M12 3c-2.5 2.5-2.5 15 0 18"/></svg>
+        Audience
+      </a>
+
+      <div class="nav-label">Business</div>
+      <a>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 7l2-3h14l2 3M8 11h8"/></svg>
+        Orders
+        <span class="badge">12</span>
+      </a>
+      <a>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="4"/><path d="M2 21c0-3.9 3.1-7 7-7s7 3.1 7 7"/><path d="M16 11l2 2 4-4"/></svg>
+        Customers
+      </a>
+      <a>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M4 9h16M9 4v16"/></svg>
+        Products
+      </a>
+
+      <div class="nav-label">System</div>
+      <a>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>
+        Settings
+      </a>
+    </nav>
+
+    <div class="side-card">
+      <svg class="ring" viewBox="0 0 40 40">
+        <circle cx="20" cy="20" r="16" fill="none" stroke="#222b40" stroke-width="5"/>
+        <circle cx="20" cy="20" r="16" fill="none" stroke="#6c8cff" stroke-width="5"
+          stroke-dasharray="100.5" stroke-dashoffset="32" stroke-linecap="round"
+          transform="rotate(-90 20 20)"/>
+      </svg>
+      <div>
+        <b>68% usage</b>
+        <small>Pro plan · 6.8K / 10K events</small>
+      </div>
+      <div class="btn" style="position:static;margin:0 0 0 auto;padding:7px 11px;width:auto">Upgrade</div>
+    </div>
+  </aside>
+  <div class="scrim" id="scrim"></div>
+
+  <!-- ============ MAIN ============ -->
+  <div class="main">
+    <header class="top">
+      <div class="hamb" id="hamb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg></div>
+      <div class="titles">
+        <h1>Dashboard</h1>
+        <p>Welcome back, Alex · here's what's happening today</p>
+      </div>
+      <div class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+        <input placeholder="Search metrics, reports…" />
+        <span class="kbd">⌘K</span>
+      </div>
+      <div class="iconbtn" title="Notifications">
+        <span class="dot"></span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+      </div>
+      <div class="user">
+        <div class="avatar">AK</div>
+        <div class="meta"><b>Alex Kim</b><small>Admin</small></div>
+        <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+    </header>
+
+    <div class="content">
+      <!-- Toolbar -->
+      <div class="toolbar">
+        <div class="seg" id="range">
+          <button data-r="7">7D</button>
+          <button class="on" data-r="30">30D</button>
+          <button data-r="90">90D</button>
+          <button data-r="365">1Y</button>
+        </div>
+        <div class="spacer"></div>
+        <button class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M6 12h12M10 18h4"/></svg> Filters</button>
+        <button class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg> Export</button>
+        <button class="primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> New report</button>
+      </div>
+
+      <!-- KPI cards -->
+      <section class="kpis" id="kpis"></section>
+
+      <!-- Charts row -->
+      <section class="grid2">
+        <div class="panel-card">
+          <div class="phead">
+            <div>
+              <h2>Revenue overview</h2>
+              <p>Monthly revenue compared to previous period</p>
+            </div>
+            <div class="legend">
+              <span><i style="background:#6c8cff"></i> This year</span>
+              <span><i style="background:#3a4564"></i> Last year</span>
+            </div>
+          </div>
+          <div class="chart bars" id="barChart"></div>
+        </div>
+
+        <div class="panel-card">
+          <div class="phead">
+            <div>
+              <h2>Active users</h2>
+              <p>Real-time sessions · last 12 weeks</p>
+            </div>
+          </div>
+          <div class="chart area" id="areaChart"></div>
+        </div>
+      </section>
+
+      <!-- Second row -->
+      <section class="grid2b">
+        <div class="panel-card">
+          <div class="phead">
+            <div>
+              <h2>Traffic by source</h2>
+              <p>Where your visitors are coming from</p>
+            </div>
+            <button class="ghost" style="padding:7px 11px">Details</button>
+          </div>
+          <div class="donut-wrap" style="flex:1;padding-top:8px">
+            <svg id="donut" viewBox="0 0 200 200" width="200" height="200"></svg>
+            <div class="donut-legend" id="donutLegend"></div>
+          </div>
+        </div>
+
+        <div class="panel-card table-card">
+          <div class="phead">
+            <div>
+              <h2>Top customers</h2>
+              <p>Highest value accounts this quarter</p>
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr><th>Customer</th><th class="num">Revenue</th><th>Status</th></tr>
+            </thead>
+            <tbody id="custBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <div class="foot">Pulse Analytics · generated offline · all data is illustrative</div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   Inline datasets
+   ========================================================= */
+const KPIS = [
+  {label:"Total Revenue", value:248530, prefix:"$", delta:+12.4, icon:"revenue", tone:"brand",
+   spark:[42,46,44,50,48,55,53,60,58,64,62,70]},
+  {label:"Active Users", value:18429, valueFmt:true, delta:+8.1, icon:"users", tone:"cyan",
+   spark:[30,32,31,35,33,38,40,39,44,46,45,52]},
+  {label:"Conversion Rate", value:3.84, suffix:"%", delta:-1.2, icon:"conv", tone:"amber",
+   spark:[40,38,41,39,37,38,36,35,37,34,33,32]},
+  {label:"Avg. Order Value", value:128.40, prefix:"$", delta:+5.7, icon:"cart", tone:"green",
+   spark:[44,45,43,47,48,46,50,49,52,51,55,57]},
+];
+
+const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const REV_THIS =[38,42,39,47,52,49,58,61,57,66,70,74];
+const REV_LAST =[31,33,30,36,40,38,44,46,43,49,52,55];
+
+const WEEKS =["W1","W2","W3","W4","W5","W6","W7","W8","W9","W10","W11","W12"];
+const ACTIVE_USERS=[820,910,880,1040,1180,1120,1320,1410,1380,1560,1690,1820];
+
+const TRAFFIC=[
+  {label:"Organic",  value:42, color:"#6c8cff"},
+  {label:"Direct",   value:24, color:"#36d6e3"},
+  {label:"Referral", value:18, color:"#8a6cff"},
+  {label:"Social",   value:11, color:"#3fd07f"},
+  {label:"Email",    value:5,  color:"#f5b042"},
+];
+
+const CUSTOMERS=[
+  {name:"Nimbus Inc.",   mail:"ops@nimbus.io",   rev:"$48,200", status:"ok",   c1:"#6c8cff", c2:"#8a6cff"},
+  {name:"Vertex Labs",   mail:"billing@vertex.co",rev:"$36,750", status:"ok",   c1:"#36d6e3", c2:"#6c8cff"},
+  {name:"Quantum Goods", mail:"hello@qg.com",    rev:"$29,100", status:"warn", c1:"#f5b042", c2:"#ff6b6b"},
+  {name:"Halcyon LLC",   mail:"pay@halcyon.dev", rev:"$22,840", status:"ok",   c1:"#3fd07f", c2:"#36d6e3"},
+  {name:"Orbit Studio",  mail:"fin@orbit.io",    rev:"$18,300", status:"bad",  c1:"#ff6b6b", c2:"#8a6cff"},
+];
+
+/* =========================================================
+   Helpers
+   ========================================================= */
+const SVGNS="http://www.w3.org/2000/svg";
+function el(tag,attrs){const e=document.createElementNS(SVGNS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);return e;}
+function fmtNum(v){
+  if(v>=1000){const k=v/1000;return (Number.isInteger(k)?k:k.toFixed(1))+"K";}
+  return Number.isInteger(v)?v.toString():v.toFixed(2);
+}
+function fmtMoney(v){
+  if(v>=1000){return "$"+(v/1000).toFixed(1)+"K";}
+  return "$"+v.toFixed(2);
+}
+
+/* =========================================================
+   KPI cards
+   ========================================================= */
+function kpiIcon(name){
+  const paths={
+    revenue:'<path d="M3 12h18M12 3v18"/><circle cx="12" cy="12" r="9"/>',
+    users:'<circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c0-3.3 2.5-6 5.5-6s5.5 2.7 5.5 6"/><path d="M16 5.5a3 3 0 0 1 0 5.8M17 20c0-2.2-.8-4-2-5"/>',
+    conv:'<path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/>',
+    cart:'<circle cx="9" cy="20" r="1.4"/><circle cx="17" cy="20" r="1.4"/><path d="M3 4h2l2.2 11.2a1 1 0 0 0 1 .8h8.4a1 1 0 0 0 1-.8L21 8H6"/>',
+  };
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+paths[name]+'</svg>';
+}
+function deltaIcon(up){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">'+
+  (up?'<path d="M12 19V5M5 12l7-7 7 7"/>':'<path d="M12 5v14M19 12l-7 7-7-7"/>')+'</svg>';}
+
+function renderKpis(){
+  const wrap=document.getElementById("kpis");
+  wrap.innerHTML=KPIS.map(k=>{
+    const valText = k.prefix?fmtMoney(k.value)
+                   : k.suffix?(k.value.toFixed(2)+k.suffix)
+                   : (k.valueFmt?fmtNum(k.value):k.value.toLocaleString());
+    const up=k.delta>=0;
+    return `<div class="card">
+      <div class="kpi-top">
+        <div class="kpi-label">${k.label}</div>
+        <div class="kpi-ico ic-${k.tone}">${kpiIcon(k.icon)}</div>
+      </div>
+      <div class="kpi-val">${valText}</div>
+      <div class="kpi-sub">
+        <span class="delta ${up?'up':'down'}">${deltaIcon(up)}${Math.abs(k.delta).toFixed(1)}%</span>
+        <span class="kpi-vs">vs last 30 days</span>
+      </div>
+      ${sparkSVG(k.spark,up)}
+    </div>`;
+  }).join("");
+}
+function sparkSVG(data,up){
+  const w=88,h=34,p=2;
+  const min=Math.min(...data),max=Math.max(...data),rng=(max-min)||1;
+  const stepX=(w-p*2)/(data.length-1);
+  const pts=data.map((d,i)=>[p+i*stepX,h-p-((d-min)/rng)*(h-p*2)]);
+  const line=pts.map((pt,i)=>(i?"L":"M")+pt[0].toFixed(1)+" "+pt[1].toFixed(1)).join(" ");
+  const area=line+` L ${pts[pts.length-1][0].toFixed(1)} ${h} L ${pts[0][0].toFixed(1)} ${h} Z`;
+  const color=up?"#3fd07f":"#ff6b6b";
+  const id="sg"+Math.random().toString(36).slice(2,7);
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${color}" stop-opacity=".45"/>
+      <stop offset="1" stop-color="${color}" stop-opacity="0"/>
+    </linearGradient></defs>
+    <path d="${area}" fill="url(#${id})"/>
+    <path d="${line}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`;
+}
+
+/* =========================================================
+   Bar chart (revenue)
+   ========================================================= */
+function renderBar(){
+  const host=document.getElementById("barChart");
+  const vbW=720,vbH=300,padT=14,padB=30,padL=34,padR=8;
+  const w=vbW-padL-padR, h=vbH-padT-padB;
+  const max=Math.max(...REV_THIS,...REV_LAST)*1.15;
+  const ticks=4;
+  const gW=w/REV_THIS.length;
+
+  let s=`<svg viewBox="0 0 ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet">`;
+  // grid + y labels
+  for(let i=0;i<=ticks;i++){
+    const y=padT+h-(i/ticks)*h;
+    const val=(i/ticks)*max;
+    s+=`<g class="grid"><line x1="${padL}" y1="${y.toFixed(1)}" x2="${vbW-padR}" y2="${y.toFixed(1)}"/></g>`;
+    s+=`<g class="axis"><text x="${padL-8}" y="${(y+3).toFixed(1)}" text-anchor="end">$${val.toFixed(0)}K</text></g>`;
+  }
+  REV_THIS.forEach((v,i)=>{
+    const x=padL+i*gW+gW*0.16;
+    const bw=gW*0.34;
+    // last year (dim)
+    const hL=(REV_LAST[i]/max)*h, hT=(v/max)*h;
+    const yL=padT+h-hL, yT=padT+h-hT;
+    s+=`<rect x="${x.toFixed(1)}" y="${yL.toFixed(1)}" width="${bw.toFixed(1)}" height="${hL.toFixed(1)}" fill="#26304a" rx="3"/>`;
+    s+=`<rect class="bar" x="${(x+bw+2).toFixed(1)}" y="${yT.toFixed(1)}" width="${bw.toFixed(1)}" height="${hT.toFixed(1)}" fill="url(#bargrad)"/>`;
+    s+=`<g class="xlab"><text x="${(x+bw+1).toFixed(1)}" y="${(vbH-10)}" text-anchor="middle">${MONTHS[i]}</text></g>`;
+  });
+  s+=`<defs><linearGradient id="bargrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8aa4ff"/><stop offset="1" stop-color="#5c78f0"/>
+    </linearGradient></defs>`;
+  s+=`</svg>`;
+  host.innerHTML=s;
+}
+
+/* =========================================================
+   Area / line chart (active users)
+   ========================================================= */
+function renderArea(){
+  const host=document.getElementById("areaChart");
+  const vbW=720,vbH=300,padT=16,padB=30,padL=34,padR=10;
+  const w=vbW-padL-padR, h=vbH-padT-padB;
+  const data=ACTIVE_USERS;
+  const min=Math.min(...data)*0.85, max=Math.max(...data)*1.05, rng=max-min;
+  const stepX=w/(data.length-1);
+  const pts=data.map((d,i)=>[padL+i*stepX, padT+h-((d-min)/rng)*h]);
+  const line=pts.map((pt,i)=>(i?"L":"M")+pt[0].toFixed(1)+" "+pt[1].toFixed(1)).join(" ");
+  const area=line+` L ${pts[pts.length-1][0].toFixed(1)} ${padT+h} L ${pts[0][0].toFixed(1)} ${padT+h} Z`;
+
+  // smooth path (Catmull-Rom -> bezier)
+  function smooth(pts){
+    if(pts.length<3) return "M"+pts.map(p=>p[0]+" "+p[1]).join(" L");
+    let d=`M${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+    for(let i=0;i<pts.length-1;i++){
+      const p0=pts[i-1]||pts[i], p1=pts[i], p2=pts[i+1], p3=pts[i+2]||p2;
+      const c1x=p1[0]+(p2[0]-p0[0])/6, c1y=p1[1]+(p2[1]-p0[1])/6;
+      const c2x=p2[0]-(p3[0]-p1[0])/6, c2y=p2[1]-(p3[1]-p1[1])/6;
+      d+=` C${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${c2y.toFixed(1)} ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+    }
+    return d;
+  }
+  const sline=smooth(pts);
+  const sarea=sline+` L ${pts[pts.length-1][0].toFixed(1)} ${padT+h} L ${pts[0][0].toFixed(1)} ${padT+h} Z`;
+
+  const ticks=4;
+  let s=`<svg viewBox="0 0 ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet">`;
+  s+=`<defs>
+    <linearGradient id="areagrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6c8cff" stop-opacity=".42"/>
+      <stop offset="1" stop-color="#6c8cff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>`;
+  for(let i=0;i<=ticks;i++){
+    const y=padT+h-(i/ticks)*h;
+    const val=(min+(i/ticks)*rng);
+    s+=`<g class="grid"><line x1="${padL}" y1="${y.toFixed(1)}" x2="${vbW-padR}" y2="${y.toFixed(1)}"/></g>`;
+    s+=`<g class="axis"><text x="${padL-8}" y="${(y+3).toFixed(1)}" text-anchor="end">${fmtNum(val)}</text></g>`;
+  }
+  WEEKS.forEach((lb,i)=>{
+    if(i%2===0){
+      const x=padL+i*stepX;
+      s+=`<g class="axis"><text x="${x.toFixed(1)}" y="${vbH-10}" text-anchor="middle">${lb}</text></g>`;
+    }
+  });
+  s+=`<path d="${sarea}" fill="url(#areagrad)"/>`;
+  s+=`<path d="${sline}" fill="none" stroke="#7e9bff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>`;
+  pts.forEach((pt,i)=>{
+    if(i===pts.length-1){
+      s+=`<circle cx="${pt[0].toFixed(1)}" cy="${pt[1].toFixed(1)}" r="5" fill="#0b0e14" stroke="#7e9bff" stroke-width="2.4"/>`;
+      s+=`<g class="tooltip"><rect x="${(pt[0]-52).toFixed(1)}" y="${(pt[1]-34).toFixed(1)}" width="86" height="22" rx="6" fill="#1a2132" stroke="#222b40"/>`;
+      s+=`<text x="${(pt[0]-9).toFixed(1)}" y="${(pt[1]-19).toFixed(1)}" fill="#e6ebf5" text-anchor="middle">${data[i].toLocaleString()}</text></g>`;
+    }
+  });
+  s+=`</svg>`;
+  host.innerHTML=s;
+}
+
+/* =========================================================
+   Donut chart (traffic)
+   ========================================================= */
+function renderDonut(){
+  const host=document.getElementById("donut");
+  const cx=100,cy=100,r=78,sw=20;
+  const total=TRAFFIC.reduce((s,d)=>s+d.value,0);
+  const C=2*Math.PI*r;
+  let offset=0;
+  let s=`<svg viewBox="0 0 200 200">
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#1c2436" stroke-width="${sw}"/>`;
+  TRAFFIC.forEach(d=>{
+    const frac=d.value/total;
+    const len=frac*C;
+    const seg=el("circle");
+    s+=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${d.color}" stroke-width="${sw}"
+      stroke-dasharray="${len.toFixed(2)} ${(C-len).toFixed(2)}"
+      stroke-dashoffset="${(-offset).toFixed(2)}" stroke-linecap="butt"
+      transform="rotate(-90 ${cx} ${cy})" style="transition:.3s"/>`;
+    offset+=len;
+  });
+  s+=`<text x="${cx}" y="${cy-2}" text-anchor="middle" class="donut-center">${total}%</text>`;
+  s+=`<text x="${cx}" y="${cy+16}" text-anchor="middle" style="font-size:11px;fill:#8b95ab;font-weight:600">Sources</text>`;
+  s+=`</svg>`;
+  host.outerHTML=s;
+
+  document.getElementById("donutLegend").innerHTML=TRAFFIC.map(d=>
+    `<div class="row"><i style="background:${d.color}"></i><span>${d.label}</span><b>${d.value}%</b></div>`).join("");
+}
+
+/* =========================================================
+   Customers table
+   ========================================================= */
+function renderCustomers(){
+  const map={ok:"Active",warn:"Trial",bad:"Churned"};
+  document.getElementById("custBody").innerHTML=CUSTOMERS.map(c=>{
+    const init=c.name.replace(/[^A-Za-z]/g,"").slice(0,2).toUpperCase();
+    return `<tr>
+      <td><div class="cust">
+        <div class="av" style="background:linear-gradient(135deg,${c.c1},${c.c2})">${init}</div>
+        <div><b>${c.name}</b><small>${c.mail}</small></div>
+      </div></td>
+      <td class="num">${c.rev}</td>
+      <td><span class="pill ${c.status}">${map[c.status]}</span></td>
+    </tr>`;
+  }).join("");
+}
+
+/* =========================================================
+   Interactions
+   ========================================================= */
+function wire(){
+  // range toggle (visual scale demo)
+  document.querySelectorAll("#range button").forEach(b=>{
+    b.addEventListener("click",()=>{
+      document.querySelectorAll("#range button").forEach(x=>x.classList.remove("on"));
+      b.classList.add("on");
+      const r=+b.dataset.r;
+      // downsample/scale the area dataset a bit for visual feedback
+      const factor = r===7?0.4 : r===30?1 : r===90?1.6 : 3.4;
+      const scaled=ACTIVE_USERS.map((v,i)=>Math.round(v*(0.7+0.3*Math.sin(i/2))*Math.min(factor,4)));
+      window.ACTIVE_USERS_DISPLAY=scaled;
+      renderAreaScaled(scaled);
+    });
+  });
+  // mobile sidebar
+  const sb=document.getElementById("sidebar"),sc=document.getElementById("scrim");
+  document.getElementById("hamb").addEventListener("click",()=>{sb.classList.add("open");sc.classList.add("show");});
+  sc.addEventListener("click",()=>{sb.classList.remove("open");sc.classList.remove("show");});
+  // sidebar nav active state
+  document.querySelectorAll(".nav a").forEach(a=>{
+    a.addEventListener("click",()=>{
+      document.querySelectorAll(".nav a").forEach(x=>x.classList.remove("active"));
+      a.classList.add("active");
+    });
+  });
+}
+function renderAreaScaled(data){
+  // re-run renderArea but with provided data
+  const host=document.getElementById("areaChart");
+  const vbW=720,vbH=300,padT=16,padB=30,padL=34,padR=10;
+  const w=vbW-padL-padR, h=vbH-padT-padB;
+  const min=Math.min(...data)*0.85, max=Math.max(...data)*1.05, rng=max-min;
+  const stepX=w/(data.length-1);
+  const pts=data.map((d,i)=>[padL+i*stepX, padT+h-((d-min)/rng)*h]);
+  function smooth(pts){
+    let d=`M${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+    for(let i=0;i<pts.length-1;i++){
+      const p0=pts[i-1]||pts[i], p1=pts[i], p2=pts[i+1], p3=pts[i+2]||p2;
+      const c1x=p1[0]+(p2[0]-p0[0])/6, c1y=p1[1]+(p2[1]-p0[1])/6;
+      const c2x=p2[0]-(p3[0]-p1[0])/6, c2y=p2[1]-(p3[1]-p1[1])/6;
+      d+=` C${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${c2y.toFixed(1)} ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+    }
+    return d;
+  }
+  const sline=smooth(pts);
+  const sarea=sline+` L ${pts[pts.length-1][0].toFixed(1)} ${padT+h} L ${pts[0][0].toFixed(1)} ${padT+h} Z`;
+  const ticks=4;
+  let s=`<svg viewBox="0 0 ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet">
+    <defs><linearGradient id="areagrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6c8cff" stop-opacity=".42"/><stop offset="1" stop-color="#6c8cff" stop-opacity="0"/>
+    </linearGradient></defs>`;
+  for(let i=0;i<=ticks;i++){
+    const y=padT+h-(i/ticks)*h;const val=(min+(i/ticks)*rng);
+    s+=`<g class="grid"><line x1="${padL}" y1="${y.toFixed(1)}" x2="${vbW-padR}" y2="${y.toFixed(1)}"/></g>`;
+    s+=`<g class="axis"><text x="${padL-8}" y="${(y+3).toFixed(1)}" text-anchor="end">${fmtNum(val)}</text></g>`;
+  }
+  WEEKS.forEach((lb,i)=>{if(i%2===0){const x=padL+i*stepX;s+=`<g class="axis"><text x="${x.toFixed(1)}" y="${vbH-10}" text-anchor="middle">${lb}</text></g>`;}});
+  s+=`<path d="${sarea}" fill="url(#areagrad)"/>`;
+  s+=`<path d="${sline}" fill="none" stroke="#7e9bff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>`;
+  const lp=pts[pts.length-1];
+  s+=`<circle cx="${lp[0].toFixed(1)}" cy="${lp[1].toFixed(1)}" r="5" fill="#0b0e14" stroke="#7e9bff" stroke-width="2.4"/>`;
+  s+=`<g class="tooltip"><rect x="${(lp[0]-52).toFixed(1)}" y="${(lp[1]-34).toFixed(1)}" width="86" height="22" rx="6" fill="#1a2132" stroke="#222b40"/>`;
+  s+=`<text x="${(lp[0]-9).toFixed(1)}" y="${(lp[1]-19).toFixed(1)}" fill="#e6ebf5" text-anchor="middle">${data[data.length-1].toLocaleString()}</text></g>`;
+  s+=`</svg>`;
+  host.innerHTML=s;
+}
+
+/* =========================================================
+   Init
+   ========================================================= */
+renderKpis();
+renderBar();
+renderArea();
+renderDonut();
+renderCustomers();
+wire();
+</script>
+</body>
+</html>

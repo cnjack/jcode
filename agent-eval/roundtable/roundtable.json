@@ -1,0 +1,62 @@
+{
+  "premise": "Before writing a single test, we convened a five-seat design round-table to decide HOW to test jcode's unattended autonomous execution. Each seat was an independent expert agent given the same grounding (jcode = a Go coding agent; headless surface = ACP JSON-RPC over stdio, the exact surface a future SDK sits on; tools = read/write/edit/execute/grep/glob/todo/subagent; models = glm-5.1, glm-5.2, qwen3.5-flash). Several experts read the source and returned findings that shaped both the harness design and the defect list.",
+  "seats": [
+    {
+      "role": "QA / Test Architect",
+      "thesis": "Cover a taxonomy of coding tasks with deterministic oracles; repeat runs matter more than breadth because the risk is nondeterminism, not coverage.",
+      "points": [
+        "12-category taxonomy, each with a machine-gradable check: file creation, targeted edit, multi-file refactor, bug-fix-from-failing-test, read-only Q&A, build/run/verify, git ops, search/locate, test authoring, ambiguous, impossible, long-horizon.",
+        "Three tiers — smoke (fast gate), core (the shipping bar), stress (autonomy under strain).",
+        "Report each {case × model} cell as k/n passed + median tool-calls + median wall-clock; a regression shows as a pass-rate drop or step-count inflation.",
+        "The strongest signals come from oracles that catch FABRICATED SUCCESS and SILENT PARTIAL COMPLETION — the two behaviors that make owners distrust unattended runs. Highest-risk categories: long-horizon, impossible, ambiguous, refactor/bug-fix."
+      ]
+    },
+    {
+      "role": "LLM Evaluation Methodologist",
+      "thesis": "Programmatic verifiers are the backbone; LLM-as-judge is the exception, reserved for qualities no assertion captures.",
+      "points": [
+        "Grade only the sandbox end-state + trajectory, never the model's self-report of success. An LLM grading an LLM shares failure modes and drifts run-to-run.",
+        "Metrics from transcript+usage: task success, tool-call efficiency (useful/total), redundant calls, iterations, wall-clock, tokens/cost, error-recovery rate, non-termination rate.",
+        "Run each case N≥5 (ideally 10); report pass@k, flakiness, and success with Wilson 95% CIs; compare models only when CIs separate.",
+        "The one pitfall that makes agent evals misleading: contaminated / non-hermetic success — reset the sandbox to a known-bad/empty state so success is impossible without real work, and add negative + trap (unsatisfiable) cases."
+      ]
+    },
+    {
+      "role": "Reliability / SRE Engineer",
+      "thesis": "An unattended agent needs guardrails and machine-readable stop reasons; the runner today has neither a wall-clock timeout nor its own tool-call budget.",
+      "points": [
+        "Source finding: the runner stops only on ADK iterator exhaustion or context cancellation — no wall-clock timeout, no runner-level tool-call cap.",
+        "Failure modes + log signatures: non-termination (rides to max_iterations), tool-call loops (same (name,args) hash repeated), hangs (tool_call with no matching tool_result), forced compaction, malformed args, ignoring-vs-recovering-from errors, premature done, runaway subagents, cost blowups.",
+        "Every unattended run needs: a per-run wall-clock timeout with a kill-AND-record path, hard caps on tool calls/iterations, and an isolated throwaway workspace + isolated state/logs per run.",
+        "Bet on the most common mid-tier-model failure: tool-call loops / non-termination — a weak model gets an error result, doesn't adapt, re-issues the same call to the iteration cap."
+      ]
+    },
+    {
+      "role": "Security / Safety Engineer",
+      "thesis": "There is no enforced filesystem/exec sandbox today — only a warning log — so isolation must come from the test harness, and containment is the #1 thing to confirm before an SDK ships.",
+      "points": [
+        "Source finding: execute runs raw `bash -c` with the operator's real environment; ResolvePath only LOGS a warning on directory escape and returns the path anyway; full_access auto-approves every call. No rm -rf denylist.",
+        "Deterministic safety probes: destructive-command scoping, path escape ('clean the parent folder'), prompt-injection via file content, planted-secret exfiltration, resource exhaustion.",
+        "Isolation is non-negotiable because the real ~/.jcode holds live API keys: run each probe with a throwaway sandbox cwd AND an isolated HOME so the agent cannot read the real config, and place canaries OUTSIDE the sandbox that the harness verifies intact.",
+        "Highest-risk behavior to confirm contained: filesystem/exec containment to the sandbox cwd."
+      ]
+    },
+    {
+      "role": "SDK / Developer-Experience Engineer",
+      "thesis": "Test the ACP CONTRACT, not just task success — an SDK consumer must be able to trust the protocol surface.",
+      "points": [
+        "Source finding: runner.Run returns only a string, so the ACP prompt handler hardcodes end_turn on the happy path — max_tokens / max_turn_requests / refusal StopReasons are unreachable, and a model error can collapse to end_turn. The SDK's StopReason enum would be a lie.",
+        "Contract assertions to add alongside task checks: exactly one terminal StopReason per turn; every tool_call reaches a terminal tool_call_update (no orphans); stdout is pure JSON-RPC (no log/print leakage); usage reported; cancellation and permission-deny honored.",
+        "Determinism knobs an SDK user needs: model pinning (never a floating default); temperature/seed if supported (if not, that's itself a finding — contract assertions must be structural, not exact-text); disposable per-session cwd.",
+        "Gate-blockers that most damage SDK trust: missing/duplicate/invalid StopReason (prompt never resolves), orphaned tool_call, and stdout protocol corruption."
+      ]
+    }
+  ],
+  "synthesis": [
+    "Drive jcode through its ACP headless surface (the SDK-facing path), not the TTY, with a custom ACP client that records the full event trajectory.",
+    "Isolate every run twice over: a throwaway sandbox cwd (fixtures + canaries) and a throwaway HOME (so the agent can't touch the real config/keys) — mandated by the Security seat and enabling per-run logs + per-model selection.",
+    "Judge with deterministic oracles over the sandbox end-state; add trap (impossible) and ambiguous cases to catch fabricated success; never trust the agent's self-report.",
+    "Assert the ACP contract on every run (terminal StopReason, no orphan tool calls, pure-protocol stdout, usage reported) in parallel with task success.",
+    "Repeat cases across models to measure stability (pass@n, flakiness) rather than anecdotes, and mine the logs for non-termination, loops, and silent empty turns."
+  ]
+}
