@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Browser Market Share</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --card: #ffffff;
+    --ink: #0f172a;
+    --muted: #64748b;
+    --line: #e2e8f0;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #eef2ff 0%, #f8fafc 100%);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 24px;
+  }
+
+  .card {
+    background: var(--card);
+    border-radius: 20px;
+    box-shadow: 0 20px 50px -20px rgba(15, 23, 42, 0.25), 0 1px 3px rgba(15, 23, 42, 0.06);
+    padding: 32px;
+    max-width: 480px;
+    width: 100%;
+  }
+
+  .card-header { margin-bottom: 24px; }
+
+  .card-header h1 {
+    font-size: 1.35rem;
+    margin: 0 0 6px;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+  }
+
+  .card-header p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+
+  .chart-wrap {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+  }
+
+  .donut {
+    position: relative;
+    flex: 0 0 auto;
+    width: 180px;
+    height: 180px;
+  }
+
+  .donut svg { display: block; width: 100%; height: 100%; }
+
+  .donut .center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+
+  .donut .center .big {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--ink);
+    line-height: 1;
+  }
+
+  .donut .center .small {
+    font-size: 0.7rem;
+    color: var(--muted);
+    margin-top: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .legend {
+    flex: 1 1 auto;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+  }
+
+  .legend li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 7px 0;
+    font-size: 0.92rem;
+  }
+
+  .legend li + li { border-top: 1px solid var(--line); }
+
+  .legend .swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 4px;
+    flex: 0 0 auto;
+  }
+
+  .legend .label { color: var(--ink); flex: 0 0 auto; }
+
+  .legend .bar {
+    flex: 1 1 auto;
+    height: 6px;
+    background: var(--line);
+    border-radius: 3px;
+    overflow: hidden;
+    margin: 0 4px;
+  }
+
+  .legend .bar > span {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+  }
+
+  .legend .pct {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    flex: 0 0 auto;
+    width: 42px;
+    text-align: right;
+  }
+
+  .footnote {
+    margin-top: 22px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.75rem;
+    text-align: center;
+  }
+
+  @media (max-width: 420px) {
+    .chart-wrap { flex-direction: column; gap: 20px; }
+    .donut { width: 160px; height: 160px; }
+    .legend { width: 100%; }
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="card-header">
+      <h1>Browser Market Share</h1>
+      <p>Distribution across major browsers</p>
+    </div>
+
+    <div class="chart-wrap">
+      <div class="donut">
+        <svg viewBox="0 0 200 200" role="img" aria-label="Browser market share donut chart"></svg>
+        <div class="center">
+          <span class="big" id="total">100%</span>
+          <span class="small">share</span>
+        </div>
+      </div>
+
+      <ul class="legend" id="legend"></ul>
+    </div>
+
+    <p class="footnote">Illustrative figures · sums to 100%</p>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  // Inline dataset: label, percentage, color.
+  var data = [
+    { label: "Chrome",  pct: 63, color: "#3b82f6" },
+    { label: "Safari",  pct: 20, color: "#06b6d4" },
+    { label: "Firefox", pct: 5,  color: "#f59e0b" },
+    { label: "Edge",    pct: 5,  color: "#10b981" },
+    { label: "Other",   pct: 7,  color: "#94a3b8" }
+  ];
+
+  // ---- Donut geometry ---------------------------------------------------
+  // Build the donut with explicit SVG arc paths so each segment is the
+  // exact share of the circle it should be (summing to 100%).
+  //
+  // Angles are measured clockwise from 12 o'clock. For a clockwise angle a:
+  //   x = cx + r * sin(a)
+  //   y = cy - r * cos(a)
+  var CX = 100, CY = 100;
+  var R_OUT = 80;   // outer radius
+  var R_IN = 50;    // inner radius (donut hole)
+
+  var svg = document.querySelector(".donut svg");
+  var ns = "http://www.w3.org/2000/svg";
+
+  var total = data.reduce(function (s, d) { return s + d.pct; }, 0);
+
+  function pointAt(r, angleRad) {
+    return {
+      x: CX + r * Math.sin(angleRad),
+      y: CY - r * Math.cos(angleRad)
+    };
+  }
+
+  // Build one donut segment as an annular-arc path.
+  function segmentPath(startPct, endPct) {
+    var a0 = (startPct / total) * 2 * Math.PI;
+    var a1 = (endPct / total) * 2 * Math.PI;
+    var largeArc = (a1 - a0) > Math.PI ? 1 : 0;
+
+    var p0 = pointAt(R_OUT, a0); // outer start
+    var p1 = pointAt(R_OUT, a1); // outer end
+    var p2 = pointAt(R_IN, a1);  // inner end
+    var p3 = pointAt(R_IN, a0);  // inner start
+
+    return [
+      "M", p0.x.toFixed(3), p0.y.toFixed(3),
+      "A", R_OUT, R_OUT, 0, largeArc, 1, p1.x.toFixed(3), p1.y.toFixed(3),
+      "L", p2.x.toFixed(3), p2.y.toFixed(3),
+      "A", R_IN, R_IN, 0, largeArc, 0, p3.x.toFixed(3), p3.y.toFixed(3),
+      "Z"
+    ].join(" ");
+  }
+
+  // Track ring (light background ring behind the segments).
+  var track = document.createElementNS(ns, "circle");
+  track.setAttribute("cx", CX);
+  track.setAttribute("cy", CY);
+  track.setAttribute("r", (R_OUT + R_IN) / 2);
+  track.setAttribute("fill", "none");
+  track.setAttribute("stroke", "#eef2f7");
+  track.setAttribute("stroke-width", R_OUT - R_IN);
+  svg.appendChild(track);
+
+  var cursor = 0;
+  data.forEach(function (d) {
+    var start = cursor;
+    var end = cursor + d.pct;
+    var path = document.createElementNS(ns, "path");
+    path.setAttribute("d", segmentPath(start, end));
+    path.setAttribute("fill", d.color);
+    path.setAttribute("stroke", "#ffffff");
+    path.setAttribute("stroke-width", 2);
+    path.setAttribute("aria-label", d.label + " " + d.pct + "%");
+    svg.appendChild(path);
+    cursor = end;
+  });
+
+  // Sanity check: the segments must cover exactly 100% of the circle.
+  if (cursor !== 100) {
+    console.warn("Segments sum to " + cursor + "%, expected 100%");
+  }
+
+  // ---- Legend -----------------------------------------------------------
+  var legend = document.getElementById("legend");
+  data.forEach(function (d) {
+    var li = document.createElement("li");
+
+    var swatch = document.createElement("span");
+    swatch.className = "swatch";
+    swatch.style.background = d.color;
+
+    var label = document.createElement("span");
+    label.className = "label";
+    label.textContent = d.label;
+
+    var bar = document.createElement("span");
+    bar.className = "bar";
+    var fill = document.createElement("span");
+    fill.style.width = d.pct + "%";
+    fill.style.background = d.color;
+    bar.appendChild(fill);
+
+    var pct = document.createElement("span");
+    pct.className = "pct";
+    pct.textContent = d.pct + "%";
+
+    li.appendChild(swatch);
+    li.appendChild(label);
+    li.appendChild(bar);
+    li.appendChild(pct);
+    legend.appendChild(li);
+  });
+})();
+</script>
+</body>
+</html>

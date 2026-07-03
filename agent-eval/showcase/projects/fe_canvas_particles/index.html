@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Particle Network</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #05060a;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+
+  #canvas {
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 0;
+  }
+
+  .overlay {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1;
+    text-align: center;
+    color: #ffffff;
+    padding: 0 24px;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .overlay h1 {
+    font-size: clamp(2rem, 7vw, 5rem);
+    font-weight: 700;
+    letter-spacing: 2px;
+    margin-bottom: 18px;
+    text-shadow: 0 0 24px rgba(80, 160, 255, 0.55);
+    background: linear-gradient(90deg, #e8f0ff, #7db8ff, #e8f0ff);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .overlay p {
+    font-size: clamp(1rem, 2.2vw, 1.4rem);
+    font-weight: 300;
+    letter-spacing: 0.5px;
+    color: #a9c4e6;
+    text-shadow: 0 0 14px rgba(0, 0, 0, 0.6);
+  }
+</style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+
+  <div class="overlay">
+    <h1>Welcome to the Network</h1>
+    <p>An animated particle field rendered live on HTML5 Canvas</p>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("canvas");
+  var ctx = canvas.getContext("2d");
+
+  var particles = [];
+  var width = 0;
+  var height = 0;
+
+  // Tunable parameters
+  var CONNECT_DIST = 130;   // pixels within which particles get linked
+  var MOUSE_DIST = 180;     // mouse interaction radius
+  var MAX_PARTICLES = 130;  // hard cap
+
+  var mouse = { x: null, y: null };
+
+  // Particle count scales with viewport area, but stays bounded.
+  function targetParticleCount() {
+    var area = window.innerWidth * window.innerHeight;
+    var count = Math.floor(area / 11000);
+    return Math.max(40, Math.min(MAX_PARTICLES, count));
+  }
+
+  function rand(min, max) {
+    return Math.random() * (max - min) + min;
+  }
+
+  function makeParticle() {
+    return {
+      x: Math.random() * width,
+      y: Math.random() * height,
+      vx: rand(-0.5, 0.5),
+      vy: rand(-0.5, 0.5),
+      r: rand(1, 2.6)
+    };
+  }
+
+  function resize() {
+    width = window.innerWidth;
+    height = window.innerHeight;
+    // Use devicePixelRatio for crisp rendering on high-density screens.
+    var dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Adjust the particle population to the new viewport.
+    var desired = targetParticleCount();
+    while (particles.length < desired) particles.push(makeParticle());
+    if (particles.length > desired) particles.length = desired;
+  }
+
+  function step() {
+    ctx.clearRect(0, 0, width, height);
+
+    // Update positions.
+    for (var i = 0; i < particles.length; i++) {
+      var p = particles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+
+      // Wrap around edges for a continuous field.
+      if (p.x < -10) p.x = width + 10;
+      else if (p.x > width + 10) p.x = -10;
+      if (p.y < -10) p.y = height + 10;
+      else if (p.y > height + 10) p.y = -10;
+    }
+
+    // Draw connecting lines.
+    for (i = 0; i < particles.length; i++) {
+      for (var j = i + 1; j < particles.length; j++) {
+        var a = particles[i];
+        var b = particles[j];
+        var dx = a.x - b.x;
+        var dy = a.y - b.y;
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < CONNECT_DIST) {
+          var alpha = (1 - dist / CONNECT_DIST) * 0.55;
+          ctx.strokeStyle = "rgba(110, 170, 255, " + alpha + ")";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Draw particles + mouse interaction.
+    for (i = 0; i < particles.length; i++) {
+      p = particles[i];
+
+      // Subtle attraction toward the cursor when nearby.
+      if (mouse.x !== null && mouse.y !== null) {
+        var mdx = mouse.x - p.x;
+        var mdy = mouse.y - p.y;
+        var mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+        if (mdist < MOUSE_DIST && mdist > 0) {
+          var force = (1 - mdist / MOUSE_DIST) * 0.6;
+          p.vx += (mdx / mdist) * force;
+          p.vy += (mdy / mdist) * force;
+
+          // Draw a line from particle to cursor.
+          ctx.strokeStyle = "rgba(150, 200, 255, " + (1 - mdist / MOUSE_DIST) * 0.5 + ")";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y);
+          ctx.lineTo(mouse.x, mouse.y);
+          ctx.stroke();
+        }
+      }
+
+      // Damping keeps velocities bounded over time.
+      p.vx *= 0.99;
+      p.vy *= 0.99;
+
+      ctx.fillStyle = "rgba(180, 215, 255, 0.9)";
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    requestAnimationFrame(step);
+  }
+
+  // Mouse tracking; null when the pointer leaves the window.
+  window.addEventListener("mousemove", function (e) {
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+  });
+  window.addEventListener("mouseleave", function () {
+    mouse.x = null;
+    mouse.y = null;
+  });
+
+  window.addEventListener("resize", resize);
+
+  resize();
+  requestAnimationFrame(step);
+})();
+</script>
+</body>
+</html>

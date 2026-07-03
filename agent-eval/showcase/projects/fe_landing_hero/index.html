@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Nimbus — Ship cloud infrastructure in minutes</title>
+<meta name="description" content="Nimbus is the developer platform for deploying, scaling, and observing cloud infrastructure without the ops overhead." />
+<style>
+  /* ---------- Design tokens ---------- */
+  :root {
+    --bg: #0b1020;
+    --bg-soft: #111835;
+    --surface: rgba(255, 255, 255, 0.04);
+    --surface-strong: rgba(255, 255, 255, 0.07);
+    --border: rgba(255, 255, 255, 0.09);
+    --border-strong: rgba(255, 255, 255, 0.16);
+    --text: #eef1fb;
+    --text-muted: #a6adcb;
+    --text-dim: #777f9f;
+    --brand: #7c5cff;
+    --brand-2: #4d8bff;
+    --accent: #2dd4bf;
+    --gradient: linear-gradient(135deg, #7c5cff 0%, #4d8bff 50%, #2dd4bf 100%);
+    --gradient-soft: linear-gradient(135deg, rgba(124, 92, 255, 0.18), rgba(77, 139, 255, 0.10) 55%, rgba(45, 212, 191, 0.12));
+    --radius: 16px;
+    --radius-sm: 10px;
+    --shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+    --maxw: 1120px;
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+
+  /* Ambient background glow */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: -20% -20% auto -20%;
+    height: 760px;
+    background:
+      radial-gradient(60% 60% at 20% 10%, rgba(124, 92, 255, 0.30), transparent 70%),
+      radial-gradient(50% 50% at 85% 0%, rgba(77, 139, 255, 0.26), transparent 70%),
+      radial-gradient(45% 45% at 60% 30%, rgba(45, 212, 191, 0.16), transparent 70%);
+    filter: blur(30px);
+    z-index: -2;
+    pointer-events: none;
+  }
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image: radial-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+    background-size: 26px 26px;
+    -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 30%, transparent 75%);
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 30%, transparent 75%);
+    z-index: -1;
+    pointer-events: none;
+  }
+
+  a { color: inherit; text-decoration: none; }
+
+  .wrap { width: 100%; max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  /* ---------- Navigation ---------- */
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    background: rgba(11, 16, 32, 0.55);
+    border-bottom: 1px solid transparent;
+    transition: border-color var(--ease) 0.3s, background var(--ease) 0.3s;
+  }
+  .nav.scrolled {
+    background: rgba(11, 16, 32, 0.82);
+    border-bottom-color: var(--border);
+  }
+  .nav-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 68px;
+  }
+  .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; font-size: 19px; letter-spacing: -0.02em; }
+  .brand .logo {
+    width: 30px; height: 30px;
+    display: grid; place-items: center;
+    border-radius: 9px;
+    background: var(--gradient);
+    box-shadow: 0 6px 18px rgba(124, 92, 255, 0.45);
+  }
+  .brand .logo svg { width: 18px; height: 18px; }
+
+  .nav-links { display: flex; align-items: center; gap: 6px; }
+  .nav-links a {
+    color: var(--text-muted);
+    font-size: 14.5px;
+    font-weight: 500;
+    padding: 8px 14px;
+    border-radius: 8px;
+    transition: color var(--ease) 0.2s, background var(--ease) 0.2s;
+  }
+  .nav-links a:hover { color: var(--text); background: var(--surface); }
+
+  .nav-actions { display: flex; align-items: center; gap: 10px; }
+  .ghost-btn { color: var(--text-muted); font-size: 14.5px; font-weight: 500; padding: 9px 14px; border-radius: 9px; transition: color var(--ease) 0.2s; }
+  .ghost-btn:hover { color: var(--text); }
+
+  .menu-toggle {
+    display: none;
+    width: 40px; height: 40px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    color: var(--text);
+    padding: 0;
+    align-items: center; justify-content: center;
+  }
+  .menu-toggle svg { width: 20px; height: 20px; }
+
+  /* ---------- Buttons ---------- */
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 15px; font-weight: 600;
+    padding: 12px 20px;
+    border-radius: 11px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: transform var(--ease) 0.2s, box-shadow var(--ease) 0.2s, background var(--ease) 0.2s, border-color var(--ease) 0.2s;
+    white-space: nowrap;
+    font-family: inherit;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn svg { width: 16px; height: 16px; }
+
+  .btn-primary {
+    background: var(--gradient);
+    color: #fff;
+    box-shadow: 0 10px 26px rgba(124, 92, 255, 0.38);
+  }
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 16px 34px rgba(124, 92, 255, 0.5); }
+
+  .btn-secondary {
+    background: var(--surface);
+    color: var(--text);
+    border-color: var(--border-strong);
+    backdrop-filter: blur(8px);
+  }
+  .btn-secondary:hover { transform: translateY(-2px); background: var(--surface-strong); border-color: rgba(255,255,255,0.28); }
+
+  .btn-sm { padding: 9px 16px; font-size: 14px; }
+
+  /* ---------- Hero ---------- */
+  .hero { padding: 96px 0 64px; text-align: center; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 13px; font-weight: 500;
+    color: var(--text-muted);
+    padding: 6px 14px 6px 6px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    margin-bottom: 28px;
+  }
+  .pill .tag { background: var(--gradient); color: #fff; font-size: 11px; font-weight: 700; letter-spacing: 0.03em; padding: 3px 9px; border-radius: 999px; text-transform: uppercase; }
+
+  h1.hero-title {
+    font-size: clamp(38px, 6.4vw, 68px);
+    line-height: 1.05;
+    letter-spacing: -0.035em;
+    font-weight: 800;
+    margin: 0 0 22px;
+    max-width: 920px;
+    margin-left: auto; margin-right: auto;
+  }
+  .grad-text {
+    background: var(--gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+  .hero-sub {
+    font-size: clamp(17px, 2.1vw, 21px);
+    color: var(--text-muted);
+    max-width: 620px;
+    margin: 0 auto 38px;
+  }
+  .hero-cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .hero-note { margin-top: 22px; font-size: 13.5px; color: var(--text-dim); display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+  .hero-note span { display: inline-flex; align-items: center; gap: 6px; }
+  .hero-note svg { width: 14px; height: 14px; color: var(--accent); }
+
+  /* ---------- Features ---------- */
+  .features { padding: 72px 0 110px; }
+  .section-head { text-align: center; margin-bottom: 52px; }
+  .eyebrow { text-transform: uppercase; letter-spacing: 0.16em; font-size: 12.5px; font-weight: 700; color: var(--brand-2); margin-bottom: 14px; }
+  .section-title { font-size: clamp(28px, 3.6vw, 40px); font-weight: 800; letter-spacing: -0.03em; margin: 0; }
+  .section-sub { color: var(--text-muted); font-size: 17px; max-width: 540px; margin: 14px auto 0; }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 22px;
+  }
+  .card {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 30px 28px;
+    overflow: hidden;
+    transition: transform var(--ease) 0.3s, border-color var(--ease) 0.3s, background var(--ease) 0.3s;
+  }
+  .card::before {
+    content: "";
+    position: absolute; inset: 0;
+    background: var(--gradient-soft);
+    opacity: 0;
+    transition: opacity var(--ease) 0.3s;
+    pointer-events: none;
+  }
+  .card:hover { transform: translateY(-6px); border-color: var(--border-strong); background: var(--surface-strong); }
+  .card:hover::before { opacity: 1; }
+  .card > * { position: relative; }
+
+  .card .icon {
+    width: 52px; height: 52px;
+    display: grid; place-items: center;
+    font-size: 24px;
+    border-radius: 13px;
+    background: var(--surface-strong);
+    border: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  .card h3 { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 8px; }
+  .card p { color: var(--text-muted); font-size: 15px; margin: 0; }
+  .card .learn { margin-top: 18px; font-size: 14px; font-weight: 600; color: var(--brand-2); display: inline-flex; align-items: center; gap: 6px; transition: gap var(--ease) 0.2s; }
+  .card:hover .learn { gap: 10px; }
+  .card .learn svg { width: 14px; height: 14px; }
+
+  /* ---------- Footer ---------- */
+  footer { border-top: 1px solid var(--border); padding: 36px 0; }
+  .footer-inner { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; color: var(--text-dim); font-size: 14px; }
+  .footer-links { display: flex; gap: 22px; }
+  .footer-links a { color: var(--text-muted); transition: color var(--ease) 0.2s; }
+  .footer-links a:hover { color: var(--text); }
+
+  /* ---------- Reveal animation ---------- */
+  .reveal { opacity: 0; transform: translateY(18px); transition: opacity 0.7s var(--ease), transform 0.7s var(--ease); }
+  .reveal.in { opacity: 1; transform: none; }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width: 880px) {
+    .cards { grid-template-columns: 1fr; }
+    .nav-links { display: none; }
+    .menu-toggle { display: inline-flex; }
+    .nav-actions .ghost-btn { display: none; }
+    .hero { padding: 64px 0 40px; }
+  }
+
+  @media (max-width: 880px) {
+    .nav-links.open {
+      display: flex;
+      position: absolute;
+      top: 68px; left: 0; right: 0;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 4px;
+      padding: 14px 24px 20px;
+      background: rgba(11, 16, 32, 0.97);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-links.open a { padding: 12px 14px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    html { scroll-behavior: auto; }
+  }
+</style>
+</head>
+<body>
+
+  <!-- Navigation -->
+  <header class="nav" id="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="#" aria-label="Nimbus home">
+        <span class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 16a4 4 0 0 1 0-8 5.5 5.5 0 0 1 10.6-1.4A4.5 4.5 0 1 1 17 16Z"/>
+          </svg>
+        </span>
+        Nimbus
+      </a>
+
+      <nav class="nav-links" id="navLinks" aria-label="Primary">
+        <a href="#features">Features</a>
+        <a href="#">Docs</a>
+        <a href="#">Pricing</a>
+        <a href="#">Changelog</a>
+        <a href="#">Blog</a>
+      </nav>
+
+      <div class="nav-actions">
+        <a class="ghost-btn" href="#">Sign in</a>
+        <a class="btn btn-primary btn-sm" href="#">Get started</a>
+        <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="navLinks">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Hero -->
+    <section class="hero wrap">
+      <span class="pill reveal"><span class="tag">New</span> Nimbus 2.0 — multi-region autoscaling is here</span>
+      <h1 class="hero-title reveal">Deploy to the cloud<br /><span class="grad-text">without the cloud complexity.</span></h1>
+      <p class="hero-sub reveal">Nimbus is the developer platform that turns infrastructure into a single command. Ship globally, scale automatically, and debug in real time — no DevOps team required.</p>
+      <div class="hero-cta reveal">
+        <a class="btn btn-primary" href="#">
+          Start building free
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+        <a class="btn btn-secondary" href="#">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5v14l11-7z"/></svg>
+          Book a demo
+        </a>
+      </div>
+      <div class="hero-note reveal">
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> No credit card required</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Free tier forever</span>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> SOC 2 compliant</span>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section class="features wrap" id="features">
+      <div class="section-head reveal">
+        <div class="eyebrow">Why Nimbus</div>
+        <h2 class="section-title">Everything you need to ship</h2>
+        <p class="section-sub">A complete platform built for developers who care about speed, safety, and simplicity.</p>
+      </div>
+
+      <div class="cards">
+        <article class="card reveal">
+          <div class="icon" aria-hidden="true">⚡</div>
+          <h3>Instant deploys</h3>
+          <p>Push to Git and Nimbus ships a global deployment in under 15 seconds — with zero config.</p>
+          <a class="learn" href="#">Learn more
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </a>
+        </article>
+
+        <article class="card reveal">
+          <div class="icon" aria-hidden="true">🌐</div>
+          <h3>Global edge network</h3>
+          <p>Serve traffic from 30+ regions with smart routing that keeps latency under 50ms worldwide.</p>
+          <a class="learn" href="#">Learn more
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </a>
+        </article>
+
+        <article class="card reveal">
+          <div class="icon" aria-hidden="true">🛡️</div>
+          <h3>Autoscale on demand</h3>
+          <p>Handle traffic spikes gracefully with autoscaling that predicts load and scales before you need it.</p>
+          <a class="learn" href="#">Learn more
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </a>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <div class="wrap footer-inner">
+      <span>© 2026 Nimbus Labs, Inc. Crafted for developers.</span>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="#">Privacy</a>
+        <a href="#">Terms</a>
+        <a href="#">Security</a>
+        <a href="#">Status</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      // Sticky nav background on scroll
+      var nav = document.getElementById('nav');
+      function onScroll() {
+        if (window.scrollY > 12) {
+          nav.classList.add('scrolled');
+        } else {
+          nav.classList.remove('scrolled');
+        }
+      }
+      window.addEventListener('scroll', onScroll, { passive: true });
+      onScroll();
+
+      // Mobile menu toggle
+      var toggle = document.getElementById('menuToggle');
+      var links = document.getElementById('navLinks');
+      toggle.addEventListener('click', function () {
+        var open = links.classList.toggle('open');
+        toggle.setAttribute('aria-expanded', String(open));
+      });
+      // Close mobile menu when a link is tapped
+      links.querySelectorAll('a').forEach(function (a) {
+        a.addEventListener('click', function () {
+          links.classList.remove('open');
+          toggle.setAttribute('aria-expanded', 'false');
+        });
+      });
+
+      // Scroll reveal animation (respects reduced-motion)
+      var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      var reveals = document.querySelectorAll('.reveal');
+      if (reduce || !('IntersectionObserver' in window)) {
+        reveals.forEach(function (el) { el.classList.add('in'); });
+      } else {
+        var io = new IntersectionObserver(function (entries) {
+          entries.forEach(function (entry, i) {
+            if (entry.isIntersecting) {
+              var el = entry.target;
+              // stagger within the same parent group
+              setTimeout(function () { el.classList.add('in'); }, i * 90);
+              io.unobserve(el);
+            }
+          });
+        }, { threshold: 0.12, rootMargin: '0px 0px -8% 0px' });
+        reveals.forEach(function (el) { io.observe(el); });
+      }
+    })();
+  </script>
+</body>
+</html>
