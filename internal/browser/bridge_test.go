@@ -144,6 +144,37 @@ func TestBridgeCDPForwarding(t *testing.T) {
 	}
 }
 
+// TestBridgeKeepAlivePing verifies the server proactively pings the extension so
+// its MV3 service worker can't nap the socket shut. A silent extension (no alarm
+// ping, no command traffic) must still receive server pings; and if it never
+// answers, the read watchdog must eventually drop it.
+func TestBridgeKeepAlivePing(t *testing.T) {
+	oldPing, oldWait := keepAlivePing, keepAliveWait
+	keepAlivePing, keepAliveWait = 20*time.Millisecond, 120*time.Millisecond
+	t.Cleanup(func() { keepAlivePing, keepAliveWait = oldPing, oldWait })
+
+	b, wsURL := bridgeServer(t)
+	token := b.IssueToken()
+	fe, ok := dialExtension(t, wsURL, map[string]any{"type": "hello", "token": token})
+	if !ok {
+		t.Fatal("token auth failed")
+	}
+
+	// Read the first frame the server sends after welcome; it must be a ping.
+	_ = fe.conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var env bridgeEnvelope
+	if err := fe.conn.ReadJSON(&env); err != nil {
+		t.Fatalf("expected a server ping, got read error: %v", err)
+	}
+	if env.Type != "ping" {
+		t.Fatalf("first server keepalive frame = %q, want \"ping\"", env.Type)
+	}
+
+	// A silent extension (we stop reading/answering) must be dropped by the read
+	// watchdog rather than lingering forever.
+	waitUntil(t, func() bool { return !b.Connected() })
+}
+
 func TestBridgeStableTokenIsStable(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	b := NewBridge()

@@ -41,7 +41,12 @@ async function refresh() {
     pill.className = "pill off";
     pill.innerHTML = '<span class="dot off"></span>Reconnecting…';
     $("autoConnect").textContent = "Auto-connect to jcode";
-    showMsg((st.lastError ? st.lastError + " " : "") + "Click Disconnect to stop trying.", "err");
+    // Only go red on a real failure; a routine reconnect stays neutral.
+    if (st.lastError) {
+      showMsg(st.lastError + " Click Disconnect to stop trying.", "err");
+    } else {
+      showMsg("Reconnecting to jcode…", "info");
+    }
   } else {
     pill.className = "pill off";
     pill.innerHTML = '<span class="dot off"></span>Offline';
