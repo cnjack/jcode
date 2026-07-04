@@ -314,6 +314,9 @@ func TestFirstJSONObject(t *testing.T) {
 		{"```json\n{\"a\":1}\n```", `{"a":1}`},
 		// braces inside string literals must not confuse the scanner
 		{`{"memory":"use {curly} braces"}`, `{"memory":"use {curly} braces"}`},
+		// a balanced-but-invalid first object must be skipped for the next one
+		// (regression: the scan loop must advance to the next '{', not the switch)
+		{`{bad json} then {"a":1}`, `{"a":1}`},
 		{`no json here`, ``},
 		{`{unbalanced`, ``},
 	}
@@ -338,7 +341,7 @@ func TestPhase2NoDiffAfterConsolidation(t *testing.T) {
 	if err := memory.EnsureScope(scope); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ensureBaseline(scope); err != nil {
+	if err := ensureBaseline(scope); err != nil {
 		t.Fatal(err)
 	}
 	// write curated artifacts + commit as a baseline

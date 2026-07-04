@@ -57,11 +57,11 @@ func ensureGitignore(root string) error {
 	return os.WriteFile(p, []byte(gitignoreBody), 0o644)
 }
 
-// ensureBaseline initializes the memory git repo if needed and returns true
-// when a fresh repo was created.
-func ensureBaseline(root string) (bool, error) {
+// ensureBaseline initializes the memory git repo (with its .gitignore) if it
+// does not already exist.
+func ensureBaseline(root string) error {
 	if err := ensureGitignore(root); err != nil {
-		return false, err
+		return err
 	}
 	if _, err := os.Stat(root + "/.git"); err == nil {
 		// Repo already exists but state.json may have been committed by an
@@ -69,19 +69,19 @@ func ensureBaseline(root string) (bool, error) {
 		// path can recover.
 		_, _ = runGit(root, "rm", "-r", "--cached", "-q", "--ignore-unmatch",
 			"state.json", ".state.lock", ".pipeline.lock")
-		return false, nil
+		return nil
 	}
 	if _, err := runGit(root, "init", "-q"); err != nil {
-		return false, err
+		return err
 	}
 	if _, err := runGit(root, "add", "-A"); err != nil {
-		return false, err
+		return err
 	}
 	// Allow-empty: a brand-new scope may have nothing yet.
 	if _, err := runGit(root, "commit", "-q", "--allow-empty", "-m", "memory: baseline"); err != nil {
-		return false, err
+		return err
 	}
-	return true, nil
+	return nil
 }
 
 // workspaceDirty reports whether anything changed since the last baseline

@@ -47,7 +47,7 @@ func runPhase2(ctx context.Context, cfg *config.Config, projectDir string, log f
 	if err := memory.EnsureScope(scope); err != nil {
 		return err
 	}
-	if _, err := ensureBaseline(scope); err != nil {
+	if err := ensureBaseline(scope); err != nil {
 		return err
 	}
 

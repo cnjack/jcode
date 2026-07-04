@@ -275,11 +275,12 @@ func runPhase1(ctx context.Context, cfg *config.Config, projectDir string, inclu
 			name := fmt.Sprintf("%s-%s.md", time.Now().Format("20060102-150405"), sanitizeFileSlug(res.Slug))
 			path := filepath.Join(scope, memory.SummariesDir, name)
 			content := renderSummaryFile(c.meta, res)
-			if err := os.MkdirAll(filepath.Dir(path), 0o755); err == nil {
-				err = os.WriteFile(path, []byte(memory.Redact(content)), 0o644)
+			werr := os.MkdirAll(filepath.Dir(path), 0o755)
+			if werr == nil {
+				werr = os.WriteFile(path, []byte(memory.Redact(content)), 0o644)
 			}
-			if err != nil {
-				record(&memory.ExtractRecord{At: now, Failed: true, Error: err.Error()})
+			if werr != nil {
+				record(&memory.ExtractRecord{At: now, Failed: true, Error: werr.Error()})
 				return
 			}
 			record(&memory.ExtractRecord{At: now, SummaryFile: filepath.Join(memory.SummariesDir, name)})
@@ -338,6 +339,7 @@ func firstJSONObject(s string) string {
 		depth := 0
 		inStr := false
 		esc := false
+	scan:
 		for i := start; i < len(s); i++ {
 			c := s[i]
 			switch {
@@ -358,7 +360,10 @@ func firstJSONObject(s string) string {
 					if json.Valid([]byte(candidate)) {
 						return candidate
 					}
-					break // this opening brace didn't yield valid JSON; try next
+					// This opening brace closed into invalid JSON; stop
+					// scanning it and try the next '{' (labeled break exits
+					// the scan loop, not just the switch).
+					break scan
 				}
 			}
 		}

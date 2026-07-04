@@ -86,7 +86,10 @@ func WriteNote(n Note) (string, error) {
 	if handle == nil {
 		return "", fmt.Errorf("could not allocate a unique note filename in %s", notesDir)
 	}
-	defer handle.Close()
+	// Closed explicitly after a successful write (below) to surface flush
+	// errors; this defensive close covers the error-return paths and is a
+	// no-op once the file is already closed.
+	defer func() { _ = handle.Close() }()
 
 	var b strings.Builder
 	b.WriteString("---\n")
@@ -104,6 +107,9 @@ func WriteNote(n Note) (string, error) {
 	b.WriteString("\n")
 
 	if _, err := handle.WriteString(b.String()); err != nil {
+		return "", err
+	}
+	if err := handle.Close(); err != nil {
 		return "", err
 	}
 	return path, nil
