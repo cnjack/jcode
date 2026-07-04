@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/memory"
 	utils "github.com/cnjack/jcode/internal/util"
 )
 
@@ -71,6 +72,10 @@ func GetSystemPrompt(platform, pwd, envLabel string, envInfo *utils.EnvInfo, ski
 	if content := loadAgentsMd(pwd); content != "" {
 		result += "\n\n## Custom Agent Instructions\n\n" + content
 	}
+	// Inject learned cross-session memory (transient: system prompt only,
+	// never part of the session history). AGENTS.md stays authoritative —
+	// the memory section explicitly yields to it.
+	result += memory.BuildInjection(pwd, cfg)
 	return result
 }
 
@@ -129,6 +134,10 @@ func GetPlanSystemPrompt(platform, pwd, envLabel string, envInfo *utils.EnvInfo)
 	if content := loadAgentsMd(pwd); content != "" {
 		result += "\n\n## Custom Agent Instructions\n\n" + content
 	}
+	// Plan mode is read-only (no memory_note tool) but still benefits from
+	// knowing what prior sessions learned about this project.
+	planCfg, _ := config.LoadConfig()
+	result += memory.BuildInjection(pwd, planCfg)
 	return result
 }
 

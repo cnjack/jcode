@@ -30,6 +30,7 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/feature"
 	"github.com/cnjack/jcode/internal/handler"
+	mempipeline "github.com/cnjack/jcode/internal/memory/pipeline"
 	"github.com/cnjack/jcode/internal/mode"
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	weixin "github.com/cnjack/jcode/internal/pkg/weixin"
@@ -451,6 +452,15 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 			}
 		}
 
+		// Background memory distillation per task session (gates inside).
+		// Local sessions only: for remote (SSH/Docker) tasks taskPwd is a path
+		// on the remote host — the memory store and session index are keyed to
+		// the local machine, so a remote path would just create a junk scope
+		// and never match any sessions.
+		if exec == nil {
+			mempipeline.MaybeStartBackground(cfg, taskPwd)
+		}
+
 		// Per-task system/plan prompts (rendered for this task's pwd).
 		skillDescs := taskLoader.Descriptions()
 		var systemPrompt, planPrompt string
@@ -485,6 +495,16 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 					BatchRequestFn: twh.RequestAskUser,
 				}),
 				skills.NewLoadSkillTool(taskLoader),
+			}
+			if config.MemoryEnabled(cfg) {
+				all = append(all, tenv.NewMemoryNoteTool(&tools.MemoryNoteDeps{
+					SessionIDFn: func() string {
+						if trec != nil {
+							return trec.UUID()
+						}
+						return ""
+					},
+				}))
 			}
 			all = append(all, tenv.NewBrowserTools()...)
 			if mt := mcpToolsPtr.Load(); mt != nil {

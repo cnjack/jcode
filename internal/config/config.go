@@ -157,6 +157,94 @@ type SubagentConfig struct {
 	MaxDepth     int `json:"max_depth,omitempty"`
 }
 
+// MemoryConfig controls cross-session learned memory (the file-based store
+// under ~/.jcode/memory). See internal-doc/agent-memory-design.md. All fields
+// have defaults so zero config works; Enabled/Generate are pointers because
+// their default is true.
+type MemoryConfig struct {
+	Enabled *bool `json:"enabled,omitempty"` // default true; false disables read+write
+	// Generate gates the offline distillation pipeline (M2+); false keeps the
+	// system a read-only/manual notebook.
+	Generate *bool `json:"generate,omitempty"` // default true
+	// Model for pipeline extraction, "provider/model". Empty → SmallModel → Model.
+	Model string `json:"model,omitempty"`
+	// DailyTokenBudget caps pipeline token spend per day (BYOM guard).
+	DailyTokenBudget int `json:"daily_token_budget,omitempty"` // default 300000
+	CooldownHours    int `json:"cooldown_hours,omitempty"`     // default 6
+	MaxAgeDays       int `json:"max_age_days,omitempty"`       // default 30
+	MaxUnusedDays    int `json:"max_unused_days,omitempty"`    // default 45
+	Phase2TopN       int `json:"phase2_top_n,omitempty"`       // default 40
+	// SummaryInjectTokens caps the memory summary injected into the system prompt.
+	SummaryInjectTokens int `json:"summary_inject_tokens,omitempty"` // default 1200
+}
+
+// MemoryEnabled reports whether the memory system is on (default true).
+func MemoryEnabled(c *Config) bool {
+	if c == nil || c.Memory == nil || c.Memory.Enabled == nil {
+		return true
+	}
+	return *c.Memory.Enabled
+}
+
+// MemoryGenerate reports whether the distillation pipeline may run (default true).
+func MemoryGenerate(c *Config) bool {
+	if !MemoryEnabled(c) {
+		return false
+	}
+	if c == nil || c.Memory == nil || c.Memory.Generate == nil {
+		return true
+	}
+	return *c.Memory.Generate
+}
+
+// MemorySummaryInjectTokens returns the summary injection cap (default 1200).
+func MemorySummaryInjectTokens(c *Config) int {
+	if c != nil && c.Memory != nil && c.Memory.SummaryInjectTokens > 0 {
+		return c.Memory.SummaryInjectTokens
+	}
+	return 1200
+}
+
+// MemoryDailyTokenBudget returns the pipeline daily token budget (default 300k).
+func MemoryDailyTokenBudget(c *Config) int {
+	if c != nil && c.Memory != nil && c.Memory.DailyTokenBudget > 0 {
+		return c.Memory.DailyTokenBudget
+	}
+	return 300000
+}
+
+// MemoryCooldownHours returns the pipeline cooldown (default 6).
+func MemoryCooldownHours(c *Config) int {
+	if c != nil && c.Memory != nil && c.Memory.CooldownHours > 0 {
+		return c.Memory.CooldownHours
+	}
+	return 6
+}
+
+// MemoryMaxAgeDays returns the extraction window (default 30).
+func MemoryMaxAgeDays(c *Config) int {
+	if c != nil && c.Memory != nil && c.Memory.MaxAgeDays > 0 {
+		return c.Memory.MaxAgeDays
+	}
+	return 30
+}
+
+// MemoryMaxUnusedDays returns the unused-expiry window (default 45).
+func MemoryMaxUnusedDays(c *Config) int {
+	if c != nil && c.Memory != nil && c.Memory.MaxUnusedDays > 0 {
+		return c.Memory.MaxUnusedDays
+	}
+	return 45
+}
+
+// MemoryPhase2TopN returns the consolidation input cap (default 40).
+func MemoryPhase2TopN(c *Config) int {
+	if c != nil && c.Memory != nil && c.Memory.Phase2TopN > 0 {
+		return c.Memory.Phase2TopN
+	}
+	return 40
+}
+
 // Config represents the application configuration
 type Config struct {
 	// Provider settings: map of provider name → config (api_key, base_url)
@@ -191,6 +279,7 @@ type Config struct {
 	Prompt        *PromptConfig         `json:"prompt,omitempty"`
 	Subagent      *SubagentConfig       `json:"subagent,omitempty"`
 	Team          *TeamConfig           `json:"team,omitempty"`
+	Memory        *MemoryConfig         `json:"memory,omitempty"`
 
 	// AutoApprove sets the default approval mode to auto on startup.
 	//
