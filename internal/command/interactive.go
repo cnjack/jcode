@@ -22,7 +22,6 @@ import (
 	"github.com/cnjack/jcode/internal/agent"
 	"github.com/cnjack/jcode/internal/browser"
 	"github.com/cnjack/jcode/internal/channel"
-	"github.com/cnjack/jcode/internal/channel/ble"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/mode"
@@ -1081,7 +1080,35 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	approvalState.SetBrowserOriginFunc(env.CurrentBrowserOrigin)
 	st.approvalState = approvalState
 
-	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore, tui.WithVersion(Version), tui.WithGoalStore(env.GoalStore), tui.WithStartupMode(startupMode), tui.WithTheme(cfg.Theme), tui.WithApprovalModeChange(func(enabled bool) {
+	// Wire the `/browser` command to the browser-use subsystem.
+	browserCtl := &tui.BrowserController{
+		Status: func() tui.BrowserStatus {
+			s := browserMgr.Status(context.Background())
+			info := s.ChromeVersion
+			if info == "" {
+				info = s.ChromePath
+			}
+			return tui.BrowserStatus{
+				Available:       true,
+				Enabled:         s.Enabled,
+				Backend:         s.Backend,
+				ChromeFound:     s.ChromeFound,
+				ChromeInfo:      info,
+				ExtensionOnline: s.ExtensionOnline,
+				DevMode:         s.DevMode,
+			}
+		},
+		SetEnabled: func(enable bool) error {
+			if cfg.Browser == nil {
+				cfg.Browser = &config.BrowserConfig{Backend: "auto"}
+			}
+			cfg.Browser.Enabled = enable
+			browserMgr.SetConfig(browserManagerConfig(cfg))
+			return config.SaveConfig(cfg)
+		},
+	}
+
+	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore, tui.WithVersion(Version), tui.WithGoalStore(env.GoalStore), tui.WithStartupMode(startupMode), tui.WithTheme(cfg.Theme), tui.WithBrowser(browserCtl), tui.WithApprovalModeChange(func(enabled bool) {
 		approvalState.SetSessionApproval(enabled)
 	}))
 	st.p = p
@@ -1112,22 +1139,8 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	// Register WeChat as a notifier for working/idle status pushes.
 	notifyingH.AddNotifier(channel.NewChannelNotifier(st.wechatClient))
 
-	// Register BLE notifier if enabled (lazy connect — will auto-discover JCODE-* devices).
-	if cfg.Channel != nil && cfg.Channel.BLEEnabled {
-		bleNotifier := ble.New()
-		notifyingH.AddNotifier(bleNotifier)
-		// Push initial idle status (triggers BLE discovery in background).
-		bleNotifier.Notify(channel.NotifyEvent{Type: channel.EventIdle})
-
-		// Forward BLE inbound commands to TUI.
-		if bleCh := bleNotifier.Receive(); bleCh != nil {
-			go func() {
-				for cmd := range bleCh {
-					p.Send(tui.BLECommandMsg{Cmd: cmd.Cmd, Val: cmd.Val})
-				}
-			}()
-		}
-	}
+	// BLE status pushes are a desktop-only feature (the desktop app bundles the
+	// jcode-ble helper). The terminal/CLI does not spawn BLE.
 
 	st.h = notifyingH
 	approvalState.SetHandler(notifyingH)

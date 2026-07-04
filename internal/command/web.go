@@ -28,6 +28,7 @@ import (
 	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/channel/ble"
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/feature"
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/mode"
 	internalmodel "github.com/cnjack/jcode/internal/model"
@@ -282,9 +283,13 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 			config.Logger().Printf("[wechat] web auto-enabled")
 		}
 	}
-	var sharedBLE *ble.Notifier
-	if cfg.Channel != nil && cfg.Channel.BLEEnabled {
-		sharedBLE = ble.New()
+	// BLE is a desktop-only feature (compiled out of plain `jcode web`). The proxy
+	// is added to every task's notifier chain; enabling/disabling it via the
+	// settings toggle takes effect live (no restart). It stays a no-op until
+	// Enable() is called — at startup here if configured, and on the toggle.
+	bleProxy := &ble.Proxy{}
+	if feature.BLE && cfg.Channel != nil && cfg.Channel.BLEEnabled {
+		bleProxy.Enable()
 	}
 
 	// makeNotifyingHandler wraps a fresh per-task WebHandler with the shared push
@@ -307,8 +312,8 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 			}
 		})
 		nh.AddNotifier(channel.NewChannelNotifier(wechatClient))
-		if sharedBLE != nil {
-			nh.AddNotifier(sharedBLE)
+		if feature.BLE {
+			nh.AddNotifier(bleProxy)
 		}
 		return nh
 	}
@@ -736,6 +741,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		AuthToken:          webToken,
 		RequireAuth:        requireAuth,
 		BrowserManager:     browserMgr,
+		BLEController:      bleProxy,
 	})
 
 	// Start the periodic automation scheduler. A single process owns periodic

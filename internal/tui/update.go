@@ -851,6 +851,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 						return m.handleMCPInput(prompt, cmds)
 					}
 
+					if prompt == "/browser" || strings.HasPrefix(prompt, "/browser ") {
+						return m.handleBrowserInput(prompt, cmds)
+					}
+
 					if prompt == "/help" {
 						m.showingHelp = true
 						m.helpScroll = 0
