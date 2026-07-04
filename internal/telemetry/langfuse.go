@@ -7,7 +7,7 @@ import (
 
 	langfuseacl "github.com/cloudwego/eino-ext/libs/acl/langfuse"
 	"github.com/cloudwego/eino/adk"
-	"github.com/cloudwego/eino/compose"
+	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/cnjack/jcode/internal/config"
@@ -117,158 +117,170 @@ func (t *LangfuseTracer) EndChildTrace(ctx context.Context, output string) {
 	})
 }
 
-// ChildAgentMiddleware returns an adk.AgentMiddleware for child agents (subagents/teammates).
-// It nests generations and tool spans under the parent span stored in context.
-func (t *LangfuseTracer) ChildAgentMiddleware() adk.AgentMiddleware {
-	return t.buildMiddleware(true)
+// ChildAgentMiddleware returns a ChatModelAgentMiddleware for child agents
+// (subagents/teammates). It nests generations and tool spans under the parent
+// span stored in context.
+func (t *LangfuseTracer) ChildAgentMiddleware() adk.ChatModelAgentMiddleware {
+	return &langfuseMiddleware{tracer: t, useParentSpan: true}
 }
 
-// AgentMiddleware returns an adk.AgentMiddleware that records model generations
-// and tool-call spans to Langfuse, keyed by the traceID stored in the context.
-func (t *LangfuseTracer) AgentMiddleware() adk.AgentMiddleware {
-	return t.buildMiddleware(false)
+// AgentMiddleware returns a ChatModelAgentMiddleware that records model
+// generations and tool-call spans to Langfuse, keyed by the traceID stored in
+// the context.
+func (t *LangfuseTracer) AgentMiddleware() adk.ChatModelAgentMiddleware {
+	return &langfuseMiddleware{tracer: t, useParentSpan: false}
 }
 
-func (t *LangfuseTracer) buildMiddleware(useParentSpan bool) adk.AgentMiddleware {
-	return adk.AgentMiddleware{
-		BeforeChatModel: func(ctx context.Context, state *adk.ChatModelAgentState) error {
-			traceID, _ := ctx.Value(traceIDKey).(string)
-			if traceID == "" {
-				return nil
+// langfuseMiddleware implements adk.ChatModelAgentMiddleware. It embeds the adk
+// base handler so only the hooks it needs are overridden (model generation
+// spans + tool-call spans); every other interface method is a no-op default.
+type langfuseMiddleware struct {
+	*adk.BaseChatModelAgentMiddleware
+	tracer        *LangfuseTracer
+	useParentSpan bool
+}
+
+// BeforeModelRewriteState opens a Langfuse generation span for the model call.
+func (mw *langfuseMiddleware) BeforeModelRewriteState(ctx context.Context, state *adk.ChatModelAgentState, _ *adk.ModelContext) (context.Context, *adk.ChatModelAgentState, error) {
+	t := mw.tracer
+	traceID, _ := ctx.Value(traceIDKey).(string)
+	if traceID == "" {
+		return ctx, state, nil
+	}
+	parentObsID := ""
+	if mw.useParentSpan {
+		parentObsID, _ = ctx.Value(parentSpanIDKey).(string)
+	}
+	genID, _ := t.client.CreateGeneration(&langfuseacl.GenerationEventBody{
+		BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
+			BaseEventBody:       langfuseacl.BaseEventBody{Name: "chat_model"},
+			TraceID:             traceID,
+			ParentObservationID: parentObsID,
+			StartTime:           time.Now(),
+		},
+		InMessages: state.Messages,
+	})
+	_ = adk.SetRunLocalValue(ctx, "langfuse_gen_id", genID)
+	return ctx, state, nil
+}
+
+// AfterModelRewriteState closes the generation span and records token usage.
+func (mw *langfuseMiddleware) AfterModelRewriteState(ctx context.Context, state *adk.ChatModelAgentState, _ *adk.ModelContext) (context.Context, *adk.ChatModelAgentState, error) {
+	t := mw.tracer
+	genID := ""
+	if val, found, err := adk.GetRunLocalValue(ctx, "langfuse_gen_id"); err == nil && found {
+		genID, _ = val.(string)
+	}
+	if genID == "" {
+		return ctx, state, nil
+	}
+	_ = adk.DeleteRunLocalValue(ctx, "langfuse_gen_id")
+	// Find the last assistant message to record as output.
+	var outMsg *schema.Message
+	for i := len(state.Messages) - 1; i >= 0; i-- {
+		if state.Messages[i].Role == schema.Assistant {
+			outMsg = state.Messages[i]
+			break
+		}
+	}
+
+	// Read per-call token usage from the context-local TokenUsage tracker.
+	var usage *langfuseacl.Usage
+	var metadata map[string]string
+	if tracker := internalmodel.TokenTrackerFromContext(ctx); tracker != nil {
+		if d := tracker.GetLastDetail(); d != nil && d.TotalTokens > 0 {
+			usage = &langfuseacl.Usage{
+				PromptTokens:     d.PromptTokens,
+				CompletionTokens: d.CompletionTokens,
+				TotalTokens:      d.TotalTokens,
 			}
+			metadata = map[string]string{
+				"cached_tokens":    fmt.Sprintf("%d", d.CachedTokens),
+				"reasoning_tokens": fmt.Sprintf("%d", d.ReasoningTokens),
+			}
+		}
+	}
+
+	_ = t.client.EndGeneration(&langfuseacl.GenerationEventBody{
+		BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
+			BaseEventBody: langfuseacl.BaseEventBody{
+				ID:       genID,
+				MetaData: metadata,
+			},
+		},
+		OutMessage: outMsg,
+		EndTime:    time.Now(),
+		Usage:      usage,
+	})
+	return ctx, state, nil
+}
+
+// WrapInvokableToolCall wraps a tool's execution in a Langfuse span and exposes
+// a sub-span creator in context for downstream middleware (e.g. approval).
+func (mw *langfuseMiddleware) WrapInvokableToolCall(_ context.Context, endpoint adk.InvokableToolCallEndpoint, tCtx *adk.ToolContext) (adk.InvokableToolCallEndpoint, error) {
+	t := mw.tracer
+	toolName := ""
+	if tCtx != nil {
+		toolName = tCtx.Name
+	}
+	return func(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
+		traceID, _ := ctx.Value(traceIDKey).(string)
+		start := time.Now()
+		var spanID string
+		if traceID != "" {
 			parentObsID := ""
-			if useParentSpan {
+			if mw.useParentSpan {
 				parentObsID, _ = ctx.Value(parentSpanIDKey).(string)
 			}
-			genID, _ := t.client.CreateGeneration(&langfuseacl.GenerationEventBody{
+			spanID, _ = t.client.CreateSpan(&langfuseacl.SpanEventBody{
 				BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
-					BaseEventBody:       langfuseacl.BaseEventBody{Name: "chat_model"},
+					BaseEventBody:       langfuseacl.BaseEventBody{Name: toolName},
 					TraceID:             traceID,
 					ParentObservationID: parentObsID,
-					StartTime:           time.Now(),
+					Input:               argumentsInJSON,
+					StartTime:           start,
 				},
-				InMessages: state.Messages,
 			})
-			_ = adk.SetRunLocalValue(ctx, "langfuse_gen_id", genID)
-			return nil
-		},
+		}
 
-		AfterChatModel: func(ctx context.Context, state *adk.ChatModelAgentState) error {
-			genID := ""
-			if val, found, err := adk.GetRunLocalValue(ctx, "langfuse_gen_id"); err == nil && found {
-				genID, _ = val.(string)
-			}
-			if genID == "" {
-				return nil
-			}
-			_ = adk.DeleteRunLocalValue(ctx, "langfuse_gen_id")
-			// Find the last assistant message to record as output.
-			var outMsg *schema.Message
-			for i := len(state.Messages) - 1; i >= 0; i-- {
-				if state.Messages[i].Role == schema.Assistant {
-					outMsg = state.Messages[i]
-					break
-				}
-			}
-
-			// Read per-call token usage from the context-local TokenUsage tracker.
-			var usage *langfuseacl.Usage
-			var metadata map[string]string
-			if tracker := internalmodel.TokenTrackerFromContext(ctx); tracker != nil {
-				if d := tracker.GetLastDetail(); d != nil && d.TotalTokens > 0 {
-					usage = &langfuseacl.Usage{
-						PromptTokens:     d.PromptTokens,
-						CompletionTokens: d.CompletionTokens,
-						TotalTokens:      d.TotalTokens,
-					}
-					metadata = map[string]string{
-						"cached_tokens":    fmt.Sprintf("%d", d.CachedTokens),
-						"reasoning_tokens": fmt.Sprintf("%d", d.ReasoningTokens),
-					}
-				}
-			}
-
-			_ = t.client.EndGeneration(&langfuseacl.GenerationEventBody{
-				BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
-					BaseEventBody: langfuseacl.BaseEventBody{
-						ID:       genID,
-						MetaData: metadata,
+		// Store a sub-span creator in context so downstream middleware
+		// (e.g. approval) can create child spans under this tool span.
+		if spanID != "" {
+			subSpanFunc := SubSpanFunc(func(name string) func(output string) {
+				childStart := time.Now()
+				childID, _ := t.client.CreateSpan(&langfuseacl.SpanEventBody{
+					BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
+						BaseEventBody:       langfuseacl.BaseEventBody{Name: name},
+						TraceID:             traceID,
+						ParentObservationID: spanID,
+						StartTime:           childStart,
 					},
-				},
-				OutMessage: outMsg,
-				EndTime:    time.Now(),
-				Usage:      usage,
-			})
-			return nil
-		},
-
-		WrapToolCall: compose.ToolMiddleware{
-			Invokable: func(next compose.InvokableToolEndpoint) compose.InvokableToolEndpoint {
-				return func(ctx context.Context, input *compose.ToolInput) (*compose.ToolOutput, error) {
-					traceID, _ := ctx.Value(traceIDKey).(string)
-					start := time.Now()
-					var spanID string
-					if traceID != "" {
-						parentObsID := ""
-						if useParentSpan {
-							parentObsID, _ = ctx.Value(parentSpanIDKey).(string)
-						}
-						spanID, _ = t.client.CreateSpan(&langfuseacl.SpanEventBody{
-							BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
-								BaseEventBody:       langfuseacl.BaseEventBody{Name: input.Name},
-								TraceID:             traceID,
-								ParentObservationID: parentObsID,
-								Input:               input.Arguments,
-								StartTime:           start,
-							},
-						})
-					}
-
-					// Store a sub-span creator in context so downstream middleware
-					// (e.g. approval) can create child spans under this tool span.
-					if spanID != "" {
-						subSpanFunc := SubSpanFunc(func(name string) func(output string) {
-							childStart := time.Now()
-							childID, _ := t.client.CreateSpan(&langfuseacl.SpanEventBody{
-								BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
-									BaseEventBody:       langfuseacl.BaseEventBody{Name: name},
-									TraceID:             traceID,
-									ParentObservationID: spanID,
-									StartTime:           childStart,
-								},
-							})
-							return func(output string) {
-								if childID != "" {
-									_ = t.client.EndSpan(&langfuseacl.SpanEventBody{
-										BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
-											BaseEventBody: langfuseacl.BaseEventBody{ID: childID},
-											Output:        output,
-										},
-										EndTime: time.Now(),
-									})
-								}
-							}
-						})
-						ctx = context.WithValue(ctx, toolSpanTracerKey, subSpanFunc)
-					}
-
-					out, err := next(ctx, input)
-					if spanID != "" {
-						output := ""
-						if out != nil {
-							output = out.Result
-						}
+				})
+				return func(output string) {
+					if childID != "" {
 						_ = t.client.EndSpan(&langfuseacl.SpanEventBody{
 							BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
-								BaseEventBody: langfuseacl.BaseEventBody{ID: spanID},
+								BaseEventBody: langfuseacl.BaseEventBody{ID: childID},
 								Output:        output,
 							},
 							EndTime: time.Now(),
 						})
 					}
-					return out, err
 				}
-			},
-		},
-	}
+			})
+			ctx = context.WithValue(ctx, toolSpanTracerKey, subSpanFunc)
+		}
+
+		out, err := endpoint(ctx, argumentsInJSON, opts...)
+		if spanID != "" {
+			_ = t.client.EndSpan(&langfuseacl.SpanEventBody{
+				BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
+					BaseEventBody: langfuseacl.BaseEventBody{ID: spanID},
+					Output:        out,
+				},
+				EndTime: time.Now(),
+			})
+		}
+		return out, err
+	}, nil
 }

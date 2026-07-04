@@ -16,9 +16,23 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 )
 
-// ExtensionID is the chrome extension id derived from the committed public key
-// ("key" field) in extension/manifest.json — stable across loads and machines.
+// ExtensionID is the unpacked/dev extension id, derived from the committed
+// public key ("key" field) in extension/manifest.json — stable across loads.
 const ExtensionID = "ekcnniaefmnhnemnpphikhgfoofnojnd"
+
+// AllowedExtensionIDs is every id the Browser Bridge extension can have: the
+// unpacked dev build (above) plus the published store builds, which the stores
+// re-sign under their own ids. All of these must appear in the native-host
+// manifest's allowed_origins, or a store-installed extension can't open the
+// native host (the browser enforces the origin before launching it).
+var AllowedExtensionIDs = []string{
+	ExtensionID,                        // unpacked / dev (manifest "key")
+	"olkapiiikpfhaccmjphakolinkcggcbd", // Chrome Web Store
+	// Microsoft Edge Add-ons: add the runtime extension id here once known. It is
+	// NOT the Partner Center product id (0RDCKGMRP90R) — that's the listing id.
+	// Find the runtime id at edge://extensions after installing, or in Partner
+	// Center → Extension overview.
+}
 
 // FindChrome returns the path to a Chromium-based browser executable, or ""
 // when none is found. Explicit configPath (config.browser.chrome_path) wins.

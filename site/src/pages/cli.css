@@ -17,7 +17,7 @@
 }
 .cli-hero h1 em { font-style: normal; color: var(--accent); }
 .cli-hero-sub { font-size: 18px; color: var(--navy-ink-soft); max-width: 600px; }
-.cli-install { margin: 24px 0 20px; max-width: 560px; padding-right: 84px; white-space: nowrap; border: 1px solid var(--navy-3); }
+.cli-install { margin: 24px 0 20px; max-width: 560px; padding-right: 84px; white-space: normal; overflow-wrap: anywhere; border: 1px solid var(--navy-3); }
 .cli-hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
 .btn-ghost-dark {
   border: 1.5px solid var(--navy-line);

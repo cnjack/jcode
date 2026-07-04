@@ -15,11 +15,10 @@ const maxIterations = 1000
 
 type ApprovalFunc func(ctx context.Context, toolName, toolArgs string) (bool, error)
 
-// NewAgent creates a ChatModelAgent with the following middleware stack
+// NewAgent creates a ChatModelAgent with the following handler stack
 // (outermost to innermost):
 //
-//	Middlewares (old-style): [langfuse]
-//	Handlers (new-style):   [...caller handlers, approval+safeTool]
+//	Handlers: [langfuse tracing, ...caller handlers, approval+safeTool]
 //
 // ModelRetryConfig is always enabled (3 retries with default exponential backoff).
 func NewAgent(
@@ -28,12 +27,15 @@ func NewAgent(
 	tools []tool.BaseTool,
 	instruction string,
 	approvalFunc ApprovalFunc,
-	middlewares []adk.AgentMiddleware,
+	middlewares []adk.ChatModelAgentMiddleware,
 	handlers []adk.ChatModelAgentMiddleware,
 ) (*adk.ChatModelAgent, error) {
-	// Approval + safe-tool-error middleware is always the innermost handler
-	// so that summarization/reduction see the raw tool output first.
-	enhanced := append(append([]adk.ChatModelAgentMiddleware{}, handlers...), newApprovalMiddleware(approvalFunc))
+	// Handler order is outermost → innermost: tracing middlewares first, then the
+	// caller's handlers, then approval + safe-tool-error innermost so that
+	// summarization/reduction see the raw tool output first.
+	enhanced := append([]adk.ChatModelAgentMiddleware{}, middlewares...)
+	enhanced = append(enhanced, handlers...)
+	enhanced = append(enhanced, newApprovalMiddleware(approvalFunc))
 
 	return adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:        "coding",
@@ -46,7 +48,6 @@ func NewAgent(
 			},
 		},
 		MaxIterations: maxIterations,
-		Middlewares:   middlewares,
 		Handlers:      enhanced,
 		ModelRetryConfig: &adk.ModelRetryConfig{
 			MaxRetries:  5,
