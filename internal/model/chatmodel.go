@@ -766,7 +766,7 @@ var knownModels = map[string]knownModel{
 	"gemini-1.5-flash": {1000000, 0.075, 0.30},
 	// 2026 long-context flagships (offline fallback when the models.dev registry
 	// is unavailable). Context windows verified against vendor docs / models.dev;
-	// see docs/model-research.md. Pricing left 0 where not confidently known.
+	// see internal-doc/model-research.md. Pricing left 0 where not confidently known.
 	"MiniMax-M3":             {1000000, 0.60, 2.40},
 	"minimax-m3":             {1000000, 0.60, 2.40},
 	"deepseek-v4-pro":        {1000000, 0, 0},

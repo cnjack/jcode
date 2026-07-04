@@ -1,7 +1,7 @@
 ---
 title: IDE Integration
 parent: Overview
-nav_order: 13
+nav_order: 15
 ---
 
 # IDE Integration (ACP)

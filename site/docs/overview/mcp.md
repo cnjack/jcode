@@ -1,7 +1,7 @@
 ---
 title: MCP Integration
 parent: Overview
-nav_order: 12
+nav_order: 13
 ---
 
 # MCP Integration

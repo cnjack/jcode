@@ -1,6 +1,6 @@
 # AGENTS.md — JCode Project Development Guide
 
-Go CLI coding assistant — [Eino](https://github.com/cloudwego/eino) + BubbleTea v2 TUI + Vue 3 web UI.
+Go coding agent — [Eino](https://github.com/cloudwego/eino) + BubbleTea v2 TUI + Vue 3 web UI + Tauri 2 desktop shell.
 
 - **Module:** `github.com/cnjack/jcode` | **Entry:** `cmd/jcode/` | **Config dir:** `~/.jcode/`
 
@@ -9,15 +9,18 @@ Go CLI coding assistant — [Eino](https://github.com/cloudwego/eino) + BubbleTe
 ## Quick Start
 
 ```bash
-make build        # generate → build-web → go build
-make install      # generate → build-web → go install
-make run          # go run ./cmd/jcode/
-make lint         # golangci-lint + eslint/oxlint
-make doctor       # system check
+make build          # generate → build-web → go build
+make install        # generate → build-web → go install
+make run            # go run ./cmd/jcode/
+make lint           # golangci-lint + eslint/oxlint (lint-go / lint-web)
+make doctor         # system check
+make desktop-dev    # Tauri desktop app in dev mode (rebuilds the Go sidecar first)
+make desktop-build  # distributable desktop bundle (.app/.dmg/.msi)
+make build-ble      # optional jcode-ble helper (BLE is a separate binary by design)
 ```
 
 - `make build-web` requires `pnpm`. Frontend builds to `internal/web/dist/`.
-- `make generate` runs `go generate ./internal/model/...` — fetches models.dev data and generates `internal/model/registry_generated.go`. **Do NOT manually edit that file.**
+- `make generate` runs `go generate` for `internal/model/...` (fetches models.dev data → `registry_generated.go`) **and** `internal/theme/...` (palette → web CSS/TS tokens). **Never edit generated files by hand.**
 - Build injects `Version`, `BuildTime`, `GitCommit` via ldflags into `internal/command`.
 
 ---
@@ -25,11 +28,12 @@ make doctor       # system check
 ## Architecture Overview
 
 ```
-cmd/jcode/           # Entry: subcommands (mcp, acp, web), main event loop
+cmd/jcode/           # Entry: cobra root (interactive) + subcommands; native-messaging host detour
+cmd/jcode-ble/       # BLE helper binary (spawned by the main binary; keeps CoreBluetooth out of jcode)
 internal/
-  command/           # Subcommand implementations + interactive session orchestration
+  command/           # Subcommand implementations + interactive session orchestration + tool wiring
   agent/             # ChatModelAgent factory + middleware chain
-  runner/            # Agent run loop + event bus
+  runner/            # Agent run loop + event bus + approval tiering
   handler/           # AgentEventHandler interface (TUI / ACP / Web implementations)
   tools/             # All built-in tools + Executor/Env abstraction
   model/             # OpenAI-compatible chat model + model registry (build-time generated)
@@ -38,10 +42,24 @@ internal/
   session/           # JSONL session recording/replay
   skills/            # Skill loader (builtin → user → project override chain)
   team/              # Multi-agent team coordination
+  mode/              # Unified session mode (Ask / Plan / Autopilot) shared by all transports
+  automation/        # Scheduled/manual agent runs (each run = a tagged session)
+  browser/           # Browser use: managed Chrome (CDP) + extension WS bridge + native-messaging host
+  remote/            # SSH / Docker connection helpers (UI-agnostic; /api/remote/*)
+  channel/           # External messaging channels (e.g. WeChat push)
+  theme/             # Single source of truth for built-in themes (generates web CSS/TS)
+  usage/             # Token-usage recording + aggregation (stats views)
+  feature/           # Compile-time feature flags via build tags (e.g. desktop, jcode_headless, ble)
+  telemetry/         # Optional Langfuse tracing
   tui/               # BubbleTea v2 TUI components
-  web/               # HTTP server (REST + SSE + PTY) + embedded Vue dist
-web/                 # Vue 3 + Vite + TypeScript frontend source
-script/              # Build-time code generation
+  web/               # HTTP server (REST + WS + PTY) + embedded Vue dist
+web/                 # Vue 3 + Vite + TypeScript frontend source (the product UI)
+site/                # React + Vite marketing/docs site → www.j-code.net (docs markdown in site/docs/)
+desktop/             # Tauri 2 desktop shell; the Go binary runs as a sidecar
+extension/           # jcode Browser Bridge Chrome extension (MV3) for the browser-use extension backend
+internal-doc/        # Internal design docs (NOT published; site/docs is the published documentation)
+script/              # Build-time code generation + install.sh
+agent-eval/          # Agent evaluation harness + showcase generation
 ```
 
 ### Key Design Decisions
@@ -72,9 +90,9 @@ script/              # Build-time code generation
 1. Define `XxxInput` struct with `json` tags
 2. Create `func (e *Env) NewXxxTool() tool.InvokableTool` on `*Env`
 3. Build `schema.ToolInfo` with `schema.NewParamsOneOfByParams(...)` — use `schema.String`, `schema.Integer`, `schema.Boolean`, `schema.Array`
-4. Register in `buildAllTools()` in `internal/command/interactive.go` (and `acp.go`, `web.go`)
-5. If the tool is read-only, also add to `buildPlanTools()`
-6. **Approval policy:** Read-only tools skip approval. Mutating tools require approval unless `AutoApprove` is set. Match existing patterns in `approval.go`.
+4. Register it in **all three transports**: `buildAllTools()` / `buildPlanTools()` in `internal/command/interactive.go`, and the inline `all`/`plan` tool lists in `acp.go` and `web.go`
+5. If the tool is read-only, also add it to the plan-mode list
+6. **Approval policy:** Read-only tools skip approval. Mutating tools require approval unless `AutoApprove` is set. Match existing patterns in `internal/runner/approval.go` (browser tools additionally tier by action/origin there).
 
 ### Approval Policy
 - Read-only tools (read, grep, glob, todoread, etc.): auto-approved
@@ -99,8 +117,8 @@ script/              # Build-time code generation
 
 ### Add a New Tool
 1. Create `internal/tools/xxx.go` with input struct + `NewXxxTool()` method on `*Env`
-2. Add to `buildAllTools()` in `interactive.go`, `acp.go`, and `web.go`
-3. If read-only and useful in plan mode, also add to `buildPlanTools()`
+2. Add to `buildAllTools()`/`buildPlanTools()` in `interactive.go` and the inline tool lists in `acp.go` and `web.go`
+3. If read-only and useful in plan mode, also add to the plan-mode lists
 4. Set appropriate approval requirements following the approval policy above
 5. If the tool needs external dependencies (like `BackgroundManager`), pass them as parameters to `NewXxxTool()`
 
@@ -128,6 +146,11 @@ script/              # Build-time code generation
 ### Modify Model Registry
 - `internal/model/registry_generated.go` is **auto-generated** — edit `script/generate_models.go` instead
 - Run `make generate` to regenerate
+
+### Write Documentation
+- **Published docs** live in `site/docs/**/*.md` (rendered at https://www.j-code.net/docs by the React site in `site/`). Pages need front-matter `title` + `nav_order` (+ `parent` for children) to appear in the nav.
+- **Internal design docs** (PRDs, design notes, research) go in `internal-doc/` — never in `site/docs/`.
+- Doc screenshots live in `site/docs/asset/` (for GitHub rendering) and `site/public/docs-asset/` (served by the site) — keep both copies in sync.
 
 ---
 
@@ -159,6 +182,7 @@ script/              # Build-time code generation
 - **Output:** builds to `internal/web/dist/`, embedded in Go binary via `//go:embed`
 - **Lint:** `cd web && pnpm lint` (eslint + oxlint)
 - Changes to the frontend require rebuilding via `make build-web` for the Go binary to pick them up
+- **Don't confuse `web/` with `site/`:** `web/` (Vue) is the product UI embedded in the binary and reused by the desktop app; `site/` (React) is the public website + docs at www.j-code.net and is deployed separately (`cd site && pnpm build`).
 
 ### Icons & Styling
 

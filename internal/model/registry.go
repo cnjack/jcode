@@ -387,7 +387,7 @@ func sortModels(models []*RegistryModel) {
 // Key: provider ID, Value: map of model ID → true (recommended + default enabled).
 //
 // Curated 2026-06-13 toward the current long-context flagships. See
-// docs/model-research.md for the per-provider context-window survey behind these
+// internal-doc/model-research.md for the per-provider context-window survey behind these
 // picks. Model IDs must match the registry exactly or the flag is silently ignored.
 var recommendedModels = map[string]map[string]bool{
 	// GLM-5.2 (1M window) is Zhipu's newest, injected via additionalModels since
@@ -448,7 +448,7 @@ var recommendedModels = map[string]map[string]bool{
 // contextLimitOverrides corrects context windows for built-in models whose
 // models.dev-sourced value understates the model's advertised window. Applied at
 // init() so corrections survive `go generate` regeneration of registry_generated.go.
-// Key: provider ID → model ID → context window (tokens). See docs/model-research.md.
+// Key: provider ID → model ID → context window (tokens). See internal-doc/model-research.md.
 var contextLimitOverrides = map[string]map[string]int{
 	// MiniMax-M3 advertises a 1M-token window; models.dev records only the
 	// 512K "guaranteed minimum". Use the advertised window for sizing.
@@ -463,7 +463,7 @@ var contextLimitOverrides = map[string]map[string]int{
 // (the standalone API / open weights land later), so it can't come through
 // registry_generated.go. Spec confirmed from the official Z.ai DevPack config
 // ("contextWindow": 1000000, "maxTokens": 131072). The full 1M window requires the
-// "glm-5.2[1m]" variant on the Coding Plan endpoint. See docs/model-research.md.
+// "glm-5.2[1m]" variant on the Coding Plan endpoint. See internal-doc/model-research.md.
 func glm52Model() *RegistryModel {
 	return &RegistryModel{
 		ID: "glm-5.2", Name: "GLM-5.2", Family: "glm",
@@ -480,7 +480,7 @@ func glm52Model() *RegistryModel {
 // released before models.dev publishes it. Applied at init() and MERGED in — an
 // entry is skipped if the provider already defines that model id, so once the
 // official record lands in registry_generated.go it transparently takes over.
-// Key: provider ID → model ID → model. See docs/model-research.md.
+// Key: provider ID → model ID → model. See internal-doc/model-research.md.
 var additionalModels = map[string]map[string]*RegistryModel{
 	"zhipuai":             {"glm-5.2": glm52Model()},
 	"zhipuai-coding-plan": {"glm-5.2": glm52Model()},

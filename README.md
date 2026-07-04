@@ -9,7 +9,7 @@
 ### **Think it. Code it.**
 
 <p align="center">
-  <img src="docs/asset/overview.png" alt="jcode overview" width="800">
+  <img src="site/docs/asset/overview.png" alt="jcode overview" width="800">
 </p>
 
 **The AI coding agent that lives in your terminal — and now on your desktop.**
@@ -27,14 +27,14 @@ Bring any OpenAI-compatible model.
   <a href="https://github.com/cnjack/jcode/stargazers"><img src="https://img.shields.io/github/stars/cnjack/jcode?style=flat" alt="Stars"></a>
 </p>
 
-[📖 Documentation](https://cnjack.github.io/jcode) · [Install](#install) · [Features](#features) · [Interfaces](#interfaces) · [Configuration](#configuration) · [Changelog](#changelog)
+[📖 Documentation](https://www.j-code.net/docs) · [Install](#install) · [Features](#features) · [Interfaces](#interfaces) · [Configuration](#configuration) · [Changelog](#changelog)
 
 </div>
 
 ---
 
 <p align="center">
-  <img src="docs/asset/tui-screenshot.png" alt="jcode terminal UI" width="800">
+  <img src="site/docs/asset/tui-screenshot.png" alt="jcode terminal UI" width="800">
 </p>
 
 ## Why jcode?
@@ -67,7 +67,8 @@ make install
 ```
 
 First launch creates `~/.jcode/config.json` with a setup wizard. Run `jcode doctor`
-to verify model & MCP connectivity.
+to verify model & MCP connectivity. For a full walkthrough see the
+[Get Started guide](https://www.j-code.net/docs/get-started).
 
 ### First commands
 
@@ -117,7 +118,7 @@ Press **Shift+Tab** to cycle the session mode:
 Spawn multiple AI teammates that work **in parallel**, each with independent tools, conversation history, and environment. The lead agent coordinates; teammates idle until they receive an explicit message.
 
 <p align="center">
-  <img src="docs/asset/agent-team-screnshot.png" alt="jcode agent teams" width="800">
+  <img src="site/docs/asset/agent-team-screnshot.png" alt="jcode agent teams" width="800">
 </p>
 
 ### 🎯 Session goals
@@ -172,6 +173,20 @@ Save connections as named aliases and jump between hosts with `/ssh`:
 ```
 
 In the web UI you can also bind a task to a **Docker container** — every file and command runs inside it via `docker exec`, and the embedded terminal opens a real TTY in the container. Saved Docker aliases live in `docker_aliases`.
+
+### 🌍 Browser use
+
+The agent can see and operate a real browser: open pages, read them as uid-tagged
+text snapshots, click, type, scroll, and manage tabs — with risky actions gated by
+per-site approvals. Two backends, same tools: a **managed** Chrome jcode launches
+itself (isolated profile — great for verifying `localhost` after frontend changes),
+or **your** Chrome via the jcode Browser Bridge extension (your logins, your tabs).
+Toggle with `/browser` in the TUI or Settings → Browser on the web. See the
+[Browser Use guide](https://www.j-code.net/docs/overview/browser-use).
+
+> The extension currently installs via `chrome://extensions` → Developer mode →
+> **Load unpacked** (from the repo's `extension/` folder) — the Chrome Web Store
+> listing is in review.
 
 ### ⏱ Automations
 
@@ -269,7 +284,7 @@ The full TUI: `jcode`. Everything above lives here.
 Start a browser-based UI with `jcode web`. Chat, file browser, built-in terminal, and full agent control at `http://localhost:8080`. Light and dark themes; remote-connect wizard for SSH and Docker.
 
 <p align="center">
-  <img src="docs/asset/web-screenshot.png" alt="jcode web UI" width="800">
+  <img src="site/docs/asset/web-screenshot.png" alt="jcode web UI" width="800">
 </p>
 
 ### 🖥 Desktop
@@ -277,7 +292,7 @@ Start a browser-based UI with `jcode web`. Chat, file browser, built-in terminal
 A native desktop app (built with [Tauri](https://tauri.app)) wraps the **same** web UI in a real OS window with native integration: OS notifications, a menu-bar tray, close-to-tray, single-instance focus, window-state memory, a global show/hide shortcut, and a native folder picker. The Go backend runs as an embedded sidecar — no separate server to start.
 
 <p align="center">
-  <img src="docs/asset/desktop-screenshot.png" alt="jcode desktop app" width="800">
+  <img src="site/docs/asset/desktop-screenshot.png" alt="jcode desktop app" width="800">
 </p>
 
 ```bash
@@ -287,7 +302,7 @@ make desktop-build   # build a distributable bundle (.app/.dmg/.msi)
 
 > Building the desktop app additionally needs the [Rust toolchain](https://rustup.rs) (and, on Linux, the [Tauri system dependencies](https://v2.tauri.app/start/prerequisites/)).
 
-See the [Desktop App guide](https://cnjack.github.io/jcode/desktop) for the architecture and security model.
+See the [Desktop App guide](https://www.j-code.net/docs/desktop) for the architecture and security model.
 
 ### Editor (ACP)
 
@@ -320,6 +335,7 @@ jcode update         # update to the latest release
 | `/theme`          | Open the theme picker (live preview)                    |
 | `/goal`           | Set, check (`status`), or `clear` the session goal      |
 | `/ssh`            | Connect to an SSH host                                  |
+| `/browser`        | Browser-use status / `on` / `off`                       |
 | `/mcp`            | Manage MCP server connections                           |
 | `/resume`         | Resume a previous session                               |
 | `/compact`        | Compact the conversation context                        |
@@ -366,6 +382,7 @@ Config lives at `~/.jcode/config.json`. Key sections:
 | `ssh_aliases`                 | Named SSH connections                                                     |
 | `docker_aliases`              | Named Docker container workspaces                                         |
 | `mcp_servers`                 | MCP server definitions (stdio / HTTP / SSE, headers, OAuth)               |
+| `browser`                     | Browser use: backend, approvals, site permissions, dev mode               |
 | `budget`                      | Token and cost limits per session                                         |
 | `compaction`                  | Auto-compaction threshold and recent-message count                        |
 | `prompt`                      | Memory size, prompt cache, async env timeout                              |
@@ -383,7 +400,7 @@ jcode update    # update to latest version
 
 ## Documentation
 
-📖 Full documentation is available at [cnjack.github.io/jcode](https://cnjack.github.io/jcode).
+📖 Full documentation is available at [www.j-code.net/docs](https://www.j-code.net/docs).
 
 ## Changelog
 
