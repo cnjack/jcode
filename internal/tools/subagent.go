@@ -153,7 +153,7 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 		prompt := subagentSystemPrompt(agentType, s.env.Pwd(), s.env.platform)
 
 		// Inject Langfuse child trace so subagent spans nest under the parent.
-		var middlewares []adk.AgentMiddleware
+		var middlewares []adk.ChatModelAgentMiddleware
 		if s.deps.Tracer != nil {
 			runCtx = s.deps.Tracer.WithChildTrace(runCtx, fmt.Sprintf("subagent-%s", input.Name))
 			middlewares = append(middlewares, s.deps.Tracer.ChildAgentMiddleware())
@@ -170,7 +170,7 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 				},
 			},
 			MaxIterations: subagentMaxIter,
-			Middlewares:   middlewares,
+			Handlers:      middlewares,
 			ModelRetryConfig: &adk.ModelRetryConfig{
 				MaxRetries:  3,
 				IsRetryAble: internalmodel.IsRetryable,

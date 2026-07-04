@@ -153,7 +153,7 @@ func (s *interactiveState) subagentTokenFn(totalTokens int64) {
 }
 
 func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
-	var middlewares []adk.AgentMiddleware
+	var middlewares []adk.ChatModelAgentMiddleware
 	if s.langfuseTracer != nil {
 		middlewares = append(middlewares, s.langfuseTracer.AgentMiddleware())
 	}
