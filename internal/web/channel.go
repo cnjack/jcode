@@ -8,6 +8,7 @@ import (
 
 	channelpkg "github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/feature"
 )
 
 func (s *Server) handleChannelStatus(w http.ResponseWriter, r *http.Request) {
@@ -114,13 +115,17 @@ func (s *Server) handleChannelBLEStatus(w http.ResponseWriter, r *http.Request) 
 	if s.cfg != nil && s.cfg.Channel != nil {
 		enabled = s.cfg.Channel.BLEEnabled
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": enabled})
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": enabled, "available": feature.BLE})
 }
 
 // handleSetChannelBLE persists the Bluetooth (BLE) status-channel preference.
 // Like the proxy/cert settings, it takes effect after an app restart (the BLE
 // notifier is created once at startup when channel.ble_enabled is true).
 func (s *Server) handleSetChannelBLE(w http.ResponseWriter, r *http.Request) {
+	if !feature.BLE {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "bluetooth channel is not available in this build"})
+		return
+	}
 	var req struct {
 		Enabled bool `json:"enabled"`
 	}
@@ -144,6 +149,17 @@ func (s *Server) handleSetChannelBLE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Unlock()
+
+	// Apply live: start/stop the BLE helper now so the toggle takes effect
+	// without an app restart (and the macOS Bluetooth prompt / device connect
+	// happens right when the user turns it on).
+	if s.bleController != nil {
+		if req.Enabled {
+			s.bleController.Enable()
+		} else {
+			s.bleController.Disable()
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": req.Enabled})
 }
 

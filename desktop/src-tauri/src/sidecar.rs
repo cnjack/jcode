@@ -49,6 +49,38 @@ fn pick_free_port() -> u16 {
         .unwrap_or(8799)
 }
 
+/// Where the last-used sidecar port is remembered so we can reuse it next
+/// launch. Reusing the port keeps the browser extension's stored server URL
+/// valid across restarts, so it reconnects silently without re-discovering.
+fn port_file(app: &AppHandle) -> PathBuf {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .unwrap_or_else(|_| std::env::temp_dir());
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join("sidecar-port")
+}
+
+/// True if `port` can currently be bound on loopback (i.e. it's free).
+fn is_port_free(port: u16) -> bool {
+    TcpListener::bind(("127.0.0.1", port)).is_ok()
+}
+
+/// Pick the sidecar port, preferring the port used last time (persisted) so the
+/// URL stays stable across launches. Falls back to a fresh free port when the
+/// remembered one is taken (another instance, or grabbed by something else).
+/// The chosen port is persisted for next time.
+fn pick_port(app: &AppHandle) -> u16 {
+    let path = port_file(app);
+    let port = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| s.trim().parse::<u16>().ok())
+        .filter(|&p| p != 0 && is_port_free(p))
+        .unwrap_or_else(pick_free_port);
+    let _ = std::fs::write(&path, port.to_string());
+    port
+}
+
 /// Path to the persisted sidecar log. Lives in the app log dir so a crash that
 /// happens before the window ever loads is still inspectable after the fact —
 /// the GUI swallows the sidecar's stdout/stderr otherwise.
@@ -62,7 +94,7 @@ fn sidecar_log_path(app: &AppHandle) -> PathBuf {
 }
 
 pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let port = pick_free_port();
+    let port = pick_port(app);
 
     // Publish the port to managed state immediately so a fast-rendering
     // frontend's `get_sidecar_port` IPC call can resolve it without waiting for

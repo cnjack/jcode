@@ -149,6 +149,18 @@ type Server struct {
 	// managed Chrome). Shared with per-task Envs so the settings UI and the
 	// agent's browser_* tools drive the same Chrome. nil disables browser use.
 	browserMgr *browser.Manager
+
+	// bleController toggles the BLE status channel live (from the settings
+	// endpoint) without an app restart. nil when BLE is not compiled in.
+	bleController BLEController
+}
+
+// BLEController lets the settings endpoint start/stop the BLE status channel at
+// runtime. Implemented by *ble.Proxy; kept as an interface so this package does
+// not depend on the ble concrete type.
+type BLEController interface {
+	Enable()
+	Disable()
 }
 
 // ServerConfig holds the configuration for creating a new Server.
@@ -187,6 +199,7 @@ type ServerConfig struct {
 	AuthToken           string                                                                // bearer token required on non-exempt requests when RequireAuth is set
 	RequireAuth         bool                                                                  // enforce token auth (set when bound to a non-loopback host)
 	BrowserManager      *browser.Manager                                                      // optional: process-wide browser-use manager shared with per-task Envs
+	BLEController       BLEController                                                         // optional: live BLE status-channel toggle (desktop builds)
 }
 
 // NewServer creates a new web server.
@@ -252,6 +265,7 @@ func NewServer(cfg *ServerConfig) *Server {
 		authToken:           cfg.AuthToken,
 		requireAuth:         cfg.RequireAuth,
 		browserMgr:          cfg.BrowserManager,
+		bleController:       cfg.BLEController,
 	}
 	// The bootstrap engine is registered (and its pump started) in Start, once
 	// the root context exists.

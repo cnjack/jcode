@@ -41,7 +41,6 @@ import {
   CheckIcon,
   ChartBarIcon,
 } from '@heroicons/vue/24/outline'
-import { isTauri } from '@/composables/useDesktop'
 import UsageStatsPanel from '@/components/UsageStatsPanel.vue'
 import ProviderIcon from '@/components/ProviderIcon.vue'
 import ProviderEditDialog from '@/components/ProviderEditDialog.vue'
@@ -121,6 +120,9 @@ const qrCanvas = ref<HTMLCanvasElement | null>(null)
 // and applied on the next app launch.
 const bleEnabled = ref(false)
 const bleSaving = ref(false)
+// Whether the connected backend was built with BLE support (`-tags desktop`).
+// Web builds report false, so the toggle is hidden — a compile-time distinction.
+const bleAvailable = ref(false)
 
 // Provider management state
 const configuredProviders = ref<ProviderDetail[]>([])
@@ -172,12 +174,13 @@ watch(() => props.open, async (isOpen) => {
       channelState.value = ch.state ?? 'none'
     } catch { /* ignore */ }
 
-    // Bluetooth status channel is desktop-only; skip the request in the browser.
-    if (isTauri) {
-      try {
-        bleEnabled.value = (await api.channelBLEStatus()).enabled
-      } catch { /* ignore */ }
-    }
+    // Bluetooth status channel: the backend reports whether it was compiled with
+    // BLE support (`available`). Web builds report false → the toggle stays hidden.
+    try {
+      const ble = await api.channelBLEStatus()
+      bleAvailable.value = ble.available
+      bleEnabled.value = ble.enabled
+    } catch { /* ignore */ }
 
     // Load configured providers, then pre-fetch each one's model catalog so the
     // "Browse Models" panel (default-open on each card) shows models immediately.
@@ -1044,8 +1047,9 @@ function closeAndSwitchModel() {
                       </div>
                     </div>
 
-                    <!-- Bluetooth status notifications (desktop only) -->
-                    <div v-if="isTauri" class="s-row">
+                    <!-- Bluetooth status notifications (desktop-only; the backend
+                         reports availability from a compile-time feature flag). -->
+                    <div v-if="bleAvailable" class="s-row">
                       <div class="s-row-icon"><SignalIcon class="w-4 h-4" /></div>
                       <div class="s-row-body">
                         <div class="s-row-title">{{ t('settings.general.bleTitle') }}</div>

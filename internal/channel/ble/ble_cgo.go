@@ -1,4 +1,13 @@
-//go:build !darwin || cgo
+//go:build ble && (!darwin || cgo)
+
+// Real BLE support is OPT-IN via the `ble` build tag. This matters on macOS:
+// tinygo.org/x/bluetooth's DefaultAdapter eagerly creates a CBCentralManager at
+// package-init time, and touching CoreBluetooth triggers the macOS Bluetooth
+// permission prompt (and a TCC SIGABRT for Finder-launched bundles) — BEFORE any
+// config is read, so the runtime BLEEnabled flag cannot prevent it. Gating the
+// import behind `ble` keeps default builds (CLI + desktop sidecar) from linking
+// CoreBluetooth at all, so Bluetooth is never touched unless explicitly built
+// with `go build -tags ble` (requires cgo on macOS).
 
 // Package ble provides a channel.Notifier that sends short status messages
 // to a JCODE-* BLE IoT device using the Nordic UART Service (NUS).
