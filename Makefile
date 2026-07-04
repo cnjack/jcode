@@ -85,7 +85,7 @@ setup-hooks:
 # ─── Desktop app (Tauri) ───
 # The desktop app embeds the same jcode binary as a sidecar: Tauri renders the
 # UI and provides native system integration, while the Go server (with the web
-# UI baked in) runs on a loopback port. See docs/desktop.md.
+# UI baked in) runs on a loopback port. See site/docs/desktop.md.
 DESKTOP_DIR  := desktop
 SIDECAR_DIR  := $(DESKTOP_DIR)/src-tauri/binaries
 RUST_TARGET  := $(shell rustc -vV 2>/dev/null | sed -n 's/^host: //p')

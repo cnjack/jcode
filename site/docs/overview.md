@@ -26,6 +26,7 @@ jcode is an AI-powered coding agent that runs in your terminal. You describe tas
 | **Interactive Questions** | The agent can ask you for clarification mid-task |
 | **Plan Mode** | Explore read-only and present a plan before making changes |
 | **SSH Remote** | Work on any machine over SSH — same tools, same experience |
+| **Browser Use** | See and operate a real browser — open pages, read snapshots, click and type, with tiered approvals |
 | **Docker Workspaces** | Work inside a Docker container with the same tool coverage |
 | **Agent Teams** | Spawn parallel AI teammates for complex tasks |
 | **Subagents** | Delegate subtasks to independent child agents |

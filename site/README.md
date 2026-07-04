@@ -6,12 +6,16 @@ It replaced the static `agent-eval/site/` pages (2026-07).
 ## Stack
 
 - **Vite + React 18 + react-router** — SPA with lazy-loaded routes.
-- **Docs** — `src/lib/docs.ts` imports the repo's `docs/**/*.md` straight from
-  `../docs` at build time (`import.meta.glob` raw), strips Jekyll/kramdown syntax
+- **Docs** — the markdown source lives in `site/docs/**/*.md` (this is the only
+  docs source; the old root `docs/` Jekyll site is gone). `src/lib/docs.ts` imports
+  it at build time (`import.meta.glob` raw), strips legacy Jekyll/kramdown syntax
   (front matter, `{: .note }` IALs, `{% link %}` tags), builds the sidebar tree from
   front-matter `nav_order`/`parent`, and renders with react-markdown in a
   Notion-help-style layout (sidebar + breadcrumbs + "On this page" scrollspy TOC +
-  client-side search). Screenshots come from `docs/asset` → `public/docs-asset`.
+  client-side search). Pages ship only with a front-matter `title`; internal drafts
+  belong in the repo's `internal-doc/`. Screenshots live twice: `site/docs/asset`
+  (so GitHub renders the markdown) and `public/docs-asset` (what the deployed site
+  serves — image paths are rewritten to `/docs-asset/` at build time).
 - **Remotion** — `src/remotion/` holds frame-driven product demos (desktop app,
   CLI TUI) embedded with `@remotion/player`; they share presentational components
   with the live interactive desktop replica (`src/components/desktop/`).

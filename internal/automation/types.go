@@ -2,7 +2,7 @@
 // runs. The package is a leaf domain layer — it owns the data model, validation,
 // scheduling math, persistence (two-file + flock), built-in templates, and the
 // single-owner scheduler loop. It does NOT depend on web/tui/runner; callers
-// inject a Runner to actually execute a run. See docs/automations-prd.md.
+// inject a Runner to actually execute a run. See internal-doc/automations-prd.md.
 package automation
 
 import "time"

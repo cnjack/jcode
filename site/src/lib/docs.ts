@@ -1,23 +1,17 @@
 import GithubSlugger from 'github-slugger'
 
 /* ------------------------------------------------------------------
-   Docs pipeline: imports the repo's docs/*.md (Just-the-Docs flavored)
-   and turns them into a clean nav tree + transformed markdown.
+   Docs pipeline: imports the markdown under site/docs/ and turns it
+   into a clean nav tree + transformed markdown. Pages need front-
+   matter `title` (+ `nav_order`/`parent`) to ship; internal drafts
+   live in the repo's internal-doc/ instead.
    ------------------------------------------------------------------ */
 
-const rawDocs = import.meta.glob('../../../docs/{*.md,overview/*.md,tools/*.md}', {
+const rawDocs = import.meta.glob('../../docs/{*.md,overview/*.md,tools/*.md}', {
   query: '?raw',
   import: 'default',
   eager: true,
 }) as Record<string, string>
-
-/** internal drafts that never ship to the site */
-const EXCLUDE = new Set([
-  'index', // jekyll home — the docs landing is custom-built
-  'model-research',
-  'tool-search-architecture-draft',
-  'usage-stats',
-])
 
 export interface DocEntry {
   slug: string // e.g. 'get-started', 'overview/agent'
@@ -108,7 +102,6 @@ function buildAll(): DocEntry[] {
     const slug = path
       .replace(/^.*\/docs\//, '')
       .replace(/\.md$/, '')
-    if (EXCLUDE.has(slug)) continue
     const { meta, body } = parseFrontMatter(src)
     if (meta.nav_exclude === 'true') continue
     if (!meta.title) continue // untitled drafts don't ship
