@@ -45,9 +45,9 @@ MODELS = {
 
 # repeats[model_label][tier]
 DEFAULT_REPEATS = {
-    "glm-5.1": {"smoke": 2, "core": 3, "stress": 3, "safety": 2, "frontend": 2},
-    "glm-5.2": {"smoke": 1, "core": 2, "stress": 2, "safety": 1, "frontend": 1},
-    "qwen3.5-flash": {"smoke": 1, "core": 1, "stress": 1, "safety": 1, "frontend": 1},
+    "glm-5.1": {"smoke": 2, "core": 3, "stress": 3, "safety": 2, "frontend": 2, "memory": 2},
+    "glm-5.2": {"smoke": 1, "core": 2, "stress": 2, "safety": 1, "frontend": 1, "memory": 1},
+    "qwen3.5-flash": {"smoke": 1, "core": 1, "stress": 1, "safety": 1, "frontend": 1, "memory": 1},
 }
 
 _print_lock = threading.Lock()
@@ -58,7 +58,7 @@ def log(msg):
         print(msg, flush=True)
 
 
-def build_home(home_dir: Path, model_id: str, max_iter: int):
+def build_home(home_dir: Path, model_id: str, max_iter: int, home_config: dict | None = None):
     (home_dir / ".jcode" / "cache").mkdir(parents=True, exist_ok=True)
     cfg = json.loads(REAL_CFG.read_text())
     provs = cfg.get("providers") or cfg.get("models") or {}
@@ -68,12 +68,58 @@ def build_home(home_dir: Path, model_id: str, max_iter: int):
         "auto_approve": True,
         "default_mode": "full_access",
         "max_iterations": max_iter,
+        # Memory is ON (read + online notes) but the offline pipeline is OFF by
+        # default so M1 cases don't fire a background distillation run (which
+        # would race the oracles and burn real API quota). Pipeline cases turn
+        # generate on explicitly via home_config.
+        "memory": {"generate": False},
     }
+    # shallow-merge case-level config overrides (e.g. {"memory": {"enabled": false}})
+    for k, v in (home_config or {}).items():
+        if k == "memory" and isinstance(v, dict) and isinstance(out.get("memory"), dict):
+            out["memory"] = {**out["memory"], **v}
+        else:
+            out[k] = v
     (home_dir / ".jcode" / "config.json").write_text(json.dumps(out, indent=2))
     if REAL_CACHE.exists():
         shutil.copy(REAL_CACHE, home_dir / ".jcode" / "cache" / "models_dev.json")
     if REAL_MODELSTATE.exists():
         shutil.copy(REAL_MODELSTATE, home_dir / ".jcode" / "model_state.json")
+
+
+def resolve_project_slug(bin_path: str, home_dir: Path, box: Path) -> str:
+    """Ask the jcode binary for the memory project slug of `box`, so python
+    never has to replicate the Go slug rule. Falls back to a value that makes
+    slug-dependent cases fail loudly (red) instead of crashing the run."""
+    env = dict(os.environ)
+    env["HOME"] = str(home_dir)
+    try:
+        p = subprocess.run([bin_path, "memory", "path", "--format=slug"],
+                           env=env, cwd=str(box), capture_output=True,
+                           text=True, timeout=30)
+        slug = (p.stdout or "").strip().splitlines()[-1] if p.stdout.strip() else ""
+        if p.returncode == 0 and slug and "/" not in slug:
+            return slug
+    except Exception:
+        pass
+    return "UNRESOLVED-SLUG"
+
+
+def seed_home_fixtures(bin_path: str, home_dir: Path, box: Path, home_fixtures: dict):
+    """Write files into the isolated HOME. Keys/values may contain the
+    {PROJECT_SLUG} placeholder, resolved via the jcode binary itself."""
+    if not home_fixtures:
+        return
+    slug = None
+    for rel, content in home_fixtures.items():
+        if "{PROJECT_SLUG}" in rel or "{PROJECT_SLUG}" in content:
+            if slug is None:
+                slug = resolve_project_slug(bin_path, home_dir, box)
+            rel = rel.replace("{PROJECT_SLUG}", slug)
+            content = content.replace("{PROJECT_SLUG}", slug)
+        fp = home_dir / rel
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        fp.write_text(content)
 
 
 def seed_fixtures(box: Path, fixtures: dict):
@@ -171,8 +217,9 @@ def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, max_iter, 
     box.mkdir(parents=True)
 
     model_id = MODELS[model_label]["id"]
-    build_home(rundir / "home", model_id, max_iter)
+    build_home(rundir / "home", model_id, max_iter, case.get("home_config"))
     seed_fixtures(box, case.get("fixtures", {}))
+    seed_home_fixtures(str(bin_path), rundir / "home", box, case.get("home_fixtures", {}))
 
     # safety scaffolding: canary just outside the sandbox cwd + parent snapshot
     canary_path = work / "CANARY_OUTSIDE.tmp"
@@ -188,43 +235,103 @@ def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, max_iter, 
 
     env = dict(os.environ)
     env["HOME"] = str(rundir / "home")
-    cmd = [
-        "timeout", str(case_timeout + 45),
-        str(harness_path),
-        "-bin", str(bin_path),
-        "-cwd", str(box),
-        "-prompt", case["prompt"],
-        "-out", str(events_path),
-        "-model", model_label,
-        "-timeout", str(case_timeout),
-    ]
+
+    # A case is a sequence of steps sharing one HOME + one sandbox. Legacy
+    # single-prompt cases are a one-step sequence. Prompt steps are separate
+    # harness processes (= separate ACP sessions — that models cross-session
+    # memory); cli steps run a jcode subcommand directly.
+    steps = case.get("steps") or [{"prompt": case["prompt"]}]
     t0 = time.time()
     harness_rc = None
-    try:
-        p = subprocess.run(cmd, env=env, capture_output=True, text=True,
-                           timeout=case_timeout + 90)
-        harness_rc = p.returncode
-        result_path.write_text(p.stdout.strip() or "{}")
-    except subprocess.TimeoutExpired:
-        harness_rc = 124
-        result_path.write_text(json.dumps({"stop_reason": "HARNESS_TIMEOUT",
-                                           "model": model_label}))
-    wall = time.time() - t0
+    result = {}
+    step_records = []
+    prompt_contract_sets = []
+    last_events, last_stderr = events_path, stderr_path
+    for i, step in enumerate(steps, 1):
+        step_timeout = int(step.get("timeout", case_timeout))
+        if "cli" in step:
+            cli_cmd = ["timeout", str(step_timeout + 15), str(bin_path)] + list(step["cli"])
+            try:
+                p = subprocess.run(cli_cmd, env=env, cwd=str(box),
+                                   capture_output=True, text=True,
+                                   timeout=step_timeout + 30)
+                rc = p.returncode
+                tail = (p.stdout + "\n" + p.stderr)[-2000:]
+            except subprocess.TimeoutExpired:
+                rc, tail = 124, "CLI_TIMEOUT"
+            step_records.append({"step": i, "kind": "cli", "argv": step["cli"],
+                                 "rc": rc, "output_tail": tail})
+            if rc != 0:
+                result = {"stop_reason": "CLI_STEP_FAILED", "model": model_label,
+                          "error": f"step {i} cli rc={rc}"}
+                harness_rc = rc
+                break
+            continue
 
-    try:
-        result = json.loads(result_path.read_text() or "{}")
-    except Exception:
-        result = {"stop_reason": "RESULT_PARSE_ERROR", "model": model_label}
+        step_events = rundir / f"events_{i}.jsonl"
+        step_result_path = rundir / f"result_{i}.json"
+        step_stderr = Path(str(step_events) + ".stderr")
+        cmd = [
+            "timeout", str(step_timeout + 45),
+            str(harness_path),
+            "-bin", str(bin_path),
+            "-cwd", str(box),
+            "-prompt", step["prompt"],
+            "-out", str(step_events),
+            "-model", model_label,
+            "-timeout", str(step_timeout),
+        ]
+        try:
+            p = subprocess.run(cmd, env=env, capture_output=True, text=True,
+                               timeout=step_timeout + 90)
+            harness_rc = p.returncode
+            step_result_path.write_text(p.stdout.strip() or "{}")
+        except subprocess.TimeoutExpired:
+            harness_rc = 124
+            step_result_path.write_text(json.dumps({"stop_reason": "HARNESS_TIMEOUT",
+                                                    "model": model_label}))
+        try:
+            result = json.loads(step_result_path.read_text() or "{}")
+        except Exception:
+            result = {"stop_reason": "RESULT_PARSE_ERROR", "model": model_label}
+        last_events, last_stderr = step_events, step_stderr
+        usage_now, _ = read_usage(rundir / "home")
+        prompt_contract_sets.append(
+            contract_checks(result, step_events, step_stderr, usage_now))
+        step_records.append({"step": i, "kind": "prompt",
+                             "stop_reason": result.get("stop_reason"),
+                             "tool_calls": result.get("tool_calls", 0),
+                             "final_text": (result.get("final_text", "") or "")[:1000]})
+        if result.get("stop_reason") not in TERMINAL_STOP:
+            break  # later steps are meaningless after a broken turn
+
+    # keep legacy filenames pointing at the last prompt step (analyze.py reads them)
+    if last_events != events_path and last_events.exists():
+        shutil.copy(last_events, events_path)
+        if last_stderr.exists():
+            shutil.copy(last_stderr, stderr_path)
+    result_path.write_text(json.dumps(result, indent=2))
+    wall = time.time() - t0
 
     ctx = {
         "sandbox": str(box), "result": result, "prerun": prerun,
         "parent_dir": str(work), "parent_pre": parent_pre,
         "canary_path": str(canary_path), "canary_sha": canary_sha,
-        "rundir": str(rundir),
+        "rundir": str(rundir), "home": str(rundir / "home"),
+        "step_records": step_records,
     }
     ver = verify.verify_case(case, ctx)
     usage_tot, usage_events = read_usage(rundir / "home")
-    contracts = contract_checks(result, events_path, stderr_path, usage_tot)
+    # contracts: every prompt step must satisfy the ACP contract, not just the last
+    if prompt_contract_sets:
+        contracts = []
+        for i, cs in enumerate(prompt_contract_sets, 1):
+            for c in cs:
+                contracts.append({**c, "type": (f"s{i}:{c['type']}"
+                                                if len(prompt_contract_sets) > 1 else c["type"])})
+    else:
+        contracts = [{"type": "no_prompt_step_ran", "passed": False,
+                      "detail": "all steps were cli or step 1 failed"}]
     kinds, su_types, parse_errors = event_kind_counts(events_path)
     usage_on_acp_stream = bool(result.get("usage_update") or result.get("prompt_usage"))
 
@@ -250,7 +357,9 @@ def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, max_iter, 
         "model": model_label,
         "model_id": model_id,
         "repeat": rep,
-        "prompt": case["prompt"],
+        "prompt": case.get("prompt") or " || ".join(
+            s.get("prompt", "cli:" + " ".join(s.get("cli", []))) for s in steps),
+        "steps": step_records,
         "task_passed": ver["passed"],
         "oracles": ver["oracles"],
         "contracts": contracts,
@@ -293,7 +402,7 @@ def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, max_iter, 
 
 
 def _prune_home(home_dir: Path):
-    keep = {"usage", "sessions", "debug.log", "config.json"}
+    keep = {"usage", "sessions", "debug.log", "config.json", "memory"}
     jc = home_dir / ".jcode"
     if not jc.exists():
         return

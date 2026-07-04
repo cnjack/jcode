@@ -8,6 +8,12 @@ nav_order: 12
 
 jcode automatically understands your project and provides the agent with rich context. You can also customize behavior through AGENTS.md files.
 
+{: .note }
+> This page covers the context jcode assembles **per session**: automatic
+> project context, the AGENTS.md instructions you write, and within-session
+> compaction. For memory that jcode **learns and carries across sessions**, see
+> [Project Memory]({% link overview/learned-memory.md %}).
+
 ## Automatic Context
 
 When jcode starts, it detects and provides to the agent:

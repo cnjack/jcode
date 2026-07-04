@@ -8,6 +8,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 
+	"github.com/cnjack/jcode/internal/memory"
 	internalmodel "github.com/cnjack/jcode/internal/model"
 )
 
@@ -36,6 +37,9 @@ func NewAgent(
 	enhanced := append([]adk.ChatModelAgentMiddleware{}, middlewares...)
 	enhanced = append(enhanced, handlers...)
 	enhanced = append(enhanced, newApprovalMiddleware(approvalFunc))
+	// Innermost: memory usage accounting observes approved executions only
+	// and sees raw endpoint errors (a failed read is not memory usage).
+	enhanced = append(enhanced, memory.NewUsageMiddleware())
 
 	return adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:        "coding",
