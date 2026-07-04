@@ -249,6 +249,47 @@ func TestNoteSlugCJKAndConcurrency(t *testing.T) {
 	}
 }
 
+func TestClearScope(t *testing.T) {
+	setHome(t)
+	proj := t.TempDir()
+	scope := ProjectRoot(proj)
+	// seed some content
+	if _, err := WriteNote(Note{Text: "keep me until cleared", Cwd: proj}); err != nil {
+		t.Fatal(err)
+	}
+	if !fileExists(filepath.Join(scope, NotesDir)) {
+		t.Fatal("scope not created")
+	}
+
+	// busy: a held pipeline lock makes clear refuse without deleting.
+	release, ok, err := TryLockPipeline(scope)
+	if err != nil || !ok {
+		t.Fatalf("could not take lock: ok=%v err=%v", ok, err)
+	}
+	busy, cerr := ClearScope(scope)
+	if !busy || cerr != nil {
+		t.Errorf("expected busy=true err=nil while lock held, got busy=%v err=%v", busy, cerr)
+	}
+	if !fileExists(scope) {
+		t.Error("scope was deleted despite pipeline lock being held")
+	}
+	release()
+
+	// not busy: clear wipes the scope.
+	busy, cerr = ClearScope(scope)
+	if busy || cerr != nil {
+		t.Fatalf("expected clean clear, got busy=%v err=%v", busy, cerr)
+	}
+	if fileExists(scope) {
+		t.Error("scope still exists after ClearScope")
+	}
+
+	// clearing a non-existent scope is a no-op success.
+	if busy, cerr := ClearScope(scope); busy || cerr != nil {
+		t.Errorf("clearing missing scope should succeed, got busy=%v err=%v", busy, cerr)
+	}
+}
+
 func TestStateConcurrentUpdates(t *testing.T) {
 	setHome(t)
 	scope := filepath.Join(Root(), "projects", "t-00000000")

@@ -210,7 +210,7 @@ Project Memory works with zero configuration. To tune it, add a `memory` block t
 | Setting | Default | Description |
 |---|---|---|
 | `enabled` | `true` | Master switch. `false` disables reading **and** writing memory. |
-| `generate` | `true` | `false` keeps online notes + reading but turns off the distillation pipeline (a manual, zero-cost notebook). |
+| `generate` | `true` | `false` still writes online notes and reads/injects memory, but never runs the distillation pipeline (a manual, zero-cost notebook — you or the notes curate the files). |
 | `model` | `""` | Model for extraction. Empty falls back to `small_model`, then `model`. |
 | `daily_token_budget` | `300000` | Hard ceiling on tokens the pipeline may spend per day. |
 | `cooldown_hours` | `6` | Minimum gap between automatic pipeline runs. |
@@ -221,7 +221,9 @@ Project Memory works with zero configuration. To tune it, add a `memory` block t
 
 ### Turning it off
 
-- **Read-only notebook** — set `"generate": false`. Online notes and reading still
-  work; the paid pipeline never runs.
-- **Fully off** — set `"enabled": false`. No memory is read, written, or injected,
+- **Manual notebook** (`"generate": false`) — reading, injection, and the
+  `memory_note` tool all still work; only the paid distillation pipeline is
+  disabled. `jcode memory sync` will refuse to run. Use this if you want to
+  write and edit memory yourself without any model spend.
+- **Fully off** (`"enabled": false`) — no memory is read, written, or injected,
   and the `memory_note` tool disappears from the agent's toolset.

@@ -70,6 +70,31 @@ func TryLockPipeline(scopeRoot string) (func(), bool, error) {
 	return l.release, true, nil
 }
 
+// ClearScope removes a scope's memory directory, coordinating with the pipeline
+// lock so a running distillation cannot resurrect a half-cleared scope.
+//
+// It reports busy=true (deleting nothing) if the pipeline currently holds the
+// lock — the caller should ask the user to retry. Otherwise it holds the lock
+// across the delete (a concurrent pipeline's non-blocking TryLockPipeline keeps
+// failing), which closes the release-then-delete race the naive version had.
+// On Windows RemoveAll can hit a sharing violation on the still-open lock file;
+// once the handle is released a retry succeeds, so we release then retry.
+func ClearScope(scopeRoot string) (busy bool, err error) {
+	release, ok, lerr := TryLockPipeline(scopeRoot)
+	if lerr == nil && !ok {
+		return true, nil
+	}
+	err = os.RemoveAll(scopeRoot)
+	if release != nil {
+		release()
+	}
+	if err != nil {
+		// Retry after the lock handle is closed (Windows).
+		err = os.RemoveAll(scopeRoot)
+	}
+	return false, err
+}
+
 // LoadState reads state.json without locking (callers that mutate must use
 // UpdateState). A missing or corrupt file yields a fresh state rather than an
 // error: memory must never take the agent down.

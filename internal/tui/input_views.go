@@ -258,9 +258,13 @@ func (m *Model) handleMemoryInput(prompt string, cmds []tea.Cmd) (tea.Model, tea
 	root := memory.ProjectRoot(m.pwd)
 	switch arg {
 	case "clear":
-		if err := os.RemoveAll(root); err != nil {
+		busy, err := memory.ClearScope(root)
+		switch {
+		case busy:
+			m.lines = append(m.lines, textLine(toolLabelStyle.Render("  🧠 memory pipeline is running; try /memory clear again shortly")))
+		case err != nil:
 			m.lines = append(m.lines, textLine(toolLabelStyle.Render("  🧠 memory clear failed: "+err.Error())))
-		} else {
+		default:
 			m.lines = append(m.lines, textLine(toolLabelStyle.Render("  🧠 Project memory cleared: "+root)))
 		}
 	case "sync":

@@ -113,18 +113,18 @@ func newMemoryClearCmd() *cobra.Command {
 				return err
 			}
 			root := memory.ProjectRoot(pwd)
-			// Don't delete out from under a running pipeline: take its lock
-			// first so we can't remove the lock file mid-run and resurrect a
-			// half-written scope.
-			release, ok, lerr := memory.TryLockPipeline(root)
-			if lerr == nil && !ok {
+			// Coordinate with a running pipeline: ClearScope refuses (busy) if
+			// the pipeline holds the lock, and otherwise holds the lock across
+			// the delete so it can't resurrect a half-cleared scope.
+			busy, err := memory.ClearScope(root)
+			if busy {
 				return fmt.Errorf("memory pipeline is running for this project; try again shortly")
 			}
-			if release != nil {
-				release()
+			if err != nil {
+				return err
 			}
-			fmt.Printf("clearing project memory: %s\n", root)
-			return os.RemoveAll(root)
+			fmt.Printf("cleared project memory: %s\n", root)
+			return nil
 		},
 	}
 	c.Flags().BoolVar(&clearGlobal, "global", false, "clear the global scope instead of the project scope")
