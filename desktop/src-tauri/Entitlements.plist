@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Signing entitlements for the notarized macOS bundle.
+
+  Bluetooth: `com.apple.security.device.bluetooth` grants Bluetooth access under
+  the App Sandbox. It is harmless (ignored) for a plain Developer ID build, which
+  is NOT sandboxed — there, CoreBluetooth is gated only by the Info.plist
+  NSBluetooth*UsageDescription strings + user consent (TCC). It's declared here so
+  a future sandboxed/App-Store distribution also works, and to make the Bluetooth
+  requirement explicit. The BLE work is done by the jcode-ble sidecar; on a
+  non-sandboxed build it inherits the bundle's Bluetooth TCC context.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.device.bluetooth</key>
+  <true/>
+</dict>
+</plist>

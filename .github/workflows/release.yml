@@ -264,11 +264,23 @@ jobs:
         run: |
           VERSION="${{ steps.get_version.outputs.version }}"
           COMMIT="$(git rev-parse --short HEAD)"
+          LDFLAGS="-s -w -X github.com/cnjack/jcode/internal/command.Version=${VERSION} -X github.com/cnjack/jcode/internal/command.GitCommit=${COMMIT}"
           mkdir -p desktop/src-tauri/binaries
-          go build -trimpath \
-            -ldflags "-s -w -X github.com/cnjack/jcode/internal/command.Version=${VERSION} -X github.com/cnjack/jcode/internal/command.GitCommit=${COMMIT}" \
+          # Main sidecar. The `desktop` tag compiles in desktop-only features (the
+          # BLE settings toggle); `jcode_headless` omits the embedded SPA. It still
+          # never links CoreBluetooth — BLE runs in the helper below.
+          go build -trimpath -tags "jcode_headless desktop" \
+            -ldflags "${LDFLAGS}" \
             -o "desktop/src-tauri/binaries/jcode-${{ matrix.triple }}${{ matrix.ext }}" \
             ./cmd/jcode/
+          # BLE helper (externalBin). Built with -tags ble; the matrix cgo flag is
+          # 1 on macOS (CoreBluetooth needs cgo) and 0 elsewhere (Linux D-Bus /
+          # Windows WinRT are pure Go). The main app spawns it only when BLE is
+          # enabled in config, so the bundle never prompts for Bluetooth at launch.
+          go build -trimpath -tags ble \
+            -ldflags "${LDFLAGS}" \
+            -o "desktop/src-tauri/binaries/jcode-ble-${{ matrix.triple }}${{ matrix.ext }}" \
+            ./cmd/jcode-ble/
 
       # macOS signing + notarization. Everything here is optional: with no secrets
       # the build still succeeds and produces an UNSIGNED bundle (Gatekeeper warns

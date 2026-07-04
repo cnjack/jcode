@@ -40,11 +40,27 @@ build-web: generate
 	cd web && (pnpm install --frozen-lockfile 2>/dev/null || pnpm install)
 	cd web && npx vite build
 
+# The main binary never links CoreBluetooth (whose eager init triggers the macOS
+# Bluetooth permission prompt at startup). BLE runs in a separate `jcode-ble`
+# helper the main binary spawns only when BLE is enabled in config — so BLE is a
+# pure runtime toggle with zero prompt when off. Build the helper once with
+# `make build-ble`; no recompile is needed to flip it on/off after that.
 build: generate build-web
 	go build -ldflags "$(LDFLAGS)" -o $(BIN) $(PKG)
 
 build-binary:
 	go build -ldflags "$(LDFLAGS)" -o $(BIN) $(PKG)
+
+# cgo is REQUIRED for BLE on macOS (CoreBluetooth via cbgo). Without it, `-tags
+# ble` on darwin silently falls back to the spawner stub — a helper that would
+# spawn itself. Linux (D-Bus) / Windows (WinRT) BLE is pure Go, so cgo off is
+# fine (and avoids needing a C toolchain). So: 1 on darwin, 0 elsewhere.
+BLE_CGO := $(if $(filter darwin,$(shell go env GOOS)),1,0)
+
+# Build the jcode-ble helper next to the main binary to enable BLE at runtime.
+# After this, toggle BLE via config — no rebuild needed.
+build-ble:
+	CGO_ENABLED=$(BLE_CGO) go build -tags ble -ldflags "$(LDFLAGS)" -o $(dir $(BIN))jcode-ble ./cmd/jcode-ble
 
 install: generate build-web
 	go install -ldflags "$(LDFLAGS)" $(PKG)
@@ -89,7 +105,9 @@ desktop-icons:
 desktop-sidecar: generate
 	@echo "Building jcode sidecar for $(RUST_TARGET)..."
 	@mkdir -p $(SIDECAR_DIR)
-	go build -tags jcode_headless -ldflags "$(LDFLAGS)" -o $(SIDECAR_DIR)/jcode-$(RUST_TARGET)$(SIDECAR_EXE) $(PKG)
+	go build -tags "jcode_headless desktop" -ldflags "$(LDFLAGS)" -o $(SIDECAR_DIR)/jcode-$(RUST_TARGET)$(SIDECAR_EXE) $(PKG)
+	@echo "Building jcode-ble helper for $(RUST_TARGET)..."
+	CGO_ENABLED=$(BLE_CGO) go build -tags ble -ldflags "$(LDFLAGS)" -o $(SIDECAR_DIR)/jcode-ble-$(RUST_TARGET)$(SIDECAR_EXE) ./cmd/jcode-ble
 
 # Run the desktop app in development (hot window; rebuilds the sidecar first).
 desktop-dev: desktop-sidecar

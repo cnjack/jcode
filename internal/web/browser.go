@@ -30,7 +30,9 @@ func (s *Server) SetupNativeMessaging() {
 	if s.browserMgr == nil || !s.browserMgr.GetConfig().Enabled {
 		return
 	}
-	token := s.browserMgr.Bridge().IssueToken()
+	// Reuse one long-lived token across restarts (the extension stores it once);
+	// with a stable port the extension reconnects silently, no re-auth.
+	token := s.browserMgr.Bridge().StableToken()
 	if err := browser.WriteEndpoint(s.extWSURL(), token); err != nil {
 		config.Logger().Printf("[browser] write endpoint failed: %v", err)
 	}

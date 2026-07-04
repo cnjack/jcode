@@ -144,6 +144,28 @@ func TestBridgeCDPForwarding(t *testing.T) {
 	}
 }
 
+func TestBridgeStableTokenIsStable(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	b := NewBridge()
+
+	tok1 := b.StableToken()
+	if tok1 == "" {
+		t.Fatal("expected a token")
+	}
+	// Same process: identical.
+	if got := b.StableToken(); got != tok1 {
+		t.Fatalf("stable token changed within process: %q vs %q", got, tok1)
+	}
+	// New bridge (simulates a restart): the persisted token is reused and valid.
+	b2 := NewBridge()
+	if got := b2.StableToken(); got != tok1 {
+		t.Fatalf("stable token not reused across restart: %q vs %q", got, tok1)
+	}
+	if !b2.validToken(tok1) {
+		t.Fatal("reused stable token should authenticate")
+	}
+}
+
 func TestBridgeOfflineBackendErrors(t *testing.T) {
 	b := NewBridge()
 	b.tokenPath = t.TempDir() + "/tokens.json"

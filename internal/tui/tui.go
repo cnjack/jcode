@@ -98,6 +98,7 @@ type Model struct {
 
 	todoStore *tools.TodoStore
 	goalStore *tools.GoalStore
+	browser   *BrowserController
 
 	totalTokens       int64
 	modelContextLimit int
@@ -431,6 +432,32 @@ func WithVersion(v string) ModelOption {
 func WithGoalStore(gs *tools.GoalStore) ModelOption {
 	return func(m *Model) {
 		m.goalStore = gs
+	}
+}
+
+// BrowserStatus is a snapshot of the browser-use subsystem for `/browser`.
+type BrowserStatus struct {
+	Available       bool // false when browser use is not wired in this context
+	Enabled         bool
+	Backend         string // auto | managed | extension
+	ChromeFound     bool
+	ChromeInfo      string // version or path
+	ExtensionOnline bool
+	DevMode         bool
+}
+
+// BrowserController lets the TUI read browser status and toggle enablement
+// without depending on the browser manager directly (which lives in the command
+// layer). Nil when browser use is unavailable.
+type BrowserController struct {
+	Status     func() BrowserStatus
+	SetEnabled func(bool) error
+}
+
+// WithBrowser wires the `/browser` command to the browser-use subsystem.
+func WithBrowser(bc *BrowserController) ModelOption {
+	return func(m *Model) {
+		m.browser = bc
 	}
 }
 
