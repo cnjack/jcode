@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import Reveal from '../components/Reveal'
 import { CHALLENGES, SPRINTS, type ShowcaseEntry } from '../data/showcase'
@@ -40,6 +41,34 @@ function ChallengeCard({ p, i }: { p: ShowcaseEntry; i: number }) {
 }
 
 export default function ShowcasePage() {
+  // A sandboxed demo iframe calls focus() on load (for keyboard control), which
+  // pins the whole page scrolled down to it. Focus leaving the host into an
+  // iframe fires window 'blur'; when it does, drop the iframe's focus and
+  // restore the user's scroll position (0 until they actually scroll).
+  useEffect(() => {
+    let userY = 0
+    const track = () => {
+      userY = window.scrollY
+    }
+    const onBlur = () => {
+      requestAnimationFrame(() => {
+        const a = document.activeElement as HTMLElement | null
+        if (a?.tagName === 'IFRAME') {
+          a.blur()
+          window.scrollTo(0, userY)
+        }
+      })
+    }
+    window.addEventListener('wheel', track, { passive: true })
+    window.addEventListener('touchmove', track, { passive: true })
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('wheel', track)
+      window.removeEventListener('touchmove', track)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [])
+
   return (
     <main className="showcase-page">
       <header className="showcase-hero">

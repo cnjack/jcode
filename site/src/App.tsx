@@ -10,6 +10,7 @@ const ShowcasePage = lazy(() => import('./pages/ShowcasePage'))
 const ShowcaseProjectPage = lazy(() => import('./pages/ShowcaseProjectPage'))
 const DocsLayout = lazy(() => import('./pages/docs/DocsLayout'))
 const DocPage = lazy(() => import('./pages/docs/DocPage'))
+const PrivacyPage = lazy(() => import('./pages/PrivacyPage'))
 
 function ScrollToTop() {
   const { pathname } = useLocation()
@@ -64,6 +65,7 @@ export default function App() {
             <Route path="/desktop" element={<DesktopPage />} />
             <Route path="/cli" element={<CliPage />} />
             <Route path="/showcase" element={<ShowcasePage />} />
+            <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/docs" element={<DocsLayout />}>
               <Route index element={<DocPage />} />
               <Route path="*" element={<DocPage />} />
