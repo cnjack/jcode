@@ -98,6 +98,7 @@ func (b *Bridge) HandleWS(w http.ResponseWriter, r *http.Request) {
 	b.mu.Unlock()
 
 	config.Logger().Printf("[browser] extension connected")
+	go bc.keepAlive()
 	bc.readLoop()
 
 	b.mu.Lock()
@@ -135,6 +136,19 @@ type bridgeEnvelope struct {
 	URL    string          `json:"url,omitempty"`
 }
 
+// Keepalive timing. Chrome/Edge kill an MV3 service worker after ~30s idle, and
+// an inbound websocket message resets that timer — so a steady server→extension
+// ping is what actually keeps the extension worker (and thus the whole bridge)
+// alive between browser commands. Without it the worker naps, the socket drops,
+// and the popup flaps to "Reconnecting…". keepAliveWait is the read side: if no
+// frame (pong, alarm ping, or command reply) arrives within two ping periods,
+// treat the extension as dead and tear the socket down.
+// vars, not consts, so tests can shrink them.
+var (
+	keepAlivePing = 15 * time.Second
+	keepAliveWait = 40 * time.Second
+)
+
 type bridgeConn struct {
 	ws      *websocket.Conn
 	writeMu sync.Mutex
@@ -145,6 +159,35 @@ type bridgeConn struct {
 	handlers map[string]EventHandler // tabID → handler
 	closed   chan struct{}
 	closeErr error
+}
+
+// writeJSON serializes all writes to the socket (gorilla forbids concurrent
+// writers) and bounds a stuck write so a wedged peer can't block a ping or a
+// command forever.
+func (c *bridgeConn) writeJSON(v any) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	_ = c.ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	return c.ws.WriteJSON(v)
+}
+
+// keepAlive pings the extension on an interval so its service worker stays awake
+// and the socket stays up between commands. It exits when the read loop closes
+// the conn.
+func (c *bridgeConn) keepAlive() {
+	t := time.NewTicker(keepAlivePing)
+	defer t.Stop()
+	for {
+		select {
+		case <-c.closed:
+			return
+		case <-t.C:
+			if err := c.writeJSON(bridgeEnvelope{Type: "ping"}); err != nil {
+				c.close() // wake the read loop so it tears the conn down
+				return
+			}
+		}
+	}
 }
 
 func newBridgeConn(ws *websocket.Conn) *bridgeConn {
@@ -158,6 +201,7 @@ func newBridgeConn(ws *websocket.Conn) *bridgeConn {
 }
 
 func (c *bridgeConn) readLoop() {
+	_ = c.ws.SetReadDeadline(time.Now().Add(keepAliveWait))
 	for {
 		var env bridgeEnvelope
 		if err := c.ws.ReadJSON(&env); err != nil {
@@ -171,7 +215,12 @@ func (c *bridgeConn) readLoop() {
 			close(c.closed)
 			return
 		}
+		// Any inbound frame proves the extension is alive; extend the window.
+		_ = c.ws.SetReadDeadline(time.Now().Add(keepAliveWait))
 		switch env.Type {
+		case "ping", "pong":
+			// Keepalive traffic (the extension's own alarm ping, or a pong to
+			// ours) — nothing to route.
 		case "cdp.result", "cdp.error", "tabs.result", "tab.result":
 			c.mu.Lock()
 			ch := c.pending[env.ID]
@@ -204,9 +253,7 @@ func (c *bridgeConn) request(ctx context.Context, env bridgeEnvelope) (bridgeEnv
 	c.pending[id] = ch
 	c.mu.Unlock()
 
-	c.writeMu.Lock()
-	err := c.ws.WriteJSON(env)
-	c.writeMu.Unlock()
+	err := c.writeJSON(env)
 	if err != nil {
 		c.mu.Lock()
 		delete(c.pending, id)
