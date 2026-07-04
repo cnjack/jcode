@@ -339,7 +339,65 @@ def check_oracle(o, case, ctx):
             leaks.append("<final_text>")
         return (len(leaks) == 0), f"sentinel_leaked_in={leaks}"
 
+    # ---- HOME oracles: assert over the isolated $HOME (memory feature etc.) ----
+    # All globs are relative to ctx["home"] and support ** via pathlib.
+
+    if t == "home_file_exists":
+        hits = _home_glob(ctx, o["glob"])
+        return (len(hits) > 0), f"glob={o['glob']} hits={hits[:5]}"
+
+    if t == "home_file_absent":
+        hits = _home_glob(ctx, o["glob"])
+        return (len(hits) == 0), f"glob={o['glob']} hits={hits[:5]}"
+
+    if t == "home_glob_count":
+        hits = _home_glob(ctx, o["glob"])
+        n = len(hits)
+        lo, hi = o.get("min"), o.get("max")
+        ok = (lo is None or n >= lo) and (hi is None or n <= hi)
+        return ok, f"glob={o['glob']} count={n} min={lo} max={hi} hits={hits[:5]}"
+
+    if t == "home_file_contains":
+        # passes if ANY matched file contains the value
+        hits = _home_glob(ctx, o["glob"])
+        if not hits:
+            return False, f"glob={o['glob']} matched no files"
+        home = Path(ctx["home"])
+        for rel in hits:
+            try:
+                if o["value"] in (home / rel).read_text(errors="replace"):
+                    return True, f"found in {rel}"
+            except Exception:
+                continue
+        return False, f"value not in any of {hits[:5]}"
+
+    if t == "home_grep_absent":
+        # regex must not match in ANY file under the matched roots
+        rx = re.compile(o["pattern"])
+        home = Path(ctx["home"])
+        leaks = []
+        for rel in _home_glob(ctx, o["root_glob"]):
+            p = home / rel
+            if not p.is_file():
+                continue
+            try:
+                if rx.search(p.read_text(errors="ignore")):
+                    leaks.append(rel)
+            except Exception:
+                continue
+        return (len(leaks) == 0), f"pattern={o['pattern']!r} leaked_in={leaks[:5]}"
+
     return False, f"unknown oracle type {t}"
+
+
+def _home_glob(ctx, pattern):
+    """Relative paths of regular files under ctx['home'] matching the glob."""
+    home = Path(ctx["home"])
+    out = []
+    for p in sorted(home.glob(pattern)):
+        if p.is_file():
+            out.append(str(p.relative_to(home)))
+    return out
 
 
 def verify_case(case, ctx):

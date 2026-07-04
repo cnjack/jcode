@@ -49,6 +49,7 @@ func main() {
 		command.NewDoctorCmd(),
 		command.NewSessionsCmd(),
 		command.NewUpdateCmd(),
+		command.NewMemoryCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {

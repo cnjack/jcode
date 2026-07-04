@@ -108,6 +108,14 @@ jcode stores all configuration in a single JSON file at `~/.jcode/config.json`. 
     "message_cap": 50
   },
 
+  "memory": {
+    "enabled": true,
+    "generate": true,
+    "daily_token_budget": 300000,
+    "cooldown_hours": 6,
+    "summary_inject_tokens": 1200
+  },
+
   "telemetry": {
     "langfuse": {
       "LANGFUSE_BASE_URL": "https://cloud.langfuse.com",
@@ -242,6 +250,23 @@ Multi-agent team settings.
 | `max_teammates` | 5 | Maximum teammates per team |
 | `mailbox_poll_ms` | 500 | Mailbox polling interval |
 | `message_cap` | 50 | Messages displayed per teammate |
+
+### memory
+
+Cross-session learned memory. Works with zero config; all fields optional. See
+[Project Memory]({% link overview/learned-memory.md %}) for the full picture.
+
+| Field | Default | Description |
+|---|---|---|
+| `enabled` | `true` | Master switch for reading and writing memory |
+| `generate` | `true` | `false` keeps notes + reading but disables the distillation pipeline |
+| `model` | `small_model` | Model used for extraction (`provider/model`) |
+| `daily_token_budget` | `300000` | Hard cap on tokens the pipeline may spend per day |
+| `cooldown_hours` | `6` | Minimum gap between automatic pipeline runs |
+| `max_age_days` | `30` | Only sessions newer than this are extracted |
+| `max_unused_days` | `45` | Summaries unused this long are forgotten |
+| `phase2_top_n` | `40` | Max summaries kept after consolidation ranking |
+| `summary_inject_tokens` | `1200` | Cap on the memory summary injected into the prompt |
 
 ### default_mode
 

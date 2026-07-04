@@ -24,6 +24,7 @@ import (
 	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
+	mempipeline "github.com/cnjack/jcode/internal/memory/pipeline"
 	"github.com/cnjack/jcode/internal/mode"
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	weixin "github.com/cnjack/jcode/internal/pkg/weixin"
@@ -106,6 +107,16 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 	// Only add switch_env tool if SSH aliases are configured
 	if s.cfg != nil && len(s.cfg.SSHAliases) > 0 {
 		all = append(all, s.env.NewSwitchEnvTool())
+	}
+	if config.MemoryEnabled(s.cfg) {
+		all = append(all, s.env.NewMemoryNoteTool(&tools.MemoryNoteDeps{
+			SessionIDFn: func() string {
+				if s.rec != nil {
+					return s.rec.UUID()
+				}
+				return ""
+			},
+		}))
 	}
 	all = append(all, s.env.NewBrowserTools()...)
 	return append(all, s.mcpTools...)
@@ -905,6 +916,13 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 
 	skillLoader := skills.NewLoaderWithDisabled(cfg.DisabledSkills)
 	skillLoader.ScanProjectSkills(pwd)
+
+	// Memory distillation runs in the background on session start (design
+	// §5.1); one-shot -p runs are excluded, gates (cooldown/budget/lock) are
+	// inside the pipeline.
+	if !hasPrompt {
+		mempipeline.MaybeStartBackground(cfg, pwd)
+	}
 
 	systemPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
 

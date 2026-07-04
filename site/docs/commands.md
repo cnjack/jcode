@@ -90,6 +90,7 @@ Type these in the TUI input area:
 | `/resume` | Resume a previous session |
 | `/compact` | Compact conversation context |
 | `/goal` | Set a persistent objective the agent works toward ([Goals](goal.html)) |
+| `/memory` | Show project memory; `/memory sync` to distill, `/memory clear` to wipe ([Project Memory](overview/learned-memory.html)) |
 | `/bg` | Show background tasks |
 | `/channel` | Open the channel management panel (WeChat push/messaging) |
 | `/mcp` | List MCP servers and status; `/mcp login <name>` to authenticate via OAuth |

@@ -21,6 +21,7 @@ import (
 	"github.com/cnjack/jcode/internal/agent"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
+	mempipeline "github.com/cnjack/jcode/internal/memory/pipeline"
 	"github.com/cnjack/jcode/internal/mode"
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/prompts"
@@ -285,6 +286,9 @@ func (a *acpAgent) NewSession(ctx context.Context, params acp.NewSessionRequest)
 		return acp.NewSessionResponse{}, err
 	}
 
+	// Background memory distillation on session start (gates inside).
+	mempipeline.MaybeStartBackground(cfg, pwd)
+
 	a.mu.Lock()
 	a.sessions[sessionID] = sess
 	a.mu.Unlock()
@@ -363,6 +367,16 @@ func (a *acpAgent) buildAgentSession(
 		env.NewAutomationCreateTool(),
 		env.NewSwitchEnvTool(),
 		env.NewCheckBackgroundTool(bgManager),
+	}
+	if config.MemoryEnabled(cfg) {
+		allTools = append(allTools, env.NewMemoryNoteTool(&tools.MemoryNoteDeps{
+			SessionIDFn: func() string {
+				if rec != nil {
+					return rec.UUID()
+				}
+				return ""
+			},
+		}))
 	}
 	allTools = append(allTools, mcpTools...)
 

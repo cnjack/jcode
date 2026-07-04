@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -9,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/memory"
 	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/tools"
 )
@@ -33,6 +36,7 @@ func (m Model) getAllCommands() []commandSuggestion {
 		{"/channel", "Manage channels (WeChat etc.)"},
 		{"/mcp", "List MCP servers / log in (/mcp login <name>)"},
 		{"/browser", "Browser use status (/browser on|off)"},
+		{"/memory", "Project memory status (/memory sync|clear)"},
 		{"/help", "Show keyboard shortcuts"},
 	}
 	for _, sc := range m.skillSlashCommands {
@@ -236,6 +240,59 @@ func (m *Model) handleBgInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 		return PromptSubmitMsg{Prompt: prompt}
 	})
 	cmds = append(cmds, m.spinner.Tick)
+	return m, tea.Batch(cmds...)
+}
+
+// handleMemoryInput handles `/memory` (status), `/memory clear` and
+// `/memory sync`. Status/clear are local filesystem operations; sync defers
+// to the background pipeline.
+func (m *Model) handleMemoryInput(prompt string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	refresh := func() {
+		if m.ready {
+			m.viewport.SetHeight(m.calcViewportHeight(m.inputActive()))
+			m.viewport.SetContent(m.renderViewportContent())
+			m.viewport.GotoBottom()
+		}
+	}
+	arg := strings.TrimSpace(strings.TrimPrefix(prompt, "/memory"))
+	root := memory.ProjectRoot(m.pwd)
+	switch arg {
+	case "clear":
+		busy, err := memory.ClearScope(root)
+		switch {
+		case busy:
+			m.lines = append(m.lines, textLine(toolLabelStyle.Render("  🧠 memory pipeline is running; try /memory clear again shortly")))
+		case err != nil:
+			m.lines = append(m.lines, textLine(toolLabelStyle.Render("  🧠 memory clear failed: "+err.Error())))
+		default:
+			m.lines = append(m.lines, textLine(toolLabelStyle.Render("  🧠 Project memory cleared: "+root)))
+		}
+	case "sync":
+		m.lines = append(m.lines, textLine(toolLabelStyle.Render("  🧠 Run `jcode memory sync --wait` in a terminal to run the distillation pipeline.")))
+	default:
+		cfg, _ := config.LoadConfig()
+		if !config.MemoryEnabled(cfg) {
+			m.lines = append(m.lines, textLine(toolLabelStyle.Render("  🧠 Memory is disabled (memory.enabled=false).")))
+			break
+		}
+		notes := memory.RecentNotes(root, 5)
+		summary := "none yet"
+		if st, err := os.Stat(filepath.Join(root, memory.SummaryFile)); err == nil {
+			summary = fmt.Sprintf("%d bytes", st.Size())
+		}
+		m.lines = append(m.lines, textLine(toolLabelStyle.Render(fmt.Sprintf("  🧠 Memory: %s", root))))
+		m.lines = append(m.lines, textLine(toolLabelStyle.Render(fmt.Sprintf("     summary: %s · inbox notes: %d", summary, len(memory.RecentNotes(root, 0))))))
+		for _, n := range notes {
+			first := n.Text
+			if i := strings.IndexByte(first, '\n'); i > 0 {
+				first = first[:i]
+			}
+			first = memory.TruncateRunes(first, 80, "…")
+			m.lines = append(m.lines, textLine(toolLabelStyle.Render("     - ["+n.Kind+"] "+first)))
+		}
+		m.lines = append(m.lines, textLine(toolLabelStyle.Render("     /memory sync · /memory clear")))
+	}
+	refresh()
 	return m, tea.Batch(cmds...)
 }
 

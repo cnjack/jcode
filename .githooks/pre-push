@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+#
+# Pre-push gate: mirrors CI's "Go (build · vet · test · lint)" job so a red CI
+# is caught before the push, not after. Runs once per push (not per commit).
+#
+# Install: make setup-hooks   (sets core.hooksPath = .githooks)
+# Bypass:  git push --no-verify
+# Skip tests only (faster): SKIP_TESTS=1 git push
+#
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+fail() { echo "" >&2; echo "✗ pre-push: $1" >&2; echo "  (bypass with: git push --no-verify)" >&2; exit 1; }
+
+# The module embeds internal/web/dist via //go:embed and depends on generated
+# code — without them nothing compiles. Don't silently run the heavy
+# `make generate build-web` here; just point the way if it's missing.
+if [ ! -d internal/web/dist ] || [ -z "$(ls -A internal/web/dist 2>/dev/null)" ]; then
+	fail "internal/web/dist is missing — run 'make generate build-web' first (needed for go:embed)."
+fi
+
+echo "==> go build ./..."
+go build ./... || fail "build failed"
+
+echo "==> go vet ./..."
+go vet ./... || fail "go vet reported problems"
+
+# golangci-lint: gate only NEW issues vs origin/main, exactly like CI, so
+# pre-existing lint debt doesn't block the push. Skip (with a warning) if the
+# tool isn't installed rather than blocking on a missing dependency.
+if command -v golangci-lint >/dev/null 2>&1; then
+	echo "==> golangci-lint (new issues vs origin/main)..."
+	git fetch -q origin main 2>/dev/null || true
+	base=$(git merge-base HEAD origin/main 2>/dev/null || true)
+	if [ -n "$base" ]; then
+		golangci-lint run --new-from-rev="$base" ./... || fail "golangci-lint found new issues"
+	else
+		golangci-lint run ./... || fail "golangci-lint found issues"
+	fi
+else
+	echo "⚠  golangci-lint not installed — skipping (install: https://golangci-lint.run/welcome/install/)"
+fi
+
+if [ "${SKIP_TESTS:-0}" = "1" ]; then
+	echo "==> tests skipped (SKIP_TESTS=1)"
+else
+	echo "==> go test ./..."
+	go test ./... || fail "tests failed"
+fi
+
+echo "✓ pre-push checks passed"
+exit 0
