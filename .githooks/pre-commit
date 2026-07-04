@@ -1,15 +1,37 @@
 #!/usr/bin/env bash
 #
-# Pre-commit hook: runs make fmt and make lint before allowing a commit.
-# Installed via: git config core.hooksPath .githooks
+# Fast pre-commit gate: formatting only, so commits stay snappy. The heavier
+# CI-parity checks (build / vet / lint / test) run in pre-push.
 #
+# Install: make setup-hooks   (sets core.hooksPath = .githooks)
+# Bypass:  git commit --no-verify
+#
+# Kept portable to macOS's stock bash 3.2 — no mapfile / associative arrays.
+set -eu
 
-set -euo pipefail
+# Staged Go files (added/copied/modified) that still exist on disk. Go source
+# filenames don't contain whitespace, so line-based iteration is safe here.
+files=$(
+	git diff --cached --name-only --diff-filter=ACM -- '*.go' |
+		while IFS= read -r f; do
+			[ -f "$f" ] && printf '%s\n' "$f"
+		done
+)
+[ -z "$files" ] && exit 0
 
-echo "==> Running make fmt..."
-make fmt
+# Prefer goimports (matches `make fmt`, also orders imports); fall back to gofmt.
+if command -v goimports >/dev/null 2>&1; then
+	tool=goimports
+else
+	tool=gofmt
+fi
 
-echo "==> Running make lint..."
-make lint
+unformatted=$(printf '%s\n' "$files" | xargs "$tool" -l 2>/dev/null || true)
+if [ -n "$unformatted" ]; then
+	echo "✗ pre-commit: these staged Go files are not formatted:" >&2
+	echo "$unformatted" | sed 's/^/    /' >&2
+	echo "  Fix with: make fmt   (then re-stage)" >&2
+	exit 1
+fi
 
-echo "==> All checks passed."
+exit 0
