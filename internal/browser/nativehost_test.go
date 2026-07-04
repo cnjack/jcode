@@ -73,12 +73,23 @@ func TestNativeHostManifestShape(t *testing.T) {
 		t.Errorf("type = %v", m["type"])
 	}
 	origins, ok := m["allowed_origins"].([]any)
-	if !ok || len(origins) != 1 {
-		t.Fatalf("allowed_origins = %v", m["allowed_origins"])
+	if !ok || len(origins) != len(AllowedExtensionIDs) {
+		t.Fatalf("allowed_origins = %v, want %d entries", m["allowed_origins"], len(AllowedExtensionIDs))
 	}
-	want := "chrome-extension://" + ExtensionID + "/"
-	if origins[0] != want {
-		t.Errorf("allowed_origins[0] = %v, want %s", origins[0], want)
+	got := make(map[string]bool, len(origins))
+	for _, o := range origins {
+		s, _ := o.(string)
+		got[s] = true
+	}
+	// Every allowed id (dev + published store builds) must be present, in the
+	// chrome-extension://<id>/ origin form.
+	for _, id := range AllowedExtensionIDs {
+		if want := "chrome-extension://" + id + "/"; !got[want] {
+			t.Errorf("allowed_origins missing %s (have %v)", want, origins)
+		}
+	}
+	if !got["chrome-extension://"+ExtensionID+"/"] {
+		t.Errorf("dev/unpacked extension id must always be allowed")
 	}
 }
 

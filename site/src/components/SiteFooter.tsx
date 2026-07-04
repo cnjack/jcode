@@ -48,9 +48,12 @@ export default function SiteFooter() {
         </div>
         <div className="footer-bottom">
           <span>© 2026 jcode. Open source, MIT licensed.</span>
-          <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">
-            津ICP备13004281号-4
-          </a>
+          <span className="footer-legal">
+            <Link to="/privacy">Privacy</Link>
+            <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">
+              津ICP备13004281号-4
+            </a>
+          </span>
         </div>
       </div>
     </footer>

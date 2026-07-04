@@ -50,7 +50,6 @@ afterwards the extension reconnects silently — you connect once. Use
 - `debugger` — the CDP control channel (Chrome shows a banner while attached).
 - `tabs`, `tabGroups` — create/switch/group tabs.
 - `storage` — persist the server URL and pairing token.
-- `scripting` — reserved for future in-page helpers.
 - `host_permissions` limited to `127.0.0.1` / `localhost` — it only ever talks
   to your local jcode.
 

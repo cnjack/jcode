@@ -358,6 +358,7 @@ code, kbd, pre { font-family: var(--font-mono); }
   font-size: 13px;
 }
 .footer-bottom a { color: var(--navy-ink-soft); }
+.footer-legal { display: inline-flex; gap: 20px; align-items: center; }
 @media (max-width: 780px) {
   .footer-grid { grid-template-columns: 1fr 1fr; padding: 44px 0 28px; }
 }
@@ -393,8 +394,14 @@ code, kbd, pre { font-family: var(--font-mono); }
   font-family: var(--font-mono);
   font-size: 13.5px;
   line-height: 1.7;
-  padding: 18px 20px;
-  overflow-x: auto;
+  /* Right padding leaves room for the absolutely-positioned copy button. */
+  padding: 18px 56px 18px 20px;
+  /* Wrap long commands instead of scrolling. The copy button is an absolute
+     child, so an overflow-x:auto scroll area here would carry the button off
+     to the side as the user scrolled — pinning it requires a non-scrolling
+     positioned parent. */
+  white-space: normal;
+  overflow-wrap: anywhere;
   box-shadow: var(--shadow-soft);
 }
 .snippet .prompt-char { color: var(--accent); user-select: none; }

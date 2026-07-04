@@ -138,12 +138,16 @@ func sendEndpoint(out io.Writer) {
 
 // nativeHostManifest is the JSON Chrome/Edge read to find and authorize the host.
 func nativeHostManifest(binPath string) []byte {
+	origins := make([]string, len(AllowedExtensionIDs))
+	for i, id := range AllowedExtensionIDs {
+		origins[i] = fmt.Sprintf("chrome-extension://%s/", id)
+	}
 	m := map[string]any{
 		"name":            NativeHostName,
 		"description":     "jcode Browser Bridge native host",
 		"path":            binPath,
 		"type":            "stdio",
-		"allowed_origins": []string{fmt.Sprintf("chrome-extension://%s/", ExtensionID)},
+		"allowed_origins": origins,
 	}
 	data, _ := json.MarshalIndent(m, "", "  ")
 	return data

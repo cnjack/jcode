@@ -568,15 +568,14 @@ func (m *Manager) runAgentTurn(ctx context.Context, state *TeammateState) (strin
 		return "", fmt.Errorf("invalid chat model type")
 	}
 
-	var middlewares []adk.AgentMiddleware
+	var handlers []adk.ChatModelAgentMiddleware
+	// Langfuse child trace (outermost) so teammate spans nest under the parent.
 	if m.deps.Tracer != nil {
 		ctx = m.deps.Tracer.WithChildTrace(ctx, fmt.Sprintf("teammate-%s", state.Identity.AgentName))
-		middlewares = append(middlewares, m.deps.Tracer.ChildAgentMiddleware())
+		handlers = append(handlers, m.deps.Tracer.ChildAgentMiddleware())
 	}
-
-	var handlers []adk.ChatModelAgentMiddleware
 	if m.deps.HandlersFactory != nil {
-		handlers = m.deps.HandlersFactory(state.Identity.AgentName, state.Identity.Color)
+		handlers = append(handlers, m.deps.HandlersFactory(state.Identity.AgentName, state.Identity.Color)...)
 	}
 
 	ag, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
@@ -590,7 +589,6 @@ func (m *Manager) runAgentTurn(ctx context.Context, state *TeammateState) (strin
 			},
 		},
 		MaxIterations: teammateMaxIter,
-		Middlewares:   middlewares,
 		Handlers:      handlers,
 		ModelRetryConfig: &adk.ModelRetryConfig{
 			MaxRetries:  3,
