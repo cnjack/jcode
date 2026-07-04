@@ -98,13 +98,21 @@ async function connect() {
     desired = false; // no token yet — wait for Auto-connect to fetch one.
     return;
   }
+  let sock;
   try {
-    ws = new WebSocket(serverUrl);
+    sock = new WebSocket(serverUrl);
   } catch (e) {
     lastError = "Bad server URL: " + String(e && e.message ? e.message : e);
     scheduleReconnect();
     return;
   }
+  ws = sock;
+  // Every handler below guards on `ws === sock`. Handlers are bound to this
+  // specific socket but mutate module-level state (`connected`, `lastError`);
+  // once a newer connect() has replaced the global `ws`, this socket is
+  // superseded and a late-firing event from it (especially onclose) must NOT
+  // clobber the live connection's state — that desync is what stranded the
+  // popup on "Reconnecting…" while the socket was actually up.
 
   // Connect-stall watchdog. When the extension lacks host access to the target
   // (e.g. 127.0.0.1 site access is off in edge://extensions), the WebSocket
@@ -113,21 +121,23 @@ async function connect() {
   if (connectTimer) clearTimeout(connectTimer);
   connectTimer = setTimeout(() => {
     connectTimer = null;
-    if (!connected && ws && ws.readyState !== WebSocket.OPEN) {
+    if (ws === sock && !connected && sock.readyState !== WebSocket.OPEN) {
       lastError =
         "Connection stalled (no response from " + serverUrl + "). " +
         "Most likely the extension lacks access to this host — open the extensions page › this extension › " +
         "Site access and allow 127.0.0.1 / localhost (set to 'On all sites'). Then reload the extension and Auto-connect again.";
-      try { ws.close(); } catch {}
+      try { sock.close(); } catch {}
     }
   }, CONNECT_TIMEOUT_MS);
 
-  ws.onopen = () => {
+  sock.onopen = () => {
+    if (ws !== sock) return;
     lastError = "";
-    ws.send(JSON.stringify({ type: "hello", token }));
+    sock.send(JSON.stringify({ type: "hello", token }));
   };
 
-  ws.onmessage = async (ev) => {
+  sock.onmessage = async (ev) => {
+    if (ws !== sock) return;
     let msg;
     try { msg = JSON.parse(ev.data); } catch { return; }
     if (msg.type === "welcome") {
@@ -150,21 +160,42 @@ async function connect() {
       stop(true);
       return;
     }
+    // Server keepalive: the inbound frame itself is what keeps this MV3 worker
+    // awake (Chrome resets the idle timer on any ws message); the pong lets the
+    // server confirm we're alive. Receiving a ping also proves we're connected,
+    // so self-heal the flag in case a stale event left it out of sync.
+    if (msg.type === "ping") {
+      if (!connected) { connected = true; chrome.action.setBadgeText({ text: "on" }); }
+      send({ type: "pong" });
+      return;
+    }
+    if (msg.type === "pong") { return; }
     await handleEnvelope(msg);
   };
 
-  ws.onclose = () => {
+  sock.onclose = () => {
+    if (ws !== sock) return; // superseded socket — leave the live one alone
     if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
+    const wasConnected = connected;
     connected = false;
-    if (!lastError) {
+    chrome.action.setBadgeText({ text: "" });
+    // Dropping a live connection is routine (MV3 worker nap, jcode restart) —
+    // don't cry wolf. Reconnect quietly and let the badge/pill show "Reconnecting…".
+    // Only surface the hard "can't reach" error once a few attempts in a row
+    // have failed, i.e. the server really is gone or on a stale port.
+    if (wasConnected) {
+      lastError = "";
+      reconnectDelay = 1000;
+      attempts = 0;
+    } else if (!lastError && attempts >= 3) {
       lastError = "Could not reach the jcode server. Check that jcode is running and the URL/port is right.";
     }
-    chrome.action.setBadgeText({ text: "" });
     scheduleReconnect();
   };
-  ws.onerror = () => {
+  sock.onerror = () => {
+    if (ws !== sock) return;
     lastError = "WebSocket error connecting to " + serverUrl + " — is jcode running there, and does the extension have site access to it?";
-    try { ws.close(); } catch {}
+    try { sock.close(); } catch {}
   };
 }
 
