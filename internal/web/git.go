@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"os"
 	"os/exec"
 	"strings"
+
+	utils "github.com/cnjack/jcode/internal/util"
 )
 
 // handleGitBranches lists local branch names (most-recently-committed first)
@@ -17,6 +18,7 @@ func (s *Server) handleGitBranches(w http.ResponseWriter, r *http.Request) {
 	listCmd := exec.CommandContext(r.Context(), "git", "for-each-ref",
 		"--format=%(refname:short)", "--sort=-committerdate", "refs/heads")
 	listCmd.Dir = s.activePwd()
+	listCmd.Env = utils.ScrubbedGitEnv()
 	out, err := listCmd.Output()
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"current": "", "branches": []string{}})
@@ -27,6 +29,7 @@ func (s *Server) handleGitBranches(w http.ResponseWriter, r *http.Request) {
 	// "main"), where `rev-parse --abbrev-ref HEAD` would just say "HEAD".
 	curCmd := exec.CommandContext(r.Context(), "git", "branch", "--show-current")
 	curCmd.Dir = s.activePwd()
+	curCmd.Env = utils.ScrubbedGitEnv()
 	curOut, _ := curCmd.Output()
 	current := strings.TrimSpace(string(curOut))
 
@@ -116,7 +119,7 @@ func (s *Server) handleGitCheckout(w http.ResponseWriter, r *http.Request) {
 	// Force stable English git output so the block detection below doesn't depend
 	// on the host locale. We present our own UI copy, so this C-locale text is
 	// only used internally, never shown to the user.
-	env := append(os.Environ(), "LC_ALL=C", "LANG=C")
+	env := append(utils.ScrubbedGitEnv(), "LC_ALL=C", "LANG=C")
 
 	// "stash" strategy: tuck the working changes (including untracked files) away
 	// before switching so nothing is lost. A genuine stash failure is fatal.
@@ -194,6 +197,7 @@ func (s *Server) handleGitCheckout(w http.ResponseWriter, r *http.Request) {
 
 	curCmd := exec.CommandContext(r.Context(), "git", "branch", "--show-current")
 	curCmd.Dir = dir
+	curCmd.Env = utils.ScrubbedGitEnv()
 	curOut, _ := curCmd.Output()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"branch":  strings.TrimSpace(string(curOut)),

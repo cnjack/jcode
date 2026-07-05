@@ -1446,6 +1446,7 @@ func resolveStartupMode(cfg *config.Config, unsafe bool) mode.SessionMode {
 // without modifying it. Returns the commit hash or empty string if there is nothing to stash.
 func computeGitBaseline() string {
 	cmd := exec.Command("git", "stash", "create", "jcode session baseline")
+	cmd.Env = util.ScrubbedGitEnv()
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -1463,6 +1464,7 @@ func computeGitDiffStats(baseline string) (added, deleted int) {
 		args = []string{"diff", "--numstat"}
 	}
 	cmd := exec.Command("git", args...)
+	cmd.Env = util.ScrubbedGitEnv()
 	out, err := cmd.Output()
 	if err != nil {
 		return 0, 0

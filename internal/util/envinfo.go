@@ -46,11 +46,36 @@ func CollectEnvInfoLight(pwd string) *EnvInfo {
 	return info
 }
 
+// ScrubbedGitEnv returns the process environment with repo-targeting GIT_*
+// variables removed. git exports these to hook subprocesses (GIT_DIR is an
+// absolute path when the hook runs in a linked worktree), and a git command
+// that inherits them silently operates on THAT repository instead of the one
+// selected by -C/cwd — e.g. a `git init` under an inherited GIT_DIR
+// re-initializes the outer repo as bare. Every git subprocess jcode spawns
+// against a caller-chosen directory must use this env.
+func ScrubbedGitEnv() []string {
+	drop := map[string]bool{
+		"GIT_DIR": true, "GIT_WORK_TREE": true, "GIT_INDEX_FILE": true,
+		"GIT_OBJECT_DIRECTORY": true, "GIT_COMMON_DIR": true, "GIT_PREFIX": true,
+		"GIT_ALTERNATE_OBJECT_DIRECTORIES": true, "GIT_NAMESPACE": true,
+	}
+	env := os.Environ()
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		if !drop[name] {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
 func gitCommand(pwd string, args ...string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	fullArgs := append([]string{"-C", pwd}, args...)
 	cmd := exec.CommandContext(ctx, "git", fullArgs...)
+	cmd.Env = ScrubbedGitEnv()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = nil

@@ -257,6 +257,13 @@ edit 无匹配报错已做 curate（whitespace 提示、最相似行）。问题
 - 修复建议：强制绝对路径或改描述为 pwd-relative；逃逸改模型可见拒绝。
 - 状态：已修-更优解（文档对齐现实：file_path Desc 改为 absolute preferred + relative 解析语义，行为零改动避免破坏现有 prompt 习惯；TestResolvePath 6 组表驱动固化语义）
 
+### 33. git 子进程继承 GIT_DIR，hook 环境下操作错误仓库（推送过程中现场发现）【tools·high】
+- 证据：internal/util/envinfo.go gitCommand（原无 Env 隔离）; internal/web/git.go 与 server.go 共 ~11 处裸 git 调用; internal/web/git_test.go runGit
+- 问题：git 给 hook 子进程导出绝对路径 GIT_DIR（linked worktree 下），jcode 及其测试派生的所有 git 命令继承后静默作用于外层仓库而非 -C/cwd 选中的目录。实锤事故：从 worktree `git push` 时 pre-push hook 跑 `go test ./...`，web 包测试里的 `git init -q`（临时目录）把主仓 /Users/jack/workpath/jjj/jcode 重初始化为 bare（无 GIT_WORK_TREE → init 判定 bare），所有 worktree 随即报 "must be run in a work tree"。memory/pipeline 早已正确钉死 GIT_DIR/GIT_WORK_TREE，其余调用点全部裸奔。
+- 对比：CC/codex 的 git 子进程均显式隔离仓库定位环境变量。
+- 修复建议 → 已修（util.ScrubbedGitEnv() 剔除 GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_COMMON_DIR 等 8 个定位变量；envinfo.gitCommand、interactive.go 两处、web/git.go+server.go 全部接入；web/git_test.go runGit 显式钉死到临时仓；回归测试 TestScrubbedGitEnvDropsRepoTargeting + TestGitCommandIgnoresInheritedGitDir + 恶意 GIT_DIR 下全量 web 测试实测替身仓库不再被写成 bare）
+- 状态：已修
+
 ## 修复波次规划（按文件重叠避免冲突）
 
 - Wave 1（互不重叠）：B=read（5/13/15-read）；D=glob/grep（8/9/26/27）；H=subagent+错误处理（10/16/28）
