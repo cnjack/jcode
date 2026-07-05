@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@remotion/player':
-        specifier: 4.0.258
-        version: 4.0.258(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+        specifier: 4.0.410
+        version: 4.0.410(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       github-slugger:
         specifier: ^2.0.0
         version: 2.0.0
@@ -322,8 +322,8 @@ packages:
     resolution: {integrity: sha512-4An71tdz9X8+3sI4Qqqd2LWd9vS39J7sqd9EU4Scw7TJE/qB10Flv/UuqbPVgfQV9XoK8Np6jNquZitnZq5i+Q==}
     engines: {node: '>=14.0.0'}
 
-  '@remotion/player@4.0.258':
-    resolution: {integrity: sha512-pVKjLv7ViFQ2xGO81RgeKAklnkTobhRg9VSJrN70is82WFRaOVUV7+/POmEvDPd8zegJ2gQfv7atk0EWOc4yHA==}
+  '@remotion/player@4.0.410':
+    resolution: {integrity: sha512-G8hATP2rdyU/jHm1MYd0jHslIyP3Vawv3mZn1HpBCtlmVH8AVK2ZmLzVYCVTeNhnYHv95SGwGlEowqiIJeM/Kw==}
     peerDependencies:
       react: '>=16.8.0'
       react-dom: '>=16.8.0'
@@ -939,12 +939,6 @@ packages:
   remark-stringify@11.0.0:
     resolution: {integrity: sha512-1OSmLd3awB/t8qdoEOMazZkNsfVTeY4fTsgzcQFdXNq8ToTN4ZGwrMnlda4K6smTFKD+GRV6O48i6Z4iKgPPpw==}
 
-  remotion@4.0.258:
-    resolution: {integrity: sha512-JIlCJu3lymhoO2drX21duDIynIt74L0ApGq2n3c3hFG7F7A6wTaaOmIr+v/bKeTp0PAUFiMsHEZkJVYnrQ5rPg==}
-    peerDependencies:
-      react: '>=16.8.0'
-      react-dom: '>=16.8.0'
-
   remotion@4.0.410:
     resolution: {integrity: sha512-qk1IRV3hSm67Bgt3yIgrNmuAE5XJRIft3t40gGbkV+H98Ob0NYHBtkJBjlkz0I1ysC7eTP6iOkPUHLDzUA1D3Q==}
     peerDependencies:
@@ -1295,11 +1289,11 @@ snapshots:
 
   '@remix-run/router@1.23.3': {}
 
-  '@remotion/player@4.0.258(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
+  '@remotion/player@4.0.410(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
     dependencies:
       react: 18.3.1
       react-dom: 18.3.1(react@18.3.1)
-      remotion: 4.0.258(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      remotion: 4.0.410(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
 
   '@rolldown/pluginutils@1.0.0-beta.27': {}
 
@@ -2158,11 +2152,6 @@ snapshots:
       '@types/mdast': 4.0.4
       mdast-util-to-markdown: 2.1.2
       unified: 11.0.5
-
-  remotion@4.0.258(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
-    dependencies:
-      react: 18.3.1
-      react-dom: 18.3.1(react@18.3.1)
 
   remotion@4.0.410(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
     dependencies:
