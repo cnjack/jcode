@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/cnjack/jcode/internal/handler"
+	"github.com/cnjack/jcode/internal/hooks"
 	"github.com/cnjack/jcode/internal/mode"
 )
 
@@ -357,6 +358,14 @@ func originFromArgs(toolArgs, key string) string {
 // It returns true immediately for read-only or obviously safe commands.
 // For everything else it sends a TUI prompt and waits for the user's answer.
 func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs string) (bool, error) {
+	// A PreToolUse hook that returned permissionDecision=allow pre-authorizes this
+	// specific call, so the user is not prompted. This is scoped to the single
+	// invocation whose ctx carries the flag.
+	if hooks.IsPreApproved(ctx) {
+		s.notifyToolInProgress(toolName, toolArgs)
+		return true, nil
+	}
+
 	// State machine: AUTO mode passes all operations directly.
 	s.mu.Lock()
 	currentMode := s.mode
