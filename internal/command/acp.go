@@ -672,7 +672,12 @@ func (a *acpAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Pr
 
 	// Inject the hook dispatcher so PreToolUse/PostToolUse/Stop hooks run on ACP
 	// too (parity with the TUI); reloaded per turn so hooks.json edits hot-apply.
-	promptCtx = hooks.WithDispatcher(promptCtx, hooks.NewSessionDispatcher(config.ConfigDir(), sess.env.Pwd(), sess.rec.UUID(), config.Logger().Printf))
+	// The recorder is optional here, so fall back to the ACP session id.
+	hookSessionID := string(params.SessionId)
+	if sess.rec != nil {
+		hookSessionID = sess.rec.UUID()
+	}
+	promptCtx = hooks.WithDispatcher(promptCtx, hooks.NewSessionDispatcher(config.ConfigDir(), sess.env.Pwd(), hookSessionID, config.Logger().Printf))
 	resp := runner.Run(promptCtx, sess.ag, history, sess.h, sess.rec, sess.todoStore, sess.env.GoalStore, sess.tracer, sess.tokenUsage)
 
 	sess.mu.Lock()

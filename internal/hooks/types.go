@@ -21,9 +21,11 @@ const (
 	PreToolUse         Event = "PreToolUse"
 	PostToolUse        Event = "PostToolUse"
 	PostToolUseFailure Event = "PostToolUseFailure"
-	PreCompact         Event = "PreCompact"
-	PostCompact        Event = "PostCompact"
 	Stop               Event = "Stop"
+	// NOTE: PreCompact/PostCompact are intentionally not defined yet — they are a
+	// documented follow-up (see internal-doc/hooks-design.md §11). Only add the
+	// constants once the compaction middleware actually fires them, so the code
+	// and the user docs never advertise an event that never runs.
 )
 
 // Blockable reports whether an event's hooks may block/deny (via exit code 2 or a
@@ -59,7 +61,6 @@ type Payload struct {
 	ToolResponse   string          `json:"tool_response,omitempty"`
 	Prompt         string          `json:"prompt,omitempty"`
 	StopHookActive bool            `json:"stop_hook_active,omitempty"`
-	Trigger        string          `json:"trigger,omitempty"` // PreCompact/PostCompact reason
 }
 
 // Decision is the folded outcome of firing all of an event's matching hooks.

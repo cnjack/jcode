@@ -85,7 +85,7 @@ func loadFile(path string) (Config, error) {
 	}
 	var c Config
 	if err := json.Unmarshal(data, &c); err != nil {
-		return Config{}, fmt.Errorf("invalid JSON: %w", err)
+		return Config{}, fmt.Errorf("hooks: invalid JSON: %w", err)
 	}
 	return c, nil
 }

@@ -20,6 +20,32 @@ const defaultTimeout = 60 * time.Second
 // the life of the (detached) process.
 const asyncHardCap = 30 * time.Second
 
+// maxHookOutput caps how much of a hook's stdout/stderr is captured, so a chatty
+// or runaway hook cannot exhaust memory.
+const maxHookOutput = 1 << 20 // 1 MiB per stream
+
+// capWriter buffers up to max bytes and silently drops the rest, while always
+// reporting a full write so the hook process is never blocked on a full pipe.
+type capWriter struct {
+	buf bytes.Buffer
+	max int
+}
+
+func (w *capWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	if remaining := w.max - w.buf.Len(); remaining > 0 {
+		if n > remaining {
+			w.buf.Write(p[:remaining])
+		} else {
+			w.buf.Write(p)
+		}
+	}
+	return n, nil
+}
+
+func (w *capWriter) Bytes() []byte  { return w.buf.Bytes() }
+func (w *capWriter) String() string { return w.buf.String() }
+
 // runOutcome is one hook command's contribution to the folded Decision.
 type runOutcome struct {
 	permission        Permission
@@ -51,13 +77,17 @@ func runHook(ctx context.Context, spec HookSpec, input []byte, cwd string, env [
 	cmd.Dir = cwd
 	cmd.Stdin = bytes.NewReader(input)
 	cmd.Env = env
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	// On timeout/cancel, CommandContext SIGKILLs `sh` but a grandchild (e.g. a
-	// `sleep` it spawned) can keep the stdout pipe open, which makes cmd.Wait
-	// block until that grandchild exits — defeating the timeout. WaitDelay bounds
-	// that wait and force-closes the pipes so runHook returns promptly.
+	// Cap captured output so a chatty hook can't OOM the agent.
+	stdout := &capWriter{max: maxHookOutput}
+	stderr := &capWriter{max: maxHookOutput}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	// Run the hook in its own process group (unix) so a timeout/cancel tears down
+	// the whole tree, not just `sh` — otherwise a grandchild it spawned (e.g. a
+	// `sleep`) survives and keeps the stdout pipe open. WaitDelay is the
+	// cross-platform backstop: it bounds cmd.Wait and force-closes the pipes so
+	// runHook returns promptly even if teardown is incomplete.
+	setupProcessGroup(cmd)
 	cmd.WaitDelay = 500 * time.Millisecond
 
 	err := cmd.Run()

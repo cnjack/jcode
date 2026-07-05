@@ -3,7 +3,7 @@ package runner
 import "testing"
 
 func TestContinuationSource(t *testing.T) {
-	const cap = 3
+	const todoCapConst = 3
 	cases := []struct {
 		name           string
 		todoIncomplete bool
@@ -14,8 +14,8 @@ func TestContinuationSource(t *testing.T) {
 	}{
 		{"todo wins over goal and stop", true, 0, true, true, "todo"},
 		{"todo within cap", true, 2, false, false, "todo"},
-		{"todo exhausted falls to goal", true, cap, true, false, "goal"},
-		{"todo exhausted falls to stop", true, cap, false, true, "stop"},
+		{"todo exhausted falls to goal", true, todoCapConst, true, false, "goal"},
+		{"todo exhausted falls to stop", true, todoCapConst, false, true, "stop"},
 		{"goal beats stop", false, 0, true, true, "goal"},
 		{"stop only", false, 0, false, true, "stop"},
 		{"nothing continues", false, 0, false, false, ""},
@@ -23,7 +23,7 @@ func TestContinuationSource(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			todoCap := cap
+			todoCap := todoCapConst
 			if c.name == "todo cap zero skips todo" {
 				todoCap = 0
 			}

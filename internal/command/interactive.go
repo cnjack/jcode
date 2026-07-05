@@ -1052,9 +1052,11 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		hookDisp:     hookDisp,
 	}
 
-	// SessionStart hook: fire once; stash any additionalContext to prepend to the
-	// first prompt. Non-blocking.
-	if hookDisp.Configured(hooks.SessionStart) {
+	// SessionStart hook: fire once for a fresh session; stash any additionalContext
+	// to prepend to the first prompt. A resumed session fires it later — after the
+	// recorder UUID is restored — to avoid a double-fire and a wrong session_id.
+	// Non-blocking.
+	if resumeUUID == "" && hookDisp.Configured(hooks.SessionStart) {
 		dec := hookDisp.Fire(ctx, hooks.SessionStart, hooks.Payload{})
 		st.hookStartContext = dec.AdditionalContext
 	}
@@ -1330,6 +1332,15 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		// Reuse the existing session UUID so new messages are appended to the same file
 		if st.rec != nil {
 			st.rec.SetUUID(resumeUUID)
+			// The dispatcher + SessionStart during setup bound to the throwaway UUID;
+			// rebuild against the restored one so hook payloads carry the correct
+			// session_id, then fire SessionStart now — once — for the real session.
+			st.hookDisp = hooks.NewSessionDispatcher(config.ConfigDir(), pwd, st.rec.UUID(), config.Logger().Printf)
+			st.ctx = hooks.WithDispatcher(st.ctx, st.hookDisp)
+			if st.hookDisp.Configured(hooks.SessionStart) {
+				dec := st.hookDisp.Fire(st.ctx, hooks.SessionStart, hooks.Payload{})
+				st.hookStartContext = dec.AdditionalContext
+			}
 		}
 	}
 

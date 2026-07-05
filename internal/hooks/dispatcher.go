@@ -116,8 +116,18 @@ func (d *dispatcher) selectSpecs(event Event, toolName string) []HookSpec {
 	}
 	var specs []HookSpec
 	for _, g := range groups {
-		if matchesTool(g.Matcher, toolName) {
-			specs = append(specs, g.Hooks...)
+		if !matchesTool(g.Matcher, toolName) {
+			continue
+		}
+		for _, h := range g.Hooks {
+			// v1 only supports command hooks; empty type defaults to command.
+			if h.Type != "" && h.Type != "command" {
+				if d.logf != nil {
+					d.logf("hooks: unsupported hook type %q ignored", h.Type)
+				}
+				continue
+			}
+			specs = append(specs, h)
 		}
 	}
 	return specs

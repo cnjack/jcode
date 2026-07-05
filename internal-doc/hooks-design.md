@@ -77,7 +77,7 @@
 放在中间件链里 **`approvalMiddleware` 的外层**（即作为 `handlers` 的最后一个，或在 `agent.go` 里 approval 之前 append），
 使其包住「审批 + 执行」：
 
-```
+```text
 tracing → budget/compaction/reminder → [hookMiddleware] → approvalMiddleware → memory.UsageMiddleware → tool
                                           │  PreToolUse             │ 审批 gate + endpoint()
                                           └─ PostToolUse/Failure ───┘
@@ -170,7 +170,7 @@ hook 脚本自己看 `stop_hook_active` 决定何时放行、外层 `input_queue
 `for`**；直接再叠一个 Stop hook 会变成三套各自为政、无统一上限的强制续跑。按 codex 的形状，合并成
 **一个续跑循环 + 一个决策聚合点**：
 
-```
+```text
 runInner()                        // 代理采样到 LLM 不再调工具
 for {                             // 单一续跑循环
     if ctx.Done() { break }       // 用户取消一票否决（保留现有语义）
@@ -215,7 +215,7 @@ h.OnAgentDone(nil)
 
 - ~~方案 A：塞进 `~/.jcode/config.json` 的 `hooks` 键~~ —— 已否，缺项目级 / 本地层。
 - **方案 B（已采纳）**：独立 `hooks` 配置，三层合并（对齐 Claude Code / Qoder，也贴合 jcode 已有的 `.jcode/` 项目目录）：
-  1. `~/.jcode/config.json` 的 `hooks` 键 —— 用户级（最低优先级）
+  1. `~/.jcode/hooks.json` —— 用户级（最低优先级，默认加载）
   2. `.jcode/hooks.json` —— 项目级（可随 git 分享）
   3. `.jcode/hooks.local.json` —— 项目本地（`.gitignore`，最高优先级）
 
@@ -345,7 +345,7 @@ stdout 结构化输出（exit 0）：
 
 对齐 codex 的四段式，但用 Go 惯用法：
 
-```
+```text
 internal/hooks/
 ├── config.go       // HooksConfig 解析 + 三层合并 + 别名表
 ├── dispatcher.go   // Fire(ctx, event, payload) → Decision；matcher 选择 + 并发执行 + 结果折叠
@@ -476,9 +476,13 @@ UserPromptSubmit / PreToolUse / PostToolUse / PostToolUseFailure / Stop。测试
 **审查确认健壮**：续跑无界/死循环（25 硬顶 + todo 子顶 + `ctx.Done()` 一票否决 + `stop_hook_active` 防自锁）、
 post hook 拿到真实 err、超时 fail-safe、regex 缓存并发安全、deny 短路不误伤 PostToolUse、pre-approved 不跨会话泄漏。
 
-**v1 已知边界（后续）**：`Decision.SystemMessage` 仅落日志未 surface 到 UI（M1）；PreToolUse 的
-`additionalContext` 拼在结果后而非工具前（M3）；SessionStart payload 缺 `model`/`source`（L6）；
-Pre/PostCompact 事件、trust-on-first-use（hash 信任 UI）、`/hooks` 管理面板、teammate/subagent 的 hook 覆盖。
+**v1 已知边界（后续）**：**工具类 hook（PreToolUse/PostToolUse/PostToolUseFailure/Stop）三端（TUI/Web/ACP）
+均生效**；但 **prompt 级 hook（UserPromptSubmit / SessionStart）目前仅 TUI**——Web/ACP 上要正确接线需处理各自
+的「拒绝 prompt」响应语义和 SessionStart 的 per-session 生命周期，列为 follow-up。因项目级 hook 默认不加载
+（只用户自己的 `~/.jcode/hooks.json`），此差异是功能不完整而非提权。其余：`Decision.SystemMessage` 仅落日志未
+surface 到 UI（M1）；PreToolUse 的 `additionalContext` 拼在结果后而非工具前（M3）；SessionStart payload 缺
+`model`/`source`（L6）；Pre/PostCompact 事件（常量暂未定义，见 `types.go`）、trust-on-first-use（hash 信任 UI）、
+`/hooks` 管理面板、teammate/subagent 的 hook 覆盖。
 
 ---
 
