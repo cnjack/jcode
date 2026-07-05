@@ -54,6 +54,11 @@ func runHook(ctx context.Context, spec HookSpec, input []byte, cwd string, env [
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	// On timeout/cancel, CommandContext SIGKILLs `sh` but a grandchild (e.g. a
+	// `sleep` it spawned) can keep the stdout pipe open, which makes cmd.Wait
+	// block until that grandchild exits — defeating the timeout. WaitDelay bounds
+	// that wait and force-closes the pipes so runHook returns promptly.
+	cmd.WaitDelay = 500 * time.Millisecond
 
 	err := cmd.Run()
 
