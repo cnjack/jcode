@@ -45,6 +45,7 @@ func main() {
 		command.NewACPCmd(),
 		command.NewWebCmd(),
 		command.NewAutomationCmd(),
+		command.NewWorkflowCmd(),
 		command.NewVersionCmd(),
 		command.NewDoctorCmd(),
 		command.NewSessionsCmd(),

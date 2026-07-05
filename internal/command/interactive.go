@@ -104,6 +104,11 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 			Recorder:   s.rec,
 			Tracer:     s.langfuseTracer,
 		}),
+		s.env.NewWorkflowRunTool(&tools.WorkflowToolDeps{
+			ModelFactory: internalmodel.NewModelFactory(s.cfg, s.chatModel),
+			Recorder:     s.rec,
+			Tracer:       s.langfuseTracer,
+		}),
 		tools.NewAskUserTool(s.askUserDeps),
 		skills.NewLoadSkillTool(s.skillLoader),
 		tools.NewTeamCreateTool(s.teamManager),
