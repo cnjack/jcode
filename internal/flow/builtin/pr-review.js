@@ -11,7 +11,11 @@ export const meta = {
 };
 
 // args: { base?: string }  — base ref to diff against (default: staged + unstaged)
-const base = (args && args.base) ? String(args.base) : "";
+// The base is interpolated into a command the review agent runs, so restrict it to
+// a safe git-ref charset to avoid shell/argument injection; anything else is ignored.
+const rawBase = (args && args.base) ? String(args.base) : "";
+const base = /^[A-Za-z0-9._/-]+$/.test(rawBase) ? rawBase : "";
+if (rawBase && !base) log("ignoring unsafe base ref: " + rawBase, "warn");
 const diffCmd = base ? ("git diff " + base + "...HEAD") : "git diff HEAD";
 
 phase("Diff", "Collecting changes");

@@ -92,6 +92,9 @@ func (t *workflowRunTool) InvokableRun(ctx context.Context, argumentsInJSON stri
 	if in.Name == "" && in.Script == "" {
 		return "", fmt.Errorf("one of `name` or `script` is required")
 	}
+	if in.Name != "" && in.Script != "" {
+		return "", fmt.Errorf("provide exactly one of `name` or `script`, not both")
+	}
 	if t.deps == nil || t.deps.ModelFactory == nil {
 		return "", fmt.Errorf("workflow_run is not available in this context (no model factory)")
 	}

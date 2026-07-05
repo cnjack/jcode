@@ -413,13 +413,23 @@ return await agent("stuck");`
 	if err == nil {
 		t.Fatalf("expected timeout error")
 	}
-	// Give the settle goroutine a moment to emit the (now out-of-loop) sink event.
-	time.Sleep(100 * time.Millisecond)
-	sink.mu.Lock()
-	starts, dones := sink.agentStarts, sink.agentDones
-	sink.mu.Unlock()
-	if starts != 1 || dones != 1 {
-		t.Fatalf("agent starts/dones = %d/%d, want 1/1 (phantom agent: unpaired start)", starts, dones)
+	// Poll (not a fixed sleep) until the settle goroutine emits the out-of-loop
+	// sink event, so this stays stable on slow CI.
+	deadline := time.After(2 * time.Second)
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		sink.mu.Lock()
+		starts, dones := sink.agentStarts, sink.agentDones
+		sink.mu.Unlock()
+		if starts == 1 && dones == 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("agent starts/dones = %d/%d, want 1/1 (phantom agent: unpaired start)", starts, dones)
+		case <-tick.C:
+		}
 	}
 }
 

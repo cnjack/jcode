@@ -1,7 +1,7 @@
 # jcode Dynamic Workflow —— 落地设计（开工前考虑）
 
 > 状态：开工设计（2026-07-05）。对标 Claude Code Dynamic Workflows / Qoder CLI Workflows。
-> 架构已锁定（见 memory `jcode dynamic workflow roundtable`）：**goja 薄壳（纯控制流、零 I/O）+ 手写 Go 执行核**；`agent()` 骑现有 `SubagentTaskManager`；非交互编排器 + 确定性 + journaled resume。
+> 架构已锁定（见 memory `jcode dynamic workflow roundtable`）：**goja 薄壳（纯控制流、零 I/O）+ 手写 Go 执行核**；`agent()` 复用 adk agent 执行机制（v1 的并发/取消用**信号量+goroutine**，非 `SubagentTaskManager`——后者后续可接入统一，见 §6）；非交互编排器 + 确定性 + journaled resume。
 > 所有 jcode 侧签名均经真实源码核对。
 
 ---
@@ -94,7 +94,7 @@ internal/flow/
   engine.go    Engine：Compile→Start loop→run wrapped program→阻塞 done/ctx；caps(16/1000)+watchdog Interrupt；journal
   host.go      host 函数 agent/parallel(内)/pipeline(内)/phase/log/workflow/__flowResolve/__flowReject；async 桥（NewPromise+RunOnLoop）
   prelude.js   parallel/pipeline（Promise.all 之上）+ 确定性守卫（Date.now/Math.random/无参 new Date 抛）
-  spawn.go     SpawnFunc：CloneForSubagent + 按 agentType 建工具 + ModelFactory.GetModel + adk.NewChatModelAgent + 运行收文本；opts.schema→合成工具+校验+重试
+  spawn.go     SpawnFunc：CloneForSubagent + 按 agentType 建工具 + ModelFactory.GetModel + adk.NewChatModelAgent + 运行收文本；opts.schema→prompt 注入 schema + 提取 JSON + 重试（v1 best-effort，不强校验 schema 符合性，见 §8）
   spawn_test.go / engine_test.go / loader_test.go
 ```
 
@@ -106,7 +106,7 @@ internal/flow/
 
 **caps**：并发信号量 16（agent goroutine 内 acquire）；总量原子计数 1000，超则 reject。两者 `log()` 出被丢弃/排队情况，不静默截断。
 
-**结构化输出 opts.schema**：spawn 注入合成工具 `submit_structured_output`（params=schema），指示 agent 调它；捕获入参 JSON→校验；不匹配 re-prompt 重试 ≤2；超限 reject（`error_max_structured_output_retries`）。
+**结构化输出 opts.schema（v1 实际做法）**：spawn 把 schema 注入 prompt（"只返回符合此 schema 的 JSON"），`extractFlowJSON` 从回复里提取首个合法 JSON 值；提取失败 re-prompt 重试 ≤2；超限 reject（`error_max_structured_output_retries`）。**注意：v1 只保证是合法 JSON，不强校验其是否符合传入 schema（见 §8 已知限制）。** 升级路径 = 合成工具 `submit_structured_output`（params=schema，需 eino schema 转换 + 真校验）。
 
 **journal（resume）**：每次 `agent()` 按 key=`sha(prompt+opts+runID)` 写 `~/.jcode/flow-runs/<runID>/journal.jsonl`；resume 时命中即返回缓存，未命中 live 跑。确定性守卫保证 key 稳定。
 

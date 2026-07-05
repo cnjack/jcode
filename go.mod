@@ -57,8 +57,8 @@ require (
 	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
 	github.com/docker/go-connections v0.7.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
-	github.com/dop251/goja v0.0.0-20260701091749-b07b74453ea9 // indirect
-	github.com/dop251/goja_nodejs v0.0.0-20260212111938-1f56ff5bcf14 // indirect
+	github.com/dop251/goja v0.0.0-20260701091749-b07b74453ea9
+	github.com/dop251/goja_nodejs v0.0.0-20260212111938-1f56ff5bcf14
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/eino-contrib/jsonschema v1.0.3 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect

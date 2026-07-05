@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/dop251/goja"
 )
@@ -47,6 +48,12 @@ func ParseMeta(src string) (Meta, error) {
 	}
 	vm := goja.New()
 	vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
+	// Guard against a pathological meta literal (e.g. a getter that loops) hanging
+	// the parse. meta is meant to be a pure data literal and evaluates instantly;
+	// the interrupt covers both RunString and the ExportTo below (property access
+	// can trigger a getter).
+	timer := time.AfterFunc(2*time.Second, func() { vm.Interrupt("meta evaluation timed out") })
+	defer timer.Stop()
 	v, err := vm.RunString("(" + lit + ")")
 	if err != nil {
 		return Meta{}, fmt.Errorf("evaluating meta object: %w", err)

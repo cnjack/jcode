@@ -3,6 +3,7 @@ package flow
 import (
 	"embed"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -45,14 +46,18 @@ func userWorkflowsDir() string {
 func (l *Loader) loadBuiltin() {
 	entries, err := builtinFS.ReadDir("builtin")
 	if err != nil {
+		config.Logger().Printf("[flow] read builtin workflows dir: %v", err)
 		return
 	}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".js") {
 			continue
 		}
-		data, err := builtinFS.ReadFile(filepath.Join("builtin", e.Name()))
+		// embed.FS always uses forward slashes — path.Join, not filepath.Join
+		// (which would emit backslashes on Windows and miss the file).
+		data, err := builtinFS.ReadFile(path.Join("builtin", e.Name()))
 		if err != nil {
+			config.Logger().Printf("[flow] read builtin workflow %s: %v", e.Name(), err)
 			continue
 		}
 		l.add(string(data), "", ScopeBuiltin, e.Name())
@@ -71,6 +76,7 @@ func (l *Loader) scanDir(dir string, scope Scope) {
 		full := filepath.Join(dir, e.Name())
 		data, err := os.ReadFile(full)
 		if err != nil {
+			config.Logger().Printf("[flow] read %s workflow %s: %v", scope, full, err)
 			continue
 		}
 		l.add(string(data), full, scope, e.Name())

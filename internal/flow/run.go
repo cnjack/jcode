@@ -104,16 +104,6 @@ func (r *run) jsAgent(call goja.FunctionCall) goja.Value {
 	if len(call.Arguments) > 0 {
 		prompt = call.Argument(0).String()
 	}
-	var spec AgentSpec
-	if len(call.Arguments) > 1 {
-		opts := call.Argument(1)
-		if opts != nil && !goja.IsUndefined(opts) && !goja.IsNull(opts) {
-			if err := vm.ExportTo(opts, &spec); err != nil {
-				config.Logger().Printf("[flow] agent opts decode: %v", err)
-			}
-		}
-	}
-	spec.Prompt = prompt
 
 	p, resolve, reject := vm.NewPromise()
 
@@ -121,6 +111,20 @@ func (r *run) jsAgent(call goja.FunctionCall) goja.Value {
 		_ = reject(vm.ToValue("agent(prompt): prompt must be a non-empty string"))
 		return vm.ToValue(p)
 	}
+
+	var spec AgentSpec
+	if len(call.Arguments) > 1 {
+		opts := call.Argument(1)
+		if opts != nil && !goja.IsUndefined(opts) && !goja.IsNull(opts) {
+			// Reject on a malformed opts object rather than silently running with
+			// defaults, which would mask a bad model/schema/agentType.
+			if err := vm.ExportTo(opts, &spec); err != nil {
+				_ = reject(vm.ToValue(fmt.Sprintf("agent(opts): invalid options object: %v", err)))
+				return vm.ToValue(p)
+			}
+		}
+	}
+	spec.Prompt = prompt
 
 	// Hard total-agent cap (runaway-loop backstop).
 	if r.engine.maxAgents > 0 && atomic.AddInt64(&r.agentTotal, 1) > int64(r.engine.maxAgents) {

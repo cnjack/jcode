@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -90,11 +91,17 @@ func NewFlowSpawn(deps FlowSpawnDeps) flow.SpawnFunc {
 			if aerr != nil {
 				return flow.AgentResult{}, fmt.Errorf("create flow agent: %w", aerr)
 			}
-			text, tok := runFlowAgent(ctx, ag, []adk.Message{schema.UserMessage(prompt)})
+			text, tok, rerr := runFlowAgent(ctx, ag, []adk.Message{schema.UserMessage(prompt)})
 			tokens += tok
 			lastText = text
 			if err := ctx.Err(); err != nil {
 				return flow.AgentResult{}, err
+			}
+			// A real agent-run error (API failure after retries, stream error) must
+			// fail the workflow — don't return partial text as a success, and don't
+			// spend the structured-output retries on it.
+			if rerr != nil {
+				return flow.AgentResult{}, fmt.Errorf("flow agent %q failed: %w", spec.Label, rerr)
 			}
 			if schemaJSON == "" {
 				break
@@ -132,20 +139,31 @@ func flowTools(env *Env, agentType string) []tool.BaseTool {
 }
 
 // runFlowAgent runs one agent turn to completion, returning accumulated assistant
-// text and this run's token delta.
-func runFlowAgent(ctx context.Context, ag *adk.ChatModelAgent, messages []adk.Message) (string, int64) {
+// text, this run's token delta, and any run error. A non-nil error means the agent
+// run genuinely failed (API error after retries, stream error) — the caller must
+// not treat the partial text as a successful result.
+func runFlowAgent(ctx context.Context, ag *adk.ChatModelAgent, messages []adk.Message) (string, int64, error) {
 	tokenUsage := &internalmodel.TokenUsage{}
 	ctx = internalmodel.WithTokenTracker(ctx, tokenUsage)
 	input := &adk.AgentInput{Messages: messages, EnableStreaming: true}
 
 	var sb strings.Builder
+	var runErr error
 	iterator := ag.Run(ctx, input)
+loop:
 	for {
 		event, ok := iterator.Next()
 		if !ok {
 			break
 		}
 		if event.Err != nil {
+			// A cancelled ctx surfaces here as a stream error; report the clean ctx
+			// error rather than the noisy wrapped one.
+			if ctx.Err() != nil {
+				runErr = ctx.Err()
+			} else {
+				runErr = event.Err
+			}
 			break
 		}
 		if event.Output == nil || event.Output.MessageOutput == nil {
@@ -158,8 +176,16 @@ func runFlowAgent(ctx context.Context, ag *adk.ChatModelAgent, messages []adk.Me
 		if mo.IsStreaming {
 			for {
 				chunk, err := mo.MessageStream.Recv()
-				if err != nil {
+				if err == io.EOF {
 					break
+				}
+				if err != nil {
+					if ctx.Err() != nil {
+						runErr = ctx.Err()
+					} else {
+						runErr = err
+					}
+					break loop
 				}
 				if chunk != nil {
 					sb.WriteString(chunk.Content)
@@ -170,7 +196,7 @@ func runFlowAgent(ctx context.Context, ag *adk.ChatModelAgent, messages []adk.Me
 		}
 	}
 	_, _, cur := tokenUsage.Get()
-	return sb.String(), cur
+	return sb.String(), cur, runErr
 }
 
 // extractFlowJSON pulls the first JSON object/array out of text (tolerating fences

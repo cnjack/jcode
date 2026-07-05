@@ -49,7 +49,7 @@ const answer = await agent(
   "Synthesize a single, balanced recommendation for this question from the panel below. " +
   "Note where the panel agreed, surface the strongest dissent, and end with a clear recommendation.\n\n" +
   "Question: " + question + "\n\n" +
-  panel.map((p, i) => "## " + p.role + "\nView: " + p.view + "\nRebuttal: " + (critiques.filter(Boolean)[i] || "")).join("\n\n"),
+  panel.map((p, i) => "## " + p.role + "\nView: " + p.view + "\nRebuttal: " + (critiques[i] || "")).join("\n\n"),
   { label: "synthesize", phase: "Synthesize", agentType: "explore" }
 );
 
