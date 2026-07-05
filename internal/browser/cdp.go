@@ -183,6 +183,21 @@ func (c *wsCDP) send(ctx context.Context, sessionID, method string, params any) 
 		c.mu.Unlock()
 		return nil, ctx.Err()
 	case <-c.closed:
+		// The read loop signals c.closed only after delivering (or closing) every
+		// pending channel, so a response for THIS request may already be waiting in
+		// ch — e.g. a server that writes a result frame and immediately drops the
+		// socket. Prefer the real response over reporting the close; select alone
+		// would pick between the two ready cases at random (a source of flakes).
+		select {
+		case msg, ok := <-ch:
+			if ok {
+				if msg.Error != nil {
+					return nil, fmt.Errorf("%s: %w", method, msg.Error)
+				}
+				return msg.Result, nil
+			}
+		default:
+		}
 		return nil, fmt.Errorf("cdp connection closed during %s", method)
 	}
 }

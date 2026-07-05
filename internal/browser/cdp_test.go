@@ -86,7 +86,11 @@ func TestManagedBackendNewTabAndSend(t *testing.T) {
 }
 
 func TestManagedBackendErrorPropagation(t *testing.T) {
-	// A handler that returns nothing useful; drive the error path by closing.
+	// Reply with a CDP error frame and immediately drop the socket. The error
+	// frame and the connection-close then race inside send's select; the caller
+	// must still surface the "boom" error rather than a "connection closed" one.
+	// Loop so a regression (picking the close signal at random) fails reliably
+	// instead of only ~half the time.
 	up := websocket.Upgrader{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := up.Upgrade(w, r, nil)
@@ -95,21 +99,23 @@ func TestManagedBackendErrorPropagation(t *testing.T) {
 		}
 		var msg cdpMessage
 		_ = conn.ReadJSON(&msg)
-		// Reply with a CDP error frame.
 		_ = conn.WriteJSON(cdpMessage{ID: msg.ID, Error: &cdpError{Code: -32000, Message: "boom"}})
 		_ = conn.Close()
 	}))
 	defer srv.Close()
 
-	ctx := context.Background()
-	backend, err := connectManaged(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	defer func() { _ = backend.Close() }()
-	_, err = backend.cdp.send(ctx, "", "Target.getTargets", nil)
-	if err == nil || !strings.Contains(err.Error(), "boom") {
-		t.Fatalf("expected boom error, got %v", err)
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	for i := 0; i < 50; i++ {
+		ctx := context.Background()
+		backend, err := connectManaged(ctx, wsURL, nil)
+		if err != nil {
+			t.Fatalf("connect: %v", err)
+		}
+		_, err = backend.cdp.send(ctx, "", "Target.getTargets", nil)
+		_ = backend.Close()
+		if err == nil || !strings.Contains(err.Error(), "boom") {
+			t.Fatalf("iter %d: expected boom error, got %v", i, err)
+		}
 	}
 }
 
