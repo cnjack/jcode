@@ -83,7 +83,7 @@ func TestGL05_RecursiveGlobE2E(t *testing.T) {
 	mustWriteFile(t, filepath.Join(dir, "src", "deep", "y.go"), "package y\n")
 
 	// '**/*.test.ts' must match at every depth
-	stdout, stderr, err := execLocal(context.Background(), buildRgGlobCmd("**/*.test.ts", dir, 0, 100), 30*time.Second)
+	stdout, stderr, err := execLocal(context.Background(), buildRgGlobCmd("**/*.test.ts", dir, 0, 100))
 	if err != nil {
 		t.Fatalf("execLocal failed: %v (stderr: %s)", err, stderr)
 	}
@@ -95,7 +95,7 @@ func TestGL05_RecursiveGlobE2E(t *testing.T) {
 	}
 
 	// 'src/**/*.go' is anchored to the search dir: matches src/ subtree only
-	stdout, stderr, err = execLocal(context.Background(), buildRgGlobCmd("src/**/*.go", dir, 0, 100), 30*time.Second)
+	stdout, stderr, err = execLocal(context.Background(), buildRgGlobCmd("src/**/*.go", dir, 0, 100))
 	if err != nil {
 		t.Fatalf("execLocal failed: %v (stderr: %s)", err, stderr)
 	}
@@ -154,7 +154,7 @@ func TestGL08_SortedByMtimeE2E(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	mustWriteFile(t, filepath.Join(dir, "b.go"), "package b\n")
 
-	stdout, stderr, err := execLocal(context.Background(), buildRgGlobCmd("*.go", dir, 0, 100), 30*time.Second)
+	stdout, stderr, err := execLocal(context.Background(), buildRgGlobCmd("*.go", dir, 0, 100))
 	if err != nil {
 		t.Fatalf("execLocal failed: %v (stderr: %s)", err, stderr)
 	}
@@ -168,7 +168,7 @@ func TestGL08_SortedByMtimeE2E(t *testing.T) {
 	}
 
 	// limit=1: truncation keeps the newest file
-	stdout, stderr, err = execLocal(context.Background(), buildRgGlobCmd("*.go", dir, 0, 1), 30*time.Second)
+	stdout, stderr, err = execLocal(context.Background(), buildRgGlobCmd("*.go", dir, 0, 1))
 	if err != nil {
 		t.Fatalf("execLocal failed: %v (stderr: %s)", err, stderr)
 	}

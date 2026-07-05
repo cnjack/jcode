@@ -77,7 +77,7 @@ func TestTodoWriteSchema_TodosItemSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	js, err := info.ParamsOneOf.ToJSONSchema()
+	js, err := info.ToJSONSchema()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestEnhancedTodoWriteSchema_ItemsSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	js, err := info.ParamsOneOf.ToJSONSchema()
+	js, err := info.ToJSONSchema()
 	if err != nil {
 		t.Fatal(err)
 	}

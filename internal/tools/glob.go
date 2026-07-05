@@ -110,7 +110,7 @@ func (g *globTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 		if _, lookErr := exec.LookPath("rg"); lookErr != nil {
 			return "", fmt.Errorf("ripgrep (rg) is required but not found in PATH. Install it: https://github.com/BurntSushi/ripgrep#installation")
 		}
-		stdout, stderr, err = execLocal(ctx, cmd, 30*time.Second)
+		stdout, stderr, err = execLocal(ctx, cmd)
 	}
 	elapsed := time.Since(start)
 
@@ -164,9 +164,12 @@ func buildRgGlobCmd(pattern, searchPath string, maxDepth, limit int) string {
 	return strings.Join(parts, " ")
 }
 
+// globExecTimeout bounds a local glob shell invocation.
+const globExecTimeout = 30 * time.Second
+
 // execLocal runs a shell command locally and returns stdout, stderr, error.
-func execLocal(ctx context.Context, cmd string, timeout time.Duration) (string, string, error) {
-	execCtx, cancel := context.WithTimeout(ctx, timeout)
+func execLocal(ctx context.Context, cmd string) (string, string, error) {
+	execCtx, cancel := context.WithTimeout(ctx, globExecTimeout)
 	defer cancel()
 
 	c := exec.CommandContext(execCtx, "sh", "-c", cmd)

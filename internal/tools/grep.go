@@ -189,7 +189,7 @@ func (g *grepTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 	return g.runLocalRg(ctx, rgPath, input, maxResults)
 }
 
-func (g *grepTool) buildRgArgs(input GrepInput, maxResults int) []string {
+func (g *grepTool) buildRgArgs(input GrepInput) []string {
 	args := []string{
 		"--no-heading", "--line-number", "--color=never",
 		"--max-columns=500", "--max-columns-preview",
@@ -255,7 +255,7 @@ func (g *grepTool) buildRgArgs(input GrepInput, maxResults int) []string {
 // collected, rg is killed instead of letting it flood memory with the full
 // result set of a broad pattern over a large repo.
 func (g *grepTool) runLocalRg(ctx context.Context, rgPath string, input GrepInput, maxResults int) (string, error) {
-	args := g.buildRgArgs(input, maxResults)
+	args := g.buildRgArgs(input)
 
 	ctx, cancel := context.WithTimeout(ctx, grepTimeout)
 	defer cancel()

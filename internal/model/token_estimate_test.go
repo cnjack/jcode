@@ -69,7 +69,7 @@ func TestCalibratedCounter_ScaleConverges(t *testing.T) {
 	}
 	v2, _ := c.Count(ctx, msgs, nil)
 	v3, _ := c.Count(ctx, msgs, nil)
-	if !(v1 < v2 && v2 < v3) {
+	if v1 >= v2 || v2 >= v3 {
 		t.Fatalf("counts not monotonically converging up: %d, %d, %d", v1, v2, v3)
 	}
 	if v3 > 2*E {
@@ -106,7 +106,7 @@ func TestCalibratedCounter_ClampAndFloor(t *testing.T) {
 		tu.Add(AddParams{Total: 5000}) // provider claims 5% of the estimate
 		c := NewCalibratedCounter(tu)
 		for i := 0; i < 8; i++ {
-			c.Count(ctx, msgs, nil)
+			_, _ = c.Count(ctx, msgs, nil)
 		}
 		if c.scale != 0.5 {
 			t.Fatalf("scale = %v, want clamped at 0.5", c.scale)
@@ -118,8 +118,8 @@ func TestCalibratedCounter_ClampAndFloor(t *testing.T) {
 		tu := &TokenUsage{}
 		tu.Add(AddParams{Total: 4000}) // too small: noise
 		c := NewCalibratedCounter(tu)
-		c.Count(ctx, msgs, nil)
-		c.Count(ctx, msgs, nil)
+		_, _ = c.Count(ctx, msgs, nil)
+		_, _ = c.Count(ctx, msgs, nil)
 		if c.scale != 1.0 {
 			t.Fatalf("scale = %v, want 1.0 (no calibration under noise floor)", c.scale)
 		}
@@ -128,8 +128,8 @@ func TestCalibratedCounter_ClampAndFloor(t *testing.T) {
 	t.Run("no calibration when provider reports nothing", func(t *testing.T) {
 		msgs := []*schema.Message{asciiMsg(36000)}
 		c := NewCalibratedCounter(&TokenUsage{})
-		c.Count(ctx, msgs, nil)
-		c.Count(ctx, msgs, nil)
+		_, _ = c.Count(ctx, msgs, nil)
+		_, _ = c.Count(ctx, msgs, nil)
 		if c.scale != 1.0 {
 			t.Fatalf("scale = %v, want 1.0 (GetLastTotal is 0)", c.scale)
 		}
@@ -155,12 +155,12 @@ func TestCalibratedCounter_SubsetCountNoRecalibrate(t *testing.T) {
 	c := NewCalibratedCounter(tu)
 	ctx := context.Background()
 
-	c.Count(ctx, full, nil) // establishes lastFullEstimate
-	c.Count(ctx, full, nil) // calibrates
+	_, _ = c.Count(ctx, full, nil) // establishes lastFullEstimate
+	_, _ = c.Count(ctx, full, nil) // calibrates
 	scaleBefore := c.scale
 	lastFullBefore := c.lastFullEstimate
 
-	c.Count(ctx, full[:1], nil) // subset re-count (post-clear)
+	_, _ = c.Count(ctx, full[:1], nil) // subset re-count (post-clear)
 	if c.scale != scaleBefore {
 		t.Fatalf("subset count changed scale: %v -> %v", scaleBefore, c.scale)
 	}

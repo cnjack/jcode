@@ -353,7 +353,7 @@ func TestEditToolSchema_EditsItemSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	js, err := info.ParamsOneOf.ToJSONSchema()
+	js, err := info.ToJSONSchema()
 	if err != nil {
 		t.Fatal(err)
 	}

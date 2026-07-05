@@ -21,7 +21,7 @@ func newTestGrepTool(t *testing.T) *grepTool {
 func TestG01_BasicSearch(t *testing.T) {
 	g := newTestGrepTool(t)
 	input := GrepInput{Pattern: "TODO", Path: "/src"}
-	args := g.buildRgArgs(input, grepDefaultMax)
+	args := g.buildRgArgs(input)
 
 	if !containsArg(args, "TODO") {
 		t.Fatal("expected pattern in args")
@@ -44,7 +44,7 @@ func TestG01_BasicSearch(t *testing.T) {
 func TestG02_FilesWithMatchesModeDefault(t *testing.T) {
 	g := newTestGrepTool(t)
 	input := GrepInput{Pattern: "foo", Path: "/src", OutputMode: "files_with_matches"}
-	args := g.buildRgArgs(input, grepDefaultMax)
+	args := g.buildRgArgs(input)
 
 	if !containsArg(args, "--files-with-matches") {
 		t.Fatal("expected --files-with-matches in default mode")
@@ -60,7 +60,7 @@ func TestG02_FilesWithMatchesModeDefault(t *testing.T) {
 func TestG03_ContentMode(t *testing.T) {
 	g := newTestGrepTool(t)
 	input := GrepInput{Pattern: "foo", Path: "/src", OutputMode: "content"}
-	args := g.buildRgArgs(input, grepDefaultMax)
+	args := g.buildRgArgs(input)
 
 	if containsArg(args, "--files-with-matches") {
 		t.Fatal("content mode should not have --files-with-matches")
@@ -74,7 +74,7 @@ func TestG03_ContentMode(t *testing.T) {
 func TestG04_CountMode(t *testing.T) {
 	g := newTestGrepTool(t)
 	input := GrepInput{Pattern: "foo", Path: "/src", OutputMode: "count"}
-	args := g.buildRgArgs(input, grepDefaultMax)
+	args := g.buildRgArgs(input)
 
 	if !containsArg(args, "--count") {
 		t.Fatal("expected --count in args")
@@ -85,7 +85,7 @@ func TestG04_CountMode(t *testing.T) {
 func TestG05_BeforeContext(t *testing.T) {
 	g := newTestGrepTool(t)
 	input := GrepInput{Pattern: "foo", Path: "/src", OutputMode: "content", BeforeContext: 3}
-	args := g.buildRgArgs(input, grepDefaultMax)
+	args := g.buildRgArgs(input)
 
 	if !containsArg(args, "--before-context=3") {
 		t.Fatalf("expected --before-context=3, got: %v", args)
@@ -96,7 +96,7 @@ func TestG05_BeforeContext(t *testing.T) {
 func TestG06_AfterContext(t *testing.T) {
 	g := newTestGrepTool(t)
 	input := GrepInput{Pattern: "foo", Path: "/src", OutputMode: "content", AfterContext: 5}
-	args := g.buildRgArgs(input, grepDefaultMax)
+	args := g.buildRgArgs(input)
 
 	if !containsArg(args, "--after-context=5") {
 		t.Fatalf("expected --after-context=5, got: %v", args)
@@ -107,7 +107,7 @@ func TestG06_AfterContext(t *testing.T) {
 func TestG07_Context(t *testing.T) {
 	g := newTestGrepTool(t)
 	input := GrepInput{Pattern: "foo", Path: "/src", OutputMode: "content", Context: 2, BeforeContext: 10, AfterContext: 10}
-	args := g.buildRgArgs(input, grepDefaultMax)
+	args := g.buildRgArgs(input)
 
 	if !containsArg(args, "--context=2") {
 		t.Fatalf("expected --context=2, got: %v", args)
@@ -149,7 +149,7 @@ func TestG08_OffsetPagination(t *testing.T) {
 func TestG09_Multiline(t *testing.T) {
 	g := newTestGrepTool(t)
 	input := GrepInput{Pattern: "foo\\nbar", Path: "/src", Multiline: true}
-	args := g.buildRgArgs(input, grepDefaultMax)
+	args := g.buildRgArgs(input)
 
 	if !containsArg(args, "--multiline") {
 		t.Fatalf("expected --multiline in args, got: %v", args)
@@ -163,7 +163,7 @@ func TestG09_Multiline(t *testing.T) {
 func TestG10_FileType(t *testing.T) {
 	g := newTestGrepTool(t)
 	input := GrepInput{Pattern: "foo", Path: "/src", FileType: "go"}
-	args := g.buildRgArgs(input, grepDefaultMax)
+	args := g.buildRgArgs(input)
 
 	found := false
 	for i, a := range args {
@@ -191,7 +191,7 @@ func TestG11_DefaultMax(t *testing.T) {
 func TestG12_LineLengthLimit(t *testing.T) {
 	g := newTestGrepTool(t)
 	input := GrepInput{Pattern: "foo", Path: "/src"}
-	args := g.buildRgArgs(input, grepDefaultMax)
+	args := g.buildRgArgs(input)
 
 	if !containsArg(args, "--max-columns=500") {
 		t.Fatalf("expected --max-columns=500, got: %v", args)
@@ -206,7 +206,7 @@ func TestG13_VCSExclusions(t *testing.T) {
 	g := newTestGrepTool(t)
 	input := GrepInput{Pattern: "foo", Path: "/src"}
 
-	rgArgs := g.buildRgArgs(input, grepDefaultMax)
+	rgArgs := g.buildRgArgs(input)
 	expectedDirs := []string{".git", "node_modules", "vendor", "__pycache__", ".venv", ".svn", ".hg", ".bzr", ".jj", ".sl"}
 	for _, dir := range expectedDirs {
 		exclusion := "!" + dir
@@ -227,7 +227,7 @@ func TestG13_VCSExclusions(t *testing.T) {
 func TestG14_DashPattern(t *testing.T) {
 	g := newTestGrepTool(t)
 	input := GrepInput{Pattern: "-verbose", Path: "/src"}
-	args := g.buildRgArgs(input, grepDefaultMax)
+	args := g.buildRgArgs(input)
 
 	found := false
 	for i, a := range args {
@@ -252,7 +252,7 @@ func TestG15_LegacyCompat(t *testing.T) {
 		MaxResults:      100,
 	}
 
-	args := g.buildRgArgs(input, 100)
+	args := g.buildRgArgs(input)
 	if !containsArg(args, "--ignore-case") {
 		t.Fatal("expected --ignore-case for basic compat")
 	}
@@ -293,7 +293,7 @@ func TestG17_RelativizeLine(t *testing.T) {
 func TestG18_ContextOnlyInContentMode(t *testing.T) {
 	g := newTestGrepTool(t)
 	input := GrepInput{Pattern: "foo", Path: "/src", OutputMode: "files_with_matches", Context: 3}
-	args := g.buildRgArgs(input, grepDefaultMax)
+	args := g.buildRgArgs(input)
 
 	if containsArgPrefix(args, "--context") {
 		t.Fatal("context flags should not appear in files_with_matches mode")
