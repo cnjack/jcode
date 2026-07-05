@@ -11,6 +11,7 @@ import (
 
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
+	"github.com/cnjack/jcode/internal/hooks"
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/telemetry"
@@ -72,71 +73,82 @@ func Run(
 	// so earlier turns are not duplicated into the context.
 	pending := resp
 
-	// Completion guard: if the agent finished but there are still incomplete
-	// todos, re-run with a reminder so nothing is left behind.
-	const maxGuardRetries = 3
-todoLoop:
-	for i := 0; i < maxGuardRetries; i++ {
-		// Respect cancellation (e.g. user stop): a canceled context must not
-		// drive the auto-continue path, mirroring the goal loop below. Without
-		// this, a stop floods the chat with paired "Incomplete todos
-		// detected" / "context canceled" messages for every retry.
+	// Unified continuation pipeline. Three mechanisms can keep the agent going
+	// after it stops calling tools — incomplete-todo guard, active-goal guard, and
+	// a user-configured Stop hook. They share ONE loop, ONE umbrella budget, and
+	// ONE cancellation check so they can't compound into an unbounded run or
+	// silently bypass each other. Precedence: todo → goal → Stop hook. The Stop
+	// hook only fires once the internal guards are quiet (the agent would truly
+	// stop), and carries stop_hook_active so a script can stop forcing laps.
+	const (
+		maxTodoRetries = 3 // sub-cap so incomplete todos can't hog the budget
+		// Umbrella budget shared by todo/goal/Stop. Sized as the goal's original
+		// 25 plus the todo sub-cap of 3, so merging the loops does not shrink the
+		// goal's effective continuation budget.
+		maxContinuations = 25 + maxTodoRetries
+	)
+	disp := hooks.DispatcherFromContext(ctx)
+	todoUsed := 0
+	stopHookActive := false
+continuationLoop:
+	for i := 0; i < maxContinuations; i++ {
+		// User cancellation is a one-vote veto over every continuation mechanism.
 		select {
 		case <-ctx.Done():
-			config.Logger().Printf("[runner] todo continuation cancelled")
-			break todoLoop
+			config.Logger().Printf("[runner] continuation cancelled")
+			break continuationLoop
 		default:
 		}
-		if todoStore == nil || !todoStore.HasIncomplete() {
-			break
+		if goalStore != nil && tokenUsage != nil {
+			goalStore.RecordTokens(tokenUsage.GetLastTotal())
 		}
-		reminder := todoStore.IncompleteSummary()
-		h.OnAgentText("\n⚠️ Incomplete todos detected, continuing...\n")
+
+		todoIncomplete := todoStore != nil && todoStore.HasIncomplete()
+		goalPrompt := ""
+		if goalStore != nil && goalStore.IsActive() {
+			goalPrompt = goalStore.ContinuationPrompt()
+		}
+		goalActive := goalPrompt != ""
+
+		// Only consult the Stop hook when the internal guards are quiet, so it sees
+		// the true end of the turn rather than a half-finished state.
+		todoWantsMore := todoIncomplete && todoUsed < maxTodoRetries
+		var stopBlock bool
+		var stopReason string
+		if !todoWantsMore && !goalActive && disp.Configured(hooks.Stop) {
+			dec := disp.Fire(ctx, hooks.Stop, hooks.Payload{StopHookActive: stopHookActive})
+			stopBlock = dec.Block
+			stopReason = dec.Reason
+		}
+
+		var reason, banner string
+		switch continuationSource(todoIncomplete, todoUsed, maxTodoRetries, goalActive, stopBlock) {
+		case "todo":
+			reason = todoStore.IncompleteSummary()
+			banner = "\n⚠️ Incomplete todos detected, continuing...\n"
+			todoUsed++
+		case "goal":
+			reason = goalPrompt
+			banner = "\n🎯 Goal active — continuing toward objective...\n"
+		case "stop":
+			reason = stopReason
+			if reason == "" {
+				reason = "A Stop hook requested that you keep working before finishing."
+			}
+			banner = "\n🛑 Stop hook active — continuing...\n"
+			stopHookActive = true
+		default:
+			break continuationLoop // nothing wants to continue → truly done
+		}
+
+		h.OnAgentText(banner)
 		messages = append(messages, &schema.Message{Role: schema.Assistant, Content: pending})
-		messages = append(messages, schema.UserMessage(reminder))
+		messages = append(messages, schema.UserMessage(reason))
 		extra, done := runInner(ctx, ag, messages, h, rec)
 		resp += extra
 		pending = extra
 		if done {
 			return resp
-		}
-	}
-
-	// Goal continuation guard: if an active goal exists and the agent stopped
-	// without proving it complete, keep injecting a continuation prompt and
-	// re-running — mirroring codex's idle auto-continuation. Bounded by a hard
-	// turn cap and context cancellation.
-	if goalStore != nil {
-		const maxGoalContinuations = 25
-	goalLoop:
-		for turns := 0; turns < maxGoalContinuations; turns++ {
-			select {
-			case <-ctx.Done():
-				config.Logger().Printf("[runner] goal continuation cancelled")
-				break goalLoop
-			default:
-			}
-			// Record observed tokens for the informational usage display.
-			if tokenUsage != nil {
-				goalStore.RecordTokens(tokenUsage.GetLastTotal())
-			}
-			if !goalStore.IsActive() {
-				break
-			}
-			cont := goalStore.ContinuationPrompt()
-			if cont == "" {
-				break
-			}
-			config.Logger().Printf("[runner] goal continuation #%d", turns+1)
-			h.OnAgentText("\n🎯 Goal active — continuing toward objective...\n")
-			messages = append(messages, &schema.Message{Role: schema.Assistant, Content: pending})
-			messages = append(messages, schema.UserMessage(cont))
-			extra, done := runInner(ctx, ag, messages, h, rec)
-			resp += extra
-			pending = extra
-			if done {
-				return resp
-			}
 		}
 	}
 
@@ -152,6 +164,23 @@ todoLoop:
 	// also covers the early-return (cancel/error) paths above.
 	h.OnAgentDone(nil)
 	return resp
+}
+
+// continuationSource picks which mechanism drives the next continuation lap,
+// encoding the precedence todo → goal → Stop hook and the todo sub-cap. It is a
+// pure function so the precedence and bounding are unit-testable without a live
+// agent. Returns "" when nothing should continue (the turn is truly done).
+func continuationSource(todoIncomplete bool, todoUsed, todoCap int, goalActive, stopBlock bool) string {
+	if todoIncomplete && todoUsed < todoCap {
+		return "todo"
+	}
+	if goalActive {
+		return "goal"
+	}
+	if stopBlock {
+		return "stop"
+	}
+	return ""
 }
 
 func runInner(

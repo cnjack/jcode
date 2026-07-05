@@ -29,6 +29,7 @@ import (
 	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
+	"github.com/cnjack/jcode/internal/hooks"
 	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/runner"
@@ -823,7 +824,10 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 		// Take a git snapshot before the agent run for session diff tracking.
 		s.takeSessionSnapshot(eng)
 
-		resp := runner.Run(runCtx, agent, history, eng.eventHandler, recorder, eng.todoStore, eng.env.GoalStore, s.tracer, eng.tokenUsage)
+		// Inject the hook dispatcher so PreToolUse/PostToolUse/Stop hooks run on the
+		// Web surface too (parity with the TUI); reloaded per turn for hot-apply.
+		hookCtx := hooks.WithDispatcher(runCtx, hooks.NewSessionDispatcher(config.ConfigDir(), eng.env.Pwd(), recorder.UUID(), config.Logger().Printf))
+		resp := runner.Run(hookCtx, agent, history, eng.eventHandler, recorder, eng.todoStore, eng.env.GoalStore, s.tracer, eng.tokenUsage)
 		if resp != "" {
 			eng.emu.Lock()
 			eng.history = append(eng.history, &schema.Message{Role: schema.Assistant, Content: resp})

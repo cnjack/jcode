@@ -21,6 +21,7 @@ import (
 	"github.com/cnjack/jcode/internal/agent"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
+	"github.com/cnjack/jcode/internal/hooks"
 	mempipeline "github.com/cnjack/jcode/internal/memory/pipeline"
 	"github.com/cnjack/jcode/internal/mode"
 	internalmodel "github.com/cnjack/jcode/internal/model"
@@ -669,6 +670,9 @@ func (a *acpAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Pr
 	copy(history, sess.history)
 	sess.mu.Unlock()
 
+	// Inject the hook dispatcher so PreToolUse/PostToolUse/Stop hooks run on ACP
+	// too (parity with the TUI); reloaded per turn so hooks.json edits hot-apply.
+	promptCtx = hooks.WithDispatcher(promptCtx, hooks.NewSessionDispatcher(config.ConfigDir(), sess.env.Pwd(), sess.rec.UUID(), config.Logger().Printf))
 	resp := runner.Run(promptCtx, sess.ag, history, sess.h, sess.rec, sess.todoStore, sess.env.GoalStore, sess.tracer, sess.tokenUsage)
 
 	sess.mu.Lock()
