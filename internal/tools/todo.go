@@ -169,12 +169,39 @@ Use this tool proactively in these scenarios:
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"todos": {
 				Type:     schema.Array,
-				Desc:     `The complete todo list. Each item: {"id": <int>, "title": "<desc>", "status": "pending|in_progress|completed|cancelled"}. Always send the FULL list.`,
+				Desc:     `The complete todo list. Always send the FULL list.`,
 				Required: true,
+				ElemInfo: todoItemParamInfo(),
 			},
 		}),
 	}
 	return &todoWriteTool{env: e, info: info}
+}
+
+// todoItemParamInfo is the item schema for the legacy todos array, kept in
+// sync with the runtime validation in todoWriteTool.InvokableRun.
+func todoItemParamInfo() *schema.ParameterInfo {
+	return &schema.ParameterInfo{
+		Type: schema.Object,
+		SubParams: map[string]*schema.ParameterInfo{
+			"id": {
+				Type:     schema.Integer,
+				Desc:     "Unique numeric identifier.",
+				Required: true,
+			},
+			"title": {
+				Type:     schema.String,
+				Desc:     "Task description.",
+				Required: true,
+			},
+			"status": {
+				Type:     schema.String,
+				Desc:     "Task state.",
+				Enum:     []string{string(TodoPending), string(TodoInProgress), string(TodoCompleted), string(TodoCancelled)},
+				Required: true,
+			},
+		},
+	}
 }
 
 type todoWriteTool struct {

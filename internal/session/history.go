@@ -214,10 +214,27 @@ func ReconstructState(entries []Entry) *SessionState {
 			}
 
 		case EntryCompact:
-			// Discard accumulated history and use the compact summary as base.
-			msgs = []adk.Message{
-				&schema.Message{Role: schema.System, Content: e.Summary},
+			// Replace accumulated history with the compact summary plus the
+			// KeptN trailing messages the live agent kept verbatim (the tail
+			// entries precede the compact event on disk, so they are already
+			// in msgs). Legacy entries have KeptN==0 and keep nothing.
+			keep := e.KeptN
+			if keep < 0 {
+				keep = 0
 			}
+			if keep > len(msgs) {
+				keep = len(msgs)
+			}
+			tailStart := len(msgs) - keep
+			// Don't orphan tool results: walk back so the assistant message
+			// carrying the corresponding tool calls is kept too (mirrors
+			// agent.findToolBoundary).
+			for tailStart > 0 && tailStart < len(msgs) && msgs[tailStart].Role == schema.Tool {
+				tailStart--
+			}
+			msgs = append([]adk.Message{
+				&schema.Message{Role: schema.System, Content: e.Summary},
+			}, msgs[tailStart:]...)
 
 		case EntryPlanUpdate:
 			if state.Plan == nil {

@@ -226,6 +226,170 @@ func TestFileTrackerTouchOnly(t *testing.T) {
 	}
 }
 
+// FT-NR1: an untracked path that exists on disk reports ConflictNeverRead;
+// an untracked path that does not exist reports ConflictNone (create is
+// naturally exempt from the read-before-edit guard).
+func TestFileTrackerCheckConflictNeverRead(t *testing.T) {
+	sm := newTestStorageManager(t)
+	defer func() { _ = sm.Close() }()
+	ft := NewFileTracker(sm)
+
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "exists.txt")
+	if err := os.WriteFile(existing, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cr, err := ft.CheckConflict(existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cr.Status != ConflictNeverRead {
+		t.Fatalf("expected ConflictNeverRead for untracked existing file, got %d", cr.Status)
+	}
+
+	cr, err = ft.CheckConflict(filepath.Join(dir, "missing.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cr.Status != ConflictNone {
+		t.Fatalf("expected ConflictNone for untracked missing file, got %d", cr.Status)
+	}
+}
+
+// FT-NR2: a FileTracker without a StorageManager must not panic on
+// CreateBackup; it reports no backup and no error.
+func TestFileTrackerCreateBackupNilStorage(t *testing.T) {
+	ft := NewFileTracker(nil)
+	bp, err := ft.CreateBackup("/some/file.go", []byte("content"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if bp != "" {
+		t.Fatalf("expected empty backup path, got %q", bp)
+	}
+}
+
+func TestFileTrackerScanExternalChanges(t *testing.T) {
+	sm := newTestStorageManager(t)
+	defer func() { _ = sm.Close() }()
+	ft := NewFileTracker(sm)
+
+	path := filepath.Join(t.TempDir(), "scan.txt")
+	if err := os.WriteFile(path, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Stat(path)
+	ft.TrackRead(path, []byte("original"), info.ModTime())
+
+	// External modification, with a forced mtime bump for determinism.
+	if err := os.WriteFile(path, []byte("changed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(5 * time.Second)
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	changes := ft.ScanExternalChanges(10)
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change, got %d: %+v", len(changes), changes)
+	}
+	if changes[0].Path != path || changes[0].Gone {
+		t.Fatalf("unexpected change: %+v", changes[0])
+	}
+
+	// Second scan is silent: tracked state was advanced in place (hash dedup).
+	if again := ft.ScanExternalChanges(10); len(again) != 0 {
+		t.Fatalf("expected no changes on rescan, got %+v", again)
+	}
+}
+
+func TestFileTrackerScanExternalChangesGone(t *testing.T) {
+	sm := newTestStorageManager(t)
+	defer func() { _ = sm.Close() }()
+	ft := NewFileTracker(sm)
+
+	path := filepath.Join(t.TempDir(), "gone.txt")
+	if err := os.WriteFile(path, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Stat(path)
+	ft.TrackRead(path, []byte("data"), info.ModTime())
+
+	_ = os.Remove(path)
+
+	changes := ft.ScanExternalChanges(10)
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change, got %d: %+v", len(changes), changes)
+	}
+	if changes[0].Path != path || !changes[0].Gone {
+		t.Fatalf("expected Gone=true for %s, got %+v", path, changes[0])
+	}
+
+	// The gone file is evicted from tracking: rescan is silent.
+	if again := ft.ScanExternalChanges(10); len(again) != 0 {
+		t.Fatalf("expected no changes after eviction, got %+v", again)
+	}
+}
+
+func TestFileTrackerScanExternalChangesLimit(t *testing.T) {
+	sm := newTestStorageManager(t)
+	defer func() { _ = sm.Close() }()
+	ft := NewFileTracker(sm)
+
+	dir := t.TempDir()
+	future := time.Now().Add(5 * time.Second)
+	for i := 0; i < 3; i++ {
+		p := filepath.Join(dir, "f"+itoa(i)+".txt")
+		if err := os.WriteFile(p, []byte("orig"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		info, _ := os.Stat(p)
+		ft.TrackRead(p, []byte("orig"), info.ModTime())
+		if err := os.WriteFile(p, []byte("changed"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, future, future); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	changes := ft.ScanExternalChanges(2)
+	if len(changes) != 2 {
+		t.Fatalf("expected limit of 2 changes, got %d: %+v", len(changes), changes)
+	}
+	// The remaining change surfaces on the next scan.
+	rest := ft.ScanExternalChanges(2)
+	if len(rest) != 1 {
+		t.Fatalf("expected 1 remaining change, got %d: %+v", len(rest), rest)
+	}
+}
+
+func TestFileTrackerScanTouchOnly(t *testing.T) {
+	sm := newTestStorageManager(t)
+	defer func() { _ = sm.Close() }()
+	ft := NewFileTracker(sm)
+
+	path := filepath.Join(t.TempDir(), "touch.txt")
+	content := []byte("same")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Stat(path)
+	ft.TrackRead(path, content, info.ModTime())
+
+	// Touch only: mtime changes, content does not.
+	future := time.Now().Add(5 * time.Second)
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	if changes := ft.ScanExternalChanges(10); len(changes) != 0 {
+		t.Fatalf("expected no changes for touch-only, got %+v", changes)
+	}
+}
+
 func TestFileTrackerCreateBackup(t *testing.T) {
 	sm := newTestStorageManager(t)
 	defer func() { _ = sm.Close() }()

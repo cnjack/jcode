@@ -98,6 +98,57 @@ type subagentTool struct {
 	info *schema.ToolInfo
 }
 
+// safeToolMiddleware folds subagent tool panics and errors into model-visible
+// strings so a single failing tool cannot kill the whole subagent run. It is a
+// local mirror of the error-handling half of the parent agent's
+// approvalMiddleware (internal/agent/middleware.go) — the tools package cannot
+// import the agent package (circular dependency), so the logic is duplicated.
+//
+// NOTE: the folding format is load-bearing and MUST stay byte-identical to
+// internal/agent/middleware.go: internal/handler/acp.go (isToolFailureOutput)
+// and internal/agent/reminder.go (updateErrorStreak) classify failures by the
+// "Tool execution failed:" / "Tool execution panicked:" prefixes.
+// TestSafeToolMiddleware_ErrorFolded and TestApprovalMiddleware_NonFatalFolded
+// lock the two formats together.
+type safeToolMiddleware struct {
+	*adk.BaseChatModelAgentMiddleware
+}
+
+func newSafeToolMiddleware() adk.ChatModelAgentMiddleware {
+	return &safeToolMiddleware{BaseChatModelAgentMiddleware: &adk.BaseChatModelAgentMiddleware{}}
+}
+
+func (m *safeToolMiddleware) WrapInvokableToolCall(
+	ctx context.Context,
+	endpoint adk.InvokableToolCallEndpoint,
+	_ *adk.ToolContext,
+) (adk.InvokableToolCallEndpoint, error) {
+	return func(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (result string, retErr error) {
+		// Recover from panics so a single buggy tool cannot crash the
+		// subagent (or, on the async path, the whole process).
+		defer func() {
+			if r := recover(); r != nil {
+				result = fmt.Sprintf("Tool execution panicked: %v", r)
+				retErr = nil // surface as agent-visible string, not error
+			}
+		}()
+
+		result, err := endpoint(ctx, argumentsInJSON, opts...)
+		if err != nil {
+			// Fatal errors (#16: executor permanently dead) propagate so
+			// the abort reaches the parent run instead of being folded.
+			if IsFatal(err) {
+				return "", err
+			}
+			if result != "" {
+				return fmt.Sprintf("%s\n\nTool execution failed: %v", result, err), nil
+			}
+			return fmt.Sprintf("Tool execution failed: %v", err), nil
+		}
+		return result, nil
+	}, nil
+}
+
 func (s *subagentTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 	return s.info, nil
 }
@@ -158,6 +209,9 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 			runCtx = s.deps.Tracer.WithChildTrace(runCtx, fmt.Sprintf("subagent-%s", input.Name))
 			middlewares = append(middlewares, s.deps.Tracer.ChildAgentMiddleware())
 		}
+		// Safe error handling MUST be appended last (innermost) so Langfuse
+		// traces record the folded result, not the raw error/panic.
+		middlewares = append(middlewares, newSafeToolMiddleware())
 
 		ag, err := adk.NewChatModelAgent(runCtx, &adk.ChatModelAgentConfig{
 			Name:        fmt.Sprintf("subagent-%s", input.Name),
@@ -180,9 +234,16 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 		if err != nil {
 			return "", fmt.Errorf("failed to create subagent: %w", err)
 		}
-		result := s.runSubagent(runCtx, ag, input)
+		result, runErr := s.runSubagent(runCtx, ag, input)
 		if s.deps.Tracer != nil {
-			s.deps.Tracer.EndChildTrace(runCtx, result)
+			if runErr != nil {
+				s.deps.Tracer.EndChildTrace(runCtx, fmt.Sprintf("error: %v", runErr))
+			} else {
+				s.deps.Tracer.EndChildTrace(runCtx, result)
+			}
+		}
+		if runErr != nil {
+			return "", runErr
 		}
 		return result, nil
 	}
@@ -228,7 +289,11 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 	return result, nil
 }
 
-func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, input subagentInput) string {
+// runSubagent drives the subagent's event loop. It returns the accumulated
+// assistant text and a non-nil error when the run terminated on a model-layer
+// failure (event.Err) — tool errors never surface here: the
+// safeToolMiddleware already folded them into model-visible strings.
+func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, input subagentInput) (string, error) {
 	agentInput := &adk.AgentInput{
 		Messages: []adk.Message{
 			schema.UserMessage(input.Prompt),
@@ -246,6 +311,31 @@ func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, 
 		}
 	}
 
+	// Roll this subagent's tokens into the global usage log under the
+	// leader's session so subagent-heavy work isn't undercounted — deferred
+	// so error returns are counted too. The tracker is fresh per run, so its
+	// cumulative snapshot IS this run's delta.
+	defer func() {
+		if s.deps.Recorder == nil {
+			return
+		}
+		d := tokenUsage.GetFull()
+		if d.TotalTokens > 0 {
+			usage.RecordEvent(usage.Event{
+				Session:    s.deps.Recorder.UUID(),
+				Project:    s.deps.Recorder.Project(),
+				Model:      s.deps.Recorder.Model(),
+				Prompt:     d.PromptTokens,
+				Completion: d.CompletionTokens,
+				Cached:     d.CachedTokens,
+				Reasoning:  d.ReasoningTokens,
+				CacheWrite: d.CacheWriteTokens,
+				Total:      d.TotalTokens,
+				Calls:      d.CallCount,
+			})
+		}
+	}()
+
 	var assistantText strings.Builder
 	iterator := ag.Run(ctx, agentInput)
 	for {
@@ -254,8 +344,14 @@ func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, 
 			break
 		}
 		if event.Err != nil {
+			// Model-layer failure (retries exhausted) or cancellation:
+			// propagate to the parent instead of returning truncated
+			// partial text as if the subagent had succeeded.
 			config.Logger().Printf("[subagent] %s error: %v", input.Name, event.Err)
-			break
+			if ctx.Err() != nil {
+				return assistantText.String(), ctx.Err()
+			}
+			return assistantText.String(), fmt.Errorf("subagent %s failed: %w", input.Name, event.Err)
 		}
 		if event.Output == nil || event.Output.MessageOutput == nil {
 			continue
@@ -345,28 +441,7 @@ func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, 
 		}
 	}
 
-	// Roll this subagent's tokens into the global usage log under the leader's
-	// session so subagent-heavy work isn't undercounted. The tracker is fresh
-	// per run, so its cumulative snapshot IS this run's delta.
-	if s.deps.Recorder != nil {
-		d := tokenUsage.GetFull()
-		if d.TotalTokens > 0 {
-			usage.RecordEvent(usage.Event{
-				Session:    s.deps.Recorder.UUID(),
-				Project:    s.deps.Recorder.Project(),
-				Model:      s.deps.Recorder.Model(),
-				Prompt:     d.PromptTokens,
-				Completion: d.CompletionTokens,
-				Cached:     d.CachedTokens,
-				Reasoning:  d.ReasoningTokens,
-				CacheWrite: d.CacheWriteTokens,
-				Total:      d.TotalTokens,
-				Calls:      d.CallCount,
-			})
-		}
-	}
-
-	return assistantText.String()
+	return assistantText.String(), nil
 }
 
 // notifyProgress sends an intermediate progress event to the TUI if a ProgressFn is set.

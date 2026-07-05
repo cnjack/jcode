@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -42,6 +43,15 @@ const grepAbsoluteMax = 1000
 // grepTimeout is the max time a local grep command may run.
 const grepTimeout = 20 * time.Second
 
+// grepHardCapLines bounds how many output lines runLocalRg buffers in
+// files_with_matches/count modes — a pure memory guard, normally never hit.
+// Content mode uses the tighter offset+max_results+1 window instead.
+const grepHardCapLines = 50000
+
+// grepScannerMaxLine bounds a single output line read from rg. Match lines
+// are already truncated by --max-columns=500; this is defensive.
+const grepScannerMaxLine = 1024 * 1024
+
 // grepVCSExclusions are directories excluded from search.
 var grepVCSExclusions = []string{
 	".git", "node_modules", "vendor", "__pycache__", ".venv",
@@ -80,12 +90,13 @@ Supports context lines, pagination via offset, multiline matching, and file type
 			},
 			"max_results": {
 				Type:     schema.Integer,
-				Desc:     "Maximum number of results to return. Default 250, max 1000. Pass 0 for unlimited (use sparingly).",
+				Desc:     "Maximum number of results to return. Default 250, max 1000.",
 				Required: false,
 			},
 			"output_mode": {
 				Type:     schema.String,
 				Desc:     `Output mode: "files_with_matches" (default, filenames sorted by mtime), "content" (matching lines), "count" (file:count format).`,
+				Enum:     []string{"files_with_matches", "content", "count"},
 				Required: false,
 			},
 			"before_context": {
@@ -157,6 +168,13 @@ func (g *grepTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 	if input.OutputMode == "" {
 		input.OutputMode = "files_with_matches"
 	}
+	// The schema declares an enum, but providers do not necessarily enforce
+	// it — reject unknown values instead of silently running in content mode.
+	switch input.OutputMode {
+	case "files_with_matches", "content", "count":
+	default:
+		return "", fmt.Errorf("invalid output_mode %q: must be one of files_with_matches, content, count", input.OutputMode)
+	}
 
 	// On remote (SSH), build the command string and run via Executor.
 	if g.env.IsRemote() {
@@ -183,15 +201,15 @@ func (g *grepTool) buildRgArgs(input GrepInput, maxResults int) []string {
 		args = append(args, "--glob", "!"+dir)
 	}
 
-	// Output mode
+	// Output mode. Content mode (the default) deliberately adds no rg-side
+	// limit: --max-count is per-file, which silently drops matches beyond the
+	// cap within a single file and makes them unreachable via offset. The
+	// global offset+limit window is applied in Go (see runLocalRg's capLines).
 	switch input.OutputMode {
 	case "files_with_matches":
 		args = append(args, "--files-with-matches")
 	case "count":
 		args = append(args, "--count")
-	default:
-		// content mode: use max-count for limiting
-		args = append(args, "--max-count", fmt.Sprintf("%d", maxResults+input.Offset+1))
 	}
 
 	// Context lines (only meaningful for content mode)
@@ -232,6 +250,10 @@ func (g *grepTool) buildRgArgs(input GrepInput, maxResults int) []string {
 }
 
 // runLocalRg executes ripgrep locally with timeout and processes results.
+// Output is consumed as a stream with an early stop: once enough lines for
+// the requested page (content mode) or the hard memory cap (other modes) are
+// collected, rg is killed instead of letting it flood memory with the full
+// result set of a broad pattern over a large repo.
 func (g *grepTool) runLocalRg(ctx context.Context, rgPath string, input GrepInput, maxResults int) (string, error) {
 	args := g.buildRgArgs(input, maxResults)
 
@@ -239,26 +261,61 @@ func (g *grepTool) runLocalRg(ctx context.Context, rgPath string, input GrepInpu
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, rgPath, args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
+	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-
-	err := cmd.Run()
+	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
+		return "", fmt.Errorf("search failed: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("search failed: %w", err)
+	}
+
+	// capLines: how many raw output lines we need at most. Content mode reads
+	// one line past the requested page to detect truncation (same slicing
+	// contract as postProcessOutput); other modes only have the memory guard.
+	capLines := grepHardCapLines
+	if input.OutputMode == "content" || input.OutputMode == "" {
+		capLines = input.Offset + maxResults + 1
+	}
+
+	var lines []string
+	capped := false
+	scanner := bufio.NewScanner(stdoutPipe)
+	scanner.Buffer(make([]byte, 64*1024), grepScannerMaxLine)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+		if len(lines) >= capLines {
+			capped = true
+			break
+		}
+	}
+	scanErr := scanner.Err()
+	if capped || scanErr != nil {
+		cancel() // stop rg early — we have all the lines we need
+	}
+	waitErr := cmd.Wait()
+
+	if scanErr != nil && !capped {
+		if len(lines) == 0 {
+			return "", fmt.Errorf("search error: failed reading results: %v", scanErr)
+		}
+		capped = true // oversized line aborted the scan — treat as partial results
+	}
+
+	if waitErr != nil && !capped {
 		// Exit code 1 = no matches
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		if exitErr, ok := waitErr.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			return "No matches found.", nil
 		}
 		// Timeout: report partial results or clear error
 		if ctx.Err() == context.DeadlineExceeded {
-			partial := stdout.String()
-			if partial != "" {
-				lines := strings.Split(strings.TrimRight(partial, "\n"), "\n")
+			if len(lines) > 0 {
 				// Drop last line which may be incomplete
 				if len(lines) > 1 {
 					lines = lines[:len(lines)-1]
 				}
-				result := g.postProcessOutput(lines, input, maxResults)
+				result := g.postProcessOutput(lines, input, maxResults, false)
 				return fmt.Sprintf("Search timed out after %s. Partial results:\n%s", grepTimeout, result), nil
 			}
 			return fmt.Sprintf("Search timed out after %s. Try a more specific path or pattern.", grepTimeout), nil
@@ -266,35 +323,34 @@ func (g *grepTool) runLocalRg(ctx context.Context, rgPath string, input GrepInpu
 		if stderr.Len() > 0 {
 			return "", fmt.Errorf("search error: %s", strings.TrimSpace(stderr.String()))
 		}
-		return "", fmt.Errorf("search failed: %w", err)
+		return "", fmt.Errorf("search failed: %w", waitErr)
 	}
 
-	raw := stdout.String()
-	if raw == "" {
+	if len(lines) == 0 {
 		return "No matches found.", nil
 	}
-
-	lines := strings.Split(strings.TrimRight(raw, "\n"), "\n")
-	return g.postProcessOutput(lines, input, maxResults), nil
+	return g.postProcessOutput(lines, input, maxResults, capped), nil
 }
 
 // postProcessOutput handles path relativization, mtime sorting (for files_with_matches),
-// pagination, and result formatting.
-func (g *grepTool) postProcessOutput(lines []string, input GrepInput, maxResults int) string {
+// pagination, and result formatting. capped indicates the line stream was cut
+// off early (rg killed after capLines), so totals derived from lines are lower
+// bounds rather than exact counts.
+func (g *grepTool) postProcessOutput(lines []string, input GrepInput, maxResults int, capped bool) string {
 	pwd := g.env.Pwd()
 
 	switch input.OutputMode {
 	case "files_with_matches":
-		return g.formatFilesWithMatches(lines, pwd, maxResults, input.Offset)
+		return g.formatFilesWithMatches(lines, pwd, maxResults, input.Offset, capped)
 	case "count":
-		return g.formatCount(lines, pwd, maxResults, input.Offset)
+		return g.formatCount(lines, pwd, maxResults, input.Offset, capped)
 	default:
-		return g.formatContent(lines, pwd, maxResults, input.Offset)
+		return g.formatContent(lines, pwd, maxResults, input.Offset, capped)
 	}
 }
 
 // formatFilesWithMatches sorts file paths by mtime (newest first) and converts to relative paths.
-func (g *grepTool) formatFilesWithMatches(lines []string, pwd string, maxResults, offset int) string {
+func (g *grepTool) formatFilesWithMatches(lines []string, pwd string, maxResults, offset int, capped bool) string {
 	type fileEntry struct {
 		path  string
 		mtime int64
@@ -352,12 +408,17 @@ func (g *grepTool) formatFilesWithMatches(lines []string, pwd string, maxResults
 	default:
 		fmt.Fprintf(&result, "\nFound %d files\n", len(entries))
 	}
+	if capped {
+		fmt.Fprintf(&result, "(file list truncated at %d entries — narrow the search)\n", grepHardCapLines)
+	}
 
 	return result.String()
 }
 
 // formatContent converts absolute paths in content lines to relative paths.
-func (g *grepTool) formatContent(lines []string, pwd string, maxResults, offset int) string {
+// capped means the underlying scan stopped early, so len(lines) is a lower
+// bound — the footer must not present it as an exact total.
+func (g *grepTool) formatContent(lines []string, pwd string, maxResults, offset int, capped bool) string {
 	totalLines := len(lines)
 
 	// Apply offset
@@ -382,6 +443,9 @@ func (g *grepTool) formatContent(lines []string, pwd string, maxResults, offset 
 	}
 
 	switch {
+	case capped:
+		fmt.Fprintf(&result, "\n(showing %d results, offset %d — more results available, use offset=%d for next page)\n",
+			len(lines), offset, offset+len(lines))
 	case truncated:
 		fmt.Fprintf(&result, "\n(showing %d results, %d total, offset %d — use offset=%d for next page)\n",
 			len(lines), totalLines, offset, offset+maxResults)
@@ -395,7 +459,7 @@ func (g *grepTool) formatContent(lines []string, pwd string, maxResults, offset 
 }
 
 // formatCount converts absolute paths in count lines to relative paths.
-func (g *grepTool) formatCount(lines []string, pwd string, maxResults, offset int) string {
+func (g *grepTool) formatCount(lines []string, pwd string, maxResults, offset int, capped bool) string {
 	totalLines := len(lines)
 
 	if offset > 0 {
@@ -430,6 +494,9 @@ func (g *grepTool) formatCount(lines []string, pwd string, maxResults, offset in
 			totalMatches, len(lines), offset, offset+maxResults)
 	} else {
 		fmt.Fprintf(&result, "\nFound %d occurrences across %d files\n", totalMatches, len(lines))
+	}
+	if capped {
+		fmt.Fprintf(&result, "(file list truncated at %d entries — narrow the search)\n", grepHardCapLines)
 	}
 
 	return result.String()
@@ -470,22 +537,42 @@ func (g *grepTool) runRemote(ctx context.Context, input GrepInput, maxResults in
 	stdout, stderr, err := g.env.Exec.Exec(ctx, cmd, "", 30*time.Second)
 
 	if err != nil {
-		// Exit code 1 = no matches
+		// Exit code 1 = no matches (files_with_matches/count run rg bare;
+		// content mode pipes through head, whose exit code masks rg's — that
+		// case is handled by the empty-stdout check below).
 		if strings.Contains(err.Error(), "exit status 1") || strings.Contains(err.Error(), "status 1") {
 			return "No matches found.", nil
 		}
-		if stderr != "" {
-			return "", fmt.Errorf("search error: %s", strings.TrimSpace(stderr))
+		if stdout == "" {
+			if stderr != "" {
+				return "", fmt.Errorf("search error: %s", strings.TrimSpace(stderr))
+			}
+			return "", fmt.Errorf("search failed: %w", err)
 		}
-		return "", fmt.Errorf("search failed: %w", err)
+		// partial results — continue with what we have
 	}
 
 	if stdout == "" {
+		// With the head pipeline the exit status is head's 0 even when rg
+		// found nothing (or failed): empty stdout with stderr output is a
+		// real failure, otherwise it is the no-match signal.
+		if strings.TrimSpace(stderr) != "" {
+			return "", fmt.Errorf("search error: %s", strings.TrimSpace(stderr))
+		}
 		return "No matches found.", nil
 	}
 
 	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
-	return g.postProcessOutput(lines, input, maxResults), nil
+
+	// The head guard cut the stream at capLines: reaching it means more
+	// results may exist and line-derived totals are lower bounds.
+	capped := false
+	if input.OutputMode == "content" {
+		if capLines := input.Offset + maxResults + 1; len(lines) >= capLines {
+			capped = true
+		}
+	}
+	return g.postProcessOutput(lines, input, maxResults, capped), nil
 }
 
 func (g *grepTool) buildRemoteCmd(input GrepInput, maxResults int) string {
@@ -497,13 +584,13 @@ func (g *grepTool) buildRemoteCmd(input GrepInput, maxResults int) string {
 		rgParts = append(rgParts, "--glob", ShellQuote("!"+dir))
 	}
 
+	// Content mode adds no rg-side limit here (--max-count is per-file and
+	// drops matches); a head guard is appended to the pipeline below instead.
 	switch input.OutputMode {
 	case "files_with_matches":
 		rgParts = append(rgParts, "--files-with-matches")
 	case "count":
 		rgParts = append(rgParts, "--count")
-	default:
-		rgParts = append(rgParts, "--max-count", fmt.Sprintf("%d", maxResults+input.Offset+1))
 	}
 
 	if input.OutputMode == "content" || input.OutputMode == "" {
@@ -540,5 +627,11 @@ func (g *grepTool) buildRemoteCmd(input GrepInput, maxResults int) string {
 	}
 	rgParts = append(rgParts, ShellQuote(input.Path))
 
-	return strings.Join(rgParts, " ")
+	cmd := strings.Join(rgParts, " ")
+	// Volume guard for content mode: cap the stream at one line past the
+	// requested page (mirrors runLocalRg's capLines early stop).
+	if input.OutputMode == "content" || input.OutputMode == "" {
+		cmd += fmt.Sprintf(" | head -n %d", input.Offset+maxResults+1)
+	}
+	return cmd
 }

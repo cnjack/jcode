@@ -101,7 +101,9 @@ func (s *ThresholdCompactionStrategy) Compact(ctx context.Context, messages []*s
 	summaryMsg, err := s.summarizer.Generate(ctx, summaryInput)
 	if err != nil {
 		config.Logger().Printf("[compaction] summarisation failed: %v", err)
-		return messages, nil // fail-open: return original messages
+		// Propagate the error so the middleware can count it towards its
+		// fuse; the caller keeps the original messages (fail-open).
+		return messages, err
 	}
 
 	summaryMessage := &schema.Message{
@@ -125,13 +127,18 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen] + "…"
 }
 
+// maxConsecutiveCompactFails is the fuse limit: after this many consecutive
+// compaction failures (summarizer errors or no-shrink results) the middleware
+// stops attempting automatic compaction for the rest of the session, instead
+// of burning tokens and latency on a summarizer that keeps failing.
+const maxConsecutiveCompactFails = 3
+
 // CompactionState tracks compaction history for diagnostics.
 type CompactionState struct {
 	mu               sync.Mutex
 	compactionCount  int
 	savedTokens      int
 	consecutiveFails int
-	tripped          bool
 }
 
 // CompactionCount returns how many compactions have occurred.
@@ -157,6 +164,9 @@ type compactionMiddleware struct {
 	contextLimit int
 	onCompact    func(savedTokens int)
 	tokenUsage   *internalmodel.TokenUsage
+	// fuseLogOnce ensures the "compaction disabled" log fires once per session
+	// instead of on every model call after the fuse blows.
+	fuseLogOnce sync.Once
 }
 
 // NewCompactionMiddleware creates a ChatModelAgentMiddleware that monitors
@@ -193,6 +203,18 @@ func (m *compactionMiddleware) BeforeModelRewriteState(
 		return ctx, state, nil
 	}
 
+	// Fuse: after repeated failures, stop retrying the summarizer for the
+	// rest of the session — each retry costs tokens and latency for nothing.
+	m.state.mu.Lock()
+	fails := m.state.consecutiveFails
+	m.state.mu.Unlock()
+	if fails >= maxConsecutiveCompactFails {
+		m.fuseLogOnce.Do(func() {
+			config.Logger().Printf("[compaction] disabled for this session after %d consecutive failures", fails)
+		})
+		return ctx, state, nil
+	}
+
 	config.Logger().Printf("[compaction] triggered: tokens=%d, limit=%d", currentTokens, m.contextLimit)
 
 	beforeLen := len(state.Messages)
@@ -206,13 +228,21 @@ func (m *compactionMiddleware) BeforeModelRewriteState(
 	}
 
 	saved := beforeLen - len(compacted)
+	if saved <= 0 {
+		// Compacted nothing (e.g. a single poison message larger than the
+		// window): a non-error failure that still counts towards the fuse.
+		config.Logger().Printf("[compaction] no shrink: %d → %d messages", beforeLen, len(compacted))
+		m.state.mu.Lock()
+		m.state.consecutiveFails++
+		m.state.mu.Unlock()
+		return ctx, state, nil
+	}
 	state.Messages = compacted
 
 	m.state.mu.Lock()
 	m.state.compactionCount++
 	m.state.savedTokens += saved
 	m.state.consecutiveFails = 0
-	m.state.tripped = true
 	m.state.mu.Unlock()
 
 	config.Logger().Printf("[compaction] compacted %d messages → %d (saved %d)", beforeLen, len(compacted), saved)

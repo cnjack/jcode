@@ -553,10 +553,6 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 			var handlers []adk.ChatModelAgentMiddleware
 
 			compactThreshold := cfg.CompactionThreshold()
-			reductionThreshold := compactThreshold - 0.15
-			if reductionThreshold < 0.1 {
-				reductionThreshold = compactThreshold * 0.8
-			}
 
 			summMw, err := summarization.New(ctx, &summarization.Config{
 				Model: cm,
@@ -569,21 +565,31 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 				handlers = append(handlers, summMw)
 			}
 
-			reductionBackend := &agent.LocalReductionBackend{RootDir: reductionRoot}
-			reductionMw, err := reduction.New(ctx, &reduction.Config{
-				Backend:           reductionBackend,
-				RootDir:           reductionRoot,
-				MaxLengthForTrunc: 50000,
-				MaxTokensForClear: int64(float64(ctxLimit) * reductionThreshold),
-				ReadFileToolName:  "read",
-				ToolConfig: map[string]*reduction.ToolReductionConfig{
-					"read": {SkipClear: true},
-				},
-			})
-			if err == nil {
+			reductionMw, err := reduction.New(ctx, agent.BuildReductionConfig(
+				reductionRoot,
+				ctxLimit,
+				compactThreshold,
+				internalmodel.NewCalibratedCounter(ttok).Count,
+			))
+			if err != nil {
+				config.Logger().Printf("[web] reduction middleware init error: %v", err)
+			} else {
 				handlers = append(handlers, reductionMw)
 			}
+			// Aggregate cap on one turn's NEW tool results: reduction only caps
+			// each result individually (50k), so N parallel calls could still
+			// flood a single request. Registered after reduction so per-result
+			// truncation runs first.
+			handlers = append(handlers, agent.NewTurnToolResultBudgetMiddleware(0))
 
+			// Env-drift/AGENTS.md refresh only applies to local tasks: for a
+			// remote executor taskPwd lives on the remote host, so collecting
+			// local state for it would be meaningless. Empty Pwd = feature off.
+			reminderPwd, reminderSnapshot := "", ""
+			if exec == nil {
+				reminderPwd = taskPwd
+				reminderSnapshot = prompts.SerializeEnvInfo(platform, taskPwd, "local", taskEnvInfo)
+			}
 			reminderMw := agent.NewReminderMiddleware(agent.ReminderConfig{
 				TodoStore:    tenv.TodoStore,
 				GoalStore:    tenv.GoalStore,
@@ -591,6 +597,10 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 				EnvLabel:     "local",
 				IsRemote:     tenv.IsRemote(),
 				ContextLimit: ctxLimit,
+				FileTracker:  tenv.FileTracker,
+				Pwd:          reminderPwd,
+				Platform:     platform,
+				EnvSnapshot:  reminderSnapshot,
 			}, ttok)
 			handlers = append(handlers, reminderMw)
 

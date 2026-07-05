@@ -2,10 +2,13 @@ package tools
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 )
@@ -117,6 +120,40 @@ func TestDockerExecutorSmoke(t *testing.T) {
 	t.Errorf("container still running after Close; expected ref-count auto-stop")
 }
 
+// TestDockerExec_TimeoutKillsRemoteProcess verifies that when an exec times
+// out, the process tree it spawned inside the container is best-effort killed
+// rather than left running after we abandon the attach stream.
+func TestDockerExec_TimeoutKillsRemoteProcess(t *testing.T) {
+	cli := dockerTestClient(t)
+	ctx := context.Background()
+	createTestContainer(t, cli, "jcode-docker-kill-test", []string{"sleep", "600"})
+
+	ex, err := AcquireDockerContainer(ctx, "jcode-docker-kill-test")
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	defer func() { _ = ex.Close() }()
+
+	if _, _, err := ex.Exec(ctx, "sleep 30", "", 1*time.Second); err == nil {
+		t.Fatalf("expected a timeout error for 'sleep 30' with a 1s timeout")
+	}
+
+	// The 'sleep 3[0]' regex matches the leftover process but not the probe's
+	// own cmdline (which contains the literal text 'sleep 3[0]').
+	probe := "ps -o args | grep 'sleep 3[0]' >/dev/null && echo ALIVE || echo GONE"
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		out, _, perr := ex.Exec(ctx, probe, "", 10*time.Second)
+		if perr == nil && strings.Contains(out, "GONE") {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("remote 'sleep 30' still running after the exec timed out: out=%q err=%v", out, perr)
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+}
+
 // TestDockerExecutorOneShotFails verifies A1 semantics: a container whose main
 // process exits immediately cannot host a workspace and yields an error.
 func TestDockerExecutorOneShotFails(t *testing.T) {
@@ -126,5 +163,28 @@ func TestDockerExecutorOneShotFails(t *testing.T) {
 
 	if _, err := AcquireDockerContainer(ctx, "jcode-docker-oneshot-test"); err == nil {
 		t.Fatalf("expected an error for a one-shot container, got nil")
+	}
+}
+
+// #16: isContainerGone classifies only container-removed (NotFound) errors as
+// permanent; everything else stays retryable. Pure function — no daemon needed.
+func TestIsContainerGone(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"plain error", errors.New("exec failed"), false},
+		{"daemon not-found error", fmt.Errorf("Error response from daemon: No such container: abc: %w", cerrdefs.ErrNotFound), true},
+		{"wrapped not-found error", fmt.Errorf("docker exec create: %w", cerrdefs.ErrNotFound), true},
+		{"timeout is not gone", context.DeadlineExceeded, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isContainerGone(tt.err); got != tt.want {
+				t.Fatalf("isContainerGone(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }

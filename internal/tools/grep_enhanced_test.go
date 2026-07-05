@@ -1,6 +1,11 @@
 package tools
 
 import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -49,7 +54,9 @@ func TestG02_FilesWithMatchesModeDefault(t *testing.T) {
 	}
 }
 
-// G-03: content mode
+// G-03: content mode must not use rg's per-file --max-count — it silently
+// drops matches beyond the cap within a single file, making them unreachable
+// via offset. Limiting is done globally in Go instead.
 func TestG03_ContentMode(t *testing.T) {
 	g := newTestGrepTool(t)
 	input := GrepInput{Pattern: "foo", Path: "/src", OutputMode: "content"}
@@ -58,8 +65,8 @@ func TestG03_ContentMode(t *testing.T) {
 	if containsArg(args, "--files-with-matches") {
 		t.Fatal("content mode should not have --files-with-matches")
 	}
-	if !containsArgPrefix(args, "--max-count") {
-		t.Fatal("expected --max-count in content mode")
+	if containsArgPrefix(args, "--max-count") {
+		t.Fatalf("content mode must not use per-file --max-count, got: %v", args)
 	}
 }
 
@@ -123,7 +130,7 @@ func TestG08_OffsetPagination(t *testing.T) {
 		lines = append(lines, "file.go:"+string(rune('0'+i))+": match")
 	}
 
-	result := g.formatContent(lines, "", 4, 3)
+	result := g.formatContent(lines, "", 4, 3, false)
 	// Should contain line index 3
 	if !strings.Contains(result, "file.go:3") {
 		t.Fatalf("expected line 3 in output, got: %s", result)
@@ -290,6 +297,192 @@ func TestG18_ContextOnlyInContentMode(t *testing.T) {
 
 	if containsArgPrefix(args, "--context") {
 		t.Fatal("context flags should not appear in files_with_matches mode")
+	}
+}
+
+// G-19: capped content output uses an honest footer instead of claiming an
+// exact total that was never fully counted.
+func TestG19_ContentCappedFooter(t *testing.T) {
+	g := newTestGrepTool(t)
+
+	var lines []string
+	for i := 0; i < 5; i++ {
+		lines = append(lines, fmt.Sprintf("file.go:%d: match", i+1))
+	}
+
+	// capped: rg was stopped early — total is unknown
+	result := g.formatContent(lines, "", 4, 0, true)
+	if !strings.Contains(result, "more results available") {
+		t.Fatalf("expected 'more results available' in capped footer, got: %s", result)
+	}
+	if !strings.Contains(result, "offset=4") {
+		t.Fatalf("expected next-page hint offset=4 in capped footer, got: %s", result)
+	}
+	if strings.Contains(result, "total") {
+		t.Fatalf("capped footer must not claim an exact total, got: %s", result)
+	}
+
+	// uncapped: totals are exact and may be reported
+	result = g.formatContent(lines, "", 4, 0, false)
+	if !strings.Contains(result, "5 total") {
+		t.Fatalf("expected exact '5 total' in uncapped truncated footer, got: %s", result)
+	}
+
+	// uncapped, not truncated: plain match count
+	result = g.formatContent(lines[:3], "", 4, 0, false)
+	if !strings.Contains(result, "3 matches found") {
+		t.Fatalf("expected '(3 matches found)', got: %s", result)
+	}
+}
+
+// G-20: e2e — a single file with more matches than max_results is paginated
+// globally. The old per-file --max-count made matches beyond the cap
+// permanently unreachable and reported a bogus total.
+func TestG20_LocalEarlyStopSingleFile(t *testing.T) {
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("rg not installed")
+	}
+
+	g := newTestGrepTool(t)
+	dir := t.TempDir()
+	var content strings.Builder
+	for i := 1; i <= 300; i++ {
+		fmt.Fprintf(&content, "match %03d\n", i)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "data.txt"), []byte(content.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// First page: exactly 10 results, honest capped footer
+	args := fmt.Sprintf(`{"pattern":"match","path":%q,"output_mode":"content","max_results":10}`, dir)
+	result, err := g.InvokableRun(context.Background(), args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultLines := 0
+	for _, line := range strings.Split(result, "\n") {
+		if strings.Contains(line, "match 0") {
+			resultLines++
+		}
+	}
+	if resultLines != 10 {
+		t.Fatalf("expected exactly 10 result lines, got %d: %s", resultLines, result)
+	}
+	if !strings.Contains(result, "more results available") {
+		t.Fatalf("expected capped footer, got: %s", result)
+	}
+	if !strings.Contains(result, "offset=10") {
+		t.Fatalf("expected next-page hint offset=10, got: %s", result)
+	}
+	if strings.Contains(result, "11 total") {
+		t.Fatalf("must not claim bogus '11 total' (old per-file cap artifact), got: %s", result)
+	}
+
+	// Deep page: offset=290 reaches matches 291-300 (unreachable under the old
+	// per-file cap of max_results+offset+1 applied at page one) with exact total
+	args = fmt.Sprintf(`{"pattern":"match","path":%q,"output_mode":"content","max_results":10,"offset":290}`, dir)
+	result, err = g.InvokableRun(context.Background(), args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "match 291") || !strings.Contains(result, "match 300") {
+		t.Fatalf("expected matches 291-300 on deep page, got: %s", result)
+	}
+	if !strings.Contains(result, "300 total") {
+		t.Fatalf("expected exact '300 total' when uncapped, got: %s", result)
+	}
+}
+
+// G-21: e2e — when the scan completes without hitting the cap, every file's
+// matches are present and the total is exact.
+func TestG21_ExactTotalWhenUncapped(t *testing.T) {
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("rg not installed")
+	}
+
+	g := newTestGrepTool(t)
+	dir := t.TempDir()
+	var a strings.Builder
+	for i := 1; i <= 300; i++ {
+		fmt.Fprintf(&a, "needle a%03d\n", i)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "aaa.txt"), []byte(a.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	for i := 1; i <= 10; i++ {
+		fmt.Fprintf(&b, "needle b%03d\n", i)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bbb.txt"), []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	args := fmt.Sprintf(`{"pattern":"needle","path":%q,"output_mode":"content","max_results":500}`, dir)
+	result, err := g.InvokableRun(context.Background(), args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "needle b010") {
+		t.Fatalf("expected second file's matches present when uncapped, got: %s", result)
+	}
+	if !strings.Contains(result, "310 matches found") {
+		t.Fatalf("expected exact '(310 matches found)', got: %s", result)
+	}
+}
+
+// G-22: remote content mode guards output volume with head instead of the
+// per-file --max-count.
+func TestG22_RemoteCmdHeadGuard(t *testing.T) {
+	g := newTestGrepTool(t)
+	input := GrepInput{Pattern: "foo", Path: "/src", OutputMode: "content", Offset: 20}
+	cmd := g.buildRemoteCmd(input, 100)
+
+	if !strings.Contains(cmd, "| head -n 121") {
+		t.Fatalf("expected '| head -n 121' (offset+max+1) in remote cmd: %s", cmd)
+	}
+	if strings.Contains(cmd, "--max-count") {
+		t.Fatalf("remote content cmd must not use per-file --max-count: %s", cmd)
+	}
+}
+
+// G-23: unknown output_mode values are rejected instead of silently running
+// in content mode.
+func TestG23_InvalidOutputModeRejected(t *testing.T) {
+	g := newTestGrepTool(t)
+	dir := t.TempDir()
+
+	for _, mode := range []string{"files", "matches"} {
+		args := fmt.Sprintf(`{"pattern":"x","path":%q,"output_mode":%q}`, dir, mode)
+		_, err := g.InvokableRun(context.Background(), args)
+		if err == nil {
+			t.Fatalf("expected error for output_mode %q", mode)
+		}
+		if !strings.Contains(err.Error(), "invalid output_mode") {
+			t.Fatalf("expected 'invalid output_mode' in error, got: %v", err)
+		}
+		for _, valid := range []string{"files_with_matches", "content", "count"} {
+			if !strings.Contains(err.Error(), valid) {
+				t.Fatalf("expected error to list valid value %q, got: %v", valid, err)
+			}
+		}
+	}
+}
+
+// G-24: all valid output modes (and the empty default) are accepted.
+func TestG24_ValidOutputModesAccepted(t *testing.T) {
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("rg not installed")
+	}
+
+	g := newTestGrepTool(t)
+	dir := t.TempDir() // empty dir: no matches, but no validation error either
+
+	for _, mode := range []string{"files_with_matches", "content", "count", ""} {
+		args := fmt.Sprintf(`{"pattern":"x","path":%q,"output_mode":%q}`, dir, mode)
+		_, err := g.InvokableRun(context.Background(), args)
+		if err != nil {
+			t.Fatalf("output_mode %q should be accepted, got error: %v", mode, err)
+		}
 	}
 }
 

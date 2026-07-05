@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +17,7 @@ import (
 	"github.com/cnjack/jcode/internal/automation"
 	"github.com/cnjack/jcode/internal/browser"
 	appconfig "github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/procutil"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -56,16 +59,22 @@ type Env struct {
 }
 
 // NewEnv creates a local Env.
+//
+// The FileTracker (no StorageManager: conflict tracking without backups)
+// powers read-before-edit enforcement and external-change detection in the
+// edit/write/read tools and the reminder middleware. CloneForSubagent shares
+// it, so subagent reads count for the whole session.
 func NewEnv(pwd, platform string) *Env {
 	exec := NewLocalExecutor(platform)
 	return &Env{
-		Exec:      exec,
-		pwd:       pwd,
-		platform:  platform,
-		TodoStore: NewTodoStore(),
-		GoalStore: NewGoalStore(),
-		origExec:  exec,
-		origPwd:   pwd,
+		Exec:        exec,
+		pwd:         pwd,
+		platform:    platform,
+		TodoStore:   NewTodoStore(),
+		GoalStore:   NewGoalStore(),
+		FileTracker: NewFileTracker(nil),
+		origExec:    exec,
+		origPwd:     pwd,
 	}
 }
 
@@ -256,7 +265,57 @@ func (l *LocalExecutor) WriteFile(_ context.Context, path string, data []byte, p
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, perm)
+	return atomicWriteFile(path, data, perm)
+}
+
+// atomicWriteFile writes data via a sibling temp file, fsync, and rename so a
+// crash or kill mid-write can never leave a truncated target file.
+//
+// Semantics:
+//   - Symlinks are written through: the link's target is replaced, the link
+//     itself is preserved.
+//   - An existing target keeps its file mode (exec bits etc.); perm applies
+//     only to newly created files.
+//   - On any temp-file failure (e.g. read-only directory with a writable
+//     file) it falls back to a plain in-place write, preserving the previous
+//     non-atomic behavior rather than failing.
+//
+// Caveats (accepted, single-user CLI): rename changes the inode, so the file
+// owner becomes the current process user and extra hard links are detached.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	target := path
+	if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		if resolved, rerr := filepath.EvalSymlinks(path); rerr == nil {
+			target = resolved
+		}
+	}
+	if fi, err := os.Stat(target); err == nil {
+		perm = fi.Mode().Perm()
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(target), "."+filepath.Base(target)+".tmp-*")
+	if err != nil {
+		return os.WriteFile(target, data, perm)
+	}
+	tmpName := tmp.Name()
+	_, err = tmp.Write(data)
+	if err == nil {
+		err = tmp.Sync()
+	}
+	if err == nil {
+		err = tmp.Chmod(perm)
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmpName, target)
+	}
+	if err != nil {
+		_ = os.Remove(tmpName)
+		return os.WriteFile(target, data, perm)
+	}
+	return nil
 }
 
 func (l *LocalExecutor) MkdirAll(_ context.Context, path string, perm os.FileMode) error {
@@ -305,9 +364,23 @@ func (l *LocalExecutor) Exec(ctx context.Context, command, workDir string, timeo
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
+	// Run the command in its own process group so a timeout/cancel tears down
+	// the whole tree, not just bash — otherwise a grandchild (e.g. a `sleep`)
+	// survives as an orphan and keeps the stdout pipe open. WaitDelay bounds
+	// cmd.Wait when a deliberately backgrounded grandchild (`daemon &`) holds
+	// the pipes after bash itself exited.
+	procutil.SetupProcessGroup(cmd)
+	cmd.WaitDelay = 2 * time.Second
+
 	err := cmd.Run()
 	if ctx.Err() == context.DeadlineExceeded {
 		return stdout.String(), stderr.String(), fmt.Errorf("command timed out")
+	}
+	// ErrWaitDelay means the command itself exited successfully and only the
+	// pipes were force-closed after WaitDelay (a backgrounded grandchild still
+	// held them). `cmd &` is normal usage, not a failure — fold to success.
+	if errors.Is(err, exec.ErrWaitDelay) {
+		err = nil
 	}
 	return stdout.String(), stderr.String(), err
 }
@@ -403,12 +476,20 @@ func (s *SSHExecutor) WriteFile(ctx context.Context, path string, data []byte, p
 
 	// Use cat with heredoc-style write. Encode data as base64 to avoid shell escaping issues.
 	encoded := base64Encode(data)
-	writeCmd := fmt.Sprintf("echo %s | base64 -d > %s && chmod %o %s",
-		ShellQuote(encoded), ShellQuote(path), perm, ShellQuote(path))
+	writeCmd := sshAtomicWriteCmd(encoded, path, perm)
 	if _, serr, err := s.run(ctx, writeCmd, "", 30*time.Second); err != nil {
 		return fmt.Errorf("write failed: %s %w", serr, err)
 	}
 	return nil
+}
+
+// sshAtomicWriteCmd builds the remote shell command that decodes base64 data
+// into a sibling temp file, sets its mode, then atomically renames it over
+// the target — so a dropped connection mid-write never truncates the target.
+func sshAtomicWriteCmd(encoded, path string, perm os.FileMode) string {
+	tmp := path + ".jcode-tmp"
+	return fmt.Sprintf("echo %s | base64 -d > %s && chmod %o %s && mv -f %s %s",
+		ShellQuote(encoded), ShellQuote(tmp), perm, ShellQuote(tmp), ShellQuote(tmp), ShellQuote(path))
 }
 
 func (s *SSHExecutor) MkdirAll(ctx context.Context, path string, _ os.FileMode) error {
@@ -467,11 +548,33 @@ func (s *SSHExecutor) ProjectLabel(pwd string) string {
 	return fmt.Sprintf("ssh://%s@%s%s", s.user, s.host, normalizeAbs(pwd))
 }
 
+// isSSHConnDead reports whether err means the underlying SSH connection is
+// permanently gone (EOF or a closed network connection), as opposed to a
+// per-command failure. Deliberately narrow (#16): command exit errors and
+// timeouts stay retryable.
+func isSSHConnDead(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	return strings.Contains(err.Error(), "use of closed network connection")
+}
+
 // run executes a command over SSH, respecting both the context and timeout.
 func (s *SSHExecutor) run(ctx context.Context, command, _ string, timeout time.Duration) (string, string, error) {
 	session, err := s.client.NewSession()
 	if err != nil {
-		return "", "", fmt.Errorf("ssh session: %w", err)
+		// A dead connection makes every future tool call fail identically:
+		// mark it Fatal so the run aborts instead of burning iterations.
+		// All SSHExecutor methods (Exec/ReadFile/WriteFile/Stat/MkdirAll)
+		// funnel through run(), so this covers the whole surface.
+		wrapped := fmt.Errorf("ssh session: %w", err)
+		if isSSHConnDead(err) {
+			return "", "", Fatal(wrapped)
+		}
+		return "", "", wrapped
 	}
 	defer func() { _ = session.Close() }()
 
@@ -489,12 +592,27 @@ func (s *SSHExecutor) run(ctx context.Context, command, _ string, timeout time.D
 	case err := <-done:
 		return stdout.String(), stderr.String(), err
 	case <-time.After(timeout):
-		_ = session.Signal(ssh.SIGTERM)
+		terminateSSHCommand(session, done)
 		return stdout.String(), stderr.String(), fmt.Errorf("command timed out after %v", timeout)
 	case <-ctx.Done():
-		_ = session.Signal(ssh.SIGTERM)
+		terminateSSHCommand(session, done)
 		return stdout.String(), stderr.String(), fmt.Errorf("command cancelled: %w", ctx.Err())
 	}
+}
+
+// terminateSSHCommand asks the remote command to exit: SIGTERM, a short grace
+// period, then SIGKILL. Best-effort only — without a PTY some sshd
+// implementations ignore signal requests entirely, so remote orphans are still
+// possible (a PTY/setsid-based teardown is a future enhancement). The caller's
+// deferred session.Close still releases the channel either way.
+func terminateSSHCommand(session *ssh.Session, done <-chan error) {
+	_ = session.Signal(ssh.SIGTERM)
+	select {
+	case <-done:
+		return
+	case <-time.After(2 * time.Second):
+	}
+	_ = session.Signal(ssh.SIGKILL)
 }
 
 // ---------------------------------------------------------------------------

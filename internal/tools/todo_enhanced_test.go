@@ -35,6 +35,123 @@ func newTestEnhancedStoreWithStorage(t *testing.T) (*EnhancedTodoStore, *Storage
 	return store, sm
 }
 
+// enumStrings extracts a []string from a JSON-schema enum ([]any) for
+// comparison.
+func enumStrings(t *testing.T, enum []any) []string {
+	t.Helper()
+	out := make([]string, 0, len(enum))
+	for _, v := range enum {
+		s, ok := v.(string)
+		if !ok {
+			t.Fatalf("expected string enum value, got %T (%v)", v, v)
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+func assertEnumEquals(t *testing.T, got []any, want []string) {
+	t.Helper()
+	gotStrs := enumStrings(t, got)
+	if len(gotStrs) != len(want) {
+		t.Fatalf("enum length mismatch: got %v, want %v", gotStrs, want)
+	}
+	set := make(map[string]bool, len(gotStrs))
+	for _, s := range gotStrs {
+		set[s] = true
+	}
+	for _, w := range want {
+		if !set[w] {
+			t.Fatalf("enum missing %q: got %v", w, gotStrs)
+		}
+	}
+}
+
+// TD-S1: legacy todowrite declares an item schema for todos with the status
+// enum (#29).
+func TestTodoWriteSchema_TodosItemSchema(t *testing.T) {
+	env := NewEnv(t.TempDir(), "linux/amd64")
+	tool := env.NewTodoWriteTool()
+
+	info, err := tool.Info(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	js, err := info.ParamsOneOf.ToJSONSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	todos := js.Properties.Value("todos")
+	if todos == nil {
+		t.Fatal("expected todos property in schema")
+	}
+	if todos.Items == nil {
+		t.Fatal("expected todos to declare an item schema (items)")
+	}
+	if todos.Items.Properties == nil {
+		t.Fatal("expected todos item schema to declare properties")
+	}
+	for _, name := range []string{"id", "title", "status"} {
+		if todos.Items.Properties.Value(name) == nil {
+			t.Fatalf("expected todos item schema to declare %q", name)
+		}
+	}
+	required := strings.Join(todos.Items.Required, ",")
+	for _, name := range []string{"id", "title", "status"} {
+		if !strings.Contains(required, name) {
+			t.Fatalf("expected %q required, got: %v", name, todos.Items.Required)
+		}
+	}
+	status := todos.Items.Properties.Value("status")
+	assertEnumEquals(t, status.Enum, []string{"pending", "in_progress", "completed", "cancelled"})
+}
+
+// TD-S2: enhanced todowrite declares an item schema for items with the
+// enhanced status enum (#29).
+func TestEnhancedTodoWriteSchema_ItemsSchema(t *testing.T) {
+	tool := NewEnhancedTodoWriteTool(newTestEnhancedStore(t))
+
+	info, err := tool.Info(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	js, err := info.ParamsOneOf.ToJSONSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items := js.Properties.Value("items")
+	if items == nil {
+		t.Fatal("expected items property in schema")
+	}
+	if items.Items == nil {
+		t.Fatal("expected items to declare an item schema (items)")
+	}
+	if items.Items.Properties == nil {
+		t.Fatal("expected items item schema to declare properties")
+	}
+	for _, name := range []string{"id", "title", "status", "blocked_by", "summary"} {
+		if items.Items.Properties.Value(name) == nil {
+			t.Fatalf("expected items item schema to declare %q", name)
+		}
+	}
+	required := strings.Join(items.Items.Required, ",")
+	for _, name := range []string{"id", "title"} {
+		if !strings.Contains(required, name) {
+			t.Fatalf("expected %q required, got: %v", name, items.Items.Required)
+		}
+	}
+	status := items.Items.Properties.Value("status")
+	assertEnumEquals(t, status.Enum, []string{"not_started", "in_progress", "completed", "skipped"})
+
+	// Legacy todos array also carries an item schema.
+	todos := js.Properties.Value("todos")
+	if todos == nil || todos.Items == nil {
+		t.Fatal("expected legacy todos to declare an item schema (items)")
+	}
+}
+
 // TD-01: legacy compat (todos array → update)
 func TestTD01_LegacyCompat(t *testing.T) {
 	store := newTestEnhancedStore(t)

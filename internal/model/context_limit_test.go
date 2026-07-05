@@ -58,6 +58,33 @@ func TestResolveContextLimit(t *testing.T) {
 	}
 }
 
+// TestEffectiveContextLimit verifies the output/summary headroom carved out of
+// the raw window before threshold math: min(DefaultOutputReserveTokens,
+// limit/4), non-positive limits passed through, and tiny windows never driven
+// to a non-positive result.
+func TestEffectiveContextLimit(t *testing.T) {
+	tests := []struct {
+		name  string
+		limit int
+		want  int
+	}{
+		{name: "standard 200k window reserves the full 20k", limit: 200_000, want: 180_000},
+		{name: "1M window reserves the full 20k", limit: 1_000_000, want: 980_000},
+		{name: "32k window clamps reserve to a quarter (8k)", limit: 32_000, want: 24_000},
+		{name: "16k window clamps reserve to a quarter (4k)", limit: 16_000, want: 12_000},
+		{name: "zero limit passes through", limit: 0, want: 0},
+		{name: "negative limit passes through", limit: -1, want: -1},
+		{name: "limit of 1 keeps a positive window", limit: 1, want: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := EffectiveContextLimit(tt.limit); got != tt.want {
+				t.Errorf("EffectiveContextLimit(%d) = %d, want %d", tt.limit, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestMiniMaxM3ContextOverride guards the headline correction: models.dev records
 // MiniMax-M3 at the 512K guaranteed minimum, but its advertised window is 1M.
 func TestMiniMaxM3ContextOverride(t *testing.T) {

@@ -233,6 +233,9 @@ const (
 	ConflictNone ConflictStatus = iota
 	ConflictModified
 	ConflictFileGone
+	// ConflictNeverRead means the file exists on disk but was never read in
+	// this session, so the agent has no verified view of its content.
+	ConflictNeverRead
 )
 
 // ConflictResult holds the details of a conflict check.
@@ -292,12 +295,18 @@ func (ft *FileTracker) TrackRead(path string, content []byte, modTime time.Time)
 }
 
 // CheckConflict compares current disk state with the tracked state.
-// Returns ConflictNone if path is untracked or unchanged.
+// Returns ConflictNone for unchanged tracked files and for untracked paths
+// that do not exist on disk (creation needs no prior read). An untracked path
+// that does exist reports ConflictNeverRead: the file must be read before it
+// is edited or overwritten.
 func (ft *FileTracker) CheckConflict(path string) (ConflictResult, error) {
 	ft.mu.RLock()
 	st, ok := ft.tracked[path]
 	ft.mu.RUnlock()
 	if !ok {
+		if _, err := os.Stat(path); err == nil {
+			return ConflictResult{Status: ConflictNeverRead}, nil
+		}
 		return ConflictResult{Status: ConflictNone}, nil
 	}
 
@@ -340,9 +349,77 @@ func (ft *FileTracker) CheckConflict(path string) (ConflictResult, error) {
 	}, nil
 }
 
+// ExternalChange describes a tracked file that was modified or deleted
+// outside the session since the agent last read or wrote it.
+type ExternalChange struct {
+	Path string
+	Gone bool
+}
+
+// ScanExternalChanges sweeps all tracked files for external modifications and
+// deletions, returning at most limit findings (limit <= 0 means unlimited).
+// The mtime fast path keeps the sweep at one stat per tracked file; content is
+// only read (and hashed) when the mtime moved.
+//
+// Reported files have their tracked hash/mtime advanced in place and deleted
+// files are evicted, so each external change is reported exactly once. As a
+// deliberate consequence, a later CheckConflict on an already-reported path
+// returns ConflictNone: the caller has told the model to re-read the file, so
+// this is an intentional hand-off, not a weakening of the write-time guard.
+func (ft *FileTracker) ScanExternalChanges(limit int) []ExternalChange {
+	ft.mu.Lock()
+	defer ft.mu.Unlock()
+
+	paths := make([]string, 0, len(ft.tracked))
+	for p := range ft.tracked {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	var changes []ExternalChange
+	for _, path := range paths {
+		if limit > 0 && len(changes) >= limit {
+			break
+		}
+		st := ft.tracked[path]
+		info, err := os.Stat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				changes = append(changes, ExternalChange{Path: path, Gone: true})
+				delete(ft.tracked, path)
+			}
+			continue
+		}
+		// Fast path: unchanged mtime means unchanged content.
+		if info.ModTime().Equal(st.ModTime) {
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		h := md5.Sum(data)
+		newHash := hex.EncodeToString(h[:])
+		if newHash == st.ContentHash {
+			// Touch only — advance the mtime so future sweeps stay on the
+			// fast path.
+			st.ModTime = info.ModTime()
+			continue
+		}
+		st.ContentHash = newHash
+		st.ModTime = info.ModTime()
+		changes = append(changes, ExternalChange{Path: path, Gone: false})
+	}
+	return changes
+}
+
 // CreateBackup writes a backup copy into the file-history directory.
-// Returns the backup file path.
+// Returns the backup file path. A tracker without a StorageManager (the
+// production wiring in NewEnv) keeps conflict tracking but skips backups.
 func (ft *FileTracker) CreateBackup(path string, content []byte) (string, error) {
+	if ft.storage == nil {
+		return "", nil
+	}
 	ft.mu.Lock()
 	st, ok := ft.tracked[path]
 	if !ok {
@@ -610,15 +687,21 @@ func (ts *TokenStore) Delete(provider string) error {
 // TaskLog writes output from a background task to disk.
 type TaskLog struct {
 	taskID  string
+	path    string
 	file    *os.File
 	maxSize int64
 	written int64
 	mu      sync.Mutex
 }
 
-// NewTaskLog opens (or creates) a log file for the task in the tasks dir.
-func NewTaskLog(storage *StorageManager, taskID string) (*TaskLog, error) {
-	path := filepath.Join(storage.TasksDir(), taskID+".log")
+// NewTaskLog creates a log file for the task in dir, creating dir as needed.
+// The file name embeds the creation time so concurrent sessions with the same
+// task IDs (bg_1, bg_2, ...) never O_APPEND into each other's logs.
+func NewTaskLog(dir, taskID string) (*TaskLog, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(dir, fmt.Sprintf("%s_%d.log", taskID, time.Now().UnixNano()))
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
@@ -630,11 +713,15 @@ func NewTaskLog(storage *StorageManager, taskID string) (*TaskLog, error) {
 	}
 	return &TaskLog{
 		taskID:  taskID,
+		path:    path,
 		file:    f,
 		maxSize: 64 * 1024 * 1024, // 64 MB
 		written: info.Size(),
 	}, nil
 }
+
+// Path returns the log file's location on disk.
+func (tl *TaskLog) Path() string { return tl.path }
 
 // Write appends data to the task log, respecting the size limit.
 func (tl *TaskLog) Write(data []byte) (int, error) {

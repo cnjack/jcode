@@ -16,8 +16,9 @@ const MaxEditFileSize = 10 * 1024 * 1024 // 10MB
 
 // EditOp represents a single edit operation in multi-edit mode.
 type EditOp struct {
-	OldString string `json:"old_string"`
-	NewString string `json:"new_string"`
+	OldString  string `json:"old_string"`
+	NewString  string `json:"new_string"`
+	ReplaceAll bool   `json:"replace_all,omitempty"`
 }
 
 type EditInput struct {
@@ -36,14 +37,14 @@ func (e *Env) NewEditTool() tool.InvokableTool {
 		Desc: `Performs exact string replacements in files. Can also create new files.
 - To EDIT a file: provide file_path, old_string, and new_string. old_string must match exactly.
 - To CREATE a file: provide file_path with new_string and leave old_string empty. The file must not already exist.
-- For MULTI-EDIT: provide file_path and edits array. Each edit has old_string and new_string. Applied sequentially.
+- For MULTI-EDIT: provide file_path and edits array. Each edit has old_string, new_string, and an optional per-edit replace_all. Edits are applied sequentially, each operating on the result of the previous one; each old_string must match exactly once unless its replace_all is true, and must not match text inserted by an earlier edit's new_string.
 - Use start_line/end_line to narrow the search scope when old_string is ambiguous.
 - Whitespace (including trailing spaces and line endings) must match exactly.
 - edits and old_string are mutually exclusive.`,
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"file_path": {
 				Type:     schema.String,
-				Desc:     "The absolute path to the file to modify or create.",
+				Desc:     "The absolute path to the file to modify or create (preferred). Relative paths are resolved against the working directory.",
 				Required: true,
 			},
 			"old_string": {
@@ -73,8 +74,27 @@ func (e *Env) NewEditTool() tool.InvokableTool {
 			},
 			"edits": {
 				Type:     schema.Array,
-				Desc:     "Array of edit operations [{old_string, new_string}, ...]. Applied sequentially. Mutually exclusive with old_string.",
+				Desc:     "Array of edit operations, applied sequentially. Mutually exclusive with old_string.",
 				Required: false,
+				ElemInfo: &schema.ParameterInfo{
+					Type: schema.Object,
+					SubParams: map[string]*schema.ParameterInfo{
+						"old_string": {
+							Type:     schema.String,
+							Desc:     "Exact text to replace.",
+							Required: true,
+						},
+						"new_string": {
+							Type:     schema.String,
+							Desc:     "Replacement text.",
+							Required: true,
+						},
+						"replace_all": {
+							Type: schema.Boolean,
+							Desc: "Replace all occurrences of old_string in this edit. Default false.",
+						},
+					},
+				},
 			},
 		}),
 	}
@@ -146,6 +166,10 @@ func (e *editTool) createFile(ctx context.Context, input EditInput) (string, err
 	if err := e.env.Exec.WriteFile(ctx, input.FilePath, []byte(input.NewString), 0644); err != nil {
 		return "", fmt.Errorf("failed to create file %s: %w", input.FilePath, err)
 	}
+
+	// Register the new file in the tracker so a follow-up edit does not
+	// trip the read-before-edit guard.
+	e.updateTrackerAfterWrite(input.FilePath, []byte(input.NewString))
 
 	lines := strings.Count(input.NewString, "\n") + 1
 	return fmt.Sprintf("Created file %s (%d lines)", input.FilePath, lines), nil
@@ -410,10 +434,13 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "\n... (truncated)"
 }
 
-// checkConflict checks if the file was modified externally since last read.
+// checkConflict checks if the file was modified externally since last read,
+// or was never read at all in this session.
 // Returns an error (as a user-visible message) if there is a conflict, nil otherwise.
+// Remote (SSH/Docker) sessions skip the check entirely: the tracker stats the
+// local filesystem and would misreport remote files as gone or unread.
 func (e *editTool) checkConflict(path string) error {
-	if e.env.FileTracker == nil {
+	if e.env.FileTracker == nil || e.env.IsRemote() {
 		return nil
 	}
 	cr, err := e.env.FileTracker.CheckConflict(path)
@@ -425,6 +452,8 @@ func (e *editTool) checkConflict(path string) error {
 		return fmt.Errorf("conflict: file %s was modified externally since last read. Please re-read the file before editing", path)
 	case ConflictFileGone:
 		return fmt.Errorf("conflict: file %s no longer exists on disk. It may have been deleted externally", path)
+	case ConflictNeverRead:
+		return fmt.Errorf("file %s has not been read yet. Use the read tool to read it before editing", path)
 	}
 	return nil
 }
@@ -442,9 +471,10 @@ func (e *editTool) createBackup(path string, content []byte) string {
 	return bp
 }
 
-// updateTrackerAfterWrite updates the FileTracker with new content after a write.
+// updateTrackerAfterWrite updates the FileTracker with new content after a
+// write. Remote sessions skip it: the local os.Stat would not see the file.
 func (e *editTool) updateTrackerAfterWrite(path string, content []byte) {
-	if e.env.FileTracker == nil {
+	if e.env.FileTracker == nil || e.env.IsRemote() {
 		return
 	}
 	info, err := os.Stat(path)
@@ -480,14 +510,35 @@ func (e *editTool) applyMultiEdits(ctx context.Context, input EditInput) (string
 
 	modified := original
 	for i, op := range input.Edits {
+		if op.OldString == "" {
+			return "", fmt.Errorf("edit #%d: old_string must not be empty (to create a file, use old_string=\"\" without the edits array)", i+1)
+		}
 		if op.OldString == op.NewString {
 			return "", fmt.Errorf("edit #%d: old_string and new_string are identical", i+1)
 		}
-		if !strings.Contains(modified, op.OldString) {
+		// Overlap guard: an old_string that appears inside an earlier edit's
+		// new_string would (also) match text this call just inserted — an
+		// almost-certain mistake. Require a single merged edit instead.
+		for j := 0; j < i; j++ {
+			if input.Edits[j].NewString != "" && strings.Contains(input.Edits[j].NewString, op.OldString) {
+				return "", fmt.Errorf("edit #%d: old_string overlaps with new_string of edit #%d; merge them into a single edit",
+					i+1, j+1)
+			}
+		}
+		count := strings.Count(modified, op.OldString)
+		if count == 0 {
 			return "", fmt.Errorf("edit #%d: old_string not found in file (%d of %d edits applied successfully before failure)",
 				i+1, i, len(input.Edits))
 		}
-		modified = strings.Replace(modified, op.OldString, op.NewString, 1)
+		if count > 1 && !op.ReplaceAll {
+			return "", fmt.Errorf("edit #%d: old_string appears %d times; set replace_all on this edit or provide a more unique string",
+				i+1, count)
+		}
+		if op.ReplaceAll {
+			modified = strings.ReplaceAll(modified, op.OldString, op.NewString)
+		} else {
+			modified = strings.Replace(modified, op.OldString, op.NewString, 1)
+		}
 	}
 
 	// Backup before writing.

@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/cnjack/jcode/internal/procutil"
 )
 
 // defaultTimeout is applied to a hook that does not set its own. Generous
@@ -87,7 +89,7 @@ func runHook(ctx context.Context, spec HookSpec, input []byte, cwd string, env [
 	// `sleep`) survives and keeps the stdout pipe open. WaitDelay is the
 	// cross-platform backstop: it bounds cmd.Wait and force-closes the pipes so
 	// runHook returns promptly even if teardown is incomplete.
-	setupProcessGroup(cmd)
+	procutil.SetupProcessGroup(cmd)
 	cmd.WaitDelay = 500 * time.Millisecond
 
 	err := cmd.Run()

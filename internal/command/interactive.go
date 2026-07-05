@@ -180,18 +180,19 @@ func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
 
 	providerName, modelName := s.cfg.GetProviderModel()
 	contextLimit := internalmodel.ResolveContextLimit(s.registry, s.cfg, providerName, modelName)
-	// compactThreshold drives summarization + compaction; reductionThreshold (the
-	// lighter, earlier tool-output clearing) sits just below it.
+	// effLimit reserves output/summary headroom so trigger math never lets the
+	// real window overflow before compaction fires. The reminder middleware
+	// keeps the raw limit (occupancy display semantics, not trigger budget).
+	effLimit := internalmodel.EffectiveContextLimit(contextLimit)
+	// compactThreshold drives summarization + compaction; the reduction (lighter,
+	// earlier tool-output clearing) threshold derives from it inside
+	// agent.BuildReductionConfig.
 	compactThreshold := s.cfg.CompactionThreshold()
-	reductionThreshold := compactThreshold - 0.15
-	if reductionThreshold < 0.1 {
-		reductionThreshold = compactThreshold * 0.8
-	}
 
 	summMw, err := summarization.New(s.ctx, &summarization.Config{
 		Model: s.chatModel,
 		Trigger: &summarization.TriggerCondition{
-			ContextTokens: int(float64(contextLimit) * compactThreshold),
+			ContextTokens: int(float64(effLimit) * compactThreshold),
 		},
 		TranscriptFilePath: filepath.Join(config.ConfigDir(), "transcript.txt"),
 		Finalize: func(ctx context.Context, originalMsgs []adk.Message, summary adk.Message) ([]adk.Message, error) {
@@ -209,33 +210,57 @@ func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
 			if s.agentTokenUsage != nil {
 				s.agentTokenUsage.ResetContext()
 			}
+			if s.p != nil {
+				s.p.Send(tui.CompactDoneMsg{})
+			}
 			return append(systemMsgs, summary), nil
 		},
 	})
 	if err != nil {
 		config.Logger().Printf("[agent] summarization middleware init error: %v", err)
+		// Fallback only: when the high-fidelity eino summarizer is unavailable,
+		// register the lossy in-run compaction middleware as a window guardrail.
+		// The two are mutually exclusive — never both in the same run — because
+		// this one truncates messages to 500 chars and its result is not synced
+		// back to s.history across turns.
+		compactionStrategy := agent.NewThresholdCompactionStrategy(compactThreshold, s.chatModel, 6)
+		compactionMw := agent.NewCompactionMiddleware(compactionStrategy, effLimit, s.agentTokenUsage, func(savedTokens int) {
+			if s.agentTokenUsage != nil {
+				s.agentTokenUsage.ResetContext()
+			}
+			if s.p != nil {
+				s.p.Send(tui.CompactDoneMsg{OldTokens: 0, NewTokens: 0})
+			}
+		})
+		handlers = append(handlers, compactionMw)
 	} else {
 		handlers = append(handlers, summMw)
 	}
 
-	reductionBackend := &agent.LocalReductionBackend{RootDir: config.ConfigDir()}
-	reductionMw, err := reduction.New(s.ctx, &reduction.Config{
-		Backend:           reductionBackend,
-		RootDir:           filepath.Join(config.ConfigDir(), "reduction"),
-		MaxLengthForTrunc: 50000,
-		MaxTokensForClear: int64(float64(contextLimit) * reductionThreshold),
-		ReadFileToolName:  "read",
-		TruncExcludeTools: []string{"ask_user", "load_skill"},
-		ToolConfig: map[string]*reduction.ToolReductionConfig{
-			"read": {SkipClear: true},
-		},
-	})
+	reductionMw, err := reduction.New(s.ctx, agent.BuildReductionConfig(
+		filepath.Join(config.ConfigDir(), "reduction"),
+		contextLimit,
+		compactThreshold,
+		internalmodel.NewCalibratedCounter(s.agentTokenUsage).Count,
+	))
 	if err != nil {
 		config.Logger().Printf("[agent] reduction middleware init error: %v", err)
 	} else {
 		handlers = append(handlers, reductionMw)
 	}
+	// Aggregate cap on one turn's NEW tool results: reduction only caps each
+	// result individually (50k), so N parallel calls could still flood a single
+	// request. Registered after reduction so per-result truncation runs first.
+	handlers = append(handlers, agent.NewTurnToolResultBudgetMiddleware(0))
 
+	// Env-drift/AGENTS.md refresh only makes sense against the local
+	// executor: the middleware collects local state, so leave Pwd empty
+	// (feature off) when this agent is rebuilt for a remote env.
+	reminderPwd, reminderSnapshot := "", ""
+	if !s.env.IsRemote() {
+		reminderPwd = s.pwd
+		reminderSnapshot = prompts.SerializeEnvInfo(s.platform, s.pwd, "local", s.envInfo)
+	}
 	reminderMw := agent.NewReminderMiddleware(agent.ReminderConfig{
 		TodoStore:    s.env.TodoStore,
 		GoalStore:    s.env.GoalStore,
@@ -243,6 +268,10 @@ func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
 		EnvLabel:     "local",
 		IsRemote:     s.env.IsRemote(),
 		ContextLimit: contextLimit,
+		FileTracker:  s.env.FileTracker,
+		Pwd:          reminderPwd,
+		Platform:     s.platform,
+		EnvSnapshot:  reminderSnapshot,
 	}, s.agentTokenUsage)
 	handlers = append(handlers, reminderMw)
 
@@ -258,18 +287,6 @@ func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
 		})
 		handlers = append([]adk.ChatModelAgentMiddleware{budgetMw}, handlers...)
 	}
-
-	// Wire up compaction middleware (per-agent tracker).
-	compactionStrategy := agent.NewThresholdCompactionStrategy(compactThreshold, s.chatModel, 6)
-	compactionMw := agent.NewCompactionMiddleware(compactionStrategy, contextLimit, s.agentTokenUsage, func(savedTokens int) {
-		if s.agentTokenUsage != nil {
-			s.agentTokenUsage.ResetContext()
-		}
-		if s.p != nil {
-			s.p.Send(tui.CompactDoneMsg{OldTokens: 0, NewTokens: 0})
-		}
-	})
-	handlers = append([]adk.ChatModelAgentMiddleware{compactionMw}, handlers...)
 
 	return agent.NewAgent(s.ctx, s.chatModel, s.toolList, s.systemPrompt, s.approvalState.RequestApproval, middlewares, handlers)
 }
@@ -675,7 +692,9 @@ func (s *interactiveState) handleCompact() {
 		_, _, newTokens = s.agentTokenUsage.Get()
 	}
 	if s.rec != nil && len(s.history) < oldLen && len(s.history) > 0 {
-		s.rec.RecordCompact(s.history[0].Content, oldLen-len(s.history))
+		// history[0] is the summary system message; everything after it is the
+		// tail kept verbatim, which resume re-attaches via KeptN.
+		s.rec.RecordCompact(s.history[0].Content, oldLen-len(s.history), len(s.history)-1)
 	}
 	if s.agentTokenUsage != nil {
 		s.agentTokenUsage.ResetContext()

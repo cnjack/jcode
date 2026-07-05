@@ -153,6 +153,52 @@ func TestWrite_UnifiedDiff(t *testing.T) {
 	}
 }
 
+// W-06: Overwriting an existing file that was never read is rejected (#7).
+func TestWrite_RejectsUnreadExistingFile(t *testing.T) {
+	env, dir := newTestEnv(t)
+	tool := env.NewWriteTool()
+
+	file := filepath.Join(dir, "unread.txt")
+	if err := os.WriteFile(file, []byte("original"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := tool.InvokableRun(context.Background(),
+		`{"file_path":"`+file+`","content":"overwritten"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "has not been read") {
+		t.Fatalf("expected read-before-write rejection, got: %s", result)
+	}
+
+	content, _ := os.ReadFile(file)
+	if string(content) != "original" {
+		t.Fatalf("file must not be overwritten, got: %q", content)
+	}
+}
+
+// W-07: Writing a brand-new file requires no prior read.
+func TestWrite_CreateNewFile_NoReadRequired(t *testing.T) {
+	env, dir := newTestEnv(t)
+	tool := env.NewWriteTool()
+
+	file := filepath.Join(dir, "brand_new.txt")
+	result, err := tool.InvokableRun(context.Background(),
+		`{"file_path":"`+file+`","content":"fresh content\n"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "Created") {
+		t.Fatalf("expected file creation, got: %s", result)
+	}
+
+	content, _ := os.ReadFile(file)
+	if string(content) != "fresh content\n" {
+		t.Fatalf("unexpected content: %q", content)
+	}
+}
+
 // W-05: >10MB content returns error.
 func TestWrite_ContentTooLarge(t *testing.T) {
 	env, dir := newTestEnv(t)
@@ -173,5 +219,49 @@ func TestWrite_ContentTooLarge(t *testing.T) {
 	// File should not have been created.
 	if _, err := os.Stat(file); !os.IsNotExist(err) {
 		t.Fatal("file should not exist after rejected write")
+	}
+}
+
+// W-06 (#28): Malformed JSON arguments carry a re-emit hint.
+func TestWrite_InvalidArgs_Hint(t *testing.T) {
+	env, _ := newTestEnv(t)
+	tool := env.NewWriteTool()
+
+	_, err := tool.InvokableRun(context.Background(), `{"file_path":`)
+	if err == nil {
+		t.Fatal("expected error for malformed JSON")
+	}
+	if !strings.Contains(err.Error(), "valid JSON") {
+		t.Fatalf("expected JSON hint, got: %s", err.Error())
+	}
+}
+
+// W-07 (#28): A failed write carries a writable-location hint.
+func TestWrite_Failed_Hint(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root; permission checks are not enforced")
+	}
+	env, dir := newTestEnv(t)
+	tool := env.NewWriteTool()
+
+	roDir := filepath.Join(dir, "readonly")
+	if err := os.Mkdir(roDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(roDir, 0555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(roDir, 0755) })
+
+	_, err := tool.InvokableRun(context.Background(),
+		`{"file_path":"`+filepath.Join(roDir, "denied.txt")+`","content":"x"}`)
+	if err == nil {
+		t.Fatal("expected error writing into a read-only directory")
+	}
+	if !strings.Contains(err.Error(), "failed to write file") {
+		t.Fatalf("original error text must be preserved, got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "writable") {
+		t.Fatalf("expected writable-location hint, got: %s", err.Error())
 	}
 }

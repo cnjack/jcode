@@ -1007,6 +1007,23 @@
           "path": "hook-ran.txt"
         }
       ]
+    },
+    {
+      "id": "robust_huge_output",
+      "title": "Huge command output is truncated (head+tail+spill), session survives and stays correct",
+      "category": "robustness",
+      "tier": "core",
+      "prompt": "Run the shell command `seq 1 200000` exactly as written (do not paraphrase it, do not pipe it through tail or head on the first run). Its output may be truncated by the tool; the truncation notice preserves the tail of the output and tells you where the full output was saved. Then create a file named answer.txt whose exact contents are the last number that command printed, with no trailing newline.",
+      "fixtures": {},
+      "timeout": 300,
+      "expect_tool_use": true,
+      "oracles": [
+        {
+          "type": "file_equals",
+          "path": "answer.txt",
+          "expected": "200000"
+        }
+      ]
     }
   ]
 }

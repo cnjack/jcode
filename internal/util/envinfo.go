@@ -33,6 +33,19 @@ func CollectEnvInfo(pwd string) *EnvInfo {
 	return info
 }
 
+// CollectEnvInfoLight gathers the cheap-to-refresh subset of environment facts
+// for pwd: git state (branch/dirty/last commit, each with the usual 2s timeout)
+// and project type. It skips buildDirTree — expensive, and never serialized
+// into env snapshots anyway. Used for periodic in-session refresh.
+func CollectEnvInfoLight(pwd string) *EnvInfo {
+	info := &EnvInfo{}
+	info.GitBranch = gitCommand(pwd, "rev-parse", "--abbrev-ref", "HEAD")
+	info.GitDirty = gitCommand(pwd, "status", "--porcelain") != ""
+	info.LastCommit = gitCommand(pwd, "log", "-1", "--format=%h %s")
+	info.ProjectType = detectProjectType(pwd)
+	return info
+}
+
 func gitCommand(pwd string, args ...string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

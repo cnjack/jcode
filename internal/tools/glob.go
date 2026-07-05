@@ -31,12 +31,14 @@ var globExclusions = []string{
 func (e *Env) NewGlobTool() tool.InvokableTool {
 	info := &schema.ToolInfo{
 		Name: "glob",
-		Desc: "Search for files by glob pattern. Returns relative file paths. " +
-			"Excludes VCS and dependency directories (.git, node_modules, vendor, etc.).",
+		Desc: "Search for files by gitignore-style glob pattern (requires ripgrep). " +
+			"'*' matches within one path segment, '**' matches across directories, and patterns containing '/' are anchored to the search directory. " +
+			"Returns file paths relative to the search directory, most recently modified first. " +
+			"Respects .gitignore, includes hidden files, and excludes VCS and dependency directories (.git, node_modules, vendor, etc.).",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"pattern": {
 				Type:     schema.String,
-				Desc:     "Glob pattern to match file names (e.g. '*.go', '**/*.test.ts', 'Makefile').",
+				Desc:     "Glob pattern matched against paths relative to the search directory (e.g. '*.go', '**/*.test.ts', 'src/**/*.go', 'Makefile').",
 				Required: true,
 			},
 			"path": {
@@ -78,6 +80,9 @@ func (g *globTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 	if input.Pattern == "" {
 		return "", fmt.Errorf("pattern is required")
 	}
+	if strings.HasPrefix(input.Pattern, "!") {
+		return "", fmt.Errorf("invalid pattern %q: a leading '!' would be interpreted as an exclusion glob; use a plain pattern", input.Pattern)
+	}
 
 	searchPath := input.Path
 	if searchPath == "" {
@@ -92,7 +97,7 @@ func (g *globTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 		}
 	}
 
-	cmd := buildFindCmd(input.Pattern, searchPath, input.MaxDepth, limit)
+	cmd := buildRgGlobCmd(input.Pattern, searchPath, input.MaxDepth, limit)
 
 	start := time.Now()
 	var stdout, stderr string
@@ -101,12 +106,17 @@ func (g *globTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 	if g.env.IsRemote() {
 		stdout, stderr, err = g.env.Exec.Exec(ctx, cmd, "", 30*time.Second)
 	} else {
+		// Require ripgrep — same hard dependency as the grep tool.
+		if _, lookErr := exec.LookPath("rg"); lookErr != nil {
+			return "", fmt.Errorf("ripgrep (rg) is required but not found in PATH. Install it: https://github.com/BurntSushi/ripgrep#installation")
+		}
 		stdout, stderr, err = execLocal(ctx, cmd, 30*time.Second)
 	}
 	elapsed := time.Since(start)
 
 	if err != nil {
-		// find returns exit code 0 normally; non-zero might mean partial failure
+		// The pipeline exit code is head's (0); a non-zero code means the cd
+		// failed (bad search path) or the shell itself failed.
 		if stdout == "" {
 			if stderr != "" {
 				return "", fmt.Errorf("glob error: %s", strings.TrimSpace(stderr))
@@ -116,35 +126,37 @@ func (g *globTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 		// partial results — continue with what we have
 	}
 
+	// rg failures (e.g. invalid glob syntax) are masked by head's exit code 0:
+	// surface them when they produced no output at all.
+	if strings.TrimSpace(stdout) == "" && strings.TrimSpace(stderr) != "" {
+		return "", fmt.Errorf("glob error: %s", strings.TrimSpace(stderr))
+	}
+
 	return formatGlobOutput(stdout, limit, elapsed)
 }
 
-// buildFindCmd constructs a find command for the given glob parameters.
-func buildFindCmd(pattern, searchPath string, maxDepth, limit int) string {
-	var parts []string
-	parts = append(parts, "find", ShellQuote(searchPath))
+// buildRgGlobCmd constructs a shell command that lists files matching the
+// glob via ripgrep (rg --files). It cd's into searchPath first because rg
+// roots --glob matching at its working directory, not at a path argument —
+// this makes slash-anchored patterns like 'src/**/*.go' match relative to
+// the search directory, and the output paths come back relative to it too.
+// --sortr=modified sorts newest-first so the head truncation deterministically
+// keeps the most recently modified files (same ordering as the grep tool's
+// files_with_matches mode).
+func buildRgGlobCmd(pattern, searchPath string, maxDepth, limit int) string {
+	parts := []string{"cd", ShellQuote(searchPath), "&&", "rg", "--files", "--hidden", "--sortr=modified"}
 
-	// Exclude VCS directories with pruning for efficiency
-	var pruneExprs []string
-	for _, dir := range globExclusions {
-		pruneExprs = append(pruneExprs, "-name", ShellQuote(dir))
-		pruneExprs = append(pruneExprs, "-o")
-	}
-	// Remove trailing -o and wrap in parentheses with -prune
-	if len(pruneExprs) > 0 {
-		pruneExprs = pruneExprs[:len(pruneExprs)-1] // remove last -o
-		parts = append(parts, "\\(")
-		parts = append(parts, pruneExprs...)
-		parts = append(parts, "\\)", "-prune", "-o")
-	}
-
-	// Max depth
+	// Max depth (1 = direct children, same semantics as find -maxdepth)
 	if maxDepth > 0 {
-		parts = append(parts, "-maxdepth", fmt.Sprintf("%d", maxDepth))
+		parts = append(parts, "--max-depth", fmt.Sprintf("%d", maxDepth))
 	}
 
-	// File type and name pattern
-	parts = append(parts, "-type", "f", "-name", ShellQuote(pattern), "-print")
+	// Exclude VCS and dependency directories
+	for _, dir := range globExclusions {
+		parts = append(parts, "--glob", ShellQuote("!"+dir))
+	}
+
+	parts = append(parts, "--glob", ShellQuote(pattern))
 
 	// Limit results (take limit+1 to detect truncation)
 	parts = append(parts, "|", "head", "-n", fmt.Sprintf("%d", limit+1))
