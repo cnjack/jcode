@@ -21,6 +21,21 @@ var (
 	metaAssignRe = regexp.MustCompile(`(?m)\bmeta\s*=\s*\{`)
 )
 
+// Validate pre-flights a workflow source WITHOUT running it: it checks the `meta`
+// block parses and that the full script compiles as JavaScript. Use it to reject an
+// agent-generated or user-supplied script with a clear error before spawning any
+// agents. (Engine.Run compiles too, so a bad script never runs; Validate just moves
+// that check up-front with a friendlier message.)
+func Validate(source string) error {
+	if _, err := ParseMeta(source); err != nil {
+		return err
+	}
+	if _, err := goja.Compile("workflow.js", wrapSource(source), false); err != nil {
+		return fmt.Errorf("workflow script does not compile: %w", err)
+	}
+	return nil
+}
+
 // ParseMeta extracts the `meta` object literal from a workflow's source and
 // evaluates it in a throwaway VM (without running the body). The meta block must
 // be a pure literal (no computed values, no host calls) — this is enforced by

@@ -84,6 +84,36 @@ return 1;`,
 	}
 }
 
+func TestValidate(t *testing.T) {
+	cases := []struct {
+		name    string
+		src     string
+		wantErr bool
+	}{
+		{"valid", `export const meta = { name: "ok", description: "d" };
+const r = await agent("x");
+return r;`, false},
+		{"syntax error in body", `export const meta = { name: "bad", description: "d" };
+const r = await agent("x"   // missing paren
+return r;`, true},
+		{"missing meta", `const x = 1; return x;`, true},
+		{"meta missing name", `export const meta = { description: "d" };`, true},
+		{"top-level return is allowed", `export const meta = { name: "r", description: "d" };
+return 42;`, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := Validate(c.src)
+			if c.wantErr && err == nil {
+				t.Fatalf("expected validation error")
+			}
+			if !c.wantErr && err != nil {
+				t.Fatalf("unexpected validation error: %v", err)
+			}
+		})
+	}
+}
+
 func TestParseMetaCannotRunSideEffects(t *testing.T) {
 	// ParseMeta must not execute the body; if it did, agent() (undefined in the bare
 	// VM) would throw or a side effect would run. A body referencing an undefined

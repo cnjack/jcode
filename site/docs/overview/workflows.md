@@ -35,6 +35,11 @@ jcode gives you an escalating ladder for delegating work:
 
 ## Authoring a workflow
 
+{: .note }
+> For the full syntax reference — every primitive's signature, control-flow
+> patterns, determinism rules, validation, and common mistakes — see
+> [Writing Workflows](writing-workflows.html).
+
 A saved workflow is a single `.js` file. It starts with an exported `meta` object,
 followed by a plain-JavaScript body with top-level `await`:
 

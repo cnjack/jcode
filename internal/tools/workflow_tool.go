@@ -107,10 +107,13 @@ func (t *workflowRunTool) InvokableRun(ctx context.Context, argumentsInJSON stri
 	// Resolve the workflow.
 	var wf flow.Workflow
 	if in.Script != "" {
-		meta, err := flow.ParseMeta(in.Script)
-		if err != nil {
+		// Pre-flight the agent-authored script: parse its meta block and compile the
+		// whole body as JavaScript before spawning anything. A syntax error comes
+		// back here so the agent can fix the script instead of a run half-starting.
+		if err := flow.Validate(in.Script); err != nil {
 			return "", fmt.Errorf("invalid workflow script: %w", err)
 		}
+		meta, _ := flow.ParseMeta(in.Script) // already validated above
 		wf = flow.Workflow{Meta: meta, Source: in.Script, Scope: flow.ScopeInline}
 	} else {
 		got, ok := loader.Get(in.Name)

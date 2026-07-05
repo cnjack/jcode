@@ -29,9 +29,41 @@ func NewWorkflowCmd() *cobra.Command {
 	cmd.AddCommand(
 		newFlowListCmd(),
 		newFlowShowCmd(),
+		newFlowValidateCmd(),
 		newFlowRunCmd(),
 	)
 	return cmd
+}
+
+func newFlowValidateCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "validate <name|file.js>",
+		Short: "Check that a workflow parses and compiles, without running it",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target := args[0]
+			var src string
+			if isFlowFile(target) {
+				data, err := os.ReadFile(target)
+				if err != nil {
+					return fmt.Errorf("read workflow file: %w", err)
+				}
+				src = string(data)
+			} else {
+				wf, ok := newFlowLoader().Get(target)
+				if !ok {
+					return fmt.Errorf("workflow %q not found", target)
+				}
+				src = wf.Source
+			}
+			if err := flow.Validate(src); err != nil {
+				return err
+			}
+			meta, _ := flow.ParseMeta(src)
+			fmt.Printf("✓ %s is valid (%d phase(s))\n", meta.Name, len(meta.Phases))
+			return nil
+		},
+	}
 }
 
 func newFlowLoader() *flow.Loader {
@@ -118,10 +150,10 @@ func newFlowRunCmd() *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("read workflow file: %w", err)
 				}
-				meta, err := flow.ParseMeta(string(data))
-				if err != nil {
-					return fmt.Errorf("parse workflow: %w", err)
+				if err := flow.Validate(string(data)); err != nil {
+					return fmt.Errorf("invalid workflow %s: %w", target, err)
 				}
+				meta, _ := flow.ParseMeta(string(data)) // already validated above
 				wf = flow.Workflow{Meta: meta, Source: string(data), Path: target, Scope: flow.ScopeInline}
 			} else {
 				l := newFlowLoader()
