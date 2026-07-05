@@ -32,11 +32,17 @@ func NewAgent(
 	handlers []adk.ChatModelAgentMiddleware,
 ) (*adk.ChatModelAgent, error) {
 	// Handler order is outermost → innermost: tracing middlewares first, then the
-	// caller's handlers, then approval + safe-tool-error innermost so that
-	// summarization/reduction see the raw tool output first.
+	// caller's handlers, then the hook + approval + safe-tool-error stack innermost
+	// so that summarization/reduction see the raw tool output first.
 	enhanced := append([]adk.ChatModelAgentMiddleware{}, middlewares...)
 	enhanced = append(enhanced, handlers...)
+	// PreToolUse hook sits OUTSIDE approval: it can deny, rewrite args, or mark the
+	// call pre-approved (so approval skips its prompt) before the gate runs.
+	enhanced = append(enhanced, newPreHookMiddleware())
 	enhanced = append(enhanced, newApprovalMiddleware(approvalFunc))
+	// PostToolUse hook sits INSIDE approval, wrapping the raw tool, so it sees the
+	// true execution error and can rewrite the result.
+	enhanced = append(enhanced, newPostHookMiddleware())
 	// Innermost: memory usage accounting observes approved executions only
 	// and sees raw endpoint errors (a failed read is not memory usage).
 	enhanced = append(enhanced, memory.NewUsageMiddleware())

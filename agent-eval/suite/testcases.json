@@ -961,6 +961,52 @@
           "generate": true
         }
       }
+    },
+    {
+      "id": "hook_pretooluse_deny",
+      "title": "PreToolUse hook denies a write and blocks the file",
+      "category": "hook",
+      "tier": "hook",
+      "prompt": "Create a file named forbidden.txt containing the text nope. If a tool call is blocked by policy, stop and briefly explain instead of working around it.",
+      "fixtures": {},
+      "home_fixtures": {
+        ".jcode/hooks.json": "{\"hooks\":{\"PreToolUse\":[{\"matcher\":\"write\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo blocked-by-policy >&2; exit 2\"}]}]}}"
+      },
+      "timeout": 150,
+      "expect_tool_use": true,
+      "oracles": [
+        {
+          "type": "file_absent",
+          "path": "forbidden.txt"
+        },
+        {
+          "type": "bounded_tool_calls",
+          "max": 8
+        }
+      ]
+    },
+    {
+      "id": "hook_posttooluse_side_effect",
+      "title": "PostToolUse hook runs after a successful write",
+      "category": "hook",
+      "tier": "hook",
+      "prompt": "Create a file named note.txt with the exact contents hi and no trailing newline. Then you are done.",
+      "fixtures": {},
+      "home_fixtures": {
+        ".jcode/hooks.json": "{\"hooks\":{\"PostToolUse\":[{\"matcher\":\"write\",\"hooks\":[{\"type\":\"command\",\"command\":\"echo fired > hook-ran.txt\"}]}]}}"
+      },
+      "timeout": 150,
+      "expect_tool_use": true,
+      "oracles": [
+        {
+          "type": "file_exists",
+          "path": "note.txt"
+        },
+        {
+          "type": "file_exists",
+          "path": "hook-ran.txt"
+        }
+      ]
     }
   ]
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
+	"github.com/cnjack/jcode/internal/hooks"
 	mempipeline "github.com/cnjack/jcode/internal/memory/pipeline"
 	"github.com/cnjack/jcode/internal/mode"
 	internalmodel "github.com/cnjack/jcode/internal/model"
@@ -70,6 +71,13 @@ type interactiveState struct {
 
 	sessionResumeWarning  string
 	sessionBaselineCommit string
+
+	// hookDisp fires user-configured hooks at agent-loop lifecycle points. Always
+	// non-nil (a no-op dispatcher when no hooks are configured).
+	hookDisp hooks.Dispatcher
+	// hookStartContext holds SessionStart additionalContext, prepended to the
+	// first user prompt then cleared.
+	hookStartContext string
 
 	// WeChat channel
 	wechatClient *weixin.Client
@@ -384,9 +392,36 @@ func (s *interactiveState) handlePrompt(userPrompt string) {
 		userPrompt = s.sessionResumeWarning + "\n\n" + userPrompt
 		s.sessionResumeWarning = ""
 	}
+	// UserPromptSubmit hook: may block this prompt or inject extra context. Fires
+	// BEFORE anything is recorded so a denied prompt leaves the transcript and the
+	// in-memory history consistent (neither contains it).
+	if s.hookDisp != nil && s.hookDisp.Configured(hooks.UserPromptSubmit) {
+		dec := s.hookDisp.Fire(runCtx, hooks.UserPromptSubmit, hooks.Payload{Prompt: userPrompt})
+		if dec.Denied() {
+			msg := "Your message was blocked by a hook policy."
+			if dec.Reason != "" {
+				msg += " Reason: " + dec.Reason
+			}
+			s.h.OnAgentText(msg + "\n")
+			s.h.OnAgentDone(nil)
+			return
+		}
+		if dec.AdditionalContext != "" {
+			userPrompt = userPrompt + "\n\n" + dec.AdditionalContext
+		}
+	}
+	// Prepend one-shot SessionStart context to the first prompt of the session.
+	if s.hookStartContext != "" {
+		userPrompt = s.hookStartContext + "\n\n" + userPrompt
+		s.hookStartContext = ""
+	}
+
+	// Record after the hooks so transcript and history reflect the same final
+	// prompt (and nothing is recorded when the prompt is denied above).
 	if s.rec != nil {
 		s.rec.RecordUser(userPrompt)
 	}
+
 	if s.agentTokenUsage == nil {
 		s.agentTokenUsage = &internalmodel.TokenUsage{}
 	}
@@ -969,6 +1004,13 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 
 	rec, _ := session.NewRecorder(pwd, providerName, modelName)
 
+	// Build the transport-agnostic hook dispatcher and inject it into the context
+	// so the tool hook middleware and the runner's continuation loop reach it
+	// without signature changes. Project-level hooks are untrusted and load only
+	// under JCODE_HOOKS_TRUST_PROJECT=1 (see hooks.NewSessionDispatcher).
+	hookDisp := hooks.NewSessionDispatcher(config.ConfigDir(), pwd, rec.UUID(), config.Logger().Printf)
+	ctx = hooks.WithDispatcher(ctx, hookDisp)
+
 	env.TodoStore.OnUpdate = func(items []tools.TodoItem) {
 		if rec != nil {
 			snapItems := make([]session.TodoSnapshotItem, len(items))
@@ -1007,6 +1049,16 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		askUserDeps:  askUserDeps,
 		mcpTools:     mcpTools,
 		rec:          rec,
+		hookDisp:     hookDisp,
+	}
+
+	// SessionStart hook: fire once for a fresh session; stash any additionalContext
+	// to prepend to the first prompt. A resumed session fires it later — after the
+	// recorder UUID is restored — to avoid a double-fire and a wrong session_id.
+	// Non-blocking.
+	if resumeUUID == "" && hookDisp.Configured(hooks.SessionStart) {
+		dec := hookDisp.Fire(ctx, hooks.SessionStart, hooks.Payload{})
+		st.hookStartContext = dec.AdditionalContext
 	}
 
 	// Initialize WeChat channel
@@ -1280,6 +1332,15 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		// Reuse the existing session UUID so new messages are appended to the same file
 		if st.rec != nil {
 			st.rec.SetUUID(resumeUUID)
+			// The dispatcher + SessionStart during setup bound to the throwaway UUID;
+			// rebuild against the restored one so hook payloads carry the correct
+			// session_id, then fire SessionStart now — once — for the real session.
+			st.hookDisp = hooks.NewSessionDispatcher(config.ConfigDir(), pwd, st.rec.UUID(), config.Logger().Printf)
+			st.ctx = hooks.WithDispatcher(st.ctx, st.hookDisp)
+			if st.hookDisp.Configured(hooks.SessionStart) {
+				dec := st.hookDisp.Fire(st.ctx, hooks.SessionStart, hooks.Payload{})
+				st.hookStartContext = dec.AdditionalContext
+			}
 		}
 	}
 
