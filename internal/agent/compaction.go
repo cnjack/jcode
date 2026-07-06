@@ -228,9 +228,11 @@ func (m *compactionMiddleware) BeforeModelRewriteState(
 	}
 
 	saved := beforeLen - len(compacted)
-	if saved <= 0 {
+	if saved <= 0 || len(compacted) == 0 {
 		// Compacted nothing (e.g. a single poison message larger than the
-		// window): a non-error failure that still counts towards the fuse.
+		// window) — or a strategy returned an empty slice with a nil error,
+		// which would silently wipe the conversation if applied. Both are
+		// non-error failures that still count towards the fuse.
 		config.Logger().Printf("[compaction] no shrink: %d → %d messages", beforeLen, len(compacted))
 		m.state.mu.Lock()
 		m.state.consecutiveFails++

@@ -151,8 +151,17 @@ func TestGL08_SortedByMtimeE2E(t *testing.T) {
 
 	dir := t.TempDir()
 	mustWriteFile(t, filepath.Join(dir, "a.go"), "package a\n")
-	time.Sleep(50 * time.Millisecond)
 	mustWriteFile(t, filepath.Join(dir, "b.go"), "package b\n")
+	// Explicit mtimes: on filesystems with coarse timestamp granularity the
+	// two writes could land in the same tick and the sort would fall back to
+	// path order, flipping the newest-first assertion.
+	now := time.Now()
+	if err := os.Chtimes(filepath.Join(dir, "a.go"), now.Add(-2*time.Second), now.Add(-2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(dir, "b.go"), now, now); err != nil {
+		t.Fatal(err)
+	}
 
 	stdout, stderr, err := execLocal(context.Background(), buildRgGlobCmd("*.go", dir, 0, 100))
 	if err != nil {

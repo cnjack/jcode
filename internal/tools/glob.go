@@ -87,6 +87,11 @@ func (g *globTool) InvokableRun(ctx context.Context, argumentsInJSON string, opt
 	searchPath := input.Path
 	if searchPath == "" {
 		searchPath = g.env.Pwd()
+	} else {
+		// Anchor relative paths to the tool workspace, not the process cwd:
+		// the command cd's into searchPath, so an unresolved relative path
+		// would glob wherever the jcode process happens to run.
+		searchPath = g.env.ResolvePath(searchPath)
 	}
 
 	limit := globDefaultLimit

@@ -326,14 +326,14 @@ func (d *DockerExecutor) run(ctx context.Context, command string, timeout time.D
 	// write, decode failure). Surface it instead of returning a truncated result
 	// as success — callers (ReadFile/Exec → edit) would otherwise persist it.
 	if copyErr != nil {
-		return stdout.String(), stderr.String(), fmt.Errorf("docker exec stream copy: %w", copyErr)
+		return stdout.String(), stderr.String(), wrapDockerRunErr("docker exec stream copy", copyErr)
 	}
 
 	// Use a fresh context for the inspect: the exec ctx may already be at its
 	// deadline, but the exec itself completed and its exit code is available.
 	inspect, ierr := d.cli.ContainerExecInspect(context.Background(), resp.ID)
 	if ierr != nil {
-		return stdout.String(), stderr.String(), fmt.Errorf("docker exec inspect: %w", ierr)
+		return stdout.String(), stderr.String(), wrapDockerRunErr("docker exec inspect", ierr)
 	}
 	if inspect.ExitCode != 0 {
 		return stdout.String(), stderr.String(), fmt.Errorf("command exited with code %d", inspect.ExitCode)

@@ -272,3 +272,82 @@ func TestReminderAgentsMdRemoved(t *testing.T) {
 		t.Fatalf("removal notice injected twice: %q", again)
 	}
 }
+
+// fakeRemoteExecutor is the minimal RemoteExecutor used to flip a live Env to
+// remote in tests without a real SSH/Docker backend.
+type fakeRemoteExecutor struct{}
+
+func (fakeRemoteExecutor) ReadFile(context.Context, string) ([]byte, error) { return nil, nil }
+func (fakeRemoteExecutor) WriteFile(context.Context, string, []byte, os.FileMode) error {
+	return nil
+}
+func (fakeRemoteExecutor) MkdirAll(context.Context, string, os.FileMode) error { return nil }
+func (fakeRemoteExecutor) Stat(context.Context, string) (*tools.FileInfo, error) {
+	return &tools.FileInfo{}, nil
+}
+func (fakeRemoteExecutor) Exec(context.Context, string, string, time.Duration) (string, string, error) {
+	return "", "", nil
+}
+func (fakeRemoteExecutor) Platform() string           { return "linux/amd64" }
+func (fakeRemoteExecutor) Label() string              { return "fake-remote" }
+func (fakeRemoteExecutor) Close() error               { return nil }
+func (fakeRemoteExecutor) ProjectLabel(string) string { return "fake" }
+
+// switch_env mutates the shared *tools.Env in place without rebuilding the
+// agent (ACP/web). While the live env is remote, the local-filesystem sweeps
+// (env drift, AGENTS.md, external file changes) must pause — they would report
+// wrong-host state — and resume after switching back to local.
+func TestReminderLocalSweepsPauseWhileEnvRemote(t *testing.T) {
+	pwd := t.TempDir()
+	env := tools.NewEnv(pwd, "test-os")
+
+	// A tracked file whose external change would normally be reported.
+	watched := filepath.Join(pwd, "watched.go")
+	if err := os.WriteFile(watched, []byte("v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Stat(watched)
+	env.FileTracker.TrackRead(watched, []byte("v1"), info.ModTime())
+
+	var collects int
+	rm := newTestReminder(t, ReminderConfig{
+		Pwd:             pwd,
+		Platform:        "test-os",
+		EnvSnapshot:     prompts.SerializeEnvInfo("test-os", pwd, "local", &utils.EnvInfo{GitBranch: "a"}),
+		EnvRefreshEvery: 1,
+		EnvCollector: func(string) *utils.EnvInfo {
+			collects++
+			return &utils.EnvInfo{GitBranch: "b"}
+		},
+		FileTracker: env.FileTracker,
+		Env:         env,
+	}, nil)
+
+	// Switch to remote, then change the watched file externally.
+	env.SetRemote(fakeRemoteExecutor{}, "/remote/pwd")
+	if err := os.WriteFile(watched, []byte("v2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(5 * time.Second)
+	if err := os.Chtimes(watched, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	text := runReminder(t, rm)
+	if strings.Contains(text, watched) || strings.Contains(text, "git_branch") || strings.Contains(text, "AGENTS.md") {
+		t.Fatalf("local sweeps ran while env was remote: %q", text)
+	}
+	if collects != 0 {
+		t.Fatalf("env collector ran %d times while remote, want 0", collects)
+	}
+
+	// Back to local: the sweeps resume and the pending change is reported.
+	env.ResetToLocal(pwd, "test-os")
+	text = runReminder(t, rm)
+	if !strings.Contains(text, watched) {
+		t.Fatalf("external change not reported after returning to local: %q", text)
+	}
+	if collects == 0 {
+		t.Fatalf("env collector did not resume after returning to local")
+	}
+}

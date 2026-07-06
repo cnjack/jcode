@@ -480,6 +480,7 @@ func (a *acpAgent) buildAgentSession(
 		IsRemote:     env.IsRemote(),
 		ContextLimit: contextLimit,
 		FileTracker:  env.FileTracker,
+		Env:          env,
 		Pwd:          pwd,
 		Platform:     platform,
 		EnvSnapshot:  prompts.SerializeEnvInfo(platform, pwd, "local", envInfo),

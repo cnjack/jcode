@@ -187,3 +187,42 @@ func TestCalibratedCounter_WalksToolCalls(t *testing.T) {
 		t.Fatalf("tool call arguments not counted: with=%d, without=%d", loaded, plain)
 	}
 }
+
+// After a compaction shrinks the window well below the recorded peak, a
+// sustained run of smaller full-window counts must adopt the new size as the
+// baseline so calibration resumes — otherwise lastFullEstimate stays stuck on
+// the stale peak and every post-compaction count is treated as a subset
+// re-count forever.
+func TestCalibratedCounter_RecoversAfterWindowShrink(t *testing.T) {
+	big := []*schema.Message{asciiMsg(36000), asciiMsg(36000)} // raw = 2*10001
+	small := []*schema.Message{asciiMsg(18000)}                // raw = 5001
+	tu := &TokenUsage{}
+	tu.Add(AddParams{Total: 40000})
+	c := NewCalibratedCounter(tu)
+	ctx := context.Background()
+
+	_, _ = c.Count(ctx, big, nil) // establishes the peak baseline
+	_, _ = c.Count(ctx, big, nil) // calibrates against the peak
+	scaleAtPeak := c.scale
+
+	// Compaction: the live window is now far below the peak. One or two
+	// below-peak counts are still treated as subset probes (no adoption)...
+	_, _ = c.Count(ctx, small, nil)
+	_, _ = c.Count(ctx, small, nil)
+	if c.lastFullEstimate <= 5001 {
+		t.Fatalf("baseline adopted too eagerly after %d shrunk counts", 2)
+	}
+	// ...but a sustained streak adopts the shrunk window as the new baseline.
+	_, _ = c.Count(ctx, small, nil)
+	if c.lastFullEstimate != 5001 {
+		t.Fatalf("lastFullEstimate = %d after shrink streak, want adopted 5001", c.lastFullEstimate)
+	}
+
+	// With the baseline adopted, the next count is full-window again and
+	// calibration resumes against the provider's post-compaction total.
+	tu.Add(AddParams{Total: 10002}) // provider says the shrunk window is 2x raw
+	_, _ = c.Count(ctx, small, nil)
+	if c.scale <= scaleAtPeak {
+		t.Fatalf("scale = %v did not move after post-shrink recalibration (peak scale %v)", c.scale, scaleAtPeak)
+	}
+}

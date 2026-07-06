@@ -602,6 +602,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 				IsRemote:     tenv.IsRemote(),
 				ContextLimit: ctxLimit,
 				FileTracker:  tenv.FileTracker,
+				Env:          tenv,
 				Pwd:          reminderPwd,
 				Platform:     platform,
 				EnvSnapshot:  reminderSnapshot,

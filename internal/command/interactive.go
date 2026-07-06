@@ -274,6 +274,7 @@ func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
 		IsRemote:     s.env.IsRemote(),
 		ContextLimit: contextLimit,
 		FileTracker:  s.env.FileTracker,
+		Env:          s.env,
 		Pwd:          reminderPwd,
 		Platform:     s.platform,
 		EnvSnapshot:  reminderSnapshot,

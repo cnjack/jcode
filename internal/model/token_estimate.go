@@ -83,6 +83,13 @@ const (
 	// calibrationMinTokens is the noise floor: provider totals below this are
 	// too small for the ratio to be meaningful.
 	calibrationMinTokens = 5000
+	// calibrationShrinkStreak is how many consecutive below-peak counts it
+	// takes to accept that the window genuinely shrank (compaction/clear) and
+	// adopt the smaller size as the new full baseline. Subset re-counts during
+	// a clear pass come in short bursts, so a sustained run means a real
+	// shrink — without this, lastFullEstimate would stay stuck on the stale
+	// peak and calibration would freeze until the prompt regrew past it.
+	calibrationShrinkStreak = 3
 )
 
 // CalibratedCounter is a reduction TokenCounter that self-calibrates the
@@ -102,6 +109,7 @@ type CalibratedCounter struct {
 	mu               sync.Mutex
 	scale            float64
 	lastFullEstimate int64
+	shrinkStreak     int
 }
 
 // NewCalibratedCounter returns a counter calibrated against tu. tu may be nil,
@@ -136,6 +144,17 @@ func (c *CalibratedCounter) Count(_ context.Context, msgs []*schema.Message, _ [
 			}
 		}
 		c.lastFullEstimate = raw
+		c.shrinkStreak = 0
+	} else {
+		// Below the recorded peak: either a subset re-count (clear pass) or
+		// the window genuinely shrank (compaction). Subset bursts are brief;
+		// a sustained streak adopts the smaller size as the new baseline so
+		// calibration resumes instead of freezing on the stale peak.
+		c.shrinkStreak++
+		if c.shrinkStreak >= calibrationShrinkStreak {
+			c.lastFullEstimate = raw
+			c.shrinkStreak = 0
+		}
 	}
 	return int64(float64(raw) * c.scale), nil
 }

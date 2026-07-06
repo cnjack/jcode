@@ -40,6 +40,13 @@ type ReminderConfig struct {
 	// modified outside the session since the agent last read them.
 	FileTracker *tools.FileTracker
 
+	// Env, when non-nil, is the live tool environment. switch_env mutates it
+	// in place (local ↔ SSH/Docker) without rebuilding the agent on every
+	// surface, so remote-ness is re-read from here each round: while remote,
+	// the env-drift / AGENTS.md / external-file sweeps are paused — they all
+	// inspect the LOCAL filesystem and would report wrong-host state.
+	Env *tools.Env
+
 	// Pwd enables the periodic environment refresh and the AGENTS.md reload
 	// check. Empty disables both (remote sessions, subagents, tests).
 	Pwd string
@@ -123,6 +130,13 @@ func (m *reminderMiddleware) BeforeModelRewriteState(
 		hasIncomplete = incompleteTodoN > 0
 	}
 
+	// Remote-ness follows the live env when available: switch_env flips the
+	// shared *tools.Env in place without rebuilding this middleware.
+	remote := m.cfg.IsRemote
+	if m.cfg.Env != nil {
+		remote = m.cfg.Env.IsRemote()
+	}
+
 	rc := &prompts.ReminderContext{
 		Iteration:         m.iteration,
 		TokensUsed:        contextTokens,
@@ -131,7 +145,7 @@ func (m *reminderMiddleware) BeforeModelRewriteState(
 		IncompleteTodoN:   incompleteTodoN,
 		ConsecutiveErrors: m.consecutiveErrors,
 		EnvLabel:          m.cfg.EnvLabel,
-		IsRemote:          m.cfg.IsRemote,
+		IsRemote:          remote,
 	}
 
 	// Inject approved plan context for execution mode.
@@ -147,12 +161,18 @@ func (m *reminderMiddleware) BeforeModelRewriteState(
 		}
 	}
 
-	// Report files modified outside the session since the agent read them.
-	m.scanExternalChanges(rc)
-	// Periodic env refresh (git state, project type, date) and AGENTS.md
-	// reload check; both are no-ops when cfg.Pwd is empty.
-	m.refreshEnvDrift(rc)
-	m.refreshAgentsMd(rc)
+	// The local-filesystem sweeps pause while the live env is remote: tracked
+	// paths, git state, and AGENTS.md all belong to the local host and would
+	// otherwise be reported as drift/changes of the wrong machine. They resume
+	// (same baselines) when switch_env returns to local.
+	if !remote {
+		// Report files modified outside the session since the agent read them.
+		m.scanExternalChanges(rc)
+		// Periodic env refresh (git state, project type, date) and AGENTS.md
+		// reload check; both are no-ops when cfg.Pwd is empty.
+		m.refreshEnvDrift(rc)
+		m.refreshAgentsMd(rc)
+	}
 
 	msgs := prompts.CollectReminders(rc)
 	text := prompts.FormatReminders(msgs)
@@ -183,11 +203,17 @@ func (m *reminderMiddleware) BeforeModelRewriteState(
 // scanExternalChanges sweeps the FileTracker for external modifications and
 // fills the reminder context. Each change is reported once (the tracker
 // advances its state in place); nil FileTracker disables the sweep entirely.
+// The tracker is read from the live env when available so a future env
+// rebuild/replacement is picked up without re-wiring this middleware.
 func (m *reminderMiddleware) scanExternalChanges(rc *prompts.ReminderContext) {
-	if m.cfg.FileTracker == nil {
+	tracker := m.cfg.FileTracker
+	if m.cfg.Env != nil {
+		tracker = m.cfg.Env.FileTracker
+	}
+	if tracker == nil {
 		return
 	}
-	for _, ch := range m.cfg.FileTracker.ScanExternalChanges(maxExternalChangesPerTurn) {
+	for _, ch := range tracker.ScanExternalChanges(maxExternalChangesPerTurn) {
 		if ch.Gone {
 			rc.ExternalGoneFiles = append(rc.ExternalGoneFiles, ch.Path)
 		} else {
