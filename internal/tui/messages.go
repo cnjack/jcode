@@ -358,6 +358,24 @@ type SkillSlashInfo struct {
 	Description string
 }
 
+// FlowSlashMsg is emitted when the user submits a "/<workflow>" slash command.
+type FlowSlashMsg struct {
+	FlowName  string // workflow name to run
+	UserInput string // additional user input after the slash command
+}
+
+// FlowsLoadedMsg is sent at startup to inform the TUI about available workflow
+// slash commands (e.g. /repo-audit, /roundtable).
+type FlowsLoadedMsg struct {
+	SlashCommands []FlowSlashInfo
+}
+
+// FlowSlashInfo describes a workflow's slash command for TUI hint display.
+type FlowSlashInfo struct {
+	Slash       string
+	Description string
+}
+
 // --- Channel (WeChat etc.) messages ---
 
 // ChannelAction represents an action the user wants to perform on a channel.

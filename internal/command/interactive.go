@@ -23,6 +23,7 @@ import (
 	"github.com/cnjack/jcode/internal/browser"
 	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/flow"
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/hooks"
 	mempipeline "github.com/cnjack/jcode/internal/memory/pipeline"
@@ -62,6 +63,7 @@ type interactiveState struct {
 	platform        string
 	registry        *internalmodel.ModelRegistry
 	skillLoader     *skills.Loader
+	flowLoader      *flow.Loader
 	langfuseTracer  *telemetry.LangfuseTracer
 	h               handler.AgentEventHandler
 	askUserDeps     *tools.AskUserDeps
@@ -108,6 +110,7 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 			ModelFactory: internalmodel.NewModelFactory(s.cfg, s.chatModel),
 			Recorder:     s.rec,
 			Tracer:       s.langfuseTracer,
+			Loader:       s.flowLoader,
 		}),
 		tools.NewAskUserTool(s.askUserDeps),
 		skills.NewLoadSkillTool(s.skillLoader),
@@ -812,6 +815,19 @@ func (s *interactiveState) runEventLoop(initialHistory []adk.Message, initialRes
 		s.p.Send(tui.SkillsLoadedMsg{SlashCommands: slashInfos})
 	}
 
+	if s.flowLoader != nil {
+		if slashFlows := s.flowLoader.SlashCommands(); len(slashFlows) > 0 {
+			var flowInfos []tui.FlowSlashInfo
+			for _, fc := range slashFlows {
+				flowInfos = append(flowInfos, tui.FlowSlashInfo{
+					Slash:       fc.Slash,
+					Description: fc.Description,
+				})
+			}
+			s.p.Send(tui.FlowsLoadedMsg{SlashCommands: flowInfos})
+		}
+	}
+
 	s.history = initialHistory
 	if initialResumeUUID != "" {
 		s.p.Send(tui.SessionResumedMsg{UUID: initialResumeUUID, Entries: initialResumeEntries})
@@ -977,6 +993,9 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	skillLoader := skills.NewLoaderWithDisabled(cfg.DisabledSkills)
 	skillLoader.ScanProjectSkills(pwd)
 
+	flowLoader := flow.NewLoader()
+	flowLoader.LoadProject(pwd)
+
 	// Memory distillation runs in the background on session start (design
 	// §5.1); one-shot -p runs are excluded, gates (cooldown/budget/lock) are
 	// inside the pipeline.
@@ -1071,6 +1090,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		platform:     platform,
 		registry:     registry,
 		skillLoader:  skillLoader,
+		flowLoader:   flowLoader,
 		askUserDeps:  askUserDeps,
 		mcpTools:     mcpTools,
 		rec:          rec,

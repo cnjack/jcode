@@ -136,10 +136,20 @@ jcode flow run ./my-workflow.js              # run a script by path
 
 Progress streams to stderr; the final result prints to stdout.
 
-**From a chat (TUI / Web / ACP):** just ask — "audit the auth module with a
-workflow". The agent uses the `workflow_run` tool to either run a saved workflow
-by name or write an inline script for the task and run it. Intermediate agent work
-stays out of the conversation; only the result comes back.
+**From a chat (TUI / Web / ACP):** every saved workflow gets a `/<name>` slash
+command (e.g. `/repo-audit`, `/roundtable`), marked with a **workflow** badge in
+the command menu so it's distinct from skills. Type the slash — anything after it
+becomes the workflow's `args` — and jcode runs the saved workflow by name:
+
+```text
+/repo-audit internal/auth
+/roundtable Should we adopt gRPC internally?
+```
+
+Or just ask in plain language — "audit the auth module with a workflow". Either
+way the agent uses the `workflow_run` tool to run a saved workflow by name (or
+write an inline script for the task and run it). Intermediate agent work stays out
+of the conversation; only the result comes back.
 
 ## Built-in workflows
 

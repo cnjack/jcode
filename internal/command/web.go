@@ -29,6 +29,7 @@ import (
 	"github.com/cnjack/jcode/internal/channel/ble"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/feature"
+	"github.com/cnjack/jcode/internal/flow"
 	"github.com/cnjack/jcode/internal/handler"
 	mempipeline "github.com/cnjack/jcode/internal/memory/pipeline"
 	"github.com/cnjack/jcode/internal/mode"
@@ -239,6 +240,9 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 	skillLoader := skills.NewLoaderWithDisabled(cfg.DisabledSkills)
 	skillLoader.ScanProjectSkills(pwd)
 
+	flowLoader := flow.NewLoader()
+	flowLoader.LoadProject(pwd)
+
 	var providerName, modelName string
 	if !needsSetup {
 		providerName, modelName = cfg.GetProviderModel()
@@ -406,6 +410,14 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 			taskEnvInfo = util.CollectEnvInfo(taskPwd)
 		}
 
+		// Per-task flow loader (builtin + user + this task's project workflows),
+		// shared with the workflow_run tool so slash triggers and inline runs
+		// resolve the same set. Project workflows only apply to a local exec.
+		taskFlowLoader := flow.NewLoader()
+		if exec == nil {
+			taskFlowLoader.LoadProject(taskPwd)
+		}
+
 		tbg := tools.NewBackgroundManager(tenv)
 		trec, _ := session.NewRecorder(projectKey, providerName, modelName)
 		if taskID != "" && trec != nil {
@@ -494,6 +506,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 				tenv.NewWorkflowRunTool(&tools.WorkflowToolDeps{
 					ModelFactory: internalmodel.NewModelFactory(cfg, cm),
 					Recorder:     trec,
+					Loader:       taskFlowLoader,
 				}),
 				tools.NewAskUserTool(&tools.AskUserDeps{
 					BatchRequestFn: twh.RequestAskUser,
@@ -710,6 +723,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 			BreakdownFn:    breakdownFn,
 			CreateAgent:    createAgent,
 			RebuildForMode: rebuildForMode,
+			FlowLoader:     taskFlowLoader,
 		}, nil
 	}
 
@@ -764,6 +778,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		Registry:           registry,
 		ApprovalState:      bootEC.ApprovalState,
 		SkillLoader:        skillLoader,
+		FlowLoader:         flowLoader,
 		ReloadMCP:          reloadMCPTools,
 		InitialMCPStatuses: initialMCPStatuses,
 		WechatClient:       wechatClient,

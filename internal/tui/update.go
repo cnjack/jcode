@@ -867,9 +867,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					}
 
 					// Check skill slash commands (e.g. /review-pr, /security-review)
+					// then workflow slash commands (e.g. /repo-audit, /roundtable).
 					if strings.HasPrefix(prompt, "/") {
 						if skillCmd := m.matchSkillSlash(prompt); skillCmd != nil {
 							return m.handleSkillSlashInput(skillCmd.SkillName, skillCmd.UserInput, cmds)
+						}
+						if flowCmd := m.matchFlowSlash(prompt); flowCmd != nil {
+							return m.handleFlowSlashInput(flowCmd.FlowName, flowCmd.UserInput, cmds)
 						}
 					}
 
@@ -1339,6 +1343,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 	case SkillsLoadedMsg:
 		m.skillSlashCommands = msg.SlashCommands
+
+	case FlowsLoadedMsg:
+		m.flowSlashCommands = msg.SlashCommands
 
 	case SessionResumedMsg:
 		m.approvalMode = ModeManual
