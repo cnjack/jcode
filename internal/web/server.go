@@ -28,6 +28,7 @@ import (
 	"github.com/cnjack/jcode/internal/browser"
 	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/flow"
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/hooks"
 	"github.com/cnjack/jcode/internal/mode"
@@ -110,6 +111,9 @@ type Server struct {
 	// skillLoader provides skill listing for slash commands.
 	skillLoader *skills.Loader
 
+	// flowLoader provides workflow listing for slash commands (e.g. /repo-audit).
+	flowLoader *flow.Loader
+
 	// reloadMCP re-establishes MCP connections from the given server map and
 	// swaps in the fresh tool set (the agent is rebuilt by the caller). nil
 	// when MCP hot-reload is unavailable. Returns per-server statuses.
@@ -188,6 +192,7 @@ type ServerConfig struct {
 	Registry            *model.ModelRegistry
 	ApprovalState       *runner.ApprovalState
 	SkillLoader         *skills.Loader
+	FlowLoader          *flow.Loader
 	ReloadMCP           func(servers map[string]*config.MCPServer) ([]tools.MCPStatus, error) // optional: hot-reload MCP tools
 	InitialMCPStatuses  []tools.MCPStatus                                                     // statuses from the startup MCP load
 	WechatClient        channel.Channel                                                       // optional WeChat channel
@@ -256,6 +261,7 @@ func NewServer(cfg *ServerConfig) *Server {
 		registry:            cfg.Registry,
 		ptyMgr:              newPTYManager(),
 		skillLoader:         cfg.SkillLoader,
+		flowLoader:          cfg.FlowLoader,
 		reloadMCP:           cfg.ReloadMCP,
 		mcpStatuses:         make(map[string]tools.MCPStatus),
 		mcpLogins:           make(map[string]*mcpLoginState),
@@ -688,12 +694,13 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 		cmd := strings.TrimPrefix(message, "/")
 		parts := strings.SplitN(cmd, " ", 2)
 		cmdName := parts[0]
+		userInput := ""
+		if len(parts) > 1 {
+			userInput = parts[1]
+		}
+		matchedSkill := false
 		if s.skillLoader != nil {
 			if sk := s.skillLoader.GetBySlash("/" + cmdName); sk != nil {
-				userInput := ""
-				if len(parts) > 1 {
-					userInput = parts[1]
-				}
 				var sb strings.Builder
 				fmt.Fprintf(&sb, "Use the load_skill tool with name=%q and follow its instructions.", sk.Name)
 				if userInput != "" {
@@ -701,6 +708,13 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 					sb.WriteString(userInput)
 				}
 				agentMsg = sb.String()
+				matchedSkill = true
+			}
+		}
+		// Otherwise check workflow slash commands (e.g. /repo-audit).
+		if !matchedSkill && s.flowLoader != nil {
+			if wf, ok := s.flowLoader.GetBySlash("/" + cmdName); ok {
+				agentMsg = flow.SlashRunPrompt(wf.Meta.Name, userInput)
 			}
 		}
 	}
@@ -2857,7 +2871,7 @@ func (s *Server) handleSlashCommands(w http.ResponseWriter, r *http.Request) {
 	type slashItem struct {
 		Slash       string `json:"slash"`
 		Description string `json:"description"`
-		Type        string `json:"type"` // "skill"
+		Type        string `json:"type"` // "skill" | "flow"
 	}
 
 	var items []slashItem
@@ -2867,6 +2881,15 @@ func (s *Server) handleSlashCommands(w http.ResponseWriter, r *http.Request) {
 				Slash:       sk.Slash,
 				Description: sk.Description,
 				Type:        "skill",
+			})
+		}
+	}
+	if s.flowLoader != nil {
+		for _, fc := range s.flowLoader.SlashCommands() {
+			items = append(items, slashItem{
+				Slash:       fc.Slash,
+				Description: fc.Description,
+				Type:        "flow",
 			})
 		}
 	}

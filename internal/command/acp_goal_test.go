@@ -3,7 +3,7 @@ package command
 import "testing"
 
 func TestAvailableCommandList_IncludesGoal(t *testing.T) {
-	cmds := availableCommandList(nil)
+	cmds := availableCommandList(nil, nil)
 	if len(cmds) == 0 {
 		t.Fatal("expected at least the goal command")
 	}

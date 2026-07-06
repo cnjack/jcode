@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/flow"
 	"github.com/cnjack/jcode/internal/memory"
 	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/tools"
@@ -42,7 +43,21 @@ func (m Model) getAllCommands() []commandSuggestion {
 	for _, sc := range m.skillSlashCommands {
 		commands = append(commands, commandSuggestion{sc.Slash, sc.Description})
 	}
+	for _, fc := range m.flowSlashCommands {
+		commands = append(commands, commandSuggestion{fc.Slash, fc.Description})
+	}
 	return commands
+}
+
+// isFlowSlash reports whether cmd (e.g. "/repo-audit") is a workflow slash
+// command, used to mark it distinctly in the suggestion list.
+func (m Model) isFlowSlash(cmd string) bool {
+	for _, fc := range m.flowSlashCommands {
+		if fc.Slash == cmd {
+			return true
+		}
+	}
+	return false
 }
 
 // filterCommands returns commands that match the given prefix.
@@ -158,18 +173,27 @@ func (m Model) renderCommandSuggestions() string {
 		s := suggestions[i]
 		cmdText := s.cmd
 		descText := s.desc
+		isFlow := m.isFlowSlash(s.cmd)
 		if i == m.cmdSuggestionIndex {
 			// Highlighted item
 			cmdStyled := lipgloss.NewStyle().Bold(true).Foreground(colorOnPrimary).Background(colorPrimary).Render(cmdText)
 			descStyled := lipgloss.NewStyle().Foreground(colorOnPrimary).Background(colorPrimary).Render(" " + descText)
+			tag := ""
+			if isFlow {
+				tag = lipgloss.NewStyle().Italic(true).Foreground(colorOnPrimary).Background(colorPrimary).Render(" workflow")
+			}
 			// Indicator
 			indicator := lipgloss.NewStyle().Foreground(colorPrimary).Render("❯")
-			lines = append(lines, fmt.Sprintf("  %s %s%s", indicator, cmdStyled, descStyled))
+			lines = append(lines, fmt.Sprintf("  %s %s%s%s", indicator, cmdStyled, tag, descStyled))
 		} else {
 			cmdStyled := lipgloss.NewStyle().Foreground(colorText).Render(cmdText)
 			descStyled := lipgloss.NewStyle().Foreground(colorMuted).Render(" " + descText)
+			tag := ""
+			if isFlow {
+				tag = lipgloss.NewStyle().Italic(true).Foreground(colorPrimary).Render(" workflow")
+			}
 			indicator := lipgloss.NewStyle().Foreground(colorMuted).Render(" ")
-			lines = append(lines, fmt.Sprintf("  %s %s%s", indicator, cmdStyled, descStyled))
+			lines = append(lines, fmt.Sprintf("  %s %s%s%s", indicator, cmdStyled, tag, descStyled))
 		}
 	}
 
@@ -430,6 +454,51 @@ func (m *Model) handleSkillSlashInput(skillName, userInput string, cmds []tea.Cm
 	m.thinking = true
 	m.lines = append(m.lines, textLine(fmt.Sprintf("%s %s",
 		userLabelStyle.Render("🔧 Skill:"), displayLabel)))
+	if m.ready {
+		m.viewport.SetHeight(m.calcViewportHeight(false))
+		m.viewport.SetContent(m.renderViewportContent())
+		m.viewport.GotoBottom()
+	}
+	cmds = append(cmds, func() tea.Msg {
+		return PromptSubmitMsg{Prompt: prompt}
+	})
+	cmds = append(cmds, m.spinner.Tick)
+	return m, tea.Batch(cmds...)
+}
+
+// matchFlowSlash checks if the prompt matches a registered workflow slash command.
+// Returns a FlowSlashMsg if matched, nil otherwise.
+func (m Model) matchFlowSlash(prompt string) *FlowSlashMsg {
+	for _, fc := range m.flowSlashCommands {
+		if prompt == fc.Slash || strings.HasPrefix(prompt, fc.Slash+" ") {
+			userInput := ""
+			if strings.HasPrefix(prompt, fc.Slash+" ") {
+				userInput = strings.TrimSpace(prompt[len(fc.Slash):])
+			}
+			return &FlowSlashMsg{
+				FlowName:  strings.TrimPrefix(fc.Slash, "/"),
+				UserInput: userInput,
+			}
+		}
+	}
+	return nil
+}
+
+// handleFlowSlashInput handles a workflow slash command by sending a prompt that
+// runs the saved workflow via the workflow_run tool.
+func (m *Model) handleFlowSlashInput(flowName, userInput string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	prompt := flow.SlashRunPrompt(flowName, userInput)
+
+	displayLabel := "/" + flowName
+	if userInput != "" {
+		displayLabel += " " + userInput
+	}
+
+	m.mode = ModeAgent
+	m.agentDone = false
+	m.thinking = true
+	m.lines = append(m.lines, textLine(fmt.Sprintf("%s %s",
+		userLabelStyle.Render("Workflow:"), displayLabel)))
 	if m.ready {
 		m.viewport.SetHeight(m.calcViewportHeight(false))
 		m.viewport.SetContent(m.renderViewportContent())
