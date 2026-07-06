@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "jcode Browser Bridge",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Let jcode see and operate your browser via the DevTools Protocol. Connects to your local jcode server.",
   "minimum_chrome_version": "116",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0JN3n8PBlNtsaMBRXs5g76Kt8C1VIO5bz+vRY4HMAyn1soIAhNDu9ZAcQjOUmuu1SyJe7A683EfgXJhpFghvSULi63rKHO584FBc9zK53b8m1yVq6HuNZtwXTZyDXeCVNwKstI9zHCLqTUEWyBuy3zJOWRq+0d8h9Moz2a0rDLePqAmPyQb6nlSvDomPIIRnk4p0sBSQbENWKwd/hhJwlsl/D4JK/SVWLXfhQZOP5PceGJ0gnOmIH38bPuxW3l1EWk3nuOZyIVRUvF9QkuAhS9U/+1WEVCco6tijVaBoHI6rzbxouR5BH9Drg0lt9VPJPlq0HlU8AyLLepweJ6MWxwIDAQAB",
