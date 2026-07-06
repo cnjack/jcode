@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -11,6 +12,14 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/cnjack/jcode/internal/config"
+)
+
+// In-memory cap for a background task's output (head+tail, tail-biased so a
+// long build/test log keeps its trailing errors); the untruncated output is in
+// the task's log file on disk.
+const (
+	bgOutputHeadBytes = 1500
+	bgOutputTailBytes = 2500
 )
 
 // --- BackgroundManager ---
@@ -32,6 +41,7 @@ type BgTask struct {
 	Description string
 	Status      BgTaskStatus
 	Output      string
+	LogPath     string // full-output log on the local disk ("" if unavailable)
 	Started     time.Time
 	Ended       time.Time
 	Timeout     time.Duration // 0 means use default (5 minutes)
@@ -43,6 +53,7 @@ type BgNotification struct {
 	Command string
 	Status  BgTaskStatus
 	Output  string
+	LogPath string
 }
 
 // BgNotifier is called on background task lifecycle events.
@@ -113,21 +124,35 @@ func (bm *BackgroundManager) Run(ctx context.Context, command string) string {
 }
 
 func (bm *BackgroundManager) execute(ctx context.Context, task *BgTask) {
-	// Open a TaskLog if storage is available.
+	// Spill the full output to a log file on disk. The tasks dir comes from
+	// the StorageManager when one was wired via SetStorage, otherwise
+	// ~/.jcode/tasks — ConfigDir always resolves (it falls back to the OS temp
+	// dir), so the log is available unconditionally.
 	bm.mu.Lock()
 	storage := bm.storage
 	bm.mu.Unlock()
 
-	var taskLog *TaskLog
+	logDir := filepath.Join(config.ConfigDir(), "tasks")
 	if storage != nil {
-		var err error
-		taskLog, err = NewTaskLog(storage, task.ID)
-		if err != nil {
-			config.Logger().Printf("[background] failed to create task log for %s: %v", task.ID, err)
-		}
+		logDir = storage.TasksDir()
+	}
+	taskLog, err := NewTaskLog(logDir, task.ID)
+	if err != nil {
+		config.Logger().Printf("[background] failed to create task log for %s: %v", task.ID, err)
+		taskLog = nil
 	}
 	if taskLog != nil {
 		defer func() { _ = taskLog.Close() }()
+		// The log lives on the local disk. Only advertise the path to the
+		// model when the executor is local too — over SSH/Docker the command
+		// runs remotely and read/grep on a local path would fail.
+		if !bm.env.IsRemote() {
+			bm.mu.Lock()
+			task.LogPath = taskLog.Path()
+			bm.mu.Unlock()
+		} else {
+			config.Logger().Printf("[background] task %s full log (local file): %s", task.ID, taskLog.Path())
+		}
 	}
 
 	timeout := task.Timeout
@@ -152,12 +177,10 @@ func (bm *BackgroundManager) execute(ctx context.Context, task *BgTask) {
 		taskLog.Write([]byte(output.String())) //nolint:errcheck
 	}
 
-	// Truncate in-memory output to keep notifications lean.
-	result := output.String()
-	const maxInMemoryOutput = 4096
-	if len(result) > maxInMemoryOutput {
-		result = result[:maxInMemoryOutput] + "\n... (truncated)"
-	}
+	// Truncate the in-memory output (head+tail) to keep notifications lean;
+	// the trailing errors of a long build/test log survive, and the full
+	// output remains in the task log.
+	result, _, _ := truncateHeadTail(output.String(), bgOutputHeadBytes, bgOutputTailBytes)
 
 	bm.mu.Lock()
 
@@ -182,6 +205,7 @@ func (bm *BackgroundManager) execute(ctx context.Context, task *BgTask) {
 			Command: task.Command,
 			Status:  task.Status,
 			Output:  result,
+			LogPath: task.LogPath,
 		})
 	}
 
@@ -311,6 +335,11 @@ func formatTask(t *BgTask) string {
 	}
 	if t.Output != "" {
 		fmt.Fprintf(&sb, "Output:\n%s\n", t.Output)
+	}
+	// Point at the full log whether or not the in-memory output was truncated,
+	// so the model can read/grep the complete output on demand.
+	if t.LogPath != "" {
+		fmt.Fprintf(&sb, "Full log: %s\n", t.LogPath)
 	}
 	return sb.String()
 }

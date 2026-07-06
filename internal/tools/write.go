@@ -26,7 +26,7 @@ func (e *Env) NewWriteTool() tool.InvokableTool {
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"file_path": {
 				Type:     schema.String,
-				Desc:     "The absolute path to the file to write.",
+				Desc:     "The absolute path to the file to write (preferred). Relative paths are resolved against the working directory.",
 				Required: true,
 			},
 			"content": {
@@ -52,11 +52,11 @@ func (w *writeTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 func (w *writeTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
 	var input WriteInput
 	if err := json.Unmarshal([]byte(argumentsInJSON), &input); err != nil {
-		return "", fmt.Errorf("failed to parse input: %w", err)
+		return "", toolErrf("invalid_args", hintInvalidJSON, "failed to parse input: %w", err)
 	}
 
 	if input.FilePath == "" {
-		return "", fmt.Errorf("file_path is required")
+		return "", toolErrf("missing_param", missingParamHint("file_path"), "file_path is required")
 	}
 	input.FilePath = w.env.ResolvePath(input.FilePath)
 
@@ -72,8 +72,10 @@ func (w *writeTool) InvokableRun(ctx context.Context, argumentsInJSON string, op
 	var backupPath string
 
 	if !isNew {
-		// Conflict detection.
-		if w.env.FileTracker != nil {
+		// Conflict detection. Remote (SSH/Docker) sessions skip it: the
+		// tracker stats the local filesystem and would misreport remote
+		// files as gone or unread.
+		if w.env.FileTracker != nil && !w.env.IsRemote() {
 			cr, err := w.env.FileTracker.CheckConflict(input.FilePath)
 			if err == nil {
 				switch cr.Status {
@@ -82,6 +84,8 @@ func (w *writeTool) InvokableRun(ctx context.Context, argumentsInJSON string, op
 				case ConflictFileGone:
 					// File was deleted externally; treat as new.
 					isNew = true
+				case ConflictNeverRead:
+					return fmt.Sprintf("file %s already exists but has not been read yet. Use the read tool to read it before overwriting", input.FilePath), nil
 				}
 			}
 		}
@@ -100,11 +104,11 @@ func (w *writeTool) InvokableRun(ctx context.Context, argumentsInJSON string, op
 	}
 
 	if err := w.env.Exec.WriteFile(ctx, input.FilePath, []byte(input.Content), 0644); err != nil {
-		return "", fmt.Errorf("failed to write file %s: %w", input.FilePath, err)
+		return "", toolErrf("write_failed", hintWriteFailed, "failed to write file %s: %w", input.FilePath, err)
 	}
 
-	// Update FileTracker after write.
-	if w.env.FileTracker != nil {
+	// Update FileTracker after write (local only: os.Stat cannot see remote files).
+	if w.env.FileTracker != nil && !w.env.IsRemote() {
 		if info, err := os.Stat(input.FilePath); err == nil {
 			w.env.FileTracker.UpdateAfterWrite(input.FilePath, []byte(input.Content), info.ModTime())
 		}

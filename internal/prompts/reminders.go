@@ -20,6 +20,20 @@ type ReminderContext struct {
 	// Goal context, set when an active session goal exists.
 	GoalActive    bool
 	GoalObjective string
+
+	// Files the FileTracker sweep found modified (or deleted) outside the
+	// session since the agent last read them.
+	ExternalChangedFiles []string
+	ExternalGoneFiles    []string
+
+	// EnvDiff is the non-empty BuildEnvDiff output when the periodic env
+	// refresh detected drift since the last snapshot (includes date changes).
+	EnvDiff string
+
+	// AGENTS.md reload: the new merged content when it changed on disk, or a
+	// removal flag when the file disappeared. Mutually exclusive.
+	AgentsMdUpdate  string
+	AgentsMdRemoved bool
 }
 
 // reminder is a single conditional reminder rule.
@@ -100,6 +114,49 @@ var builtinReminders = []reminder{
 		},
 		message: func(_ *ReminderContext) string {
 			return "Two or more tool calls have failed in a row. Try a different approach."
+		},
+	},
+	{
+		name: "external_file_changed",
+		condition: func(rc *ReminderContext) bool {
+			return len(rc.ExternalChangedFiles) > 0 || len(rc.ExternalGoneFiles) > 0
+		},
+		message: func(rc *ReminderContext) string {
+			var sb strings.Builder
+			sb.WriteString("[External file changes]\nThe following files were modified outside this session since you last read them; re-read before relying on or editing them:")
+			for _, p := range rc.ExternalChangedFiles {
+				sb.WriteString("\n- " + p)
+			}
+			for _, p := range rc.ExternalGoneFiles {
+				sb.WriteString("\n- " + p + " (deleted)")
+			}
+			return sb.String()
+		},
+	},
+	{
+		name: "env_drift",
+		condition: func(rc *ReminderContext) bool {
+			return rc.EnvDiff != ""
+		},
+		message: func(rc *ReminderContext) string {
+			// BuildEnvDiff output already carries its own header line.
+			return rc.EnvDiff
+		},
+	},
+	{
+		name: "agents_md_changed",
+		condition: func(rc *ReminderContext) bool {
+			return rc.AgentsMdUpdate != "" || rc.AgentsMdRemoved
+		},
+		message: func(rc *ReminderContext) string {
+			if rc.AgentsMdUpdate == "" {
+				return "AGENTS.md was removed; the custom agent instructions in your system prompt may no longer apply."
+			}
+			content := rc.AgentsMdUpdate
+			if len(content) > 10000 {
+				content = content[:10000] + "\n... (content truncated)"
+			}
+			return "[AGENTS.md updated]\nThe project agent instructions changed on disk. The version below supersedes the one in your system prompt:\n\n" + content
 		},
 	},
 }

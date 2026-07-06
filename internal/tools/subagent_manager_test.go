@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -195,6 +196,48 @@ func TestTaskManager_MaxParallelLimit(t *testing.T) {
 
 	close(ch)
 	time.Sleep(50 * time.Millisecond)
+}
+
+// #10: A panic inside a background runFn must not crash the process; the task
+// is marked failed with the panic message and a notification is emitted.
+func TestTaskManager_AsyncPanicRecovered(t *testing.T) {
+	mgr := NewSubagentTaskManager(5, 10)
+	task := &SubagentTask{Name: "panics", AgentType: AgentTypeGeneral}
+	taskID, _, err := mgr.Submit(context.Background(), task, func(ctx context.Context) (string, error) {
+		panic("kaboom")
+	}, true)
+	if err != nil {
+		t.Fatalf("unexpected submit error: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		got, gerr := mgr.Get(taskID)
+		if gerr != nil {
+			t.Fatalf("Get failed: %v", gerr)
+		}
+		if got.Status == TaskStatusFailed {
+			if !strings.Contains(got.Error, "panic") {
+				t.Fatalf("expected panic in task error, got %q", got.Error)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("task never reached failed status, status=%s", got.Status)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	notifs := mgr.DrainNotifications()
+	if len(notifs) != 1 {
+		t.Fatalf("expected 1 notification, got %d", len(notifs))
+	}
+	if notifs[0].Status != TaskStatusFailed {
+		t.Fatalf("expected failed notification, got %s", notifs[0].Status)
+	}
+	if !strings.Contains(notifs[0].Summary, "panic") {
+		t.Fatalf("expected panic in notification summary, got %q", notifs[0].Summary)
+	}
 }
 
 func TestTaskManager_ConcurrentSubmit(t *testing.T) {

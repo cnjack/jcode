@@ -613,6 +613,35 @@ func NewEnhancedTodoWriteTool(store *EnhancedTodoStore) tool.InvokableTool {
 			"items": {
 				Type: schema.Array,
 				Desc: `Array of todo items for "update" or "add" actions.`,
+				ElemInfo: &schema.ParameterInfo{
+					Type: schema.Object,
+					SubParams: map[string]*schema.ParameterInfo{
+						"id": {
+							Type:     schema.String,
+							Desc:     "Unique identifier.",
+							Required: true,
+						},
+						"title": {
+							Type:     schema.String,
+							Desc:     "Task description.",
+							Required: true,
+						},
+						"status": {
+							Type: schema.String,
+							Desc: "Task state.",
+							Enum: []string{StatusNotStarted, StatusInProgress, StatusCompleted, StatusSkipped},
+						},
+						"blocked_by": {
+							Type:     schema.Array,
+							Desc:     "IDs of items this task depends on.",
+							ElemInfo: &schema.ParameterInfo{Type: schema.String},
+						},
+						"summary": {
+							Type: schema.String,
+							Desc: "Optional completion note.",
+						},
+					},
+				},
 			},
 			"id": {
 				Type: schema.String,
@@ -627,8 +656,9 @@ func NewEnhancedTodoWriteTool(store *EnhancedTodoStore) tool.InvokableTool {
 				Desc: `New title for "modify" action.`,
 			},
 			"todos": {
-				Type: schema.Array,
-				Desc: `Legacy compatibility: array of legacy-format todos. If present without action, treated as update.`,
+				Type:     schema.Array,
+				Desc:     `Legacy compatibility: array of legacy-format todos. If present without action, treated as update.`,
+				ElemInfo: todoItemParamInfo(),
 			},
 		}),
 	}

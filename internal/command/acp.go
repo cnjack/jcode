@@ -443,10 +443,6 @@ func (a *acpAgent) buildAgentSession(
 	// Build agent with middlewares
 	contextLimit := internalmodel.ResolveContextLimit(registry, cfg, providerName, modelName)
 	compactThreshold := cfg.CompactionThreshold()
-	reductionThreshold := compactThreshold - 0.15
-	if reductionThreshold < 0.1 {
-		reductionThreshold = compactThreshold * 0.8
-	}
 
 	var handlers []adk.ChatModelAgentMiddleware
 
@@ -461,20 +457,21 @@ func (a *acpAgent) buildAgentSession(
 		handlers = append(handlers, summMw)
 	}
 
-	reductionBackend := &agent.LocalReductionBackend{RootDir: config.ConfigDir()}
-	reductionMw, err := reduction.New(ctx, &reduction.Config{
-		Backend:           reductionBackend,
-		RootDir:           filepath.Join(config.ConfigDir(), "reduction"),
-		MaxLengthForTrunc: 50000,
-		MaxTokensForClear: int64(float64(contextLimit) * reductionThreshold),
-		ReadFileToolName:  "read",
-		ToolConfig: map[string]*reduction.ToolReductionConfig{
-			"read": {SkipClear: true},
-		},
-	})
-	if err == nil {
+	reductionMw, err := reduction.New(ctx, agent.BuildReductionConfig(
+		filepath.Join(config.ConfigDir(), "reduction"),
+		contextLimit,
+		compactThreshold,
+		internalmodel.NewCalibratedCounter(tokenUsage).Count,
+	))
+	if err != nil {
+		config.Logger().Printf("[acp] reduction middleware init error: %v", err)
+	} else {
 		handlers = append(handlers, reductionMw)
 	}
+	// Aggregate cap on one turn's NEW tool results: reduction only caps each
+	// result individually (50k), so N parallel calls could still flood a single
+	// request. Registered after reduction so per-result truncation runs first.
+	handlers = append(handlers, agent.NewTurnToolResultBudgetMiddleware(0))
 
 	reminderMw := agent.NewReminderMiddleware(agent.ReminderConfig{
 		TodoStore:    env.TodoStore,
@@ -482,6 +479,11 @@ func (a *acpAgent) buildAgentSession(
 		EnvLabel:     "local",
 		IsRemote:     env.IsRemote(),
 		ContextLimit: contextLimit,
+		FileTracker:  env.FileTracker,
+		Env:          env,
+		Pwd:          pwd,
+		Platform:     platform,
+		EnvSnapshot:  prompts.SerializeEnvInfo(platform, pwd, "local", envInfo),
 	}, tokenUsage)
 	handlers = append(handlers, reminderMw)
 
