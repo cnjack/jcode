@@ -491,6 +491,10 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 						twh.OnSubagentProgress(agentName, event, toolName, detail)
 					},
 				}),
+				tenv.NewWorkflowRunTool(&tools.WorkflowToolDeps{
+					ModelFactory: internalmodel.NewModelFactory(cfg, cm),
+					Recorder:     trec,
+				}),
 				tools.NewAskUserTool(&tools.AskUserDeps{
 					BatchRequestFn: twh.RequestAskUser,
 				}),

@@ -368,6 +368,10 @@ func (a *acpAgent) buildAgentSession(
 		env.NewAutomationCreateTool(),
 		env.NewSwitchEnvTool(),
 		env.NewCheckBackgroundTool(bgManager),
+		env.NewWorkflowRunTool(&tools.WorkflowToolDeps{
+			ModelFactory: internalmodel.NewModelFactory(cfg, chatModel),
+			Recorder:     rec,
+		}),
 	}
 	if config.MemoryEnabled(cfg) {
 		allTools = append(allTools, env.NewMemoryNoteTool(&tools.MemoryNoteDeps{
