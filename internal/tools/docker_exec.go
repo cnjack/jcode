@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
@@ -270,22 +271,35 @@ func (d *DockerExecutor) ProjectLabel(pwd string) string {
 
 // run executes a command inside the container via `sh -c`, honoring both the
 // context and the timeout. stdout/stderr are demultiplexed (Tty:false).
+//
+// The shell records its own container-namespace pid ($$) in a pidfile so that
+// a timeout/cancel can best-effort kill the process tree it spawned.
+// ContainerExecInspect is useless for this: its Pid field is the pid in the
+// daemon host's namespace, which a `kill` executed inside the container's pid
+// namespace cannot address.
 func (d *DockerExecutor) run(ctx context.Context, command string, timeout time.Duration) (string, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	// The wrapper never alters the command's stdout/stderr or exit code: the
+	// pidfile write is silenced, and the recorded $rc is re-raised at the end
+	// (the trailer also removes the pidfile on normal completion).
+	pidFile := fmt.Sprintf("/tmp/.jcode_exec_%d.pid", time.Now().UnixNano())
+	wrapped := fmt.Sprintf("{ echo $$ > %s; } 2>/dev/null\n%s\nrc=$?; rm -f %s 2>/dev/null; exit $rc",
+		pidFile, command, pidFile)
+
 	resp, err := d.cli.ContainerExecCreate(ctx, d.containerID, container.ExecOptions{
-		Cmd:          []string{"sh", "-c", command},
+		Cmd:          []string{"sh", "-c", wrapped},
 		AttachStdout: true,
 		AttachStderr: true,
 	})
 	if err != nil {
-		return "", "", fmt.Errorf("docker exec create: %w", err)
+		return "", "", wrapDockerRunErr("docker exec create", err)
 	}
 
 	att, err := d.cli.ContainerExecAttach(ctx, resp.ID, container.ExecAttachOptions{})
 	if err != nil {
-		return "", "", fmt.Errorf("docker exec attach: %w", err)
+		return "", "", wrapDockerRunErr("docker exec attach", err)
 	}
 	defer att.Close()
 
@@ -301,6 +315,9 @@ func (d *DockerExecutor) run(ctx context.Context, command string, timeout time.D
 	case copyErr = <-copyDone:
 		// stream drained: command finished
 	case <-ctx.Done():
+		// Kill the exec's process tree inside the container before abandoning
+		// the attach stream; closing the stream alone leaves it running.
+		d.killExecTree(pidFile)
 		att.Close() // unblock the StdCopy goroutine
 		<-copyDone
 		return stdout.String(), stderr.String(), fmt.Errorf("command timed out or cancelled: %w", ctx.Err())
@@ -309,19 +326,67 @@ func (d *DockerExecutor) run(ctx context.Context, command string, timeout time.D
 	// write, decode failure). Surface it instead of returning a truncated result
 	// as success — callers (ReadFile/Exec → edit) would otherwise persist it.
 	if copyErr != nil {
-		return stdout.String(), stderr.String(), fmt.Errorf("docker exec stream copy: %w", copyErr)
+		return stdout.String(), stderr.String(), wrapDockerRunErr("docker exec stream copy", copyErr)
 	}
 
 	// Use a fresh context for the inspect: the exec ctx may already be at its
 	// deadline, but the exec itself completed and its exit code is available.
 	inspect, ierr := d.cli.ContainerExecInspect(context.Background(), resp.ID)
 	if ierr != nil {
-		return stdout.String(), stderr.String(), fmt.Errorf("docker exec inspect: %w", ierr)
+		return stdout.String(), stderr.String(), wrapDockerRunErr("docker exec inspect", ierr)
 	}
 	if inspect.ExitCode != 0 {
 		return stdout.String(), stderr.String(), fmt.Errorf("command exited with code %d", inspect.ExitCode)
 	}
 	return stdout.String(), stderr.String(), nil
+}
+
+// isContainerGone reports whether err means the bound container no longer
+// exists (removed from the daemon) — a permanent failure for this executor:
+// every subsequent exec/read/write/stat is guaranteed to fail the same way.
+// Deliberately narrow (#16): transient daemon hiccups, timeouts, and non-zero
+// exit codes are NOT classified as gone.
+func isContainerGone(err error) bool {
+	return err != nil && cerrdefs.IsNotFound(err)
+}
+
+// wrapDockerRunErr wraps a daemon-level exec failure, marking it Fatal when
+// the container has been removed. All DockerExecutor methods
+// (Exec/ReadFile/WriteFile/Stat/MkdirAll) funnel through run(), so wrapping
+// here covers the whole surface; their own %w wrapping preserves the chain
+// for IsFatal.
+func wrapDockerRunErr(op string, err error) error {
+	wrapped := fmt.Errorf("%s: %w", op, err)
+	if isContainerGone(err) {
+		return Fatal(wrapped)
+	}
+	return wrapped
+}
+
+// killExecTree best-effort kills the process tree of a timed-out/cancelled
+// exec inside the container: the process group first (runc makes the exec'd
+// shell a group leader), then pid/ppid descendants walked via ps as a fallback
+// for children that moved to their own group. Uses the container-namespace pid
+// recorded in pidFile and a fresh context (the exec's own ctx is already
+// done). Failures are only logged: the process may have exited on its own, or
+// a minimal image may lack ps/awk.
+func (d *DockerExecutor) killExecTree(pidFile string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	script := fmt.Sprintf(`pid=$(cat %s 2>/dev/null); rm -f %s 2>/dev/null
+[ -n "$pid" ] || exit 0
+kill -9 -"$pid" 2>/dev/null
+frontier="$pid"; all="$pid"
+for i in 1 2 3 4 5; do
+  next=$(ps -o pid,ppid 2>/dev/null | awk -v f="$frontier" 'BEGIN{n=split(f,a," "); for(i=1;i<=n;i++) p[a[i]]=1} $1 ~ /^[0-9]+$/ && ($2 in p) {print $1}')
+  [ -n "$next" ] || break
+  all="$all $next"; frontier="$next"
+done
+kill -9 $all 2>/dev/null
+exit 0`, pidFile, pidFile)
+	if _, serr, err := dockerExecCapture(ctx, d.cli, d.containerID, script); err != nil {
+		appconfig.Logger().Printf("[docker] best-effort kill of exec tree failed: %v %s", err, strings.TrimSpace(serr))
+	}
 }
 
 // ---------------------------------------------------------------------------

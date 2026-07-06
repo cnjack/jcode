@@ -141,6 +141,14 @@ func GetPlanSystemPrompt(platform, pwd, envLabel string, envInfo *utils.EnvInfo)
 	return result
 }
 
+// LoadAgentsMdContent loads the merged agent-instruction content for pwd via
+// the same MemoryLoader pipeline (char limits, @include resolution) that feeds
+// the system prompt. Exported for the reminder middleware's AGENTS.md reload
+// check, so both paths always see identical content.
+func LoadAgentsMdContent(pwd string) string {
+	return loadAgentsMd(pwd)
+}
+
 func loadAgentsMd(pwd string) string {
 	loader := NewMemoryLoader(MemoryConfig{
 		MaxTotalChars: 40000,
@@ -214,5 +222,5 @@ func BuildEnvDiff(storedEnvInfo string, platform, pwd, envLabel string, envInfo 
 	if len(diffs) == 0 {
 		return ""
 	}
-	return "Environment changes since session was last active:\n" + strings.Join(diffs, "\n")
+	return "Environment changes since your context was last updated:\n" + strings.Join(diffs, "\n")
 }

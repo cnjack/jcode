@@ -121,7 +121,7 @@ func SyncSummarization(cap *SummarizationCapture, history []adk.Message, rec *se
 	newHistory = append(newHistory, kept...)
 
 	if rec != nil {
-		rec.RecordCompact(summary, compactedN)
+		rec.RecordCompact(summary, compactedN, len(kept))
 	}
 	config.Logger().Printf("[summarization] synced history: %d → %d messages", len(history), len(newHistory))
 	return newHistory

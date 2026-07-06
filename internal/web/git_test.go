@@ -10,17 +10,25 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	utils "github.com/cnjack/jcode/internal/util"
 )
 
 // runGit runs git in dir with an isolated config so host/global settings (default
-// branch, signing, hooks) can't perturb the test. Fails the test on git error.
+// branch, signing, hooks) can't perturb the test. GIT_DIR/GIT_WORK_TREE are
+// pinned to dir: when this suite runs inside a git hook (pre-push runs
+// `go test ./...`), git exports an absolute GIT_DIR for the pushing repo, and
+// an unpinned `git init` here would re-initialize THAT repo as bare instead of
+// touching the temp dir. Fails the test on git error.
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(utils.ScrubbedGitEnv(),
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_SYSTEM=/dev/null",
+		"GIT_DIR="+filepath.Join(dir, ".git"),
+		"GIT_WORK_TREE="+dir,
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)

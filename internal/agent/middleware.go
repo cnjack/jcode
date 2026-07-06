@@ -8,6 +8,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 
 	"github.com/cnjack/jcode/internal/telemetry"
+	"github.com/cnjack/jcode/internal/tools"
 )
 
 // approvalMiddleware implements adk.ChatModelAgentMiddleware with both
@@ -83,6 +84,22 @@ func (m *approvalMiddleware) WrapInvokableToolCall(
 
 		result, err := endpoint(ctx, argumentsInJSON, opts...)
 		if err != nil {
+			// Fatal errors (permanently dead executor: container removed,
+			// SSH connection gone) abort the run by propagating instead of
+			// being folded — every retry would fail identically and burn
+			// the iteration budget. Checked BEFORE folding on purpose.
+			if tools.IsFatal(err) {
+				if finishExec != nil {
+					finishExec("fatal: " + err.Error())
+				}
+				return "", err
+			}
+			// NOTE: this folding format is load-bearing. The
+			// "Tool execution failed:" prefix is matched by
+			// internal/handler/acp.go (isToolFailureOutput) and
+			// internal/agent/reminder.go (updateErrorStreak), and mirrored
+			// by the subagent safeToolMiddleware in
+			// internal/tools/subagent.go — keep all of them in sync.
 			if result != "" {
 				result = fmt.Sprintf("%s\n\nTool execution failed: %v", result, err)
 			} else {

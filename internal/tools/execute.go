@@ -91,11 +91,11 @@ func (et *executeTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 func (et *executeTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
 	var input ExecuteInput
 	if err := json.Unmarshal([]byte(argumentsInJSON), &input); err != nil {
-		return "", fmt.Errorf("failed to parse input: %w", err)
+		return "", toolErrf("invalid_args", hintInvalidJSON, "failed to parse input: %w", err)
 	}
 
 	if input.Command == "" {
-		return "", fmt.Errorf("command is required")
+		return "", toolErrf("missing_param", missingParamHint("command"), "command is required")
 	}
 
 	// Sleep detection: block dangerous sleep commands.
@@ -127,17 +127,34 @@ func (et *executeTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 	elapsed := time.Since(start)
 	config.Logger().Printf("[execute] finished in %v, err=%v", elapsed, err)
 
-	var result strings.Builder
-	if stdout != "" {
-		result.WriteString("STDOUT:\n")
-		result.WriteString(stdout)
+	// Cap what goes back to the model (head+tail per stream); the tool result
+	// must stay bounded even when no reduction middleware is protecting the
+	// surface. When anything was dropped, spill the full output to disk and
+	// point at it so the model can read/grep the rest.
+	stdoutBody, stdoutDropped, _ := truncateHeadTail(stdout, execStdoutHeadBytes, execStdoutTailBytes)
+	stderrBody, stderrDropped, _ := truncateHeadTail(stderr, execStderrHeadBytes, execStderrTailBytes)
+	spillPath := ""
+	if stdoutDropped > 0 || stderrDropped > 0 {
+		spillPath = spillExecOutput(stdout, stderr)
 	}
-	if stderr != "" {
+
+	var result strings.Builder
+	if stdoutBody != "" {
+		result.WriteString("STDOUT:\n")
+		result.WriteString(stdoutBody)
+	}
+	if stderrBody != "" {
 		if result.Len() > 0 {
 			result.WriteString("\n")
 		}
 		result.WriteString("STDERR:\n")
-		result.WriteString(stderr)
+		result.WriteString(stderrBody)
+	}
+	if spillPath != "" {
+		if result.Len() > 0 {
+			result.WriteString("\n")
+		}
+		fmt.Fprintf(&result, "[Full output: %s]", spillPath)
 	}
 
 	if err != nil {

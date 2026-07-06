@@ -574,11 +574,13 @@ func (s *Server) handleWorkspace(w http.ResponseWriter, r *http.Request) {
 	// "main") instead of the literal "HEAD".
 	branchCmd := exec.CommandContext(r.Context(), "git", "branch", "--show-current")
 	branchCmd.Dir = s.activePwd()
+	branchCmd.Env = utils.ScrubbedGitEnv()
 	branchOut, _ := branchCmd.Output()
 	branch := strings.TrimSpace(string(branchOut))
 
 	statusCmd := exec.CommandContext(r.Context(), "git", "status", "--porcelain")
 	statusCmd.Dir = s.activePwd()
+	statusCmd.Env = utils.ScrubbedGitEnv()
 	statusOut, _ := statusCmd.Output()
 	dirty := strings.TrimSpace(string(statusOut)) != ""
 
@@ -1714,6 +1716,7 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 
 	cmd := exec.CommandContext(s.rootCtx(), "git", args...)
 	cmd.Dir = s.activePwd()
+	cmd.Env = utils.ScrubbedGitEnv()
 	output, _ := cmd.CombinedOutput()
 
 	// Parse diff into structured entries
@@ -1730,11 +1733,14 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 
 	// Also get changed file list for status
 	statCmd := exec.CommandContext(s.rootCtx(), "git", "diff", "--stat", "--no-color")
+	statCmd.Env = utils.ScrubbedGitEnv()
 	switch mode {
 	case "staged":
 		statCmd = exec.CommandContext(s.rootCtx(), "git", "diff", "--cached", "--stat", "--no-color")
+		statCmd.Env = utils.ScrubbedGitEnv()
 	case "branch":
 		statCmd = exec.CommandContext(s.rootCtx(), "git", "diff", "HEAD~1", "--stat", "--no-color")
+		statCmd.Env = utils.ScrubbedGitEnv()
 	}
 	statCmd.Dir = s.activePwd()
 	_, _ = statCmd.CombinedOutput()
@@ -1828,12 +1834,14 @@ func (s *Server) takeSessionSnapshot(eng *Engine) {
 	// actually stashing. If there are no changes, use HEAD.
 	cmd := exec.CommandContext(s.rootCtx(), "git", "stash", "create")
 	cmd.Dir = eng.pwd
+	cmd.Env = utils.ScrubbedGitEnv()
 	out, err := cmd.Output()
 	snapshot := strings.TrimSpace(string(out))
 	if err != nil || snapshot == "" {
 		// No local changes — use HEAD as baseline
 		cmd2 := exec.CommandContext(s.rootCtx(), "git", "rev-parse", "HEAD")
 		cmd2.Dir = eng.pwd
+		cmd2.Env = utils.ScrubbedGitEnv()
 		out2, _ := cmd2.Output()
 		snapshot = strings.TrimSpace(string(out2))
 	}
@@ -1877,6 +1885,7 @@ func (s *Server) handleSessionDiff(w http.ResponseWriter, _ *http.Request) {
 	// Diff from snapshot to current working tree
 	cmd := exec.CommandContext(s.rootCtx(), "git", "diff", snapshot, "--no-color")
 	cmd.Dir = pwd
+	cmd.Env = utils.ScrubbedGitEnv()
 	output, _ := cmd.CombinedOutput()
 
 	var entries []diffEntry

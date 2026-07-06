@@ -1,0 +1,117 @@
+package tools
+
+import (
+	"context"
+	"os"
+	"regexp"
+	"runtime"
+	"strings"
+	"testing"
+)
+
+// execToolRun runs the execute tool against a real LocalExecutor.
+func execToolRun(t *testing.T, args string) string {
+	t.Helper()
+	env := NewEnv(t.TempDir(), runtime.GOOS+"/"+runtime.GOARCH)
+	et := env.NewExecuteTool(nil)
+	out, err := et.InvokableRun(context.Background(), args)
+	if err != nil {
+		t.Fatalf("InvokableRun(%s): %v", args, err)
+	}
+	return out
+}
+
+// #28: Malformed JSON arguments carry a re-emit hint.
+func TestExecute_InvalidArgs_Hint(t *testing.T) {
+	env := NewEnv(t.TempDir(), runtime.GOOS+"/"+runtime.GOARCH)
+	et := env.NewExecuteTool(nil)
+
+	_, err := et.InvokableRun(context.Background(), `{"command":`)
+	if err == nil {
+		t.Fatal("expected error for malformed JSON")
+	}
+	if !strings.Contains(err.Error(), "valid JSON") {
+		t.Fatalf("expected JSON hint, got: %s", err.Error())
+	}
+}
+
+// #28: Missing command parameter carries a provide-and-retry hint.
+func TestExecute_MissingCommand_Hint(t *testing.T) {
+	env := NewEnv(t.TempDir(), runtime.GOOS+"/"+runtime.GOARCH)
+	et := env.NewExecuteTool(nil)
+
+	_, err := et.InvokableRun(context.Background(), `{}`)
+	if err == nil {
+		t.Fatal("expected error for missing command")
+	}
+	if !strings.Contains(err.Error(), "command is required") {
+		t.Fatalf("original error text must be preserved, got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "Provide the command parameter") {
+		t.Fatalf("expected missing-param hint, got: %s", err.Error())
+	}
+}
+
+func TestExecute_TruncatesLargeStdout(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // keep the spill file out of the real ~/.jcode
+
+	res := execToolRun(t, `{"command":"seq 1 100000"}`)
+	if len(res) >= 50000 {
+		t.Fatalf("result length = %d, want < 50000 (below the eino reduction threshold)", len(res))
+	}
+	if !strings.Contains(res, "STDOUT:\n1\n2\n") {
+		t.Fatalf("head of stdout missing: %.120q", res)
+	}
+	if !strings.Contains(res, "\n100000\n") {
+		t.Fatalf("tail of stdout missing: ...%q", res[len(res)-200:])
+	}
+	if !strings.Contains(res, "output truncated") {
+		t.Fatalf("truncation marker missing: ...%q", res[len(res)-200:])
+	}
+}
+
+func TestExecute_StderrSurvivesHugeStdout(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	res := execToolRun(t, `{"command":"seq 1 100000; echo BOOM_ERR >&2; exit 1"}`)
+	if !strings.Contains(res, "BOOM_ERR") {
+		t.Fatalf("stderr was squeezed out by the huge stdout: ...%q", res[len(res)-300:])
+	}
+	if !strings.Contains(res, "[Exit code: 1]") {
+		t.Fatalf("exit-code footer missing: ...%q", res[len(res)-300:])
+	}
+}
+
+func TestExecute_SmallOutputUntouched(t *testing.T) {
+	res := execToolRun(t, `{"command":"echo hi"}`)
+	if !strings.Contains(res, "hi") {
+		t.Fatalf("output missing: %q", res)
+	}
+	if strings.Contains(res, "truncated") || strings.Contains(res, "Full output") {
+		t.Fatalf("small output must not carry truncation markers: %q", res)
+	}
+}
+
+func TestExecute_SpillFileWritten(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	res := execToolRun(t, `{"command":"seq 1 100000"}`)
+	m := regexp.MustCompile(`\[Full output: (.+)\]`).FindStringSubmatch(res)
+	if m == nil {
+		t.Fatalf("no [Full output: <path>] marker in result: ...%q", res[len(res)-300:])
+	}
+	data, err := os.ReadFile(m[1])
+	if err != nil {
+		t.Fatalf("read spill file %q: %v", m[1], err)
+	}
+	full := string(data)
+	// The spill must be the complete output, including the middle dropped inline.
+	for _, want := range []string{"STDOUT:\n1\n", "\n50000\n", "\n100000\n"} {
+		if !strings.Contains(full, want) {
+			t.Fatalf("spill file missing %q — not the full output (len=%d)", want, len(full))
+		}
+	}
+	if strings.Contains(full, "output truncated") {
+		t.Fatalf("spill file itself must not be truncated")
+	}
+}

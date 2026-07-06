@@ -125,6 +125,29 @@ func (m *SubagentTaskManager) runAsync(ctx context.Context, task *SubagentTask, 
 
 	go func() {
 		defer cancel()
+		// A panic escaping runFn would crash the whole process (background
+		// goroutines have no upstream recover). Mark the task failed and
+		// notify, mirroring the error path below.
+		defer func() {
+			r := recover()
+			if r == nil {
+				return
+			}
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			task.Ended = time.Now()
+			task.Status = TaskStatusFailed
+			task.Error = fmt.Sprintf("panic: %v", r)
+			m.notifications = append(m.notifications, SubagentNotification{
+				TaskID:    task.ID,
+				Name:      task.Name,
+				AgentType: task.AgentType,
+				Status:    task.Status,
+				Summary:   "error: " + task.Error,
+			})
+			m.evictOldest()
+			config.Logger().Printf("[task-manager] async task %s panicked: %v", task.ID, r)
+		}()
 		result, err := runFn(childCtx)
 		m.mu.Lock()
 		defer m.mu.Unlock()

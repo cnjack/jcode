@@ -84,9 +84,13 @@ type Entry struct {
 	// mode_change field
 	Mode string `json:"mode,omitempty"`
 
-	// compact fields
+	// compact fields. KeptN is the number of trailing messages the live agent
+	// kept verbatim after the summary; replay re-attaches that many entries
+	// from before the compact event. Legacy files lack kept_n (unmarshals to
+	// 0), which replays as "summary only" — the pre-KeptN behaviour.
 	Summary    string `json:"summary,omitempty"`
 	CompactedN int    `json:"compacted_n,omitempty"`
+	KeptN      int    `json:"kept_n,omitempty"`
 
 	// system_prompt fields
 	EnvInfo string `json:"env_info,omitempty"` // serialized environment snapshot
@@ -357,9 +361,11 @@ func (r *Recorder) RecordModeChange(mode string) {
 	_ = r.writeEntry(Entry{Type: EntryModeChange, Mode: mode})
 }
 
-// RecordCompact appends a compact/summarization event entry.
-func (r *Recorder) RecordCompact(summary string, compactedN int) {
-	_ = r.writeEntry(Entry{Type: EntryCompact, Summary: summary, CompactedN: compactedN})
+// RecordCompact appends a compact/summarization event entry. keptN is the
+// number of trailing messages preserved verbatim alongside the summary, so a
+// resume can rebuild the same tail from the entries already on disk.
+func (r *Recorder) RecordCompact(summary string, compactedN, keptN int) {
+	_ = r.writeEntry(Entry{Type: EntryCompact, Summary: summary, CompactedN: compactedN, KeptN: keptN})
 }
 
 // RecordSystemPrompt buffers the system prompt so it can be written together
