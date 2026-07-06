@@ -128,22 +128,21 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         ])
         .current_dir(workdir);
 
-    // GUI launches hand us launchd's minimal environment — no Homebrew, no
-    // profile PATH — so the sidecar can't find `rg`, `git`, node, etc. Overlay
-    // the user's real login-shell environment so tools resolve exactly as they
-    // would in a terminal. On failure we keep the inherited env and log it, so
-    // the app still starts (just with the degraded PATH).
-    match crate::shell_env::login_shell_env() {
-        Some(env) => {
-            eprintln!(
-                "[jcode] resolved login-shell environment ({} vars) for sidecar",
-                env.len()
-            );
-            command = command.envs(env);
+    // GUI launches hand us launchd's minimal PATH — no Homebrew, no profile
+    // additions — so the sidecar can't find `rg`, `git`, node, etc. Overlay the
+    // user's login-shell PATH so tools resolve as they would in a terminal. We
+    // set ONLY PATH, not the whole login environment: importing everything would
+    // pull the user's profile-exported secrets (cloud keys, tokens) into the
+    // agent's process, which it can read and shouldn't need. On failure we keep
+    // the inherited PATH and log it, so the app still starts (just degraded).
+    match crate::shell_env::login_shell_path() {
+        Some(path) => {
+            eprintln!("[jcode] resolved login-shell PATH for sidecar");
+            command = command.env("PATH", path);
         }
         None => {
             eprintln!(
-                "[jcode] could not resolve login-shell environment; \
+                "[jcode] could not resolve login-shell PATH; \
                  using inherited env (some CLI tools may be missing from PATH)"
             );
         }
