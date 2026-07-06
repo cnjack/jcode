@@ -20,6 +20,7 @@ import (
 
 	"github.com/cnjack/jcode/internal/agent"
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/flow"
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/hooks"
 	mempipeline "github.com/cnjack/jcode/internal/memory/pipeline"
@@ -80,6 +81,7 @@ type acpSession struct {
 	normalPrompt string
 	planPrompt   string
 	skillLoader  *skills.Loader
+	flowLoader   *flow.Loader
 }
 
 // Close releases resources held by the session (recorder file handle, tracer).
@@ -145,7 +147,7 @@ func handleACPSubcommand() {
 
 // availableCommandList builds the slash commands advertised to ACP clients:
 // the built-in /goal command plus any skill-based commands.
-func availableCommandList(skillLoader *skills.Loader) []acp.AvailableCommand {
+func availableCommandList(skillLoader *skills.Loader, flowLoader *flow.Loader) []acp.AvailableCommand {
 	cmds := []acp.AvailableCommand{
 		{
 			Name:        "goal",
@@ -176,13 +178,32 @@ func availableCommandList(skillLoader *skills.Loader) []acp.AvailableCommand {
 			})
 		}
 	}
+	if flowLoader != nil {
+		for _, fc := range flowLoader.SlashCommands() {
+			name := strings.TrimPrefix(fc.Slash, "/")
+			if name == "goal" {
+				continue
+			}
+			// ACP has no "type" field, so mark workflows in the description so
+			// editor command palettes distinguish them from skills.
+			cmds = append(cmds, acp.AvailableCommand{
+				Name:        name,
+				Description: "workflow — " + fc.Description,
+				Input: &acp.AvailableCommandInput{
+					Unstructured: &acp.UnstructuredCommandInput{
+						Hint: "args / context",
+					},
+				},
+			})
+		}
+	}
 	return cmds
 }
 
 // broadcastSlashCommands sends the available slash commands to the client via
 // an available_commands_update session notification.
 func (a *acpAgent) broadcastSlashCommands(sessionID acp.SessionId, sess *acpSession) {
-	cmds := availableCommandList(sess.skillLoader)
+	cmds := availableCommandList(sess.skillLoader, sess.flowLoader)
 	if len(cmds) == 0 {
 		return
 	}
@@ -324,6 +345,9 @@ func (a *acpAgent) buildAgentSession(
 	skillLoader := skills.NewLoader()
 	skillLoader.ScanProjectSkills(pwd)
 
+	flowLoader := flow.NewLoader()
+	flowLoader.LoadProject(pwd)
+
 	providerName, modelName := cfg.GetProviderModel()
 	providers := cfg.GetProviders()
 	providerCfg := providers[providerName]
@@ -371,6 +395,7 @@ func (a *acpAgent) buildAgentSession(
 		env.NewWorkflowRunTool(&tools.WorkflowToolDeps{
 			ModelFactory: internalmodel.NewModelFactory(cfg, chatModel),
 			Recorder:     rec,
+			Loader:       flowLoader,
 		}),
 	}
 	if config.MemoryEnabled(cfg) {
@@ -522,6 +547,7 @@ func (a *acpAgent) buildAgentSession(
 		normalPrompt:  normalPrompt,
 		planPrompt:    planPrompt,
 		skillLoader:   skillLoader,
+		flowLoader:    flowLoader,
 	}
 
 	// Reconcile the session's advertised mode when the handler promotes to
@@ -623,6 +649,7 @@ func (a *acpAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Pr
 		}
 
 		// Check if it's a skill slash command.
+		matchedSkill := false
 		if sess.skillLoader != nil {
 			if sk := sess.skillLoader.GetBySlash("/" + cmdName); sk != nil {
 				userInput := ""
@@ -630,6 +657,18 @@ func (a *acpAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Pr
 					userInput = parts[1]
 				}
 				prompt = fmt.Sprintf("Use the load_skill tool with name=%q and follow its instructions. %s", sk.Name, userInput)
+				matchedSkill = true
+			}
+		}
+
+		// Otherwise check workflow slash commands (e.g. /repo-audit).
+		if !matchedSkill && sess.flowLoader != nil {
+			if wf, ok := sess.flowLoader.GetBySlash("/" + cmdName); ok {
+				userInput := ""
+				if len(parts) > 1 {
+					userInput = parts[1]
+				}
+				prompt = flow.SlashRunPrompt(wf.Meta.Name, userInput)
 			}
 		}
 	}

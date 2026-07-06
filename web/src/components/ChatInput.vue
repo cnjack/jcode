@@ -507,6 +507,7 @@ watch(() => store.imageSupport, (supported) => {
             @mouseenter="selectedSlashIdx = i"
           >
             <span class="slash-cmd">{{ cmd.slash }}</span>
+            <span v-if="cmd.type === 'flow'" class="slash-badge slash-badge-flow">workflow</span>
             <span class="slash-desc">{{ cmd.description }}</span>
           </button>
         </div>
@@ -2177,6 +2178,22 @@ watch(() => store.imageSupport, (supported) => {
   font-family: var(--font-mono);
   color: var(--color-accent-neutral);
   flex-shrink: 0;
+}
+
+.slash-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.slash-badge-flow {
+  color: var(--color-accent);
+  background: var(--accent-wash);
+  border: 1px solid var(--accent-wash);
 }
 
 .slash-desc {

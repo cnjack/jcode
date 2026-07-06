@@ -141,6 +141,8 @@ type Model struct {
 
 	// Skill slash commands from skill loader
 	skillSlashCommands []SkillSlashInfo
+	// Workflow slash commands from flow loader (e.g. /repo-audit)
+	flowSlashCommands []FlowSlashInfo
 
 	// Subagent progress tracking
 	subagentActive    bool

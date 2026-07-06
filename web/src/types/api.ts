@@ -310,7 +310,7 @@ export interface SkillInfo {
 export interface SlashCommandInfo {
   slash: string
   description: string
-  type: 'builtin' | 'skill'
+  type: 'builtin' | 'skill' | 'flow'
 }
 
 // WebSocket event data types
