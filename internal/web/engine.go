@@ -9,6 +9,7 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 
+	"github.com/cnjack/jcode/internal/flow"
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/runner"
@@ -87,6 +88,12 @@ type Engine struct {
 
 	// pumpCancel stops this engine's event-forwarding goroutine on teardown.
 	pumpCancel context.CancelFunc
+
+	// flowLoader resolves workflow slash commands (/api/slash-commands, slash
+	// rewrites) for THIS task's project, so a task in a different project sees its
+	// own .jcode/workflows. Shared with this task's workflow_run tool. nil ⇒ the
+	// server falls back to its boot loader.
+	flowLoader *flow.Loader
 }
 
 // EngineConfig carries the per-task pieces a factory (command.buildWebTask)
@@ -110,6 +117,7 @@ type EngineConfig struct {
 	BreakdownFn    func() usage.ContextBreakdown
 	CreateAgent    func(providerName, modelName string) (*adk.ChatModelAgent, error)
 	RebuildForMode func(planMode bool) (*adk.ChatModelAgent, error)
+	FlowLoader     *flow.Loader
 }
 
 // newEngine assembles an *Engine from the factory-produced config. The engine's
@@ -141,6 +149,7 @@ func newEngine(c *EngineConfig) *Engine {
 		breakdownFn:    c.BreakdownFn,
 		createAgent:    c.CreateAgent,
 		rebuildForMode: c.RebuildForMode,
+		flowLoader:     c.FlowLoader,
 	}
 }
 
@@ -152,6 +161,16 @@ func (s *Server) activeEngine() *Engine {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.Engine
+}
+
+// flowLoaderFor returns the task-scoped workflow loader for eng (so slash
+// commands resolve THIS task's project workflows), falling back to the server's
+// boot loader when the engine has none — e.g. before any task engine exists.
+func (s *Server) flowLoaderFor(eng *Engine) *flow.Loader {
+	if eng != nil && eng.flowLoader != nil {
+		return eng.flowLoader
+	}
+	return s.flowLoader
 }
 
 // --- emu-guarded accessors for an engine's MUTABLE run-state fields (agent,

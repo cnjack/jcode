@@ -2192,8 +2192,8 @@ watch(() => store.imageSupport, (supported) => {
 
 .slash-badge-flow {
   color: var(--color-accent);
-  background: var(--color-accent-wash);
-  border: 1px solid var(--color-accent-wash);
+  background: var(--accent-wash);
+  border: 1px solid var(--accent-wash);
 }
 
 .slash-desc {

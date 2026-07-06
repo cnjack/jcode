@@ -711,9 +711,10 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 				matchedSkill = true
 			}
 		}
-		// Otherwise check workflow slash commands (e.g. /repo-audit).
-		if !matchedSkill && s.flowLoader != nil {
-			if wf, ok := s.flowLoader.GetBySlash("/" + cmdName); ok {
+		// Otherwise check workflow slash commands (e.g. /repo-audit) against this
+		// task's project loader so its .jcode/workflows resolve.
+		if fl := s.flowLoaderFor(eng); !matchedSkill && fl != nil {
+			if wf, ok := fl.GetBySlash("/" + cmdName); ok {
 				agentMsg = flow.SlashRunPrompt(wf.Meta.Name, userInput)
 			}
 		}
@@ -2884,8 +2885,10 @@ func (s *Server) handleSlashCommands(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
-	if s.flowLoader != nil {
-		for _, fc := range s.flowLoader.SlashCommands() {
+	// Workflows resolve against the foreground task's project so its
+	// .jcode/workflows show up in autocomplete, falling back to the boot loader.
+	if fl := s.flowLoaderFor(s.activeEngine()); fl != nil {
+		for _, fc := range fl.SlashCommands() {
 			items = append(items, slashItem{
 				Slash:       fc.Slash,
 				Description: fc.Description,

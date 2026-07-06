@@ -141,7 +141,7 @@ command (e.g. `/repo-audit`, `/roundtable`), marked with a **workflow** badge in
 the command menu so it's distinct from skills. Type the slash — anything after it
 becomes the workflow's `args` — and jcode runs the saved workflow by name:
 
-```
+```text
 /repo-audit internal/auth
 /roundtable Should we adopt gRPC internally?
 ```

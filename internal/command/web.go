@@ -723,6 +723,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 			BreakdownFn:    breakdownFn,
 			CreateAgent:    createAgent,
 			RebuildForMode: rebuildForMode,
+			FlowLoader:     taskFlowLoader,
 		}, nil
 	}
 
