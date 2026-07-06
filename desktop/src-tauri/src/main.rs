@@ -1,6 +1,7 @@
 // Prevents a stray console window on Windows in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod shell_env;
 mod sidecar;
 mod tray;
 

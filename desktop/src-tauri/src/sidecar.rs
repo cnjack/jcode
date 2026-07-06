@@ -115,7 +115,7 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
     let log_path = sidecar_log_path(app);
 
-    let (mut rx, child) = app
+    let mut command = app
         .shell()
         .sidecar("jcode")?
         .args([
@@ -126,8 +126,30 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             "127.0.0.1",
             "--open=false",
         ])
-        .current_dir(workdir)
-        .spawn()?;
+        .current_dir(workdir);
+
+    // GUI launches hand us launchd's minimal environment — no Homebrew, no
+    // profile PATH — so the sidecar can't find `rg`, `git`, node, etc. Overlay
+    // the user's real login-shell environment so tools resolve exactly as they
+    // would in a terminal. On failure we keep the inherited env and log it, so
+    // the app still starts (just with the degraded PATH).
+    match crate::shell_env::login_shell_env() {
+        Some(env) => {
+            eprintln!(
+                "[jcode] resolved login-shell environment ({} vars) for sidecar",
+                env.len()
+            );
+            command = command.envs(env);
+        }
+        None => {
+            eprintln!(
+                "[jcode] could not resolve login-shell environment; \
+                 using inherited env (some CLI tools may be missing from PATH)"
+            );
+        }
+    }
+
+    let (mut rx, child) = command.spawn()?;
 
     if let Some(state) = app.try_state::<SidecarHandle>() {
         if let Ok(mut guard) = state.0.lock() {
