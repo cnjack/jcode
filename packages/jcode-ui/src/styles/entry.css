@@ -1,0 +1,37 @@
+/*
+ * jcode-ui — single CSS entry.
+ *
+ * Consumers import this once: `import 'jcode-ui/styles.css'`.
+ *
+ * Layers (in order):
+ *   1. Tailwind CSS 4 (utilities — used by the styled components below).
+ *   2. Design tokens (CSS custom properties for color/radius/shadow/…). The
+ *      generated-theme variants (jcode-dark, dracula, …) are produced by the
+ *      Go theme generator and shipped by the host app, not here — this file
+ *      only defines the base :root (light) + .dark (dark) so the components
+ *      have sensible defaults even without a generated theme.
+ *   3. Animations (shimmer/pulse used by tool-running states).
+ *   4. Component styles (the small amount of non-utility CSS for xterm-style
+ *      code blocks, diff tables, etc.).
+ *
+ * Dark mode: toggled by a `.dark` class on <html> (matches the Vue app and the
+ * Go theme generator). Generated themes additionally key off
+ * `html[data-theme="<id>"]`.
+ */
+
+@import 'tailwindcss';
+
+/* Dark mode variant keyed off the .dark class (Tailwind 4 in-CSS config). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Typography plugin for markdown prose (assistant messages). */
+@plugin '@tailwindcss/typography';
+
+/* ─── Design tokens (base light + .dark) ─── */
+@import './tokens.css';
+
+/* ─── Animations (shimmer/pulse for running states) ─── */
+@import './animations.css';
+
+/* ─── Component-local styles ─── */
+@import './components.css';

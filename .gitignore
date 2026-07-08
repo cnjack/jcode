@@ -6,6 +6,16 @@ internal/model/registry_generated.go
 web/src/styles/tokens.generated.css
 web/src/composables/themes.generated.ts
 
+# Node / pnpm (root monorepo + per-app workspaces)
+node_modules/
+**/node_modules/
+*.tsbuildinfo
+packages/*/dist/
+web-react/dist/
+
+# Lockfile — committed at repo root for the monorepo
+# (pnpm-lock.yaml IS committed; do NOT ignore it)
+
 # Jekyll
 docs/_site/
 docs/.jekyll-cache/
