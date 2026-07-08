@@ -24,4 +24,5 @@ docs/.jekyll-metadata
 .claude
 site/dist
 site/node_modules
-.jcode
+.jcode/jcode-new
+*.tsbuildinfo

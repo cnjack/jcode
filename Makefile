@@ -13,7 +13,7 @@ LDFLAGS := -s -w \
 
 export GOFLAGS := -buildvcs=false
 
-.PHONY: build build-binary run doctor version install clean build-web build-web-react fmt lint lint-go lint-web lint-react generate setup-hooks desktop-icons desktop-sidecar desktop-dev desktop-build desktop-clean
+.PHONY: build build-binary run doctor version install clean build-web build-web-react fmt lint lint-go lint-web lint-react generate setup-hooks desktop-icons desktop-sidecar desktop-dev desktop-build desktop-react-dev desktop-react-build desktop-clean
 
 fmt:
 	@echo "Formatting Go..."
@@ -154,6 +154,23 @@ desktop-dev: desktop-sidecar
 # Produce a distributable bundle (.app/.dmg on macOS, .msi on Windows, etc.).
 desktop-build: desktop-sidecar
 	cd $(DESKTOP_DIR) && (pnpm install 2>/dev/null || npm install) && pnpm tauri build
+
+# ─── React desktop variants ────────────────────────────────────────────────
+# Same as desktop-dev/desktop-build but load the React frontend (web-react/)
+# instead of the Vue app (web/). Uses tauri.react.conf.json to override the
+# build block (frontendDist / beforeDevCommand / beforeBuildCommand) — every
+# other Tauri setting (window, tray, sidecar, capabilities) is inherited.
+# Requires `pnpm install` to have run once at the repo root (the React
+# workspace lives there, not under desktop/).
+desktop-react-dev: desktop-sidecar
+	@echo "Launching desktop (React frontend)…"
+	cd $(DESKTOP_DIR) && (pnpm install 2>/dev/null || npm install) && \
+		pnpm tauri dev --config src-tauri/tauri.react.conf.json
+
+desktop-react-build: desktop-sidecar
+	@echo "Bundling desktop (React frontend)…"
+	cd $(DESKTOP_DIR) && (pnpm install 2>/dev/null || npm install) && \
+		pnpm tauri build --config src-tauri/tauri.react.conf.json
 
 desktop-clean:
 	rm -rf $(SIDECAR_DIR) $(DESKTOP_DIR)/src-tauri/target

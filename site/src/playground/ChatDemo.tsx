@@ -38,13 +38,13 @@ export function ChatDemo({ loop = true, loopPause = 3000, height = 480, chrome =
   useEffect(() => {
     const rt = createMockRuntime()
     setRuntime(rt)
+    let cancelled = false
     const playOnce = () => {
       const cancel = runScript(rt as never, buildDemoScript())
-      cancelRef.current = cancel
-      // Schedule a reset + replay if looping.
       if (loop) {
         const totalDelay = buildDemoScript().reduce((a, s) => a + s.delay, 0) + loopPause
         const replay = setTimeout(() => {
+          if (cancelled) return
           rt.setItems([])
           playOnce()
         }, totalDelay)
@@ -52,10 +52,13 @@ export function ChatDemo({ loop = true, loopPause = 3000, height = 480, chrome =
           cancel()
           clearTimeout(replay)
         }
+      } else {
+        cancelRef.current = cancel
       }
     }
     const start = setTimeout(playOnce, 400)
     return () => {
+      cancelled = true
       clearTimeout(start)
       cancelRef.current?.()
     }
@@ -64,11 +67,11 @@ export function ChatDemo({ loop = true, loopPause = 3000, height = 480, chrome =
 
   return (
     <div
-      className="overflow-hidden rounded-xl border border-[var(--color-border,#2E2E2E)] bg-[var(--color-surface,#1A1A1A)] shadow-2xl"
+      className="flex flex-col overflow-hidden rounded-xl border border-[var(--color-border,#2E2E2E)] bg-[var(--color-surface,#1A1A1A)] shadow-2xl"
       style={{ height }}
     >
       {chrome && (
-        <div className="flex items-center gap-1.5 border-b border-[var(--color-border,#2E2E2E)] bg-[var(--color-muted,#2E2E2E)] px-3 py-2">
+        <div className="flex shrink-0 items-center gap-1.5 border-b border-[var(--color-border,#2E2E2E)] bg-[var(--color-muted,#2E2E2E)] px-3 py-2">
           <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" />
           <span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" />
           <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
@@ -78,11 +81,11 @@ export function ChatDemo({ loop = true, loopPause = 3000, height = 480, chrome =
       {runtime && (
         <RuntimeProvider runtime={runtime}>
           <ToolRegistryProvider registry={registry}>
-            <div className="flex h-[calc(100%-2.25rem)] flex-col">
-              <div className="flex-1 overflow-hidden">
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="min-h-0 flex-1 overflow-hidden">
                 <Thread overscanBottom={8} />
               </div>
-              <div className="border-t border-[var(--color-border,#2E2E2E)] p-2">
+              <div className="shrink-0 border-t border-[var(--color-border,#2E2E2E)] p-2">
                 <ChatInput placeholder="This demo plays automatically…" showContextBar={false} />
               </div>
             </div>

@@ -10,7 +10,7 @@
 
 import { PlusIcon, ChatBubbleLeftIcon, BoltIcon, ChatBubbleOvalLeftIcon } from '@heroicons/react/24/outline'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
-import { uiActions, sessionActions, chatActions } from '../app/store'
+import { uiActions, sessionActions, chatActions, loadSession } from '../app/store'
 import { api } from '../lib/api'
 import type { SessionItem } from '../lib/types'
 
@@ -40,11 +40,8 @@ export function Sidebar() {
   }
 
   async function openSession(s: SessionItem) {
-    dispatch(chatActions.clearChat())
-    dispatch(sessionActions.setCurrentSession(s.uuid))
     dispatch(uiActions.setView('chat'))
-    // Session replay (load entries + rebuild timeline) is a follow-up; the live
-    // WS events will repopulate the timeline when the agent resumes.
+    await dispatch(loadSession(s.uuid))
   }
 
   return (

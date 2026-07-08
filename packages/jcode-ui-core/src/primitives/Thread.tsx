@@ -149,18 +149,24 @@ function VirtualizedThread({
   })
 
   return (
-    <div
-      ref={(el) => {
-        ;(parentRef as React.MutableRefObject<HTMLDivElement | null>).current = el
-        containerRef?.(el)
-      }}
-      className={className}
-      role={role}
-      onScroll={autoScroll.onScroll}
-      style={{ overflowY: 'auto', contain: 'strict', height: '100%' } as React.CSSProperties}
-    >
-      <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
-        {rowVirtualizer.getVirtualItems().map((vi) => {
+  // Wrapper: the scroll element MUST resolve to a concrete pixel height for the
+  // virtualizer to measure rows. We use flex:1 + min-height:0 so it fills any
+  // flex parent, and height:100% as a fallback for block parents. Both the
+  // wrapper and scroll element get these so the height resolves through the
+  // chain regardless of the host's layout.
+  <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', minHeight: 0, flex: 1 }}>
+      <div
+        ref={(el) => {
+          ;(parentRef as React.MutableRefObject<HTMLDivElement | null>).current = el
+          containerRef?.(el)
+        }}
+        className={className}
+        role={role}
+        onScroll={autoScroll.onScroll}
+        style={{ overflowY: 'auto', contain: 'strict', flex: 1, minHeight: 0, height: '100%' } as React.CSSProperties}
+      >
+        <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+          {rowVirtualizer.getVirtualItems().map((vi) => {
           // Trailing rows.
           if (vi.index === items.length && isRunning && renderPending) {
             return (
@@ -212,6 +218,7 @@ function VirtualizedThread({
             </div>
           )
         })}
+        </div>
       </div>
     </div>
   )

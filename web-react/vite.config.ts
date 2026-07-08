@@ -20,6 +20,11 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    // Pinned to 5173 to match the Tauri shell's devUrl (see desktop/src-tauri/
+    // tauri.react.conf.json). The Vue app also defaults to 5173 — only one runs
+    // at a time, so no conflict in practice.
+    port: 5173,
+    strictPort: true,
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8080',
