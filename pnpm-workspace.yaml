@@ -1,0 +1,14 @@
+# Root pnpm workspace for the React migration + reusable component library.
+#
+# Members:
+#   - packages/jcode-ui       : published React component library (styled)
+#   - packages/jcode-ui-core  : framework-agnostic core (types, runtime, primitives)
+#   - web-react               : the React product app (replaces web/ after switch-over)
+#
+# The legacy web/ (Vue) and site/ keep their own workspace files and are NOT
+# members here — they are independent during the migration.
+packages:
+  - 'packages/*'
+  - 'web-react'
+allowBuilds:
+  '@parcel/watcher': set this to true or false
