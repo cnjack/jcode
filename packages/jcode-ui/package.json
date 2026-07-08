@@ -41,8 +41,14 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
-    "src"
+    "src",
+    "README.md",
+    "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": false
+  },
   "scripts": {
     "build": "pnpm build:css && tsc -p tsconfig.build.json",
     "build:css": "tailwindcss -i src/styles/entry.css -o dist/styles.css --minify",
