@@ -31,6 +31,9 @@ export interface ChatDemoProps {
 }
 
 export function ChatDemo({ loop = true, loopPause = 3000, height = 480, chrome = true }: ChatDemoProps) {
+  // NOTE: the default loops for the marketing page; tests can pass loop={false}.
+  // Allow ?noloop=1 to disable looping for screenshot/tests.
+  const shouldLoop = loop && !new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '').has('noloop')
   const registry = useMemo(() => createDefaultToolRegistry(), [])
   const [runtime, setRuntime] = useState(() => createMockRuntime())
   const cancelRef = useRef<(() => void) | null>(null)
@@ -41,7 +44,7 @@ export function ChatDemo({ loop = true, loopPause = 3000, height = 480, chrome =
     let cancelled = false
     const playOnce = () => {
       const cancel = runScript(rt as never, buildDemoScript())
-      if (loop) {
+      if (shouldLoop) {
         const totalDelay = buildDemoScript().reduce((a, s) => a + s.delay, 0) + loopPause
         const replay = setTimeout(() => {
           if (cancelled) return
@@ -63,7 +66,7 @@ export function ChatDemo({ loop = true, loopPause = 3000, height = 480, chrome =
       cancelRef.current?.()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loop, loopPause])
+  }, [shouldLoop, loopPause])
 
   return (
     <div

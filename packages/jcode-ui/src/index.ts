@@ -40,6 +40,9 @@ export { ApprovalBanner } from './components/ApprovalBanner.js'
 export { AskUserCard } from './components/AskUserCard.js'
 export { ContextBar } from './components/ContextBar.js'
 export { ChatInput } from './components/ChatInput.js'
+export { Reasoning } from './components/Reasoning.js'
+export { Sources } from './components/Sources.js'
+export { Attachment, AttachmentList } from './components/Attachment.js'
 
 // Re-export the core types + primitives so consumers have a single import.
 export type {

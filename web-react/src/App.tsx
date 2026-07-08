@@ -113,6 +113,27 @@ export default function App() {
     void dispatch(loadSlashCommands())
   }, [dispatch])
 
+  // Global keyboard shortcuts: ⌘K (command palette), ⌘N (new chat), Esc (close
+  // overlays). Mirrors the Vue App.vue shortcut wiring.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const meta = e.metaKey || e.ctrlKey
+      if (meta && e.key === 'k') {
+        e.preventDefault()
+        dispatch(uiActions.setPaletteOpen(true))
+      } else if (meta && e.key === 'n') {
+        e.preventDefault()
+        // New chat: clear + reset session + switch to chat view.
+        dispatch(loadSession('')) // empty → new session flow handled in Sidebar
+      } else if (e.key === 'Escape') {
+        dispatch(uiActions.setPaletteOpen(false))
+        dispatch(uiActions.setSettingsOpen(false))
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [dispatch])
+
   // Gate screens take precedence.
   if (connectionError) {
     return <ErrorScreen message={connectionError} />

@@ -10,6 +10,8 @@ import { memo, useMemo } from 'react'
 import type { Message as MessageData } from 'jcode-ui-core'
 import { MessageView } from 'jcode-ui-core/primitives'
 import { renderMarkdown } from '../lib/markdown.js'
+import { Reasoning } from './Reasoning.js'
+import { Sources } from './Sources.js'
 
 export interface MessageProps {
   message: MessageData
@@ -34,7 +36,9 @@ export const Message = memo(function Message({ message, canEdit }: MessageProps)
     >
       <Avatar role={message.role} source={message.source} />
       <div className={`min-w-0 max-w-[85%] ${isUser ? 'items-end' : 'items-start'} flex flex-col`}>
+        {message.reasoning && <Reasoning reasoning={message.reasoning} durationMs={message.durationMs} />}
         <Bubble message={message} canEdit={canEdit} isUser={isUser} />
+        {message.sources && message.sources.length > 0 && <Sources sources={message.sources} />}
       </div>
     </div>
   )
