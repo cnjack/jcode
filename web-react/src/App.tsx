@@ -28,6 +28,7 @@ import {
   loadSessions,
   loadTasks,
   loadSlashCommands,
+  loadSession,
 } from './app/store'
 import { bridgeWS } from './app/wsBridge'
 import { useChatRuntime } from './app/runtime'
@@ -60,9 +61,21 @@ export default function App() {
         dispatch(modelActions.setServerVersion(h.version))
         dispatch(modelActions.setImageSupport(!!h.image_support))
         dispatch(sessionActions.setProjectPath(h.pwd))
-        if (h.session_id) dispatch(sessionActions.setCurrentSession(h.session_id))
         if (h.auth_required) dispatch(uiActions.setNeedsAuth(true))
         if (h.needs_setup) dispatch(uiActions.setNeedsSetup(true))
+        // Load the current session's history into the timeline (replay). The
+        // boot session_id may be a fresh empty session (no JSONL yet, 404) — in
+        // that case fall back to the most recent listed session. loadSession
+        // swallows the 404 internally and returns without setting a timeline,
+        // so we detect an empty timeline and retry with the most recent session.
+        if (!h.needs_setup) {
+          await dispatch(loadSession(h.session_id))
+          const state = store_getState()
+          if (state.chat.timeline.length === 0) {
+            const sessions = await api.sessions()
+            if (sessions.length > 0) await dispatch(loadSession(sessions[0].uuid))
+          }
+        }
       } catch (err) {
         if (!cancelled) {
           dispatch(uiActions.setConnectionError(err instanceof Error ? err.message : String(err)))

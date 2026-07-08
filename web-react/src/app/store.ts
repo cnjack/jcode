@@ -15,7 +15,8 @@
 import { configureStore, createSlice, createAsyncThunk } from '@reduxjs/toolkit'
 import type { ThreadItem, Message, ToolCall, Approval, TokenSnapshot, Goal, TodoItem, QueuedMessage, AskUserQuestion } from 'jcode-ui-core'
 import { api } from '../lib/api'
-import type { AgentMode, ProviderInfo, SessionItem, TaskItem, SlashCommandInfo } from '../lib/types'
+import { extractToolDisplayInfo } from '../lib/toolInfo'
+import type { AgentMode, ProviderInfo, SessionItem, TaskItem, SlashCommandInfo, SessionEntry } from '../lib/types'
 
 // ─── seq counter (stable DOM identity across streaming updates) ───
 let _seq = 0
@@ -182,6 +183,9 @@ const chatSlice = createSlice({
     },
     setSlashCommands(s, a: { payload: SlashCommandInfo[] }) {
       s.slashCommands = a.payload
+    },
+    setTimeline(s, a: { payload: ThreadItem[] }) {
+      s.timeline = a.payload
     },
     addApprovalRequest(s, a: { payload: Approval }) {
       s.timeline.push({ kind: 'approval', data: a.payload, seq: nextSeq() })
@@ -451,6 +455,107 @@ export const loadSlashCommands = createAsyncThunk('chat/loadSlash', async (_, { 
   const cmds = await api.slashCommands()
   dispatch(chatActions.setSlashCommands(cmds))
 })
+
+/**
+ * Load (replay) a session's history into the timeline. Ported from the Vue
+ * store's loadSession: fetches the JSONL entries, tells the backend to resume
+ * that session, clears the UI, then rebuilds the timeline by walking the entries
+ * (user/assistant → messages; tool_call+tool_result → resolved tool calls).
+ */
+export const loadSession = createAsyncThunk(
+  'session/loadOne',
+  async (uuid: string, { dispatch, getState }) => {
+    // Fetch the session's history. A 404 means the session has no JSONL yet
+    // (fresh, never-used session) — return without rebuilding so the caller can
+    // fall back to a different session.
+    let entries: SessionEntry[]
+    try {
+      entries = await api.session(uuid)
+    } catch {
+      return
+    }
+    // Tell the backend to switch to (resume) this session.
+    const resp = await api.newSession(uuid)
+    dispatch(sessionActions.setCurrentSession(resp.session_id || uuid))
+
+    // Clear the UI before rebuilding.
+    dispatch(chatActions.clearChat())
+
+    // Rebuild the timeline from entries.
+    const timeline: ThreadItem[] = []
+    const pendingToolCalls = new Map<string, ToolCall>()
+    for (const e of entries) {
+      if (e.type === 'user' && e.content) {
+        timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('msg'), role: 'user', content: e.content, timestamp: ts(e.timestamp) } })
+      } else if (e.type === 'assistant' && e.content) {
+        timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('asst'), role: 'assistant', content: e.content, timestamp: ts(e.timestamp) } })
+      } else if (e.type === 'tool_call' && e.name) {
+        const tc: ToolCall = {
+          id: genId('tc'),
+          toolCallID: e.tool_call_id,
+          name: e.name,
+          args: e.args || '',
+          status: 'running',
+          timestamp: ts(e.timestamp),
+          displayInfo: extractToolDisplayInfo(e.name, e.args || ''),
+        }
+        timeline.push({ kind: 'tool', seq: nextSeq(), data: tc })
+        if (e.tool_call_id) pendingToolCalls.set(e.tool_call_id, tc)
+      } else if (e.type === 'tool_result') {
+        let resolved = false
+        if (e.tool_call_id) {
+          const tc = pendingToolCalls.get(e.tool_call_id)
+          if (tc) {
+            tc.output = e.output || ''
+            tc.error = e.error || ''
+            tc.status = e.error ? 'error' : 'done'
+            pendingToolCalls.delete(e.tool_call_id)
+            resolved = true
+          }
+        }
+        if (!resolved && e.name) {
+          for (let i = timeline.length - 1; i >= 0; i--) {
+            const item = timeline[i]
+            if (item.kind === 'tool' && item.data.name === e.name && item.data.status === 'running') {
+              item.data.output = e.output || ''
+              item.data.error = e.error || ''
+              item.data.status = e.error ? 'error' : 'done'
+              break
+            }
+          }
+        }
+      }
+    }
+    // Any tool calls that never got a result (interrupted session) → done.
+    for (const tc of pendingToolCalls.values()) tc.status = 'done'
+
+    dispatch(chatActions.setTimeline(timeline))
+
+    // Seed isRunning from the task list (a resumed task may still be running).
+    const state = getState() as RootState
+    const resumedId = resp.session_id || uuid
+    const running = !!state.session.tasks.find((t) => t.uuid === resumedId)?.running
+    dispatch(chatActions.setRunning(running))
+
+    // Refresh goal + todos (the backend restored them; no WS push on switch).
+    try {
+      const goal = await api.goal()
+      dispatch(chatActions.setGoal(goal))
+    } catch {
+      // ignore
+    }
+    try {
+      const todos = await api.todos()
+      dispatch(chatActions.setTodos(todos))
+    } catch {
+      // ignore
+    }
+  },
+)
+
+function ts(t?: string): number {
+  return t ? new Date(t).getTime() : Date.now()
+}
 
 export const store = configureStore({
   reducer: {

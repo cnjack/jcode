@@ -1,7 +1,6 @@
 ---
 title: jcode-ui
-parent: Docs
-nav_order: 10
+nav_order: 0
 has_children: true
 ---
 
@@ -72,7 +71,8 @@ image attachments, context bar).
 
 ## Next
 
-- [Runtime](./runtime) — the `ChatRuntime` contract and `ExternalStoreRuntime`.
-- [Primitives](./primitives) — the headless components under the styled layer.
-- [Tool renderers](./tool-renderers) — the registry + writing your own.
-- [Theming](./theming) — CSS custom properties and dark mode.
+- [Runtime](/chat-ui/docs/runtime) — the `ChatRuntime` contract and `ExternalStoreRuntime`.
+- [Primitives](/chat-ui/docs/primitives) — the headless components under the styled layer.
+- [Tool renderers](/chat-ui/docs/tool-renderers) — the registry + writing your own.
+- [Theming](/chat-ui/docs/theming) — CSS custom properties and dark mode.
+- [Components](/chat-ui/docs/components) — props + examples for every styled component.
