@@ -1,0 +1,68 @@
+.chatui-page {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+
+/* Hero */
+.chatui-hero { text-align: center; margin-bottom: 4rem; }
+.chatui-eyebrow {
+  font-size: 0.8rem; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--accent, #FF8400); margin: 0 0 0.75rem;
+}
+.chatui-title {
+  font-size: clamp(2rem, 5vw, 3.25rem); font-weight: 700; line-height: 1.1;
+  margin: 0 0 1rem; letter-spacing: -0.02em;
+}
+.chatui-title .accent { color: var(--accent, #FF8400); }
+.chatui-lede {
+  font-size: 1.1rem; line-height: 1.6; max-width: 620px; margin: 0 auto 2rem;
+  color: var(--muted, #888);
+}
+.chatui-cta { display: flex; gap: 1rem; justify-content: center; align-items: center; flex-wrap: wrap; }
+.chatui-install {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  background: #1a1a1a; border: 1px solid #2e2e2e; border-radius: 8px;
+  padding: 0.5rem 0.75rem; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem;
+}
+.chatui-install code { color: #e4e4e7; }
+.chatui-docs-link { color: var(--accent, #FF8400); font-weight: 500; text-decoration: none; }
+.chatui-docs-link:hover { text-decoration: underline; }
+
+/* Sections */
+.chatui-section-title { font-size: 1.75rem; font-weight: 700; margin: 0 0 0.5rem; letter-spacing: -0.01em; }
+.chatui-section-lede { color: var(--muted, #888); margin: 0 0 2rem; max-width: 640px; }
+
+/* Demo */
+.chatui-demo-section { margin-bottom: 5rem; }
+.chatui-demo-frame { max-width: 760px; margin: 0 auto; }
+
+/* Features */
+.chatui-features { margin-bottom: 5rem; }
+.chatui-feature-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem; margin-top: 2rem;
+}
+.chatui-feature {
+  border: 1px solid var(--border, #2e2e2e); border-radius: 12px; padding: 1.5rem;
+  background: var(--surface, #1a1a1a);
+}
+.chatui-feature-n {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--accent, #FF8400);
+  font-weight: 600;
+}
+.chatui-feature h3 { font-size: 1.05rem; margin: 0.5rem 0 0.5rem; }
+.chatui-feature p { font-size: 0.9rem; line-height: 1.55; color: var(--muted, #888); margin: 0; }
+
+/* Quick start code */
+.chatui-quickstart { margin-bottom: 2rem; }
+.chatui-codeblock {
+  background: #0d0d0d; border: 1px solid #2e2e2e; border-radius: 12px;
+  padding: 1.5rem; overflow-x: auto; font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem; line-height: 1.6; color: #e4e4e7; margin: 1.5rem 0 0;
+}
+
+@media (max-width: 640px) {
+  .chatui-page { padding: 2rem 1rem 4rem; }
+  .chatui-cta { flex-direction: column; }
+}

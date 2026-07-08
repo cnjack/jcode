@@ -6,6 +6,7 @@ import HomePage from './pages/HomePage'
 
 const DesktopPage = lazy(() => import('./pages/DesktopPage'))
 const CliPage = lazy(() => import('./pages/CliPage'))
+const ChatUIPage = lazy(() => import('./pages/ChatUIPage'))
 const ShowcasePage = lazy(() => import('./pages/ShowcasePage'))
 const ShowcaseProjectPage = lazy(() => import('./pages/ShowcaseProjectPage'))
 const DocsLayout = lazy(() => import('./pages/docs/DocsLayout'))
@@ -64,6 +65,7 @@ export default function App() {
             <Route path="/" element={<HomePage />} />
             <Route path="/desktop" element={<DesktopPage />} />
             <Route path="/cli" element={<CliPage />} />
+            <Route path="/chat-ui" element={<ChatUIPage />} />
             <Route path="/showcase" element={<ShowcasePage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/docs" element={<DocsLayout />}>
