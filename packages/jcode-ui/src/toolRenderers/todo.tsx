@@ -75,7 +75,7 @@ function normalize(arr: unknown[]): TodoItem[] {
       if (typeof a !== 'object' || a === null) return null
       const o = a as Record<string, unknown>
       return {
-        id: typeof o.id === 'string' ? o.id : `todo_${i}`,
+        id: typeof o.id === 'number' ? o.id : i,
         title: typeof o.title === 'string' ? o.title : typeof o.content === 'string' ? o.content : '',
         status: isValidStatus(o.status) ? o.status : 'pending',
       }

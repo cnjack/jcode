@@ -169,9 +169,9 @@ export interface TaskContextBreakdown {
   messages_tokens: number
 }
 
-/** A todo/goal tracking item. */
+/** A todo/goal tracking item. (id is a number — matches the Go backend.) */
 export interface TodoItem {
-  id: string
+  id: number
   title: string
   status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
 }

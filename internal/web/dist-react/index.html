@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>jcode</title>
+    <!-- Pre-mount theme resolution: apply the saved theme BEFORE the bundle loads
+         so there's no flash of the wrong theme. Mirrors web/index.html. -->
+    <script>
+      ;(function () {
+        try {
+          var stored = localStorage.getItem('jcode_theme') || 'system'
+          var dark =
+            stored === 'dark' ||
+            stored === 'jcode-dark' ||
+            (stored === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
+          var cls = document.documentElement.classList
+          cls.toggle('dark', dark)
+          if (stored && stored !== 'system' && stored !== 'light' && stored !== 'dark') {
+            document.documentElement.setAttribute('data-theme', stored)
+          }
+        } catch (e) {
+          /* noop */
+        }
+      })()
+    </script>
+    <script type="module" crossorigin src="/assets/index-Bg8rBW4i.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-Cs-LfJ7j.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
