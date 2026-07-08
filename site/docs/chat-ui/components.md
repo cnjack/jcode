@@ -12,17 +12,33 @@ table below maps their components to ours.
 
 ## assistant-ui → jcode-ui mapping
 
-| assistant-ui | jcode-ui | Notes |
-|--------------|----------|-------|
-| `Thread` | `Thread` | Virtualized + auto-follow. Same concept. |
-| `Composer` | `ChatInput` | Send/queue/stop, slash commands, attachments. |
-| `Message` | `Message` (via `Thread`) | Markdown + role bubbles. |
-| `Markdown` | (built into `Message`) | marked + highlight.js + DOMPurify. |
-| `DiffViewer` | `DiffRenderer` (tool renderer) | Renders edit/multi_edit tool calls. |
-| `ToolFallback` / `makeAssistantToolUI` | `ToolRendererRegistry` | Plugin registry pattern. |
-| `ThreadConfig` `Context` | `RuntimeProvider` + `ChatRuntime` | The data-source seam. |
-| `AssistantModal` / `AssistantSidebar` | `Sidebar` (product app) | In the product, not the library. |
-| `ModelPicker` | `ProjectHeader` (product) | In the product app. |
+Complete coverage of the assistant-ui component catalog. Every component has a
+jcode-ui equivalent (either a same-named component, a field-driven render inside
+an existing component, or a documented product-app equivalent).
+
+| assistant-ui | jcode-ui equivalent | Status | Notes |
+|--------------|---------------------|--------|-------|
+| `Thread` | `Thread` | ✅ same-named | Virtualized + auto-follow. |
+| `ThreadList` (conversation list) | `Sidebar` (product app) | 🟡 product | The conversation list is app chrome, not a library primitive — shipped in the web-react product app. |
+| `Composer` | `ChatInput` | ✅ same concept | Send/queue/stop, slash commands, attachments, context bar. |
+| `Attachment` | `Attachment` + `AttachmentList` | ✅ same-named | Standalone + embedded in ChatInput. |
+| `Markdown` | (built into `Message`) | ✅ field-driven | marked + highlight.js + DOMPurify. Render any markdown via `renderMarkdown()`. |
+| `Diff Viewer` | `DiffRenderer` | ✅ tool renderer | Renders edit/multi_edit tool calls (red/green line table). |
+| `Image` | (built into `Message` + `Attachment`) | ✅ field-driven | `message.images[]` renders inline; `Attachment` for the composer. |
+| `Context Display` | `ContextBar` | ✅ same concept | SVG ring + breakdown popover. |
+| `Message Timing` | (built into `Message`) | ✅ field-driven | `message.durationMs` renders a turn-elapsed label on the final assistant message. |
+| `Reasoning` | `Reasoning` | ✅ same-named | Collapsible model thinking. Driven by `message.reasoning`. |
+| `Sources` | `Sources` | ✅ same-named | Citation list. Driven by `message.sources`. |
+| `Tool Fallback` | `GenericRenderer` | ✅ same concept | The registry fallback for unknown tools. |
+| `Tool Group` | `ToolCallCard` (children recursion) | ✅ field-driven | Subagent nested calls render recursively via `tool.children`. |
+| `Assistant Modal` | (product app) | 🟡 product | A floating-chat pattern is app-level; jcode ships a full-screen product UI instead. Buildable on top of the primitives. |
+| `Assistant Sidebar` | `Sidebar` (product app) | 🟡 product | Same as ThreadList — app chrome. |
+| `Model Selector` | `ProjectHeader` (product) | 🟡 product | Model/mode switching is app-level; the library is model-agnostic. |
+| `makeAssistantToolUI` | `ToolRendererRegistry` | ✅ same concept | Plugin registry — register any tool renderer by name. |
+
+**Legend:** ✅ = same-named / equivalent component in the library · 🟡 = app-level
+(lives in the product app, not the library, because it's host-specific chrome) ·
+field-driven = rendered automatically from a `Message`/`ToolCall` field.
 
 ---
 
@@ -148,6 +164,67 @@ import { AskUserCard } from 'jcode-ui'
 
 <AskUserCard tool={toolWithAskUser} />
 ```
+
+---
+
+## `<Reasoning />`
+
+Collapsible model thinking / chain-of-thought. Mirrors assistant-ui's Reasoning.
+Renders an assistant message's `reasoning` field in a collapsed disclosure
+("Thought for Ns") with markdown support.
+
+```tsx
+import { Reasoning } from 'jcode-ui'
+
+// Usually rendered automatically by <Message> when message.reasoning is set,
+// but usable standalone:
+<Reasoning reasoning={msg.reasoning} durationMs={msg.durationMs} defaultExpanded={false} />
+```
+
+| Prop | Type | Notes |
+|------|------|-------|
+| `reasoning` | `string` | Markdown text of the model's thinking. |
+| `defaultExpanded` | `boolean` | Default `false` (collapsed). |
+| `durationMs` | `number?` | Shows "Thought for Ns" label. |
+
+---
+
+## `<Sources />`
+
+Citation list for a message. Mirrors assistant-ui's Sources. Renders a row of
+clickable source chips; clicking opens a snippet popover.
+
+```tsx
+import { Sources } from 'jcode-ui'
+
+// Usually rendered automatically by <Message> when message.sources is set:
+<Sources sources={msg.sources} />
+```
+
+| Prop | Type | Notes |
+|------|------|-------|
+| `sources` | `MessageSource[]` | `{ id, title, url?, snippet? }`. |
+
+---
+
+## `<Attachment />` + `<AttachmentList />`
+
+Image-attachment thumbnails. Mirrors assistant-ui's Attachment. Embedded in
+`ChatInput`; also exported standalone for composing custom attachment UIs
+(drag-drop zones, file pickers).
+
+```tsx
+import { Attachment, AttachmentList } from 'jcode-ui'
+
+<Attachment image={img} size={64} onRemove={() => removeImage(i)} />
+<AttachmentList images={images} onRemove={removeImage} />
+```
+
+| Prop | Type | Notes |
+|------|------|-------|
+| `image` | `ChatImage` | `{ data: base64, media_type }`. |
+| `onRemove` | `() => void` | Renders the × button when provided. |
+| `size` | `number` | Thumbnail px. Default 64. |
 
 ---
 

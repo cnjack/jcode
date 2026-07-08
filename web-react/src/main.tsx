@@ -39,6 +39,12 @@ async function bootstrap() {
       </Provider>
     </StrictMode>,
   )
+
+  // DEV-ONLY: expose the store for manual/debug testing. Stripped in prod builds
+  // (import.meta.env.DEV is false in production).
+  if (import.meta.env.DEV) {
+    ;(window as unknown as { __jcodeStore?: typeof store }).__jcodeStore = store
+  }
 }
 
 void bootstrap()

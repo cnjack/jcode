@@ -174,5 +174,36 @@ export function buildDemoScript(): ScriptStep[] {
         ),
     },
     { delay: 600, do: (rt) => rt.setRunning(false) },
+    // Showcase the Reasoning + Sources components on the final assistant message.
+    {
+      delay: 400,
+      do: (rt) => {
+        const items = rt.getState().items
+        // Build a NEW items array with a NEW data object for the last assistant
+        // message (immutable update) so React.memo re-renders it.
+        let updated = false
+        const next = items.map((it) => {
+          if (!updated && it.kind === 'message' && it.data.role === 'assistant') {
+            updated = true
+            return {
+              ...it,
+              data: {
+                ...it.data,
+                reasoning:
+                  'The leak is in handle() — it spawns process(conn) via `go` without tracking it. ' +
+                  'A sync.WaitGroup lets the server join all handlers on shutdown. The test failure ' +
+                  'confirms the goroutine escapes; adding wg.Done() closes the lifecycle.',
+                sources: [
+                  { id: 's1', title: 'Go concurrency: WaitGroups', url: 'https://go.dev/ref/spec#Go_statements', snippet: 'A WaitGroup waits for a collection of goroutines to finish.' },
+                  { id: 's2', title: 'server.go:42', snippet: 'func handle(conn Conn) { go process(conn) }' },
+                ],
+              },
+            }
+          }
+          return it
+        })
+        if (updated) rt.setItems(next)
+      },
+    },
   ]
 }

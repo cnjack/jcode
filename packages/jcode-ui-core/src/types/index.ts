@@ -37,6 +37,24 @@ export interface Message {
   detail?: string
   /** Assistant turn elapsed (ms), stamped on the final message of a turn. */
   durationMs?: number
+  /** Optional model reasoning / chain-of-thought text (rendered collapsible).
+   *  Mirrors assistant-ui's Reasoning component + OpenAI/Anthropic thinking. */
+  reasoning?: string
+  /** Optional citation sources for the message (rendered as a Sources list).
+   *  Mirrors assistant-ui's Sources component. */
+  sources?: MessageSource[]
+}
+
+/** A citation source attached to a message (e.g. a retrieved doc or URL). */
+export interface MessageSource {
+  /** Stable id for keying. */
+  id: string
+  /** Display title of the source. */
+  title: string
+  /** Optional URL or deep link. */
+  url?: string
+  /** Optional snippet/excerpt quoted from the source. */
+  snippet?: string
 }
 
 /** Display metadata for a tool call, surfaced from the backend or extracted
