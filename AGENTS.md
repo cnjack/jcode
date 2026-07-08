@@ -53,7 +53,11 @@ internal/
   telemetry/         # Optional Langfuse tracing
   tui/               # BubbleTea v2 TUI components
   web/               # HTTP server (REST + WS + PTY) + embedded Vue dist
-web/                 # Vue 3 + Vite + TypeScript frontend source (the product UI)
+web/                 # Vue 3 + Vite + TypeScript frontend source (the CURRENT product UI)
+web-react/           # React 18 + Vite + RTK product app (migration in progress; parallel to web/)
+packages/            # pnpm workspace: the reusable jcode-ui component library
+  jcode-ui/          #   published styled React chat components (→ npm: jcode-ui)
+  jcode-ui-core/     #   framework-agnostic core: types, ChatRuntime, headless primitives
 site/                # React + Vite marketing/docs site → www.j-code.net (docs markdown in site/docs/)
 desktop/             # Tauri 2 desktop shell; the Go binary runs as a sidecar
 extension/           # jcode Browser Bridge Chrome extension (MV3) for the browser-use extension backend
@@ -61,6 +65,19 @@ internal-doc/        # Internal design docs (NOT published; site/docs is the pub
 script/              # Build-time code generation + install.sh
 agent-eval/          # Agent evaluation harness + showcase generation
 ```
+
+### Frontend migration (Vue → React) — in progress
+
+The product UI is migrating from Vue 3 (`web/`) to React 18 (`web-react/`),
+built on a new reusable component library (`packages/jcode-ui` + `jcode-ui-core`).
+**During the migration both coexist:**
+
+- `make build-web` (default) builds the **Vue** app → `internal/web/dist/` (production).
+- `make build-web-react` builds the **React** app + packages → `internal/web/dist-react/` (parallel validation).
+- `make lint-react` typechecks the React app + both packages.
+- The Go `embed.FS` and Tauri `frontendDist` still point at the Vue `dist/`. The switch-over happens once `web-react` reaches feature parity.
+
+The component library is the migration's organizing principle — see `packages/jcode-ui/README.md` and `site/docs/chat-ui/`. It's published to npm as `jcode-ui` (styled) + `jcode-ui-core` (headless). The runtime abstraction (`ChatRuntime` + `createExternalStoreRuntime`) is the seam that lets the components render from any Redux-shaped store.
 
 ### Key Design Decisions
 
@@ -175,7 +192,9 @@ agent-eval/          # Agent evaluation harness + showcase generation
 
 ---
 
-## Frontend (web/)
+## Frontend (web/) — Vue (production)
+
+> **Note:** the product UI is migrating to React (`web-react/` + `packages/jcode-ui`). The Vue app remains the production build during the migration. New reusable UI work goes in `packages/jcode-ui` (React); see the migration section above and `packages/jcode-ui/README.md`.
 
 - **Stack:** Vue 3 + TypeScript + Vite
 - **Build:** `cd web && pnpm install && npx vite build` (or `make build-web`)

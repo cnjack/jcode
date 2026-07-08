@@ -11,5 +11,10 @@ packages:
   - 'packages/*'
   - 'web-react'
 allowBuilds:
-  '@parcel/watcher': set this to true or false
   esbuild: set this to true or false
+# Native build scripts to allow. esbuild (Vite's bundler) and @parcel/watcher
+# (dev-server file watching) are trusted toolchain deps — whitelisting them
+# avoids ERR_PNPM_IGNORED_BUILDS failing `pnpm install` (and the Makefile build).
+onlyBuiltDependencies:
+  - esbuild
+  - '@parcel/watcher'
