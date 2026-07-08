@@ -13,6 +13,7 @@ export default function SiteNav() {
         <ul className={`site-nav-links${open ? ' open' : ''}`} onClick={() => setOpen(false)}>
           <li><NavLink to="/desktop">Desktop</NavLink></li>
           <li><NavLink to="/cli">CLI</NavLink></li>
+          <li><NavLink to="/chat-ui">Chat UI</NavLink></li>
           <li><NavLink to="/showcase">Showcase</NavLink></li>
           <li><NavLink to="/docs">Docs</NavLink></li>
         </ul>

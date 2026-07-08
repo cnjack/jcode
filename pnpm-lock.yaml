@@ -21,7 +21,7 @@ importers:
         specifier: ^11.11.1
         version: 11.11.1
       jcode-ui-core:
-        specifier: workspace:*
+        specifier: file:../jcode-ui-core
         version: link:../jcode-ui-core
       marked:
         specifier: ^18.0.0
