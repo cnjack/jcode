@@ -1,6 +1,4 @@
 {
-  "$schema": "https://schema.tauri.dev/config/2",
-  "$comment": "React-frontend override for tauri.conf.json. Use with: pnpm tauri dev --config ../tauri.react.conf.json (or tauri build). Patches the three build-block keys to point at the React app (web-react/) instead of the Vue app (web/). Everything else is inherited from tauri.conf.json — Tauri merges the override deeply.",
   "build": {
     "frontendDist": "../../internal/web/dist-react",
     "beforeDevCommand": "pnpm --dir ../web-react dev",
