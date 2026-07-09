@@ -29,6 +29,7 @@ import {
 } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
+import { useTranslation } from 'react-i18next'
 import {
   HandRaisedIcon,
   ShieldExclamationIcon,
@@ -52,14 +53,18 @@ import { StarIcon as StarIconSolid, CheckCircleIcon } from '@heroicons/react/24/
 import { useRuntimeActions, useRuntimeState } from 'jcode-ui'
 import type { ChatImage as RuntimeChatImage } from 'jcode-ui-core'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
-import { modelActions } from '../app/store'
+import { chatActions, modelActions } from '../app/store'
 import { api } from '../lib/api'
+import { BranchPicker } from './BranchPicker'
+import { ProviderIcon } from './ProviderIcon'
+import { WorkspacePicker } from './WorkspacePicker'
 import type {
   AgentMode,
   ChatImage,
   ModelInfo,
   ProviderInfo,
   SlashCommandInfo,
+  TaskStats,
 } from '../lib/types'
 
 // ─── Props ──────────────────────────────────────────────────────────────────
@@ -67,6 +72,8 @@ import type {
 export interface ChatInputProps {
   /** Fired when the user dispatches a message (sent now or queued mid-turn). */
   onSent?: () => void
+  /** Direction for workspace/branch panels. Welcome opens downward. */
+  pickerPlacement?: 'top' | 'bottom'
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -86,39 +93,11 @@ const MODE_DEFS: ModeDef[] = [
   { value: 'full_access', label: 'Full access', sub: 'Agent can act without asking', risk: 'danger', Icon: ShieldExclamationIcon },
 ]
 
+const STANDARD_EFFORT_OPTIONS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+
 function modeLabel(m: string): string {
   const def = MODE_DEFS.find((d) => d.value === m)
   return def ? def.label : 'Ask for approval'
-}
-
-// ─── Provider monogram ──────────────────────────────────────────────────────
-// jcode-ui has no ProviderIcon export; render a compact monogram tile instead.
-
-const PROVIDER_INITIALS: Record<string, string> = {
-  openai: 'OA',
-  anthropic: 'A',
-  google: 'G',
-  gemini: 'G',
-  deepseek: 'DS',
-  mistral: 'M',
-  meta: 'M',
-  xai: 'X',
-  groq: 'G',
-  cohere: 'C',
-  azure: 'Az',
-}
-
-function ProviderMonogram({ provider, size = 16 }: { provider: string; size?: number }) {
-  const initials = PROVIDER_INITIALS[provider] ?? provider.slice(0, 2).toUpperCase()
-  return (
-    <span
-      className="inline-flex shrink-0 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--neutral-wash)] font-mono font-semibold leading-none text-[var(--color-foreground)]"
-      style={{ width: size, height: size, fontSize: Math.max(8, size * 0.42) }}
-      aria-hidden="true"
-    >
-      {initials}
-    </span>
-  )
 }
 
 // ─── Format helpers ─────────────────────────────────────────────────────────
@@ -144,7 +123,8 @@ function modelSubline(modelId: string, info?: { context_limit?: number }): strin
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export function ChatInput({ onSent }: ChatInputProps) {
+export function ChatInput({ onSent, pickerPlacement = 'top' }: ChatInputProps) {
+  const { t } = useTranslation()
   const dispatch = useAppDispatch()
 
   // Runtime (timeline/queue + send/stop actions).
@@ -159,8 +139,11 @@ export function ChatInput({ onSent }: ChatInputProps) {
   const favoriteModels = useAppSelector((s) => s.model.favoriteModels)
   const recentModels = useAppSelector((s) => s.model.recentModels)
   const imageSupport = useAppSelector((s) => s.model.imageSupport)
+  const effortOverrides = useAppSelector((s) => s.model.effortOverrides)
   const slashCommands = useAppSelector((s) => s.chat.slashCommands)
   const hasMessages = useAppSelector((s) => s.chat.timeline.length > 0)
+  const goalArmed = useAppSelector((s) => s.chat.goalArmed)
+  const currentSessionId = useAppSelector((s) => s.session.currentSessionId)
 
   // Composer-local state.
   const [input, setInput] = useState('')
@@ -174,11 +157,10 @@ export function ChatInput({ onSent }: ChatInputProps) {
   const [showEffortPicker, setShowEffortPicker] = useState(false)
   const [showAddMenu, setShowAddMenu] = useState(false)
   const [showManageModels, setShowManageModels] = useState(false)
+  const [showContextPopup, setShowContextPopup] = useState(false)
+  const [taskStats, setTaskStats] = useState<TaskStats | null>(null)
+  const [taskStatsLoading, setTaskStatsLoading] = useState(false)
   const [modelFilter, setModelFilter] = useState('')
-
-  // TODO: goalArmed does not exist on the store yet (the Vue store has it; the
-  // React model/chat slices don't). Track locally until the slice is extended.
-  const [goalArmed, setGoalArmed] = useState(false)
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -189,6 +171,10 @@ export function ChatInput({ onSent }: ChatInputProps) {
   function modelInfoFor(provider: string, model: string): ModelInfo | undefined {
     const p = providers.find((x) => x.id === provider)
     return p?.models.find((m) => m.id === model)
+  }
+
+  function providerInfoFor(provider: string): ProviderInfo | undefined {
+    return providers.find((x) => x.id === provider)
   }
 
   function getModelDisplayName(providerId: string, modelId: string): string {
@@ -240,23 +226,27 @@ export function ChatInput({ onSent }: ChatInputProps) {
     [providerName, modelName, providers],
   )
 
-  // Reasoning-effort levels the current model advertises.
-  const currentEffortOptions: string[] = useMemo(() => {
-    const info = currentModelInfo
-    if (!info?.reasoning_options) return []
-    for (const o of info.reasoning_options) {
-      if (o.type === 'effort' && o.values?.length) return o.values
-    }
-    return []
-  }, [currentModelInfo])
-  const showEffortControl = currentEffortOptions.length > 0
-
-  // TODO: the store has no getEffortOverride / effort_overrides slice yet, so
-  // the active effort is tracked locally for the current model. On a real model
-  // switch the override should reset; track by provider/model key to clear it.
   const effortKey = `${providerName}/${modelName}`
-  const [effortMap, setEffortMap] = useState<Record<string, string>>({})
-  const currentEffort = effortMap[effortKey] ?? ''
+  const currentEffort = effortOverrides[effortKey] ?? ''
+
+  // Reasoning-effort levels the current model advertises. Some custom and
+  // OpenAI-compatible models only expose a broad `reasoning` flag, so fall back
+  // to the backend-accepted standard tiers and keep an existing override visible.
+  const currentEffortOptions: string[] = useMemo(() => {
+    const values = new Set<string>()
+    const info = currentModelInfo
+    for (const o of info?.reasoning_options ?? []) {
+      if (o.type === 'effort') {
+        for (const v of o.values ?? []) values.add(v)
+      }
+    }
+    if (values.size === 0 && (info?.reasoning || currentEffort)) {
+      for (const v of STANDARD_EFFORT_OPTIONS) values.add(v)
+    }
+    if (currentEffort) values.add(currentEffort)
+    return [...values]
+  }, [currentEffort, currentModelInfo])
+  const showEffortControl = currentEffortOptions.length > 0
 
   const manageVisibleCount = filteredProviders.reduce((n, p) => n + p.models.length, 0)
   const manageTotalCount = providers.reduce((n, p) => n + p.models.length, 0)
@@ -272,8 +262,23 @@ export function ChatInput({ onSent }: ChatInputProps) {
     ? Math.min(100, Math.max(0, Math.round((tokenSnapshot.total_tokens / tokenSnapshot.model_context_limit) * 100)))
     : 0
   const ctxRingOffset = ctxRingCirc * (1 - tokenPct / 100)
-  const ctxRingColor = tokenPct >= 90 ? '#E24B4A' : 'var(--color-primary)'
+  const ctxRingColor = tokenPct >= 90 ? 'var(--color-destructive)' : 'var(--color-primary)'
   const showTokenCount = hasMessages && !!tokenSnapshot && tokenSnapshot.total_tokens > 0
+
+  async function toggleContextPopup() {
+    setShowContextPopup((v) => !v)
+    if (!showContextPopup && currentSessionId) {
+      setTaskStatsLoading(true)
+      try {
+        const stats = await api.taskStats(currentSessionId)
+        setTaskStats(stats)
+      } catch {
+        setTaskStats(null)
+      } finally {
+        setTaskStatsLoading(false)
+      }
+    }
+  }
 
   // ─── Autosize ─────────────────────────────────────────────────────────────
 
@@ -335,34 +340,18 @@ export function ChatInput({ onSent }: ChatInputProps) {
 
   async function pickEffort(effort: string) {
     setShowEffortPicker(false)
-    // Track locally + persist to the backend.
-    setEffortMap((prev) => {
-      const next = { ...prev }
-      if (effort) next[effortKey] = effort
-      else delete next[effortKey]
-      return next
-    })
+    dispatch(modelActions.setEffortOverride({ provider: providerName, model: modelName, effort }))
     try {
       await api.setModelEffort(providerName, modelName, effort)
     } catch {
-      /* ignore */
+      dispatch(modelActions.setEffortOverride({ provider: providerName, model: modelName, effort: currentEffort }))
     }
   }
 
   async function toggleFavorite(provider: string, model: string) {
-    // Persist the change to the backend. The favorite list (favoriteModels) is
-    // part of the model slice but has no dedicated reducer exposed here, so the
-    // star tint in the picker won't flip until a full models() refresh re-seeds
-    // the slice.
-    // TODO: wire a setFavoriteModels reducer to reflect the toggle immediately.
     try {
-      await api.toggleFavorite(provider, model)
-      const ms = await api.modelState()
-      const newFavs = ms.favorite.map((r) => `${r.provider}/${r.model}`)
-      // No setFavoriteModels action exists yet; re-seed via the catalog path is
-      // not applicable. Surface the fetched value so it is not silently dropped.
-      void newFavs
-      void favoriteModels
+      const result = await api.toggleFavorite(provider, model)
+      dispatch(modelActions.setFavorite({ provider, model, favorite: result.favorite }))
     } catch {
       /* ignore */
     }
@@ -545,6 +534,7 @@ export function ChatInput({ onSent }: ChatInputProps) {
         setShowAddMenu(false)
         setShowSlashMenu(false)
         setShowEffortPicker(false)
+        setShowContextPopup(false)
         if (showManageModels) {
           setShowManageModels(false)
           setModelFilter('')
@@ -688,6 +678,13 @@ export function ChatInput({ onSent }: ChatInputProps) {
           </div>
         )}
 
+        {!hasMessages && (
+          <div className="flex min-w-0 items-center gap-1.5 px-1 pb-2">
+            <WorkspacePicker placement={pickerPlacement} />
+            <BranchPicker placement={pickerPlacement} />
+          </div>
+        )}
+
         <div
           className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[color-mix(in_srgb,var(--color-surface)_90%,#000)] transition-colors focus-within:border-[color-mix(in_srgb,var(--color-foreground)_30%,transparent)]"
           style={{ padding: '14px 16px 0' }}
@@ -704,7 +701,7 @@ export function ChatInput({ onSent }: ChatInputProps) {
               placeholder={
                 isRunning
                   ? 'Queue a message…'
-                  : goalArmed
+                    : goalArmed
                     ? 'What is your goal?'
                     : 'Send a message…'
               }
@@ -793,7 +790,7 @@ export function ChatInput({ onSent }: ChatInputProps) {
                     <button
                       type="button"
                       title={goalArmed ? 'Goal is armed — your next message becomes the objective' : 'Arm Goal mode'}
-                      onClick={() => { setGoalArmed((v) => !v); setShowAddMenu(false) }}
+                      onClick={() => { dispatch(chatActions.setGoalArmed(!goalArmed)); setShowAddMenu(false) }}
                       className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)] ${
                         goalArmed ? 'bg-[var(--neutral-wash)] text-[var(--color-foreground)]' : ''
                       }`}
@@ -894,7 +891,7 @@ export function ChatInput({ onSent }: ChatInputProps) {
                     <button
                       type="button"
                       title="Disarm Goal"
-                      onClick={() => setGoalArmed(false)}
+                      onClick={() => dispatch(chatActions.setGoalArmed(false))}
                       className="grid h-4 w-4 place-items-center rounded-[var(--radius-pill)] border-none bg-[color-mix(in_srgb,var(--color-primary)_18%,transparent)] text-[var(--color-primary)] transition-colors hover:bg-[color-mix(in_srgb,var(--color-primary)_34%,transparent)]"
                     >
                       <XMarkIcon className="h-2.5 w-2.5" />
@@ -910,36 +907,51 @@ export function ChatInput({ onSent }: ChatInputProps) {
             <div className="flex items-center gap-2">
               {/* Context-fill ring */}
               {showTokenCount && (
-                <button
-                  type="button"
-                  title="Context capacity"
-                  className="inline-flex items-center gap-[5px] rounded-[var(--radius-sm)] border-none bg-transparent px-[5px] py-0.5 font-mono text-[10px] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-secondary)] hover:text-[var(--color-foreground)]"
-                >
-                  <svg width="17" height="17" viewBox="0 0 16 16" aria-hidden="true">
-                    <circle
-                      cx="8"
-                      cy="8"
-                      r="6.4"
-                      fill="none"
-                      stroke="color-mix(in srgb, var(--color-foreground) 20%, transparent)"
-                      strokeWidth="2.2"
+                <div className="relative">
+                  <button
+                    type="button"
+                    title="Context capacity"
+                    onClick={(e) => { e.stopPropagation(); void toggleContextPopup() }}
+                    className="inline-flex items-center gap-[5px] rounded-[var(--radius-sm)] border-none bg-transparent px-[5px] py-0.5 font-mono text-[10px] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-secondary)] hover:text-[var(--color-foreground)]"
+                  >
+                    <svg width="17" height="17" viewBox="0 0 16 16" aria-hidden="true">
+                      <circle
+                        cx="8"
+                        cy="8"
+                        r="6.4"
+                        fill="none"
+                        stroke="color-mix(in srgb, var(--color-foreground) 20%, transparent)"
+                        strokeWidth="2.2"
+                      />
+                      <circle
+                        cx="8"
+                        cy="8"
+                        r="6.4"
+                        fill="none"
+                        stroke={ctxRingColor}
+                        strokeWidth="2.2"
+                        strokeLinecap="round"
+                        strokeDasharray={ctxRingCirc}
+                        strokeDashoffset={ctxRingOffset}
+                        transform="rotate(-90 8 8)"
+                        style={{ transition: 'stroke-dashoffset 0.3s ease' }}
+                      />
+                    </svg>
+                    <span className="tabular-nums">{tokenPct}%</span>
+                  </button>
+                  {showContextPopup && (
+                    <ContextCapacityPopup
+                      loading={taskStatsLoading}
+                      stats={taskStats}
+                      total={tokenSnapshot.total_tokens}
+                      limit={tokenSnapshot.model_context_limit}
+                      prompt={tokenSnapshot.prompt_tokens}
+                      completion={tokenSnapshot.completion_tokens}
+                      cached={tokenSnapshot.cached_tokens}
+                      reasoning={tokenSnapshot.reasoning_tokens}
                     />
-                    <circle
-                      cx="8"
-                      cy="8"
-                      r="6.4"
-                      fill="none"
-                      stroke={ctxRingColor}
-                      strokeWidth="2.2"
-                      strokeLinecap="round"
-                      strokeDasharray={ctxRingCirc}
-                      strokeDashoffset={ctxRingOffset}
-                      transform="rotate(-90 8 8)"
-                      style={{ transition: 'stroke-dashoffset 0.3s ease' }}
-                    />
-                  </svg>
-                  <span className="tabular-nums">{tokenPct}%</span>
-                </button>
+                  )}
+                </div>
               )}
 
               {/* Model picker + effort picker */}
@@ -950,7 +962,7 @@ export function ChatInput({ onSent }: ChatInputProps) {
                   onClick={(e: ReactMouseEvent) => { e.stopPropagation(); openModel() }}
                   className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-lg)] border border-transparent bg-transparent px-2 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
                 >
-                  {providerName && <ProviderMonogram provider={providerName} size={16} />}
+                  {providerName && <ProviderIcon provider={providerName} custom={providerInfoFor(providerName)?.custom} size={16} />}
                   {modelName ? getModelDisplayName(providerName, modelName) : 'model'}
                   <ChevronDownIcon
                     className={`h-3 w-3 opacity-55 transition-transform ${showModelPicker ? 'rotate-180' : ''}`}
@@ -962,14 +974,14 @@ export function ChatInput({ onSent }: ChatInputProps) {
                   <button
                     type="button"
                     aria-expanded={showEffortPicker}
-                    title="Reasoning effort"
+                    title={t('chat.model.effortTitle')}
                     onClick={(e: ReactMouseEvent) => { e.stopPropagation(); openEffort() }}
                     className={`inline-flex h-7 items-center gap-1 rounded-[var(--radius-lg)] border border-transparent bg-transparent px-2 text-xs font-medium transition-colors hover:bg-[var(--color-muted)] ${
                       currentEffort ? 'text-[var(--color-primary)]' : 'text-[var(--color-foreground)]'
                     }`}
                   >
                     <SparklesIcon className="h-3 w-3" />
-                    <span>{currentEffort || 'Effort'}</span>
+                    <span>{currentEffort || t('chat.model.effort')}</span>
                     <ChevronDownIcon
                       className={`effort-chev h-3 w-3 opacity-55 transition-transform ${showEffortPicker ? 'rotate-180' : ''}`}
                     />
@@ -984,7 +996,7 @@ export function ChatInput({ onSent }: ChatInputProps) {
                         !currentEffort ? 'font-semibold text-[var(--color-primary)]' : ''
                       }`}
                     >
-                      <span>Default</span>
+                      <span>{t('chat.model.effortDefault')}</span>
                       {!currentEffort && <CheckIcon className="h-3.5 w-3.5 text-[var(--color-primary)]" />}
                     </button>
                     {currentEffortOptions.map((opt) => (
@@ -1028,7 +1040,7 @@ export function ChatInput({ onSent }: ChatInputProps) {
                     {providerName && modelName && (
                       <div className="flex items-center gap-2.5 border-b border-[var(--color-border)] px-3 py-2">
                         <CheckCircleIcon className="h-[17px] w-[17px] shrink-0 text-[var(--color-primary)]" title="Current model" />
-                        <ProviderMonogram provider={providerName} size={22} />
+                        <ProviderIcon provider={providerName} custom={providerInfoFor(providerName)?.custom} size={22} />
                         <span className="flex min-w-0 flex-1 flex-col">
                           <span className="truncate text-[12.5px] text-[var(--color-foreground)]">{getModelDisplayName(providerName, modelName)}</span>
                           <span className="mt-px truncate font-mono text-[10px] text-[var(--color-muted-foreground)]">{modelSubline(modelName, currentModelInfo)}</span>
@@ -1059,7 +1071,7 @@ export function ChatInput({ onSent }: ChatInputProps) {
                                 onClick={() => selectModel(r.provider, r.model)}
                                 className="group flex w-full items-center gap-2.5 rounded-[var(--radius-md)] border-none bg-transparent px-2 py-1.5 text-left transition-colors hover:bg-[var(--color-muted)]"
                               >
-                                <ProviderMonogram provider={r.provider} size={22} />
+                                <ProviderIcon provider={r.provider} custom={providerInfoFor(r.provider)?.custom} size={22} />
                                 <span className="flex min-w-0 flex-1 flex-col">
                                   <span className="truncate text-[12.5px] text-[var(--color-foreground)]">{getModelDisplayName(r.provider, r.model)}</span>
                                   <span className="mt-px truncate font-mono text-[10px] text-[var(--color-muted-foreground)]">{modelSubline(r.model, info)}</span>
@@ -1104,7 +1116,7 @@ export function ChatInput({ onSent }: ChatInputProps) {
                                   active ? 'bg-[var(--neutral-wash)]' : ''
                                 }`}
                               >
-                                <ProviderMonogram provider={p.id} size={22} />
+                                <ProviderIcon provider={p.id} custom={p.custom} size={22} />
                                 <span className="flex min-w-0 flex-1 flex-col">
                                   <span className={`truncate text-[12.5px] leading-snug text-[var(--color-foreground)] ${active ? 'font-semibold text-[var(--color-primary)]' : ''}`}>{m.name || m.id}</span>
                                   <span className="mt-px truncate font-mono text-[10px] text-[var(--color-muted-foreground)]">{modelSubline(m.id, m)}</span>
@@ -1211,6 +1223,95 @@ export function ChatInput({ onSent }: ChatInputProps) {
   )
 }
 
+// ─── Context capacity popup ─────────────────────────────────────────────────
+
+function ContextCapacityPopup({
+  loading,
+  stats,
+  total,
+  limit,
+  prompt,
+  completion,
+  cached,
+  reasoning,
+}: {
+  loading: boolean
+  stats: TaskStats | null
+  total: number
+  limit: number
+  prompt: number
+  completion: number
+  cached?: number
+  reasoning?: number
+}) {
+  const context = stats?.context
+  const effectiveLimit = context?.context_limit || limit
+  const rows = context
+    ? [
+        { label: 'System prompt', value: context.system_prompt_tokens },
+        { label: 'System tools', value: context.system_tools_tokens },
+        { label: 'MCP tools', value: context.mcp_tools_tokens },
+        { label: 'Skills', value: context.skills_tokens },
+        { label: 'Messages', value: context.messages_tokens },
+      ]
+    : [
+        { label: 'Input', value: prompt },
+        { label: 'Output', value: completion },
+        { label: 'Cached', value: cached || 0 },
+        { label: 'Reasoning', value: reasoning || 0 },
+      ]
+  const max = Math.max(1, ...rows.map((r) => r.value))
+  const percent = effectiveLimit > 0 ? Math.min(100, Math.round((total / effectiveLimit) * 100)) : 0
+
+  return (
+    <div className="absolute bottom-full right-0 z-[var(--z-dropdown)] mb-2 w-[280px] rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-[var(--shadow-lg)]">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div>
+          <div className="text-[12px] font-semibold text-[var(--color-foreground)]">Context capacity</div>
+          <div className="mt-0.5 font-mono text-[10.5px] text-[var(--color-muted-foreground)]">
+            {formatCompact(total)} / {effectiveLimit > 0 ? formatCompact(effectiveLimit) : '-'} tokens
+          </div>
+        </div>
+        <span className={`font-mono text-[13px] font-semibold ${percent >= 90 ? 'text-[var(--color-destructive)]' : 'text-[var(--color-primary)]'}`}>
+          {percent}%
+        </span>
+      </div>
+      <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-[var(--color-muted)]">
+        <div className="h-full rounded-full bg-[var(--color-primary)]" style={{ width: `${percent}%` }} />
+      </div>
+      {loading ? (
+        <div className="py-4 text-center text-xs text-[var(--color-muted-foreground)]">Loading...</div>
+      ) : (
+        <div className="space-y-1.5">
+          {rows.map((row) => (
+            <div key={row.label}>
+              <div className="mb-0.5 flex items-center justify-between gap-2 text-[10.5px]">
+                <span className="text-[var(--color-muted-foreground)]">{row.label}</span>
+                <span className="font-mono text-[var(--color-foreground)]">{formatCompact(row.value)}</span>
+              </div>
+              <div className="h-1 overflow-hidden rounded-full bg-[var(--color-muted)]">
+                <div className="h-full rounded-full bg-[var(--accent-fill)]" style={{ width: `${Math.max(2, (row.value / max) * 100)}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {stats?.cache_supported && (
+        <div className="mt-2 rounded-[var(--radius-md)] bg-[var(--color-muted)] px-2 py-1.5 text-[10.5px] text-[var(--color-muted-foreground)]">
+          Cache hit rate: <span className="font-mono text-[var(--color-foreground)]">{Math.round(stats.cache_hit_rate * 100)}%</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function formatCompact(n: number): string {
+  if (!Number.isFinite(n)) return '0'
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`
+  if (n >= 1000) return `${Math.round(n / 1000)}K`
+  return String(n)
+}
+
 // ─── Manage Models dialog ────────────────────────────────────────────────────
 
 interface ManageModelsDialogProps {
@@ -1286,7 +1387,7 @@ function ManageModelsDialog({
           {providers.map((p) => (
             <div key={`mgr-${p.id}`}>
               <div className="sticky top-0 z-[1] flex items-center gap-2 bg-[var(--color-surface)] px-2 pb-1.5 pt-3">
-                <ProviderMonogram provider={p.id} size={18} />
+                <ProviderIcon provider={p.id} custom={p.custom} size={18} />
                 <span className="text-[11px] font-semibold text-[var(--color-foreground)]">{p.name}</span>
                 <span className="font-mono text-[10px] text-[var(--color-muted-foreground)]">{p.id}</span>
                 <span className="ml-auto font-mono text-[10px] text-[var(--color-muted-foreground)]">{p.models.length}</span>
@@ -1298,7 +1399,7 @@ function ManageModelsDialog({
                     key={`mgr-${p.id}-${m.id}`}
                     className={`flex items-center gap-2.5 rounded-[var(--radius-md)] px-2 py-2 transition-colors hover:bg-[var(--color-muted)] ${off ? 'opacity-50' : ''}`}
                   >
-                    <ProviderMonogram provider={p.id} size={18} />
+                    <ProviderIcon provider={p.id} custom={p.custom} size={18} />
                     <span className="flex min-w-0 flex-1 flex-col">
                       <span className={`text-[12.5px] leading-snug ${off ? 'text-[var(--color-muted-foreground)]' : 'text-[var(--color-foreground)]'}`}>{m.name || m.id}</span>
                       <span className="mt-px font-mono text-[10px] text-[var(--color-muted-foreground)]">{modelSubline(m.id, m)}</span>

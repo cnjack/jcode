@@ -58,6 +58,7 @@ export class WSClient {
   /** Update the handler set (e.g. when the active task changes). */
   setHandlers(handlers: WSHandlers): void {
     this.handlers = handlers
+    this.handlerMap = null
   }
 
   /** True when the WS is open. */

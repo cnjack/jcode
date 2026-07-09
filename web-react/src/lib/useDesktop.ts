@@ -8,6 +8,21 @@
 export const isTauri: boolean =
   typeof window !== 'undefined' && !!(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
 
+/**
+ * Tag the root document for native desktop shell styling. The macOS Tauri
+ * window uses an overlay title bar, so CSS needs an `is-tauri-macos` hook to
+ * reveal draggable strips and inset content below the traffic-light controls.
+ */
+export function initDesktop(): void {
+  if (!isTauri || typeof document === 'undefined') return
+  const root = document.documentElement
+  root.classList.add('is-tauri')
+  const platform = navigator.platform || ''
+  if (/Mac/i.test(platform)) root.classList.add('is-tauri-macos')
+  else if (/Win/i.test(platform)) root.classList.add('is-tauri-windows')
+  else root.classList.add('is-tauri-linux')
+}
+
 /** Invoke a Tauri command (no-op in browser mode). */
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   if (!isTauri) throw new Error('invoke() called outside Tauri')

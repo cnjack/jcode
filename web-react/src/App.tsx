@@ -13,6 +13,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  ArrowLeftIcon,
+  CheckCircleIcon,
+  ExclamationCircleIcon,
+  PlayIcon,
+  StopIcon,
+} from '@heroicons/react/24/outline'
+import {
   RuntimeProvider,
   ToolRegistryProvider,
   createDefaultToolRegistry,
@@ -25,13 +32,14 @@ import {
   modelActions,
   sessionActions,
   uiActions,
-  loadSessions,
-  loadTasks,
-  loadSlashCommands,
+  chatActions,
   loadSession,
+  loadWorkspaceState,
+  replaySession,
 } from './app/store'
 import { bridgeWS } from './app/wsBridge'
 import { useChatRuntime } from './app/runtime'
+import type { AutomationRun } from './lib/automation'
 import { Sidebar } from './components/Sidebar'
 import { ChatView } from './components/ChatView'
 import { AutomationsView } from './components/AutomationsView'
@@ -43,6 +51,7 @@ import { SettingsDialog } from './components/SettingsDialog'
 import { TopBar } from './components/TopBar'
 import { RightPanel } from './components/RightPanel'
 import { TerminalPanel } from './components/TerminalPanel'
+import { RemoteConnectWizard } from './components/RemoteConnectWizard'
 
 export default function App() {
   const dispatch = useAppDispatch()
@@ -65,20 +74,15 @@ export default function App() {
         dispatch(modelActions.setServerVersion(h.version))
         dispatch(modelActions.setImageSupport(!!h.image_support))
         dispatch(sessionActions.setProjectPath(h.pwd))
+        dispatch(sessionActions.setCurrentSession(h.session_id || ''))
+        dispatch(chatActions.setRunning(!!h.running))
         if (h.auth_required) dispatch(uiActions.setNeedsAuth(true))
         if (h.needs_setup) dispatch(uiActions.setNeedsSetup(true))
-        // Load the current session's history into the timeline (replay). The
-        // boot session_id may be a fresh empty session (no JSONL yet, 404) — in
-        // that case fall back to the most recent listed session. loadSession
-        // swallows the 404 internally and returns without setting a timeline,
-        // so we detect an empty timeline and retry with the most recent session.
-        if (!h.needs_setup) {
-          await dispatch(loadSession(h.session_id))
-          const state = store_getState()
-          if (state.chat.timeline.length === 0) {
-            const sessions = await api.sessions()
-            if (sessions.length > 0) await dispatch(loadSession(sessions[0].uuid))
-          }
+        // Load the workspace state, then restore the current session only if it
+        // has persisted history. A fresh empty session should stay on welcome.
+        if (!h.auth_required && !h.needs_setup) {
+          await dispatch(loadWorkspaceState())
+          if (h.session_id) await dispatch(loadSession(h.session_id))
         }
       } catch (err) {
         if (!cancelled) {
@@ -108,13 +112,6 @@ export default function App() {
       wsRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dispatch])
-
-  // Load sidebar data + slash commands after boot.
-  useEffect(() => {
-    void dispatch(loadSessions())
-    void dispatch(loadTasks())
-    void dispatch(loadSlashCommands())
   }, [dispatch])
 
   // Global keyboard shortcuts: ⌘K (command palette), ⌘N (new chat), Esc (close
@@ -165,6 +162,7 @@ function store_getState() {
 type PanelType = 'terminal' | 'files' | 'changes' | 'plan'
 
 function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels' | 'automation-run' }) {
+  const dispatch = useAppDispatch()
   const runtime = useChatRuntime()
   const registry = useRef(createDefaultToolRegistry()).current
   const paletteOpen = useAppSelector((s) => s.ui.paletteOpen)
@@ -177,6 +175,19 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels'
   const [rightPanelTab, setRightPanelTab] = useState<'files' | 'changes' | 'plan'>('files')
   const [bottomPanel, setBottomPanel] = useState<'none' | 'terminal'>('none')
   const [bottomPanelHeight, setBottomPanelHeight] = useState(260)
+  const [activeRun, setActiveRun] = useState<AutomationRun | null>(null)
+  const [remoteWizardOpen, setRemoteWizardOpen] = useState(false)
+
+  const openRun = useCallback((run: AutomationRun) => {
+    setActiveRun(run)
+    dispatch(uiActions.setView('automation-run'))
+    void dispatch(replaySession(run.session_id))
+  }, [dispatch])
+
+  const closeRun = useCallback(() => {
+    setActiveRun(null)
+    dispatch(uiActions.setView('automations'))
+  }, [dispatch])
 
   const togglePanel = useCallback((panel: PanelType) => {
     if (panel === 'terminal') {
@@ -210,6 +221,14 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels'
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [togglePanel])
+
+  useEffect(() => {
+    function onOpenRemote() {
+      setRemoteWizardOpen(true)
+    }
+    window.addEventListener('jcode:open-remote-connect', onOpenRemote)
+    return () => window.removeEventListener('jcode:open-remote-connect', onOpenRemote)
+  }, [])
 
   // Bottom-panel resize handle.
   const startResize = useCallback((e: React.MouseEvent) => {
@@ -245,43 +264,132 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels'
             />
           )}
 
-          <Sidebar />
+          <div className="workspace-frame flex min-h-0 flex-1 overflow-hidden">
+            <Sidebar />
 
-          <main className="relative flex min-w-0 flex-1 flex-col">
-            {activeView === 'chat' && <ChatView />}
-            {activeView === 'automations' && <AutomationsView />}
-            {activeView === 'channels' && <ChannelsView />}
-            {activeView === 'automation-run' && <ChatView readOnly />}
+            <main className="workspace-main relative flex min-w-0 flex-1 flex-col">
+              {activeView === 'chat' && <ChatView />}
+              {activeView === 'automations' && <AutomationsView onOpenRun={openRun} />}
+              {activeView === 'channels' && <ChannelsView />}
+              {activeView === 'automation-run' && (
+                <AutomationRunReplay run={activeRun} onBack={closeRun} />
+              )}
 
-            {/* Bottom panel (terminal) */}
-            {bottomPanel === 'terminal' && (
-              <div className="relative shrink-0 border-t border-[var(--color-border)]" style={{ height: bottomPanelHeight }}>
-                <div
-                  className="absolute -top-1 left-0 right-0 z-10 h-2 cursor-row-resize"
-                  onMouseDown={startResize}
-                >
-                  <div className="absolute left-1/2 top-[3px] h-1 w-8 -translate-x-1/2 rounded-full bg-[var(--color-border)]" />
+              {/* Bottom panel (terminal) */}
+              {bottomPanel === 'terminal' && (
+                <div className="relative shrink-0 border-t border-[var(--color-border)]" style={{ height: bottomPanelHeight }}>
+                  <div
+                    className="absolute -top-1 left-0 right-0 z-10 h-2 cursor-row-resize"
+                    onMouseDown={startResize}
+                  >
+                    <div className="absolute left-1/2 top-[3px] h-1 w-8 -translate-x-1/2 rounded-full bg-[var(--color-border)]" />
+                  </div>
+                  <TerminalPanel onClose={() => setBottomPanel('none')} />
                 </div>
-                <TerminalPanel onClose={() => setBottomPanel('none')} />
-              </div>
-            )}
-          </main>
+              )}
+            </main>
 
-          {/* Right panel (files/changes/plan) */}
-          {rightPanelOpen && (
-            <RightPanel
-              activeTab={rightPanelTab}
-              onClose={() => setRightPanelOpen(false)}
-              onSwitchTab={setRightPanelTab}
-            />
-          )}
+            {/* Right panel (files/changes/plan) */}
+            {rightPanelOpen && (
+              <RightPanel
+                activeTab={rightPanelTab}
+                onClose={() => setRightPanelOpen(false)}
+                onSwitchTab={setRightPanelTab}
+              />
+            )}
+          </div>
 
           {paletteOpen && <CommandPalette />}
           <SettingsDialog />
+          <RemoteConnectWizard open={remoteWizardOpen} onClose={() => setRemoteWizardOpen(false)} />
         </div>
       </ToolRegistryProvider>
     </RuntimeProvider>
   )
+}
+
+function AutomationRunReplay({ run, onBack }: { run: AutomationRun | null; onBack: () => void }) {
+  const isRunning = run ? (run.terminal_status || run.status) === 'running' || (!run.terminal_status && run.status === 'running') : false
+  const status = run ? statusKind(run) : 'running'
+  const StatusIcon = status === 'success' ? CheckCircleIcon : status === 'error' ? ExclamationCircleIcon : PlayIcon
+  const statusLabel = status === 'success' ? 'Completed' : status === 'error' ? 'Failed' : 'Running'
+
+  async function stopRun() {
+    if (!run) return
+    await api.stop(run.session_id).catch(() => {})
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <header className="flex shrink-0 flex-col gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex w-fit items-center gap-1.5 rounded-[var(--radius-md)] px-1.5 py-1 text-[12px] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
+        >
+          <ArrowLeftIcon className="h-3.5 w-3.5" />
+          Automations
+        </button>
+        <div className="flex min-w-0 items-center gap-2">
+          <h1 className="min-w-0 flex-1 truncate text-base font-semibold text-[var(--color-foreground)]">
+            {run?.title || 'Automation run'}
+          </h1>
+          <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ${statusClass(status)}`}>
+            <StatusIcon className="h-3.5 w-3.5" />
+            {statusLabel}
+          </span>
+          {isRunning && (
+            <button
+              type="button"
+              onClick={() => void stopRun()}
+              className="inline-flex shrink-0 items-center gap-1 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-background)] px-2 py-1 text-[11px] text-[var(--color-foreground)] hover:bg-[var(--color-muted)]"
+            >
+              <StopIcon className="h-3.5 w-3.5" />
+              Stop
+            </button>
+          )}
+        </div>
+        {run && (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-[var(--color-muted-foreground)]">
+            <span className="font-mono uppercase tracking-[0.05em]">trigger</span>
+            <span>{run.trigger_kind}</span>
+            {run.project && (
+              <>
+                <span className="text-[var(--color-border)]">·</span>
+                <span className="font-mono uppercase tracking-[0.05em]">project</span>
+                <span className="max-w-[360px] truncate">{run.project}</span>
+              </>
+            )}
+            {run.start_time && (
+              <>
+                <span className="text-[var(--color-border)]">·</span>
+                <span>{new Date(run.start_time).toLocaleString()}</span>
+              </>
+            )}
+          </div>
+        )}
+        {run?.error_reason && status === 'error' && (
+          <div className="rounded-[var(--radius-md)] border border-[var(--color-destructive)] bg-[var(--color-error-bg)] px-2.5 py-2 text-xs text-[var(--color-error-fg)]">
+            {run.error_reason}
+          </div>
+        )}
+      </header>
+      <ChatView readOnly />
+    </div>
+  )
+}
+
+function statusKind(run: AutomationRun): 'success' | 'error' | 'running' {
+  const s = run.terminal_status || run.status
+  if (s === 'success') return 'success'
+  if (s === 'error') return 'error'
+  return 'running'
+}
+
+function statusClass(status: 'success' | 'error' | 'running'): string {
+  if (status === 'success') return 'bg-[var(--color-success-bg)] text-[var(--color-success-fg)]'
+  if (status === 'error') return 'bg-[var(--color-error-bg)] text-[var(--color-error-fg)]'
+  return 'bg-[var(--accent-wash)] text-[var(--color-primary)]'
 }
 
 function ErrorScreen({ message }: { message: string }) {

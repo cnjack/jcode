@@ -16,7 +16,7 @@ import { configureStore, createSlice, createAsyncThunk } from '@reduxjs/toolkit'
 import type { ThreadItem, Message, ToolCall, Approval, TokenSnapshot, Goal, TodoItem, QueuedMessage, AskUserQuestion } from 'jcode-ui-core'
 import { api } from '../lib/api'
 import { extractToolDisplayInfo } from '../lib/toolInfo'
-import type { AgentMode, ProviderInfo, SessionItem, TaskItem, SlashCommandInfo, SessionEntry } from '../lib/types'
+import { normalizeMode, type AgentMode, type ProviderInfo, type SessionItem, type TaskItem, type SlashCommandInfo, type SessionEntry, type ModelRef } from '../lib/types'
 
 // ─── seq counter (stable DOM identity across streaming updates) ───
 let _seq = 0
@@ -34,6 +34,7 @@ interface ChatState {
   isRunning: boolean
   tokenSnapshot: TokenSnapshot | null
   goal: Goal | null
+  goalArmed: boolean
   todos: TodoItem[]
   queued: QueuedMessage[]
   slashCommands: SlashCommandInfo[]
@@ -44,6 +45,7 @@ const initialChat: ChatState = {
   isRunning: false,
   tokenSnapshot: null,
   goal: null,
+  goalArmed: false,
   todos: [],
   queued: [],
   slashCommands: [],
@@ -62,6 +64,7 @@ const chatSlice = createSlice({
       s.isRunning = false
       s.tokenSnapshot = null
       s.goal = null
+      s.goalArmed = false
       s.todos = []
       s.queued = []
       streamingText = ''
@@ -142,6 +145,9 @@ const chatSlice = createSlice({
     setGoal(s, a: { payload: Goal | null }) {
       s.goal = a.payload
     },
+    setGoalArmed(s, a: { payload: boolean }) {
+      s.goalArmed = a.payload
+    },
     setTodos(s, a: { payload: TodoItem[] }) {
       s.todos = a.payload
     },
@@ -187,18 +193,68 @@ const chatSlice = createSlice({
     setTimeline(s, a: { payload: ThreadItem[] }) {
       s.timeline = a.payload
     },
+    truncateTimelineFrom(s, a: { payload: string }) {
+      const idx = s.timeline.findIndex((i) => i.kind === 'message' && i.data.id === a.payload)
+      if (idx >= 0) s.timeline = s.timeline.slice(0, idx)
+      streamingText = ''
+      streamingMsgId = ''
+    },
     addApprovalRequest(s, a: { payload: Approval }) {
       s.timeline.push({ kind: 'approval', data: a.payload, seq: nextSeq() })
     },
-    attachAskUser(s, a: { payload: { toolName: string; askUserId: string; questions: AskUserQuestion[] } }) {
+    attachAskUser(s, a: { payload: { toolName: string; askUserId: string; questions: AskUserQuestion[]; taskId?: string } }) {
       // Arm the matching tool with ask_user state (the tool was added by tool_call).
       for (let i = s.timeline.length - 1; i >= 0; i--) {
         const item = s.timeline[i]
-        if (item.kind === 'tool' && item.data.name === a.payload.toolName && item.data.status === 'running' && !item.data.askUserId) {
+        if (item.kind !== 'tool' || item.data.name !== a.payload.toolName) continue
+        if (item.data.askUserId === a.payload.askUserId) return
+        if (!item.data.askUserId && (item.data.status === 'running' || (item.data.status === 'done' && !item.data.output))) {
+          item.data.status = 'running'
           item.data.askUserId = a.payload.askUserId
           item.data.askUserQuestions = a.payload.questions
-          break
+          ;(item.data as ToolCall & { askUserTaskId?: string }).askUserTaskId = a.payload.taskId
+          return
         }
+      }
+      const args = JSON.stringify({ questions: a.payload.questions })
+      const tc: ToolCall = {
+        id: genId('ask'),
+        name: a.payload.toolName,
+        args,
+        status: 'running',
+        timestamp: Date.now(),
+        displayInfo: extractToolDisplayInfo(a.payload.toolName, args),
+        askUserId: a.payload.askUserId,
+        askUserQuestions: a.payload.questions,
+      }
+      ;(tc as ToolCall & { askUserTaskId?: string }).askUserTaskId = a.payload.taskId
+      s.timeline.push({ kind: 'tool', data: tc, seq: nextSeq() })
+    },
+    addSubagentProgress(s, a: { payload: { event: string; toolName: string; detail: string } }) {
+      for (let i = s.timeline.length - 1; i >= 0; i--) {
+        const item = s.timeline[i]
+        if (item.kind !== 'tool' || item.data.name !== 'subagent' || item.data.status !== 'running') continue
+        item.data.children ??= []
+        if (a.payload.event === 'tool_call') {
+          item.data.children.push({
+            id: genId('sub_tc'),
+            name: a.payload.toolName,
+            args: a.payload.detail,
+            status: 'running',
+            timestamp: Date.now(),
+            displayInfo: extractToolDisplayInfo(a.payload.toolName, a.payload.detail),
+          })
+        } else if (a.payload.event === 'tool_result') {
+          for (let j = item.data.children.length - 1; j >= 0; j--) {
+            const child = item.data.children[j]
+            if (child.name === a.payload.toolName && child.status === 'running') {
+              child.output = a.payload.detail
+              child.status = 'done'
+              break
+            }
+          }
+        }
+        break
       }
     },
     setApprovalResolving(s, a: { payload: { id: string; resolving: boolean } }) {
@@ -272,10 +328,12 @@ interface ModelState {
   mode: AgentMode
   providers: ProviderInfo[]
   favoriteModels: string[]
-  recentModels: { provider: string; model: string }[]
+  recentModels: ModelRef[]
+  effortOverrides: Record<string, string>
   autoApprove: boolean
   imageSupport: boolean
   serverVersion: string
+  maxIterations: number
 }
 
 const initialModel: ModelState = {
@@ -285,9 +343,11 @@ const initialModel: ModelState = {
   providers: [],
   favoriteModels: [],
   recentModels: [],
+  effortOverrides: {},
   autoApprove: false,
   imageSupport: false,
   serverVersion: '',
+  maxIterations: 0,
 }
 
 const modelSlice = createSlice({
@@ -306,6 +366,24 @@ const modelSlice = createSlice({
     setProviders(s, a: { payload: ProviderInfo[] }) {
       s.providers = a.payload
     },
+    setModelState(s, a: { payload: { recent: ModelRef[]; favorite: ModelRef[]; effortOverrides?: Record<string, string> } }) {
+      s.recentModels = a.payload.recent
+      s.favoriteModels = a.payload.favorite.map((r) => `${r.provider}/${r.model}`)
+      s.effortOverrides = a.payload.effortOverrides ?? {}
+    },
+    setFavorite(s, a: { payload: { provider: string; model: string; favorite: boolean } }) {
+      const key = `${a.payload.provider}/${a.payload.model}`
+      if (a.payload.favorite) {
+        if (!s.favoriteModels.includes(key)) s.favoriteModels.push(key)
+      } else {
+        s.favoriteModels = s.favoriteModels.filter((x) => x !== key)
+      }
+    },
+    setEffortOverride(s, a: { payload: { provider: string; model: string; effort: string } }) {
+      const key = `${a.payload.provider}/${a.payload.model}`
+      if (a.payload.effort) s.effortOverrides[key] = a.payload.effort
+      else delete s.effortOverrides[key]
+    },
     setAutoApprove(s, a: { payload: boolean }) {
       s.autoApprove = a.payload
     },
@@ -314,6 +392,9 @@ const modelSlice = createSlice({
     },
     setServerVersion(s, a: { payload: string }) {
       s.serverVersion = a.payload
+    },
+    setMaxIterations(s, a: { payload: number }) {
+      s.maxIterations = a.payload
     },
   },
 })
@@ -332,6 +413,10 @@ interface UiState {
   needsSetup: boolean
   connectionError: string
   theme: string
+  channelAvailable: boolean
+  channelEnabled: boolean
+  bleAvailable: boolean
+  bleEnabled: boolean
 }
 
 const initialUi: UiState = {
@@ -342,6 +427,10 @@ const initialUi: UiState = {
   needsSetup: false,
   connectionError: '',
   theme: 'system',
+  channelAvailable: false,
+  channelEnabled: false,
+  bleAvailable: false,
+  bleEnabled: false,
 }
 
 const uiSlice = createSlice({
@@ -369,6 +458,14 @@ const uiSlice = createSlice({
     setTheme(s, a: { payload: string }) {
       s.theme = a.payload
     },
+    setChannelState(s, a: { payload: { available: boolean; enabled: boolean } }) {
+      s.channelAvailable = a.payload.available
+      s.channelEnabled = a.payload.enabled
+    },
+    setBLEState(s, a: { payload: { available: boolean; enabled: boolean } }) {
+      s.bleAvailable = a.payload.available
+      s.bleEnabled = a.payload.enabled
+    },
   },
 })
 
@@ -387,12 +484,37 @@ export const sendMessage = createAsyncThunk(
   async (payload: { text: string; images?: import('jcode-ui-core').ChatImage[]; mode?: AgentMode }, { dispatch, getState }) => {
     const state = getState() as RootState
     const sessionId = state.session.currentSessionId || undefined
-    // /goal slash interception (matches Vue store.sendMessage).
-    if (payload.text.startsWith('/goal ')) {
-      const objective = payload.text.slice(6).trim()
+    const trimmed = payload.text.trim()
+    if (state.chat.goalArmed && trimmed && !trimmed.startsWith('/')) {
+      dispatch(chatActions.setGoalArmed(false))
       dispatch(chatActions.addMessage({ role: 'user', content: payload.text }))
-      const goal = await api.setGoal(objective)
+      const goal = await api.setGoal(trimmed, true)
       dispatch(chatActions.setGoal(goal))
+      dispatch(chatActions.setRunning(true))
+      return
+    }
+    // /goal slash interception (matches Vue store.sendMessage).
+    if (trimmed === '/goal' || trimmed.startsWith('/goal ')) {
+      const objective = trimmed.slice('/goal'.length).trim()
+      if (objective === '' || objective === 'status') {
+        const goal = await api.goal()
+        dispatch(chatActions.setGoal(goal))
+        dispatch(chatActions.addMessage({
+          role: 'system',
+          content: goal ? `Goal is ${goal.status}: ${goal.objective}` : 'No active goal.',
+        }))
+        return
+      }
+      if (objective === 'clear') {
+        await api.clearGoal()
+        dispatch(chatActions.setGoal(null))
+        dispatch(chatActions.addMessage({ role: 'system', content: 'Goal cleared.' }))
+        return
+      }
+      dispatch(chatActions.addMessage({ role: 'user', content: payload.text }))
+      const goal = await api.setGoal(objective, true)
+      dispatch(chatActions.setGoal(goal))
+      dispatch(chatActions.setRunning(true))
       return
     }
     dispatch(chatActions.addMessage({ role: 'user', content: payload.text, images: payload.images }))
@@ -409,10 +531,13 @@ export const stopAgent = createAsyncThunk('chat/stop', async (_, { getState }) =
 
 export const resolveApproval = createAsyncThunk(
   'approval/resolve',
-  async (payload: { id: string; approved: boolean; approveAll?: boolean }, { dispatch }) => {
+  async (payload: { id: string; approved: boolean; approveAll?: boolean }, { dispatch, getState }) => {
     dispatch(chatActions.setApprovalResolving({ id: payload.id, resolving: true }))
+    const state = getState() as RootState
+    const item = state.chat.timeline.find((i) => i.kind === 'approval' && i.data.id === payload.id)
+    const taskId = item?.kind === 'approval' ? (item.data as Approval & { task_id?: string }).task_id : undefined
     try {
-      await api.approval(payload.id, payload.approved, payload.approveAll ?? false)
+      await api.approval(payload.id, payload.approved, payload.approveAll ?? false, taskId)
       dispatch(chatActions.resolveApprovalItem({ id: payload.id, approved: payload.approved }))
     } catch {
       dispatch(chatActions.setApprovalResolving({ id: payload.id, resolving: false }))
@@ -422,9 +547,17 @@ export const resolveApproval = createAsyncThunk(
 
 export const submitAskUser = createAsyncThunk(
   'askUser/submit',
-  async (payload: { id: string; answers: import('jcode-ui-core').AskUserAnswer[] }, { dispatch }) => {
+  async (payload: { id: string; answers: import('jcode-ui-core').AskUserAnswer[] }, { dispatch, getState }) => {
+    const state = getState() as RootState
+    let taskId: string | undefined
+    for (const item of state.chat.timeline) {
+      if (item.kind === 'tool' && item.data.askUserId === payload.id) {
+        taskId = (item.data as ToolCall & { askUserTaskId?: string }).askUserTaskId
+        break
+      }
+    }
     try {
-      await api.askUser(payload.id, payload.answers)
+      await api.askUser(payload.id, payload.answers, taskId)
     } catch {
       // surface in timeline as a system message
       dispatch(chatActions.addMessage({ role: 'system', content: 'Failed to submit answer', level: 'error' }))
@@ -434,9 +567,26 @@ export const submitAskUser = createAsyncThunk(
 
 export const editMessage = createAsyncThunk(
   'chat/edit',
-  async (payload: { id: string; text: string }, { dispatch }) => {
-    // Trim the timeline up to (and including) the edited message, then resend.
-    dispatch(chatActions.clearChat())
+  async (payload: { id: string; text: string }, { dispatch, getState }) => {
+    const state = getState() as RootState
+    const msgIdx = state.chat.timeline.findIndex((i) => i.kind === 'message' && i.data.id === payload.id && i.data.role === 'user')
+    if (msgIdx < 0) return
+    const beforeUserMessage = state.chat.timeline
+      .slice(0, msgIdx)
+      .filter((i) => i.kind === 'message' && i.data.role === 'user')
+      .length
+    try {
+      const res = await api.truncateHistory(beforeUserMessage)
+      if (res.session_id) dispatch(sessionActions.setCurrentSession(res.session_id))
+    } catch (e) {
+      dispatch(chatActions.addMessage({
+        role: 'system',
+        content: e instanceof Error ? e.message : 'Failed to truncate history',
+        level: 'error',
+      }))
+      return
+    }
+    dispatch(chatActions.truncateTimelineFrom(payload.id))
     await dispatch(sendMessage({ text: payload.text }))
   },
 )
@@ -454,6 +604,123 @@ export const loadTasks = createAsyncThunk('tasks/load', async (_, { dispatch }) 
 export const loadSlashCommands = createAsyncThunk('chat/loadSlash', async (_, { dispatch }) => {
   const cmds = await api.slashCommands()
   dispatch(chatActions.setSlashCommands(cmds))
+})
+
+export const loadModels = createAsyncThunk('model/loadModels', async (_, { dispatch }) => {
+  const data = await api.models()
+  dispatch(modelActions.setProviders(data.providers || []))
+  dispatch(modelActions.setProvider(data.current.provider))
+  dispatch(modelActions.setModel(data.current.model))
+  const provider = data.providers.find((p) => p.id === data.current.provider)
+  const model = provider?.models.find((m) => m.id === data.current.model)
+  dispatch(modelActions.setImageSupport(!!model?.image_support))
+})
+
+export const loadModelState = createAsyncThunk('model/loadState', async (_, { dispatch }) => {
+  const data = await api.modelState()
+  dispatch(modelActions.setModelState({
+    recent: data.recent || [],
+    favorite: data.favorite || [],
+    effortOverrides: data.effort_overrides || {},
+  }))
+})
+
+export const loadApprovalMode = createAsyncThunk('model/loadApprovalMode', async (_, { dispatch, getState }) => {
+  const data = await api.approvalMode()
+  dispatch(modelActions.setAutoApprove(data.auto_approve))
+  const state = getState() as RootState
+  if (data.auto_approve) dispatch(modelActions.setMode('full_access'))
+  else if (state.model.mode === 'full_access') dispatch(modelActions.setMode('approval'))
+})
+
+export const loadChannelState = createAsyncThunk('ui/loadChannelState', async (_, { dispatch }) => {
+  const data = await api.channelStatus()
+  dispatch(uiActions.setChannelState({ available: data.available, enabled: data.state === 'enabled' }))
+})
+
+export const loadBLEState = createAsyncThunk('ui/loadBLEState', async (_, { dispatch }) => {
+  const data = await api.channelBLEStatus()
+  dispatch(uiActions.setBLEState({ available: data.available, enabled: data.enabled }))
+})
+
+export const loadConfig = createAsyncThunk('model/loadConfig', async (_, { dispatch }) => {
+  const cfg = await api.config()
+  dispatch(modelActions.setMaxIterations(cfg.max_iterations))
+})
+
+export const loadStatus = createAsyncThunk('app/loadStatus', async (_, { dispatch }) => {
+  const status = await api.status()
+  dispatch(chatActions.setRunning(!!status.running))
+  dispatch(sessionActions.setProjectPath(status.pwd))
+  dispatch(modelActions.setProvider(status.provider))
+  dispatch(modelActions.setModel(status.model))
+  dispatch(modelActions.setMode(normalizeMode(status.mode)))
+  if (status.token) dispatch(chatActions.setTokenSnapshot(status.token))
+})
+
+export const loadGoal = createAsyncThunk('chat/loadGoal', async (_, { dispatch }) => {
+  const goal = await api.goal()
+  dispatch(chatActions.setGoal(goal))
+})
+
+export const loadTodos = createAsyncThunk('chat/loadTodos', async (_, { dispatch }) => {
+  const todos = await api.todos()
+  dispatch(chatActions.setTodos(todos))
+})
+
+export const reconcilePendingInteractions = createAsyncThunk('chat/reconcilePending', async (_, { dispatch, getState }) => {
+  const [askResult, approvalResult] = await Promise.allSettled([
+    api.askPending(),
+    api.approvalPending(),
+  ])
+  if (askResult.status === 'fulfilled') {
+    for (const req of askResult.value) {
+      dispatch(chatActions.attachAskUser({
+        toolName: 'ask_user',
+        askUserId: req.id,
+        questions: req.questions,
+        taskId: req.task_id,
+      }))
+    }
+  }
+  if (approvalResult.status === 'fulfilled') {
+    const state = getState() as RootState
+    const existing = new Set(
+      state.chat.timeline
+        .filter((i) => i.kind === 'approval')
+        .map((i) => i.kind === 'approval' ? i.data.id : ''),
+    )
+    for (const req of approvalResult.value) {
+      if (existing.has(req.id)) continue
+      const approval: Approval = {
+        id: req.id,
+        tool_name: req.tool_name,
+        tool_args: req.tool_args,
+        is_external: req.is_external,
+      }
+      ;(approval as Approval & { task_id?: string }).task_id = req.task_id
+      dispatch(chatActions.addApprovalRequest(approval))
+      existing.add(req.id)
+    }
+  }
+})
+
+export const loadWorkspaceState = createAsyncThunk('app/loadWorkspaceState', async (_, { dispatch }) => {
+  await Promise.allSettled([
+    dispatch(loadStatus()),
+    dispatch(loadConfig()),
+    dispatch(loadModels()),
+    dispatch(loadModelState()),
+    dispatch(loadSessions()),
+    dispatch(loadTasks()),
+    dispatch(loadSlashCommands()),
+    dispatch(loadApprovalMode()),
+    dispatch(loadChannelState()),
+    dispatch(loadBLEState()),
+    dispatch(loadGoal()),
+    dispatch(loadTodos()),
+    dispatch(reconcilePendingInteractions()),
+  ])
 })
 
 /**
@@ -536,6 +803,7 @@ export const loadSession = createAsyncThunk(
     const resumedId = resp.session_id || uuid
     const running = !!state.session.tasks.find((t) => t.uuid === resumedId)?.running
     dispatch(chatActions.setRunning(running))
+    await dispatch(reconcilePendingInteractions())
 
     // Refresh goal + todos (the backend restored them; no WS push on switch).
     try {
@@ -550,6 +818,73 @@ export const loadSession = createAsyncThunk(
     } catch {
       // ignore
     }
+  },
+)
+
+export const replaySession = createAsyncThunk(
+  'session/replay',
+  async (uuid: string, { dispatch }) => {
+    let entries: SessionEntry[]
+    try {
+      entries = await api.session(uuid)
+    } catch (e) {
+      dispatch(chatActions.clearChat())
+      dispatch(chatActions.addMessage({
+        role: 'system',
+        content: e instanceof Error ? e.message : 'Failed to load session replay',
+        level: 'error',
+      }))
+      return
+    }
+
+    dispatch(chatActions.clearChat())
+    const timeline: ThreadItem[] = []
+    const pendingToolCalls = new Map<string, ToolCall>()
+    for (const e of entries) {
+      if (e.type === 'user' && e.content) {
+        timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('msg'), role: 'user', content: e.content, timestamp: ts(e.timestamp) } })
+      } else if (e.type === 'assistant' && e.content) {
+        timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('asst'), role: 'assistant', content: e.content, timestamp: ts(e.timestamp) } })
+      } else if (e.type === 'tool_call' && e.name) {
+        const tc: ToolCall = {
+          id: genId('tc'),
+          toolCallID: e.tool_call_id,
+          name: e.name,
+          args: e.args || '',
+          status: 'running',
+          timestamp: ts(e.timestamp),
+          displayInfo: extractToolDisplayInfo(e.name, e.args || ''),
+        }
+        timeline.push({ kind: 'tool', seq: nextSeq(), data: tc })
+        if (e.tool_call_id) pendingToolCalls.set(e.tool_call_id, tc)
+      } else if (e.type === 'tool_result') {
+        let resolved = false
+        if (e.tool_call_id) {
+          const tc = pendingToolCalls.get(e.tool_call_id)
+          if (tc) {
+            tc.output = e.output || ''
+            tc.error = e.error || ''
+            tc.status = e.error ? 'error' : 'done'
+            pendingToolCalls.delete(e.tool_call_id)
+            resolved = true
+          }
+        }
+        if (!resolved && e.name) {
+          for (let i = timeline.length - 1; i >= 0; i--) {
+            const item = timeline[i]
+            if (item.kind === 'tool' && item.data.name === e.name && item.data.status === 'running') {
+              item.data.output = e.output || ''
+              item.data.error = e.error || ''
+              item.data.status = e.error ? 'error' : 'done'
+              break
+            }
+          }
+        }
+      }
+    }
+    for (const tc of pendingToolCalls.values()) tc.status = 'done'
+    dispatch(chatActions.setTimeline(timeline))
+    dispatch(chatActions.setRunning(false))
   },
 )
 

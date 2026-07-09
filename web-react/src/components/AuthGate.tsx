@@ -2,9 +2,10 @@
 
 import { useState } from 'react'
 import { api } from '../lib/api'
+import { normalizeMode } from '../lib/types'
 import { setAuthToken, clearAuthToken } from '../lib/authToken'
 import { useAppDispatch } from '../app/hooks'
-import { uiActions } from '../app/store'
+import { chatActions, loadWorkspaceState, modelActions, sessionActions, uiActions } from '../app/store'
 
 export function AuthGate() {
   const dispatch = useAppDispatch()
@@ -20,6 +21,16 @@ export function AuthGate() {
       const resp = await api.authVerify(token)
       if (resp.ok) {
         setAuthToken(token)
+        const h = await api.health()
+        dispatch(modelActions.setProvider(h.provider))
+        dispatch(modelActions.setModel(h.model))
+        dispatch(modelActions.setMode(normalizeMode(h.mode)))
+        dispatch(modelActions.setServerVersion(h.version))
+        dispatch(modelActions.setImageSupport(!!h.image_support))
+        dispatch(sessionActions.setProjectPath(h.pwd))
+        dispatch(sessionActions.setCurrentSession(h.session_id || ''))
+        dispatch(chatActions.setRunning(!!h.running))
+        await dispatch(loadWorkspaceState())
         dispatch(uiActions.setNeedsAuth(false))
       } else {
         setError('Invalid token')
@@ -32,7 +43,8 @@ export function AuthGate() {
   }
 
   return (
-    <div className="flex h-screen items-center justify-center bg-[var(--color-background)]">
+    <div className="setup-frame relative flex h-screen items-center justify-center bg-[var(--color-background)]">
+      <div className="titlebar-drag" data-tauri-drag-region aria-hidden="true" />
       <form
         onSubmit={submit}
         className="w-full max-w-sm rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-md)]"

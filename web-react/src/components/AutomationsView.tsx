@@ -536,7 +536,7 @@ function AutomationEditor({
 
 // ─── Main view ───────────────────────────────────────────────────────────────
 
-export function AutomationsView() {
+export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun) => void }) {
   const [items, setItems] = useState<AutomationItem[]>([])
   const [runs, setRuns] = useState<AutomationRun[]>([])
   const [templates, setTemplates] = useState<AutomationTemplate[]>([])
@@ -610,7 +610,7 @@ export function AutomationsView() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="page-surface flex min-h-0 flex-1 flex-col">
       <header className="flex h-[var(--header-height)] shrink-0 items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4">
         <BoltIcon className="h-4 w-4 text-[var(--color-primary)]" />
         <h1 className="flex-1 text-sm font-medium">Automations</h1>
@@ -833,6 +833,15 @@ export function AutomationsView() {
                       return (
                         <div
                           key={r.session_id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => onOpenRun?.(r)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              onOpenRun?.(r)
+                            }
+                          }}
                           className={
                             'relative block w-full cursor-pointer px-4 py-3 pl-[18px] text-left transition-colors hover:bg-[var(--neutral-wash-soft)] ' +
                             (idx < filteredRuns.length - 1 ? 'border-b border-[var(--color-border)]' : '')
