@@ -561,21 +561,21 @@ export const sendMessage = createAsyncThunk(
     // First user turn materializes the session on disk — surface it in the
     // sidebar immediately (title + running) before the chat HTTP round-trip.
     if (sessionId) {
-      dispatch(revealSessionInSidebar({
+      revealSessionInSidebar(dispatch as AppDispatch, () => getState() as RootState, {
         uuid: sessionId,
         title: sessionTitleFromMessage(payload.text),
         running: true,
-      }))
+      })
     }
     const resp = await api.chat(payload.text, payload.mode, sessionId, payload.images)
     const sid = resp.session_id || sessionId
     if (sid) {
       if (!state.session.currentSessionId) dispatch(sessionActions.setCurrentSession(sid))
-      dispatch(revealSessionInSidebar({
+      revealSessionInSidebar(dispatch as AppDispatch, () => getState() as RootState, {
         uuid: sid,
         title: sessionTitleFromMessage(payload.text),
         running: true,
-      }))
+      })
       // Reconcile with the server index (now written by RecordUser).
       void dispatch(loadSessions())
       void dispatch(loadTasks())
@@ -595,45 +595,50 @@ function sessionTitleFromMessage(content: string): string {
  * Ensure a session/task appears in the left sidebar immediately.
  * Backend only indexes a session after the first recorded message; empty
  * "new chat" UUIDs are otherwise invisible until the next full reload.
+ *
+ * Takes dispatch/getState directly (not an RTK thunk) so it can be called
+ * from createAsyncThunk without AppDispatch vs ThunkDispatch type friction.
  */
-export function revealSessionInSidebar(opts: {
-  uuid: string
-  title?: string
-  running?: boolean
-  project?: string
-  provider?: string
-  model?: string
-}) {
-  return (dispatch: AppDispatch, getState: () => RootState) => {
-    if (!opts.uuid) return
-    const state = getState()
-    const now = new Date().toISOString()
-    const project = opts.project || state.session.projectPath || ''
-    const existing = state.session.tasks.find((t) => t.uuid === opts.uuid)
-    // First non-empty title wins (matches backend generateTitle on first user msg).
-    const title = existing?.title || opts.title || ''
-    dispatch(sessionActions.upsertTask({
-      uuid: opts.uuid,
-      project: existing?.project || project,
-      created_at: existing?.created_at || now,
-      updated_at: now,
-      provider: opts.provider || existing?.provider || state.model.providerName || '',
-      model: opts.model || existing?.model || state.model.modelName || '',
-      title,
-      pinned: existing?.pinned ?? false,
-      archived: existing?.archived ?? false,
-      unread: existing?.unread ?? false,
-      status: existing?.status,
-      running: opts.running ?? existing?.running ?? false,
-    }))
-    dispatch(sessionActions.upsertSession({
-      uuid: opts.uuid,
-      created_at: existing?.created_at || now,
-      provider: opts.provider || existing?.provider || state.model.providerName || '',
-      model: opts.model || existing?.model || state.model.modelName || '',
-      title: title || undefined,
-    }))
-  }
+export function revealSessionInSidebar(
+  dispatch: AppDispatch,
+  getState: () => RootState,
+  opts: {
+    uuid: string
+    title?: string
+    running?: boolean
+    project?: string
+    provider?: string
+    model?: string
+  },
+) {
+  if (!opts.uuid) return
+  const state = getState()
+  const now = new Date().toISOString()
+  const project = opts.project || state.session.projectPath || ''
+  const existing = state.session.tasks.find((t) => t.uuid === opts.uuid)
+  // First non-empty title wins (matches backend generateTitle on first user msg).
+  const title = existing?.title || opts.title || ''
+  dispatch(sessionActions.upsertTask({
+    uuid: opts.uuid,
+    project: existing?.project || project,
+    created_at: existing?.created_at || now,
+    updated_at: now,
+    provider: opts.provider || existing?.provider || state.model.providerName || '',
+    model: opts.model || existing?.model || state.model.modelName || '',
+    title,
+    pinned: existing?.pinned ?? false,
+    archived: existing?.archived ?? false,
+    unread: existing?.unread ?? false,
+    status: existing?.status,
+    running: opts.running ?? existing?.running ?? false,
+  }))
+  dispatch(sessionActions.upsertSession({
+    uuid: opts.uuid,
+    created_at: existing?.created_at || now,
+    provider: opts.provider || existing?.provider || state.model.providerName || '',
+    model: opts.model || existing?.model || state.model.modelName || '',
+    title: title || undefined,
+  }))
 }
 
 export const stopAgent = createAsyncThunk('chat/stop', async (_, { getState }) => {
