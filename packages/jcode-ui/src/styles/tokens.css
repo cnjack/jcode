@@ -4,6 +4,15 @@
  */
 
 :root {
+  /* ─── Layout (conversation column) ───
+   * Hosts/embeds can override on a parent:
+   *   .jcode-demo { --jcode-col-max: 100%; --jcode-col-pad-x: 0.75rem; }
+   * Product full-screen keeps the wide reading column. */
+  --jcode-col-max: min(56rem, 100%);
+  --jcode-col-pad-x: 1rem;
+  /* Avatar + gap → content indent (was hard-coded Tailwind pl-9 = 2.25rem). */
+  --jcode-gutter: 2.25rem;
+
   /* ─── Fonts ─── */
   --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -21,13 +30,12 @@
   --radius-2xl: 16px;
   --radius-pill: 9999px;
 
-  /* ─── Shadows & elevation ─── one warm-tinted scale (near-invisible on dark
-   * surfaces, which is correct). sm = resting card · md = dropdown/menu ·
-   * lg = dialog/modal · xl = floating hero (the centered composer). */
-  --shadow-sm: 0 1px 2px rgba(24, 20, 16, 0.06);
-  --shadow-md: 0 4px 14px -4px rgba(24, 20, 16, 0.12);
-  --shadow-lg: 0 14px 36px -14px rgba(24, 20, 16, 0.20);
-  --shadow-xl: 0 1px 2px rgba(24, 20, 16, 0.04), 0 24px 56px -28px rgba(24, 20, 16, 0.26);
+  /* ─── Shadows & elevation ─── warm-tinted scale.
+   * sm = resting card · md = composer/dropdown · lg = popover · xl = hero. */
+  --shadow-sm: 0 1px 2px rgba(24, 20, 16, 0.05), 0 1px 1px rgba(24, 20, 16, 0.03);
+  --shadow-md: 0 2px 4px rgba(24, 20, 16, 0.04), 0 8px 24px -8px rgba(24, 20, 16, 0.14);
+  --shadow-lg: 0 4px 8px rgba(24, 20, 16, 0.04), 0 18px 40px -14px rgba(24, 20, 16, 0.22);
+  --shadow-xl: 0 1px 2px rgba(24, 20, 16, 0.04), 0 28px 64px -28px rgba(24, 20, 16, 0.28);
 
   /* Modal scrim — one backdrop for every dialog/popover overlay. */
   --backdrop: rgba(20, 18, 16, 0.5);
@@ -52,6 +60,9 @@
    * tint instead, so the UI reads as calm and monochrome rather than flooded
    * with orange. It's a single alias so the whole de-emphasis can be retuned
    * (e.g. to muted-foreground) by editing one line. */
+  /* Re-declared on .dark — custom props inherit *computed* values, so a
+   * :root-only `var(--color-foreground)` freezes to light #111 and never
+   * tracks dark foreground (breaks tool subtitles, neutral washes, etc.). */
   --color-accent-neutral: var(--color-foreground);
   --neutral-wash-soft: color-mix(in srgb, var(--color-foreground) 8%, transparent);
   --neutral-wash: color-mix(in srgb, var(--color-foreground) 11%, transparent);
@@ -117,11 +128,12 @@
   --color-on-primary: #FFFFFF;
   --color-on-destructive: #FFFFFF;
 
-  /* Code-block surface (markdown <pre>). Distinct from --color-surface so a code
-   * block reads as its own inset surface; matches GitHub's light code bg and the
-   * dark terminal/code tone. */
-  --code-bg: #f6f8fa;
-  --code-border: #d0d7de;
+  /* Code surfaces — elevated "card" that must contrast with surface/background.
+   * Light: soft gray panel on cream/white. Never equal surface or paper. */
+  --code-bg: #e8ebf0;
+  --code-border: #c8cdd5;
+  --code-fg: #1f2328;
+  --code-inline-bg: #e2e6ec;
 
   /* Terminal (xterm) palette — single source for the JS theme object in
    * TerminalInstance.vue (read via getComputedStyle). Cursor uses the brand
@@ -166,6 +178,12 @@
 
 /* ─── Dark Mode ─── */
 .dark {
+  /* Elevation reads as light-on-dark, not warm brown. */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(255, 255, 255, 0.03);
+  --shadow-md: 0 4px 16px -4px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --shadow-lg: 0 12px 36px -12px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-xl: 0 24px 56px -20px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.06);
+
   --color-primary: #FF8400;
   --color-background: #111111;
   --color-surface: #1A1A1A;
@@ -191,10 +209,19 @@
   --color-on-primary: #FFFFFF;
   --color-on-destructive: #FFFFFF;
 
-  /* Code-block surface (dark). #1A1A1A matches --color-surface here, but kept as
-   * its own token so a generated theme can diverge the code tone independently. */
-  --code-bg: #1A1A1A;
-  --code-border: var(--color-border);
+  /* Re-bind aliases that reference --color-foreground (see light-mode note). */
+  --color-accent-neutral: var(--color-foreground);
+  --neutral-wash-soft: color-mix(in srgb, var(--color-foreground) 8%, transparent);
+  --neutral-wash: color-mix(in srgb, var(--color-foreground) 11%, transparent);
+  --neutral-wash-strong: color-mix(in srgb, var(--color-foreground) 16%, transparent);
+  --neutral-border: color-mix(in srgb, var(--color-foreground) 30%, transparent);
+
+  /* Code surfaces (dark) — elevated card ABOVE background (#111) / surface (#1A1A1A).
+   * Sunken near-black (#0c0c0e) looked like "no card". Prefer a lifted panel. */
+  --code-bg: #222228;
+  --code-border: #3f3f48;
+  --code-fg: #f0f0f4;
+  --code-inline-bg: #2c2c34;
 
   /* Terminal (xterm) palette — dark variant. */
   --term-bg: #18181b;
@@ -218,26 +245,28 @@
   --term-bright-cyan: #22d3ee;
   --term-bright-white: #fafafa;
 
-  /* ─── Syntax highlighting (dark) ─── */
-  --hljs-fg: #e4e4e7;
+  /* ─── Syntax highlighting (dark) — high contrast on --code-bg ─── */
+  --hljs-fg: #e8e8ec;
   --hljs-keyword: #7dd3fc;
-  --hljs-string: #6ee7b7;
-  --hljs-comment: #52525b;
-  --hljs-number: #fbbf24;
-  --hljs-title: #c4b5fd;
+  --hljs-string: #86efac;
+  --hljs-comment: #8b8b96;
+  --hljs-number: #fcd34d;
+  --hljs-title: #d8b4fe;
   --hljs-type: #fca5a5;
   --hljs-params: #f0abfc;
   --hljs-variable: #fde68a;
   --hljs-function: #c4b5fd;
-  --hljs-meta: #71717a;
+  --hljs-meta: #a1a1aa;
   --hljs-property: #93c5fd;
-  --hljs-punctuation: #71717a;
+  --hljs-punctuation: #a1a1aa;
 }
 
 /* ─── Code Syntax Highlighting ─── */
 .hljs {
   color: var(--hljs-fg);
   background: transparent;
+  display: block;
+  overflow-x: auto;
 }
 .hljs-keyword,
 .hljs-selector-tag,

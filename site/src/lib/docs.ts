@@ -65,7 +65,9 @@ function transformBody(body: string, slug: string): string {
   // asset image paths → /docs-asset/
   out = out.replace(/\]\((?:\.\.\/)*asset\//g, '](/docs-asset/')
 
-  // strip a leading h1 that duplicates the front-matter title (we render our own)
+  // strip a leading h1 that duplicates the front-matter title (we render our own).
+  // Trim leading blanks after `---` so `^#` still matches.
+  out = out.replace(/^\s+/, '')
   out = out.replace(/^#\s+.+\n+/, '')
 
   void slug

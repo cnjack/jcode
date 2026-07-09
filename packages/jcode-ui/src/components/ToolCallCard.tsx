@@ -106,10 +106,11 @@ function ToolHeader({
     <button
       type="button"
       onClick={onToggle}
-      className="flex w-full cursor-pointer items-center gap-1.5 bg-transparent py-1 pl-0 pr-1 text-left transition-opacity hover:opacity-70"
+      className="flex w-full max-w-full cursor-pointer items-center gap-1.5 bg-transparent text-left"
     >
+      {/* Title cluster packs left — no ml-auto gap that leaves a hollow middle. */}
       <span
-        className={`shrink-0 text-xs font-medium ${isRunning ? 'shimmer-running' : ''}`}
+        className={`shrink-0 text-xs font-medium tracking-wide ${isRunning ? 'shimmer-running' : ''}`}
         style={{
           color: isError ? 'var(--color-destructive, var(--color-error-fg))' : 'var(--color-muted-foreground)',
         }}
@@ -118,21 +119,26 @@ function ToolHeader({
       </span>
       {subtitle && (
         <span
-          className="truncate font-mono text-xs"
+          className="jcode-toolcall__subtitle min-w-0 truncate font-mono text-[0.72rem]"
           style={{
-            color: isContext ? 'var(--color-muted-foreground)' : 'var(--color-accent-neutral)',
+            // Use foreground/muted directly — not --color-accent-neutral, which
+            // freezes to light #111 when only defined on :root (inherited computed).
+            color: isContext
+              ? 'var(--color-muted-foreground)'
+              : 'var(--color-foreground)',
+            opacity: 0.88,
           }}
           // Subtitle may contain backend-escaped HTML (path highlights).
           dangerouslySetInnerHTML={{ __html: subtitle }}
         />
       )}
       <ChevronDownIcon
-        className={`h-3 w-3 shrink-0 text-[var(--color-muted-foreground)] transition-transform ${
+        className={`h-3 w-3 shrink-0 text-[var(--color-muted-foreground)] transition-transform duration-[var(--duration-normal)] ${
           expanded ? 'rotate-180' : ''
         }`}
       />
       {diff && (diff.added > 0 || diff.deleted > 0) && (
-        <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums">
+        <span className="jcode-toolcall__diff shrink-0 rounded-[var(--radius-sm)] bg-[var(--color-muted)] px-1.5 py-0.5 font-mono text-[10px] tabular-nums">
           {diff.added > 0 && (
             <span style={{ color: 'var(--color-success-fg)' }}>+{diff.added}</span>
           )}

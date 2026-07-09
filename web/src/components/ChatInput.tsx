@@ -50,7 +50,7 @@ import {
   SparklesIcon,
 } from '@heroicons/react/24/outline'
 import { StarIcon as StarIconSolid, CheckCircleIcon } from '@heroicons/react/24/solid'
-import { useRuntimeActions, useRuntimeState } from 'jcode-ui'
+import { AttachmentList, useRuntimeActions, useRuntimeState } from 'jcode-ui'
 import type { ChatImage as RuntimeChatImage } from 'jcode-ui-core'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
 import { chatActions, modelActions } from '../app/store'
@@ -153,8 +153,8 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
 
   // Composer-local state.
   const [input, setInput] = useState('')
+  /** Pending vision images — same shape as jcode-ui `ChatImage` / AttachmentList. */
   const [pendingImages, setPendingImages] = useState<ChatImage[]>([])
-  const [pendingPreviews, setPendingPreviews] = useState<string[]>([])
   const [showSlashMenu, setShowSlashMenu] = useState(false)
   const [slashFilter, setSlashFilter] = useState('')
   const [selectedSlashIdx, setSelectedSlashIdx] = useState(0)
@@ -305,7 +305,9 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
     const text = input.trim()
     if (!text && pendingImages.length === 0) return
     const images: RuntimeChatImage[] | undefined =
-      pendingImages.length > 0 ? pendingImages.map((i) => ({ data: i.data, media_type: i.media_type })) : undefined
+      pendingImages.length > 0
+        ? pendingImages.map((i) => ({ data: i.data, media_type: i.media_type, name: i.name }))
+        : undefined
     const body = text || '(see attached images)'
     if (isRunning) {
       actions.enqueueMessage(body, images)
@@ -314,7 +316,6 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
     }
     setInput('')
     setPendingImages([])
-    setPendingPreviews([])
     setShowSlashMenu(false)
     onSent?.()
   }, [actions, input, isRunning, onSent, pendingImages])
@@ -401,8 +402,10 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
       const commaIdx = result.indexOf(',')
       if (commaIdx < 0) return
       const base64Data = result.substring(commaIdx + 1)
-      setPendingImages((prev) => [...prev, { data: base64Data, media_type: file.type }])
-      setPendingPreviews((prev) => [...prev, result])
+      setPendingImages((prev) => [
+        ...prev,
+        { data: base64Data, media_type: file.type, name: file.name || undefined },
+      ])
     }
     reader.readAsDataURL(file)
   }
@@ -432,7 +435,6 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
 
   function removeImage(index: number) {
     setPendingImages((prev) => prev.filter((_, i) => i !== index))
-    setPendingPreviews((prev) => prev.filter((_, i) => i !== index))
   }
 
   function triggerImageUpload() {
@@ -584,7 +586,6 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
   useEffect(() => {
     if (!imageSupport && pendingImages.length > 0) {
       setPendingImages([])
-      setPendingPreviews([])
     }
   }, [imageSupport, pendingImages.length])
 
@@ -729,25 +730,9 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
               style={{ minHeight: 28, maxHeight: 200, fontFamily: 'var(--font-sans)' }}
             />
 
-            {pendingPreviews.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-2">
-                {pendingPreviews.map((preview, i) => (
-                  <div key={i} className="group relative">
-                    <img
-                      src={preview}
-                      alt={`attachment ${i + 1}`}
-                      className="h-14 w-14 rounded-[var(--radius-md)] border border-[var(--color-border)] object-cover"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeImage(i)}
-                      className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full border-none bg-[var(--color-destructive)] text-[9px] text-[var(--color-on-destructive)] opacity-0 transition-opacity group-hover:opacity-100"
-                      aria-label="Remove image"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
+            {pendingImages.length > 0 && (
+              <div className="mt-2">
+                <AttachmentList images={pendingImages} onRemove={removeImage} size={56} />
               </div>
             )}
 

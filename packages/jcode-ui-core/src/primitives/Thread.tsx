@@ -76,6 +76,9 @@ export function Thread({
   }
 
   if (!virtualize) {
+    // IMPORTANT: do NOT use `contain: strict` here. Size containment collapses
+    // the box to 0 when height is percentage/auto without a definite parent
+    // size — which is exactly how most demos and short embeds mount Thread.
     return (
       <div
         ref={(el) => {
@@ -85,13 +88,13 @@ export function Thread({
         className={className}
         role={role}
         onScroll={autoScroll.onScroll}
-        style={{ overflowY: 'auto', contain: 'strict' } as React.CSSProperties}
+        style={{ overflowY: 'auto', minHeight: 0, height: '100%' } as React.CSSProperties}
       >
         {items.map((it) => (
           <Fragment key={it.seq}>{renderItem(it)}</Fragment>
         ))}
         {isRunning && renderPending?.()}
-        {overscanBottom > 0 && <div style={{ height: overscanBottom }} />}
+        {overscanBottom > 0 && <div style={{ height: overscanBottom }} aria-hidden />}
       </div>
     )
   }
@@ -149,12 +152,20 @@ function VirtualizedThread({
   })
 
   return (
-  // Wrapper: the scroll element MUST resolve to a concrete pixel height for the
-  // virtualizer to measure rows. We use flex:1 + min-height:0 so it fills any
-  // flex parent, and height:100% as a fallback for block parents. Both the
-  // wrapper and scroll element get these so the height resolves through the
-  // chain regardless of the host's layout.
-  <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', minHeight: 0, flex: 1 }}>
+    // Wrapper: the scroll element MUST resolve to a concrete pixel height for the
+    // virtualizer to measure rows. flex:1 + min-height:0 fills flex parents;
+    // height:100% covers block parents that already have a definite height.
+    // Use layout/paint containment only — never size containment (collapses).
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        width: '100%',
+        height: '100%',
+        minHeight: 0,
+        flex: 1,
+      }}
+    >
       <div
         ref={(el) => {
           ;(parentRef as React.MutableRefObject<HTMLDivElement | null>).current = el
@@ -163,15 +174,66 @@ function VirtualizedThread({
         className={className}
         role={role}
         onScroll={autoScroll.onScroll}
-        style={{ overflowY: 'auto', contain: 'strict', flex: 1, minHeight: 0, height: '100%' } as React.CSSProperties}
+        style={
+          {
+            overflowY: 'auto',
+            contain: 'layout paint',
+            flex: 1,
+            minHeight: 0,
+            height: '100%',
+            position: 'relative',
+          } as React.CSSProperties
+        }
       >
-        <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+        <div
+          style={{
+            height: Math.max(rowVirtualizer.getTotalSize(), 1),
+            position: 'relative',
+            width: '100%',
+          }}
+        >
           {rowVirtualizer.getVirtualItems().map((vi) => {
-          // Trailing rows.
-          if (vi.index === items.length && isRunning && renderPending) {
+            // Trailing rows. Keys must be unique across the whole virtual list.
+            if (vi.index === items.length && isRunning && renderPending) {
+              return (
+                <div
+                  key={`__pending__${vi.index}`}
+                  data-index={vi.index}
+                  ref={rowVirtualizer.measureElement}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    transform: `translateY(${vi.start}px)`,
+                  }}
+                >
+                  {renderPending()}
+                </div>
+              )
+            }
+            if (vi.index >= items.length) {
+              // overscan spacer
+              return (
+                <div
+                  key={`__overscan__${vi.index}`}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: overscanBottom,
+                    transform: `translateY(${vi.start}px)`,
+                  }}
+                />
+              )
+            }
+            const item = items[vi.index]
             return (
               <div
-                key="pending"
+                key={`item-${item.seq}-${item.kind}-${vi.index}`}
+                data-index={vi.index}
+                ref={rowVirtualizer.measureElement}
                 style={{
                   position: 'absolute',
                   top: 0,
@@ -180,44 +242,10 @@ function VirtualizedThread({
                   transform: `translateY(${vi.start}px)`,
                 }}
               >
-                {renderPending()}
+                {renderItem(item)}
               </div>
             )
-          }
-          if (vi.index >= items.length) {
-            // overscan spacer
-            return (
-              <div
-                key="overscan"
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  height: overscanBottom,
-                  transform: `translateY(${vi.start}px)`,
-                }}
-              />
-            )
-          }
-          const item = items[vi.index]
-          return (
-            <div
-              key={item.seq}
-              data-index={vi.index}
-              ref={rowVirtualizer.measureElement}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                transform: `translateY(${vi.start}px)`,
-              }}
-            >
-              {renderItem(item)}
-            </div>
-          )
-        })}
+          })}
         </div>
       </div>
     </div>

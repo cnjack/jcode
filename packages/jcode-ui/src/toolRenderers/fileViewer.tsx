@@ -23,13 +23,13 @@ export const FileViewerRenderer = memo(function FileViewerRenderer({
 
   if (lines.length > 0) {
     return (
-      <div className="jcode-file-viewer max-h-72 overflow-y-auto" style={{ background: 'var(--color-surface)' }}>
+      <div className="jcode-file-viewer max-h-72 overflow-y-auto">
         <table className="jcode-file-table w-full border-collapse">
           <tbody>
             {lines.map((l) => (
               <tr key={l.num}>
                 <td className="jcode-file-lineno">{l.num}</td>
-                <td style={{ color: 'var(--color-foreground)' }}>{l.text}</td>
+                <td className="jcode-file-text">{l.text}</td>
               </tr>
             ))}
           </tbody>

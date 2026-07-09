@@ -5,7 +5,7 @@
   "type": "module",
   "license": "MIT",
   "author": "jack",
-  "homepage": "https://www.j-code.net/docs/chat-ui",
+  "homepage": "https://www.j-code.net/chat-ui/docs",
   "repository": {
     "type": "git",
     "url": "https://github.com/cnjack/jcode",
@@ -55,6 +55,7 @@
     "dev:css": "tailwindcss -i src/styles/entry.css -o dist/styles.css --watch",
     "dev": "pnpm dev:css & tsc -p tsconfig.build.json --watch --preserveWatchOutput",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "generate:api-docs": "node ../../script/generate_jcode_ui_api_docs.mjs",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "peerDependencies": {

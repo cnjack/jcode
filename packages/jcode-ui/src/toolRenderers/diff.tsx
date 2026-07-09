@@ -23,7 +23,7 @@ export const DiffRenderer = memo(function DiffRenderer({
 
   if (sections.length > 0) {
     return (
-      <div className="jcode-diff max-h-72 overflow-y-auto" style={{ background: 'var(--color-surface)' }}>
+      <div className="jcode-diff max-h-72 overflow-y-auto">
         <table className="jcode-diff-table w-full border-collapse">
           <tbody>
             {sections.map((section, si) =>

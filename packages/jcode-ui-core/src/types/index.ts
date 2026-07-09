@@ -9,10 +9,18 @@
 /** Who authored a message. */
 export type Role = 'user' | 'assistant' | 'system'
 
-/** A base64-encoded image attached to a message (no `data:` prefix). */
+/**
+ * A base64-encoded image attached to a message (no `data:` prefix).
+ *
+ * Image-first (vision models). Generic file/PDF adapters are host concerns —
+ * see docs/chat-ui attachments guide. Optional `name` is used for tooltips and
+ * a11y labels (mirrors assistant-ui Attachment.name).
+ */
 export interface ChatImage {
   data: string
   media_type: string
+  /** Original filename when known (file picker / drag-drop). */
+  name?: string
 }
 
 /** Severity for `system` messages. Undefined → default neutral styling. */

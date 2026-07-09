@@ -49,7 +49,7 @@ interface ChatRuntime {
 }
 ```
 
-`RuntimeState` carries `items` / `isRunning` / `tokenSnapshot` / `goal` / `todos` / `queued`. `RuntimeActions` exposes `sendMessage`, `enqueueMessage`, `stop`, `resolveApproval`, `submitAskUser`, `editMessage`, `removeQueuedMessage`. See the [runtime docs](https://www.j-code.net/docs/chat-ui/runtime).
+`RuntimeState` carries `items` / `isRunning` / `tokenSnapshot` / `goal` / `todos` / `queued`. `RuntimeActions` exposes `sendMessage`, `enqueueMessage`, `stop`, `resolveApproval`, `submitAskUser`, `editMessage`, `removeQueuedMessage`. See the [runtime docs](https://www.j-code.net/chat-ui/docs/runtime).
 
 ## License
 

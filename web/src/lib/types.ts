@@ -475,6 +475,8 @@ export function normalizeMode(m?: string): AgentMode {
 export interface ChatImage {
   data: string       // base64 data (without data: prefix)
   media_type: string // e.g. "image/png", "image/jpeg"
+  /** Original filename when known (file picker / paste). */
+  name?: string
 }
 
 export interface ChatMessage {

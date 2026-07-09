@@ -1,0 +1,60 @@
+# jcode-ui
+
+> React components for AI chat interfaces — streaming messages, tool calls, approvals, and ask-user interactions. Backend-agnostic, token-driven. Powers jcode Web + Desktop.
+
+Packages: `jcode-ui` (styled) · `jcode-ui-core` (types, runtime, headless primitives)
+
+## Docs
+
+- [Overview](https://www.j-code.net/chat-ui/docs): Library intro + quick start
+- [Installation](https://www.j-code.net/chat-ui/docs/installation): Install, CSS, Vite/Next, mock runtime
+- [Runtime](https://www.j-code.net/chat-ui/docs/runtime): ChatRuntime, external store, mock runtime
+- [Primitives](https://www.j-code.net/chat-ui/docs/primitives): Headless Thread / Composer / ApprovalBlock / …
+- [Components](https://www.j-code.net/chat-ui/docs/components): Styled component catalog
+- [Thread](https://www.j-code.net/chat-ui/docs/components/thread)
+- [ChatInput](https://www.j-code.net/chat-ui/docs/components/chat-input)
+- [Message](https://www.j-code.net/chat-ui/docs/components/message)
+- [ToolCallCard](https://www.j-code.net/chat-ui/docs/components/tool-call-card)
+- [ApprovalBanner](https://www.j-code.net/chat-ui/docs/components/approval-banner)
+- [AskUserCard](https://www.j-code.net/chat-ui/docs/components/ask-user-card)
+- [Reasoning](https://www.j-code.net/chat-ui/docs/components/reasoning)
+- [Sources](https://www.j-code.net/chat-ui/docs/components/sources)
+- [Attachment](https://www.j-code.net/chat-ui/docs/components/attachment)
+- [ContextBar](https://www.j-code.net/chat-ui/docs/components/context-bar)
+- [Tool renderers](https://www.j-code.net/chat-ui/docs/tool-renderers): Registry + defaults + gallery
+- [Theming](https://www.j-code.net/chat-ui/docs/theming): CSS tokens
+- [API Reference](https://www.j-code.net/chat-ui/docs/api)
+- [Types](https://www.j-code.net/chat-ui/docs/api/types)
+- [Runtime API](https://www.j-code.net/chat-ui/docs/api/runtime)
+- [Hooks](https://www.j-code.net/chat-ui/docs/api/hooks)
+- [Primitives API](https://www.j-code.net/chat-ui/docs/api/primitives)
+- [Components API](https://www.j-code.net/chat-ui/docs/api/components)
+- [Guides](https://www.j-code.net/chat-ui/docs/guides)
+- [External store](https://www.j-code.net/chat-ui/docs/guides/external-store)
+- [Custom tool renderer](https://www.j-code.net/chat-ui/docs/guides/custom-tool-renderer)
+- [Slash commands](https://www.j-code.net/chat-ui/docs/guides/slash-commands)
+- [Approvals](https://www.j-code.net/chat-ui/docs/guides/approvals)
+- [Virtualization](https://www.j-code.net/chat-ui/docs/guides/virtualization)
+- [Live playground](https://www.j-code.net/chat-ui)
+- [Examples](https://www.j-code.net/chat-ui/docs/examples): cloneable Vite starters
+- [Generated API](https://www.j-code.net/chat-ui/docs/api/generated): full symbol dump from sources
+
+## Examples (repo)
+
+- https://github.com/cnjack/jcode/tree/main/examples/jcode-ui-minimal
+- https://github.com/cnjack/jcode/tree/main/examples/jcode-ui-zustand
+
+## Install
+
+```bash
+pnpm add jcode-ui jcode-ui-core
+```
+
+```tsx
+import { RuntimeProvider, createMockRuntime, Thread, ChatInput } from 'jcode-ui'
+import 'jcode-ui/styles.css'
+```
+
+## Out of scope (for now)
+
+Voice / dictation, branch picker, assistant-ui Cloud, audio multimodal widgets.

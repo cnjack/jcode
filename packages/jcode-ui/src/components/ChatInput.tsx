@@ -1,20 +1,23 @@
 /**
  * ChatInput — styled composer (wraps headless Composer primitive).
  *
- * Renders the autosizing textarea, the send/stop button (swaps on isRunning),
- * the type-ahead queue chips, slash-command dropdown, and image attachments.
- * App-specific pickers (model/mode/workspace) are NOT included — the product
- * app layers those on top. This keeps the component reusable across agents.
+ * Floating surface with focus ring, queue chips, slash palette, attachments,
+ * and a circular send/stop control. App-specific pickers (model/mode/workspace)
+ * stay in the host product.
+ *
+ * Attachments follow assistant-ui's ComposerAttachments / ComposerAddAttachment
+ * pattern, image-first via `ChatImage` + `AttachmentList`.
  */
 
 import { memo } from 'react'
 import {
   PaperAirplaneIcon,
-  StopCircleIcon,
-  XMarkIcon,
+  PaperClipIcon,
+  StopIcon,
 } from '@heroicons/react/24/outline'
 import { Composer } from 'jcode-ui-core/primitives'
 import type { SlashCommand } from 'jcode-ui-core/primitives'
+import { AttachmentList } from './Attachment.js'
 import { ContextBar } from './ContextBar.js'
 
 export interface ChatInputProps {
@@ -22,6 +25,8 @@ export interface ChatInputProps {
   slashCommands?: SlashCommand[]
   /** Allow image attachments (gated by model vision support). */
   allowImages?: boolean
+  /** `accept` for the file picker. Default `image/*`. */
+  acceptImages?: string
   /** Placeholder text. */
   placeholder?: string
   /** Show the context bar suffix. Default true. */
@@ -33,6 +38,7 @@ export interface ChatInputProps {
 export const ChatInput = memo(function ChatInput({
   slashCommands,
   allowImages = false,
+  acceptImages = 'image/*',
   placeholder = 'Send a message…',
   showContextBar = true,
   onSent,
@@ -41,17 +47,19 @@ export const ChatInput = memo(function ChatInput({
     <Composer
       slashCommands={slashCommands}
       allowImages={allowImages}
+      acceptImages={acceptImages}
       placeholder={placeholder}
       onSent={onSent}
       className="jcode-chat-input"
       renderQueue={(queued) =>
         queued.length > 0 ? (
-          <div className="mb-1 flex flex-wrap gap-1">
+          <div className="jcode-chat-input__queue mb-2 flex flex-wrap gap-1.5">
             {queued.map((q) => (
               <span
                 key={q.id}
-                className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] bg-[var(--accent-wash)] px-2 py-0.5 text-[0.72rem] text-[var(--color-foreground)]"
+                className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] border border-[var(--accent-border)] bg-[var(--accent-wash)] px-2.5 py-0.5 text-[0.72rem] text-[var(--color-foreground)] shadow-[var(--shadow-sm)]"
               >
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-primary)]" aria-hidden />
                 <span className="max-w-[200px] truncate">{q.text}</span>
               </span>
             ))}
@@ -60,66 +68,64 @@ export const ChatInput = memo(function ChatInput({
       }
       renderSlashMenu={(state) =>
         state.open ? (
-          <div className="mb-1 max-h-64 overflow-auto rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-[var(--shadow-md)]">
+          <div className="jcode-chat-input__slash mb-2 max-h-64 overflow-auto rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] py-1.5 shadow-[var(--shadow-lg)]">
             {state.commands.map((cmd, i) => (
               <button
                 key={cmd.slash}
                 type="button"
-                onMouseEnter={() => {
-                  // selection highlight is driven by keyboard; clicking applies
-                }}
                 onClick={() => state.apply(cmd)}
-                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[0.8rem] ${
+                className={`flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-[0.8rem] transition-colors ${
                   i === state.activeIndex
                     ? 'bg-[var(--accent-wash)] text-[var(--color-foreground)]'
                     : 'text-[var(--color-foreground)] hover:bg-[var(--neutral-wash-soft)]'
                 }`}
               >
-                <code className="font-mono text-[var(--color-primary)]">{cmd.slash}</code>
-                {cmd.description && <span className="truncate text-[var(--color-muted-foreground)]">{cmd.description}</span>}
+                <code className="rounded-[var(--radius-sm)] bg-[var(--color-muted)] px-1.5 py-0.5 font-mono text-[0.75rem] font-medium text-[var(--color-primary)]">
+                  {cmd.slash}
+                </code>
+                {cmd.description && (
+                  <span className="truncate text-[var(--color-muted-foreground)]">{cmd.description}</span>
+                )}
               </button>
             ))}
           </div>
         ) : null
       }
       renderAttachments={(imgs, remove) => (
-        <div className="mt-1 flex flex-wrap gap-1">
-          {imgs.map((img, i) => (
-            <div key={i} className="relative">
-              <img
-                src={`data:${img.media_type};base64,${img.data}`}
-                alt={`attachment ${i + 1}`}
-                className="h-16 w-16 rounded-[var(--radius-md)] border border-[var(--color-border)] object-cover"
-              />
-              <button
-                type="button"
-                onClick={() => remove(i)}
-                className="absolute -right-1 -top-1 rounded-full bg-[var(--color-surface)] p-0.5 text-[var(--color-muted-foreground)] shadow-[var(--shadow-sm)] hover:text-[var(--color-foreground)]"
-                aria-label="Remove attachment"
-              >
-                <XMarkIcon className="h-3 w-3" />
-              </button>
-            </div>
-          ))}
+        <div className="jcode-chat-input__attachments">
+          <AttachmentList images={imgs} onRemove={remove} size={56} />
         </div>
       )}
-      renderSubmitButton={(mode, disabled) =>
+      renderAddAttachment={(openPicker) => (
+        <button
+          type="button"
+          onClick={openPicker}
+          className="jcode-chat-input__add-att"
+          aria-label="Add attachment"
+          title="Add image"
+        >
+          <PaperClipIcon className="h-4 w-4" />
+        </button>
+      )}
+      renderSubmitButton={(mode, disabled, onActivate) =>
         mode === 'send' ? (
           <button
             type="button"
+            onClick={onActivate}
             disabled={disabled}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-primary)] text-[var(--color-on-primary)] transition-colors hover:bg-[var(--accent-wash-strong)] disabled:opacity-40"
+            className="jcode-chat-input__send flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)] text-[var(--color-on-primary)] shadow-[var(--shadow-sm)] transition-all duration-[var(--duration-fast)] hover:brightness-110 hover:shadow-[var(--shadow-md)] active:scale-95 disabled:opacity-35 disabled:shadow-none disabled:hover:brightness-100"
             aria-label="Send message"
           >
-            <PaperAirplaneIcon className="h-4 w-4" />
+            <PaperAirplaneIcon className="h-4 w-4 -translate-x-px translate-y-px" />
           </button>
         ) : (
           <button
             type="button"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-muted)] text-[var(--color-foreground)] transition-colors hover:bg-[var(--neutral-wash-soft)]"
+            onClick={onActivate}
+            className="jcode-chat-input__stop flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--color-foreground)] text-[var(--color-surface)] shadow-[var(--shadow-sm)] transition-all duration-[var(--duration-fast)] hover:opacity-90 active:scale-95"
             aria-label="Stop"
           >
-            <StopCircleIcon className="h-4 w-4" />
+            <StopIcon className="h-3.5 w-3.5" />
           </button>
         )
       }

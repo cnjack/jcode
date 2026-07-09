@@ -23,36 +23,16 @@ export const TerminalRenderer = memo(function TerminalRenderer({
   }
   const body = displayOutput || output || ''
   return (
-    <div
-      className="jcode-terminal max-h-72 overflow-y-auto px-3 py-2 font-mono text-xs"
-      style={{ background: 'var(--color-muted)' }}
-    >
+    <div className="jcode-terminal max-h-72 overflow-y-auto px-3 py-2.5 font-mono text-xs leading-relaxed">
       {command && (
-        <div>
-          <span className="select-none" style={{ color: 'var(--color-muted-foreground)' }}>
-            ${' '}
-          </span>
-          <span style={{ color: 'var(--color-foreground)' }}>{command}</span>
+        <div className="jcode-terminal__cmd">
+          <span className="jcode-terminal__prompt select-none">$ </span>
+          <span className="jcode-terminal__command">{command}</span>
         </div>
       )}
-      {body && (
-        <div
-          className="mt-1 whitespace-pre-wrap break-all"
-          style={{ color: 'var(--color-muted-foreground)' }}
-        >
-          {truncate(body, 2000)}
-        </div>
-      )}
-      {error && (
-        <div className="mt-1 whitespace-pre-wrap" style={{ color: 'var(--color-error-fg)' }}>
-          {error}
-        </div>
-      )}
-      {status === 'running' && (
-        <div className="mt-1 animate-pulse" style={{ color: 'var(--color-muted-foreground)' }}>
-          Running…
-        </div>
-      )}
+      {body && <div className="jcode-terminal__out mt-1.5 whitespace-pre-wrap break-all">{truncate(body, 2000)}</div>}
+      {error && <div className="jcode-terminal__err mt-1 whitespace-pre-wrap">{error}</div>}
+      {status === 'running' && <div className="jcode-terminal__run mt-1 animate-pulse">Running…</div>}
     </div>
   )
 })
