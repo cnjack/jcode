@@ -43,8 +43,8 @@ export function CommandPalette() {
     dispatch(uiActions.setView('chat'))
     dispatch(chatActions.clearChat())
     const resp = await api.newSession()
+    // Stay off the sidebar until the first user message (empty UUID rows look broken).
     dispatch(sessionActions.setCurrentSession(resp.session_id))
-    await dispatch(loadWorkspaceState())
   }
 
   async function openTask(task: TaskItem) {

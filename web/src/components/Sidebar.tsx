@@ -31,7 +31,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
-import { uiActions, sessionActions, chatActions, loadSession, loadTasks, loadWorkspaceState } from '../app/store'
+import { uiActions, sessionActions, chatActions, loadSession, loadWorkspaceState } from '../app/store'
 import { api } from '../lib/api'
 import type { TaskItem } from '../lib/types'
 import { ThemeToggle } from './ThemeToggle'
@@ -102,6 +102,12 @@ export function Sidebar() {
   const [ctx, setCtx] = useState<CtxMenu | null>(null)
   const ctxRef = useRef<HTMLDivElement | null>(null)
 
+  // Track rows that just appeared so we can play a one-shot enter animation
+  // (avoids a hard pop-in when a new session is revealed optimistically).
+  const knownUuids = useRef<Set<string>>(new Set())
+  const [entering, setEntering] = useState<Set<string>>(() => new Set())
+  const seededList = useRef(false)
+
   // A coarse clock so time-based filtering/grouping re-evaluates as the wall
   // clock advances (Date.now() isn't a reactive dep on its own).
   const [now, setNow] = useState(() => Date.now())
@@ -152,6 +158,37 @@ export function Sidebar() {
     return out
   }, [tasks, sessions, activePath])
 
+  // After the first non-empty paint, animate only newly-added rows (not the
+  // initial hydrate of the whole list).
+  useEffect(() => {
+    const ids = rows.map((r) => r.uuid)
+    if (!seededList.current) {
+      if (ids.length === 0) return
+      knownUuids.current = new Set(ids)
+      seededList.current = true
+      return
+    }
+    const added: string[] = []
+    for (const id of ids) {
+      if (!knownUuids.current.has(id)) added.push(id)
+    }
+    knownUuids.current = new Set(ids)
+    if (added.length === 0) return
+    setEntering((prev) => {
+      const next = new Set(prev)
+      for (const id of added) next.add(id)
+      return next
+    })
+    const t = window.setTimeout(() => {
+      setEntering((prev) => {
+        const next = new Set(prev)
+        for (const id of added) next.delete(id)
+        return next
+      })
+    }, 220)
+    return () => window.clearTimeout(t)
+  }, [rows])
+
   const projects = useMemo(() => {
     const map = new Map<string, string>()
     if (activePath) map.set(activePath, projectName(activePath))
@@ -174,6 +211,10 @@ export function Sidebar() {
 
   const filtered = useMemo(() => {
     return rows.filter((r) => {
+      // Untitled rows are empty sessions that never recorded a message (or
+      // optimistic placeholders). Keep them out of the list — welcome stays
+      // clean until the first user turn materializes a real title.
+      if (!r.title?.trim() && !r.running) return false
       // The open conversation always stays visible regardless of filters —
       // otherwise archiving or a narrowing window would strand it.
       if (r.uuid === currentSessionId) return true
@@ -193,17 +234,19 @@ export function Sidebar() {
 
   // ── Sort: running first, then pinned, then the chosen key ──
 
+  const untitledLabel = t('sidebar.untitled')
+
   const sorted = useMemo(() => {
     const arr = [...filtered]
     arr.sort((a, b) => {
       if (a.running !== b.running) return a.running ? -1 : 1
       if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
-      if (filters.sort === 'name') return rowTitle(a).localeCompare(rowTitle(b))
+      if (filters.sort === 'name') return rowTitle(a, untitledLabel).localeCompare(rowTitle(b, untitledLabel))
       if (filters.sort === 'created') return (b.created_at || '').localeCompare(a.created_at || '')
       return (b.updated_at || '').localeCompare(a.updated_at || '')
     })
     return arr
-  }, [filtered, filters.sort])
+  }, [filtered, filters.sort, untitledLabel])
 
   // ── Group by project or recency ──
 
@@ -281,10 +324,9 @@ export function Sidebar() {
     dispatch(uiActions.setView('chat'))
     try {
       const resp = await api.newSession()
+      // Keep the welcome screen empty-session out of the sidebar until the
+      // first user message (backend only indexes then; a UUID-only row looks broken).
       dispatch(sessionActions.setCurrentSession(resp.session_id))
-      const fresh = await api.sessions()
-      dispatch(sessionActions.setSessions(fresh))
-      dispatch(loadTasks())
     } catch {
       // surfaced via health/gate
     }
@@ -566,7 +608,7 @@ export function Sidebar() {
                             }
                           }}
                           onContextMenu={(e) => openContext(e, row)}
-                          className={`sb-task-row group ${active ? 'active' : ''} ${row.archived ? 'archived' : ''} ${row.running ? 'running' : ''}`}
+                          className={`sb-task-row group ${active ? 'active' : ''} ${row.archived ? 'archived' : ''} ${row.running ? 'running' : ''} ${entering.has(row.uuid) ? 'sb-task-enter' : ''}`}
                         >
                           {row.running ? (
                             <span className="sb-ring h-[11px] w-[11px] shrink-0" aria-hidden="true" />
@@ -577,7 +619,7 @@ export function Sidebar() {
                             />
                           )}
                           {row.pinned && <BookmarkIcon className="sb-task-pin h-2.5 w-2.5 shrink-0" />}
-                          <span className="sb-task-title">{rowTitle(row)}</span>
+                          <span className="sb-task-title">{rowTitle(row, untitledLabel)}</span>
                           {!isProject && <span className="sb-task-project">{projectName(row.project)}</span>}
                           <span className={`sb-task-time ${row.running ? 'running' : ''}`}>
                             {row.running ? t('sidebar.running') : relativeTime(row.updated_at || row.created_at, now, t)}
@@ -637,10 +679,11 @@ export function Sidebar() {
           )
         : null}
 
-      {/* Animations: running ring breathe + pop-in for menus. Scoped via sb-* names. */}
+      {/* Animations: running ring breathe + pop-in for menus / new rows. Scoped via sb-* names. */}
       <style>{`
         @keyframes sb-ring-breathe { 0%,100% { opacity:0.35; transform:scale(0.78); } 50% { opacity:1; transform:scale(1); } }
         @keyframes sb-pop-in { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+        @keyframes sb-task-enter { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:none; } }
         .sb-header { padding: 48px 12px 6px; }
         html.is-tauri-macos .sb-header { padding-top: 20px; }
         .sb-nav-list { display:flex; flex-direction:column; gap:6px; }
@@ -714,6 +757,7 @@ export function Sidebar() {
           /* Match Vue: no custom line-height — inherit body (tight, single-line rows). */
           line-height: normal;
         }
+        .sb-task-row.sb-task-enter { animation: sb-task-enter 0.2s ease; }
         .sb-task-row:hover { background:var(--color-muted); }
         .sb-task-row.active { background:var(--neutral-wash-soft); border-left-color:var(--color-accent-neutral); }
         .sb-task-row.archived { opacity:0.55; }
@@ -775,6 +819,7 @@ export function Sidebar() {
         @media (prefers-reduced-motion: reduce) {
           .sb-ring { animation: none; opacity: 1; transform: none; }
           .sb-pop { animation: none; }
+          .sb-task-row.sb-task-enter { animation: none; }
         }
       `}</style>
     </aside>
@@ -811,8 +856,9 @@ function CtxItem({
 
 // ─── Helpers ───
 
-function rowTitle(r: SessionRow): string {
-  return r.title || r.uuid.slice(0, 8) + '…'
+function rowTitle(r: SessionRow, untitled: string): string {
+  // Never fall back to a raw UUID fragment — it reads as garbled noise.
+  return r.title?.trim() || untitled
 }
 
 function taskToRow(t: TaskItem): SessionRow {
