@@ -1,0 +1,20 @@
+# Root pnpm workspace for the React migration + reusable component library.
+#
+# Members:
+#   - packages/jcode-ui       : published React component library (styled)
+#   - packages/jcode-ui-core  : framework-agnostic core (types, runtime, primitives)
+#   - web-react               : the React product app (replaces web/ after switch-over)
+#
+# The legacy web/ (Vue) and site/ keep their own workspace files and are NOT
+# members here — they are independent during the migration.
+packages:
+  - 'packages/*'
+  - 'web-react'
+allowBuilds:
+  esbuild: true
+# Native build scripts to allow. esbuild (Vite's bundler) and @parcel/watcher
+# (dev-server file watching) are trusted toolchain deps — whitelisting them
+# avoids ERR_PNPM_IGNORED_BUILDS failing `pnpm install` (and the Makefile build).
+onlyBuiltDependencies:
+  - esbuild
+  - '@parcel/watcher'

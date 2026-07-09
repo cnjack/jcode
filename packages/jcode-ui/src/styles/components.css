@@ -1,0 +1,107 @@
+/*
+ * Component-local styles for jcode-ui.
+ *
+ * Everything here is driven by design tokens (var(--color-*), --radius-*, …) —
+ * never hardcoded hex/rgb. Tailwind utility classes cover most styling in the
+ * components themselves; this file holds the few things utilities can't express
+ * cleanly (code-block surfaces, diff row tinting, shimmer keyframes wiring).
+ */
+
+/* ─── Markdown code blocks ───
+ * A distinct inset surface so a <pre> reads as its own block (matches the
+ * Vue app's --code-bg / --code-border tokens). */
+.jcode-prose pre {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  margin: 0.5rem 0;
+}
+.jcode-prose code {
+  font-family: var(--font-mono);
+}
+.jcode-prose :not(pre) > code {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius-xs);
+  padding: 0.1em 0.35em;
+  font-size: 0.85em;
+}
+.jcode-prose a {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ─── Tool-call diff renderer ───
+ * Red/green line tinting for edit/multi_edit. Uses the semantic status tokens
+ * so generated themes recolor correctly. */
+.jcode-diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+}
+.jcode-diff-table td {
+  padding: 0 0.5rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.jcode-diff-line-add {
+  background: var(--color-success-bg);
+  color: var(--color-success-fg);
+}
+.jcode-diff-line-del {
+  background: var(--color-error-bg);
+  color: var(--color-error-fg);
+}
+.jcode-diff-line-meta {
+  color: var(--color-muted-foreground);
+}
+
+/* ─── Tool-call file viewer (line-numbered) ─── */
+.jcode-file-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+}
+.jcode-file-table td {
+  padding: 0 0.5rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.jcode-file-lineno {
+  color: var(--color-muted-foreground);
+  user-select: none;
+  text-align: right;
+  min-width: 2.5rem;
+  border-right: 1px solid var(--color-border);
+}
+
+/* ─── Tool running shimmer ───
+ * Wired to the `shimmer` keyframe defined in animations.css. Applied to the
+ * header of a running tool call so the user sees live activity. Class name
+ * matches the Vue app's `.shimmer-running` so generated themes stay consistent. */
+.shimmer-running {
+  background: linear-gradient(
+    90deg,
+    var(--neutral-wash-soft) 0%,
+    var(--neutral-wash) 50%,
+    var(--neutral-wash-soft) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+/* ─── Selection ───
+ * Brand-tinted text selection inside thread content. */
+.jcode-selectable ::selection {
+  background: var(--accent-selection);
+}
+.jcode-selectable {
+  user-select: text;
+}

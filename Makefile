@@ -13,7 +13,7 @@ LDFLAGS := -s -w \
 
 export GOFLAGS := -buildvcs=false
 
-.PHONY: build build-binary run doctor version install clean build-web fmt lint lint-go lint-web generate setup-hooks desktop-icons desktop-sidecar desktop-dev desktop-build desktop-clean
+.PHONY: build build-binary run doctor version install clean build-web build-web-react fmt lint lint-go lint-web lint-react generate setup-hooks desktop-icons desktop-sidecar desktop-dev desktop-build desktop-react-dev desktop-react-build desktop-clean
 
 fmt:
 	@echo "Formatting Go..."
@@ -26,19 +26,54 @@ lint-go:
 	golangci-lint run
 
 lint-web:
-	@echo "Linting frontend..."
+	@echo "Linting frontend (Vue)..."
 	cd web && (pnpm install --frozen-lockfile 2>/dev/null || pnpm install)
 	cd web && pnpm lint
+
+lint-react:
+	@echo "Type-checking React frontend + packages..."
+	cd packages/jcode-ui-core && pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+	cd packages/jcode-ui-core && npx tsc --noEmit -p tsconfig.json
+	cd packages/jcode-ui && npx tsc --noEmit -p tsconfig.json
+	cd web-react && npx tsc --noEmit -p tsconfig.app.json
 
 generate:
 	@echo "Generating code..."
 	go generate ./internal/model/...
 	go generate ./internal/theme/...
 
+# The frontend build. FRONTEND selects which app to build:
+#   web        (default) — the current Vue app (production)
+#   web-react  — the new React app (migration in progress; produces dist-react/)
+# During the migration both coexist. The switch-over to React-as-default happens
+# once web-react reaches feature parity and the Go embed points at dist-react.
+FRONTEND ?= web
+
 build-web: generate
-	@echo "Building frontend..."
+	@echo "Building frontend ($(FRONTEND))..."
+ifeq ($(FRONTEND),web-react)
+	$(MAKE) build-web-react
+else
 	cd web && (pnpm install --frozen-lockfile 2>/dev/null || pnpm install)
 	cd web && npx vite build
+endif
+
+# Build the React frontend + the two component-library packages it depends on.
+# Output goes to ../internal/web/dist-react (kept separate from the Vue dist
+# until the embed path is switched). The packages are workspace-linked, so this
+# also builds jcode-ui-core (a dependency of jcode-ui).
+#
+# NOTE: pnpm's ERR_PNPM_IGNORED_BUILDS (esbuild/@parcel/watcher native scripts)
+# returns a non-zero exit even when deps are fully installed. We tolerate that
+# exit code from the install step — the build steps below don't depend on those
+# build scripts having run.
+build-web-react: generate
+	@echo "Building React frontend + packages..."
+	-pnpm install --frozen-lockfile 2>/dev/null || true
+	cd packages/jcode-ui-core && npx tsc -p tsconfig.build.json
+	cd packages/jcode-ui && npx tsc -p tsconfig.build.json
+	cd packages/jcode-ui && npx tailwindcss -i src/styles/entry.css -o dist/styles.css --minify
+	cd web-react && npx vite build
 
 # The main binary never links CoreBluetooth (whose eager init triggers the macOS
 # Bluetooth permission prompt at startup). BLE runs in a separate `jcode-ble`
@@ -119,6 +154,23 @@ desktop-dev: desktop-sidecar
 # Produce a distributable bundle (.app/.dmg on macOS, .msi on Windows, etc.).
 desktop-build: desktop-sidecar
 	cd $(DESKTOP_DIR) && (pnpm install 2>/dev/null || npm install) && pnpm tauri build
+
+# ─── React desktop variants ────────────────────────────────────────────────
+# Same as desktop-dev/desktop-build but load the React frontend (web-react/)
+# instead of the Vue app (web/). Uses tauri.react.conf.json to override the
+# build block (frontendDist / beforeDevCommand / beforeBuildCommand) — every
+# other Tauri setting (window, tray, sidecar, capabilities) is inherited.
+# Requires `pnpm install` to have run once at the repo root (the React
+# workspace lives there, not under desktop/).
+desktop-react-dev: desktop-sidecar
+	@echo "Launching desktop (React frontend)…"
+	cd $(DESKTOP_DIR) && (pnpm install 2>/dev/null || npm install) && \
+		pnpm tauri dev --config src-tauri/tauri.react.conf.json
+
+desktop-react-build: desktop-sidecar
+	@echo "Bundling desktop (React frontend)…"
+	cd $(DESKTOP_DIR) && (pnpm install 2>/dev/null || npm install) && \
+		pnpm tauri build --config src-tauri/tauri.react.conf.json
 
 desktop-clean:
 	rm -rf $(SIDECAR_DIR) $(DESKTOP_DIR)/src-tauri/target

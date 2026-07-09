@@ -11,6 +11,8 @@
   "dependencies": {
     "@remotion/player": "4.0.410",
     "github-slugger": "^2.0.0",
+    "jcode-ui": "file:../packages/jcode-ui",
+    "jcode-ui-core": "file:../packages/jcode-ui-core",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^9.0.3",

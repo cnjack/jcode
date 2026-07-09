@@ -6,6 +6,10 @@ import HomePage from './pages/HomePage'
 
 const DesktopPage = lazy(() => import('./pages/DesktopPage'))
 const CliPage = lazy(() => import('./pages/CliPage'))
+const ChatUIPage = lazy(() => import('./pages/ChatUIPage'))
+const ChatUiDocsLayout = lazy(() => import('./pages/chatui/ChatUiDocsLayout'))
+const ChatUiDocPage = lazy(() => import('./pages/chatui/ChatUiDocPage'))
+const ChatUiDocsIndex = lazy(() => import('./pages/chatui/ChatUiDocsIndex'))
 const ShowcasePage = lazy(() => import('./pages/ShowcasePage'))
 const ShowcaseProjectPage = lazy(() => import('./pages/ShowcaseProjectPage'))
 const DocsLayout = lazy(() => import('./pages/docs/DocsLayout'))
@@ -64,6 +68,11 @@ export default function App() {
             <Route path="/" element={<HomePage />} />
             <Route path="/desktop" element={<DesktopPage />} />
             <Route path="/cli" element={<CliPage />} />
+            <Route path="/chat-ui" element={<ChatUIPage />} />
+            <Route path="/chat-ui/docs" element={<ChatUiDocsLayout />}>
+              <Route index element={<ChatUiDocsIndex />} />
+              <Route path="*" element={<ChatUiDocPage />} />
+            </Route>
             <Route path="/showcase" element={<ShowcasePage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/docs" element={<DocsLayout />}>
