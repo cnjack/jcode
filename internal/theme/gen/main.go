@@ -4,9 +4,9 @@
 //
 // Two files are generated (both build artifacts, gitignored — never edit by
 // hand):
-//   - web/src/styles/tokens.generated.css : one html[data-theme="<name>"] block
+//   - web/src/styles/tokens.generated.css : one [data-theme="<name>"] block
 //     of CSS custom properties per theme.
-//   - web/src/composables/themes.generated.ts : the theme registry (id, label,
+//   - web/src/lib/themes.generated.ts : the theme registry (id, label,
 //     appearance) the picker UI iterates, so the list can't drift either.
 package main
 
@@ -22,7 +22,7 @@ import (
 
 func main() {
 	writeFile(repoPath("web", "src", "styles", "tokens.generated.css"), css())
-	writeFile(repoPath("web", "src", "composables", "themes.generated.ts"), ts())
+	writeFile(repoPath("web", "src", "lib", "themes.generated.ts"), ts())
 	fmt.Printf("theme/gen: wrote %d themes (css + ts)\n", len(theme.All()))
 }
 

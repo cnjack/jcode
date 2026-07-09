@@ -1,17 +1,16 @@
 /**
  * ToolCallView — the headless expand/collapse shell for a tool invocation.
  *
- * Owns: expand/collapse state, status glyph dispatch, and renderer lookup via a
- * ToolRendererRegistry (provided through context by the host). Does NOT own the
- * per-tool rendering logic — that lives in registered renderers. The styled
- * `jcode-ui` `ToolCallCard` wraps this with the jcode visual language.
+ * Owns: expand/collapse state, renderer lookup via ToolRendererRegistry, and
+ * subagent recursion. Does NOT own per-tool body chrome — the styled
+ * `jcode-ui` `ToolCallCard` supplies header styling + CSS for `.toolcall-body`.
  *
- * Subagent recursion: when `tool.name === 'subagent'`, children are rendered as
- * nested ToolCallView instances (capped at a max-depth). ask_user tools are
- * routed to the AskUserBlock renderer.
+ * Subagent: only `tool.name === 'subagent'` (NOT team_spawn — that has its own
+ * renderer). Children recurse as nested ToolCallView instances. ask_user tools
+ * route to the host's renderAskUser slot.
  */
 
-import { useContext, useMemo, useState } from 'react'
+import { createContext, useContext, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { ToolCall } from '../types/index.js'
 import type { ToolRendererRegistry, ToolRendererProps } from '../adapters/index.js'
@@ -25,7 +24,6 @@ export interface ToolCallContextValue {
   renderAskUser?: (tool: ToolCall) => ReactNode
 }
 
-import { createContext } from 'react'
 const ToolCallCtx = createContext<ToolCallContextValue | null>(null)
 
 export function ToolCallProvider({ value, children }: { value: ToolCallContextValue; children: ReactNode }) {
@@ -44,13 +42,16 @@ export interface ToolCallViewProps {
   maxDepth?: number
   /** Default expanded state. Default false (subagents default true). */
   defaultExpanded?: boolean
-  /** Render-prop for the collapsed header. Falls back to a default row. */
+  /** Render-prop for the header. Falls back to a default row. */
   renderHeader?: (tool: ToolCall, expanded: boolean, toggle: () => void) => ReactNode
+  /**
+   * Optional subagent body (output/error). Styled layer supplies markdown.
+   * Receives only output-related fields — never args.
+   */
+  renderSubagentOutput?: (tool: ToolCall) => ReactNode
   /** className passthrough. */
   className?: string
 }
-
-const SUBAGENT_NAMES = new Set(['subagent', 'team_spawn'])
 
 export function ToolCallView({
   tool,
@@ -59,9 +60,11 @@ export function ToolCallView({
   defaultExpanded,
   className,
   renderHeader,
+  renderSubagentOutput,
 }: ToolCallViewProps): ReactNode {
   const ctx = useToolCallContext()
-  const isSubagent = SUBAGENT_NAMES.has(tool.name)
+  // Only the recursive subagent tool — team_spawn has its own renderer (Vue parity).
+  const isSubagent = tool.name === 'subagent'
   const isAskUser = tool.name === 'ask_user' && (!!tool.askUserId || tool.status === 'running')
 
   const [expanded, setExpanded] = useState(defaultExpanded ?? isSubagent)
@@ -72,7 +75,7 @@ export function ToolCallView({
     return <>{ctx.renderAskUser(tool)}</>
   }
 
-  // Look up a renderer for the body.
+  // Look up a renderer for the body (not used for subagent shells — no args dump).
   const Renderer = ctx?.registry.get(tool.name) ?? null
 
   const header =
@@ -80,23 +83,63 @@ export function ToolCallView({
       <DefaultToolHeader tool={tool} expanded={expanded} onToggle={toggle} />
     )
 
-  const body = Renderer ? <Renderer {...toRendererProps(tool)} /> : null
+  const body = !isSubagent && Renderer ? <Renderer {...toRendererProps(tool)} /> : null
+
   const children =
     isSubagent && tool.children && tool.children.length > 0 && depth < maxDepth
-      ? tool.children.map((c) => (
-          <div key={c.id} style={{ marginLeft: 12 }}>
-            {ctx?.renderChild ? ctx.renderChild(c, depth + 1) : <ToolCallView tool={c} depth={depth + 1} maxDepth={maxDepth} />}
-          </div>
-        ))
+      ? tool.children.map((c) =>
+          ctx?.renderChild ? (
+            <div key={c.id}>{ctx.renderChild(c, depth + 1)}</div>
+          ) : (
+            <ToolCallView
+              key={c.id}
+              tool={c}
+              depth={depth + 1}
+              maxDepth={maxDepth}
+              renderHeader={renderHeader}
+              renderSubagentOutput={renderSubagentOutput}
+            />
+          ),
+        )
       : null
 
+  // Prefer displayOutput (clean) over raw output; never surface args for subagents.
+  const subagentText = tool.displayOutput || tool.output || ''
+
   return (
-    <div className={className} data-tool-name={tool.name} data-tool-status={tool.status}>
+    <div
+      className={className}
+      data-tool-name={tool.name}
+      data-tool-status={tool.status}
+      data-expanded={expanded ? 'true' : 'false'}
+    >
       {header}
-      {expanded && (
-        <div className="toolcall-body">
+
+      {/* Subagent: children + output only (no args). Output rendered by styled slot. */}
+      {expanded && isSubagent && (
+        <div className="toolcall-subagent-body">
+          {children && children.length > 0 ? (
+            <div className="toolcall-subagent-children">{children}</div>
+          ) : tool.status === 'running' && !subagentText ? (
+            <div className="toolcall-subagent-starting">Starting…</div>
+          ) : null}
+          {renderSubagentOutput
+            ? renderSubagentOutput(tool)
+            : subagentText
+              ? <pre className="toolcall-subagent-output">{truncate(subagentText, 2000)}</pre>
+              : null}
+          {tool.error ? <pre className="toolcall-subagent-error">{tool.error}</pre> : null}
+        </div>
+      )}
+
+      {/* Regular tool: single content box under the title (top edge = divider). */}
+      {expanded && !isSubagent && (
+        <div
+          className="toolcall-body jcode-selectable"
+          data-selectable
+          data-tool-status={tool.status}
+        >
           {body}
-          {children}
         </div>
       )}
     </div>
@@ -117,7 +160,12 @@ function toRendererProps(tool: ToolCall): ToolRendererProps {
   }
 }
 
-/** Minimal default header: status glyph + title + subtitle + chevron. */
+function truncate(text: string, max: number): string {
+  const chars = [...text]
+  return chars.length > max ? chars.slice(0, max).join('') + `… (${chars.length} chars)` : text
+}
+
+/** Minimal default header (headless fallback). */
 function DefaultToolHeader({
   tool,
   expanded,
@@ -127,12 +175,23 @@ function DefaultToolHeader({
   expanded: boolean
   onToggle: () => void
 }): ReactNode {
-  const glyph = tool.status === 'running' ? '◈' : tool.status === 'error' ? '✗' : '✓'
   const title = tool.displayInfo?.title ?? tool.name
   const subtitle = tool.displayInfo?.subtitle ?? ''
   return (
-    <button type="button" onClick={onToggle} style={{ display: 'flex', gap: 8, alignItems: 'center', cursor: 'pointer', background: 'none', border: 'none', padding: 0, textAlign: 'left' }}>
-      <span aria-hidden>{glyph}</span>
+    <button
+      type="button"
+      onClick={onToggle}
+      style={{
+        display: 'flex',
+        gap: 6,
+        alignItems: 'center',
+        cursor: 'pointer',
+        background: 'none',
+        border: 'none',
+        padding: 0,
+        textAlign: 'left',
+      }}
+    >
       <span>{title}</span>
       {subtitle && <span style={{ opacity: 0.7 }}>{subtitle}</span>}
       <span aria-hidden>{expanded ? '▾' : '▸'}</span>

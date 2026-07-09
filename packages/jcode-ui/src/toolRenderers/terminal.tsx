@@ -1,12 +1,19 @@
 /**
- * TerminalRenderer — renders `execute` tool calls.
- * Shows `$ <command>` then stdout/stderr, with error tinting on failure.
+ * TerminalRenderer — `execute` tool (matches Vue ToolCallCard terminal block).
+ * Renders inside `.toolcall-body` — no outer border of its own.
+ * Background is muted (not code-bg); `$ ` prefix is muted-foreground.
  */
 
 import { memo } from 'react'
 import type { ToolRendererProps } from 'jcode-ui-core/adapters'
 
-export const TerminalRenderer = memo(function TerminalRenderer({ args, output, error, status }: ToolRendererProps) {
+export const TerminalRenderer = memo(function TerminalRenderer({
+  args,
+  output,
+  displayOutput,
+  error,
+  status,
+}: ToolRendererProps) {
   let command = ''
   try {
     const parsed = JSON.parse(args)
@@ -14,21 +21,37 @@ export const TerminalRenderer = memo(function TerminalRenderer({ args, output, e
   } catch {
     // ignore
   }
-  const isError = status === 'error' || !!error
+  const body = displayOutput || output || ''
   return (
-    <div className="jcode-terminal jcode-selectable my-1 overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--code-bg)]">
+    <div
+      className="jcode-terminal max-h-72 overflow-y-auto px-3 py-2 font-mono text-xs"
+      style={{ background: 'var(--color-muted)' }}
+    >
       {command && (
-        <div className="border-b border-[var(--color-border)] px-3 py-1.5 font-mono text-[0.78rem]">
-          <span className="text-[var(--color-primary)]">$ </span>
-          <span className="text-[var(--color-foreground)]">{command}</span>
+        <div>
+          <span className="select-none" style={{ color: 'var(--color-muted-foreground)' }}>
+            ${' '}
+          </span>
+          <span style={{ color: 'var(--color-foreground)' }}>{command}</span>
         </div>
       )}
-      {(output || error) && (
-        <pre className="max-h-[400px] overflow-auto px-3 py-2 font-mono text-[0.76rem] leading-relaxed">
-          {error && <span className="text-[var(--color-error-fg)]">{error}</span>}
-          {error && output && '\n'}
-          {output && <span className={isError ? 'text-[var(--color-error-fg)]' : 'text-[var(--color-foreground)]'}>{truncate(output, 20000)}</span>}
-        </pre>
+      {body && (
+        <div
+          className="mt-1 whitespace-pre-wrap break-all"
+          style={{ color: 'var(--color-muted-foreground)' }}
+        >
+          {truncate(body, 2000)}
+        </div>
+      )}
+      {error && (
+        <div className="mt-1 whitespace-pre-wrap" style={{ color: 'var(--color-error-fg)' }}>
+          {error}
+        </div>
+      )}
+      {status === 'running' && (
+        <div className="mt-1 animate-pulse" style={{ color: 'var(--color-muted-foreground)' }}>
+          Running…
+        </div>
       )}
     </div>
   )
@@ -38,5 +61,5 @@ export const TerminalRenderer = memo(function TerminalRenderer({ args, output, e
 export function truncate(text: string, max: number): string {
   const chars = [...text]
   if (chars.length <= max) return text
-  return chars.slice(0, max).join('') + `\n… (${chars.length - max} more chars truncated)`
+  return chars.slice(0, max).join('') + `… (${chars.length} chars)`
 }

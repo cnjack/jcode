@@ -119,7 +119,7 @@ Every theme is defined once, in Go:
 internal/theme/palette.go        # the Theme catalog (~26 semantic tokens each)
         │  go generate ./internal/theme/...   (run by `make generate`)
         ├─►  web/src/styles/tokens.generated.css        # [data-theme="…"] blocks
-        └─►  web/src/composables/themes.generated.ts     # the picker registry
+        └─►  web/src/lib/themes.generated.ts             # the picker registry
 ```
 
 The web token set and the picker list are a pure function of the Go palette, so

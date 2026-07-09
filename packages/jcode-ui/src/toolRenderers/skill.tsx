@@ -1,14 +1,16 @@
 /**
- * SkillRenderer — renders `load_skill` tool calls.
- * Parses the skill name from args and description from output (format:
- * `description="..."`).
+ * SkillRenderer — `load_skill` (matches Vue skill block). No outer border / icon.
  */
 
 import { memo, useMemo } from 'react'
-import { SparklesIcon } from '@heroicons/react/24/outline'
 import type { ToolRendererProps } from 'jcode-ui-core/adapters'
 
-export const SkillRenderer = memo(function SkillRenderer({ args, output }: ToolRendererProps) {
+export const SkillRenderer = memo(function SkillRenderer({
+  args,
+  output,
+  error,
+  status,
+}: ToolRendererProps) {
   const { name, description } = useMemo(() => {
     let n = ''
     try {
@@ -17,15 +19,34 @@ export const SkillRenderer = memo(function SkillRenderer({ args, output }: ToolR
       // ignore
     }
     const descMatch = (output ?? '').match(/description="([^"]*)"/)
-    return { name: n, description: descMatch ? descMatch[1] ?? '' : '' }
+    return { name: n, description: descMatch ? (descMatch[1] ?? '') : '' }
   }, [args, output])
+
   return (
-    <div className="jcode-skill my-1 flex items-start gap-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--code-bg)] px-3 py-2">
-      <SparklesIcon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-primary)]" />
-      <div className="min-w-0">
-        <div className="font-medium text-[var(--color-foreground)]">{name}</div>
-        {description && <div className="text-[0.78rem] text-[var(--color-muted-foreground)]">{description}</div>}
+    <div className="jcode-skill px-3 py-2.5" style={{ background: 'var(--color-surface)' }}>
+      <div className="flex items-center gap-2">
+        <span className="font-mono text-[11px] font-semibold" style={{ color: 'var(--color-foreground)' }}>
+          {name}
+        </span>
+        {status === 'running' && (
+          <span className="animate-pulse text-[10px]" style={{ color: 'var(--color-muted-foreground)' }}>
+            loading
+          </span>
+        )}
       </div>
+      {description && (
+        <div className="mt-1 text-[11px] leading-snug" style={{ color: 'var(--color-muted-foreground)' }}>
+          {description}
+        </div>
+      )}
+      {error && (
+        <div
+          className="mt-1 font-mono text-[11px]"
+          style={{ color: 'var(--color-destructive, var(--color-error-fg))' }}
+        >
+          {error}
+        </div>
+      )}
     </div>
   )
 })

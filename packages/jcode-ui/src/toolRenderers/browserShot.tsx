@@ -1,11 +1,6 @@
 /**
- * BrowserShotRenderer — renders `browser_screenshot` tool calls.
- * Extracts the image_ref emitted in output (`image_ref=/api/browser/shots/…`)
- * and renders it inline. The image URL must be resolved against the API base by
- * the host; here we accept an optional `apiBase` via context to prefix it.
- *
- * If no image_ref is present (still running, or a non-screenshot browser tool),
- * falls back to a generic block.
+ * BrowserShotRenderer — `browser_screenshot`.
+ * Extracts image_ref from output and renders inline. Falls back to generic.
  */
 
 import { memo, useContext, useMemo } from 'react'
@@ -19,10 +14,19 @@ export const BrowserShotRenderer = memo(function BrowserShotRenderer(props: Tool
     const m = (props.output ?? '').match(/image_ref=(\/api\/browser\/shots\/[\w-]+\.png)/)
     return m ? `${apiBase}${m[1]}` : ''
   }, [props.output, apiBase])
+
   if (!src) return <GenericRenderer {...props} />
+
   return (
-    <div className="jcode-browser-shot my-1 overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)]">
-      <img src={src} alt="browser screenshot" className="max-h-[400px] w-full object-contain" />
+    <div className="jcode-browser-shot px-3 py-2" style={{ background: 'var(--color-surface)' }}>
+      <a href={src} target="_blank" rel="noopener noreferrer">
+        <img
+          src={src}
+          alt="page screenshot"
+          className="max-h-80 max-w-full rounded-md border"
+          style={{ borderColor: 'var(--color-border)' }}
+        />
+      </a>
     </div>
   )
 })
