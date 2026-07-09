@@ -10,6 +10,7 @@
  */
 
 import { Thread } from 'jcode-ui'
+import { useTranslation } from 'react-i18next'
 import { useAppSelector } from '../app/hooks'
 import { GoalBanner } from './GoalBanner'
 import { ChatInput } from './ChatInput'
@@ -20,11 +21,14 @@ export interface ChatViewProps {
 }
 
 export function ChatView({ readOnly }: ChatViewProps) {
+  const { t } = useTranslation()
   const hasMessages = useAppSelector((s) => s.chat.timeline.length > 0)
+  const projectPath = useAppSelector((s) => s.session.projectPath)
+  const project = projectName(projectPath) || 'jcode'
 
   if (readOnly) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="chat-panel flex min-h-0 flex-1 flex-col">
         <GoalBanner />
         <div className="min-h-0 flex-1">
           <Thread overscanBottom={8} />
@@ -35,26 +39,31 @@ export function ChatView({ readOnly }: ChatViewProps) {
 
   // Welcome screen: centered hero + composer (no messages yet).
   if (!hasMessages) {
+    const subtitle = t('welcome.subtitle')
+    const title = t('welcome.startIn').replace('{project}', project)
+    const [subtitleBefore, subtitleAfter] = subtitle.split('{kbd}')
+
     return (
-      <div className="flex flex-1 flex-col items-center overflow-y-auto px-6">
+      <div className="chat-panel welcome flex flex-1 flex-col items-center overflow-y-auto px-6">
+        <div className="welcome-aura" aria-hidden="true" />
         {/* Top half: hero floats above the centered composer. */}
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-end pb-10">
-          <div className="select-none pb-4 text-center">
-            <span className="font-mono text-3xl font-bold tracking-tight" style={{ color: 'var(--color-muted-foreground)' }}>
-              <span style={{ opacity: 0.4 }}>[</span>
-              <span style={{ color: 'var(--color-primary)' }}>J</span>
-              <span style={{ color: 'var(--color-foreground)' }}>CODE</span>
-              <span style={{ opacity: 0.4 }}>)</span>
-            </span>
+        <div className="welcome-hero flex min-h-0 flex-1 flex-col items-center justify-end pb-10">
+          <div className="welcome-logo select-none">
+            <span className="wl-dim">[</span>
+            <span className="wl-j">J</span>
+            <span className="wl-fg">CODE</span>
+            <span className="wl-dim">]</span>
           </div>
-          <h2 className="text-xl font-semibold text-[var(--color-foreground)]">Start a conversation</h2>
-          <p className="mt-2 text-sm text-[var(--color-muted-foreground)]">
-            Type <kbd className="rounded border border-[var(--color-border)] px-1.5 py-0.5 font-mono text-xs">/</kbd> for commands, or just start typing.
+          <h2 className="welcome-title">{title}</h2>
+          <p className="welcome-sub">
+            {subtitleBefore}
+            <kbd className="welcome-kbd">/</kbd>
+            {subtitleAfter}
           </p>
         </div>
         {/* Centered composer */}
-        <div className="w-full max-w-2xl pb-10">
-          <ChatInput onSent={() => { /* timeline auto-follows */ }} />
+        <div className="welcome-composer w-full max-w-2xl">
+          <ChatInput pickerPlacement="bottom" onSent={() => { /* timeline auto-follows */ }} />
         </div>
         {/* Bottom half balances the center */}
         <div className="min-h-0 flex-1" aria-hidden="true" />
@@ -64,14 +73,25 @@ export function ChatView({ readOnly }: ChatViewProps) {
 
   // Active conversation: scrollable timeline + docked composer.
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="chat-panel flex min-h-0 flex-1 flex-col">
       <GoalBanner />
       <div className="min-h-0 flex-1">
         <Thread overscanBottom={96} />
       </div>
-      <div className="border-t border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2.5">
+      <div className="border-t border-[var(--color-border)] px-3 py-2.5">
         <ChatInput onSent={() => { /* timeline auto-follows via useStreamFollow */ }} />
       </div>
     </div>
   )
+}
+
+function projectName(path: string): string {
+  if (!path) return ''
+  if (path.startsWith('ssh://') || path.startsWith('docker://')) {
+    const clean = path.replace(/^ssh:\/\//, '').replace(/^docker:\/\//, '')
+    const parts = clean.split('/').filter(Boolean)
+    return parts[parts.length - 1] || clean
+  }
+  const parts = path.split('/').filter(Boolean)
+  return parts[parts.length - 1] || path
 }

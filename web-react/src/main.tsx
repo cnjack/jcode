@@ -13,11 +13,16 @@ import { Provider } from 'react-redux'
 import { store } from './app/store'
 import { initApiBase } from './lib/apiBase'
 import { setAuthExpiredHandler } from './lib/authToken'
+import { initDesktop } from './lib/useDesktop'
 import { uiActions } from './app/store'
 import App from './App'
 import './styles.css'
+import './i18n'
 
 async function bootstrap() {
+  // Tag <html> for native desktop shell CSS before the first render.
+  initDesktop()
+
   // Dual-host: resolve the API base + wait for the sidecar to be healthy before
   // mounting. In browser mode this is a no-op.
   try {
