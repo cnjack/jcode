@@ -19,7 +19,7 @@ an existing component, or a documented product-app equivalent).
 | assistant-ui | jcode-ui equivalent | Status | Notes |
 |--------------|---------------------|--------|-------|
 | `Thread` | `Thread` | ✅ same-named | Virtualized + auto-follow. |
-| `ThreadList` (conversation list) | `Sidebar` (product app) | 🟡 product | The conversation list is app chrome, not a library primitive — shipped in the web-react product app. |
+| `ThreadList` (conversation list) | `Sidebar` (product app) | 🟡 product | The conversation list is app chrome, not a library primitive — shipped in the product web app. |
 | `Composer` | `ChatInput` | ✅ same concept | Send/queue/stop, slash commands, attachments, context bar. |
 | `Attachment` | `Attachment` + `AttachmentList` | ✅ same-named | Standalone + embedded in ChatInput. |
 | `Markdown` | (built into `Message`) | ✅ field-driven | marked + highlight.js + DOMPurify. Render any markdown via `renderMarkdown()`. |
