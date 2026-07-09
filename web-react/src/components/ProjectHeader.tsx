@@ -1,12 +1,15 @@
 /**
- * ProjectHeader — top bar showing the active project path, model, and mode.
- * Minimal product chrome; the full Vue header has more controls (model/mode
- * pickers) which the Composer's suffix slots cover for the chat view.
+ * ProjectHeader — top bar: project path, model, mode, connection status,
+ * theme toggle, and settings button.
  */
 
-import { useAppSelector } from '../app/hooks'
+import { Cog6ToothIcon } from '@heroicons/react/24/outline'
+import { useAppDispatch, useAppSelector } from '../app/hooks'
+import { uiActions } from '../app/store'
+import { ThemeToggle } from './ThemeToggle'
 
 export function ProjectHeader() {
+  const dispatch = useAppDispatch()
   const projectPath = useAppSelector((s) => s.session.projectPath)
   const provider = useAppSelector((s) => s.model.providerName)
   const model = useAppSelector((s) => s.model.modelName)
@@ -28,10 +31,22 @@ export function ProjectHeader() {
           {mode}
         </span>
       )}
-      <span
-        className={`ml-auto h-2 w-2 rounded-full ${wsConnected ? 'bg-[var(--color-success)]' : 'bg-[var(--color-muted-foreground)]'}`}
-        title={wsConnected ? 'connected' : 'disconnected'}
-      />
+      <div className="ml-auto flex items-center gap-1">
+        <ThemeToggle />
+        <button
+          type="button"
+          onClick={() => dispatch(uiActions.setSettingsOpen(true))}
+          className="rounded-[var(--radius-md)] p-1.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--neutral-wash-soft)] hover:text-[var(--color-foreground)]"
+          aria-label="Settings"
+          title="Settings (⌘,)"
+        >
+          <Cog6ToothIcon className="h-4 w-4" />
+        </button>
+        <span
+          className={`h-2 w-2 rounded-full ${wsConnected ? 'bg-[var(--color-success)]' : 'bg-[var(--color-muted-foreground)]'}`}
+          title={wsConnected ? 'connected' : 'disconnected'}
+        />
+      </div>
     </header>
   )
 }
