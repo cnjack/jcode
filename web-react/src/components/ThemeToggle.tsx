@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from 'react'
 import { SunIcon, MoonIcon, SwatchIcon } from '@heroicons/react/24/outline'
 import { useTheme, THEME_CHOICES } from '../lib/useTheme'
 
-export function ThemeToggle() {
+export function ThemeToggle({ compact = false }: { compact?: boolean }) {
   const { theme, resolvedTheme, setTheme, toggleDark } = useTheme()
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -42,26 +42,32 @@ export function ThemeToggle() {
           SwatchIcon button. */}
       <button
         type="button"
-        onClick={toggleDark}
+        onClick={compact ? toggleDark : () => setOpen((v) => !v)}
         title={resolvedTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
         aria-label={resolvedTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-        className="flex h-[34px] w-[34px] items-center justify-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
+        className={`flex items-center justify-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--neutral-wash-soft)] hover:text-[var(--color-foreground)] ${compact ? 'h-7 w-7' : 'h-[34px] w-[34px] hover:bg-[var(--color-muted)]'}`}
       >
-        {resolvedTheme === 'dark' ? <SunIcon className="h-[18px] w-[18px]" /> : <MoonIcon className="h-[18px] w-[18px]" />}
+        {resolvedTheme === 'dark' ? (
+          <SunIcon className={compact ? 'h-3.5 w-3.5' : 'h-[18px] w-[18px]'} />
+        ) : (
+          <MoonIcon className={compact ? 'h-3.5 w-3.5' : 'h-[18px] w-[18px]'} />
+        )}
       </button>
 
-      {/* Picker toggle — opens the full theme list. */}
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        title="Themes"
-        aria-label="Choose theme"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className="flex h-[34px] w-[34px] items-center justify-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
-      >
-        <SwatchIcon className="h-[18px] w-[18px]" />
-      </button>
+      {/* Picker toggle — opens the full theme list. Hidden in compact (sidebar footer) mode. */}
+      {!compact && (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          title="Themes"
+          aria-label="Choose theme"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          className="flex h-[34px] w-[34px] items-center justify-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
+        >
+          <SwatchIcon className="h-[18px] w-[18px]" />
+        </button>
+      )}
 
       {open && (
         <div
