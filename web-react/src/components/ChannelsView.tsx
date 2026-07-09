@@ -13,7 +13,7 @@
  * → detect scan → online → logout. The view owns its own scan lifecycle.
  *
  * Strings are ported from web/src/i18n/locales/en.ts (channels.* + the
- * settings.channels.* keys the Vue file reuses); the React app has no i18n.
+ * settings.channels.* keys the Vue file reuses).
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -27,6 +27,8 @@ import {
 } from '@heroicons/react/24/outline'
 import QRCode from 'qrcode'
 import { api } from '../lib/api'
+import { useAppDispatch } from '../app/hooks'
+import { uiActions } from '../app/store'
 
 // Finer-grained string the QR flow drives.
 type ChannelState = 'none' | 'scanning' | 'enabled' | 'disabled'
@@ -56,6 +58,7 @@ const FEATURES: Feature[] = [
 ]
 
 export function ChannelsView() {
+  const dispatch = useAppDispatch()
   // ── WeChat channel state ──
   const [channelAvailable, setChannelAvailable] = useState(false)
   const [channelState, setChannelState] = useState<ChannelState>('none')
@@ -72,10 +75,11 @@ export function ChannelsView() {
       const ch = await api.channelStatus()
       setChannelAvailable(ch.available)
       setChannelState((ch.state as ChannelState) || 'none')
+      dispatch(uiActions.setChannelState({ available: ch.available, enabled: ch.state === 'enabled' }))
     } catch {
       /* ignore */
     }
-  }, [])
+  }, [dispatch])
 
   // Initial load.
   useEffect(() => {
@@ -109,6 +113,7 @@ export function ChannelsView() {
             setChannelState(next)
             setQrDataUrl('')
             setChannelAvailable(true)
+            dispatch(uiActions.setChannelState({ available: true, enabled: next === 'enabled' }))
             // Show the "activate" reminder the first time we go online via the
             // login flow (scanning → enabled).
             if (next === 'enabled' && previousState === 'scanning') {
@@ -122,7 +127,7 @@ export function ChannelsView() {
       }, 2000)
       pollTimeoutRef.current = setTimeout(stopPoll, 180000)
     },
-    [stopPoll],
+    [dispatch, stopPoll],
   )
 
   const channelLogin = useCallback(async () => {
@@ -158,18 +163,47 @@ export function ChannelsView() {
       setChannelState('none')
       setQrDataUrl('')
       setChannelAvailable(false)
+      dispatch(uiActions.setChannelState({ available: false, enabled: false }))
       setLoginReminder(false)
     } catch (err) {
       console.error('Channel logout failed:', err)
     }
     setChannelLoading(false)
-  }, [])
+  }, [dispatch])
+
+  const channelEnable = useCallback(async () => {
+    setChannelLoading(true)
+    try {
+      const res = await api.channelEnable()
+      setChannelAvailable(true)
+      setChannelState((res.state as ChannelState) || 'enabled')
+      dispatch(uiActions.setChannelState({ available: true, enabled: res.state === 'enabled' }))
+    } catch (err) {
+      console.error('Channel enable failed:', err)
+    } finally {
+      setChannelLoading(false)
+    }
+  }, [dispatch])
+
+  const channelDisable = useCallback(async () => {
+    setChannelLoading(true)
+    try {
+      const res = await api.channelDisable()
+      setChannelAvailable(true)
+      setChannelState((res.state as ChannelState) || 'disabled')
+      dispatch(uiActions.setChannelState({ available: true, enabled: false }))
+    } catch (err) {
+      console.error('Channel disable failed:', err)
+    } finally {
+      setChannelLoading(false)
+    }
+  }, [dispatch])
 
   const isConnected = channelState === 'enabled'
   const isScanning = channelState === 'scanning'
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="page-surface flex min-h-0 flex-1 flex-col">
       <header className="flex h-[var(--header-height)] shrink-0 items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4">
         <SignalIcon className="h-4 w-4 text-[var(--color-primary)]" />
         <h1 className="text-sm font-medium">Channels</h1>
@@ -227,14 +261,24 @@ export function ChannelsView() {
                         Once activated, you can receive notifications for 24 hours.
                       </p>
                     )}
-                    <button
-                      type="button"
-                      onClick={channelLogout}
-                      disabled={channelLoading}
-                      className="btn-outline"
-                    >
-                      Disconnect
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={channelDisable}
+                        disabled={channelLoading}
+                        className="btn-outline"
+                      >
+                        Disable
+                      </button>
+                      <button
+                        type="button"
+                        onClick={channelLogout}
+                        disabled={channelLoading}
+                        className="btn-outline"
+                      >
+                        Disconnect
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -259,15 +303,27 @@ export function ChannelsView() {
                     </div>
 
                     <div className="promo-cta">
-                      <button
-                        type="button"
-                        onClick={channelLogin}
-                        disabled={channelLoading}
-                        className="btn-primary"
-                      >
-                        <DevicePhoneMobileIcon className="h-4 w-4" />
-                        {channelLoading ? 'Loading…' : 'Connect'}
-                      </button>
+                      {channelAvailable && channelState === 'disabled' ? (
+                        <button
+                          type="button"
+                          onClick={channelEnable}
+                          disabled={channelLoading}
+                          className="btn-primary"
+                        >
+                          <DevicePhoneMobileIcon className="h-4 w-4" />
+                          {channelLoading ? 'Loading…' : 'Enable'}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={channelLogin}
+                          disabled={channelLoading}
+                          className="btn-primary"
+                        >
+                          <DevicePhoneMobileIcon className="h-4 w-4" />
+                          {channelLoading ? 'Loading…' : 'Connect'}
+                        </button>
+                      )}
                       {!channelAvailable && <span className="cta-hint">No channels configured</span>}
                     </div>
                   </>

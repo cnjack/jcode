@@ -13,7 +13,7 @@
  * add/edit form with advanced fields (base_url, headers, vision, thinking,
  * reasoning_effort), browsable model catalog with add/remove/toggle, and an
  * inline custom-model authoring form. Other tabs are functional CRUD ports of
- * the Vue logic; a few polish items are marked TODO.
+ * the Vue logic.
  *
  * State is per-tab (each tab remounts on activation, so switching tabs naturally
  * abandons in-progress sub-flows — mirroring the Vue `watch(activeTab)` reset).
@@ -43,10 +43,11 @@ import {
   ArrowRightIcon,
   ChatBubbleOvalLeftIcon,
 } from '@heroicons/react/24/outline'
-import type { AgentMode } from '../lib/types'
+import { useTranslation } from 'react-i18next'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
 import { uiActions, modelActions } from '../app/store'
 import { api } from '../lib/api'
+import { LOCALE_LABELS, SUPPORTED_LOCALES, setLocale, type SupportedLocale } from '../i18n'
 import type { BrowserConfig, BrowserStatusResponse, BrowserSitePermission } from '../lib/api'
 import type {
   ProviderDetail,
@@ -68,17 +69,17 @@ import type {
 //   inside the Providers tab (catalog + custom models), mirroring the Vue app.
 type TabId = 'general' | 'appearance' | 'providers' | 'mcp' | 'skills' | 'browser' | 'ssh' | 'channels' | 'shortcuts' | 'usage'
 
-const TABS: { id: TabId; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
-  { id: 'general', label: 'General', Icon: Cog6ToothIcon },
-  { id: 'appearance', label: 'Appearance', Icon: SwatchIcon },
-  { id: 'providers', label: 'Providers', Icon: CpuChipIcon },
-  { id: 'mcp', label: 'MCP', Icon: ServerStackIcon },
-  { id: 'skills', label: 'Skills', Icon: SparklesIcon },
-  { id: 'browser', label: 'Browser', Icon: GlobeAltIcon },
-  { id: 'ssh', label: 'SSH', Icon: CommandLineIcon },
-  { id: 'channels', label: 'Channels', Icon: ChatBubbleOvalLeftIcon },
-  { id: 'shortcuts', label: 'Shortcuts', Icon: KeyIcon },
-  { id: 'usage', label: 'Usage', Icon: ChartBarIcon },
+const TABS: { id: TabId; Icon: React.ComponentType<{ className?: string }> }[] = [
+  { id: 'general', Icon: Cog6ToothIcon },
+  { id: 'appearance', Icon: SwatchIcon },
+  { id: 'providers', Icon: CpuChipIcon },
+  { id: 'mcp', Icon: ServerStackIcon },
+  { id: 'skills', Icon: SparklesIcon },
+  { id: 'browser', Icon: GlobeAltIcon },
+  { id: 'ssh', Icon: CommandLineIcon },
+  { id: 'channels', Icon: ChatBubbleOvalLeftIcon },
+  { id: 'shortcuts', Icon: KeyIcon },
+  { id: 'usage', Icon: ChartBarIcon },
 ]
 
 const THEMES: { id: string; label: string; appearance: 'dark' | 'light' }[] = [
@@ -276,6 +277,7 @@ function mcpStatusColor(info: MCPServerInfo): string {
 export function SettingsDialog() {
   const open = useAppSelector((s) => s.ui.settingsOpen)
   const dispatch = useAppDispatch()
+  const { t } = useTranslation()
   const [tab, setTab] = useState<TabId>('general')
 
   // Esc closes (App.tsx also binds a global Esc, but this is self-contained).
@@ -297,23 +299,24 @@ export function SettingsDialog() {
     // background covering the entire window, with its own left rail + inset
     // content panel — NOT a small centered dialog. z-modal covers the TopBar.
     <div
-      className="fixed inset-0 flex overflow-hidden"
+      className="settings-shell fixed inset-0 box-border flex overflow-hidden"
       style={{ backgroundColor: 'var(--color-background)', zIndex: 'var(--z-modal)' }}
     >
+      <div className="titlebar-drag" data-tauri-drag-region aria-hidden="true" />
       {/* Left rail: shell tone, same width as the workspace sidebar, no border.
           Holds the vertical section nav (full-width buttons, active one
           highlighted) with a "Close" action pinned to the bottom. */}
       <nav
-        className="flex w-[var(--sidebar-width)] shrink-0 flex-col gap-0.5 overflow-y-auto p-3"
+        className="flex w-[var(--sidebar-width,20rem)] shrink-0 flex-col gap-0.5 overflow-y-auto p-3"
         style={{ backgroundColor: 'var(--color-background)' }}
       >
-        {TABS.map((t) => {
-          const active = tab === t.id
+        {TABS.map((tabItem) => {
+          const active = tab === tabItem.id
           return (
             <button
-              key={t.id}
+              key={tabItem.id}
               type="button"
-              onClick={() => setTab(t.id)}
+              onClick={() => setTab(tabItem.id)}
               className="relative flex h-8 w-full items-center gap-2.5 rounded-[var(--radius-md)] px-2.5 text-left text-[13px] transition-colors duration-[var(--duration-fast,150ms)] hover:bg-[var(--color-secondary)]"
               style={
                 active
@@ -327,8 +330,8 @@ export function SettingsDialog() {
                   style={{ backgroundColor: 'var(--color-accent-neutral)' }}
                 />
               )}
-              <t.Icon className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">{t.label}</span>
+              <tabItem.Icon className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{t(`settings.tabs.${tabItem.id}`)}</span>
             </button>
           )
         })}
@@ -339,11 +342,11 @@ export function SettingsDialog() {
         <button
           type="button"
           onClick={close}
-          title="Close settings (Esc)"
+          title={`${t('settings.backToWorkspace')} (Esc)`}
           className="mt-auto flex h-9 items-center gap-1.5 rounded-[var(--radius-md)] px-2.5 text-[13px] font-medium text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-secondary)] hover:text-[var(--color-foreground)]"
         >
           <XMarkIcon className="h-4 w-4" />
-          Close
+          {t('settings.backToWorkspace')}
         </button>
       </nav>
 
@@ -1238,91 +1241,96 @@ function CustomModelForm({
 // (matches the Vue SettingsDialog 'general' tab; a functional port.)
 // ════════════════════════════════════════════════════════════════════════════
 
-const LANGUAGES: { code: string; label: string }[] = [
-  { code: 'en', label: 'English' },
-  { code: 'zh', label: '中文' },
-  { code: 'ja', label: '日本語' },
-  { code: 'es', label: 'Español' },
-  { code: 'fr', label: 'Français' },
-  { code: 'de', label: 'Deutsch' },
-]
-
 function GeneralTab() {
   const dispatch = useAppDispatch()
-  const mode = useAppSelector((s) => s.model.mode)
+  const { t, i18n } = useTranslation()
   const autoApprove = useAppSelector((s) => s.model.autoApprove)
+  const wsConnected = useAppSelector((s) => s.session.wsConnected)
+  const tokenSnapshot = useAppSelector((s) => s.chat.tokenSnapshot)
+  const bleAvailable = useAppSelector((s) => s.ui.bleAvailable)
+  const bleEnabled = useAppSelector((s) => s.ui.bleEnabled)
+  const [bleSaving, setBLESaving] = useState(false)
 
-  const [maxIterations, setMaxIterations] = useState<number>(0)
-  const [lang, setLang] = useState<string>('en')
-  const [loadingCfg, setLoadingCfg] = useState(true)
-
-  useEffect(() => {
-    // Load persisted max_iterations (from /api/config) + language (localStorage).
-    api
-      .config()
-      .then((c) => setMaxIterations(c.max_iterations))
-      .catch(() => {})
-      .finally(() => setLoadingCfg(false))
-    try {
-      setLang(localStorage.getItem('jcode-lang') || 'en')
-    } catch {
-      /* ignore */
-    }
-  }, [])
-
-  function changeMode(next: AgentMode) {
-    dispatch(modelActions.setMode(next))
-    // Reflect approval auto-approve coupling: full_access implies auto-approve on.
-    if (next === 'full_access' && !autoApprove) {
-      api.setApprovalMode(true).catch(() => {})
-      dispatch(modelActions.setAutoApprove(true))
-    }
-  }
+  const tokenPct = tokenSnapshot?.model_context_limit
+    ? Math.round((tokenSnapshot.total_tokens / tokenSnapshot.model_context_limit) * 100)
+    : 0
 
   async function toggleAutoApprove() {
     const next = !autoApprove
     try {
       await api.setApprovalMode(next)
       dispatch(modelActions.setAutoApprove(next))
+      dispatch(modelActions.setMode(next ? 'full_access' : 'approval'))
     } catch (err) {
       console.error('Failed to toggle auto-approve:', err)
     }
   }
 
-  function changeLanguage(code: string) {
-    setLang(code)
+  async function toggleBLE() {
+    if (bleSaving) return
+    setBLESaving(true)
+    const next = !bleEnabled
     try {
-      localStorage.setItem('jcode-lang', code)
-    } catch {
-      /* ignore */
+      const res = await api.setChannelBLE(next)
+      dispatch(uiActions.setBLEState({ available: bleAvailable, enabled: res.enabled }))
+    } catch (err) {
+      console.error('Failed to toggle BLE:', err)
+    } finally {
+      setBLESaving(false)
     }
   }
 
-  function saveMaxIterations(v: number) {
-    setMaxIterations(v)
-    // Best-effort persist via config endpoint shape; the backend reads
-    // max_iterations at session start, so this is advisory in the UI.
+  async function changeLanguage(code: string) {
+    await setLocale(code as SupportedLocale)
   }
 
   return (
     <div className="space-y-5">
-      <h3 className={SECTION_TITLE}>General</h3>
+      <h3 className={SECTION_TITLE}>{t('settings.general.title')}</h3>
 
-      {/* Default mode */}
-      <div>
-        <div className={LABEL}>Default mode</div>
-        <Segmented
-          value={mode}
-          onChange={(m) => changeMode(m)}
-          options={[
-            { value: 'approval', label: 'Approval' },
-            { value: 'plan', label: 'Plan' },
-            { value: 'full_access', label: 'Full access' },
-          ]}
-        />
-        <div className="mt-1.5 text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">
-          Controls how much autonomy the agent has on each new chat.
+      <div className={ROW}>
+        <div className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)]">
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ backgroundColor: wsConnected ? 'var(--color-success)' : 'var(--color-border)' }}
+          />
         </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.general.serverState')}</div>
+          <div
+            className="text-[11px]"
+            style={{ color: wsConnected ? 'var(--color-success)' : 'var(--color-muted-foreground)' }}
+          >
+            {wsConnected ? t('settings.general.serverOnline') : t('settings.general.serverOffline')}
+          </div>
+        </div>
+      </div>
+
+      {tokenSnapshot && (
+        <div className={ROW}>
+          <div className="min-w-0 flex-1">
+            <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.general.tokenUsage')}</div>
+            <div className="mt-1.5 flex items-center gap-2">
+              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--color-muted)]">
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{
+                    width: `${tokenPct}%`,
+                    backgroundColor: tokenPct > 80 ? 'var(--color-destructive)' : tokenPct > 50 ? 'var(--color-warning-fg)' : 'var(--color-accent-neutral)',
+                  }}
+                />
+              </div>
+              <span className="font-mono text-[10px] text-[var(--color-muted-foreground)]">
+                {tokenSnapshot.total_tokens.toLocaleString()}
+                {tokenSnapshot.model_context_limit ? ` / ${tokenSnapshot.model_context_limit.toLocaleString()}` : ''}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-muted-foreground)]">
+        {t('settings.general.preferences')}
       </div>
 
       {/* Auto-approve */}
@@ -1331,34 +1339,31 @@ function GeneralTab() {
           <ShieldCheckIcon className="h-4 w-4" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-[12px] font-medium text-[var(--color-foreground)]">Auto-approve</div>
+          <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.general.autoApproveTitle')}</div>
           <div className="text-[11px] text-[var(--color-muted-foreground)]">
-            Automatically approve tool calls without prompting.
+            {t('settings.general.autoApproveDesc')}
           </div>
         </div>
-        <Switch on={autoApprove} onClick={toggleAutoApprove} title={autoApprove ? 'Disable' : 'Enable'} />
+        <Switch on={autoApprove} onClick={toggleAutoApprove} title={autoApprove ? t('common.disable') : t('common.enable')} />
       </div>
 
-      {/* Max iterations */}
-      <div>
-        <label className={LABEL}>Max iterations</label>
-        <input
-          value={loadingCfg ? '' : String(maxIterations)}
-          onChange={(e) => {
-            const n = Number(e.target.value)
-            if (!Number.isNaN(n) && n >= 0) saveMaxIterations(n)
-          }}
-          disabled={loadingCfg}
-          type="number"
-          min={0}
-          placeholder="50"
-          className={INPUT}
-          style={{ maxWidth: '140px' }}
-        />
-        <div className="mt-1.5 text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">
-          Maximum agent turns per run before it stops to ask.
+      {bleAvailable && (
+        <div className={ROW}>
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)]">
+            <BoltIcon className="h-4 w-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.general.bleTitle')}</div>
+            <div className="text-[11px] text-[var(--color-muted-foreground)]">{t('settings.general.bleDesc')}</div>
+          </div>
+          <Switch
+            on={bleEnabled}
+            onClick={toggleBLE}
+            disabled={bleSaving}
+            title={bleEnabled ? t('common.disable') : t('common.enable')}
+          />
         </div>
-      </div>
+      )}
 
       {/* Language */}
       <div className={ROW}>
@@ -1366,18 +1371,18 @@ function GeneralTab() {
           <GlobeAltIcon className="h-4 w-4" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-[12px] font-medium text-[var(--color-foreground)]">Language</div>
-          <div className="text-[11px] text-[var(--color-muted-foreground)]">Interface language preference.</div>
+          <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.general.languageTitle')}</div>
+          <div className="text-[11px] text-[var(--color-muted-foreground)]">{t('settings.general.languageDesc')}</div>
         </div>
         <select
-          value={lang}
+          value={i18n.language}
           onChange={(e) => changeLanguage(e.target.value)}
           className={INPUT_SM}
           style={{ width: '9rem' }}
         >
-          {LANGUAGES.map((l) => (
-            <option key={l.code} value={l.code}>
-              {l.label}
+          {SUPPORTED_LOCALES.map((locale) => (
+            <option key={locale} value={locale}>
+              {LOCALE_LABELS[locale]}
             </option>
           ))}
         </select>
@@ -2408,7 +2413,7 @@ function BrowserTab() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// SSH tab — SSH aliases (read + connect via wizard is a follow-up)
+// SSH tab — SSH aliases + remote-connect wizard entrypoint
 // ════════════════════════════════════════════════════════════════════════════
 
 function SSHTab() {
@@ -2430,8 +2435,7 @@ function SSHTab() {
     <div>
       <div className="mb-4 flex items-center justify-between">
         <h3 className={SECTION_TITLE}>SSH</h3>
-        {/* TODO: wire the remote-connect wizard (Vue inject('openRemoteConnect')). */}
-        <button type="button" className={`${BTN_SECONDARY} ${BTN_SM}`} disabled title="Coming soon">
+        <button type="button" className={`${BTN_SECONDARY} ${BTN_SM}`} onClick={() => window.dispatchEvent(new Event('jcode:open-remote-connect'))}>
           <PlusIcon className="h-3.5 w-3.5" /> Connect
         </button>
       </div>
@@ -2480,103 +2484,149 @@ function SSHTab() {
 // ════════════════════════════════════════════════════════════════════════════
 
 function UsageTab() {
+  const { t, i18n } = useTranslation()
   const [stats, setStats] = useState<UsageStats | null>(null)
   const [days, setDays] = useState(30)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     setLoading(true)
+    setError('')
     api
       .usageStats(days)
       .then(setStats)
-      .catch(() => {})
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false))
   }, [days])
 
+  const fmtCompact = (n: number) => new Intl.NumberFormat(i18n.language, { notation: 'compact', maximumFractionDigits: 1 }).format(n)
+  const fmtFull = (n: number) => new Intl.NumberFormat(i18n.language).format(n)
+  const fmtPct = (frac: number) => `${Math.round(frac * 100)}%`
+
   if (loading) {
-    return <div className="animate-pulse py-6 text-center text-xs text-[var(--color-muted-foreground)]">Loading usage…</div>
+    return <div className="animate-pulse py-6 text-center text-xs text-[var(--color-muted-foreground)]">{t('common.loading')}</div>
   }
   if (!stats) {
-    return <EmptyState Icon={ChartBarIcon} title="No usage data" hint="Usage statistics will appear here once available." />
+    return <EmptyState Icon={ChartBarIcon} title={t('settings.usageStats.noData')} hint={error || t('settings.usageStats.subtitle')} />
   }
 
-  const t = stats.totals
+  const totals = stats.totals
   const trend = stats.daily_trend
   const maxTokens = Math.max(1, ...trend.map((d) => d.tokens))
-  const fmt = (n: number) => n.toLocaleString()
+  const heat = buildHeatmap(stats.heatmap)
 
   return (
-    <div>
-      <div className="mb-4 flex items-center justify-between">
-        <h3 className={SECTION_TITLE}>Usage</h3>
-        <select value={days} onChange={(e) => setDays(Number(e.target.value))} className={INPUT_SM} style={{ width: '7rem' }}>
-          <option value={7}>7 days</option>
-          <option value={30}>30 days</option>
-          <option value={90}>90 days</option>
-          <option value={365}>1 year</option>
-        </select>
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className={SECTION_TITLE}>{t('settings.usageStats.title')}</h3>
+          <p className="mt-0.5 text-[11px] text-[var(--color-muted-foreground)]">{t('settings.usageStats.subtitle')}</p>
+        </div>
+        <div className="inline-flex rounded-[var(--radius-md)] bg-[var(--color-secondary)] p-0.5">
+          {[7, 30].map((d) => (
+            <button
+              key={d}
+              type="button"
+              onClick={() => setDays(d)}
+              className={`h-7 rounded-[var(--radius-sm)] px-2.5 text-xs transition-colors ${
+                days === d
+                  ? 'bg-[var(--color-background)] font-medium text-[var(--color-foreground)] shadow-[var(--shadow-sm)]'
+                  : 'text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]'
+              }`}
+            >
+              {t('settings.usageStats.lastNDays').replace('{n}', String(d))}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Totals */}
-      <div className="mb-5 grid grid-cols-2 gap-2 lg:grid-cols-4">
-        <StatCard label="Total tokens" value={fmt(t.total_tokens)} />
-        <StatCard label="Calls" value={fmt(t.calls)} />
-        <StatCard label="Turns" value={fmt(t.turns)} />
-        <StatCard label="Sessions" value={fmt(t.sessions)} />
-        <StatCard label="Prompt" value={fmt(t.prompt_tokens)} />
-        <StatCard label="Completion" value={fmt(t.completion_tokens)} />
-        <StatCard label="Cached" value={fmt(t.cached_tokens)} />
-        <StatCard label="Reasoning" value={fmt(t.reasoning_tokens)} />
+      {error && <div className="rounded-[var(--radius-md)] bg-[var(--color-warning-bg)] px-3 py-2 text-xs text-[var(--color-warning-fg)]">{error}</div>}
+
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+        <StatCard label={t('settings.usageStats.totalTokens')} value={fmtCompact(totals.total_tokens)} title={fmtFull(totals.total_tokens)} large />
+        <StatCard label={t('settings.usageStats.cacheHitRate')} value={stats.cache_supported ? fmtPct(stats.cache_hit_rate) : '—'} large accent />
+        <StatCard label={t('settings.usageStats.mostUsedModel')} value={stats.most_used_model || '—'} title={stats.most_used_model} large />
+        <StatCard label={t('settings.usageStats.sessions')} value={fmtFull(totals.sessions)} />
+        <StatCard label={t('settings.usageStats.turns')} value={fmtFull(totals.turns)} />
+        <StatCard label={t('settings.usageStats.activeDays')} value={fmtFull(stats.active_days)} sub={t('settings.usageStats.streak').replace('{n}', String(stats.current_streak))} />
       </div>
 
-      {/* Streak + cache */}
-      <div className="mb-5 flex flex-wrap gap-2">
-        <span className={CHIP}>Active days: {stats.active_days}</span>
-        <span className={CHIP}>Current streak: {stats.current_streak}</span>
-        <span className={CHIP}>Longest streak: {stats.longest_streak}</span>
-        {stats.cache_supported && (
-          <span className={CHIP}>Cache hit: {Math.round(stats.cache_hit_rate * 100)}%</span>
-        )}
-        {stats.most_used_model && <span className={CHIP}>Top model: {stats.most_used_model}</span>}
-      </div>
+      <section className={US_PANEL}>
+        <div className={US_PANEL_TITLE}>{t('settings.usageStats.tokenBreakdown')}</div>
+        <div className="mt-2 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+          <MiniStat label={t('settings.usageStats.promptTokens')} value={fmtCompact(totals.prompt_tokens)} />
+          <MiniStat label={t('settings.usageStats.cachedTokens')} value={fmtCompact(totals.cached_tokens)} />
+          <MiniStat label={t('settings.usageStats.completionTokens')} value={fmtCompact(totals.completion_tokens)} />
+          <MiniStat label={t('settings.usageStats.reasoningTokens')} value={fmtCompact(totals.reasoning_tokens)} />
+        </div>
+        <div className="mt-2 text-[10.5px] text-[var(--color-muted-foreground)]">{t('settings.usageStats.tokenBreakdownHint')}</div>
+      </section>
 
-      {/* Daily trend (mini bar chart) */}
-      {trend.length > 0 && (
-        <div className="mb-5">
-          <div className="mb-1.5 text-[11px] font-medium text-[var(--color-muted-foreground)]">Daily token trend</div>
-          <div className="flex h-20 items-end gap-px overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-muted)] p-1.5">
-            {trend.map((d) => (
-              <div
-                key={d.date}
-                title={`${d.date}: ${fmt(d.tokens)} tokens`}
-                className="flex-1 rounded-sm"
-                style={{
-                  height: `${Math.max(2, (d.tokens / maxTokens) * 100)}%`,
-                  backgroundColor: 'var(--color-accent-neutral)',
-                  opacity: d.tokens === 0 ? 0.2 : 0.85,
-                }}
+      <section className={US_PANEL}>
+        <div className="flex items-center justify-between">
+          <div className={US_PANEL_TITLE}>{t('settings.usageStats.heatmap')}</div>
+          <div className="flex items-center gap-1 text-[10px] text-[var(--color-muted-foreground)]">
+            <span>{t('settings.usageStats.less')}</span>
+            {HEAT_FILL.map((fill) => <span key={fill} className="inline-block h-2.5 w-2.5 rounded-[2px]" style={{ background: fill }} />)}
+            <span>{t('settings.usageStats.more')}</span>
+          </div>
+        </div>
+        <div className="mt-2 overflow-x-auto pb-1">
+          <div className="grid w-max grid-flow-col grid-rows-7 gap-[3px]">
+            {heat.map((cell) => (
+              <span
+                key={cell.date}
+                title={cell.future ? '' : cell.tokens > 0 ? `${cell.date} · ${fmtCompact(cell.tokens)} tokens · ${cell.turns} ${t('settings.usageStats.turnsUnit')}` : `${cell.date} · ${t('settings.usageStats.noActivity')}`}
+                className="h-[11px] w-[11px] rounded-[2px]"
+                style={{ background: cell.future ? 'transparent' : HEAT_FILL[cell.level] }}
               />
             ))}
           </div>
         </div>
-      )}
+      </section>
 
-      {/* Breakdowns */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Breakdown title="By model" shares={stats.by_model} />
-        <Breakdown title="By project" shares={stats.by_project} />
+      <section className={US_PANEL}>
+        <div className={US_PANEL_TITLE}>{t('settings.usageStats.dailyTrend')}</div>
+        {trend.length > 0 ? (
+          <div className="mt-3 flex h-[120px] items-end gap-[3px]">
+            {trend.map((d) => (
+              <div
+                key={d.date}
+                title={`${d.date} · ${fmtCompact(d.tokens)} tokens · ${d.turns} ${t('settings.usageStats.turnsUnit')}`}
+                className="min-w-[2px] flex-1 rounded-t-[2px] bg-[var(--accent-fill)] transition-[height]"
+                style={{ height: `${Math.max(2, (d.tokens / maxTokens) * 100)}%`, opacity: d.tokens === 0 ? 0.25 : 0.9 }}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="py-6 text-center text-[11px] text-[var(--color-muted-foreground)]">{t('settings.usageStats.noData')}</div>
+        )}
+      </section>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Breakdown title={t('settings.usageStats.byModel')} shares={stats.by_model} compact={fmtCompact} />
+        <Breakdown title={t('settings.usageStats.byProject')} shares={stats.by_project} compact={fmtCompact} project />
       </div>
-
-      {/* TODO: port the 365-day heatmap from UsageStatsPanel.vue. */}
     </div>
   )
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function StatCard({ label, value, title, sub, large, accent }: { label: string; value: string; title?: string; sub?: string; large?: boolean; accent?: boolean }) {
   return (
-    <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
+    <div className={`rounded-[var(--radius-md)] bg-[var(--color-secondary)] px-3 py-2 ${large ? 'py-3' : ''}`}>
       <div className="text-[10px] uppercase tracking-wide text-[var(--color-muted-foreground)]">{label}</div>
-      <div className="mt-0.5 font-mono text-[14px] font-semibold text-[var(--color-foreground)]">{value}</div>
+      <div title={title} className={`mt-0.5 truncate font-mono font-semibold ${large ? 'text-[18px]' : 'text-[14px]'} ${accent ? 'text-[var(--color-primary)]' : 'text-[var(--color-foreground)]'}`}>{value}</div>
+      {sub && <div className="mt-px text-[10.5px] text-[var(--color-muted-foreground)]">{sub}</div>}
+    </div>
+  )
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-[0.05em] text-[var(--color-muted-foreground)]">{label}</div>
+      <div className="mt-0.5 font-mono text-sm font-semibold text-[var(--color-foreground)]">{value}</div>
     </div>
   )
 }
@@ -2584,22 +2634,26 @@ function StatCard({ label, value }: { label: string; value: string }) {
 function Breakdown({
   title,
   shares,
+  compact,
+  project,
 }: {
   title: string
   shares: { name: string; tokens: number; share: number }[]
+  compact: (n: number) => string
+  project?: boolean
 }) {
   const sorted = [...shares].sort((a, b) => b.tokens - a.tokens).slice(0, 8)
   return (
-    <div>
-      <div className="mb-1.5 text-[11px] font-medium text-[var(--color-muted-foreground)]">{title}</div>
+    <section className={US_PANEL}>
+      <div className={US_PANEL_TITLE}>{title}</div>
       <div className="space-y-1.5">
         {sorted.length === 0 && <div className="text-[11px] text-[var(--color-muted-foreground)]">No data.</div>}
         {sorted.map((s) => (
           <div key={s.name}>
             <div className="flex items-center justify-between text-[11px]">
-              <span className="truncate text-[var(--color-foreground)]">{s.name}</span>
+              <span className="truncate text-[var(--color-foreground)]" title={s.name}>{project ? shortProjectName(s.name) : s.name}</span>
               <span className="ml-2 shrink-0 font-mono text-[var(--color-muted-foreground)]">
-                {Math.round(s.share * 100)}%
+                {compact(s.tokens)}
               </span>
             </div>
             <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-[var(--color-muted)]">
@@ -2611,6 +2665,60 @@ function Breakdown({
           </div>
         ))}
       </div>
-    </div>
+    </section>
   )
+}
+
+const US_PANEL = 'rounded-[var(--radius-md)] bg-[var(--color-secondary)] p-3'
+const US_PANEL_TITLE = 'text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--color-muted-foreground)]'
+const HEAT_FILL = [
+  'color-mix(in srgb, var(--color-foreground) 7%, transparent)',
+  'color-mix(in srgb, var(--color-primary) 28%, transparent)',
+  'color-mix(in srgb, var(--color-primary) 48%, transparent)',
+  'color-mix(in srgb, var(--color-primary) 72%, transparent)',
+  'var(--color-primary)',
+]
+
+function buildHeatmap(buckets: { date: string; tokens: number; turns: number }[]) {
+  const map = new Map(buckets.map((b) => [b.date, b]))
+  const max = Math.max(0, ...buckets.map((b) => b.tokens))
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const lastSunday = new Date(today)
+  lastSunday.setDate(today.getDate() - today.getDay())
+  const start = new Date(lastSunday)
+  start.setDate(lastSunday.getDate() - 52 * 7)
+  const cells: { date: string; tokens: number; turns: number; level: number; future: boolean }[] = []
+  for (let w = 0; w < 53; w++) {
+    for (let d = 0; d < 7; d++) {
+      const cur = new Date(start)
+      cur.setDate(start.getDate() + w * 7 + d)
+      const key = dateKey(cur)
+      const bucket = map.get(key)
+      const tokens = bucket?.tokens || 0
+      cells.push({
+        date: key,
+        tokens,
+        turns: bucket?.turns || 0,
+        level: levelFor(tokens, max),
+        future: cur.getTime() > today.getTime(),
+      })
+    }
+  }
+  return cells
+}
+
+function levelFor(tokens: number, max: number): number {
+  if (tokens <= 0 || max <= 0) return 0
+  const ratio = Math.log(tokens + 1) / Math.log(max + 1)
+  return Math.min(4, Math.max(1, Math.ceil(ratio * 4)))
+}
+
+function dateKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function shortProjectName(path: string): string {
+  const parts = path.replace(/\/+$/, '').split('/').filter(Boolean)
+  return parts.at(-1) || path
 }

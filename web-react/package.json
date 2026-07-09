@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",
+    "@lobehub/icons-static-svg": "^1.91.0",
     "@reduxjs/toolkit": "^2.8.2",
     "@tauri-apps/api": "^2.9.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",

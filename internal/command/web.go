@@ -255,16 +255,12 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 
 	registry := internalmodel.NewModelRegistryWithConfig(cfg)
 
-	// Load MCP tools. mcpToolsPtr is swapped atomically by reloadMCPTools so a new
-	// task (built concurrently by buildWebTask) always reads a consistent slice
-	// header without a data race on hot-reload.
+	// MCP tools are loaded asynchronously after the web server starts listening.
+	// A slow remote MCP server must not block /api/health and make desktop launch
+	// look hung. mcpToolsPtr is swapped atomically by reloadMCPTools so a new task
+	// (built concurrently by buildWebTask) always reads a consistent slice header
+	// without a data race on hot-reload.
 	var mcpToolsPtr atomic.Pointer[[]tool.BaseTool]
-	var initialMCPStatuses []tools.MCPStatus
-	if len(cfg.MCPServers) > 0 {
-		mt, statuses := tools.LoadMCPTools(ctx, cfg.MCPServers)
-		mcpToolsPtr.Store(&mt)
-		initialMCPStatuses = statuses
-	}
 	reloadMCPTools := func(servers map[string]*config.MCPServer) ([]tools.MCPStatus, error) {
 		nt, statuses := tools.LoadMCPTools(ctx, servers)
 		mcpToolsPtr.Store(&nt)
@@ -780,7 +776,6 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		SkillLoader:        skillLoader,
 		FlowLoader:         flowLoader,
 		ReloadMCP:          reloadMCPTools,
-		InitialMCPStatuses: initialMCPStatuses,
 		WechatClient:       wechatClient,
 		WebHandler:         bootEC.Handler,
 		EventHandler:       bootEC.EventHandler,
@@ -801,6 +796,10 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 	if autoStore != nil {
 		sched := automation.NewScheduler(autoStore, srv.AutomationRunner())
 		go sched.Run(ctx)
+	}
+
+	if len(cfg.MCPServers) > 0 {
+		srv.ReloadMCPInBackground()
 	}
 
 	// Set up inbound WeChat message handler now that srv exists. Always register

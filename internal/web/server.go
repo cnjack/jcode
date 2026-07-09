@@ -2009,12 +2009,59 @@ func serverFromReq(req *mcpServerReq) (*config.MCPServer, error) {
 	return srv, nil
 }
 
+func cloneMCPServers(in map[string]*config.MCPServer) map[string]*config.MCPServer {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]*config.MCPServer, len(in))
+	for name, srv := range in {
+		if srv == nil {
+			out[name] = nil
+			continue
+		}
+		cp := *srv
+		cp.Args = append([]string(nil), srv.Args...)
+		cp.Env = append([]string(nil), srv.Env...)
+		if srv.Headers != nil {
+			cp.Headers = make(map[string]string, len(srv.Headers))
+			for k, v := range srv.Headers {
+				cp.Headers[k] = v
+			}
+		}
+		if srv.OAuth != nil {
+			oa := *srv.OAuth
+			oa.Scopes = append([]string(nil), srv.OAuth.Scopes...)
+			cp.OAuth = &oa
+		}
+		out[name] = &cp
+	}
+	return out
+}
+
+// ReloadMCPInBackground connects configured MCP servers without blocking web
+// startup. Slow or unreachable MCP servers should update settings/tool state
+// when they finish, never delay /api/health or the desktop window.
+func (s *Server) ReloadMCPInBackground() {
+	if s.reloadMCP == nil {
+		return
+	}
+	go func() {
+		config.Logger().Printf("[web] loading MCP tools in background")
+		if err := s.reloadMCPAndRebuild(); err != nil {
+			config.Logger().Printf("[web] background MCP reload failed: %v", err)
+		} else {
+			config.Logger().Printf("[web] background MCP reload finished")
+		}
+		s.wsBroker.Broadcast(WSEvent{Type: "mcp_changed", Data: map[string]string{"source": "startup"}})
+	}()
+}
+
 // reloadMCPAndRebuild reconnects MCP servers from the current config and
 // rebuilds the live agent so new tools take effect without a restart.
 func (s *Server) reloadMCPAndRebuild() error {
 	if s.reloadMCP != nil {
 		s.mu.RLock()
-		servers := s.cfg.MCPServers
+		servers := cloneMCPServers(s.cfg.MCPServers)
 		s.mu.RUnlock()
 		statuses, err := s.reloadMCP(servers)
 		if err != nil {
