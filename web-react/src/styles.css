@@ -1,0 +1,8 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* jcode-ui ships its own tokens + component styles via jcode-ui/styles.css.
+   We import it here (single import site for the product app). It brings in the
+   base :root/.dark tokens, animations, and component-local CSS. */
+@import 'jcode-ui/styles.css';

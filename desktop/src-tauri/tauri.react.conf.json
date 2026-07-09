@@ -1,0 +1,8 @@
+{
+  "build": {
+    "frontendDist": "../../internal/web/dist-react",
+    "beforeDevCommand": "pnpm --dir ../web-react dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "make -C .. build-web-react"
+  }
+}
