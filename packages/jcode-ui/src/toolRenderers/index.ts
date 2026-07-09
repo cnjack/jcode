@@ -4,6 +4,11 @@ export * from './diff.js'
 export * from './search.js'
 export * from './todo.js'
 export * from './skill.js'
-export * from './team.js'
+export {
+  TeamListRenderer,
+  TeamMessageRenderer,
+  TeamCreateRenderer,
+  TeamSpawnRenderer,
+} from './team.js'
 export * from './browserShot.js'
 export * from './generic.js'

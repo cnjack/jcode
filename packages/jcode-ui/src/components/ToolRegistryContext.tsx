@@ -15,13 +15,18 @@ import { DiffRenderer } from '../toolRenderers/diff.js'
 import { SearchRenderer } from '../toolRenderers/search.js'
 import { TodoRenderer } from '../toolRenderers/todo.js'
 import { SkillRenderer } from '../toolRenderers/skill.js'
-import { TeamListRenderer, TeamMessageRenderer, TeamCreateRenderer } from '../toolRenderers/team.js'
+import {
+  TeamListRenderer,
+  TeamMessageRenderer,
+  TeamCreateRenderer,
+  TeamSpawnRenderer,
+} from '../toolRenderers/team.js'
 import { BrowserShotRenderer } from '../toolRenderers/browserShot.js'
 import { GenericRenderer } from '../toolRenderers/generic.js'
 
 const Ctx = createContext<ToolRendererRegistry | null>(null)
 
-/** Build the jcode default registry (9 tool renderers + generic fallback). */
+/** Build the jcode default registry (matches Vue ToolCallCard renderType map). */
 export function createDefaultToolRegistry(): ToolRendererRegistry {
   const r = createToolRendererRegistry()
   const map: Record<string, ToolRenderer> = {
@@ -37,6 +42,7 @@ export function createDefaultToolRegistry(): ToolRendererRegistry {
     team_list: TeamListRenderer,
     team_send_message: TeamMessageRenderer,
     team_create: TeamCreateRenderer,
+    team_spawn: TeamSpawnRenderer,
     browser_screenshot: BrowserShotRenderer,
   }
   r.registerAll(map)

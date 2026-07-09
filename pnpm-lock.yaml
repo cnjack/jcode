@@ -74,7 +74,7 @@ importers:
         specifier: ^5.9.2
         version: 5.9.3
 
-  web-react:
+  web:
     dependencies:
       '@heroicons/react':
         specifier: ^2.2.0

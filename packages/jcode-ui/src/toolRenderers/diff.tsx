@@ -1,82 +1,100 @@
 /**
- * DiffRenderer — renders `edit`/`multi_edit` tool calls.
- * Builds a red/green diff table from old_string → new_string in the args.
- * Handles both single-edit and multi_edit (array) shapes.
+ * DiffRenderer — `edit` / `multi_edit` (matches Vue diff block).
+ * Sections of del/add lines with line numbers + sign column. No outer border.
  */
 
 import { memo, useMemo } from 'react'
 import type { ToolRendererProps } from 'jcode-ui-core/adapters'
+import { truncate } from './terminal.js'
 
-interface EditSpec {
-  old_string?: string
-  new_string?: string
-  path?: string
-  file_path?: string
+interface Section {
+  type: 'add' | 'del'
+  lines: string[]
 }
 
-interface DiffRow {
-  kind: 'add' | 'del' | 'ctx' | 'meta'
-  text: string
-}
+export const DiffRenderer = memo(function DiffRenderer({
+  name,
+  args,
+  output,
+  error,
+  status,
+}: ToolRendererProps) {
+  const { sections } = useMemo(() => buildDiff(name, args), [name, args])
 
-export const DiffRenderer = memo(function DiffRenderer({ args }: ToolRendererProps) {
-  const { path, rows } = useMemo(() => buildDiff(args), [args])
-  if (rows.length === 0) {
-    return <div className="px-3 py-2 text-[var(--color-muted-foreground)]">No changes</div>
+  if (sections.length > 0) {
+    return (
+      <div className="jcode-diff max-h-72 overflow-y-auto" style={{ background: 'var(--color-surface)' }}>
+        <table className="jcode-diff-table w-full border-collapse">
+          <tbody>
+            {sections.map((section, si) =>
+              section.lines.map((line, li) => (
+                <tr
+                  key={`${si}-${li}`}
+                  className={section.type === 'del' ? 'jcode-diff-line-del' : 'jcode-diff-line-add'}
+                >
+                  <td className="jcode-diff-ln">{li + 1}</td>
+                  <td className="jcode-diff-sign">{section.type === 'del' ? '−' : '+'}</td>
+                  <td>{line}</td>
+                </tr>
+              )),
+            )}
+          </tbody>
+        </table>
+        {output && !error && (
+          <div
+            className="px-3 py-1 font-mono text-[10px]"
+            style={{ color: 'var(--color-muted-foreground)' }}
+          >
+            {truncate(output, 200)}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div
+        className="px-3 py-2 font-mono text-xs whitespace-pre-wrap"
+        style={{ color: 'var(--color-destructive, var(--color-error-fg))' }}
+      >
+        {error}
+      </div>
+    )
+  }
+  if (status === 'running') {
+    return (
+      <div className="animate-pulse px-3 py-3 text-xs" style={{ color: 'var(--color-muted-foreground)' }}>
+        Applying…
+      </div>
+    )
   }
   return (
-    <div className="jcode-diff jcode-selectable my-1 overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--code-bg)]">
-      {path && (
-        <div className="truncate border-b border-[var(--color-border)] px-3 py-1 font-mono text-[0.72rem] text-[var(--color-muted-foreground)]">
-          {path}
-        </div>
-      )}
-      <table className="jcode-diff-table">
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={i} className={rowClass(r.kind)}>
-              <td className="w-4 select-none text-center">
-                {r.kind === 'add' ? '+' : r.kind === 'del' ? '-' : ''}
-              </td>
-              <td>{r.text}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="px-3 py-2 text-xs italic" style={{ color: 'var(--color-muted-foreground)' }}>
+      No changes
     </div>
   )
 })
 
-function rowClass(kind: DiffRow['kind']): string {
-  switch (kind) {
-    case 'add':
-      return 'jcode-diff-line-add'
-    case 'del':
-      return 'jcode-diff-line-del'
-    case 'meta':
-      return 'jcode-diff-line-meta'
-    default:
-      return ''
-  }
-}
-
-function buildDiff(args: string): { path: string; rows: DiffRow[] } {
-  let specs: EditSpec[]
+function buildDiff(name: string, args: string): { sections: Section[] } {
   try {
     const parsed = JSON.parse(args)
-    specs = Array.isArray(parsed) ? parsed : [parsed]
+    if (name === 'multi_edit' && Array.isArray(parsed.edits)) {
+      const sections: Section[] = []
+      for (const edit of parsed.edits as Array<{ old_string?: string; new_string?: string }>) {
+        if (edit.old_string) sections.push({ type: 'del', lines: edit.old_string.split('\n') })
+        if (edit.new_string) sections.push({ type: 'add', lines: edit.new_string.split('\n') })
+      }
+      return { sections }
+    }
+    const oldStr: string = parsed.old_string || ''
+    const newStr: string = parsed.new_string || ''
+    const isCreate = !oldStr && !!newStr
+    const sections: Section[] = []
+    if (oldStr && !isCreate) sections.push({ type: 'del', lines: oldStr.split('\n') })
+    if (newStr) sections.push({ type: 'add', lines: newStr.split('\n') })
+    return { sections }
   } catch {
-    return { path: '', rows: [] }
+    return { sections: [] }
   }
-  const path = specs[0]?.path ?? specs[0]?.file_path ?? ''
-  const rows: DiffRow[] = []
-  for (const s of specs) {
-    const oldLines = (s.old_string ?? '').split('\n')
-    const newLines = (s.new_string ?? '').split('\n')
-    rows.push({ kind: 'del', text: '── old ──' })
-    for (const l of oldLines) rows.push({ kind: 'del', text: l })
-    rows.push({ kind: 'add', text: '── new ──' })
-    for (const l of newLines) rows.push({ kind: 'add', text: l })
-  }
-  return { path, rows }
 }

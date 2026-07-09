@@ -1,10 +1,10 @@
-<!DOCTYPE html>
-<html lang="en" class="dark">
+<!doctype html>
+<html lang="en">
   <head>
-    <meta charset="UTF-8">
-    <link rel="icon" type="image/png" href="/icon.png">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#111111">
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>jcode</title>
     <style>
       .boot-screen {
         position: fixed;
@@ -66,54 +66,29 @@
         }
       }
     </style>
+    <!-- Pre-mount theme resolution: apply the saved theme BEFORE the bundle loads
+         so there's no flash of the wrong theme. Mirrors web/index.html. -->
     <script>
-      // Pre-mount theme application to avoid a flash before Vue boots. Mirrors
-      // useTheme.ts; the post-mount applyTheme() corrects any edge case using
-      // the real theme registry. This runs before the module bundle, so it
-      // can't import the registry: light theme ids end in "-light" and dark
-      // ids do not — a convention enforced by TestLightThemeNamingConvention
-      // in internal/theme, which keeps the /-light$/ check below correct.
-      (function () {
+      ;(function () {
         try {
-          var v = localStorage.getItem('jcode_theme');
-          var id;
-          if (!v || v === 'system') id = matchMedia('(prefers-color-scheme: dark)').matches ? 'jcode-dark' : 'jcode-light';
-          else if (v === 'dark') id = 'jcode-dark';
-          else if (v === 'light') id = 'jcode-light';
-          else id = v;
-          var html = document.documentElement;
-          html.setAttribute('data-theme', id);
-          html.classList.toggle('dark', !/-light$/.test(id));
-        } catch (e) {}
-
-        // Pre-mount <html lang> application to match the stored UI locale. i18n
-        // re-applies this after boot, but setting it early avoids a flash and
-        // keeps screen readers / translation prompts correct from first paint.
-        try {
-          var map = { en: 'en', 'zh-Hans': 'zh-Hans', 'zh-Hant': 'zh-Hant', ja: 'ja', ko: 'ko' };
-          var loc = localStorage.getItem('jcode_locale');
-          if (!loc && navigator.languages) {
-            for (var i = 0; i < navigator.languages.length; i++) {
-              var l = (navigator.languages[i] || '').toLowerCase();
-              if (l === 'zh' || l.indexOf('zh-cn') === 0 || l.indexOf('zh-sg') === 0 || l.indexOf('zh-hans') === 0) { loc = 'zh-Hans'; break; }
-              if (l.indexOf('zh-tw') === 0 || l.indexOf('zh-hk') === 0 || l.indexOf('zh-mo') === 0 || l.indexOf('zh-hant') === 0) { loc = 'zh-Hant'; break; }
-              var p = l.split('-')[0];
-              if (p === 'ja') { loc = 'ja'; break; }
-              if (p === 'ko') { loc = 'ko'; break; }
-              if (p === 'en') { loc = 'en'; break; }
-            }
+          var stored = localStorage.getItem('jcode_theme') || 'system'
+          var dark =
+            stored === 'dark' ||
+            stored === 'jcode-dark' ||
+            (stored === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
+          var cls = document.documentElement.classList
+          cls.toggle('dark', dark)
+          if (stored && stored !== 'system' && stored !== 'light' && stored !== 'dark') {
+            document.documentElement.setAttribute('data-theme', stored)
           }
-          if (loc && map[loc]) document.documentElement.lang = map[loc];
-        } catch (e) {}
-      })();
+        } catch (e) {
+          /* noop */
+        }
+      })()
     </script>
-    <title>JCODE — Coding Assistant</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   </head>
-  <body style="background: var(--color-background); color: var(--color-foreground);" class="antialiased">
-    <div id="app">
+  <body>
+    <div id="root">
       <div class="boot-screen" role="status" aria-live="polite">
         <div class="boot-card">
           <div class="boot-logo"><span>[</span><b>J</b>CODE<span>]</span></div>
@@ -122,6 +97,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

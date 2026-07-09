@@ -1,6 +1,6 @@
 # AGENTS.md — JCode Project Development Guide
 
-Go coding agent — [Eino](https://github.com/cloudwego/eino) + BubbleTea v2 TUI + Vue 3 web UI + Tauri 2 desktop shell.
+Go coding agent — [Eino](https://github.com/cloudwego/eino) + BubbleTea v2 TUI + React web UI + Tauri 2 desktop shell.
 
 - **Module:** `github.com/cnjack/jcode` | **Entry:** `cmd/jcode/` | **Config dir:** `~/.jcode/`
 
@@ -12,7 +12,7 @@ Go coding agent — [Eino](https://github.com/cloudwego/eino) + BubbleTea v2 TUI
 make build          # generate → build-web → go build
 make install        # generate → build-web → go install
 make run            # go run ./cmd/jcode/
-make lint           # golangci-lint + eslint/oxlint (lint-go / lint-web)
+make lint           # golangci-lint + React typecheck (lint-go / lint-web)
 make doctor         # system check
 make desktop-dev    # Tauri desktop app in dev mode (rebuilds the Go sidecar first)
 make desktop-build  # distributable desktop bundle (.app/.dmg/.msi)
@@ -52,9 +52,8 @@ internal/
   feature/           # Compile-time feature flags via build tags (e.g. desktop, jcode_headless, ble)
   telemetry/         # Optional Langfuse tracing
   tui/               # BubbleTea v2 TUI components
-  web/               # HTTP server (REST + WS + PTY) + embedded Vue dist
-web/                 # Vue 3 + Vite + TypeScript frontend source (the CURRENT product UI)
-web-react/           # React 18 + Vite + RTK product app (migration in progress; parallel to web/)
+  web/               # HTTP server (REST + WS + PTY) + embedded React dist
+web/                 # React 18 + Vite + RTK product UI (embedded in the binary / Tauri)
 packages/            # pnpm workspace: the reusable jcode-ui component library
   jcode-ui/          #   published styled React chat components (→ npm: jcode-ui)
   jcode-ui-core/     #   framework-agnostic core: types, ChatRuntime, headless primitives
@@ -66,18 +65,15 @@ script/              # Build-time code generation + install.sh
 agent-eval/          # Agent evaluation harness + showcase generation
 ```
 
-### Frontend migration (Vue → React) — in progress
+### Frontend (React)
 
-The product UI is migrating from Vue 3 (`web/`) to React 18 (`web-react/`),
-built on a new reusable component library (`packages/jcode-ui` + `jcode-ui-core`).
-**During the migration both coexist:**
+The product UI is React 18 (`web/`) built on `packages/jcode-ui` + `jcode-ui-core`.
 
-- `make build-web` (default) builds the **Vue** app → `internal/web/dist/` (production).
-- `make build-web-react` builds the **React** app + packages → `internal/web/dist-react/` (parallel validation).
-- `make lint-react` typechecks the React app + both packages.
-- The Go `embed.FS` and Tauri `frontendDist` still point at the Vue `dist/`. The switch-over happens once `web-react` reaches feature parity.
+- `make build-web` builds packages + the React app → `internal/web/dist/` (production embed).
+- `make lint-web` typechecks the React app + both packages.
+- Go `//go:embed dist/*` and Tauri `frontendDist` both point at `internal/web/dist/`.
 
-The component library is the migration's organizing principle — see `packages/jcode-ui/README.md` and `site/docs/chat-ui/`. It's published to npm as `jcode-ui` (styled) + `jcode-ui-core` (headless). The runtime abstraction (`ChatRuntime` + `createExternalStoreRuntime`) is the seam that lets the components render from any Redux-shaped store.
+See `packages/jcode-ui/README.md` and `site/docs/chat-ui/`. Published to npm as `jcode-ui` (styled) + `jcode-ui-core` (headless). The runtime abstraction (`ChatRuntime` + `createExternalStoreRuntime`) is the seam that lets the components render from any Redux-shaped store.
 
 ### Key Design Decisions
 
@@ -192,21 +188,19 @@ The component library is the migration's organizing principle — see `packages/
 
 ---
 
-## Frontend (web/) — Vue (production)
+## Frontend (web/) — React (production)
 
-> **Note:** the product UI is migrating to React (`web-react/` + `packages/jcode-ui`). The Vue app remains the production build during the migration. New reusable UI work goes in `packages/jcode-ui` (React); see the migration section above and `packages/jcode-ui/README.md`.
-
-- **Stack:** Vue 3 + TypeScript + Vite
-- **Build:** `cd web && pnpm install && npx vite build` (or `make build-web`)
-- **Output:** builds to `internal/web/dist/`, embedded in Go binary via `//go:embed`
-- **Lint:** `cd web && pnpm lint` (eslint + oxlint)
+- **Stack:** React 18 + TypeScript + Vite + Redux Toolkit + `jcode-ui` / `jcode-ui-core`
+- **Build:** `make build-web` (packages + `cd web && npx vite build`)
+- **Output:** builds to `internal/web/dist/`, embedded in the Go binary via `//go:embed`
+- **Lint:** `make lint-web` (tsc for web + packages)
 - Changes to the frontend require rebuilding via `make build-web` for the Go binary to pick them up
-- **Don't confuse `web/` with `site/`:** `web/` (Vue) is the product UI embedded in the binary and reused by the desktop app; `site/` (React) is the public website + docs at www.j-code.net and is deployed separately (`cd site && pnpm build`).
+- **Don't confuse `web/` with `site/`:** `web/` is the product UI embedded in the binary and reused by the desktop app; `site/` is the public website + docs at www.j-code.net and is deployed separately (`cd site && pnpm build`).
 
 ### Icons & Styling
 
-- **Icons:** use `@heroicons/vue/24/outline` exclusively. Import each icon by name from its subpath (`import { XMarkIcon } from '@heroicons/vue/24/outline'`) for per-file tree-shaking. Do **not** hand-write inline `<svg>` icons or `v-html` SVG path strings.
-- **Icon sizing:** use Tailwind `w-N h-N` classes (e.g. `class="w-3.5 h-3.5"`), never a `:size` prop.
-- **Colors:** every color must come from a CSS custom property defined in `src/styles/tokens.css`. Never hardcode hex/rgb/`#fff`/`white` in `.vue` or `.css`. Text on the primary/destructive fills uses `--color-on-primary` / `--color-on-destructive`; code blocks use `--code-bg` / `--code-border`; syntax highlighting uses `--hljs-*`.
-- **Terminal (xterm) colors:** live in tokens (`--term-*` and the 16-color ANSI palette) and are read at runtime via `getComputedStyle` in `TerminalInstance.vue` — see `termTheme()`. Do not define terminal colors inline.
-- **Adding a new color:** add the token to `tokens.css` (both `:root` light and `.dark`) first, then reference it by `var(...)`. To theme it per generated theme, edit `internal/theme/palette.go` and regenerate — never edit `tokens.generated.css` by hand.
+- **Icons:** use `@heroicons/react/24/outline` exclusively. Import each icon by name. Do **not** hand-write inline `<svg>` icons.
+- **Icon sizing:** use Tailwind `h-N w-N` classes (e.g. `className="h-3.5 w-3.5"`).
+- **Colors:** every color must come from a CSS custom property (jcode-ui tokens / `tokens.generated.css`). Never hardcode hex/rgb/`#fff`/`white` in components.
+- **Themes:** edit `internal/theme/palette.go` and run `make generate` — never edit `tokens.generated.css` or `themes.generated.ts` by hand.
+- **Reusable chat UI:** prefer components from `packages/jcode-ui` over one-off markup in `web/`.
