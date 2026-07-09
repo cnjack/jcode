@@ -3,6 +3,31 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* jcode-ui ships its own tokens + component styles via jcode-ui/styles.css.
-   We import it here (single import site for the product app). It brings in the
-   base :root/.dark tokens, animations, and component-local CSS. */
+   It brings in the base :root/.dark tokens, animations, and component-local CSS. */
 @import 'jcode-ui/styles.css';
+
+/* Generated themes (dracula, nord, midnight, solarized, etc.) — produced by
+   `go generate ./internal/theme/...` from palette.go. Defines
+   html[data-theme="<id>"] color overrides. Copied from web/src/styles/. */
+@import './styles/tokens.generated.css';
+
+/* ─── Title-bar drag strip (Tauri desktop only) ───
+   In the Tauri shell the window uses an overlay title bar; this reserves the
+   band the traffic-light buttons float over and lets the user drag the window.
+   In the browser it's hidden. Mirrors web/src/style.css. */
+.titlebar-drag {
+  display: none;
+}
+html.is-tauri-macos .app-shell,
+html.is-tauri-macos .settings-shell {
+  padding-top: 28px;
+}
+html.is-tauri-macos .titlebar-drag {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 28px;
+  z-index: 45;
+}
