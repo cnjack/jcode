@@ -627,6 +627,7 @@ export default {
     noProjects: 'プロジェクトがまだありません',
     noTasks: 'タスクなし',
     running: '実行中',
+    untitled: '新しいチャット',
     newTaskHere: 'ここで新規タスク',
     filter: {
       title: 'フィルターと並べ替え',

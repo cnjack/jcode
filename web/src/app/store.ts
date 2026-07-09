@@ -297,10 +297,24 @@ const sessionSlice = createSlice({
   initialState: initialSession,
   reducers: {
     setSessions(s, a: { payload: SessionItem[] }) {
-      s.sessions = a.payload
+      // Same lazy-index race as setTasks: keep the open session if the server
+      // hasn't written it to the index yet.
+      const next = a.payload
+      const seen = new Set(next.map((x) => x.uuid))
+      const localOnly = s.sessions.filter(
+        (x) => !seen.has(x.uuid) && x.uuid === s.currentSessionId,
+      )
+      s.sessions = localOnly.length ? [...localOnly, ...next] : next
     },
     setTasks(s, a: { payload: TaskItem[] }) {
-      s.tasks = a.payload
+      // Preserve a just-created local task that isn't in the server index yet
+      // (session files are created lazily on the first user message).
+      const next = a.payload
+      const seen = new Set(next.map((t) => t.uuid))
+      const localOnly = s.tasks.filter(
+        (t) => !seen.has(t.uuid) && t.uuid === s.currentSessionId,
+      )
+      s.tasks = localOnly.length ? [...localOnly, ...next] : next
     },
     setCurrentSession(s, a: { payload: string }) {
       s.currentSessionId = a.payload
@@ -314,6 +328,31 @@ const sessionSlice = createSlice({
     setTaskRunning(s, a: { payload: { taskId: string; running: boolean } }) {
       const t = s.tasks.find((x) => x.uuid === a.payload.taskId)
       if (t) t.running = a.payload.running
+    },
+    /** Insert or merge a task so the sidebar shows it immediately. */
+    upsertTask(s, a: { payload: TaskItem }) {
+      const i = s.tasks.findIndex((t) => t.uuid === a.payload.uuid)
+      if (i >= 0) {
+        s.tasks[i] = { ...s.tasks[i], ...a.payload }
+      } else {
+        s.tasks.unshift(a.payload)
+      }
+    },
+    /** Patch fields on an existing task (no-op if missing). */
+    patchTask(s, a: { payload: { uuid: string } & Partial<TaskItem> }) {
+      const t = s.tasks.find((x) => x.uuid === a.payload.uuid)
+      if (!t) return
+      const { uuid: _uuid, ...rest } = a.payload
+      Object.assign(t, rest)
+    },
+    /** Insert or merge a session for the active-project fallback list. */
+    upsertSession(s, a: { payload: SessionItem }) {
+      const i = s.sessions.findIndex((x) => x.uuid === a.payload.uuid)
+      if (i >= 0) {
+        s.sessions[i] = { ...s.sessions[i], ...a.payload }
+      } else {
+        s.sessions.unshift(a.payload)
+      }
     },
   },
 })
@@ -519,10 +558,83 @@ export const sendMessage = createAsyncThunk(
     }
     dispatch(chatActions.addMessage({ role: 'user', content: payload.text, images: payload.images }))
     dispatch(chatActions.setRunning(true))
+    // First user turn materializes the session on disk — surface it in the
+    // sidebar immediately (title + running) before the chat HTTP round-trip.
+    if (sessionId) {
+      dispatch(revealSessionInSidebar({
+        uuid: sessionId,
+        title: sessionTitleFromMessage(payload.text),
+        running: true,
+      }))
+    }
     const resp = await api.chat(payload.text, payload.mode, sessionId, payload.images)
-    if (!state.session.currentSessionId) dispatch(sessionActions.setCurrentSession(resp.session_id))
+    const sid = resp.session_id || sessionId
+    if (sid) {
+      if (!state.session.currentSessionId) dispatch(sessionActions.setCurrentSession(sid))
+      dispatch(revealSessionInSidebar({
+        uuid: sid,
+        title: sessionTitleFromMessage(payload.text),
+        running: true,
+      }))
+      // Reconcile with the server index (now written by RecordUser).
+      void dispatch(loadSessions())
+      void dispatch(loadTasks())
+    }
   },
 )
+
+/** Match backend generateTitle so the sidebar title doesn't flicker after refresh. */
+function sessionTitleFromMessage(content: string): string {
+  const first = content.split(/\r?\n/, 1)[0]?.trim() ?? ''
+  if (!first) return 'New session'
+  const chars = Array.from(first)
+  return chars.length > 80 ? chars.slice(0, 80).join('') + '…' : first
+}
+
+/**
+ * Ensure a session/task appears in the left sidebar immediately.
+ * Backend only indexes a session after the first recorded message; empty
+ * "new chat" UUIDs are otherwise invisible until the next full reload.
+ */
+export function revealSessionInSidebar(opts: {
+  uuid: string
+  title?: string
+  running?: boolean
+  project?: string
+  provider?: string
+  model?: string
+}) {
+  return (dispatch: AppDispatch, getState: () => RootState) => {
+    if (!opts.uuid) return
+    const state = getState()
+    const now = new Date().toISOString()
+    const project = opts.project || state.session.projectPath || ''
+    const existing = state.session.tasks.find((t) => t.uuid === opts.uuid)
+    // First non-empty title wins (matches backend generateTitle on first user msg).
+    const title = existing?.title || opts.title || ''
+    dispatch(sessionActions.upsertTask({
+      uuid: opts.uuid,
+      project: existing?.project || project,
+      created_at: existing?.created_at || now,
+      updated_at: now,
+      provider: opts.provider || existing?.provider || state.model.providerName || '',
+      model: opts.model || existing?.model || state.model.modelName || '',
+      title,
+      pinned: existing?.pinned ?? false,
+      archived: existing?.archived ?? false,
+      unread: existing?.unread ?? false,
+      status: existing?.status,
+      running: opts.running ?? existing?.running ?? false,
+    }))
+    dispatch(sessionActions.upsertSession({
+      uuid: opts.uuid,
+      created_at: existing?.created_at || now,
+      provider: opts.provider || existing?.provider || state.model.providerName || '',
+      model: opts.model || existing?.model || state.model.modelName || '',
+      title: title || undefined,
+    }))
+  }
+}
 
 export const stopAgent = createAsyncThunk('chat/stop', async (_, { getState }) => {
   const state = getState() as RootState

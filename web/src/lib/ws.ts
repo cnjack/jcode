@@ -52,6 +52,12 @@ export class WSClient {
   private pingTimer: ReturnType<typeof setInterval> | null = null
   private connected = false
   private handlers: WSHandlers
+  /** When true, onclose must not schedule a reconnect (intentional teardown /
+   *  socket replacement). Without this, React StrictMode remount leaves a
+   *  ghost client that also receives agent_text → doubled streaming text. */
+  private closed = false
+  /** Monotonic id so stale socket callbacks never touch a newer connection. */
+  private gen = 0
 
   constructor(handlers: WSHandlers) {
     this.handlers = handlers
@@ -69,23 +75,27 @@ export class WSClient {
   }
 
   connect(): void {
-    if (this.ws) {
-      this.ws.close()
-      this.ws = null
-    }
+    this.closed = false
+    this.clearRetry()
+    this.detachSocket() // drop any existing socket without auto-reconnect
+
     const token = getAuthToken()
-    this.ws = token
+    const gen = ++this.gen
+    const ws = token
       ? new WebSocket(`${wsBase()}/api/ws`, ['jcode-auth', token])
       : new WebSocket(`${wsBase()}/api/ws`)
+    this.ws = ws
 
-    this.ws.onopen = () => {
+    ws.onopen = () => {
+      if (this.gen !== gen || this.ws !== ws) return
       this.connected = true
       this.handlers.onConnectionChange?.(true)
       if (this.pingTimer) clearInterval(this.pingTimer)
       this.pingTimer = setInterval(() => this.send({ type: 'ping' }), 30000)
     }
 
-    this.ws.onmessage = (event) => {
+    ws.onmessage = (event) => {
+      if (this.gen !== gen || this.ws !== ws) return
       try {
         const msg: WSMessage = JSON.parse(event.data)
         const active = this.handlers.activeTaskId?.()
@@ -108,20 +118,28 @@ export class WSClient {
       }
     }
 
-    this.ws.onerror = () => {
+    ws.onerror = () => {
+      if (this.gen !== gen || this.ws !== ws) return
       this.connected = false
       this.handlers.onConnectionChange?.(false)
     }
 
-    this.ws.onclose = () => {
+    ws.onclose = () => {
+      if (this.gen !== gen) return
+      if (this.ws === ws) this.ws = null
       this.connected = false
       this.handlers.onConnectionChange?.(false)
       if (this.pingTimer) {
         clearInterval(this.pingTimer)
         this.pingTimer = null
       }
-      this.ws = null
-      this.retryTimer = setTimeout(() => this.connect(), 3000)
+      // Only auto-reconnect unexpected drops — never after disconnect() or
+      // when connect() replaced this socket.
+      if (this.closed) return
+      this.clearRetry()
+      this.retryTimer = setTimeout(() => {
+        if (!this.closed) this.connect()
+      }, 3000)
     }
   }
 
@@ -136,11 +154,38 @@ export class WSClient {
   }
 
   disconnect(): void {
-    if (this.retryTimer) clearTimeout(this.retryTimer)
-    if (this.pingTimer) clearInterval(this.pingTimer)
-    this.ws?.close()
-    this.ws = null
+    this.closed = true
+    this.clearRetry()
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer)
+      this.pingTimer = null
+    }
+    this.detachSocket()
     this.connected = false
+  }
+
+  private clearRetry(): void {
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer)
+      this.retryTimer = null
+    }
+  }
+
+  /** Close the current socket without scheduling reconnect. */
+  private detachSocket(): void {
+    const ws = this.ws
+    this.ws = null
+    if (!ws) return
+    // Null handlers first so the close event cannot re-enter connect().
+    ws.onopen = null
+    ws.onmessage = null
+    ws.onerror = null
+    ws.onclose = null
+    try {
+      ws.close()
+    } catch {
+      // ignore
+    }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
