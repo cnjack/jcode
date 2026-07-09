@@ -61,6 +61,13 @@ func ts() string {
 }
 
 func writeFile(path, content string) {
+	// Generated files are gitignored; their parent dirs may not exist on a
+	// clean checkout (CI). Create them so go generate never fails only because
+	// tokens.generated.css / themes.generated.ts were never committed.
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "theme/gen: mkdir %s: %v\n", filepath.Dir(path), err)
+		os.Exit(1)
+	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "theme/gen: write %s: %v\n", path, err)
 		os.Exit(1)
