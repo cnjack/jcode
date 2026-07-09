@@ -39,6 +39,7 @@ import { ChannelsView } from './components/ChannelsView'
 import { CommandPalette } from './components/CommandPalette'
 import { AuthGate } from './components/AuthGate'
 import { SetupView } from './components/SetupView'
+import { SettingsDialog } from './components/SettingsDialog'
 
 export default function App() {
   const dispatch = useAppDispatch()
@@ -125,6 +126,9 @@ export default function App() {
         e.preventDefault()
         // New chat: clear + reset session + switch to chat view.
         dispatch(loadSession('')) // empty → new session flow handled in Sidebar
+      } else if (meta && e.key === ',') {
+        e.preventDefault()
+        dispatch(uiActions.setSettingsOpen(true))
       } else if (e.key === 'Escape') {
         dispatch(uiActions.setPaletteOpen(false))
         dispatch(uiActions.setSettingsOpen(false))
@@ -172,6 +176,7 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels'
             {activeView === 'automation-run' && <ChatView readOnly />}
           </main>
           {paletteOpen && <CommandPalette />}
+          <SettingsDialog />
         </div>
       </ToolRegistryProvider>
     </RuntimeProvider>
