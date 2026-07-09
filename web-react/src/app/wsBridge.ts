@@ -16,7 +16,8 @@ import {
   sendMessage,
 } from './store'
 import { api } from '../lib/api'
-import type { Goal } from 'jcode-ui-core'
+import type { Approval, Goal } from 'jcode-ui-core'
+import { normalizeMode } from '../lib/types'
 
 /** Create the handler set for a given store getter + dispatch. The handlers read
  *  fresh state (active task id) so they don't capture stale closures. */
@@ -69,7 +70,8 @@ export function createWSHandlers(
           tool_name: d.tool_name,
           tool_args: d.tool_args,
           is_external: d.is_external,
-        }),
+          task_id: d.task_id,
+        } as Approval & { task_id?: string }),
       ),
     onAskUserRequest: (d) =>
       dispatch(
@@ -77,13 +79,29 @@ export function createWSHandlers(
           toolName: 'ask_user',
           askUserId: d.id,
           questions: d.questions,
+          taskId: d.task_id,
         }),
       ),
     onModelChanged: (d) => {
       dispatch(modelActions.setProvider(d.provider))
       dispatch(modelActions.setModel(d.model))
     },
-    onModeChanged: (d) => dispatch(modelActions.setMode(d as never)),
+    onModeChanged: (d) => {
+      const mode = normalizeMode(d.mode)
+      dispatch(modelActions.setMode(mode))
+      dispatch(modelActions.setAutoApprove(mode === 'full_access'))
+    },
+    onApprovalModeChanged: (d) => {
+      dispatch(modelActions.setAutoApprove(d.auto_approve))
+      if (d.auto_approve) dispatch(modelActions.setMode('full_access'))
+      else if (getState().model.mode === 'full_access') dispatch(modelActions.setMode('approval'))
+    },
+    onSubagentProgress: (d) =>
+      dispatch(chatActions.addSubagentProgress({
+        event: d.event,
+        toolName: d.tool_name,
+        detail: d.detail,
+      })),
     onUserMessage: (d) => {
       dispatch(chatActions.addMessage({ role: 'user', content: d.content, source: d.source }))
       dispatch(chatActions.setRunning(true))

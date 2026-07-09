@@ -6,7 +6,7 @@
 //! spawns `jcode web --headless` on it, waits until /api/health answers, stores
 //! the port in the managed `SidecarPort` state (so the frontend can resolve an
 //! absolute `http://127.0.0.1:<port>` API base via the `get_sidecar_port` IPC
-//! command), then reveals the window.
+//! command), then keeps health-polling so startup failures can be surfaced.
 
 use std::collections::VecDeque;
 use std::io::Write as _;
@@ -159,6 +159,15 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Show the frontend shell as soon as the sidecar has been spawned. The page
+    // itself waits for /api/health before issuing API calls, but keeping the
+    // native window hidden until then makes slow sidecar boot look like a blank
+    // or stuck app.
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+
     // `ready` flips true once the sidecar's /api/health answers. Until then, the
     // sidecar exiting is a fatal *startup* failure that we surface to the user —
     // previously such a crash left the splash spinning forever, which is exactly
@@ -218,7 +227,7 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // Health-poll the port on a background thread, then reveal the window. We
+    // Health-poll the port on a background thread. We
     // verify the /api/health response (not just a bare TCP connect) so that if
     // another process grabbed the port in the moment between pick_free_port and
     // the sidecar binding it, the frontend won't be pointed at a foreign server.
@@ -237,7 +246,6 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             if health_ok(&addr, port) {
                 poll_ready.store(true, Ordering::SeqCst);
                 if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.show();
                     let _ = w.set_focus();
                 }
                 return;
@@ -305,9 +313,8 @@ fn health_ok(addr: &SocketAddr, port: u16) -> bool {
     let _ = stream.set_read_timeout(Some(Duration::from_millis(600)));
     let _ = stream.set_write_timeout(Some(Duration::from_millis(600)));
 
-    let req = format!(
-        "GET /api/health HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
-    );
+    let req =
+        format!("GET /api/health HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
     if stream.write_all(req.as_bytes()).is_err() {
         return false;
     }
@@ -328,5 +335,12 @@ fn health_ok(addr: &SocketAddr, port: u16) -> bool {
     }
 
     let resp = String::from_utf8_lossy(&buf);
-    resp.starts_with("HTTP/1.") && resp.contains(" 200 ") && resp.contains("\"status\"")
+    let status_ok = resp
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .map(|code| code == "200")
+        .unwrap_or(false);
+
+    status_ok && resp.contains("\"status\"")
 }

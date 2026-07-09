@@ -22,6 +22,7 @@ import {
   FolderOpenIcon,
   RectangleStackIcon,
 } from '@heroicons/react/24/outline'
+import { useTranslation } from 'react-i18next'
 import { api } from '../lib/api'
 
 type PanelType = 'plan' | 'files' | 'changes' | 'terminal'
@@ -33,21 +34,6 @@ interface Props {
   terminalOpen: boolean
   onTogglePanel: (panel: PanelType) => void
 }
-
-// Strings hardcoded from web/src/i18n/locales/en.ts (the React app has no i18n
-// wired up yet — matches CommandPalette/ProjectHeader which also hardcode English).
-const LABELS = {
-  plan: 'Plan',
-  files: 'Files',
-  changes: 'Changes',
-  terminal: 'Terminal',
-} as const
-
-const STATUS_LABELS = {
-  running: 'Running',
-  connected: 'Connected',
-  disconnected: 'Disconnected',
-} as const
 
 const PANEL_BUTTONS: { panel: PanelType; shortcut: string }[] = [
   { panel: 'plan', shortcut: '⇧⌘P' },
@@ -64,6 +50,7 @@ const PANEL_ICONS: Record<PanelType, typeof RectangleStackIcon> = {
 }
 
 export function TopBar({ isRunning, wsConnected, activePanel, terminalOpen, onTogglePanel }: Props) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   // Working-tree diff stat shown inline on the Changes item. null on failure /
   // clean tree (matches the Vue behaviour — never fabricated).
@@ -136,10 +123,10 @@ export function TopBar({ isRunning, wsConnected, activePanel, terminalOpen, onTo
       ? 'var(--color-success)'
       : 'var(--color-muted-foreground)'
   const statusLabel = isRunning
-    ? STATUS_LABELS.running
+    ? t('topbar.status.running')
     : wsConnected
-      ? STATUS_LABELS.connected
-      : STATUS_LABELS.disconnected
+      ? t('topbar.status.connected')
+      : t('topbar.status.disconnected')
 
   // Terminal is a bottom panel tracked separately; the other three reflect
   // activePanel (the right panel).
@@ -148,8 +135,8 @@ export function TopBar({ isRunning, wsConnected, activePanel, terminalOpen, onTo
     return activePanel === panel
   }
 
-  const panelsHint = `Panels · ${statusLabel}  (⇧⌘P plan · ⇧⌘E files · ⇧⌘G changes · ⌘\` terminal)`
-  const panelsMenuLabel = `Panels menu · ${statusLabel}`
+  const panelsHint = t('topbar.panelsHint', { status: statusLabel })
+  const panelsMenuLabel = t('topbar.panelsMenu', { status: statusLabel })
 
   return (
     <div
@@ -214,7 +201,7 @@ export function TopBar({ isRunning, wsConnected, activePanel, terminalOpen, onTo
                       current ? 'text-[var(--color-accent-neutral)]' : 'text-[var(--color-muted-foreground)]'
                     }`}
                   />
-                  <span className="flex-1 whitespace-nowrap">{LABELS[btn.panel]}</span>
+                  <span className="flex-1 whitespace-nowrap">{t(`topbar.${btn.panel}`)}</span>
                   {btn.panel === 'changes' && diffStat && (
                     <span
                       className="inline-flex shrink-0 items-center gap-1.5 font-mono text-[11px]"
