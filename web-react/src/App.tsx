@@ -11,7 +11,7 @@
  * The WS bridge is a module-level singleton created here via useEffect (once).
  */
 
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   RuntimeProvider,
   ToolRegistryProvider,
@@ -40,6 +40,9 @@ import { CommandPalette } from './components/CommandPalette'
 import { AuthGate } from './components/AuthGate'
 import { SetupView } from './components/SetupView'
 import { SettingsDialog } from './components/SettingsDialog'
+import { TopBar } from './components/TopBar'
+import { RightPanel } from './components/RightPanel'
+import { TerminalPanel } from './components/TerminalPanel'
 
 export default function App() {
   const dispatch = useAppDispatch()
@@ -159,22 +162,118 @@ function store_getState() {
   return store.getState()
 }
 
+type PanelType = 'terminal' | 'files' | 'changes' | 'plan'
+
 function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels' | 'automation-run' }) {
   const runtime = useChatRuntime()
   const registry = useRef(createDefaultToolRegistry()).current
   const paletteOpen = useAppSelector((s) => s.ui.paletteOpen)
+  const isRunning = useAppSelector((s) => s.chat.isRunning)
+  const wsConnected = useAppSelector((s) => s.session.wsConnected)
+
+  // Panel state — mirrors Vue App.vue: a right panel (files/changes/plan) and a
+  // bottom panel (terminal) that can be open simultaneously.
+  const [rightPanelOpen, setRightPanelOpen] = useState(false)
+  const [rightPanelTab, setRightPanelTab] = useState<'files' | 'changes' | 'plan'>('files')
+  const [bottomPanel, setBottomPanel] = useState<'none' | 'terminal'>('none')
+  const [bottomPanelHeight, setBottomPanelHeight] = useState(260)
+
+  const togglePanel = useCallback((panel: PanelType) => {
+    if (panel === 'terminal') {
+      setBottomPanel((p) => (p === 'terminal' ? 'none' : 'terminal'))
+      return
+    }
+    setRightPanelTab((current) => {
+      if (rightPanelOpen && current === panel) {
+        setRightPanelOpen(false)
+        return current
+      }
+      setRightPanelOpen(true)
+      return panel
+    })
+  }, [rightPanelOpen])
+
+  // Panel keyboard shortcuts: ⇧⌘P (plan), ⇧⌘E (files), ⇧⌘G (changes), ⌘` (terminal).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const meta = e.metaKey || e.ctrlKey
+      if (meta && e.shiftKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault(); togglePanel('plan')
+      } else if (meta && e.shiftKey && e.key.toLowerCase() === 'e') {
+        e.preventDefault(); togglePanel('files')
+      } else if (meta && e.shiftKey && e.key.toLowerCase() === 'g') {
+        e.preventDefault(); togglePanel('changes')
+      } else if (meta && e.key === '`') {
+        e.preventDefault(); togglePanel('terminal')
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [togglePanel])
+
+  // Bottom-panel resize handle.
+  const startResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const startY = e.clientY
+    const startH = bottomPanelHeight
+    function onMove(ev: MouseEvent) {
+      const diff = startY - ev.clientY
+      setBottomPanelHeight(Math.max(120, Math.min(600, startH + diff)))
+    }
+    function onUp() {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [bottomPanelHeight])
 
   return (
     <RuntimeProvider runtime={runtime}>
       <ToolRegistryProvider registry={registry}>
-        <div className="flex h-screen overflow-hidden bg-[var(--color-background)] text-[var(--color-foreground)]">
+        <div className="relative flex h-[100dvh] overflow-hidden bg-[var(--color-background)] text-[var(--color-foreground)]">
+          {/* TopBar — floated top-right (only on chat view, like Vue). */}
+          {activeView === 'chat' && (
+            <TopBar
+              isRunning={isRunning}
+              wsConnected={wsConnected}
+              activePanel={rightPanelOpen ? rightPanelTab : 'none'}
+              terminalOpen={bottomPanel === 'terminal'}
+              onTogglePanel={togglePanel}
+            />
+          )}
+
           <Sidebar />
-          <main className="flex min-w-0 flex-1 flex-col">
+
+          <main className="relative flex min-w-0 flex-1 flex-col">
             {activeView === 'chat' && <ChatView />}
             {activeView === 'automations' && <AutomationsView />}
             {activeView === 'channels' && <ChannelsView />}
             {activeView === 'automation-run' && <ChatView readOnly />}
+
+            {/* Bottom panel (terminal) */}
+            {bottomPanel === 'terminal' && (
+              <div className="relative shrink-0 border-t border-[var(--color-border)]" style={{ height: bottomPanelHeight }}>
+                <div
+                  className="absolute -top-1 left-0 right-0 z-10 h-2 cursor-row-resize"
+                  onMouseDown={startResize}
+                >
+                  <div className="absolute left-1/2 top-[3px] h-1 w-8 -translate-x-1/2 rounded-full bg-[var(--color-border)]" />
+                </div>
+                <TerminalPanel onClose={() => setBottomPanel('none')} />
+              </div>
+            )}
           </main>
+
+          {/* Right panel (files/changes/plan) */}
+          {rightPanelOpen && (
+            <RightPanel
+              activeTab={rightPanelTab}
+              onClose={() => setRightPanelOpen(false)}
+              onSwitchTab={setRightPanelTab}
+            />
+          )}
+
           {paletteOpen && <CommandPalette />}
           <SettingsDialog />
         </div>

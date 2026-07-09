@@ -1,7 +1,9 @@
 .DS_Store
 /jcode
+/jcode-new
 /weixin_poc
 internal/web/dist
+internal/web/dist-react
 internal/model/registry_generated.go
 web/src/styles/tokens.generated.css
 web/src/composables/themes.generated.ts
