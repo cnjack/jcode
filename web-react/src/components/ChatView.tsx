@@ -1,12 +1,12 @@
 /**
- * ChatView — the main chat column. Composes jcode-ui's Thread + ChatInput with
- * a header (project path, connection status) and a GoalBanner. The data flows
- * from the RTK store via the RuntimeProvider wired in App.tsx.
+ * ChatView — the main chat column. The TopBar (floated top-right) carries the
+ * panel menu + connection status, so there is NO separate header here (matches
+ * the Vue app, where the chat canvas has no header bar). Just GoalBanner +
+ * Thread + ChatInput.
  */
 
 import { Thread } from 'jcode-ui'
 import { GoalBanner } from './GoalBanner'
-import { ProjectHeader } from './ProjectHeader'
 import { ChatInput } from './ChatInput'
 
 export interface ChatViewProps {
@@ -17,7 +17,6 @@ export interface ChatViewProps {
 export function ChatView({ readOnly }: ChatViewProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ProjectHeader />
       <GoalBanner />
       <div className="min-h-0 flex-1">
         <Thread overscanBottom={readOnly ? 8 : 96} />

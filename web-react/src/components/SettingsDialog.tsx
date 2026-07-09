@@ -1,11 +1,13 @@
 /**
  * SettingsDialog — React port of web/src/components/SettingsDialog.vue.
  *
- * Modal overlay with a left tab nav + right scrollable content panel. Tabs:
- * Providers (full CRUD + catalog + advanced config), Models (state/favorites/
- * effort), MCP (servers CRUD + OAuth login), Skills (enable/disable), Appearance
- * (theme picker), Browser (config + site permissions), Remote (SSH aliases),
- * Usage (stats).
+ * Full-screen app-like overlay (mirrors the Vue .settings-shell): a `fixed
+ * inset-0` surface with an opaque background and its own left nav rail + an
+ * inset surface content panel — the same geometry as the chat page, NOT a small
+ * centered dialog. Tabs: Providers (full CRUD + catalog + advanced config),
+ * Models (state/favorites/effort), MCP (servers CRUD + OAuth login), Skills
+ * (enable/disable), Appearance (theme picker), Browser (config + site
+ * permissions), Remote (SSH aliases), Usage (stats).
  *
  * The Providers tab is the most complete port: list of provider cards, inline
  * add/edit form with advanced fields (base_url, headers, vision, thinking,
@@ -289,55 +291,69 @@ export function SettingsDialog() {
   const close = () => dispatch(uiActions.setSettingsOpen(false))
 
   return (
+    // Full-screen app-like overlay (mirrors the Vue .settings-shell): opaque
+    // background covering the entire window, with its own left rail + inset
+    // content panel — NOT a small centered dialog. z-modal covers the TopBar.
     <div
-      className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--backdrop)] p-4"
-      onClick={close}
+      className="fixed inset-0 flex overflow-hidden"
+      style={{ backgroundColor: 'var(--color-background)', zIndex: 'var(--z-modal)' }}
     >
-      <div
-        className="flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden rounded-[var(--radius-2xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)]"
-        onClick={(e) => e.stopPropagation()}
+      {/* Left rail: shell tone, same width as the workspace sidebar, no border.
+          Holds the vertical section nav (full-width buttons, active one
+          highlighted) with a "Close" action pinned to the bottom. */}
+      <nav
+        className="flex w-[var(--sidebar-width)] shrink-0 flex-col gap-0.5 overflow-y-auto p-3"
+        style={{ backgroundColor: 'var(--color-background)' }}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-[var(--color-foreground)]">
-            <Cog6ToothIcon className="h-4 w-4" />
-            Settings
-          </div>
-          <button
-            type="button"
-            onClick={close}
-            title="Close"
-            className="rounded-[var(--radius-md)] p-1 text-[var(--color-muted-foreground)] hover:bg-[var(--color-secondary)]"
-          >
-            <XMarkIcon className="h-4 w-4" />
-          </button>
-        </div>
+        {TABS.map((t) => {
+          const active = tab === t.id
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTab(t.id)}
+              className="relative flex h-8 w-full items-center gap-2.5 rounded-[var(--radius-md)] px-2.5 text-left text-[13px] transition-colors duration-[var(--duration-fast,150ms)] hover:bg-[var(--color-secondary)]"
+              style={
+                active
+                  ? { color: 'var(--color-foreground)', backgroundColor: 'var(--color-secondary)', fontWeight: 500 }
+                  : { color: 'var(--color-muted-foreground)', backgroundColor: 'transparent' }
+              }
+            >
+              {active && (
+                <span
+                  className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-full"
+                  style={{ backgroundColor: 'var(--color-accent-neutral)' }}
+                />
+              )}
+              <t.Icon className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{t.label}</span>
+            </button>
+          )
+        })}
 
-        {/* Body: left nav + right content */}
-        <div className="flex min-h-0 flex-1">
-          <nav className="w-44 shrink-0 overflow-y-auto border-r border-[var(--color-border)] p-2">
-            {TABS.map((t) => {
-              const active = tab === t.id
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => setTab(t.id)}
-                  className="mb-0.5 flex w-full items-center gap-2.5 rounded-[var(--radius-md)] px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-[var(--color-secondary)]"
-                  style={
-                    active
-                      ? { background: 'var(--color-secondary)', color: 'var(--color-foreground)', fontWeight: 500 }
-                      : { color: 'var(--color-muted-foreground)' }
-                  }
-                >
-                  <t.Icon className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">{t.label}</span>
-                </button>
-              )
-            })}
-          </nav>
+        {/* Close action pinned to the bottom of the rail — settings is opened
+            from the sidebar's bottom gear, so returning shouldn't require
+            traveling all the way back to the top. */}
+        <button
+          type="button"
+          onClick={close}
+          title="Close settings (Esc)"
+          className="mt-auto flex h-9 items-center gap-1.5 rounded-[var(--radius-md)] px-2.5 text-[13px] font-medium text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-secondary)] hover:text-[var(--color-foreground)]"
+        >
+          <XMarkIcon className="h-4 w-4" />
+          Close
+        </button>
+      </nav>
 
-          <div className="min-w-0 flex-1 overflow-y-auto px-6 py-5">
+      {/* Right column: inset surface content panel (mirrors .settings-panel /
+          .chat-panel). Only this panel scrolls; each section is centered and
+          width-capped (max-w-3xl). No header bar — the rail conveys navigation. */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div
+          className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-2xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-sm)]"
+          style={{ margin: '4px 14px 14px' }}
+        >
+          <div className="min-h-0 flex-1 overflow-y-auto px-8 py-7 [&>div]:mx-auto [&>div]:max-w-3xl">
             {tab === 'providers' && <ProvidersTab />}
             {tab === 'models' && <ModelsTab />}
             {tab === 'mcp' && <MCPTab />}
