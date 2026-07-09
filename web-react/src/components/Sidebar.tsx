@@ -8,11 +8,12 @@
  * functional minimum that makes the chat app navigable.
  */
 
-import { PlusIcon, ChatBubbleLeftIcon, BoltIcon, ChatBubbleOvalLeftIcon } from '@heroicons/react/24/outline'
+import { PlusIcon, ChatBubbleLeftIcon, BoltIcon, ChatBubbleOvalLeftIcon, Cog6ToothIcon } from '@heroicons/react/24/outline'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
 import { uiActions, sessionActions, chatActions, loadSession } from '../app/store'
 import { api } from '../lib/api'
 import type { SessionItem } from '../lib/types'
+import { ThemeToggle } from './ThemeToggle'
 
 export function Sidebar() {
   const dispatch = useAppDispatch()
@@ -91,6 +92,20 @@ export function Sidebar() {
             </button>
           ))
         )}
+      </div>
+
+      {/* Footer: theme toggle + settings (matches Vue sidebar footer) */}
+      <div className="flex shrink-0 items-center gap-1 px-3 py-2">
+        <ThemeToggle compact />
+        <button
+          type="button"
+          onClick={() => dispatch(uiActions.setSettingsOpen(true))}
+          className="rounded-[var(--radius-md)] p-1.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--neutral-wash-soft)] hover:text-[var(--color-foreground)]"
+          aria-label="Settings"
+          title="Settings (⌘,)"
+        >
+          <Cog6ToothIcon className="h-3.5 w-3.5" />
+        </button>
       </div>
     </aside>
   )
