@@ -20,6 +20,26 @@ export interface MessageViewRenderSlots {
   renderContent?: (htmlOrText: string, message: Message) => ReactNode
   /** Render the avatar glyph for a role. */
   renderAvatar?: (role: Message['role']) => ReactNode
+  /**
+   * Render the hover action row (copy / edit). When provided, this replaces the
+   * default text buttons entirely — the styled wrapper supplies icon buttons
+   * while MessageView still owns the copy/edit state and handlers.
+   */
+  renderActions?: (actions: MessageActions) => ReactNode
+}
+
+/** Action handles passed to `renderActions` so the caller can wire its own UI. */
+export interface MessageActions {
+  /** Whether the copy action just fired (show a "copied" affordance). */
+  copied: boolean
+  /** Copy the message content to the clipboard. */
+  onCopy: () => void
+  /** Whether the user may edit this message (role==='user' && !isRunning). */
+  canEdit: boolean
+  /** Enter edit mode for this message. */
+  onEdit: () => void
+  /** Whether the message is currently being edited (hide actions while true). */
+  editing: boolean
 }
 
 export interface MessageViewProps extends MessageViewRenderSlots {
@@ -39,6 +59,7 @@ export function MessageView({
   className,
   renderContent,
   renderAvatar,
+  renderActions,
 }: MessageViewProps): ReactNode {
   const actions = useRuntimeActions()
   const [editing, setEditing] = useState(false)
@@ -115,10 +136,14 @@ export function MessageView({
             </div>
           )}
           {showCopy && !editing && (
-            <div style={{ opacity: 0.6 }}>
-              <button type="button" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>
-              {canEdit && <button type="button" onClick={startEdit}>Edit</button>}
-            </div>
+            renderActions ? (
+              renderActions({ copied, onCopy: copy, canEdit: !!canEdit, onEdit: startEdit, editing })
+            ) : (
+              <div style={{ opacity: 0.6 }}>
+                <button type="button" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>
+                {canEdit && <button type="button" onClick={startEdit}>Edit</button>}
+              </div>
+            )
           )}
         </div>
       </div>

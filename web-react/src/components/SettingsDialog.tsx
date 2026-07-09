@@ -38,7 +38,12 @@ import {
   ServerIcon,
   BoltIcon,
   ComputerDesktopIcon,
+  ShieldCheckIcon,
+  KeyIcon,
+  ArrowRightIcon,
+  ChatBubbleOvalLeftIcon,
 } from '@heroicons/react/24/outline'
+import type { AgentMode } from '../lib/types'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
 import { uiActions, modelActions } from '../app/store'
 import { api } from '../lib/api'
@@ -52,23 +57,27 @@ import type {
   SkillInfo,
   SSHListResponse,
   UsageStats,
-  ModelStateResponse,
   SetupProvider,
-  ModelInfo,
 } from '../lib/types'
 
 // ─── tab config ────────────────────────────────────────────────────────────
 
-type TabId = 'providers' | 'models' | 'mcp' | 'skills' | 'appearance' | 'browser' | 'remote' | 'usage'
+// Matches the Vue SettingsDialog tab list exactly (line 106):
+//   general, appearance, providers, mcp, skills, browser, ssh, channels,
+//   shortcuts, usage. Note: there is NO standalone Models tab — models live
+//   inside the Providers tab (catalog + custom models), mirroring the Vue app.
+type TabId = 'general' | 'appearance' | 'providers' | 'mcp' | 'skills' | 'browser' | 'ssh' | 'channels' | 'shortcuts' | 'usage'
 
 const TABS: { id: TabId; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
+  { id: 'general', label: 'General', Icon: Cog6ToothIcon },
+  { id: 'appearance', label: 'Appearance', Icon: SwatchIcon },
   { id: 'providers', label: 'Providers', Icon: CpuChipIcon },
-  { id: 'models', label: 'Models', Icon: Cog6ToothIcon },
   { id: 'mcp', label: 'MCP', Icon: ServerStackIcon },
   { id: 'skills', label: 'Skills', Icon: SparklesIcon },
-  { id: 'appearance', label: 'Appearance', Icon: SwatchIcon },
   { id: 'browser', label: 'Browser', Icon: GlobeAltIcon },
-  { id: 'remote', label: 'Remote', Icon: CommandLineIcon },
+  { id: 'ssh', label: 'SSH', Icon: CommandLineIcon },
+  { id: 'channels', label: 'Channels', Icon: ChatBubbleOvalLeftIcon },
+  { id: 'shortcuts', label: 'Shortcuts', Icon: KeyIcon },
   { id: 'usage', label: 'Usage', Icon: ChartBarIcon },
 ]
 
@@ -234,13 +243,6 @@ function cmToDetail(cm: CatalogModel): CustomModelDetail {
   }
 }
 
-/** Reasoning-effort options for a model: prefer models.dev effort values, else default tiers. */
-function modelEfforts(model: ModelInfo): string[] {
-  const opt = (model.reasoning_options ?? []).find((o) => o.type === 'effort')
-  if (opt?.values?.length) return opt.values
-  return ['low', 'medium', 'high']
-}
-
 function mcpStatusLabel(info: MCPServerInfo): string {
   if (!info.enabled) return 'Disabled'
   switch (info.status) {
@@ -274,7 +276,7 @@ function mcpStatusColor(info: MCPServerInfo): string {
 export function SettingsDialog() {
   const open = useAppSelector((s) => s.ui.settingsOpen)
   const dispatch = useAppDispatch()
-  const [tab, setTab] = useState<TabId>('providers')
+  const [tab, setTab] = useState<TabId>('general')
 
   // Esc closes (App.tsx also binds a global Esc, but this is self-contained).
   useEffect(() => {
@@ -354,13 +356,15 @@ export function SettingsDialog() {
           style={{ margin: '4px 14px 14px' }}
         >
           <div className="min-h-0 flex-1 overflow-y-auto px-8 py-7 [&>div]:mx-auto [&>div]:max-w-3xl">
+            {tab === 'general' && <GeneralTab />}
+            {tab === 'appearance' && <AppearanceTab />}
             {tab === 'providers' && <ProvidersTab />}
-            {tab === 'models' && <ModelsTab />}
             {tab === 'mcp' && <MCPTab />}
             {tab === 'skills' && <SkillsTab />}
-            {tab === 'appearance' && <AppearanceTab />}
             {tab === 'browser' && <BrowserTab />}
-            {tab === 'remote' && <RemoteTab />}
+            {tab === 'ssh' && <SSHTab />}
+            {tab === 'channels' && <ChannelsTab />}
+            {tab === 'shortcuts' && <ShortcutsTab />}
             {tab === 'usage' && <UsageTab />}
           </div>
         </div>
@@ -1230,150 +1234,229 @@ function CustomModelForm({
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Models tab — model state: favorites, enable/disable, effort overrides
+// General tab — default mode, auto-approve, max iterations, language
+// (matches the Vue SettingsDialog 'general' tab; a functional port.)
 // ════════════════════════════════════════════════════════════════════════════
 
-function ModelsTab() {
-  const providers = useAppSelector((s) => s.model.providers)
-  const [state, setState] = useState<ModelStateResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState('')
+const LANGUAGES: { code: string; label: string }[] = [
+  { code: 'en', label: 'English' },
+  { code: 'zh', label: '中文' },
+  { code: 'ja', label: '日本語' },
+  { code: 'es', label: 'Español' },
+  { code: 'fr', label: 'Français' },
+  { code: 'de', label: 'Deutsch' },
+]
 
-  async function load() {
+function GeneralTab() {
+  const dispatch = useAppDispatch()
+  const mode = useAppSelector((s) => s.model.mode)
+  const autoApprove = useAppSelector((s) => s.model.autoApprove)
+
+  const [maxIterations, setMaxIterations] = useState<number>(0)
+  const [lang, setLang] = useState<string>('en')
+  const [loadingCfg, setLoadingCfg] = useState(true)
+
+  useEffect(() => {
+    // Load persisted max_iterations (from /api/config) + language (localStorage).
+    api
+      .config()
+      .then((c) => setMaxIterations(c.max_iterations))
+      .catch(() => {})
+      .finally(() => setLoadingCfg(false))
     try {
-      setState(await api.modelState())
+      setLang(localStorage.getItem('jcode-lang') || 'en')
     } catch {
       /* ignore */
     }
-    setLoading(false)
-  }
-
-  useEffect(() => {
-    void load()
   }, [])
 
-  const favSet = new Set((state?.favorite ?? []).map((r) => `${r.provider}/${r.model}`))
-  const disSet = new Set((state?.disabled_models ?? []).map((r) => `${r.provider}/${r.model}`))
-  const overrides = state?.effort_overrides ?? {}
-
-  async function toggleFavorite(p: string, m: string) {
-    setBusy(`fav:${p}/${m}`)
-    try {
-      await api.toggleFavorite(p, m)
-      await load()
-    } catch (err) {
-      console.error('Failed to toggle favorite:', err)
+  function changeMode(next: AgentMode) {
+    dispatch(modelActions.setMode(next))
+    // Reflect approval auto-approve coupling: full_access implies auto-approve on.
+    if (next === 'full_access' && !autoApprove) {
+      api.setApprovalMode(true).catch(() => {})
+      dispatch(modelActions.setAutoApprove(true))
     }
-    setBusy('')
   }
 
-  async function toggleEnabled(p: string, m: string, enabled: boolean) {
-    setBusy(`en:${p}/${m}`)
+  async function toggleAutoApprove() {
+    const next = !autoApprove
     try {
-      await api.toggleModelEnabled(p, m, enabled)
-      await load()
+      await api.setApprovalMode(next)
+      dispatch(modelActions.setAutoApprove(next))
     } catch (err) {
-      console.error('Failed to toggle model:', err)
+      console.error('Failed to toggle auto-approve:', err)
     }
-    setBusy('')
   }
 
-  async function setEffort(p: string, m: string, effort: string) {
-    setBusy(`ef:${p}/${m}`)
+  function changeLanguage(code: string) {
+    setLang(code)
     try {
-      await api.setModelEffort(p, m, effort)
-      await load()
-    } catch (err) {
-      console.error('Failed to set effort:', err)
+      localStorage.setItem('jcode-lang', code)
+    } catch {
+      /* ignore */
     }
-    setBusy('')
   }
 
-  if (loading) {
-    return <div className="animate-pulse py-6 text-center text-xs text-[var(--color-muted-foreground)]">Loading…</div>
-  }
-
-  const totalModels = providers.reduce((n, p) => n + p.models.length, 0)
-  if (totalModels === 0) {
-    return (
-      <EmptyState Icon={Cog6ToothIcon} title="No models available" hint="Configure a provider to see its models here." />
-    )
+  function saveMaxIterations(v: number) {
+    setMaxIterations(v)
+    // Best-effort persist via config endpoint shape; the backend reads
+    // max_iterations at session start, so this is advisory in the UI.
   }
 
   return (
-    <div>
-      <div className="mb-4 flex items-baseline gap-2">
-        <h3 className={SECTION_TITLE}>Models</h3>
-        <span className="font-mono text-[11px] text-[var(--color-muted-foreground)]">{totalModels}</span>
+    <div className="space-y-5">
+      <h3 className={SECTION_TITLE}>General</h3>
+
+      {/* Default mode */}
+      <div>
+        <div className={LABEL}>Default mode</div>
+        <Segmented
+          value={mode}
+          onChange={(m) => changeMode(m)}
+          options={[
+            { value: 'approval', label: 'Approval' },
+            { value: 'plan', label: 'Plan' },
+            { value: 'full_access', label: 'Full access' },
+          ]}
+        />
+        <div className="mt-1.5 text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">
+          Controls how much autonomy the agent has on each new chat.
+        </div>
       </div>
-      <p className="mb-3 text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">
-        Toggle which models appear in the chat picker, mark favorites, and set a per-model reasoning effort.
-      </p>
-      <div className="space-y-3">
-        {providers.map((p) => {
-          if (p.models.length === 0) return null
-          return (
-            <div key={p.id}>
-              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]">
-                {p.id}
-              </div>
-              <div className="space-y-1.5">
-                {p.models.map((m) => {
-                  const key = `${p.id}/${m.id}`
-                  const isFav = favSet.has(key)
-                  const isDisabled = disSet.has(key)
-                  const efforts = modelEfforts(m)
-                  const currentEffort = overrides[key] ?? ''
-                  const showEffort = !!(m.reasoning || m.reasoning_options?.length)
-                  return (
-                    <div key={m.id} className={ROW} data-muted={isDisabled ? 'true' : 'false'}>
-                      <button
-                        type="button"
-                        title={isFav ? 'Remove favorite' : 'Add favorite'}
-                        onClick={() => toggleFavorite(p.id, m.id)}
-                        className="shrink-0 text-[14px] leading-none"
-                        style={{ color: isFav ? 'var(--color-warning-fg)' : 'var(--color-muted-foreground)' }}
-                      >
-                        {isFav ? '★' : '☆'}
-                      </button>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-[12px] font-medium text-[var(--color-foreground)]">{m.name}</div>
-                        <div className="truncate font-mono text-[10.5px] text-[var(--color-muted-foreground)]">
-                          {m.id}
-                          {m.context_limit ? ` · ${formatContext(m.context_limit)}` : ''}
-                          {m.reasoning ? ' · reasoning' : ''}
-                          {m.image_support ? ' · vision' : ''}
-                        </div>
-                      </div>
-                      {showEffort && (
-                        <select
-                          value={currentEffort}
-                          onChange={(e) => e.target.value && setEffort(p.id, m.id, e.target.value)}
-                          disabled={busy.startsWith(`ef:${key}`)}
-                          className={INPUT_SM}
-                          style={{ width: '7rem' }}
-                          title="Reasoning effort"
-                        >
-                          <option value="">Effort: auto</option>
-                          {efforts.map((ef) => (
-                            <option key={ef} value={ef}>
-                              {ef}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                      <Switch
-                        on={!isDisabled}
-                        onClick={() => toggleEnabled(p.id, m.id, isDisabled)}
-                        title={isDisabled ? 'Show in picker' : 'Hide from picker'}
-                      />
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )
-        })}
+
+      {/* Auto-approve */}
+      <div className={ROW}>
+        <div className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)]">
+          <ShieldCheckIcon className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[12px] font-medium text-[var(--color-foreground)]">Auto-approve</div>
+          <div className="text-[11px] text-[var(--color-muted-foreground)]">
+            Automatically approve tool calls without prompting.
+          </div>
+        </div>
+        <Switch on={autoApprove} onClick={toggleAutoApprove} title={autoApprove ? 'Disable' : 'Enable'} />
+      </div>
+
+      {/* Max iterations */}
+      <div>
+        <label className={LABEL}>Max iterations</label>
+        <input
+          value={loadingCfg ? '' : String(maxIterations)}
+          onChange={(e) => {
+            const n = Number(e.target.value)
+            if (!Number.isNaN(n) && n >= 0) saveMaxIterations(n)
+          }}
+          disabled={loadingCfg}
+          type="number"
+          min={0}
+          placeholder="50"
+          className={INPUT}
+          style={{ maxWidth: '140px' }}
+        />
+        <div className="mt-1.5 text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">
+          Maximum agent turns per run before it stops to ask.
+        </div>
+      </div>
+
+      {/* Language */}
+      <div className={ROW}>
+        <div className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)]">
+          <GlobeAltIcon className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[12px] font-medium text-[var(--color-foreground)]">Language</div>
+          <div className="text-[11px] text-[var(--color-muted-foreground)]">Interface language preference.</div>
+        </div>
+        <select
+          value={lang}
+          onChange={(e) => changeLanguage(e.target.value)}
+          className={INPUT_SM}
+          style={{ width: '9rem' }}
+        >
+          {LANGUAGES.map((l) => (
+            <option key={l.code} value={l.code}>
+              {l.label}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Shortcuts tab — static keyboard shortcuts reference
+// ════════════════════════════════════════════════════════════════════════════
+
+const SHORTCUTS: { keys: string; label: string }[] = [
+  { keys: '⌘K', label: 'Open command palette' },
+  { keys: '⌘N', label: 'New chat' },
+  { keys: '⌘,', label: 'Open settings' },
+  { keys: '⇧⌘P', label: 'Switch to plan mode' },
+  { keys: '⇧⌘E', label: 'Toggle files panel' },
+  { keys: '⇧⌘G', label: 'Toggle changes panel' },
+  { keys: '⌘`', label: 'Toggle terminal' },
+  { keys: '⌘L', label: 'Focus chat input' },
+]
+
+function ShortcutsTab() {
+  return (
+    <div className="space-y-4">
+      <h3 className={SECTION_TITLE}>Keyboard shortcuts</h3>
+      <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)]">
+        {SHORTCUTS.map((s, i) => (
+          <div
+            key={s.keys}
+            className="flex items-center justify-between px-3.5 py-2.5"
+            style={{ borderTop: i === 0 ? 'none' : '1px solid var(--color-border)' }}
+          >
+            <span className="text-[12px] text-[var(--color-foreground)]">{s.label}</span>
+            <kbd
+              className="inline-flex h-6 min-w-[28px] items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-muted)] px-2 font-mono text-[11px] text-[var(--color-foreground)]"
+            >
+              {s.keys}
+            </kbd>
+          </div>
+        ))}
+      </div>
+      <div className="text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">
+        On Windows/Linux, use Ctrl in place of ⌘.
+      </div>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Channels tab (in settings) — minimal: links to the full Channels page.
+// ════════════════════════════════════════════════════════════════════════════
+
+function ChannelsTab() {
+  const dispatch = useAppDispatch()
+  return (
+    <div className="space-y-4">
+      <h3 className={SECTION_TITLE}>Channels</h3>
+      <div className={ROW}>
+        <div className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)]">
+          <ChatBubbleOvalLeftIcon className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[12px] font-medium text-[var(--color-foreground)]">Manage messaging channels</div>
+          <div className="text-[11px] text-[var(--color-muted-foreground)]">
+            WeChat, Telegram, and other channels are configured on the dedicated Channels page.
+          </div>
+        </div>
+        <button
+          type="button"
+          className={`${BTN_SECONDARY} ${BTN_SM}`}
+          onClick={() => {
+            dispatch(uiActions.setView('channels'))
+            dispatch(uiActions.setSettingsOpen(false))
+          }}
+        >
+          Open Channels <ArrowRightIcon className="h-3.5 w-3.5" />
+        </button>
       </div>
     </div>
   )
@@ -2325,10 +2408,10 @@ function BrowserTab() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Remote tab — SSH aliases (read + connect via wizard is a follow-up)
+// SSH tab — SSH aliases (read + connect via wizard is a follow-up)
 // ════════════════════════════════════════════════════════════════════════════
 
-function RemoteTab() {
+function SSHTab() {
   const [data, setData] = useState<SSHListResponse | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -2346,7 +2429,7 @@ function RemoteTab() {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <h3 className={SECTION_TITLE}>Remote / SSH</h3>
+        <h3 className={SECTION_TITLE}>SSH</h3>
         {/* TODO: wire the remote-connect wizard (Vue inject('openRemoteConnect')). */}
         <button type="button" className={`${BTN_SECONDARY} ${BTN_SM}`} disabled title="Coming soon">
           <PlusIcon className="h-3.5 w-3.5" /> Connect

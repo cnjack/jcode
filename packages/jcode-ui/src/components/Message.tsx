@@ -7,8 +7,10 @@
  */
 
 import { memo, useMemo } from 'react'
+import { CheckIcon, PencilSquareIcon, Square2StackIcon } from '@heroicons/react/24/outline'
 import type { Message as MessageData } from 'jcode-ui-core'
 import { MessageView } from 'jcode-ui-core/primitives'
+import type { MessageActions } from 'jcode-ui-core/primitives'
 import { renderMarkdown } from '../lib/markdown.js'
 import { Reasoning } from './Reasoning.js'
 import { Sources } from './Sources.js'
@@ -46,17 +48,59 @@ export const Message = memo(function Message({ message, canEdit }: MessageProps)
 
 function Bubble({ message, canEdit, isUser }: { message: MessageData; canEdit?: boolean; isUser: boolean }) {
   return (
-    <MessageView
-      message={message}
-      canEdit={canEdit}
-      className={`jcode-selectable relative rounded-[var(--radius-lg)] px-3.5 py-2.5 text-[0.9rem] leading-relaxed ${
-        isUser
-          ? 'bg-[var(--color-primary)] text-[var(--color-on-primary)]'
-          : 'bg-[var(--color-surface)] text-[var(--color-foreground)] border border-[var(--color-border)]'
-      }`}
-      renderContent={(content) => <MarkdownBody html={content} />}
-      renderAvatar={() => null}
-    />
+    <div className="group/msg">
+      <MessageView
+        message={message}
+        canEdit={canEdit}
+        className={`jcode-selectable relative rounded-[var(--radius-lg)] px-3.5 py-2.5 text-[0.9rem] leading-relaxed ${
+          isUser
+            ? 'bg-[var(--color-primary)] text-[var(--color-on-primary)]'
+            : 'bg-[var(--color-surface)] text-[var(--color-foreground)] border border-[var(--color-border)]'
+        }`}
+        renderContent={(content) => <MarkdownBody html={content} />}
+        renderAvatar={() => null}
+        renderActions={(actions) => <MessageActionsRow {...actions} />}
+      />
+    </div>
+  )
+}
+
+/**
+ * Icon-based hover actions (mirrors ChatMessage.vue lines 172-189): a copy
+ * button (Square2StackIcon → CheckIcon when copied) and, for editable user
+ * messages, an edit button (PencilSquareIcon). Both render inside a row that
+ * fades in on group hover/focus.
+ */
+function MessageActionsRow({ copied, onCopy, canEdit, onEdit }: MessageActions) {
+  return (
+    <div className="flex items-center gap-0.5 pl-9 opacity-0 transition-opacity duration-150 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100">
+      <button
+        type="button"
+        onClick={onCopy}
+        title={copied ? 'Copied' : 'Copy'}
+        aria-label={copied ? 'Copied' : 'Copy'}
+        className="flex h-5 w-5 items-center justify-center rounded-[var(--radius-sm)] cursor-pointer transition-all hover:bg-[var(--color-secondary)] active:scale-90"
+        style={{ color: 'var(--color-muted-foreground)' }}
+      >
+        {copied ? (
+          <CheckIcon className="h-3 w-3" style={{ color: 'var(--color-accent-neutral)' }} />
+        ) : (
+          <Square2StackIcon className="h-3 w-3" />
+        )}
+      </button>
+      {canEdit && (
+        <button
+          type="button"
+          onClick={onEdit}
+          title="Edit"
+          aria-label="Edit"
+          className="flex h-5 w-5 items-center justify-center rounded-[var(--radius-sm)] cursor-pointer transition-all hover:bg-[var(--color-secondary)] active:scale-90"
+          style={{ color: 'var(--color-muted-foreground)' }}
+        >
+          <PencilSquareIcon className="h-3 w-3" />
+        </button>
+      )}
+    </div>
   )
 }
 
