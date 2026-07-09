@@ -1,0 +1,7 @@
+# Standalone example (not part of the monorepo workspace).
+packages:
+  - '.'
+allowBuilds:
+  esbuild: true
+onlyBuiltDependencies:
+  - esbuild

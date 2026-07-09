@@ -37,10 +37,12 @@ export function Thread({
   overscanBottom,
 }: ThreadProps): ReactNode {
   const { isRunning } = useRuntimeState()
+  // min-h-0 is required for flex children to shrink and scroll; h-full fills
+  // definite parents. Avoid forcing height when the host uses content-sized embeds.
   return (
     <ThreadPrimitive
       virtualize={virtualize}
-      className={`jcode-thread messages-feather h-full scroll-smooth rounded-t-[13px] ${className ?? ''}`}
+      className={`jcode-thread messages-feather min-h-0 w-full flex-1 scroll-smooth ${className ?? ''}`}
       overscanBottom={overscanBottom ?? 24}
       renderItem={(item) => renderItem(item, isRunning)}
       renderPending={renderPending ?? DefaultPending}
@@ -50,27 +52,28 @@ export function Thread({
 }
 
 function renderItem(item: ThreadItem, isRunning: boolean): ReactNode {
+  // Keys live on the Thread list containers (virtualizer / map) — do not set
+  // keys here or React warns about duplicate sibling keys when seq collides.
   if (isMessageItem(item)) {
     return (
       <Message
-        key={item.seq}
         message={item.data}
         canEdit={item.data.role === 'user' && !isRunning}
       />
     )
   }
   if (isToolItem(item)) {
-    // pl-9 matches Vue App.vue: tools indent under the message content column.
+    // Indent under the avatar gutter so tools line up with message body.
     return (
-      <div key={item.seq} className="chat-col">
-        <ToolCallCard tool={item.data} className="pl-9" />
+      <div className="jcode-chat-col">
+        <ToolCallCard tool={item.data} className="jcode-gutter" />
       </div>
     )
   }
   if (isApprovalItem(item)) {
     return (
-      <div key={item.seq} className="chat-col">
-        <div className="pl-9">
+      <div className="jcode-chat-col">
+        <div className="jcode-gutter jcode-approval-slot">
           <ApprovalBanner approval={item.data} />
         </div>
       </div>
@@ -80,31 +83,22 @@ function renderItem(item: ThreadItem, isRunning: boolean): ReactNode {
 }
 
 function DefaultPending(): ReactNode {
-  // Matches Vue's thinking footer: three pulsing dots + label, indented pl-9.
+  // Align with message body / tools (chat-col + gutter under the avatar).
   return (
     <div
-      className="jcode-pending chat-col flex select-none items-center gap-2.5 py-3 pl-[3.25rem]"
+      className="jcode-pending jcode-chat-col"
       role="status"
       aria-live="polite"
       aria-label="Thinking…"
     >
-      <span className="flex gap-1" aria-hidden="true">
-        <span
-          className="h-1.5 w-1.5 animate-pulse rounded-full"
-          style={{ background: 'var(--color-accent-neutral)', animationDelay: '0ms' }}
-        />
-        <span
-          className="h-1.5 w-1.5 animate-pulse rounded-full"
-          style={{ background: 'var(--color-accent-neutral)', animationDelay: '160ms' }}
-        />
-        <span
-          className="h-1.5 w-1.5 animate-pulse rounded-full"
-          style={{ background: 'var(--color-accent-neutral)', animationDelay: '320ms' }}
-        />
-      </span>
-      <span className="text-[13px]" style={{ fontFamily: 'var(--font-sans)', color: 'var(--color-muted-foreground)' }}>
-        Thinking…
-      </span>
+      <div className="jcode-pending__inner jcode-gutter">
+        <span className="jcode-pending__dots" aria-hidden="true">
+          <span className="jcode-pending-dot" />
+          <span className="jcode-pending-dot" />
+          <span className="jcode-pending-dot" />
+        </span>
+        <span className="jcode-pending__label">Thinking</span>
+      </div>
     </div>
   )
 }

@@ -73,6 +73,11 @@ export default function App() {
               <Route index element={<ChatUiDocsIndex />} />
               <Route path="*" element={<ChatUiDocPage />} />
             </Route>
+            {/* Legacy product-docs path used in older links / README */}
+            <Route path="/docs/chat-ui" element={<ChatUiDocsLayout />}>
+              <Route index element={<ChatUiDocsIndex />} />
+              <Route path="*" element={<ChatUiDocPage />} />
+            </Route>
             <Route path="/showcase" element={<ShowcasePage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/docs" element={<DocsLayout />}>

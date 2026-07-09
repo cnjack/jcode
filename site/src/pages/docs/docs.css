@@ -147,6 +147,16 @@
   font-size: 15.5px;
   line-height: 1.75;
 }
+/* Live component previews need the full article width (not a nested 56rem). */
+.doc-article .jcode-demo {
+  max-width: none;
+  width: 100%;
+}
+/* Chat-ui docs (live demos + long code samples) get a wider reading column. */
+.docs-shell:has(.jcode-demo) .doc-article,
+.docs-shell:has(.doc-codeblock) .doc-article {
+  max-width: min(960px, 100%);
+}
 .doc-article h1 {
   font-size: clamp(30px, 4vw, 40px);
   margin: 10px 0 18px;
@@ -167,7 +177,8 @@
 .doc-article li { color: var(--ink); margin: 0.25em 0; }
 .doc-article ul, .doc-article ol { padding-left: 26px; }
 .doc-article hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
-.doc-article code {
+/* Inline chips only — never paint `pre > code` (breaks jcode-ui demos). */
+.doc-article :not(pre) > code {
   background: var(--paper-2);
   border: 1px solid var(--line);
   padding: 0.1em 0.38em;
@@ -228,26 +239,35 @@ kbd {
 .callout-important { background: var(--accent-soft); border-color: #f0c2a0; }
 .callout-new { background: #edf7ee; border-color: #cbe5cd; }
 
-/* code blocks */
+/* code blocks — wrap long lines, no horizontal scrollbar */
 .doc-codeblock {
   position: relative;
   margin: 1.2em 0;
+  max-width: 100%;
 }
 .doc-codeblock pre {
   background: var(--navy-2);
   color: var(--navy-ink);
   border-radius: var(--r-md);
   padding: 16px 74px 16px 18px;
-  overflow-x: auto;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: pre-wrap;
   font-size: 13px;
   line-height: 1.65;
   margin: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 .doc-codeblock code {
   background: none;
   border: none;
   padding: 0;
   font-size: inherit;
+  white-space: inherit;
+  overflow-wrap: inherit;
+  word-break: inherit;
 }
 
 /* hljs — warm-navy syntax palette */
@@ -365,6 +385,62 @@ kbd {
 }
 .doc-home-card h3 { font-size: 18px; margin: 0 0 6px; color: var(--ink); }
 .doc-home-card p { font-size: 13.5px; color: var(--ink-soft); margin: 0; }
+/* Section card: parent link + child links share one bordered surface. */
+.doc-home-section {
+  display: flex;
+  flex-direction: column;
+  align-content: start;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--card);
+  overflow: hidden;
+  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+}
+.doc-home-section:hover {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-soft);
+}
+.doc-home-section > .doc-home-card {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+.doc-home-section > .doc-home-card:hover {
+  transform: none;
+  box-shadow: none;
+  background: color-mix(in srgb, var(--accent, #ff8400) 6%, transparent);
+}
+.doc-home-section:has(.doc-home-children) > .doc-home-card {
+  border-bottom: 1px solid var(--line);
+}
+.doc-home-meta {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+.doc-home-children {
+  margin: 0;
+  padding: 8px 10px 12px;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+}
+.doc-home-children a {
+  display: block;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13.5px;
+  color: var(--ink-soft);
+  text-decoration: none;
+}
+.doc-home-children a:hover {
+  color: var(--accent-ink, var(--accent));
+  background: color-mix(in srgb, var(--accent, #ff8400) 8%, transparent);
+}
 
 /* ---------- responsive ---------- */
 @media (max-width: 1120px) {
