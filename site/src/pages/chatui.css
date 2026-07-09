@@ -35,7 +35,14 @@
 
 /* Demo */
 .chatui-demo-section { margin-bottom: 5rem; }
-.chatui-demo-frame { max-width: 760px; margin: 0 auto; }
+/* Wider than the default marketing column so the chat UI can breathe. */
+.chatui-demo-frame {
+  max-width: 920px;
+  margin: 0 auto;
+}
+.chatui-demo-frame .jcode-live-demo {
+  width: 100%;
+}
 
 /* Features */
 .chatui-features { margin-bottom: 5rem; }
@@ -54,13 +61,72 @@
 .chatui-feature h3 { font-size: 1.05rem; margin: 0.5rem 0 0.5rem; }
 .chatui-feature p { font-size: 0.9rem; line-height: 1.55; color: var(--muted, #888); margin: 0; }
 
-/* Quick start code */
+/* Quick start code — dark pane + hljs (same palette as demo Code tabs) */
 .chatui-quickstart { margin-bottom: 2rem; }
-.chatui-codeblock {
-  background: #0d0d0d; border: 1px solid #2e2e2e; border-radius: 12px;
-  padding: 1.5rem; overflow-x: auto; font-family: 'JetBrains Mono', monospace;
-  font-size: 0.82rem; line-height: 1.6; color: #e4e4e7; margin: 1.5rem 0 0;
+.chatui-codeblock-wrap {
+  position: relative;
+  margin: 1.5rem 0 0;
 }
+.chatui-codeblock-wrap .copy-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
+}
+.chatui-codeblock {
+  background: #121218;
+  border: 1px solid #2e2e2e;
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: pre-wrap;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: #e8e8ec;
+  margin: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  tab-size: 2;
+}
+.chatui-codeblock code,
+.chatui-codeblock .hljs {
+  display: block;
+  background: transparent !important;
+  color: #e8e8ec !important;
+  padding: 0 !important;
+  border: 0 !important;
+  font: inherit;
+  white-space: inherit;
+  overflow-wrap: inherit;
+  word-break: inherit;
+}
+.chatui-codeblock .hljs-comment,
+.chatui-codeblock .hljs-quote { color: #8b8b96; font-style: italic; }
+.chatui-codeblock .hljs-keyword,
+.chatui-codeblock .hljs-selector-tag,
+.chatui-codeblock .hljs-meta,
+.chatui-codeblock .hljs-built_in { color: #7dd3fc; }
+.chatui-codeblock .hljs-string,
+.chatui-codeblock .hljs-attr,
+.chatui-codeblock .hljs-template-tag { color: #86efac; }
+.chatui-codeblock .hljs-number,
+.chatui-codeblock .hljs-literal { color: #fcd34d; }
+.chatui-codeblock .hljs-title,
+.chatui-codeblock .hljs-section,
+.chatui-codeblock .hljs-name,
+.chatui-codeblock .hljs-title.class_ { color: #d8b4fe; }
+.chatui-codeblock .hljs-type { color: #fca5a5; }
+.chatui-codeblock .hljs-params { color: #f0abfc; }
+.chatui-codeblock .hljs-variable,
+.chatui-codeblock .hljs-template-variable { color: #fde68a; }
+.chatui-codeblock .hljs-function,
+.chatui-codeblock .hljs-title.function_ { color: #c4b5fd; }
+.chatui-codeblock .hljs-property { color: #93c5fd; }
+.chatui-codeblock .hljs-punctuation,
+.chatui-codeblock .hljs-tag { color: #a1a1aa; }
 
 @media (max-width: 640px) {
   .chatui-page { padding: 2rem 1rem 4rem; }

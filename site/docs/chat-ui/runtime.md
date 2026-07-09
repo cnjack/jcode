@@ -1,7 +1,6 @@
 ---
 title: Runtime
-parent: jcode-ui
-nav_order: 1
+nav_order: 2
 ---
 
 # ChatRuntime
@@ -19,7 +18,7 @@ interface ChatRuntime {
 }
 ```
 
-`RuntimeState` is the read side:
+### RuntimeState (read side)
 
 ```ts
 interface RuntimeState {
@@ -32,7 +31,7 @@ interface RuntimeState {
 }
 ```
 
-`RuntimeActions` is the write side — callbacks the UI dispatches:
+### RuntimeActions (write side)
 
 ```ts
 interface RuntimeActions {
@@ -46,6 +45,8 @@ interface RuntimeActions {
 }
 ```
 
+Full field reference: [API → Runtime](/chat-ui/docs/api/runtime) · [API → Types](/chat-ui/docs/api/types).
+
 ## Wrapping an external store
 
 `createExternalStoreRuntime` adapts any Redux-shaped store. You provide a `select` function that
@@ -53,10 +54,7 @@ projects your full app state down to a (possibly partial) `RuntimeState` — mis
 to safe empties.
 
 ```ts
-import { configureStore } from '@reduxjs/toolkit'
 import { createExternalStoreRuntime } from 'jcode-ui'
-
-const store = configureStore({ /* your reducers */ })
 
 const runtime = createExternalStoreRuntime({
   store,
@@ -81,30 +79,75 @@ const runtime = createExternalStoreRuntime({
 })
 ```
 
-The action bag's identity should be stable (memoize it) — the components don't depend on it changing.
+**Options**
+
+| Option | Type | Notes |
+|--------|------|-------|
+| `store` | `{ getState, subscribe }` | Redux / Zustand / custom |
+| `select` | `(state) => PartialRuntimeState` | Project host → runtime |
+| `actions` | `RuntimeActions` | Keep identity stable (memoize) |
+
+Snapshot caching: `getState()` returns a **stable reference** between host dispatches so
+`useSyncExternalStore` does not loop.
 
 ## Subscribing in components
 
 Under a `<RuntimeProvider>`, three hooks read state:
 
 ```ts
-const items      = useRuntimeSelector((s) => s.items)       // granular; re-renders only on items change
-const state      = useRuntimeState()                        // full state; re-renders on any change
-const actions    = useRuntimeActions()                      // stable action bag
+const items   = useRuntimeSelector((s) => s.items)  // granular re-renders
+const state   = useRuntimeState()                     // full state
+const actions = useRuntimeActions()                   // stable action bag
 ```
 
-`useRuntimeSelector` is the preferred read — it memoizes via a ref cache so a stable selector
-returning a primitive won't trigger spurious re-renders.
+Prefer `useRuntimeSelector` for hot paths (timeline length, `isRunning`).
 
 ## Mock runtime
 
 For docs, tests, and demos, `createMockRuntime` gives you a scriptable runtime with no backend:
 
 ```ts
-const rt = createMockRuntime()
+const rt = createMockRuntime({
+  items: [],
+  state: { tokenSnapshot: { total_tokens: 1000, prompt_tokens: 800, completion_tokens: 200, model_context_limit: 128000 } },
+})
+
 rt.push({ kind: 'message', seq: 1, data: { id: 'm1', role: 'user', content: 'hi', timestamp: 0 } })
 rt.appendText('Hello!')   // streams into the last assistant message
 rt.setRunning(true)
+rt.patchState({ goal: { objective: 'Ship the UI', status: 'active' } })
 ```
 
-This is exactly what powers the [live demo on the chat-ui page](/chat-ui).
+### Mutators
+
+| Method | Purpose |
+|--------|---------|
+| `setItems(items)` | Replace timeline |
+| `push(item)` | Append one item |
+| `setRunning(bool)` | Toggle agent-running |
+| `appendText(delta)` | Stream into last assistant message |
+| `patchState(partial)` | Merge token/goal/todos/queued/… |
+| `calls` | Recorded action invocations (tests) |
+
+Default `resolveApproval` / `submitAskUser` handlers update items in-place so interactive demos work without a backend.
+
+This powers the [live demo](/chat-ui) and every docs preview on this site.
+
+## Providers
+
+```tsx
+<RuntimeProvider runtime={runtime}>
+  <ToolRegistryProvider registry={createDefaultToolRegistry()}>
+    <Thread />
+    <ChatInput />
+  </ToolRegistryProvider>
+</RuntimeProvider>
+```
+
+Optional: `<ApiBaseProvider apiBase={…}>` so `browser_screenshot` can resolve image URLs.
+
+## Related
+
+- [External store guide](/chat-ui/docs/guides/external-store)  
+- [API → Runtime](/chat-ui/docs/api/runtime)  
+- [API → Hooks](/chat-ui/docs/api/hooks)  

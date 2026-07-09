@@ -2,7 +2,7 @@
 
 React components for AI chat interfaces — streaming messages, tool calls, approvals, and ask-user interactions. Backend-agnostic, token-driven, and tree-shakeable. Powers [jcode](https://github.com/cnjack/jcode)'s Web + Desktop UIs.
 
-[**Live demo**](https://www.j-code.net/chat-ui) · [**Docs**](https://www.j-code.net/docs/chat-ui)
+[**Live demo**](https://www.j-code.net/chat-ui) · [**Docs**](https://www.j-code.net/chat-ui/docs) · [**llms.txt**](https://www.j-code.net/llms.txt)
 
 ## Why
 
@@ -92,7 +92,7 @@ registry.register('my_custom_tool', MyRenderer)
 registry.setFallback(GenericRenderer)
 ```
 
-See the [tool renderers docs](https://www.j-code.net/docs/chat-ui/tool-renderers).
+See the [tool renderers docs](https://www.j-code.net/chat-ui/docs/tool-renderers).
 
 ## Theming
 
@@ -103,12 +103,24 @@ Every color/radius/shadow is a CSS custom property — no hardcoded hex. Re-them
 .dark { --color-primary: #818cf8; }
 ```
 
-Light/dark via a `.dark` class on `<html>`. Generated themes (dracula, nord, …) work too. See the [theming docs](https://www.j-code.net/docs/chat-ui/theming).
+Light/dark via a `.dark` class on `<html>`. Generated themes (dracula, nord, …) work too. See the [theming docs](https://www.j-code.net/chat-ui/docs/theming).
 
 ## Packages
 
 - [`jcode-ui-core`](../jcode-ui-core) — types, `ChatRuntime`, `ExternalStoreRuntime`, `MockRuntime`, `ToolRendererRegistry`, headless primitives (`Thread`, `MessageView`, `Composer`, `ToolCallView`, `ApprovalBlock`, `AskUserBlock`), behavioral hooks.
 - `jcode-ui` — styled wrappers + 9 default tool renderers + markdown pipeline + token CSS.
+
+## Examples
+
+| App | Pattern |
+|-----|---------|
+| [`examples/jcode-ui-minimal`](../../examples/jcode-ui-minimal) | Mock runtime, no backend |
+| [`examples/jcode-ui-zustand`](../../examples/jcode-ui-zustand) | External store + Zustand |
+
+```bash
+cd packages/jcode-ui-core && pnpm build && cd ../jcode-ui && pnpm build
+cd ../../examples/jcode-ui-minimal && pnpm install && pnpm dev
+```
 
 ## License
 

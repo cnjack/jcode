@@ -1,0 +1,573 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Live demo shell — PURE CSS (no Tailwind). Host pages must not depend on
+ * utilities from jcode-ui/styles.css (those are tree-shaken to package source).
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+.jcode-live-demo {
+  --jcode-col-max: 100%;
+  --jcode-col-pad-x: 1rem;
+  --jcode-gutter: 2.25rem;
+
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid var(--color-border, #2e2e2e);
+  background: var(--color-background, #111111);
+  color: var(--color-foreground, #e4e4e7);
+  box-shadow: 0 12px 40px -12px rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
+  font-family: var(--font-sans, system-ui, sans-serif);
+}
+
+.jcode-live-demo__chrome {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border, #2e2e2e);
+  background: var(--color-muted, #2e2e2e);
+}
+
+.jcode-live-demo__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.jcode-live-demo__dot--red { background: #ff5f57; }
+.jcode-live-demo__dot--yellow { background: #febc2e; }
+.jcode-live-demo__dot--green { background: #28c840; }
+
+.jcode-live-demo__title {
+  margin-left: 8px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: #888;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  writing-mode: horizontal-tb; /* never vertical */
+}
+
+.jcode-live-demo__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  background: var(--color-background, #111111);
+}
+
+.jcode-live-demo__thread {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+.jcode-live-demo__composer {
+  flex-shrink: 0;
+  width: 100%;
+  border-top: 1px solid var(--color-border, #2e2e2e);
+  padding: 8px 10px 10px;
+  background: var(--color-surface, #1a1a1a);
+  box-sizing: border-box;
+}
+
+.jcode-live-demo__composer .jcode-chat-input {
+  max-width: 100%;
+  margin: 0;
+  box-shadow: none;
+}
+
+/* Docs embed frames */
+.jcode-demo {
+  /* Fill the host frame — don't inherit product-app 56rem reading column. */
+  --jcode-col-max: 100%;
+  --jcode-col-pad-x: 0.75rem;
+  --jcode-gutter: 2rem;
+
+  margin: 1.25rem 0 1.75rem;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong, #2e2e2e);
+  overflow: hidden;
+  background: var(--color-background, #111);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  /* Isolate from host .doc-article typography (code/pre/p styles). */
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--color-foreground, #e4e4e7);
+  color-scheme: dark;
+}
+
+/*
+ * Host isolation: docs use `.doc-article code { background: paper; }` for
+ * inline chips. That selector also hits `pre > code` inside demos and paints a
+ * light paper strip under light syntax colors → unreadable "blank" code cards.
+ *
+ * 1) Pin elevated dark code tokens on demo roots (don't inherit host paper).
+ * 2) Reset every `code` under demos, then re-apply inline/pre surfaces.
+ */
+.jcode-demo-preview-slot.dark,
+.jcode-live-demo.dark,
+.jcode-demo-body.dark,
+.chatui-demo-frame.dark {
+  --code-bg: #222228;
+  --code-border: #3f3f48;
+  --code-fg: #f0f0f4;
+  --code-inline-bg: #2c2c34;
+  --hljs-fg: #f0f0f4;
+  --hljs-keyword: #7dd3fc;
+  --hljs-string: #86efac;
+  --hljs-comment: #8b8b96;
+  --hljs-number: #fcd34d;
+  --hljs-title: #d8b4fe;
+  --hljs-type: #fca5a5;
+  --hljs-params: #f0abfc;
+  --hljs-variable: #fde68a;
+  --hljs-function: #c4b5fd;
+  --hljs-meta: #a1a1aa;
+  --hljs-property: #93c5fd;
+  --hljs-punctuation: #a1a1aa;
+}
+
+/* Strip host paper chip from ALL code nodes inside demos (incl. pre > code). */
+.doc-article .jcode-demo code,
+.doc-article .jcode-live-demo code,
+.chatui-demo-frame code {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: 0 !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  color: inherit !important;
+  font-size: inherit !important;
+  box-shadow: none !important;
+}
+
+.doc-article .jcode-demo .jcode-prose pre,
+.chatui-demo-frame .jcode-prose pre,
+.jcode-live-demo .jcode-prose pre {
+  background: var(--code-bg, #222228) !important;
+  color: var(--code-fg, #f0f0f4) !important;
+  border: 1px solid var(--code-border, #3f3f48) !important;
+  padding: 0.85rem 1rem !important;
+  border-radius: 8px !important;
+}
+.doc-article .jcode-demo .jcode-prose pre code,
+.doc-article .jcode-demo .jcode-prose pre .hljs,
+.chatui-demo-frame .jcode-prose pre code,
+.jcode-live-demo .jcode-prose pre code {
+  background: transparent !important;
+  background-color: transparent !important;
+  color: inherit !important;
+  border: 0 !important;
+  padding: 0 !important;
+}
+.doc-article .jcode-demo .jcode-prose :not(pre) > code,
+.chatui-demo-frame .jcode-prose :not(pre) > code,
+.jcode-live-demo .jcode-prose :not(pre) > code {
+  background: var(--code-inline-bg, #2c2c34) !important;
+  color: var(--code-fg, #f0f0f4) !important;
+  border: 1px solid var(--code-border, #3f3f48) !important;
+  padding: 0.12em 0.45em !important;
+  border-radius: 4px !important;
+  font-family: var(--font-mono, ui-monospace, monospace) !important;
+  font-size: 0.86em !important;
+}
+.doc-article .jcode-demo .jcode-terminal,
+.doc-article .jcode-demo .jcode-file-viewer,
+.doc-article .jcode-demo .jcode-diff,
+.jcode-live-demo .jcode-terminal,
+.jcode-live-demo .jcode-file-viewer,
+.jcode-live-demo .jcode-diff {
+  background: var(--code-bg, #222228) !important;
+  color: var(--code-fg, #f0f0f4) !important;
+}
+
+/* Preview | Code shell */
+.jcode-demo-shell {
+  display: flex;
+  flex-direction: column;
+}
+
+.jcode-demo-tabbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 10px;
+  background: #161616;
+  border-bottom: 1px solid #2e2e2e;
+  min-height: 40px;
+}
+
+.jcode-demo-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.jcode-demo-tabs button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #999;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  padding: 10px 12px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.jcode-demo-tabs button:hover {
+  color: #ddd;
+}
+
+.jcode-demo-tabs button.active {
+  color: #fff;
+  border-bottom-color: var(--accent, #ff8400);
+}
+
+.jcode-demo-tab-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.jcode-demo-copy {
+  appearance: none;
+  border: 1px solid #333;
+  background: #222;
+  color: #ccc;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.jcode-demo-copy:hover {
+  border-color: #555;
+  color: #fff;
+}
+
+.jcode-demo-preview-slot {
+  min-height: 0;
+  flex: 1;
+  background: var(--color-background, #0d0d0d);
+  color: var(--color-foreground, #e4e4e7);
+  color-scheme: dark;
+}
+
+.jcode-demo-placeholder-body {
+  flex: 1;
+  min-height: 72px;
+  background:
+    linear-gradient(90deg, #1a1a1a 25%, #222 37%, #1a1a1a 63%);
+  background-size: 400% 100%;
+  animation: jcode-demo-shimmer 1.2s ease infinite;
+}
+
+@keyframes jcode-demo-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: 0 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jcode-demo-placeholder-body {
+    animation: none;
+  }
+}
+
+/* Code tab — dark elevated pane + hljs tokens (readable on #121218). */
+.jcode-demo-code {
+  margin: 0;
+  padding: 16px 18px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: 480px;
+  max-width: 100%;
+  background: #121218 !important;
+  color: #e8e8ec !important;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12.5px;
+  line-height: 1.55;
+  tab-size: 2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  box-sizing: border-box;
+}
+
+.jcode-demo-code code,
+.jcode-demo-code .hljs {
+  display: block;
+  font-family: inherit;
+  white-space: inherit;
+  overflow-wrap: inherit;
+  word-break: inherit;
+  background: transparent !important;
+  color: #e8e8ec !important;
+  padding: 0 !important;
+  border: 0 !important;
+  font-size: inherit !important;
+  line-height: inherit;
+}
+
+/* Syntax colors scoped to demo Code tab (not docs navy article blocks). */
+.jcode-demo-code .hljs-comment,
+.jcode-demo-code .hljs-quote {
+  color: #8b8b96;
+  font-style: italic;
+}
+.jcode-demo-code .hljs-keyword,
+.jcode-demo-code .hljs-selector-tag,
+.jcode-demo-code .hljs-meta,
+.jcode-demo-code .hljs-built_in {
+  color: #7dd3fc;
+}
+.jcode-demo-code .hljs-string,
+.jcode-demo-code .hljs-attr,
+.jcode-demo-code .hljs-template-tag {
+  color: #86efac;
+}
+.jcode-demo-code .hljs-number,
+.jcode-demo-code .hljs-literal {
+  color: #fcd34d;
+}
+.jcode-demo-code .hljs-title,
+.jcode-demo-code .hljs-section,
+.jcode-demo-code .hljs-name {
+  color: #d8b4fe;
+}
+.jcode-demo-code .hljs-type,
+.jcode-demo-code .hljs-class .hljs-title {
+  color: #fca5a5;
+}
+.jcode-demo-code .hljs-params {
+  color: #f0abfc;
+}
+.jcode-demo-code .hljs-variable,
+.jcode-demo-code .hljs-template-variable {
+  color: #fde68a;
+}
+.jcode-demo-code .hljs-function,
+.jcode-demo-code .hljs-title.function_ {
+  color: #c4b5fd;
+}
+.jcode-demo-code .hljs-property {
+  color: #93c5fd;
+}
+.jcode-demo-code .hljs-punctuation,
+.jcode-demo-code .hljs-tag {
+  color: #a1a1aa;
+}
+.jcode-demo-code .hljs-tag .hljs-name {
+  color: #f9a8d4;
+}
+.jcode-demo-code .hljs-tag .hljs-attr {
+  color: #93c5fd;
+}
+.jcode-demo-code .hljs-tag .hljs-string {
+  color: #86efac;
+}
+
+.jcode-demo-chrome {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: #1a1a1a;
+  border-bottom: 1px solid #2e2e2e;
+}
+
+.jcode-demo-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.jcode-demo-dot.red { background: #ff5f57; }
+.jcode-demo-dot.yellow { background: #febc2e; }
+.jcode-demo-dot.green { background: #28c840; }
+
+.jcode-demo-label {
+  margin-left: 8px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.jcode-demo-body {
+  background: var(--color-background, #0d0d0d);
+  color: var(--color-foreground, #e4e4e7);
+  min-height: 64px;
+}
+
+.jcode-demo-body.dark {
+  /* Ensure jcode-ui dark tokens apply even if the marketing site is light */
+  color-scheme: dark;
+}
+
+.jcode-demo-pad {
+  padding: 12px 14px 16px;
+}
+
+/* Composer fills the demo frame width (inherits --jcode-col-max: 100%). */
+.jcode-demo .jcode-chat-input {
+  border-radius: var(--radius-xl, 12px);
+  box-shadow: none;
+}
+
+.jcode-demo-input {
+  flex-shrink: 0;
+  border-top: 1px solid var(--color-border, #2e2e2e);
+  padding: 8px;
+}
+
+.jcode-demo-thread-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+  width: 100%;
+}
+
+.jcode-demo-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #a1a1aa;
+  line-height: 1.45;
+}
+.jcode-demo-hint code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.92em;
+  color: #e4e4e7;
+  background: #25252b;
+  border: 1px solid #3a3a40;
+  border-radius: 4px;
+  padding: 0.05em 0.35em;
+}
+
+.jcode-demo-hint.mono {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+/* Attachment demos: don't let host button/img rules blow up tiles. */
+.jcode-demo .jcode-attachment-list,
+.jcode-live-demo .jcode-attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+.jcode-demo .jcode-attachment__thumb,
+.jcode-live-demo .jcode-attachment__thumb {
+  padding: 0 !important;
+  border-radius: 8px !important;
+}
+.jcode-demo .jcode-attachment__thumb img,
+.jcode-live-demo .jcode-attachment__thumb img {
+  margin: 0 !important;
+  max-width: none !important;
+}
+
+.jcode-demo-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-height: 48px;
+}
+
+.jcode-demo-gallery {
+  display: grid;
+  gap: 4px;
+}
+
+.jcode-demo-gallery-label {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  color: #777;
+  margin: 6px 0 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.jcode-demo-gallery-item:first-child .jcode-demo-gallery-label {
+  margin-top: 0;
+}
+
+.jcode-demo-gallery-item {
+  padding: 0;
+  border-bottom: none;
+}
+/* Keep tool headers compact in the gallery strip. */
+.jcode-demo-gallery .jcode-toolcall {
+  margin: 0;
+}
+.jcode-demo-gallery .jcode-toolcall > button {
+  padding-top: 0.2rem;
+  padding-bottom: 0.2rem;
+}
+
+.jcode-demo-swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.jcode-demo-swatch {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.jcode-demo-swatch-chip {
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid #333;
+}
+
+.jcode-demo-swatch code {
+  font-size: 10px;
+  color: #aaa;
+  word-break: break-all;
+}
+
+.jcode-demo-swatch span {
+  color: #ccc;
+}
+
+.jcode-demo-missing {
+  padding: 16px;
+  color: #f87171;
+  font-size: 13px;
+}
+
+/* Callouts inside chat-ui docs */
+.doc-article .jcode-callout {
+  margin: 1rem 0 1.25rem;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line, #e5e5e5);
+  background: var(--paper-2, #fafafa);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.doc-article .jcode-callout.tip {
+  border-color: color-mix(in srgb, var(--accent, #ff8400) 35%, transparent);
+  background: color-mix(in srgb, var(--accent, #ff8400) 8%, transparent);
+}
+.doc-article .jcode-callout.warn {
+  border-color: #f59e0b55;
+  background: #f59e0b12;
+}

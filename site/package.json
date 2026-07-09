@@ -6,11 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "generate:api-docs": "node ../script/generate_jcode_ui_api_docs.mjs"
   },
   "dependencies": {
     "@remotion/player": "4.0.410",
     "github-slugger": "^2.0.0",
+    "highlight.js": "^11.11.1",
     "jcode-ui": "file:../packages/jcode-ui",
     "jcode-ui-core": "file:../packages/jcode-ui-core",
     "react": "^18.3.1",

@@ -1,7 +1,6 @@
 ---
 title: Primitives
-parent: jcode-ui
-nav_order: 2
+nav_order: 3
 ---
 
 # Headless primitives
@@ -9,6 +8,12 @@ nav_order: 2
 Under every styled `jcode-ui` component is a headless primitive in `jcode-ui-core` — behavior with
 no styling. Use these directly when you want the logic (streaming, virtualization, keyboard
 handling) but your own visual language.
+
+```ts
+import { Thread, MessageView, Composer, ToolCallView, ApprovalBlock, AskUserBlock } from 'jcode-ui-core/primitives'
+```
+
+Full prop tables: [API → Primitives](/chat-ui/docs/api/primitives).
 
 ## Thread
 
@@ -36,10 +41,8 @@ Key behaviors:
 - **Virtualization** via TanStack Virtual — handles 10k-message threads. Set `virtualize={false}` for
   short replay timelines where DOM simplicity matters.
 - **Auto-follow**: when the user is within `scrollThreshold` px of the bottom, new/streaming content
-  scrolls into view. Scroll up to read and the view won't yank back down — the core streaming-UX
-  contract.
-- **`seq` keying**: each `ThreadItem` carries a `seq` counter used as the React key, keeping DOM
-  identity stable across streaming updates.
+  scrolls into view. Scroll up to read and the view won't yank back down.
+- **`seq` keying**: each `ThreadItem` carries a `seq` counter used as the React key.
 
 ## MessageView
 
@@ -68,12 +71,14 @@ import { Composer } from 'jcode-ui-core/primitives'
   slashCommands={[{ slash: '/goal', description: 'set the session goal' }]}
   allowImages={modelSupportsVision}
   onSent={() => timelineSnapToBottom()}
-  renderSubmitButton={(mode, disabled) => <MyButton ... />}
+  renderSubmitButton={(mode, disabled, onActivate) => (
+    <MyButton disabled={disabled} onClick={onActivate} />
+  )}
 />
 ```
 
 When the runtime reports `isRunning`, `send()` routes to `enqueueMessage` (type-ahead) and the
-button slot receives `mode: 'stop'`.
+button slot receives `mode: 'stop'`. Always wire `onActivate` on the submit control.
 
 ## ToolCallView
 
@@ -128,3 +133,26 @@ import { AskUserBlock } from 'jcode-ui-core/primitives'
 
 The `controls` object exposes `toggleOption`, `setOther`, `submit`, `skip` — so a styled consumer
 needs no local state.
+
+## Behavioral hooks
+
+```ts
+import { useAutoScroll, useStreamFollow, useFocusOnIdle, useQueuedMessages } from 'jcode-ui-core/hooks'
+```
+
+| Hook | Purpose |
+|------|---------|
+| `useAutoScroll(threshold?)` | Track "at bottom" + `scrollToBottom` |
+| `useStreamFollow(autoScroll, dep)` | Follow stream only when at bottom |
+| `useFocusOnIdle(isRunning)` | Refocus composer when turn ends |
+| `useQueuedMessages()` | Read type-ahead queue |
+
+See [API → Hooks](/chat-ui/docs/api/hooks).
+
+## Styled vs headless
+
+| Need | Use |
+|------|-----|
+| Drop-in jcode look | `jcode-ui` (`Thread`, `ChatInput`, …) |
+| Own design system | `jcode-ui-core/primitives` + your CSS |
+| Mix | Styled `Thread` + custom `Composer` slots, etc. |

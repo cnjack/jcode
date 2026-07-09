@@ -3,7 +3,7 @@
  *
  * Layout (NOT chat-bubble cards):
  *   [avatar] Role label
- *            markdown content (pl-9, no bg / no border)
+ *            markdown content (jcode-gutter, no bg / no border)
  *            duration · copy / edit (hover)
  *
  * User and assistant share the same left-aligned structure; only the avatar
@@ -16,6 +16,7 @@ import { CheckIcon, PencilSquareIcon, Square2StackIcon } from '@heroicons/react/
 import type { Message as MessageData } from 'jcode-ui-core'
 import { useRuntimeActions } from 'jcode-ui-core/runtime'
 import { renderMarkdown } from '../lib/markdown.js'
+import { AttachmentList } from './Attachment.js'
 import { Reasoning } from './Reasoning.js'
 import { Sources } from './Sources.js'
 
@@ -98,7 +99,7 @@ export const Message = memo(function Message({ message, canEdit }: MessageProps)
 
   return (
     <div
-      className="jcode-message chat-col group/msg animate-fade-in py-3"
+      className="jcode-message jcode-chat-col group/msg animate-fade-in py-3"
       data-role={message.role}
       data-source={message.source}
       data-level={message.level}
@@ -106,44 +107,33 @@ export const Message = memo(function Message({ message, canEdit }: MessageProps)
       {/* Role label + avatar — always left-aligned, no bubble chrome. */}
       <div className="mb-2 flex items-center gap-2.5">
         <div
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
+          className="jcode-msg-avatar flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
           style={{ background: avatarBg, color: 'var(--color-surface)' }}
           aria-hidden
         >
           {avatarGlyph}
         </div>
-        <span className="text-[11px] font-semibold" style={{ color: labelColor }}>
+        <span className="text-[11px] font-semibold tracking-wide" style={{ color: labelColor }}>
           {roleLabel}
         </span>
       </div>
 
-      {/* Attachments */}
+      {/* Attachments — same Attachment tiles as composer (assistant-ui UserMessageAttachments). */}
       {message.images && message.images.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-2 pl-9">
-          {message.images.map((img, i) => (
-            <img
-              key={i}
-              src={`data:${img.media_type};base64,${img.data}`}
-              alt={`attachment ${i + 1}`}
-              className="max-h-48 max-w-64 cursor-pointer object-contain transition-opacity hover:opacity-90"
-              style={{
-                borderRadius: 'var(--radius-lg)',
-                border: '1px solid var(--color-border)',
-              }}
-            />
-          ))}
+        <div className="jcode-gutter mb-2">
+          <AttachmentList images={message.images} size={96} preview />
         </div>
       )}
 
       {message.reasoning && (
-        <div className="pl-9">
+        <div className="jcode-gutter">
           <Reasoning reasoning={message.reasoning} durationMs={message.durationMs} />
         </div>
       )}
 
       {/* Body or inline edit — flat prose, no card bg/border. */}
       {editing ? (
-        <div className="pl-9">
+        <div className="jcode-gutter">
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -156,39 +146,22 @@ export const Message = memo(function Message({ message, canEdit }: MessageProps)
                 cancelEdit()
               }
             }}
-            className="min-h-20 max-h-80 w-full resize-y px-3 py-2 text-sm transition-colors"
+            className="min-h-20 max-h-80 w-full resize-y px-3 py-2.5 text-sm shadow-[var(--shadow-sm)] transition-[border-color,box-shadow] outline-none focus:border-[var(--color-primary)] focus:shadow-[0_0_0_3px_var(--accent-wash)]"
             style={{
-              borderRadius: 'var(--radius-lg)',
+              borderRadius: 'var(--radius-xl)',
               border: '1px solid var(--color-border)',
               background: 'var(--color-surface)',
               color: 'var(--color-foreground)',
+              fontFamily: 'var(--font-sans)',
             }}
             // eslint-disable-next-line jsx-a11y/no-autofocus
             autoFocus
           />
           <div className="mt-2 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={saveEdit}
-              className="cursor-pointer px-3 py-1 text-xs font-semibold transition-all active:scale-95"
-              style={{
-                background: 'var(--color-accent-neutral)',
-                color: 'var(--color-surface)',
-                borderRadius: 'var(--radius-md)',
-              }}
-            >
+            <button type="button" onClick={saveEdit} className="jcode-btn jcode-btn-primary">
               Save
             </button>
-            <button
-              type="button"
-              onClick={cancelEdit}
-              className="cursor-pointer px-3 py-1 text-xs font-medium transition-all active:scale-95"
-              style={{
-                background: 'var(--color-secondary)',
-                color: 'var(--color-foreground)',
-                borderRadius: 'var(--radius-md)',
-              }}
-            >
+            <button type="button" onClick={cancelEdit} className="jcode-btn jcode-btn-secondary">
               Cancel
             </button>
             <span className="text-[10px]" style={{ color: 'var(--color-muted-foreground)' }}>
@@ -201,14 +174,14 @@ export const Message = memo(function Message({ message, canEdit }: MessageProps)
       )}
 
       {message.sources && message.sources.length > 0 && (
-        <div className="pl-9">
+        <div className="jcode-gutter">
           <Sources sources={message.sources} />
         </div>
       )}
 
       {/* Action footer: duration (assistant) + hover copy/edit. */}
       {!editing && (
-        <div className="mt-1.5 flex items-center gap-2 pl-9">
+        <div className="jcode-gutter mt-1.5 flex items-center gap-2">
           {durationLabel && message.role === 'assistant' && (
             <span
               className="text-[10px] tabular-nums"
@@ -222,19 +195,18 @@ export const Message = memo(function Message({ message, canEdit }: MessageProps)
               {durationLabel}
             </span>
           )}
-          <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100">
+          <div className="jcode-msg-actions flex items-center gap-0.5">
             <button
               type="button"
               onClick={copy}
               title={copied ? 'Copied' : 'Copy'}
               aria-label={copied ? 'Copied' : 'Copy'}
-              className="flex h-5 w-5 cursor-pointer items-center justify-center rounded-[var(--radius-sm)] transition-all hover:bg-[var(--color-secondary)] active:scale-90"
-              style={{ color: 'var(--color-muted-foreground)' }}
+              className="jcode-msg-action-btn flex h-6 w-6 cursor-pointer items-center justify-center rounded-[var(--radius-md)]"
             >
               {copied ? (
-                <CheckIcon className="h-3 w-3" style={{ color: 'var(--color-accent-neutral)' }} />
+                <CheckIcon className="h-3.5 w-3.5" style={{ color: 'var(--color-success)' }} />
               ) : (
-                <Square2StackIcon className="h-3 w-3" />
+                <Square2StackIcon className="h-3.5 w-3.5" />
               )}
             </button>
             {canEdit && (
@@ -243,10 +215,9 @@ export const Message = memo(function Message({ message, canEdit }: MessageProps)
                 onClick={startEdit}
                 title="Edit"
                 aria-label="Edit"
-                className="flex h-5 w-5 cursor-pointer items-center justify-center rounded-[var(--radius-sm)] transition-all hover:bg-[var(--color-secondary)] active:scale-90"
-                style={{ color: 'var(--color-muted-foreground)' }}
+                className="jcode-msg-action-btn flex h-6 w-6 cursor-pointer items-center justify-center rounded-[var(--radius-md)]"
               >
-                <PencilSquareIcon className="h-3 w-3" />
+                <PencilSquareIcon className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
@@ -255,7 +226,7 @@ export const Message = memo(function Message({ message, canEdit }: MessageProps)
 
       {/* System error detail */}
       {isSystem && message.level === 'error' && message.detail && (
-        <details className="mt-1 pl-9">
+        <details className="jcode-gutter mt-1">
           <summary className="cursor-pointer text-[11px] text-[var(--color-muted-foreground)]">
             details
           </summary>
@@ -279,7 +250,7 @@ const MarkdownBody = memo(function MarkdownBody({ html }: { html: string }) {
   const sanitized = useMemo(() => renderMarkdown(html), [html])
   return (
     <div
-      className="jcode-prose jcode-selectable max-w-none break-words pl-9"
+      className="jcode-prose jcode-selectable jcode-gutter max-w-none break-words"
       dangerouslySetInnerHTML={{ __html: sanitized }}
     />
   )
