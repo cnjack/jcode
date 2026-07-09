@@ -44,6 +44,9 @@ export { Reasoning } from './components/Reasoning.js'
 export { Sources } from './components/Sources.js'
 export { Attachment, AttachmentList } from './components/Attachment.js'
 
+// Markdown pipeline (same renderer Message uses).
+export { renderMarkdown } from './lib/markdown.js'
+
 // Re-export the core types + primitives so consumers have a single import.
 export type {
   Message as MessageData,

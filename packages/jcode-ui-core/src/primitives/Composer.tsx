@@ -27,10 +27,18 @@ export interface ComposerRenderSlots {
   renderSlashMenu?: (state: SlashMenuState) => ReactNode
   /** Render queued-message chips above the textarea. */
   renderQueue?: (queued: { id: string; text: string; images?: ChatImage[] }[]) => ReactNode
-  /** Render the send/stop button. `mode` is 'send' or 'stop'. */
-  renderSubmitButton?: (mode: 'send' | 'stop', disabled: boolean) => ReactNode
-  /** Render attached-image thumbnails below the textarea. */
+  /** Render the send/stop button. `mode` is 'send' or 'stop'.
+   *  Call `onActivate` on click (send when idle, stop when running). */
+  renderSubmitButton?: (mode: 'send' | 'stop', disabled: boolean, onActivate: () => void) => ReactNode
+  /** Render attached-image thumbnails (composer attachments strip). */
   renderAttachments?: (imgs: ChatImage[], remove: (i: number) => void) => ReactNode
+  /**
+   * Render the "add attachment" control (paperclip / +). Called with
+   * `openPicker` that opens the hidden file input. When omitted and
+   * `allowImages` is true, a minimal default button is rendered.
+   * Mirrors assistant-ui `ComposerAddAttachment`.
+   */
+  renderAddAttachment?: (openPicker: () => void) => ReactNode
   /** Optional content rendered before the textarea inside the input row
    *  (e.g. a "+" menu button). */
   renderPrefix?: () => ReactNode
@@ -47,6 +55,8 @@ export interface ComposerProps extends ComposerRenderSlots {
   slashCommands?: SlashCommand[]
   /** Whether image attachments are allowed (gated by model vision support). */
   allowImages?: boolean
+  /** `accept` attribute for the file picker (default `image/*`). */
+  acceptImages?: string
   /** Max image size in bytes (default 10MB). */
   maxImageBytes?: number
   /** aria-label for the textarea. */
@@ -71,11 +81,37 @@ export interface SlashMenuState {
 
 const DEFAULT_MAX_ROWS_PX = 160
 
+function readImageFile(file: File): Promise<ChatImage | null> {
+  return new Promise((resolve) => {
+    if (!file.type.startsWith('image/')) {
+      resolve(null)
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = String(reader.result ?? '')
+      const comma = dataUrl.indexOf(',')
+      if (comma < 0) {
+        resolve(null)
+        return
+      }
+      resolve({
+        data: dataUrl.slice(comma + 1),
+        media_type: file.type,
+        name: file.name || undefined,
+      })
+    }
+    reader.onerror = () => resolve(null)
+    reader.readAsDataURL(file)
+  })
+}
+
 export function Composer({
   placeholder = 'Send a message…',
   maxRows = DEFAULT_MAX_ROWS_PX,
   slashCommands,
   allowImages = false,
+  acceptImages = 'image/*',
   maxImageBytes = 10 * 1024 * 1024,
   ariaLabel = 'Message input',
   defaultValue = '',
@@ -85,6 +121,7 @@ export function Composer({
   renderQueue,
   renderSubmitButton,
   renderAttachments,
+  renderAddAttachment,
   renderPrefix,
   renderSuffix,
 }: ComposerProps): ReactNode {
@@ -93,6 +130,7 @@ export function Composer({
   const [text, setText] = useState(defaultValue)
   const [images, setImages] = useState<ChatImage[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // --- Autosize: grow with content up to maxRows, then scroll. ---
   useLayoutEffect(() => {
@@ -174,9 +212,9 @@ export function Composer({
     [applySlash, filteredCommands, send, slashActive, slashOpen],
   )
 
-  // --- Image attachment: paste + remove. File picking is left to the host
-  //     (it needs a file input + app-specific UX); addImage accepts a ready
-  //     ChatImage. ---
+  // --- Image attachments: paste + file picker + remove.
+  //     Mirrors assistant-ui ComposerAttachments / ComposerAddAttachment,
+  //     scoped to vision images (ChatImage base64) for agent backends. ---
   const addImage = useCallback(
     (img: ChatImage) => {
       if (!allowImages) return
@@ -187,14 +225,41 @@ export function Composer({
     },
     [allowImages, maxImageBytes],
   )
+  const addImageFiles = useCallback(
+    async (files: FileList | File[]) => {
+      if (!allowImages) return
+      for (const file of Array.from(files)) {
+        if (file.size > maxImageBytes) continue
+        const img = await readImageFile(file)
+        if (img) addImage(img)
+      }
+    },
+    [addImage, allowImages, maxImageBytes],
+  )
   const removeImage = useCallback((i: number) => {
     setImages((prev) => prev.filter((_, idx) => idx !== i))
+  }, [])
+  const openPicker = useCallback(() => {
+    fileInputRef.current?.click()
   }, [])
 
   const mode: 'send' | 'stop' = isRunning ? 'stop' : 'send'
 
+  const onActivate = mode === 'send' ? send : stop
+
+  const addAttachmentControl =
+    allowImages
+      ? renderAddAttachment
+        ? renderAddAttachment(openPicker)
+        : (
+          <button type="button" onClick={openPicker} aria-label="Add attachment">
+            +
+          </button>
+        )
+      : null
+
   return (
-    <div className={className}>
+    <div className={className} data-running={isRunning ? 'true' : 'false'}>
       {renderQueue?.(queued)}
       {renderSlashMenu?.({
         open: !!slashOpen && filteredCommands.length > 0,
@@ -202,8 +267,10 @@ export function Composer({
         activeIndex: slashOpen ? slashActive : -1,
         apply: applySlash,
       })}
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+      {allowImages && images.length > 0 && renderAttachments?.(images, removeImage)}
+      <div className="jcode-composer-row" style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
         {renderPrefix?.()}
+        {addAttachmentControl}
         <textarea
           ref={textareaRef}
           value={text}
@@ -213,33 +280,30 @@ export function Composer({
             if (!allowImages) return
             const items = e.clipboardData?.items
             if (!items) return
+            const files: File[] = []
             for (const it of items) {
               if (it.kind === 'file' && it.type.startsWith('image/')) {
                 const file = it.getAsFile()
-                if (!file) continue
-                e.preventDefault()
-                const reader = new FileReader()
-                reader.onload = () => {
-                  const dataUrl = String(reader.result)
-                  const comma = dataUrl.indexOf(',')
-                  addImage({ data: dataUrl.slice(comma + 1), media_type: file.type })
-                }
-                reader.readAsDataURL(file)
+                if (file) files.push(file)
               }
             }
+            if (files.length === 0) return
+            e.preventDefault()
+            void addImageFiles(files)
           }}
           placeholder={placeholder}
           aria-label={ariaLabel}
           rows={1}
+          className="jcode-composer-input"
           style={{ resize: 'none', flex: 1, overflowY: 'auto' }}
         />
         {renderSuffix?.()}
         {renderSubmitButton
-          ? renderSubmitButton(mode, mode === 'send' ? !canSend : false)
+          ? renderSubmitButton(mode, mode === 'send' ? !canSend : false, onActivate)
           : (
             <button
               type="button"
-              onClick={mode === 'send' ? send : stop}
+              onClick={onActivate}
               disabled={mode === 'send' ? !canSend : false}
               aria-label={mode === 'send' ? 'Send message' : 'Stop'}
             >
@@ -247,7 +311,23 @@ export function Composer({
             </button>
           )}
       </div>
-      {allowImages && images.length > 0 && renderAttachments?.(images, removeImage)}
+      {allowImages && (
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={acceptImages}
+          multiple
+          className="jcode-composer-file-input"
+          style={{ display: 'none' }}
+          aria-hidden
+          tabIndex={-1}
+          onChange={(e) => {
+            const files = e.target.files
+            if (files && files.length > 0) void addImageFiles(files)
+            e.target.value = ''
+          }}
+        />
+      )}
     </div>
   )
 }

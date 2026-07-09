@@ -1,10 +1,8 @@
 /**
- * ApprovalBanner — styled approval gate (wraps headless ApprovalBlock).
+ * ApprovalBanner — human-in-the-loop approval gate.
  *
- * Pending: warning-tinted decision card with a tool-identity tile (icon keyed
- * off tool_name), the primary target pulled from args, an external-path chip,
- * and the 3-tier button ramp (allow once / allow all [armed] / deny). Resolved:
- * collapses to a borderless inline note.
+ * Soft surface card (matches chat surface), neutral chrome, accent only on the
+ * primary action — avoids the "black card + loud orange" clash.
  */
 
 import { memo, useMemo } from 'react'
@@ -26,7 +24,7 @@ export const ApprovalBanner = memo(function ApprovalBanner({ approval }: Approva
   return (
     <ApprovalBlock
       approval={approval}
-      className="jcode-approval px-4 py-1"
+      className="jcode-approval"
       renderPending={(a, acts) => <PendingCard approval={a} {...acts} />}
       renderResolved={(a) => <ResolvedNote approval={a} />}
     />
@@ -54,43 +52,36 @@ function PendingCard({
   const Icon = toolIcon(approval.tool_name)
   const disabled = !!approval.resolving
   return (
-    <div className="my-1 rounded-[var(--radius-lg)] border border-[var(--color-warning-fg)] bg-[var(--color-warning-bg)] px-3.5 py-2.5">
-      <div className="flex items-center gap-2">
-        <Icon className="h-4 w-4 shrink-0 text-[var(--color-warning-fg)]" />
-        <span className="text-[0.82rem] font-medium text-[var(--color-foreground)]">
-          Approve <span className="text-[var(--color-warning-fg)]">{verbOf(approval.tool_name)}</span>
+    <div className={`jcode-approval-card${armed ? ' is-armed' : ''}${approval.is_external ? ' is-external' : ''}`}>
+      <div className="jcode-approval-card__head">
+        <span className="jcode-approval-card__icon" aria-hidden>
+          <Icon className="h-4 w-4" />
         </span>
-        {target && (
-          <code className="ml-1 max-w-[50%] truncate rounded-[var(--radius-xs)] bg-[var(--color-muted)] px-1.5 py-0.5 font-mono text-[0.72rem] text-[var(--color-foreground)]">
-            {target}
-          </code>
-        )}
-        {approval.is_external && (
-          <span className="ml-auto shrink-0 rounded-[var(--radius-xs)] bg-[var(--color-error-bg)] px-1.5 py-0.5 text-[0.66rem] text-[var(--color-error-fg)]">
-            external
+        <div className="jcode-approval-card__titles">
+          <span className="jcode-approval-card__label">Approval needed</span>
+          <span className="jcode-approval-card__verb">
+            {verbOf(approval.tool_name)}
+            {target ? (
+              <code className="jcode-approval-card__target" title={target}>
+                {target}
+              </code>
+            ) : null}
           </span>
-        )}
+        </div>
+        {approval.is_external && <span className="jcode-approval-card__badge">external</span>}
       </div>
-      <details className="mt-1.5">
-        <summary className="cursor-pointer text-[0.7rem] text-[var(--color-muted-foreground)]">full arguments</summary>
-        <pre className="mt-1 overflow-auto rounded-[var(--radius-md)] bg-[var(--code-bg)] px-2 py-1 font-mono text-[0.7rem] text-[var(--color-foreground)]">{prettyArgs(approval.tool_args)}</pre>
+
+      <details className="jcode-approval-card__details">
+        <summary>Arguments</summary>
+        <pre>{prettyArgs(approval.tool_args)}</pre>
       </details>
-      <div className="mt-2.5 flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={allowOnce}
-          disabled={disabled}
-          className="rounded-[var(--radius-md)] bg-[var(--color-primary)] px-3 py-1 text-[0.8rem] font-medium text-[var(--color-on-primary)] hover:bg-[var(--accent-wash-strong)] disabled:opacity-50"
-        >
+
+      <div className="jcode-approval-card__actions">
+        <button type="button" onClick={allowOnce} disabled={disabled} className="jcode-btn jcode-btn-allow">
           Allow once
         </button>
         {!armed ? (
-          <button
-            type="button"
-            onClick={allowAllArm}
-            disabled={disabled}
-            className="rounded-[var(--radius-md)] border border-[var(--color-border)] px-3 py-1 text-[0.8rem] text-[var(--color-foreground)] hover:bg-[var(--neutral-wash-soft)] disabled:opacity-50"
-          >
+          <button type="button" onClick={allowAllArm} disabled={disabled} className="jcode-btn jcode-btn-ghost">
             Allow all…
           </button>
         ) : (
@@ -99,26 +90,16 @@ function PendingCard({
               type="button"
               onClick={allowAllConfirm}
               disabled={disabled}
-              className="rounded-[var(--radius-md)] bg-[var(--color-destructive)] px-3 py-1 text-[0.8rem] font-medium text-[var(--color-on-destructive)] hover:opacity-90 disabled:opacity-50"
+              className="jcode-btn jcode-btn-caution"
             >
               Confirm allow all
             </button>
-            <button
-              type="button"
-              onClick={allowAllCancel}
-              disabled={disabled}
-              className="rounded-[var(--radius-md)] px-3 py-1 text-[0.8rem] text-[var(--color-muted-foreground)] hover:bg-[var(--neutral-wash-soft)] disabled:opacity-50"
-            >
+            <button type="button" onClick={allowAllCancel} disabled={disabled} className="jcode-btn jcode-btn-ghost">
               Cancel
             </button>
           </>
         )}
-        <button
-          type="button"
-          onClick={deny}
-          disabled={disabled}
-          className="ml-auto rounded-[var(--radius-md)] px-3 py-1 text-[0.8rem] text-[var(--color-error-fg)] hover:bg-[var(--color-error-bg)] disabled:opacity-50"
-        >
+        <button type="button" onClick={deny} disabled={disabled} className="jcode-btn jcode-btn-deny">
           Deny
         </button>
       </div>
@@ -130,10 +111,12 @@ function ResolvedNote({ approval }: { approval: Approval }) {
   const ok = approval.approved
   const Icon = ok ? ShieldCheckIcon : ShieldExclamationIcon
   return (
-    <div className="flex items-center gap-1.5 px-4 py-0.5 text-[0.78rem]">
-      <Icon className={`h-3.5 w-3.5 ${ok ? 'text-[var(--color-success)]' : 'text-[var(--color-muted-foreground)]'}`} />
-      <span className="text-[var(--color-muted-foreground)]">
-        {ok ? 'allowed' : 'denied'} · {approval.tool_name}
+    <div className={`jcode-approval-resolved${ok ? ' is-ok' : ''}`}>
+      <Icon className="h-3.5 w-3.5 shrink-0" />
+      <span>
+        {ok ? 'Allowed' : 'Denied'}
+        <span className="jcode-approval-resolved__sep">·</span>
+        <span className="jcode-approval-resolved__name">{approval.tool_name}</span>
       </span>
     </div>
   )
@@ -151,12 +134,12 @@ function extractTarget(approval: Approval): string {
 function verbOf(name: string): string {
   switch (name) {
     case 'execute':
-      return 'command'
+      return 'Run command'
     case 'write':
-      return 'write'
+      return 'Write file'
     case 'edit':
     case 'multi_edit':
-      return 'edit'
+      return 'Edit file'
     default:
       return name
   }

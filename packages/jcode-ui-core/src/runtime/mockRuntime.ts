@@ -1,14 +1,10 @@
 /**
  * MockRuntime — a self-contained, scriptable ChatRuntime for demos, docs, and
  * tests. No backend required: you feed it a "script" of items + a streaming
- * text fragment sequence, and it emits them on a timer. This is what powers the
- * website playground and visual-regression fixtures.
- *
- * It's read-only-ish: action callbacks are captured (so you can assert on them)
- * but don't drive scripted playback — the script is the source of truth.
+ * text fragment sequence, and it emits them on a timer.
  */
 
-import type { ChatRuntime, RuntimeActions, RuntimeState } from './index.js'
+import type { ChatRuntime, PartialRuntimeState, RuntimeActions, RuntimeState } from './index.js'
 import { normalizeState } from './index.js'
 import type { ThreadItem } from '../types/index.js'
 
@@ -17,28 +13,39 @@ export interface MockRuntimeOptions {
   items?: ThreadItem[]
   /** Initial isRunning flag. */
   isRunning?: boolean
+  /** Initial full/partial runtime state (overrides items/isRunning when set). */
+  state?: PartialRuntimeState
   /** Captured-action handlers (defaults are no-ops that record to `.calls`). */
   actions?: Partial<RuntimeActions>
 }
 
+function maxSeq(items: ThreadItem[]): number {
+  let m = 0
+  for (const i of items) {
+    if (i.seq > m) m = i.seq
+  }
+  return m
+}
+
 /**
  * Create a ChatRuntime backed by an in-memory store with pub/sub. Exposes
- * imperative mutators (`setItems`, `push`, `appendText`, `setRunning`) so a
- * script driver (or a test) can evolve the state over time.
+ * imperative mutators (`setItems`, `push`, `appendText`, `setRunning`, `patchState`)
+ * so a script driver (or a test / docs demo) can evolve the state over time.
  */
 export function createMockRuntime(opts: MockRuntimeOptions = {}): ChatRuntime & {
-  /** Mutators for scripts/tests. */
   setItems: (items: ThreadItem[]) => void
   push: (item: ThreadItem) => void
   setRunning: (running: boolean) => void
-  /** Append to the content of the last message item. */
+  patchState: (partial: PartialRuntimeState) => void
   appendText: (delta: string) => void
-  /** Recorded action calls (most-recent-last). */
+  /** Allocate a fresh seq higher than any current item (and any previously seen). */
+  nextSeq: () => number
   calls: { action: string; args: unknown[] }[]
 } {
   let state: RuntimeState = normalizeState({
     items: opts.items,
     isRunning: opts.isRunning,
+    ...opts.state,
   })
   const listeners = new Set<() => void>()
   const calls: { action: string; args: unknown[] }[] = []
@@ -46,12 +53,17 @@ export function createMockRuntime(opts: MockRuntimeOptions = {}): ChatRuntime & 
   function emit() {
     for (const l of listeners) l()
   }
-  function setState(next: RuntimeState) {
+  function replaceState(next: RuntimeState) {
     state = next
+    // Keep the seq counter ahead of anything in the timeline so push/appendText
+    // never collide with caller-assigned seq values (e.g. demo scripts).
+    const m = maxSeq(next.items)
+    if (m > seq) seq = m
     emit()
   }
 
-  let seq = state.items.reduce((m, i) => Math.max(m, i.seq), 0)
+  // Monotonic counter for auto-allocated seqs. Always stays >= max item.seq.
+  let seq = maxSeq(state.items)
   const nextSeq = () => ++seq
 
   const noop = (action: string) => (...args: unknown[]) => {
@@ -63,8 +75,41 @@ export function createMockRuntime(opts: MockRuntimeOptions = {}): ChatRuntime & 
     enqueueMessage: opts.actions?.enqueueMessage ?? noop('enqueueMessage'),
     removeQueuedMessage: opts.actions?.removeQueuedMessage ?? noop('removeQueuedMessage'),
     stop: opts.actions?.stop ?? noop('stop'),
-    resolveApproval: opts.actions?.resolveApproval ?? noop('resolveApproval'),
-    submitAskUser: opts.actions?.submitAskUser ?? noop('submitAskUser'),
+    resolveApproval:
+      opts.actions?.resolveApproval ??
+      ((id, approved, approveAll) => {
+        calls.push({ action: 'resolveApproval', args: [id, approved, approveAll] })
+        replaceState({
+          ...state,
+          items: state.items.map((i) =>
+            i.kind === 'approval' && i.data.id === id
+              ? { ...i, data: { ...i.data, resolved: true, approved } }
+              : i,
+          ),
+        })
+      }),
+    submitAskUser:
+      opts.actions?.submitAskUser ??
+      ((id, answers) => {
+        calls.push({ action: 'submitAskUser', args: [id, answers] })
+        replaceState({
+          ...state,
+          items: state.items.map((i) =>
+            i.kind === 'tool' && (i.data.askUserId === id || i.data.id === id)
+              ? {
+                  ...i,
+                  data: {
+                    ...i.data,
+                    status: 'done',
+                    askUserId: undefined,
+                    askUserQuestions: undefined,
+                    output: JSON.stringify(answers),
+                  },
+                }
+              : i,
+          ),
+        })
+      }),
     editMessage: opts.actions?.editMessage ?? noop('editMessage'),
   }
 
@@ -75,20 +120,38 @@ export function createMockRuntime(opts: MockRuntimeOptions = {}): ChatRuntime & 
       return () => listeners.delete(l)
     },
     actions,
-    setItems: (items) => setState({ ...state, items }),
-    push: (item) => setState({ ...state, items: [...state.items, item] }),
-    setRunning: (isRunning) => setState({ ...state, isRunning }),
+    setItems: (items) => replaceState({ ...state, items }),
+    push: (item) => {
+      // If the caller omitted a meaningful seq (0 / negative), assign one.
+      const withSeq =
+        item.seq > 0
+          ? item
+          : { ...item, seq: nextSeq() }
+      if (withSeq.seq > seq) seq = withSeq.seq
+      replaceState({ ...state, items: [...state.items, withSeq] })
+    },
+    setRunning: (isRunning) => replaceState({ ...state, isRunning }),
+    patchState: (partial) => {
+      const next = { ...state, ...partial }
+      if (partial.items) {
+        replaceState(next)
+      } else {
+        state = next
+        emit()
+      }
+    },
+    nextSeq,
     appendText: (delta) => {
       const items = [...state.items]
       for (let i = items.length - 1; i >= 0; i--) {
         const it = items[i]
         if (it.kind === 'message' && it.data.role === 'assistant') {
           items[i] = { ...it, data: { ...it.data, content: it.data.content + delta } }
-          setState({ ...state, items })
+          replaceState({ ...state, items })
           return
         }
       }
-      // No assistant message yet — create one.
+      // No assistant message yet — create one with a non-colliding seq.
       const msg: ThreadItem = {
         kind: 'message',
         seq: nextSeq(),
@@ -99,7 +162,7 @@ export function createMockRuntime(opts: MockRuntimeOptions = {}): ChatRuntime & 
           timestamp: Date.now(),
         },
       }
-      setState({ ...state, items: [...state.items, msg] })
+      replaceState({ ...state, items: [...state.items, msg] })
     },
     calls,
   }

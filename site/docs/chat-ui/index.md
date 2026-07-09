@@ -1,7 +1,6 @@
 ---
-title: jcode-ui
+title: Overview
 nav_order: 0
-has_children: true
 ---
 
 # jcode-ui — React AI Chat Components
@@ -10,6 +9,8 @@ has_children: true
 messages, tool calls, approvals, and ask-user interactions. It powers jcode's own Web + Desktop UIs
 and is published as a standalone package so you can drop the same components into any agent or
 copilot.
+
+<div data-jcode-demo="thread" data-height="420"></div>
 
 ## Two packages
 
@@ -27,6 +28,8 @@ Use `jcode-ui` for the full styled experience, or reach for `jcode-ui-core` if y
 pnpm add jcode-ui jcode-ui-core
 # or: npm install jcode-ui jcode-ui-core
 ```
+
+See the full [Installation](/chat-ui/docs/installation) guide for Vite/Next setup, CSS, and a 5-minute mock runtime walkthrough.
 
 ## Quick start
 
@@ -69,10 +72,20 @@ mock, a replayed session, or a different state manager without touching the UI.
 On top of that, `ChatInput` is the composer (autosizing textarea, send/queue/stop, slash commands,
 image attachments, context bar).
 
-## Next
+## Docs map
 
-- [Runtime](/chat-ui/docs/runtime) — the `ChatRuntime` contract and `ExternalStoreRuntime`.
-- [Primitives](/chat-ui/docs/primitives) — the headless components under the styled layer.
-- [Tool renderers](/chat-ui/docs/tool-renderers) — the registry + writing your own.
-- [Theming](/chat-ui/docs/theming) — CSS custom properties and dark mode.
-- [Components](/chat-ui/docs/components) — props + examples for every styled component.
+| Section | Contents |
+|---------|----------|
+| [Installation](/chat-ui/docs/installation) | Package install, CSS, Vite/Next, mock runtime |
+| [Runtime](/chat-ui/docs/runtime) | `ChatRuntime`, external store, mock runtime |
+| [Primitives](/chat-ui/docs/primitives) | Headless building blocks |
+| [Components](/chat-ui/docs/components) | Styled components + live previews |
+| [Tool renderers](/chat-ui/docs/tool-renderers) | Registry + 9 defaults + gallery |
+| [Theming](/chat-ui/docs/theming) | CSS tokens, light/dark |
+| [API Reference](/chat-ui/docs/api) | Types, hooks, runtime, primitives |
+| [Guides](/chat-ui/docs/guides) | Recipes (store wiring, tools, approvals, …) |
+| [Examples](/chat-ui/docs/examples) | Cloneable Vite apps (mock + Zustand) |
+
+## Live playground
+
+The [chat-ui marketing page](/chat-ui) runs a full scripted conversation with the real components — no backend required.

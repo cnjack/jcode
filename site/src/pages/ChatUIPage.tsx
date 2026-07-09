@@ -6,13 +6,38 @@
  * but showcases the reusable React library rather than the product.
  */
 
+import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import Reveal from '../components/Reveal'
 import CopyButton from '../components/CopyButton'
 import { ChatDemo } from '../playground/ChatDemo'
+import { highlightDemoCode } from '../playground/highlightDemoCode'
 import './chatui.css'
 
 const INSTALL = 'pnpm add jcode-ui jcode-ui-core'
+
+const QUICK_START = `import { RuntimeProvider, createExternalStoreRuntime, Thread, ChatInput } from 'jcode-ui'
+import 'jcode-ui/styles.css'
+
+const runtime = createExternalStoreRuntime({
+  store,                       // your Redux/Zustand store
+  select: (s) => ({            // project to RuntimeState
+    items: s.chat.timeline,
+    isRunning: s.chat.isRunning,
+    tokenSnapshot: s.chat.tokenInfo,
+    // …
+  }),
+  actions: { sendMessage, stop, resolveApproval, /* … */ },
+})
+
+export function App() {
+  return (
+    <RuntimeProvider runtime={runtime}>
+      <Thread />
+      <ChatInput />
+    </RuntimeProvider>
+  )
+}`
 
 const FEATURES = [
   {
@@ -48,6 +73,8 @@ const FEATURES = [
 ]
 
 export default function ChatUIPage() {
+  const quickStartHtml = useMemo(() => highlightDemoCode(QUICK_START, 'tsx'), [])
+
   return (
     <div className="chatui-page">
       {/* Hero */}
@@ -66,7 +93,7 @@ export default function ChatUIPage() {
               <code>{INSTALL}</code>
               <CopyButton text={INSTALL} />
             </div>
-            <Link className="chatui-docs-link" to="/docs/chat-ui">
+            <Link className="chatui-docs-link" to="/chat-ui/docs">
               Read the docs →
             </Link>
           </div>
@@ -109,28 +136,15 @@ export default function ChatUIPage() {
       <section className="chatui-quickstart">
         <Reveal>
           <h2 className="chatui-section-title">Quick start</h2>
-          <pre className="chatui-codeblock">{`import { RuntimeProvider, createExternalStoreRuntime, Thread, ChatInput } from 'jcode-ui'
-import 'jcode-ui/styles.css'
-
-const runtime = createExternalStoreRuntime({
-  store,                       // your Redux/Zustand store
-  select: (s) => ({            // project to RuntimeState
-    items: s.chat.timeline,
-    isRunning: s.chat.isRunning,
-    tokenSnapshot: s.chat.tokenInfo,
-    // …
-  }),
-  actions: { sendMessage, stop, resolveApproval, /* … */ },
-})
-
-export function App() {
-  return (
-    <RuntimeProvider runtime={runtime}>
-      <Thread />
-      <ChatInput />
-    </RuntimeProvider>
-  )
-}`}</pre>
+          <div className="chatui-codeblock-wrap">
+            <CopyButton text={QUICK_START} />
+            <pre className="chatui-codeblock">
+              <code
+                className="hljs language-tsx"
+                dangerouslySetInnerHTML={{ __html: quickStartHtml }}
+              />
+            </pre>
+          </div>
         </Reveal>
       </section>
     </div>

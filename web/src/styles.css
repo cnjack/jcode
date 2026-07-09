@@ -133,20 +133,28 @@ select:focus-visible {
 }
 .jcode-prose pre {
   border-radius: var(--radius-lg);
-  border: 1px solid var(--code-border);
+  border: 1px solid var(--code-border, #3f3f48);
   font-size: 0.8125rem;
   line-height: 1.625;
   padding: 0.875em 1em;
-  background: var(--code-bg);
-  color: var(--hljs-fg);
+  background: var(--code-bg, #222228);
+  color: var(--code-fg, var(--hljs-fg, #f0f0f4));
+}
+.jcode-prose pre code,
+.jcode-prose pre .hljs {
+  background: transparent !important;
+  color: inherit !important;
+  padding: 0 !important;
+  border: 0 !important;
 }
 .jcode-prose code:not(pre code) {
   padding: 0.15em 0.4em;
   border-radius: var(--radius-sm);
   font-size: 0.8125em;
   font-family: var(--font-mono);
-  background: var(--color-muted);
-  color: var(--color-foreground);
+  background: var(--code-inline-bg, var(--color-muted));
+  color: var(--code-fg, var(--color-foreground));
+  border: 1px solid var(--code-border, transparent);
 }
 .jcode-prose a {
   text-decoration: underline;
