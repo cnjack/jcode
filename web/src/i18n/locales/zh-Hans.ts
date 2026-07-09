@@ -660,6 +660,7 @@ export default {
     noProjects: '暂无项目',
     noTasks: '暂无任务',
     running: '运行中',
+    untitled: '新会话',
     newTaskHere: '在此新建任务',
     filter: {
       title: '筛选与排序',

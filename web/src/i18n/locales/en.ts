@@ -676,6 +676,7 @@ export default {
     noProjects: 'No projects yet',
     noTasks: 'No tasks',
     running: 'Running',
+    untitled: 'New chat',
     newTaskHere: 'New task here',
     filter: {
       title: 'Filters & sorting',
