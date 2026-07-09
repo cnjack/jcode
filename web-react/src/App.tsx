@@ -231,7 +231,9 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels'
   return (
     <RuntimeProvider runtime={runtime}>
       <ToolRegistryProvider registry={registry}>
-        <div className="relative flex h-[100dvh] overflow-hidden bg-[var(--color-background)] text-[var(--color-foreground)]">
+        <div className="app-shell relative flex h-[100dvh] overflow-hidden bg-[var(--color-background)] text-[var(--color-foreground)]">
+          {/* Native title-bar drag strip — hidden in browser, shown in Tauri (CSS). */}
+          <div className="titlebar-drag" data-tauri-drag-region aria-hidden="true" />
           {/* TopBar — floated top-right (only on chat view, like Vue). */}
           {activeView === 'chat' && (
             <TopBar
