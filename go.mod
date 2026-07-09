@@ -22,7 +22,7 @@ require (
 	github.com/rivo/uniseg v0.4.7
 	github.com/sashabaranov/go-openai v1.41.2
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/crypto v0.51.0
+	golang.org/x/crypto v0.52.0
 	golang.org/x/sys v0.45.0
 	tinygo.org/x/bluetooth v0.15.0
 )
