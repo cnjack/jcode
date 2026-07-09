@@ -4,9 +4,9 @@
 //
 // Two files are generated (both build artifacts, gitignored — never edit by
 // hand):
-//   - web/src/styles/tokens.generated.css : one html[data-theme="<name>"] block
+//   - web/src/styles/tokens.generated.css : one [data-theme="<name>"] block
 //     of CSS custom properties per theme.
-//   - web/src/composables/themes.generated.ts : the theme registry (id, label,
+//   - web/src/lib/themes.generated.ts : the theme registry (id, label,
 //     appearance) the picker UI iterates, so the list can't drift either.
 package main
 
@@ -22,7 +22,7 @@ import (
 
 func main() {
 	writeFile(repoPath("web", "src", "styles", "tokens.generated.css"), css())
-	writeFile(repoPath("web", "src", "composables", "themes.generated.ts"), ts())
+	writeFile(repoPath("web", "src", "lib", "themes.generated.ts"), ts())
 	fmt.Printf("theme/gen: wrote %d themes (css + ts)\n", len(theme.All()))
 }
 
@@ -61,6 +61,13 @@ func ts() string {
 }
 
 func writeFile(path, content string) {
+	// Generated files are gitignored; their parent dirs may not exist on a
+	// clean checkout (CI). Create them so go generate never fails only because
+	// tokens.generated.css / themes.generated.ts were never committed.
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "theme/gen: mkdir %s: %v\n", filepath.Dir(path), err)
+		os.Exit(1)
+	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "theme/gen: write %s: %v\n", path, err)
 		os.Exit(1)

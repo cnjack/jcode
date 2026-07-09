@@ -5,7 +5,7 @@
   "identifier": "com.cnjack.jcode",
   "build": {
     "frontendDist": "../../internal/web/dist",
-    "beforeDevCommand": "pnpm --dir ../web dev",
+    "beforeDevCommand": "pnpm --dir ../web dev --host",
     "devUrl": "http://localhost:5173",
     "beforeBuildCommand": "make -C .. build-web"
   },

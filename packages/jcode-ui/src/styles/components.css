@@ -36,19 +36,182 @@
   text-underline-offset: 2px;
 }
 
-/* ─── Tool-call diff renderer ───
- * Red/green line tinting for edit/multi_edit. Uses the semantic status tokens
- * so generated themes recolor correctly. */
+/* ─── Markdown tables (GFM) ───
+ * Framed, scrollable, token-driven. renderMarkdown wraps each <table> in
+ * `.jcode-md-table-wrap` so wide tables scroll without breaking the layout. */
+.jcode-prose .jcode-md-table-wrap {
+  margin: 0.85em 0;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  /* Soft inset so the table reads as its own surface against the chat panel. */
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-foreground) 3%, transparent);
+  -webkit-overflow-scrolling: touch;
+}
+.jcode-prose .jcode-md-table-wrap > table,
+.jcode-prose table {
+  width: 100%;
+  min-width: max-content;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.84em;
+  line-height: 1.5;
+  margin: 0;
+  color: var(--color-foreground);
+}
+/* Bare tables (no wrap yet / paste) still get a basic frame. */
+.jcode-prose > table {
+  margin: 0.85em 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.jcode-prose th,
+.jcode-prose td {
+  padding: 0.55rem 0.85rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--color-border);
+  border-right: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+}
+.jcode-prose th:last-child,
+.jcode-prose td:last-child {
+  border-right: none;
+}
+.jcode-prose thead th {
+  background: var(--color-muted);
+  color: var(--color-foreground);
+  font-weight: 600;
+  font-size: 0.92em;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--color-border);
+}
+.jcode-prose tbody tr:last-child th,
+.jcode-prose tbody tr:last-child td {
+  border-bottom: none;
+}
+.jcode-prose tbody tr:nth-child(even) td,
+.jcode-prose tbody tr:nth-child(even) th {
+  background: color-mix(in srgb, var(--color-muted) 45%, transparent);
+}
+.jcode-prose tbody tr:hover td,
+.jcode-prose tbody tr:hover th {
+  background: var(--neutral-wash-soft);
+}
+/* Numeric-looking cells stay monospace-friendly when authors use code in cells. */
+.jcode-prose td code,
+.jcode-prose th code {
+  font-size: 0.9em;
+}
+
+/* ─── Shared conversation column ───
+ * Messages, tools, and the docked composer all use this so their outer edges
+ * line up (max-w-4xl + 20px horizontal inset — Vue App.vue column geometry). */
+.chat-col {
+  width: 100%;
+  max-width: 56rem;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1.25rem;
+  padding-right: 1.25rem;
+  box-sizing: border-box;
+}
+
+/* ─── Tool call shell (matches Vue ToolCallCard.vue) ───
+ * Header stays outside; ONLY the expanded body gets a frame. The top edge of
+ * `.toolcall-body` is the visual divider between title and content. */
+.jcode-toolcall .toolcall-body {
+  overflow: hidden;
+  /* Vue: ml-0 mr-2 mt-1.5 mb-1.5 */
+  margin: 0.375rem 0.5rem 0.375rem 0;
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  /* Stronger top edge so title ↔ content separation reads as a 横线. */
+  box-shadow: 0 -1px 0 0 transparent;
+}
+.jcode-toolcall .toolcall-body[data-tool-status='error'] {
+  border-color: var(--color-destructive, var(--color-error-fg));
+}
+
+/* When expanded, a hairline under the header row reinforces the title/content split
+   even before the content box edge is noticed. */
+.jcode-toolcall[data-expanded='true'] > button {
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 6px;
+  margin-bottom: 2px;
+}
+
+/* Subagent: children under a plain indent; output is a framed markdown block. */
+.jcode-toolcall .toolcall-subagent-body {
+  margin: 0.25rem 0.5rem 0.25rem 0;
+}
+.jcode-toolcall .toolcall-subagent-children {
+  max-height: 600px;
+  overflow-y: auto;
+}
+.jcode-toolcall .toolcall-subagent-starting {
+  padding: 0.5rem 0;
+  font-size: 0.75rem;
+  color: var(--color-muted-foreground);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+.jcode-toolcall .toolcall-subagent-output {
+  margin-top: 0.375rem;
+  max-height: 18rem;
+  overflow: auto;
+  padding: 0.625rem 0.875rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+  color: var(--color-foreground);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+.jcode-toolcall .toolcall-subagent-output.jcode-prose {
+  font-size: 0.8125rem;
+}
+.jcode-toolcall .toolcall-subagent-error {
+  margin-top: 0.25rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-destructive, var(--color-error-fg));
+  border-radius: var(--radius-xl);
+  color: var(--color-destructive, var(--color-error-fg));
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+}
+
+/* ─── Tool-call diff renderer ─── */
 .jcode-diff-table {
   width: 100%;
   border-collapse: collapse;
   font-family: var(--font-mono);
-  font-size: 0.8em;
+  font-size: 0.75rem;
 }
 .jcode-diff-table td {
   padding: 0 0.5rem;
   white-space: pre-wrap;
   word-break: break-word;
+  vertical-align: top;
+}
+.jcode-diff-table .jcode-diff-ln {
+  width: 1px;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  text-align: right;
+  white-space: nowrap;
+  user-select: none;
+  opacity: 0.6;
+}
+.jcode-diff-table .jcode-diff-sign {
+  width: 1rem;
+  padding: 0 0.25rem;
+  user-select: none;
+  font-weight: 700;
 }
 .jcode-diff-line-add {
   background: var(--color-success-bg);
@@ -67,34 +230,56 @@
   width: 100%;
   border-collapse: collapse;
   font-family: var(--font-mono);
-  font-size: 0.8em;
+  font-size: 0.75rem;
 }
 .jcode-file-table td {
-  padding: 0 0.5rem;
+  padding: 0 0.75rem 0 0;
   white-space: pre-wrap;
-  word-break: break-word;
+  word-break: break-all;
+  vertical-align: top;
+}
+.jcode-file-table tr:hover {
+  background: var(--neutral-wash-soft);
 }
 .jcode-file-lineno {
-  color: var(--color-muted-foreground);
+  color: color-mix(in srgb, var(--color-muted-foreground), transparent 40%);
   user-select: none;
   text-align: right;
-  min-width: 2.5rem;
-  border-right: 1px solid var(--color-border);
+  white-space: nowrap;
+  width: 1px;
+  padding: 0 0.75rem 0 0.5rem;
 }
 
-/* ─── Tool running shimmer ───
- * Wired to the `shimmer` keyframe defined in animations.css. Applied to the
- * header of a running tool call so the user sees live activity. Class name
- * matches the Vue app's `.shimmer-running` so generated themes stay consistent. */
+/* ─── Tool running shimmer (text gradient, matches Vue ToolCallCard) ─── */
+@keyframes shimmer-sweep {
+  0% {
+    background-position: -200% center;
+  }
+  100% {
+    background-position: 200% center;
+  }
+}
 .shimmer-running {
   background: linear-gradient(
     90deg,
-    var(--neutral-wash-soft) 0%,
-    var(--neutral-wash) 50%,
-    var(--neutral-wash-soft) 100%
+    var(--color-muted-foreground) 20%,
+    var(--color-foreground) 50%,
+    var(--color-muted-foreground) 80%
   );
-  background-size: 200% 100%;
-  animation: shimmer 1.6s ease-in-out infinite;
+  background-size: 200% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent !important;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer-sweep 2s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-running {
+    animation: none;
+    background: none;
+    color: var(--color-muted-foreground) !important;
+    -webkit-text-fill-color: var(--color-muted-foreground);
+  }
 }
 
 /* ─── Selection ───

@@ -1,41 +1,84 @@
 /**
- * GenericRenderer — fallback renderer for tools without a specific renderer.
- * Shows args + output + error in labeled columns.
+ * GenericRenderer — fallback (matches Vue left-border block).
+ * No full card chrome — a left accent border inside the shared toolcall-body.
  */
 
 import { memo } from 'react'
 import type { ToolRendererProps } from 'jcode-ui-core/adapters'
 import { truncate } from './terminal.js'
 
-export const GenericRenderer = memo(function GenericRenderer({ args, output, error }: ToolRendererProps) {
+export const GenericRenderer = memo(function GenericRenderer({
+  args,
+  output,
+  error,
+  status,
+}: ToolRendererProps) {
+  const borderColor =
+    status === 'error' || error
+      ? 'var(--color-destructive, var(--color-error-fg))'
+      : 'var(--color-border)'
+
   return (
-    <div className="jcode-tool-generic jcode-selectable my-1 space-y-1 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--code-bg)] px-3 py-2 font-mono text-[0.76rem]">
+    <div
+      className="jcode-tool-generic max-h-64 overflow-y-auto border-l-2 py-2 pl-3 ml-3 font-mono text-xs"
+      style={{ borderColor }}
+    >
       {args && args !== '{}' && (
-        <div>
-          <div className="text-[0.68rem] uppercase text-[var(--color-muted-foreground)]">args</div>
-          <pre className="whitespace-pre-wrap break-words text-[var(--color-foreground)]">{truncate(prettyArgs(args), 8000)}</pre>
+        <div className="mb-1.5">
+          <span
+            className="text-[10px] uppercase tracking-wider"
+            style={{ color: 'var(--color-muted-foreground)' }}
+          >
+            args
+          </span>
+          <div className="mt-0.5" style={{ color: 'var(--color-muted-foreground)' }}>
+            {formatArgs(args)}
+          </div>
         </div>
       )}
       {output && (
-        <div>
-          <div className="text-[0.68rem] uppercase text-[var(--color-muted-foreground)]">output</div>
-          <pre className="whitespace-pre-wrap break-words text-[var(--color-foreground)]">{truncate(output, 20000)}</pre>
+        <div className="mt-2">
+          <span
+            className="text-[10px] uppercase tracking-wider"
+            style={{ color: 'var(--color-muted-foreground)' }}
+          >
+            output
+          </span>
+          <div className="mt-0.5 whitespace-pre-wrap" style={{ color: 'var(--color-muted-foreground)' }}>
+            {truncate(output, 500)}
+          </div>
         </div>
       )}
       {error && (
-        <div>
-          <div className="text-[0.68rem] uppercase text-[var(--color-muted-foreground)]">error</div>
-          <pre className="whitespace-pre-wrap break-words text-[var(--color-error-fg)]">{truncate(error, 8000)}</pre>
+        <div className="mt-2">
+          <span
+            className="text-[10px] uppercase tracking-wider"
+            style={{ color: 'var(--color-destructive, var(--color-error-fg))' }}
+          >
+            error
+          </span>
+          <div
+            className="mt-0.5 whitespace-pre-wrap"
+            style={{ color: 'var(--color-destructive, var(--color-error-fg))' }}
+          >
+            {truncate(error, 500)}
+          </div>
         </div>
       )}
     </div>
   )
 })
 
-function prettyArgs(args: string): string {
+function formatArgs(args: string): string {
   try {
-    return JSON.stringify(JSON.parse(args), null, 2)
+    const parsed = JSON.parse(args)
+    return Object.entries(parsed)
+      .map(
+        ([k, v]) =>
+          `${k}: ${typeof v === 'string' ? v.slice(0, 80) : JSON.stringify(v).slice(0, 80)}`,
+      )
+      .join(', ')
   } catch {
-    return args
+    return args.slice(0, 120)
   }
 }

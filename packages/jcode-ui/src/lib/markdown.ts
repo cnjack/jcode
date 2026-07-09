@@ -28,10 +28,18 @@ marked.setOptions({
   gfm: true,
 })
 
+/** Wrap each <table> so wide GFM tables scroll inside a framed container. */
+function wrapTables(html: string): string {
+  return html
+    .replace(/<table(\s[^>]*)?>/gi, '<div class="jcode-md-table-wrap"><table$1>')
+    .replace(/<\/table>/gi, '</table></div>')
+}
+
 export function renderMarkdown(text: string): string {
   const raw = marked.parse(text) as string
-  return DOMPurify.sanitize(raw, {
-    ADD_ATTR: ['target'],
+  const withTables = wrapTables(typeof raw === 'string' ? raw : String(raw))
+  return DOMPurify.sanitize(withTables, {
+    ADD_ATTR: ['target', 'class'],
     ADD_TAGS: ['mark'],
   })
 }
