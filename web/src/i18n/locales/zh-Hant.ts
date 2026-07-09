@@ -628,6 +628,7 @@ export default {
     noProjects: '暫無專案',
     noTasks: '暫無工作',
     running: '執行中',
+    untitled: '新對話',
     newTaskHere: '在此新建工作',
     filter: {
       title: '篩選與排序',

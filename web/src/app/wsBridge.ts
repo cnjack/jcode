@@ -14,6 +14,8 @@ import {
   sessionActions,
   modelActions,
   sendMessage,
+  loadTasks,
+  loadSessions,
 } from './store'
 import { api } from '../lib/api'
 import type { Approval, Goal } from 'jcode-ui-core'
@@ -52,6 +54,9 @@ export function createWSHandlers(
     onTokenUpdate: (d) => dispatch(chatActions.setTokenSnapshot(d)),
     onAgentDone: (d) => {
       dispatch(chatActions.agentDone(d ? { error: d.error } : undefined))
+      // Refresh sidebar metadata (title / updated_at / running) after a turn.
+      void dispatch(loadTasks() as never)
+      void dispatch(loadSessions() as never)
       // Drain one queued type-ahead message (terminal-style), if any.
       const queued = getState().chat.queued
       if (queued.length > 0) {

@@ -627,6 +627,7 @@ export default {
     noProjects: '프로젝트가 아직 없습니다',
     noTasks: '작업 없음',
     running: '실행 중',
+    untitled: '새 채팅',
     newTaskHere: '여기에 새 작업',
     filter: {
       title: '필터 및 정렬',
