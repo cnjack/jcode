@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
-	"strings"
 	"time"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -13,7 +11,12 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 )
 
-// StreamChunk represents a chunk of command output (for future streaming support).
+// StreamChunk represents a chunk of command output.
+//
+// Phase E (live execute output deltas over WS) is intentionally deferred:
+// emitting partial chunks requires runner/handler transport changes that would
+// risk half-landed events. Types are kept here so a future delta path can
+// reuse the same dual-channel streams shape without breaking callers.
 type StreamChunk struct {
 	Data      string
 	Timestamp time.Time
@@ -127,66 +130,9 @@ func (et *executeTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 	elapsed := time.Since(start)
 	config.Logger().Printf("[execute] finished in %v, err=%v", elapsed, err)
 
-	// Cap what goes back to the model (head+tail per stream); the tool result
-	// must stay bounded even when no reduction middleware is protecting the
-	// surface. When anything was dropped, spill the full output to disk and
-	// point at it so the model can read/grep the rest.
-	stdoutBody, stdoutDropped, _ := truncateHeadTail(stdout, execStdoutHeadBytes, execStdoutTailBytes)
-	stderrBody, stderrDropped, _ := truncateHeadTail(stderr, execStderrHeadBytes, execStderrTailBytes)
-	spillPath := ""
-	if stdoutDropped > 0 || stderrDropped > 0 {
-		spillPath = spillExecOutput(stdout, stderr)
-	}
-
-	var result strings.Builder
-	if stdoutBody != "" {
-		result.WriteString("STDOUT:\n")
-		result.WriteString(stdoutBody)
-	}
-	if stderrBody != "" {
-		if result.Len() > 0 {
-			result.WriteString("\n")
-		}
-		result.WriteString("STDERR:\n")
-		result.WriteString(stderrBody)
-	}
-	if spillPath != "" {
-		if result.Len() > 0 {
-			result.WriteString("\n")
-		}
-		fmt.Fprintf(&result, "[Full output: %s]", spillPath)
-	}
-
-	if err != nil {
-		if result.Len() > 0 {
-			result.WriteString("\n")
-		}
-		exitCode := -1
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		}
-		fmt.Fprintf(&result, "[Exit code: %d]\n", exitCode)
-		fmt.Fprintf(&result, "[Completed in %.1fs]", elapsed.Seconds())
-		if elapsed > bgHintThreshold {
-			fmt.Fprintf(&result,
-				"\n[Hint: command took %.0fs. Consider using background=true for long-running commands.]",
-				elapsed.Seconds(),
-			)
-		}
-		return result.String(), nil
-	}
-
-	if result.Len() == 0 {
-		result.WriteString("Command executed successfully (no output)")
-	}
-
-	fmt.Fprintf(&result, "\n[Completed in %.1fs]", elapsed.Seconds())
-	if elapsed > bgHintThreshold {
-		fmt.Fprintf(&result,
-			"\n[Hint: command took %.0fs. Consider using background=true for long-running commands.]",
-			elapsed.Seconds(),
-		)
-	}
-
-	return result.String(), nil
+	// Dual-channel: ModelOutput keeps the historical labeled string for the
+	// LLM; Streams/Meta are reconstructed by the web handler via
+	// ParseExecModelOutput for structured UI rendering.
+	res := BuildExecResult(stdout, stderr, err, elapsed, input.Command)
+	return res.ModelOutput, nil
 }

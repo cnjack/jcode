@@ -18,7 +18,16 @@ export interface WSHandlers {
   onAgentStart?: () => void
   onAgentText?: (data: { text: string }) => void
   onToolCall?: (data: { name: string; args: string; tool_call_id?: string; display_info?: { title: string; subtitle?: string; icon?: string; category?: string } }) => void
-  onToolResult?: (data: { name: string; output: string; display_output?: string; error?: string; tool_call_id?: string }) => void
+  onToolResult?: (data: {
+    name: string
+    output: string
+    display_output?: string
+    error?: string
+    tool_call_id?: string
+    streams?: import('./types').ToolResultStreams
+    meta?: import('./types').ToolResultMeta
+    presentation?: import('./types').ToolResultPresentation
+  }) => void
   onTokenUpdate?: (data: import('./types').TokenUpdateData) => void
   onAgentDone?: (data: { error?: string }) => void
   onTodoUpdate?: () => void

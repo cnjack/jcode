@@ -31,10 +31,12 @@ type WebToolCallData struct {
 
 // ToolDisplayInfo carries human-readable tool metadata for UI rendering.
 type ToolDisplayInfo struct {
-	Title    string `json:"title"`              // Human-readable tool name (e.g. "Read", "Edit", "Shell")
-	Subtitle string `json:"subtitle,omitempty"` // Context info (file path, command description, pattern)
-	Icon     string `json:"icon,omitempty"`     // Icon identifier
-	Category string `json:"category,omitempty"` // "context" (read-only), "mutation", "execution"
+	Title       string `json:"title"`              // Human-readable tool name (e.g. "Read", "Edit", "Shell")
+	Subtitle    string `json:"subtitle,omitempty"` // Context info (file path, command description, pattern)
+	Icon        string `json:"icon,omitempty"`     // Icon identifier
+	Category    string `json:"category,omitempty"` // "context" (read-only), "mutation", "execution"
+	Kind        string `json:"kind,omitempty"`     // presentation kind: read|search|list|shell|edit|agent|other
+	Collapsible bool   `json:"collapsible,omitempty"`
 }
 
 // extractToolDisplayInfo extracts display metadata from tool name and args.
@@ -197,6 +199,11 @@ func extractToolDisplayInfo(name, argsJSON string) *ToolDisplayInfo {
 		info.Category = ""
 	}
 
+	// Presentation kind / collapsible for exploring-group UI (additive).
+	kind, collapsible := tools.PresentationKindForTool(name, argsJSON)
+	info.Kind = kind
+	info.Collapsible = collapsible
+
 	return info
 }
 
@@ -246,13 +253,42 @@ func cleanToolOutput(name, output string) string {
 	return result
 }
 
+// WebToolResultStreams is the structured stream payload for execute-style tools.
+type WebToolResultStreams struct {
+	Stdout     string `json:"stdout,omitempty"`
+	Stderr     string `json:"stderr,omitempty"`
+	Aggregated string `json:"aggregated,omitempty"`
+}
+
+// WebToolResultMeta is structured execution metadata for UI consumers.
+type WebToolResultMeta struct {
+	ExitCode   int    `json:"exit_code"`
+	DurationMs int64  `json:"duration_ms"`
+	TimedOut   bool   `json:"timed_out,omitempty"`
+	Truncated  bool   `json:"truncated,omitempty"`
+	SpillPath  string `json:"spill_path,omitempty"`
+}
+
+// WebToolResultPresentation carries UI presentation hints on a tool result.
+type WebToolResultPresentation struct {
+	Kind        string `json:"kind,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Subtitle    string `json:"subtitle,omitempty"`
+	Collapsible bool   `json:"collapsible,omitempty"`
+}
+
 // WebToolResultData carries tool completion info.
+// Legacy fields (output / display_output) are always populated for old clients;
+// streams/meta/presentation are additive dual-channel fields.
 type WebToolResultData struct {
-	Name          string `json:"name"`
-	Output        string `json:"output"`
-	DisplayOutput string `json:"display_output,omitempty"` // clean output for UI display
-	Error         string `json:"error,omitempty"`
-	ToolCallID    string `json:"tool_call_id,omitempty"`
+	Name          string                     `json:"name"`
+	Output        string                     `json:"output"`
+	DisplayOutput string                     `json:"display_output,omitempty"` // clean output for UI display
+	Error         string                     `json:"error,omitempty"`
+	ToolCallID    string                     `json:"tool_call_id,omitempty"`
+	Streams       *WebToolResultStreams      `json:"streams,omitempty"`
+	Meta          *WebToolResultMeta         `json:"meta,omitempty"`
+	Presentation  *WebToolResultPresentation `json:"presentation,omitempty"`
 }
 
 // WebTokenData carries token usage to the browser. Field order/types MUST match
@@ -386,14 +422,41 @@ func (h *WebHandler) OnToolResult(name, output, toolCallID string, err error) {
 	if err != nil {
 		errMsg = err.Error()
 	}
-	display := cleanToolOutput(name, output)
-	h.emit("tool_result", WebToolResultData{
-		Name:          name,
-		Output:        output,
-		DisplayOutput: display,
-		ToolCallID:    toolCallID,
-		Error:         errMsg,
-	})
+	data := WebToolResultData{
+		Name:       name,
+		Output:     output,
+		ToolCallID: toolCallID,
+		Error:      errMsg,
+	}
+	// Dual-channel for execute: parse model string into streams/meta for UI.
+	if name == "execute" {
+		if parsed, ok := tools.ParseExecModelOutput(output); ok {
+			data.DisplayOutput = parsed.DisplayBody
+			data.Streams = &WebToolResultStreams{
+				Stdout:     parsed.Streams.Stdout,
+				Stderr:     parsed.Streams.Stderr,
+				Aggregated: parsed.Streams.Aggregated,
+			}
+			data.Meta = &WebToolResultMeta{
+				ExitCode:   parsed.Meta.ExitCode,
+				DurationMs: parsed.Meta.DurationMs,
+				TimedOut:   parsed.Meta.TimedOut,
+				Truncated:  parsed.Meta.Truncated,
+				SpillPath:  parsed.Meta.SpillPath,
+			}
+			data.Presentation = &WebToolResultPresentation{
+				Kind:        parsed.Presentation.Kind,
+				Title:       parsed.Presentation.Title,
+				Subtitle:    parsed.Presentation.Subtitle,
+				Collapsible: parsed.Presentation.Collapsible,
+			}
+		} else {
+			data.DisplayOutput = cleanToolOutput(name, output)
+		}
+	} else {
+		data.DisplayOutput = cleanToolOutput(name, output)
+	}
+	h.emit("tool_result", data)
 }
 
 func (h *WebHandler) OnTodoUpdate() {

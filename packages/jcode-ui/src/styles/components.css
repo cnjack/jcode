@@ -706,6 +706,51 @@
 .jcode-terminal__run {
   color: color-mix(in srgb, var(--code-fg, var(--color-muted-foreground)) 60%, transparent);
 }
+.jcode-terminal__stream-label {
+  color: var(--color-error-fg);
+  opacity: 0.85;
+}
+.jcode-terminal__ellipsis {
+  color: color-mix(in srgb, var(--code-fg, var(--color-muted-foreground)) 55%, transparent);
+}
+
+/* Exploring group (coalesced read/search/list tools) */
+.jcode-exploring__steps {
+  margin: 0.15rem 0 0.1rem 0.15rem;
+  padding-left: 0.35rem;
+  border-left: 2px solid var(--color-border);
+}
+.jcode-exploring__step {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.1rem 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  min-width: 0;
+}
+.jcode-exploring__action {
+  flex-shrink: 0;
+  color: var(--color-primary);
+  font-weight: 600;
+}
+.jcode-exploring__detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  color: var(--color-foreground);
+  opacity: 0.88;
+}
+.jcode-exploring--nested .jcode-exploring__step {
+  padding-left: 0.35rem;
+}
+.jcode-compact-tool-row {
+  border-left: 2px solid var(--color-border);
+  padding-left: 0.5rem;
+  margin-left: 0.15rem;
+}
 
 /* ─── Tool running shimmer (text gradient, matches Vue ToolCallCard) ─── */
 @keyframes shimmer-sweep {
