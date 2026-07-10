@@ -54,9 +54,9 @@ internal/
   tui/               # BubbleTea v2 TUI components
   web/               # HTTP server (REST + WS + PTY) + embedded React dist
 web/                 # React 18 + Vite + RTK product UI (embedded in the binary / Tauri)
-packages/            # pnpm workspace: the reusable jcode-ui component library
-  jcode-ui/          #   published styled React chat components (→ npm: jcode-ui)
-  jcode-ui-core/     #   framework-agnostic core: types, ChatRuntime, headless primitives
+packages/            # publish source for the jcode-ui npm packages (still in root pnpm workspace)
+  jcode-ui/          #   styled React chat components → npm: jcode-ui
+  jcode-ui-core/     #   types, ChatRuntime, headless primitives → npm: jcode-ui-core
 site/                # React + Vite marketing/docs site → www.j-code.net (docs markdown in site/docs/)
 desktop/             # Tauri 2 desktop shell; the Go binary runs as a sidecar
 extension/           # jcode Browser Bridge Chrome extension (MV3) for the browser-use extension backend
@@ -67,13 +67,39 @@ agent-eval/          # Agent evaluation harness + showcase generation
 
 ### Frontend (React)
 
-The product UI is React 18 (`web/`) built on `packages/jcode-ui` + `jcode-ui-core`.
+The product UI is React 18 (`web/`) and **consumes `jcode-ui` / `jcode-ui-core` from the npm registry** (not `file:` / `workspace:*` links). `packages/` is the source tree used to publish those packages.
 
-- `make build-web` builds packages + the React app → `internal/web/dist/` (production embed).
+- `make build-web` typechecks/builds package `dist/` then builds the React app → `internal/web/dist/` (production embed).
 - `make lint-web` typechecks the React app + both packages.
 - Go `//go:embed dist/*` and Tauri `frontendDist` both point at `internal/web/dist/`.
+- Consumers (`web/`, `site/`, `examples/*`) declare registry versions, e.g. `"jcode-ui": "^0.1.1"`, `"jcode-ui-core": "^0.1.0"`.
+- Inside `packages/jcode-ui`, depend on core via a version range (`"jcode-ui-core": "^0.1.0"`) — **never** `file:../jcode-ui-core` (that broke `jcode-ui@0.1.0` on npm; use `0.1.1+`).
 
-See `packages/jcode-ui/README.md` and `site/docs/chat-ui/`. Published to npm as `jcode-ui` (styled) + `jcode-ui-core` (headless). The runtime abstraction (`ChatRuntime` + `createExternalStoreRuntime`) is the seam that lets the components render from any Redux-shaped store.
+See `packages/jcode-ui/README.md` and `site/docs/chat-ui/`. Published: [jcode-ui](https://www.npmjs.com/package/jcode-ui) (styled) + [jcode-ui-core](https://www.npmjs.com/package/jcode-ui-core) (headless). The runtime abstraction (`ChatRuntime` + `createExternalStoreRuntime`) is the seam that lets the components render from any Redux-shaped store.
+
+#### Publishing jcode-ui to npm
+
+Order matters: **publish `jcode-ui-core` first, then `jcode-ui`**.
+
+```bash
+# 1) bump versions in packages/*/package.json as needed
+# 2) build
+cd packages/jcode-ui-core && pnpm build
+cd ../jcode-ui && pnpm build
+
+# 3) publish (2FA/OTP may be required)
+cd packages/jcode-ui-core && npm publish --access public --otp=XXXXXX
+cd ../jcode-ui && npm publish --access public --otp=XXXXXX
+```
+
+After a successful publish, bump consumer deps (`web/`, `site/`, `examples/*`) to the new range and run `pnpm install` (and `cd site && pnpm install` for the site workspace). Also refresh `minimumReleaseAgeExclude` entries in every `pnpm-workspace.yaml` (root, `site/`, `examples/*`) so the newly published versions are not blocked by release-age checks. Local edits under `packages/` do **not** reach `web`/`site` until a new version is published and the dependency range is updated.
+
+Checklist before publish:
+
+1. `jcode-ui` → `jcode-ui-core` is a registry range (`^x.y.z`), not `file:`
+2. Both packages have fresh `dist/` (`pnpm build`)
+3. Smoke: `npm install jcode-ui@<ver>` in a temp dir imports both packages and pulls core transitively
+4. After publish: update `minimumReleaseAgeExclude` in all `pnpm-workspace.yaml` files to the new `jcode-ui` / `jcode-ui-core` versions (drop stale entries)
 
 ### Key Design Decisions
 
@@ -176,6 +202,7 @@ See `packages/jcode-ui/README.md` and `site/docs/chat-ui/`. Published to npm as 
 - **Don't store mutable state in tool closures.** Use `*Env` or pass state explicitly. Tools may be re-created across mode transitions (normal ↔ plan).
 - **Don't skip `env.ResolvePath()`.** Raw path concatenation can escape the working directory without warning.
 - **Don't import `internal/tui` from non-TUI packages.** The handler interface is the decoupling boundary.
+- **Don't depend on `jcode-ui` / `jcode-ui-core` via `file:` or `workspace:*`.** Consumers and `packages/jcode-ui`→core must use registry version ranges so publish and local installs match.
 
 ---
 
@@ -190,11 +217,12 @@ See `packages/jcode-ui/README.md` and `site/docs/chat-ui/`. Published to npm as 
 
 ## Frontend (web/) — React (production)
 
-- **Stack:** React 18 + TypeScript + Vite + Redux Toolkit + `jcode-ui` / `jcode-ui-core`
-- **Build:** `make build-web` (packages + `cd web && npx vite build`)
+- **Stack:** React 18 + TypeScript + Vite + Redux Toolkit + npm `jcode-ui` / `jcode-ui-core`
+- **Build:** `make build-web` (package typecheck/build + `cd web && npx vite build`)
 - **Output:** builds to `internal/web/dist/`, embedded in the Go binary via `//go:embed`
 - **Lint:** `make lint-web` (tsc for web + packages)
-- Changes to the frontend require rebuilding via `make build-web` for the Go binary to pick them up
+- Changes to the product UI (`web/`) require rebuilding via `make build-web` for the Go binary to pick them up
+- Changes to the chat library (`packages/jcode-ui*`) require **npm publish + consumer version bump + `pnpm install`** before `web`/`site` see them (registry deps, not workspace links)
 - **Don't confuse `web/` with `site/`:** `web/` is the product UI embedded in the binary and reused by the desktop app; `site/` is the public website + docs at www.j-code.net and is deployed separately (`cd site && pnpm build`).
 
 ### Icons & Styling
@@ -203,4 +231,4 @@ See `packages/jcode-ui/README.md` and `site/docs/chat-ui/`. Published to npm as 
 - **Icon sizing:** use Tailwind `h-N w-N` classes (e.g. `className="h-3.5 w-3.5"`).
 - **Colors:** every color must come from a CSS custom property (jcode-ui tokens / `tokens.generated.css`). Never hardcode hex/rgb/`#fff`/`white` in components.
 - **Themes:** edit `internal/theme/palette.go` and run `make generate` — never edit `tokens.generated.css` or `themes.generated.ts` by hand.
-- **Reusable chat UI:** prefer components from `packages/jcode-ui` over one-off markup in `web/`.
+- **Reusable chat UI:** import from the `jcode-ui` package (registry); implement/fix library code under `packages/jcode-ui` and publish.

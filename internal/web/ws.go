@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"net/http"
 	"sync"
 	"sync/atomic"
 
@@ -178,4 +179,99 @@ type WSEvent struct {
 type WSIncoming struct {
 	Type string          `json:"type"`
 	Data json.RawMessage `json:"data,omitempty"`
+}
+
+// --- WebSocket handler ---
+
+// CheckOrigin rejects cross-origin WebSocket handshakes from untrusted web
+// pages (see isAllowedWebOrigin); without this any website could open a socket
+// to the loopback server and read the agent's live event stream.
+var wsUpgrader = websocket.Upgrader{
+	CheckOrigin: isAllowedWebOrigin,
+	// Advertise the auth subprotocol so gorilla echoes it back on the handshake
+	// response; browsers send ["jcode-auth", "<token>"] and expect the server to
+	// confirm a subprotocol, otherwise some reject the connection. The token (the
+	// second value) is never echoed.
+	Subprotocols: []string{wsAuthSubprotocol},
+}
+
+func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	conn, err := wsUpgrader.Upgrade(w, r, nil)
+	if err != nil {
+		config.Logger().Printf("[ws] upgrade error: %v", err)
+		return
+	}
+
+	id, client, unsub := s.wsBroker.Register(conn)
+	config.Logger().Printf("[ws] client %d connected", id)
+
+	// Write pump: send events to client.
+	go client.writePump()
+
+	// Read pump: handle incoming messages.
+	defer func() {
+		unsub()
+		_ = conn.Close()
+		config.Logger().Printf("[ws] client %d disconnected", id)
+	}()
+
+	for {
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		var incoming WSIncoming
+		if err := json.Unmarshal(msg, &incoming); err != nil {
+			continue
+		}
+		s.handleWSMessage(client, incoming)
+	}
+}
+
+func (s *Server) handleWSMessage(client *WSClient, msg WSIncoming) {
+	switch msg.Type {
+	case "ping":
+		// Unicast the pong to the pinging client (broadcasting it woke every
+		// client unnecessarily).
+		if data, err := json.Marshal(WSEvent{Type: "pong"}); err == nil {
+			client.send(data)
+		}
+	case "subscribe":
+		var data struct {
+			TaskIDs []string `json:"task_ids"`
+		}
+		if json.Unmarshal(msg.Data, &data) == nil {
+			client.subscribe(data.TaskIDs)
+		}
+	case "unsubscribe":
+		var data struct {
+			TaskIDs []string `json:"task_ids"`
+		}
+		if json.Unmarshal(msg.Data, &data) == nil {
+			client.unsubscribe(data.TaskIDs)
+		}
+	case "approval":
+		var data struct {
+			ID         string `json:"id"`
+			TaskID     string `json:"task_id"`
+			Approved   bool   `json:"approved"`
+			ApproveAll bool   `json:"approve_all"`
+		}
+		if err := json.Unmarshal(msg.Data, &data); err != nil {
+			return
+		}
+		// Empty task_id → active task (legacy); non-empty unknown → drop (ids are
+		// handler-local and could collide with another task's).
+		reng := s.resolveEngine(data.TaskID)
+		if reng == nil || reng.handler == nil {
+			return
+		}
+		if err := reng.handler.ResolveApproval(data.ID, data.Approved, data.ApproveAll); err != nil {
+			config.Logger().Printf("[ws] resolve approval failed for id=%q: %v", data.ID, err)
+			return
+		}
+		// Same mode-sync as the POST path: an "allow all" over WS must also
+		// update the selector pill the user is looking at.
+		s.syncModeAfterApproval(reng, data.Approved, data.ApproveAll)
+	}
 }

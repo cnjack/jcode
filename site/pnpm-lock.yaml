@@ -18,11 +18,11 @@ importers:
         specifier: ^11.11.1
         version: 11.11.1
       jcode-ui:
-        specifier: file:../packages/jcode-ui
-        version: file:../packages/jcode-ui(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+        specifier: ^0.1.1
+        version: 0.1.1(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       jcode-ui-core:
-        specifier: file:../packages/jcode-ui-core
-        version: file:../packages/jcode-ui-core(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+        specifier: ^0.1.0
+        version: 0.1.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -735,8 +735,8 @@ packages:
     resolution: {integrity: sha512-+Pgi+vMuUNkJyExiMBt5IlFoMyKnr5zhJ4Uspz58WOhBF5QoIZkFyNHIbBAtHwzVAgk5RtndVNsDRN61/mmDqg==}
     engines: {node: '>=12'}
 
-  jcode-ui-core@file:../packages/jcode-ui-core:
-    resolution: {directory: ../packages/jcode-ui-core, type: directory}
+  jcode-ui-core@0.1.0:
+    resolution: {integrity: sha512-ziWRzhQoP8yU9Un4qE6OWayyhRzxrVC8hKJQXm+Aff135X54xNgJim1Vf1QUZVrw3oBERpeK8TJlJjbq6D6i/w==}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
@@ -746,8 +746,8 @@ packages:
       react-dom:
         optional: true
 
-  jcode-ui@file:../packages/jcode-ui:
-    resolution: {directory: ../packages/jcode-ui, type: directory}
+  jcode-ui@0.1.1:
+    resolution: {integrity: sha512-XHg8Xe0PFPGnTJGcTE3LOMX9symuJurNUjwxygr95qAvsvSa1VN8CRGcNYRJ/34CiK7TQXfI0VoqqiM8H22jLg==}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
@@ -1753,20 +1753,20 @@ snapshots:
 
   is-plain-obj@4.1.0: {}
 
-  jcode-ui-core@file:../packages/jcode-ui-core(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
+  jcode-ui-core@0.1.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
     dependencies:
       '@tanstack/react-virtual': 3.14.5(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
     optionalDependencies:
       react: 18.3.1
       react-dom: 18.3.1(react@18.3.1)
 
-  jcode-ui@file:../packages/jcode-ui(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
+  jcode-ui@0.1.1(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
     dependencies:
       '@heroicons/react': 2.2.0(react@18.3.1)
       '@tailwindcss/typography': 0.5.20
       dompurify: 3.4.11
       highlight.js: 11.11.1
-      jcode-ui-core: file:../packages/jcode-ui-core(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      jcode-ui-core: 0.1.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       marked: 18.0.5
       marked-highlight: 2.2.4(marked@18.0.5)
       react: 18.3.1
