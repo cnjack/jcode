@@ -12,6 +12,52 @@ import (
 	"github.com/cnjack/jcode/internal/tools"
 )
 
+// taskItem is the sidebar's view of a session: its persisted metadata plus a
+// live-running flag, with created_at normalized from the on-disk start_time.
+// Both the task list and the metadata-update endpoint return this exact shape so
+// the web client can splice an updated task straight into its list without the
+// field drifting (start_time vs created_at) that would blank created_at and
+// scramble the recency sort.
+type taskItem struct {
+	UUID      string `json:"uuid"`
+	Project   string `json:"project"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+	Provider  string `json:"provider"`
+	Model     string `json:"model"`
+	Title     string `json:"title,omitempty"`
+	Pinned    bool   `json:"pinned"`
+	Archived  bool   `json:"archived"`
+	Unread    bool   `json:"unread"`
+	Status    string `json:"status,omitempty"`
+	Running   bool   `json:"running"`
+}
+
+func newTaskItem(m *session.SessionMeta, project string, running bool) taskItem {
+	return taskItem{
+		UUID:      m.UUID,
+		Project:   project,
+		CreatedAt: m.StartTime,
+		UpdatedAt: m.UpdatedAt,
+		Provider:  m.Provider,
+		Model:     m.Model,
+		Title:     m.Title,
+		Pinned:    m.Pinned,
+		Archived:  m.Archived,
+		Unread:    m.Unread,
+		Status:    m.Status,
+		Running:   running,
+	}
+}
+
+// isTaskRunning reports whether a live engine for this task id is mid-run.
+func (s *Server) isTaskRunning(id string) bool {
+	s.tasksMu.RLock()
+	defer s.tasksMu.RUnlock()
+	e := s.tasks[id]
+	return e != nil && e.running.Load()
+}
+
 // handleListAllTasks returns every session across all projects (flat list,
 // each tagged with its project path) so the web sidebar can render a
 // Workspace > Project > Task tree without switching the active project.
@@ -32,43 +78,17 @@ func (s *Server) handleListAllTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	s.tasksMu.RUnlock()
 
-	type taskItem struct {
-		UUID      string `json:"uuid"`
-		Project   string `json:"project"`
-		CreatedAt string `json:"created_at"`
-		UpdatedAt string `json:"updated_at,omitempty"`
-		Provider  string `json:"provider"`
-		Model     string `json:"model"`
-		Title     string `json:"title,omitempty"`
-		Pinned    bool   `json:"pinned"`
-		Archived  bool   `json:"archived"`
-		Unread    bool   `json:"unread"`
-		Status    string `json:"status,omitempty"`
-		Running   bool   `json:"running"`
-	}
 	items := make([]taskItem, 0)
 	for project, metas := range all {
-		for _, m := range metas {
+		for i := range metas {
+			m := &metas[i]
 			// Automation runs are surfaced on the Automations page ("Recent
 			// runs"), not the main task list — exclude them here so a nightly
 			// automation doesn't bury the sidebar.
 			if m.AutomationID != "" {
 				continue
 			}
-			items = append(items, taskItem{
-				UUID:      m.UUID,
-				Project:   project,
-				CreatedAt: m.StartTime,
-				UpdatedAt: m.UpdatedAt,
-				Provider:  m.Provider,
-				Model:     m.Model,
-				Title:     m.Title,
-				Pinned:    m.Pinned,
-				Archived:  m.Archived,
-				Unread:    m.Unread,
-				Status:    m.Status,
-				Running:   running[m.UUID],
-			})
+			items = append(items, newTaskItem(m, project, running[m.UUID]))
 		}
 	}
 	writeJSON(w, http.StatusOK, items)
@@ -101,7 +121,12 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		if req.Title != nil {
 			m.Title = *req.Title
 		}
-		m.UpdatedAt = time.Now().Format(time.RFC3339)
+		// Deliberately do NOT bump UpdatedAt here. UpdatedAt is the "last activity"
+		// key the sidebar sorts by, and activity means a real turn (a user prompt →
+		// setTaskStatus on run start/end), not a metadata edit. Bumping it on
+		// pin/archive/mark-read/rename made a task jump to the top of the recency
+		// sort the instant it was opened (open marks it read), which is exactly the
+		// reordering we don't want. Resuming/opening a session must not reorder it.
 	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -111,7 +136,10 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
 		return
 	}
-	writeJSON(w, http.StatusOK, meta)
+	// Echo the same normalized task shape the list endpoint returns (created_at,
+	// running, …) — not the raw SessionMeta — so the client can splice the result
+	// straight back into its task list without corrupting the recency sort.
+	writeJSON(w, http.StatusOK, newTaskItem(meta, meta.Project, s.isTaskRunning(id)))
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {

@@ -1,5 +1,7 @@
 // Automation types — mirror internal/automation + internal/web/automation_api.go.
 
+import type { TFunction } from 'i18next'
+
 export type AutomationCadence = 'hourly' | 'daily' | 'weekly'
 
 export interface AutomationTrigger {
@@ -65,4 +67,15 @@ export interface AutomationTemplate {
 
 export type AutomationCreate = Partial<Omit<Automation, 'id' | 'created_at' | 'updated_at'>> & {
   run_now?: boolean
+}
+
+/**
+ * Localize a run's trigger kind. A run's kind is 'manual' or 'scheduled'
+ * (internal/automation KindManual/KindScheduled); 'schedule' is accepted too for
+ * safety. Falls back to the raw value for anything unknown.
+ */
+export function triggerKindLabel(kind: string, t: TFunction): string {
+  if (kind === 'manual') return t('automations.triggerManual')
+  if (kind === 'scheduled' || kind === 'schedule') return t('automations.triggerSchedule')
+  return kind
 }

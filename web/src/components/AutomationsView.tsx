@@ -15,8 +15,11 @@
  */
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useTranslation, Trans } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import {
   BoltIcon,
+  SparklesIcon,
   PlusIcon,
   PlayIcon,
   TrashIcon,
@@ -29,6 +32,7 @@ import {
   HandRaisedIcon,
 } from '@heroicons/react/24/outline'
 import { api } from '../lib/api'
+import { triggerKindLabel } from '../lib/automation'
 import type {
   Automation,
   AutomationCadence,
@@ -46,7 +50,7 @@ type StatusFilter = 'all' | 'success' | 'failed'
 type CardState = 'running' | 'error' | 'success' | 'paused'
 type FormTrigger = 'manual' | 'hourly' | 'daily' | 'weekly'
 
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const WEEKDAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
 
 function cardState(a: AutomationItem): CardState {
   if (!a.enabled) return 'paused'
@@ -61,68 +65,71 @@ function isRunning(a: AutomationItem): boolean {
 }
 
 /** Compact relative time: "just now" / "3m" / "6h 12m" / "3d". */
-function relLabel(diff: number): string {
+function relLabel(diff: number, t: TFunction): string {
   const abs = Math.abs(diff)
   const min = 60_000
   const hr = 60 * min
   const day = 24 * hr
-  if (abs < min) return 'just now'
-  if (abs < hr) return `${Math.round(abs / min)}m`
+  if (abs < min) return t('automations.rel.justNow')
+  if (abs < hr) return t('automations.rel.minutes', { n: Math.round(abs / min) })
   if (abs < day) {
     const h = Math.floor(abs / hr)
     const m = Math.round((abs % hr) / min)
-    return m ? `${h}h ${m}m` : `${h}h`
+    return m ? t('automations.rel.hoursMinutes', { h, m }) : t('automations.rel.hours', { h })
   }
-  return `${Math.round(abs / day)}d`
+  return t('automations.rel.days', { n: Math.round(abs / day) })
 }
 
-function relTime(iso: string): string {
-  return relLabel(Date.now() - new Date(iso).getTime())
+function relTime(iso: string, t: TFunction): string {
+  return relLabel(Date.now() - new Date(iso).getTime(), t)
 }
 
-function relTimeFromNow(iso: string): string {
-  return relLabel(new Date(iso).getTime() - Date.now())
+function relTimeFromNow(iso: string, t: TFunction): string {
+  return relLabel(new Date(iso).getTime() - Date.now(), t)
 }
 
-function nextRunLabel(a: AutomationItem): string {
+function nextRunLabel(a: AutomationItem, t: TFunction): string {
   if (a.trigger.type === 'manual') {
     const last = a.state.last_run_at
-    if (!last) return 'Not run yet'
-    const ok = a.state.last_status === 'success'
-    return relTime(last) + (ok ? ' · ok' : a.state.last_status === 'error' ? ' · failed' : '')
+    if (!last) return t('automations.notRunYet')
+    const rel = relTime(last, t)
+    if (a.state.last_status === 'success') return t('automations.lastRunOk', { time: rel })
+    if (a.state.last_status === 'error') return t('automations.lastRunFailed', { time: rel })
+    return rel
   }
   const next = a.state.next_run_at
-  return next ? 'in ' + relTimeFromNow(next) : a.human_schedule
+  return next ? t('automations.nextRunIn', { time: relTimeFromNow(next, t) }) : a.human_schedule
 }
 
 function runLabel(r: AutomationRun): string {
   return r.start_time ? new Date(r.start_time).toLocaleString() : ''
 }
 
-function modeLabel(mode?: string): string {
-  if (mode === 'full_access') return 'Autopilot'
-  if (mode === 'approval') return 'Ask'
-  if (mode === 'plan') return 'Plan'
-  return mode || 'Autopilot'
+function modeLabel(mode: string | undefined, t: TFunction): string {
+  if (mode === 'approval') return t('automations.mode.ask')
+  if (mode === 'plan') return t('automations.mode.plan')
+  if (mode === 'full_access') return t('automations.mode.autopilot')
+  return mode || t('automations.mode.autopilot')
 }
 
 // ─── Cadence chip ────────────────────────────────────────────────────────────
 
 function CadenceChip({ a }: { a: AutomationItem | AutomationTemplate }) {
+  const { t } = useTranslation()
   const trig: AutomationTrigger = a.trigger
-  let label = 'Schedule'
+  let label = t('automations.cadence.schedule')
   let Icon = CalendarDaysIcon
   if (trig.type === 'manual') {
-    label = 'Manual'
+    label = t('automations.cadence.manual')
     Icon = HandRaisedIcon
   } else if (trig.cadence === 'hourly') {
-    label = 'Hourly'
+    label = t('automations.cadence.hourly')
     Icon = ClockIcon
   } else if (trig.cadence === 'daily') {
-    label = 'Daily'
+    label = t('automations.cadence.daily')
     Icon = CalendarDaysIcon
   } else if (trig.cadence === 'weekly') {
-    label = 'Weekly'
+    label = t('automations.cadence.weekly')
     Icon = CalendarDaysIcon
   }
   return (
@@ -136,11 +143,12 @@ function CadenceChip({ a }: { a: AutomationItem | AutomationTemplate }) {
 // ─── Card status chip ────────────────────────────────────────────────────────
 
 function StatusChip({ state }: { state: CardState }) {
+  const { t } = useTranslation()
   if (state === 'success') {
     return (
       <span className="inline-flex flex-shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-[var(--color-success-bg)] px-[7px] py-[3px] text-[10.5px] font-semibold leading-none text-[var(--color-success-fg)]">
         <CheckCircleIcon className="h-3 w-3" />
-        Ran ok
+        {t('automations.status.ranOk')}
       </span>
     )
   }
@@ -148,14 +156,14 @@ function StatusChip({ state }: { state: CardState }) {
     return (
       <span className="inline-flex flex-shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-[var(--accent-wash)] px-[7px] py-[3px] text-[10.5px] font-semibold leading-none text-[var(--color-primary)]">
         <PlayIcon className="h-3 w-3" />
-        Running
+        {t('automations.status.running')}
       </span>
     )
   }
   return (
     <span className="inline-flex flex-shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-[var(--color-error-bg)] px-[7px] py-[3px] text-[10.5px] font-semibold leading-none text-[var(--color-error-fg)]">
       <ExclamationCircleIcon className="h-3 w-3" />
-      Failed
+      {t('automations.status.failed')}
     </span>
   )
 }
@@ -290,6 +298,7 @@ function AutomationEditor({
   onClose: () => void
   onSaved: () => void
 }) {
+  const { t } = useTranslation()
   const editing = state.editing
   const [form, setForm] = useState<FormValues>(() => buildForm(editing, state.prefill))
   const [saving, setSaving] = useState(false)
@@ -313,15 +322,15 @@ function AutomationEditor({
   async function save(runNow: boolean) {
     setError(null)
     if (!form.name.trim()) {
-      setError('Name is required.')
+      setError(t('automations.editor.errName'))
       return
     }
     if (!form.prompt.trim()) {
-      setError('Prompt is required.')
+      setError(t('automations.editor.errPrompt'))
       return
     }
     if (!form.projectPath.trim()) {
-      setError('A project is required (no-project automations cannot run unattended).')
+      setError(t('automations.editor.errProject'))
       return
     }
     setSaving(true)
@@ -335,7 +344,7 @@ function AutomationEditor({
       onSaved()
       onClose()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save automation.')
+      setError(e instanceof Error ? e.message : t('automations.editor.errSave'))
     } finally {
       setSaving(false)
     }
@@ -361,11 +370,11 @@ function AutomationEditor({
       >
         <header className="flex items-center justify-between px-5 pb-3 pt-[18px]">
           <h2 className="text-base font-semibold text-[var(--color-foreground)]">
-            {editing ? 'Edit automation' : 'New automation'}
+            {editing ? t('automations.editor.editTitle') : t('automations.new')}
           </h2>
           <button
             type="button"
-            aria-label="Close"
+            aria-label={t('common.close')}
             onClick={onClose}
             className="cursor-pointer rounded-lg p-1 text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)]"
           >
@@ -375,41 +384,41 @@ function AutomationEditor({
 
         <div className="flex flex-col gap-[14px] px-5 pb-4">
           <label className="flex flex-1 flex-col gap-1.5">
-            <span className="text-xs font-semibold text-[var(--color-foreground)]">Name</span>
+            <span className="text-xs font-semibold text-[var(--color-foreground)]">{t('automations.editor.name')}</span>
             <input
               value={form.name}
               onChange={(e) => update('name', e.target.value)}
-              placeholder="e.g., Daily code review"
+              placeholder={t('automations.editor.namePlaceholder')}
               className="w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-2 text-[13px] text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
             />
           </label>
 
           <div className="flex flex-wrap gap-2.5">
             <label className="flex flex-1 min-w-0 flex-col gap-1.5">
-              <span className="text-xs font-semibold text-[var(--color-foreground)]">Trigger</span>
+              <span className="text-xs font-semibold text-[var(--color-foreground)]">{t('automations.editor.trigger')}</span>
               <select
                 value={form.trigger}
                 onChange={(e) => update('trigger', e.target.value as FormTrigger)}
                 className="w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-2 text-[13px] text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
               >
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="hourly">Hourly</option>
-                <option value="manual">Manual</option>
+                <option value="daily">{t('automations.cadence.daily')}</option>
+                <option value="weekly">{t('automations.cadence.weekly')}</option>
+                <option value="hourly">{t('automations.cadence.hourly')}</option>
+                <option value="manual">{t('automations.cadence.manual')}</option>
               </select>
             </label>
 
             {showWeekday && (
               <label className="flex flex-1 min-w-0 flex-col gap-1.5">
-                <span className="text-xs font-semibold text-[var(--color-foreground)]">Day</span>
+                <span className="text-xs font-semibold text-[var(--color-foreground)]">{t('automations.editor.day')}</span>
                 <select
                   value={form.weekday}
                   onChange={(e) => update('weekday', Number(e.target.value))}
                   className="w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-2 text-[13px] text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
                 >
-                  {WEEKDAYS.map((d, i) => (
-                    <option key={d} value={i}>
-                      {d}
+                  {WEEKDAY_KEYS.map((key, i) => (
+                    <option key={key} value={i}>
+                      {t(`automations.weekday.${key}`)}
                     </option>
                   ))}
                 </select>
@@ -418,7 +427,7 @@ function AutomationEditor({
 
             {showHour && (
               <label className="flex flex-1 min-w-0 flex-col gap-1.5">
-                <span className="text-xs font-semibold text-[var(--color-foreground)]">Hour</span>
+                <span className="text-xs font-semibold text-[var(--color-foreground)]">{t('automations.editor.hour')}</span>
                 <select
                   value={form.hour}
                   onChange={(e) => update('hour', Number(e.target.value))}
@@ -435,7 +444,7 @@ function AutomationEditor({
 
             {isSchedule && (
               <label className="flex flex-1 min-w-0 flex-col gap-1.5">
-                <span className="text-xs font-semibold text-[var(--color-foreground)]">Minute</span>
+                <span className="text-xs font-semibold text-[var(--color-foreground)]">{t('automations.editor.minute')}</span>
                 <select
                   value={form.minute}
                   onChange={(e) => update('minute', Number(e.target.value))}
@@ -452,45 +461,47 @@ function AutomationEditor({
           </div>
 
           <label className="flex flex-1 flex-col gap-1.5">
-            <span className="text-xs font-semibold text-[var(--color-foreground)]">Project</span>
+            <span className="text-xs font-semibold text-[var(--color-foreground)]">{t('automations.editor.project')}</span>
             <input
               value={form.projectPath}
               onChange={(e) => update('projectPath', e.target.value)}
-              placeholder="/path/to/project"
+              placeholder={t('automations.editor.projectPlaceholder')}
               className="w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-2 text-[13px] text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
             />
             <span className="text-[11px] text-[var(--color-muted-foreground)]">
-              Required — scheduled automations run unattended in this project.
+              {t('automations.editor.projectHint')}
             </span>
           </label>
 
           {!isSchedule ? (
             <label className="flex flex-1 flex-col gap-1.5">
-              <span className="text-xs font-semibold text-[var(--color-foreground)]">Mode</span>
+              <span className="text-xs font-semibold text-[var(--color-foreground)]">{t('automations.editor.mode')}</span>
               <select
                 value={form.mode}
                 onChange={(e) => update('mode', e.target.value)}
                 className="w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-2 text-[13px] text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
               >
-                <option value="full_access">Autopilot</option>
-                <option value="approval">Ask</option>
-                <option value="plan">Plan</option>
+                <option value="full_access">{t('automations.mode.autopilot')}</option>
+                <option value="approval">{t('automations.mode.ask')}</option>
+                <option value="plan">{t('automations.mode.plan')}</option>
               </select>
             </label>
           ) : (
             <p className="text-xs text-[var(--color-muted-foreground)]">
-              Scheduled runs use <strong className="font-semibold">Autopilot</strong> (unattended; approvals would
-              block).
+              <Trans
+                i18nKey="automations.editor.scheduleModeNote"
+                components={{ b: <strong className="font-semibold" /> }}
+              />
             </p>
           )}
 
           <label className="flex flex-1 flex-col gap-1.5">
-            <span className="text-xs font-semibold text-[var(--color-foreground)]">Prompt</span>
+            <span className="text-xs font-semibold text-[var(--color-foreground)]">{t('automations.editor.prompt')}</span>
             <textarea
               value={form.prompt}
               onChange={(e) => update('prompt', e.target.value)}
               rows={4}
-              placeholder="Describe what this automation should do…"
+              placeholder={t('automations.editor.promptPlaceholder')}
               className="w-full resize-y rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 py-2 font-sans text-[13px] leading-relaxed text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
             />
           </label>
@@ -500,7 +511,7 @@ function AutomationEditor({
 
         <footer className="flex items-center justify-between gap-3 rounded-b-[var(--radius-2xl)] border-t border-[var(--color-border)] bg-[var(--color-muted)] px-5 py-3">
           <span className="min-w-0 flex-1 text-[11px] text-[var(--color-muted-foreground)]">
-            Use “Create and run” to test your prompt right away.
+            {t('automations.editor.footerHint')}
           </span>
           <div className="flex flex-shrink-0 gap-2">
             <button
@@ -508,7 +519,7 @@ function AutomationEditor({
               onClick={onClose}
               className="cursor-pointer whitespace-nowrap rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-[12.5px] transition-colors hover:bg-[var(--color-muted)] disabled:cursor-not-allowed disabled:opacity-55"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             {!editing && (
               <button
@@ -517,7 +528,7 @@ function AutomationEditor({
                 onClick={() => void save(true)}
                 className="cursor-pointer whitespace-nowrap rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-[12.5px] transition-colors hover:bg-[var(--color-muted)] disabled:cursor-not-allowed disabled:opacity-55"
               >
-                Create and run
+                {t('automations.editor.createAndRun')}
               </button>
             )}
             <button
@@ -525,7 +536,7 @@ function AutomationEditor({
               disabled={saving}
               className="cursor-pointer whitespace-nowrap rounded-[var(--radius-lg)] bg-[var(--color-primary)] px-3.5 py-1.5 text-[12.5px] font-medium text-[var(--color-on-primary)] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-55"
             >
-              {editing ? 'Save' : 'Create'}
+              {editing ? t('common.save') : t('automations.editor.create')}
             </button>
           </div>
         </footer>
@@ -537,6 +548,7 @@ function AutomationEditor({
 // ─── Main view ───────────────────────────────────────────────────────────────
 
 export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun) => void }) {
+  const { t } = useTranslation()
   const [items, setItems] = useState<AutomationItem[]>([])
   const [runs, setRuns] = useState<AutomationRun[]>([])
   const [templates, setTemplates] = useState<AutomationTemplate[]>([])
@@ -589,10 +601,10 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
   function editAutomation(item: AutomationItem) {
     setEditor({ editing: item, prefill: null })
   }
-  function fromTemplate(t: AutomationTemplate) {
+  function fromTemplate(tpl: AutomationTemplate) {
     setEditor({
       editing: null,
-      prefill: { name: t.name, prompt: t.prompt, trigger: t.trigger, mode: t.suggest_mode },
+      prefill: { name: tpl.name, prompt: tpl.prompt, trigger: tpl.trigger, mode: tpl.suggest_mode },
     })
     setView('list')
   }
@@ -612,8 +624,8 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
   return (
     <div className="page-surface flex min-h-0 flex-1 flex-col">
       <header className="flex h-[var(--header-height)] shrink-0 items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4">
-        <BoltIcon className="h-4 w-4 text-[var(--color-primary)]" />
-        <h1 className="flex-1 text-sm font-medium">Automations</h1>
+        <SparklesIcon className="h-4 w-4 text-[var(--color-primary)]" />
+        <h1 className="flex-1 text-sm font-medium">{t('nav.automations')}</h1>
         <div className="flex gap-0.5 rounded-full bg-[var(--color-muted)] p-0.5">
           <button
             type="button"
@@ -625,7 +637,7 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
                 : 'text-[var(--color-muted-foreground)]')
             }
           >
-            Your automations
+            {t('automations.tabYours')}
           </button>
           <button
             type="button"
@@ -637,7 +649,7 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
                 : 'text-[var(--color-muted-foreground)]')
             }
           >
-            Templates
+            {t('automations.tabTemplates')}
           </button>
         </div>
         <button
@@ -646,7 +658,7 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
           className="inline-flex items-center gap-1.5 rounded-[var(--radius-lg)] bg-[var(--color-primary)] px-3 py-1.5 text-[12.5px] font-medium text-[var(--color-on-primary)] transition-opacity hover:opacity-90"
         >
           <PlusIcon className="h-3.5 w-3.5" />
-          New automation
+          {t('automations.new')}
         </button>
       </header>
 
@@ -654,16 +666,16 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
         <div className="mx-auto w-full max-w-3xl px-5">
           {view === 'list' ? (
             loading && !items.length ? (
-              <div className="py-7 text-[13.5px] text-[var(--color-muted-foreground)]">Loading…</div>
+              <div className="py-7 text-[13.5px] text-[var(--color-muted-foreground)]">{t('common.loading')}</div>
             ) : !items.length ? (
               // ── Empty state ──
               <div className="flex flex-1 flex-col items-center justify-center py-16 text-center">
                 <div className="mb-1 grid h-10 w-10 place-items-center rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-muted-foreground)]">
                   <BoltIcon className="h-5 w-5" />
                 </div>
-                <h2 className="mt-2.5 text-[15px] font-semibold text-[var(--color-foreground)]">No automations yet</h2>
+                <h2 className="mt-2.5 text-[15px] font-semibold text-[var(--color-foreground)]">{t('automations.emptyTitle')}</h2>
                 <p className="mt-2.5 max-w-[380px] text-[13px] leading-relaxed text-[var(--color-muted-foreground)]">
-                  Use agents to handle recurring work on a cadence you choose.
+                  {t('automations.lede')}
                 </p>
                 <div className="mt-3 flex gap-2">
                   <button
@@ -671,21 +683,21 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
                     onClick={newAutomation}
                     className="rounded-[var(--radius-lg)] bg-[var(--color-primary)] px-3 py-1.5 text-[12.5px] font-medium text-[var(--color-on-primary)]"
                   >
-                    New automation
+                    {t('automations.new')}
                   </button>
                   <button
                     type="button"
                     onClick={() => setView('templates')}
                     className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-[12.5px] font-medium transition-colors hover:bg-[var(--color-muted)]"
                   >
-                    Browse templates
+                    {t('automations.browseTemplates')}
                   </button>
                 </div>
               </div>
             ) : (
               <>
                 <p className="py-[18px] text-[13px] leading-relaxed text-[var(--color-muted-foreground)]">
-                  Use agents to handle recurring work on a cadence you choose.
+                  {t('automations.lede')}
                 </p>
 
                 {/* ── Cards ── */}
@@ -727,11 +739,11 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
                         {/* meta grid */}
                         <div className="mt-1 grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-1 border-t border-[var(--color-border)] pt-2.5">
                           <span className="font-mono text-[9.5px] font-semibold uppercase tracking-[0.06em] text-[var(--color-muted-foreground)]">
-                            Schedule
+                            {t('automations.meta.schedule')}
                           </span>
                           <span className="truncate text-xs text-[var(--color-foreground)]">{a.human_schedule}</span>
                           <span className="font-mono text-[9.5px] font-semibold uppercase tracking-[0.06em] text-[var(--color-muted-foreground)]">
-                            {a.trigger.type === 'manual' ? 'Last run' : 'Next run'}
+                            {a.trigger.type === 'manual' ? t('automations.meta.lastRun') : t('automations.meta.nextRun')}
                           </span>
                           <span
                             className={
@@ -741,13 +753,13 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
                                 : 'text-[var(--color-foreground)]')
                             }
                           >
-                            {nextRunLabel(a)}
+                            {nextRunLabel(a, t)}
                           </span>
 
                           <div className="col-span-2 mt-1 flex items-center gap-0.5">
                             <button
                               type="button"
-                              title="Edit"
+                              title={t('common.edit')}
                               onClick={() => editAutomation(a)}
                               className="cursor-pointer rounded-[var(--radius-md)] p-1 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
                             >
@@ -755,7 +767,7 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
                             </button>
                             <button
                               type="button"
-                              title="Delete"
+                              title={t('common.delete')}
                               onClick={() => void remove(a.id)}
                               className="cursor-pointer rounded-[var(--radius-md)] p-1 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-muted)] hover:text-[var(--color-destructive)]"
                             >
@@ -765,11 +777,11 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
                             <Toggle
                               checked={a.enabled}
                               onChange={(next) => void setEnabled(a, next)}
-                              title={a.enabled ? 'Enabled' : 'Disabled'}
+                              title={a.enabled ? t('automations.enabled') : t('automations.disabled')}
                             />
                             <button
                               type="button"
-                              title="Run now"
+                              title={t('automations.runNow')}
                               disabled={isRunning(a)}
                               onClick={() => void runNow(a.id)}
                               className={
@@ -790,23 +802,23 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
 
                 {/* ── Recent runs ── */}
                 <div className="mb-3 mt-7 flex items-center justify-between">
-                  <h2 className="text-[15px] font-semibold">Recent runs</h2>
+                  <h2 className="text-[15px] font-semibold">{t('automations.recentRuns')}</h2>
                   {runs.length > 0 && (
                     <div className="flex items-center gap-2">
                       <select
                         value={statusFilter}
                         onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-                        title="Filter runs"
+                        title={t('automations.filterRuns')}
                         className="h-8 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] px-2 text-[12.5px] text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
                       >
-                        <option value="all">All</option>
-                        <option value="success">Success</option>
-                        <option value="failed">Failed</option>
+                        <option value="all">{t('automations.filterAll')}</option>
+                        <option value="success">{t('automations.filterSuccess')}</option>
+                        <option value="failed">{t('automations.filterFailed')}</option>
                       </select>
                       <input
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        placeholder={`Search ${runs.length} runs…`}
+                        placeholder={t('automations.searchRuns', { n: runs.length })}
                         className="h-8 min-w-[220px] rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 text-[12.5px] text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)]"
                       />
                     </div>
@@ -814,7 +826,7 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
                 </div>
 
                 {filteredRuns.length === 0 ? (
-                  <div className="py-3.5 text-[13px] text-[var(--color-muted-foreground)]">No runs yet.</div>
+                  <div className="py-3.5 text-[13px] text-[var(--color-muted-foreground)]">{t('automations.noRuns')}</div>
                 ) : (
                   <div className="mb-6 overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-background)]">
                     {filteredRuns.map((r, idx) => {
@@ -853,12 +865,12 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
                             style={{ background: barColor }}
                           />
                           <div className="flex min-w-0 flex-col gap-0.5">
-                            <span className="text-[13.5px] font-medium">{r.title || 'Automation run'}</span>
+                            <span className="text-[13.5px] font-medium">{r.title || t('automations.runFallback')}</span>
                             <div className="inline-flex items-center gap-2 text-[11.5px] tabular-nums text-[var(--color-muted-foreground)]">
                               <span>{runLabel(r)}</span>
                               <span className="text-[var(--color-border)]">·</span>
                               <span className="rounded-[var(--radius-sm)] bg-[var(--color-muted)] px-1.5 py-px text-[10.5px] font-semibold text-[var(--color-muted-foreground)]">
-                                {r.trigger_kind}
+                                {triggerKindLabel(r.trigger_kind, t)}
                               </span>
                             </div>
                             {r.error_reason && (
@@ -878,32 +890,35 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
             // ── Templates ──
             <>
               <p className="py-[18px] text-[13px] leading-relaxed text-[var(--color-muted-foreground)]">
-                Start from a template — pick a project and confirm.
+                {t('automations.templatesLede')}
               </p>
               <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-3.5 pb-6">
-                {templates.map((t) => (
+                {templates.map((tpl) => (
                   <button
-                    key={t.id}
+                    key={tpl.id}
                     type="button"
-                    onClick={() => fromTemplate(t)}
+                    onClick={() => fromTemplate(tpl)}
                     className="flex cursor-pointer flex-col gap-2 rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-background)] p-4 text-left transition-colors hover:border-[var(--color-primary)] hover:shadow-[var(--shadow-sm)]"
                   >
                     <div className="mb-0.5 flex items-center justify-between gap-2">
-                      <span className="text-sm font-semibold">{t.name}</span>
+                      <span className="text-sm font-semibold">{tpl.name}</span>
                       <span className="rounded-full bg-[var(--accent-wash)] px-2 py-0.5 text-[10.5px] font-semibold text-[var(--color-primary)]">
-                        {t.badge}
+                        {tpl.badge}
                       </span>
                     </div>
                     <p className="line-clamp-2 text-[12.5px] leading-relaxed text-[var(--color-muted-foreground)]">
-                      {t.description}
+                      {tpl.description}
                     </p>
                     <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-[var(--color-muted-foreground)]">
-                      {modeLabel(t.suggest_mode)} · {t.trigger.type === 'manual' ? 'manual' : 'schedule'}
+                      {modeLabel(tpl.suggest_mode, t)} ·{' '}
+                      {tpl.trigger.type === 'manual'
+                        ? t('automations.triggerManual')
+                        : t('automations.triggerSchedule')}
                     </div>
                   </button>
                 ))}
                 {!templates.length && (
-                  <div className="py-7 text-[13.5px] text-[var(--color-muted-foreground)]">No templates available.</div>
+                  <div className="py-7 text-[13.5px] text-[var(--color-muted-foreground)]">{t('automations.templatesNone')}</div>
                 )}
               </div>
             </>
