@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   ArrowLeftIcon,
   CheckCircleIcon,
@@ -328,10 +329,16 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels'
 }
 
 function AutomationRunReplay({ run, onBack }: { run: AutomationRun | null; onBack: () => void }) {
+  const { t } = useTranslation()
   const isRunning = run ? (run.terminal_status || run.status) === 'running' || (!run.terminal_status && run.status === 'running') : false
   const status = run ? statusKind(run) : 'running'
   const StatusIcon = status === 'success' ? CheckCircleIcon : status === 'error' ? ExclamationCircleIcon : PlayIcon
-  const statusLabel = status === 'success' ? 'Completed' : status === 'error' ? 'Failed' : 'Running'
+  const statusLabel =
+    status === 'success'
+      ? t('automations.replay.completed')
+      : status === 'error'
+        ? t('automations.replay.failed')
+        : t('automations.replay.running')
 
   async function stopRun() {
     if (!run) return
@@ -347,11 +354,11 @@ function AutomationRunReplay({ run, onBack }: { run: AutomationRun | null; onBac
           className="inline-flex w-fit items-center gap-1.5 rounded-[var(--radius-md)] px-1.5 py-1 text-[12px] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
         >
           <ArrowLeftIcon className="h-3.5 w-3.5" />
-          Automations
+          {t('nav.automations')}
         </button>
         <div className="flex min-w-0 items-center gap-2">
           <h1 className="min-w-0 flex-1 truncate text-base font-semibold text-[var(--color-foreground)]">
-            {run?.title || 'Automation run'}
+            {run?.title || t('automations.runFallback')}
           </h1>
           <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ${statusClass(status)}`}>
             <StatusIcon className="h-3.5 w-3.5" />
@@ -364,18 +371,18 @@ function AutomationRunReplay({ run, onBack }: { run: AutomationRun | null; onBac
               className="inline-flex shrink-0 items-center gap-1 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-background)] px-2 py-1 text-[11px] text-[var(--color-foreground)] hover:bg-[var(--color-muted)]"
             >
               <StopIcon className="h-3.5 w-3.5" />
-              Stop
+              {t('chat.stop')}
             </button>
           )}
         </div>
         {run && (
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-[var(--color-muted-foreground)]">
-            <span className="font-mono uppercase tracking-[0.05em]">trigger</span>
+            <span className="font-mono uppercase tracking-[0.05em]">{t('automations.replay.trigger')}</span>
             <span>{run.trigger_kind}</span>
             {run.project && (
               <>
                 <span className="text-[var(--color-border)]">·</span>
-                <span className="font-mono uppercase tracking-[0.05em]">project</span>
+                <span className="font-mono uppercase tracking-[0.05em]">{t('automations.replay.project')}</span>
                 <span className="max-w-[360px] truncate">{run.project}</span>
               </>
             )}
