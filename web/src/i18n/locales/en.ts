@@ -202,7 +202,7 @@ export default {
   },
 
   tool: {
-    // Tool display titles (composables/toolInfo.ts).
+    // Tool display titles (lib/toolInfo.ts).
     read: 'Read',
     write: 'Write',
     edit: 'Edit',

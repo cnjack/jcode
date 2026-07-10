@@ -358,3 +358,50 @@ func shortContainer(id string) string {
 	}
 	return id
 }
+
+func (s *Server) handleCreatePTY(w http.ResponseWriter, r *http.Request) {
+	pwd, owner := "", ""
+	var dockerExec *tools.DockerExecutor
+	if eng := s.activeEngine(); eng != nil {
+		pwd, owner = eng.pwd, eng.taskID
+		// A container-bound engine gets a terminal INSIDE the container; SSH and
+		// local engines keep a local shell (SSH-in-terminal remains a known gap).
+		if eng.env != nil {
+			if de, ok := eng.env.Exec.(*tools.DockerExecutor); ok {
+				dockerExec = de
+			}
+		}
+	}
+
+	var (
+		id  string
+		err error
+	)
+	if dockerExec != nil {
+		// createDocker acquires its own container ref (so an env switch can't stop
+		// the container under a live terminal) and resolves the shared client itself.
+		id, err = s.ptyMgr.createDocker(dockerExec.ContainerID(), pwd, owner)
+	} else {
+		id, err = s.ptyMgr.create(pwd, owner)
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": id})
+}
+
+func (s *Server) handleListPTY(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": s.ptyMgr.list()})
+}
+
+func (s *Server) handleKillPTY(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	s.ptyMgr.kill(id)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handlePTYWebSocket(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	s.ptyMgr.serveWS(w, r, id)
+}

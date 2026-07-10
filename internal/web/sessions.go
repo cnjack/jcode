@@ -1,0 +1,351 @@
+package web
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"time"
+
+	"github.com/cloudwego/eino/schema"
+	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/session"
+	"github.com/cnjack/jcode/internal/tools"
+)
+
+// handleListAllTasks returns every session across all projects (flat list,
+// each tagged with its project path) so the web sidebar can render a
+// Workspace > Project > Task tree without switching the active project.
+func (s *Server) handleListAllTasks(w http.ResponseWriter, r *http.Request) {
+	all, err := session.ListAllSessions()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	// Snapshot which task ids are currently running (live engines) so the sidebar
+	// can show a running indicator even on a fresh page load.
+	running := make(map[string]bool)
+	s.tasksMu.RLock()
+	for id, e := range s.tasks {
+		if e != nil && e.running.Load() {
+			running[id] = true
+		}
+	}
+	s.tasksMu.RUnlock()
+
+	type taskItem struct {
+		UUID      string `json:"uuid"`
+		Project   string `json:"project"`
+		CreatedAt string `json:"created_at"`
+		UpdatedAt string `json:"updated_at,omitempty"`
+		Provider  string `json:"provider"`
+		Model     string `json:"model"`
+		Title     string `json:"title,omitempty"`
+		Pinned    bool   `json:"pinned"`
+		Archived  bool   `json:"archived"`
+		Unread    bool   `json:"unread"`
+		Status    string `json:"status,omitempty"`
+		Running   bool   `json:"running"`
+	}
+	items := make([]taskItem, 0)
+	for project, metas := range all {
+		for _, m := range metas {
+			// Automation runs are surfaced on the Automations page ("Recent
+			// runs"), not the main task list — exclude them here so a nightly
+			// automation doesn't bury the sidebar.
+			if m.AutomationID != "" {
+				continue
+			}
+			items = append(items, taskItem{
+				UUID:      m.UUID,
+				Project:   project,
+				CreatedAt: m.StartTime,
+				UpdatedAt: m.UpdatedAt,
+				Provider:  m.Provider,
+				Model:     m.Model,
+				Title:     m.Title,
+				Pinned:    m.Pinned,
+				Archived:  m.Archived,
+				Unread:    m.Unread,
+				Status:    m.Status,
+				Running:   running[m.UUID],
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+// handleUpdateTask applies a partial metadata update (pin/archive/unread/title)
+// to a task by uuid across all projects.
+func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Pinned   *bool   `json:"pinned"`
+		Archived *bool   `json:"archived"`
+		Unread   *bool   `json:"unread"`
+		Title    *string `json:"title"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	meta, err := session.UpdateSessionMeta(id, func(m *session.SessionMeta) {
+		if req.Pinned != nil {
+			m.Pinned = *req.Pinned
+		}
+		if req.Archived != nil {
+			m.Archived = *req.Archived
+		}
+		if req.Unread != nil {
+			m.Unread = *req.Unread
+		}
+		if req.Title != nil {
+			m.Title = *req.Title
+		}
+		m.UpdatedAt = time.Now().Format(time.RFC3339)
+	})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if meta == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, meta)
+}
+
+func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
+	metas, err := session.ListSessions(s.activePwd())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	type sessionItem struct {
+		UUID      string `json:"uuid"`
+		CreatedAt string `json:"created_at"`
+		Provider  string `json:"provider"`
+		Model     string `json:"model"`
+		Title     string `json:"title,omitempty"`
+	}
+
+	items := make([]sessionItem, 0, len(metas))
+	for _, m := range metas {
+		items = append(items, sessionItem{
+			UUID:      m.UUID,
+			CreatedAt: m.StartTime,
+			Provider:  m.Provider,
+			Model:     m.Model,
+			Title:     m.Title,
+		})
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	entries, err := session.LoadSession(id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, entries)
+}
+
+func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "session id is required"})
+		return
+	}
+	// Tear down the live engine for this task (if any) so its run is cancelled and
+	// resources reclaimed. The active foreground engine is left in place — but its
+	// recorder is reset to a fresh session so post-delete writes don't land in the
+	// now-unlinked file (silent data loss).
+	if eng := s.resolveEngine(id); eng != nil {
+		eng.emu.Lock()
+		cancel := eng.runCancel
+		eng.emu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		if eng != s.activeEngine() {
+			s.deleteEngine(id)
+		} else {
+			// Active task: wait for the cancelled run to drain so its final
+			// RecordAssistant/usage writes land before we close + reset the recorder
+			// (a post-close write would re-create and truncate the file).
+			for i := 0; i < 200 && eng.running.Load(); i++ {
+				time.Sleep(5 * time.Millisecond)
+			}
+			eng.emu.Lock()
+			if eng.recorder != nil && eng.recorder.UUID() == id {
+				eng.recorder.Close()
+				eng.recorder = nil
+				eng.history = nil
+			}
+			eng.emu.Unlock()
+		}
+	}
+
+	// Resolve the owning project across all projects: a task deleted from the
+	// sidebar tree may not belong to the active project.
+	if _, err := session.DeleteSessionByUUID(id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleTruncateHistory(w http.ResponseWriter, r *http.Request) {
+	eng := s.activeEngine()
+	if eng == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no active task"})
+		return
+	}
+	if eng.running.Load() {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is currently running"})
+		return
+	}
+
+	var req struct {
+		// BeforeUserMessage: keep all history entries that come before the
+		// Nth user message (0-indexed). Everything from that user message
+		// onward is discarded. Pass 0 to clear everything.
+		BeforeUserMessage int `json:"before_user_message"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+
+	// Capture the recorder under eng.emu (same lock submitMessage uses) but do
+	// file I/O outside the lock.
+	eng.emu.Lock()
+	rec := eng.recorder
+	eng.emu.Unlock()
+	sessionID := ""
+	if rec != nil {
+		sessionID = rec.UUID()
+	}
+
+	// Persist first — if the file rewrite fails we abort without touching
+	// the in-memory history so state never diverges.
+	if rec != nil {
+		if err := rec.TruncateAtUserMessage(req.BeforeUserMessage); err != nil {
+			config.Logger().Printf("[truncate] rewrite session file failed: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to truncate session file"})
+			return
+		}
+	}
+
+	// Now truncate in-memory history under eng.emu.
+	eng.emu.Lock()
+	truncAt := 0
+	if req.BeforeUserMessage > 0 {
+		userCount := 0
+		truncAt = len(eng.history) // default: keep all
+		for i, msg := range eng.history {
+			if msg.Role == schema.User {
+				if userCount == req.BeforeUserMessage {
+					truncAt = i
+					break
+				}
+				userCount++
+			}
+		}
+	}
+	if truncAt == 0 {
+		eng.history = nil
+	} else {
+		eng.history = eng.history[:truncAt]
+	}
+	eng.emu.Unlock()
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":     "ok",
+		"session_id": sessionID,
+	})
+}
+
+func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
+	// Parse optional resume session ID + project. Creating a task no longer
+	// blocks on "is the agent running" — tasks run concurrently.
+	var req struct {
+		SessionID string `json:"session_id,omitempty"`
+		Pwd       string `json:"pwd,omitempty"`
+	}
+	// The body is optional (empty = brand-new task → EOF), but a non-empty
+	// malformed body should be rejected rather than creating a zero-value task.
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil && err != io.EOF {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	// Already-live task: just focus it (do not disturb its run).
+	if req.SessionID != "" {
+		if eng := s.resolveEngine(req.SessionID); eng != nil {
+			s.setActiveEngine(eng)
+			writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "session_id": eng.taskID})
+			return
+		}
+	}
+
+	if s.newEngine == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "task creation is not supported"})
+		return
+	}
+
+	// Each new/resumed task gets its OWN engine (env, agent, recorder, handler),
+	// so it runs independently of every other task.
+	pwd := req.Pwd
+	if pwd == "" {
+		if a := s.activeEngine(); a != nil {
+			pwd = a.pwd
+		}
+	}
+	eng, err := s.buildLocalEngine(req.SessionID, pwd, s.activeMode())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Resume: hydrate the fresh engine with the persisted conversation/todos/goal.
+	if req.SessionID != "" {
+		entries, lerr := session.LoadSession(req.SessionID)
+		if lerr != nil {
+			// Stale/nonexistent session id: don't silently register a phantom empty
+			// engine under it — tear the just-built engine down and report not-found.
+			s.deleteEngine(eng.taskID)
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+			return
+		}
+		st := session.ReconstructState(entries)
+		eng.emu.Lock()
+		eng.history = st.History
+		eng.emu.Unlock()
+		if eng.todoStore != nil {
+			items := make([]tools.TodoItem, len(st.Todos))
+			for i, t := range st.Todos {
+				items[i] = tools.TodoItem{ID: t.ID, Title: t.Title, Status: tools.TodoStatus(t.Status)}
+			}
+			eng.todoStore.Update(items)
+		}
+		if eng.env != nil && eng.env.GoalStore != nil {
+			eng.env.GoalStore.RestoreFromSnapshot(st.Goal)
+			if eng.handler != nil {
+				eng.handler.Emit("goal_update", eng.env.GoalStore.Get())
+			}
+		}
+	}
+
+	s.setActiveEngine(eng)
+
+	// Brand-new task: tell its view to start clean.
+	if req.SessionID == "" {
+		s.wsBroker.Broadcast(WSEvent{TaskID: eng.taskID, Type: "session_reset", Data: map[string]string{}})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "session_id": eng.taskID})
+}
