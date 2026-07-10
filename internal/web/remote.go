@@ -408,3 +408,37 @@ func (s *Server) handleRemoteSaveDockerAlias(w http.ResponseWriter, r *http.Requ
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
+
+// --- SSH list handler ---
+
+func (s *Server) handleListSSH(w http.ResponseWriter, r *http.Request) {
+	type sshItem struct {
+		Name string `json:"name"`
+		Addr string `json:"addr"`
+		Path string `json:"path,omitempty"`
+	}
+
+	var items []sshItem
+	if s.cfg != nil {
+		for _, a := range s.cfg.SSHAliases {
+			items = append(items, sshItem{
+				Name: a.Name,
+				Addr: a.Addr,
+				Path: a.Path,
+			})
+		}
+	}
+	if items == nil {
+		items = []sshItem{}
+	}
+
+	current := "local"
+	if eng := s.activeEngine(); eng != nil && eng.env != nil && eng.env.IsRemote() {
+		current = "ssh"
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"current": current,
+		"aliases": items,
+	})
+}
