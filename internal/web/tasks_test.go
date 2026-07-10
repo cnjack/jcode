@@ -156,6 +156,46 @@ func TestUpdateTaskMeta(t *testing.T) {
 	}
 }
 
+// Regression: PATCH /api/tasks/{id} must echo the normalized task shape
+// (created_at + project), NOT the raw SessionMeta (start_time). An old session
+// with no updated_at sorts by the created_at fallback, so a response that
+// dropped created_at made the row jump the instant it was opened (open marks it
+// read). It must also NOT bump updated_at — activity is a real turn, not a
+// pin/mark-read.
+func TestUpdateTaskMetaResponseShape(t *testing.T) {
+	seedIndex(t, map[string][]session.SessionMeta{
+		// An "old" session: it has a StartTime but no UpdatedAt yet.
+		"/work/tpm": {{UUID: "u-old", Project: "/work/tpm", Title: "old one", StartTime: "2020-01-02T03:04:05Z"}},
+	})
+	s := &Server{}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/api/tasks/u-old", strings.NewReader(`{"unread":false}`))
+	req.SetPathValue("id", "u-old")
+	s.handleUpdateTask(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	if _, leaked := raw["start_time"]; leaked {
+		t.Fatalf("response leaked raw SessionMeta shape (start_time): %v", raw)
+	}
+	if raw["created_at"] != "2020-01-02T03:04:05Z" {
+		t.Fatalf("created_at must be preserved in response, got %v", raw["created_at"])
+	}
+	if raw["project"] != "/work/tpm" {
+		t.Fatalf("project must be set in response, got %v", raw["project"])
+	}
+	// A metadata edit is not activity — updated_at stays empty (field omitted).
+	if v, ok := raw["updated_at"]; ok && v != "" {
+		t.Fatalf("updated_at must not be bumped by a metadata edit, got %v", v)
+	}
+}
+
 // Regression: deleting a task that belongs to a project OTHER than the active
 // one (s.pwd) must still remove it from the index — the sidebar tree can delete
 // across projects. Previously this silently no-op'd, leaving a ghost task.

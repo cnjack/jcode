@@ -241,9 +241,16 @@ export function Sidebar() {
     arr.sort((a, b) => {
       if (a.running !== b.running) return a.running ? -1 : 1
       if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
-      if (filters.sort === 'name') return rowTitle(a, untitledLabel).localeCompare(rowTitle(b, untitledLabel))
-      if (filters.sort === 'created') return (b.created_at || '').localeCompare(a.created_at || '')
-      return (b.updated_at || '').localeCompare(a.updated_at || '')
+      let cmp = 0
+      if (filters.sort === 'name') cmp = rowTitle(a, untitledLabel).localeCompare(rowTitle(b, untitledLabel))
+      else if (filters.sort === 'created') cmp = (b.created_at || '').localeCompare(a.created_at || '')
+      else cmp = (b.updated_at || '').localeCompare(a.updated_at || '')
+      // Deterministic final tiebreaker. /api/tasks returns rows in Go map order
+      // (randomized per request), so without a stable key, any re-fetch would
+      // reshuffle rows whose sort key ties — making the list "jump" on actions
+      // that trigger a refresh (e.g. opening a task in another project). uuid is
+      // unique and stable, so equal-key rows keep a fixed relative order.
+      return cmp !== 0 ? cmp : a.uuid.localeCompare(b.uuid)
     })
     return arr
   }, [filtered, filters.sort, untitledLabel])
@@ -358,13 +365,18 @@ export function Sidebar() {
     await dispatch(loadSession(row.uuid))
   }
 
-  // Apply a task metadata patch via the API and merge the result into the
-  // store's task list so the UI reflects it immediately.
+  // Apply a task metadata patch via the API and reflect it in the store.
+  //
+  // Merge ONLY the fields we changed — never the timestamps. A metadata edit
+  // (pin / archive / mark-read / rename) must not touch created_at/updated_at, so
+  // opening a session (which marks it read) can't move it in the recency sort.
+  // We intentionally ignore the endpoint's echoed row so the sidebar's order is
+  // fully decoupled from this round-trip: the list only ever reorders when a new
+  // prompt is sent, never on selection.
   async function patchTask(uuid: string, patch: Parameters<typeof api.updateTask>[1]) {
     try {
-      const updated = await api.updateTask(uuid, patch)
-      const next = tasks.map((t) => (t.uuid === uuid ? updated : t))
-      dispatch(sessionActions.setTasks(next))
+      await api.updateTask(uuid, patch)
+      dispatch(sessionActions.patchTask({ uuid, ...patch }))
     } catch {
       // ignore — the next tasks refresh will reconcile
     }
@@ -526,12 +538,15 @@ export function Sidebar() {
         </div>
       </div>
 
-      <div className="sb-tree sb-tree-feather min-h-0 flex-1 overflow-y-auto">
+      {/* Pinned workspace + filter header — stays put while the list scrolls. */}
+      <div className="sb-tree-head-fixed shrink-0">
         <div className="sb-tree-head">
           <span className="sb-tree-label">{t('nav.workspace')}</span>
           <SidebarFilterMenu filters={filters} projects={projects} onChange={setFilters} />
         </div>
+      </div>
 
+      <div className="sb-tree sb-tree-feather min-h-0 flex-1 overflow-y-auto">
         {groups.length === 0 ? (
           <div className="px-3 py-6 text-center text-xs text-[var(--color-muted-foreground)]">{t('sidebar.noConversations')}</div>
         ) : (
@@ -699,12 +714,19 @@ export function Sidebar() {
         .sb-nav-ic { width:18px; height:18px; flex-shrink:0; color:var(--color-muted-foreground); transition:color 0.15s; }
         .sb-nav-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13.5px; font-weight:500; }
         .sb-nav-kbd { flex-shrink:0; color:var(--color-foreground); font-family:var(--font-sans); font-size:11.5px; line-height:1; white-space:nowrap; }
-        .sb-tree { padding:4px 8px 20px; }
-        /* Feather the bottom of the session list into the footer (same idea as
-           messages-feather above the composer). */
+        .sb-tree { padding:10px 8px 20px; }
+        /* Pinned Workspace + filter header (moved out of the scroll area). Left
+           padding (8px) + the head's own 6px keeps the label aligned with the
+           list rows as before. */
+        .sb-tree-head-fixed { padding:4px 8px 2px; }
+        /* Feather both edges of the scrolling session list: a soft top edge so
+           rows dissolve under the pinned header (the 10px fade sits over the
+           list's 10px top padding, so the first row is crisp at rest and only
+           softens once it scrolls up), plus the existing bottom fade into the
+           footer (same idea as messages-feather above the composer). */
         .sb-tree-feather {
-          -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent 100%);
-          mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent 100%);
+          -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 28px), transparent 100%);
+          mask-image: linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 28px), transparent 100%);
         }
         .sb-footer {
           padding-top: 14px;
@@ -942,25 +964,37 @@ function projectParentHint(path: string): string {
 }
 
 function compareProjectGroups(a: SidebarGroup, b: SidebarGroup, activePath: string): number {
-  if (a.path === activePath) return -1
-  if (b.path === activePath) return 1
+  // Fallback ONLY for an empty active project: a freshly-opened project with no
+  // sessions has no activity timestamp, so pure lastTs ordering would sink it to
+  // the bottom. Float just that case to the top so the project you're in stays in
+  // view. A non-empty active project is ordered by its activity like any other —
+  // selecting a project must not yank it around.
+  const aEmptyActive = a.path === activePath && a.items.length === 0
+  const bEmptyActive = b.path === activePath && b.items.length === 0
+  if (aEmptyActive !== bEmptyActive) return aEmptyActive ? -1 : 1
+
   const A = aggregate(a.items)
   const B = aggregate(b.items)
+  // Otherwise order projects purely by last activity — most recent first. A live
+  // run floats its project up (and a run only starts from a sent prompt).
+  // Deliberately NOT by the active/current project or by unread: selecting a
+  // session — or marking it read on open — must never reorder its project.
+  // Activity means a sent prompt (which bumps lastTs), never opening a project.
   if (A.running !== B.running) return A.running ? -1 : 1
-  if (A.unread !== B.unread) return A.unread ? -1 : 1
   if (A.lastTs !== B.lastTs) return B.lastTs.localeCompare(A.lastTs)
-  return a.label.localeCompare(b.label)
+  const byLabel = a.label.localeCompare(b.label)
+  // Stable final tiebreaker (path) so equal-label groups don't reshuffle when
+  // /api/tasks is re-fetched in a non-deterministic order.
+  return byLabel !== 0 ? byLabel : (a.path || '').localeCompare(b.path || '')
 }
 
 function aggregate(items: SessionRow[]) {
   let running = false
-  let unread = false
   let lastTs = ''
   for (const item of items) {
     if (item.running) running = true
-    if (item.unread) unread = true
     const ts = item.updated_at || item.created_at || ''
     if (ts > lastTs) lastTs = ts
   }
-  return { running, unread, lastTs }
+  return { running, lastTs }
 }
