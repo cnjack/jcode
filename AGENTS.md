@@ -92,13 +92,14 @@ cd packages/jcode-ui-core && npm publish --access public --otp=XXXXXX
 cd ../jcode-ui && npm publish --access public --otp=XXXXXX
 ```
 
-After a successful publish, bump consumer deps (`web/`, `site/`, `examples/*`) to the new range and run `pnpm install` (and `cd site && pnpm install` for the site workspace). Local edits under `packages/` do **not** reach `web`/`site` until a new version is published and the dependency range is updated.
+After a successful publish, bump consumer deps (`web/`, `site/`, `examples/*`) to the new range and run `pnpm install` (and `cd site && pnpm install` for the site workspace). Also refresh `minimumReleaseAgeExclude` entries in every `pnpm-workspace.yaml` (root, `site/`, `examples/*`) so the newly published versions are not blocked by release-age checks. Local edits under `packages/` do **not** reach `web`/`site` until a new version is published and the dependency range is updated.
 
 Checklist before publish:
 
 1. `jcode-ui` → `jcode-ui-core` is a registry range (`^x.y.z`), not `file:`
 2. Both packages have fresh `dist/` (`pnpm build`)
 3. Smoke: `npm install jcode-ui@<ver>` in a temp dir imports both packages and pulls core transitively
+4. After publish: update `minimumReleaseAgeExclude` in all `pnpm-workspace.yaml` files to the new `jcode-ui` / `jcode-ui-core` versions (drop stale entries)
 
 ### Key Design Decisions
 

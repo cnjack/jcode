@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	utils "github.com/cnjack/jcode/internal/util"
 )
@@ -92,17 +93,17 @@ func (s *Server) handleReadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	content, err := os.ReadFile(abs)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
-		return
-	}
-
-	// Limit file size to 1MB.
-	if len(content) > 1<<20 {
+	// Reject oversized files before loading them into memory.
+	if info, err := os.Stat(abs); err == nil && info.Size() > 1<<20 {
 		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
 			"error": "file too large (>1MB)",
 		})
+		return
+	}
+
+	content, err := os.ReadFile(abs)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -125,7 +126,7 @@ func (s *Server) handleExec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(s.rootCtx(), 30*1e9) // 30 seconds
+	ctx, cancel := context.WithTimeout(s.rootCtx(), 30*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", req.Command)
@@ -192,20 +193,6 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 
 	var entries []diffEntry
 	rawDiff := string(output)
-
-	// Also get changed file list for status
-	statCmd := exec.CommandContext(s.rootCtx(), "git", "diff", "--stat", "--no-color")
-	statCmd.Env = utils.ScrubbedGitEnv()
-	switch mode {
-	case "staged":
-		statCmd = exec.CommandContext(s.rootCtx(), "git", "diff", "--cached", "--stat", "--no-color")
-		statCmd.Env = utils.ScrubbedGitEnv()
-	case "branch":
-		statCmd = exec.CommandContext(s.rootCtx(), "git", "diff", "HEAD~1", "--stat", "--no-color")
-		statCmd.Env = utils.ScrubbedGitEnv()
-	}
-	statCmd.Dir = s.activePwd()
-	_, _ = statCmd.CombinedOutput()
 
 	// Parse unified diff into per-file entries
 	sections := splitDiffByFile(rawDiff)

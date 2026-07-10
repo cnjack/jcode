@@ -368,6 +368,10 @@ func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Serialize config RMW + live publish under cfgMu (see Server.cfgMu).
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
+
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		cfg = &config.Config{MaxIterations: 1000}
@@ -415,6 +419,10 @@ func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config: " + err.Error()})
 		return
 	}
+
+	// Publish into the live server so /api/models sees the new provider without a restart.
+	s.cfg = cfg
+	s.registry = model.NewModelRegistryWithConfig(cfg)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -487,6 +495,10 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid reasoning_effort"})
 		return
 	}
+
+	// Serialize config RMW + live publish under cfgMu (see Server.cfgMu).
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -626,10 +638,8 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 	// Publish the updated config + registry to the live server so the chat model
 	// picker (/api/models) and catalog reflect added/edited/removed models
 	// without a restart — matching handleSetupComplete's publish step.
-	s.cfgMu.Lock()
 	s.cfg = cfg
 	s.registry = model.NewModelRegistryWithConfig(cfg)
-	s.cfgMu.Unlock()
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -641,6 +651,10 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider id is required"})
 		return
 	}
+
+	// Serialize RMW with other config writers (cfgMu documents this in Server).
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -654,19 +668,16 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Don't allow deleting the active provider.
 	activeProvider, _ := cfg.GetProviderModel()
 	if activeProvider == providerID {
-		remaining := 0
-		for k := range providers {
-			if k != providerID {
-				remaining++
-			}
-		}
-		if remaining == 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot delete the only provider"})
+		// Pick a surviving provider+model so cfg.Model is never left pointing at
+		// a deleted provider. Reject when no safe replacement exists.
+		nextRef := firstAlternateProviderModel(cfg, s.registry, providerID)
+		if nextRef == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot delete the only provider (or no replacement model available)"})
 			return
 		}
+		cfg.Model = nextRef
 	}
 
 	delete(cfg.Providers, providerID)
@@ -675,5 +686,35 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.cfg = cfg
+	s.registry = model.NewModelRegistryWithConfig(cfg)
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// firstAlternateProviderModel returns "provider/model" for the first configured
+// provider other than skipID that has at least one usable model, or "" if none.
+func firstAlternateProviderModel(cfg *config.Config, reg *model.ModelRegistry, skipID string) string {
+	if cfg == nil {
+		return ""
+	}
+	// Prefer a registry rebuilt from cfg so custom models on survivors are visible.
+	live := model.NewModelRegistryWithConfig(cfg)
+	if live == nil {
+		live = reg
+	}
+	for id, pc := range cfg.GetProviders() {
+		if id == skipID || pc == nil {
+			continue
+		}
+		if live != nil {
+			if models := live.ListProviderModels(id, true); len(models) > 0 {
+				return id + "/" + models[0].ID
+			}
+		}
+		if len(pc.CustomModels) > 0 {
+			return id + "/" + pc.CustomModels[0].ID
+		}
+	}
+	return ""
 }
