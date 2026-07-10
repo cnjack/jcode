@@ -824,6 +824,10 @@ func UpdateSessionMeta(uuid string, mutate func(*SessionMeta)) (*SessionMeta, er
 					return nil, err
 				}
 				updated := metas[i]
+				// The index keys sessions by project, so the stored meta may not
+				// carry its own Project. Populate it on the returned copy so callers
+				// can build a self-describing task view without re-deriving the path.
+				updated.Project = project
 				return &updated, nil
 			}
 		}
