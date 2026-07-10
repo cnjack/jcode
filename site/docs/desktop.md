@@ -135,7 +135,7 @@ desktop/
 ```
 
 The desktop bridge on the frontend side lives in
-`web/src/composables/useDesktop.ts` — every export is feature-detected, so the
+`web/src/lib/useDesktop.ts` — every export is feature-detected, so the
 same web bundle runs unchanged in a browser and inside the desktop shell.
 
 ## Troubleshooting

@@ -51,7 +51,7 @@
 | **进度** | stdout 行 | `/workflows` 面板（仿 team panel） | WS `flow_progress` → WorkflowsView 树 | ACP session/update 文本 |
 
 **接线点（verbatim 已勘）：**
-- Web 事件：`internal/handler/web.go` 加 `OnFlowProgress(data)` → `h.emit("flow_progress", WebFlowProgressData{...})`；`internal/web/engine.go:startPump` 自动 `WSBroker.Broadcast(WSEvent{Type,TaskID,Data})`；前端 `web/src/composables/ws.ts` handlerMap 加 `flow_progress`。
+- Web 事件：`internal/handler/web.go` 加 `OnFlowProgress(data)` → `h.emit("flow_progress", WebFlowProgressData{...})`；`internal/web/engine.go:startPump` 自动 `WSBroker.Broadcast(WSEvent{Type,TaskID,Data})`；前端 `web/src/lib/ws.ts` handlerMap 加 `flow_progress`。
 - Web API：`internal/web/server.go` 加 `GET/POST /api/workflows`、`GET /api/workflows/runs`、`POST /api/workflows/{name}/run`（仿 automations）。Vue：`stores/workflow.ts` + `components/WorkflowsView.vue` + App.vue `activeView` 加 `'workflows'` + Sidebar 入口。
 - TUI：`internal/tui/messages.go` 加 `FlowProgressMsg`；`internal/tui/update.go` 加 `case FlowProgressMsg`（仿 `SubagentProgressMsg`）；`internal/command/interactive.go` 加 `s.flowProgress(...)` → `s.p.Send(...)`；斜杠复用 `skillSlashCommands` 模式，新增 flow slash 源。
 - 命令：`internal/command/workflow.go` 新建 `NewWorkflowCmd()`（`Use:"workflow" Aliases:["workflows","flow"]`），`cmd/jcode/main.go:47` 注册。

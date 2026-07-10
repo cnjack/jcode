@@ -1,6 +1,6 @@
 {
   "name": "jcode-ui",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "React AI chat UI components — styled, token-driven, backend-agnostic. Streams messages, tool calls, approvals, and ask-user interactions.",
   "type": "module",
   "license": "MIT",
@@ -8,7 +8,7 @@
   "homepage": "https://www.j-code.net/chat-ui/docs",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cnjack/jcode",
+    "url": "git+https://github.com/cnjack/jcode.git",
     "directory": "packages/jcode-ui"
   },
   "keywords": [
@@ -67,7 +67,7 @@
     "@tailwindcss/typography": "^0.5.16",
     "dompurify": "^3.2.4",
     "highlight.js": "^11.11.1",
-    "jcode-ui-core": "file:../jcode-ui-core",
+    "jcode-ui-core": "^0.1.0",
     "marked": "^18.0.0",
     "marked-highlight": "^2.2.2"
   },

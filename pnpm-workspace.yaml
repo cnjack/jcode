@@ -12,6 +12,9 @@ packages:
 allowBuilds:
   '@parcel/watcher': true
   esbuild: true
+minimumReleaseAgeExclude:
+  - jcode-ui-core@0.1.0
+  - jcode-ui@0.1.1
 # Native build scripts to allow. esbuild (Vite's bundler) and @parcel/watcher
 # (dev-server file watching) are trusted toolchain deps — whitelisting them
 # avoids ERR_PNPM_IGNORED_BUILDS failing `pnpm install` (and the Makefile build).

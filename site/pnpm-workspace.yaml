@@ -1,2 +1,5 @@
 allowBuilds:
   esbuild: true
+minimumReleaseAgeExclude:
+  - jcode-ui-core@0.1.0
+  - jcode-ui@0.1.1
