@@ -8,7 +8,7 @@
   "homepage": "https://www.j-code.net/chat-ui/docs",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cnjack/jcode",
+    "url": "git+https://github.com/cnjack/jcode.git",
     "directory": "packages/jcode-ui-core"
   },
   "keywords": [
