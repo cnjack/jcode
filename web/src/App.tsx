@@ -40,7 +40,7 @@ import {
 } from './app/store'
 import { bridgeWS } from './app/wsBridge'
 import { useChatRuntime } from './app/runtime'
-import type { AutomationRun } from './lib/automation'
+import { triggerKindLabel, type AutomationRun } from './lib/automation'
 import { Sidebar } from './components/Sidebar'
 import { ChatView } from './components/ChatView'
 import { AutomationsView } from './components/AutomationsView'
@@ -378,7 +378,7 @@ function AutomationRunReplay({ run, onBack }: { run: AutomationRun | null; onBac
         {run && (
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-[var(--color-muted-foreground)]">
             <span className="font-mono uppercase tracking-[0.05em]">{t('automations.replay.trigger')}</span>
-            <span>{run.trigger_kind}</span>
+            <span>{triggerKindLabel(run.trigger_kind, t)}</span>
             {run.project && (
               <>
                 <span className="text-[var(--color-border)]">·</span>

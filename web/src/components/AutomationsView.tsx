@@ -32,6 +32,7 @@ import {
   HandRaisedIcon,
 } from '@heroicons/react/24/outline'
 import { api } from '../lib/api'
+import { triggerKindLabel } from '../lib/automation'
 import type {
   Automation,
   AutomationCadence,
@@ -869,7 +870,7 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
                               <span>{runLabel(r)}</span>
                               <span className="text-[var(--color-border)]">·</span>
                               <span className="rounded-[var(--radius-sm)] bg-[var(--color-muted)] px-1.5 py-px text-[10.5px] font-semibold text-[var(--color-muted-foreground)]">
-                                {r.trigger_kind}
+                                {triggerKindLabel(r.trigger_kind, t)}
                               </span>
                             </div>
                             {r.error_reason && (
