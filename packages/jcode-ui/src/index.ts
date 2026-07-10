@@ -36,6 +36,8 @@ export { ApiBaseContext, ApiBaseProvider } from './lib/apiBaseContext.js'
 export { Thread } from './components/Thread.js'
 export { Message } from './components/Message.js'
 export { ToolCallCard } from './components/ToolCallCard.js'
+export { ExploringGroupCard } from './components/ExploringGroupCard.js'
+export { CompactToolRow } from './components/CompactToolRow.js'
 export { ApprovalBanner } from './components/ApprovalBanner.js'
 export { AskUserCard } from './components/AskUserCard.js'
 export { ContextBar } from './components/ContextBar.js'
@@ -61,4 +63,12 @@ export type {
   Goal,
   Role,
 } from 'jcode-ui-core'
-export { isMessageItem, isToolItem, isApprovalItem } from 'jcode-ui-core'
+export {
+  isMessageItem,
+  isToolItem,
+  isApprovalItem,
+  isExploringItem,
+  groupExploringTimeline,
+  isCollapsibleTool,
+  summarizeExploringSteps,
+} from 'jcode-ui-core'

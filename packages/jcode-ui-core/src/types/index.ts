@@ -73,9 +73,37 @@ export interface ToolDisplayInfo {
   icon?: string
   /** 'context' | 'mutation' | 'execution' — informational grouping. */
   category?: string
+  /** Presentation kind: read | search | list | shell | edit | agent | other. */
+  kind?: string
+  /** When true, adjacent tools may coalesce into an Exploring group. */
+  collapsible?: boolean
 }
 
 export type ToolStatus = 'running' | 'done' | 'error'
+
+/** Structured stdout/stderr for execute-style tools (dual-channel UI path). */
+export interface ToolStreams {
+  stdout?: string
+  stderr?: string
+  aggregated?: string
+}
+
+/** Structured execution metadata for execute-style tools. */
+export interface ToolMeta {
+  exit_code?: number
+  duration_ms?: number
+  timed_out?: boolean
+  truncated?: boolean
+  spill_path?: string
+}
+
+/** Presentation hints attached to a tool result. */
+export interface ToolPresentation {
+  kind?: string
+  title?: string
+  subtitle?: string
+  collapsible?: boolean
+}
 
 /**
  * A tool invocation. `args`/`output` are raw JSON strings; renderers parse
@@ -100,6 +128,22 @@ export interface ToolCall {
   askUserId?: string
   /** ask_user: backend-normalized questions to render. */
   askUserQuestions?: AskUserQuestion[]
+  /** Dual-channel streams (execute). */
+  streams?: ToolStreams
+  /** Dual-channel meta (execute). */
+  meta?: ToolMeta
+  /** Dual-channel presentation (execute). */
+  presentation?: ToolPresentation
+}
+
+/**
+ * A UI-only coalesced group of collapsible read/search/list tool calls.
+ * Does not change model-facing tool boundaries.
+ */
+export interface ExploringGroup {
+  id: string
+  tools: ToolCall[]
+  status: ToolStatus
 }
 
 /** An option in an `ask_user` question. */
@@ -141,8 +185,8 @@ export interface Approval {
   resolving?: boolean
 }
 
-/** The three built-in thread-item kinds. */
-export type ThreadItemKind = 'message' | 'tool' | 'approval'
+/** Built-in thread-item kinds (exploring is UI-only coalescing). */
+export type ThreadItemKind = 'message' | 'tool' | 'approval' | 'exploring'
 
 /**
  * The discriminated union rendered by `Thread`. A `seq` counter keeps DOM
@@ -152,6 +196,7 @@ export type ThreadItem =
   | { kind: 'message'; data: Message; seq: number }
   | { kind: 'tool'; data: ToolCall; seq: number }
   | { kind: 'approval'; data: Approval; seq: number }
+  | { kind: 'exploring'; data: ExploringGroup; seq: number }
 
 /** Type guard helpers (kept generic so consumers can narrow item arrays). */
 export function isMessageItem(i: ThreadItem): i is Extract<ThreadItem, { kind: 'message' }> {
@@ -162,6 +207,9 @@ export function isToolItem(i: ThreadItem): i is Extract<ThreadItem, { kind: 'too
 }
 export function isApprovalItem(i: ThreadItem): i is Extract<ThreadItem, { kind: 'approval' }> {
   return i.kind === 'approval'
+}
+export function isExploringItem(i: ThreadItem): i is Extract<ThreadItem, { kind: 'exploring' }> {
+  return i.kind === 'exploring'
 }
 
 /** A message composed while the agent is running; drained turn-by-turn. */

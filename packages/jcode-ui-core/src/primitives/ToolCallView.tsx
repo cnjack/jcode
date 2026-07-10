@@ -49,6 +49,11 @@ export interface ToolCallViewProps {
    * Receives only output-related fields — never args.
    */
   renderSubagentOutput?: (tool: ToolCall) => ReactNode
+  /**
+   * Optional custom renderer for the full children list (e.g. compact rows +
+   * exploring groups). When set, overrides per-child renderChild recursion.
+   */
+  renderSubagentChildren?: (children: ToolCall[]) => ReactNode
   /** className passthrough. */
   className?: string
 }
@@ -61,6 +66,7 @@ export function ToolCallView({
   className,
   renderHeader,
   renderSubagentOutput,
+  renderSubagentChildren,
 }: ToolCallViewProps): ReactNode {
   const ctx = useToolCallContext()
   // Only the recursive subagent tool — team_spawn has its own renderer (Vue parity).
@@ -85,9 +91,15 @@ export function ToolCallView({
 
   const body = !isSubagent && Renderer ? <Renderer {...toRendererProps(tool)} /> : null
 
-  const children =
+  const childTools =
     isSubagent && tool.children && tool.children.length > 0 && depth < maxDepth
-      ? tool.children.map((c) =>
+      ? tool.children
+      : null
+
+  const children = childTools
+    ? renderSubagentChildren
+      ? renderSubagentChildren(childTools)
+      : childTools.map((c) =>
           ctx?.renderChild ? (
             <div key={c.id}>{ctx.renderChild(c, depth + 1)}</div>
           ) : (
@@ -98,13 +110,16 @@ export function ToolCallView({
               maxDepth={maxDepth}
               renderHeader={renderHeader}
               renderSubagentOutput={renderSubagentOutput}
+              renderSubagentChildren={renderSubagentChildren}
             />
           ),
         )
-      : null
+    : null
 
   // Prefer displayOutput (clean) over raw output; never surface args for subagents.
   const subagentText = tool.displayOutput || tool.output || ''
+  // When done with a result, show result first prominence (children still available).
+  const showResultFirst = isSubagent && tool.status === 'done' && !!subagentText
 
   return (
     <div
@@ -118,16 +133,25 @@ export function ToolCallView({
       {/* Subagent: children + output only (no args). Output rendered by styled slot. */}
       {expanded && isSubagent && (
         <div className="toolcall-subagent-body">
-          {children && children.length > 0 ? (
-            <div className="toolcall-subagent-children">{children}</div>
+          {showResultFirst &&
+            (renderSubagentOutput
+              ? renderSubagentOutput(tool)
+              : subagentText
+                ? <pre className="toolcall-subagent-output">{truncate(subagentText, 2000)}</pre>
+                : null)}
+          {children ? (
+            <div className={renderSubagentChildren ? undefined : 'toolcall-subagent-children'}>
+              {children}
+            </div>
           ) : tool.status === 'running' && !subagentText ? (
             <div className="toolcall-subagent-starting">Starting…</div>
           ) : null}
-          {renderSubagentOutput
-            ? renderSubagentOutput(tool)
-            : subagentText
-              ? <pre className="toolcall-subagent-output">{truncate(subagentText, 2000)}</pre>
-              : null}
+          {!showResultFirst &&
+            (renderSubagentOutput
+              ? renderSubagentOutput(tool)
+              : subagentText
+                ? <pre className="toolcall-subagent-output">{truncate(subagentText, 2000)}</pre>
+                : null)}
           {tool.error ? <pre className="toolcall-subagent-error">{tool.error}</pre> : null}
         </div>
       )}
@@ -157,6 +181,9 @@ function toRendererProps(tool: ToolCall): ToolRendererProps {
     status: tool.status,
     displayInfo: tool.displayInfo,
     children: tool.children,
+    streams: tool.streams,
+    meta: tool.meta,
+    presentation: tool.presentation,
   }
 }
 

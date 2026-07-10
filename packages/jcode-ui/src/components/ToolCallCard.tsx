@@ -1,20 +1,19 @@
 /**
- * ToolCallCard — styled tool-invocation shell (matches web ToolCallCard.vue).
+ * ToolCallCard — styled tool-invocation shell.
  *
- * Design:
- *   - Header is a borderless plain-text row (title + subtitle + chevron).
- *     No permanent status glyph; running titles use `.shimmer-running`.
- *   - Content box is ONE shared frame (`.toolcall-body` in components.css);
- *     individual renderers must not add their own outer border.
- *   - Subagent gets a dedicated header + unboxed children list.
+ * - Header is a borderless plain-text row (title + subtitle + chevron).
+ * - Content box is ONE shared frame (`.toolcall-body`).
+ * - Subagent: compact header + compact children rows + result prominence.
  */
 
 import { memo, useMemo } from 'react'
 import { ChevronDownIcon } from '@heroicons/react/24/outline'
 import type { ToolCall } from 'jcode-ui-core'
+import { groupExploringTimeline, summarizeExploringSteps } from 'jcode-ui-core'
 import { ToolCallView, ToolCallProvider } from 'jcode-ui-core/primitives'
 import type { ToolRendererRegistry } from 'jcode-ui-core/adapters'
 import { AskUserCard } from './AskUserCard.js'
+import { CompactToolRow } from './CompactToolRow.js'
 import { useToolRegistry } from './ToolRegistryContext.js'
 import { renderMarkdown } from '../lib/markdown.js'
 
@@ -40,10 +39,8 @@ export const ToolCallCard = memo(function ToolCallCard({
     () => ({
       registry: reg,
       renderAskUser: (t: ToolCall) => <AskUserCard tool={t} />,
-      // Nested subagent children re-enter the styled card (same header chrome).
-      renderChild: (child: ToolCall, childDepth: number) => (
-        <ToolCallCard tool={child} registry={reg} depth={childDepth} />
-      ),
+      // Nested subagent children use compact rows (not full ToolCallCards).
+      renderChild: (child: ToolCall) => <CompactToolRow tool={child} />,
     }),
     [reg],
   )
@@ -61,6 +58,7 @@ export const ToolCallCard = memo(function ToolCallCard({
           )
         }
         renderSubagentOutput={(t) => <SubagentOutput tool={t} />}
+        renderSubagentChildren={(children) => <SubagentChildren tools={children} />}
       />
     </ToolCallProvider>
   )
@@ -68,23 +66,60 @@ export const ToolCallCard = memo(function ToolCallCard({
 
 /**
  * Subagent body: output only (never args), rendered as markdown.
- * Matches Vue's subagent output box but with prose instead of a plain <pre>.
  */
 function SubagentOutput({ tool }: { tool: ToolCall }) {
   const text = (tool.displayOutput || tool.output || '').trim()
   if (!text) return null
-  // Cap very long outputs for DOM size; still enough for typical summaries.
   const capped = text.length > 12000 ? text.slice(0, 12000) + '\n\n…' : text
   const html = renderMarkdown(capped)
   return (
     <div
       className="toolcall-subagent-output jcode-prose jcode-selectable max-h-72 overflow-y-auto break-words"
+      data-testid="subagent-result"
       dangerouslySetInnerHTML={{ __html: html }}
     />
   )
 }
 
-// ─── Regular tool header (Vue: transparent row, no glyph) ───
+/** Compact children: exploring-group summary when possible, else compact rows. */
+function SubagentChildren({ tools }: { tools: ToolCall[] }) {
+  // Build a mini-timeline of tool items so we can reuse exploring grouping.
+  const items = tools.map((t, i) => ({ kind: 'tool' as const, data: t, seq: i + 1 }))
+  const grouped = groupExploringTimeline(items)
+
+  return (
+    <div className="toolcall-subagent-children" data-testid="subagent-children">
+      {grouped.map((unit) => {
+        if (unit.kind === 'exploring') {
+          const steps = summarizeExploringSteps(unit.data.tools)
+          const label = unit.data.status === 'running' ? 'Exploring' : 'Explored'
+          return (
+            <div key={unit.data.id} className="jcode-exploring jcode-exploring--nested py-1">
+              <div
+                className={`text-[11px] font-medium ${unit.data.status === 'running' ? 'shimmer-running' : ''}`}
+                style={{ color: 'var(--color-muted-foreground)' }}
+              >
+                {label} · {unit.data.tools.length} steps
+              </div>
+              {steps.map((s, i) => (
+                <div key={i} className="jcode-exploring__step">
+                  <span className="jcode-exploring__action">{s.action}</span>
+                  {s.detail ? <span className="jcode-exploring__detail">{s.detail}</span> : null}
+                </div>
+              ))}
+            </div>
+          )
+        }
+        if (unit.kind === 'tool') {
+          return <CompactToolRow key={unit.data.id} tool={unit.data} />
+        }
+        return null
+      })}
+    </div>
+  )
+}
+
+// ─── Regular tool header ───
 
 function ToolHeader({
   tool,
@@ -99,8 +134,18 @@ function ToolHeader({
   const subtitle = tool.displayInfo?.subtitle ?? ''
   const isContext = tool.displayInfo?.category === 'context'
   const isRunning = tool.status === 'running'
-  const isError = tool.status === 'error'
+  const isError = tool.status === 'error' || (tool.meta?.exit_code !== undefined && tool.meta.exit_code !== 0)
   const diff = useMemo(() => parseDiffCount(tool), [tool])
+  const exitBadge =
+    tool.name === 'execute' && tool.meta?.exit_code !== undefined
+      ? `exit ${tool.meta.exit_code}`
+      : null
+  const durationBadge =
+    tool.meta?.duration_ms && tool.meta.duration_ms > 0
+      ? tool.meta.duration_ms < 1000
+        ? `${tool.meta.duration_ms}ms`
+        : `${(tool.meta.duration_ms / 1000).toFixed(1)}s`
+      : null
 
   return (
     <button
@@ -108,7 +153,6 @@ function ToolHeader({
       onClick={onToggle}
       className="flex w-full max-w-full cursor-pointer items-center gap-1.5 bg-transparent text-left"
     >
-      {/* Title cluster packs left — no ml-auto gap that leaves a hollow middle. */}
       <span
         className={`shrink-0 text-xs font-medium tracking-wide ${isRunning ? 'shimmer-running' : ''}`}
         style={{
@@ -121,16 +165,21 @@ function ToolHeader({
         <span
           className="jcode-toolcall__subtitle min-w-0 truncate font-mono text-[0.72rem]"
           style={{
-            // Use foreground/muted directly — not --color-accent-neutral, which
-            // freezes to light #111 when only defined on :root (inherited computed).
             color: isContext
               ? 'var(--color-muted-foreground)'
               : 'var(--color-foreground)',
             opacity: 0.88,
           }}
-          // Subtitle may contain backend-escaped HTML (path highlights).
           dangerouslySetInnerHTML={{ __html: subtitle }}
         />
+      )}
+      {(exitBadge || durationBadge) && (
+        <span
+          className="shrink-0 font-mono text-[10px] tabular-nums"
+          style={{ color: isError ? 'var(--color-error-fg)' : 'var(--color-muted-foreground)' }}
+        >
+          {[exitBadge, durationBadge].filter(Boolean).join(' · ')}
+        </span>
       )}
       <ChevronDownIcon
         className={`h-3 w-3 shrink-0 text-[var(--color-muted-foreground)] transition-transform duration-[var(--duration-normal)] ${
@@ -156,7 +205,7 @@ function ToolHeader({
   )
 }
 
-// ─── Subagent header (Vue: SUBAGENT label + name + working + call count) ───
+// ─── Subagent header ───
 
 function SubagentHeader({
   tool,
@@ -170,20 +219,20 @@ function SubagentHeader({
   const name = useMemo(() => {
     try {
       const parsed = JSON.parse(tool.args)
-      return (parsed.name || parsed.description || 'subagent') as string
+      return (parsed.description || parsed.name || 'subagent') as string
     } catch {
       return 'subagent'
     }
   }, [tool.args])
 
+  const statusLabel =
+    tool.status === 'done' ? 'Done' : tool.status === 'error' ? 'Error' : 'Running'
   const statusColor =
     tool.status === 'done'
-      ? 'var(--color-accent-neutral)'
+      ? 'var(--color-muted-foreground)'
       : tool.status === 'error'
         ? 'var(--color-destructive, var(--color-error-fg))'
-        : 'var(--color-muted-foreground)'
-
-  const glyph = tool.status === 'running' ? '◈' : tool.status === 'done' ? '✓' : '✗'
+        : 'var(--color-primary)'
   const childCount = tool.children?.length ?? 0
 
   return (
@@ -191,37 +240,35 @@ function SubagentHeader({
       type="button"
       onClick={onToggle}
       className="flex w-full cursor-pointer items-center gap-1.5 bg-transparent py-1 pl-0 pr-1 text-left transition-opacity hover:opacity-70"
+      data-testid="subagent-header"
     >
+      <span
+        className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+        style={{
+          color: 'var(--color-muted-foreground)',
+          background: 'var(--color-muted)',
+        }}
+      >
+        Agent
+      </span>
+      <span
+        className={`min-w-0 truncate text-[12px] font-medium ${tool.status === 'running' ? 'shimmer-running' : ''}`}
+        style={{ color: 'var(--color-foreground)' }}
+      >
+        {name}
+      </span>
       <span
         className={`shrink-0 text-[10px] ${tool.status === 'running' ? 'animate-pulse' : ''}`}
         style={{ color: statusColor }}
-        aria-hidden
       >
-        {glyph}
+        {statusLabel}
       </span>
-      <span
-        className="shrink-0 text-[10px] font-semibold uppercase tracking-wider"
-        style={{ color: 'var(--color-muted-foreground)' }}
-      >
-        Subagent
-      </span>
-      <span className="font-mono text-[11px]" style={{ color: 'var(--color-foreground)' }}>
-        {name}
-      </span>
-      {tool.status === 'running' && (
-        <span
-          className="animate-pulse text-[10px]"
-          style={{ color: 'var(--color-muted-foreground)' }}
-        >
-          working
-        </span>
-      )}
       {childCount > 0 && (
         <span
           className="ml-auto text-[10px] tabular-nums"
           style={{ color: 'var(--color-muted-foreground)' }}
         >
-          {childCount} call{childCount === 1 ? '' : 's'}
+          {childCount} step{childCount === 1 ? '' : 's'}
         </span>
       )}
       <ChevronDownIcon
@@ -233,7 +280,7 @@ function SubagentHeader({
   )
 }
 
-/** Count +N/-M lines from edit/multi_edit args (matches Vue diffData). */
+/** Count +N/-M lines from edit/multi_edit args. */
 function parseDiffCount(tool: ToolCall): { added: number; deleted: number } | null {
   if (tool.name !== 'edit' && tool.name !== 'multi_edit') return null
   try {
