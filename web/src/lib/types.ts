@@ -330,6 +330,29 @@ export interface ToolDisplayInfo {
   subtitle?: string
   icon?: string
   category?: string // 'context' | 'mutation' | 'execution'
+  kind?: string
+  collapsible?: boolean
+}
+
+export interface ToolResultStreams {
+  stdout?: string
+  stderr?: string
+  aggregated?: string
+}
+
+export interface ToolResultMeta {
+  exit_code?: number
+  duration_ms?: number
+  timed_out?: boolean
+  truncated?: boolean
+  spill_path?: string
+}
+
+export interface ToolResultPresentation {
+  kind?: string
+  title?: string
+  subtitle?: string
+  collapsible?: boolean
 }
 
 export interface ToolResultData {
@@ -338,6 +361,9 @@ export interface ToolResultData {
   display_output?: string  // clean output for UI display (no metadata)
   error?: string
   tool_call_id?: string
+  streams?: ToolResultStreams
+  meta?: ToolResultMeta
+  presentation?: ToolResultPresentation
 }
 
 export interface TokenUpdateData {
@@ -519,6 +545,9 @@ export interface ToolCall {
   askUserId?: string
   /** For ask_user tools: the backend-normalized questions to render. */
   askUserQuestions?: AskUserQuestion[]
+  streams?: ToolResultStreams
+  meta?: ToolResultMeta
+  presentation?: ToolResultPresentation
 }
 
 /** Subagent lifecycle event (start/done). */

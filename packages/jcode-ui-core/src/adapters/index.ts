@@ -30,6 +30,12 @@ export interface ToolRendererProps {
   displayInfo?: ToolDisplayInfo
   /** Nested subagent calls — renderers decide whether to recurse. */
   children?: ToolCall[]
+  /** Dual-channel streams (execute). */
+  streams?: ToolCall['streams']
+  /** Dual-channel meta (execute). */
+  meta?: ToolCall['meta']
+  /** Dual-channel presentation (execute). */
+  presentation?: ToolCall['presentation']
 }
 
 /** A tool renderer is just a React component. */

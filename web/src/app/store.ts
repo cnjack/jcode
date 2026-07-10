@@ -122,19 +122,41 @@ const chatSlice = createSlice({
     },
     resolveToolCall(
       s,
-      a: { payload: { name: string; toolCallID?: string; output?: string; displayOutput?: string; error?: string } },
+      a: {
+        payload: {
+          name: string
+          toolCallID?: string
+          output?: string
+          displayOutput?: string
+          error?: string
+          streams?: ToolCall['streams']
+          meta?: ToolCall['meta']
+          presentation?: ToolCall['presentation']
+        }
+      },
     ) {
-      const { toolCallID, name, output, displayOutput, error } = a.payload
+      const { toolCallID, name, output, displayOutput, error, streams, meta, presentation } = a.payload
       // Match by toolCallID (precise) or by the last running tool with this name.
       for (let i = s.timeline.length - 1; i >= 0; i--) {
         const item = s.timeline[i]
         if (item.kind !== 'tool') continue
         const match = toolCallID ? item.data.toolCallID === toolCallID : item.data.name === name && item.data.status === 'running'
         if (match) {
-          item.data.status = error ? 'error' : 'done'
+          item.data.status = error ? 'error' : (meta?.exit_code !== undefined && meta.exit_code !== 0 ? 'error' : 'done')
           item.data.output = output
           item.data.displayOutput = displayOutput
           item.data.error = error
+          if (streams) item.data.streams = streams
+          if (meta) item.data.meta = meta
+          if (presentation) {
+            item.data.presentation = presentation
+            // Merge presentation collapsible/kind into displayInfo for grouping.
+            item.data.displayInfo = {
+              ...(item.data.displayInfo || { title: name }),
+              kind: presentation.kind || item.data.displayInfo?.kind,
+              collapsible: presentation.collapsible ?? item.data.displayInfo?.collapsible,
+            }
+          }
           break
         }
       }

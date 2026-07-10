@@ -43,6 +43,11 @@ export interface ThreadProps extends ThreadRenderSlots {
   role?: string
   /** Ref callback for the scroll container (for parent scroll control). */
   containerRef?: (el: HTMLElement | null) => void
+  /**
+   * Optional pure transform applied to runtime items before render (e.g.
+   * exploring-group coalescing). Must not mutate the input array.
+   */
+  mapItems?: (items: ThreadItem[]) => ThreadItem[]
 }
 
 export function Thread({
@@ -56,8 +61,13 @@ export function Thread({
   className,
   role = 'log',
   containerRef,
+  mapItems,
 }: ThreadProps): ReactNode {
-  const { items, isRunning } = useRuntimeState()
+  const { items: rawItems, isRunning } = useRuntimeState()
+  const items = useMemo(
+    () => (mapItems ? mapItems(rawItems) : rawItems),
+    [rawItems, mapItems],
+  )
   const autoScroll = useAutoScroll<HTMLDivElement>(scrollThreshold)
 
   // Stream-follow: a dep that changes whenever there's new/changed content.
