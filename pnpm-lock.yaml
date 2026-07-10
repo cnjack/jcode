@@ -21,8 +21,8 @@ importers:
         specifier: ^11.11.1
         version: 11.11.1
       jcode-ui-core:
-        specifier: file:../jcode-ui-core
-        version: link:../jcode-ui-core
+        specifier: ^0.1.0
+        version: 0.1.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       marked:
         specifier: ^18.0.0
         version: 18.0.5
@@ -116,11 +116,11 @@ importers:
         specifier: ^25.3.2
         version: 25.10.10(typescript@5.9.3)
       jcode-ui:
-        specifier: workspace:*
-        version: link:../packages/jcode-ui
+        specifier: ^0.1.1
+        version: 0.1.1(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(tailwindcss@4.3.2)
       jcode-ui-core:
-        specifier: workspace:*
-        version: link:../packages/jcode-ui-core
+        specifier: ^0.1.0
+        version: 0.1.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       marked:
         specifier: ^18.0.0
         version: 18.0.5
@@ -1027,6 +1027,23 @@ packages:
   is-number@7.0.0:
     resolution: {integrity: sha512-41Cifkg6e8TylSpdtTpeLVMqvSBEVzTttHvERD741+pnZ8ANv0004MRL43QKPDlK9cGvNp6NZWZUBlbGXYxxng==}
     engines: {node: '>=0.12.0'}
+
+  jcode-ui-core@0.1.0:
+    resolution: {integrity: sha512-ziWRzhQoP8yU9Un4qE6OWayyhRzxrVC8hKJQXm+Aff135X54xNgJim1Vf1QUZVrw3oBERpeK8TJlJjbq6D6i/w==}
+    peerDependencies:
+      react: ^18.0.0 || ^19.0.0
+      react-dom: ^18.0.0 || ^19.0.0
+    peerDependenciesMeta:
+      react:
+        optional: true
+      react-dom:
+        optional: true
+
+  jcode-ui@0.1.1:
+    resolution: {integrity: sha512-XHg8Xe0PFPGnTJGcTE3LOMX9symuJurNUjwxygr95qAvsvSa1VN8CRGcNYRJ/34CiK7TQXfI0VoqqiM8H22jLg==}
+    peerDependencies:
+      react: ^18.0.0 || ^19.0.0
+      react-dom: ^18.0.0 || ^19.0.0
 
   jiti@2.7.0:
     resolution: {integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==}
@@ -2087,6 +2104,27 @@ snapshots:
       is-extglob: 2.1.1
 
   is-number@7.0.0: {}
+
+  jcode-ui-core@0.1.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
+    dependencies:
+      '@tanstack/react-virtual': 3.14.5(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+    optionalDependencies:
+      react: 18.3.1
+      react-dom: 18.3.1(react@18.3.1)
+
+  jcode-ui@0.1.1(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(tailwindcss@4.3.2):
+    dependencies:
+      '@heroicons/react': 2.2.0(react@18.3.1)
+      '@tailwindcss/typography': 0.5.20(tailwindcss@4.3.2)
+      dompurify: 3.4.11
+      highlight.js: 11.11.1
+      jcode-ui-core: 0.1.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      marked: 18.0.5
+      marked-highlight: 2.2.4(marked@18.0.5)
+      react: 18.3.1
+      react-dom: 18.3.1(react@18.3.1)
+    transitivePeerDependencies:
+      - tailwindcss
 
   jiti@2.7.0: {}
 
