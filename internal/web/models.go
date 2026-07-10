@@ -16,7 +16,12 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	if eng := s.activeEngine(); eng != nil {
 		curProvider, curModel, _ = eng.modelSnapshot()
 	}
-	if s.registry == nil || s.cfg == nil {
+	// Snapshot pointers under cfgMu — setup/provider handlers reassign s.cfg and
+	// s.registry under that lock after SaveConfig.
+	s.cfgMu.Lock()
+	cfg := s.cfg
+	s.cfgMu.Unlock()
+	if cfg == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"current":   map[string]string{"provider": curProvider, "model": curModel},
 			"providers": []any{},
@@ -49,10 +54,10 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	// (custom models saved via the providers API) appear immediately in the chat
 	// model picker. The startup registry (s.registry) is a snapshot and would not
 	// reflect these additions until a restart.
-	registry := model.NewModelRegistryWithConfig(s.cfg)
+	registry := model.NewModelRegistryWithConfig(cfg)
 
 	var result []providerInfo
-	configuredProviders := s.cfg.GetProviders()
+	configuredProviders := cfg.GetProviders()
 	for _, rp := range registry.ListProviders() {
 		if _, configured := configuredProviders[rp.ID]; !configured {
 			continue
