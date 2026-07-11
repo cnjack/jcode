@@ -22,7 +22,7 @@
  */
 
 import type { ChatRuntime, RuntimeActions, RuntimeState } from './index.js'
-import type { ConnectionState, Message, Role, ThreadItem, ToolCall } from '../types/index.js'
+import type { ConnectionState, Message, QueuedMessage, Role, ThreadItem, ToolCall } from '../types/index.js'
 import type {
   AGUIEvent,
   AGUIMessage,
@@ -137,6 +137,8 @@ export function createAGUIRuntime(options: AGUIRuntimeOptions): AGUIRuntime {
   let seq = 0
   /** Reasoning deltas accumulated before the assistant text message exists. */
   let pendingReasoning = ''
+  /** Type-ahead queue: drafts composed mid-run, drained one per turn end. */
+  let queued: QueuedMessage[] = []
   const msgIndex = new Map<string, number>()
   const toolIndex = new Map<string, number>()
 
@@ -146,8 +148,8 @@ export function createAGUIRuntime(options: AGUIRuntimeOptions): AGUIRuntime {
   let scheduled = false
 
   function buildSnapshot(): RuntimeState {
-    // AG-UI has no token/goal/todo/queue channel; those slices stay defaulted.
-    return { items, isRunning, tokenSnapshot: null, goal: null, todos: [], queued: [], connection }
+    // AG-UI has no token/goal/todo channel; those slices stay defaulted.
+    return { items, isRunning, tokenSnapshot: null, goal: null, todos: [], queued, connection }
   }
   function markDirty(): void {
     if (scheduled) return
@@ -415,6 +417,14 @@ export function createAGUIRuntime(options: AGUIRuntimeOptions): AGUIRuntime {
     } finally {
       if (controller === ac) controller = null
       setRunning(false)
+      // Drain the type-ahead queue one draft per natural turn end. A stop()
+      // aborts the signal — don't fire queued drafts the user just cancelled.
+      if (!ac.signal.aborted && queued.length > 0) {
+        const [next, ...rest] = queued
+        queued = rest
+        markDirty()
+        actions.sendMessage(next.text, next.images)
+      }
     }
   }
 
@@ -445,10 +455,23 @@ export function createAGUIRuntime(options: AGUIRuntimeOptions): AGUIRuntime {
       controller?.abort()
       setRunning(false)
     },
-    // AG-UI has no client-side queue/approval/ask_user/edit channel in this
-    // adapter; kept present with full types so the UI never crashes calling them.
-    enqueueMessage: () => {},
-    removeQueuedMessage: () => {},
+    enqueueMessage: (text, images) => {
+      queued = [
+        ...queued,
+        {
+          id: genId('queued'),
+          text,
+          images: images?.map((i) => ({ data: i.data, media_type: i.media_type })),
+        },
+      ]
+      markDirty()
+    },
+    removeQueuedMessage: (id) => {
+      queued = queued.filter((q) => q.id !== id)
+      markDirty()
+    },
+    // AG-UI has no approval/ask_user/edit channel in this adapter; kept
+    // present with full types so the UI never crashes calling them.
     resolveApproval: () => {},
     submitAskUser: () => {},
     editMessage: () => {},

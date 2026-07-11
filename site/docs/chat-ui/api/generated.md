@@ -11,7 +11,7 @@ nav_order: 6
 >
 > Human-written guides: [Types](/chat-ui/docs/api/types) · [Runtime](/chat-ui/docs/api/runtime) · [Hooks](/chat-ui/docs/api/hooks) · [Primitives](/chat-ui/docs/api/primitives) · [Components](/chat-ui/docs/api/components).
 
-**226** public symbols extracted.
+**275** public symbols extracted.
 
 ## `jcode-ui`
 
@@ -20,6 +20,8 @@ nav_order: 6
 | [`ApprovalBanner`](#jcode-ui-approvalbanner) | const | `packages/jcode-ui/src/components/ApprovalBanner.tsx` |
 | [`Artifact`](#jcode-ui-artifact) | const | `packages/jcode-ui/src/components/Artifact.tsx` |
 | [`AskUserCard`](#jcode-ui-askusercard) | const | `packages/jcode-ui/src/components/AskUserCard.tsx` |
+| [`Attachment`](#jcode-ui-attachment) | const | `packages/jcode-ui/src/components/Attachment.tsx` |
+| [`AttachmentList`](#jcode-ui-attachmentlist) | const | `packages/jcode-ui/src/components/Attachment.tsx` |
 | [`AudioPlayer`](#jcode-ui-audioplayer) | const | `packages/jcode-ui/src/voice/AudioPlayer.tsx` |
 | [`BranchPicker`](#jcode-ui-branchpicker) | const | `packages/jcode-ui/src/components/BranchPicker.tsx` |
 | [`BrowserShotRenderer`](#jcode-ui-browsershotrenderer) | const | `packages/jcode-ui/src/toolRenderers/browserShot.tsx` |
@@ -32,9 +34,11 @@ nav_order: 6
 | [`DiffRenderer`](#jcode-ui-diffrenderer) | const | `packages/jcode-ui/src/toolRenderers/diff.tsx` |
 | [`ExploringGroupCard`](#jcode-ui-exploringgroupcard) | const | `packages/jcode-ui/src/components/ExploringGroupCard.tsx` |
 | [`ExportButton`](#jcode-ui-exportbutton) | const | `packages/jcode-ui/src/components/ExportButton.tsx` |
+| [`FileTreeRenderer`](#jcode-ui-filetreerenderer) | const | `packages/jcode-ui/src/toolRenderers/fileTree.tsx` |
 | [`FileViewerRenderer`](#jcode-ui-fileviewerrenderer) | const | `packages/jcode-ui/src/toolRenderers/fileViewer.tsx` |
 | [`GenericRenderer`](#jcode-ui-genericrenderer) | const | `packages/jcode-ui/src/toolRenderers/generic.tsx` |
 | [`Message`](#jcode-ui-message) | const | `packages/jcode-ui/src/components/Message.tsx` |
+| [`PendingAttachmentList`](#jcode-ui-pendingattachmentlist) | const | `packages/jcode-ui/src/components/Attachment.tsx` |
 | [`QuoteSelection`](#jcode-ui-quoteselection) | const | `packages/jcode-ui/src/components/QuoteSelection.tsx` |
 | [`RuntimeTaskList`](#jcode-ui-runtimetasklist) | const | `packages/jcode-ui/src/components/TaskList.tsx` |
 | [`SearchRenderer`](#jcode-ui-searchrenderer) | const | `packages/jcode-ui/src/toolRenderers/search.tsx` |
@@ -46,14 +50,18 @@ nav_order: 6
 | [`TeamListRenderer`](#jcode-ui-teamlistrenderer) | const | `packages/jcode-ui/src/toolRenderers/team.tsx` |
 | [`TeamMessageRenderer`](#jcode-ui-teammessagerenderer) | const | `packages/jcode-ui/src/toolRenderers/team.tsx` |
 | [`TeamSpawnRenderer`](#jcode-ui-teamspawnrenderer) | const | `packages/jcode-ui/src/toolRenderers/team.tsx` |
+| [`TerminalRenderer`](#jcode-ui-terminalrenderer) | const | `packages/jcode-ui/src/toolRenderers/terminal.tsx` |
 | [`TestResultsRenderer`](#jcode-ui-testresultsrenderer) | const | `packages/jcode-ui/src/toolRenderers/testResults.tsx` |
+| [`ThreadList`](#jcode-ui-threadlist) | const | `packages/jcode-ui/src/components/ThreadList.tsx` |
 | [`ThreadWelcome`](#jcode-ui-threadwelcome) | const | `packages/jcode-ui/src/components/ThreadWelcome.tsx` |
 | [`TodoRenderer`](#jcode-ui-todorenderer) | const | `packages/jcode-ui/src/toolRenderers/todo.tsx` |
 | [`ToolCallCard`](#jcode-ui-toolcallcard) | const | `packages/jcode-ui/src/components/ToolCallCard.tsx` |
 | [`Transcription`](#jcode-ui-transcription) | const | `packages/jcode-ui/src/voice/Transcription.tsx` |
 | [`VoiceVisualizer`](#jcode-ui-voicevisualizer) | const | `packages/jcode-ui/src/voice/VoiceVisualizer.tsx` |
+| [`WorkflowAnimatedEdge`](#jcode-ui-workflowanimatededge) | const | `packages/jcode-ui/src/canvas/WorkflowEdge.tsx` |
 | [`WorkflowCanvas`](#jcode-ui-workflowcanvas) | const | `packages/jcode-ui/src/canvas/WorkflowCanvas.tsx` |
 | [`WorkflowNode`](#jcode-ui-workflownode) | const | `packages/jcode-ui/src/canvas/WorkflowNode.tsx` |
+| [`WorkflowTemporaryEdge`](#jcode-ui-workflowtemporaryedge) | const | `packages/jcode-ui/src/canvas/WorkflowEdge.tsx` |
 | [`ApiBaseProvider`](#jcode-ui-apibaseprovider) | function | `packages/jcode-ui/src/lib/apiBaseContext.tsx` |
 | [`balanceEmphasis`](#jcode-ui-balanceemphasis) | function | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
 | [`balanceInlineCode`](#jcode-ui-balanceinlinecode) | function | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
@@ -69,6 +77,7 @@ nav_order: 6
 | [`headTail`](#jcode-ui-headtail) | function | `packages/jcode-ui/src/toolRenderers/terminal.tsx` |
 | [`ModelSelector`](#jcode-ui-modelselector) | function | `packages/jcode-ui/src/components/ModelSelector.tsx` |
 | [`parseCodeInfo`](#jcode-ui-parsecodeinfo) | function | `packages/jcode-ui/src/lib/markdown.ts` |
+| [`parsePathList`](#jcode-ui-parsepathlist) | function | `packages/jcode-ui/src/toolRenderers/fileTree.tsx` |
 | [`parseStackTrace`](#jcode-ui-parsestacktrace) | function | `packages/jcode-ui/src/toolRenderers/stackTrace.tsx` |
 | [`parseTestOutput`](#jcode-ui-parsetestoutput) | function | `packages/jcode-ui/src/toolRenderers/testResults.tsx` |
 | [`Reasoning`](#jcode-ui-reasoning) | function | `packages/jcode-ui/src/components/Reasoning.tsx` |
@@ -90,6 +99,8 @@ nav_order: 6
 | [`ApprovalBannerProps`](#jcode-ui-approvalbannerprops) | interface | `packages/jcode-ui/src/components/ApprovalBanner.tsx` |
 | [`ArtifactProps`](#jcode-ui-artifactprops) | interface | `packages/jcode-ui/src/components/Artifact.tsx` |
 | [`AskUserCardProps`](#jcode-ui-askusercardprops) | interface | `packages/jcode-ui/src/components/AskUserCard.tsx` |
+| [`AttachmentListProps`](#jcode-ui-attachmentlistprops) | interface | `packages/jcode-ui/src/components/Attachment.tsx` |
+| [`AttachmentProps`](#jcode-ui-attachmentprops) | interface | `packages/jcode-ui/src/components/Attachment.tsx` |
 | [`AudioPlayerProps`](#jcode-ui-audioplayerprops) | interface | `packages/jcode-ui/src/voice/AudioPlayer.tsx` |
 | [`BranchPickerProps`](#jcode-ui-branchpickerprops) | interface | `packages/jcode-ui/src/components/BranchPicker.tsx` |
 | [`CanvasControlsProps`](#jcode-ui-canvascontrolsprops) | interface | `packages/jcode-ui/src/canvas/CanvasControls.tsx` |
@@ -111,6 +122,8 @@ nav_order: 6
 | [`MessageSlots`](#jcode-ui-messageslots) | interface | `packages/jcode-ui/src/components/Message.tsx` |
 | [`ModelSelectorOption`](#jcode-ui-modelselectoroption) | interface | `packages/jcode-ui/src/components/ModelSelector.tsx` |
 | [`ModelSelectorProps`](#jcode-ui-modelselectorprops) | interface | `packages/jcode-ui/src/components/ModelSelector.tsx` |
+| [`PendingAttachmentListProps`](#jcode-ui-pendingattachmentlistprops) | interface | `packages/jcode-ui/src/components/Attachment.tsx` |
+| [`QuoteSelectionProps`](#jcode-ui-quoteselectionprops) | interface | `packages/jcode-ui/src/components/QuoteSelection.tsx` |
 | [`ReasoningProps`](#jcode-ui-reasoningprops) | interface | `packages/jcode-ui/src/components/Reasoning.tsx` |
 | [`RuntimeTaskListProps`](#jcode-ui-runtimetasklistprops) | interface | `packages/jcode-ui/src/components/TaskList.tsx` |
 | [`SourcesProps`](#jcode-ui-sourcesprops) | interface | `packages/jcode-ui/src/components/Sources.tsx` |
@@ -119,8 +132,11 @@ nav_order: 6
 | [`StackTrace`](#jcode-ui-stacktrace) | interface | `packages/jcode-ui/src/toolRenderers/stackTrace.tsx` |
 | [`SuggestionItem`](#jcode-ui-suggestionitem) | interface | `packages/jcode-ui/src/components/Suggestions.tsx` |
 | [`SuggestionsProps`](#jcode-ui-suggestionsprops) | interface | `packages/jcode-ui/src/components/Suggestions.tsx` |
+| [`TaskListItemProps`](#jcode-ui-tasklistitemprops) | interface | `packages/jcode-ui/src/components/TaskList.tsx` |
+| [`TaskListProps`](#jcode-ui-tasklistprops) | interface | `packages/jcode-ui/src/components/TaskList.tsx` |
 | [`TestCase`](#jcode-ui-testcase) | interface | `packages/jcode-ui/src/toolRenderers/testResults.tsx` |
 | [`TestSummary`](#jcode-ui-testsummary) | interface | `packages/jcode-ui/src/toolRenderers/testResults.tsx` |
+| [`ThreadListProps`](#jcode-ui-threadlistprops) | interface | `packages/jcode-ui/src/components/ThreadList.tsx` |
 | [`ThreadProps`](#jcode-ui-threadprops) | interface | `packages/jcode-ui/src/components/Thread.tsx` |
 | [`ThreadWelcomeProps`](#jcode-ui-threadwelcomeprops) | interface | `packages/jcode-ui/src/components/ThreadWelcome.tsx` |
 | [`ToolCallCardProps`](#jcode-ui-toolcallcardprops) | interface | `packages/jcode-ui/src/components/ToolCallCard.tsx` |
@@ -139,9 +155,9 @@ nav_order: 6
 | [`MathRenderer`](#jcode-ui-mathrenderer) | type | `packages/jcode-ui/src/lib/markdown.ts` |
 | [`SpeechInputStatus`](#jcode-ui-speechinputstatus) | type | `packages/jcode-ui/src/voice/SpeechInput.tsx` |
 
-### `ApprovalBanner`
+<a id="jcode-ui-approvalbanner"></a>
 
-<!-- jcode-ui-approvalbanner -->
+### `ApprovalBanner`
 
 `const` · `packages/jcode-ui/src/components/ApprovalBanner.tsx`
 
@@ -149,9 +165,9 @@ nav_order: 6
 export const ApprovalBanner = …
 ```
 
-### `Artifact`
+<a id="jcode-ui-artifact"></a>
 
-<!-- jcode-ui-artifact -->
+### `Artifact`
 
 `const` · `packages/jcode-ui/src/components/Artifact.tsx`
 
@@ -159,9 +175,9 @@ export const ApprovalBanner = …
 export const Artifact = …
 ```
 
-### `AskUserCard`
+<a id="jcode-ui-askusercard"></a>
 
-<!-- jcode-ui-askusercard -->
+### `AskUserCard`
 
 `const` · `packages/jcode-ui/src/components/AskUserCard.tsx`
 
@@ -169,9 +185,29 @@ export const Artifact = …
 export const AskUserCard = …
 ```
 
-### `AudioPlayer`
+<a id="jcode-ui-attachment"></a>
 
-<!-- jcode-ui-audioplayer -->
+### `Attachment`
+
+`const` · `packages/jcode-ui/src/components/Attachment.tsx`
+
+```ts
+export const Attachment = …
+```
+
+<a id="jcode-ui-attachmentlist"></a>
+
+### `AttachmentList`
+
+`const` · `packages/jcode-ui/src/components/Attachment.tsx`
+
+```ts
+export const AttachmentList = …
+```
+
+<a id="jcode-ui-audioplayer"></a>
+
+### `AudioPlayer`
 
 `const` · `packages/jcode-ui/src/voice/AudioPlayer.tsx`
 
@@ -179,9 +215,9 @@ export const AskUserCard = …
 export const AudioPlayer = …
 ```
 
-### `BranchPicker`
+<a id="jcode-ui-branchpicker"></a>
 
-<!-- jcode-ui-branchpicker -->
+### `BranchPicker`
 
 `const` · `packages/jcode-ui/src/components/BranchPicker.tsx`
 
@@ -189,9 +225,9 @@ export const AudioPlayer = …
 export const BranchPicker = …
 ```
 
-### `BrowserShotRenderer`
+<a id="jcode-ui-browsershotrenderer"></a>
 
-<!-- jcode-ui-browsershotrenderer -->
+### `BrowserShotRenderer`
 
 `const` · `packages/jcode-ui/src/toolRenderers/browserShot.tsx`
 
@@ -199,9 +235,9 @@ export const BranchPicker = …
 export const BrowserShotRenderer = …
 ```
 
-### `CanvasControls`
+<a id="jcode-ui-canvascontrols"></a>
 
-<!-- jcode-ui-canvascontrols -->
+### `CanvasControls`
 
 `const` · `packages/jcode-ui/src/canvas/CanvasControls.tsx`
 
@@ -209,9 +245,9 @@ export const BrowserShotRenderer = …
 export const CanvasControls = …
 ```
 
-### `CanvasPanel`
+<a id="jcode-ui-canvaspanel"></a>
 
-<!-- jcode-ui-canvaspanel -->
+### `CanvasPanel`
 
 `const` · `packages/jcode-ui/src/canvas/CanvasPanel.tsx`
 
@@ -219,9 +255,9 @@ export const CanvasControls = …
 export const CanvasPanel = …
 ```
 
-### `ChatInput`
+<a id="jcode-ui-chatinput"></a>
 
-<!-- jcode-ui-chatinput -->
+### `ChatInput`
 
 `const` · `packages/jcode-ui/src/components/ChatInput.tsx`
 
@@ -229,9 +265,9 @@ export const CanvasPanel = …
 export const ChatInput = …
 ```
 
-### `CompactToolRow`
+<a id="jcode-ui-compacttoolrow"></a>
 
-<!-- jcode-ui-compacttoolrow -->
+### `CompactToolRow`
 
 `const` · `packages/jcode-ui/src/components/CompactToolRow.tsx`
 
@@ -239,9 +275,9 @@ export const ChatInput = …
 export const CompactToolRow = …
 ```
 
-### `ConnectionBanner`
+<a id="jcode-ui-connectionbanner"></a>
 
-<!-- jcode-ui-connectionbanner -->
+### `ConnectionBanner`
 
 `const` · `packages/jcode-ui/src/components/ConnectionBanner.tsx`
 
@@ -249,9 +285,9 @@ export const CompactToolRow = …
 export const ConnectionBanner = …
 ```
 
-### `ContextBar`
+<a id="jcode-ui-contextbar"></a>
 
-<!-- jcode-ui-contextbar -->
+### `ContextBar`
 
 `const` · `packages/jcode-ui/src/components/ContextBar.tsx`
 
@@ -259,9 +295,9 @@ export const ConnectionBanner = …
 export const ContextBar = …
 ```
 
-### `DiffRenderer`
+<a id="jcode-ui-diffrenderer"></a>
 
-<!-- jcode-ui-diffrenderer -->
+### `DiffRenderer`
 
 `const` · `packages/jcode-ui/src/toolRenderers/diff.tsx`
 
@@ -269,9 +305,9 @@ export const ContextBar = …
 export const DiffRenderer = …
 ```
 
-### `ExploringGroupCard`
+<a id="jcode-ui-exploringgroupcard"></a>
 
-<!-- jcode-ui-exploringgroupcard -->
+### `ExploringGroupCard`
 
 `const` · `packages/jcode-ui/src/components/ExploringGroupCard.tsx`
 
@@ -279,9 +315,9 @@ export const DiffRenderer = …
 export const ExploringGroupCard = …
 ```
 
-### `ExportButton`
+<a id="jcode-ui-exportbutton"></a>
 
-<!-- jcode-ui-exportbutton -->
+### `ExportButton`
 
 `const` · `packages/jcode-ui/src/components/ExportButton.tsx`
 
@@ -289,9 +325,19 @@ export const ExploringGroupCard = …
 export const ExportButton = …
 ```
 
-### `FileViewerRenderer`
+<a id="jcode-ui-filetreerenderer"></a>
 
-<!-- jcode-ui-fileviewerrenderer -->
+### `FileTreeRenderer`
+
+`const` · `packages/jcode-ui/src/toolRenderers/fileTree.tsx`
+
+```ts
+export const FileTreeRenderer = …
+```
+
+<a id="jcode-ui-fileviewerrenderer"></a>
+
+### `FileViewerRenderer`
 
 `const` · `packages/jcode-ui/src/toolRenderers/fileViewer.tsx`
 
@@ -299,9 +345,9 @@ export const ExportButton = …
 export const FileViewerRenderer = …
 ```
 
-### `GenericRenderer`
+<a id="jcode-ui-genericrenderer"></a>
 
-<!-- jcode-ui-genericrenderer -->
+### `GenericRenderer`
 
 `const` · `packages/jcode-ui/src/toolRenderers/generic.tsx`
 
@@ -309,9 +355,9 @@ export const FileViewerRenderer = …
 export const GenericRenderer = …
 ```
 
-### `Message`
+<a id="jcode-ui-message"></a>
 
-<!-- jcode-ui-message -->
+### `Message`
 
 `const` · `packages/jcode-ui/src/components/Message.tsx`
 
@@ -319,9 +365,22 @@ export const GenericRenderer = …
 export const Message = …
 ```
 
-### `QuoteSelection`
+<a id="jcode-ui-pendingattachmentlist"></a>
 
-<!-- jcode-ui-quoteselection -->
+### `PendingAttachmentList`
+
+`const` · `packages/jcode-ui/src/components/Attachment.tsx`
+
+Renders the composer's pending-attachment strip (Composer 2 adapter path).
+
+```ts
+/** Renders the composer's pending-attachment strip (Composer 2 adapter path). */
+export const PendingAttachmentList = …
+```
+
+<a id="jcode-ui-quoteselection"></a>
+
+### `QuoteSelection`
 
 `const` · `packages/jcode-ui/src/components/QuoteSelection.tsx`
 
@@ -329,9 +388,9 @@ export const Message = …
 export const QuoteSelection = …
 ```
 
-### `RuntimeTaskList`
+<a id="jcode-ui-runtimetasklist"></a>
 
-<!-- jcode-ui-runtimetasklist -->
+### `RuntimeTaskList`
 
 `const` · `packages/jcode-ui/src/components/TaskList.tsx`
 
@@ -342,9 +401,9 @@ TaskList bound to the runtime `todos` selector.
 export const RuntimeTaskList = …
 ```
 
-### `SearchRenderer`
+<a id="jcode-ui-searchrenderer"></a>
 
-<!-- jcode-ui-searchrenderer -->
+### `SearchRenderer`
 
 `const` · `packages/jcode-ui/src/toolRenderers/search.tsx`
 
@@ -352,9 +411,9 @@ export const RuntimeTaskList = …
 export const SearchRenderer = …
 ```
 
-### `SkillRenderer`
+<a id="jcode-ui-skillrenderer"></a>
 
-<!-- jcode-ui-skillrenderer -->
+### `SkillRenderer`
 
 `const` · `packages/jcode-ui/src/toolRenderers/skill.tsx`
 
@@ -362,9 +421,9 @@ export const SearchRenderer = …
 export const SkillRenderer = …
 ```
 
-### `SpeechInput`
+<a id="jcode-ui-speechinput"></a>
 
-<!-- jcode-ui-speechinput -->
+### `SpeechInput`
 
 `const` · `packages/jcode-ui/src/voice/SpeechInput.tsx`
 
@@ -372,9 +431,9 @@ export const SkillRenderer = …
 export const SpeechInput = …
 ```
 
-### `StackTraceRenderer`
+<a id="jcode-ui-stacktracerenderer"></a>
 
-<!-- jcode-ui-stacktracerenderer -->
+### `StackTraceRenderer`
 
 `const` · `packages/jcode-ui/src/toolRenderers/stackTrace.tsx`
 
@@ -382,9 +441,9 @@ export const SpeechInput = …
 export const StackTraceRenderer = …
 ```
 
-### `Suggestions`
+<a id="jcode-ui-suggestions"></a>
 
-<!-- jcode-ui-suggestions -->
+### `Suggestions`
 
 `const` · `packages/jcode-ui/src/components/Suggestions.tsx`
 
@@ -392,9 +451,9 @@ export const StackTraceRenderer = …
 export const Suggestions = …
 ```
 
-### `TeamCreateRenderer`
+<a id="jcode-ui-teamcreaterenderer"></a>
 
-<!-- jcode-ui-teamcreaterenderer -->
+### `TeamCreateRenderer`
 
 `const` · `packages/jcode-ui/src/toolRenderers/team.tsx`
 
@@ -402,9 +461,9 @@ export const Suggestions = …
 export const TeamCreateRenderer = …
 ```
 
-### `TeamListRenderer`
+<a id="jcode-ui-teamlistrenderer"></a>
 
-<!-- jcode-ui-teamlistrenderer -->
+### `TeamListRenderer`
 
 `const` · `packages/jcode-ui/src/toolRenderers/team.tsx`
 
@@ -412,9 +471,9 @@ export const TeamCreateRenderer = …
 export const TeamListRenderer = …
 ```
 
-### `TeamMessageRenderer`
+<a id="jcode-ui-teammessagerenderer"></a>
 
-<!-- jcode-ui-teammessagerenderer -->
+### `TeamMessageRenderer`
 
 `const` · `packages/jcode-ui/src/toolRenderers/team.tsx`
 
@@ -422,9 +481,9 @@ export const TeamListRenderer = …
 export const TeamMessageRenderer = …
 ```
 
-### `TeamSpawnRenderer`
+<a id="jcode-ui-teamspawnrenderer"></a>
 
-<!-- jcode-ui-teamspawnrenderer -->
+### `TeamSpawnRenderer`
 
 `const` · `packages/jcode-ui/src/toolRenderers/team.tsx`
 
@@ -432,9 +491,19 @@ export const TeamMessageRenderer = …
 export const TeamSpawnRenderer = …
 ```
 
-### `TestResultsRenderer`
+<a id="jcode-ui-terminalrenderer"></a>
 
-<!-- jcode-ui-testresultsrenderer -->
+### `TerminalRenderer`
+
+`const` · `packages/jcode-ui/src/toolRenderers/terminal.tsx`
+
+```ts
+export const TerminalRenderer = …
+```
+
+<a id="jcode-ui-testresultsrenderer"></a>
+
+### `TestResultsRenderer`
 
 `const` · `packages/jcode-ui/src/toolRenderers/testResults.tsx`
 
@@ -442,9 +511,19 @@ export const TeamSpawnRenderer = …
 export const TestResultsRenderer = …
 ```
 
-### `ThreadWelcome`
+<a id="jcode-ui-threadlist"></a>
 
-<!-- jcode-ui-threadwelcome -->
+### `ThreadList`
+
+`const` · `packages/jcode-ui/src/components/ThreadList.tsx`
+
+```ts
+export const ThreadList = …
+```
+
+<a id="jcode-ui-threadwelcome"></a>
+
+### `ThreadWelcome`
 
 `const` · `packages/jcode-ui/src/components/ThreadWelcome.tsx`
 
@@ -452,9 +531,9 @@ export const TestResultsRenderer = …
 export const ThreadWelcome = …
 ```
 
-### `TodoRenderer`
+<a id="jcode-ui-todorenderer"></a>
 
-<!-- jcode-ui-todorenderer -->
+### `TodoRenderer`
 
 `const` · `packages/jcode-ui/src/toolRenderers/todo.tsx`
 
@@ -462,9 +541,9 @@ export const ThreadWelcome = …
 export const TodoRenderer = …
 ```
 
-### `ToolCallCard`
+<a id="jcode-ui-toolcallcard"></a>
 
-<!-- jcode-ui-toolcallcard -->
+### `ToolCallCard`
 
 `const` · `packages/jcode-ui/src/components/ToolCallCard.tsx`
 
@@ -472,9 +551,9 @@ export const TodoRenderer = …
 export const ToolCallCard = …
 ```
 
-### `Transcription`
+<a id="jcode-ui-transcription"></a>
 
-<!-- jcode-ui-transcription -->
+### `Transcription`
 
 `const` · `packages/jcode-ui/src/voice/Transcription.tsx`
 
@@ -482,9 +561,9 @@ export const ToolCallCard = …
 export const Transcription = …
 ```
 
-### `VoiceVisualizer`
+<a id="jcode-ui-voicevisualizer"></a>
 
-<!-- jcode-ui-voicevisualizer -->
+### `VoiceVisualizer`
 
 `const` · `packages/jcode-ui/src/voice/VoiceVisualizer.tsx`
 
@@ -492,9 +571,19 @@ export const Transcription = …
 export const VoiceVisualizer = …
 ```
 
-### `WorkflowCanvas`
+<a id="jcode-ui-workflowanimatededge"></a>
 
-<!-- jcode-ui-workflowcanvas -->
+### `WorkflowAnimatedEdge`
+
+`const` · `packages/jcode-ui/src/canvas/WorkflowEdge.tsx`
+
+```ts
+export const WorkflowAnimatedEdge = …
+```
+
+<a id="jcode-ui-workflowcanvas"></a>
+
+### `WorkflowCanvas`
 
 `const` · `packages/jcode-ui/src/canvas/WorkflowCanvas.tsx`
 
@@ -502,9 +591,9 @@ export const VoiceVisualizer = …
 export const WorkflowCanvas = …
 ```
 
-### `WorkflowNode`
+<a id="jcode-ui-workflownode"></a>
 
-<!-- jcode-ui-workflownode -->
+### `WorkflowNode`
 
 `const` · `packages/jcode-ui/src/canvas/WorkflowNode.tsx`
 
@@ -512,9 +601,19 @@ export const WorkflowCanvas = …
 export const WorkflowNode = …
 ```
 
-### `ApiBaseProvider`
+<a id="jcode-ui-workflowtemporaryedge"></a>
 
-<!-- jcode-ui-apibaseprovider -->
+### `WorkflowTemporaryEdge`
+
+`const` · `packages/jcode-ui/src/canvas/WorkflowEdge.tsx`
+
+```ts
+export const WorkflowTemporaryEdge = …
+```
+
+<a id="jcode-ui-apibaseprovider"></a>
+
+### `ApiBaseProvider`
 
 `function` · `packages/jcode-ui/src/lib/apiBaseContext.tsx`
 
@@ -522,9 +621,9 @@ export const WorkflowNode = …
 export function ApiBaseProvider({ apiBase, children }: ApiBaseProviderProps) { … }
 ```
 
-### `balanceEmphasis`
+<a id="jcode-ui-balanceemphasis"></a>
 
-<!-- jcode-ui-balanceemphasis -->
+### `balanceEmphasis`
 
 `function` · `packages/jcode-ui/src/lib/streamingMarkdown.ts`
 
@@ -536,42 +635,12 @@ boundary, so `snake_case` and URLs don't trigger a false close.
 export function balanceEmphasis(text: string): string { … }
 ```
 
-### `balanceInlineCode`
+<a id="jcode-ui-balanceinlinecode"></a>
 
-<!-- jcode-ui-balanceinlinecode -->
+### `balanceInlineCode`
 
 `function` · `packages/jcode-ui/src/lib/streamingMarkdown.ts`
 
-Drop the contents of *closed* fenced blocks (used for delimiter counting). */
-function stripFenced(text: string): string {
-  const out: string[] = []
-  let open: Fence | null = null
-  for (const line of text.split('\n')) {
-    const m = FENCE_LINE.exec(line)
-    if (m) {
-      const char = m[2][0]
-      const len = m[2].length
-      const info = m[3]
-      if (open == null) {
-        open = { char, len }
-        continue
-      }
-      if (char === open.char && len >= open.len && info.trim() === '') {
-        open = null
-        continue
-      }
-    }
-    if (open == null) out.push(line)
-  }
-  return out.join('\n')
-}
-
-/** Blank out inline code spans so their delimiters don't skew emphasis counts. */
-function stripInlineCode(text: string): string {
-  return text.replace(/`+[^`]*`+/g, ' ')
-}
-
-/**
 Close a dangling inline code span. Counts backticks in prose (outside fenced
 blocks); an odd count means one span is open, so append a closing backtick.
 
@@ -579,9 +648,9 @@ blocks); an odd count means one span is open, so append a closing backtick.
 export function balanceInlineCode(text: string): string { … }
 ```
 
-### `bindCodeBlockCopy`
+<a id="jcode-ui-bindcodeblockcopy"></a>
 
-<!-- jcode-ui-bindcodeblockcopy -->
+### `bindCodeBlockCopy`
 
 `function` · `packages/jcode-ui/src/lib/markdown.ts`
 
@@ -593,54 +662,12 @@ flips the label to "Copied" for 1.5s.
 @returns a cleanup function that removes the listener.
 
 ```ts
-export function bindCodeBlockCopy(root: HTMLElement): () => void {
-  const KEY = '__jcodeCopyBound'
-  const el = root as HTMLElement & Record<string, unknown>
-  if (el[KEY]) return () => {}
-  el[KEY] = true
-
-  const onClick = (ev: Event) => {
-    const target = ev.target as HTMLElement | null
-    const btn = target?.closest<HTMLElement>('.jcode-codeblock__copy')
-    if (!btn || !root.contains(btn)) return
-    const raw = btn.getAttribute('data-code')
-    if (raw == null) return
-    let code = raw
-    try {
-      code = decodeURIComponent(raw)
-    } catch {
-      /* keep raw if it was not encoded */
-    }
-    void navigator.clipboard?.writeText(code).then(
-      () => flashCopied(btn),
-      () => {
-        /* clipboard unavailable */
-      },
-    )
-  }
-
-  root.addEventListener('click', onClick)
-  return () => {
-    root.removeEventListener('click', onClick)
-    el[KEY] = false
-  }
-}
-
-function flashCopied(btn: HTMLElement): void {
-  if (btn.getAttribute('data-copied') === '1') return
-  const prev = btn.textContent
-  btn.setAttribute('data-copied', '1')
-  btn.textContent = 'Copied'
-  window.setTimeout(() => {
-    btn.textContent = prev
-    btn.removeAttribute('data-copied')
-  }, 1500)
-}
+export function bindCodeBlockCopy(root: HTMLElement): () => void { … }
 ```
 
-### `completeStreamingMarkdown`
+<a id="jcode-ui-completestreamingmarkdown"></a>
 
-<!-- jcode-ui-completestreamingmarkdown -->
+### `completeStreamingMarkdown`
 
 `function` · `packages/jcode-ui/src/lib/streamingMarkdown.ts`
 
@@ -650,17 +677,12 @@ Pure completion: raw streaming buffer → renderable markdown string.
 export function completeStreamingMarkdown(md: string): string { … }
 ```
 
-### `completeStreamingMarkdownInfo`
+<a id="jcode-ui-completestreamingmarkdowninfo"></a>
 
-<!-- jcode-ui-completestreamingmarkdowninfo -->
+### `completeStreamingMarkdownInfo`
 
 `function` · `packages/jcode-ui/src/lib/streamingMarkdown.ts`
 
-True when an open code fence was auto-closed (last block is streaming). */
-  fenceStreaming: boolean
-}
-
-/**
 Complete unclosed markdown structures. Reports whether a code fence was closed
 so the renderer can flag the active code block (shimmer). See the module doc.
 
@@ -668,9 +690,9 @@ so the renderer can flag the active code block (shimmer). See the module doc.
 export function completeStreamingMarkdownInfo(md: string): CompletionResult { … }
 ```
 
-### `completeTableRow`
+<a id="jcode-ui-completetablerow"></a>
 
-<!-- jcode-ui-completetablerow -->
+### `completeTableRow`
 
 `function` · `packages/jcode-ui/src/lib/streamingMarkdown.ts`
 
@@ -680,646 +702,48 @@ Add the trailing pipe to a table row that is still being typed.
 export function completeTableRow(text: string): string { … }
 ```
 
-### `createDefaultToolRegistry`
+<a id="jcode-ui-createdefaulttoolregistry"></a>
 
-<!-- jcode-ui-createdefaulttoolregistry -->
+### `createDefaultToolRegistry`
 
 `function` · `packages/jcode-ui/src/components/ToolRegistryContext.tsx`
 
-ToolRendererRegistry context — the host provides a registry (built with
-createDefaultToolRegistry or a custom one) once at the app root, and every
-ToolCallCard reads from it. This avoids prop-drilling the registry through
-every component.
-/
-
-import { createContext, useContext } from 'react'
-import type { ReactNode } from 'react'
-import { createToolRendererRegistry } from 'jcode-ui-core/adapters'
-import type { ToolRendererRegistry, ToolRenderer } from 'jcode-ui-core/adapters'
-import { TerminalRenderer } from '../toolRenderers/terminal.js'
-import { FileViewerRenderer } from '../toolRenderers/fileViewer.js'
-import { DiffRenderer } from '../toolRenderers/diff.js'
-import { SearchRenderer } from '../toolRenderers/search.js'
-import { TodoRenderer } from '../toolRenderers/todo.js'
-import { SkillRenderer } from '../toolRenderers/skill.js'
-import {
-  TeamListRenderer,
-  TeamMessageRenderer,
-  TeamCreateRenderer,
-  TeamSpawnRenderer,
-} from '../toolRenderers/team.js'
-import { BrowserShotRenderer } from '../toolRenderers/browserShot.js'
-import { FileTreeRenderer } from '../toolRenderers/fileTree.js'
-import { GenericRenderer } from '../toolRenderers/generic.js'
-
-const Ctx = createContext<ToolRendererRegistry | null>(null)
-
-/** Build the jcode default registry (matches Vue ToolCallCard renderType map).
+Build the jcode default registry (matches Vue ToolCallCard renderType map).
 
 ```ts
 export function createDefaultToolRegistry(): ToolRendererRegistry { … }
 ```
 
-### `extCategory`
+<a id="jcode-ui-extcategory"></a>
 
-<!-- jcode-ui-extcategory -->
+### `extCategory`
 
 `function` · `packages/jcode-ui/src/toolRenderers/fileTree.tsx`
 
-FileTreeRenderer — `list_dir` / `glob`. Parses a line-separated path list
-(tolerant of leading bullets / tree glyphs) into a collapsible tree.
-
-- Directories collapse/expand (chevron + folder icon).
-- Files get an extension-colored dot (colors resolve to theme tokens in p5.css).
-- Rows highlight on hover.
-- Default: fully expanded. When the tree exceeds 200 nodes, only the top
-  level stays open (second level and below collapse) to keep it scannable.
-/
-
-import { memo, useMemo, useState } from 'react'
-import { ChevronRightIcon, FolderIcon, FolderOpenIcon } from '@heroicons/react/24/outline'
-import type { ToolRendererProps } from 'jcode-ui-core/adapters'
-
-interface TreeNode {
-  name: string
-  path: string
-  isDir: boolean
-  children: TreeNode[]
-}
-
-const LARGE_TREE_THRESHOLD = 200
-
-export const FileTreeRenderer = memo(function FileTreeRenderer({
-  output,
-  displayOutput,
-  error,
-  status,
-}: ToolRendererProps) {
-  const raw = displayOutput || output || ''
-  const { roots, count } = useMemo(() => parsePathList(raw), [raw])
-
-  if (roots.length === 0) {
-    if (error) {
-      return (
-        <div className="jcode-filetree__msg jcode-filetree__msg--error">{error}</div>
-      )
-    }
-    if (status === 'running') {
-      return <div className="jcode-filetree__msg animate-pulse">Listing…</div>
-    }
-    if (raw.trim()) {
-      // Parsed nothing but there is text — show it raw rather than an empty box.
-      return <pre className="jcode-filetree__raw">{raw}</pre>
-    }
-    return <div className="jcode-filetree__msg">Empty</div>
-  }
-
-  // >200 nodes: keep only the top level open.
-  const initialOpenDepth = count > LARGE_TREE_THRESHOLD ? 1 : Infinity
-
-  return (
-    <div data-jcode-ui="" className="jcode-filetree">
-      {count > LARGE_TREE_THRESHOLD && (
-        <div className="jcode-filetree__hint">{count} entries · deep folders collapsed</div>
-      )}
-      <ul className="jcode-filetree__list" role="tree">
-        {roots.map((node) => (
-          <TreeRow key={node.path} node={node} depth={0} initialOpenDepth={initialOpenDepth} />
-        ))}
-      </ul>
-    </div>
-  )
-})
-
-function TreeRow({
-  node,
-  depth,
-  initialOpenDepth,
-}: {
-  node: TreeNode
-  depth: number
-  initialOpenDepth: number
-}) {
-  const [open, setOpen] = useState(depth < initialOpenDepth)
-  const indent = { paddingLeft: `${depth * 0.85 + 0.35}rem` }
-
-  if (!node.isDir) {
-    return (
-      <li role="treeitem" className="jcode-filetree__row jcode-filetree__row--file" style={indent}>
-        <span className="jcode-filetree__lead" aria-hidden />
-        <span className={`jcode-filetree__dot jcode-filetree__dot--${extCategory(node.name)}`} aria-hidden />
-        <span className="jcode-filetree__name">{node.name}</span>
-      </li>
-    )
-  }
-
-  return (
-    <li role="treeitem" aria-expanded={open} className="jcode-filetree__group">
-      <button
-        type="button"
-        className="jcode-filetree__row jcode-filetree__row--dir"
-        style={indent}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <ChevronRightIcon className={`jcode-filetree__chevron${open ? ' jcode-filetree__chevron--open' : ''}`} />
-        {open ? (
-          <FolderOpenIcon className="jcode-filetree__folder" />
-        ) : (
-          <FolderIcon className="jcode-filetree__folder" />
-        )}
-        <span className="jcode-filetree__name jcode-filetree__name--dir">{node.name}</span>
-        {!open && node.children.length > 0 && (
-          <span className="jcode-filetree__badge">{node.children.length}</span>
-        )}
-      </button>
-      {open && node.children.length > 0 && (
-        <ul className="jcode-filetree__list" role="group">
-          {node.children.map((child) => (
-            <TreeRow
-              key={child.path}
-              node={child}
-              depth={depth + 1}
-              initialOpenDepth={initialOpenDepth}
-            />
-          ))}
-        </ul>
-      )}
-    </li>
-  )
-}
-
-/** Strip common list decorations and return the bare path (or ''). */
-function cleanLine(line: string): string {
-  let s = line.replace(/\r$/, '')
-  // Drop leading tree glyphs / bullets / whitespace.
-  s = s.replace(/^[\s│├└─\-*•▸▾▪]+/, '')
-  s = s.trim()
-  // Drop trailing annotations like "  (dir)" or size columns — keep first token
-  // only when it clearly contains a path separator or looks like a filename.
-  return s
-}
-
-export function parsePathList(text: string): { roots: TreeNode[]; count: number } {
-  const nodes = new Map<string, TreeNode>() // full path → node
-  const roots: TreeNode[] = []
-  const seenLines = new Set<string>()
-
-  const getOrCreate = (
-    path: string,
-    name: string,
-    isDir: boolean,
-    parent: TreeNode | null,
-  ): TreeNode => {
-    let node = nodes.get(path)
-    if (!node) {
-      node = { name, path, isDir, children: [] }
-      nodes.set(path, node)
-      if (parent) parent.children.push(node)
-      else roots.push(node)
-    } else if (isDir && !node.isDir) {
-      node.isDir = true
-    }
-    return node
-  }
-
-  for (const rawLine of text.split('\n')) {
-    const cleaned = cleanLine(rawLine)
-    if (!cleaned || seenLines.has(cleaned)) continue
-    seenLines.add(cleaned)
-    const explicitDir = cleaned.endsWith('/')
-    const path = cleaned.replace(/\/+$/, '')
-    const segments = path.split('/').filter(Boolean)
-    if (segments.length === 0) continue
-
-    let parent: TreeNode | null = null
-    let acc = ''
-    segments.forEach((seg, i) => {
-      acc = acc ? `${acc}/${seg}` : seg
-      const isDir = i < segments.length - 1 || explicitDir
-      parent = getOrCreate(acc, seg, isDir, parent)
-    })
-  }
-
-  sortNodes(roots)
-  return { roots, count: nodes.size }
-}
-
-/** Directories first, then case-insensitive name order (recursive). */
-function sortNodes(nodes: TreeNode[]): void {
-  nodes.sort((a, b) => {
-    if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
-    return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
-  })
-  for (const n of nodes) if (n.children.length > 1) sortNodes(n.children)
-}
-
-/** Map a filename to a dot color category (resolved to a token in p5.css).
+Map a filename to a dot color category (resolved to a token in p5.css).
 
 ```ts
 export function extCategory(name: string): string { … }
 ```
 
-### `formatQuote`
+<a id="jcode-ui-formatquote"></a>
 
-<!-- jcode-ui-formatquote -->
+### `formatQuote`
 
 `function` · `packages/jcode-ui/src/components/QuoteSelection.tsx`
 
-QuoteSelection — "quote this" affordance for selected thread text.
-
-Watches text selections inside jcode-ui prose (`.jcode-prose` under a
-`[data-jcode-ui]` root) and floats a small Quote button at the selection.
-Picking it hands the text to `onQuote` — typically wired into the composer:
-
-  const input = useRef<ComposerHandle>(null)
-  <QuoteSelection onQuote={(t) => input.current?.insertText(formatQuote(t))} />
-  <ChatInput ref={input} />
-
-Renders in a portal so ancestor overflow/transform can't clip the button.
-/
-
-import { memo, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
-import { ChatBubbleBottomCenterTextIcon } from '@heroicons/react/24/outline'
-
-export interface QuoteSelectionProps {
-  /** Receives the selected plain text when the user clicks Quote. */
-  onQuote: (text: string) => void
-  /** Button label. Default "Quote". */
-  label?: string
-  /** Max characters captured. Default 2000. */
-  maxLength?: number
-}
-
-/** Turn selected text into a markdown blockquote block for the composer.
+Turn selected text into a markdown blockquote block for the composer.
 
 ```ts
 export function formatQuote(text: string): string { … }
 ```
 
-### `formatRelative`
+<a id="jcode-ui-formatrelative"></a>
 
-<!-- jcode-ui-formatrelative -->
+### `formatRelative`
 
 `function` · `packages/jcode-ui/src/components/ThreadList.tsx`
 
-ThreadList — session/thread list sidebar (the sidebar analog of `Thread`).
-
-Reads a `ThreadStore` (via `ThreadStoreProvider` from jcode-ui-core) and
-renders grouped rows: an Active group and a collapsible Archived group. Each
-row shows the title, a relative timestamp, and a pulsing dot while running;
-the active row gets an `--jcode-accent-wash` fill plus a 2px accent bar.
-
-Fail-visible: per-row controls (rename / archive / delete) and the New button
-render only when the matching `store.actions.*` exists — mirroring how
-`Message` shows its edit affordance only when `canEdit` is set. A host that
-wires just `select` gets a clean read-only list with no dangling controls.
-
-All visuals live in `../styles/threadlist.css` (`.jcode-threadlist-*`), which
-the host imports via `jcode-ui/styles.css`. Style is aligned with Sources /
-ContextBar: `data-jcode-ui` root, token-driven colors, heroicons, memo.
-/
-
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
-import {
-  ArchiveBoxIcon,
-  ChatBubbleLeftRightIcon,
-  ChevronRightIcon,
-  EllipsisHorizontalIcon,
-  PencilSquareIcon,
-  PlusIcon,
-  TrashIcon,
-} from '@heroicons/react/24/outline'
-import type { ThreadSummary, ThreadStoreActions } from 'jcode-ui-core'
-import { useThreadListState, useThreadStoreActions } from 'jcode-ui-core'
-
-export interface ThreadListProps {
-  /** Optional small header label above the list (e.g. "Sessions"). */
-  title?: string
-  /** Extra class on the root (composed after `jcode-threadlist`). */
-  className?: string
-}
-
-export const ThreadList = memo(function ThreadList({ title, className }: ThreadListProps) {
-  const { threads, activeId, loading } = useThreadListState()
-  const actions = useThreadStoreActions()
-  const [renamingId, setRenamingId] = useState<string | null>(null)
-  const [archivedOpen, setArchivedOpen] = useState(false)
-
-  const { active, archived } = useMemo(() => {
-    const a: ThreadSummary[] = []
-    const ar: ThreadSummary[] = []
-    for (const t of threads) (t.archived ? ar : a).push(t)
-    const byRecency = (x: ThreadSummary, y: ThreadSummary) => y.updatedAt - x.updatedAt
-    return { active: a.sort(byRecency), archived: ar.sort(byRecency) }
-  }, [threads])
-
-  const canCreate = !!actions.create
-
-  // Empty state — centered prompt + New button (fail-visible).
-  if (threads.length === 0 && !loading) {
-    return (
-      <div data-jcode-ui="" className={cx('jcode-threadlist jcode-threadlist--empty', className)}>
-        <div className="jcode-threadlist-empty">
-          <ChatBubbleLeftRightIcon className="jcode-threadlist-empty-icon" />
-          <p className="jcode-threadlist-empty-text">No threads yet</p>
-          {canCreate && (
-            <button type="button" className="jcode-threadlist-new" onClick={() => actions.create!()}>
-              <PlusIcon className="jcode-threadlist-icon" />
-              New thread
-            </button>
-          )}
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div data-jcode-ui="" className={cx('jcode-threadlist', className)}>
-      {(title || canCreate) && (
-        <div className="jcode-threadlist-header">
-          {title && <span className="jcode-threadlist-title">{title}</span>}
-          {canCreate && (
-            <button type="button" className="jcode-threadlist-new" onClick={() => actions.create!()}>
-              <PlusIcon className="jcode-threadlist-icon" />
-              New thread
-            </button>
-          )}
-        </div>
-      )}
-
-      <div className="jcode-threadlist-scroll">
-        {loading && threads.length === 0 && (
-          <div className="jcode-threadlist-loading">Loading…</div>
-        )}
-
-        {active.length > 0 && (
-          <div className="jcode-threadlist-group">
-            {archived.length > 0 && <div className="jcode-threadlist-group-label">Active</div>}
-            <ul className="jcode-threadlist-rows">
-              {active.map((t) => (
-                <ThreadRow
-                  key={t.id}
-                  thread={t}
-                  isActive={t.id === activeId}
-                  actions={actions}
-                  renaming={renamingId === t.id}
-                  onStartRename={() => setRenamingId(t.id)}
-                  onStopRename={() => setRenamingId(null)}
-                />
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {archived.length > 0 && (
-          <div className="jcode-threadlist-group">
-            <button
-              type="button"
-              className="jcode-threadlist-archived-toggle"
-              aria-expanded={archivedOpen}
-              onClick={() => setArchivedOpen((o) => !o)}
-            >
-              <ChevronRightIcon
-                className={cx(
-                  'jcode-threadlist-chevron',
-                  archivedOpen && 'jcode-threadlist-chevron--open',
-                )}
-              />
-              Archived
-              <span className="jcode-threadlist-count">{archived.length}</span>
-            </button>
-            {archivedOpen && (
-              <ul className="jcode-threadlist-rows">
-                {archived.map((t) => (
-                  <ThreadRow
-                    key={t.id}
-                    thread={t}
-                    isActive={t.id === activeId}
-                    actions={actions}
-                    renaming={renamingId === t.id}
-                    onStartRename={() => setRenamingId(t.id)}
-                    onStopRename={() => setRenamingId(null)}
-                  />
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-})
-
-interface ThreadRowProps {
-  thread: ThreadSummary
-  isActive: boolean
-  actions: ThreadStoreActions
-  renaming: boolean
-  onStartRename: () => void
-  onStopRename: () => void
-}
-
-const ThreadRow = memo(function ThreadRow({
-  thread,
-  isActive,
-  actions,
-  renaming,
-  onStartRename,
-  onStopRename,
-}: ThreadRowProps) {
-  const [draft, setDraft] = useState(thread.title)
-
-  // Re-seed the draft each time this row enters rename mode.
-  useEffect(() => {
-    if (renaming) setDraft(thread.title)
-  }, [renaming, thread.title])
-
-  const commit = () => {
-    const text = draft.trim()
-    onStopRename()
-    if (text && text !== thread.title) actions.rename?.(thread.id, text)
-  }
-
-  if (renaming) {
-    return (
-      <li className="jcode-threadlist-item">
-        <input
-          className="jcode-threadlist-rename-input"
-          value={draft}
-          aria-label="Rename thread"
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              commit()
-            } else if (e.key === 'Escape') {
-              e.preventDefault()
-              onStopRename()
-            }
-          }}
-          // Clicking away discards the edit (Enter saves, Esc cancels).
-          onBlur={onStopRename}
-          // eslint-disable-next-line jsx-a11y/no-autofocus
-          autoFocus
-        />
-      </li>
-    )
-  }
-
-  const relative = formatRelative(thread.updatedAt)
-
-  return (
-    <li className="jcode-threadlist-item">
-      <button
-        type="button"
-        className={cx('jcode-threadlist-row', isActive && 'jcode-threadlist-row--active')}
-        aria-current={isActive ? 'page' : undefined}
-        onClick={() => actions.select?.(thread.id)}
-      >
-        <span className="jcode-threadlist-row-main">
-          <span className="jcode-threadlist-row-title">{thread.title || 'Untitled'}</span>
-          <span className="jcode-threadlist-row-meta">
-            {thread.status === 'running' && (
-              <span className="jcode-threadlist-dot" title="Running" aria-hidden="true" />
-            )}
-            <span>{relative}</span>
-          </span>
-        </span>
-      </button>
-      <RowActions thread={thread} actions={actions} onRename={onStartRename} />
-    </li>
-  )
-})
-
-interface RowActionsProps {
-  thread: ThreadSummary
-  actions: ThreadStoreActions
-  onRename: () => void
-}
-
-/** The hover ⋯ menu. Owns its own open state + focus management so click-outside
- auto-closes any other row's menu. Renders nothing if no menu action exists. */
-function RowActions({ thread, actions, onRename }: RowActionsProps) {
-  const [open, setOpen] = useState(false)
-  const triggerRef = useRef<HTMLButtonElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
-
-  const canRename = !!actions.rename
-  const canArchive = !!actions.archive && !thread.archived
-  const canRemove = !!actions.remove
-
-  const close = (returnFocus?: boolean) => {
-    setOpen(false)
-    if (returnFocus) triggerRef.current?.focus()
-  }
-
-  useEffect(() => {
-    if (!open) return
-    // Focus the first item on open.
-    menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
-    // Dismiss on outside pointer-down.
-    const onDoc = (e: MouseEvent) => {
-      const target = e.target as Node
-      if (!menuRef.current?.contains(target) && !triggerRef.current?.contains(target)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', onDoc)
-    return () => document.removeEventListener('mousedown', onDoc)
-  }, [open])
-
-  if (!canRename && !canArchive && !canRemove) return null
-
-  const onMenuKeyDown = (e: ReactKeyboardEvent) => {
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      close(true)
-      return
-    }
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault()
-      const items = Array.from(
-        menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [],
-      )
-      if (items.length === 0) return
-      const idx = items.indexOf(document.activeElement as HTMLButtonElement)
-      const delta = e.key === 'ArrowDown' ? 1 : -1
-      const next = (idx + delta + items.length) % items.length
-      items[next]?.focus()
-    }
-  }
-
-  return (
-    <div className="jcode-threadlist-actions">
-      <button
-        ref={triggerRef}
-        type="button"
-        className="jcode-threadlist-menu-btn"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="Thread options"
-        onClick={() => setOpen((o) => !o)}
-      >
-        <EllipsisHorizontalIcon className="jcode-threadlist-icon" />
-      </button>
-      {open && (
-        <div ref={menuRef} role="menu" className="jcode-threadlist-menu" onKeyDown={onMenuKeyDown}>
-          {canRename && (
-            <button
-              type="button"
-              role="menuitem"
-              className="jcode-threadlist-menu-item"
-              onClick={() => {
-                close()
-                onRename()
-              }}
-            >
-              <PencilSquareIcon className="jcode-threadlist-icon" />
-              Rename
-            </button>
-          )}
-          {canArchive && (
-            <button
-              type="button"
-              role="menuitem"
-              className="jcode-threadlist-menu-item"
-              onClick={() => {
-                close()
-                actions.archive?.(thread.id)
-              }}
-            >
-              <ArchiveBoxIcon className="jcode-threadlist-icon" />
-              Archive
-            </button>
-          )}
-          {canRemove && (
-            <button
-              type="button"
-              role="menuitem"
-              className="jcode-threadlist-menu-item jcode-threadlist-menu-item--danger"
-              onClick={() => {
-                close()
-                actions.remove?.(thread.id)
-              }}
-            >
-              <TrashIcon className="jcode-threadlist-icon" />
-              Delete
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** Join truthy class fragments (tiny local helper — no clsx dependency). */
-function cx(...parts: (string | false | null | undefined)[]): string {
-  return parts.filter(Boolean).join(' ')
-}
-
-/**
 Compact relative-time formatter (no date-fns / dayjs). Buckets: just now,
 Nm, Nh, Nd, Nw, Nmo, Ny. `now` is injectable for deterministic tests.
 
@@ -1327,9 +751,9 @@ Nm, Nh, Nd, Nw, Nmo, Ny. `now` is injectable for deterministic tests.
 export function formatRelative(ts: number, now: number = Date.now()): string { … }
 ```
 
-### `hashString`
+<a id="jcode-ui-hashstring"></a>
 
-<!-- jcode-ui-hashstring -->
+### `hashString`
 
 `function` · `packages/jcode-ui/src/lib/streamingMarkdown.ts`
 
@@ -1339,127 +763,13 @@ Fast, stable string hash (djb2 + length) for block cache keys.
 export function hashString(s: string): string { … }
 ```
 
-### `headTail`
+<a id="jcode-ui-headtail"></a>
 
-<!-- jcode-ui-headtail -->
+### `headTail`
 
 `function` · `packages/jcode-ui/src/toolRenderers/terminal.tsx`
 
-TerminalRenderer — `execute` tool with dual-channel streams/meta support.
-Head/tail preview, stderr separation, exit/duration badge.
-/
-
-import { memo, useMemo } from 'react'
-import type { ToolRendererProps } from 'jcode-ui-core/adapters'
-
-const HEAD_LINES = 5
-const TAIL_LINES = 5
-
-export const TerminalRenderer = memo(function TerminalRenderer({
-  args,
-  output,
-  displayOutput,
-  error,
-  status,
-  streams,
-  meta,
-}: ToolRendererProps) {
-  let command = ''
-  try {
-    const parsed = JSON.parse(args)
-    command = parsed.command ?? ''
-  } catch {
-    // ignore
-  }
-
-  const stdout = streams?.stdout ?? ''
-  const stderr = streams?.stderr ?? ''
-  const hasStreams = !!(stdout || stderr)
-  const body = hasStreams
-    ? ''
-    : displayOutput || output || ''
-
-  const stdoutPreview = useMemo(() => (stdout ? headTail(stdout, HEAD_LINES, TAIL_LINES) : null), [stdout])
-  const stderrPreview = useMemo(() => (stderr ? headTail(stderr, HEAD_LINES, TAIL_LINES) : null), [stderr])
-  const bodyPreview = useMemo(() => (body ? headTail(body, HEAD_LINES, TAIL_LINES) : null), [body])
-
-  const exitCode = meta?.exit_code
-  const durationMs = meta?.duration_ms
-  const failed = status === 'error' || (typeof exitCode === 'number' && exitCode !== 0)
-
-  return (
-    <div className="jcode-terminal max-h-72 overflow-y-auto px-3 py-2.5 font-mono text-xs leading-relaxed">
-      {command && (
-        <div className="jcode-terminal__cmd">
-          <span className="jcode-terminal__prompt select-none">$ </span>
-          <span className="jcode-terminal__command">{command}</span>
-        </div>
-      )}
-
-      {(typeof exitCode === 'number' || typeof durationMs === 'number') && (
-        <div
-          className="jcode-terminal__meta mt-1.5 flex flex-wrap gap-2 text-[10px] tabular-nums"
-          style={{
-            color: failed
-              ? 'var(--jcode-color-error-fg)'
-              : 'color-mix(in srgb, var(--jcode-code-fg, var(--jcode-color-muted-foreground)) 65%, transparent)',
-          }}
-        >
-          {typeof exitCode === 'number' && (
-            <span data-testid="terminal-exit">exit {exitCode}</span>
-          )}
-          {typeof durationMs === 'number' && durationMs > 0 && (
-            <span data-testid="terminal-duration">{formatDuration(durationMs)}</span>
-          )}
-          {meta?.truncated && <span>truncated</span>}
-        </div>
-      )}
-
-      {stdoutPreview && (
-        <div className="jcode-terminal__out mt-1.5 whitespace-pre-wrap break-all" data-testid="terminal-stdout">
-          {stdoutPreview.head}
-          {stdoutPreview.omitted > 0 && (
-            <div className="jcode-terminal__ellipsis opacity-60">… +{stdoutPreview.omitted} lines</div>
-          )}
-          {stdoutPreview.tail ? `\n${stdoutPreview.tail}` : null}
-        </div>
-      )}
-
-      {stderrPreview && (
-        <div className="jcode-terminal__err mt-1.5 whitespace-pre-wrap break-all" data-testid="terminal-stderr">
-          <div className="jcode-terminal__stream-label mb-0.5 text-[10px] uppercase tracking-wide opacity-80">
-            stderr
-          </div>
-          {stderrPreview.head}
-          {stderrPreview.omitted > 0 && (
-            <div className="jcode-terminal__ellipsis opacity-60">… +{stderrPreview.omitted} lines</div>
-          )}
-          {stderrPreview.tail ? `\n${stderrPreview.tail}` : null}
-        </div>
-      )}
-
-      {!hasStreams && bodyPreview && (
-        <div className="jcode-terminal__out mt-1.5 whitespace-pre-wrap break-all">
-          {bodyPreview.head}
-          {bodyPreview.omitted > 0 && (
-            <div className="jcode-terminal__ellipsis opacity-60">… +{bodyPreview.omitted} lines</div>
-          )}
-          {bodyPreview.tail ? `\n${bodyPreview.tail}` : null}
-        </div>
-      )}
-
-      {error && <div className="jcode-terminal__err mt-1 whitespace-pre-wrap">{error}</div>}
-      {status === 'running' && <div className="jcode-terminal__run mt-1 animate-pulse">Running…</div>}
-    </div>
-  )
-})
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(1)}s`
-}
-
-/** Keep head + tail lines with an omitted count (Codex-style mid ellipsis).
+Keep head + tail lines with an omitted count (Codex-style mid ellipsis).
 
 ```ts
 export function headTail(
@@ -1469,9 +779,9 @@ export function headTail(
 ): { … }
 ```
 
-### `ModelSelector`
+<a id="jcode-ui-modelselector"></a>
 
-<!-- jcode-ui-modelselector -->
+### `ModelSelector`
 
 `function` · `packages/jcode-ui/src/components/ModelSelector.tsx`
 
@@ -1486,20 +796,12 @@ export function ModelSelector({
 }: ModelSelectorProps) { … }
 ```
 
-### `parseCodeInfo`
+<a id="jcode-ui-parsecodeinfo"></a>
 
-<!-- jcode-ui-parsecodeinfo -->
+### `parseCodeInfo`
 
 `function` · `packages/jcode-ui/src/lib/markdown.ts`
 
-Escape text for use as HTML text content or a double-quoted attribute. */
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => HTML_ESCAPES[c])
-}
-
-// ─── Info-string parsing ───────────────────────────────────────────────────
-
-/**
 Parse a fenced-code info string into `{ lang, filename }`.
 Supports two filename conventions:
   ```` ```ts title=a.ts ````  (also title="a b.ts")
@@ -1509,9 +811,19 @@ Supports two filename conventions:
 export function parseCodeInfo(info: string): { … }
 ```
 
-### `parseStackTrace`
+<a id="jcode-ui-parsepathlist"></a>
 
-<!-- jcode-ui-parsestacktrace -->
+### `parsePathList`
+
+`function` · `packages/jcode-ui/src/toolRenderers/fileTree.tsx`
+
+```ts
+export function parsePathList(text: string): { … }
+```
+
+<a id="jcode-ui-parsestacktrace"></a>
+
+### `parseStackTrace`
 
 `function` · `packages/jcode-ui/src/toolRenderers/stackTrace.tsx`
 
@@ -1519,9 +831,9 @@ export function parseCodeInfo(info: string): { … }
 export function parseStackTrace(text: string): StackTrace | null { … }
 ```
 
-### `parseTestOutput`
+<a id="jcode-ui-parsetestoutput"></a>
 
-<!-- jcode-ui-parsetestoutput -->
+### `parseTestOutput`
 
 `function` · `packages/jcode-ui/src/toolRenderers/testResults.tsx`
 
@@ -1529,9 +841,9 @@ export function parseStackTrace(text: string): StackTrace | null { … }
 export function parseTestOutput(text: string): TestSummary | null { … }
 ```
 
-### `Reasoning`
+<a id="jcode-ui-reasoning"></a>
 
-<!-- jcode-ui-reasoning -->
+### `Reasoning`
 
 `function` · `packages/jcode-ui/src/components/Reasoning.tsx`
 
@@ -1539,9 +851,9 @@ export function parseTestOutput(text: string): TestSummary | null { … }
 export function Reasoning({ reasoning, defaultExpanded = false, durationMs }: ReasoningProps) { … }
 ```
 
-### `registerCodeBlockRenderer`
+<a id="jcode-ui-registercodeblockrenderer"></a>
 
-<!-- jcode-ui-registercodeblockrenderer -->
+### `registerCodeBlockRenderer`
 
 `function` · `packages/jcode-ui/src/lib/markdown.ts`
 
@@ -1552,9 +864,9 @@ first to return non-null wins (used by the mermaid plugin for ```` ```mermaid ``
 export function registerCodeBlockRenderer(hook: CodeBlockHook): void { … }
 ```
 
-### `registerMathRenderer`
+<a id="jcode-ui-registermathrenderer"></a>
 
-<!-- jcode-ui-registermathrenderer -->
+### `registerMathRenderer`
 
 `function` · `packages/jcode-ui/src/lib/markdown.ts`
 
@@ -1566,59 +878,24 @@ that never registers katex renders `$x^2$` verbatim (and pays no math cost).
 export function registerMathRenderer(render: MathRenderer): void { … }
 ```
 
-### `renderMarkdown`
+<a id="jcode-ui-rendermarkdown"></a>
 
-<!-- jcode-ui-rendermarkdown -->
+### `renderMarkdown`
 
 `function` · `packages/jcode-ui/src/lib/markdown.ts`
 
-Wrap each <table> so wide GFM tables scroll inside a framed container. */
-function wrapTables(html: string): string {
-  return html
-    .replace(/<table(\s[^>]*)?>/gi, '<div class="jcode-md-table-wrap"><table$1>')
-    .replace(/<\/table>/gi, '</table></div>')
-}
-
-// ─── Sanitization (DOM-only) ────────────────────────────────────────────────
-
-// DOMPurify's default export auto-binds to `window` at import time when a DOM
-// exists; in Node it stays an uninitialized factory with no `.sanitize`. Guard
-// on capability so SSR/tests get a pass-through (the HTML is only ever injected
-// in the browser, which always has a real sanitizer).
-const canSanitize = typeof DOMPurify.sanitize === 'function'
-
-const SANITIZE_CONFIG = {
-  // class → code-block chrome + table wrap; data-* → copy button payload + meta;
-  // style → katex inline layout; target → external links; mark → highlights.
-  ADD_ATTR: ['target', 'class', 'style', 'data-code', 'data-lang', 'data-filename', 'data-mermaid-src'],
-  ADD_TAGS: ['mark'],
-}
-
-function sanitize(html: string): string {
-  return canSanitize ? DOMPurify.sanitize(html, SANITIZE_CONFIG) : html
-}
-
-/** Render markdown → sanitized HTML string.
+Render markdown → sanitized HTML string.
 
 ```ts
 export function renderMarkdown(text: string): string { … }
 ```
 
-### `renderMarkdownStreaming`
+<a id="jcode-ui-rendermarkdownstreaming"></a>
 
-<!-- jcode-ui-rendermarkdownstreaming -->
+### `renderMarkdownStreaming`
 
 `function` · `packages/jcode-ui/src/lib/streamingMarkdown.ts`
 
-Tag the last `.jcode-codeblock` as streaming so CSS can shimmer its tail. */
-function markStreamingCodeblock(html: string): string {
-  const MARK = 'class="jcode-codeblock"'
-  const i = html.lastIndexOf(MARK)
-  if (i < 0) return html
-  return html.slice(0, i) + 'class="jcode-codeblock jcode-code-streaming"' + html.slice(i + MARK.length)
-}
-
-/**
 Render a streaming buffer to sanitized HTML. Equivalent to
 `renderMarkdown(completeStreamingMarkdown(md))`, plus a shimmer class on the
 code block that is still streaming.
@@ -1627,34 +904,12 @@ code block that is still streaming.
 export function renderMarkdownStreaming(md: string): string { … }
 ```
 
-### `scanFenceState`
+<a id="jcode-ui-scanfencestate"></a>
 
-<!-- jcode-ui-scanfencestate -->
+### `scanFenceState`
 
 `function` · `packages/jcode-ui/src/lib/streamingMarkdown.ts`
 
-Streaming-stable markdown.
-
-While an assistant message streams token-by-token, the tail of the buffer is
-almost always mid-structure — an open code fence, a half-typed `**bold`, a
-dangling `[link`. Rendering that raw produces flicker (a stray ``` turns the
-rest of the doc into a code block for one frame). `completeStreamingMarkdown`
-closes those open structures so every intermediate frame is valid markdown.
-
-All helpers are pure and individually exported for unit testing.
-/
-
-import { renderMarkdown } from './markdown.js'
-
-/** Matches a line that opens or closes a fenced code block (indent ≤ 3). */
-const FENCE_LINE = /^(\s{0,3})(`{3,}|~{3,})(.*)$/
-
-interface Fence {
-  char: string
-  len: number
-}
-
-/**
 Scan for an unterminated code fence. Returns the open fence descriptor (so the
 caller knows what to close with), or `null` when all fences are balanced.
 
@@ -1662,9 +917,9 @@ caller knows what to close with), or `null` when all fences are balanced.
 export function scanFenceState(md: string): Fence | null { … }
 ```
 
-### `Sources`
+<a id="jcode-ui-sources"></a>
 
-<!-- jcode-ui-sources -->
+### `Sources`
 
 `function` · `packages/jcode-ui/src/components/Sources.tsx`
 
@@ -1672,9 +927,9 @@ export function scanFenceState(md: string): Fence | null { … }
 export function Sources({ sources }: SourcesProps) { … }
 ```
 
-### `splitTopLevelBlocks`
+<a id="jcode-ui-splittoplevelblocks"></a>
 
-<!-- jcode-ui-splittoplevelblocks -->
+### `splitTopLevelBlocks`
 
 `function` · `packages/jcode-ui/src/lib/streamingMarkdown.ts`
 
@@ -1686,9 +941,9 @@ work is O(active block) instead of O(whole document).
 export function splitTopLevelBlocks(md: string): string[] { … }
 ```
 
-### `stripTrailingLink`
+<a id="jcode-ui-striptrailinglink"></a>
 
-<!-- jcode-ui-striptrailinglink -->
+### `stripTrailingLink`
 
 `function` · `packages/jcode-ui/src/lib/streamingMarkdown.ts`
 
@@ -1701,9 +956,9 @@ Leaves completed links untouched.
 export function stripTrailingLink(text: string): string { … }
 ```
 
-### `Thread`
+<a id="jcode-ui-thread"></a>
 
-<!-- jcode-ui-thread -->
+### `Thread`
 
 `function` · `packages/jcode-ui/src/components/Thread.tsx`
 
@@ -1718,9 +973,9 @@ export function Thread({
 }: ThreadProps): ReactNode { … }
 ```
 
-### `ToolRegistryProvider`
+<a id="jcode-ui-toolregistryprovider"></a>
 
-<!-- jcode-ui-toolregistryprovider -->
+### `ToolRegistryProvider`
 
 `function` · `packages/jcode-ui/src/components/ToolRegistryContext.tsx`
 
@@ -1728,9 +983,9 @@ export function Thread({
 export function ToolRegistryProvider({ registry, children }: ToolRegistryProviderProps) { … }
 ```
 
-### `toolTreeToGraph`
+<a id="jcode-ui-tooltreetograph"></a>
 
-<!-- jcode-ui-tooltreetograph -->
+### `toolTreeToGraph`
 
 `function` · `packages/jcode-ui/src/canvas/toolTreeToGraph.ts`
 
@@ -1741,9 +996,9 @@ export function toolTreeToGraph(
 ): ToolGraph { … }
 ```
 
-### `truncate`
+<a id="jcode-ui-truncate"></a>
 
-<!-- jcode-ui-truncate -->
+### `truncate`
 
 `function` · `packages/jcode-ui/src/toolRenderers/terminal.tsx`
 
@@ -1753,9 +1008,9 @@ Count code points (not UTF-16 units) so CJK truncation is fair.
 export function truncate(text: string, max: number): string { … }
 ```
 
-### `useStreamingMarkdown`
+<a id="jcode-ui-usestreamingmarkdown"></a>
 
-<!-- jcode-ui-usestreamingmarkdown -->
+### `useStreamingMarkdown`
 
 `function` · `packages/jcode-ui/src/lib/useStreamingMarkdown.ts`
 
@@ -1763,9 +1018,9 @@ export function truncate(text: string, max: number): string { … }
 export function useStreamingMarkdown(md: string): string { … }
 ```
 
-### `useToolRegistry`
+<a id="jcode-ui-usetoolregistry"></a>
 
-<!-- jcode-ui-usetoolregistry -->
+### `useToolRegistry`
 
 `function` · `packages/jcode-ui/src/components/ToolRegistryContext.tsx`
 
@@ -1773,9 +1028,9 @@ export function useStreamingMarkdown(md: string): string { … }
 export function useToolRegistry(): ToolRendererRegistry { … }
 ```
 
-### `ApiBaseProviderProps`
+<a id="jcode-ui-apibaseproviderprops"></a>
 
-<!-- jcode-ui-apibaseproviderprops -->
+### `ApiBaseProviderProps`
 
 `interface` · `packages/jcode-ui/src/lib/apiBaseContext.tsx`
 
@@ -1787,9 +1042,9 @@ export interface ApiBaseProviderProps {
 }
 ```
 
-### `ApprovalBannerProps`
+<a id="jcode-ui-approvalbannerprops"></a>
 
-<!-- jcode-ui-approvalbannerprops -->
+### `ApprovalBannerProps`
 
 `interface` · `packages/jcode-ui/src/components/ApprovalBanner.tsx`
 
@@ -1799,9 +1054,9 @@ export interface ApprovalBannerProps {
 }
 ```
 
-### `ArtifactProps`
+<a id="jcode-ui-artifactprops"></a>
 
-<!-- jcode-ui-artifactprops -->
+### `ArtifactProps`
 
 `interface` · `packages/jcode-ui/src/components/Artifact.tsx`
 
@@ -1825,9 +1080,9 @@ export interface ArtifactProps {
 }
 ```
 
-### `AskUserCardProps`
+<a id="jcode-ui-askusercardprops"></a>
 
-<!-- jcode-ui-askusercardprops -->
+### `AskUserCardProps`
 
 `interface` · `packages/jcode-ui/src/components/AskUserCard.tsx`
 
@@ -1837,9 +1092,44 @@ export interface AskUserCardProps {
 }
 ```
 
-### `AudioPlayerProps`
+<a id="jcode-ui-attachmentlistprops"></a>
 
-<!-- jcode-ui-audioplayerprops -->
+### `AttachmentListProps`
+
+`interface` · `packages/jcode-ui/src/components/Attachment.tsx`
+
+```ts
+export interface AttachmentListProps {
+  images: ChatImage[]
+  onRemove?: (index: number) => void
+  size?: number
+  /** Click-to-preview. Default true. */
+  preview?: boolean
+  className?: string
+}
+```
+
+<a id="jcode-ui-attachmentprops"></a>
+
+### `AttachmentProps`
+
+`interface` · `packages/jcode-ui/src/components/Attachment.tsx`
+
+```ts
+export interface AttachmentProps {
+  image: ChatImage
+  /** Optional remove handler — renders the × button when provided (composer). */
+  onRemove?: () => void
+  /** Thumbnail size in px. Default 56 (assistant-ui tile is ~56). */
+  size?: number
+  /** Allow click-to-preview lightbox. Default true. */
+  preview?: boolean
+}
+```
+
+<a id="jcode-ui-audioplayerprops"></a>
+
+### `AudioPlayerProps`
 
 `interface` · `packages/jcode-ui/src/voice/AudioPlayer.tsx`
 
@@ -1855,9 +1145,9 @@ export interface AudioPlayerProps {
 }
 ```
 
-### `BranchPickerProps`
+<a id="jcode-ui-branchpickerprops"></a>
 
-<!-- jcode-ui-branchpickerprops -->
+### `BranchPickerProps`
 
 `interface` · `packages/jcode-ui/src/components/BranchPicker.tsx`
 
@@ -1867,9 +1157,9 @@ export interface BranchPickerProps {
 }
 ```
 
-### `CanvasControlsProps`
+<a id="jcode-ui-canvascontrolsprops"></a>
 
-<!-- jcode-ui-canvascontrolsprops -->
+### `CanvasControlsProps`
 
 `interface` · `packages/jcode-ui/src/canvas/CanvasControls.tsx`
 
@@ -1881,9 +1171,9 @@ export interface CanvasControlsProps {
 }
 ```
 
-### `CanvasPanelProps`
+<a id="jcode-ui-canvaspanelprops"></a>
 
-<!-- jcode-ui-canvaspanelprops -->
+### `CanvasPanelProps`
 
 `interface` · `packages/jcode-ui/src/canvas/CanvasPanel.tsx`
 
@@ -1896,9 +1186,9 @@ export interface CanvasPanelProps {
 }
 ```
 
-### `ChatInputProps`
+<a id="jcode-ui-chatinputprops"></a>
 
-<!-- jcode-ui-chatinputprops -->
+### `ChatInputProps`
 
 `interface` · `packages/jcode-ui/src/components/ChatInput.tsx`
 
@@ -1936,36 +1226,13 @@ export interface ChatInputProps {
 }
 ```
 
-### `CodeBlockHookArgs`
+<a id="jcode-ui-codeblockhookargs"></a>
 
-<!-- jcode-ui-codeblockhookargs -->
+### `CodeBlockHookArgs`
 
 `interface` · `packages/jcode-ui/src/lib/markdown.ts`
 
-Markdown rendering — marked + highlight.js + DOMPurify.
-
-Ported from the Vue composable and extended with:
-  - a code-block "chrome" renderer (filename bar + copy button), and
-  - a zero-cost plugin hook table (mermaid / katex register into it; the core
-    never imports the plugin files, so not importing them costs nothing).
-
-Framework-agnostic; returns an HTML string the consumer injects via
-dangerouslySetInnerHTML. Sanitization runs only when a DOM is present
-(browser); in SSR/Node it is a no-op so the pipeline stays testable — the
-browser, which is the only place the HTML is ever injected, always sanitizes.
-/
-
-import { Marked } from 'marked'
-import type { TokenizerAndRendererExtension, Tokens } from 'marked'
-import hljs from 'highlight.js'
-import DOMPurify from 'dompurify'
-
-// ─── Plugin hook table ───────────────────────────────────────────────────
-// Optional plugins register renderers here. `markdown.ts` never imports the
-// plugin files (mermaid.ts / katex.ts), only the reverse — so a consumer that
-// never calls registerMermaid()/registerKatex() ships zero plugin code.
-
-/** Arguments passed to a fenced-code-block hook.
+Arguments passed to a fenced-code-block hook.
 
 ```ts
 export interface CodeBlockHookArgs {
@@ -1978,9 +1245,9 @@ export interface CodeBlockHookArgs {
 }
 ```
 
-### `CompactToolRowProps`
+<a id="jcode-ui-compacttoolrowprops"></a>
 
-<!-- jcode-ui-compacttoolrowprops -->
+### `CompactToolRowProps`
 
 `interface` · `packages/jcode-ui/src/components/CompactToolRow.tsx`
 
@@ -1990,9 +1257,9 @@ export interface CompactToolRowProps {
 }
 ```
 
-### `CompletionResult`
+<a id="jcode-ui-completionresult"></a>
 
-<!-- jcode-ui-completionresult -->
+### `CompletionResult`
 
 `interface` · `packages/jcode-ui/src/lib/streamingMarkdown.ts`
 
@@ -2004,9 +1271,9 @@ export interface CompletionResult {
 }
 ```
 
-### `ContextBarProps`
+<a id="jcode-ui-contextbarprops"></a>
 
-<!-- jcode-ui-contextbarprops -->
+### `ContextBarProps`
 
 `interface` · `packages/jcode-ui/src/components/ContextBar.tsx`
 
@@ -2023,9 +1290,9 @@ export interface ContextBarProps {
 }
 ```
 
-### `ExploringGroupCardProps`
+<a id="jcode-ui-exploringgroupcardprops"></a>
 
-<!-- jcode-ui-exploringgroupcardprops -->
+### `ExploringGroupCardProps`
 
 `interface` · `packages/jcode-ui/src/components/ExploringGroupCard.tsx`
 
@@ -2036,9 +1303,9 @@ export interface ExploringGroupCardProps {
 }
 ```
 
-### `ExportButtonProps`
+<a id="jcode-ui-exportbuttonprops"></a>
 
-<!-- jcode-ui-exportbuttonprops -->
+### `ExportButtonProps`
 
 `interface` · `packages/jcode-ui/src/components/ExportButton.tsx`
 
@@ -2052,9 +1319,9 @@ export interface ExportButtonProps {
 }
 ```
 
-### `KatexApi`
+<a id="jcode-ui-katexapi"></a>
 
-<!-- jcode-ui-katexapi -->
+### `KatexApi`
 
 `interface` · `packages/jcode-ui/src/plugins/external-modules.d.ts`
 
@@ -2064,9 +1331,9 @@ export interface KatexApi {
   }
 ```
 
-### `KatexOptions`
+<a id="jcode-ui-katexoptions"></a>
 
-<!-- jcode-ui-katexoptions -->
+### `KatexOptions`
 
 `interface` · `packages/jcode-ui/src/plugins/external-modules.d.ts`
 
@@ -2079,9 +1346,9 @@ export interface KatexOptions {
   }
 ```
 
-### `KatexPluginOptions`
+<a id="jcode-ui-katexpluginoptions"></a>
 
-<!-- jcode-ui-katexpluginoptions -->
+### `KatexPluginOptions`
 
 `interface` · `packages/jcode-ui/src/plugins/katex.ts`
 
@@ -2094,9 +1361,9 @@ export interface KatexPluginOptions {
 }
 ```
 
-### `MermaidApi`
+<a id="jcode-ui-mermaidapi"></a>
 
-<!-- jcode-ui-mermaidapi -->
+### `MermaidApi`
 
 `interface` · `packages/jcode-ui/src/plugins/external-modules.d.ts`
 
@@ -2108,9 +1375,9 @@ export interface MermaidApi {
   }
 ```
 
-### `MermaidPluginOptions`
+<a id="jcode-ui-mermaidpluginoptions"></a>
 
-<!-- jcode-ui-mermaidpluginoptions -->
+### `MermaidPluginOptions`
 
 `interface` · `packages/jcode-ui/src/plugins/mermaid.ts`
 
@@ -2123,9 +1390,9 @@ export interface MermaidPluginOptions {
 }
 ```
 
-### `MermaidRenderResult`
+<a id="jcode-ui-mermaidrenderresult"></a>
 
-<!-- jcode-ui-mermaidrenderresult -->
+### `MermaidRenderResult`
 
 `interface` · `packages/jcode-ui/src/plugins/external-modules.d.ts`
 
@@ -2136,9 +1403,9 @@ export interface MermaidRenderResult {
   }
 ```
 
-### `MessageProps`
+<a id="jcode-ui-messageprops"></a>
 
-<!-- jcode-ui-messageprops -->
+### `MessageProps`
 
 `interface` · `packages/jcode-ui/src/components/Message.tsx`
 
@@ -2152,44 +1419,13 @@ export interface MessageProps {
 }
 ```
 
-### `MessageSlots`
+<a id="jcode-ui-messageslots"></a>
 
-<!-- jcode-ui-messageslots -->
+### `MessageSlots`
 
 `interface` · `packages/jcode-ui/src/components/Message.tsx`
 
-Message — flat chat message (matches web/src/components/ChatMessage.vue).
-
-Layout (NOT chat-bubble cards):
-  [avatar] Role label
-           markdown content (jcode-gutter, no bg / no border)
-           duration · copy / edit (hover)
-
-User and assistant share the same left-aligned structure; only the avatar
-fill and label color differ. System messages keep the same skeleton with
-a level-tinted avatar.
-/
-
-import { memo, useCallback, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
-import {
-  ArrowPathIcon,
-  CheckIcon,
-  HandThumbDownIcon,
-  HandThumbUpIcon,
-  PencilSquareIcon,
-  Square2StackIcon,
-} from '@heroicons/react/24/outline'
-import type { Message as MessageData } from 'jcode-ui-core'
-import { useRuntimeActions } from 'jcode-ui-core/runtime'
-import { bindCodeBlockCopy } from '../lib/markdown.js'
-import { useStreamingMarkdown } from '../lib/useStreamingMarkdown.js'
-import { AttachmentList } from './Attachment.js'
-import { BranchPicker } from './BranchPicker.js'
-import { Reasoning } from './Reasoning.js'
-import { Sources } from './Sources.js'
-
-/** Render-prop overrides for the message chrome. Each replaces a piece of the
+Render-prop overrides for the message chrome. Each replaces a piece of the
  default layout; omitting one keeps the built-in rendering unchanged.
 
 ```ts
@@ -2203,9 +1439,9 @@ export interface MessageSlots {
 }
 ```
 
-### `ModelSelectorOption`
+<a id="jcode-ui-modelselectoroption"></a>
 
-<!-- jcode-ui-modelselectoroption -->
+### `ModelSelectorOption`
 
 `interface` · `packages/jcode-ui/src/components/ModelSelector.tsx`
 
@@ -2220,9 +1456,9 @@ export interface ModelSelectorOption {
 }
 ```
 
-### `ModelSelectorProps`
+<a id="jcode-ui-modelselectorprops"></a>
 
-<!-- jcode-ui-modelselectorprops -->
+### `ModelSelectorProps`
 
 `interface` · `packages/jcode-ui/src/components/ModelSelector.tsx`
 
@@ -2239,9 +1475,41 @@ export interface ModelSelectorProps {
 }
 ```
 
-### `ReasoningProps`
+<a id="jcode-ui-pendingattachmentlistprops"></a>
 
-<!-- jcode-ui-reasoningprops -->
+### `PendingAttachmentListProps`
+
+`interface` · `packages/jcode-ui/src/components/Attachment.tsx`
+
+```ts
+export interface PendingAttachmentListProps {
+  items: PendingAttachmentItem[]
+  /** Image tile size in px. Default 56. */
+  size?: number
+  className?: string
+}
+```
+
+<a id="jcode-ui-quoteselectionprops"></a>
+
+### `QuoteSelectionProps`
+
+`interface` · `packages/jcode-ui/src/components/QuoteSelection.tsx`
+
+```ts
+export interface QuoteSelectionProps {
+  /** Receives the selected plain text when the user clicks Quote. */
+  onQuote: (text: string) => void
+  /** Button label. Default "Quote". */
+  label?: string
+  /** Max characters captured. Default 2000. */
+  maxLength?: number
+}
+```
+
+<a id="jcode-ui-reasoningprops"></a>
+
+### `ReasoningProps`
 
 `interface` · `packages/jcode-ui/src/components/Reasoning.tsx`
 
@@ -2256,9 +1524,9 @@ export interface ReasoningProps {
 }
 ```
 
-### `RuntimeTaskListProps`
+<a id="jcode-ui-runtimetasklistprops"></a>
 
-<!-- jcode-ui-runtimetasklistprops -->
+### `RuntimeTaskListProps`
 
 `interface` · `packages/jcode-ui/src/components/TaskList.tsx`
 
@@ -2271,9 +1539,9 @@ export interface RuntimeTaskListProps {
 }
 ```
 
-### `SourcesProps`
+<a id="jcode-ui-sourcesprops"></a>
 
-<!-- jcode-ui-sourcesprops -->
+### `SourcesProps`
 
 `interface` · `packages/jcode-ui/src/components/Sources.tsx`
 
@@ -2283,9 +1551,9 @@ export interface SourcesProps {
 }
 ```
 
-### `SpeechInputProps`
+<a id="jcode-ui-speechinputprops"></a>
 
-<!-- jcode-ui-speechinputprops -->
+### `SpeechInputProps`
 
 `interface` · `packages/jcode-ui/src/voice/SpeechInput.tsx`
 
@@ -2305,9 +1573,9 @@ export interface SpeechInputProps {
 }
 ```
 
-### `StackFrame`
+<a id="jcode-ui-stackframe"></a>
 
-<!-- jcode-ui-stackframe -->
+### `StackFrame`
 
 `interface` · `packages/jcode-ui/src/toolRenderers/stackTrace.tsx`
 
@@ -2323,9 +1591,9 @@ export interface StackFrame {
 }
 ```
 
-### `StackTrace`
+<a id="jcode-ui-stacktrace"></a>
 
-<!-- jcode-ui-stacktrace -->
+### `StackTrace`
 
 `interface` · `packages/jcode-ui/src/toolRenderers/stackTrace.tsx`
 
@@ -2337,9 +1605,9 @@ export interface StackTrace {
 }
 ```
 
-### `SuggestionItem`
+<a id="jcode-ui-suggestionitem"></a>
 
-<!-- jcode-ui-suggestionitem -->
+### `SuggestionItem`
 
 `interface` · `packages/jcode-ui/src/components/Suggestions.tsx`
 
@@ -2354,9 +1622,9 @@ export interface SuggestionItem {
 }
 ```
 
-### `SuggestionsProps`
+<a id="jcode-ui-suggestionsprops"></a>
 
-<!-- jcode-ui-suggestionsprops -->
+### `SuggestionsProps`
 
 `interface` · `packages/jcode-ui/src/components/Suggestions.tsx`
 
@@ -2372,9 +1640,43 @@ export interface SuggestionsProps {
 }
 ```
 
-### `TestCase`
+<a id="jcode-ui-tasklistitemprops"></a>
 
-<!-- jcode-ui-testcase -->
+### `TaskListItemProps`
+
+`interface` · `packages/jcode-ui/src/components/TaskList.tsx`
+
+```ts
+export interface TaskListItemProps {
+  item: TodoItem
+  compact?: boolean
+}
+```
+
+<a id="jcode-ui-tasklistprops"></a>
+
+### `TaskListProps`
+
+`interface` · `packages/jcode-ui/src/components/TaskList.tsx`
+
+```ts
+export interface TaskListProps {
+  /** Ordered task items. */
+  items: TodoItem[]
+  /** Optional heading shown above the progress bar. */
+  title?: string
+  /** Denser rows + smaller type for embedding in tool cards. */
+  compact?: boolean
+  /** Hide the top progress bar. Default false. */
+  hideProgress?: boolean
+  /** Extra classes on the root. */
+  className?: string
+}
+```
+
+<a id="jcode-ui-testcase"></a>
+
+### `TestCase`
 
 `interface` · `packages/jcode-ui/src/toolRenderers/testResults.tsx`
 
@@ -2387,9 +1689,9 @@ export interface TestCase {
 }
 ```
 
-### `TestSummary`
+<a id="jcode-ui-testsummary"></a>
 
-<!-- jcode-ui-testsummary -->
+### `TestSummary`
 
 `interface` · `packages/jcode-ui/src/toolRenderers/testResults.tsx`
 
@@ -2403,9 +1705,24 @@ export interface TestSummary {
 }
 ```
 
-### `ThreadProps`
+<a id="jcode-ui-threadlistprops"></a>
 
-<!-- jcode-ui-threadprops -->
+### `ThreadListProps`
+
+`interface` · `packages/jcode-ui/src/components/ThreadList.tsx`
+
+```ts
+export interface ThreadListProps {
+  /** Optional small header label above the list (e.g. "Sessions"). */
+  title?: string
+  /** Extra class on the root (composed after `jcode-threadlist`). */
+  className?: string
+}
+```
+
+<a id="jcode-ui-threadprops"></a>
+
+### `ThreadProps`
 
 `interface` · `packages/jcode-ui/src/components/Thread.tsx`
 
@@ -2427,9 +1744,9 @@ export interface ThreadProps {
 }
 ```
 
-### `ThreadWelcomeProps`
+<a id="jcode-ui-threadwelcomeprops"></a>
 
-<!-- jcode-ui-threadwelcomeprops -->
+### `ThreadWelcomeProps`
 
 `interface` · `packages/jcode-ui/src/components/ThreadWelcome.tsx`
 
@@ -2446,9 +1763,9 @@ export interface ThreadWelcomeProps {
 }
 ```
 
-### `ToolCallCardProps`
+<a id="jcode-ui-toolcallcardprops"></a>
 
-<!-- jcode-ui-toolcallcardprops -->
+### `ToolCallCardProps`
 
 `interface` · `packages/jcode-ui/src/components/ToolCallCard.tsx`
 
@@ -2466,9 +1783,9 @@ export interface ToolCallCardProps {
 }
 ```
 
-### `ToolCallCardSlots`
+<a id="jcode-ui-toolcallcardslots"></a>
 
-<!-- jcode-ui-toolcallcardslots -->
+### `ToolCallCardSlots`
 
 `interface` · `packages/jcode-ui/src/components/ToolCallCard.tsx`
 
@@ -2484,9 +1801,9 @@ export interface ToolCallCardSlots {
 }
 ```
 
-### `ToolGraph`
+<a id="jcode-ui-toolgraph"></a>
 
-<!-- jcode-ui-toolgraph -->
+### `ToolGraph`
 
 `interface` · `packages/jcode-ui/src/canvas/toolTreeToGraph.ts`
 
@@ -2497,9 +1814,9 @@ export interface ToolGraph {
 }
 ```
 
-### `ToolRegistryProviderProps`
+<a id="jcode-ui-toolregistryproviderprops"></a>
 
-<!-- jcode-ui-toolregistryproviderprops -->
+### `ToolRegistryProviderProps`
 
 `interface` · `packages/jcode-ui/src/components/ToolRegistryContext.tsx`
 
@@ -2511,9 +1828,9 @@ export interface ToolRegistryProviderProps {
 }
 ```
 
-### `ToolTreeToGraphOptions`
+<a id="jcode-ui-tooltreetographoptions"></a>
 
-<!-- jcode-ui-tooltreetographoptions -->
+### `ToolTreeToGraphOptions`
 
 `interface` · `packages/jcode-ui/src/canvas/toolTreeToGraph.ts`
 
@@ -2528,9 +1845,9 @@ export interface ToolTreeToGraphOptions {
 }
 ```
 
-### `TranscriptionProps`
+<a id="jcode-ui-transcriptionprops"></a>
 
-<!-- jcode-ui-transcriptionprops -->
+### `TranscriptionProps`
 
 `interface` · `packages/jcode-ui/src/voice/Transcription.tsx`
 
@@ -2545,9 +1862,9 @@ export interface TranscriptionProps {
 }
 ```
 
-### `TranscriptSegment`
+<a id="jcode-ui-transcriptsegment"></a>
 
-<!-- jcode-ui-transcriptsegment -->
+### `TranscriptSegment`
 
 `interface` · `packages/jcode-ui/src/voice/Transcription.tsx`
 
@@ -2564,9 +1881,9 @@ export interface TranscriptSegment {
 }
 ```
 
-### `VoiceVisualizerProps`
+<a id="jcode-ui-voicevisualizerprops"></a>
 
-<!-- jcode-ui-voicevisualizerprops -->
+### `VoiceVisualizerProps`
 
 `interface` · `packages/jcode-ui/src/voice/VoiceVisualizer.tsx`
 
@@ -2582,9 +1899,9 @@ export interface VoiceVisualizerProps {
 }
 ```
 
-### `WorkflowCanvasProps`
+<a id="jcode-ui-workflowcanvasprops"></a>
 
-<!-- jcode-ui-workflowcanvasprops -->
+### `WorkflowCanvasProps`
 
 `interface` · `packages/jcode-ui/src/canvas/WorkflowCanvas.tsx`
 
@@ -2598,29 +1915,21 @@ export interface WorkflowCanvasProps extends ReactFlowProps {
 }
 ```
 
-### `CodeBlockHook`
+<a id="jcode-ui-codeblockhook"></a>
 
-<!-- jcode-ui-codeblockhook -->
+### `CodeBlockHook`
 
 `type` · `packages/jcode-ui/src/lib/markdown.ts`
 
-Raw (un-highlighted) code text. */
-  code: string
-  /** First token of the info string, e.g. `ts` for ```` ```ts title=a.ts ````. */
-  lang: string
-  /** Parsed filename (from `title=` or `lang:file` conventions), or ''. */
-  filename: string
-}
-
-/** Return HTML to fully replace the code block, or `null` to fall through.
+Return HTML to fully replace the code block, or `null` to fall through.
 
 ```ts
 export type CodeBlockHook = (args: CodeBlockHookArgs) => string | null;
 ```
 
-### `JcodeStepData`
+<a id="jcode-ui-jcodestepdata"></a>
 
-<!-- jcode-ui-jcodestepdata -->
+### `JcodeStepData`
 
 `type` · `packages/jcode-ui/src/canvas/WorkflowNode.tsx`
 
@@ -2638,56 +1947,33 @@ export type JcodeStepData = {
 };
 ```
 
-### `JcodeStepNode`
+<a id="jcode-ui-jcodestepnode"></a>
 
-<!-- jcode-ui-jcodestepnode -->
+### `JcodeStepNode`
 
 `type` · `packages/jcode-ui/src/canvas/WorkflowNode.tsx`
 
-Icon slot — a string (emoji / glyph) or any React node. */
-  icon?: ReactNode
-  status?: JcodeStepStatus
-}
-
-/** Concrete node type for this renderer.
+Concrete node type for this renderer.
 
 ```ts
 export type JcodeStepNode = Node<JcodeStepData, 'jcodeStep'>;
 ```
 
-### `JcodeStepStatus`
+<a id="jcode-ui-jcodestepstatus"></a>
 
-<!-- jcode-ui-jcodestepstatus -->
+### `JcodeStepStatus`
 
 `type` · `packages/jcode-ui/src/canvas/WorkflowNode.tsx`
 
-WorkflowNode — the custom `jcodeStep` React Flow node.
-
-A token-driven card (surface / radius-lg / shadow-sm) with an icon slot,
-title, subtitle and a status affordance. Status drives the frame:
-  - running → primary border, breathing pulse
-  - error   → destructive border + tint
-  - done / pending → neutral
-
-Props are typed as the base `NodeProps` (not `NodeProps<JcodeStepNode>`) so
-the component stays assignable to React Flow's `NodeTypes` without a cast;
-`data` is narrowed internally. Styling lives in `./canvas.css`.
-/
-
-import { memo } from 'react'
-import type { ReactNode } from 'react'
-import { Handle, Position } from '@xyflow/react'
-import type { Node, NodeProps, NodeTypes } from '@xyflow/react'
-
-/** Lifecycle of a step; a superset of the runtime `ToolStatus`.
+Lifecycle of a step; a superset of the runtime `ToolStatus`.
 
 ```ts
 export type JcodeStepStatus = 'pending' | 'running' | 'done' | 'error';
 ```
 
-### `MathRenderer`
+<a id="jcode-ui-mathrenderer"></a>
 
-<!-- jcode-ui-mathrenderer -->
+### `MathRenderer`
 
 `type` · `packages/jcode-ui/src/lib/markdown.ts`
 
@@ -2697,9 +1983,9 @@ Render TeX to an HTML string. `displayMode` = block (`$$…$$`) vs inline (`$…
 export type MathRenderer = (tex: string, displayMode: boolean) => string;
 ```
 
-### `SpeechInputStatus`
+<a id="jcode-ui-speechinputstatus"></a>
 
-<!-- jcode-ui-speechinputstatus -->
+### `SpeechInputStatus`
 
 `type` · `packages/jcode-ui/src/voice/SpeechInput.tsx`
 
@@ -2713,6 +1999,7 @@ export type SpeechInputStatus = 'idle' | 'listening' | 'recording' | 'error';
 |--------|------|--------|
 | [`ToolRendererRegistry`](#jcode-ui-core-toolrendererregistry) | class | `packages/jcode-ui-core/src/adapters/index.ts` |
 | [`ApprovalBlock`](#jcode-ui-core-approvalblock) | function | `packages/jcode-ui-core/src/primitives/ApprovalBlock.tsx` |
+| [`AskUserBlock`](#jcode-ui-core-askuserblock) | function | `packages/jcode-ui-core/src/primitives/AskUserBlock.tsx` |
 | [`createAGUIRuntime`](#jcode-ui-core-createaguiruntime) | function | `packages/jcode-ui-core/src/runtime/aguiRuntime.ts` |
 | [`createExternalStoreRuntime`](#jcode-ui-core-createexternalstoreruntime) | function | `packages/jcode-ui-core/src/runtime/externalStore.ts` |
 | [`createFetchTransport`](#jcode-ui-core-createfetchtransport) | function | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
@@ -2752,6 +2039,7 @@ export type SpeechInputStatus = 'idle' | 'listening' | 'recording' | 'error';
 | [`AGUIPatchOp`](#jcode-ui-core-aguipatchop) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`AGUIRunInput`](#jcode-ui-core-aguiruninput) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`AGUIRuntime`](#jcode-ui-core-aguiruntime) | interface | `packages/jcode-ui-core/src/runtime/aguiRuntime.ts` |
+| [`AGUIRuntimeOptions`](#jcode-ui-core-aguiruntimeoptions) | interface | `packages/jcode-ui-core/src/runtime/aguiRuntime.ts` |
 | [`AGUIToolCall`](#jcode-ui-core-aguitoolcall) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`Approval`](#jcode-ui-core-approval) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`ApprovalBlockProps`](#jcode-ui-core-approvalblockprops) | interface | `packages/jcode-ui-core/src/primitives/ApprovalBlock.tsx` |
@@ -2759,43 +2047,73 @@ export type SpeechInputStatus = 'idle' | 'listening' | 'recording' | 'error';
 | [`ApprovalDecisionActions`](#jcode-ui-core-approvaldecisionactions) | interface | `packages/jcode-ui-core/src/primitives/ApprovalBlock.tsx` |
 | [`ApprovalOption`](#jcode-ui-core-approvaloption) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`AskUserAnswer`](#jcode-ui-core-askuseranswer) | interface | `packages/jcode-ui-core/src/types/index.ts` |
+| [`AskUserBlockProps`](#jcode-ui-core-askuserblockprops) | interface | `packages/jcode-ui-core/src/primitives/AskUserBlock.tsx` |
+| [`AskUserBlockRenderSlots`](#jcode-ui-core-askuserblockrenderslots) | interface | `packages/jcode-ui-core/src/primitives/AskUserBlock.tsx` |
 | [`AskUserControls`](#jcode-ui-core-askusercontrols) | interface | `packages/jcode-ui-core/src/primitives/AskUserBlock.tsx` |
 | [`AskUserOption`](#jcode-ui-core-askuseroption) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`AskUserQuestion`](#jcode-ui-core-askuserquestion) | interface | `packages/jcode-ui-core/src/types/index.ts` |
+| [`AskUserState`](#jcode-ui-core-askuserstate) | interface | `packages/jcode-ui-core/src/primitives/AskUserBlock.tsx` |
 | [`AttachmentAdapter`](#jcode-ui-core-attachmentadapter) | interface | `packages/jcode-ui-core/src/primitives/attachmentAdapter.ts` |
 | [`ChatImage`](#jcode-ui-core-chatimage) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`ChatRuntime`](#jcode-ui-core-chatruntime) | interface | `packages/jcode-ui-core/src/runtime/index.ts` |
 | [`ComposerHandle`](#jcode-ui-core-composerhandle) | interface | `packages/jcode-ui-core/src/primitives/Composer.tsx` |
 | [`ComposerProps`](#jcode-ui-core-composerprops) | interface | `packages/jcode-ui-core/src/primitives/Composer.tsx` |
 | [`ComposerRenderSlots`](#jcode-ui-core-composerrenderslots) | interface | `packages/jcode-ui-core/src/primitives/Composer.tsx` |
+| [`CustomEvent`](#jcode-ui-core-customevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`DictationState`](#jcode-ui-core-dictationstate) | interface | `packages/jcode-ui-core/src/primitives/Composer.tsx` |
 | [`ExploringGroup`](#jcode-ui-core-exploringgroup) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`ExportMarkdownOptions`](#jcode-ui-core-exportmarkdownoptions) | interface | `packages/jcode-ui-core/src/export/markdown.ts` |
+| [`ExternalStoreRuntimeOptions`](#jcode-ui-core-externalstoreruntimeoptions) | interface | `packages/jcode-ui-core/src/runtime/externalStore.ts` |
 | [`Goal`](#jcode-ui-core-goal) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`InlineImageAdapterOptions`](#jcode-ui-core-inlineimageadapteroptions) | interface | `packages/jcode-ui-core/src/primitives/attachmentAdapter.ts` |
 | [`Message`](#jcode-ui-core-message) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`MessageActions`](#jcode-ui-core-messageactions) | interface | `packages/jcode-ui-core/src/primitives/MessageView.tsx` |
 | [`MessageSource`](#jcode-ui-core-messagesource) | interface | `packages/jcode-ui-core/src/types/index.ts` |
+| [`MessagesSnapshotEvent`](#jcode-ui-core-messagessnapshotevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`MessageVersion`](#jcode-ui-core-messageversion) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`MessageViewProps`](#jcode-ui-core-messageviewprops) | interface | `packages/jcode-ui-core/src/primitives/MessageView.tsx` |
+| [`MessageViewRenderSlots`](#jcode-ui-core-messageviewrenderslots) | interface | `packages/jcode-ui-core/src/primitives/MessageView.tsx` |
+| [`MockRuntimeOptions`](#jcode-ui-core-mockruntimeoptions) | interface | `packages/jcode-ui-core/src/runtime/mockRuntime.ts` |
 | [`MockThreadStore`](#jcode-ui-core-mockthreadstore) | interface | `packages/jcode-ui-core/src/threads/store.ts` |
 | [`PendingAttachment`](#jcode-ui-core-pendingattachment) | interface | `packages/jcode-ui-core/src/primitives/attachmentAdapter.ts` |
 | [`PendingAttachmentItem`](#jcode-ui-core-pendingattachmentitem) | interface | `packages/jcode-ui-core/src/primitives/Composer.tsx` |
 | [`QueuedMessage`](#jcode-ui-core-queuedmessage) | interface | `packages/jcode-ui-core/src/types/index.ts` |
+| [`RawEvent`](#jcode-ui-core-rawevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
+| [`ReasoningMessageChunkEvent`](#jcode-ui-core-reasoningmessagechunkevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
+| [`ReasoningMessageContentEvent`](#jcode-ui-core-reasoningmessagecontentevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
+| [`RunErrorEvent`](#jcode-ui-core-runerrorevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
+| [`RunFinishedEvent`](#jcode-ui-core-runfinishedevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
+| [`RunStartedEvent`](#jcode-ui-core-runstartedevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`RuntimeActions`](#jcode-ui-core-runtimeactions) | interface | `packages/jcode-ui-core/src/runtime/index.ts` |
+| [`RuntimeProviderProps`](#jcode-ui-core-runtimeproviderprops) | interface | `packages/jcode-ui-core/src/runtime/context.tsx` |
 | [`RuntimeState`](#jcode-ui-core-runtimestate) | interface | `packages/jcode-ui-core/src/runtime/index.ts` |
+| [`SlashCommand`](#jcode-ui-core-slashcommand) | interface | `packages/jcode-ui-core/src/primitives/Composer.tsx` |
 | [`SlashMenuState`](#jcode-ui-core-slashmenustate) | interface | `packages/jcode-ui-core/src/primitives/Composer.tsx` |
+| [`StateDeltaEvent`](#jcode-ui-core-statedeltaevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
+| [`StateSnapshotEvent`](#jcode-ui-core-statesnapshotevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
+| [`StepFinishedEvent`](#jcode-ui-core-stepfinishedevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
+| [`StepStartedEvent`](#jcode-ui-core-stepstartedevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`TaskContextBreakdown`](#jcode-ui-core-taskcontextbreakdown) | interface | `packages/jcode-ui-core/src/types/index.ts` |
+| [`TextMessageChunkEvent`](#jcode-ui-core-textmessagechunkevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
+| [`TextMessageContentEvent`](#jcode-ui-core-textmessagecontentevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
+| [`TextMessageEndEvent`](#jcode-ui-core-textmessageendevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
+| [`TextMessageStartEvent`](#jcode-ui-core-textmessagestartevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`ThreadListState`](#jcode-ui-core-threadliststate) | interface | `packages/jcode-ui-core/src/threads/store.ts` |
 | [`ThreadProps`](#jcode-ui-core-threadprops) | interface | `packages/jcode-ui-core/src/primitives/Thread.tsx` |
 | [`ThreadRenderSlots`](#jcode-ui-core-threadrenderslots) | interface | `packages/jcode-ui-core/src/primitives/Thread.tsx` |
 | [`ThreadStore`](#jcode-ui-core-threadstore) | interface | `packages/jcode-ui-core/src/threads/store.ts` |
 | [`ThreadStoreActions`](#jcode-ui-core-threadstoreactions) | interface | `packages/jcode-ui-core/src/threads/store.ts` |
+| [`ThreadStoreProviderProps`](#jcode-ui-core-threadstoreproviderprops) | interface | `packages/jcode-ui-core/src/threads/context.tsx` |
 | [`ThreadSummary`](#jcode-ui-core-threadsummary) | interface | `packages/jcode-ui-core/src/threads/store.ts` |
 | [`TodoItem`](#jcode-ui-core-todoitem) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`TokenSnapshot`](#jcode-ui-core-tokensnapshot) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`ToolCall`](#jcode-ui-core-toolcall) | interface | `packages/jcode-ui-core/src/types/index.ts` |
+| [`ToolCallArgsEvent`](#jcode-ui-core-toolcallargsevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
+| [`ToolCallChunkEvent`](#jcode-ui-core-toolcallchunkevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`ToolCallContextValue`](#jcode-ui-core-toolcallcontextvalue) | interface | `packages/jcode-ui-core/src/primitives/ToolCallView.tsx` |
+| [`ToolCallEndEvent`](#jcode-ui-core-toolcallendevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
+| [`ToolCallResultEvent`](#jcode-ui-core-toolcallresultevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
+| [`ToolCallStartEvent`](#jcode-ui-core-toolcallstartevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`ToolCallViewProps`](#jcode-ui-core-toolcallviewprops) | interface | `packages/jcode-ui-core/src/primitives/ToolCallView.tsx` |
 | [`ToolDisplayInfo`](#jcode-ui-core-tooldisplayinfo) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`ToolMeta`](#jcode-ui-core-toolmeta) | interface | `packages/jcode-ui-core/src/types/index.ts` |
@@ -2816,10 +2134,11 @@ export type SpeechInputStatus = 'idle' | 'listening' | 'recording' | 'error';
 | [`ThreadItem`](#jcode-ui-core-threaditem) | type | `packages/jcode-ui-core/src/types/index.ts` |
 | [`ThreadItemKind`](#jcode-ui-core-threaditemkind) | type | `packages/jcode-ui-core/src/types/index.ts` |
 | [`ToolRenderer`](#jcode-ui-core-toolrenderer) | type | `packages/jcode-ui-core/src/adapters/index.ts` |
+| [`ToolStatus`](#jcode-ui-core-toolstatus) | type | `packages/jcode-ui-core/src/types/index.ts` |
+
+<a id="jcode-ui-core-toolrendererregistry"></a>
 
 ### `ToolRendererRegistry`
-
-<!-- jcode-ui-core-toolrendererregistry -->
 
 `class` · `packages/jcode-ui-core/src/adapters/index.ts`
 
@@ -2870,9 +2189,9 @@ export class ToolRendererRegistry {
 }
 ```
 
-### `ApprovalBlock`
+<a id="jcode-ui-core-approvalblock"></a>
 
-<!-- jcode-ui-core-approvalblock -->
+### `ApprovalBlock`
 
 `function` · `packages/jcode-ui-core/src/primitives/ApprovalBlock.tsx`
 
@@ -2880,9 +2199,19 @@ export class ToolRendererRegistry {
 export function ApprovalBlock({ approval, className, renderPending, renderResolved }: ApprovalBlockProps): ReactNode { … }
 ```
 
-### `createAGUIRuntime`
+<a id="jcode-ui-core-askuserblock"></a>
 
-<!-- jcode-ui-core-createaguiruntime -->
+### `AskUserBlock`
+
+`function` · `packages/jcode-ui-core/src/primitives/AskUserBlock.tsx`
+
+```ts
+export function AskUserBlock({ tool, className, renderPending, renderResolved }: AskUserBlockProps): ReactNode { … }
+```
+
+<a id="jcode-ui-core-createaguiruntime"></a>
+
+### `createAGUIRuntime`
 
 `function` · `packages/jcode-ui-core/src/runtime/aguiRuntime.ts`
 
@@ -2890,41 +2219,12 @@ export function ApprovalBlock({ approval, className, renderPending, renderResolv
 export function createAGUIRuntime(options: AGUIRuntimeOptions): AGUIRuntime { … }
 ```
 
-### `createExternalStoreRuntime`
+<a id="jcode-ui-core-createexternalstoreruntime"></a>
 
-<!-- jcode-ui-core-createexternalstoreruntime -->
+### `createExternalStoreRuntime`
 
 `function` · `packages/jcode-ui-core/src/runtime/externalStore.ts`
 
-ExternalStoreRuntime — wrap any Redux-shaped external store as a ChatRuntime.
-
-The host store holds the *full* app state (e.g. an RTK root state with many
-slices). We select just the `RuntimeState` slice out of it via a provided
-selector, and bind the action callbacks. The resulting `ChatRuntime` is what
-jcode-ui components consume.
-
-Snapshot caching: the host store's state reference changes only when a reducer
-dispatches. We cache the normalized RuntimeState keyed on that raw reference,
-so `getState()` returns a stable identity between dispatches — a hard
-requirement for React's `useSyncExternalStore` (which loops otherwise).
-/
-
-import type { ChatRuntime, PartialRuntimeState, RuntimeActions } from './index.js'
-import { normalizeState } from './index.js'
-
-export interface ExternalStoreRuntimeOptions<THostState> {
-  /** The external store. Must expose Redux-compatible getState/subscribe. */
-  store: {
-    getState: () => THostState
-    subscribe: (listener: () => void) => () => void
-  }
-  /** Project the host state down to a (possibly partial) RuntimeState. */
-  select: (state: THostState) => PartialRuntimeState
-  /** Action bag. Identity should be stable across renders. */
-  actions: RuntimeActions
-}
-
-/**
 Wrap an external store as a ChatRuntime. The returned object's `getState`
 always returns a fully-populated RuntimeState (missing slices defaulted), and
 returns the SAME object reference between dispatches (so it's safe to pass to
@@ -2936,70 +2236,12 @@ export function createExternalStoreRuntime<THostState>(
 ): ChatRuntime { … }
 ```
 
-### `createFetchTransport`
+<a id="jcode-ui-core-createfetchtransport"></a>
 
-<!-- jcode-ui-core-createfetchtransport -->
+### `createFetchTransport`
 
 `function` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
 
-Parse one SSE event block into an AG-UI event. Joins multiple `data:` lines,
-skips comments/other fields, and returns null for keep-alives, `[DONE]`
-sentinels, or unparseable JSON (so a single bad frame can't kill the stream).
-/
-function parseSSEBlock(block: string): AGUIEvent | null {
-  const dataLines: string[] = []
-  for (const line of block.split('\n')) {
-    if (line === '' || line.startsWith(':')) continue
-    if (line.startsWith('data:')) {
-      // A single leading space after the colon is part of the SSE framing.
-      dataLines.push(line.slice(5).replace(/^ /, ''))
-    }
-  }
-  if (dataLines.length === 0) return null
-  const payload = dataLines.join('\n')
-  if (payload === '[DONE]') return null
-  try {
-    return JSON.parse(payload) as AGUIEvent
-  } catch {
-    return null
-  }
-}
-
-/**
-Turn a byte stream of SSE frames into a stream of AG-UI events. Frame
-boundaries are blank lines; CRLF is normalized to LF first so the same
-splitter handles both line endings.
-/
-export async function* parseSSEStream(
-  body: ReadableStream<Uint8Array>,
-): AsyncGenerator<AGUIEvent> {
-  const reader = body.getReader()
-  const decoder = new TextDecoder()
-  let buf = ''
-  try {
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
-      let boundary = buf.indexOf('\n\n')
-      while (boundary !== -1) {
-        const ev = parseSSEBlock(buf.slice(0, boundary))
-        if (ev) yield ev
-        buf = buf.slice(boundary + 2)
-        boundary = buf.indexOf('\n\n')
-      }
-    }
-    const tail = (buf + decoder.decode()).trim()
-    if (tail) {
-      const ev = parseSSEBlock(tail)
-      if (ev) yield ev
-    }
-  } finally {
-    reader.releaseLock()
-  }
-}
-
-/**
 The default transport: HTTP POST + `text/event-stream`. Built from the
 runtime's `url`/`headers` and closed over so the `AGUITransport` it returns
 matches the `(input, signal)` shape tests use.
@@ -3011,19 +2253,12 @@ export function createFetchTransport(
 ): AGUITransport { … }
 ```
 
-### `createInlineImageAdapter`
+<a id="jcode-ui-core-createinlineimageadapter"></a>
 
-<!-- jcode-ui-core-createinlineimageadapter -->
+### `createInlineImageAdapter`
 
 `function` · `packages/jcode-ui-core/src/primitives/attachmentAdapter.ts`
 
-Reject images larger than this (bytes). Default 10MB. */
-  maxBytes?: number
-  /** `accept` for the picker. Default `image/*`. */
-  accept?: string
-}
-
-/**
 The default adapter: reads image files into base64 (the existing ChatImage
 behavior) and reports an error for non-images or oversize files. Keeps the
 `sendMessage(text, images)` fast-path working with zero host wiring.
@@ -3032,41 +2267,12 @@ behavior) and reports an error for non-images or oversize files. Keeps the
 export function createInlineImageAdapter(options: InlineImageAdapterOptions = {}): AttachmentAdapter { … }
 ```
 
-### `createMockRuntime`
+<a id="jcode-ui-core-createmockruntime"></a>
 
-<!-- jcode-ui-core-createmockruntime -->
+### `createMockRuntime`
 
 `function` · `packages/jcode-ui-core/src/runtime/mockRuntime.ts`
 
-MockRuntime — a self-contained, scriptable ChatRuntime for demos, docs, and
-tests. No backend required: you feed it a "script" of items + a streaming
-text fragment sequence, and it emits them on a timer.
-/
-
-import type { ChatRuntime, PartialRuntimeState, RuntimeActions, RuntimeState } from './index.js'
-import { normalizeState } from './index.js'
-import type { ThreadItem } from '../types/index.js'
-
-export interface MockRuntimeOptions {
-  /** Initial items. */
-  items?: ThreadItem[]
-  /** Initial isRunning flag. */
-  isRunning?: boolean
-  /** Initial full/partial runtime state (overrides items/isRunning when set). */
-  state?: PartialRuntimeState
-  /** Captured-action handlers (defaults are no-ops that record to `.calls`). */
-  actions?: Partial<RuntimeActions>
-}
-
-function maxSeq(items: ThreadItem[]): number {
-  let m = 0
-  for (const i of items) {
-    if (i.seq > m) m = i.seq
-  }
-  return m
-}
-
-/**
 Create a ChatRuntime backed by an in-memory store with pub/sub. Exposes
 imperative mutators (`setItems`, `push`, `appendText`, `setRunning`, `patchState`)
 so a script driver (or a test / docs demo) can evolve the state over time.
@@ -3075,30 +2281,12 @@ so a script driver (or a test / docs demo) can evolve the state over time.
 export function createMockRuntime(opts: MockRuntimeOptions = {}): ChatRuntime & { … }
 ```
 
-### `createMockThreadStore`
+<a id="jcode-ui-core-createmockthreadstore"></a>
 
-<!-- jcode-ui-core-createmockthreadstore -->
+### `createMockThreadStore`
 
 `function` · `packages/jcode-ui-core/src/threads/store.ts`
 
-Replace the whole thread array. */
-  setThreads: (threads: ThreadSummary[]) => void
-  /** Merge a partial state patch (threads/activeId/loading). */
-  patchState: (partial: Partial<ThreadListState>) => void
-  /** Recorded action invocations, for test assertions. */
-  calls: { action: string; args: unknown[] }[]
-}
-
-function normalizeSeed(seed: MockThreadStoreSeed | undefined): ThreadListState {
-  if (Array.isArray(seed)) return { threads: seed }
-  return {
-    threads: seed?.threads ?? [],
-    activeId: seed?.activeId,
-    loading: seed?.loading,
-  }
-}
-
-/**
 Create an in-memory `ThreadStore` with every action wired to real mutations.
 Ideal for demos, docs, Storybook, and tests — no host store required.
 
@@ -3112,56 +2300,21 @@ Ideal for demos, docs, Storybook, and tests — no host store required.
 export function createMockThreadStore(seed?: MockThreadStoreSeed): MockThreadStore { … }
 ```
 
-### `createToolRendererRegistry`
+<a id="jcode-ui-core-createtoolrendererregistry"></a>
 
-<!-- jcode-ui-core-createtoolrendererregistry -->
+### `createToolRendererRegistry`
 
 `function` · `packages/jcode-ui-core/src/adapters/index.ts`
 
-Register a renderer for one or more tool names (later writes win). */
-  register(name: string, renderer: ToolRenderer): this
-  register(names: string[], renderer: ToolRenderer): this
-  register(nameOrNames: string | string[], renderer: ToolRenderer): this {
-    const names = Array.isArray(nameOrNames) ? nameOrNames : [nameOrNames]
-    for (const n of names) this.renderers.set(n, renderer)
-    return this
-  }
-
-  /** Register a batch of { name → renderer } entries. */
-  registerAll(entries: Record<string, ToolRenderer>): this {
-    for (const [name, renderer] of Object.entries(entries)) {
-      this.renderers.set(name, renderer)
-    }
-    return this
-  }
-
-  /** Set the renderer used when no name-specific match exists. */
-  setFallback(renderer: ToolRenderer): this {
-    this.fallback = renderer
-    return this
-  }
-
-  /** Look up a renderer by tool name, falling back if absent. Returns null
- only when nothing is registered AND no fallback is set. */
-  get(name: string): ToolRenderer | null {
-    return this.renderers.get(name) ?? this.fallback
-  }
-
-  /** True if a name-specific renderer is registered. */
-  has(name: string): boolean {
-    return this.renderers.has(name)
-  }
-}
-
-/** Create a fresh registry. Convenience over `new` for chained registration.
+Create a fresh registry. Convenience over `new` for chained registration.
 
 ```ts
 export function createToolRendererRegistry(): ToolRendererRegistry { … }
 ```
 
-### `exportThreadMarkdown`
+<a id="jcode-ui-core-exportthreadmarkdown"></a>
 
-<!-- jcode-ui-core-exportthreadmarkdown -->
+### `exportThreadMarkdown`
 
 `function` · `packages/jcode-ui-core/src/export/markdown.ts`
 
@@ -3169,9 +2322,9 @@ export function createToolRendererRegistry(): ToolRendererRegistry { … }
 exportThreadMarkdown(items: ThreadItem[], opts: ExportMarkdownOptions = {}): string { … }
 ```
 
-### `groupExploringTimeline`
+<a id="jcode-ui-core-groupexploringtimeline"></a>
 
-<!-- jcode-ui-core-groupexploringtimeline -->
+### `groupExploringTimeline`
 
 `function` · `packages/jcode-ui-core/src/timeline/groupExploring.ts`
 
@@ -3182,84 +2335,63 @@ Non-tool items and non-collapsible tools always break a group.
 export function groupExploringTimeline(items: ThreadItem[]): ThreadItem[] { … }
 ```
 
-### `isApprovalItem`
+<a id="jcode-ui-core-isapprovalitem"></a>
 
-<!-- jcode-ui-core-isapprovalitem -->
+### `isApprovalItem`
 
 `function` · `packages/jcode-ui-core/src/types/index.ts`
 
 ```ts
-export function isApprovalItem(i: ThreadItem): i is Extract<ThreadItem, { kind: 'approval' }> { … }
+export function isApprovalItem(i: ThreadItem): i is Extract<ThreadItem, { … }
 ```
+
+<a id="jcode-ui-core-iscollapsibletool"></a>
 
 ### `isCollapsibleTool`
 
-<!-- jcode-ui-core-iscollapsibletool -->
-
 `function` · `packages/jcode-ui-core/src/timeline/groupExploring.ts`
 
-Exploring-group coalescing for the chat timeline.
-
-Adjacent collapsible/read-only tool items collapse into one synthetic
-`exploring` ThreadItem. Mutating tools, agent text, and approvals break the
-group. Grouping is UI-only — tool-call ids and model boundaries are unchanged.
-/
-
-import type { ExploringGroup, ThreadItem, ToolCall, ToolStatus } from '../types/index.js'
-
-const COLLAPSIBLE_NAMES = new Set([
-  'read',
-  'grep',
-  'glob',
-  'todoread',
-  'load_skill',
-  'browser_snapshot',
-  'browser_screenshot',
-  'browser_read',
-  'browser_tabs',
-])
-
-/** True when a tool should join an Exploring/Explored group.
+True when a tool should join an Exploring/Explored group.
 
 ```ts
 export function isCollapsibleTool(tool: ToolCall): boolean { … }
 ```
 
-### `isExploringItem`
+<a id="jcode-ui-core-isexploringitem"></a>
 
-<!-- jcode-ui-core-isexploringitem -->
+### `isExploringItem`
 
 `function` · `packages/jcode-ui-core/src/types/index.ts`
 
 ```ts
-export function isExploringItem(i: ThreadItem): i is Extract<ThreadItem, { kind: 'exploring' }> { … }
+export function isExploringItem(i: ThreadItem): i is Extract<ThreadItem, { … }
 ```
 
-### `isMessageItem`
+<a id="jcode-ui-core-ismessageitem"></a>
 
-<!-- jcode-ui-core-ismessageitem -->
+### `isMessageItem`
 
 `function` · `packages/jcode-ui-core/src/types/index.ts`
 
 Type guard helpers (kept generic so consumers can narrow item arrays).
 
 ```ts
-export function isMessageItem(i: ThreadItem): i is Extract<ThreadItem, { kind: 'message' }> { … }
+export function isMessageItem(i: ThreadItem): i is Extract<ThreadItem, { … }
 ```
 
-### `isToolItem`
+<a id="jcode-ui-core-istoolitem"></a>
 
-<!-- jcode-ui-core-istoolitem -->
+### `isToolItem`
 
 `function` · `packages/jcode-ui-core/src/types/index.ts`
 
 ```ts
-export function isToolItem(i: ThreadItem): i is Extract<ThreadItem, { kind: 'tool' }> { … }
+export function isToolItem(i: ThreadItem): i is Extract<ThreadItem, { … }
 ```
 
-### `MessageView`
+<a id="jcode-ui-core-messageview"></a>
 
-<!-- jcode-ui-core-messageview -->
+### `MessageView`
 
 `function` · `packages/jcode-ui-core/src/primitives/MessageView.tsx`
 
@@ -3275,34 +2407,21 @@ export function MessageView({
 }: MessageViewProps): ReactNode { … }
 ```
 
-### `nextAttachmentId`
+<a id="jcode-ui-core-nextattachmentid"></a>
 
-<!-- jcode-ui-core-nextattachmentid -->
+### `nextAttachmentId`
 
 `function` · `packages/jcode-ui-core/src/primitives/attachmentAdapter.ts`
 
-`accept` attribute for the file picker (default falls back to `*​/*`). */
-  accept?: string
-  /**
-Ingest a file. `onProgress` (0–1) may be called any number of times before
-the promise settles. Resolve with `error` set for a handled failure.
-/
-  add(file: File, onProgress?: (p: number) => void): Promise<PendingAttachment>
-  /** Optional cleanup when an attachment is removed (e.g. delete an upload). */
-  remove?(id: string): void | Promise<void>
-}
-
-let idCounter = 0
-
-/** Monotonic, collision-resistant id for composer-assigned attachments.
+Monotonic, collision-resistant id for composer-assigned attachments.
 
 ```ts
 export function nextAttachmentId(): string { … }
 ```
 
-### `normalizeState`
+<a id="jcode-ui-core-normalizestate"></a>
 
-<!-- jcode-ui-core-normalizestate -->
+### `normalizeState`
 
 `function` · `packages/jcode-ui-core/src/runtime/index.ts`
 
@@ -3313,185 +2432,34 @@ Merge a partial state onto the default empty state. Missing slices get
 export function normalizeState(partial: PartialRuntimeState | undefined): RuntimeState { … }
 ```
 
-### `parseResolvedAnswers`
+<a id="jcode-ui-core-parseresolvedanswers"></a>
 
-<!-- jcode-ui-core-parseresolvedanswers -->
+### `parseResolvedAnswers`
 
 `function` · `packages/jcode-ui-core/src/primitives/AskUserBlock.tsx`
 
-Current selection map (question key → labels). */
-  selected: Record<string, string[]>
-  /** Current "Other" text map (question key → free text). */
-  other: Record<string, string>
-  /** Toggle an option. Honors multi_select. */
-  toggleOption: (question: AskUserQuestion, label: string) => void
-  /** Set the free-text value for a question. */
-  setOther: (question: AskUserQuestion, value: string) => void
-  /** Submit the current selections (no-op if nothing chosen per question). */
-  submit: () => void
-  /** Submit empty answers (skip). */
-  skip: () => void
-}
-
-export interface AskUserBlockRenderSlots {
-  /** Render the pending interactive card. */
-  renderPending?: (questions: AskUserQuestion[], controls: AskUserControls) => ReactNode
-  /** Render the resolved (replay) view. */
-  renderResolved?: (tool: ToolCall, answers: AskUserAnswer[]) => ReactNode
-}
-
-export interface AskUserBlockProps extends AskUserBlockRenderSlots {
-  tool: ToolCall
-  /** className passthrough. */
-  className?: string
-}
-
-const EMPTY_STATE: AskUserState = { selected: {}, other: {} }
-
-export function AskUserBlock({ tool, className, renderPending, renderResolved }: AskUserBlockProps): ReactNode {
-  const actions = useRuntimeActions()
-  const questions = useMemo(() => extractQuestions(tool), [tool])
-  const isPending = !!tool.askUserId && tool.status === 'running' && !tool.output
-
-  const [state, setState] = useState<AskUserState>(EMPTY_STATE)
-
-  const keyOf = useCallback((q: AskUserQuestion) => q.header ?? q.question, [])
-
-  const toggleOption = useCallback(
-    (q: AskUserQuestion, label: string) => {
-      const key = keyOf(q)
-      setState((s) => ({
-        ...s,
-        selected: q.multi_select
-          ? { ...s.selected, [key]: toggle(s.selected[key], label) }
-          : { ...s.selected, [key]: [label] },
-      }))
-    },
-    [keyOf],
-  )
-
-  const setOther = useCallback(
-    (q: AskUserQuestion, value: string) => {
-      const key = keyOf(q)
-      setState((s) => ({ ...s, other: { ...s.other, [key]: value } }))
-    },
-    [keyOf],
-  )
-
-  const submit = useCallback(() => {
-    const answers: AskUserAnswer[] = questions.map((q) => {
-      const key = keyOf(q)
-      const sel = state.selected[key] ?? []
-      const other = state.other[key] ?? ''
-      return {
-        question_header: key,
-        answer: sel.length > 0 ? sel.join(', ') : other,
-        selected: sel.length > 0 ? sel : undefined,
-      }
-    })
-    if (tool.askUserId) actions.submitAskUser(tool.askUserId, answers)
-  }, [actions, keyOf, questions, state, tool.askUserId])
-
-  const skip = useCallback(() => {
-    if (tool.askUserId) actions.submitAskUser(tool.askUserId, [])
-  }, [actions, tool.askUserId])
-
-  // Digit-key shortcuts (1-9) select an option for the first unanswered question.
-  useEffect(() => {
-    if (!isPending) return
-    function onKey(e: KeyboardEvent) {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-      const n = Number(e.key)
-      if (!Number.isInteger(n) || n < 1 || n > 9) return
-      const q = questions.find((qq) => (state.selected[keyOf(qq)]?.length ?? 0) === 0)
-      if (!q?.options || n > q.options.length) return
-      e.preventDefault()
-      toggleOption(q, q.options[n - 1].label)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [isPending, questions, state.selected, keyOf, toggleOption])
-
-  if (!isPending) {
-    const answers = parseResolvedAnswers(tool)
-    return <div data-jcode-ui="" className={className}>{renderResolved?.(tool, answers) ?? <DefaultResolved tool={tool} answers={answers} />}</div>
-  }
-
-  const controls: AskUserControls = {
-    selected: state.selected,
-    other: state.other,
-    toggleOption,
-    setOther,
-    submit,
-    skip,
-  }
-
-  return (
-    <div data-jcode-ui="" className={className} data-ask-user-id={tool.askUserId}>
-      {renderPending?.(questions, controls) ?? <DefaultPending questions={questions} controls={controls} />}
-    </div>
-  )
-}
-
-/** Extract the questions list from tool fields (with fallbacks). */
-function extractQuestions(tool: ToolCall): AskUserQuestion[] {
-  if (tool.askUserQuestions && tool.askUserQuestions.length > 0) return tool.askUserQuestions
-  try {
-    const parsed = JSON.parse(tool.args)
-    if (Array.isArray(parsed.questions)) return parsed.questions as AskUserQuestion[]
-    if (parsed.question) {
-      // legacy single-question shape
-      return [{ question: parsed.question, options: parsed.options ?? [] }]
-    }
-  } catch {
-    // ignore
-  }
-  return []
-}
-
-/** Best-effort parse of a resolved tool's output into answers (for replay).
+Best-effort parse of a resolved tool's output into answers (for replay).
 
 ```ts
 export function parseResolvedAnswers(tool: ToolCall): AskUserAnswer[] { … }
 ```
 
-### `RuntimeProvider`
+<a id="jcode-ui-core-runtimeprovider"></a>
 
-<!-- jcode-ui-core-runtimeprovider -->
+### `RuntimeProvider`
 
 `function` · `packages/jcode-ui-core/src/runtime/context.tsx`
 
-React binding for ChatRuntime: a Context provider + hooks that subscribe via
-`useSyncExternalStore` (the React 18 idiom for external stores — handles
-tearing and concurrent rendering). Selector memoization is layered on top
-with a ref cache so granular reads don't re-render on unrelated changes.
-
-Stability contract: the ChatRuntime's getState() MUST return a stable
-reference between dispatches (the ExternalStoreRuntime + MockRuntime both
-honor this by caching). Without it, useSyncExternalStore infinite-loops.
-/
-
-import { createContext, useContext, useMemo, useRef, useSyncExternalStore } from 'react'
-import type { ReactNode } from 'react'
-import type { ChatRuntime, RuntimeState } from './index.js'
-
-const RuntimeContext = createContext<ChatRuntime | null>(null)
-
-export interface RuntimeProviderProps {
-  runtime: ChatRuntime
-  children: ReactNode
-}
-
-/** Provide a ChatRuntime to a subtree. Components under it read state/actions
+Provide a ChatRuntime to a subtree. Components under it read state/actions
  via `useRuntimeState` / `useRuntimeSelector` / `useRuntimeActions`.
 
 ```ts
 export function RuntimeProvider({ runtime, children }: RuntimeProviderProps): ReactNode { … }
 ```
 
-### `summarizeExploringSteps`
+<a id="jcode-ui-core-summarizeexploringsteps"></a>
 
-<!-- jcode-ui-core-summarizeexploringsteps -->
+### `summarizeExploringSteps`
 
 `function` · `packages/jcode-ui-core/src/timeline/groupExploring.ts`
 
@@ -3501,9 +2469,9 @@ Summarize an exploring group into action lines (Read / Search / List …).
 export function summarizeExploringSteps(tools: ToolCall[]): { … }
 ```
 
-### `Thread`
+<a id="jcode-ui-core-thread"></a>
 
-<!-- jcode-ui-core-thread -->
+### `Thread`
 
 `function` · `packages/jcode-ui-core/src/primitives/Thread.tsx`
 
@@ -3524,42 +2492,21 @@ export function Thread({
 }: ThreadProps): ReactNode { … }
 ```
 
-### `ThreadStoreProvider`
+<a id="jcode-ui-core-threadstoreprovider"></a>
 
-<!-- jcode-ui-core-threadstoreprovider -->
+### `ThreadStoreProvider`
 
 `function` · `packages/jcode-ui-core/src/threads/context.tsx`
 
-React binding for `ThreadStore`: a Context provider + hooks that subscribe via
-`useSyncExternalStore` (the React 18 idiom for external stores). This mirrors
-the runtime binding in `../runtime/context.tsx` exactly — the thread list is
-just a second external store living alongside the conversation runtime.
-
-Stability contract: the store's `getState()` MUST return a stable reference
-between changes (the mock honors this; real hosts must too), otherwise
-`useSyncExternalStore` infinite-loops.
-/
-
-import { createContext, useContext, useMemo, useSyncExternalStore } from 'react'
-import type { ReactNode } from 'react'
-import type { ThreadStore, ThreadListState, ThreadStoreActions } from './store.js'
-
-const ThreadStoreContext = createContext<ThreadStore | null>(null)
-
-export interface ThreadStoreProviderProps {
-  store: ThreadStore
-  children: ReactNode
-}
-
-/** Provide a `ThreadStore` to a subtree. `ThreadList` reads it via the hooks.
+Provide a `ThreadStore` to a subtree. `ThreadList` reads it via the hooks.
 
 ```ts
 export function ThreadStoreProvider({ store, children }: ThreadStoreProviderProps): ReactNode { … }
 ```
 
-### `ToolCallProvider`
+<a id="jcode-ui-core-toolcallprovider"></a>
 
-<!-- jcode-ui-core-toolcallprovider -->
+### `ToolCallProvider`
 
 `function` · `packages/jcode-ui-core/src/primitives/ToolCallView.tsx`
 
@@ -3567,9 +2514,9 @@ export function ThreadStoreProvider({ store, children }: ThreadStoreProviderProp
 export function ToolCallProvider({ value, children }: { value: ToolCallContextValue; children: ReactNode }) { … }
 ```
 
-### `ToolCallView`
+<a id="jcode-ui-core-toolcallview"></a>
 
-<!-- jcode-ui-core-toolcallview -->
+### `ToolCallView`
 
 `function` · `packages/jcode-ui-core/src/primitives/ToolCallView.tsx`
 
@@ -3586,21 +2533,12 @@ export function ToolCallView({
 }: ToolCallViewProps): ReactNode { … }
 ```
 
-### `useAutoScroll`
+<a id="jcode-ui-core-useautoscroll"></a>
 
-<!-- jcode-ui-core-useautoscroll -->
+### `useAutoScroll`
 
 `function` · `packages/jcode-ui-core/src/hooks/index.ts`
 
-Behavioral hooks for chat UI primitives. These contain the interaction logic
-the Vue version baked into App.vue (scroll tracking, type-ahead draining,
-etc.) but framework-correct and reusable.
-/
-
-import { useCallback, useEffect, useRef } from 'react'
-import { useRuntimeState } from '../runtime/context.js'
-
-/**
 Auto-scroll-to-bottom tracking: reports whether the user is "at the bottom"
 of a scroll container (within `threshold` px of the bottom edge). When at the
 bottom, streaming content auto-follows; when scrolled up, it does NOT yank the
@@ -3614,9 +2552,9 @@ Returns the container ref to attach, the live `isAtBottom` flag, and a
 export function useAutoScroll<T extends HTMLElement>(threshold = 80) { … }
 ```
 
-### `useFocusOnIdle`
+<a id="jcode-ui-core-usefocusonidle"></a>
 
-<!-- jcode-ui-core-usefocusonidle -->
+### `useFocusOnIdle`
 
 `function` · `packages/jcode-ui-core/src/hooks/index.ts`
 
@@ -3627,37 +2565,12 @@ refocuses the composer when a turn ends).
 export function useFocusOnIdle<T extends HTMLElement>(isRunning: boolean) { … }
 ```
 
-### `useIsAtBottom`
+<a id="jcode-ui-core-useisatbottom"></a>
 
-<!-- jcode-ui-core-useisatbottom -->
+### `useIsAtBottom`
 
 `function` · `packages/jcode-ui-core/src/hooks/index.ts`
 
-Imperatively scroll to the bottom edge. `behavior` defaults to 'auto'
- (instant) since this is called mid-stream. */
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
-    const el = ref.current
-    if (!el) return
-    el.scrollTo({ top: el.scrollHeight, behavior })
-    isAtBottomRef.current = true
-  }, [])
-
-  /** Attach to the container's onScroll (or wire a listener). Updates the flag. */
-  const onScroll = useCallback(() => {
-    const el = ref.current
-    if (!el) return
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight
-    isAtBottomRef.current = distance <= threshold
-  }, [threshold])
-
-  /** Read the current flag. Use this in effects; for render, prefer the
- `useIsAtBottom` hook below which re-renders on change. */
-  const getIsAtBottom = useCallback(() => isAtBottomRef.current, [])
-
-  return { ref, onScroll, scrollToBottom, getIsAtBottom, isAtBottomRef }
-}
-
-/**
 Re-render-friendly version of the at-bottom flag: re-renders the component
 when the flag flips. Use sparingly (the scroll handler runs a lot); for most
 cases the imperative `getIsAtBottom` + an effect is enough.
@@ -3669,9 +2582,9 @@ crossing the threshold, not on every scroll event.
 export function useIsAtBottom<T extends HTMLElement>(threshold = 80) { … }
 ```
 
-### `useQueuedMessages`
+<a id="jcode-ui-core-usequeuedmessages"></a>
 
-<!-- jcode-ui-core-usequeuedmessages -->
+### `useQueuedMessages`
 
 `function` · `packages/jcode-ui-core/src/hooks/index.ts`
 
@@ -3683,9 +2596,9 @@ end); this hook just surfaces the queue for rendering.
 export function useQueuedMessages() { … }
 ```
 
-### `useRuntimeActions`
+<a id="jcode-ui-core-useruntimeactions"></a>
 
-<!-- jcode-ui-core-useruntimeactions -->
+### `useRuntimeActions`
 
 `function` · `packages/jcode-ui-core/src/runtime/context.tsx`
 
@@ -3695,9 +2608,9 @@ Stable handle to the action bag. Identity is owned by the runtime.
 export function useRuntimeActions() { … }
 ```
 
-### `useRuntimeSelector`
+<a id="jcode-ui-core-useruntimeselector"></a>
 
-<!-- jcode-ui-core-useruntimeselector -->
+### `useRuntimeSelector`
 
 `function` · `packages/jcode-ui-core/src/runtime/context.tsx`
 
@@ -3710,18 +2623,12 @@ re-render on every store change. For object returns, also pass an `isEqual`
 export function useRuntimeSelector<T>(
   selector: (state: RuntimeState) => T,
   isEqual: (a: T, b: T) => boolean = Object.is,
-): T {
-  const runtime = useRuntime()
-  // Subscribe to the raw snapshot (stable identity), then memoize the selected
-  // value in a ref so a stable selector returning a primitive doesn't trigger
-  // spurious re-renders.
-  const snapshot = useSyncExternalStore(runtime.subscribe, runtime.getState, runtime.getState)
-  const cacheRef = useRef< { … }
+): T { … }
 ```
 
-### `useRuntimeState`
+<a id="jcode-ui-core-useruntimestate"></a>
 
-<!-- jcode-ui-core-useruntimestate -->
+### `useRuntimeState`
 
 `function` · `packages/jcode-ui-core/src/runtime/context.tsx`
 
@@ -3733,9 +2640,9 @@ state changes.
 export function useRuntimeState(): RuntimeState { … }
 ```
 
-### `useStreamFollow`
+<a id="jcode-ui-core-usestreamfollow"></a>
 
-<!-- jcode-ui-core-usestreamfollow -->
+### `useStreamFollow`
 
 `function` · `packages/jcode-ui-core/src/hooks/index.ts`
 
@@ -3753,9 +2660,9 @@ export function useStreamFollow<T extends HTMLElement>(
 ) { … }
 ```
 
-### `useThreadListState`
+<a id="jcode-ui-core-usethreadliststate"></a>
 
-<!-- jcode-ui-core-usethreadliststate -->
+### `useThreadListState`
 
 `function` · `packages/jcode-ui-core/src/threads/context.tsx`
 
@@ -3765,9 +2672,9 @@ Subscribe to the full `ThreadListState`. Re-renders on any list change.
 export function useThreadListState(): ThreadListState { … }
 ```
 
-### `useThreadStoreActions`
+<a id="jcode-ui-core-usethreadstoreactions"></a>
 
-<!-- jcode-ui-core-usethreadstoreactions -->
+### `useThreadStoreActions`
 
 `function` · `packages/jcode-ui-core/src/threads/context.tsx`
 
@@ -3777,9 +2684,9 @@ Stable handle to the thread-list action bag (identity owned by the store).
 export function useThreadStoreActions(): ThreadStoreActions { … }
 ```
 
-### `useToolCallContext`
+<a id="jcode-ui-core-usetoolcallcontext"></a>
 
-<!-- jcode-ui-core-usetoolcallcontext -->
+### `useToolCallContext`
 
 `function` · `packages/jcode-ui-core/src/primitives/ToolCallView.tsx`
 
@@ -3787,9 +2694,9 @@ export function useThreadStoreActions(): ThreadStoreActions { … }
 export function useToolCallContext(): ToolCallContextValue | null { … }
 ```
 
-### `AGUIMessage`
+<a id="jcode-ui-core-aguimessage"></a>
 
-<!-- jcode-ui-core-aguimessage -->
+### `AGUIMessage`
 
 `interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
 
@@ -3809,21 +2716,13 @@ export interface AGUIMessage {
 }
 ```
 
-### `AGUIPatchOp`
+<a id="jcode-ui-core-aguipatchop"></a>
 
-<!-- jcode-ui-core-aguipatchop -->
+### `AGUIPatchOp`
 
 `interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
 
-Tool name (present on `role: 'tool'` result messages). */
-  name?: string
-  /** Links a `role: 'tool'` message to the tool call it answers. */
-  toolCallId?: string
-  /** Present on assistant messages that invoke tools. */
-  toolCalls?: AGUIToolCall[]
-}
-
-/** A single RFC 6902 JSON Patch operation (STATE_DELTA payload element).
+A single RFC 6902 JSON Patch operation (STATE_DELTA payload element).
 
 ```ts
 export interface AGUIPatchOp {
@@ -3834,9 +2733,9 @@ export interface AGUIPatchOp {
 }
 ```
 
-### `AGUIRunInput`
+<a id="jcode-ui-core-aguiruninput"></a>
 
-<!-- jcode-ui-core-aguiruninput -->
+### `AGUIRunInput`
 
 `interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
 
@@ -3854,58 +2753,13 @@ export interface AGUIRunInput {
 }
 ```
 
-### `AGUIRuntime`
+<a id="jcode-ui-core-aguiruntime"></a>
 
-<!-- jcode-ui-core-aguiruntime -->
+### `AGUIRuntime`
 
 `interface` · `packages/jcode-ui-core/src/runtime/aguiRuntime.ts`
 
-createAGUIRuntime — drive jcode-ui from any AG-UI protocol backend.
-
-An AG-UI server (LangGraph, CrewAI, Mastra, …) emits a normalized event stream;
-this reducer folds that stream into `RuntimeState` so those backends need zero
-glue to render in jcode-ui. It is the AG-UI sibling of `mockRuntime` /
-`externalStore`: same `{ getState, subscribe, actions }` contract, same
-stable-snapshot discipline that `context.tsx` requires from `getState`.
-
-Design notes (constraints not obvious from the code):
-- Snapshot stability: `getState()` returns the SAME object reference until a
-  real change, or `useSyncExternalStore` loops. We rebuild the snapshot only
-  inside the batched flush.
-- Notify batching: many events arrive per microtask (START/CONTENT/END for one
-  token burst). We coalesce listener notifications with `queueMicrotask`, like
-  externalStore leans on the host store's single post-dispatch notification.
-- Item indices: `msgIndex`/`toolIndex` map ids → positions in `items`. Only
-  append + full MESSAGES_SNAPSHOT rebuild ever run, so appended indices stay
-  valid; immutable per-item replacement preserves positions.
-- Agent state lives OUTSIDE RuntimeState (it is arbitrary backend JSON, not a
-  chat concept) and is read via `getAgentState()`.
-/
-
-import type { ChatRuntime, RuntimeActions, RuntimeState } from './index.js'
-import type { ConnectionState, Message, Role, ThreadItem, ToolCall } from '../types/index.js'
-import type {
-  AGUIEvent,
-  AGUIMessage,
-  AGUIPatchOp,
-  AGUIRunInput,
-  AGUITransport,
-} from './aguiEvents.js'
-import { createFetchTransport } from './aguiEvents.js'
-
-export interface AGUIRuntimeOptions {
-  /** AG-UI run endpoint (POST, streams `text/event-stream`). */
-  url: string
-  /** Extra request headers (auth, etc.) for the default transport. */
-  headers?: Record<string, string>
-  /** Override the event source — inject a scripted stream in tests, or swap in
- WebSocket/other transports. Defaults to `createFetchTransport(url, headers)`. */
-  transport?: AGUITransport
-  /** Stable thread id for the whole session. Auto-generated when omitted. */
-  threadId?: string
-}
-
-/** The AG-UI runtime adds read-only agent-state access to the base contract.
+The AG-UI runtime adds read-only agent-state access to the base contract.
 
 ```ts
 export interface AGUIRuntime extends ChatRuntime {
@@ -3914,9 +2768,29 @@ export interface AGUIRuntime extends ChatRuntime {
 }
 ```
 
-### `AGUIToolCall`
+<a id="jcode-ui-core-aguiruntimeoptions"></a>
 
-<!-- jcode-ui-core-aguitoolcall -->
+### `AGUIRuntimeOptions`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiRuntime.ts`
+
+```ts
+export interface AGUIRuntimeOptions {
+  /** AG-UI run endpoint (POST, streams `text/event-stream`). */
+  url: string
+  /** Extra request headers (auth, etc.) for the default transport. */
+  headers?: Record<string, string>
+  /** Override the event source — inject a scripted stream in tests, or swap in
+   *  WebSocket/other transports. Defaults to `createFetchTransport(url, headers)`. */
+  transport?: AGUITransport
+  /** Stable thread id for the whole session. Auto-generated when omitted. */
+  threadId?: string
+}
+```
+
+<a id="jcode-ui-core-aguitoolcall"></a>
+
+### `AGUIToolCall`
 
 `interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
 
@@ -3930,9 +2804,9 @@ export interface AGUIToolCall {
 }
 ```
 
-### `Approval`
+<a id="jcode-ui-core-approval"></a>
 
-<!-- jcode-ui-core-approval -->
+### `Approval`
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
@@ -3961,9 +2835,9 @@ export interface Approval {
 }
 ```
 
-### `ApprovalBlockProps`
+<a id="jcode-ui-core-approvalblockprops"></a>
 
-<!-- jcode-ui-core-approvalblockprops -->
+### `ApprovalBlockProps`
 
 `interface` · `packages/jcode-ui-core/src/primitives/ApprovalBlock.tsx`
 
@@ -3975,9 +2849,9 @@ export interface ApprovalBlockProps extends ApprovalBlockRenderSlots {
 }
 ```
 
-### `ApprovalBlockRenderSlots`
+<a id="jcode-ui-core-approvalblockrenderslots"></a>
 
-<!-- jcode-ui-core-approvalblockrenderslots -->
+### `ApprovalBlockRenderSlots`
 
 `interface` · `packages/jcode-ui-core/src/primitives/ApprovalBlock.tsx`
 
@@ -3990,9 +2864,9 @@ export interface ApprovalBlockRenderSlots {
 }
 ```
 
-### `ApprovalDecisionActions`
+<a id="jcode-ui-core-approvaldecisionactions"></a>
 
-<!-- jcode-ui-core-approvaldecisionactions -->
+### `ApprovalDecisionActions`
 
 `interface` · `packages/jcode-ui-core/src/primitives/ApprovalBlock.tsx`
 
@@ -4017,9 +2891,9 @@ export interface ApprovalDecisionActions {
 }
 ```
 
-### `ApprovalOption`
+<a id="jcode-ui-core-approvaloption"></a>
 
-<!-- jcode-ui-core-approvaloption -->
+### `ApprovalOption`
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
@@ -4035,9 +2909,9 @@ export interface ApprovalOption {
 }
 ```
 
-### `AskUserAnswer`
+<a id="jcode-ui-core-askuseranswer"></a>
 
-<!-- jcode-ui-core-askuseranswer -->
+### `AskUserAnswer`
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
@@ -4053,37 +2927,42 @@ export interface AskUserAnswer {
 }
 ```
 
-### `AskUserControls`
+<a id="jcode-ui-core-askuserblockprops"></a>
 
-<!-- jcode-ui-core-askusercontrols -->
+### `AskUserBlockProps`
 
 `interface` · `packages/jcode-ui-core/src/primitives/AskUserBlock.tsx`
 
-AskUserBlock — the headless interactive question block.
-
-Owns: the pending/resolved split, per-question selection state (single +
-multi-select), free-text "Other" input, digit-key shortcuts (1-9), and
-dispatching via runtime actions. Does NOT own styling or the output-format
-parsing for resolved display (those live in the styled wrapper).
-
-The `renderPending` slot receives a `controls` object exposing the live
-`selected`/`other` maps plus mutators (`toggleOption`, `setOther`) and the
-`submit`/`skip` actions — so a styled consumer needs no local state.
-/
-
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
-import type { AskUserQuestion, AskUserAnswer, ToolCall } from '../types/index.js'
-import { useRuntimeActions } from '../runtime/context.js'
-
-export interface AskUserState {
-  /** Per-question-header selected labels (single-select: one entry; multi: N). */
-  selected: Record<string, string[]>
-  /** Per-question-header free-text "Other" value. */
-  other: Record<string, string>
+```ts
+export interface AskUserBlockProps extends AskUserBlockRenderSlots {
+  tool: ToolCall
+  /** className passthrough. */
+  className?: string
 }
+```
 
-/** Controls handed to the pending render-prop.
+<a id="jcode-ui-core-askuserblockrenderslots"></a>
+
+### `AskUserBlockRenderSlots`
+
+`interface` · `packages/jcode-ui-core/src/primitives/AskUserBlock.tsx`
+
+```ts
+export interface AskUserBlockRenderSlots {
+  /** Render the pending interactive card. */
+  renderPending?: (questions: AskUserQuestion[], controls: AskUserControls) => ReactNode
+  /** Render the resolved (replay) view. */
+  renderResolved?: (tool: ToolCall, answers: AskUserAnswer[]) => ReactNode
+}
+```
+
+<a id="jcode-ui-core-askusercontrols"></a>
+
+### `AskUserControls`
+
+`interface` · `packages/jcode-ui-core/src/primitives/AskUserBlock.tsx`
+
+Controls handed to the pending render-prop.
 
 ```ts
 export interface AskUserControls {
@@ -4102,9 +2981,9 @@ export interface AskUserControls {
 }
 ```
 
-### `AskUserOption`
+<a id="jcode-ui-core-askuseroption"></a>
 
-<!-- jcode-ui-core-askuseroption -->
+### `AskUserOption`
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
@@ -4117,9 +2996,9 @@ export interface AskUserOption {
 }
 ```
 
-### `AskUserQuestion`
+<a id="jcode-ui-core-askuserquestion"></a>
 
-<!-- jcode-ui-core-askuserquestion -->
+### `AskUserQuestion`
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
@@ -4134,33 +3013,27 @@ export interface AskUserQuestion {
 }
 ```
 
-### `AttachmentAdapter`
+<a id="jcode-ui-core-askuserstate"></a>
 
-<!-- jcode-ui-core-attachmentadapter -->
+### `AskUserState`
+
+`interface` · `packages/jcode-ui-core/src/primitives/AskUserBlock.tsx`
+
+```ts
+export interface AskUserState {
+  /** Per-question-header selected labels (single-select: one entry; multi: N). */
+  selected: Record<string, string[]>
+  /** Per-question-header free-text "Other" value. */
+  other: Record<string, string>
+}
+```
+
+<a id="jcode-ui-core-attachmentadapter"></a>
+
+### `AttachmentAdapter`
 
 `interface` · `packages/jcode-ui-core/src/primitives/attachmentAdapter.ts`
 
-Stable id (adapter- or composer-assigned) for keying, remove, retry. */
-  id: string
-  /** Coarse kind — drives tile (image) vs. chip (file) presentation. */
-  kind: 'image' | 'file'
-  /** Display name (usually the original filename). */
-  name: string
-  /** Size in bytes when known. */
-  size?: number
-  /** MIME type when known. */
-  media_type?: string
-  /** base64 payload for images (ChatImage fast-path, no `data:` prefix). */
-  data?: string
-  /** Host URL once uploaded (upload adapters). */
-  url?: string
-  /** Upload progress in the range 0–1. */
-  progress?: number
-  /** Failure message; when set the attachment is in the error state. */
-  error?: string
-}
-
-/**
 Turns raw `File`s into `PendingAttachment`s. Supplied to `Composer` via the
 `attachmentAdapter` prop.
 
@@ -4178,9 +3051,9 @@ export interface AttachmentAdapter {
 }
 ```
 
-### `ChatImage`
+<a id="jcode-ui-core-chatimage"></a>
 
-<!-- jcode-ui-core-chatimage -->
+### `ChatImage`
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
@@ -4199,45 +3072,12 @@ export interface ChatImage {
 }
 ```
 
-### `ChatRuntime`
+<a id="jcode-ui-core-chatruntime"></a>
 
-<!-- jcode-ui-core-chatruntime -->
+### `ChatRuntime`
 
 `interface` · `packages/jcode-ui-core/src/runtime/index.ts`
 
-Send a user-authored message. `images` are base64 payloads. */
-  sendMessage: (text: string, images?: { data: string; media_type: string }[]) => void
-  /** Enqueue a message while a turn is running (type-ahead). */
-  enqueueMessage: (text: string, images?: { data: string; media_type: string }[]) => void
-  /** Remove a queued message by id (before it is sent). */
-  removeQueuedMessage: (id: string) => void
-  /** Cancel the in-flight turn. */
-  stop: () => void
-  /** Resolve an approval gate. `approveAll` arms "allow all future" semantics. */
-  resolveApproval: (id: string, approved: boolean, approveAll?: boolean) => void
-  /** Answer an `ask_user` batch. */
-  submitAskUser: (id: string, answers: { question_header: string; answer: string; selected?: string[] }[]) => void
-  /** Edit a past user message and resend from that point. */
-  editMessage: (id: string, newText: string) => void
-
-  // ── Optional capabilities ─────────────────────────────────────────────
-  // Fail-visible convention: when a host omits one of these, the UI control
-  // that would dispatch it is NOT rendered (never a dead button).
-
-  /** Resolve an approval that carries host-defined `options` (e.g. ACP
- permission_request with arbitrary option ids). */
-  resolveApprovalOption?: (id: string, optionId: string) => void
-  /** Regenerate an assistant message; the host appends a new version. */
-  regenerate?: (messageId: string) => void
-  /** Switch the visible version of a branched message. */
-  switchVersion?: (messageId: string, versionId: string) => void
-  /** Record 👍/👎 feedback on an assistant message. */
-  submitFeedback?: (messageId: string, rating: 'up' | 'down', comment?: string) => void
-  /** Retry a failed assistant turn (system error follow-up). */
-  retryMessage?: (messageId: string) => void
-}
-
-/**
 The contract every jcode-ui data source implements. `getState`/`subscribe`
 deliberately match the Redux `Store` signature so a real RTK store can be
 wrapped with a thin selector + the actions bound.
@@ -4251,9 +3091,9 @@ export interface ChatRuntime {
 }
 ```
 
-### `ComposerHandle`
+<a id="jcode-ui-core-composerhandle"></a>
 
-<!-- jcode-ui-core-composerhandle -->
+### `ComposerHandle`
 
 `interface` · `packages/jcode-ui-core/src/primitives/Composer.tsx`
 
@@ -4268,9 +3108,9 @@ export interface ComposerHandle {
 }
 ```
 
-### `ComposerProps`
+<a id="jcode-ui-core-composerprops"></a>
 
-<!-- jcode-ui-core-composerprops -->
+### `ComposerProps`
 
 `interface` · `packages/jcode-ui-core/src/primitives/Composer.tsx`
 
@@ -4317,9 +3157,9 @@ export interface ComposerProps extends ComposerRenderSlots {
 }
 ```
 
-### `ComposerRenderSlots`
+<a id="jcode-ui-core-composerrenderslots"></a>
 
-<!-- jcode-ui-core-composerrenderslots -->
+### `ComposerRenderSlots`
 
 `interface` · `packages/jcode-ui-core/src/primitives/Composer.tsx`
 
@@ -4355,22 +3195,27 @@ export interface ComposerRenderSlots {
 }
 ```
 
-### `DictationState`
+<a id="jcode-ui-core-customevent"></a>
 
-<!-- jcode-ui-core-dictationstate -->
+### `CustomEvent`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
+
+```ts
+export interface CustomEvent extends AGUIBaseEvent {
+  type: 'CUSTOM'
+  name: string
+  value: unknown
+}
+```
+
+<a id="jcode-ui-core-dictationstate"></a>
+
+### `DictationState`
 
 `interface` · `packages/jcode-ui-core/src/primitives/Composer.tsx`
 
-Latest adapter snapshot (or the provisional entry while uploading). */
-  attachment: PendingAttachment
-  status: PendingStatus
-  /** Remove this attachment (also invokes `adapter.remove` when present). */
-  remove: () => void
-  /** Re-run `adapter.add` for this file (error recovery). */
-  retry: () => void
-}
-
-/** Dictation (speech-to-text) UI state passed to `renderDictationButton`.
+Dictation (speech-to-text) UI state passed to `renderDictationButton`.
 
 ```ts
 export interface DictationState {
@@ -4378,38 +3223,12 @@ export interface DictationState {
 }
 ```
 
-### `ExploringGroup`
+<a id="jcode-ui-core-exploringgroup"></a>
 
-<!-- jcode-ui-core-exploringgroup -->
+### `ExploringGroup`
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
-Backend tool_call_id for precise result matching. */
-  toolCallID?: string
-  name: string
-  args: string
-  output?: string
-  /** Clean output for UI display (metadata stripped). */
-  displayOutput?: string
-  error?: string
-  status: ToolStatus
-  timestamp: number
-  displayInfo?: ToolDisplayInfo
-  /** Nested tool calls (subagent inner calls). */
-  children?: ToolCall[]
-  /** ask_user: request id while awaiting an answer (live runs only). */
-  askUserId?: string
-  /** ask_user: backend-normalized questions to render. */
-  askUserQuestions?: AskUserQuestion[]
-  /** Dual-channel streams (execute). */
-  streams?: ToolStreams
-  /** Dual-channel meta (execute). */
-  meta?: ToolMeta
-  /** Dual-channel presentation (execute). */
-  presentation?: ToolPresentation
-}
-
-/**
 A UI-only coalesced group of collapsible read/search/list tool calls.
 Does not change model-facing tool boundaries.
 
@@ -4421,9 +3240,9 @@ export interface ExploringGroup {
 }
 ```
 
-### `ExportMarkdownOptions`
+<a id="jcode-ui-core-exportmarkdownoptions"></a>
 
-<!-- jcode-ui-core-exportmarkdownoptions -->
+### `ExportMarkdownOptions`
 
 `interface` · `packages/jcode-ui-core/src/export/markdown.ts`
 
@@ -4440,9 +3259,29 @@ export interface ExportMarkdownOptions {
 }
 ```
 
-### `Goal`
+<a id="jcode-ui-core-externalstoreruntimeoptions"></a>
 
-<!-- jcode-ui-core-goal -->
+### `ExternalStoreRuntimeOptions`
+
+`interface` · `packages/jcode-ui-core/src/runtime/externalStore.ts`
+
+```ts
+export interface ExternalStoreRuntimeOptions<THostState> {
+  /** The external store. Must expose Redux-compatible getState/subscribe. */
+  store: {
+    getState: () => THostState
+    subscribe: (listener: () => void) => () => void
+  }
+  /** Project the host state down to a (possibly partial) RuntimeState. */
+  select: (state: THostState) => PartialRuntimeState
+  /** Action bag. Identity should be stable across renders. */
+  actions: RuntimeActions
+}
+```
+
+<a id="jcode-ui-core-goal"></a>
+
+### `Goal`
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
@@ -4458,9 +3297,9 @@ export interface Goal {
 }
 ```
 
-### `InlineImageAdapterOptions`
+<a id="jcode-ui-core-inlineimageadapteroptions"></a>
 
-<!-- jcode-ui-core-inlineimageadapteroptions -->
+### `InlineImageAdapterOptions`
 
 `interface` · `packages/jcode-ui-core/src/primitives/attachmentAdapter.ts`
 
@@ -4475,9 +3314,9 @@ export interface InlineImageAdapterOptions {
 }
 ```
 
-### `Message`
+<a id="jcode-ui-core-message"></a>
 
-<!-- jcode-ui-core-message -->
+### `Message`
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
@@ -4516,42 +3355,13 @@ export interface Message {
 }
 ```
 
-### `MessageActions`
+<a id="jcode-ui-core-messageactions"></a>
 
-<!-- jcode-ui-core-messageactions -->
+### `MessageActions`
 
 `interface` · `packages/jcode-ui-core/src/primitives/MessageView.tsx`
 
-MessageView — the headless chat bubble.
-
-Owns: role-aware structure (avatar + label + body + actions), copy/edit
-interactions, and image toggling. Does NOT own markdown rendering (passed in
-via `renderContent`) or styling — the styled jcode-ui `Message` supplies the
-marked+highlight.js+DOMPurify pipeline and token-driven classes.
-
-Streaming is invisible here: `MessageView` just re-renders when
-`message.content` changes. The runtime owns accumulation.
-/
-
-import { useCallback, useState } from 'react'
-import type { ReactNode } from 'react'
-import type { Message } from '../types/index.js'
-import { useRuntimeActions } from '../runtime/context.js'
-
-export interface MessageViewRenderSlots {
-  /** Render the message body (markdown → sanitized HTML). Default: raw text. */
-  renderContent?: (htmlOrText: string, message: Message) => ReactNode
-  /** Render the avatar glyph for a role. */
-  renderAvatar?: (role: Message['role']) => ReactNode
-  /**
-Render the hover action row (copy / edit). When provided, this replaces the
-default text buttons entirely — the styled wrapper supplies icon buttons
-while MessageView still owns the copy/edit state and handlers.
-/
-  renderActions?: (actions: MessageActions) => ReactNode
-}
-
-/** Action handles passed to `renderActions` so the caller can wire its own UI.
+Action handles passed to `renderActions` so the caller can wire its own UI.
 
 ```ts
 export interface MessageActions {
@@ -4568,9 +3378,9 @@ export interface MessageActions {
 }
 ```
 
-### `MessageSource`
+<a id="jcode-ui-core-messagesource"></a>
 
-<!-- jcode-ui-core-messagesource -->
+### `MessageSource`
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
@@ -4589,9 +3399,22 @@ export interface MessageSource {
 }
 ```
 
-### `MessageVersion`
+<a id="jcode-ui-core-messagessnapshotevent"></a>
 
-<!-- jcode-ui-core-messageversion -->
+### `MessagesSnapshotEvent`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
+
+```ts
+export interface MessagesSnapshotEvent extends AGUIBaseEvent {
+  type: 'MESSAGES_SNAPSHOT'
+  messages: AGUIMessage[]
+}
+```
+
+<a id="jcode-ui-core-messageversion"></a>
+
+### `MessageVersion`
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
@@ -4610,9 +3433,9 @@ export interface MessageVersion {
 }
 ```
 
-### `MessageViewProps`
+<a id="jcode-ui-core-messageviewprops"></a>
 
-<!-- jcode-ui-core-messageviewprops -->
+### `MessageViewProps`
 
 `interface` · `packages/jcode-ui-core/src/primitives/MessageView.tsx`
 
@@ -4628,9 +3451,49 @@ export interface MessageViewProps extends MessageViewRenderSlots {
 }
 ```
 
-### `MockThreadStore`
+<a id="jcode-ui-core-messageviewrenderslots"></a>
 
-<!-- jcode-ui-core-mockthreadstore -->
+### `MessageViewRenderSlots`
+
+`interface` · `packages/jcode-ui-core/src/primitives/MessageView.tsx`
+
+```ts
+export interface MessageViewRenderSlots {
+  /** Render the message body (markdown → sanitized HTML). Default: raw text. */
+  renderContent?: (htmlOrText: string, message: Message) => ReactNode
+  /** Render the avatar glyph for a role. */
+  renderAvatar?: (role: Message['role']) => ReactNode
+  /**
+   * Render the hover action row (copy / edit). When provided, this replaces the
+   * default text buttons entirely — the styled wrapper supplies icon buttons
+   * while MessageView still owns the copy/edit state and handlers.
+   */
+  renderActions?: (actions: MessageActions) => ReactNode
+}
+```
+
+<a id="jcode-ui-core-mockruntimeoptions"></a>
+
+### `MockRuntimeOptions`
+
+`interface` · `packages/jcode-ui-core/src/runtime/mockRuntime.ts`
+
+```ts
+export interface MockRuntimeOptions {
+  /** Initial items. */
+  items?: ThreadItem[]
+  /** Initial isRunning flag. */
+  isRunning?: boolean
+  /** Initial full/partial runtime state (overrides items/isRunning when set). */
+  state?: PartialRuntimeState
+  /** Captured-action handlers (defaults are no-ops that record to `.calls`). */
+  actions?: Partial<RuntimeActions>
+}
+```
+
+<a id="jcode-ui-core-mockthreadstore"></a>
+
+### `MockThreadStore`
 
 `interface` · `packages/jcode-ui-core/src/threads/store.ts`
 
@@ -4647,30 +3510,13 @@ export interface MockThreadStore extends ThreadStore {
 }
 ```
 
-### `PendingAttachment`
+<a id="jcode-ui-core-pendingattachment"></a>
 
-<!-- jcode-ui-core-pendingattachment -->
+### `PendingAttachment`
 
 `interface` · `packages/jcode-ui-core/src/primitives/attachmentAdapter.ts`
 
-AttachmentAdapter — the pluggable contract for composer attachments.
-
-The headless `Composer` owns the pending-attachment state machine
-(uploading → done / error, progress passthrough). *How* a raw `File` becomes
-a sendable attachment is delegated to an adapter, so hosts can choose between:
-
-  - inline base64 images (vision fast-path — `createInlineImageAdapter`), or
-  - an upload adapter that PUTs to object storage and returns a host URL, or
-  - a hybrid that inlines small images and uploads everything else.
-
-An adapter never touches React; it takes a `File`, optionally reports
-progress, and resolves a `PendingAttachment`. A failed attachment resolves
-with `error` set (rather than rejecting) so the composer can render it inline
-with a retry affordance — a thrown/rejected error is also tolerated by the
-composer and surfaced the same way.
-/
-
-/** One attachment in the composer's pending strip.
+One attachment in the composer's pending strip.
 
 ```ts
 export interface PendingAttachment {
@@ -4695,9 +3541,9 @@ export interface PendingAttachment {
 }
 ```
 
-### `PendingAttachmentItem`
+<a id="jcode-ui-core-pendingattachmentitem"></a>
 
-<!-- jcode-ui-core-pendingattachmentitem -->
+### `PendingAttachmentItem`
 
 `interface` · `packages/jcode-ui-core/src/primitives/Composer.tsx`
 
@@ -4715,9 +3561,9 @@ export interface PendingAttachmentItem {
 }
 ```
 
-### `QueuedMessage`
+<a id="jcode-ui-core-queuedmessage"></a>
 
-<!-- jcode-ui-core-queuedmessage -->
+### `QueuedMessage`
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
@@ -4731,30 +3577,95 @@ export interface QueuedMessage {
 }
 ```
 
-### `RuntimeActions`
+<a id="jcode-ui-core-rawevent"></a>
 
-<!-- jcode-ui-core-runtimeactions -->
+### `RawEvent`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
+
+```ts
+export interface RawEvent extends AGUIBaseEvent {
+  type: 'RAW'
+  event: unknown
+  source?: string
+}
+```
+
+<a id="jcode-ui-core-reasoningmessagechunkevent"></a>
+
+### `ReasoningMessageChunkEvent`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
+
+```ts
+export interface ReasoningMessageChunkEvent extends AGUIBaseEvent {
+  type: 'REASONING_MESSAGE_CHUNK'
+  messageId?: string
+  delta?: string
+}
+```
+
+<a id="jcode-ui-core-reasoningmessagecontentevent"></a>
+
+### `ReasoningMessageContentEvent`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
+
+```ts
+export interface ReasoningMessageContentEvent extends AGUIBaseEvent {
+  type: 'REASONING_MESSAGE_CONTENT'
+  messageId?: string
+  delta: string
+}
+```
+
+<a id="jcode-ui-core-runerrorevent"></a>
+
+### `RunErrorEvent`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
+
+```ts
+export interface RunErrorEvent extends AGUIBaseEvent {
+  type: 'RUN_ERROR'
+  message: string
+  code?: string
+}
+```
+
+<a id="jcode-ui-core-runfinishedevent"></a>
+
+### `RunFinishedEvent`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
+
+```ts
+export interface RunFinishedEvent extends AGUIBaseEvent {
+  type: 'RUN_FINISHED'
+  result?: unknown
+}
+```
+
+<a id="jcode-ui-core-runstartedevent"></a>
+
+### `RunStartedEvent`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
+
+```ts
+export interface RunStartedEvent extends AGUIBaseEvent {
+  type: 'RUN_STARTED'
+  threadId?: string
+  runId?: string
+}
+```
+
+<a id="jcode-ui-core-runtimeactions"></a>
+
+### `RuntimeActions`
 
 `interface` · `packages/jcode-ui-core/src/runtime/index.ts`
 
-The conversation timeline (messages, tool calls, approvals, interleaved). */
-  items: ThreadItem[]
-  /** True while the agent is producing output (drives the "Thinking…" row, the
- composer's send→stop button swap, and auto-follow behavior). */
-  isRunning: boolean
-  /** Live token/context snapshot, or null when no turn has reported usage yet. */
-  tokenSnapshot: TokenSnapshot | null
-  /** Active goal banner, or null. */
-  goal: Goal | null
-  /** Todo list (also rendered inside `todowrite` tool calls). */
-  todos: TodoItem[]
-  /** Type-ahead queue: messages composed mid-turn, drained on each turn end. */
-  queued: QueuedMessage[]
-  /** Transport liveness (drives ConnectionBanner). Defaults to 'connected'. */
-  connection: ConnectionState
-}
-
-/**
 Actions the UI dispatches. The runtime forwards these to the host store
 (which may in turn POST to a backend, resolve locally, etc.). Keeping these
 as a flat bag of callbacks (rather than a discriminated union dispatched via
@@ -4797,34 +3708,25 @@ export interface RuntimeActions {
 }
 ```
 
-### `RuntimeState`
+<a id="jcode-ui-core-runtimeproviderprops"></a>
 
-<!-- jcode-ui-core-runtimestate -->
+### `RuntimeProviderProps`
+
+`interface` · `packages/jcode-ui-core/src/runtime/context.tsx`
+
+```ts
+export interface RuntimeProviderProps {
+  runtime: ChatRuntime
+  children: ReactNode
+}
+```
+
+<a id="jcode-ui-core-runtimestate"></a>
+
+### `RuntimeState`
 
 `interface` · `packages/jcode-ui-core/src/runtime/index.ts`
 
-ChatRuntime — the host-agnostic data source for jcode-ui.
-
-Components never touch the store directly. They talk to a `ChatRuntime`, which
-is an `ExternalStore`-shaped interface (matching Redux's store signature) so
-it can wrap RTK, Zustand, Pinia-via-snapshot, or a hand-rolled reducer with
-zero adapter code.
-
-Why this abstraction exists: jcode-ui must render the same whether the data
-comes from a live WebSocket-backed RTK store, a replayed JSONL session, or a
-mock playground. The runtime is the single seam.
-/
-
-import type {
-  ThreadItem,
-  TokenSnapshot,
-  Goal,
-  TodoItem,
-  QueuedMessage,
-  ConnectionState,
-} from '../types/index.js'
-
-/**
 The read-side state a Thread + Composer render from. Consumers provide an
 object of this shape (or a subset — see `PartialRuntimeState`); the runtime
 normalizes missing slices to safe defaults.
@@ -4849,9 +3751,23 @@ export interface RuntimeState {
 }
 ```
 
-### `SlashMenuState`
+<a id="jcode-ui-core-slashcommand"></a>
 
-<!-- jcode-ui-core-slashmenustate -->
+### `SlashCommand`
+
+`interface` · `packages/jcode-ui-core/src/primitives/Composer.tsx`
+
+```ts
+export interface SlashCommand {
+  /** The literal text inserted when chosen (e.g. '/goal'). */
+  slash: string
+  description?: string
+}
+```
+
+<a id="jcode-ui-core-slashmenustate"></a>
+
+### `SlashMenuState`
 
 `interface` · `packages/jcode-ui-core/src/primitives/Composer.tsx`
 
@@ -4867,9 +3783,61 @@ export interface SlashMenuState {
 }
 ```
 
-### `TaskContextBreakdown`
+<a id="jcode-ui-core-statedeltaevent"></a>
 
-<!-- jcode-ui-core-taskcontextbreakdown -->
+### `StateDeltaEvent`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
+
+```ts
+export interface StateDeltaEvent extends AGUIBaseEvent {
+  type: 'STATE_DELTA'
+  delta: AGUIPatchOp[]
+}
+```
+
+<a id="jcode-ui-core-statesnapshotevent"></a>
+
+### `StateSnapshotEvent`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
+
+```ts
+export interface StateSnapshotEvent extends AGUIBaseEvent {
+  type: 'STATE_SNAPSHOT'
+  snapshot: unknown
+}
+```
+
+<a id="jcode-ui-core-stepfinishedevent"></a>
+
+### `StepFinishedEvent`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
+
+```ts
+export interface StepFinishedEvent extends AGUIBaseEvent {
+  type: 'STEP_FINISHED'
+  stepName: string
+}
+```
+
+<a id="jcode-ui-core-stepstartedevent"></a>
+
+### `StepStartedEvent`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
+
+```ts
+export interface StepStartedEvent extends AGUIBaseEvent {
+  type: 'STEP_STARTED'
+  stepName: string
+}
+```
+
+<a id="jcode-ui-core-taskcontextbreakdown"></a>
+
+### `TaskContextBreakdown`
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
@@ -4886,27 +3854,69 @@ export interface TaskContextBreakdown {
 }
 ```
 
-### `ThreadListState`
+<a id="jcode-ui-core-textmessagechunkevent"></a>
 
-<!-- jcode-ui-core-threadliststate -->
+### `TextMessageChunkEvent`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
+
+```ts
+export interface TextMessageChunkEvent extends AGUIBaseEvent {
+  type: 'TEXT_MESSAGE_CHUNK'
+  messageId?: string
+  role?: string
+  delta?: string
+}
+```
+
+<a id="jcode-ui-core-textmessagecontentevent"></a>
+
+### `TextMessageContentEvent`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
+
+```ts
+export interface TextMessageContentEvent extends AGUIBaseEvent {
+  type: 'TEXT_MESSAGE_CONTENT'
+  messageId: string
+  delta: string
+}
+```
+
+<a id="jcode-ui-core-textmessageendevent"></a>
+
+### `TextMessageEndEvent`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
+
+```ts
+export interface TextMessageEndEvent extends AGUIBaseEvent {
+  type: 'TEXT_MESSAGE_END'
+  messageId: string
+}
+```
+
+<a id="jcode-ui-core-textmessagestartevent"></a>
+
+### `TextMessageStartEvent`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
+
+```ts
+export interface TextMessageStartEvent extends AGUIBaseEvent {
+  type: 'TEXT_MESSAGE_START'
+  messageId: string
+  role?: string
+}
+```
+
+<a id="jcode-ui-core-threadliststate"></a>
+
+### `ThreadListState`
 
 `interface` · `packages/jcode-ui-core/src/threads/store.ts`
 
-Stable id (used for React keys, selection, and action targeting). */
-  id: string
-  /** Display title. Hosts may lazily fill this from the first user message. */
-  title: string
-  /** Last-activity timestamp (ms epoch). Drives relative-time + default sort. */
-  updatedAt: number
-  /** Live status. `running` renders a pulsing status dot; default is idle. */
-  status?: 'idle' | 'running'
-  /** Soft-hidden: rendered under the collapsible "Archived" group. */
-  archived?: boolean
-  /** Free-form host metadata (project id, trigger kind, avatar tint, …). */
-  meta?: Record<string, unknown>
-}
-
-/** The read-side state the `ThreadList` renders from.
+The read-side state the `ThreadList` renders from.
 
 ```ts
 export interface ThreadListState {
@@ -4919,9 +3929,9 @@ export interface ThreadListState {
 }
 ```
 
-### `ThreadProps`
+<a id="jcode-ui-core-threadprops"></a>
 
-<!-- jcode-ui-core-threadprops -->
+### `ThreadProps`
 
 `interface` · `packages/jcode-ui-core/src/primitives/Thread.tsx`
 
@@ -4950,9 +3960,9 @@ export interface ThreadProps extends ThreadRenderSlots {
 }
 ```
 
-### `ThreadRenderSlots`
+<a id="jcode-ui-core-threadrenderslots"></a>
 
-<!-- jcode-ui-core-threadrenderslots -->
+### `ThreadRenderSlots`
 
 `interface` · `packages/jcode-ui-core/src/primitives/Thread.tsx`
 
@@ -4970,25 +3980,12 @@ export interface ThreadRenderSlots {
 }
 ```
 
-### `ThreadStore`
+<a id="jcode-ui-core-threadstore"></a>
 
-<!-- jcode-ui-core-threadstore -->
+### `ThreadStore`
 
 `interface` · `packages/jcode-ui-core/src/threads/store.ts`
 
-Open/select a thread by id. */
-  select?: (id: string) => void
-  /** Create a new thread (host decides id + initial title). */
-  create?: () => void
-  /** Rename a thread. */
-  rename?: (id: string, title: string) => void
-  /** Archive (soft-hide) a thread. */
-  archive?: (id: string) => void
-  /** Permanently remove a thread. */
-  remove?: (id: string) => void
-}
-
-/**
 The contract every thread-list data source implements. `getState`/`subscribe`
 match the Redux `Store` signature so an RTK store wraps with a thin selector.
 
@@ -5005,21 +4002,12 @@ export interface ThreadStore {
 }
 ```
 
-### `ThreadStoreActions`
+<a id="jcode-ui-core-threadstoreactions"></a>
 
-<!-- jcode-ui-core-threadstoreactions -->
+### `ThreadStoreActions`
 
 `interface` · `packages/jcode-ui-core/src/threads/store.ts`
 
-All threads (active + archived). The UI splits/sorts them for display. */
-  threads: ThreadSummary[]
-  /** The currently-open thread id, or undefined when none is selected. */
-  activeId?: string
-  /** True while the initial list is loading (drives a skeleton/spinner). */
-  loading?: boolean
-}
-
-/**
 Actions the `ThreadList` dispatches. All optional — the host wires only what
 it supports, and the UI hides controls for the rest (fail-visible). Keeping
 these a flat bag of callbacks (rather than a dispatched union) means a host
@@ -5040,27 +4028,26 @@ export interface ThreadStoreActions {
 }
 ```
 
-### `ThreadSummary`
+<a id="jcode-ui-core-threadstoreproviderprops"></a>
 
-<!-- jcode-ui-core-threadsummary -->
+### `ThreadStoreProviderProps`
+
+`interface` · `packages/jcode-ui-core/src/threads/context.tsx`
+
+```ts
+export interface ThreadStoreProviderProps {
+  store: ThreadStore
+  children: ReactNode
+}
+```
+
+<a id="jcode-ui-core-threadsummary"></a>
+
+### `ThreadSummary`
 
 `interface` · `packages/jcode-ui-core/src/threads/store.ts`
 
-ThreadStore — the host-agnostic data source for a session/thread *list*.
-
-This is the sidebar analog of `ChatRuntime`: where `ChatRuntime` drives a
-single conversation, `ThreadStore` drives the collection of conversations
-(jcode calls them sessions; the cloud console calls them runs). Both hosts
-implement the same `getState`/`subscribe`/`actions` shape so the styled
-`ThreadList` renders identically over Redux, Zustand, or a hand-rolled store.
-
-Fail-visible actions: every action is optional. A host that can't (or won't)
-support renaming simply omits `actions.rename`, and the UI renders no rename
-control — mirroring how `Message` only shows the edit affordance when
-`canEdit` is set. Never call an action without guarding its presence.
-/
-
-/** A single row in the thread list — a lightweight summary, not the full convo.
+A single row in the thread list — a lightweight summary, not the full convo.
 
 ```ts
 export interface ThreadSummary {
@@ -5079,9 +4066,9 @@ export interface ThreadSummary {
 }
 ```
 
-### `TodoItem`
+<a id="jcode-ui-core-todoitem"></a>
 
-<!-- jcode-ui-core-todoitem -->
+### `TodoItem`
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
@@ -5095,9 +4082,9 @@ export interface TodoItem {
 }
 ```
 
-### `TokenSnapshot`
+<a id="jcode-ui-core-tokensnapshot"></a>
 
-<!-- jcode-ui-core-tokensnapshot -->
+### `TokenSnapshot`
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
@@ -5118,9 +4105,9 @@ export interface TokenSnapshot {
 }
 ```
 
-### `ToolCall`
+<a id="jcode-ui-core-toolcall"></a>
 
-<!-- jcode-ui-core-toolcall -->
+### `ToolCall`
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
@@ -5156,29 +4143,43 @@ export interface ToolCall {
 }
 ```
 
-### `ToolCallContextValue`
+<a id="jcode-ui-core-toolcallargsevent"></a>
 
-<!-- jcode-ui-core-toolcallcontextvalue -->
+### `ToolCallArgsEvent`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
+
+```ts
+export interface ToolCallArgsEvent extends AGUIBaseEvent {
+  type: 'TOOL_CALL_ARGS'
+  toolCallId: string
+  delta: string
+}
+```
+
+<a id="jcode-ui-core-toolcallchunkevent"></a>
+
+### `ToolCallChunkEvent`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
+
+```ts
+export interface ToolCallChunkEvent extends AGUIBaseEvent {
+  type: 'TOOL_CALL_CHUNK'
+  toolCallId?: string
+  toolCallName?: string
+  parentMessageId?: string
+  delta?: string
+}
+```
+
+<a id="jcode-ui-core-toolcallcontextvalue"></a>
+
+### `ToolCallContextValue`
 
 `interface` · `packages/jcode-ui-core/src/primitives/ToolCallView.tsx`
 
-ToolCallView — the headless expand/collapse shell for a tool invocation.
-
-Owns: expand/collapse state, renderer lookup via ToolRendererRegistry, and
-subagent recursion. Does NOT own per-tool body chrome — the styled
-`jcode-ui` `ToolCallCard` supplies header styling + CSS for `.toolcall-body`.
-
-Subagent: only `tool.name === 'subagent'` (NOT team_spawn — that has its own
-renderer). Children recurse as nested ToolCallView instances. ask_user tools
-route to the host's renderAskUser slot.
-/
-
-import { createContext, useContext, useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
-import type { ToolCall } from '../types/index.js'
-import type { ToolRendererRegistry, ToolRendererProps } from '../adapters/index.js'
-
-/** Context the host provides to wire the registry + the subagent/askuser slots.
+Context the host provides to wire the registry + the subagent/askuser slots.
 
 ```ts
 export interface ToolCallContextValue {
@@ -5190,9 +4191,53 @@ export interface ToolCallContextValue {
 }
 ```
 
-### `ToolCallViewProps`
+<a id="jcode-ui-core-toolcallendevent"></a>
 
-<!-- jcode-ui-core-toolcallviewprops -->
+### `ToolCallEndEvent`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
+
+```ts
+export interface ToolCallEndEvent extends AGUIBaseEvent {
+  type: 'TOOL_CALL_END'
+  toolCallId: string
+}
+```
+
+<a id="jcode-ui-core-toolcallresultevent"></a>
+
+### `ToolCallResultEvent`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
+
+```ts
+export interface ToolCallResultEvent extends AGUIBaseEvent {
+  type: 'TOOL_CALL_RESULT'
+  messageId?: string
+  toolCallId: string
+  content: unknown
+  role?: string
+}
+```
+
+<a id="jcode-ui-core-toolcallstartevent"></a>
+
+### `ToolCallStartEvent`
+
+`interface` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
+
+```ts
+export interface ToolCallStartEvent extends AGUIBaseEvent {
+  type: 'TOOL_CALL_START'
+  toolCallId: string
+  toolCallName: string
+  parentMessageId?: string
+}
+```
+
+<a id="jcode-ui-core-toolcallviewprops"></a>
+
+### `ToolCallViewProps`
 
 `interface` · `packages/jcode-ui-core/src/primitives/ToolCallView.tsx`
 
@@ -5222,23 +4267,13 @@ export interface ToolCallViewProps {
 }
 ```
 
-### `ToolDisplayInfo`
+<a id="jcode-ui-core-tooldisplayinfo"></a>
 
-<!-- jcode-ui-core-tooldisplayinfo -->
+### `ToolDisplayInfo`
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
-Stable id for keying. */
-  id: string
-  /** Display title of the source. */
-  title: string
-  /** Optional URL or deep link. */
-  url?: string
-  /** Optional snippet/excerpt quoted from the source. */
-  snippet?: string
-}
-
-/** Display metadata for a tool call, surfaced from the backend or extracted
+Display metadata for a tool call, surfaced from the backend or extracted
  client-side from args. Lets renderers show a title/icon without parsing args.
 
 ```ts
@@ -5255,9 +4290,9 @@ export interface ToolDisplayInfo {
 }
 ```
 
-### `ToolMeta`
+<a id="jcode-ui-core-toolmeta"></a>
 
-<!-- jcode-ui-core-toolmeta -->
+### `ToolMeta`
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
@@ -5273,9 +4308,9 @@ export interface ToolMeta {
 }
 ```
 
-### `ToolPresentation`
+<a id="jcode-ui-core-toolpresentation"></a>
 
-<!-- jcode-ui-core-toolpresentation -->
+### `ToolPresentation`
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
@@ -5290,27 +4325,13 @@ export interface ToolPresentation {
 }
 ```
 
-### `ToolRendererProps`
+<a id="jcode-ui-core-toolrendererprops"></a>
 
-<!-- jcode-ui-core-toolrendererprops -->
+### `ToolRendererProps`
 
 `interface` · `packages/jcode-ui-core/src/adapters/index.ts`
 
-Tool renderer registry — the plugin seam for tool-call visualization.
-
-`ToolCallCard` doesn't know how to render any specific tool. Instead it looks
-up a renderer by `tool.name` in a `ToolRendererRegistry`. jcode-ui ships
-default renderers (terminal/file-viewer/diff/search/…) as a preset; consumers
-override or extend with their own. This is what makes the component reusable
-across agents with completely different tool surfaces.
-/
-
-import type { ComponentType } from 'react'
-import type { ToolCall, ToolDisplayInfo, ToolStatus } from '../types/index.js'
-
-export type { ToolStatus }
-
-/** Props every tool renderer receives.
+Props every tool renderer receives.
 
 ```ts
 export interface ToolRendererProps {
@@ -5338,23 +4359,13 @@ export interface ToolRendererProps {
 }
 ```
 
-### `ToolStreams`
+<a id="jcode-ui-core-toolstreams"></a>
 
-<!-- jcode-ui-core-toolstreams -->
+### `ToolStreams`
 
 `interface` · `packages/jcode-ui-core/src/types/index.ts`
 
-'context' | 'mutation' | 'execution' — informational grouping. */
-  category?: string
-  /** Presentation kind: read | search | list | shell | edit | agent | other. */
-  kind?: string
-  /** When true, adjacent tools may coalesce into an Exploring group. */
-  collapsible?: boolean
-}
-
-export type ToolStatus = 'running' | 'done' | 'error'
-
-/** Structured stdout/stderr for execute-style tools (dual-channel UI path).
+Structured stdout/stderr for execute-style tools (dual-channel UI path).
 
 ```ts
 export interface ToolStreams {
@@ -5364,135 +4375,12 @@ export interface ToolStreams {
 }
 ```
 
-### `AGUIEvent`
+<a id="jcode-ui-core-aguievent"></a>
 
-<!-- jcode-ui-core-aguievent -->
+### `AGUIEvent`
 
 `type` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
 
-Fields shared by every event. */
-interface AGUIBaseEvent {
-  type: string
-  timestamp?: number
-  rawEvent?: unknown
-}
-
-// Lifecycle -----------------------------------------------------------------
-export interface RunStartedEvent extends AGUIBaseEvent {
-  type: 'RUN_STARTED'
-  threadId?: string
-  runId?: string
-}
-export interface RunFinishedEvent extends AGUIBaseEvent {
-  type: 'RUN_FINISHED'
-  result?: unknown
-}
-export interface RunErrorEvent extends AGUIBaseEvent {
-  type: 'RUN_ERROR'
-  message: string
-  code?: string
-}
-export interface StepStartedEvent extends AGUIBaseEvent {
-  type: 'STEP_STARTED'
-  stepName: string
-}
-export interface StepFinishedEvent extends AGUIBaseEvent {
-  type: 'STEP_FINISHED'
-  stepName: string
-}
-
-// Text messages -------------------------------------------------------------
-export interface TextMessageStartEvent extends AGUIBaseEvent {
-  type: 'TEXT_MESSAGE_START'
-  messageId: string
-  role?: string
-}
-export interface TextMessageContentEvent extends AGUIBaseEvent {
-  type: 'TEXT_MESSAGE_CONTENT'
-  messageId: string
-  delta: string
-}
-export interface TextMessageEndEvent extends AGUIBaseEvent {
-  type: 'TEXT_MESSAGE_END'
-  messageId: string
-}
-export interface TextMessageChunkEvent extends AGUIBaseEvent {
-  type: 'TEXT_MESSAGE_CHUNK'
-  messageId?: string
-  role?: string
-  delta?: string
-}
-
-// Tool calls ----------------------------------------------------------------
-export interface ToolCallStartEvent extends AGUIBaseEvent {
-  type: 'TOOL_CALL_START'
-  toolCallId: string
-  toolCallName: string
-  parentMessageId?: string
-}
-export interface ToolCallArgsEvent extends AGUIBaseEvent {
-  type: 'TOOL_CALL_ARGS'
-  toolCallId: string
-  delta: string
-}
-export interface ToolCallEndEvent extends AGUIBaseEvent {
-  type: 'TOOL_CALL_END'
-  toolCallId: string
-}
-export interface ToolCallResultEvent extends AGUIBaseEvent {
-  type: 'TOOL_CALL_RESULT'
-  messageId?: string
-  toolCallId: string
-  content: unknown
-  role?: string
-}
-export interface ToolCallChunkEvent extends AGUIBaseEvent {
-  type: 'TOOL_CALL_CHUNK'
-  toolCallId?: string
-  toolCallName?: string
-  parentMessageId?: string
-  delta?: string
-}
-
-// State ---------------------------------------------------------------------
-export interface StateSnapshotEvent extends AGUIBaseEvent {
-  type: 'STATE_SNAPSHOT'
-  snapshot: unknown
-}
-export interface StateDeltaEvent extends AGUIBaseEvent {
-  type: 'STATE_DELTA'
-  delta: AGUIPatchOp[]
-}
-export interface MessagesSnapshotEvent extends AGUIBaseEvent {
-  type: 'MESSAGES_SNAPSHOT'
-  messages: AGUIMessage[]
-}
-
-// Reasoning (supersedes THINKING_*) -----------------------------------------
-export interface ReasoningMessageContentEvent extends AGUIBaseEvent {
-  type: 'REASONING_MESSAGE_CONTENT'
-  messageId?: string
-  delta: string
-}
-export interface ReasoningMessageChunkEvent extends AGUIBaseEvent {
-  type: 'REASONING_MESSAGE_CHUNK'
-  messageId?: string
-  delta?: string
-}
-
-// Passthrough ---------------------------------------------------------------
-export interface CustomEvent extends AGUIBaseEvent {
-  type: 'CUSTOM'
-  name: string
-  value: unknown
-}
-export interface RawEvent extends AGUIBaseEvent {
-  type: 'RAW'
-  event: unknown
-  source?: string
-}
-
-/**
 The discriminated union the reducer switches on. Unmodelled `type`s (STEP_*,
 REASONING lifecycle markers, ACTIVITY_*, deprecated THINKING_*) still arrive
 as objects at runtime and fall through to the reducer's default branch.
@@ -5522,9 +4410,9 @@ export type AGUIEvent =
   | RawEvent;
 ```
 
-### `AGUIRole`
+<a id="jcode-ui-core-aguirole"></a>
 
-<!-- jcode-ui-core-aguirole -->
+### `AGUIRole`
 
 `type` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
 
@@ -5534,9 +4422,9 @@ AG-UI role space. Not all map onto jcode's `Role` (see `toRole`).
 export type AGUIRole = 'developer' | 'system' | 'assistant' | 'user' | 'tool';
 ```
 
-### `AGUITransport`
+<a id="jcode-ui-core-aguitransport"></a>
 
-<!-- jcode-ui-core-aguitransport -->
+### `AGUITransport`
 
 `type` · `packages/jcode-ui-core/src/runtime/aguiEvents.ts`
 
@@ -5550,64 +4438,34 @@ export type AGUITransport = (
 ) => AsyncIterable<AGUIEvent>;
 ```
 
-### `ApprovalOptionKind`
+<a id="jcode-ui-core-approvaloptionkind"></a>
 
-<!-- jcode-ui-core-approvaloptionkind -->
+### `ApprovalOptionKind`
 
 `type` · `packages/jcode-ui-core/src/types/index.ts`
 
-single-select label or free text. */
-  answer: string
-  /** multi-select labels. */
-  selected?: string[]
-}
-
-/** Button treatment for a host-defined approval option. `allow_always` keeps
+Button treatment for a host-defined approval option. `allow_always` keeps
  the two-step arming UX; `custom` renders as a neutral choice.
 
 ```ts
 export type ApprovalOptionKind = 'allow_once' | 'allow_always' | 'deny' | 'custom';
 ```
 
-### `ConnectionState`
+<a id="jcode-ui-core-connectionstate"></a>
 
-<!-- jcode-ui-core-connectionstate -->
+### `ConnectionState`
 
 `type` · `packages/jcode-ui-core/src/types/index.ts`
 
-Origin channel for inbound messages (e.g. 'wechat'). Drives avatar tint. */
-  source?: string
-  images?: ChatImage[]
-  /** system-message severity. */
-  level?: SystemLevel
-  /** Optional raw detail (collapsed by default). */
-  detail?: string
-  /** Assistant turn elapsed (ms), stamped on the final message of a turn. */
-  durationMs?: number
-  /** Optional model reasoning / chain-of-thought text (rendered collapsible).
- Mirrors assistant-ui's Reasoning component + OpenAI/Anthropic thinking. */
-  reasoning?: string
-  /** Optional citation sources for the message (rendered as a Sources list).
- Mirrors assistant-ui's Sources component. */
-  sources?: MessageSource[]
-  /** Alternate versions (edit/regenerate branches). `content` mirrors the
- active version; absent for unbranched messages. */
-  versions?: MessageVersion[]
-  /** Which entry of `versions` is showing. */
-  activeVersionId?: string
-  /** Recorded 👍/👎 feedback, when the host persists it. */
-  feedback?: 'up' | 'down'
-}
-
-/** Transport liveness surfaced by the runtime (drives ConnectionBanner).
+Transport liveness surfaced by the runtime (drives ConnectionBanner).
 
 ```ts
 export type ConnectionState = 'connected' | 'reconnecting' | 'disconnected';
 ```
 
-### `GoalStatus`
+<a id="jcode-ui-core-goalstatus"></a>
 
-<!-- jcode-ui-core-goalstatus -->
+### `GoalStatus`
 
 `type` · `packages/jcode-ui-core/src/types/index.ts`
 
@@ -5615,131 +4473,70 @@ export type ConnectionState = 'connected' | 'reconnecting' | 'disconnected';
 export type GoalStatus = 'active' | 'complete' | 'blocked';
 ```
 
-### `MockThreadStoreSeed`
+<a id="jcode-ui-core-mockthreadstoreseed"></a>
 
-<!-- jcode-ui-core-mockthreadstoreseed -->
+### `MockThreadStoreSeed`
 
 `type` · `packages/jcode-ui-core/src/threads/store.ts`
 
-Action bag. Stable identity recommended (consumers may memoize). */
-  readonly actions: ThreadStoreActions
-}
-
-/** Seed for `createMockThreadStore` — an array of threads, or a partial state.
+Seed for `createMockThreadStore` — an array of threads, or a partial state.
 
 ```ts
 export type MockThreadStoreSeed = ThreadSummary[] | Partial<ThreadListState>;
 ```
 
-### `PartialRuntimeState`
+<a id="jcode-ui-core-partialruntimestate"></a>
 
-<!-- jcode-ui-core-partialruntimestate -->
+### `PartialRuntimeState`
 
 `type` · `packages/jcode-ui-core/src/runtime/index.ts`
 
-Action bag. Stable identity is recommended (consumers should memoize). */
-  readonly actions: RuntimeActions
-}
-
-/** A `RuntimeState` where every slice is optional; useful for adapters that
+A `RuntimeState` where every slice is optional; useful for adapters that
  only implement part of the contract (e.g. a read-only replay runtime).
 
 ```ts
 export type PartialRuntimeState = Partial<RuntimeState>;
 ```
 
-### `PendingStatus`
+<a id="jcode-ui-core-pendingstatus"></a>
 
-<!-- jcode-ui-core-pendingstatus -->
+### `PendingStatus`
 
 `type` · `packages/jcode-ui-core/src/primitives/Composer.tsx`
 
-Composer — the headless message composer.
-
-Owns: textarea state, autosize, IME-safe key handling, send/queue/stop
-dispatch, a slash-command palette skeleton, and (Composer 2) a pluggable
-attachment pipeline, drag/paste ingestion, control slots, dictation, and an
-imperative `ComposerHandle`. Does NOT own styling or the model/mode/workspace
-pickers (those are app-specific — the styled jcode-ui `ChatInput` composes
-this primitive and layers them on).
-
-Streaming interaction: when the runtime reports `isRunning`, the send button
-becomes a stop button, and `send()` routes to `enqueueMessage` instead of
-`sendMessage` (type-ahead). The runtime drains the queue on each turn end.
-
-Attachments: with no `attachmentAdapter` the legacy `allowImages` base64 path
-is used (unchanged). With an adapter, every picked/pasted/dropped file flows
-through `adapter.add`, tracked in a pending state machine (uploading →
-done/error). On send, completed image attachments still ride the ChatImage
-`images` argument (so `sendMessage` stays compatible) and the full completed
-set is also handed to `onSendAttachments`.
-/
-
-import {
-  forwardRef,
-  useCallback,
-  useEffect,
-  useImperativeHandle,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from 'react'
-import type { ClipboardEvent, DragEvent, KeyboardEvent, ReactNode } from 'react'
-import { useRuntimeActions, useRuntimeState } from '../runtime/context.js'
-import type { ChatImage } from '../types/index.js'
-import { nextAttachmentId } from './attachmentAdapter.js'
-import type { AttachmentAdapter, PendingAttachment } from './attachmentAdapter.js'
-
-export interface SlashCommand {
-  /** The literal text inserted when chosen (e.g. '/goal'). */
-  slash: string
-  description?: string
-}
-
-/** Lifecycle status of a pending attachment slot.
+Lifecycle status of a pending attachment slot.
 
 ```ts
 export type PendingStatus = 'uploading' | 'done' | 'error';
 ```
 
-### `Role`
+<a id="jcode-ui-core-role"></a>
 
-<!-- jcode-ui-core-role -->
+### `Role`
 
 `type` · `packages/jcode-ui-core/src/types/index.ts`
 
-Core message + tool types for jcode-ui.
-
-These mirror the jcode backend contract (see `web/src/types/api.ts`) but are
-framework-agnostic and the single source of truth for both `jcode-ui-core`
-(headless primitives) and `jcode-ui` (styled components).
-/
-
-/** Who authored a message.
+Who authored a message.
 
 ```ts
 export type Role = 'user' | 'assistant' | 'system';
 ```
 
-### `SystemLevel`
+<a id="jcode-ui-core-systemlevel"></a>
 
-<!-- jcode-ui-core-systemlevel -->
+### `SystemLevel`
 
 `type` · `packages/jcode-ui-core/src/types/index.ts`
 
-Original filename when known (file picker / drag-drop). */
-  name?: string
-}
-
-/** Severity for `system` messages. Undefined → default neutral styling.
+Severity for `system` messages. Undefined → default neutral styling.
 
 ```ts
 export type SystemLevel = 'error' | 'notice';
 ```
 
-### `ThreadItem`
+<a id="jcode-ui-core-threaditem"></a>
 
-<!-- jcode-ui-core-threaditem -->
+### `ThreadItem`
 
 `type` · `packages/jcode-ui-core/src/types/index.ts`
 
@@ -5754,62 +4551,37 @@ export type ThreadItem =
   | { kind: 'exploring'; data: ExploringGroup; seq: number };
 ```
 
-### `ThreadItemKind`
+<a id="jcode-ui-core-threaditemkind"></a>
 
-<!-- jcode-ui-core-threaditemkind -->
+### `ThreadItemKind`
 
 `type` · `packages/jcode-ui-core/src/types/index.ts`
 
-Target outside the workspace root — UI flags it prominently. */
-  is_external: boolean
-  resolved?: boolean
-  approved?: boolean
-  /** True while a resolve request is in flight (disables controls). */
-  resolving?: boolean
-  /** Host-defined decision options; absent → classic boolean controls. */
-  options?: ApprovalOption[]
-  /** The chosen option id once resolved (options mode). */
-  resolvedOptionId?: string
-}
-
-/** Built-in thread-item kinds (exploring is UI-only coalescing).
+Built-in thread-item kinds (exploring is UI-only coalescing).
 
 ```ts
 export type ThreadItemKind = 'message' | 'tool' | 'approval' | 'exploring';
 ```
 
-### `ToolRenderer`
+<a id="jcode-ui-core-toolrenderer"></a>
 
-<!-- jcode-ui-core-toolrenderer -->
+### `ToolRenderer`
 
 `type` · `packages/jcode-ui-core/src/adapters/index.ts`
 
-Logical tool name (e.g. 'execute', 'read', 'edit', 'grep', …). */
-  name: string
-  /** Raw args JSON string. Renderers parse what they need. */
-  args: string
-  /** Raw output string (may be omitted while running). */
-  output?: string
-  /** Clean display output (backend metadata stripped). */
-  displayOutput?: string
-  /** Error string if the tool failed. */
-  error?: string
-  status: ToolStatus
-  /** Pre-extracted display metadata (title/subtitle/icon). May be absent. */
-  displayInfo?: ToolDisplayInfo
-  /** Nested subagent calls — renderers decide whether to recurse. */
-  children?: ToolCall[]
-  /** Dual-channel streams (execute). */
-  streams?: ToolCall['streams']
-  /** Dual-channel meta (execute). */
-  meta?: ToolCall['meta']
-  /** Dual-channel presentation (execute). */
-  presentation?: ToolCall['presentation']
-}
-
-/** A tool renderer is just a React component.
+A tool renderer is just a React component.
 
 ```ts
 export type ToolRenderer = ComponentType<ToolRendererProps>;
+```
+
+<a id="jcode-ui-core-toolstatus"></a>
+
+### `ToolStatus`
+
+`type` · `packages/jcode-ui-core/src/types/index.ts`
+
+```ts
+export type ToolStatus = 'running' | 'done' | 'error';
 ```
 

@@ -45,4 +45,4 @@ type ConnectionState = 'connected' | 'reconnecting' | 'disconnected'
 
 ## Related
 
-- [Runtime state](/chat-ui/docs/guides/runtime)
+- [Runtime state](/chat-ui/docs/runtime)
