@@ -63,12 +63,27 @@ const FEATURES = [
   {
     n: '05',
     title: 'Interactive blocks',
-    body: 'Approval gates (3-tier with arming) and ask-user question flows ship as first-class primitives, not afterthoughts.',
+    body: 'Approval gates — two-step arming, or arbitrary host-defined options (ACP-ready) — plus ask-user question flows as first-class primitives.',
   },
   {
     n: '06',
     title: 'Headless or styled',
     body: 'Use the styled jcode-ui components, or drop down to jcode-ui-core primitives and bring your own Tailwind layer.',
+  },
+  {
+    n: '07',
+    title: 'Complete conversation loop',
+    body: 'Branch picker, regenerate, 👍👎 feedback, failed-turn retry, quote-reply, markdown export, welcome + suggestions — the whole lifecycle, fail-visible by design.',
+  },
+  {
+    n: '08',
+    title: 'AG-UI native',
+    body: 'createAGUIRuntime speaks the AG-UI protocol, so LangGraph, CrewAI, Mastra and friends drive these components with zero glue.',
+  },
+  {
+    n: '09',
+    title: 'Scoped tokens + shadcn bridge',
+    body: 'Every token lives under [data-jcode-ui] as --jcode-* — zero host pollution. Import shadcn.css and it inherits your shadcn theme automatically.',
   },
 ]
 
@@ -105,11 +120,12 @@ export default function ChatUIPage() {
         <Reveal>
           <h2 className="chatui-section-title">Live demo</h2>
           <p className="chatui-section-lede">
-            This is the real jcode-ui, driven by a mock runtime — no backend. It streams a scripted
-            conversation through every item kind.
+            This is the real jcode-ui, driven by a mock runtime — no backend. Type a message, pick a
+            starter, or hit <em>tour</em> to stream a scripted agent run through every item kind.
+            Flip light/dark and mobile from the chrome bar.
           </p>
           <div className="chatui-demo-frame">
-            <ChatDemo height={520} />
+            <ChatDemo height={520} interactive controls />
           </div>
         </Reveal>
       </section>

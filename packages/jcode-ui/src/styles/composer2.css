@@ -1,0 +1,417 @@
+/*
+ * Composer 2 — styles for the extended composer surface.
+ *
+ * Token-driven only (var(--jcode-*)); dark mode adapts automatically. Not
+ * imported by entry.css automatically — add `@import './composer2.css';` to
+ * entry.css (after components.css) to ship it.
+ *
+ * Covers: drag-and-drop overlay, pending-attachment strip (file chips + image
+ * tiles with progress/error/retry), dictation mic button, and ModelSelector.
+ */
+
+/* ─── Drag & drop overlay ─────────────────────────────────────────────────── */
+.jcode-composer-drop {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+  border-radius: inherit;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--jcode-color-surface) 78%, transparent);
+  backdrop-filter: blur(1px);
+}
+.jcode-composer-drop__inner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  height: 100%;
+  justify-content: center;
+  border: 2px dashed var(--jcode-accent-border);
+  border-radius: var(--jcode-radius-xl);
+  color: var(--jcode-color-primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-family: var(--jcode-font-sans);
+  background: var(--jcode-accent-wash-soft);
+}
+
+/* ─── Pending attachments strip ───────────────────────────────────────────── */
+.jcode-pending-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.4rem 0.55rem 0.25rem 0.15rem;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+/* File chip (non-image attachments). */
+.jcode-attachment-chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 11rem;
+  max-width: 17rem;
+  padding: 0.45rem 1.8rem 0.45rem 0.5rem;
+  box-sizing: border-box;
+  border: 1px solid var(--jcode-color-border);
+  border-radius: var(--jcode-radius-lg);
+  background: var(--jcode-color-surface);
+  box-shadow: var(--jcode-shadow-sm);
+}
+.jcode-attachment-chip.is-error {
+  border-color: var(--jcode-color-destructive);
+  background: color-mix(in srgb, var(--jcode-color-destructive) 7%, var(--jcode-color-surface));
+}
+.jcode-attachment-chip__icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+  border-radius: var(--jcode-radius-md);
+  background: var(--jcode-neutral-wash-soft);
+  color: var(--jcode-color-muted-foreground);
+}
+.jcode-attachment-chip__icon svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+.jcode-attachment-chip__ext {
+  position: absolute;
+  bottom: -0.15rem;
+  right: -0.2rem;
+  padding: 0 0.2rem;
+  border-radius: var(--jcode-radius-xs);
+  background: var(--jcode-color-primary);
+  color: var(--jcode-color-on-primary);
+  font-family: var(--jcode-font-mono);
+  font-size: 0.5rem;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+}
+.jcode-attachment-chip__meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  gap: 0.15rem;
+}
+.jcode-attachment-chip__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--jcode-color-foreground);
+}
+.jcode-attachment-chip__sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.68rem;
+  font-family: var(--jcode-font-mono);
+  color: var(--jcode-color-muted-foreground);
+}
+.jcode-attachment-chip.is-error .jcode-attachment-chip__sub {
+  color: var(--jcode-color-destructive);
+}
+.jcode-attachment-chip__retry,
+.jcode-pending-image__retry {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--jcode-color-destructive);
+}
+.jcode-attachment-chip__retry {
+  width: 1.4rem;
+  height: 1.4rem;
+  flex-shrink: 0;
+}
+.jcode-attachment-chip__retry svg,
+.jcode-pending-image__retry svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+.jcode-attachment-chip__remove {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: var(--jcode-radius-pill);
+  color: var(--jcode-color-muted-foreground);
+}
+.jcode-attachment-chip__remove:hover {
+  color: var(--jcode-color-foreground);
+  background: var(--jcode-neutral-wash-soft);
+}
+.jcode-attachment-chip__remove svg {
+  width: 0.7rem;
+  height: 0.7rem;
+}
+
+/* Linear progress bar (uploading). */
+.jcode-attachment-progress {
+  display: block;
+  width: 100%;
+  height: 3px;
+  margin-top: 0.1rem;
+  border-radius: var(--jcode-radius-pill);
+  background: var(--jcode-neutral-wash);
+  overflow: hidden;
+}
+.jcode-attachment-progress__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--jcode-color-primary);
+  transition: width var(--jcode-duration-normal, 200ms) var(--jcode-ease-out, ease);
+}
+
+/* Pending image tile (adapter image with inline data). */
+.jcode-pending-image {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  overflow: visible;
+  line-height: 0;
+}
+.jcode-pending-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border: 1px solid var(--jcode-color-border);
+  border-radius: var(--jcode-radius-md);
+  box-shadow: var(--jcode-shadow-sm);
+  max-width: none !important;
+}
+.jcode-pending-image.is-error img {
+  border-color: var(--jcode-color-destructive);
+}
+.jcode-pending-image__veil {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--jcode-radius-md);
+  background: color-mix(in srgb, var(--jcode-color-surface) 55%, transparent);
+}
+.jcode-pending-spinner {
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: var(--jcode-radius-pill);
+  border: 2px solid var(--jcode-neutral-border);
+  border-top-color: var(--jcode-color-primary);
+  animation: jcode-spin 0.7s linear infinite;
+}
+.jcode-pending-image__retry {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: color-mix(in srgb, var(--jcode-color-destructive) 14%, transparent);
+  border-radius: var(--jcode-radius-md);
+}
+@keyframes jcode-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ─── Dictation mic button ────────────────────────────────────────────────── */
+.jcode-dictation-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+  border-radius: var(--jcode-radius-md);
+  color: var(--jcode-color-muted-foreground);
+  transition:
+    background-color var(--jcode-duration-fast) var(--jcode-ease-out, ease),
+    color var(--jcode-duration-fast) var(--jcode-ease-out, ease);
+}
+.jcode-dictation-btn:hover {
+  background: var(--jcode-neutral-wash-soft);
+  color: var(--jcode-color-foreground);
+}
+.jcode-dictation-btn.is-listening {
+  color: var(--jcode-color-destructive);
+  background: color-mix(in srgb, var(--jcode-color-destructive) 12%, transparent);
+  animation: jcode-mic-pulse 1.4s ease-in-out infinite;
+}
+@keyframes jcode-mic-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--jcode-color-destructive) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--jcode-color-destructive) 0%, transparent);
+  }
+}
+
+/* ─── ModelSelector ───────────────────────────────────────────────────────── */
+.jcode-model-selector {
+  position: relative;
+  display: inline-flex;
+  font-family: var(--jcode-font-sans);
+}
+.jcode-model-selector__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  height: 1.9rem;
+  padding: 0 0.4rem 0 0.55rem;
+  border-radius: var(--jcode-radius-lg);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--jcode-color-foreground);
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--jcode-duration-fast) var(--jcode-ease-out, ease);
+}
+.jcode-model-selector__trigger:hover:not(:disabled) {
+  background: var(--jcode-neutral-wash-soft);
+}
+.jcode-model-selector__trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.jcode-model-selector__current {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.jcode-model-selector__chev {
+  width: 0.85rem;
+  height: 0.85rem;
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+.jcode-model-selector__menu {
+  position: absolute;
+  bottom: calc(100% + 0.35rem);
+  left: 0;
+  z-index: var(--jcode-z-dropdown, 40);
+  display: flex;
+  flex-direction: column;
+  width: 18rem;
+  max-height: 22rem;
+  overflow: hidden;
+  border-radius: var(--jcode-radius-xl);
+  border: 1px solid var(--jcode-color-border);
+  background: var(--jcode-color-surface);
+  box-shadow: var(--jcode-shadow-lg);
+}
+.jcode-model-selector__search {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.65rem;
+  border-bottom: 1px solid var(--jcode-color-border);
+  color: var(--jcode-color-muted-foreground);
+}
+.jcode-model-selector__search-icon {
+  width: 0.9rem;
+  height: 0.9rem;
+  flex-shrink: 0;
+}
+.jcode-model-selector__search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--jcode-color-foreground);
+  font-size: 0.8rem;
+  font-family: inherit;
+}
+.jcode-model-selector__search input::placeholder {
+  color: var(--jcode-color-muted-foreground);
+}
+.jcode-model-selector__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.3rem;
+}
+.jcode-model-selector__empty {
+  padding: 1rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--jcode-color-muted-foreground);
+}
+.jcode-model-selector__group-label {
+  padding: 0.45rem 0.5rem 0.2rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--jcode-color-muted-foreground);
+}
+.jcode-model-selector__option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: 0;
+  border-radius: var(--jcode-radius-md);
+  background: transparent;
+  color: var(--jcode-color-foreground);
+  text-align: left;
+  cursor: pointer;
+}
+.jcode-model-selector__option.is-active {
+  background: var(--jcode-neutral-wash-soft);
+}
+.jcode-model-selector__option.is-selected {
+  background: var(--jcode-accent-wash);
+}
+.jcode-model-selector__option-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  gap: 0.1rem;
+}
+.jcode-model-selector__option-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+}
+.jcode-model-selector__option.is-selected .jcode-model-selector__option-label {
+  font-weight: 600;
+  color: var(--jcode-color-primary);
+}
+.jcode-model-selector__option-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.68rem;
+  color: var(--jcode-color-muted-foreground);
+}
+.jcode-model-selector__check {
+  width: 0.9rem;
+  height: 0.9rem;
+  flex-shrink: 0;
+  color: var(--jcode-color-primary);
+}

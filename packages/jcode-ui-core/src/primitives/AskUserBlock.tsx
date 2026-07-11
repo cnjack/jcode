@@ -120,7 +120,7 @@ export function AskUserBlock({ tool, className, renderPending, renderResolved }:
 
   if (!isPending) {
     const answers = parseResolvedAnswers(tool)
-    return <div className={className}>{renderResolved?.(tool, answers) ?? <DefaultResolved tool={tool} answers={answers} />}</div>
+    return <div data-jcode-ui="" className={className}>{renderResolved?.(tool, answers) ?? <DefaultResolved tool={tool} answers={answers} />}</div>
   }
 
   const controls: AskUserControls = {
@@ -133,7 +133,7 @@ export function AskUserBlock({ tool, className, renderPending, renderResolved }:
   }
 
   return (
-    <div className={className} data-ask-user-id={tool.askUserId}>
+    <div data-jcode-ui="" className={className} data-ask-user-id={tool.askUserId}>
       {renderPending?.(questions, controls) ?? <DefaultPending questions={questions} controls={controls} />}
     </div>
   )

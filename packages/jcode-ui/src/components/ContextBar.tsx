@@ -39,14 +39,14 @@ export const ContextBar = memo(function ContextBar({
   const circ = 2 * Math.PI * r
 
   return (
-    <div className="jcode-context-bar group relative inline-flex">
+    <div data-jcode-ui="" className="jcode-context-bar group relative inline-flex">
       <svg width={size} height={size} className="-rotate-90">
         <circle
           cx={size / 2}
           cy={size / 2}
           r={r}
           fill="none"
-          stroke="var(--color-border)"
+          stroke="var(--jcode-color-border)"
           strokeWidth={2}
         />
         <circle
@@ -54,7 +54,7 @@ export const ContextBar = memo(function ContextBar({
           cy={size / 2}
           r={r}
           fill="none"
-          stroke={danger ? 'var(--color-error-fg)' : 'var(--color-primary)'}
+          stroke={danger ? 'var(--jcode-color-error-fg)' : 'var(--jcode-color-primary)'}
           strokeWidth={2}
           strokeDasharray={circ}
           strokeDashoffset={circ * (1 - pct)}
@@ -63,8 +63,8 @@ export const ContextBar = memo(function ContextBar({
         />
       </svg>
       {showPopover && (
-        <div className="pointer-events-none absolute bottom-full right-0 mb-2 w-56 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 opacity-0 shadow-[var(--shadow-md)] transition-opacity group-hover:opacity-100">
-          <div className="mb-2 text-[0.72rem] font-medium text-[var(--color-foreground)]">Context</div>
+        <div className="pointer-events-none absolute bottom-full right-0 mb-2 w-56 rounded-[var(--jcode-radius-lg)] border border-[var(--jcode-color-border)] bg-[var(--jcode-color-surface)] p-3 opacity-0 shadow-[var(--jcode-shadow-md)] transition-opacity group-hover:opacity-100">
+          <div className="mb-2 text-[0.72rem] font-medium text-[var(--jcode-color-foreground)]">Context</div>
           {snapshot ? (
             <div className="space-y-0.5 text-[0.72rem]">
               <Row label="tokens" value={formatNum(snapshot.total_tokens)} />
@@ -75,10 +75,10 @@ export const ContextBar = memo(function ContextBar({
               )}
             </div>
           ) : (
-            <div className="text-[0.72rem] text-[var(--color-muted-foreground)]">No usage yet</div>
+            <div className="text-[0.72rem] text-[var(--jcode-color-muted-foreground)]">No usage yet</div>
           )}
           {breakdown && (
-            <div className="mt-2 space-y-0.5 border-t border-[var(--color-border)] pt-2 text-[0.72rem]">
+            <div className="mt-2 space-y-0.5 border-t border-[var(--jcode-color-border)] pt-2 text-[0.72rem]">
               <Row label="messages" value={formatNum(breakdown.messages_tokens)} />
               <Row label="system prompt" value={formatNum(breakdown.system_prompt_tokens)} />
               <Row label="tools" value={formatNum(breakdown.system_tools_tokens)} />
@@ -95,8 +95,8 @@ export const ContextBar = memo(function ContextBar({
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between gap-2">
-      <span className="text-[var(--color-muted-foreground)]">{label}</span>
-      <span className="font-mono text-[var(--color-foreground)]">{value}</span>
+      <span className="text-[var(--jcode-color-muted-foreground)]">{label}</span>
+      <span className="font-mono text-[var(--jcode-color-foreground)]">{value}</span>
     </div>
   )
 }

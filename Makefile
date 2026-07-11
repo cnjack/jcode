@@ -45,9 +45,8 @@ generate:
 build-web: generate
 	@echo "Building React frontend + packages..."
 	-pnpm install --frozen-lockfile 2>/dev/null || true
-	cd packages/jcode-ui-core && npx tsc -p tsconfig.build.json
-	cd packages/jcode-ui && npx tsc -p tsconfig.build.json
-	cd packages/jcode-ui && npx tailwindcss -i src/styles/entry.css -o dist/styles.css --minify
+	cd packages/jcode-ui-core && pnpm build
+	cd packages/jcode-ui && pnpm build
 	cd web && npx vite build
 
 # The main binary never links CoreBluetooth (whose eager init triggers the macOS

@@ -13,8 +13,9 @@ import {
   DocumentTextIcon,
   PencilSquareIcon,
 } from '@heroicons/react/24/outline'
-import type { Approval } from 'jcode-ui-core'
+import type { Approval, ApprovalOption } from 'jcode-ui-core'
 import { ApprovalBlock } from 'jcode-ui-core/primitives'
+import type { ApprovalDecisionActions } from 'jcode-ui-core/primitives'
 
 export interface ApprovalBannerProps {
   approval: Approval
@@ -25,32 +26,31 @@ export const ApprovalBanner = memo(function ApprovalBanner({ approval }: Approva
     <ApprovalBlock
       approval={approval}
       className="jcode-approval"
-      renderPending={(a, acts) => <PendingCard approval={a} {...acts} />}
+      renderPending={(a, acts) => <PendingCard approval={a} actions={acts} />}
       renderResolved={(a) => <ResolvedNote approval={a} />}
     />
   )
 })
 
-function PendingCard({
-  approval,
-  allowOnce,
-  allowAllArm,
-  allowAllConfirm,
-  allowAllCancel,
-  deny,
-  armed,
-}: {
-  approval: Approval
-  allowOnce: () => void
-  allowAllArm: () => void
-  allowAllConfirm: () => void
-  allowAllCancel: () => void
-  deny: () => void
-  armed: boolean
-}) {
+/** Button class per option kind — allow reads as the primary action, deny as
+ *  destructive-outline, everything else stays neutral. */
+function optionButtonClass(kind: ApprovalOption['kind']): string {
+  switch (kind) {
+    case 'allow_once':
+      return 'jcode-btn jcode-btn-allow'
+    case 'deny':
+      return 'jcode-btn jcode-btn-deny'
+    default:
+      return 'jcode-btn jcode-btn-ghost'
+  }
+}
+
+function PendingCard({ approval, actions }: { approval: Approval; actions: ApprovalDecisionActions }) {
   const target = useMemo(() => extractTarget(approval), [approval])
   const Icon = toolIcon(approval.tool_name)
   const disabled = !!approval.resolving
+  const armed = actions.armed || actions.armedOptionId !== null
+  const hasOptions = !!approval.options?.length
   return (
     <div className={`jcode-approval-card${armed ? ' is-armed' : ''}${approval.is_external ? ' is-external' : ''}`}>
       <div className="jcode-approval-card__head">
@@ -77,44 +77,101 @@ function PendingCard({
       </details>
 
       <div className="jcode-approval-card__actions">
-        <button type="button" onClick={allowOnce} disabled={disabled} className="jcode-btn jcode-btn-allow">
-          Allow once
-        </button>
-        {!armed ? (
-          <button type="button" onClick={allowAllArm} disabled={disabled} className="jcode-btn jcode-btn-ghost">
-            Allow all…
-          </button>
+        {hasOptions ? (
+          approval.options!.map((o) => {
+            const kind = o.kind ?? 'custom'
+            if (kind === 'allow_always') {
+              // Blanket approvals keep the two-step arming UX regardless of host.
+              return actions.armedOptionId === o.id ? (
+                <span key={o.id} className="contents">
+                  <button
+                    type="button"
+                    onClick={() => actions.confirmOption(o.id)}
+                    disabled={disabled}
+                    className="jcode-btn jcode-btn-caution"
+                  >
+                    Confirm: {o.label}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={actions.cancelArm}
+                    disabled={disabled}
+                    className="jcode-btn jcode-btn-ghost"
+                  >
+                    Cancel
+                  </button>
+                </span>
+              ) : (
+                <button
+                  key={o.id}
+                  type="button"
+                  onClick={() => actions.armOption(o.id)}
+                  disabled={disabled}
+                  title={o.description}
+                  className="jcode-btn jcode-btn-ghost"
+                >
+                  {o.label}…
+                </button>
+              )
+            }
+            return (
+              <button
+                key={o.id}
+                type="button"
+                onClick={() => actions.choose(o.id)}
+                disabled={disabled}
+                title={o.description}
+                className={optionButtonClass(kind)}
+              >
+                {o.label}
+              </button>
+            )
+          })
         ) : (
           <>
-            <button
-              type="button"
-              onClick={allowAllConfirm}
-              disabled={disabled}
-              className="jcode-btn jcode-btn-caution"
-            >
-              Confirm allow all
+            <button type="button" onClick={actions.allowOnce} disabled={disabled} className="jcode-btn jcode-btn-allow">
+              Allow once
             </button>
-            <button type="button" onClick={allowAllCancel} disabled={disabled} className="jcode-btn jcode-btn-ghost">
-              Cancel
+            {!actions.armed ? (
+              <button type="button" onClick={actions.allowAllArm} disabled={disabled} className="jcode-btn jcode-btn-ghost">
+                Allow all…
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={actions.allowAllConfirm}
+                  disabled={disabled}
+                  className="jcode-btn jcode-btn-caution"
+                >
+                  Confirm allow all
+                </button>
+                <button type="button" onClick={actions.allowAllCancel} disabled={disabled} className="jcode-btn jcode-btn-ghost">
+                  Cancel
+                </button>
+              </>
+            )}
+            <button type="button" onClick={actions.deny} disabled={disabled} className="jcode-btn jcode-btn-deny">
+              Deny
             </button>
           </>
         )}
-        <button type="button" onClick={deny} disabled={disabled} className="jcode-btn jcode-btn-deny">
-          Deny
-        </button>
       </div>
     </div>
   )
 }
 
 function ResolvedNote({ approval }: { approval: Approval }) {
-  const ok = approval.approved
+  const chosen = approval.resolvedOptionId
+    ? approval.options?.find((o) => o.id === approval.resolvedOptionId)
+    : undefined
+  const ok = chosen ? (chosen.kind ?? 'custom') !== 'deny' : approval.approved
   const Icon = ok ? ShieldCheckIcon : ShieldExclamationIcon
   return (
     <div className={`jcode-approval-resolved${ok ? ' is-ok' : ''}`}>
       <Icon className="h-3.5 w-3.5 shrink-0" />
       <span>
-        {ok ? 'Allowed' : 'Denied'}
+        {chosen?.label ?? (ok ? 'Allowed' : 'Denied')}
         <span className="jcode-approval-resolved__sep">·</span>
         <span className="jcode-approval-resolved__name">{approval.tool_name}</span>
       </span>

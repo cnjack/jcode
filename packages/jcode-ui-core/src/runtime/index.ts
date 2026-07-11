@@ -11,7 +11,14 @@
  * mock playground. The runtime is the single seam.
  */
 
-import type { ThreadItem, TokenSnapshot, Goal, TodoItem, QueuedMessage } from '../types/index.js'
+import type {
+  ThreadItem,
+  TokenSnapshot,
+  Goal,
+  TodoItem,
+  QueuedMessage,
+  ConnectionState,
+} from '../types/index.js'
 
 /**
  * The read-side state a Thread + Composer render from. Consumers provide an
@@ -32,6 +39,8 @@ export interface RuntimeState {
   todos: TodoItem[]
   /** Type-ahead queue: messages composed mid-turn, drained on each turn end. */
   queued: QueuedMessage[]
+  /** Transport liveness (drives ConnectionBanner). Defaults to 'connected'. */
+  connection: ConnectionState
 }
 
 /**
@@ -57,6 +66,22 @@ export interface RuntimeActions {
   submitAskUser: (id: string, answers: { question_header: string; answer: string; selected?: string[] }[]) => void
   /** Edit a past user message and resend from that point. */
   editMessage: (id: string, newText: string) => void
+
+  // ── Optional capabilities ─────────────────────────────────────────────
+  // Fail-visible convention: when a host omits one of these, the UI control
+  // that would dispatch it is NOT rendered (never a dead button).
+
+  /** Resolve an approval that carries host-defined `options` (e.g. ACP
+   *  permission_request with arbitrary option ids). */
+  resolveApprovalOption?: (id: string, optionId: string) => void
+  /** Regenerate an assistant message; the host appends a new version. */
+  regenerate?: (messageId: string) => void
+  /** Switch the visible version of a branched message. */
+  switchVersion?: (messageId: string, versionId: string) => void
+  /** Record 👍/👎 feedback on an assistant message. */
+  submitFeedback?: (messageId: string, rating: 'up' | 'down', comment?: string) => void
+  /** Retry a failed assistant turn (system error follow-up). */
+  retryMessage?: (messageId: string) => void
 }
 
 /**
@@ -85,6 +110,7 @@ export function normalizeState(partial: PartialRuntimeState | undefined): Runtim
     goal: partial?.goal ?? null,
     todos: partial?.todos ?? [],
     queued: partial?.queued ?? [],
+    connection: partial?.connection ?? 'connected',
   }
 }
 
@@ -93,3 +119,4 @@ export function normalizeState(partial: PartialRuntimeState | undefined): Runtim
 export * from './externalStore.js'
 export * from './mockRuntime.js'
 export * from './context.js'
+export * from './agui.js'

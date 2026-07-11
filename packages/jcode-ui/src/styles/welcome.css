@@ -1,0 +1,149 @@
+/* ─── ThreadWelcome / Suggestions / ExportButton ─── */
+
+.jcode-welcome {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  padding-top: 3rem;
+  padding-bottom: 3rem;
+}
+.jcode-welcome__inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.5rem;
+  max-width: 34rem;
+  animation: jcode-fade-up var(--jcode-duration-slow) var(--jcode-ease-out) both;
+}
+.jcode-welcome__logo {
+  margin-bottom: 0.25rem;
+}
+.jcode-welcome__title {
+  font-family: var(--jcode-font-sans);
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--jcode-color-foreground);
+  margin: 0;
+}
+.jcode-welcome__subtitle {
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: var(--jcode-color-muted-foreground);
+  margin: 0;
+}
+.jcode-welcome__extra {
+  margin-top: 1rem;
+  width: 100%;
+}
+
+/* Suggestion pills — quiet chips that light up on hover. */
+.jcode-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+}
+.jcode-suggestions--scroll {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+.jcode-suggestions--scroll::-webkit-scrollbar {
+  display: none;
+}
+.jcode-suggestion {
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--jcode-color-foreground);
+  background: var(--jcode-color-surface);
+  border: 1px solid var(--jcode-color-border);
+  border-radius: var(--jcode-radius-pill);
+  padding: 0.35rem 0.85rem;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: var(--jcode-shadow-sm);
+  transition:
+    border-color var(--jcode-duration-fast) var(--jcode-ease-out),
+    background-color var(--jcode-duration-fast) var(--jcode-ease-out),
+    transform var(--jcode-duration-fast) var(--jcode-ease-out);
+}
+.jcode-suggestion:hover:not(:disabled) {
+  border-color: var(--jcode-accent-border);
+  background: var(--jcode-accent-wash-soft);
+}
+.jcode-suggestion:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.jcode-suggestion:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.jcode-suggestion:focus-visible {
+  outline: 2px solid var(--jcode-accent-border);
+  outline-offset: 1px;
+}
+
+/* Follow-up placement under the last turn: align with the chat column. */
+.jcode-thread-followups {
+  padding-top: 0.25rem;
+  padding-bottom: 0.75rem;
+}
+.jcode-thread-followups .jcode-suggestions {
+  justify-content: flex-start;
+}
+
+/* Export button — quiet chrome control. */
+.jcode-export-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font: inherit;
+  font-size: 0.72rem;
+  color: var(--jcode-color-muted-foreground);
+  background: transparent;
+  border: 1px solid var(--jcode-color-border);
+  border-radius: var(--jcode-radius-md);
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+  transition:
+    color var(--jcode-duration-fast) var(--jcode-ease-out),
+    border-color var(--jcode-duration-fast) var(--jcode-ease-out),
+    background-color var(--jcode-duration-fast) var(--jcode-ease-out);
+}
+.jcode-export-btn:hover {
+  color: var(--jcode-color-foreground);
+  background: var(--jcode-neutral-wash-soft);
+}
+.jcode-export-btn:focus-visible {
+  outline: 2px solid var(--jcode-accent-border);
+  outline-offset: 1px;
+}
+
+/* Floating quote-selection button (portal to body). */
+.jcode-quote-btn {
+  position: fixed;
+  transform: translate(-50%, calc(-100% - 6px));
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-family: var(--jcode-font-sans);
+  font-size: 0.72rem;
+  color: var(--jcode-color-foreground);
+  background: var(--jcode-color-surface);
+  border: 1px solid var(--jcode-color-border);
+  border-radius: var(--jcode-radius-pill);
+  padding: 0.25rem 0.65rem;
+  cursor: pointer;
+  box-shadow: var(--jcode-shadow-lg);
+  z-index: var(--jcode-z-toast);
+  animation: jcode-fade-up var(--jcode-duration-fast) var(--jcode-ease-out) both;
+}
+.jcode-quote-btn:hover {
+  border-color: var(--jcode-accent-border);
+  background: var(--jcode-accent-wash-soft);
+}

@@ -11,4 +11,7 @@ export {
   TeamSpawnRenderer,
 } from './team.js'
 export * from './browserShot.js'
+export * from './fileTree.js'
+export * from './testResults.js'
+export * from './stackTrace.js'
 export * from './generic.js'
