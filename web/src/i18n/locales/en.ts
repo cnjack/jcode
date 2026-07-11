@@ -773,6 +773,7 @@ export default {
     showArchived: 'Show archived tasks',
     noProjects: 'No projects yet',
     noTasks: 'No tasks',
+    noConversations: 'No conversations yet',
     running: 'Running',
     untitled: 'New chat',
     newTaskHere: 'New task here',

@@ -722,6 +722,7 @@ export default {
     showArchived: 'アーカイブ済みタスクを表示',
     noProjects: 'プロジェクトがまだありません',
     noTasks: 'タスクなし',
+    noConversations: 'まだ会話がありません',
     running: '実行中',
     untitled: '新しいチャット',
     newTaskHere: 'ここで新規タスク',

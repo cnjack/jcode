@@ -722,6 +722,7 @@ export default {
     showArchived: '보관된 작업 표시',
     noProjects: '프로젝트가 아직 없습니다',
     noTasks: '작업 없음',
+    noConversations: '아직 대화가 없습니다',
     running: '실행 중',
     untitled: '새 채팅',
     newTaskHere: '여기에 새 작업',
