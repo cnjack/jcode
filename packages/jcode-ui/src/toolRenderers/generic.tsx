@@ -15,8 +15,8 @@ export const GenericRenderer = memo(function GenericRenderer({
 }: ToolRendererProps) {
   const borderColor =
     status === 'error' || error
-      ? 'var(--color-destructive, var(--color-error-fg))'
-      : 'var(--color-border)'
+      ? 'var(--jcode-color-destructive, var(--jcode-color-error-fg))'
+      : 'var(--jcode-color-border)'
 
   return (
     <div
@@ -27,11 +27,11 @@ export const GenericRenderer = memo(function GenericRenderer({
         <div className="mb-1.5">
           <span
             className="text-[10px] uppercase tracking-wider"
-            style={{ color: 'var(--color-muted-foreground)' }}
+            style={{ color: 'var(--jcode-color-muted-foreground)' }}
           >
             args
           </span>
-          <div className="mt-0.5" style={{ color: 'var(--color-muted-foreground)' }}>
+          <div className="mt-0.5" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
             {formatArgs(args)}
           </div>
         </div>
@@ -40,11 +40,11 @@ export const GenericRenderer = memo(function GenericRenderer({
         <div className="mt-2">
           <span
             className="text-[10px] uppercase tracking-wider"
-            style={{ color: 'var(--color-muted-foreground)' }}
+            style={{ color: 'var(--jcode-color-muted-foreground)' }}
           >
             output
           </span>
-          <div className="mt-0.5 whitespace-pre-wrap" style={{ color: 'var(--color-muted-foreground)' }}>
+          <div className="mt-0.5 whitespace-pre-wrap" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
             {truncate(output, 500)}
           </div>
         </div>
@@ -53,13 +53,13 @@ export const GenericRenderer = memo(function GenericRenderer({
         <div className="mt-2">
           <span
             className="text-[10px] uppercase tracking-wider"
-            style={{ color: 'var(--color-destructive, var(--color-error-fg))' }}
+            style={{ color: 'var(--jcode-color-destructive, var(--jcode-color-error-fg))' }}
           >
             error
           </span>
           <div
             className="mt-0.5 whitespace-pre-wrap"
-            style={{ color: 'var(--color-destructive, var(--color-error-fg))' }}
+            style={{ color: 'var(--jcode-color-destructive, var(--jcode-color-error-fg))' }}
           >
             {truncate(error, 500)}
           </div>

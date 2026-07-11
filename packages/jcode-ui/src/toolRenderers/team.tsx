@@ -15,10 +15,10 @@ interface TeamMember {
 }
 
 function memberStatusColor(status: string): string {
-  if (status === 'running' || status === 'busy') return 'var(--color-accent-neutral)'
-  if (status === 'done' || status === 'finished') return 'var(--color-success-fg)'
-  if (status === 'error') return 'var(--color-destructive, var(--color-error-fg))'
-  return 'var(--color-muted-foreground)'
+  if (status === 'running' || status === 'busy') return 'var(--jcode-color-accent-neutral)'
+  if (status === 'done' || status === 'finished') return 'var(--jcode-color-success-fg)'
+  if (status === 'error') return 'var(--jcode-color-destructive, var(--jcode-color-error-fg))'
+  return 'var(--jcode-color-muted-foreground)'
 }
 
 export const TeamListRenderer = memo(function TeamListRenderer({
@@ -28,24 +28,24 @@ export const TeamListRenderer = memo(function TeamListRenderer({
 }: ToolRendererProps) {
   const { teamName, members } = useMemo(() => parseTeamList(output), [output])
   return (
-    <div className="jcode-team-list max-h-64 overflow-y-auto px-3 py-2" style={{ background: 'var(--color-surface)' }}>
+    <div className="jcode-team-list max-h-64 overflow-y-auto px-3 py-2" style={{ background: 'var(--jcode-color-surface)' }}>
       {teamName && (
         <div
           className="mb-2 flex items-center gap-2 pb-1.5"
-          style={{ borderBottom: '1px solid var(--color-border)' }}
+          style={{ borderBottom: '1px solid var(--jcode-color-border)' }}
         >
           <span
             className="text-[10px] font-semibold uppercase tracking-wider"
-            style={{ color: 'var(--color-muted-foreground)' }}
+            style={{ color: 'var(--jcode-color-muted-foreground)' }}
           >
             Team
           </span>
-          <span className="font-mono text-xs font-semibold" style={{ color: 'var(--color-foreground)' }}>
+          <span className="font-mono text-xs font-semibold" style={{ color: 'var(--jcode-color-foreground)' }}>
             {teamName}
           </span>
           <span
             className="ml-auto text-[10px] tabular-nums"
-            style={{ color: 'var(--color-muted-foreground)' }}
+            style={{ color: 'var(--jcode-color-muted-foreground)' }}
           >
             {members.length} member{members.length === 1 ? '' : 's'}
           </span>
@@ -61,17 +61,17 @@ export const TeamListRenderer = memo(function TeamListRenderer({
               >
                 ●
               </span>
-              <span className="flex-1 font-mono text-xs" style={{ color: 'var(--color-foreground)' }}>
+              <span className="flex-1 font-mono text-xs" style={{ color: 'var(--jcode-color-foreground)' }}>
                 @{m.name}
               </span>
               <span
                 className="rounded px-1.5 py-0.5 font-mono text-[10px] tabular-nums"
-                style={{ background: 'var(--color-muted)', color: 'var(--color-muted-foreground)' }}
+                style={{ background: 'var(--jcode-color-muted)', color: 'var(--jcode-color-muted-foreground)' }}
               >
                 {m.status}
               </span>
               {m.type && (
-                <span className="text-[10px]" style={{ color: 'var(--color-muted-foreground)' }}>
+                <span className="text-[10px]" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
                   {m.type}
                 </span>
               )}
@@ -79,18 +79,18 @@ export const TeamListRenderer = memo(function TeamListRenderer({
           ))}
         </div>
       ) : status === 'running' ? (
-        <div className="animate-pulse py-1 text-xs" style={{ color: 'var(--color-muted-foreground)' }}>
+        <div className="animate-pulse py-1 text-xs" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
           Loading…
         </div>
       ) : (
-        <div className="py-1 text-xs italic" style={{ color: 'var(--color-muted-foreground)' }}>
+        <div className="py-1 text-xs italic" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
           No teammates
         </div>
       )}
       {error && (
         <div
           className="mt-1.5 font-mono text-xs"
-          style={{ color: 'var(--color-destructive, var(--color-error-fg))' }}
+          style={{ color: 'var(--jcode-color-destructive, var(--jcode-color-error-fg))' }}
         >
           {error}
         </div>
@@ -120,36 +120,36 @@ export const TeamCreateRenderer = memo(function TeamCreateRenderer({
   }, [args, output])
 
   return (
-    <div className="jcode-team-create px-3 py-2.5" style={{ background: 'var(--color-surface)' }}>
+    <div className="jcode-team-create px-3 py-2.5" style={{ background: 'var(--jcode-color-surface)' }}>
       <div className="mb-1 flex items-center gap-2">
-        <span className="font-mono text-xs font-semibold" style={{ color: 'var(--color-foreground)' }}>
+        <span className="font-mono text-xs font-semibold" style={{ color: 'var(--jcode-color-foreground)' }}>
           {data.teamName}
         </span>
         {status === 'done' && !error && (
-          <span className="ml-auto text-[10px] font-semibold" style={{ color: 'var(--color-accent-neutral)' }}>
+          <span className="ml-auto text-[10px] font-semibold" style={{ color: 'var(--jcode-color-accent-neutral)' }}>
             created
           </span>
         )}
         {status === 'running' && (
-          <span className="ml-auto animate-pulse text-[10px]" style={{ color: 'var(--color-muted-foreground)' }}>
+          <span className="ml-auto animate-pulse text-[10px]" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
             creating
           </span>
         )}
       </div>
       {data.description && (
-        <div className="text-[11px] leading-snug" style={{ color: 'var(--color-muted-foreground)' }}>
+        <div className="text-[11px] leading-snug" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
           {data.description}
         </div>
       )}
       {data.lead && (
-        <div className="mt-1.5 font-mono text-[10px]" style={{ color: 'var(--color-muted-foreground)' }}>
+        <div className="mt-1.5 font-mono text-[10px]" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
           Lead {data.lead}
         </div>
       )}
       {error && (
         <div
           className="mt-1 font-mono text-xs"
-          style={{ color: 'var(--color-destructive, var(--color-error-fg))' }}
+          style={{ color: 'var(--jcode-color-destructive, var(--jcode-color-error-fg))' }}
         >
           {error}
         </div>
@@ -180,26 +180,26 @@ export const TeamSpawnRenderer = memo(function TeamSpawnRenderer({
   }, [args, output])
 
   return (
-    <div className="jcode-team-spawn px-3 py-2.5" style={{ background: 'var(--color-surface)' }}>
+    <div className="jcode-team-spawn px-3 py-2.5" style={{ background: 'var(--jcode-color-surface)' }}>
       <div className="mb-1 flex items-center gap-2">
-        <span className="font-mono text-xs font-semibold" style={{ color: 'var(--color-foreground)' }}>
+        <span className="font-mono text-xs font-semibold" style={{ color: 'var(--jcode-color-foreground)' }}>
           @{data.name}
         </span>
         {data.agentType && (
           <span
             className="rounded px-1.5 py-0.5 text-[10px]"
-            style={{ background: 'var(--color-muted)', color: 'var(--color-muted-foreground)' }}
+            style={{ background: 'var(--jcode-color-muted)', color: 'var(--jcode-color-muted-foreground)' }}
           >
             {data.agentType}
           </span>
         )}
         {status === 'done' && !error && (
-          <span className="ml-auto text-[10px] font-semibold" style={{ color: 'var(--color-accent-neutral)' }}>
+          <span className="ml-auto text-[10px] font-semibold" style={{ color: 'var(--jcode-color-accent-neutral)' }}>
             running
           </span>
         )}
         {status === 'running' && (
-          <span className="ml-auto animate-pulse text-[10px]" style={{ color: 'var(--color-muted-foreground)' }}>
+          <span className="ml-auto animate-pulse text-[10px]" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
             spawning
           </span>
         )}
@@ -208,7 +208,7 @@ export const TeamSpawnRenderer = memo(function TeamSpawnRenderer({
         <div
           className="text-[11px] leading-snug"
           style={{
-            color: 'var(--color-muted-foreground)',
+            color: 'var(--jcode-color-muted-foreground)',
             fontStyle: 'italic',
             whiteSpace: 'pre-wrap',
           }}
@@ -217,14 +217,14 @@ export const TeamSpawnRenderer = memo(function TeamSpawnRenderer({
         </div>
       )}
       {data.id && (
-        <div className="mt-1.5 font-mono text-[10px]" style={{ color: 'var(--color-muted-foreground)' }}>
+        <div className="mt-1.5 font-mono text-[10px]" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
           ID {data.id}
         </div>
       )}
       {error && (
         <div
           className="mt-1 font-mono text-xs"
-          style={{ color: 'var(--color-destructive, var(--color-error-fg))' }}
+          style={{ color: 'var(--jcode-color-destructive, var(--jcode-color-error-fg))' }}
         >
           {error}
         </div>
@@ -252,27 +252,27 @@ export const TeamMessageRenderer = memo(function TeamMessageRenderer({
   }, [args])
 
   return (
-    <div className="jcode-team-message px-3 py-2.5" style={{ background: 'var(--color-surface)' }}>
+    <div className="jcode-team-message px-3 py-2.5" style={{ background: 'var(--jcode-color-surface)' }}>
       <div className="mb-1.5 flex items-center gap-2">
-        <span className="text-[10px]" style={{ color: 'var(--color-muted-foreground)' }}>
+        <span className="text-[10px]" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
           →
         </span>
-        <span className="font-mono text-xs font-semibold" style={{ color: 'var(--color-foreground)' }}>
+        <span className="font-mono text-xs font-semibold" style={{ color: 'var(--jcode-color-foreground)' }}>
           {data.to === '*' ? 'all' : `@${data.to}`}
         </span>
         {status === 'done' && !error && (
-          <span className="ml-auto text-[10px] font-semibold" style={{ color: 'var(--color-accent-neutral)' }}>
+          <span className="ml-auto text-[10px] font-semibold" style={{ color: 'var(--jcode-color-accent-neutral)' }}>
             sent
           </span>
         )}
         {status === 'running' && (
-          <span className="ml-auto animate-pulse text-[10px]" style={{ color: 'var(--color-muted-foreground)' }}>
+          <span className="ml-auto animate-pulse text-[10px]" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
             sending
           </span>
         )}
       </div>
       {data.summary && (
-        <div className="mb-1 text-[11px] font-medium leading-snug" style={{ color: 'var(--color-foreground)' }}>
+        <div className="mb-1 text-[11px] font-medium leading-snug" style={{ color: 'var(--jcode-color-foreground)' }}>
           {data.summary}
         </div>
       )}
@@ -280,7 +280,7 @@ export const TeamMessageRenderer = memo(function TeamMessageRenderer({
         <div
           className="text-[11px] leading-snug"
           style={{
-            color: 'var(--color-muted-foreground)',
+            color: 'var(--jcode-color-muted-foreground)',
             fontStyle: 'italic',
             whiteSpace: 'pre-wrap',
           }}
@@ -291,7 +291,7 @@ export const TeamMessageRenderer = memo(function TeamMessageRenderer({
       {error && (
         <div
           className="mt-1.5 font-mono text-xs"
-          style={{ color: 'var(--color-destructive, var(--color-error-fg))' }}
+          style={{ color: 'var(--jcode-color-destructive, var(--jcode-color-error-fg))' }}
         >
           {error}
         </div>

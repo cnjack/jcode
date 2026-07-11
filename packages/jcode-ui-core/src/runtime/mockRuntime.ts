@@ -111,6 +111,69 @@ export function createMockRuntime(opts: MockRuntimeOptions = {}): ChatRuntime & 
         })
       }),
     editMessage: opts.actions?.editMessage ?? noop('editMessage'),
+    resolveApprovalOption:
+      opts.actions?.resolveApprovalOption ??
+      ((id, optionId) => {
+        calls.push({ action: 'resolveApprovalOption', args: [id, optionId] })
+        replaceState({
+          ...state,
+          items: state.items.map((i) =>
+            i.kind === 'approval' && i.data.id === id
+              ? {
+                  ...i,
+                  data: {
+                    ...i.data,
+                    resolved: true,
+                    resolvedOptionId: optionId,
+                    approved:
+                      (i.data.options?.find((o) => o.id === optionId)?.kind ?? 'custom') !== 'deny',
+                  },
+                }
+              : i,
+          ),
+        })
+      }),
+    switchVersion:
+      opts.actions?.switchVersion ??
+      ((messageId, versionId) => {
+        calls.push({ action: 'switchVersion', args: [messageId, versionId] })
+        replaceState({
+          ...state,
+          items: state.items.map((i) => {
+            if (i.kind !== 'message' || i.data.id !== messageId) return i
+            const v = i.data.versions?.find((x) => x.id === versionId)
+            if (!v) return i
+            // content mirrors the active version — the contract non-branching
+            // consumers rely on.
+            return {
+              ...i,
+              data: {
+                ...i.data,
+                activeVersionId: versionId,
+                content: v.content,
+                reasoning: v.reasoning,
+                sources: v.sources,
+                images: v.images,
+              },
+            }
+          }),
+        })
+      }),
+    submitFeedback:
+      opts.actions?.submitFeedback ??
+      ((messageId, rating, comment) => {
+        calls.push({ action: 'submitFeedback', args: [messageId, rating, comment] })
+        replaceState({
+          ...state,
+          items: state.items.map((i) =>
+            i.kind === 'message' && i.data.id === messageId
+              ? { ...i, data: { ...i.data, feedback: rating } }
+              : i,
+          ),
+        })
+      }),
+    regenerate: opts.actions?.regenerate ?? noop('regenerate'),
+    retryMessage: opts.actions?.retryMessage ?? noop('retryMessage'),
   }
 
   return {

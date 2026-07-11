@@ -1,0 +1,127 @@
+/*
+ * conversation.css — session-loop controls (P2A):
+ *   branch picker · message feedback · failed-turn retry · connection banner.
+ *
+ * Token-driven (var(--jcode-*)); every rule is scoped under [data-jcode-ui] so
+ * nothing leaks to host apps and each token resolves from the component root.
+ * Dark mode is automatic (the tokens flip). This file is @import'd from
+ * styles/entry.css after components.css.
+ */
+
+/* ─── Branch picker (‹ 2/3 ›) ─── */
+[data-jcode-ui].jcode-branch-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.0625rem;
+  font-family: var(--jcode-font-mono);
+  color: var(--jcode-color-muted-foreground);
+}
+[data-jcode-ui] .jcode-branch-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 1.25rem;
+  width: 1.25rem;
+  border-radius: var(--jcode-radius-md);
+  color: var(--jcode-color-muted-foreground);
+  transition:
+    color var(--jcode-duration-fast) var(--jcode-ease-out),
+    background-color var(--jcode-duration-fast) var(--jcode-ease-out);
+}
+[data-jcode-ui] .jcode-branch-btn:hover:not(:disabled) {
+  color: var(--jcode-color-foreground);
+  background: var(--jcode-neutral-wash-soft);
+}
+[data-jcode-ui] .jcode-branch-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+[data-jcode-ui] .jcode-branch-label {
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  min-width: 1.9rem;
+  text-align: center;
+  user-select: none;
+}
+
+/* ─── Message feedback (👍/👎) ─── */
+[data-jcode-ui] .jcode-feedback-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 1.25rem;
+  width: 1.25rem;
+  border-radius: var(--jcode-radius-md);
+  color: var(--jcode-color-muted-foreground);
+  transition:
+    color var(--jcode-duration-fast) var(--jcode-ease-out),
+    background-color var(--jcode-duration-fast) var(--jcode-ease-out);
+}
+[data-jcode-ui] .jcode-feedback-btn:hover:not(:disabled) {
+  color: var(--jcode-color-foreground);
+  background: var(--jcode-neutral-wash-soft);
+}
+[data-jcode-ui] .jcode-feedback-btn[data-active='true'] {
+  color: var(--jcode-color-primary);
+}
+/* A recorded rating locks its own button but keeps the highlight readable. */
+[data-jcode-ui] .jcode-feedback-btn[data-active='true']:disabled {
+  opacity: 1;
+  cursor: default;
+}
+/* Keep the whole action row visible once a rating is recorded, so the
+ * highlighted thumb doesn't hide behind the hover-reveal on .jcode-msg-actions. */
+[data-jcode-ui] .jcode-msg-actions[data-has-feedback='true'] {
+  opacity: 1;
+}
+
+/* ─── Failed-turn retry ─── */
+[data-jcode-ui] .jcode-retry-row {
+  margin-top: 0.5rem;
+}
+/* Re-assert the box that the `.jcode-message button` reset flattens, so the
+ * jcode-btn-secondary base reads as a real button inside a message. */
+[data-jcode-ui] .jcode-retry-btn {
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--jcode-color-border);
+  gap: 0.35rem;
+}
+
+/* ─── Connection banner ─── */
+[data-jcode-ui].jcode-connection-banner {
+  position: sticky;
+  top: 0;
+  z-index: var(--jcode-z-header);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.3;
+  border-bottom: 1px solid transparent;
+}
+[data-jcode-ui].jcode-connection-banner[data-state='reconnecting'] {
+  color: var(--jcode-color-warning-fg);
+  background: var(--jcode-color-warning-bg);
+  border-bottom-color: color-mix(in srgb, var(--jcode-color-warning-fg) 20%, transparent);
+}
+[data-jcode-ui].jcode-connection-banner[data-state='disconnected'] {
+  color: var(--jcode-color-error-fg);
+  background: var(--jcode-color-error-bg);
+  border-bottom-color: color-mix(in srgb, var(--jcode-color-error-fg) 20%, transparent);
+}
+[data-jcode-ui].jcode-connection-banner[data-state='reconnected'] {
+  color: var(--jcode-color-success-fg);
+  background: var(--jcode-color-success-bg);
+  border-bottom-color: color-mix(in srgb, var(--jcode-color-success-fg) 20%, transparent);
+}
+[data-jcode-ui] .jcode-connection-icon {
+  height: 0.95rem;
+  width: 0.95rem;
+  flex-shrink: 0;
+}
+[data-jcode-ui] .jcode-connection-detail {
+  font-weight: 400;
+  opacity: 0.85;
+}

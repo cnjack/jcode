@@ -4,12 +4,12 @@
  */
 
 /* ─── Keyframes ─── */
-@keyframes fade-in {
+@keyframes jcode-fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 
-@keyframes fade-up {
+@keyframes jcode-fade-up {
   from {
     opacity: 0;
     transform: translateY(8px);
@@ -20,7 +20,7 @@
   }
 }
 
-@keyframes fade-down {
+@keyframes jcode-fade-down {
   from {
     opacity: 0;
     transform: translateY(-8px);
@@ -31,7 +31,7 @@
   }
 }
 
-@keyframes slide-in-right {
+@keyframes jcode-slide-in-right {
   from {
     opacity: 0;
     transform: translateX(12px);
@@ -42,7 +42,7 @@
   }
 }
 
-@keyframes slide-in-left {
+@keyframes jcode-slide-in-left {
   from {
     opacity: 0;
     transform: translateX(-12px);
@@ -53,7 +53,7 @@
   }
 }
 
-@keyframes scale-in {
+@keyframes jcode-scale-in {
   from {
     opacity: 0;
     transform: scale(0.95);
@@ -64,21 +64,21 @@
   }
 }
 
-@keyframes shimmer {
+@keyframes jcode-shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
 
-@keyframes pulse-glow {
+@keyframes jcode-pulse-glow {
   0%, 100% {
-    box-shadow: 0 0 8px color-mix(in srgb, var(--color-primary) 20%, transparent);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--jcode-color-primary) 20%, transparent);
   }
   50% {
-    box-shadow: 0 0 20px color-mix(in srgb, var(--color-primary) 40%, transparent);
+    box-shadow: 0 0 20px color-mix(in srgb, var(--jcode-color-primary) 40%, transparent);
   }
 }
 
-@keyframes dot-pulse {
+@keyframes jcode-dot-pulse {
   0%, 80%, 100% {
     opacity: 0.3;
     transform: scale(0.8);
@@ -89,38 +89,38 @@
   }
 }
 
-@keyframes spin-slow {
+@keyframes jcode-spin-slow {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
 
-@keyframes breathing {
+@keyframes jcode-breathing {
   0%, 100% { opacity: 0.5; }
   50% { opacity: 1; }
 }
 
 /* ─── Utility Classes ─── */
-.animate-fade-in {
-  animation: fade-in var(--duration-slow) var(--ease-out) both;
+.jcode-animate-fade-in {
+  animation: jcode-fade-in var(--jcode-duration-slow) var(--jcode-ease-out) both;
 }
 
-.animate-fade-up {
-  animation: fade-up var(--duration-slow) var(--ease-out) both;
+.jcode-animate-fade-up {
+  animation: jcode-fade-up var(--jcode-duration-slow) var(--jcode-ease-out) both;
 }
 
-.animate-fade-down {
-  animation: fade-down var(--duration-slow) var(--ease-out) both;
+.jcode-animate-fade-down {
+  animation: jcode-fade-down var(--jcode-duration-slow) var(--jcode-ease-out) both;
 }
 
-.animate-slide-in-right {
-  animation: slide-in-right var(--duration-slow) var(--ease-out) both;
+.jcode-animate-slide-in-right {
+  animation: jcode-slide-in-right var(--jcode-duration-slow) var(--jcode-ease-out) both;
 }
 
-.animate-scale-in {
-  animation: scale-in var(--duration-slow) var(--ease-out) both;
+.jcode-animate-scale-in {
+  animation: jcode-scale-in var(--jcode-duration-slow) var(--jcode-ease-out) both;
 }
 
-.animate-shimmer {
+.jcode-animate-shimmer {
   background: linear-gradient(
     90deg,
     transparent 0%,
@@ -128,56 +128,56 @@
     transparent 100%
   );
   background-size: 200% 100%;
-  animation: shimmer 2s infinite;
+  animation: jcode-shimmer 2s infinite;
 }
 
-.animate-pulse-glow {
-  animation: pulse-glow 2s ease-in-out infinite;
+.jcode-animate-pulse-glow {
+  animation: jcode-pulse-glow 2s ease-in-out infinite;
 }
 
-.animate-breathing {
-  animation: breathing 2s ease-in-out infinite;
+.jcode-animate-breathing {
+  animation: jcode-breathing 2s ease-in-out infinite;
 }
 
 /* Reusable dot-pulse utility (keyframe defined above) for the thinking footer. */
-.animate-dot-pulse {
-  animation: dot-pulse 1.4s ease-in-out infinite both;
+.jcode-animate-dot-pulse {
+  animation: jcode-dot-pulse 1.4s ease-in-out infinite both;
 }
 
 /* Soft thinking label — no flashy orange sweep. */
 .thinking-label {
-  color: var(--color-muted-foreground);
+  color: var(--jcode-color-muted-foreground);
   letter-spacing: 0.01em;
 }
 
 /* Stagger children */
-.stagger-children > * {
-  animation: fade-up var(--duration-slow) var(--ease-out) both;
+.jcode-stagger-children > * {
+  animation: jcode-fade-up var(--jcode-duration-slow) var(--jcode-ease-out) both;
 }
-.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
-.stagger-children > *:nth-child(2) { animation-delay: 50ms; }
-.stagger-children > *:nth-child(3) { animation-delay: 100ms; }
-.stagger-children > *:nth-child(4) { animation-delay: 150ms; }
-.stagger-children > *:nth-child(5) { animation-delay: 200ms; }
-.stagger-children > *:nth-child(6) { animation-delay: 250ms; }
-.stagger-children > *:nth-child(7) { animation-delay: 300ms; }
-.stagger-children > *:nth-child(8) { animation-delay: 350ms; }
+.jcode-stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+.jcode-stagger-children > *:nth-child(2) { animation-delay: 50ms; }
+.jcode-stagger-children > *:nth-child(3) { animation-delay: 100ms; }
+.jcode-stagger-children > *:nth-child(4) { animation-delay: 150ms; }
+.jcode-stagger-children > *:nth-child(5) { animation-delay: 200ms; }
+.jcode-stagger-children > *:nth-child(6) { animation-delay: 250ms; }
+.jcode-stagger-children > *:nth-child(7) { animation-delay: 300ms; }
+.jcode-stagger-children > *:nth-child(8) { animation-delay: 350ms; }
 
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
-  .animate-fade-in,
-  .animate-fade-up,
-  .animate-fade-down,
-  .animate-slide-in-right,
-  .animate-scale-in,
-  .animate-shimmer,
-  .animate-pulse-glow,
-  .animate-breathing,
+  .jcode-animate-fade-in,
+  .jcode-animate-fade-up,
+  .jcode-animate-fade-down,
+  .jcode-animate-slide-in-right,
+  .jcode-animate-scale-in,
+  .jcode-animate-shimmer,
+  .jcode-animate-pulse-glow,
+  .jcode-animate-breathing,
   .animate-spin,
   .animate-pulse,
-  .animate-dot-pulse,
+  .jcode-animate-dot-pulse,
   .thinking-label,
-  .stagger-children > * {
+  .jcode-stagger-children > * {
     animation: none !important;
   }
 }

@@ -7,6 +7,7 @@
  */
 
 import { memo, useMemo } from 'react'
+import type { ReactNode } from 'react'
 import { ChevronDownIcon } from '@heroicons/react/24/outline'
 import type { ToolCall } from 'jcode-ui-core'
 import { groupExploringTimeline, summarizeExploringSteps } from 'jcode-ui-core'
@@ -17,6 +18,16 @@ import { CompactToolRow } from './CompactToolRow.js'
 import { useToolRegistry } from './ToolRegistryContext.js'
 import { renderMarkdown } from '../lib/markdown.js'
 
+export interface ToolCallCardSlots {
+  /**
+   * Replace the content of the title-row button (expand/collapse interaction
+   * is preserved — clicking still toggles the card).
+   */
+  header?: (tool: ToolCall) => ReactNode
+  /** Extra content appended below the card body. */
+  footer?: (tool: ToolCall) => ReactNode
+}
+
 export interface ToolCallCardProps {
   tool: ToolCall
   /** Override the registry (defaults to the context-provided one). */
@@ -25,6 +36,8 @@ export interface ToolCallCardProps {
   className?: string
   /** Nesting depth for subagent children. */
   depth?: number
+  /** Optional header/footer overrides. Omit for the default card (unchanged). */
+  slots?: ToolCallCardSlots
 }
 
 export const ToolCallCard = memo(function ToolCallCard({
@@ -32,6 +45,7 @@ export const ToolCallCard = memo(function ToolCallCard({
   registry,
   className,
   depth = 0,
+  slots,
 }: ToolCallCardProps) {
   const ctxRegistry = useToolRegistry()
   const reg = registry ?? ctxRegistry
@@ -49,9 +63,18 @@ export const ToolCallCard = memo(function ToolCallCard({
       <ToolCallView
         tool={tool}
         depth={depth}
-        className={`jcode-toolcall my-1 ${className ?? ''}`}
+        data-jcode-ui="" className={`jcode-toolcall my-1 ${className ?? ''}`}
         renderHeader={(t, expanded, toggle) =>
-          t.name === 'subagent' ? (
+          slots?.header ? (
+            <button
+              type="button"
+              onClick={toggle}
+              data-expanded={expanded ? 'true' : 'false'}
+              className="jcode-toolcall__slot-header flex w-full max-w-full cursor-pointer items-center gap-1.5 bg-transparent text-left"
+            >
+              {slots.header(t)}
+            </button>
+          ) : t.name === 'subagent' ? (
             <SubagentHeader tool={t} expanded={expanded} onToggle={toggle} />
           ) : (
             <ToolHeader tool={t} expanded={expanded} onToggle={toggle} />
@@ -60,6 +83,7 @@ export const ToolCallCard = memo(function ToolCallCard({
         renderSubagentOutput={(t) => <SubagentOutput tool={t} />}
         renderSubagentChildren={(children) => <SubagentChildren tools={children} />}
       />
+      {slots?.footer && <div className="jcode-toolcall__footer">{slots.footer(tool)}</div>}
     </ToolCallProvider>
   )
 })
@@ -97,7 +121,7 @@ function SubagentChildren({ tools }: { tools: ToolCall[] }) {
             <div key={unit.data.id} className="jcode-exploring jcode-exploring--nested py-1">
               <div
                 className={`text-[11px] font-medium ${unit.data.status === 'running' ? 'shimmer-running' : ''}`}
-                style={{ color: 'var(--color-muted-foreground)' }}
+                style={{ color: 'var(--jcode-color-muted-foreground)' }}
               >
                 {label} · {unit.data.tools.length} steps
               </div>
@@ -156,7 +180,7 @@ function ToolHeader({
       <span
         className={`shrink-0 text-xs font-medium tracking-wide ${isRunning ? 'shimmer-running' : ''}`}
         style={{
-          color: isError ? 'var(--color-destructive, var(--color-error-fg))' : 'var(--color-muted-foreground)',
+          color: isError ? 'var(--jcode-color-destructive, var(--jcode-color-error-fg))' : 'var(--jcode-color-muted-foreground)',
         }}
       >
         {title}
@@ -166,8 +190,8 @@ function ToolHeader({
           className="jcode-toolcall__subtitle min-w-0 truncate font-mono text-[0.72rem]"
           style={{
             color: isContext
-              ? 'var(--color-muted-foreground)'
-              : 'var(--color-foreground)',
+              ? 'var(--jcode-color-muted-foreground)'
+              : 'var(--jcode-color-foreground)',
             opacity: 0.88,
           }}
           dangerouslySetInnerHTML={{ __html: subtitle }}
@@ -176,28 +200,28 @@ function ToolHeader({
       {(exitBadge || durationBadge) && (
         <span
           className="shrink-0 font-mono text-[10px] tabular-nums"
-          style={{ color: isError ? 'var(--color-error-fg)' : 'var(--color-muted-foreground)' }}
+          style={{ color: isError ? 'var(--jcode-color-error-fg)' : 'var(--jcode-color-muted-foreground)' }}
         >
           {[exitBadge, durationBadge].filter(Boolean).join(' · ')}
         </span>
       )}
       <ChevronDownIcon
-        className={`h-3 w-3 shrink-0 text-[var(--color-muted-foreground)] transition-transform duration-[var(--duration-normal)] ${
+        className={`h-3 w-3 shrink-0 text-[var(--jcode-color-muted-foreground)] transition-transform duration-[var(--jcode-duration-normal)] ${
           expanded ? 'rotate-180' : ''
         }`}
       />
       {diff && (diff.added > 0 || diff.deleted > 0) && (
-        <span className="jcode-toolcall__diff shrink-0 rounded-[var(--radius-sm)] bg-[var(--color-muted)] px-1.5 py-0.5 font-mono text-[10px] tabular-nums">
+        <span className="jcode-toolcall__diff shrink-0 rounded-[var(--jcode-radius-sm)] bg-[var(--jcode-color-muted)] px-1.5 py-0.5 font-mono text-[10px] tabular-nums">
           {diff.added > 0 && (
-            <span style={{ color: 'var(--color-success-fg)' }}>+{diff.added}</span>
+            <span style={{ color: 'var(--jcode-color-success-fg)' }}>+{diff.added}</span>
           )}
           {diff.added > 0 && diff.deleted > 0 && (
-            <span className="mx-0.5" style={{ color: 'var(--color-muted-foreground)' }}>
+            <span className="mx-0.5" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
               /
             </span>
           )}
           {diff.deleted > 0 && (
-            <span style={{ color: 'var(--color-error-fg)' }}>-{diff.deleted}</span>
+            <span style={{ color: 'var(--jcode-color-error-fg)' }}>-{diff.deleted}</span>
           )}
         </span>
       )}
@@ -229,10 +253,10 @@ function SubagentHeader({
     tool.status === 'done' ? 'Done' : tool.status === 'error' ? 'Error' : 'Running'
   const statusColor =
     tool.status === 'done'
-      ? 'var(--color-muted-foreground)'
+      ? 'var(--jcode-color-muted-foreground)'
       : tool.status === 'error'
-        ? 'var(--color-destructive, var(--color-error-fg))'
-        : 'var(--color-primary)'
+        ? 'var(--jcode-color-destructive, var(--jcode-color-error-fg))'
+        : 'var(--jcode-color-primary)'
   const childCount = tool.children?.length ?? 0
 
   return (
@@ -245,15 +269,15 @@ function SubagentHeader({
       <span
         className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
         style={{
-          color: 'var(--color-muted-foreground)',
-          background: 'var(--color-muted)',
+          color: 'var(--jcode-color-muted-foreground)',
+          background: 'var(--jcode-color-muted)',
         }}
       >
         Agent
       </span>
       <span
         className={`min-w-0 truncate text-[12px] font-medium ${tool.status === 'running' ? 'shimmer-running' : ''}`}
-        style={{ color: 'var(--color-foreground)' }}
+        style={{ color: 'var(--jcode-color-foreground)' }}
       >
         {name}
       </span>
@@ -266,13 +290,13 @@ function SubagentHeader({
       {childCount > 0 && (
         <span
           className="ml-auto text-[10px] tabular-nums"
-          style={{ color: 'var(--color-muted-foreground)' }}
+          style={{ color: 'var(--jcode-color-muted-foreground)' }}
         >
           {childCount} step{childCount === 1 ? '' : 's'}
         </span>
       )}
       <ChevronDownIcon
-        className={`ml-1 h-3 w-3 shrink-0 text-[var(--color-muted-foreground)] transition-transform ${
+        className={`ml-1 h-3 w-3 shrink-0 text-[var(--jcode-color-muted-foreground)] transition-transform ${
           expanded ? 'rotate-180' : ''
         }`}
       />

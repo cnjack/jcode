@@ -24,8 +24,11 @@ import { ExploringGroupCard } from './ExploringGroupCard.js'
 export interface ThreadProps {
   /** Disable virtualization (short/replay timelines). Default true. */
   virtualize?: boolean
-  /** Empty-state node. */
+  /** Empty-state node (typically `<ThreadWelcome>`). */
   emptyState?: ReactNode
+  /** Follow-up content under the last turn when idle (typically
+   *  `<Suggestions scroll>`), aligned to the chat column. */
+  suggestions?: ReactNode
   /** Override the pending ("Thinking…") indicator. */
   renderPending?: () => ReactNode
   /** className passthrough for the scroll container. */
@@ -37,6 +40,7 @@ export interface ThreadProps {
 export function Thread({
   virtualize,
   emptyState,
+  suggestions,
   renderPending,
   className,
   overscanBottom,
@@ -53,6 +57,15 @@ export function Thread({
       renderItem={(item) => renderItem(item, isRunning)}
       renderPending={renderPending ?? DefaultPending}
       renderEmpty={emptyState ? () => emptyState : undefined}
+      renderFooter={
+        suggestions
+          ? () => (
+              <div className="jcode-thread-followups jcode-chat-col">
+                <div className="jcode-gutter">{suggestions}</div>
+              </div>
+            )
+          : undefined
+      }
     />
   )
 }
