@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.2.2 — 2026-07 (with jcode-ui-core 0.2.1)
+## 0.2.3 — 2026-07
+
+Republish of 0.2.2, which was again published with npm and shipped the literal
+`workspace:*` specifier (uninstallable — same failure as 0.2.0, now
+deprecated). No code changes. Reminder: **always `pnpm publish`.**
+
+## 0.2.2 — 2026-07 (with jcode-ui-core 0.2.1) — BROKEN on npm, use 0.2.3
 
 Post-release review fixes (PR #133 findings):
 

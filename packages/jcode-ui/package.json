@@ -1,6 +1,6 @@
 {
   "name": "jcode-ui",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "React AI chat UI components — styled, token-driven, backend-agnostic. Streams messages, tool calls, approvals, and ask-user interactions.",
   "type": "module",
   "license": "MIT",
