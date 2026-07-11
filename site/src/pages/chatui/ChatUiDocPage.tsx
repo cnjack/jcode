@@ -1,9 +1,9 @@
 /**
  * ChatUiDocPage — renders a single jcode-ui doc page from CHAT_UI_DOCS.
- * Live previews are lazy-loaded so non-demo docs stay light.
+ * Live previews ship with this (route-lazy) chunk.
  */
 
-import { lazy, Suspense, isValidElement, useMemo, type HTMLAttributes, type ReactNode } from 'react'
+import { Suspense, isValidElement, useMemo, type HTMLAttributes, type ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -28,10 +28,10 @@ function stripDuplicateLeadingH1(body: string, title: string): string {
   return body.replace(new RegExp(`^#\\s+${escaped}\\s*\\n+`, 'i'), '')
 }
 
-// Heavy: jcode-ui + demos. Only fetched when a page embeds data-jcode-demo.
-const ComponentDemo = lazy(() =>
-  import('../../playground/ComponentDemo').then((m) => ({ default: m.ComponentDemo })),
-)
+// jcode-ui + demos. Imported eagerly: this page is already a lazy ROUTE chunk,
+// and a nested React.lazy proved fragile (Suspense occasionally never settled
+// after dep re-optimization). The demos ship with the docs route bundle.
+import { ComponentDemo } from '../../playground/ComponentDemo'
 
 function rewriteInternalHref(href: string): string {
   if (/^https?:/.test(href) || href.startsWith('#') || href.startsWith('mailto:')) return href

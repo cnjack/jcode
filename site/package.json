@@ -13,8 +13,8 @@
     "@remotion/player": "4.0.410",
     "github-slugger": "^2.0.0",
     "highlight.js": "^11.11.1",
-    "jcode-ui": "^0.1.1",
-    "jcode-ui-core": "^0.1.0",
+    "jcode-ui": "^0.2.0",
+    "jcode-ui-core": "^0.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^9.0.3",
@@ -32,5 +32,6 @@
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.7.2",
     "vite": "^6.0.7"
-  }
+  },
+  "pnpm": {}
 }
