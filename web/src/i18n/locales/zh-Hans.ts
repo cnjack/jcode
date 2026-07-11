@@ -755,6 +755,7 @@ export default {
     showArchived: '显示已归档任务',
     noProjects: '暂无项目',
     noTasks: '暂无任务',
+    noConversations: '暂无会话',
     running: '运行中',
     untitled: '新会话',
     newTaskHere: '在此新建任务',
