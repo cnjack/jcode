@@ -346,4 +346,198 @@ export function Demo() {
 
 /* Toggle dark mode */
 // document.documentElement.classList.toggle('dark')`,
+
+  welcome: `import {
+  RuntimeProvider,
+  createMockRuntime,
+  Thread,
+  ThreadWelcome,
+  Suggestions,
+} from 'jcode-ui'
+import 'jcode-ui/styles.css'
+
+const runtime = createMockRuntime()
+
+// Drop the hero into Thread's emptyState; Suggestions send through the runtime.
+const welcome = (
+  <ThreadWelcome
+    title="What can I help you ship?"
+    subtitle="Ask about your codebase, or pick a starter below."
+  >
+    <Suggestions
+      items={[
+        { id: 's1', label: 'Explain this repo', prompt: 'Give me a tour of this repository.' },
+        { id: 's2', label: 'Find the race condition', prompt: 'Fix the race in server.go.' },
+        { id: 's3', label: 'Write tests', prompt: 'Add table-driven tests for the parser.' },
+      ]}
+    />
+  </ThreadWelcome>
+)
+
+export function Demo() {
+  return (
+    <RuntimeProvider runtime={runtime}>
+      <Thread emptyState={welcome} />
+    </RuntimeProvider>
+  )
+}`,
+
+  branching: `import { RuntimeProvider, createMockRuntime, Message } from 'jcode-ui'
+import 'jcode-ui/styles.css'
+
+// content mirrors the active version; BranchPicker steps activeVersionId.
+const assistant = {
+  id: 'a1',
+  role: 'assistant' as const,
+  content: 'Use sync.Map for the shared registry — lock-free reads.',
+  timestamp: Date.now(),
+  durationMs: 3800,
+  activeVersionId: 'v2',
+  versions: [
+    { id: 'v1', content: 'Wrap map access in a sync.Mutex.', timestamp: Date.now() },
+    { id: 'v2', content: 'Use sync.Map for the shared registry.', timestamp: Date.now() },
+    { id: 'v3', content: 'Shard the map by key hash.', timestamp: Date.now() },
+  ],
+}
+
+export function Demo() {
+  // MockRuntime's default switchVersion + submitFeedback make the controls live.
+  return (
+    <RuntimeProvider runtime={createMockRuntime({ items: [{ kind: 'message', seq: 1, data: assistant }] })}>
+      <Message message={assistant} />
+    </RuntimeProvider>
+  )
+}`,
+
+  connection: `import {
+  RuntimeProvider,
+  createMockRuntime,
+  ConnectionBanner,
+} from 'jcode-ui'
+import 'jcode-ui/styles.css'
+
+const runtime = createMockRuntime({ state: { connection: 'reconnecting' } })
+
+export function Demo() {
+  // ConnectionBanner reads state.connection; nothing renders while connected.
+  return (
+    <RuntimeProvider runtime={runtime}>
+      <ConnectionBanner />
+      <button onClick={() => runtime.patchState({ connection: 'disconnected' })}>
+        Drop
+      </button>
+      <button onClick={() => runtime.patchState({ connection: 'connected' })}>
+        Restore
+      </button>
+    </RuntimeProvider>
+  )
+}`,
+
+  tasklist: `import { TaskList } from 'jcode-ui'
+import 'jcode-ui/styles.css'
+
+const items = [
+  { id: 1, title: 'Read the current parser', status: 'completed' as const },
+  { id: 2, title: 'Extract the tokenizer', status: 'in_progress' as const },
+  { id: 3, title: 'Add table-driven tests', status: 'pending' as const },
+  { id: 4, title: 'Delete the legacy shim', status: 'cancelled' as const },
+]
+
+export function Demo() {
+  return <TaskList title="Ship the parser refactor" items={items} />
+}`,
+
+  'model-selector': `import { useState } from 'react'
+import { ChatInput, ModelSelector } from 'jcode-ui'
+import 'jcode-ui/styles.css'
+
+const models = [
+  { id: 'claude-opus-4', label: 'Claude Opus 4', provider: 'Anthropic', description: 'Most capable' },
+  { id: 'claude-sonnet-4', label: 'Claude Sonnet 4', provider: 'Anthropic' },
+  { id: 'gpt-5', label: 'GPT-5', provider: 'OpenAI' },
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'Google' },
+]
+
+export function Demo() {
+  const [model, setModel] = useState('claude-opus-4')
+  // Typically the composer's leadingControls:
+  return (
+    <ChatInput
+      leadingControls={<ModelSelector models={models} value={model} onChange={setModel} />}
+    />
+  )
+}`,
+
+  artifact: `import { Artifact } from 'jcode-ui'
+import 'jcode-ui/styles.css'
+
+export function Demo() {
+  return (
+    <Artifact
+      title="vite.config.ts"
+      subtitle="7 lines · typescript"
+      actions={<button type="button" onClick={() => copy(source)}>Copy</button>}
+      onClose={() => setOpen(false)}
+    >
+      <pre style={{ margin: 0, padding: '0.75rem' }}>{source}</pre>
+    </Artifact>
+  )
+}`,
+
+  'thread-list': `import {
+  createMockThreadStore,
+  ThreadStoreProvider,
+} from 'jcode-ui-core'
+import { ThreadList } from 'jcode-ui'
+import 'jcode-ui/styles.css'
+
+const store = createMockThreadStore({
+  activeId: 'th1',
+  threads: [
+    { id: 'th1', title: 'Refactor auth middleware', updatedAt: Date.now(), status: 'running' },
+    { id: 'th2', title: 'Fix flaky payment test', updatedAt: Date.now() - 6e5 },
+    { id: 'th3', title: 'Draft the release notes', updatedAt: Date.now() - 5e6 },
+    { id: 'th4', title: 'Investigate memory leak', updatedAt: Date.now() - 3e8, archived: true },
+  ],
+})
+
+export function Demo() {
+  // Controls (New / rename / archive / delete) render only for wired actions.
+  return (
+    <ThreadStoreProvider store={store}>
+      <ThreadList title="Sessions" />
+    </ThreadStoreProvider>
+  )
+}`,
+
+  'tool-gallery-2': `import {
+  RuntimeProvider,
+  ToolRegistryProvider,
+  createDefaultToolRegistry,
+  createMockRuntime,
+  ToolCallCard,
+} from 'jcode-ui'
+import { TestResultsRenderer, StackTraceRenderer } from 'jcode-ui/tool-renderers'
+import 'jcode-ui/styles.css'
+
+// FileTree ships in the default registry (list_dir / glob). Map the two code
+// renderers onto the tool names your host emits (here: go_test, panic).
+const registry = createDefaultToolRegistry()
+registry.register('go_test', TestResultsRenderer)
+registry.register('panic', StackTraceRenderer)
+
+const goTest = {
+  id: '1', name: 'go_test', args: '{}', status: 'error' as const, timestamp: 0,
+  output: '--- FAIL: TestSubtraction (0.01s)\\n    math_test.go:24: got 1; want 2\\nFAIL',
+}
+
+export function Demo() {
+  return (
+    <RuntimeProvider runtime={createMockRuntime()}>
+      <ToolRegistryProvider registry={registry}>
+        <ToolCallCard tool={goTest} />
+      </ToolRegistryProvider>
+    </RuntimeProvider>
+  )
+}`,
 }

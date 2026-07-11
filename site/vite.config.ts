@@ -23,6 +23,11 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
+    // Scan only the real SPA entry. Vite's default (`**/*.html` under root)
+    // crawls public/showcase-projects/*/index.html too; those static demos use
+    // import maps (e.g. city3d maps "three" to a vendored module) that the
+    // dep-scanner can't resolve, failing the whole scan.
+    entries: ['index.html'],
     include: ['react', 'react-dom', 'react/jsx-runtime', 'jcode-ui', 'jcode-ui-core'],
     // Force rebundle when local packages change
     exclude: [],
