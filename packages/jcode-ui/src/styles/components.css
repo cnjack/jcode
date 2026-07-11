@@ -1,41 +1,49 @@
 /*
  * Component-local styles for jcode-ui.
  *
- * Everything here is driven by design tokens (var(--color-*), --radius-*, …) —
+ * Everything here is driven by design tokens (var(--jcode-color-*), --jcode-radius-*, …) —
  * never hardcoded hex/rgb. Tailwind utility classes cover most styling in the
  * components themselves; this file holds the few things utilities can't express
  * cleanly (composer shell, code-block surfaces, diff tinting, focus rings).
  */
 
-/* ─── Scoped element resets (no global preflight) ─── */
-.jcode-thread button,
-.jcode-chat-input button,
-.jcode-message button,
-.jcode-toolcall button,
-.jcode-approval button,
-.jcode-ask-user button,
-.jcode-sources button,
-.jcode-reasoning button,
-.jcode-attachment button,
-.jcode-attachment-list button,
-.jcode-attachment-preview button {
-  font: inherit;
-  color: inherit;
-  background: transparent;
-  border: 0;
-  padding: 0;
-  margin: 0;
-  cursor: pointer;
-}
-.jcode-thread textarea,
-.jcode-chat-input textarea,
-.jcode-message textarea,
-.jcode-ask-user input {
-  font: inherit;
-  color: inherit;
-  background: transparent;
-  border: 0;
-  margin: 0;
+/* ─── Scoped element resets (no global preflight) ───
+ * MUST stay in @layer base with :where(): the reset only needs to beat
+ * user-agent styles. Unlayered or specific selectors here would outrank the
+ * @layer utilities Tailwind classes AND `.jcode-btn`-style component classes
+ * (layered rules lose to unlayered ones regardless of specificity), which
+ * strips every styled button back to bare text. */
+@layer base {
+  :where(
+      .jcode-thread,
+      .jcode-chat-input,
+      .jcode-message,
+      .jcode-toolcall,
+      .jcode-approval,
+      .jcode-ask-user,
+      .jcode-sources,
+      .jcode-reasoning,
+      .jcode-attachment,
+      .jcode-attachment-list,
+      .jcode-attachment-preview
+    )
+    button {
+    font: inherit;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+  }
+  :where(.jcode-thread, .jcode-chat-input, .jcode-message) textarea,
+  :where(.jcode-ask-user) input {
+    font: inherit;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    margin: 0;
+  }
 }
 
 /* ─── Conversation column ───
@@ -62,10 +70,10 @@
   width: 100%;
   max-width: none;
   box-sizing: border-box;
-  font-family: var(--font-sans);
+  font-family: var(--jcode-font-sans);
   font-size: 0.9375rem;
   line-height: 1.5;
-  color: var(--color-foreground);
+  color: var(--jcode-color-foreground);
 }
 
 /* ─── Composer shell ───
@@ -78,20 +86,20 @@
   margin-right: auto;
   padding: 0.65rem var(--jcode-col-pad-x, 0.75rem) 0.7rem;
   box-sizing: border-box;
-  border-radius: var(--radius-2xl);
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-md);
-  font-family: var(--font-sans);
+  border-radius: var(--jcode-radius-2xl);
+  border: 1px solid var(--jcode-color-border);
+  background: var(--jcode-color-surface);
+  box-shadow: var(--jcode-shadow-md);
+  font-family: var(--jcode-font-sans);
   transition:
-    border-color var(--duration-normal) var(--ease-out),
-    box-shadow var(--duration-normal) var(--ease-out);
+    border-color var(--jcode-duration-normal) var(--jcode-ease-out),
+    box-shadow var(--jcode-duration-normal) var(--jcode-ease-out);
 }
 .jcode-chat-input:focus-within {
-  border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-border));
+  border-color: color-mix(in srgb, var(--jcode-color-primary) 55%, var(--jcode-color-border));
   box-shadow:
-    var(--shadow-md),
-    0 0 0 3px var(--accent-wash);
+    var(--jcode-shadow-md),
+    0 0 0 3px var(--jcode-accent-wash);
 }
 .jcode-chat-input .jcode-composer-input {
   min-height: 1.5rem;
@@ -99,15 +107,15 @@
   border: 0;
   outline: none;
   background: transparent;
-  color: var(--color-foreground);
-  font-family: var(--font-sans);
+  color: var(--jcode-color-foreground);
+  font-family: var(--jcode-font-sans);
   font-size: 0.9375rem;
   line-height: 1.5;
   padding: 0.35rem 0.25rem;
-  caret-color: var(--color-primary);
+  caret-color: var(--jcode-color-primary);
 }
 .jcode-chat-input .jcode-composer-input::placeholder {
-  color: var(--color-muted-foreground);
+  color: var(--jcode-color-muted-foreground);
   opacity: 0.75;
 }
 .jcode-chat-input .jcode-composer-row {
@@ -123,17 +131,17 @@
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-md);
+  border-radius: var(--jcode-radius-md);
   border: 0;
   background: transparent;
-  color: var(--color-muted-foreground);
+  color: var(--jcode-color-muted-foreground);
   transition:
-    background-color var(--duration-fast) var(--ease-out),
-    color var(--duration-fast) var(--ease-out);
+    background-color var(--jcode-duration-fast) var(--jcode-ease-out),
+    color var(--jcode-duration-fast) var(--jcode-ease-out);
 }
 .jcode-chat-input__add-att:hover {
-  background: var(--neutral-wash-soft);
-  color: var(--color-foreground);
+  background: var(--jcode-neutral-wash-soft);
+  color: var(--jcode-color-foreground);
 }
 
 /* ─── Attachment tiles + lightbox (assistant-ui-inspired) ─── */
@@ -163,10 +171,10 @@
   overflow: hidden;
   padding: 0 !important;
   margin: 0 !important;
-  border: 1px solid var(--color-border) !important;
-  border-radius: var(--radius-md);
-  background: var(--color-muted) !important;
-  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--jcode-color-border) !important;
+  border-radius: var(--jcode-radius-md);
+  background: var(--jcode-color-muted) !important;
+  box-shadow: var(--jcode-shadow-sm);
   cursor: pointer;
   appearance: none;
   -webkit-appearance: none;
@@ -198,19 +206,19 @@
   height: 1.25rem !important;
   padding: 0 !important;
   margin: 0 !important;
-  border: 1px solid var(--color-border) !important;
+  border: 1px solid var(--jcode-color-border) !important;
   border-radius: 9999px !important;
-  background: var(--color-surface) !important;
-  color: var(--color-muted-foreground) !important;
-  box-shadow: var(--shadow-sm);
+  background: var(--jcode-color-surface) !important;
+  color: var(--jcode-color-muted-foreground) !important;
+  box-shadow: var(--jcode-shadow-sm);
   line-height: 0;
   appearance: none;
   -webkit-appearance: none;
 }
 .jcode-attachment__remove:hover {
-  border-color: var(--color-foreground) !important;
-  color: var(--color-foreground) !important;
-  background: var(--color-surface) !important;
+  border-color: var(--jcode-color-foreground) !important;
+  color: var(--jcode-color-foreground) !important;
+  background: var(--jcode-color-surface) !important;
 }
 .jcode-attachment__remove svg {
   width: 0.7rem;
@@ -221,7 +229,7 @@
 .jcode-attachment-preview {
   position: fixed;
   inset: 0;
-  z-index: var(--z-modal, 50);
+  z-index: var(--jcode-z-modal, 50);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -241,17 +249,17 @@
   max-width: min(56rem, 100%);
   flex-direction: column;
   overflow: hidden;
-  border-radius: var(--radius-xl);
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-xl);
+  border-radius: var(--jcode-radius-xl);
+  border: 1px solid var(--jcode-color-border);
+  background: var(--jcode-color-surface);
+  box-shadow: var(--jcode-shadow-xl);
 }
 .jcode-attachment-preview__bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--jcode-color-border);
   padding: 0.55rem 0.75rem;
 }
 .jcode-attachment-preview__name {
@@ -259,9 +267,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--font-mono);
+  font-family: var(--jcode-font-mono);
   font-size: 0.75rem;
-  color: var(--color-muted-foreground);
+  color: var(--jcode-color-muted-foreground);
 }
 .jcode-attachment-preview__close {
   display: flex;
@@ -271,13 +279,13 @@
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: var(--radius-md);
+  border-radius: var(--jcode-radius-md);
   background: transparent;
-  color: var(--color-muted-foreground);
+  color: var(--jcode-color-muted-foreground);
 }
 .jcode-attachment-preview__close:hover {
-  background: var(--neutral-wash-soft);
-  color: var(--color-foreground);
+  background: var(--jcode-neutral-wash-soft);
+  color: var(--jcode-color-foreground);
 }
 .jcode-attachment-preview__img {
   display: block;
@@ -290,17 +298,17 @@
 
 /* ─── Message polish ─── */
 .jcode-message {
-  transition: background-color var(--duration-normal) var(--ease-out);
+  transition: background-color var(--jcode-duration-normal) var(--jcode-ease-out);
 }
 .jcode-message .jcode-msg-avatar {
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--color-foreground) 8%, transparent),
-    var(--shadow-sm);
+    0 0 0 1px color-mix(in srgb, var(--jcode-color-foreground) 8%, transparent),
+    var(--jcode-shadow-sm);
   letter-spacing: 0.02em;
 }
 .jcode-message .jcode-msg-actions {
   opacity: 0;
-  transition: opacity var(--duration-fast) var(--ease-out);
+  transition: opacity var(--jcode-duration-fast) var(--jcode-ease-out);
 }
 .jcode-message:hover .jcode-msg-actions,
 .jcode-message:focus-within .jcode-msg-actions {
@@ -312,15 +320,15 @@
   }
 }
 .jcode-message .jcode-msg-action-btn {
-  color: var(--color-muted-foreground);
+  color: var(--jcode-color-muted-foreground);
   transition:
-    color var(--duration-fast) var(--ease-out),
-    background-color var(--duration-fast) var(--ease-out),
-    transform var(--duration-fast) var(--ease-out);
+    color var(--jcode-duration-fast) var(--jcode-ease-out),
+    background-color var(--jcode-duration-fast) var(--jcode-ease-out),
+    transform var(--jcode-duration-fast) var(--jcode-ease-out);
 }
 .jcode-message .jcode-msg-action-btn:hover {
-  color: var(--color-foreground);
-  background: var(--neutral-wash-soft);
+  color: var(--jcode-color-foreground);
+  background: var(--jcode-neutral-wash-soft);
 }
 .jcode-message .jcode-msg-action-btn:active {
   transform: scale(0.92);
@@ -330,7 +338,19 @@
 .jcode-prose {
   font-size: 0.9375rem;
   line-height: 1.65;
-  color: var(--color-foreground);
+  color: var(--jcode-color-foreground);
+}
+
+/* Host-article isolation: docs/blog shells often style bare elements
+ * (`.doc-article p { color: … }`), which outranks inheritance and paints
+ * chat prose in the host's ink — unreadable on our dark surfaces. The
+ * attribute-scoped selector outguns typical host element rules; `inherit`
+ * keeps blockquote/muted contexts intact. */
+[data-jcode-ui] .jcode-prose :is(p, li, h1, h2, h3, h4, h5, h6) {
+  color: inherit;
+}
+[data-jcode-ui] .jcode-prose :is(ul, ol) {
+  padding-left: 1.35em;
 }
 .jcode-prose p {
   margin: 0.45em 0;
@@ -364,12 +384,12 @@
 .jcode-prose blockquote {
   margin: 0.6em 0;
   padding: 0.15em 0 0.15em 0.9em;
-  border-left: 3px solid var(--accent-border);
-  color: var(--color-muted-foreground);
+  border-left: 3px solid var(--jcode-accent-border);
+  color: var(--jcode-color-muted-foreground);
 }
 .jcode-prose hr {
   border: 0;
-  border-top: 1px solid var(--color-border);
+  border-top: 1px solid var(--jcode-color-border);
   margin: 1em 0;
 }
 
@@ -380,24 +400,24 @@
  * rules (e.g. docs `.doc-article code { background: paper }`) which otherwise
  * paint a light chip under light syntax text → invisible code. */
 .jcode-prose pre {
-  background: var(--code-bg, #222228) !important;
-  color: var(--code-fg, var(--hljs-fg, #f0f0f4)) !important;
-  border: 1px solid var(--code-border, #3f3f48) !important;
-  border-radius: var(--radius-lg);
+  background: var(--jcode-code-bg, #222228) !important;
+  color: var(--jcode-code-fg, var(--jcode-hljs-fg, #f0f0f4)) !important;
+  border: 1px solid var(--jcode-code-border, #3f3f48) !important;
+  border-radius: var(--jcode-radius-lg);
   padding: 0.85rem 1rem !important;
   /* Wrap long lines — avoid horizontal scroll in narrow demo/message columns. */
   overflow-x: hidden;
   overflow-wrap: anywhere;
   word-break: break-word;
   white-space: pre-wrap;
-  font-family: var(--font-mono);
+  font-family: var(--jcode-font-mono);
   font-size: 0.84em;
   line-height: 1.55;
   margin: 0.65rem 0;
   max-width: 100%;
   box-sizing: border-box;
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--color-foreground) 6%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--jcode-color-foreground) 6%, transparent),
     0 1px 2px color-mix(in srgb, #000 18%, transparent);
 }
 .jcode-prose pre code,
@@ -417,23 +437,23 @@
   word-break: inherit;
 }
 .jcode-prose code {
-  font-family: var(--font-mono);
+  font-family: var(--jcode-font-mono);
 }
 .jcode-prose :not(pre) > code {
-  background: var(--code-inline-bg, var(--code-bg, #2c2c34)) !important;
-  color: var(--code-fg, var(--color-foreground, #f0f0f4)) !important;
-  border: 1px solid var(--code-border, #3f3f48) !important;
-  border-radius: var(--radius-sm);
+  background: var(--jcode-code-inline-bg, var(--jcode-code-bg, #2c2c34)) !important;
+  color: var(--jcode-code-fg, var(--jcode-color-foreground, #f0f0f4)) !important;
+  border: 1px solid var(--jcode-code-border, #3f3f48) !important;
+  border-radius: var(--jcode-radius-sm);
   padding: 0.12em 0.45em !important;
   font-size: 0.86em;
   font-weight: 500;
 }
 .jcode-prose a {
-  color: var(--color-primary);
+  color: var(--jcode-color-primary);
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 2px;
-  transition: opacity var(--duration-fast) var(--ease-out);
+  transition: opacity var(--jcode-duration-fast) var(--jcode-ease-out);
 }
 .jcode-prose a:hover {
   opacity: 0.85;
@@ -446,11 +466,11 @@
   margin: 0.85em 0;
   max-width: 100%;
   overflow-x: auto;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface);
+  border: 1px solid var(--jcode-color-border);
+  border-radius: var(--jcode-radius-lg);
+  background: var(--jcode-color-surface);
   /* Soft inset so the table reads as its own surface against the chat panel. */
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-foreground) 3%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--jcode-color-foreground) 3%, transparent);
   -webkit-overflow-scrolling: touch;
 }
 .jcode-prose .jcode-md-table-wrap > table,
@@ -462,13 +482,13 @@
   font-size: 0.84em;
   line-height: 1.5;
   margin: 0;
-  color: var(--color-foreground);
+  color: var(--jcode-color-foreground);
 }
 /* Bare tables (no wrap yet / paste) still get a basic frame. */
 .jcode-prose > table {
   margin: 0.85em 0;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border: 1px solid var(--jcode-color-border);
+  border-radius: var(--jcode-radius-lg);
   overflow: hidden;
 }
 .jcode-prose th,
@@ -476,21 +496,21 @@
   padding: 0.55rem 0.85rem;
   text-align: left;
   vertical-align: top;
-  border-bottom: 1px solid var(--color-border);
-  border-right: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  border-bottom: 1px solid var(--jcode-color-border);
+  border-right: 1px solid color-mix(in srgb, var(--jcode-color-border) 70%, transparent);
 }
 .jcode-prose th:last-child,
 .jcode-prose td:last-child {
   border-right: none;
 }
 .jcode-prose thead th {
-  background: var(--color-muted);
-  color: var(--color-foreground);
+  background: var(--jcode-color-muted);
+  color: var(--jcode-color-foreground);
   font-weight: 600;
   font-size: 0.92em;
   letter-spacing: 0.01em;
   white-space: nowrap;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--jcode-color-border);
 }
 .jcode-prose tbody tr:last-child th,
 .jcode-prose tbody tr:last-child td {
@@ -498,11 +518,11 @@
 }
 .jcode-prose tbody tr:nth-child(even) td,
 .jcode-prose tbody tr:nth-child(even) th {
-  background: color-mix(in srgb, var(--color-muted) 45%, transparent);
+  background: color-mix(in srgb, var(--jcode-color-muted) 45%, transparent);
 }
 .jcode-prose tbody tr:hover td,
 .jcode-prose tbody tr:hover th {
-  background: var(--neutral-wash-soft);
+  background: var(--jcode-neutral-wash-soft);
 }
 /* Numeric-looking cells stay monospace-friendly when authors use code in cells. */
 .jcode-prose td code,
@@ -514,50 +534,50 @@
  * Header stays outside; ONLY the expanded body gets a frame. The top edge of
  * `.toolcall-body` is the visual divider between title and content. */
 .jcode-toolcall {
-  transition: opacity var(--duration-fast) var(--ease-out);
+  transition: opacity var(--jcode-duration-fast) var(--jcode-ease-out);
 }
 .jcode-toolcall > button {
-  border-radius: var(--radius-md);
+  border-radius: var(--jcode-radius-md);
   padding: 0.3rem 0.35rem 0.3rem 0;
   margin-left: -0.15rem;
   transition:
-    background-color var(--duration-fast) var(--ease-out),
-    opacity var(--duration-fast) var(--ease-out);
+    background-color var(--jcode-duration-fast) var(--jcode-ease-out),
+    opacity var(--jcode-duration-fast) var(--jcode-ease-out);
 }
 .jcode-toolcall > button:hover {
   opacity: 1;
-  background: var(--neutral-wash-soft);
+  background: var(--jcode-neutral-wash-soft);
 }
 .jcode-toolcall > button:focus-visible {
-  outline: 2px solid var(--accent-border);
+  outline: 2px solid var(--jcode-accent-border);
   outline-offset: 1px;
 }
 .jcode-toolcall .toolcall-body {
   overflow: hidden;
   /* Vue: ml-0 mr-2 mt-1.5 mb-1.5 */
   margin: 0.375rem 0.5rem 0.375rem 0;
-  border-radius: var(--radius-xl);
-  border: 1px solid var(--color-border);
+  border-radius: var(--jcode-radius-xl);
+  border: 1px solid var(--jcode-color-border);
   /* Slightly lifted from thread bg so inner code/terminal can contrast further. */
-  background: var(--color-surface);
-  box-shadow: var(--shadow-sm);
-  animation: scale-in var(--duration-normal) var(--ease-out) both;
-  color: var(--color-foreground);
+  background: var(--jcode-color-surface);
+  box-shadow: var(--jcode-shadow-sm);
+  animation: jcode-scale-in var(--jcode-duration-normal) var(--jcode-ease-out) both;
+  color: var(--jcode-color-foreground);
 }
 
 /* Shared code-panel look for tool bodies (terminal / file / diff). */
 .jcode-terminal,
 .jcode-file-viewer,
 .jcode-diff {
-  background: var(--code-bg, #222228) !important;
-  color: var(--code-fg, var(--hljs-fg, #f0f0f4)) !important;
+  background: var(--jcode-code-bg, #222228) !important;
+  color: var(--jcode-code-fg, var(--jcode-hljs-fg, #f0f0f4)) !important;
 }
 .jcode-toolcall .toolcall-body[data-tool-status='error'] {
-  border-color: color-mix(in srgb, var(--color-destructive, var(--color-error-fg)) 55%, var(--color-border));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-error-fg) 12%, transparent);
+  border-color: color-mix(in srgb, var(--jcode-color-destructive, var(--jcode-color-error-fg)) 55%, var(--jcode-color-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--jcode-color-error-fg) 12%, transparent);
 }
 .jcode-toolcall .toolcall-body[data-tool-status='running'] {
-  border-color: color-mix(in srgb, var(--color-primary) 28%, var(--color-border));
+  border-color: color-mix(in srgb, var(--jcode-color-primary) 28%, var(--jcode-color-border));
 }
 
 /* When expanded, a hairline under the header row reinforces the title/content split
@@ -579,7 +599,7 @@
 .jcode-toolcall .toolcall-subagent-starting {
   padding: 0.5rem 0;
   font-size: 0.75rem;
-  color: var(--color-muted-foreground);
+  color: var(--jcode-color-muted-foreground);
   animation: pulse 1.5s ease-in-out infinite;
 }
 .jcode-toolcall .toolcall-subagent-output {
@@ -587,10 +607,10 @@
   max-height: 18rem;
   overflow: auto;
   padding: 0.625rem 0.875rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-xl);
-  background: var(--color-surface);
-  color: var(--color-foreground);
+  border: 1px solid var(--jcode-color-border);
+  border-radius: var(--jcode-radius-xl);
+  background: var(--jcode-color-surface);
+  color: var(--jcode-color-foreground);
   font-size: 0.8125rem;
   line-height: 1.55;
 }
@@ -600,10 +620,10 @@
 .jcode-toolcall .toolcall-subagent-error {
   margin-top: 0.25rem;
   padding: 0.5rem 0.75rem;
-  border: 1px solid var(--color-destructive, var(--color-error-fg));
-  border-radius: var(--radius-xl);
-  color: var(--color-destructive, var(--color-error-fg));
-  font-family: var(--font-mono);
+  border: 1px solid var(--jcode-color-destructive, var(--jcode-color-error-fg));
+  border-radius: var(--jcode-radius-xl);
+  color: var(--jcode-color-destructive, var(--jcode-color-error-fg));
+  font-family: var(--jcode-font-mono);
   font-size: 0.75rem;
   white-space: pre-wrap;
 }
@@ -612,9 +632,9 @@
 .jcode-diff-table {
   width: 100%;
   border-collapse: collapse;
-  font-family: var(--font-mono);
+  font-family: var(--jcode-font-mono);
   font-size: 0.75rem;
-  color: var(--code-fg, var(--hljs-fg));
+  color: var(--jcode-code-fg, var(--jcode-hljs-fg));
 }
 .jcode-diff-table td {
   padding: 0.08rem 0.5rem;
@@ -630,7 +650,7 @@
   white-space: nowrap;
   user-select: none;
   opacity: 0.55;
-  color: var(--code-fg, var(--hljs-fg));
+  color: var(--jcode-code-fg, var(--jcode-hljs-fg));
 }
 .jcode-diff-table .jcode-diff-sign {
   width: 1rem;
@@ -639,32 +659,32 @@
   font-weight: 700;
 }
 .jcode-diff-line-add {
-  background: color-mix(in srgb, var(--color-success) 14%, var(--code-bg));
-  color: var(--color-success-fg);
+  background: color-mix(in srgb, var(--jcode-color-success) 14%, var(--jcode-code-bg));
+  color: var(--jcode-color-success-fg);
 }
 .dark .jcode-diff-line-add {
-  background: color-mix(in srgb, #22c55e 16%, var(--code-bg));
+  background: color-mix(in srgb, #22c55e 16%, var(--jcode-code-bg));
   color: #bbf7d0;
 }
 .jcode-diff-line-del {
-  background: color-mix(in srgb, var(--color-error-fg) 14%, var(--code-bg));
-  color: var(--color-error-fg);
+  background: color-mix(in srgb, var(--jcode-color-error-fg) 14%, var(--jcode-code-bg));
+  color: var(--jcode-color-error-fg);
 }
 .dark .jcode-diff-line-del {
-  background: color-mix(in srgb, #ef4444 16%, var(--code-bg));
+  background: color-mix(in srgb, #ef4444 16%, var(--jcode-code-bg));
   color: #fecaca;
 }
 .jcode-diff-line-meta {
-  color: color-mix(in srgb, var(--code-fg) 55%, transparent);
+  color: color-mix(in srgb, var(--jcode-code-fg) 55%, transparent);
 }
 
 /* ─── Tool-call file viewer (line-numbered) ─── */
 .jcode-file-table {
   width: 100%;
   border-collapse: collapse;
-  font-family: var(--font-mono);
+  font-family: var(--jcode-font-mono);
   font-size: 0.75rem;
-  color: var(--code-fg, var(--hljs-fg));
+  color: var(--jcode-code-fg, var(--jcode-hljs-fg));
 }
 .jcode-file-table td {
   padding: 0.05rem 0.75rem 0.05rem 0;
@@ -673,52 +693,52 @@
   vertical-align: top;
 }
 .jcode-file-table tr:hover {
-  background: color-mix(in srgb, var(--color-foreground) 4%, transparent);
+  background: color-mix(in srgb, var(--jcode-color-foreground) 4%, transparent);
 }
 .jcode-file-lineno {
-  color: color-mix(in srgb, var(--code-fg, var(--color-muted-foreground)) 45%, transparent);
+  color: color-mix(in srgb, var(--jcode-code-fg, var(--jcode-color-muted-foreground)) 45%, transparent);
   user-select: none;
   text-align: right;
   white-space: nowrap;
   width: 1px;
   padding: 0.05rem 0.75rem 0.05rem 0.65rem;
-  border-right: 1px solid var(--code-border);
+  border-right: 1px solid var(--jcode-code-border);
 }
 .jcode-file-text {
-  color: var(--code-fg, var(--hljs-fg));
+  color: var(--jcode-code-fg, var(--jcode-hljs-fg));
   padding-left: 0.75rem !important;
 }
 
 /* Terminal tool body */
 .jcode-terminal__prompt {
-  color: color-mix(in srgb, var(--code-fg, var(--color-muted-foreground)) 55%, transparent);
+  color: color-mix(in srgb, var(--jcode-code-fg, var(--jcode-color-muted-foreground)) 55%, transparent);
 }
 .jcode-terminal__command {
-  color: var(--code-fg, var(--hljs-fg));
+  color: var(--jcode-code-fg, var(--jcode-hljs-fg));
   font-weight: 500;
 }
 .jcode-terminal__out {
-  color: color-mix(in srgb, var(--code-fg, var(--hljs-fg)) 78%, transparent);
+  color: color-mix(in srgb, var(--jcode-code-fg, var(--jcode-hljs-fg)) 78%, transparent);
 }
 .jcode-terminal__err {
-  color: var(--color-error-fg);
+  color: var(--jcode-color-error-fg);
 }
 .jcode-terminal__run {
-  color: color-mix(in srgb, var(--code-fg, var(--color-muted-foreground)) 60%, transparent);
+  color: color-mix(in srgb, var(--jcode-code-fg, var(--jcode-color-muted-foreground)) 60%, transparent);
 }
 .jcode-terminal__stream-label {
-  color: var(--color-error-fg);
+  color: var(--jcode-color-error-fg);
   opacity: 0.85;
 }
 .jcode-terminal__ellipsis {
-  color: color-mix(in srgb, var(--code-fg, var(--color-muted-foreground)) 55%, transparent);
+  color: color-mix(in srgb, var(--jcode-code-fg, var(--jcode-color-muted-foreground)) 55%, transparent);
 }
 
 /* Exploring group (coalesced read/search/list tools) */
 .jcode-exploring__steps {
   margin: 0.15rem 0 0.1rem 0.15rem;
   padding-left: 0.35rem;
-  border-left: 2px solid var(--color-border);
+  border-left: 2px solid var(--jcode-color-border);
 }
 .jcode-exploring__step {
   display: flex;
@@ -731,7 +751,7 @@
 }
 .jcode-exploring__action {
   flex-shrink: 0;
-  color: var(--color-primary);
+  color: var(--jcode-color-primary);
   font-weight: 600;
 }
 .jcode-exploring__detail {
@@ -739,21 +759,21 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--font-mono);
-  color: var(--color-foreground);
+  font-family: var(--jcode-font-mono);
+  color: var(--jcode-color-foreground);
   opacity: 0.88;
 }
 .jcode-exploring--nested .jcode-exploring__step {
   padding-left: 0.35rem;
 }
 .jcode-compact-tool-row {
-  border-left: 2px solid var(--color-border);
+  border-left: 2px solid var(--jcode-color-border);
   padding-left: 0.5rem;
   margin-left: 0.15rem;
 }
 
 /* ─── Tool running shimmer (text gradient, matches Vue ToolCallCard) ─── */
-@keyframes shimmer-sweep {
+@keyframes jcode-shimmer-sweep {
   0% {
     background-position: -200% center;
   }
@@ -764,30 +784,30 @@
 .shimmer-running {
   background: linear-gradient(
     90deg,
-    var(--color-muted-foreground) 20%,
-    var(--color-foreground) 50%,
-    var(--color-muted-foreground) 80%
+    var(--jcode-color-muted-foreground) 20%,
+    var(--jcode-color-foreground) 50%,
+    var(--jcode-color-muted-foreground) 80%
   );
   background-size: 200% auto;
   background-clip: text;
   -webkit-background-clip: text;
   color: transparent !important;
   -webkit-text-fill-color: transparent;
-  animation: shimmer-sweep 2s linear infinite;
+  animation: jcode-shimmer-sweep 2s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
   .shimmer-running {
     animation: none;
     background: none;
-    color: var(--color-muted-foreground) !important;
-    -webkit-text-fill-color: var(--color-muted-foreground);
+    color: var(--jcode-color-muted-foreground) !important;
+    -webkit-text-fill-color: var(--jcode-color-muted-foreground);
   }
 }
 
 /* ─── Selection ───
  * Brand-tinted text selection inside thread content. */
 .jcode-selectable ::selection {
-  background: var(--accent-selection);
+  background: var(--jcode-accent-selection);
 }
 .jcode-selectable {
   user-select: text;
@@ -799,19 +819,19 @@
   align-items: center;
   justify-content: center;
   gap: 0.35rem;
-  border-radius: var(--radius-md);
+  border-radius: var(--jcode-radius-md);
   font-size: 0.8rem;
   font-weight: 500;
   line-height: 1.25;
   padding: 0.45rem 0.9rem;
   border: 1px solid transparent;
   transition:
-    background-color var(--duration-normal) var(--ease-out),
-    border-color var(--duration-normal) var(--ease-out),
-    color var(--duration-normal) var(--ease-out),
-    opacity var(--duration-fast) var(--ease-out),
-    transform var(--duration-fast) var(--ease-out),
-    box-shadow var(--duration-normal) var(--ease-out);
+    background-color var(--jcode-duration-normal) var(--jcode-ease-out),
+    border-color var(--jcode-duration-normal) var(--jcode-ease-out),
+    color var(--jcode-duration-normal) var(--jcode-ease-out),
+    opacity var(--jcode-duration-fast) var(--jcode-ease-out),
+    transform var(--jcode-duration-fast) var(--jcode-ease-out),
+    box-shadow var(--jcode-duration-normal) var(--jcode-ease-out);
   cursor: pointer;
 }
 .jcode-btn:active:not(:disabled) {
@@ -822,77 +842,77 @@
   cursor: not-allowed;
 }
 .jcode-btn:focus-visible {
-  outline: 2px solid var(--accent-border);
+  outline: 2px solid var(--jcode-accent-border);
   outline-offset: 2px;
 }
 /* Soft accent — not a loud solid orange block on dark */
 .jcode-btn-allow {
-  background: var(--accent-wash-strong);
-  color: var(--color-foreground);
-  border-color: var(--accent-border);
+  background: var(--jcode-accent-wash-strong);
+  color: var(--jcode-color-foreground);
+  border-color: var(--jcode-accent-border);
 }
 .jcode-btn-allow:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-primary) 22%, var(--color-surface));
-  border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
+  background: color-mix(in srgb, var(--jcode-color-primary) 22%, var(--jcode-color-surface));
+  border-color: color-mix(in srgb, var(--jcode-color-primary) 40%, var(--jcode-color-border));
 }
 .jcode-btn-ghost {
   background: transparent;
-  color: var(--color-muted-foreground);
-  border-color: var(--color-border);
+  color: var(--jcode-color-muted-foreground);
+  border-color: var(--jcode-color-border);
 }
 .jcode-btn-ghost:hover:not(:disabled) {
-  background: var(--neutral-wash-soft);
-  color: var(--color-foreground);
+  background: var(--jcode-neutral-wash-soft);
+  color: var(--jcode-color-foreground);
 }
 .jcode-btn-deny {
   margin-left: auto;
   background: transparent;
-  color: var(--color-muted-foreground);
+  color: var(--jcode-color-muted-foreground);
   border-color: transparent;
 }
 .jcode-btn-deny:hover:not(:disabled) {
-  color: var(--color-error-fg);
-  background: var(--color-error-bg);
+  color: var(--jcode-color-error-fg);
+  background: var(--jcode-color-error-bg);
 }
 .jcode-btn-caution {
-  background: color-mix(in srgb, var(--color-warning-fg) 14%, var(--color-surface));
-  color: var(--color-foreground);
-  border-color: color-mix(in srgb, var(--color-warning-fg) 28%, var(--color-border));
+  background: color-mix(in srgb, var(--jcode-color-warning-fg) 14%, var(--jcode-color-surface));
+  color: var(--jcode-color-foreground);
+  border-color: color-mix(in srgb, var(--jcode-color-warning-fg) 28%, var(--jcode-color-border));
 }
 .jcode-btn-caution:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-warning-fg) 20%, var(--color-surface));
+  background: color-mix(in srgb, var(--jcode-color-warning-fg) 20%, var(--jcode-color-surface));
 }
 /* Legacy aliases used by ask-user / edit UI */
 .jcode-btn-primary {
-  background: var(--accent-wash-strong);
-  color: var(--color-foreground);
-  border-color: var(--accent-border);
+  background: var(--jcode-accent-wash-strong);
+  color: var(--jcode-color-foreground);
+  border-color: var(--jcode-accent-border);
 }
 .jcode-btn-primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-primary) 22%, var(--color-surface));
+  background: color-mix(in srgb, var(--jcode-color-primary) 22%, var(--jcode-color-surface));
 }
 .jcode-btn-secondary {
   background: transparent;
-  color: var(--color-muted-foreground);
-  border-color: var(--color-border);
+  color: var(--jcode-color-muted-foreground);
+  border-color: var(--jcode-color-border);
 }
 .jcode-btn-secondary:hover:not(:disabled) {
-  background: var(--neutral-wash-soft);
-  color: var(--color-foreground);
+  background: var(--jcode-neutral-wash-soft);
+  color: var(--jcode-color-foreground);
 }
 .jcode-btn-danger {
   background: transparent;
-  color: var(--color-muted-foreground);
+  color: var(--jcode-color-muted-foreground);
   border-color: transparent;
 }
 .jcode-btn-danger:hover:not(:disabled) {
-  color: var(--color-error-fg);
-  background: var(--color-error-bg);
+  color: var(--jcode-color-error-fg);
+  background: var(--jcode-color-error-bg);
 }
 .jcode-btn-danger-solid {
-  background: color-mix(in srgb, var(--color-error-fg) 16%, var(--color-surface));
-  color: var(--color-error-fg);
-  border-color: color-mix(in srgb, var(--color-error-fg) 28%, var(--color-border));
+  background: color-mix(in srgb, var(--jcode-color-error-fg) 16%, var(--jcode-color-surface));
+  color: var(--jcode-color-error-fg);
+  border-color: color-mix(in srgb, var(--jcode-color-error-fg) 28%, var(--jcode-color-border));
 }
 
 /* ─── Approval card ───
@@ -903,17 +923,17 @@
 .jcode-approval-card {
   margin: 0.35rem 0 0.75rem;
   padding: 0.85rem 1rem;
-  border-radius: var(--radius-xl);
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-sm);
-  animation: jcode-card-in var(--duration-slow) var(--ease-out) both;
+  border-radius: var(--jcode-radius-xl);
+  border: 1px solid var(--jcode-color-border);
+  background: var(--jcode-color-surface);
+  box-shadow: var(--jcode-shadow-sm);
+  animation: jcode-card-in var(--jcode-duration-slow) var(--jcode-ease-out) both;
 }
 .jcode-approval-card.is-external {
-  border-color: color-mix(in srgb, var(--color-error-fg) 28%, var(--color-border));
+  border-color: color-mix(in srgb, var(--jcode-color-error-fg) 28%, var(--jcode-color-border));
 }
 .jcode-approval-card.is-armed {
-  border-color: color-mix(in srgb, var(--color-warning-fg) 30%, var(--color-border));
+  border-color: color-mix(in srgb, var(--jcode-color-warning-fg) 30%, var(--jcode-color-border));
 }
 .jcode-approval-card__head {
   display: flex;
@@ -927,9 +947,9 @@
   width: 1.75rem;
   height: 1.75rem;
   flex-shrink: 0;
-  border-radius: var(--radius-md);
-  background: var(--neutral-wash);
-  color: var(--color-muted-foreground);
+  border-radius: var(--jcode-radius-md);
+  background: var(--jcode-neutral-wash);
+  color: var(--jcode-color-muted-foreground);
 }
 .jcode-approval-card__titles {
   display: flex;
@@ -943,7 +963,7 @@
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--color-muted-foreground);
+  color: var(--jcode-color-muted-foreground);
 }
 .jcode-approval-card__verb {
   display: flex;
@@ -952,7 +972,7 @@
   gap: 0.4rem;
   font-size: 0.88rem;
   font-weight: 500;
-  color: var(--color-foreground);
+  color: var(--jcode-color-foreground);
   line-height: 1.35;
 }
 .jcode-approval-card__target {
@@ -962,21 +982,21 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   padding: 0.12rem 0.45rem;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border);
-  background: var(--color-muted);
-  font-family: var(--font-mono);
+  border-radius: var(--jcode-radius-sm);
+  border: 1px solid var(--jcode-color-border);
+  background: var(--jcode-color-muted);
+  font-family: var(--jcode-font-mono);
   font-size: 0.74rem;
   font-weight: 400;
-  color: var(--color-muted-foreground);
+  color: var(--jcode-color-muted-foreground);
   vertical-align: middle;
 }
 .jcode-approval-card__badge {
   flex-shrink: 0;
   padding: 0.15rem 0.5rem;
-  border-radius: var(--radius-pill);
-  background: var(--color-error-bg);
-  color: var(--color-error-fg);
+  border-radius: var(--jcode-radius-pill);
+  background: var(--jcode-color-error-bg);
+  color: var(--jcode-color-error-fg);
   font-size: 0.66rem;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -988,9 +1008,9 @@
   cursor: pointer;
   user-select: none;
   font-size: 0.74rem;
-  color: var(--color-muted-foreground);
+  color: var(--jcode-color-muted-foreground);
   list-style: none;
-  transition: color var(--duration-fast) var(--ease-out);
+  transition: color var(--jcode-duration-fast) var(--jcode-ease-out);
 }
 .jcode-approval-card__details summary::-webkit-details-marker {
   display: none;
@@ -999,27 +1019,27 @@
   content: '▸';
   display: inline-block;
   margin-right: 0.35rem;
-  transition: transform var(--duration-fast) var(--ease-out);
+  transition: transform var(--jcode-duration-fast) var(--jcode-ease-out);
   opacity: 0.7;
 }
 .jcode-approval-card__details[open] summary::before {
   transform: rotate(90deg);
 }
 .jcode-approval-card__details summary:hover {
-  color: var(--color-foreground);
+  color: var(--jcode-color-foreground);
 }
 .jcode-approval-card__details pre {
   margin: 0.45rem 0 0;
   max-height: 10rem;
   overflow: auto;
   padding: 0.55rem 0.7rem;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--code-border);
-  background: var(--code-bg);
-  font-family: var(--font-mono);
+  border-radius: var(--jcode-radius-md);
+  border: 1px solid var(--jcode-code-border);
+  background: var(--jcode-code-bg);
+  font-family: var(--jcode-font-mono);
   font-size: 0.7rem;
   line-height: 1.45;
-  color: var(--color-muted-foreground);
+  color: var(--jcode-color-muted-foreground);
 }
 .jcode-approval-card__actions {
   display: flex;
@@ -1028,7 +1048,7 @@
   gap: 0.45rem;
   margin-top: 0.85rem;
   padding-top: 0.75rem;
-  border-top: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--jcode-color-border) 80%, transparent);
 }
 .jcode-approval-resolved {
   display: flex;
@@ -1036,18 +1056,18 @@
   gap: 0.4rem;
   padding: 0.35rem 0;
   font-size: 0.78rem;
-  color: var(--color-muted-foreground);
-  animation: fade-in var(--duration-normal) var(--ease-out) both;
+  color: var(--jcode-color-muted-foreground);
+  animation: jcode-fade-in var(--jcode-duration-normal) var(--jcode-ease-out) both;
 }
 .jcode-approval-resolved.is-ok {
-  color: color-mix(in srgb, var(--color-success) 70%, var(--color-muted-foreground));
+  color: color-mix(in srgb, var(--jcode-color-success) 70%, var(--jcode-color-muted-foreground));
 }
 .jcode-approval-resolved__sep {
   margin: 0 0.25rem;
   opacity: 0.4;
 }
 .jcode-approval-resolved__name {
-  font-family: var(--font-mono);
+  font-family: var(--jcode-font-mono);
   font-size: 0.72rem;
   opacity: 0.85;
 }
@@ -1065,25 +1085,25 @@
 
 /* Ask-user keeps a soft surface card (no warning paint) */
 .jcode-ask-user .jcode-interactive-card {
-  border-radius: var(--radius-xl);
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-sm);
-  animation: jcode-card-in var(--duration-slow) var(--ease-out) both;
+  border-radius: var(--jcode-radius-xl);
+  border: 1px solid var(--jcode-color-border);
+  background: var(--jcode-color-surface);
+  box-shadow: var(--jcode-shadow-sm);
+  animation: jcode-card-in var(--jcode-duration-slow) var(--jcode-ease-out) both;
 }
 
 /* ─── Reasoning disclosure ─── */
 .jcode-reasoning {
-  border-radius: var(--radius-lg);
+  border-radius: var(--jcode-radius-lg);
 }
 .jcode-reasoning__trigger {
   transition:
-    background-color var(--duration-fast) var(--ease-out),
-    color var(--duration-fast) var(--ease-out);
+    background-color var(--jcode-duration-fast) var(--jcode-ease-out),
+    color var(--jcode-duration-fast) var(--jcode-ease-out);
 }
 .jcode-reasoning__body {
-  animation: fade-down var(--duration-normal) var(--ease-out) both;
-  border-left-color: color-mix(in srgb, var(--color-border) 80%, transparent) !important;
+  animation: jcode-fade-down var(--jcode-duration-normal) var(--jcode-ease-out) both;
+  border-left-color: color-mix(in srgb, var(--jcode-color-border) 80%, transparent) !important;
 }
 
 /* ─── Thread pending ("Thinking") ───
@@ -1107,7 +1127,7 @@
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--color-muted-foreground);
+  background: var(--jcode-color-muted-foreground);
   opacity: 0.45;
   animation: jcode-think-dot 1.2s ease-in-out infinite both;
 }
@@ -1121,7 +1141,7 @@
   font-size: 0.8rem;
   font-weight: 500;
   letter-spacing: 0.01em;
-  color: var(--color-muted-foreground);
+  color: var(--jcode-color-muted-foreground);
   opacity: 0.9;
 }
 
@@ -1152,19 +1172,19 @@
 /* ─── Thread scroll surface ─── */
 .jcode-thread {
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--color-muted-foreground) 35%, transparent) transparent;
+  scrollbar-color: color-mix(in srgb, var(--jcode-color-muted-foreground) 35%, transparent) transparent;
 }
 .jcode-thread::-webkit-scrollbar {
   width: 8px;
 }
 .jcode-thread::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--color-muted-foreground) 28%, transparent);
-  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--jcode-color-muted-foreground) 28%, transparent);
+  border-radius: var(--jcode-radius-pill);
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 .jcode-thread::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--color-muted-foreground) 48%, transparent);
+  background: color-mix(in srgb, var(--jcode-color-muted-foreground) 48%, transparent);
   background-clip: padding-box;
 }
 
@@ -1179,6 +1199,6 @@
 .jcode-message button:focus-visible,
 .jcode-sources button:focus-visible,
 .jcode-reasoning button:focus-visible {
-  outline: 2px solid var(--accent-border);
+  outline: 2px solid var(--jcode-accent-border);
   outline-offset: 2px;
 }

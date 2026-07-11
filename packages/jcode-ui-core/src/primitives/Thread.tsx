@@ -25,6 +25,9 @@ export interface ThreadRenderSlots {
   renderPending?: () => ReactNode
   /** Optional empty state (no items at all). */
   renderEmpty?: () => ReactNode
+  /** Optional footer after the last item when idle (e.g. follow-up
+   *  suggestions). Not rendered while running or when the thread is empty. */
+  renderFooter?: () => ReactNode
 }
 
 export interface ThreadProps extends ThreadRenderSlots {
@@ -54,6 +57,7 @@ export function Thread({
   renderItem,
   renderPending,
   renderEmpty,
+  renderFooter,
   virtualize = true,
   estimateSize = 80,
   scrollThreshold = 80,
@@ -96,6 +100,7 @@ export function Thread({
           containerRef?.(el)
         }}
         className={className}
+        data-jcode-ui=""
         role={role}
         onScroll={autoScroll.onScroll}
         style={{ overflowY: 'auto', minHeight: 0, height: '100%' } as React.CSSProperties}
@@ -104,6 +109,7 @@ export function Thread({
           <Fragment key={it.seq}>{renderItem(it)}</Fragment>
         ))}
         {isRunning && renderPending?.()}
+        {!isRunning && items.length > 0 && renderFooter?.()}
         {overscanBottom > 0 && <div style={{ height: overscanBottom }} aria-hidden />}
       </div>
     )
@@ -115,6 +121,7 @@ export function Thread({
       isRunning={isRunning}
       renderItem={renderItem}
       renderPending={renderPending}
+      renderFooter={renderFooter}
       estimateSize={estimateSize}
       overscanBottom={overscanBottom}
       className={className}
@@ -130,6 +137,7 @@ interface VirtualizedThreadProps {
   isRunning: boolean
   renderItem: (item: ThreadItem) => ReactNode
   renderPending?: () => ReactNode
+  renderFooter?: () => ReactNode
   estimateSize: number
   overscanBottom: number
   className?: string
@@ -143,6 +151,7 @@ function VirtualizedThread({
   isRunning,
   renderItem,
   renderPending,
+  renderFooter,
   estimateSize,
   overscanBottom,
   className,
@@ -182,6 +191,7 @@ function VirtualizedThread({
           containerRef?.(el)
         }}
         className={className}
+        data-jcode-ui=""
         role={role}
         onScroll={autoScroll.onScroll}
         style={
@@ -257,6 +267,9 @@ function VirtualizedThread({
             )
           })}
         </div>
+        {/* Footer flows after the virtual sizer — it is never virtualized so
+            follow-up chips stay simple and measurable. */}
+        {!isRunning && items.length > 0 && renderFooter?.()}
       </div>
     </div>
   )

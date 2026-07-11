@@ -11,6 +11,11 @@
  *   - component CSS + design tokens
  */
 
+/* Explicit layer order — 'base' must sort BELOW 'utilities' so the scoped
+ * element resets in components.css never beat Tailwind utility classes.
+ * (Without this, 'base' is first declared after 'utilities' and would win.) */
+@layer theme, base, components, utilities;
+
 @import 'tailwindcss/theme' layer(theme);
 @import 'tailwindcss/utilities' layer(utilities);
 
@@ -26,3 +31,9 @@
 
 /* ─── Component-local styles ─── */
 @import './components.css';
+@import './threadlist.css';
+@import './welcome.css';
+@import './conversation.css';
+@import './composer2.css';
+@import './markdown-chrome.css';
+@import './p5.css';

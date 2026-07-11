@@ -571,3 +571,157 @@
   border-color: #f59e0b55;
   background: #f59e0b12;
 }
+
+/* ─── Demo v2: chrome controls, light theme, mobile viewport ─── */
+.jcode-live-demo__controls {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 6px;
+}
+.jcode-live-demo__ctl {
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--color-muted-foreground, #b8b9b6);
+  background: transparent;
+  border: 1px solid var(--color-border, #2e2e2e);
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.jcode-live-demo__ctl:hover:not(:disabled) {
+  color: var(--color-foreground, #fff);
+  background: rgba(255, 255, 255, 0.06);
+}
+.jcode-live-demo__ctl:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Light frame — components self-theme light when no .dark ancestor. */
+.jcode-live-demo.light {
+  border-color: #cbccc9;
+  background: #f2f3f0;
+  color: #111;
+  color-scheme: light;
+  box-shadow: 0 12px 40px -16px rgba(24, 20, 16, 0.25);
+}
+.jcode-live-demo.light .jcode-live-demo__chrome {
+  border-bottom: 1px solid #e0e1de;
+}
+.jcode-live-demo.light .jcode-live-demo__title {
+  color: #666;
+}
+.jcode-live-demo.light .jcode-live-demo__ctl {
+  color: #666;
+  border-color: #cbccc9;
+}
+.jcode-live-demo.light .jcode-live-demo__ctl:hover:not(:disabled) {
+  color: #111;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+/* Inner viewport wrapper: desktop fills; mobile narrows to a phone column. */
+.jcode-live-demo__viewport {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  margin: 0 auto;
+  transition: max-width 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  max-width: 100%;
+}
+.jcode-live-demo--mobile .jcode-live-demo__viewport {
+  max-width: 390px;
+  border-left: 1px solid var(--color-border, #2e2e2e);
+  border-right: 1px solid var(--color-border, #2e2e2e);
+}
+.jcode-live-demo.light.jcode-live-demo--mobile .jcode-live-demo__viewport {
+  border-color: #e0e1de;
+}
+
+/* Export control row above the composer. */
+.jcode-live-demo__composer-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 2px 4px;
+}
+
+/* Light values for the legacy frame vars — the frame CSS above reads
+ * var(--color-*, <dark fallback>); in light mode we supply the light palette
+ * on the scope so every fallback stops firing. Inner jcode-ui components
+ * self-theme via scoped --jcode-* tokens and need none of this. */
+.jcode-live-demo.light {
+  --color-background: #f2f3f0;
+  --color-surface: #ffffff;
+  --color-foreground: #111111;
+  --color-muted-foreground: #666666;
+  --color-border: #cbccc9;
+  --code-bg: #e8ebf0;
+  --code-border: #c8cdd5;
+  --code-fg: #1f2328;
+  --code-inline-bg: #e2e6ec;
+  --hljs-fg: #3f3f46;
+  --hljs-keyword: #0369a1;
+  --hljs-string: #047857;
+  --hljs-comment: #a1a1aa;
+  --hljs-number: #b45309;
+  --hljs-title: #7c3aed;
+  --hljs-type: #dc2626;
+  --hljs-params: #c026d3;
+  --hljs-variable: #ca8a04;
+  --hljs-function: #7c3aed;
+  --hljs-meta: #71717a;
+  --hljs-property: #2563eb;
+  --hljs-punctuation: #a1a1aa;
+}
+
+/* ─── Preview theme toggle + light preview slot ─── */
+.jcode-demo-theme-toggle {
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--color-muted-foreground, #b8b9b6);
+  background: transparent;
+  border: 1px solid var(--color-border, #2e2e2e);
+  border-radius: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+.jcode-demo-theme-toggle:hover {
+  color: var(--color-foreground, #fff);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Light preview slot — components self-theme light (no .dark ancestor); the
+ * legacy frame vars below feed the demo scaffolding (hints, rows, pads). */
+.jcode-demo-preview-slot.light {
+  background: #f2f3f0;
+  color: #111;
+  color-scheme: light;
+  --color-background: #f2f3f0;
+  --color-surface: #ffffff;
+  --color-foreground: #111111;
+  --color-muted-foreground: #666666;
+  --color-border: #cbccc9;
+  --code-bg: #e8ebf0;
+  --code-border: #c8cdd5;
+  --code-fg: #1f2328;
+  --code-inline-bg: #e2e6ec;
+  --hljs-fg: #3f3f46;
+  --hljs-keyword: #0369a1;
+  --hljs-string: #047857;
+  --hljs-comment: #a1a1aa;
+  --hljs-number: #b45309;
+  --hljs-title: #7c3aed;
+  --hljs-type: #dc2626;
+  --hljs-params: #c026d3;
+  --hljs-variable: #ca8a04;
+  --hljs-function: #7c3aed;
+  --hljs-meta: #71717a;
+  --hljs-property: #2563eb;
+  --hljs-punctuation: #a1a1aa;
+}

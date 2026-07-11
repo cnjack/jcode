@@ -15,14 +15,14 @@ export const CompactToolRow = memo(function CompactToolRow({ tool }: CompactTool
   const subtitle = tool.displayInfo?.subtitle ?? ''
   const statusColor =
     tool.status === 'error'
-      ? 'var(--color-error-fg)'
+      ? 'var(--jcode-color-error-fg)'
       : tool.status === 'running'
-        ? 'var(--color-muted-foreground)'
-        : 'var(--color-muted-foreground)'
+        ? 'var(--jcode-color-muted-foreground)'
+        : 'var(--jcode-color-muted-foreground)'
 
   return (
     <div
-      className="jcode-compact-tool-row flex min-w-0 items-center gap-1.5 py-0.5"
+      data-jcode-ui="" className="jcode-compact-tool-row flex min-w-0 items-center gap-1.5 py-0.5"
       data-tool-name={tool.name}
       data-tool-status={tool.status}
     >
@@ -35,20 +35,20 @@ export const CompactToolRow = memo(function CompactToolRow({ tool }: CompactTool
       </span>
       <span
         className="shrink-0 text-[11px] font-medium"
-        style={{ color: 'var(--color-muted-foreground)' }}
+        style={{ color: 'var(--jcode-color-muted-foreground)' }}
       >
         {title}
       </span>
       {subtitle && (
         <span
           className="min-w-0 truncate font-mono text-[11px]"
-          style={{ color: 'var(--color-foreground)', opacity: 0.85 }}
+          style={{ color: 'var(--jcode-color-foreground)', opacity: 0.85 }}
         >
           {subtitle}
         </span>
       )}
       {tool.meta?.exit_code !== undefined && tool.meta.exit_code !== 0 && (
-        <span className="ml-auto shrink-0 text-[10px]" style={{ color: 'var(--color-error-fg)' }}>
+        <span className="ml-auto shrink-0 text-[10px]" style={{ color: 'var(--jcode-color-error-fg)' }}>
           exit {tool.meta.exit_code}
         </span>
       )}

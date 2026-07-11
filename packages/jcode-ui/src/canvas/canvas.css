@@ -1,0 +1,237 @@
+/*
+ * jcode-ui/canvas — styles for the optional workflow-canvas subentry.
+ *
+ * This file owns EVERY style for the canvas subentry. It does NOT ship the
+ * React Flow base layer — that lives in `@xyflow/react` and the consumer must
+ * import it FIRST, then this file:
+ *
+ *     import '@xyflow/react/dist/style.css'   // React Flow base (grid, edges, handles…)
+ *     import 'jcode-ui/canvas.css'            // the overrides below
+ *
+ * Everything here is scoped to `[data-jcode-ui]` and reads `--jcode-*` tokens,
+ * so it never leaks to the host and dark mode is automatic (no `.dark` rules).
+ * React Flow v12 is themed by overriding its own `--xy-*` variables on the
+ * `.react-flow` root, which avoids specificity fights with the base sheet.
+ */
+
+/* ─── Canvas wrapper ───
+ * React Flow needs an explicitly-sized parent; default to filling the host
+ * box with a sensible floor. Override via a className on <WorkflowCanvas>. */
+.jcode-wf-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+}
+
+/* Map React Flow's design variables onto jcode tokens. */
+[data-jcode-ui] .react-flow,
+.jcode-wf-canvas .react-flow {
+  --xy-background-color: transparent;
+  --xy-background-pattern-color: var(--jcode-color-border);
+  --xy-edge-stroke: var(--jcode-color-border);
+  --xy-edge-stroke-width: 1.5;
+  --xy-edge-stroke-selected: var(--jcode-color-primary);
+  --xy-connectionline-stroke: var(--jcode-accent-border);
+  --xy-connectionline-stroke-width: 1.5;
+  --xy-handle-background-color: var(--jcode-color-surface);
+  --xy-handle-border-color: var(--jcode-color-border);
+  --xy-edge-label-background-color: var(--jcode-color-surface);
+  --xy-edge-label-color: var(--jcode-color-muted-foreground);
+  --xy-attribution-background-color: transparent;
+  background: transparent;
+}
+
+/* ─── Node card (custom `jcodeStep`) ─── */
+[data-jcode-ui].jcode-wf-node {
+  box-sizing: border-box;
+  width: 220px;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  font-family: var(--jcode-font-sans);
+  color: var(--jcode-color-foreground);
+  background: var(--jcode-color-surface);
+  border: 1px solid var(--jcode-color-border);
+  border-radius: var(--jcode-radius-lg);
+  box-shadow: var(--jcode-shadow-sm);
+  transition:
+    border-color var(--jcode-duration-normal) var(--jcode-ease-out),
+    box-shadow var(--jcode-duration-normal) var(--jcode-ease-out);
+}
+
+[data-jcode-ui].jcode-wf-node.is-selected {
+  border-color: var(--jcode-color-primary);
+  box-shadow: var(--jcode-shadow-sm), 0 0 0 2px var(--jcode-accent-wash-strong);
+}
+
+.jcode-wf-node__icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  font-size: 0.95rem;
+  line-height: 1;
+  color: var(--jcode-color-muted-foreground);
+}
+
+.jcode-wf-node__body {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.jcode-wf-node__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.jcode-wf-node__subtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--jcode-font-mono);
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  color: var(--jcode-color-muted-foreground);
+}
+
+/* Status dot */
+.jcode-wf-node__status {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--jcode-radius-pill);
+  background: var(--jcode-color-muted-foreground);
+}
+.jcode-wf-node__status[data-status='pending'] {
+  background: var(--jcode-color-border);
+}
+.jcode-wf-node__status[data-status='running'] {
+  background: var(--jcode-color-primary);
+}
+.jcode-wf-node__status[data-status='done'] {
+  background: var(--jcode-color-success);
+}
+.jcode-wf-node__status[data-status='error'] {
+  background: var(--jcode-color-destructive);
+}
+
+/* Status → frame */
+[data-jcode-ui].jcode-wf-node--pending {
+  opacity: 0.72;
+}
+[data-jcode-ui].jcode-wf-node--running {
+  border-color: var(--jcode-color-primary);
+  animation: jcode-wf-node-breathe 1.8s var(--jcode-ease-out) infinite;
+}
+[data-jcode-ui].jcode-wf-node--error {
+  border-color: var(--jcode-color-destructive);
+  background: color-mix(in srgb, var(--jcode-color-destructive) 6%, var(--jcode-color-surface));
+}
+
+@keyframes jcode-wf-node-breathe {
+  0%,
+  100% {
+    box-shadow: var(--jcode-shadow-sm), 0 0 0 0 color-mix(in srgb, var(--jcode-color-primary) 45%, transparent);
+  }
+  50% {
+    box-shadow: var(--jcode-shadow-sm), 0 0 0 4px color-mix(in srgb, var(--jcode-color-primary) 20%, transparent);
+  }
+}
+
+/* Handles — small, unobtrusive. */
+[data-jcode-ui] .jcode-wf-node__handle {
+  width: 7px;
+  height: 7px;
+  background: var(--jcode-color-border);
+  border: 1.5px solid var(--jcode-color-surface);
+}
+
+/* ─── Edges ─── */
+/* `path.` + attribute scope out-specifies React Flow's `.react-flow__edge-path`. */
+[data-jcode-ui] path.jcode-wf-edge--animated {
+  stroke: var(--jcode-accent-fill);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  animation: jcode-wf-dash-flow 0.6s linear infinite;
+}
+[data-jcode-ui] path.jcode-wf-edge--temporary {
+  stroke: var(--jcode-color-border);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+  opacity: 0.8;
+}
+
+@keyframes jcode-wf-dash-flow {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+/* ─── Controls (CanvasControls) ─── */
+[data-jcode-ui].jcode-wf-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px;
+  background: var(--jcode-color-surface);
+  border: 1px solid var(--jcode-color-border);
+  border-radius: var(--jcode-radius-lg);
+  box-shadow: var(--jcode-shadow-md);
+}
+.jcode-wf-controls__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  cursor: pointer;
+  color: var(--jcode-color-foreground);
+  background: transparent;
+  border: none;
+  border-radius: var(--jcode-radius-md);
+  transition: background var(--jcode-duration-fast) var(--jcode-ease-out);
+}
+.jcode-wf-controls__btn:hover {
+  background: var(--jcode-neutral-wash);
+}
+.jcode-wf-controls__btn:focus-visible {
+  outline: 2px solid var(--jcode-color-primary);
+  outline-offset: 1px;
+}
+.jcode-wf-controls__icon {
+  width: 0.95rem;
+  height: 0.95rem;
+  stroke-width: var(--jcode-icon-stroke);
+}
+
+/* ─── Free panel (CanvasPanel) ─── */
+[data-jcode-ui].jcode-wf-panel {
+  padding: 0.5rem 0.75rem;
+  font-family: var(--jcode-font-sans);
+  font-size: 0.75rem;
+  color: var(--jcode-color-foreground);
+  background: var(--jcode-color-surface);
+  border: 1px solid var(--jcode-color-border);
+  border-radius: var(--jcode-radius-lg);
+  box-shadow: var(--jcode-shadow-md);
+}
+
+/* ─── Reduced motion ─── */
+@media (prefers-reduced-motion: reduce) {
+  [data-jcode-ui].jcode-wf-node--running,
+  [data-jcode-ui] path.jcode-wf-edge--animated {
+    animation: none !important;
+  }
+}

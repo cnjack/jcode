@@ -91,7 +91,7 @@ export function MessageView({
   }, [message.content])
 
   return (
-    <div className={className} data-role={message.role} data-message-level={message.level ?? undefined}>
+    <div data-jcode-ui="" className={className} data-role={message.role} data-message-level={message.level ?? undefined}>
       <div style={{ display: 'flex', gap: 8 }}>
         {renderAvatar ? renderAvatar(message.role) : <DefaultAvatar role={message.role} />}
         <div style={{ flex: 1 }}>

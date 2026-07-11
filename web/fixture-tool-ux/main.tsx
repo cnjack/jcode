@@ -9,8 +9,9 @@ import {
   Thread,
   ToolRegistryProvider,
   createDefaultToolRegistry,
+  ConnectionBanner,
 } from 'jcode-ui'
-import type { ThreadItem, ToolCall } from 'jcode-ui-core'
+import type { ConnectionState, ThreadItem, ToolCall } from 'jcode-ui-core'
 import 'jcode-ui/styles.css'
 
 function tool(partial: Partial<ToolCall> & Pick<ToolCall, 'id' | 'name'>): ToolCall {
@@ -171,6 +172,64 @@ const items: ThreadItem[] = [
         'Found dual-channel `BuildExecResult` + exploring groups in the timeline.\n\n- Model string keeps STDOUT/STDERR labels\n- UI uses streams/meta',
     }),
   },
+  // ── P2A session-loop controls ──────────────────────────────────────────
+  {
+    kind: 'message',
+    seq: 12,
+    data: {
+      id: 'm5',
+      role: 'assistant',
+      content:
+        '### Branch picker\nThis assistant turn was regenerated three times — step through the versions with the `‹ 1/3 ›` control in the footer.',
+      timestamp: Date.now(),
+      durationMs: 3100,
+      activeVersionId: 'm5-v1',
+      versions: [
+        {
+          id: 'm5-v1',
+          content:
+            '### Branch picker\nThis assistant turn was regenerated three times — step through the versions with the `‹ 1/3 ›` control in the footer.',
+          timestamp: Date.now(),
+        },
+        {
+          id: 'm5-v2',
+          content: '### Branch picker\n**Version 2** — a terser regeneration of the same answer.',
+          timestamp: Date.now(),
+        },
+        {
+          id: 'm5-v3',
+          content:
+            '### Branch picker\n**Version 3** — a longer regeneration with an extra example and a closing note.',
+          timestamp: Date.now(),
+        },
+      ],
+    },
+  },
+  {
+    kind: 'message',
+    seq: 13,
+    data: {
+      id: 'm6',
+      role: 'assistant',
+      content:
+        '### Feedback recorded\nThis message already carries 👍 feedback: the thumb stays highlighted and locked, while 👎 remains clickable to re-rate. Regenerate (↻) sits alongside.',
+      timestamp: Date.now(),
+      durationMs: 4200,
+      feedback: 'up',
+    },
+  },
+  {
+    kind: 'message',
+    seq: 14,
+    data: {
+      id: 'm7',
+      role: 'system',
+      level: 'error',
+      content: 'The agent turn failed: connection reset while streaming the response.',
+      detail: 'Error: ECONNRESET\n  at TLSSocket.onStreamRead (node:internal/stream_base:190)',
+      timestamp: Date.now(),
+    },
+  },
 ]
 
 const runtime = createMockRuntime({ items, isRunning: false })
@@ -200,6 +259,7 @@ function App() {
         }}
       >
         <RuntimeProvider runtime={runtime}>
+          <ConnectionBanner />
           <ToolRegistryProvider registry={registry}>
             <Thread virtualize={false} />
           </ToolRegistryProvider>
@@ -221,3 +281,14 @@ setTimeout(() => {
   })
   document.body.setAttribute('data-fixture-ready', 'true')
 }, 400)
+
+// Cycle the ConnectionBanner through its three states. Ending on 'connected'
+// right after 'reconnecting' triggers the transient "Reconnected" flash.
+const connectionCycle: ConnectionState[] = ['reconnecting', 'disconnected', 'reconnecting', 'connected']
+let connectionStep = 0
+function cycleConnection() {
+  runtime.patchState({ connection: connectionCycle[connectionStep % connectionCycle.length] })
+  connectionStep += 1
+  setTimeout(cycleConnection, 2600)
+}
+setTimeout(cycleConnection, 1500)

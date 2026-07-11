@@ -22,6 +22,7 @@ import {
   TeamSpawnRenderer,
 } from '../toolRenderers/team.js'
 import { BrowserShotRenderer } from '../toolRenderers/browserShot.js'
+import { FileTreeRenderer } from '../toolRenderers/fileTree.js'
 import { GenericRenderer } from '../toolRenderers/generic.js'
 
 const Ctx = createContext<ToolRendererRegistry | null>(null)
@@ -44,6 +45,8 @@ export function createDefaultToolRegistry(): ToolRendererRegistry {
     team_create: TeamCreateRenderer,
     team_spawn: TeamSpawnRenderer,
     browser_screenshot: BrowserShotRenderer,
+    list_dir: FileTreeRenderer,
+    glob: FileTreeRenderer,
   }
   r.registerAll(map)
   r.setFallback(GenericRenderer)

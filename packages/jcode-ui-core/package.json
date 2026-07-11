@@ -1,6 +1,6 @@
 {
   "name": "jcode-ui-core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Framework-agnostic core for jcode-ui: types, chat runtime abstraction, and headless React primitives for AI chat interfaces.",
   "type": "module",
   "license": "MIT",
@@ -64,6 +64,7 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "selftest:agui": "pnpm run build && node dist/runtime/agui.selftest.js",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "peerDependencies": {

@@ -18,13 +18,13 @@ export const BrowserShotRenderer = memo(function BrowserShotRenderer(props: Tool
   if (!src) return <GenericRenderer {...props} />
 
   return (
-    <div className="jcode-browser-shot px-3 py-2" style={{ background: 'var(--color-surface)' }}>
+    <div className="jcode-browser-shot px-3 py-2" style={{ background: 'var(--jcode-color-surface)' }}>
       <a href={src} target="_blank" rel="noopener noreferrer">
         <img
           src={src}
           alt="page screenshot"
           className="max-h-80 max-w-full rounded-md border"
-          style={{ borderColor: 'var(--color-border)' }}
+          style={{ borderColor: 'var(--jcode-color-border)' }}
         />
       </a>
     </div>

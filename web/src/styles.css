@@ -2,14 +2,23 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* jcode-ui ships its own tokens + component styles via jcode-ui/styles.css.
-   It brings in the base :root/.dark tokens, animations, and component-local CSS. */
+/* jcode-ui ≥0.2 is scoped: its tokens live under [data-jcode-ui] as --jcode-*
+   and no longer leak to :root. Import order matters:
+   1. styles.css      — scoped component styles + default tokens
+   2. tokens.base.css — legacy-name base tokens (:root/.dark) for the APP
+                        chrome (sidebar, header, xterm, …), derived via
+                        script/sync-web-base-tokens.sh
+   3. tokens.generated.css — per-theme overrides of the legacy names
+   4. compat.css      — bridges legacy names back into --jcode-* inside
+                        [data-jcode-ui], so themes keep styling the chat UI */
 @import 'jcode-ui/styles.css';
+@import './styles/tokens.base.css';
 
 /* Generated themes (dracula, nord, midnight, solarized, etc.) — produced by
    `go generate ./internal/theme/...` from palette.go. Defines
    html[data-theme="<id>"] color overrides. Copied from web/src/styles/. */
 @import './styles/tokens.generated.css';
+@import 'jcode-ui/compat.css';
 
 /* ─── Layout sizing fallbacks ───
    jcode-ui/styles.css should bring these in, but declare them at the app root

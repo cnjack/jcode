@@ -69,13 +69,24 @@ That's the whole API surface for the common case. The runtime owns the data; the
 
 ## What renders
 
-`<Thread>` renders a discriminated-union timeline of three item kinds:
+`<Thread>` renders a discriminated-union timeline:
 
-- **`message`** — user / assistant / system bubbles, markdown-rendered with syntax highlighting (marked + highlight.js + DOMPurify).
-- **`tool`** — expand/collapse cards dispatched to a registry of tool renderers (9 defaults: terminal, file-viewer, diff, search, todo, skill, team, browser-shot, generic).
-- **`approval`** — interactive decision gates (allow once / allow all [armed] / deny).
+- **`message`** — user / assistant / system, streaming-stable markdown (unclosed fences render cleanly, finished blocks are cached), code-block chrome with copy, branch picker (`‹ 2/3 ›`), regenerate, 👍👎 feedback, failed-turn retry.
+- **`tool`** — expand/collapse cards dispatched to a registry of renderers (terminal with dual-channel stdout/stderr, diff, file-viewer, file-tree, test-results, stack-trace, search, todo, skill, team/subagent trees, browser-shot, generic).
+- **`approval`** — decision gates: classic allow once / allow all (two-step armed) / deny, or arbitrary host-defined options (ACP-compatible).
 
-`<ChatInput>` is the composer: autosizing textarea, send/queue/stop, slash commands, image attachments, context bar.
+Plus `ThreadWelcome` + `Suggestions` (empty state & follow-ups), `ConnectionBanner`, `ThreadList` (sidebar contract + UI), `ExportButton` (markdown download), `QuoteSelection`, `TaskList`, `Artifact`, `ModelSelector`.
+
+`<ChatInput>` is the composer: autosizing textarea, send/queue/stop, slash commands, attachments (pluggable `AttachmentAdapter` with progress, drag & drop, paste-screenshot), optional dictation, `leadingControls`/`trailingControls`/`footer` slots, and a `ComposerHandle` ref (`insertText`/`focus`).
+
+### Optional subentries
+
+| Import | What |
+|--------|------|
+| `jcode-ui/canvas` (+`canvas.css`) | Agent workflow canvas on `@xyflow/react` — status-aware nodes, animated edges, `toolTreeToGraph` |
+| `jcode-ui/voice` (+`voice.css`) | SpeechInput, Transcription, AudioPlayer, VoiceVisualizer — browser APIs only |
+| `jcode-ui/plugins/mermaid` / `plugins/katex` | Diagram/math rendering via dynamic-import peers (zero cost unused) |
+| `createAGUIRuntime` (core) | Drive everything from any AG-UI backend — LangGraph, CrewAI, Mastra, … |
 
 ## Custom tool renderers
 
@@ -96,14 +107,20 @@ See the [tool renderers docs](https://www.j-code.net/chat-ui/docs/tool-renderers
 
 ## Theming
 
-Every color/radius/shadow is a CSS custom property — no hardcoded hex. Re-theme by overriding tokens:
+Every color/radius/shadow is a **scoped** CSS custom property (`--jcode-*` under `[data-jcode-ui]`) — no hardcoded hex, zero leakage into your page:
 
 ```css
-:root { --color-primary: #6366f1; }
-.dark { --color-primary: #818cf8; }
+[data-jcode-ui] { --jcode-color-primary: #6366f1; }
+.dark [data-jcode-ui] { --jcode-color-primary: #818cf8; }
 ```
 
-Light/dark via a `.dark` class on `<html>`. Generated themes (dracula, nord, …) work too. See the [theming docs](https://www.j-code.net/chat-ui/docs/theming).
+Light/dark via a `.dark` class on any ancestor. Three ways in:
+
+- `jcode-ui/styles.css` — self-contained defaults, override on `[data-jcode-ui]`.
+- `+ jcode-ui/compat.css` — keep theming via legacy unprefixed names (`--color-primary`, generated themes, 0.1 hosts).
+- `+ jcode-ui/shadcn.css` — inherit your shadcn theme automatically.
+
+See the [theming docs](https://www.j-code.net/chat-ui/docs/theming) and the [0.2 migration guide](https://www.j-code.net/chat-ui/docs/guides/migration-0.2).
 
 ## Packages
 

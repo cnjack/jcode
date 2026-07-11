@@ -51,6 +51,28 @@ export interface Message {
   /** Optional citation sources for the message (rendered as a Sources list).
    *  Mirrors assistant-ui's Sources component. */
   sources?: MessageSource[]
+  /** Alternate versions (edit/regenerate branches). `content` mirrors the
+   *  active version; absent for unbranched messages. */
+  versions?: MessageVersion[]
+  /** Which entry of `versions` is showing. */
+  activeVersionId?: string
+  /** Recorded 👍/👎 feedback, when the host persists it. */
+  feedback?: 'up' | 'down'
+}
+
+/** Transport liveness surfaced by the runtime (drives ConnectionBanner). */
+export type ConnectionState = 'connected' | 'reconnecting' | 'disconnected'
+
+/** One alternate take of a message — produced by editing a user message or
+ *  regenerating an assistant one. The parent `Message.content` always mirrors
+ *  the active version so non-branching consumers keep working untouched. */
+export interface MessageVersion {
+  id: string
+  content: string
+  timestamp: number
+  reasoning?: string
+  sources?: MessageSource[]
+  images?: ChatImage[]
 }
 
 /** A citation source attached to a message (e.g. a retrieved doc or URL). */
@@ -169,9 +191,26 @@ export interface AskUserAnswer {
   selected?: string[]
 }
 
+/** Button treatment for a host-defined approval option. `allow_always` keeps
+ *  the two-step arming UX; `custom` renders as a neutral choice. */
+export type ApprovalOptionKind = 'allow_once' | 'allow_always' | 'deny' | 'custom'
+
+/** A host-defined approval decision (e.g. an ACP permission option). The `id`
+ *  is echoed back verbatim via `resolveApprovalOption`. */
+export interface ApprovalOption {
+  id: string
+  label: string
+  kind?: ApprovalOptionKind
+  description?: string
+}
+
 /**
  * A pending approval gate. While `resolved` is falsy the UI shows the decision
  * controls; once resolved it collapses to an inline note.
+ *
+ * Two shapes: the classic boolean contract (allow once / allow all / deny), or
+ * host-defined `options` (arbitrary ids, e.g. ACP permission_request) — when
+ * `options` is present the UI renders one control per option instead.
  */
 export interface Approval {
   id: string
@@ -183,6 +222,10 @@ export interface Approval {
   approved?: boolean
   /** True while a resolve request is in flight (disables controls). */
   resolving?: boolean
+  /** Host-defined decision options; absent → classic boolean controls. */
+  options?: ApprovalOption[]
+  /** The chosen option id once resolved (options mode). */
+  resolvedOptionId?: string
 }
 
 /** Built-in thread-item kinds (exploring is UI-only coalescing). */

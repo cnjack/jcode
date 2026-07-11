@@ -723,6 +723,7 @@ export default {
     showArchived: '顯示已封存工作',
     noProjects: '暫無專案',
     noTasks: '暫無工作',
+    noConversations: '暫無對話',
     running: '執行中',
     untitled: '新對話',
     newTaskHere: '在此新建工作',
