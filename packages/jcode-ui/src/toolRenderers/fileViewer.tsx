@@ -42,7 +42,7 @@ export const FileViewerRenderer = memo(function FileViewerRenderer({
     return (
       <div
         className="px-3 py-2 font-mono text-xs whitespace-pre-wrap"
-        style={{ color: 'var(--color-destructive, var(--color-error-fg))' }}
+        style={{ color: 'var(--jcode-color-destructive, var(--jcode-color-error-fg))' }}
       >
         {error}
       </div>
@@ -50,13 +50,13 @@ export const FileViewerRenderer = memo(function FileViewerRenderer({
   }
   if (status === 'running') {
     return (
-      <div className="animate-pulse px-3 py-3 text-xs" style={{ color: 'var(--color-muted-foreground)' }}>
+      <div className="animate-pulse px-3 py-3 text-xs" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
         Loading…
       </div>
     )
   }
   return (
-    <div className="px-3 py-2 text-xs italic" style={{ color: 'var(--color-muted-foreground)' }}>
+    <div className="px-3 py-2 text-xs italic" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
       No content
     </div>
   )

@@ -43,7 +43,7 @@ export const DiffRenderer = memo(function DiffRenderer({
         {output && !error && (
           <div
             className="px-3 py-1 font-mono text-[10px]"
-            style={{ color: 'var(--color-muted-foreground)' }}
+            style={{ color: 'var(--jcode-color-muted-foreground)' }}
           >
             {truncate(output, 200)}
           </div>
@@ -56,7 +56,7 @@ export const DiffRenderer = memo(function DiffRenderer({
     return (
       <div
         className="px-3 py-2 font-mono text-xs whitespace-pre-wrap"
-        style={{ color: 'var(--color-destructive, var(--color-error-fg))' }}
+        style={{ color: 'var(--jcode-color-destructive, var(--jcode-color-error-fg))' }}
       >
         {error}
       </div>
@@ -64,13 +64,13 @@ export const DiffRenderer = memo(function DiffRenderer({
   }
   if (status === 'running') {
     return (
-      <div className="animate-pulse px-3 py-3 text-xs" style={{ color: 'var(--color-muted-foreground)' }}>
+      <div className="animate-pulse px-3 py-3 text-xs" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
         Applying…
       </div>
     )
   }
   return (
-    <div className="px-3 py-2 text-xs italic" style={{ color: 'var(--color-muted-foreground)' }}>
+    <div className="px-3 py-2 text-xs italic" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
       No changes
     </div>
   )

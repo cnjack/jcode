@@ -25,12 +25,12 @@ export const SearchRenderer = memo(function SearchRenderer({
   return (
     <div
       className="jcode-search max-h-72 overflow-y-auto px-3 py-2"
-      style={{ background: 'var(--color-surface)' }}
+      style={{ background: 'var(--jcode-color-surface)' }}
     >
       {argsDisplay && (
         <div
           className="mb-2 whitespace-pre-wrap font-mono text-[11px]"
-          style={{ color: 'var(--color-muted-foreground)' }}
+          style={{ color: 'var(--jcode-color-muted-foreground)' }}
         >
           {argsDisplay}
         </div>
@@ -40,36 +40,36 @@ export const SearchRenderer = memo(function SearchRenderer({
           <div key={i} className="py-0.5">
             {line.isRef && (
               <div className="flex items-baseline gap-1.5 font-mono text-[10px]">
-                <span style={{ color: 'var(--color-accent-neutral)' }}>{line.file}</span>
-                <span style={{ color: 'var(--color-muted-foreground)' }}>:{line.lineNum}</span>
+                <span style={{ color: 'var(--jcode-color-accent-neutral)' }}>{line.file}</span>
+                <span style={{ color: 'var(--jcode-color-muted-foreground)' }}>:{line.lineNum}</span>
               </div>
             )}
             <div
               className="whitespace-pre-wrap font-mono text-xs"
-              style={{ color: 'var(--color-foreground)' }}
+              style={{ color: 'var(--jcode-color-foreground)' }}
             >
               {line.content}
             </div>
           </div>
         ))
       ) : status === 'running' ? (
-        <div className="animate-pulse py-1 text-xs" style={{ color: 'var(--color-muted-foreground)' }}>
+        <div className="animate-pulse py-1 text-xs" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
           Searching…
         </div>
       ) : error ? (
         <div
           className="whitespace-pre-wrap py-1 font-mono text-xs"
-          style={{ color: 'var(--color-destructive, var(--color-error-fg))' }}
+          style={{ color: 'var(--jcode-color-destructive, var(--jcode-color-error-fg))' }}
         >
           {error}
         </div>
       ) : (
-        <div className="py-1 text-xs italic" style={{ color: 'var(--color-muted-foreground)' }}>
+        <div className="py-1 text-xs italic" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
           No results
         </div>
       )}
       {count !== null && (
-        <div className="mt-1.5 font-mono text-[10px]" style={{ color: 'var(--color-muted-foreground)' }}>
+        <div className="mt-1.5 font-mono text-[10px]" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
           {count} matches found
         </div>
       )}

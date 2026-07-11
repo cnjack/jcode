@@ -1,0 +1,173 @@
+/*
+ * Markdown chrome — jcode
+ *
+ * Styling for the rich-render additions produced by src/lib/markdown.ts:
+ *   - .jcode-codeblock         fenced code block with a filename/lang bar + copy
+ *   - .jcode-code-streaming    the code block still receiving tokens (shimmer)
+ *   - .jcode-math / .jcode-mermaid   optional katex / mermaid plugin output
+ *
+ * All color comes from the `--jcode-*` token contract (see tokens.css). Scoped
+ * under `[data-jcode-ui]`; the `jcode-shimmer` keyframes live in animations.css.
+ *
+ * NOTE: this file must be @import'ed from entry.css to ship — see report.
+ */
+
+/* ─── Code block wrapper ─────────────────────────────────────────────────── */
+[data-jcode-ui] .jcode-codeblock {
+  margin: 0.75rem 0;
+  border: 1px solid var(--jcode-code-border);
+  border-radius: var(--jcode-radius-lg);
+  background: var(--jcode-code-bg);
+  overflow: hidden; /* clip the bar + pre into the rounded frame */
+}
+
+/* ─── Header bar (filename · lang · copy) ────────────────────────────────── */
+[data-jcode-ui] .jcode-codeblock__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.5rem 0.3rem 0.7rem;
+  /* one step deeper than the code surface, blended toward its own border */
+  background: color-mix(in srgb, var(--jcode-code-bg), var(--jcode-code-border) 45%);
+  border-bottom: 1px solid var(--jcode-code-border);
+  font-family: var(--jcode-font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+[data-jcode-ui] .jcode-codeblock__lang {
+  color: var(--jcode-color-muted-foreground);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+/* Collapse the slot when there's no language token. */
+[data-jcode-ui] .jcode-codeblock__lang:empty {
+  display: none;
+}
+
+[data-jcode-ui] .jcode-codeblock__name {
+  color: var(--jcode-color-foreground);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A lang chip sitting right before a filename reads better as a divider. */
+[data-jcode-ui] .jcode-codeblock__lang:not(:empty) + .jcode-codeblock__name::before {
+  content: '·';
+  margin-right: 0.5rem;
+  color: var(--jcode-color-muted-foreground);
+  font-weight: 400;
+}
+
+[data-jcode-ui] .jcode-codeblock__copy {
+  margin-left: auto;
+  flex: none;
+  cursor: pointer;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--jcode-radius-sm);
+  background: transparent;
+  color: var(--jcode-color-muted-foreground);
+  font-family: inherit;
+  font-size: inherit;
+  line-height: 1.4;
+  transition:
+    color var(--jcode-duration-fast) var(--jcode-ease-out),
+    background var(--jcode-duration-fast) var(--jcode-ease-out),
+    border-color var(--jcode-duration-fast) var(--jcode-ease-out);
+}
+[data-jcode-ui] .jcode-codeblock__copy:hover {
+  color: var(--jcode-color-foreground);
+  background: var(--jcode-neutral-wash);
+  border-color: var(--jcode-neutral-border);
+}
+[data-jcode-ui] .jcode-codeblock__copy[data-copied='1'] {
+  color: var(--jcode-color-success);
+  border-color: transparent;
+  background: transparent;
+}
+
+/* ─── Code body ──────────────────────────────────────────────────────────── */
+[data-jcode-ui] .jcode-codeblock > pre {
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent; /* wrapper owns the surface */
+  overflow-x: auto;
+}
+[data-jcode-ui] .jcode-codeblock > pre > code {
+  background: transparent;
+  padding: 0;
+  font-family: var(--jcode-font-mono);
+  font-size: 0.8125rem;
+  color: var(--jcode-code-fg);
+}
+
+/* ─── Streaming shimmer ──────────────────────────────────────────────────── */
+[data-jcode-ui] .jcode-codeblock.jcode-code-streaming {
+  position: relative;
+}
+[data-jcode-ui] .jcode-codeblock.jcode-code-streaming::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--jcode-accent-fill) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: jcode-shimmer 1.6s linear infinite;
+  pointer-events: none;
+}
+
+/* ─── Optional plugin output ─────────────────────────────────────────────── */
+[data-jcode-ui] .jcode-math--block {
+  display: block;
+  overflow-x: auto;
+  margin: 0.75rem 0;
+  text-align: center;
+}
+[data-jcode-ui] .jcode-math--inline {
+  display: inline;
+}
+
+[data-jcode-ui] .jcode-mermaid {
+  margin: 0.75rem 0;
+  display: flex;
+  justify-content: center;
+}
+[data-jcode-ui] .jcode-mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+/* While a diagram is still a placeholder, show its source as a plain block. */
+[data-jcode-ui] .jcode-mermaid__source {
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  width: 100%;
+  border: 1px solid var(--jcode-code-border);
+  border-radius: var(--jcode-radius-lg);
+  background: var(--jcode-code-bg);
+  color: var(--jcode-code-fg);
+  font-family: var(--jcode-font-mono);
+  font-size: 0.8125rem;
+  overflow-x: auto;
+}
+/* Once mermaid renders (or errors), the SVG replaces the source. */
+[data-jcode-ui] .jcode-mermaid[data-mermaid-done='1'] .jcode-mermaid__source {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-jcode-ui] .jcode-codeblock.jcode-code-streaming::after {
+    animation: none;
+  }
+}

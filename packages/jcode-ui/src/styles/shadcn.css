@@ -1,0 +1,42 @@
+/*
+ * shadcn bridge — inherit a host shadcn/ui theme.
+ *
+ * Maps the standard shadcn CSS-variable contract onto jcode-ui's scoped
+ * tokens, so components blend into any shadcn-themed app (light AND dark:
+ * shadcn hosts flip their own variables under `.dark`, and these mappings
+ * simply follow — no dark override block needed here).
+ *
+ *   import 'jcode-ui/styles.css'
+ *   import 'jcode-ui/shadcn.css'   // AFTER styles.css so it wins the cascade
+ *
+ * Every mapping keeps our default as the var() fallback, so a page that only
+ * defines part of the shadcn contract degrades gracefully.
+ */
+
+[data-jcode-ui] {
+  /* Core surfaces */
+  --jcode-color-primary: var(--primary, #ff8400);
+  --jcode-color-on-primary: var(--primary-foreground, #ffffff);
+  --jcode-color-background: var(--background, #f2f3f0);
+  --jcode-color-foreground: var(--foreground, #111111);
+  --jcode-color-surface: var(--card, var(--background, #ffffff));
+  --jcode-color-muted: var(--muted, #f2f3f0);
+  --jcode-color-muted-foreground: var(--muted-foreground, #666666);
+  --jcode-color-border: var(--border, #cbccc9);
+  --jcode-color-secondary: var(--secondary, #e7e8e5);
+  --jcode-color-secondary-foreground: var(--secondary-foreground, #111111);
+  --jcode-color-destructive: var(--destructive, #d93c15);
+  --jcode-color-on-destructive: var(--destructive-foreground, #ffffff);
+  --jcode-color-sidebar-bg: var(--sidebar, var(--background, #fafaf8));
+
+  /* Radii — mirror shadcn's derived scale off the single --radius knob. */
+  --jcode-radius-sm: calc(var(--radius, 0.5rem) - 6px);
+  --jcode-radius-md: calc(var(--radius, 0.5rem) - 4px);
+  --jcode-radius-lg: calc(var(--radius, 0.5rem) - 2px);
+  --jcode-radius-xl: var(--radius, 0.5rem);
+  --jcode-radius-2xl: calc(var(--radius, 0.5rem) + 4px);
+
+  /* Typography — follow the host's font stack when it defines one. */
+  --jcode-font-sans: var(--font-sans, 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+  --jcode-font-mono: var(--font-mono, 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace);
+}

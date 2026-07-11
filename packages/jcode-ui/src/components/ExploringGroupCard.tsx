@@ -26,7 +26,7 @@ export const ExploringGroupCard = memo(function ExploringGroupCard({
 
   return (
     <div
-      className={`jcode-toolcall jcode-exploring my-1 ${className ?? ''}`}
+      data-jcode-ui="" className={`jcode-toolcall jcode-exploring my-1 ${className ?? ''}`}
       data-tool-name="exploring"
       data-tool-status={group.status}
       data-expanded={expanded ? 'true' : 'false'}
@@ -40,20 +40,20 @@ export const ExploringGroupCard = memo(function ExploringGroupCard({
           className={`shrink-0 text-xs font-medium tracking-wide ${running ? 'shimmer-running' : ''}`}
           style={{
             color: errored
-              ? 'var(--color-destructive, var(--color-error-fg))'
-              : 'var(--color-muted-foreground)',
+              ? 'var(--jcode-color-destructive, var(--jcode-color-error-fg))'
+              : 'var(--jcode-color-muted-foreground)',
           }}
         >
           {label}
         </span>
         <span
           className="min-w-0 truncate font-mono text-[0.72rem]"
-          style={{ color: 'var(--color-foreground)', opacity: 0.88 }}
+          style={{ color: 'var(--jcode-color-foreground)', opacity: 0.88 }}
         >
           {count} step{count === 1 ? '' : 's'}
         </span>
         <ChevronDownIcon
-          className={`h-3 w-3 shrink-0 text-[var(--color-muted-foreground)] transition-transform duration-[var(--duration-normal)] ${
+          className={`h-3 w-3 shrink-0 text-[var(--jcode-color-muted-foreground)] transition-transform duration-[var(--jcode-duration-normal)] ${
             expanded ? 'rotate-180' : ''
           }`}
         />
@@ -76,17 +76,17 @@ export const ExploringGroupCard = memo(function ExploringGroupCard({
             {group.tools.map((t) => (
               <li
                 key={t.id}
-                className="flex items-center gap-2 border-b border-[var(--color-border)] px-1 py-1.5 last:border-0"
+                className="flex items-center gap-2 border-b border-[var(--jcode-color-border)] px-1 py-1.5 last:border-0"
               >
                 <span
                   className="shrink-0 text-[10px] font-medium uppercase tracking-wide"
-                  style={{ color: 'var(--color-muted-foreground)' }}
+                  style={{ color: 'var(--jcode-color-muted-foreground)' }}
                 >
                   {t.displayInfo?.title || t.name}
                 </span>
                 <span
                   className="min-w-0 truncate font-mono text-[11px]"
-                  style={{ color: 'var(--color-foreground)' }}
+                  style={{ color: 'var(--jcode-color-foreground)' }}
                 >
                   {t.displayInfo?.subtitle || ''}
                 </span>
@@ -95,8 +95,8 @@ export const ExploringGroupCard = memo(function ExploringGroupCard({
                   style={{
                     color:
                       t.status === 'error'
-                        ? 'var(--color-error-fg)'
-                        : 'var(--color-muted-foreground)',
+                        ? 'var(--jcode-color-error-fg)'
+                        : 'var(--jcode-color-muted-foreground)',
                   }}
                 >
                   {t.status}

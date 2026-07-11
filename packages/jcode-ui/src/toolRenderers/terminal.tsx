@@ -55,8 +55,8 @@ export const TerminalRenderer = memo(function TerminalRenderer({
           className="jcode-terminal__meta mt-1.5 flex flex-wrap gap-2 text-[10px] tabular-nums"
           style={{
             color: failed
-              ? 'var(--color-error-fg)'
-              : 'color-mix(in srgb, var(--code-fg, var(--color-muted-foreground)) 65%, transparent)',
+              ? 'var(--jcode-color-error-fg)'
+              : 'color-mix(in srgb, var(--jcode-code-fg, var(--jcode-color-muted-foreground)) 65%, transparent)',
           }}
         >
           {typeof exitCode === 'number' && (

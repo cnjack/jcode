@@ -1,0 +1,535 @@
+/*
+ * P5 — first-class component styles (component-tier promotion).
+ *
+ * Scope: TaskList, FileTree, TestResults, StackTrace renderers, the Artifact
+ * container, and the new ToolCallCard slots. All colors resolve through
+ * `--jcode-*` tokens (dark mode adapts automatically); nothing is hardcoded.
+ *
+ * NOTE: this file is NOT yet @import-ed by entry.css (owned by another agent).
+ * Add `@import './p5.css';` to src/styles/entry.css to ship it.
+ */
+
+/* ─── shared spin keyframe (respects reduced motion) ─── */
+@keyframes jcode-spin-kf {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.jcode-spin {
+  animation: jcode-spin-kf 1s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .jcode-spin {
+    animation: none;
+  }
+}
+
+/* ═══════════════════════ TaskList ═══════════════════════ */
+.jcode-tasklist {
+  font-size: 0.8125rem;
+  color: var(--jcode-color-foreground);
+}
+.jcode-tasklist__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+.jcode-tasklist__title {
+  font-weight: 600;
+  font-size: 0.75rem;
+  color: var(--jcode-color-foreground);
+}
+.jcode-tasklist__count {
+  font-family: var(--jcode-font-mono);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--jcode-color-muted-foreground);
+}
+.jcode-tasklist__progress {
+  height: 3px;
+  border-radius: var(--jcode-radius-pill);
+  background: var(--jcode-neutral-wash);
+  overflow: hidden;
+  margin-bottom: 0.45rem;
+}
+.jcode-tasklist__progress-fill {
+  height: 100%;
+  border-radius: var(--jcode-radius-pill);
+  background: var(--jcode-accent-fill);
+  transition: width var(--jcode-duration-slow) var(--jcode-ease-out);
+}
+.jcode-tasklist__items {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.jcode-tasklist__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.28rem 0.35rem;
+  border-radius: var(--jcode-radius-md);
+}
+.jcode-tasklist__item--in_progress {
+  background: var(--jcode-accent-wash-soft);
+}
+.jcode-tasklist--compact .jcode-tasklist__item {
+  padding: 0.16rem 0.3rem;
+  gap: 0.4rem;
+}
+.jcode-tasklist__bar {
+  position: absolute;
+  left: 0;
+  top: 0.28rem;
+  bottom: 0.28rem;
+  width: 2px;
+  border-radius: var(--jcode-radius-pill);
+  background: var(--jcode-color-accent-neutral);
+}
+.jcode-tasklist__icon {
+  width: 0.95rem;
+  height: 0.95rem;
+  flex: none;
+}
+.jcode-tasklist--compact .jcode-tasklist__icon {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+.jcode-tasklist__icon--pending {
+  color: var(--jcode-color-muted-foreground);
+}
+.jcode-tasklist__icon--in_progress {
+  color: var(--jcode-color-accent-neutral);
+}
+.jcode-tasklist__icon--completed {
+  color: var(--jcode-color-success-fg);
+}
+.jcode-tasklist__icon--cancelled {
+  color: var(--jcode-color-muted-foreground);
+}
+.jcode-tasklist__label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--jcode-color-foreground);
+}
+.jcode-tasklist--compact .jcode-tasklist__label {
+  font-size: 0.78rem;
+}
+.jcode-tasklist__label--active {
+  font-weight: 500;
+}
+.jcode-tasklist__label--done {
+  color: var(--jcode-color-muted-foreground);
+  text-decoration: line-through;
+}
+
+/* ═══════════════════════ FileTree ═══════════════════════ */
+.jcode-filetree {
+  font-family: var(--jcode-font-mono);
+  font-size: 0.75rem;
+  color: var(--jcode-color-foreground);
+  max-height: 20rem;
+  overflow: auto;
+  padding: 0.25rem 0;
+}
+.jcode-filetree__hint {
+  padding: 0.15rem 0.6rem 0.35rem;
+  font-size: 0.68rem;
+  color: var(--jcode-color-muted-foreground);
+}
+.jcode-filetree__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.jcode-filetree__row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.12rem 0.5rem;
+  border: none;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  border-radius: var(--jcode-radius-sm);
+}
+.jcode-filetree__row--dir {
+  cursor: pointer;
+}
+.jcode-filetree__row:hover {
+  background: var(--jcode-neutral-wash-soft);
+}
+.jcode-filetree__chevron {
+  width: 0.7rem;
+  height: 0.7rem;
+  flex: none;
+  color: var(--jcode-color-muted-foreground);
+  transition: transform var(--jcode-duration-fast) var(--jcode-ease-out);
+}
+.jcode-filetree__chevron--open {
+  transform: rotate(90deg);
+}
+.jcode-filetree__folder {
+  width: 0.85rem;
+  height: 0.85rem;
+  flex: none;
+  color: color-mix(in srgb, var(--jcode-color-primary) 70%, var(--jcode-color-muted-foreground));
+}
+.jcode-filetree__lead {
+  width: 0.7rem;
+  flex: none;
+}
+.jcode-filetree__dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: var(--jcode-radius-pill);
+  flex: none;
+}
+.jcode-filetree__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.jcode-filetree__name--dir {
+  font-weight: 500;
+}
+.jcode-filetree__badge {
+  margin-left: auto;
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--jcode-color-muted-foreground);
+  background: var(--jcode-neutral-wash);
+  border-radius: var(--jcode-radius-pill);
+  padding: 0 0.35rem;
+}
+.jcode-filetree__msg {
+  padding: 0.5rem 0.6rem;
+  font-size: 0.75rem;
+  color: var(--jcode-color-muted-foreground);
+}
+.jcode-filetree__msg--error {
+  color: var(--jcode-color-destructive, var(--jcode-color-error-fg));
+  white-space: pre-wrap;
+}
+.jcode-filetree__raw {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  font-family: var(--jcode-font-mono);
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--jcode-color-muted-foreground);
+}
+/* Extension dot colors — mapped onto theme-aware syntax tokens. */
+.jcode-filetree__dot--js {
+  background: var(--jcode-hljs-function);
+}
+.jcode-filetree__dot--go {
+  background: var(--jcode-hljs-property);
+}
+.jcode-filetree__dot--py {
+  background: var(--jcode-hljs-string);
+}
+.jcode-filetree__dot--rust {
+  background: var(--jcode-hljs-type);
+}
+.jcode-filetree__dot--style {
+  background: var(--jcode-hljs-title);
+}
+.jcode-filetree__dot--data {
+  background: var(--jcode-hljs-number);
+}
+.jcode-filetree__dot--doc {
+  background: var(--jcode-color-muted-foreground);
+}
+.jcode-filetree__dot--shell {
+  background: var(--jcode-hljs-keyword);
+}
+.jcode-filetree__dot--default {
+  background: var(--jcode-neutral-border);
+}
+
+/* ═══════════════════════ TestResults ═══════════════════════ */
+.jcode-testresults {
+  font-size: 0.8rem;
+  color: var(--jcode-color-foreground);
+}
+.jcode-testresults__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  padding: 0.45rem 0.6rem;
+  font-weight: 500;
+}
+.jcode-testresults__stat--pass {
+  color: var(--jcode-color-success-fg);
+}
+.jcode-testresults__stat--fail {
+  color: var(--jcode-color-error-fg);
+}
+.jcode-testresults__stat--skip {
+  color: var(--jcode-color-muted-foreground);
+}
+.jcode-testresults__sep {
+  color: var(--jcode-color-muted-foreground);
+  opacity: 0.6;
+}
+.jcode-testresults__framework {
+  margin-left: auto;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--jcode-color-muted-foreground);
+  background: var(--jcode-neutral-wash);
+  border-radius: var(--jcode-radius-sm);
+  padding: 0.1rem 0.35rem;
+}
+.jcode-testresults__list {
+  list-style: none;
+  margin: 0;
+  padding: 0.1rem 0.3rem 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.jcode-testresults__case-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.25rem 0.35rem;
+  border: none;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  border-radius: var(--jcode-radius-sm);
+  cursor: pointer;
+}
+.jcode-testresults__case-row:disabled {
+  cursor: default;
+}
+.jcode-testresults__case-row:hover:not(:disabled) {
+  background: var(--jcode-neutral-wash-soft);
+}
+.jcode-testresults__case-icon {
+  flex: none;
+  font-weight: 700;
+  color: var(--jcode-color-error-fg);
+}
+.jcode-testresults__case-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--jcode-font-mono);
+  font-size: 0.75rem;
+}
+.jcode-testresults__case-dur {
+  flex: none;
+  font-family: var(--jcode-font-mono);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--jcode-color-muted-foreground);
+}
+.jcode-testresults__case-chev {
+  flex: none;
+  font-size: 0.7rem;
+  color: var(--jcode-color-muted-foreground);
+  transition: transform var(--jcode-duration-fast) var(--jcode-ease-out);
+}
+.jcode-testresults__case-chev--open {
+  transform: rotate(90deg);
+}
+.jcode-testresults__detail {
+  margin: 0.15rem 0.5rem 0.35rem 1.7rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--jcode-code-border);
+  border-radius: var(--jcode-radius-md);
+  background: var(--jcode-code-bg);
+  color: var(--jcode-code-fg);
+  font-family: var(--jcode-font-mono);
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+.jcode-testresults__raw {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  font-family: var(--jcode-font-mono);
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--jcode-color-muted-foreground);
+}
+.jcode-testresults__msg {
+  padding: 0.5rem 0.6rem;
+  font-size: 0.75rem;
+  color: var(--jcode-color-muted-foreground);
+}
+
+/* ═══════════════════════ StackTrace ═══════════════════════ */
+.jcode-stacktrace {
+  font-size: 0.75rem;
+  color: var(--jcode-color-foreground);
+  padding: 0.3rem 0;
+}
+.jcode-stacktrace__message {
+  padding: 0.35rem 0.6rem;
+  font-family: var(--jcode-font-mono);
+  font-weight: 600;
+  color: var(--jcode-color-error-fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.jcode-stacktrace__frames {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.jcode-stacktrace__frame-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.15rem 0.6rem;
+  border: none;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  border-radius: var(--jcode-radius-sm);
+  cursor: pointer;
+}
+.jcode-stacktrace__frame-row:disabled {
+  cursor: default;
+}
+.jcode-stacktrace__frame-row:hover:not(:disabled) {
+  background: var(--jcode-neutral-wash-soft);
+}
+.jcode-stacktrace__frame-row:hover:not(:disabled) .jcode-stacktrace__loc {
+  color: var(--jcode-color-primary);
+}
+.jcode-stacktrace__func {
+  font-family: var(--jcode-font-mono);
+  font-weight: 600;
+  color: var(--jcode-color-foreground);
+  word-break: break-all;
+}
+.jcode-stacktrace__loc {
+  font-family: var(--jcode-font-mono);
+  font-size: 0.7rem;
+  color: var(--jcode-color-muted-foreground);
+  word-break: break-all;
+}
+.jcode-stacktrace__frame--runtime .jcode-stacktrace__func {
+  font-weight: 500;
+  color: var(--jcode-color-muted-foreground);
+}
+.jcode-stacktrace__toggle {
+  margin: 0.3rem 0.6rem 0;
+  border: none;
+  background: transparent;
+  color: var(--jcode-color-muted-foreground);
+  font-size: 0.7rem;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+.jcode-stacktrace__toggle:hover {
+  color: var(--jcode-color-foreground);
+}
+.jcode-stacktrace__raw,
+.jcode-stacktrace__msg {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  font-family: var(--jcode-font-mono);
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--jcode-color-muted-foreground);
+}
+
+/* ═══════════════════════ Artifact ═══════════════════════ */
+.jcode-artifact {
+  border: 1px solid var(--jcode-color-border);
+  border-radius: var(--jcode-radius-xl);
+  background: var(--jcode-color-surface);
+  box-shadow: var(--jcode-shadow-sm);
+  color: var(--jcode-color-foreground);
+  overflow: hidden;
+}
+.jcode-artifact__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--jcode-color-border);
+}
+.jcode-artifact__icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--jcode-color-muted-foreground);
+}
+.jcode-artifact__icon svg {
+  width: 1rem;
+  height: 1rem;
+}
+.jcode-artifact__title {
+  font-weight: 600;
+  font-size: 0.8125rem;
+  flex: none;
+}
+.jcode-artifact__subtitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--jcode-font-mono);
+  font-size: 0.72rem;
+  color: var(--jcode-color-muted-foreground);
+}
+.jcode-artifact__actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: none;
+}
+.jcode-artifact__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--jcode-color-muted-foreground);
+  padding: 0.15rem;
+  border-radius: var(--jcode-radius-sm);
+}
+.jcode-artifact__close:hover {
+  background: var(--jcode-neutral-wash-soft);
+  color: var(--jcode-color-foreground);
+}
+.jcode-artifact__close-icon {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+.jcode-artifact__body {
+  overflow: auto;
+}
+
+/* ═══════════════════════ ToolCallCard slots ═══════════════════════ */
+.jcode-toolcall__footer {
+  margin: 0.15rem 0.5rem 0.375rem 0;
+}

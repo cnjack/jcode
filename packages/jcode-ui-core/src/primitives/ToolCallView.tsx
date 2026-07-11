@@ -123,6 +123,7 @@ export function ToolCallView({
 
   return (
     <div
+      data-jcode-ui=""
       className={className}
       data-tool-name={tool.name}
       data-tool-status={tool.status}
