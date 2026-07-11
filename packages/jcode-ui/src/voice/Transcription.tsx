@@ -114,7 +114,10 @@ export const Transcription = memo(function Transcription({
           const isActive = i === activeIndex
           const seekable = onSeek != null && seg.startMs != null
           const setRef = (node: HTMLButtonElement | HTMLDivElement | null) => {
-            if (isActive) activeRef.current = node
+            // Assign only — never null out. On backward seeks React detaches
+            // the OLD active segment after attaching the new one, so a
+            // null-clear here would wipe the ref that was just set.
+            if (isActive && node) activeRef.current = node
           }
           const content = (
             <>

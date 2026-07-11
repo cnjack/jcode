@@ -468,15 +468,26 @@ export function Demo() {
   )
 }`,
 
-  artifact: `import { Artifact } from 'jcode-ui'
+  artifact: `import { useState } from 'react'
+import { Artifact } from 'jcode-ui'
 import 'jcode-ui/styles.css'
 
+const source = \`export default defineConfig({
+  plugins: [react()],
+})\`
+
 export function Demo() {
+  const [open, setOpen] = useState(true)
+  if (!open) return null
   return (
     <Artifact
       title="vite.config.ts"
-      subtitle="7 lines · typescript"
-      actions={<button type="button" onClick={() => copy(source)}>Copy</button>}
+      subtitle="3 lines · typescript"
+      actions={
+        <button type="button" onClick={() => navigator.clipboard.writeText(source)}>
+          Copy
+        </button>
+      }
       onClose={() => setOpen(false)}
     >
       <pre style={{ margin: 0, padding: '0.75rem' }}>{source}</pre>

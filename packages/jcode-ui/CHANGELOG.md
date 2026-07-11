@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.2 — 2026-07 (with jcode-ui-core 0.2.1)
+
+Post-release review fixes (PR #133 findings):
+
+- **AG-UI runtime**: `enqueueMessage` is now a real type-ahead queue — drafts
+  composed mid-run are kept in `RuntimeState.queued` and drained one per
+  natural turn end (never after a user `stop()`); `removeQueuedMessage` works.
+  Previously queued drafts were silently dropped.
+- **Composer**: `send()` keeps uploading/error attachment slots (only `done`
+  ones are consumed) and resets dictation buffers so recognized text can't
+  resurface after sending.
+- **ConnectionBanner**: the "Reconnected" flash now auto-hides — the effect no
+  longer cancels its own timeout via a self-triggering dependency.
+- **WorkflowCanvas**: `interactive` can no longer be silently overridden by
+  props spread; per-flag overrides still supported.
+- **Transcription**: active-segment ref survives backward seeks.
+- **FileTree renderer**: trailing annotations ("(dir)", size columns) are now
+  actually stripped as documented.
+- Packaging: `./package.json` added to both packages' exports; core selftest
+  artifacts excluded from the published tarball; deprecated CSS
+  (`word-break: break-word`, `clip`) replaced.
+
 ## 0.2.1 — 2026-07
 
 Republish of 0.2.0 with correct dependency metadata: the 0.2.0 tarball was

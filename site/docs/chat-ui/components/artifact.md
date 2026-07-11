@@ -16,6 +16,7 @@ A titled card container for rich tool output — file viewers, diffs, previews, 
 
 ```tsx
 import { Artifact } from 'jcode-ui'
+import { DocumentIcon } from '@heroicons/react/24/outline'
 import 'jcode-ui/styles.css'
 
 <Artifact

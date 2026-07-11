@@ -64,12 +64,16 @@ export const WorkflowCanvas = memo(function WorkflowCanvas({
         fitView={fitView}
         panOnScroll={panOnScroll}
         zoomOnDoubleClick={false}
-        panOnDrag={interactive}
-        nodesDraggable={interactive}
-        nodesConnectable={interactive}
-        elementsSelectable={interactive}
         proOptions={{ hideAttribution: true }}
         {...rest}
+        /* interactive is the component's contract — keep it after the spread
+         * so a stray panOnDrag/nodesDraggable in rest can't silently undo it.
+         * Consumers who want per-flag control pass interactive plus the flag
+         * they want to differ. */
+        panOnDrag={rest.panOnDrag ?? interactive}
+        nodesDraggable={rest.nodesDraggable ?? interactive}
+        nodesConnectable={rest.nodesConnectable ?? interactive}
+        elementsSelectable={rest.elementsSelectable ?? interactive}
       >
         {showBackground ? (
           <Background

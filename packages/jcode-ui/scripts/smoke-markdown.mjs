@@ -85,7 +85,9 @@ function assert(name, cond, detail) {
   const blocks = splitTopLevelBlocks('# Title\n\npara one\n\n```js\ncode\n```\n\ntail')
   assert('splitTopLevelBlocks → 4 blocks', blocks.length === 4, JSON.stringify(blocks))
   assert('fenced block kept intact', blocks.some((b) => b.includes('```js\ncode\n```')), JSON.stringify(blocks))
-  assert('hashString is deterministic', hashString('abc') === hashString('abc'))
+  const hashA = hashString('abc')
+  const hashB = hashString('abc')
+  assert('hashString is deterministic', hashA === hashB)
   assert('hashString distinguishes content', hashString('abc') !== hashString('abd'))
 }
 

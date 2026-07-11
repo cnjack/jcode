@@ -408,7 +408,6 @@
   /* Wrap long lines — avoid horizontal scroll in narrow demo/message columns. */
   overflow-x: hidden;
   overflow-wrap: anywhere;
-  word-break: break-word;
   white-space: pre-wrap;
   font-family: var(--jcode-font-mono);
   font-size: 0.84em;
