@@ -95,11 +95,14 @@ jobs:
       - name: Install monorepo deps
         run: pnpm install --frozen-lockfile || pnpm install
 
+      # Use the packages' own build scripts — they also generate compat.css,
+      # shadcn.css and copy the voice/canvas subentry styles into dist/.
+      # Hand-rolling tsc+tailwind here drifts the moment a package adds a
+      # build step (exactly what broke ./compat.css resolution in 0.2.0).
       - name: Build packages
         run: |
-          cd packages/jcode-ui-core && npx tsc -p tsconfig.build.json
-          cd ../jcode-ui && npx tsc -p tsconfig.build.json
-          npx tailwindcss -i src/styles/entry.css -o dist/styles.css --minify
+          pnpm -C packages/jcode-ui-core build
+          pnpm -C packages/jcode-ui build
 
       - name: Type-check web app
         working-directory: web
