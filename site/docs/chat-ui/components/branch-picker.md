@@ -51,7 +51,7 @@ const assistant = {
   activeVersionId: 'v2',
   versions: [
     { id: 'v1', content: 'Wrap map access in a sync.Mutex.', timestamp: Date.now() },
-    { id: 'v2', content: 'Use sync.Map for the shared registry.', timestamp: Date.now() },
+    { id: 'v2', content: 'Use sync.Map for the shared registry — lock-free reads.', timestamp: Date.now() },
     { id: 'v3', content: 'Shard the map by key hash.', timestamp: Date.now() },
   ],
 }

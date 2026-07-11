@@ -370,7 +370,7 @@
   font-family: var(--jcode-font-mono);
   font-size: 0.72rem;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: break-word;
   color: var(--jcode-color-muted-foreground);
 }
 .jcode-testresults__msg {
@@ -391,7 +391,7 @@
   font-weight: 600;
   color: var(--jcode-color-error-fg);
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: break-word;
 }
 .jcode-stacktrace__frames {
   list-style: none;
@@ -456,7 +456,7 @@
   font-family: var(--jcode-font-mono);
   font-size: 0.72rem;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: break-word;
   color: var(--jcode-color-muted-foreground);
 }
 

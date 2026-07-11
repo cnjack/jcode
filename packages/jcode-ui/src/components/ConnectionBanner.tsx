@@ -28,17 +28,20 @@ export const ConnectionBanner = memo(function ConnectionBanner() {
     const from = prev.current
     prev.current = connection
     if (connection === 'connected' && from !== 'connected') {
-      // Just recovered — show the success flash, then let it fade.
+      // Just recovered — show the success flash, then let it fade. Deps must
+      // NOT include flashRecovered: the setState below would re-run this
+      // effect, and its cleanup would cancel the timeout — leaving the flash
+      // stuck on screen forever.
       setFlashRecovered(true)
       const t = setTimeout(() => setFlashRecovered(false), RECONNECTED_MS)
       return () => clearTimeout(t)
     }
-    if (connection !== 'connected' && flashRecovered) {
-      // Dropped again before the flash expired — clear it immediately.
+    if (connection !== 'connected') {
+      // Dropped (again) — clear any pending flash immediately.
       setFlashRecovered(false)
     }
     return undefined
-  }, [connection, flashRecovered])
+  }, [connection])
 
   // Steady connected state with no pending flash → nothing to show.
   if (connection === 'connected' && !flashRecovered) return null

@@ -441,6 +441,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const doneAttachments = pending.filter((s) => s.status === 'done').map((s) => s.attachment)
   const canSend =
     text.trim().length > 0 || images.length > 0 || doneAttachments.length > 0
+  // Dictation buffers (declared before send(), which resets them).
+  const dictBaseRef = useRef('')
+  const dictFinalRef = useRef('')
+
   const send = useCallback(() => {
     if (!canSend) return
     const doneNow = pending.filter((s) => s.status === 'done').map((s) => s.attachment)
@@ -457,7 +461,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     if (doneNow.length > 0) onSendAttachments?.(doneNow)
     setText('')
     setImages([])
-    setPending([])
+    // Only the completed slots were sent — keep uploading/error slots visible
+    // so an in-flight upload isn't silently dropped and a failed one can still
+    // be retried or removed (which also runs adapter cleanup).
+    setPending((prev) => prev.filter((slot) => slot.status !== 'done'))
+    // Dictation appends relative to these buffers; reset them so the next
+    // recognition result doesn't resurrect text that was just sent.
+    dictBaseRef.current = ''
+    dictFinalRef.current = ''
     onSent?.()
   }, [actions, canSend, images, isRunning, onSendAttachments, onSent, pending, text])
 
@@ -465,8 +476,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   // --- Dictation. ---
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
-  const dictBaseRef = useRef('')
-  const dictFinalRef = useRef('')
   const dictationSupported = enableDictation && getSpeechRecognitionCtor() !== null
 
   const toggleDictation = useCallback(() => {

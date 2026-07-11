@@ -1,6 +1,6 @@
 {
   "name": "jcode-ui-core",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Framework-agnostic core for jcode-ui: types, chat runtime abstraction, and headless React primitives for AI chat interfaces.",
   "type": "module",
   "license": "MIT",
@@ -46,13 +46,16 @@
     "./types": {
       "types": "./dist/types/index.d.ts",
       "import": "./dist/types/index.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
+    "!dist/**/*.selftest.*",
     "src",
+    "!src/**/*.selftest.*",
     "README.md",
     "LICENSE"
   ],

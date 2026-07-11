@@ -39,6 +39,7 @@
   --xy-edge-label-background-color: var(--jcode-color-surface);
   --xy-edge-label-color: var(--jcode-color-muted-foreground);
   --xy-attribution-background-color: transparent;
+
   background: transparent;
 }
 

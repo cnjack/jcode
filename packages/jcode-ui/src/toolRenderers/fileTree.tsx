@@ -127,9 +127,13 @@ function cleanLine(line: string): string {
   // Drop leading tree glyphs / bullets / whitespace.
   s = s.replace(/^[\s│├└─\-*•▸▾▪]+/, '')
   s = s.trim()
-  // Drop trailing annotations like "  (dir)" or size columns — keep first token
-  // only when it clearly contains a path separator or looks like a filename.
-  return s
+  // Drop trailing annotations: "(dir)"-style parentheticals and column-style
+  // suffixes separated by 2+ spaces (sizes, dates). Paths themselves never
+  // contain double spaces, so splitting there is safe.
+  s = s.replace(/\s+\([^)]*\)$/, '')
+  const columns = s.split(/\s{2,}/)
+  if (columns.length > 1) s = columns[0]
+  return s.trim()
 }
 
 export function parsePathList(text: string): { roots: TreeNode[]; count: number } {

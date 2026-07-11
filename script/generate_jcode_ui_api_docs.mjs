@@ -56,8 +56,11 @@ function extractSymbols(file, src) {
   const symbols = []
 
   // Match export interface / type / class / function with optional JSDoc above.
+  // The doc group must FORBID '*/' inside — a lazy [\s\S]*? backtracks past
+  // the first '*/' when the following text isn't `export`, welding an earlier
+  // comment + intervening code onto the next exported symbol's doc.
   const re =
-    /(?:\/\*\*([\s\S]*?)\*\/\s*)?export\s+(?:declare\s+)?(interface|type|class|function|const)\s+([A-Za-z0-9_]+)/g
+    /(?:\/\*\*((?:(?!\*\/)[\s\S])*)\*\/\s*)?export\s+(?:declare\s+)?(interface|type|class|function|const)\s+([A-Za-z0-9_]+)/g
 
   let m
   while ((m = re.exec(src))) {
@@ -112,24 +115,23 @@ function extractSymbols(file, src) {
       signature = src.slice(expIdx, i).trim()
       if (!signature.endsWith(';')) signature += ';'
     } else if (kind === 'function') {
-      // function name(...) : Ret { or ;
+      // Signature = "export function name<…>(args): Ret" up to the body brace.
+      // Count ONLY parentheses: '<'/'>' also appear in arrows (=>) and
+      // comparisons, and counting them corrupted the depth so the scan ran
+      // past the body and swallowed the following declarations.
       let i = start
-      let depth = 0
+      let paren = 0
+      let sawParens = false
       for (; i < src.length; i++) {
         const ch = src[i]
-        if (ch === '(' || ch === '<' || ch === '{') depth++
-        else if (ch === ')' || ch === '>' || ch === '}') {
-          depth--
-          if (ch === '{' && depth === 0) break
-          if (ch === ')' && depth <= 0) {
-            // keep going for return type until { or ;
-          }
-        }
-        if (ch === '{' && depth === 1) {
-          // signature ends before body
+        if (ch === '(') paren++
+        else if (ch === ')') {
+          paren--
+          if (paren === 0) sawParens = true
+        } else if (paren === 0 && sawParens && ch === '{') {
+          // body starts — signature ends here
           break
-        }
-        if (ch === ';' && depth <= 0) {
+        } else if (paren === 0 && sawParens && ch === ';') {
           i++
           break
         }
@@ -236,8 +238,11 @@ nav_order: 6
 
     for (const s of list) {
       const headingId = `${pkg}-${s.name}`.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+      // Standalone anchor (raw HTML passes through the docs renderer) so the
+      // index table's #pkg-name links land here; the heading's auto-slug is
+      // just the bare symbol name and collides across packages.
+      md += `<a id="${headingId}"></a>\n\n`
       md += `### \`${s.name}\`\n\n`
-      md += `<!-- ${headingId} -->\n\n`
       md += `\`${s.kind}\` · \`${s.file}\`\n\n`
       if (s.doc) {
         md += `${s.doc}\n\n`
