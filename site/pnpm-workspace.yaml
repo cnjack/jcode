@@ -3,3 +3,4 @@ allowBuilds:
 minimumReleaseAgeExclude:
   - jcode-ui-core@0.2.0
   - jcode-ui@0.2.0
+  - jcode-ui@0.2.1

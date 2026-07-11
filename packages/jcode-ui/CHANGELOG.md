@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1 — 2026-07
+
+Republish of 0.2.0 with correct dependency metadata: the 0.2.0 tarball was
+published with npm, which leaked the literal `workspace:*` specifier for
+`jcode-ui-core` and made the package uninstallable. No code changes.
+`jcode-ui@0.2.0` is deprecated on the registry. Always publish with
+`pnpm publish` (it rewrites workspace specifiers at pack time).
+
 ## 0.2.0 — 2026-07
 
 The "complete the loop" release: scoped theming, the full conversation
