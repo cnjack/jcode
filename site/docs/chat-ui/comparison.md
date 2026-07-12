@@ -22,8 +22,9 @@ libraries are excellent; they optimize for different things.
 
 - Your agent **runs tools** and users need to *trust* what it did: dual-channel
   terminal output (stdout/stderr/exit/duration), diffs, file viewers, search
-  results, nested subagent trees, and "Exploring…" coalescing are first-class,
-  runtime-wired renderers — not static display components.
+  results, nested subagent trees, and activity-group coalescing (adjacent tool
+  calls collapse to a `Ran 3 commands · read 2 files` line once done) are
+  first-class, runtime-wired renderers — not static display components.
 - You need **human-in-the-loop safety**: two-step armed "allow all", external-
   path flagging, and arbitrary host-defined approval options (ACP-compatible).
 - Your app **isn't a Tailwind/shadcn app** (or isn't even React-styled the same

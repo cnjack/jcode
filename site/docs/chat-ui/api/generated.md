@@ -6,17 +6,18 @@ nav_order: 6
 
 # Generated API
 
-> Auto-generated from TypeScript sources on **2026-07-11**.
+> Auto-generated from TypeScript sources on **2026-07-12**.
 > Do not edit by hand — run `node script/generate_jcode_ui_api_docs.mjs`.
 >
 > Human-written guides: [Types](/chat-ui/docs/api/types) · [Runtime](/chat-ui/docs/api/runtime) · [Hooks](/chat-ui/docs/api/hooks) · [Primitives](/chat-ui/docs/api/primitives) · [Components](/chat-ui/docs/api/components).
 
-**275** public symbols extracted.
+**304** public symbols extracted.
 
 ## `jcode-ui`
 
 | Symbol | Kind | Source |
 |--------|------|--------|
+| [`ActivityGroupCard`](#jcode-ui-activitygroupcard) | const | `packages/jcode-ui/src/components/ActivityGroupCard.tsx` |
 | [`ApprovalBanner`](#jcode-ui-approvalbanner) | const | `packages/jcode-ui/src/components/ApprovalBanner.tsx` |
 | [`Artifact`](#jcode-ui-artifact) | const | `packages/jcode-ui/src/components/Artifact.tsx` |
 | [`AskUserCard`](#jcode-ui-askusercard) | const | `packages/jcode-ui/src/components/AskUserCard.tsx` |
@@ -55,8 +56,10 @@ nav_order: 6
 | [`ThreadList`](#jcode-ui-threadlist) | const | `packages/jcode-ui/src/components/ThreadList.tsx` |
 | [`ThreadWelcome`](#jcode-ui-threadwelcome) | const | `packages/jcode-ui/src/components/ThreadWelcome.tsx` |
 | [`TodoRenderer`](#jcode-ui-todorenderer) | const | `packages/jcode-ui/src/toolRenderers/todo.tsx` |
+| [`ToolBatchGroupCard`](#jcode-ui-toolbatchgroupcard) | const | `packages/jcode-ui/src/components/ToolBatchGroup.tsx` |
 | [`ToolCallCard`](#jcode-ui-toolcallcard) | const | `packages/jcode-ui/src/components/ToolCallCard.tsx` |
 | [`Transcription`](#jcode-ui-transcription) | const | `packages/jcode-ui/src/voice/Transcription.tsx` |
+| [`TurnChangesCard`](#jcode-ui-turnchangescard) | const | `packages/jcode-ui/src/components/TurnChangesCard.tsx` |
 | [`VoiceVisualizer`](#jcode-ui-voicevisualizer) | const | `packages/jcode-ui/src/voice/VoiceVisualizer.tsx` |
 | [`WorkflowAnimatedEdge`](#jcode-ui-workflowanimatededge) | const | `packages/jcode-ui/src/canvas/WorkflowEdge.tsx` |
 | [`WorkflowCanvas`](#jcode-ui-workflowcanvas) | const | `packages/jcode-ui/src/canvas/WorkflowCanvas.tsx` |
@@ -91,10 +94,13 @@ nav_order: 6
 | [`stripTrailingLink`](#jcode-ui-striptrailinglink) | function | `packages/jcode-ui/src/lib/streamingMarkdown.ts` |
 | [`Thread`](#jcode-ui-thread) | function | `packages/jcode-ui/src/components/Thread.tsx` |
 | [`ToolRegistryProvider`](#jcode-ui-toolregistryprovider) | function | `packages/jcode-ui/src/components/ToolRegistryContext.tsx` |
+| [`ToolRow`](#jcode-ui-toolrow) | function | `packages/jcode-ui/src/components/ToolRow.tsx` |
+| [`ToolRowHeader`](#jcode-ui-toolrowheader) | function | `packages/jcode-ui/src/components/ToolRow.tsx` |
 | [`toolTreeToGraph`](#jcode-ui-tooltreetograph) | function | `packages/jcode-ui/src/canvas/toolTreeToGraph.ts` |
 | [`truncate`](#jcode-ui-truncate) | function | `packages/jcode-ui/src/toolRenderers/terminal.tsx` |
 | [`useStreamingMarkdown`](#jcode-ui-usestreamingmarkdown) | function | `packages/jcode-ui/src/lib/useStreamingMarkdown.ts` |
 | [`useToolRegistry`](#jcode-ui-usetoolregistry) | function | `packages/jcode-ui/src/components/ToolRegistryContext.tsx` |
+| [`ActivityGroupCardProps`](#jcode-ui-activitygroupcardprops) | interface | `packages/jcode-ui/src/components/ActivityGroupCard.tsx` |
 | [`ApiBaseProviderProps`](#jcode-ui-apibaseproviderprops) | interface | `packages/jcode-ui/src/lib/apiBaseContext.tsx` |
 | [`ApprovalBannerProps`](#jcode-ui-approvalbannerprops) | interface | `packages/jcode-ui/src/components/ApprovalBanner.tsx` |
 | [`ArtifactProps`](#jcode-ui-artifactprops) | interface | `packages/jcode-ui/src/components/Artifact.tsx` |
@@ -139,13 +145,16 @@ nav_order: 6
 | [`ThreadListProps`](#jcode-ui-threadlistprops) | interface | `packages/jcode-ui/src/components/ThreadList.tsx` |
 | [`ThreadProps`](#jcode-ui-threadprops) | interface | `packages/jcode-ui/src/components/Thread.tsx` |
 | [`ThreadWelcomeProps`](#jcode-ui-threadwelcomeprops) | interface | `packages/jcode-ui/src/components/ThreadWelcome.tsx` |
+| [`ToolBatchGroupCardProps`](#jcode-ui-toolbatchgroupcardprops) | interface | `packages/jcode-ui/src/components/ToolBatchGroup.tsx` |
 | [`ToolCallCardProps`](#jcode-ui-toolcallcardprops) | interface | `packages/jcode-ui/src/components/ToolCallCard.tsx` |
 | [`ToolCallCardSlots`](#jcode-ui-toolcallcardslots) | interface | `packages/jcode-ui/src/components/ToolCallCard.tsx` |
 | [`ToolGraph`](#jcode-ui-toolgraph) | interface | `packages/jcode-ui/src/canvas/toolTreeToGraph.ts` |
 | [`ToolRegistryProviderProps`](#jcode-ui-toolregistryproviderprops) | interface | `packages/jcode-ui/src/components/ToolRegistryContext.tsx` |
+| [`ToolRowProps`](#jcode-ui-toolrowprops) | interface | `packages/jcode-ui/src/components/ToolRow.tsx` |
 | [`ToolTreeToGraphOptions`](#jcode-ui-tooltreetographoptions) | interface | `packages/jcode-ui/src/canvas/toolTreeToGraph.ts` |
 | [`TranscriptionProps`](#jcode-ui-transcriptionprops) | interface | `packages/jcode-ui/src/voice/Transcription.tsx` |
 | [`TranscriptSegment`](#jcode-ui-transcriptsegment) | interface | `packages/jcode-ui/src/voice/Transcription.tsx` |
+| [`TurnChangesCardProps`](#jcode-ui-turnchangescardprops) | interface | `packages/jcode-ui/src/components/TurnChangesCard.tsx` |
 | [`VoiceVisualizerProps`](#jcode-ui-voicevisualizerprops) | interface | `packages/jcode-ui/src/voice/VoiceVisualizer.tsx` |
 | [`WorkflowCanvasProps`](#jcode-ui-workflowcanvasprops) | interface | `packages/jcode-ui/src/canvas/WorkflowCanvas.tsx` |
 | [`CodeBlockHook`](#jcode-ui-codeblockhook) | type | `packages/jcode-ui/src/lib/markdown.ts` |
@@ -154,6 +163,16 @@ nav_order: 6
 | [`JcodeStepStatus`](#jcode-ui-jcodestepstatus) | type | `packages/jcode-ui/src/canvas/WorkflowNode.tsx` |
 | [`MathRenderer`](#jcode-ui-mathrenderer) | type | `packages/jcode-ui/src/lib/markdown.ts` |
 | [`SpeechInputStatus`](#jcode-ui-speechinputstatus) | type | `packages/jcode-ui/src/voice/SpeechInput.tsx` |
+
+<a id="jcode-ui-activitygroupcard"></a>
+
+### `ActivityGroupCard`
+
+`const` · `packages/jcode-ui/src/components/ActivityGroupCard.tsx`
+
+```ts
+export const ActivityGroupCard = …
+```
 
 <a id="jcode-ui-approvalbanner"></a>
 
@@ -311,7 +330,10 @@ export const DiffRenderer = …
 
 `const` · `packages/jcode-ui/src/components/ExploringGroupCard.tsx`
 
+@deprecated See module note — use ActivityGroupCard for new timelines.
+
 ```ts
+/** @deprecated See module note — use ActivityGroupCard for new timelines. */
 export const ExploringGroupCard = …
 ```
 
@@ -541,6 +563,19 @@ export const ThreadWelcome = …
 export const TodoRenderer = …
 ```
 
+<a id="jcode-ui-toolbatchgroupcard"></a>
+
+### `ToolBatchGroupCard`
+
+`const` · `packages/jcode-ui/src/components/ToolBatchGroup.tsx`
+
+@deprecated See module note — use ActivityGroupCard for new timelines.
+
+```ts
+/** @deprecated See module note — use ActivityGroupCard for new timelines. */
+export const ToolBatchGroupCard = …
+```
+
 <a id="jcode-ui-toolcallcard"></a>
 
 ### `ToolCallCard`
@@ -559,6 +594,16 @@ export const ToolCallCard = …
 
 ```ts
 export const Transcription = …
+```
+
+<a id="jcode-ui-turnchangescard"></a>
+
+### `TurnChangesCard`
+
+`const` · `packages/jcode-ui/src/components/TurnChangesCard.tsx`
+
+```ts
+export const TurnChangesCard = …
 ```
 
 <a id="jcode-ui-voicevisualizer"></a>
@@ -983,6 +1028,31 @@ export function Thread({
 export function ToolRegistryProvider({ registry, children }: ToolRegistryProviderProps) { … }
 ```
 
+<a id="jcode-ui-toolrow"></a>
+
+### `ToolRow`
+
+`function` · `packages/jcode-ui/src/components/ToolRow.tsx`
+
+One expandable row: slot-headered ToolCallCard with the compact row line.
+
+```ts
+export function ToolRow({ tool, className }: ToolRowProps) { … }
+```
+
+<a id="jcode-ui-toolrowheader"></a>
+
+### `ToolRowHeader`
+
+`function` · `packages/jcode-ui/src/components/ToolRow.tsx`
+
+Slot header for a grouped tool row. Rendered inside ToolCallCard's
+slot-header button, so clicking anywhere on the row toggles the tool body.
+
+```ts
+export function ToolRowHeader({ tool }: { tool: ToolCall }) { … }
+```
+
 <a id="jcode-ui-tooltreetograph"></a>
 
 ### `toolTreeToGraph`
@@ -1026,6 +1096,19 @@ export function useStreamingMarkdown(md: string): string { … }
 
 ```ts
 export function useToolRegistry(): ToolRendererRegistry { … }
+```
+
+<a id="jcode-ui-activitygroupcardprops"></a>
+
+### `ActivityGroupCardProps`
+
+`interface` · `packages/jcode-ui/src/components/ActivityGroupCard.tsx`
+
+```ts
+export interface ActivityGroupCardProps {
+  group: ActivityGroup
+  className?: string
+}
 ```
 
 <a id="jcode-ui-apibaseproviderprops"></a>
@@ -1763,6 +1846,19 @@ export interface ThreadWelcomeProps {
 }
 ```
 
+<a id="jcode-ui-toolbatchgroupcardprops"></a>
+
+### `ToolBatchGroupCardProps`
+
+`interface` · `packages/jcode-ui/src/components/ToolBatchGroup.tsx`
+
+```ts
+export interface ToolBatchGroupCardProps {
+  group: ToolBatchGroup
+  className?: string
+}
+```
+
 <a id="jcode-ui-toolcallcardprops"></a>
 
 ### `ToolCallCardProps`
@@ -1828,6 +1924,20 @@ export interface ToolRegistryProviderProps {
 }
 ```
 
+<a id="jcode-ui-toolrowprops"></a>
+
+### `ToolRowProps`
+
+`interface` · `packages/jcode-ui/src/components/ToolRow.tsx`
+
+```ts
+export interface ToolRowProps {
+  tool: ToolCall
+  /** Row class — defaults to the shared `.jcode-toolbatch__row` styling. */
+  className?: string
+}
+```
+
 <a id="jcode-ui-tooltreetographoptions"></a>
 
 ### `ToolTreeToGraphOptions`
@@ -1878,6 +1988,19 @@ export interface TranscriptSegment {
   endMs?: number
   /** Optional speaker label / diarization tag. */
   speaker?: string
+}
+```
+
+<a id="jcode-ui-turnchangescardprops"></a>
+
+### `TurnChangesCardProps`
+
+`interface` · `packages/jcode-ui/src/components/TurnChangesCard.tsx`
+
+```ts
+export interface TurnChangesCardProps {
+  summary: TurnChangesSummary
+  className?: string
 }
 ```
 
@@ -1998,8 +2121,10 @@ export type SpeechInputStatus = 'idle' | 'listening' | 'recording' | 'error';
 | Symbol | Kind | Source |
 |--------|------|--------|
 | [`ToolRendererRegistry`](#jcode-ui-core-toolrendererregistry) | class | `packages/jcode-ui-core/src/adapters/index.ts` |
+| [`appendTurnChangeSummaries`](#jcode-ui-core-appendturnchangesummaries) | function | `packages/jcode-ui-core/src/timeline/turnChanges.ts` |
 | [`ApprovalBlock`](#jcode-ui-core-approvalblock) | function | `packages/jcode-ui-core/src/primitives/ApprovalBlock.tsx` |
 | [`AskUserBlock`](#jcode-ui-core-askuserblock) | function | `packages/jcode-ui-core/src/primitives/AskUserBlock.tsx` |
+| [`countActivityFlags`](#jcode-ui-core-countactivityflags) | function | `packages/jcode-ui-core/src/timeline/groupActivity.ts` |
 | [`createAGUIRuntime`](#jcode-ui-core-createaguiruntime) | function | `packages/jcode-ui-core/src/runtime/aguiRuntime.ts` |
 | [`createExternalStoreRuntime`](#jcode-ui-core-createexternalstoreruntime) | function | `packages/jcode-ui-core/src/runtime/externalStore.ts` |
 | [`createFetchTransport`](#jcode-ui-core-createfetchtransport) | function | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
@@ -2007,24 +2132,36 @@ export type SpeechInputStatus = 'idle' | 'listening' | 'recording' | 'error';
 | [`createMockRuntime`](#jcode-ui-core-createmockruntime) | function | `packages/jcode-ui-core/src/runtime/mockRuntime.ts` |
 | [`createMockThreadStore`](#jcode-ui-core-createmockthreadstore) | function | `packages/jcode-ui-core/src/threads/store.ts` |
 | [`createToolRendererRegistry`](#jcode-ui-core-createtoolrendererregistry) | function | `packages/jcode-ui-core/src/adapters/index.ts` |
+| [`diffStatForTool`](#jcode-ui-core-diffstatfortool) | function | `packages/jcode-ui-core/src/timeline/turnChanges.ts` |
 | [`exportThreadMarkdown`](#jcode-ui-core-exportthreadmarkdown) | function | `packages/jcode-ui-core/src/export/markdown.ts` |
+| [`formatElapsed`](#jcode-ui-core-formatelapsed) | function | `packages/jcode-ui-core/src/hooks/index.ts` |
+| [`groupActivityTimeline`](#jcode-ui-core-groupactivitytimeline) | function | `packages/jcode-ui-core/src/timeline/groupActivity.ts` |
 | [`groupExploringTimeline`](#jcode-ui-core-groupexploringtimeline) | function | `packages/jcode-ui-core/src/timeline/groupExploring.ts` |
+| [`groupToolTimeline`](#jcode-ui-core-grouptooltimeline) | function | `packages/jcode-ui-core/src/timeline/groupExploring.ts` |
+| [`isActivityItem`](#jcode-ui-core-isactivityitem) | function | `packages/jcode-ui-core/src/types/index.ts` |
 | [`isApprovalItem`](#jcode-ui-core-isapprovalitem) | function | `packages/jcode-ui-core/src/types/index.ts` |
+| [`isBatchItem`](#jcode-ui-core-isbatchitem) | function | `packages/jcode-ui-core/src/types/index.ts` |
 | [`isCollapsibleTool`](#jcode-ui-core-iscollapsibletool) | function | `packages/jcode-ui-core/src/timeline/groupExploring.ts` |
 | [`isExploringItem`](#jcode-ui-core-isexploringitem) | function | `packages/jcode-ui-core/src/types/index.ts` |
+| [`isFileChangeTool`](#jcode-ui-core-isfilechangetool) | function | `packages/jcode-ui-core/src/timeline/turnChanges.ts` |
 | [`isMessageItem`](#jcode-ui-core-ismessageitem) | function | `packages/jcode-ui-core/src/types/index.ts` |
 | [`isToolItem`](#jcode-ui-core-istoolitem) | function | `packages/jcode-ui-core/src/types/index.ts` |
+| [`isTurnChangesItem`](#jcode-ui-core-isturnchangesitem) | function | `packages/jcode-ui-core/src/types/index.ts` |
 | [`MessageView`](#jcode-ui-core-messageview) | function | `packages/jcode-ui-core/src/primitives/MessageView.tsx` |
 | [`nextAttachmentId`](#jcode-ui-core-nextattachmentid) | function | `packages/jcode-ui-core/src/primitives/attachmentAdapter.ts` |
 | [`normalizeState`](#jcode-ui-core-normalizestate) | function | `packages/jcode-ui-core/src/runtime/index.ts` |
 | [`parseResolvedAnswers`](#jcode-ui-core-parseresolvedanswers) | function | `packages/jcode-ui-core/src/primitives/AskUserBlock.tsx` |
 | [`RuntimeProvider`](#jcode-ui-core-runtimeprovider) | function | `packages/jcode-ui-core/src/runtime/context.tsx` |
+| [`summarizeActivityCounts`](#jcode-ui-core-summarizeactivitycounts) | function | `packages/jcode-ui-core/src/timeline/groupActivity.ts` |
+| [`summarizeExploringCounts`](#jcode-ui-core-summarizeexploringcounts) | function | `packages/jcode-ui-core/src/timeline/groupExploring.ts` |
 | [`summarizeExploringSteps`](#jcode-ui-core-summarizeexploringsteps) | function | `packages/jcode-ui-core/src/timeline/groupExploring.ts` |
+| [`summarizeTurnChanges`](#jcode-ui-core-summarizeturnchanges) | function | `packages/jcode-ui-core/src/timeline/turnChanges.ts` |
 | [`Thread`](#jcode-ui-core-thread) | function | `packages/jcode-ui-core/src/primitives/Thread.tsx` |
 | [`ThreadStoreProvider`](#jcode-ui-core-threadstoreprovider) | function | `packages/jcode-ui-core/src/threads/context.tsx` |
 | [`ToolCallProvider`](#jcode-ui-core-toolcallprovider) | function | `packages/jcode-ui-core/src/primitives/ToolCallView.tsx` |
 | [`ToolCallView`](#jcode-ui-core-toolcallview) | function | `packages/jcode-ui-core/src/primitives/ToolCallView.tsx` |
 | [`useAutoScroll`](#jcode-ui-core-useautoscroll) | function | `packages/jcode-ui-core/src/hooks/index.ts` |
+| [`useElapsed`](#jcode-ui-core-useelapsed) | function | `packages/jcode-ui-core/src/hooks/index.ts` |
 | [`useFocusOnIdle`](#jcode-ui-core-usefocusonidle) | function | `packages/jcode-ui-core/src/hooks/index.ts` |
 | [`useIsAtBottom`](#jcode-ui-core-useisatbottom) | function | `packages/jcode-ui-core/src/hooks/index.ts` |
 | [`useQueuedMessages`](#jcode-ui-core-usequeuedmessages) | function | `packages/jcode-ui-core/src/hooks/index.ts` |
@@ -2035,12 +2172,14 @@ export type SpeechInputStatus = 'idle' | 'listening' | 'recording' | 'error';
 | [`useThreadListState`](#jcode-ui-core-usethreadliststate) | function | `packages/jcode-ui-core/src/threads/context.tsx` |
 | [`useThreadStoreActions`](#jcode-ui-core-usethreadstoreactions) | function | `packages/jcode-ui-core/src/threads/context.tsx` |
 | [`useToolCallContext`](#jcode-ui-core-usetoolcallcontext) | function | `packages/jcode-ui-core/src/primitives/ToolCallView.tsx` |
+| [`ActivityGroup`](#jcode-ui-core-activitygroup) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`AGUIMessage`](#jcode-ui-core-aguimessage) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`AGUIPatchOp`](#jcode-ui-core-aguipatchop) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`AGUIRunInput`](#jcode-ui-core-aguiruninput) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`AGUIRuntime`](#jcode-ui-core-aguiruntime) | interface | `packages/jcode-ui-core/src/runtime/aguiRuntime.ts` |
 | [`AGUIRuntimeOptions`](#jcode-ui-core-aguiruntimeoptions) | interface | `packages/jcode-ui-core/src/runtime/aguiRuntime.ts` |
 | [`AGUIToolCall`](#jcode-ui-core-aguitoolcall) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
+| [`AppendTurnChangesOptions`](#jcode-ui-core-appendturnchangesoptions) | interface | `packages/jcode-ui-core/src/timeline/turnChanges.ts` |
 | [`Approval`](#jcode-ui-core-approval) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`ApprovalBlockProps`](#jcode-ui-core-approvalblockprops) | interface | `packages/jcode-ui-core/src/primitives/ApprovalBlock.tsx` |
 | [`ApprovalBlockRenderSlots`](#jcode-ui-core-approvalblockrenderslots) | interface | `packages/jcode-ui-core/src/primitives/ApprovalBlock.tsx` |
@@ -2093,6 +2232,7 @@ export type SpeechInputStatus = 'idle' | 'listening' | 'recording' | 'error';
 | [`StateSnapshotEvent`](#jcode-ui-core-statesnapshotevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`StepFinishedEvent`](#jcode-ui-core-stepfinishedevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`StepStartedEvent`](#jcode-ui-core-stepstartedevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
+| [`SummarizeTurnChangesOptions`](#jcode-ui-core-summarizeturnchangesoptions) | interface | `packages/jcode-ui-core/src/timeline/turnChanges.ts` |
 | [`TaskContextBreakdown`](#jcode-ui-core-taskcontextbreakdown) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`TextMessageChunkEvent`](#jcode-ui-core-textmessagechunkevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`TextMessageContentEvent`](#jcode-ui-core-textmessagecontentevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
@@ -2107,6 +2247,7 @@ export type SpeechInputStatus = 'idle' | 'listening' | 'recording' | 'error';
 | [`ThreadSummary`](#jcode-ui-core-threadsummary) | interface | `packages/jcode-ui-core/src/threads/store.ts` |
 | [`TodoItem`](#jcode-ui-core-todoitem) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`TokenSnapshot`](#jcode-ui-core-tokensnapshot) | interface | `packages/jcode-ui-core/src/types/index.ts` |
+| [`ToolBatchGroup`](#jcode-ui-core-toolbatchgroup) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`ToolCall`](#jcode-ui-core-toolcall) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`ToolCallArgsEvent`](#jcode-ui-core-toolcallargsevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`ToolCallChunkEvent`](#jcode-ui-core-toolcallchunkevent) | interface | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
@@ -2120,6 +2261,8 @@ export type SpeechInputStatus = 'idle' | 'listening' | 'recording' | 'error';
 | [`ToolPresentation`](#jcode-ui-core-toolpresentation) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`ToolRendererProps`](#jcode-ui-core-toolrendererprops) | interface | `packages/jcode-ui-core/src/adapters/index.ts` |
 | [`ToolStreams`](#jcode-ui-core-toolstreams) | interface | `packages/jcode-ui-core/src/types/index.ts` |
+| [`TurnChangesSummary`](#jcode-ui-core-turnchangessummary) | interface | `packages/jcode-ui-core/src/types/index.ts` |
+| [`TurnFileChange`](#jcode-ui-core-turnfilechange) | interface | `packages/jcode-ui-core/src/types/index.ts` |
 | [`AGUIEvent`](#jcode-ui-core-aguievent) | type | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`AGUIRole`](#jcode-ui-core-aguirole) | type | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
 | [`AGUITransport`](#jcode-ui-core-aguitransport) | type | `packages/jcode-ui-core/src/runtime/aguiEvents.ts` |
@@ -2189,6 +2332,27 @@ export class ToolRendererRegistry {
 }
 ```
 
+<a id="jcode-ui-core-appendturnchangesummaries"></a>
+
+### `appendTurnChangeSummaries`
+
+`function` · `packages/jcode-ui-core/src/timeline/turnChanges.ts`
+
+Insert a `turnchanges` item at the end of every completed turn.
+
+Turn boundary = a user message up to (exclusive) the next user message.
+Items before the first user message belong to no turn. The synthetic item's
+seq is `last item seq + 0.5` — stable across re-renders and collision-free
+against integer seqs. Intended as the LAST step of a `mapItems` pipeline
+(after `groupToolTimeline`).
+
+```ts
+export function appendTurnChangeSummaries(
+  items: ThreadItem[],
+  opts: AppendTurnChangesOptions = {},
+): ThreadItem[] { … }
+```
+
 <a id="jcode-ui-core-approvalblock"></a>
 
 ### `ApprovalBlock`
@@ -2207,6 +2371,20 @@ export function ApprovalBlock({ approval, className, renderPending, renderResolv
 
 ```ts
 export function AskUserBlock({ tool, className, renderPending, renderResolved }: AskUserBlockProps): ReactNode { … }
+```
+
+<a id="jcode-ui-core-countactivityflags"></a>
+
+### `countActivityFlags`
+
+`function` · `packages/jcode-ui-core/src/timeline/groupActivity.ts`
+
+Count the collapsed-header suffix flags of an activity group. `failed` =
+errored or nonzero exit code (denied tools excluded — a user decision is
+not a failure); `denied` = rejected at the approval prompt.
+
+```ts
+export function countActivityFlags(tools: ToolCall[]): { … }
 ```
 
 <a id="jcode-ui-core-createaguiruntime"></a>
@@ -2312,6 +2490,21 @@ Create a fresh registry. Convenience over `new` for chained registration.
 export function createToolRendererRegistry(): ToolRendererRegistry { … }
 ```
 
+<a id="jcode-ui-core-diffstatfortool"></a>
+
+### `diffStatForTool`
+
+`function` · `packages/jcode-ui-core/src/timeline/turnChanges.ts`
+
+Derive ±line counts from edit/write args. Returns null when the args carry
+no countable diff text (then the summary lists the file without counts).
+Mirrors ToolCallCard's badge heuristic: line counts of old/new strings,
+`write` counts content lines as additions (prior content is unknown).
+
+```ts
+export function diffStatForTool(tool: ToolCall): { … }
+```
+
 <a id="jcode-ui-core-exportthreadmarkdown"></a>
 
 ### `exportThreadMarkdown`
@@ -2322,6 +2515,37 @@ export function createToolRendererRegistry(): ToolRendererRegistry { … }
 exportThreadMarkdown(items: ThreadItem[], opts: ExportMarkdownOptions = {}): string { … }
 ```
 
+<a id="jcode-ui-core-formatelapsed"></a>
+
+### `formatElapsed`
+
+`function` · `packages/jcode-ui-core/src/hooks/index.ts`
+
+Format elapsed/duration ms as a compact badge: `2s`, `1m 05s`.
+
+```ts
+export function formatElapsed(ms: number): string { … }
+```
+
+<a id="jcode-ui-core-groupactivitytimeline"></a>
+
+### `groupActivityTimeline`
+
+`function` · `packages/jcode-ui-core/src/timeline/groupActivity.ts`
+
+Coalesce adjacent tool items (and whole `batchId` batches) into `activity`
+groups. Output contains only `'activity'` items (≥2 tools) and plain
+`'tool'` items (isolated singles) — never `'exploring'` or `'batch'`.
+
+- Batch members are anchored at the FIRST member's position even when
+  approvals (or anything else) sit between them.
+- Approvals never break a group; they render right after the group anchor.
+- Any other item (message, turnchanges, …) closes the open group.
+
+```ts
+export function groupActivityTimeline(items: ThreadItem[]): ThreadItem[] { … }
+```
+
 <a id="jcode-ui-core-groupexploringtimeline"></a>
 
 ### `groupExploringTimeline`
@@ -2330,9 +2554,41 @@ exportThreadMarkdown(items: ThreadItem[], opts: ExportMarkdownOptions = {}): str
 
 Collapse consecutive collapsible tools into exploring groups.
 Non-tool items and non-collapsible tools always break a group.
+@deprecated Superseded by `groupActivityTimeline` (activity groups coalesce
+ALL adjacent tools, not just read-only ones). Kept for external consumers.
 
 ```ts
 export function groupExploringTimeline(items: ThreadItem[]): ThreadItem[] { … }
+```
+
+<a id="jcode-ui-core-grouptooltimeline"></a>
+
+### `groupToolTimeline`
+
+`function` · `packages/jcode-ui-core/src/timeline/groupExploring.ts`
+
+Coalesce tool calls that share a `batchId` (concurrent calls from one
+assistant message) into `batch` items anchored at the first member's
+position. Items in between (approvals, messages) stay in place and do NOT
+break a batch. Single-member batches unwrap back to plain tool cards, and
+tools without a batchId (old sessions / replay) keep the existing
+exploring-adjacent coalescing behavior unchanged.
+@deprecated Superseded by `groupActivityTimeline`, which absorbs the batch
+coalescing and merges ALL adjacent tools/batches into `activity` groups.
+Kept for external consumers (and nested subagent-children rendering).
+
+```ts
+export function groupToolTimeline(items: ThreadItem[]): ThreadItem[] { … }
+```
+
+<a id="jcode-ui-core-isactivityitem"></a>
+
+### `isActivityItem`
+
+`function` · `packages/jcode-ui-core/src/types/index.ts`
+
+```ts
+export function isActivityItem(i: ThreadItem): i is Extract<ThreadItem, { … }
 ```
 
 <a id="jcode-ui-core-isapprovalitem"></a>
@@ -2343,6 +2599,16 @@ export function groupExploringTimeline(items: ThreadItem[]): ThreadItem[] { … 
 
 ```ts
 export function isApprovalItem(i: ThreadItem): i is Extract<ThreadItem, { … }
+```
+
+<a id="jcode-ui-core-isbatchitem"></a>
+
+### `isBatchItem`
+
+`function` · `packages/jcode-ui-core/src/types/index.ts`
+
+```ts
+export function isBatchItem(i: ThreadItem): i is Extract<ThreadItem, { … }
 ```
 
 <a id="jcode-ui-core-iscollapsibletool"></a>
@@ -2367,6 +2633,18 @@ export function isCollapsibleTool(tool: ToolCall): boolean { … }
 export function isExploringItem(i: ThreadItem): i is Extract<ThreadItem, { … }
 ```
 
+<a id="jcode-ui-core-isfilechangetool"></a>
+
+### `isFileChangeTool`
+
+`function` · `packages/jcode-ui-core/src/timeline/turnChanges.ts`
+
+True when a tool is an edit/write/patch-style file mutation.
+
+```ts
+export function isFileChangeTool(tool: ToolCall): boolean { … }
+```
+
 <a id="jcode-ui-core-ismessageitem"></a>
 
 ### `isMessageItem`
@@ -2387,6 +2665,16 @@ export function isMessageItem(i: ThreadItem): i is Extract<ThreadItem, { … }
 
 ```ts
 export function isToolItem(i: ThreadItem): i is Extract<ThreadItem, { … }
+```
+
+<a id="jcode-ui-core-isturnchangesitem"></a>
+
+### `isTurnChangesItem`
+
+`function` · `packages/jcode-ui-core/src/types/index.ts`
+
+```ts
+export function isTurnChangesItem(i: ThreadItem): i is Extract<ThreadItem, { … }
 ```
 
 <a id="jcode-ui-core-messageview"></a>
@@ -2457,6 +2745,41 @@ Provide a ChatRuntime to a subtree. Components under it read state/actions
 export function RuntimeProvider({ runtime, children }: RuntimeProviderProps): ReactNode { … }
 ```
 
+<a id="jcode-ui-core-summarizeactivitycounts"></a>
+
+### `summarizeActivityCounts`
+
+`function` · `packages/jcode-ui-core/src/timeline/groupActivity.ts`
+
+Bucket an activity group's tools into a compact category-count header.
+
+- Mixed groups: `Ran 3 commands · read 2 files · ran 1 agent` (verb
+  phrases, first segment capitalized).
+- All-read-only groups (every tool passes `isCollapsibleTool`): the
+  Explored phrasing `3 files read · 2 searches · 1 list` — the card
+  prefixes its own `Explored` label.
+
+Reads and edits dedupe by file (`displayInfo.subtitle`) so re-touching the
+same file counts once.
+
+```ts
+export function summarizeActivityCounts(tools: ToolCall[]): string { … }
+```
+
+<a id="jcode-ui-core-summarizeexploringcounts"></a>
+
+### `summarizeExploringCounts`
+
+`function` · `packages/jcode-ui-core/src/timeline/groupExploring.ts`
+
+Bucket exploring steps into a compact category-count summary, e.g.
+`3 files read · 2 searches · 1 list`. Read counts dedupe by file name
+(subtitle) so re-reads of the same file count once.
+
+```ts
+export function summarizeExploringCounts(tools: ToolCall[]): string { … }
+```
+
 <a id="jcode-ui-core-summarizeexploringsteps"></a>
 
 ### `summarizeExploringSteps`
@@ -2467,6 +2790,27 @@ Summarize an exploring group into action lines (Read / Search / List …).
 
 ```ts
 export function summarizeExploringSteps(tools: ToolCall[]): { … }
+```
+
+<a id="jcode-ui-core-summarizeturnchanges"></a>
+
+### `summarizeTurnChanges`
+
+`function` · `packages/jcode-ui-core/src/timeline/turnChanges.ts`
+
+Aggregate the file changes of one turn's items.
+
+Returns null when the turn has no completed file changes OR any tool in the
+turn is still running (work in progress — the summary only appears once the
+turn settles). Denied and errored change tools are skipped (they did not
+touch the file). Files dedupe by path keeping the LAST change; totals sum
+over the deduped set.
+
+```ts
+export function summarizeTurnChanges(
+  items: ThreadItem[],
+  opts: SummarizeTurnChangesOptions = {},
+): TurnChangesSummary | null { … }
 ```
 
 <a id="jcode-ui-core-thread"></a>
@@ -2550,6 +2894,21 @@ Returns the container ref to attach, the live `isAtBottom` flag, and a
 
 ```ts
 export function useAutoScroll<T extends HTMLElement>(threshold = 80) { … }
+```
+
+<a id="jcode-ui-core-useelapsed"></a>
+
+### `useElapsed`
+
+`function` · `packages/jcode-ui-core/src/hooks/index.ts`
+
+Live elapsed milliseconds since `startedAt` (unix ms), ticking once per
+second while `active`. When inactive (or `startedAt` is missing) the
+interval is not scheduled — mount this only where a live badge is shown
+(e.g. a running batch row) to keep timers scarce.
+
+```ts
+export function useElapsed(startedAt: number | undefined, active = true): number { … }
 ```
 
 <a id="jcode-ui-core-usefocusonidle"></a>
@@ -2694,6 +3053,29 @@ export function useThreadStoreActions(): ThreadStoreActions { … }
 export function useToolCallContext(): ToolCallContextValue | null { … }
 ```
 
+<a id="jcode-ui-core-activitygroup"></a>
+
+### `ActivityGroup`
+
+`interface` · `packages/jcode-ui-core/src/types/index.ts`
+
+A UI-only group of ADJACENT tool calls in the timeline (adjacent = no
+assistant/user message in between; approvals do NOT break adjacency and
+render in place). Collapsed (all members settled) it shows one category-
+count header line; expanded it is a bordered row-stack card whose rows
+expand in place to each tool's registry-rendered body. Supersedes the
+`exploring` and `batch` kinds. Does not change model-facing boundaries.
+
+```ts
+export interface ActivityGroup {
+  id: string
+  tools: ToolCall[]
+  status: ToolStatus
+  /** True when ALL tools are read-only (per `isCollapsibleTool`). */
+  explorative: boolean
+}
+```
+
 <a id="jcode-ui-core-aguimessage"></a>
 
 ### `AGUIMessage`
@@ -2804,6 +3186,20 @@ export interface AGUIToolCall {
 }
 ```
 
+<a id="jcode-ui-core-appendturnchangesoptions"></a>
+
+### `AppendTurnChangesOptions`
+
+`interface` · `packages/jcode-ui-core/src/timeline/turnChanges.ts`
+
+```ts
+export interface AppendTurnChangesOptions extends SummarizeTurnChangesOptions {
+  /** While the runtime is streaming, the LAST turn is still open — suppress
+   *  its summary even if no tool is currently running. */
+  isRunning?: boolean
+}
+```
+
 <a id="jcode-ui-core-approval"></a>
 
 ### `Approval`
@@ -2822,6 +3218,9 @@ export interface Approval {
   id: string
   tool_name: string
   tool_args: string
+  /** Backend tool_call_id of the gated call — lets the host mark the exact
+   *  pending tool row as awaiting approval (warning color). */
+  tool_call_id?: string
   /** Target outside the workspace root — UI flags it prominently. */
   is_external: boolean
   resolved?: boolean
@@ -3231,6 +3630,8 @@ export interface DictationState {
 
 A UI-only coalesced group of collapsible read/search/list tool calls.
 Does not change model-facing tool boundaries.
+@deprecated Superseded by {@link ActivityGroup} (`'activity'` items). Kept
+for external consumers that still feed `'exploring'` items to `Thread`.
 
 ```ts
 export interface ExploringGroup {
@@ -3835,6 +4236,19 @@ export interface StepStartedEvent extends AGUIBaseEvent {
 }
 ```
 
+<a id="jcode-ui-core-summarizeturnchangesoptions"></a>
+
+### `SummarizeTurnChangesOptions`
+
+`interface` · `packages/jcode-ui-core/src/timeline/turnChanges.ts`
+
+```ts
+export interface SummarizeTurnChangesOptions {
+  /** Display cap before files spill into `overflow`. Default 10. */
+  maxFiles?: number
+}
+```
+
 <a id="jcode-ui-core-taskcontextbreakdown"></a>
 
 ### `TaskContextBreakdown`
@@ -4105,6 +4519,31 @@ export interface TokenSnapshot {
 }
 ```
 
+<a id="jcode-ui-core-toolbatchgroup"></a>
+
+### `ToolBatchGroup`
+
+`interface` · `packages/jcode-ui-core/src/types/index.ts`
+
+A UI-only group of tool calls issued concurrently by one assistant message
+(same `batchId`). Rendered as a stacked status-row list; when every member
+is a collapsible read/search/list tool (`explorative`) it renders as an
+upgraded Exploring card instead. Does not change model-facing boundaries.
+@deprecated Superseded by {@link ActivityGroup} (`'activity'` items) — batch
+members now coalesce into activity groups. Kept for external consumers that
+still feed `'batch'` items to `Thread`.
+
+```ts
+export interface ToolBatchGroup {
+  id: string
+  batchId: string
+  tools: ToolCall[]
+  status: ToolStatus
+  /** True when ALL tools are collapsible (read/search/list). */
+  explorative: boolean
+}
+```
+
 <a id="jcode-ui-core-toolcall"></a>
 
 ### `ToolCall`
@@ -4126,6 +4565,12 @@ export interface ToolCall {
   displayOutput?: string
   error?: string
   status: ToolStatus
+  /** User rejected this call at the approval prompt. Rendered struck-through
+   *  and muted (declined ≠ failed) — status stays 'done', not 'error'. */
+  denied?: boolean
+  /** True while this call sits at an unresolved approval prompt. Rendered in
+   *  the warning color; cleared when the approval resolves or a result lands. */
+  awaitingApproval?: boolean
   timestamp: number
   displayInfo?: ToolDisplayInfo
   /** Nested tool calls (subagent inner calls). */
@@ -4140,6 +4585,15 @@ export interface ToolCall {
   meta?: ToolMeta
   /** Dual-channel presentation (execute). */
   presentation?: ToolPresentation
+  /** Concurrent-batch id — tools issued together by one assistant message
+   *  share it and coalesce into a `ToolBatchGroup` row stack. */
+  batchId?: string
+  /** 0-based position within the batch. */
+  batchIndex?: number
+  /** Total number of tools in the batch. */
+  batchSize?: number
+  /** Wall-clock start (unix ms) — drives the live elapsed badge while running. */
+  startedAt?: number
 }
 ```
 
@@ -4375,6 +4829,50 @@ export interface ToolStreams {
 }
 ```
 
+<a id="jcode-ui-core-turnchangessummary"></a>
+
+### `TurnChangesSummary`
+
+`interface` · `packages/jcode-ui-core/src/types/index.ts`
+
+A UI-only per-turn summary of file changes (opencode SessionTurn-style):
+"Changed N files (+A −R)" inserted at the end of a completed turn.
+`files` holds up to the display cap; `overflow` the rest ("… N more").
+
+```ts
+export interface TurnChangesSummary {
+  id: string
+  /** Total distinct files changed this turn (files + overflow). */
+  fileCount: number
+  files: TurnFileChange[]
+  overflow: TurnFileChange[]
+  totalAdded: number
+  totalRemoved: number
+  /** True when at least one file has derived ± line counts. */
+  hasLineCounts: boolean
+}
+```
+
+<a id="jcode-ui-core-turnfilechange"></a>
+
+### `TurnFileChange`
+
+`interface` · `packages/jcode-ui-core/src/types/index.ts`
+
+One changed file inside a turn-changes summary. `added`/`removed` are
+client-derived line counts (absent when the tool args carry no diff text);
+`tool` is the LAST call that touched the file, kept so the UI can expand
+its registry-rendered diff body.
+
+```ts
+export interface TurnFileChange {
+  path: string
+  added?: number
+  removed?: number
+  tool: ToolCall
+}
+```
+
 <a id="jcode-ui-core-aguievent"></a>
 
 ### `AGUIEvent`
@@ -4548,7 +5046,10 @@ export type ThreadItem =
   | { kind: 'message'; data: Message; seq: number }
   | { kind: 'tool'; data: ToolCall; seq: number }
   | { kind: 'approval'; data: Approval; seq: number }
-  | { kind: 'exploring'; data: ExploringGroup; seq: number };
+  | { kind: 'activity'; data: ActivityGroup; seq: number }
+  | { kind: 'exploring'; data: ExploringGroup; seq: number }
+  | { kind: 'batch'; data: ToolBatchGroup; seq: number }
+  | { kind: 'turnchanges'; data: TurnChangesSummary; seq: number };
 ```
 
 <a id="jcode-ui-core-threaditemkind"></a>
@@ -4557,10 +5058,17 @@ export type ThreadItem =
 
 `type` · `packages/jcode-ui-core/src/types/index.ts`
 
-Built-in thread-item kinds (exploring is UI-only coalescing).
+Built-in thread-item kinds (activity/exploring/batch/turnchanges are UI-only coalescing).
 
 ```ts
-export type ThreadItemKind = 'message' | 'tool' | 'approval' | 'exploring';
+export type ThreadItemKind =
+  | 'message'
+  | 'tool'
+  | 'approval'
+  | 'activity'
+  | 'exploring'
+  | 'batch'
+  | 'turnchanges';
 ```
 
 <a id="jcode-ui-core-toolrenderer"></a>

@@ -41,6 +41,15 @@ Styled components exported by `jcode-ui`. Each page includes a **live preview** 
 | `jcode-ui/canvas` | Workflow canvas subentry (`@xyflow/react` peer) |
 | `jcode-ui/voice` | SpeechInput / Transcription / AudioPlayer / VoiceVisualizer |
 
+### New in 0.4
+
+| Component | Role |
+|-----------|------|
+| `ActivityGroupCard` | Adjacent tool calls coalesce into one **activity group**: auto-expanded with live rows (ticking elapsed) while running, auto-collapsed to a one-line category-count header (`Ran 3 commands · read 2 files · 1 failed`; all-read-only groups show `Explored …`) once done. Expanded rows re-use the tool renderer registry inline. Produced by `groupActivityTimeline` — `Thread` uses it by default. |
+| `TurnChangesCard` | End-of-turn file-change summary: `Changed N files (+A −R)`, per-file expandable diff, de-duplicated (last write wins), capped at 10 with overflow. Produced by `appendTurnChangeSummaries`. |
+
+Deprecated (still exported for compatibility, no longer produced by `Thread`): `ExploringGroupCard`, `ToolBatchGroupCard`, `groupExploringTimeline`, `groupToolTimeline`.
+
 Providers: `RuntimeProvider`, `ToolRegistryProvider`, `ThreadStoreProvider`, `ApiBaseProvider` — see [Runtime](/chat-ui/docs/runtime).
 
 ## assistant-ui → jcode-ui mapping
@@ -65,7 +74,7 @@ Providers: `RuntimeProvider`, `ToolRegistryProvider`, `ThreadStoreProvider`, `Ap
 | Quote / SelectionToolbar | `QuoteSelection` | ✅ | → `ComposerHandle.insertText` |
 | Export | `ExportButton` / `exportThreadMarkdown` | ✅ | |
 | `Tool Fallback` | `GenericRenderer` | ✅ | Registry fallback |
-| `Tool Group` | `tool.children` recursion + Exploring groups | ✅ | Subagent nesting |
+| `Tool Group` | `ActivityGroupCard` (adjacent-tool coalescing) + `tool.children` recursion | ✅ | Collapses to a category-count line when done |
 | `ActionBar` (copy/edit) | built into `Message` | ✅ | Hover actions |
 | Mermaid / LaTeX | `jcode-ui/plugins/mermaid` / `katex` | ✅ optional | Dynamic-import peers |
 | Voice / Dictation | `jcode-ui/voice` + `enableDictation` | ✅ subentry | No 3D persona |
