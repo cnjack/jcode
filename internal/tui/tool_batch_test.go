@@ -23,27 +23,27 @@ func lineAt(t *testing.T, m *Model, idx int) string {
 	return m.lines[idx].text
 }
 
-// groupAt returns the activity group of m.lines[idx], failing the test when
-// the line is not a group line.
-func groupAt(t *testing.T, m *Model, idx int) *activityGroupData {
+// firstGroup returns the activity group of m.lines[0], failing the test when
+// the first line is not a group line.
+func firstGroup(t *testing.T, m *Model) *activityGroupData {
 	t.Helper()
-	if idx < 0 || idx >= len(m.lines) {
-		t.Fatalf("line index %d out of range (have %d lines)", idx, len(m.lines))
+	if len(m.lines) == 0 {
+		t.Fatal("timeline is empty")
 	}
-	g := m.lines[idx].group
+	g := m.lines[0].group
 	if g == nil {
-		t.Fatalf("line %d is not an activity group line: %q", idx, m.lines[idx].text)
+		t.Fatalf("line 0 is not an activity group line: %q", m.lines[0].text)
 	}
 	return g
 }
 
-// renderLineAt renders m.lines[idx] at a fixed width.
-func renderLineAt(t *testing.T, m *Model, idx int) string {
+// renderFirstLine renders m.lines[0] at a fixed width.
+func renderFirstLine(t *testing.T, m *Model) string {
 	t.Helper()
-	if idx < 0 || idx >= len(m.lines) {
-		t.Fatalf("line index %d out of range (have %d lines)", idx, len(m.lines))
+	if len(m.lines) == 0 {
+		t.Fatal("timeline is empty")
 	}
-	return m.lines[idx].render(100, nil)
+	return m.lines[0].render(100, nil)
 }
 
 // TestToolBatchOutOfOrderResults drives a 3-tool concurrent batch whose
@@ -67,11 +67,11 @@ func TestToolBatchOutOfOrderResults(t *testing.T) {
 	if len(m.lines) != 1 {
 		t.Fatalf("expected 1 group line, got %d lines", len(m.lines))
 	}
-	g := groupAt(t, &m, 0)
+	g := firstGroup(t, &m)
 	if len(g.members) != 3 {
 		t.Fatalf("expected 3 members, got %d", len(g.members))
 	}
-	live := renderLineAt(t, &m, 0)
+	live := renderFirstLine(t, &m)
 	if !strings.Contains(live, "Running 3 tools…") || !strings.Contains(live, toolIconRunning) {
 		t.Fatalf("live header wrong: %q", live)
 	}
@@ -86,7 +86,7 @@ func TestToolBatchOutOfOrderResults(t *testing.T) {
 			t.Fatalf("member %d flipped prematurely: %v", idx, g.members[idx].status)
 		}
 	}
-	live = renderLineAt(t, &m, 0)
+	live = renderFirstLine(t, &m)
 	if !strings.Contains(live, toolIconSuccess) || !strings.Contains(live, toolIconRunning) {
 		t.Fatalf("live form should mix flipped and running members: %q", live)
 	}
@@ -97,7 +97,7 @@ func TestToolBatchOutOfOrderResults(t *testing.T) {
 	// c3 fails: its member flips to error, and the live form shows a short
 	// error digest under the row (plus a duration, always on failures).
 	m.Update(ToolResultMsg{Name: "read", ToolCallID: "c3", Err: errors.New("boom"), Duration: 3 * time.Second})
-	live = renderLineAt(t, &m, 0)
+	live = renderFirstLine(t, &m)
 	if !strings.Contains(live, toolIconError) || !strings.Contains(live, "3.0s") || !strings.Contains(live, "boom") {
 		t.Fatalf("failed member missing error icon/duration/digest: %q", live)
 	}
@@ -105,7 +105,7 @@ func TestToolBatchOutOfOrderResults(t *testing.T) {
 	// c1 completes last: the group collapses to one summary line. All three
 	// are reads → Explored phrasing; the failure keeps ✗ and a failed count.
 	m.Update(ToolResultMsg{Name: "read", Output: "ok row c1", ToolCallID: "c1", Duration: 5200 * time.Millisecond})
-	collapsed := renderLineAt(t, &m, 0)
+	collapsed := renderFirstLine(t, &m)
 	if strings.Contains(collapsed, "Running") {
 		t.Fatalf("group did not collapse after completion: %q", collapsed)
 	}
@@ -140,7 +140,7 @@ func TestToolBatchAllSuccess(t *testing.T) {
 	m.Update(ToolResultMsg{Name: "grep", Output: "ok", ToolCallID: "x2", Duration: 90 * time.Millisecond})
 	m.Update(ToolResultMsg{Name: "grep", Output: "ok", ToolCallID: "x1", Duration: 80 * time.Millisecond})
 
-	collapsed := renderLineAt(t, &m, 0)
+	collapsed := renderFirstLine(t, &m)
 	if !strings.Contains(collapsed, toolIconSuccess) || !strings.Contains(collapsed, "Explored 2 searches") {
 		t.Fatalf("collapsed summary not success/Explored: %q", collapsed)
 	}
@@ -168,7 +168,7 @@ func TestMixedGroupSummaryCounts(t *testing.T) {
 		m.Update(ToolResultMsg{Name: "x", Output: "ok", ToolCallID: id})
 	}
 
-	collapsed := renderLineAt(t, &m, 0)
+	collapsed := renderFirstLine(t, &m)
 	for _, want := range []string{"Ran 1 command", "read 1 file", "edited 1 file"} {
 		if !strings.Contains(collapsed, want) {
 			t.Fatalf("collapsed summary missing %q: %q", want, collapsed)
@@ -189,7 +189,7 @@ func TestSingleToolGroupForms(t *testing.T) {
 	if len(m.lines) != 1 {
 		t.Fatalf("expected 1 line, got %d", len(m.lines))
 	}
-	live := renderLineAt(t, &m, 0)
+	live := renderFirstLine(t, &m)
 	if strings.Contains(live, "Running") {
 		t.Fatalf("single-member group must not render a header: %q", live)
 	}
@@ -201,7 +201,7 @@ func TestSingleToolGroupForms(t *testing.T) {
 	}
 
 	m.Update(ToolResultMsg{Name: "read", Output: "ok", ToolCallID: "s1", Duration: 2500 * time.Millisecond})
-	collapsed := renderLineAt(t, &m, 0)
+	collapsed := renderFirstLine(t, &m)
 	if !strings.Contains(collapsed, toolIconSuccess) || !strings.Contains(collapsed, "Read") ||
 		!strings.Contains(collapsed, "2.5s") {
 		t.Fatalf("collapsed single line wrong: %q", collapsed)
@@ -220,7 +220,7 @@ func TestTextMessageClosesGroup(t *testing.T) {
 	m.Update(AgentTextMsg{Text: "some analysis"})
 	m.Update(ToolCallMsg{Name: "read", Title: "Read", ToolCallID: "a2"})
 
-	first := groupAt(t, &m, 0)
+	first := firstGroup(t, &m)
 	last := m.lines[len(m.lines)-1].group
 	if last == nil {
 		t.Fatalf("last line should be a new group line")
@@ -243,7 +243,7 @@ func TestBatchMemberRejoinsAfterInterruption(t *testing.T) {
 	m.lines = append(m.lines, textLine("  ⚠ Rejected: execute — user denied this operation"))
 	m.Update(ToolCallMsg{Name: "execute", Title: "Shell", ToolCallID: "p2", BatchID: "b9", BatchSize: 2})
 
-	g := groupAt(t, &m, 0)
+	g := firstGroup(t, &m)
 	if len(g.members) != 2 {
 		t.Fatalf("same-batch member did not rejoin its group: %d members", len(g.members))
 	}
@@ -260,7 +260,7 @@ func TestAgentDoneInterruptsRunningMembers(t *testing.T) {
 	m.Update(ToolCallMsg{Name: "execute", Title: "Shell", ToolCallID: "z1"})
 	m.Update(AgentDoneMsg{})
 
-	g := groupAt(t, &m, 0)
+	g := firstGroup(t, &m)
 	if g.members[0].status != memberInterrupted {
 		t.Fatalf("member not marked interrupted: %v", g.members[0].status)
 	}
@@ -316,7 +316,7 @@ func TestToolResultDenied(t *testing.T) {
 		m.Update(ToolCallMsg{Name: "execute", Title: "Shell", ToolCallID: id, BatchID: "b4", BatchIndex: i, BatchSize: 2})
 	}
 	m.Update(ToolResultMsg{Name: "execute", Output: "ok", ToolCallID: "d1", Duration: 100 * time.Millisecond})
-	live := renderLineAt(t, &m, 0)
+	live := renderFirstLine(t, &m)
 	if !strings.Contains(live, "Running 2 tools…") {
 		t.Fatalf("group should still be live: %q", live)
 	}
@@ -326,14 +326,14 @@ func TestToolResultDenied(t *testing.T) {
 		ToolCallID: "d2", Denied: true, Duration: 8 * time.Second,
 	})
 
-	g := groupAt(t, &m, 0)
+	g := firstGroup(t, &m)
 	if g.members[1].status != memberDenied {
 		t.Fatalf("denied member wrong status: %v", g.members[1].status)
 	}
 	if g.members[1].output != "" {
 		t.Fatalf("denied member must not keep the rejection boilerplate: %q", g.members[1].output)
 	}
-	collapsed := renderLineAt(t, &m, 0)
+	collapsed := renderFirstLine(t, &m)
 	if !strings.Contains(collapsed, toolIconSuccess) || strings.Contains(collapsed, toolIconError) {
 		t.Fatalf("denial must not flip the summary to failed: %q", collapsed)
 	}

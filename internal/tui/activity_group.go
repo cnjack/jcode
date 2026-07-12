@@ -276,9 +276,9 @@ func (g *activityGroupData) renderLive() string {
 	var sb strings.Builder
 	indent := "  "
 	if len(g.members) > 1 {
-		sb.WriteString(fmt.Sprintf("  %s %s",
+		fmt.Fprintf(&sb, "  %s %s",
 			toolIconRunning,
-			toolNameStyle.Render(fmt.Sprintf("Running %d tools…", len(g.members)))))
+			toolNameStyle.Render(fmt.Sprintf("Running %d tools…", len(g.members))))
 		indent = "    "
 	}
 	for i, mem := range g.members {
