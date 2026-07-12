@@ -28,7 +28,7 @@ func TestOnToolResult_ExecuteEmitsStreamsAndMeta(t *testing.T) {
 	h := NewWebHandler()
 
 	failed := tools.BuildExecResult("out\n", "err\n", errLike(t), 800*time.Millisecond, "false")
-	h.OnToolResult("execute", failed.ModelOutput, "call_1", nil)
+	h.OnToolResult(ToolResultEvent{Name: "execute", Output: failed.ModelOutput, ToolCallID: "call_1"})
 
 	select {
 	case ev := <-h.Events():

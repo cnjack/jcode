@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/cnjack/jcode/internal/agent"
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/hooks"
 	"github.com/cnjack/jcode/internal/mode"
@@ -403,13 +405,26 @@ func (s *ApprovalState) requestUserApprovalWithWorker(ctx context.Context, toolN
 		return false, fmt.Errorf("event handler not initialized")
 	}
 
+	// The approval middleware stamps the LLM tool-call id into ctx; forward it
+	// so UIs can tie the prompt to the exact pending tool row, and key the
+	// wait/denied bookkeeping below by it.
+	toolCallID := agent.ToolCallIDFromContext(ctx)
+
+	start := time.Now()
 	resp, err := s.h.RequestApproval(ctx, handler.ApprovalRequest{
 		ToolName:    toolName,
 		ToolArgs:    toolArgs,
+		ToolCallID:  toolCallID,
 		IsExternal:  isExternal,
 		WorkerName:  workerName,
 		WorkerColor: workerColor,
 	})
+	// Record how long this call sat at the prompt (and whether it was denied)
+	// so the runner reports pure execution time and a distinct denied state.
+	// Recorded even on error: an errored prompt still consumed wall-clock wait.
+	if meter := approvalMeterFrom(ctx); meter != nil {
+		meter.record(toolCallID, time.Since(start), err == nil && !resp.Approved)
+	}
 	if err != nil {
 		return false, err
 	}

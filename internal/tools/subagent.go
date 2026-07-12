@@ -37,7 +37,8 @@ type SubagentProgressFn func(agentName, event, toolName, detail string)
 
 // SubagentTokenFn is called after each model turn with the cumulative token delta
 // (tokens used by this subagent since it started) so the TUI can display progress.
-type SubagentTokenFn func(totalTokens int64)
+// agentName identifies the subagent, so parallel subagents can be told apart.
+type SubagentTokenFn func(agentName string, totalTokens int64)
 
 // SubagentDeps holds dependencies injected into the subagent tool at creation time.
 type SubagentDeps struct {
@@ -307,7 +308,7 @@ func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, 
 	reportTokens := func() {
 		if s.deps.TokenFn != nil {
 			_, _, cur := tokenUsage.Get()
-			s.deps.TokenFn(cur)
+			s.deps.TokenFn(input.Name, cur)
 		}
 	}
 

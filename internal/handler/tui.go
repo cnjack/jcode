@@ -32,18 +32,30 @@ func (h *TUIHandler) OnAgentText(text string) {
 	h.p.Send(tui.AgentTextMsg{Text: text})
 }
 
-func (h *TUIHandler) OnToolCall(name, args, _ string) {
-	info := extractToolDisplayInfo(name, args)
+func (h *TUIHandler) OnToolCall(ev ToolCallEvent) {
+	info := extractToolDisplayInfo(ev.Name, ev.Args)
 	h.p.Send(tui.ToolCallMsg{
-		Name:     name,
-		Args:     args,
-		Title:    info.Title,
-		Subtitle: info.Subtitle,
+		Name:       ev.Name,
+		Args:       ev.Args,
+		Title:      info.Title,
+		Subtitle:   info.Subtitle,
+		ToolCallID: ev.ToolCallID,
+		BatchID:    ev.BatchID,
+		BatchIndex: ev.BatchIndex,
+		BatchSize:  ev.BatchSize,
+		StartedAt:  ev.StartedAt,
 	})
 }
 
-func (h *TUIHandler) OnToolResult(name, output, _ string, err error) {
-	h.p.Send(tui.ToolResultMsg{Name: name, Output: output, Err: err})
+func (h *TUIHandler) OnToolResult(ev ToolResultEvent) {
+	h.p.Send(tui.ToolResultMsg{
+		Name:       ev.Name,
+		Output:     ev.Output,
+		ToolCallID: ev.ToolCallID,
+		Err:        ev.Err,
+		Denied:     ev.Denied,
+		Duration:   ev.Duration,
+	})
 }
 
 func (h *TUIHandler) OnTodoUpdate() {

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -21,12 +22,18 @@ type WebTextData struct {
 	Text string `json:"text"`
 }
 
-// WebToolCallData carries tool invocation info.
+// WebToolCallData carries tool invocation info. The batch fields group tool
+// calls issued by the same assistant message (batch_size > 1 → concurrent
+// batch); started_at is unix milliseconds.
 type WebToolCallData struct {
 	Name        string           `json:"name"`
 	Args        string           `json:"args"`
 	ToolCallID  string           `json:"tool_call_id,omitempty"`
 	DisplayInfo *ToolDisplayInfo `json:"display_info,omitempty"`
+	BatchID     string           `json:"batch_id,omitempty"`
+	BatchIndex  int              `json:"batch_index,omitempty"`
+	BatchSize   int              `json:"batch_size,omitempty"`
+	StartedAt   int64            `json:"started_at,omitempty"`
 }
 
 // ToolDisplayInfo carries human-readable tool metadata for UI rendering.
@@ -108,6 +115,7 @@ func extractToolDisplayInfo(name, argsJSON string) *ToolDisplayInfo {
 		info.Title = "Update Todos"
 		info.Icon = "checklist"
 		info.Category = "mutation"
+		info.Subtitle = todoWriteSubtitle(args)
 	case "todoread":
 		info.Title = "Read Todos"
 		info.Icon = "checklist"
@@ -193,10 +201,19 @@ func extractToolDisplayInfo(name, argsJSON string) *ToolDisplayInfo {
 		info.Icon = "browser"
 		info.Category = "execution"
 	default:
-		// MCP or unknown tools
-		info.Title = name
-		info.Icon = "tool"
-		info.Category = ""
+		if server, ok := tools.MCPServerForTool(name); ok {
+			// MCP tool, codex-style: "server.tool" title + compact-JSON args
+			// subtitle ("Calling server.tool(args)").
+			info.Title = server + "." + name
+			info.Icon = "mcp"
+			info.Category = ""
+			info.Subtitle = compactToolArgs(argsJSON, 80)
+		} else {
+			// Unknown tools
+			info.Title = name
+			info.Icon = "tool"
+			info.Category = ""
+		}
 	}
 
 	// Presentation kind / collapsible for exploring-group UI (additive).
@@ -205,6 +222,68 @@ func extractToolDisplayInfo(name, argsJSON string) *ToolDisplayInfo {
 	info.Collapsible = collapsible
 
 	return info
+}
+
+// todoWriteSubtitle summarizes a todowrite call from its parsed args:
+// "3/8 · <in-progress title>" for list payloads (legacy `todos` or enhanced
+// `items`), the action name for single-item actions, "" when unparseable.
+// This keeps the timeline call line to a compact change summary instead of a
+// raw dump of the whole todos array.
+func todoWriteSubtitle(args map[string]interface{}) string {
+	list, ok := args["todos"].([]interface{})
+	if !ok {
+		list, ok = args["items"].([]interface{})
+	}
+	if !ok || len(list) == 0 {
+		if action, _ := args["action"].(string); action != "" && action != "update" {
+			return action
+		}
+		return ""
+	}
+	completed := 0
+	current := ""
+	for _, raw := range list {
+		item, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		status, _ := item["status"].(string)
+		switch status {
+		case "completed", "done":
+			completed++
+		case "in_progress":
+			if title, _ := item["title"].(string); title != "" && current == "" {
+				current = title
+			}
+		}
+	}
+	subtitle := fmt.Sprintf("%d/%d", completed, len(list))
+	if current != "" {
+		if r := []rune(current); len(r) > 40 {
+			current = string(r[:40]) + "…"
+		}
+		subtitle += " · " + current
+	}
+	return subtitle
+}
+
+// compactToolArgs renders a JSON args payload as a single compact line capped
+// at maxLen runes, for codex-style "server.tool(args)" subtitles. Empty or
+// no-op payloads collapse to "".
+func compactToolArgs(argsJSON string, maxLen int) string {
+	s := strings.TrimSpace(argsJSON)
+	if s == "" || s == "{}" || s == "null" {
+		return ""
+	}
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, []byte(s)); err == nil {
+		s = buf.String()
+	}
+	s = strings.ReplaceAll(s, "\n", " ")
+	if r := []rune(s); len(r) > maxLen {
+		s = string(r[:maxLen]) + "…"
+	}
+	return s
 }
 
 // shortenPath returns the last 2 path components for display.
@@ -289,6 +368,14 @@ type WebToolResultData struct {
 	Streams       *WebToolResultStreams      `json:"streams,omitempty"`
 	Meta          *WebToolResultMeta         `json:"meta,omitempty"`
 	Presentation  *WebToolResultPresentation `json:"presentation,omitempty"`
+	// DurationMs is the runner-measured call→result latency (approval wait
+	// already subtracted), provided for all tools. It coexists with
+	// Meta.DurationMs, which only execute-style tools report (in-sandbox
+	// execution time).
+	DurationMs int64 `json:"duration_ms,omitempty"`
+	// Denied is true when the user rejected this call at the approval prompt.
+	// The UI renders it struck-through/muted (declined), not as an error.
+	Denied bool `json:"denied,omitempty"`
 }
 
 // WebTokenData carries token usage to the browser. Field order/types MUST match
@@ -330,11 +417,14 @@ type WebDoneData struct {
 	Error string `json:"error,omitempty"`
 }
 
-// WebApprovalRequestData carries an approval request.
+// WebApprovalRequestData carries an approval request. ToolCallID (when known)
+// ties the prompt to the exact pending tool_call row so the UI can paint that
+// row as "waiting for approval".
 type WebApprovalRequestData struct {
 	ID         string `json:"id"`
 	ToolName   string `json:"tool_name"`
 	ToolArgs   string `json:"tool_args"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
 	IsExternal bool   `json:"is_external"`
 }
 
@@ -408,25 +498,35 @@ func (h *WebHandler) OnAgentText(text string) {
 	h.emit("agent_text", WebTextData{Text: text})
 }
 
-func (h *WebHandler) OnToolCall(name, args, toolCallID string) {
-	h.emit("tool_call", WebToolCallData{
-		Name:        name,
-		Args:        args,
-		ToolCallID:  toolCallID,
-		DisplayInfo: extractToolDisplayInfo(name, args),
-	})
+func (h *WebHandler) OnToolCall(ev ToolCallEvent) {
+	data := WebToolCallData{
+		Name:        ev.Name,
+		Args:        ev.Args,
+		ToolCallID:  ev.ToolCallID,
+		DisplayInfo: extractToolDisplayInfo(ev.Name, ev.Args),
+		BatchID:     ev.BatchID,
+		BatchIndex:  ev.BatchIndex,
+		BatchSize:   ev.BatchSize,
+	}
+	if !ev.StartedAt.IsZero() {
+		data.StartedAt = ev.StartedAt.UnixMilli()
+	}
+	h.emit("tool_call", data)
 }
 
-func (h *WebHandler) OnToolResult(name, output, toolCallID string, err error) {
+func (h *WebHandler) OnToolResult(ev ToolResultEvent) {
+	name, output := ev.Name, ev.Output
 	errMsg := ""
-	if err != nil {
-		errMsg = err.Error()
+	if ev.Err != nil {
+		errMsg = ev.Err.Error()
 	}
 	data := WebToolResultData{
 		Name:       name,
 		Output:     output,
-		ToolCallID: toolCallID,
+		ToolCallID: ev.ToolCallID,
 		Error:      errMsg,
+		DurationMs: ev.Duration.Milliseconds(),
+		Denied:     ev.Denied,
 	}
 	// Dual-channel for execute: parse model string into streams/meta for UI.
 	if name == "execute" {
@@ -510,6 +610,7 @@ func (h *WebHandler) RequestApproval(ctx context.Context, req ApprovalRequest) (
 		ID:         id,
 		ToolName:   req.ToolName,
 		ToolArgs:   req.ToolArgs,
+		ToolCallID: req.ToolCallID,
 		IsExternal: req.IsExternal,
 	}
 	h.pendingApproval[id] = &webPendingApproval{ch: respCh, data: data}

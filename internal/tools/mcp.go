@@ -3,12 +3,38 @@ package tools
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	mcpp "github.com/cloudwego/eino-ext/components/tool/mcp"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/mark3labs/mcp-go/mcp"
 )
+
+// mcpToolServers maps an MCP tool name → providing server name. MCP tools
+// keep their server-declared names (no prefix), so display layers need this
+// lookup to render codex-style "server.tool" titles. Populated on every
+// load/connect; hot-reload simply overwrites entries.
+var mcpToolServers sync.Map
+
+// RegisterMCPToolServer records which server provides an MCP tool.
+func RegisterMCPToolServer(toolName, serverName string) {
+	if toolName == "" || serverName == "" {
+		return
+	}
+	mcpToolServers.Store(toolName, serverName)
+}
+
+// MCPServerForTool returns the server providing toolName, if it is a known
+// MCP tool.
+func MCPServerForTool(toolName string) (string, bool) {
+	v, ok := mcpToolServers.Load(toolName)
+	if !ok {
+		return "", false
+	}
+	s, _ := v.(string)
+	return s, s != ""
+}
 
 type MCPStatus struct {
 	Name      string
@@ -79,6 +105,13 @@ func LoadMCPTools(ctx context.Context, mcpConfig map[string]*config.MCPServer) (
 		status.Running = true
 		status.ToolCount = len(ts)
 		statuses = append(statuses, status)
+
+		// Record tool→server ownership for display ("server.tool" titles).
+		for _, t := range ts {
+			if info, err := t.Info(ctx); err == nil && info != nil {
+				RegisterMCPToolServer(info.Name, name)
+			}
+		}
 
 		allTools = append(allTools, ts...)
 	}

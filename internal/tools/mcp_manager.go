@@ -248,6 +248,9 @@ func (m *MCPManager) doConnect(ctx context.Context, conn *MCPConnection) error {
 					InputSchema: schema,
 					ServerName:  conn.Name,
 				})
+				// Keep the display lookup in sync on manager-driven
+				// (re)connects too, not just LoadMCPTools.
+				RegisterMCPToolServer(t.Name, conn.Name)
 			}
 		}
 	}

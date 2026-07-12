@@ -5,7 +5,10 @@
 // adapt the events to the target transport (BubbleTea, WebSocket, ACP JSON-RPC…).
 package handler
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // AgentEventHandler is the primary abstraction between the agent runner and the
 // presentation layer. It covers three concerns:
@@ -23,10 +26,10 @@ type AgentEventHandler interface {
 	OnAgentText(text string)
 
 	// OnToolCall is called at the beginning of a tool invocation.
-	OnToolCall(name, args, toolCallID string)
+	OnToolCall(ev ToolCallEvent)
 
 	// OnToolResult is called when a tool execution completes.
-	OnToolResult(name, output, toolCallID string, err error)
+	OnToolResult(ev ToolResultEvent)
 
 	// OnTodoUpdate is called when the todo store is mutated.
 	OnTodoUpdate()
@@ -50,6 +53,36 @@ type AgentEventHandler interface {
 	// It blocks until the user responds or ctx is cancelled.
 	// Returns (approved, newMode, error).
 	RequestApproval(ctx context.Context, req ApprovalRequest) (ApprovalResponse, error)
+}
+
+// ToolCallEvent describes a single tool invocation announced by the agent.
+// All tool calls issued by one assistant message share a BatchID so UIs can
+// group concurrent invocations; a single-tool message still forms a batch
+// (BatchSize == 1).
+type ToolCallEvent struct {
+	Name       string
+	Args       string
+	ToolCallID string
+	BatchID    string    // batch identity: one assistant message = one batch
+	BatchIndex int       // 0-based position inside the batch
+	BatchSize  int       // number of tool calls in the batch
+	StartedAt  time.Time // when the runner announced the call
+}
+
+// ToolResultEvent describes a completed tool execution.
+type ToolResultEvent struct {
+	Name       string
+	Output     string
+	ToolCallID string
+	Err        error
+	// Duration is result arrival minus call announcement, with any time spent
+	// blocked on user approval subtracted (pure execution latency); 0 when
+	// unknown.
+	Duration time.Duration
+	// Denied is true when the user rejected this tool call at the approval
+	// prompt. UIs should render this as "declined" (e.g. strikethrough), not
+	// as an execution error.
+	Denied bool
 }
 
 // TokenUsage carries token usage info to the UI surfaces.

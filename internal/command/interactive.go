@@ -172,9 +172,9 @@ func (s *interactiveState) subagentProgress(agentName, event, toolName, detail s
 	})
 }
 
-func (s *interactiveState) subagentTokenFn(totalTokens int64) {
+func (s *interactiveState) subagentTokenFn(agentName string, totalTokens int64) {
 	if s.p != nil {
-		s.p.Send(tui.SubagentTokenUpdateMsg{TotalTokens: totalTokens})
+		s.p.Send(tui.SubagentTokenUpdateMsg{Name: agentName, TotalTokens: totalTokens})
 	}
 }
 

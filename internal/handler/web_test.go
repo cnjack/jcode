@@ -60,6 +60,61 @@ func TestWebHandler_ResolveApprovalOnceVsAll(t *testing.T) {
 	}
 }
 
+// TestWebHandler_ToolResultDeniedAndApprovalToolCallID covers the approval
+// semantics WS contract: tool_result carries denied (+ the runner-adjusted
+// duration_ms), and approval_request carries the gated call's tool_call_id so
+// the UI can paint that row as awaiting approval.
+func TestWebHandler_ToolResultDeniedAndApprovalToolCallID(t *testing.T) {
+	h := NewWebHandler()
+
+	h.OnToolResult(ToolResultEvent{
+		Name:       "execute",
+		Output:     "Tool execution was rejected by user.",
+		ToolCallID: "call_1",
+		Denied:     true,
+		Duration:   1500 * time.Millisecond,
+	})
+	ev := <-h.Events()
+	if ev.Event != "tool_result" {
+		t.Fatalf("expected tool_result event, got %q", ev.Event)
+	}
+	data, ok := ev.Data.(WebToolResultData)
+	if !ok {
+		t.Fatalf("expected WebToolResultData, got %T", ev.Data)
+	}
+	if !data.Denied {
+		t.Error("tool_result should carry denied=true")
+	}
+	if data.DurationMs != 1500 {
+		t.Errorf("duration_ms = %d, want 1500", data.DurationMs)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	go func() {
+		_, _ = h.RequestApproval(ctx, ApprovalRequest{ToolName: "execute", ToolCallID: "call_2"})
+	}()
+	select {
+	case ev = <-h.Events():
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for approval_request event")
+	}
+	req, ok := ev.Data.(WebApprovalRequestData)
+	if !ok {
+		t.Fatalf("expected WebApprovalRequestData, got %T", ev.Data)
+	}
+	if req.ToolCallID != "call_2" {
+		t.Errorf("approval_request tool_call_id = %q, want call_2", req.ToolCallID)
+	}
+	// The pending (reload-reconcile) snapshot must carry it too.
+	if pending := h.PendingApprovalRequests(); len(pending) != 1 || pending[0].ToolCallID != "call_2" {
+		t.Errorf("pending approvals = %+v, want one entry with tool_call_id call_2", pending)
+	}
+	if err := h.ResolveApproval(req.ID, false, false); err != nil {
+		t.Fatalf("ResolveApproval: %v", err)
+	}
+}
+
 // TestWebHandler_AskUserRoundTrip exercises the full web ask_user loop through
 // the real tool: the tool's BatchRequestFn blocks on RequestAskUser, the
 // handler emits ask_user_request with a generated id, and ResolveAskUser

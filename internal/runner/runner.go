@@ -2,9 +2,12 @@ package runner
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"sort"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
@@ -36,6 +39,10 @@ func Run(
 	if tracer != nil {
 		ctx = tracer.WithNewTrace(ctx, "coding_agent")
 	}
+	// Per-run approval meter: the approval path (blocked inside tool execution)
+	// records wait time + denied verdicts into it via ctx, and runInner's
+	// result emission folds them back out (pause-during-approval + denied flag).
+	ctx = withApprovalMeter(ctx, newApprovalMeter())
 	if tokenUsage != nil {
 		ctx = internalmodel.WithTokenTracker(ctx, tokenUsage)
 	}
@@ -183,6 +190,17 @@ func continuationSource(todoIncomplete bool, todoUsed, todoCap int, goalActive, 
 	return ""
 }
 
+// batchSeq issues process-wide sequence numbers for tool-call batch IDs.
+// batchEpoch (process start, unix ms) is baked into every ID so batches
+// recorded into the same session file across restarts can never collide.
+var batchSeq atomic.Int64
+var batchEpoch = time.Now().UnixMilli()
+
+// nextBatchID returns a fresh batch ID. One assistant message = one batch.
+func nextBatchID() string {
+	return fmt.Sprintf("b%d-%d", batchEpoch, batchSeq.Add(1))
+}
+
 func runInner(
 	ctx context.Context,
 	ag *adk.ChatModelAgent,
@@ -196,6 +214,28 @@ func runInner(
 	}
 
 	var assistantText strings.Builder
+
+	// toolStarts records when each tool call was announced so results can
+	// carry a call→result latency. The event loop below is the only reader
+	// and writer (single goroutine), so no locking is needed.
+	toolStarts := make(map[string]time.Time)
+	// meter carries approval wait/denied outcomes from the approval path (see
+	// Run) so the emitted Duration is pure execution time and denied calls are
+	// flagged. emitToolResult also owns session recording so the persisted
+	// entry matches the emitted event exactly (denied + adjusted duration).
+	meter := approvalMeterFrom(ctx)
+	emitToolResult := func(name, output, toolCallID string, err error) {
+		ev := handler.ToolResultEvent{Name: name, Output: output, ToolCallID: toolCallID, Err: err}
+		if started, ok := toolStarts[toolCallID]; ok {
+			ev.Duration = time.Since(started)
+			delete(toolStarts, toolCallID)
+		}
+		applyApprovalOutcome(&ev, meter)
+		h.OnToolResult(ev)
+		if rec != nil {
+			rec.RecordToolResult(name, output, toolCallID, err, ev.Denied, ev.Duration)
+		}
+	}
 
 	config.Logger().Printf("[runner] runInner start, messages=%d", len(messages))
 	iterator := ag.Run(ctx, input)
@@ -249,12 +289,9 @@ func runInner(
 			toolName := mo.ToolName
 			if !mo.IsStreaming && mo.Message != nil {
 				output := mo.Message.Content
-				h.OnToolResult(toolName, output, mo.Message.ToolCallID, nil)
+				emitToolResult(toolName, output, mo.Message.ToolCallID, nil)
 				if toolName == "todowrite" || toolName == "todoread" {
 					h.OnTodoUpdate()
-				}
-				if rec != nil {
-					rec.RecordToolResult(toolName, output, mo.Message.ToolCallID, nil)
 				}
 			} else if mo.IsStreaming {
 				var sb strings.Builder
@@ -267,7 +304,7 @@ func runInner(
 					}
 					if err != nil {
 						toolErr = err
-						h.OnToolResult(toolName, "", toolCallID, err)
+						emitToolResult(toolName, "", toolCallID, err)
 						break
 					}
 					if chunk != nil {
@@ -278,15 +315,10 @@ func runInner(
 					}
 				}
 				if toolErr == nil {
-					h.OnToolResult(toolName, sb.String(), toolCallID, nil)
+					emitToolResult(toolName, sb.String(), toolCallID, nil)
 					if toolName == "todowrite" || toolName == "todoread" {
 						h.OnTodoUpdate()
 					}
-					if rec != nil {
-						rec.RecordToolResult(toolName, sb.String(), toolCallID, nil)
-					}
-				} else if rec != nil {
-					rec.RecordToolResult(toolName, "", toolCallID, toolErr)
 				}
 			}
 			continue
@@ -334,24 +366,50 @@ func runInner(
 				}
 			}
 			// Notify and record accumulated tool calls in index order.
+			// All tool calls from this assistant message form one batch.
 			indices := make([]int, 0, len(pending))
 			for idx := range pending {
 				indices = append(indices, idx)
 			}
 			sort.Ints(indices)
-			for _, idx := range indices {
-				p := pending[idx]
-				h.OnToolCall(p.name, p.args.String(), p.id)
-				if rec != nil {
-					rec.RecordToolCall(p.name, p.args.String(), p.id)
+			if len(indices) > 0 {
+				batchID := nextBatchID()
+				startedAt := time.Now()
+				for i, idx := range indices {
+					p := pending[idx]
+					toolStarts[p.id] = startedAt
+					h.OnToolCall(handler.ToolCallEvent{
+						Name:       p.name,
+						Args:       p.args.String(),
+						ToolCallID: p.id,
+						BatchID:    batchID,
+						BatchIndex: i,
+						BatchSize:  len(indices),
+						StartedAt:  startedAt,
+					})
+					if rec != nil {
+						rec.RecordToolCall(p.name, p.args.String(), p.id, batchID, i, len(indices))
+					}
 				}
 			}
 		} else if mo.Message != nil {
 			if len(mo.Message.ToolCalls) > 0 {
-				for _, tc := range mo.Message.ToolCalls {
-					h.OnToolCall(tc.Function.Name, tc.Function.Arguments, tc.ID)
+				batchID := nextBatchID()
+				startedAt := time.Now()
+				size := len(mo.Message.ToolCalls)
+				for i, tc := range mo.Message.ToolCalls {
+					toolStarts[tc.ID] = startedAt
+					h.OnToolCall(handler.ToolCallEvent{
+						Name:       tc.Function.Name,
+						Args:       tc.Function.Arguments,
+						ToolCallID: tc.ID,
+						BatchID:    batchID,
+						BatchIndex: i,
+						BatchSize:  size,
+						StartedAt:  startedAt,
+					})
 					if rec != nil {
-						rec.RecordToolCall(tc.Function.Name, tc.Function.Arguments, tc.ID)
+						rec.RecordToolCall(tc.Function.Name, tc.Function.Arguments, tc.ID, batchID, i, size)
 					}
 				}
 			}

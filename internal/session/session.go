@@ -65,6 +65,19 @@ type Entry struct {
 	ToolCallID string    `json:"tool_call_id,omitempty"` // links tool_call ↔ tool_result
 	Timestamp  string    `json:"timestamp"`
 
+	// Tool-call batch fields. Tool calls issued by one assistant message share
+	// a BatchID; legacy files simply lack these keys (unmarshal to zero values,
+	// i.e. "no batch info").
+	BatchID    string `json:"batch_id,omitempty"`
+	BatchIndex int    `json:"batch_index,omitempty"`
+	BatchSize  int    `json:"batch_size,omitempty"`
+
+	// tool_result semantics. Denied marks a user-rejected approval (replay
+	// renders it struck-through, not as an error); DurationMs is the runner's
+	// approval-wait-adjusted execution latency. Legacy files lack both keys.
+	Denied     bool  `json:"denied,omitempty"`
+	DurationMs int64 `json:"duration_ms,omitempty"`
+
 	// Images attached to a user message.
 	Images []EntryImage `json:"images,omitempty"`
 
@@ -288,21 +301,30 @@ func (r *Recorder) RecordAssistant(content string) {
 	_ = r.writeEntry(Entry{Type: EntryAssistant, Content: content})
 }
 
-// RecordToolCall appends a tool-call entry.
-func (r *Recorder) RecordToolCall(name, args, toolCallID string) {
-	_ = r.writeEntry(Entry{Type: EntryToolCall, Name: name, Args: args, ToolCallID: toolCallID})
+// RecordToolCall appends a tool-call entry. The batch fields group tool calls
+// issued by the same assistant message so replay can rebuild batch boundaries
+// (batchSize > 1 means a concurrent batch).
+func (r *Recorder) RecordToolCall(name, args, toolCallID, batchID string, batchIndex, batchSize int) {
+	_ = r.writeEntry(Entry{
+		Type: EntryToolCall, Name: name, Args: args, ToolCallID: toolCallID,
+		BatchID: batchID, BatchIndex: batchIndex, BatchSize: batchSize,
+	})
 }
 
-// RecordToolResult appends a tool-result entry.
-// Large outputs are automatically truncated (head+tail preserved) and the
-// full content is saved to an overflow file on disk.
-func (r *Recorder) RecordToolResult(name, output, toolCallID string, err error) {
+// RecordToolResult appends a tool-result entry. denied marks a user-rejected
+// approval; duration is the approval-wait-adjusted execution latency (0 when
+// unknown). Large outputs are automatically truncated (head+tail preserved)
+// and the full content is saved to an overflow file on disk.
+func (r *Recorder) RecordToolResult(name, output, toolCallID string, err error, denied bool, duration time.Duration) {
 	errStr := ""
 	if err != nil {
 		errStr = err.Error()
 	}
 	output = TruncateToolOutput(output, r.uuid, toolCallID)
-	_ = r.writeEntry(Entry{Type: EntryToolResult, Name: name, Output: output, ToolCallID: toolCallID, Error: errStr})
+	_ = r.writeEntry(Entry{
+		Type: EntryToolResult, Name: name, Output: output, ToolCallID: toolCallID, Error: errStr,
+		Denied: denied, DurationMs: duration.Milliseconds(),
+	})
 }
 
 // RecordPlanUpdate appends a plan state change entry.

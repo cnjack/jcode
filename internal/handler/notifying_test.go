@@ -36,14 +36,14 @@ func (m *mockHandler) OnAgentText(text string) {
 	m.texts = append(m.texts, text)
 }
 
-func (m *mockHandler) OnToolCall(name, args, toolCallID string) {
+func (m *mockHandler) OnToolCall(ev ToolCallEvent) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.toolCalls = append(m.toolCalls, name)
+	m.toolCalls = append(m.toolCalls, ev.Name)
 }
 
-func (m *mockHandler) OnToolResult(name, output, toolCallID string, err error) {}
-func (m *mockHandler) OnTodoUpdate()                                           {}
+func (m *mockHandler) OnToolResult(ev ToolResultEvent) {}
+func (m *mockHandler) OnTodoUpdate()                   {}
 
 func (m *mockHandler) OnAgentStart() {}
 
@@ -219,7 +219,7 @@ func TestNotifyingHandler_Passthrough(t *testing.T) {
 	h := NewNotifyingHandler(inner, 10*time.Second)
 
 	h.OnAgentText("test")
-	h.OnToolCall("edit", "{}", "call_1")
+	h.OnToolCall(ToolCallEvent{Name: "edit", Args: "{}", ToolCallID: "call_1"})
 	h.OnAgentDone(nil)
 
 	inner.mu.Lock()

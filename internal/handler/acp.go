@@ -316,7 +316,8 @@ func parseRawInput(argsJSON string) any {
 	return obj
 }
 
-func (h *ACPHandler) OnToolCall(name, args, einoToolCallID string) {
+func (h *ACPHandler) OnToolCall(ev ToolCallEvent) {
+	name, args, einoToolCallID := ev.Name, ev.Args, ev.ToolCallID
 	id := h.nextToolCallID()
 	h.mu.Lock()
 	if einoToolCallID != "" {
@@ -379,7 +380,8 @@ func (h *ACPHandler) updateMatchedToolStatus(name, args string, status acp.ToolC
 	}
 }
 
-func (h *ACPHandler) OnToolResult(name, output, einoToolCallID string, err error) {
+func (h *ACPHandler) OnToolResult(ev ToolResultEvent) {
+	name, output, einoToolCallID, err := ev.Name, ev.Output, ev.ToolCallID, ev.Err
 	h.mu.Lock()
 	id := h.einoToACP[einoToolCallID]
 	cachedArgs := h.toolArgs[id]

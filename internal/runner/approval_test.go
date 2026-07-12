@@ -14,13 +14,13 @@ type stubHandler struct {
 	resp handler.ApprovalResponse
 }
 
-func (stubHandler) OnAgentText(string)                         {}
-func (stubHandler) OnToolCall(string, string, string)          {}
-func (stubHandler) OnToolResult(string, string, string, error) {}
-func (stubHandler) OnTodoUpdate()                              {}
-func (stubHandler) OnAgentStart()                              {}
-func (stubHandler) OnAgentDone(error)                          {}
-func (stubHandler) OnTokenUpdate(handler.TokenUsage)           {}
+func (stubHandler) OnAgentText(string)                   {}
+func (stubHandler) OnToolCall(handler.ToolCallEvent)     {}
+func (stubHandler) OnToolResult(handler.ToolResultEvent) {}
+func (stubHandler) OnTodoUpdate()                        {}
+func (stubHandler) OnAgentStart()                        {}
+func (stubHandler) OnAgentDone(error)                    {}
+func (stubHandler) OnTokenUpdate(handler.TokenUsage)     {}
 func (h stubHandler) RequestApproval(context.Context, handler.ApprovalRequest) (handler.ApprovalResponse, error) {
 	return h.resp, nil
 }

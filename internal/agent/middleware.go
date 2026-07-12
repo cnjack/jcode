@@ -43,6 +43,11 @@ func (m *approvalMiddleware) WrapInvokableToolCall(
 			}
 		}()
 
+		// Expose the LLM tool-call id to downstream layers (the approval
+		// gate keys per-call bookkeeping — denied flag, approval wait time —
+		// by this id; the ApprovalFunc signature itself carries no identity).
+		ctx = WithToolCallID(ctx, tCtx.CallID)
+
 		subSpan := telemetry.SubSpanFromContext(ctx)
 
 		// Approval gate — traced as a separate "approval" span.

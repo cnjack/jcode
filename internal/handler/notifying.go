@@ -107,12 +107,12 @@ func (h *NotifyingHandler) OnAgentText(text string) {
 	h.inner.OnAgentText(text)
 }
 
-func (h *NotifyingHandler) OnToolCall(name, args, toolCallID string) {
-	h.inner.OnToolCall(name, args, toolCallID)
+func (h *NotifyingHandler) OnToolCall(ev ToolCallEvent) {
+	h.inner.OnToolCall(ev)
 }
 
-func (h *NotifyingHandler) OnToolResult(name, output, toolCallID string, err error) {
-	h.inner.OnToolResult(name, output, toolCallID, err)
+func (h *NotifyingHandler) OnToolResult(ev ToolResultEvent) {
+	h.inner.OnToolResult(ev)
 }
 
 func (h *NotifyingHandler) OnTodoUpdate() {
