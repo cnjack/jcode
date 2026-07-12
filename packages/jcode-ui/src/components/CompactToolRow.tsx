@@ -13,44 +13,59 @@ export interface CompactToolRowProps {
 export const CompactToolRow = memo(function CompactToolRow({ tool }: CompactToolRowProps) {
   const title = tool.displayInfo?.title ?? tool.name
   const subtitle = tool.displayInfo?.subtitle ?? ''
-  const statusColor =
-    tool.status === 'error'
+  // Denied ≠ error: muted strikethrough. Awaiting approval = warning color.
+  const isDenied = !!tool.denied
+  const isAwaiting = !isDenied && !!tool.awaitingApproval && tool.status === 'running'
+  const statusColor = isAwaiting
+    ? 'var(--jcode-color-warning-fg)'
+    : !isDenied && tool.status === 'error'
       ? 'var(--jcode-color-error-fg)'
-      : tool.status === 'running'
-        ? 'var(--jcode-color-muted-foreground)'
-        : 'var(--jcode-color-muted-foreground)'
+      : 'var(--jcode-color-muted-foreground)'
 
   return (
     <div
       data-jcode-ui="" className="jcode-compact-tool-row flex min-w-0 items-center gap-1.5 py-0.5"
       data-tool-name={tool.name}
       data-tool-status={tool.status}
+      data-tool-denied={isDenied ? 'true' : undefined}
+      data-tool-awaiting-approval={isAwaiting ? 'true' : undefined}
     >
       <span
-        className={`shrink-0 text-[10px] ${tool.status === 'running' ? 'animate-pulse' : ''}`}
+        className={`shrink-0 text-[10px] ${tool.status === 'running' && !isAwaiting ? 'animate-pulse' : ''}`}
         style={{ color: statusColor }}
         aria-hidden
       >
-        {tool.status === 'running' ? '●' : tool.status === 'error' ? '✗' : '·'}
+        {isDenied ? '⊘' : tool.status === 'running' ? '●' : tool.status === 'error' ? '✗' : '·'}
       </span>
       <span
-        className="shrink-0 text-[11px] font-medium"
-        style={{ color: 'var(--jcode-color-muted-foreground)' }}
+        className={`shrink-0 text-[11px] font-medium ${isDenied ? 'line-through' : ''}`}
+        style={{
+          color: isAwaiting ? 'var(--jcode-color-warning-fg)' : 'var(--jcode-color-muted-foreground)',
+        }}
       >
         {title}
       </span>
       {subtitle && (
         <span
-          className="min-w-0 truncate font-mono text-[11px]"
-          style={{ color: 'var(--jcode-color-foreground)', opacity: 0.85 }}
+          className={`min-w-0 truncate font-mono text-[11px] ${isDenied ? 'line-through' : ''}`}
+          style={{
+            color: isDenied ? 'var(--jcode-color-muted-foreground)' : 'var(--jcode-color-foreground)',
+            opacity: 0.85,
+          }}
         >
           {subtitle}
         </span>
       )}
-      {tool.meta?.exit_code !== undefined && tool.meta.exit_code !== 0 && (
-        <span className="ml-auto shrink-0 text-[10px]" style={{ color: 'var(--jcode-color-error-fg)' }}>
-          exit {tool.meta.exit_code}
+      {isDenied ? (
+        <span className="ml-auto shrink-0 text-[10px]" style={{ color: 'var(--jcode-color-muted-foreground)' }}>
+          Denied
         </span>
+      ) : (
+        tool.meta?.exit_code !== undefined && tool.meta.exit_code !== 0 && (
+          <span className="ml-auto shrink-0 text-[10px]" style={{ color: 'var(--jcode-color-error-fg)' }}>
+            exit {tool.meta.exit_code}
+          </span>
+        )
       )}
     </div>
   )

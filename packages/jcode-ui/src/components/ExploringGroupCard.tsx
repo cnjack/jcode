@@ -1,24 +1,32 @@
 /**
  * ExploringGroupCard — compact summary for coalesced read/search/list tools.
  * Renders "Exploring" / "Explored" with action lines (Read a, b · Search …).
+ *
+ * @deprecated Superseded by ActivityGroupCard (`'activity'` items) — Thread no
+ * longer produces `'exploring'` items. Kept for external consumers that still
+ * feed them directly.
  */
 
 import { memo, useMemo, useState } from 'react'
 import { ChevronDownIcon } from '@heroicons/react/24/outline'
 import type { ExploringGroup } from 'jcode-ui-core'
-import { summarizeExploringSteps } from 'jcode-ui-core'
+import { summarizeExploringSteps, summarizeExploringCounts } from 'jcode-ui-core'
 
 export interface ExploringGroupCardProps {
   group: ExploringGroup
   className?: string
 }
 
+/** @deprecated See module note — use ActivityGroupCard for new timelines. */
 export const ExploringGroupCard = memo(function ExploringGroupCard({
   group,
   className,
 }: ExploringGroupCardProps) {
   const [expanded, setExpanded] = useState(false)
   const steps = useMemo(() => summarizeExploringSteps(group.tools), [group.tools])
+  // Category-count summary (`3 files read · 2 searches`) replaces the plain
+  // step count when the group has classifiable steps.
+  const counts = useMemo(() => summarizeExploringCounts(group.tools), [group.tools])
   const running = group.status === 'running'
   const errored = group.status === 'error'
   const label = running ? 'Exploring' : 'Explored'
@@ -50,7 +58,7 @@ export const ExploringGroupCard = memo(function ExploringGroupCard({
           className="min-w-0 truncate font-mono text-[0.72rem]"
           style={{ color: 'var(--jcode-color-foreground)', opacity: 0.88 }}
         >
-          {count} step{count === 1 ? '' : 's'}
+          {counts || `${count} step${count === 1 ? '' : 's'}`}
         </span>
         <ChevronDownIcon
           className={`h-3 w-3 shrink-0 text-[var(--jcode-color-muted-foreground)] transition-transform duration-[var(--jcode-duration-normal)] ${

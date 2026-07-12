@@ -4,7 +4,7 @@
  * etc.) but framework-correct and reusable.
  */
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRuntimeState } from '../runtime/context.js'
 
 /**
@@ -97,4 +97,31 @@ export function useFocusOnIdle<T extends HTMLElement>(isRunning: boolean) {
 export function useQueuedMessages() {
   const { queued } = useRuntimeState()
   return queued
+}
+
+/**
+ * Live elapsed milliseconds since `startedAt` (unix ms), ticking once per
+ * second while `active`. When inactive (or `startedAt` is missing) the
+ * interval is not scheduled — mount this only where a live badge is shown
+ * (e.g. a running batch row) to keep timers scarce.
+ */
+export function useElapsed(startedAt: number | undefined, active = true): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!active || !startedAt) return
+    setNow(Date.now())
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [active, startedAt])
+  if (!startedAt) return 0
+  return Math.max(0, now - startedAt)
+}
+
+/** Format elapsed/duration ms as a compact badge: `2s`, `1m 05s`. */
+export function formatElapsed(ms: number): string {
+  const totalSec = Math.floor(ms / 1000)
+  if (totalSec < 60) return `${totalSec}s`
+  const min = Math.floor(totalSec / 60)
+  const sec = totalSec % 60
+  return `${min}m ${String(sec).padStart(2, '0')}s`
 }

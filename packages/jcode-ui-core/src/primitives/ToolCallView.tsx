@@ -127,6 +127,8 @@ export function ToolCallView({
       className={className}
       data-tool-name={tool.name}
       data-tool-status={tool.status}
+      data-tool-denied={tool.denied ? 'true' : undefined}
+      data-tool-awaiting-approval={tool.awaitingApproval ? 'true' : undefined}
       data-expanded={expanded ? 'true' : 'false'}
     >
       {header}

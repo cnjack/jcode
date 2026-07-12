@@ -38,7 +38,16 @@ export { Message } from './components/Message.js'
 export { BranchPicker } from './components/BranchPicker.js'
 export { ConnectionBanner } from './components/ConnectionBanner.js'
 export { ToolCallCard } from './components/ToolCallCard.js'
+export { ActivityGroupCard } from './components/ActivityGroupCard.js'
+export type { ActivityGroupCardProps } from './components/ActivityGroupCard.js'
+export { ToolRow, ToolRowHeader } from './components/ToolRow.js'
+export type { ToolRowProps } from './components/ToolRow.js'
+// Deprecated: superseded by ActivityGroupCard — kept for external consumers.
 export { ExploringGroupCard } from './components/ExploringGroupCard.js'
+export { ToolBatchGroupCard } from './components/ToolBatchGroup.js'
+export type { ToolBatchGroupCardProps } from './components/ToolBatchGroup.js'
+export { TurnChangesCard } from './components/TurnChangesCard.js'
+export type { TurnChangesCardProps } from './components/TurnChangesCard.js'
 export { CompactToolRow } from './components/CompactToolRow.js'
 export { ApprovalBanner } from './components/ApprovalBanner.js'
 export { AskUserCard } from './components/AskUserCard.js'
@@ -81,13 +90,31 @@ export type {
   TodoItem,
   Goal,
   Role,
+  ActivityGroup,
+  ToolBatchGroup,
+  ExploringGroup,
+  TurnChangesSummary,
+  TurnFileChange,
 } from 'jcode-ui-core'
 export {
   isMessageItem,
   isToolItem,
   isApprovalItem,
+  isActivityItem,
   isExploringItem,
+  isBatchItem,
+  isTurnChangesItem,
+  groupActivityTimeline,
+  summarizeActivityCounts,
+  countActivityFlags,
   groupExploringTimeline,
+  groupToolTimeline,
   isCollapsibleTool,
   summarizeExploringSteps,
+  summarizeExploringCounts,
+  summarizeTurnChanges,
+  appendTurnChangeSummaries,
+  diffStatForTool,
+  useElapsed,
+  formatElapsed,
 } from 'jcode-ui-core'

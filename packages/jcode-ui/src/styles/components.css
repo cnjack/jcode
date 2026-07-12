@@ -771,6 +771,79 @@
   margin-left: 0.15rem;
 }
 
+/* ─── Tool batch (concurrent tool calls from one assistant message) ───
+ * A flat row stack with no group header: each row keeps the borderless
+ * toolcall header look but tighter, and expands its own body independently. */
+.jcode-toolbatch {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.jcode-toolbatch .jcode-toolbatch__row {
+  margin: 0;
+}
+.jcode-toolbatch .jcode-toolbatch__row > .jcode-toolcall__slot-header {
+  padding-top: 0.18rem;
+  padding-bottom: 0.18rem;
+}
+.jcode-toolbatch__status {
+  width: 0.85rem;
+  flex-shrink: 0;
+  text-align: center;
+  line-height: 1;
+}
+/* Chevron rotation is CSS-driven — the slot header stamps data-expanded. */
+.jcode-toolcall__slot-header[data-expanded='true'] .jcode-toolbatch__chevron {
+  transform: rotate(180deg);
+}
+
+/* ─── Activity group (ALL adjacent tool calls, Claude-Code-style) ───
+ * Collapsed: one muted summary line (chevron + status icon + category counts).
+ * Expanded: a bordered card whose rows reuse the .jcode-toolbatch row styling
+ * and expand their registry-rendered bodies in place. */
+.jcode-activity__header {
+  border-radius: var(--jcode-radius-md);
+  padding: 0.18rem 0.35rem 0.18rem 0;
+  transition:
+    background-color var(--jcode-duration-fast) var(--jcode-ease-out),
+    opacity var(--jcode-duration-fast) var(--jcode-ease-out);
+}
+.jcode-activity__header:hover {
+  background: color-mix(in srgb, var(--jcode-color-foreground) 4%, transparent);
+}
+.jcode-activity__body {
+  margin: 0.375rem 0.5rem 0.375rem 0;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--jcode-color-border);
+  border-radius: var(--jcode-radius-xl);
+  background: var(--jcode-color-surface);
+  box-shadow: var(--jcode-shadow-sm);
+  animation: jcode-scale-in var(--jcode-duration-normal) var(--jcode-ease-out) both;
+}
+.jcode-activity__body[data-tool-status='error'] {
+  border-color: color-mix(in srgb, var(--jcode-color-destructive, var(--jcode-color-error-fg)) 55%, var(--jcode-color-border));
+}
+.jcode-activity__body[data-tool-status='running'] {
+  border-color: color-mix(in srgb, var(--jcode-color-primary) 28%, var(--jcode-color-border));
+}
+
+/* ─── Turn changes (per-turn "Changed N files" summary, opencode-style) ───
+ * Header is a slim muted row; expanded file rows reuse the batch-row look
+ * (borderless slot header + independent registry-rendered diff bodies). */
+.jcode-turnchanges__files {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding-left: 0.25rem;
+}
+.jcode-turnchanges__files .jcode-turnchanges__row {
+  margin: 0;
+}
+.jcode-turnchanges__files .jcode-turnchanges__row > .jcode-toolcall__slot-header {
+  padding-top: 0.18rem;
+  padding-bottom: 0.18rem;
+}
+
 /* ─── Tool running shimmer (text gradient, matches Vue ToolCallCard) ─── */
 @keyframes jcode-shimmer-sweep {
   0% {

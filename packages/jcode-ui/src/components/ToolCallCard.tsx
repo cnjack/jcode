@@ -6,11 +6,11 @@
  * - Subagent: compact header + compact children rows + result prominence.
  */
 
-import { memo, useMemo } from 'react'
+import { memo, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { ChevronDownIcon } from '@heroicons/react/24/outline'
 import type { ToolCall } from 'jcode-ui-core'
-import { groupExploringTimeline, summarizeExploringSteps } from 'jcode-ui-core'
+import { groupToolTimeline, summarizeExploringSteps, formatElapsed } from 'jcode-ui-core'
 import { ToolCallView, ToolCallProvider } from 'jcode-ui-core/primitives'
 import type { ToolRendererRegistry } from 'jcode-ui-core/adapters'
 import { AskUserCard } from './AskUserCard.js'
@@ -107,9 +107,9 @@ function SubagentOutput({ tool }: { tool: ToolCall }) {
 
 /** Compact children: exploring-group summary when possible, else compact rows. */
 function SubagentChildren({ tools }: { tools: ToolCall[] }) {
-  // Build a mini-timeline of tool items so we can reuse exploring grouping.
+  // Build a mini-timeline of tool items so we can reuse batch/exploring grouping.
   const items = tools.map((t, i) => ({ kind: 'tool' as const, data: t, seq: i + 1 }))
-  const grouped = groupExploringTimeline(items)
+  const grouped = groupToolTimeline(items)
 
   return (
     <div className="toolcall-subagent-children" data-testid="subagent-children">
@@ -137,6 +137,10 @@ function SubagentChildren({ tools }: { tools: ToolCall[] }) {
         if (unit.kind === 'tool') {
           return <CompactToolRow key={unit.data.id} tool={unit.data} />
         }
+        if (unit.kind === 'batch') {
+          // Nested batches stay compact: one slim row per member.
+          return unit.data.tools.map((t) => <CompactToolRow key={t.id} tool={t} />)
+        }
         return null
       })}
     </div>
@@ -158,14 +162,19 @@ function ToolHeader({
   const subtitle = tool.displayInfo?.subtitle ?? ''
   const isContext = tool.displayInfo?.category === 'context'
   const isRunning = tool.status === 'running'
-  const isError = tool.status === 'error' || (tool.meta?.exit_code !== undefined && tool.meta.exit_code !== 0)
+  // Denied (user rejected at the approval prompt) is NOT an error: muted +
+  // strikethrough, never the destructive red.
+  const isDenied = !!tool.denied
+  const isAwaiting = !isDenied && !!tool.awaitingApproval && isRunning
+  const isError =
+    !isDenied && (tool.status === 'error' || (tool.meta?.exit_code !== undefined && tool.meta.exit_code !== 0))
   const diff = useMemo(() => parseDiffCount(tool), [tool])
   const exitBadge =
-    tool.name === 'execute' && tool.meta?.exit_code !== undefined
+    !isDenied && tool.name === 'execute' && tool.meta?.exit_code !== undefined
       ? `exit ${tool.meta.exit_code}`
       : null
   const durationBadge =
-    tool.meta?.duration_ms && tool.meta.duration_ms > 0
+    !isDenied && tool.meta?.duration_ms && tool.meta.duration_ms > 0
       ? tool.meta.duration_ms < 1000
         ? `${tool.meta.duration_ms}ms`
         : `${(tool.meta.duration_ms / 1000).toFixed(1)}s`
@@ -178,24 +187,44 @@ function ToolHeader({
       className="flex w-full max-w-full cursor-pointer items-center gap-1.5 bg-transparent text-left"
     >
       <span
-        className={`shrink-0 text-xs font-medium tracking-wide ${isRunning ? 'shimmer-running' : ''}`}
+        className={`shrink-0 text-xs font-medium tracking-wide ${isRunning && !isAwaiting ? 'shimmer-running' : ''} ${isDenied ? 'line-through' : ''}`}
         style={{
-          color: isError ? 'var(--jcode-color-destructive, var(--jcode-color-error-fg))' : 'var(--jcode-color-muted-foreground)',
+          color: isError
+            ? 'var(--jcode-color-destructive, var(--jcode-color-error-fg))'
+            : isAwaiting
+              ? 'var(--jcode-color-warning-fg)'
+              : 'var(--jcode-color-muted-foreground)',
         }}
       >
         {title}
       </span>
       {subtitle && (
         <span
-          className="jcode-toolcall__subtitle min-w-0 truncate font-mono text-[0.72rem]"
+          className={`jcode-toolcall__subtitle min-w-0 truncate font-mono text-[0.72rem] ${isDenied ? 'line-through' : ''}`}
           style={{
-            color: isContext
+            color: isDenied || isContext
               ? 'var(--jcode-color-muted-foreground)'
               : 'var(--jcode-color-foreground)',
             opacity: 0.88,
           }}
           dangerouslySetInnerHTML={{ __html: subtitle }}
         />
+      )}
+      {isDenied && (
+        <span
+          className="jcode-toolcall__denied shrink-0 rounded-[var(--jcode-radius-sm)] bg-[var(--jcode-color-muted)] px-1.5 py-0.5 text-[10px] font-medium"
+          style={{ color: 'var(--jcode-color-muted-foreground)' }}
+        >
+          Denied
+        </span>
+      )}
+      {isAwaiting && (
+        <span
+          className="shrink-0 font-mono text-[10px]"
+          style={{ color: 'var(--jcode-color-warning-fg)' }}
+        >
+          approval…
+        </span>
       )}
       {(exitBadge || durationBadge) && (
         <span
@@ -249,15 +278,46 @@ function SubagentHeader({
     }
   }, [tool.args])
 
-  const statusLabel =
-    tool.status === 'done' ? 'Done' : tool.status === 'error' ? 'Error' : 'Running'
+  const running = tool.status === 'running'
+  const statusLabel = tool.status === 'done' ? 'Done' : tool.status === 'error' ? 'Error' : 'Running'
   const statusColor =
     tool.status === 'done'
       ? 'var(--jcode-color-muted-foreground)'
       : tool.status === 'error'
         ? 'var(--jcode-color-destructive, var(--jcode-color-error-fg))'
         : 'var(--jcode-color-primary)'
-  const childCount = tool.children?.length ?? 0
+  const children = tool.children ?? []
+  const childCount = children.length
+
+  // Inline progress while running: the LAST running child ("↳ Read foo.go").
+  let current: ToolCall | undefined
+  if (running) {
+    for (let i = children.length - 1; i >= 0; i--) {
+      if (children[i]?.status === 'running') {
+        current = children[i]
+        break
+      }
+    }
+  }
+
+  // Finished summary duration: meta.duration_ms when the host provides it
+  // (the jcode web store merges the event duration in for every tool); else
+  // freeze `now - startedAt` once at the running→done transition we observed.
+  const sawRunning = useRef(running)
+  const frozenMs = useRef<number | undefined>(undefined)
+  if (running) {
+    sawRunning.current = true
+  } else if (sawRunning.current && frozenMs.current === undefined && tool.startedAt) {
+    frozenMs.current = Date.now() - tool.startedAt
+  }
+  const durationMs = tool.meta?.duration_ms ?? frozenMs.current
+
+  const doneSummary =
+    !running && childCount > 0
+      ? `${childCount} toolcall${childCount === 1 ? '' : 's'}${
+          durationMs !== undefined && durationMs > 0 ? ` · ${formatElapsed(durationMs)}` : ''
+        }`
+      : null
 
   return (
     <button
@@ -276,23 +336,35 @@ function SubagentHeader({
         Agent
       </span>
       <span
-        className={`min-w-0 truncate text-[12px] font-medium ${tool.status === 'running' ? 'shimmer-running' : ''}`}
+        className={`min-w-0 shrink-[2] truncate text-[12px] font-medium ${running ? 'shimmer-running' : ''}`}
         style={{ color: 'var(--jcode-color-foreground)' }}
       >
         {name}
       </span>
-      <span
-        className={`shrink-0 text-[10px] ${tool.status === 'running' ? 'animate-pulse' : ''}`}
-        style={{ color: statusColor }}
-      >
-        {statusLabel}
-      </span>
-      {childCount > 0 && (
+      {current ? (
         <span
-          className="ml-auto text-[10px] tabular-nums"
+          className="shimmer-running min-w-0 truncate text-[11px]"
           style={{ color: 'var(--jcode-color-muted-foreground)' }}
+          data-testid="subagent-current"
         >
-          {childCount} step{childCount === 1 ? '' : 's'}
+          ↳ {current.displayInfo?.title ?? current.name}
+          {current.displayInfo?.subtitle ? ` ${current.displayInfo.subtitle}` : ''}
+        </span>
+      ) : (
+        <span
+          className={`shrink-0 text-[10px] ${running ? 'animate-pulse' : ''}`}
+          style={{ color: statusColor }}
+        >
+          {statusLabel}
+        </span>
+      )}
+      {doneSummary && (
+        <span
+          className="ml-auto shrink-0 text-[10px] tabular-nums"
+          style={{ color: 'var(--jcode-color-muted-foreground)' }}
+          data-testid="subagent-summary"
+        >
+          {doneSummary}
         </span>
       )}
       <ChevronDownIcon

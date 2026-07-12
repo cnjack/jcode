@@ -117,6 +117,10 @@ export function exportThreadMarkdown(items: ThreadItem[], opts: ExportMarkdownOp
       case 'exploring':
         out.push(renderExploring(item.data, maxOutput))
         break
+      case 'batch':
+        // Batches are UI-only grouping — export each member as a plain tool.
+        for (const t of item.data.tools) out.push(renderTool(t, maxOutput))
+        break
     }
   }
   return out.join('\n\n') + '\n'

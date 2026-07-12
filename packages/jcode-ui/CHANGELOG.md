@@ -1,5 +1,103 @@
 # Changelog
 
+## 0.4.1 — 2026-07-13
+
+Republish of 0.4.0 with correct dependency metadata (0.4.0 was published
+with npm and shipped a literal `workspace:*` dependency — BROKEN on npm,
+use 0.4.1). No code changes.
+
+Activity groups — Claude Code / Codex-style collapsed tool timeline:
+
+- **ActivityGroupCard** — ALL adjacent tool calls now coalesce into one
+  activity group. Once every member settles it collapses to a single muted
+  line: chevron + status icon + category counts (`Ran 3 commands · read 2
+  files · ran 1 agent`; all-read-only groups show `Explored` + `3 files read
+  · 2 searches`). Failures stay visible collapsed (error icon + `N failed`);
+  denied members append a muted `N denied`. Expanded it is a bordered card
+  with one row per tool (icon + title + mono subtitle + elapsed/exit badge)
+  where each row expands IN PLACE to the tool's registry-rendered body
+  (diff/shell/subagent renderers) — no duplicate summary list anywhere.
+  Expansion follows `userOverride ?? (status === 'running')`: auto-open while
+  anything runs (live elapsed rows), auto-collapse when the group settles,
+  manual toggles win from then on.
+- **ToolRow / ToolRowHeader** — the batch row implementation extracted from
+  ToolBatchGroupCard into a shared component; activity groups and batches
+  render the same row.
+- **Thread** now maps items through `groupActivityTimeline` (batches
+  absorbed) and no longer produces `'exploring'`/`'batch'` items; both render
+  branches remain for hosts that feed those kinds directly.
+- **Deprecated** (kept + exported): `ExploringGroupCard`,
+  `ToolBatchGroupCard`.
+- New re-exports from core: `isActivityItem`, `groupActivityTimeline`,
+  `summarizeActivityCounts`, `countActivityFlags`, and the `ActivityGroup`
+  type.
+- CSS: new `.jcode-activity` family (header hover, bordered
+  `.jcode-activity__body` reusing the `.jcode-toolbatch` row styles), built
+  entirely from existing `--jcode-*` tokens.
+
+Turn-level change summary card (opencode SessionTurn-style):
+
+- **TurnChangesCard** — after a turn completes, a slim `Changed N files`
+  header (with a green/red `+A −R` badge when line counts are derivable)
+  summarizes the turn's file changes. Expanded, it lists one row per file
+  (deduped, last change wins) with per-file ± counts; clicking a row expands
+  that change's registry-rendered body (diff/file renderers apply) via the
+  same ToolCallCard slot-header path batch rows use. Files beyond 10 collapse
+  behind an expandable `… N more`.
+- **Thread** appends the summaries automatically
+  (`appendTurnChangeSummaries` after `groupToolTimeline`); nothing is shown
+  while the turn still has running tools or the agent is working.
+
+Subagent inline progress:
+
+- **ToolCallCard** subagent header now shows `↳ <current tool> <subtitle>`
+  (last running child, shimmer animation) while running, and
+  `N toolcalls · <duration>` once finished (duration from `meta.duration_ms`
+  when the host provides it — the jcode web store merges the runner-measured
+  event duration for every tool — else frozen from `startedAt` at the
+  running→done transition; omitted when unknown).
+- Re-exports from core: `isTurnChangesItem`, `summarizeTurnChanges`,
+  `appendTurnChangeSummaries`, `diffStatForTool`, and the
+  `TurnChangesSummary` / `TurnFileChange` types.
+
+## 0.3.0 — 2026-07 (with jcode-ui-core 0.3.0)
+
+Concurrent tool-call batch groups (Claude-Code-style):
+
+- **ToolBatchGroupCard** — new component for tools issued concurrently by one
+  assistant message (same `batchId`). Mixed batches render as a flat row
+  stack with no group header: each row shows a status icon (● running with
+  pulse / ✓ done / ✗ error), the tool title, a mono subtitle, a right-side
+  elapsed badge, and expands independently to the tool's registry-rendered
+  body (diff/shell renderers apply). Running rows tick a live elapsed badge
+  (`2s`, `1m 05s`); finished rows show a duration only beyond 2s
+  (`meta.duration_ms` preferred); error rows add `exit N` in the error color.
+- **Thread** now groups via `groupToolTimeline` (batch + exploring). Tools
+  without a `batchId` (old sessions/replay) behave exactly as before.
+- **ExploringGroupCard** header upgraded to a category-count summary
+  (`3 files read · 2 searches · 1 list`); merged Read lines dedupe file names.
+  All-read/search/list batches render as this upgraded Exploring card.
+- Subagent children lists handle batch groups (compact rows); markdown export
+  expands batches into per-tool entries.
+- Re-exports from core: `isBatchItem`, `groupToolTimeline`,
+  `summarizeExploringCounts`, `useElapsed`, `formatElapsed`, and the
+  `ToolBatchGroup` / `ExploringGroup` types.
+
+Approval semantics (opencode/codex-inspired):
+
+- **Denied ≠ error** — a tool call the user rejected at the approval prompt
+  (`tool.denied`) renders with a struck-through, muted title/subtitle, a
+  neutral `Denied` badge, and a `⊘` status glyph. It never uses the
+  destructive/error red. Applied consistently in `ToolCallCard`,
+  `ToolBatchGroupCard` rows, and `CompactToolRow`.
+- **Awaiting approval = warning yellow** — while a call sits at an unresolved
+  approval prompt (`tool.awaitingApproval`), its title/status glyph switch to
+  `--jcode-color-warning-fg`, the shimmer/pulse pauses, and the live elapsed
+  badge is replaced with `approval…` (the backend excludes approval wait from
+  the reported duration, so timers effectively pause during approval).
+- `data-tool-denied` / `data-tool-awaiting-approval` attributes (from core's
+  `ToolCallView`, mirrored on `CompactToolRow`) for external customization.
+
 ## 0.2.3 — 2026-07
 
 Republish of 0.2.2, which was again published with npm and shipped the literal

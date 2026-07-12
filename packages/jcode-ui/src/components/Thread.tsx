@@ -2,7 +2,10 @@
  * Thread — styled conversation container (wraps the headless Thread primitive).
  *
  * Wires up the per-kind renderers (Message / ToolCallCard / ApprovalBanner /
- * ExploringGroupCard), applying exploring-group coalescing via mapItems.
+ * ActivityGroupCard / TurnChangesCard), coalescing ALL adjacent tools into
+ * activity groups via mapItems (groupActivityTimeline). The legacy
+ * exploring/batch branches remain for external hosts that feed those kinds
+ * directly — Thread itself no longer produces them.
  */
 
 import { useCallback, type ReactNode } from 'react'
@@ -12,14 +15,21 @@ import {
   isMessageItem,
   isToolItem,
   isApprovalItem,
+  isActivityItem,
   isExploringItem,
-  groupExploringTimeline,
+  isBatchItem,
+  isTurnChangesItem,
+  groupActivityTimeline,
+  appendTurnChangeSummaries,
 } from 'jcode-ui-core'
 import type { ThreadItem } from 'jcode-ui-core'
 import { Message } from './Message.js'
 import { ToolCallCard } from './ToolCallCard.js'
 import { ApprovalBanner } from './ApprovalBanner.js'
+import { ActivityGroupCard } from './ActivityGroupCard.js'
 import { ExploringGroupCard } from './ExploringGroupCard.js'
+import { ToolBatchGroupCard } from './ToolBatchGroup.js'
+import { TurnChangesCard } from './TurnChangesCard.js'
 
 export interface ThreadProps {
   /** Disable virtualization (short/replay timelines). Default true. */
@@ -46,7 +56,13 @@ export function Thread({
   overscanBottom,
 }: ThreadProps): ReactNode {
   const { isRunning } = useRuntimeState()
-  const mapItems = useCallback((items: ThreadItem[]) => groupExploringTimeline(items), [])
+  // Activity coalescing (batches absorbed, ALL adjacent tools grouped), then
+  // per-turn "Changed N files" summaries (the last turn stays summary-free
+  // while the agent is working).
+  const mapItems = useCallback(
+    (items: ThreadItem[]) => appendTurnChangeSummaries(groupActivityTimeline(items), { isRunning }),
+    [isRunning],
+  )
 
   return (
     <ThreadPrimitive
@@ -79,10 +95,32 @@ function renderItem(item: ThreadItem, isRunning: boolean): ReactNode {
       />
     )
   }
+  if (isActivityItem(item)) {
+    return (
+      <div className="jcode-chat-col">
+        <ActivityGroupCard group={item.data} className="jcode-gutter" />
+      </div>
+    )
+  }
+  // Legacy kinds — Thread no longer produces them; kept for hosts that do.
   if (isExploringItem(item)) {
     return (
       <div className="jcode-chat-col">
         <ExploringGroupCard group={item.data} className="jcode-gutter" />
+      </div>
+    )
+  }
+  if (isBatchItem(item)) {
+    return (
+      <div className="jcode-chat-col">
+        <ToolBatchGroupCard group={item.data} className="jcode-gutter" />
+      </div>
+    )
+  }
+  if (isTurnChangesItem(item)) {
+    return (
+      <div className="jcode-chat-col">
+        <TurnChangesCard summary={item.data} className="jcode-gutter" />
       </div>
     )
   }

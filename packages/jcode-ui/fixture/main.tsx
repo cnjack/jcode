@@ -95,7 +95,8 @@ const items: ThreadItem[] = [
     data: {
       id: 'm1',
       role: 'assistant',
-      content: '### Exploring group\nAdjacent read/search tools collapse into one summary.',
+      content:
+        '### Activity group — explorative (collapsed)\nAdjacent read/search tools collapse into one `Explored` line; click to expand the bordered row card.',
       timestamp: Date.now(),
     },
   },
@@ -211,6 +212,169 @@ const items: ThreadItem[] = [
   },
   {
     kind: 'message',
+    seq: 20,
+    data: {
+      id: 'm-batch',
+      role: 'assistant',
+      content:
+        '### Activity group — running (auto-expanded)\nThree parallel shells (same batchId): 2 done + 1 running with a live elapsed row. Header shows `Running…`; the card auto-collapses once everything settles.',
+      timestamp: Date.now(),
+    },
+  },
+  {
+    kind: 'tool',
+    seq: 21,
+    data: tool({
+      id: 'batch-1',
+      name: 'execute',
+      args: JSON.stringify({ command: 'go build ./...', description: 'Build all packages' }),
+      status: 'done',
+      batchId: 'batch-demo',
+      batchIndex: 0,
+      batchSize: 3,
+      startedAt: Date.now() - 9000,
+      displayInfo: { title: 'Shell', subtitle: 'go build ./...', category: 'execution', kind: 'shell' },
+      streams: { stdout: 'ok', stderr: '', aggregated: 'ok' },
+      meta: { exit_code: 0, duration_ms: 3200 },
+      displayOutput: 'ok',
+    }),
+  },
+  {
+    kind: 'tool',
+    seq: 22,
+    data: tool({
+      id: 'batch-2',
+      name: 'execute',
+      args: JSON.stringify({ command: 'go vet ./...', description: 'Vet all packages' }),
+      status: 'done',
+      batchId: 'batch-demo',
+      batchIndex: 1,
+      batchSize: 3,
+      startedAt: Date.now() - 9000,
+      displayInfo: { title: 'Shell', subtitle: 'go vet ./...', category: 'execution', kind: 'shell' },
+      streams: { stdout: 'ok', stderr: '', aggregated: 'ok' },
+      meta: { exit_code: 0, duration_ms: 2600 },
+      displayOutput: 'ok',
+    }),
+  },
+  {
+    kind: 'tool',
+    seq: 23,
+    data: tool({
+      id: 'batch-3',
+      name: 'execute',
+      args: JSON.stringify({ command: 'go test ./...', description: 'Run all tests' }),
+      status: 'running',
+      batchId: 'batch-demo',
+      batchIndex: 2,
+      batchSize: 3,
+      startedAt: Date.now() - 65000,
+      displayInfo: { title: 'Shell', subtitle: 'go test ./...', category: 'execution', kind: 'shell' },
+    }),
+  },
+  {
+    kind: 'message',
+    seq: 24,
+    data: {
+      id: 'm-activity-done',
+      role: 'assistant',
+      content:
+        '### Activity group — completed mixed (collapsed)\nOne muted line `Ran 1 command · read 1 file · edited 1 file`; expand it, then click a row to open that tool\'s full body (diff/terminal renderers) in place.',
+      timestamp: Date.now(),
+    },
+  },
+  {
+    kind: 'tool',
+    seq: 25,
+    data: tool({
+      id: 'act-shell',
+      name: 'execute',
+      args: JSON.stringify({ command: 'pnpm -r build', description: 'Build workspace' }),
+      status: 'done',
+      displayInfo: { title: 'Shell', subtitle: 'pnpm -r build', category: 'execution', kind: 'shell' },
+      streams: { stdout: 'packages built: 3', stderr: '', aggregated: 'packages built: 3' },
+      meta: { exit_code: 0, duration_ms: 5200 },
+      displayOutput: 'packages built: 3',
+    }),
+  },
+  {
+    kind: 'tool',
+    seq: 26,
+    data: tool({
+      id: 'act-read',
+      name: 'read',
+      args: JSON.stringify({ file_path: 'src/registry.ts' }),
+      displayInfo: { title: 'Read', subtitle: 'src/registry.ts', category: 'context', kind: 'read', collapsible: true },
+      output: "export const registry = new Map<string, Renderer>()",
+      displayOutput: "export const registry = new Map<string, Renderer>()",
+    }),
+  },
+  {
+    kind: 'tool',
+    seq: 27,
+    data: tool({
+      id: 'act-edit',
+      name: 'edit',
+      args: JSON.stringify({
+        file_path: 'src/registry.ts',
+        old_string: 'export const registry = new Map<string, Renderer>()',
+        new_string: "export const registry = new Map<string, Renderer>()\nregistry.set('diff', DiffRenderer)",
+      }),
+      displayInfo: { title: 'Edit', subtitle: 'src/registry.ts', category: 'mutation', kind: 'edit' },
+    }),
+  },
+  {
+    kind: 'message',
+    seq: 28,
+    data: {
+      id: 'm-activity-err',
+      role: 'assistant',
+      content:
+        '### Activity group — failure visible while collapsed\nError icon + `1 failed` (and a muted `1 denied`) stay on the collapsed line.',
+      timestamp: Date.now(),
+    },
+  },
+  {
+    kind: 'tool',
+    seq: 29,
+    data: tool({
+      id: 'err-shell-1',
+      name: 'execute',
+      args: JSON.stringify({ command: 'go vet ./...', description: 'Vet all packages' }),
+      status: 'error',
+      displayInfo: { title: 'Shell', subtitle: 'go vet ./...', category: 'execution', kind: 'shell' },
+      streams: { stdout: '', stderr: 'vet: internal/tools/execute.go:12: unused variable', aggregated: 'vet: unused variable' },
+      meta: { exit_code: 1, duration_ms: 2600 },
+      displayOutput: 'vet: internal/tools/execute.go:12: unused variable',
+    }),
+  },
+  {
+    kind: 'tool',
+    seq: 29.2,
+    data: tool({
+      id: 'err-shell-2',
+      name: 'execute',
+      args: JSON.stringify({ command: 'gofmt -l .', description: 'Check formatting' }),
+      status: 'done',
+      displayInfo: { title: 'Shell', subtitle: 'gofmt -l .', category: 'execution', kind: 'shell' },
+      streams: { stdout: '', stderr: '', aggregated: '' },
+      meta: { exit_code: 0, duration_ms: 300 },
+    }),
+  },
+  {
+    kind: 'tool',
+    seq: 29.4,
+    data: tool({
+      id: 'err-denied',
+      name: 'execute',
+      args: JSON.stringify({ command: 'rm -rf dist', description: 'Clean dist' }),
+      status: 'done',
+      denied: true,
+      displayInfo: { title: 'Shell', subtitle: 'rm -rf dist', category: 'execution', kind: 'shell' },
+    }),
+  },
+  {
+    kind: 'message',
     seq: 12,
     data: {
       id: 'm4',
@@ -227,6 +391,7 @@ const items: ThreadItem[] = [
       name: 'subagent',
       args: JSON.stringify({ name: 'explore', description: 'Map tool output dual-channel' }),
       status: 'done',
+      meta: { duration_ms: 42000 },
       displayInfo: { title: 'Subagent', subtitle: 'Map tool output dual-channel', kind: 'agent' },
       children: [
         tool({
@@ -254,6 +419,121 @@ const items: ThreadItem[] = [
       ],
       displayOutput: 'Found dual-channel `BuildExecResult` + exploring groups in the timeline.\n\n- Model string keeps STDOUT/STDERR labels\n- UI uses streams/meta',
     }),
+  },
+  {
+    kind: 'message',
+    seq: 14,
+    data: {
+      id: 'm-sa-running',
+      role: 'assistant',
+      content: '### Subagent inline progress (running)\nHeader shows `↳ current tool` while a child is running.',
+      timestamp: Date.now(),
+    },
+  },
+  {
+    kind: 'tool',
+    seq: 15,
+    data: tool({
+      id: 'sa2',
+      name: 'subagent',
+      args: JSON.stringify({ name: 'fix', description: 'Fix the flaky retry test' }),
+      status: 'running',
+      startedAt: Date.now() - 23000,
+      displayInfo: { title: 'Subagent', subtitle: 'Fix the flaky retry test', kind: 'agent' },
+      children: [
+        tool({
+          id: 'sb1',
+          name: 'read',
+          displayInfo: { title: 'Read', subtitle: 'retry_test.go', category: 'context', kind: 'read', collapsible: true },
+        }),
+        tool({
+          id: 'sb2',
+          name: 'execute',
+          status: 'running',
+          args: JSON.stringify({ command: 'go test ./internal/retry -run Flaky' }),
+          displayInfo: { title: 'Shell', subtitle: 'go test ./internal/retry', kind: 'shell', collapsible: false },
+        }),
+      ],
+    }),
+  },
+  // ─── Turn-changes demo: a user turn with edits/writes; the Thread inserts
+  // a "Changed N files (+A −R)" summary card at the end of the turn. ───
+  {
+    kind: 'message',
+    seq: 30,
+    data: {
+      id: 'u-turn',
+      role: 'user',
+      content: 'Apply the config refactor (turn-changes demo).',
+      timestamp: Date.now(),
+    },
+  },
+  {
+    kind: 'tool',
+    seq: 31,
+    data: tool({
+      id: 'tc-edit-1',
+      name: 'edit',
+      args: JSON.stringify({
+        file_path: 'src/config.ts',
+        old_string: "export const config = load('legacy')",
+        new_string: "import { schema } from './config.schema.js'\n\nexport const config = load('v2', schema)",
+      }),
+      displayInfo: { title: 'Edit', subtitle: 'src/config.ts', category: 'mutation', kind: 'edit' },
+    }),
+  },
+  {
+    kind: 'tool',
+    seq: 32,
+    data: tool({
+      id: 'tc-write-1',
+      name: 'write',
+      args: JSON.stringify({
+        file_path: 'src/config.schema.json',
+        content: '{\n  "$schema": "https://json-schema.org/draft-07/schema",\n  "type": "object",\n  "required": ["port"]\n}',
+      }),
+      displayInfo: { title: 'Write', subtitle: 'src/config.schema.json', category: 'mutation', kind: 'edit' },
+    }),
+  },
+  {
+    kind: 'tool',
+    seq: 33,
+    data: tool({
+      id: 'tc-edit-2',
+      name: 'edit',
+      args: JSON.stringify({
+        file_path: 'src/config.ts',
+        old_string: "load('v2', schema)",
+        new_string: "load('v2', schema) // validated",
+      }),
+      displayInfo: { title: 'Edit', subtitle: 'src/config.ts', category: 'mutation', kind: 'edit' },
+    }),
+  },
+  {
+    kind: 'tool',
+    seq: 34,
+    data: tool({
+      id: 'tc-multi-1',
+      name: 'multi_edit',
+      args: JSON.stringify({
+        file_path: 'src/server.ts',
+        edits: [
+          { old_string: 'const port = 3000', new_string: 'const port = config.port' },
+          { old_string: 'app.listen(3000)', new_string: 'app.listen(port)\nlog.info({ port })' },
+        ],
+      }),
+      displayInfo: { title: 'Multi Edit', subtitle: 'src/server.ts', category: 'mutation', kind: 'edit' },
+    }),
+  },
+  {
+    kind: 'message',
+    seq: 35,
+    data: {
+      id: 'a-turn',
+      role: 'assistant',
+      content: 'Config refactor applied — schema extracted and the server now reads `config.port`.',
+      timestamp: Date.now(),
+    },
   },
 ]
 
@@ -379,10 +659,13 @@ function App() {
 createRoot(document.getElementById('root')!).render(<App />)
 
 // Expand terminal + subagent + P5 demo cards after mount for screenshots.
+// Rows inside activity groups are left alone — collapsed groups must stay a
+// single line, and the running group's live rows stay headers-only.
 setTimeout(() => {
   const expandNames = new Set(['execute', 'subagent', 'list_dir', 'go_test', 'panic'])
   document.querySelectorAll<HTMLButtonElement>('.jcode-toolcall > button').forEach((btn) => {
     const card = btn.closest('.jcode-toolcall')
+    if (card?.closest('.jcode-activity')) return
     const name = card?.getAttribute('data-tool-name')
     if (name && expandNames.has(name)) {
       if (card?.getAttribute('data-expanded') !== 'true') btn.click()

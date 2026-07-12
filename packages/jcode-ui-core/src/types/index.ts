@@ -142,6 +142,12 @@ export interface ToolCall {
   displayOutput?: string
   error?: string
   status: ToolStatus
+  /** User rejected this call at the approval prompt. Rendered struck-through
+   *  and muted (declined ≠ failed) — status stays 'done', not 'error'. */
+  denied?: boolean
+  /** True while this call sits at an unresolved approval prompt. Rendered in
+   *  the warning color; cleared when the approval resolves or a result lands. */
+  awaitingApproval?: boolean
   timestamp: number
   displayInfo?: ToolDisplayInfo
   /** Nested tool calls (subagent inner calls). */
@@ -156,16 +162,61 @@ export interface ToolCall {
   meta?: ToolMeta
   /** Dual-channel presentation (execute). */
   presentation?: ToolPresentation
+  /** Concurrent-batch id — tools issued together by one assistant message
+   *  share it and coalesce into a `ToolBatchGroup` row stack. */
+  batchId?: string
+  /** 0-based position within the batch. */
+  batchIndex?: number
+  /** Total number of tools in the batch. */
+  batchSize?: number
+  /** Wall-clock start (unix ms) — drives the live elapsed badge while running. */
+  startedAt?: number
+}
+
+/**
+ * A UI-only group of ADJACENT tool calls in the timeline (adjacent = no
+ * assistant/user message in between; approvals do NOT break adjacency and
+ * render in place). Collapsed (all members settled) it shows one category-
+ * count header line; expanded it is a bordered row-stack card whose rows
+ * expand in place to each tool's registry-rendered body. Supersedes the
+ * `exploring` and `batch` kinds. Does not change model-facing boundaries.
+ */
+export interface ActivityGroup {
+  id: string
+  tools: ToolCall[]
+  status: ToolStatus
+  /** True when ALL tools are read-only (per `isCollapsibleTool`). */
+  explorative: boolean
 }
 
 /**
  * A UI-only coalesced group of collapsible read/search/list tool calls.
  * Does not change model-facing tool boundaries.
+ * @deprecated Superseded by {@link ActivityGroup} (`'activity'` items). Kept
+ * for external consumers that still feed `'exploring'` items to `Thread`.
  */
 export interface ExploringGroup {
   id: string
   tools: ToolCall[]
   status: ToolStatus
+}
+
+/**
+ * A UI-only group of tool calls issued concurrently by one assistant message
+ * (same `batchId`). Rendered as a stacked status-row list; when every member
+ * is a collapsible read/search/list tool (`explorative`) it renders as an
+ * upgraded Exploring card instead. Does not change model-facing boundaries.
+ * @deprecated Superseded by {@link ActivityGroup} (`'activity'` items) — batch
+ * members now coalesce into activity groups. Kept for external consumers that
+ * still feed `'batch'` items to `Thread`.
+ */
+export interface ToolBatchGroup {
+  id: string
+  batchId: string
+  tools: ToolCall[]
+  status: ToolStatus
+  /** True when ALL tools are collapsible (read/search/list). */
+  explorative: boolean
 }
 
 /** An option in an `ask_user` question. */
@@ -216,6 +267,9 @@ export interface Approval {
   id: string
   tool_name: string
   tool_args: string
+  /** Backend tool_call_id of the gated call — lets the host mark the exact
+   *  pending tool row as awaiting approval (warning color). */
+  tool_call_id?: string
   /** Target outside the workspace root — UI flags it prominently. */
   is_external: boolean
   resolved?: boolean
@@ -228,8 +282,45 @@ export interface Approval {
   resolvedOptionId?: string
 }
 
-/** Built-in thread-item kinds (exploring is UI-only coalescing). */
-export type ThreadItemKind = 'message' | 'tool' | 'approval' | 'exploring'
+/**
+ * One changed file inside a turn-changes summary. `added`/`removed` are
+ * client-derived line counts (absent when the tool args carry no diff text);
+ * `tool` is the LAST call that touched the file, kept so the UI can expand
+ * its registry-rendered diff body.
+ */
+export interface TurnFileChange {
+  path: string
+  added?: number
+  removed?: number
+  tool: ToolCall
+}
+
+/**
+ * A UI-only per-turn summary of file changes (opencode SessionTurn-style):
+ * "Changed N files (+A −R)" inserted at the end of a completed turn.
+ * `files` holds up to the display cap; `overflow` the rest ("… N more").
+ */
+export interface TurnChangesSummary {
+  id: string
+  /** Total distinct files changed this turn (files + overflow). */
+  fileCount: number
+  files: TurnFileChange[]
+  overflow: TurnFileChange[]
+  totalAdded: number
+  totalRemoved: number
+  /** True when at least one file has derived ± line counts. */
+  hasLineCounts: boolean
+}
+
+/** Built-in thread-item kinds (activity/exploring/batch/turnchanges are UI-only coalescing). */
+export type ThreadItemKind =
+  | 'message'
+  | 'tool'
+  | 'approval'
+  | 'activity'
+  | 'exploring'
+  | 'batch'
+  | 'turnchanges'
 
 /**
  * The discriminated union rendered by `Thread`. A `seq` counter keeps DOM
@@ -239,7 +330,10 @@ export type ThreadItem =
   | { kind: 'message'; data: Message; seq: number }
   | { kind: 'tool'; data: ToolCall; seq: number }
   | { kind: 'approval'; data: Approval; seq: number }
+  | { kind: 'activity'; data: ActivityGroup; seq: number }
   | { kind: 'exploring'; data: ExploringGroup; seq: number }
+  | { kind: 'batch'; data: ToolBatchGroup; seq: number }
+  | { kind: 'turnchanges'; data: TurnChangesSummary; seq: number }
 
 /** Type guard helpers (kept generic so consumers can narrow item arrays). */
 export function isMessageItem(i: ThreadItem): i is Extract<ThreadItem, { kind: 'message' }> {
@@ -251,8 +345,17 @@ export function isToolItem(i: ThreadItem): i is Extract<ThreadItem, { kind: 'too
 export function isApprovalItem(i: ThreadItem): i is Extract<ThreadItem, { kind: 'approval' }> {
   return i.kind === 'approval'
 }
+export function isActivityItem(i: ThreadItem): i is Extract<ThreadItem, { kind: 'activity' }> {
+  return i.kind === 'activity'
+}
 export function isExploringItem(i: ThreadItem): i is Extract<ThreadItem, { kind: 'exploring' }> {
   return i.kind === 'exploring'
+}
+export function isBatchItem(i: ThreadItem): i is Extract<ThreadItem, { kind: 'batch' }> {
+  return i.kind === 'batch'
+}
+export function isTurnChangesItem(i: ThreadItem): i is Extract<ThreadItem, { kind: 'turnchanges' }> {
+  return i.kind === 'turnchanges'
 }
 
 /** A message composed while the agent is running; drained turn-by-turn. */
