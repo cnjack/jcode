@@ -25,6 +25,10 @@ func (m *Model) View() tea.View {
 		m.observeViewRender(time.Since(viewStart))
 	}()
 
+	if m.showingTranscript {
+		return m.newView(m.transcriptView())
+	}
+
 	if m.showingHelp {
 		return m.newView(m.helpPanelView())
 	}

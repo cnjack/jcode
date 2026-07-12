@@ -34,6 +34,11 @@ func ConvertSessionEntries(entries []session.Entry) []SessionEntry {
 			ToolCallID:   e.ToolCallID,
 			SubagentName: e.SubagentName,
 			SubagentType: e.SubagentType,
+			// Tool-call batch fields
+			BatchID:    e.BatchID,
+			BatchIndex: e.BatchIndex,
+			BatchSize:  e.BatchSize,
+			Denied:     e.Denied,
 			// Plan fields
 			PlanStatus:  e.PlanStatus,
 			PlanTitle:   e.PlanTitle,

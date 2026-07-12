@@ -58,10 +58,15 @@ func (m *Model) toggleSubagentExpand() {
 	startIdx := 0
 	for i, cl := range m.lines {
 		var n int
-		if cl.tool != nil {
+		switch {
+		case cl.tool != nil:
 			// Tool results are multi-line boxes; estimate conservatively.
 			n = maxRenderedLines(cl.tool, m.contentWidth())
-		} else {
+		case cl.group != nil:
+			// Live form: header + one row per member; collapsed: one row.
+			// Overestimating slightly is fine for scroll mapping.
+			n = len(cl.group.members) + 1
+		default:
 			n = strings.Count(cl.text, "\n") + 1
 		}
 		if lineCount+n > topRenderedLine {
@@ -95,19 +100,175 @@ func (m *Model) toggleSubagentExpand() {
 	}
 }
 
+// toolLineRef locates the timeline line of an announced tool call so its
+// result can flip the status icon precisely by toolCallID.
+type toolLineRef struct {
+	idx     int    // index into m.lines (append-only during a run)
+	batchID string // non-empty when the call belongs to a BatchSize>1 batch
+}
+
+// batchLineState tracks a batch header line ("⏺ Running N tools") until all
+// members of the batch have reported a result.
+type batchLineState struct {
+	headerIdx int // index of the header line in m.lines
+	size      int
+	done      int
+	failed    int
+}
+
+// replaceToolIconAt flips the status icon on the tool line at idx and appends
+// suffix (e.g. a dimmed duration) to the line. It returns false when idx no
+// longer points at a running/pending tool line — cleared history, view swap —
+// so the caller can fall back to replaceLastToolIcon.
+func (m *Model) replaceToolIconAt(idx int, newIcon, suffix string) bool {
+	if idx < 0 || idx >= len(m.lines) {
+		return false
+	}
+	text := m.lines[idx].text
+	var replaced string
+	switch {
+	case strings.Contains(text, toolIconRunning):
+		replaced = strings.Replace(text, toolIconRunning, newIcon, 1)
+	case strings.Contains(text, toolIconPending):
+		replaced = strings.Replace(text, toolIconPending, newIcon, 1)
+	default:
+		return false
+	}
+	m.lines[idx] = contentLine{text: replaced + suffix}
+	return true
+}
+
 // replaceLastToolIcon replaces the status icon on the last tool call line.
-func (m *Model) replaceLastToolIcon(newIcon string) {
+// Fallback for results without a toolCallID (legacy replays); results that
+// carry an ID flip their exact line via replaceToolIconAt instead.
+func (m *Model) replaceLastToolIcon(newIcon, suffix string) {
 	for i := len(m.lines) - 1; i >= 0; i-- {
-		line := m.lines[i]
-		if strings.Contains(line.text, toolIconRunning) {
-			m.lines[i] = contentLine{text: strings.Replace(line.text, toolIconRunning, newIcon, 1)}
-			return
-		}
-		if strings.Contains(line.text, toolIconPending) {
-			m.lines[i] = contentLine{text: strings.Replace(line.text, toolIconPending, newIcon, 1)}
+		if m.replaceToolIconAt(i, newIcon, suffix) {
 			return
 		}
 	}
+}
+
+// completeBatchMember records one finished member of a tool-call batch and,
+// once every member has reported, flips the batch header line in place:
+// all succeeded → "✓ Ran N tools", any failure → "✗ Ran N tools".
+func (m *Model) completeBatchMember(batchID string, failed bool) {
+	if batchID == "" {
+		return
+	}
+	st, ok := m.batchLines[batchID]
+	if !ok {
+		return
+	}
+	st.done++
+	if failed {
+		st.failed++
+	}
+	if st.done < st.size {
+		return
+	}
+	delete(m.batchLines, batchID)
+	icon := toolIconSuccess
+	if st.failed > 0 {
+		icon = toolIconError
+	}
+	// Rebuild the header in place, but only if the line still is the running
+	// header (history may have been cleared or swapped mid-batch).
+	if st.headerIdx < 0 || st.headerIdx >= len(m.lines) ||
+		!strings.Contains(m.lines[st.headerIdx].text, toolIconRunning) {
+		return
+	}
+	m.lines[st.headerIdx] = contentLine{text: fmt.Sprintf("  %s %s",
+		icon,
+		toolNameStyle.Render(fmt.Sprintf("Ran %d tools", st.size)),
+	)}
+}
+
+// resetToolLineTracking drops all toolCallID→line, batch header, and
+// activity-group tracking. Call it whenever m.lines is rebuilt wholesale
+// (e.g. session resume) so stale references can never mutate an unrelated
+// line or group.
+func (m *Model) resetToolLineTracking() {
+	m.toolLines = make(map[string]toolLineRef)
+	m.batchLines = make(map[string]*batchLineState)
+	m.groupMembers = make(map[string]groupMemberRef)
+	m.groupBatches = make(map[string]*activityGroupData)
+}
+
+// formatToolDuration renders a tool's call→result latency for the timeline:
+// "4.2s" under a minute, "1m05s" from there on.
+func formatToolDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	mins := int(d / time.Minute)
+	secs := int(d/time.Second) % 60
+	return fmt.Sprintf("%dm%02ds", mins, secs)
+}
+
+// formatElapsed renders the run stopwatch for the status line:
+// "5s", "1m 05s", "1h 02m".
+func formatElapsed(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	s := int(d / time.Second)
+	switch {
+	case s < 60:
+		return fmt.Sprintf("%ds", s)
+	case s < 3600:
+		return fmt.Sprintf("%dm %02ds", s/60, s%60)
+	default:
+		return fmt.Sprintf("%dh %02dm", s/3600, (s%3600)/60)
+	}
+}
+
+// runElapsed computes the stopwatch value at now for a run started at start.
+// pausedTotal is subtracted, and a non-zero pauseStart (an approval dialog is
+// open) freezes the clock at the pause boundary.
+func runElapsed(start, now time.Time, pausedTotal time.Duration, pauseStart time.Time) time.Duration {
+	if start.IsZero() {
+		return 0
+	}
+	end := now
+	if !pauseStart.IsZero() && pauseStart.Before(end) {
+		end = pauseStart
+	}
+	e := end.Sub(start) - pausedTotal
+	if e < 0 {
+		e = 0
+	}
+	return e
+}
+
+// currentRunElapsed returns the approval-adjusted elapsed time of the active
+// agent run.
+func (m *Model) currentRunElapsed() time.Duration {
+	return runElapsed(m.promptStartTime, time.Now(), m.runPausedTotal, m.runPauseStart)
+}
+
+// beginRunPause freezes the run stopwatch while an approval dialog is open.
+// Idempotent: queued dialogs shown back-to-back keep one open pause.
+func (m *Model) beginRunPause() {
+	if m.runPauseStart.IsZero() {
+		m.runPauseStart = time.Now()
+	}
+}
+
+// endRunPause folds an open pause into runPausedTotal and resumes the clock.
+func (m *Model) endRunPause() {
+	if !m.runPauseStart.IsZero() {
+		m.runPausedTotal += time.Since(m.runPauseStart)
+		m.runPauseStart = time.Time{}
+	}
+}
+
+// resetRunClock starts a fresh stopwatch for a new agent run.
+func (m *Model) resetRunClock() {
+	m.promptStartTime = time.Now()
+	m.runPausedTotal = 0
+	m.runPauseStart = time.Time{}
+	m.runningTools = 0
 }
 
 func (m *Model) flushText() {
@@ -205,71 +366,72 @@ func (m *Model) renderContent() string {
 	return result
 }
 
-// appendStatusLine writes the spinner / thinking status line into sb.
+// appendStatusLine writes the structured status block into sb:
+//
+//	<spinner> Working (1m 05s · esc interrupt)
+//	  └ Shell: git push origin main
+//
+// The stopwatch excludes time spent waiting in approval dialogs. The subagent
+// progress box keeps its dedicated rendering.
 func (m *Model) appendStatusLine(sb *strings.Builder) {
-	switch {
-	case m.subagentActive && len(m.subagentProgress) > 0:
+	if m.hasSubagentDisplay() {
 		sb.WriteString(m.renderSubagentBox())
 		sb.WriteString("\n")
+		steps, tokens := m.subagentTotals()
 		tokenStr := ""
-		if m.subagentTokens > 0 {
+		if tokens > 0 {
 			if m.modelContextLimit > 0 {
-				pct := float64(m.subagentTokens) / float64(m.modelContextLimit) * 100
-				tokenStr = fmt.Sprintf(" %d tok / %.0f%%", m.subagentTokens, pct)
+				pct := float64(tokens) / float64(m.modelContextLimit) * 100
+				tokenStr = fmt.Sprintf(" %d tok / %.0f%%", tokens, pct)
 			} else {
-				tokenStr = fmt.Sprintf(" %d tok", m.subagentTokens)
+				tokenStr = fmt.Sprintf(" %d tok", tokens)
 			}
+		}
+		label := fmt.Sprintf("Subagent [%d steps]...", steps)
+		if n := m.activeSubagentCount(); n > 1 {
+			label = fmt.Sprintf("%d subagents [%d steps]...", n, steps)
 		}
 		fmt.Fprintf(sb, "  %s %s%s",
 			m.spinner.View(),
-			subagentLabelStyle.Render(fmt.Sprintf("Subagent [%d steps]...", m.subagentStepCount)),
+			subagentLabelStyle.Render(label),
 			toolArgsStyle.Render(tokenStr),
 		)
-	case m.pendingTool != "":
-		fmt.Fprintf(sb, "  %s Running %s...", m.spinner.View(), toolNameStyle.Render(m.pendingTool))
-	default:
-		fmt.Fprintf(sb, "  %s Thinking...", m.spinner.View())
+		sb.WriteString("\n")
+		return
+	}
+
+	meta := "esc interrupt"
+	if !m.promptStartTime.IsZero() {
+		meta = formatElapsed(m.currentRunElapsed()) + " · " + meta
+	}
+	fmt.Fprintf(sb, "  %s %s %s", m.spinner.View(),
+		shimmerText(time.Now()),
+		toolArgsStyle.Render("("+meta+")"))
+
+	if detail := m.statusDetail(); detail != "" {
+		fmt.Fprintf(sb, "\n  %s %s", lipgloss.NewStyle().Foreground(colorMuted).Render("└"), detail)
 	}
 	sb.WriteString("\n")
 }
 
-// renderSubagentBox returns a bordered box showing live subagent tool calls.
-// Results are cached until subagentProgress changes or width changes.
-func (m *Model) renderSubagentBox() string {
-	width := m.contentWidth()
-	if m.subagentBoxCache != "" && m.subagentBoxCacheLen == len(m.subagentProgress) && m.subagentBoxCacheWidth == width {
-		return m.subagentBoxCache
-	}
-
-	const maxVisible = 8
-	lines := m.subagentProgress
-	hidden := 0
-	if len(lines) > maxVisible {
-		hidden = len(lines) - maxVisible
-		lines = lines[hidden:]
-	}
-
-	var content strings.Builder
-	if hidden > 0 {
-		content.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
-			Render(fmt.Sprintf("... (%d earlier steps)", hidden)))
-		content.WriteString("\n")
-	}
-	for i, line := range lines {
-		content.WriteString(line)
-		if i < len(lines)-1 {
-			content.WriteString("\n")
+// statusDetail returns the one-line current-activity row under the status
+// line: the running tool's title + subtitle, or the concurrent batch count.
+func (m *Model) statusDetail() string {
+	switch {
+	case m.runningTools > 1:
+		return toolNameStyle.Render(fmt.Sprintf("%d tools running", m.runningTools))
+	case m.pendingTool != "":
+		title := m.pendingToolTitle
+		if title == "" {
+			title = m.pendingTool
 		}
+		s := toolNameStyle.Render(title)
+		if m.pendingToolSubtitle != "" {
+			s += toolArgsStyle.Render(": " + truncate(m.pendingToolSubtitle, 80))
+		}
+		return s
+	case m.runningTools == 1:
+		return toolNameStyle.Render("1 tool running")
 	}
-
-	boxWidth := width - 8
-	if boxWidth < 30 {
-		boxWidth = 30
-	}
-
-	box := subagentBoxStyle.Width(boxWidth).Render(content.String())
-	m.subagentBoxCache = box
-	m.subagentBoxCacheLen = len(m.subagentProgress)
-	m.subagentBoxCacheWidth = width
-	return box
+	return ""
 }

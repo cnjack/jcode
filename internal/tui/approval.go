@@ -1,7 +1,10 @@
 package tui
 
 // showApproval activates the approval dialog for a single request.
+// The run stopwatch pauses while the dialog is up (time waiting on the user
+// is not agent time).
 func (m *Model) showApproval(msg ToolApprovalRequestMsg) {
+	m.beginRunPause()
 	m.approvalPending = true
 	m.approvalToolName = msg.Name
 	m.approvalToolArgs = msg.Args
@@ -31,17 +34,20 @@ func (m *Model) resolveApproval(resp ToolApprovalResponse) {
 			}
 		}
 		m.approvalQueue = nil
+		m.endRunPause()
 		m.textarea.Focus()
 		m.refreshViewport()
 		return
 	}
 
-	// Show next queued approval, or restore input focus.
+	// Show next queued approval (the pause stays open), or resume the run
+	// stopwatch and restore input focus.
 	if len(m.approvalQueue) > 0 {
 		next := m.approvalQueue[0]
 		m.approvalQueue = m.approvalQueue[1:]
 		m.showApproval(next)
 	} else {
+		m.endRunPause()
 		m.textarea.Focus()
 		m.refreshViewport()
 	}

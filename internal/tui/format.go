@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
+	xansi "github.com/charmbracelet/x/ansi"
 )
 
 func formatToolArgs(argsJSON string) string {
@@ -129,76 +131,160 @@ func formatToolResultBody(toolName, output string, err error, termWidth int, exp
 	}
 }
 
-// formatDefaultOutput renders tool output with left border, truncating if too many lines.
+// ─── Row-aware head/tail truncation ───
+
+// transcriptHint is the trailing pointer on hidden-lines markers, steering the
+// user to the full-output transcript overlay. Keep in sync with the key
+// bindings in update.go (ctrl+t; ctrl+o during team sessions).
+const transcriptHint = "ctrl+t transcript"
+
+// toolBoxWidths returns the outer box width and the approximate inner text
+// wrap width for a tool output box at the given terminal width.
+func toolBoxWidths(termWidth int) (boxWidth, wrapWidth int) {
+	boxWidth = termWidth - 8
+	if boxWidth < 30 {
+		boxWidth = 30
+	}
+	wrapWidth = boxWidth - 2 // left border + padding
+	if wrapWidth < 20 {
+		wrapWidth = 20
+	}
+	return boxWidth, wrapWidth
+}
+
+// displayRows returns how many terminal rows s occupies when soft-wrapped at
+// width columns. Zero/negative width counts as a single row.
+func displayRows(s string, width int) int {
+	if width <= 0 {
+		return 1
+	}
+	w := xansi.StringWidth(s)
+	if w <= width {
+		return 1
+	}
+	return (w + width - 1) / width
+}
+
+// capLineToRows truncates one logical line so it wraps into at most rows
+// display rows at width, appending "…" when content was cut. Grapheme
+// clusters are never split.
+func capLineToRows(line string, rows, width int) string {
+	if rows < 1 {
+		rows = 1
+	}
+	if width <= 0 || displayRows(line, width) <= rows {
+		return line
+	}
+	return xansi.Truncate(line, rows*width, "…")
+}
+
+// takeDisplayRows collects logical lines from the front (fromEnd=false) or the
+// back (fromEnd=true) of lines until budget display rows are used. A line that
+// alone overflows the remaining budget is capped to fit (trailing "…") and
+// ends the take, so a single huge line can never blow up the viewport.
+func takeDisplayRows(lines []string, budget, width int, fromEnd bool) (kept []string, taken int) {
+	remaining := budget
+	for i := 0; i < len(lines) && remaining > 0; i++ {
+		idx := i
+		if fromEnd {
+			idx = len(lines) - 1 - i
+		}
+		line := lines[idx]
+		rows := displayRows(line, width)
+		if rows > remaining {
+			line = capLineToRows(line, remaining, width)
+			rows = remaining
+		}
+		if fromEnd {
+			kept = append([]string{line}, kept...)
+		} else {
+			kept = append(kept, line)
+		}
+		taken++
+		remaining -= rows
+	}
+	return kept, taken
+}
+
+// hiddenLinesMarker renders the "… +K lines" separator row. K counts logical
+// lines, so the copy stays stable across terminal widths.
+func hiddenLinesMarker(k int) string {
+	return lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
+		Render(fmt.Sprintf("… +%d lines (%s)", k, transcriptHint))
+}
+
+// headTailTruncate keeps the first headRows and the last tailRows display rows
+// of lines (as wrapped at width) and replaces the middle with a hidden-lines
+// marker — output tails often carry the error message, so both ends matter.
+// Content that already fits within headRows+tailRows+1 rows is returned as-is.
+func headTailTruncate(lines []string, headRows, tailRows, width int) string {
+	totalRows := 0
+	for _, l := range lines {
+		totalRows += displayRows(l, width)
+	}
+	if totalRows <= headRows+tailRows+1 {
+		return strings.Join(lines, "\n")
+	}
+
+	head, headTaken := takeDisplayRows(lines, headRows, width, false)
+	tail, tailTaken := takeDisplayRows(lines[headTaken:], tailRows, width, true)
+	hidden := len(lines) - headTaken - tailTaken
+
+	parts := make([]string, 0, len(head)+len(tail)+1)
+	parts = append(parts, head...)
+	if hidden > 0 {
+		parts = append(parts, hiddenLinesMarker(hidden))
+	}
+	parts = append(parts, tail...)
+	return strings.Join(parts, "\n")
+}
+
+// formatDefaultOutput renders tool output with left border. Long outputs keep
+// the first and last few display rows with an "… +K lines" marker in between;
+// budgets count wrapped rows, so overlong single lines are capped too.
 func formatDefaultOutput(output string, termWidth int) []string {
 	output = strings.TrimRight(output, "\n")
 	if output == "" {
 		return nil
 	}
 
-	const maxLines = 6
-	rawLines := strings.Split(output, "\n")
+	// Head/tail row budget. Total shown is ≤ 2*edgeRows+1 rows, close to the
+	// old 6-line head-only budget.
+	const edgeRows = 3
 
-	shown := rawLines
-	hidden := 0
-	if len(rawLines) > maxLines {
-		shown = rawLines[:maxLines]
-		hidden = len(rawLines) - maxLines
-	}
+	boxWidth, wrapWidth := toolBoxWidths(termWidth)
+	body := headTailTruncate(strings.Split(output, "\n"), edgeRows, edgeRows, wrapWidth)
 
-	var boxContent strings.Builder
-	for i, line := range shown {
-		boxContent.WriteString(line)
-		if i < len(shown)-1 {
-			boxContent.WriteString("\n")
-		}
-	}
-	if hidden > 0 {
-		boxContent.WriteString("\n")
-		boxContent.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
-			Render(fmt.Sprintf("… %d more lines", hidden)))
-	}
-
-	boxWidth := termWidth - 8
-	if boxWidth < 30 {
-		boxWidth = 30
-	}
-
-	box := toolBodyStyle.Width(boxWidth).Render(boxContent.String())
+	box := toolBodyStyle.Width(boxWidth).Render(body)
 	return []string{box}
 }
 
-// formatExecuteOutput shows the last 5 lines of command output with left border.
+// formatExecuteOutput shows the tail of command output with left border — the
+// end is where errors and summaries land. The tail budget counts wrapped
+// display rows, so one overlong line cannot flood the viewport.
 func formatExecuteOutput(output string, termWidth int) []string {
-	const tailLines = 5
+	const tailRows = 5
+
+	boxWidth, wrapWidth := toolBoxWidths(termWidth)
 	rawLines := strings.Split(strings.TrimRight(output, "\n"), "\n")
 
-	// Take last N lines
-	start := 0
-	if len(rawLines) > tailLines {
-		start = len(rawLines) - tailLines
+	totalRows := 0
+	for _, l := range rawLines {
+		totalRows += displayRows(l, wrapWidth)
 	}
-	tail := rawLines[start:]
 
-	var boxContent strings.Builder
-	if start > 0 {
-		boxContent.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Italic(true).
-			Render(fmt.Sprintf("… %d lines hidden", start)))
-		boxContent.WriteString("\n")
-	}
-	for i, line := range tail {
-		boxContent.WriteString(line)
-		if i < len(tail)-1 {
-			boxContent.WriteString("\n")
+	var parts []string
+	if totalRows <= tailRows+1 {
+		parts = rawLines
+	} else {
+		tail, taken := takeDisplayRows(rawLines, tailRows, wrapWidth, true)
+		if hidden := len(rawLines) - taken; hidden > 0 {
+			parts = append(parts, hiddenLinesMarker(hidden))
 		}
+		parts = append(parts, tail...)
 	}
 
-	boxWidth := termWidth - 8
-	if boxWidth < 30 {
-		boxWidth = 30
-	}
-
-	box := toolBodyStyle.Width(boxWidth).Render(boxContent.String())
+	box := toolBodyStyle.Width(boxWidth).Render(strings.Join(parts, "\n"))
 	return []string{box}
 }
 
@@ -311,9 +397,20 @@ func formatSubagentOutput(output string, termWidth int, expanded bool, mdRendere
 	return []string{box}
 }
 
-// formatTodoWriteOutput renders todowrite result as a compact single line.
-// The full state is visible in the todo bar, so just show the summary line.
+// todoSummaryRe matches the summary sentence both todowrite variants emit:
+// "8 todos (3 completed, 1 in_progress, …)". Capture groups: total, completed.
+var todoSummaryRe = regexp.MustCompile(`(\d+) todos \((\d+) completed, (\d+) in_progress`)
+
+// formatTodoWriteOutput collapses a todowrite result to one minimal, muted
+// change-summary line ("✓ Todos 3/8 · <current task>") — the authoritative
+// list lives in the sidebar todo panel, so the timeline stays quiet.
 func formatTodoWriteOutput(output string) []string {
+	if m := todoSummaryRe.FindStringSubmatch(output); m != nil {
+		total, _ := strconv.Atoi(m[1])
+		completed, _ := strconv.Atoi(m[2])
+		return []string{todoSummaryLine(completed, total, todoInProgressTitle(output))}
+	}
+	// Unrecognized output (future formats): keep the old first-line summary.
 	summary := strings.SplitN(output, "\n", 2)[0]
 	if summary == "" {
 		summary = "updated"
@@ -321,6 +418,38 @@ func formatTodoWriteOutput(output string) []string {
 	return []string{
 		fmt.Sprintf("   %s %s", toolSuccessStyle.Render("✓"), toolArgsStyle.Render(summary)),
 	}
+}
+
+// todoSummaryLine renders the shared "✓ Todos N/M · current" row used by both
+// the live todowrite result and the session-replay todo snapshot.
+func todoSummaryLine(completed, total int, current string) string {
+	text := fmt.Sprintf("Todos %d/%d", completed, total)
+	if current != "" {
+		text += " · " + truncate(current, 40)
+	}
+	return fmt.Sprintf("   %s %s", toolSuccessStyle.Render("✓"), toolArgsStyle.Render(text))
+}
+
+// todoInProgressTitle extracts the in-progress item's title from the JSON
+// payload that follows a todowrite result's summary line, "" when absent.
+func todoInProgressTitle(output string) string {
+	idx := strings.IndexByte(output, '\n')
+	if idx < 0 {
+		return ""
+	}
+	var items []struct {
+		Title  string `json:"title"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(output[idx+1:]), &items); err != nil {
+		return ""
+	}
+	for _, it := range items {
+		if it.Status == "in_progress" {
+			return it.Title
+		}
+	}
+	return ""
 }
 
 // formatLoadSkillOutput shows skill name + description, skipping the full markdown body.

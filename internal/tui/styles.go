@@ -81,6 +81,7 @@ var (
 	toolIconRunning string
 	toolIconSuccess string
 	toolIconError   string
+	toolIconDenied  string
 
 	// --- Tool / subagent output body styles ---
 	toolBodyStyle     lipgloss.Style
@@ -186,6 +187,8 @@ func ApplyTheme(name string) {
 	toolIconRunning = lipgloss.NewStyle().Foreground(colorSecondary).Render("●")
 	toolIconSuccess = lipgloss.NewStyle().Foreground(colorSuccess).Render("✓")
 	toolIconError = lipgloss.NewStyle().Foreground(colorError).Render("✗")
+	// Denied is a user decision, not a failure: muted, no error red.
+	toolIconDenied = lipgloss.NewStyle().Foreground(colorMuted).Render("⊘")
 
 	// --- Tool output body style (indented with left border) ---
 	toolBodyStyle = lipgloss.NewStyle().

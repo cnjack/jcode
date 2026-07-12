@@ -44,6 +44,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		}
 
 		switch {
+		case m.showingTranscript:
+			var cmd tea.Cmd
+			m.transcriptVP, cmd = m.transcriptVP.Update(msg)
+			cmds = append(cmds, cmd)
 		case m.pickingSession:
 			var cmd tea.Cmd
 			m.sessionPicker, cmd = m.sessionPicker.Update(msg)
@@ -77,6 +81,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 	case tea.KeyPressMsg:
 		m.invalidateFooterCache() // textarea content may change
+		// Transcript overlay swallows every key while open.
+		if m.showingTranscript {
+			return m.handleTranscriptKey(msg)
+		}
 		// Tool approval dialog handling
 		if m.approvalPending {
 			switch msg.String() {
@@ -768,6 +776,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.refreshViewport()
 					return m, tea.Batch(cmds...)
 				}
+				// Interrupt the running agent (the status line advertises
+				// "esc interrupt"); shows the same confirm dialog as ctrl+c.
+				if m.thinking && !m.agentDone {
+					m.requestCancelAgent()
+					return m, tea.Batch(cmds...)
+				}
 			case "enter":
 				// If command suggestion is active, accept it instead of submitting
 				if m.cmdSuggestionActive && len(m.cmdSuggestions) > 0 && m.cmdSuggestionIndex < len(m.cmdSuggestions) {
@@ -908,7 +922,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.mode = ModeAgent
 					m.agentDone = false
 					m.thinking = true
-					m.promptStartTime = time.Now()
+					m.resetRunClock()
 
 					// In Plan mode, send prompt directly (agent already has plan system prompt + read-only tools).
 					modePrefix := ">"
@@ -1019,12 +1033,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					return m, tea.Batch(cmds...)
 				}
 			case "ctrl+t":
-				// Team: toggle coordinator panel
+				// Team sessions keep the pre-existing coordinator-panel
+				// binding; the transcript stays reachable via ctrl+o there.
 				if m.teamState.HasTeam() {
 					m.teamState.PanelVisible = !m.teamState.PanelVisible
 					m.refreshViewport()
 					return m, tea.Batch(cmds...)
 				}
+				m.openTranscript()
+				return m, tea.Batch(cmds...)
+			case "ctrl+o":
+				// Always-available transcript alias (see ctrl+t above).
+				m.openTranscript()
+				return m, tea.Batch(cmds...)
 			case "ctrl+e":
 				// Toggle expand/collapse of subagent output near viewport top
 				m.toggleSubagentExpand()
@@ -1166,6 +1187,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		// but we reset renderedLineWidth so renderContent() takes the slow path.
 		m.renderedLineWidth = 0
 		m.viewport.SetContent(m.renderViewportContent())
+		m.resizeTranscript()
 
 	case spinner.TickMsg:
 		if m.thinking {
@@ -1279,7 +1301,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				m.mode = ModeAgent
 				m.agentDone = false
 				m.thinking = true
-				m.promptStartTime = time.Now()
+				m.resetRunClock()
 
 				modePrefix := ">"
 				if m.agentMode == ModePlanning {
@@ -1353,6 +1375,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.mode = ModeAgent
 		m.agentDone = true
 		m.lines = nil
+		m.resetToolLineTracking()
 		m.currentText.Reset()
 		// Clear todo and usage on resume
 		if m.todoStore != nil {
@@ -1364,7 +1387,31 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.invalidateFooterCache()
 		m.lines = append(m.lines, textLine(toolLabelStyle.Render("📂 Session resumed: ")+msg.UUID))
 		m.lines = append(m.lines, textLine(""))
+		// Batch headers already emitted during this replay (keyed by BatchID).
+		replayedBatches := make(map[string]bool)
+		// Structured replay: adjacent tool_call/tool_result entries that carry
+		// a ToolCallID rebuild an activityGroupLine with completed member data
+		// (rendered directly in collapsed form). Entries without an ID keep
+		// the legacy string replay below.
+		var replayGroup *activityGroupData
+		replayMembers := make(map[string]*activityMember)
+		var replayUnresolved []*activityMember
+		closeReplayGroup := func() {
+			// Members that never saw a result in the recording (session died
+			// mid-run) are frozen as interrupted so the group collapses.
+			for _, mem := range replayUnresolved {
+				if mem.status == memberRunning {
+					mem.status = memberInterrupted
+				}
+			}
+			replayUnresolved = replayUnresolved[:0]
+			replayGroup = nil
+		}
 		for _, e := range msg.Entries {
+			// Any non-tool entry breaks tool adjacency, closing the group.
+			if e.Type != string(session.EntryToolCall) && e.Type != string(session.EntryToolResult) {
+				closeReplayGroup()
+			}
 			switch e.Type {
 			case string(session.EntryUser):
 				m.lines = append(m.lines, textLine(""))
@@ -1383,16 +1430,88 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.lines = append(m.lines, textLine(rendered))
 				}
 			case string(session.EntryToolCall):
+				if e.ToolCallID != "" {
+					// Structured rebuild: join the open replay group (or open
+					// one). BatchID needs no special casing — recorded batch
+					// members are adjacent entries anyway.
+					mem := &activityMember{
+						toolCallID: e.ToolCallID,
+						name:       e.Name,
+						title:      e.Name,
+						subtitle:   truncate(sanitize(e.Args), 100),
+						status:     memberRunning,
+					}
+					if replayGroup == nil {
+						replayGroup = &activityGroupData{}
+						m.lines = append(m.lines, activityGroupContentLine(replayGroup))
+					}
+					replayGroup.members = append(replayGroup.members, mem)
+					replayGroup.rev++
+					replayMembers[e.ToolCallID] = mem
+					replayUnresolved = append(replayUnresolved, mem)
+					continue
+				}
+				// Legacy string replay (no ToolCallID). Recorded batches keep
+				// their stacking: header line once per BatchID, members
+				// indented. Entries without batch info render as before.
+				closeReplayGroup()
+				replayIndent := "  "
+				if e.BatchID != "" && e.BatchSize > 1 {
+					replayIndent = "    "
+					if !replayedBatches[e.BatchID] {
+						replayedBatches[e.BatchID] = true
+						m.lines = append(m.lines, textLine(fmt.Sprintf("  %s %s",
+							toolIconRunning,
+							toolNameStyle.Render(fmt.Sprintf("Running %d tools", e.BatchSize)),
+						)))
+					}
+				}
 				// Tool calls always show running icon (they don't have error status yet)
-				m.lines = append(m.lines, textLine(fmt.Sprintf("  %s %s %s",
+				m.lines = append(m.lines, textLine(fmt.Sprintf("%s%s %s %s",
+					replayIndent,
 					toolIconRunning,
 					toolNameStyle.Render(e.Name),
 					toolArgsStyle.Render(truncate(sanitize(e.Args), 100)),
 				)))
 			case string(session.EntryToolResult):
-				if e.Error != "" {
+				// Structured rebuild: route the result to its member (by ID,
+				// or the oldest unresolved member when the ID is missing) —
+				// no result box, the output lives on the member.
+				var mem *activityMember
+				if e.ToolCallID != "" {
+					mem = replayMembers[e.ToolCallID]
+				} else if len(replayUnresolved) > 0 {
+					mem = replayUnresolved[0]
+				}
+				if mem != nil {
+					switch {
+					case e.Denied:
+						mem.status = memberDenied
+					case e.Error != "":
+						mem.status = memberFailed
+						mem.err = fmt.Errorf("%s", e.Error)
+					default:
+						mem.status = memberSuccess
+						mem.output = sanitize(e.Output)
+					}
+					for i, u := range replayUnresolved {
+						if u == mem {
+							replayUnresolved = append(replayUnresolved[:i], replayUnresolved[i+1:]...)
+							break
+						}
+					}
+					if replayGroup != nil {
+						replayGroup.rev++
+					}
+					continue
+				}
+				switch {
+				case e.Denied:
+					m.lines = append(m.lines, textLine(fmt.Sprintf("    %s %s",
+						toolIconDenied, toolArgsStyle.Render("denied"))))
+				case e.Error != "":
 					m.lines = append(m.lines, toolResultContentLine(e.Name, "", fmt.Errorf("%s", e.Error)))
-				} else {
+				default:
 					m.lines = append(m.lines, toolResultContentLine(e.Name, e.Output, nil))
 				}
 			case string(session.EntrySubagentStart):
@@ -1430,16 +1549,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					toolNameStyle.Render(e.PlanStatus),
 					toolArgsStyle.Render(e.PlanTitle))))
 			case string(session.EntryTodoSnapshot):
+				// Same minimal one-liner as the live todowrite result — the
+				// full list lives in the sidebar (restored from state).
 				if len(e.Todos) > 0 {
-					m.lines = append(m.lines, textLine(toolLabelStyle.Render("  📋 Todo List:")))
+					completed := 0
+					current := ""
 					for _, t := range e.Todos {
-						statusIcon := "⬜"
-						if t.Status == "completed" || t.Status == "done" {
-							statusIcon = "✅"
+						switch t.Status {
+						case "completed", "done":
+							completed++
+						case "in_progress":
+							if current == "" {
+								current = t.Title
+							}
 						}
-						m.lines = append(m.lines, textLine(fmt.Sprintf("     %s %d: %s",
-							statusIcon, t.ID, t.Title)))
 					}
+					m.lines = append(m.lines, textLine(todoSummaryLine(completed, len(e.Todos), current)))
 				}
 			case string(session.EntryModeChange):
 				m.lines = append(m.lines, textLine(fmt.Sprintf("  %s Mode changed to: %s",
@@ -1453,6 +1578,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				m.lines = append(m.lines, textLine(toolErrorStyle.Render("  ⚠️ Budget warning")))
 			}
 		}
+		closeReplayGroup()
 		// Add a divider line after resumed content
 		{
 			contentW := m.contentWidth()
@@ -1549,6 +1675,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		}
 
 	case UserPromptMsg:
+		// Sent by the main goroutine when an externally-queued prompt (pending
+		// queue, channel inbound, plan revise) actually starts its run — reset
+		// the stopwatch so elapsed reflects this run, not the original submit.
+		m.resetRunClock()
 		m.lines = append(m.lines, textLine(""))
 		displayPrompt := m.pasteStore.StoreAndFormat(NormalizeLineEndings(sanitize(msg.Prompt)))
 		m.lines = append(m.lines, textLine(userPromptStyle.Render("> "+displayPrompt)))
@@ -1581,16 +1711,45 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		if msg.Title != "" {
 			displayLabel = msg.Title
 		}
+		subtitle := msg.Subtitle
+		if subtitle == "" {
+			subtitle = formatToolArgs(msg.Args)
+		}
 		subtitlePart := ""
-		if msg.Subtitle != "" {
-			subtitlePart = " " + toolArgsStyle.Render(msg.Subtitle)
-		} else {
-			argsDisplay := formatToolArgs(msg.Args)
-			if argsDisplay != "" {
-				subtitlePart = " " + toolArgsStyle.Render(argsDisplay)
+		if subtitle != "" {
+			subtitlePart = " " + toolArgsStyle.Render(subtitle)
+		}
+		// Status-line detail + in-flight counter for "N tools running".
+		m.pendingToolTitle = displayLabel
+		m.pendingToolSubtitle = subtitle
+		m.runningTools++
+		if msg.ToolCallID != "" {
+			// Structured path: adjacent tool calls coalesce into one
+			// activity-group line whose members flip by data update.
+			m.appendGroupToolCall(msg)
+			m.refreshViewport()
+			cmds = append(cmds, m.spinner.Tick)
+			break
+		}
+		// Legacy string path (no ToolCallID: old replays, external feeds).
+		// Concurrent batch: stack members under a shared header line that is
+		// appended once, when the batch's first member arrives.
+		indent := "  "
+		if msg.BatchID != "" && msg.BatchSize > 1 {
+			indent = "    "
+			if m.batchLines == nil {
+				m.batchLines = make(map[string]*batchLineState)
+			}
+			if _, ok := m.batchLines[msg.BatchID]; !ok {
+				m.lines = append(m.lines, textLine(fmt.Sprintf("  %s %s",
+					toolIconRunning,
+					toolNameStyle.Render(fmt.Sprintf("Running %d tools", msg.BatchSize)),
+				)))
+				m.batchLines[msg.BatchID] = &batchLineState{headerIdx: len(m.lines) - 1, size: msg.BatchSize}
 			}
 		}
-		m.lines = append(m.lines, textLine(fmt.Sprintf("  %s %s%s",
+		m.lines = append(m.lines, textLine(fmt.Sprintf("%s%s %s%s",
+			indent,
 			toolIconRunning,
 			toolNameStyle.Render(displayLabel),
 			subtitlePart,
@@ -1601,14 +1760,61 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 	case ToolResultMsg:
 		m.thinking = true
 		m.pendingTool = ""
-		if msg.Err != nil {
-			// Replace the running icon with error icon on the last tool line
-			m.replaceLastToolIcon(toolIconError)
-			m.lines = append(m.lines, toolResultContentLine(msg.Name, "", msg.Err))
-		} else {
-			// Replace the running icon with success icon
-			m.replaceLastToolIcon(toolIconSuccess)
-			m.lines = append(m.lines, toolResultContentLine(msg.Name, sanitize(msg.Output), nil))
+		m.pendingToolTitle = ""
+		m.pendingToolSubtitle = ""
+		if m.runningTools > 0 {
+			m.runningTools--
+		}
+		// Structured path: results whose call went into an activity group
+		// mutate their member in place; the rev-keyed cache re-renders the
+		// group line (live flip or collapse). Output is stored on the member
+		// for the transcript — no result box is appended.
+		if m.resolveGroupToolResult(msg) {
+			m.refreshViewport()
+			cmds = append(cmds, m.spinner.Tick)
+			break
+		}
+		failed := msg.Err != nil
+		icon := toolIconSuccess
+		if failed {
+			icon = toolIconError
+		}
+		// Dim duration suffix: always on failures, on successes only when slow
+		// enough to be interesting (>2s). Zero duration means unknown (legacy).
+		suffix := ""
+		if msg.Duration > 0 && (failed || msg.Duration > 2*time.Second) {
+			suffix = " " + toolArgsStyle.Render(formatToolDuration(msg.Duration))
+		}
+		// A denied call is a user decision, not a failure: muted ⊘, no red,
+		// no duration (the wait was the user's, not the tool's).
+		if msg.Denied {
+			failed = false
+			icon = toolIconDenied
+			suffix = " " + toolArgsStyle.Render("denied")
+		}
+		// Flip the exact line by toolCallID so out-of-order results in a
+		// concurrent batch land on the right row; fall back to the legacy
+		// last-running-icon scan when the ID is unknown or the line is gone.
+		flipped := false
+		if msg.ToolCallID != "" {
+			if ref, ok := m.toolLines[msg.ToolCallID]; ok {
+				delete(m.toolLines, msg.ToolCallID)
+				flipped = m.replaceToolIconAt(ref.idx, icon, suffix)
+				m.completeBatchMember(ref.batchID, failed)
+			}
+		}
+		if !flipped {
+			m.replaceLastToolIcon(icon, suffix)
+		}
+		// Denied results carry only the fixed rejection boilerplate — the ⊘
+		// suffix on the tool line says it all, skip the output box.
+		if !msg.Denied {
+			resLine := toolResultContentLine(msg.Name, sanitize(msg.Output), nil)
+			if failed {
+				resLine = toolResultContentLine(msg.Name, "", msg.Err)
+			}
+			resLine.tool.duration = msg.Duration // shown untruncated in the transcript overlay
+			m.lines = append(m.lines, resLine)
 		}
 		m.refreshViewport()
 		cmds = append(cmds, m.spinner.Tick)
@@ -1622,6 +1828,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 	case AgentDoneMsg:
 		m.thinking = false
 		m.renderPending = false // cancel any pending batch render
+		// Clear status-line run state so a stale tool/pause can't leak into
+		// the next run (e.g. after cancellation mid-batch).
+		m.pendingTool = ""
+		m.pendingToolTitle = ""
+		m.pendingToolSubtitle = ""
+		m.runningTools = 0
+		m.clearSubagentSlots() // stale live boxes can't outlive the run
+		m.endRunPause()
+		// Members that never got a result (cancelled/errored mid-flight) are
+		// marked interrupted so their activity groups can collapse.
+		m.finalizeActivityGroups()
 		m.flushText()
 		if msg.Err != nil {
 			if msg.Err.Error() == "context canceled" {
@@ -1690,13 +1907,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			typeLabel = "explore"
 		}
 		m.pendingTool = "subagent"
-		m.subagentActive = true
-		m.subagentName = msg.Name
-		m.subagentType = typeLabel
-		m.subagentStepCount = 0
-		m.subagentLastTool = ""
-		m.subagentProgress = nil
-		m.subagentTokens = 0
+		m.startSubagentSlot(msg.Name, typeLabel)
 		m.lines = append(m.lines, textLine(fmt.Sprintf("  %s %s %s",
 			subagentLabelStyle.Render("🤖 Subagent:"),
 			toolNameStyle.Render(msg.Name),
@@ -1706,37 +1917,51 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		cmds = append(cmds, m.spinner.Tick)
 
 	case SubagentProgressMsg:
-		if m.subagentActive && msg.Event == "tool_call" {
-			m.subagentStepCount++
-			args := formatToolArgs(msg.Detail)
-			if args != "" {
-				m.subagentLastTool = msg.ToolName + " " + args
-			} else {
-				m.subagentLastTool = msg.ToolName
+		if msg.Event == "tool_call" {
+			if slot := m.findActiveSubagent(msg.AgentName); slot != nil {
+				args := formatToolArgs(msg.Detail)
+				line := fmt.Sprintf("%s %s", toolNameStyle.Render(msg.ToolName), toolArgsStyle.Render(args))
+				slot.recordSubagentProgress(line)
+				m.touchSubagents()
+				m.refreshViewport()
 			}
-			line := fmt.Sprintf("%s %s", toolNameStyle.Render(msg.ToolName), toolArgsStyle.Render(args))
-			m.subagentProgress = append(m.subagentProgress, line)
-			m.refreshViewport()
 		}
 
 	case SubagentTokenUpdateMsg:
-		m.subagentTokens = msg.TotalTokens
+		if slot := m.findActiveSubagent(msg.Name); slot != nil {
+			slot.tokens = msg.TotalTokens
+			m.touchSubagents()
+		}
 		m.invalidateSidebarCache()
 		m.refreshViewport()
 
 	case SubagentDoneMsg:
-		m.pendingTool = ""
-		m.subagentActive = false
-		m.subagentLastTool = ""
-		m.subagentProgress = nil
-		m.subagentTokens = 0
+		slot := m.findActiveSubagent(msg.Name)
+		if slot != nil {
+			slot.finishSubagentSlot(msg.Err != nil)
+			m.touchSubagents()
+		}
 		if msg.Err != nil {
 			m.lines = append(m.lines, textLine(fmt.Sprintf("   %s %s",
 				toolErrorStyle.Render("✗ Subagent Error:"),
 				toolResultStyle.Render(truncate(sanitize(msg.Err.Error()), maxToolOutputLen)))))
 		} else {
-			m.lines = append(m.lines, textLine(fmt.Sprintf("   %s",
-				toolSuccessStyle.Render("✓ Subagent Done"))))
+			// "✓ Subagent name · N steps · 4.2s" when we tracked the run;
+			// plain "✓ Subagent Done" otherwise (never invent numbers).
+			doneLine := "✓ Subagent Done"
+			suffix := ""
+			if slot != nil {
+				doneLine = "✓ Subagent"
+				suffix = " " + toolArgsStyle.Render(slot.subagentSummary())
+			}
+			m.lines = append(m.lines, textLine(fmt.Sprintf("   %s%s",
+				toolSuccessStyle.Render(doneLine), suffix)))
+		}
+		// Keep finished slots visible while siblings still run; once the
+		// last subagent reports, drop the whole set.
+		if m.activeSubagentCount() == 0 {
+			m.clearSubagentSlots()
+			m.pendingTool = ""
 		}
 		m.refreshViewport()
 		cmds = append(cmds, m.spinner.Tick)

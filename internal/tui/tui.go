@@ -52,6 +52,41 @@ type Model struct {
 	textarea    textarea.Model
 	mcpStatuses []MCPStatusItem
 
+	// ─── Status line state ───
+	// pendingToolTitle/Subtitle mirror the display info of the most recent
+	// tool call for the status detail row ("└ Shell: git push origin main").
+	pendingToolTitle    string
+	pendingToolSubtitle string
+	// runningTools counts announced tool calls that have not reported a
+	// result yet; >1 means a concurrent batch is in flight.
+	runningTools int
+	// runPausedTotal accumulates time spent in approval dialogs during the
+	// current run; runPauseStart is non-zero while a dialog is open. The
+	// status-line stopwatch subtracts both so waiting on the user is free.
+	runPausedTotal time.Duration
+	runPauseStart  time.Time
+
+	// ─── Tool-call line tracking ───
+	// toolLines maps a toolCallID to the timeline line holding its status
+	// icon so a result flips the exact line, even when a concurrent batch
+	// returns out of order. m.lines is append-only during a run, so an index
+	// is a stable handle; flips re-validate the icon before replacing and
+	// fall back to the legacy last-running-icon scan when stale (cleared
+	// history, legacy replays without IDs).
+	toolLines map[string]toolLineRef
+	// batchLines maps a BatchID to its header-line stacking state until every
+	// member of the batch has completed.
+	batchLines map[string]*batchLineState
+
+	// ─── Activity-group tracking (structured tool lines) ───
+	// groupMembers maps a toolCallID to its activity-group member so a result
+	// mutates structured state in place; the string-backfill maps above stay
+	// only as the fallback for legacy no-ID paths.
+	groupMembers map[string]groupMemberRef
+	// groupBatches maps a BatchID to its activity group so batch members that
+	// arrive after an interruption (approval dialog) still join their group.
+	groupBatches map[string]*activityGroupData
+
 	sshStep int
 	sshAddr string
 	sshPath string
@@ -83,6 +118,13 @@ type Model struct {
 
 	showingHelp bool // keyboard shortcuts help panel
 	helpScroll  int  // scroll offset for help panel
+
+	// ─── Transcript overlay state ───
+	// showingTranscript is true while the full-screen transcript pager is
+	// open (ctrl+t; ctrl+o during team sessions). transcriptVP holds the
+	// snapshot content taken at open time.
+	showingTranscript bool
+	transcriptVP      viewport.Model
 
 	version string // version string displayed in bottom bar
 
@@ -144,14 +186,10 @@ type Model struct {
 	// Workflow slash commands from flow loader (e.g. /repo-audit)
 	flowSlashCommands []FlowSlashInfo
 
-	// Subagent progress tracking
-	subagentActive    bool
-	subagentName      string
-	subagentType      string
-	subagentStepCount int      // total tool calls so far
-	subagentLastTool  string   // last tool name + args summary
-	subagentProgress  []string // tool call progress lines for box display
-	subagentTokens    int64    // cumulative tokens used by current subagent
+	// Subagent progress tracking: one slot per subagent (ordered by start)
+	// so parallel subagents don't overwrite each other's live progress.
+	subagentSlots []*subagentSlot
+	subagentRev   int // bumped on every slot mutation; keys the box cache
 
 	// Exit / cancel confirmation
 	exitPending     bool      // true when quit dialog is showing
@@ -220,7 +258,7 @@ type Model struct {
 
 	// subagentBoxCache caches the rendered subagent progress box.
 	subagentBoxCache      string
-	subagentBoxCacheLen   int // len(m.subagentProgress) when cached
+	subagentBoxCacheRev   int // m.subagentRev when cached
 	subagentBoxCacheWidth int // content width when cached
 
 	renderPerf tuiRenderPerf
@@ -307,6 +345,10 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 		sessionPicker:     sesl,
 		channelMenu:       chl,
 		channelStates:     make(map[string]string),
+		toolLines:         make(map[string]toolLineRef),
+		batchLines:        make(map[string]*batchLineState),
+		groupMembers:      make(map[string]groupMemberRef),
+		groupBatches:      make(map[string]*activityGroupData),
 		pwd:               pwd,
 		history:           loadHistory(),
 		todoStore:         todoStore,
@@ -372,7 +414,7 @@ func (m *Model) confirmCancelAgent() {
 }
 
 func (m Model) inputActive() bool {
-	return (m.mode == ModeAgent || m.sshStep > 0 || m.sshSavePrompt) && !m.pickingModel && !m.managingModels && !m.pickingTheme && !m.showingSetting && !m.showingHelp && !m.pickingSSHAlias && !m.pickingSession && !m.approvalPending && !m.planReviewActive && !m.askUserActive
+	return (m.mode == ModeAgent || m.sshStep > 0 || m.sshSavePrompt) && !m.pickingModel && !m.managingModels && !m.pickingTheme && !m.showingSetting && !m.showingHelp && !m.showingTranscript && !m.pickingSSHAlias && !m.pickingSession && !m.approvalPending && !m.planReviewActive && !m.askUserActive
 }
 
 // ModelOption configures a Model before the BubbleTea program starts.

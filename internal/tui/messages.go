@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"time"
+
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/mode"
 )
@@ -52,14 +54,22 @@ func GetResumeChannel() <-chan string {
 
 type AgentTextMsg struct{ Text string }
 type ToolCallMsg struct {
-	Name     string
-	Args     string
-	Title    string // human-readable tool name (e.g. "Read", "Shell")
-	Subtitle string // context info (file path, description)
+	Name       string
+	Args       string
+	Title      string // human-readable tool name (e.g. "Read", "Shell")
+	Subtitle   string // context info (file path, description)
+	ToolCallID string // unique tool invocation ID (links call ↔ result)
+	BatchID    string // shared by all tool calls of one assistant message
+	BatchIndex int    // 0-based position inside the batch
+	BatchSize  int    // number of tool calls in the batch
+	StartedAt  time.Time
 }
 type ToolResultMsg struct {
 	Name, Output string
+	ToolCallID   string // unique tool invocation ID (links call ↔ result)
 	Err          error
+	Denied       bool          // user rejected the call at the approval gate (not an error)
+	Duration     time.Duration // call→result latency; 0 when unknown
 }
 type AgentDoneMsg struct{ Err error }
 type PromptSubmitMsg struct{ Prompt string }
@@ -89,6 +99,14 @@ type SessionEntry struct {
 	ToolCallID   string
 	SubagentName string
 	SubagentType string
+
+	// Tool-call batch fields (zero values for legacy sessions).
+	BatchID    string
+	BatchIndex int
+	BatchSize  int
+
+	// Denied marks a tool result the user rejected at the approval gate.
+	Denied bool
 
 	// Plan fields
 	PlanStatus  string
@@ -236,7 +254,8 @@ type SubagentProgressMsg struct {
 
 // SubagentTokenUpdateMsg is sent after each model turn to update the subagent's token usage.
 type SubagentTokenUpdateMsg struct {
-	TotalTokens int64 // cumulative tokens used by the subagent since it started
+	Name        string // subagent name (distinguishes parallel subagents)
+	TotalTokens int64  // cumulative tokens used by the subagent since it started
 }
 
 // CompactRequestMsg is sent when the user requests manual context compaction.
