@@ -103,7 +103,18 @@ const chatSlice = createSlice({
     },
     addToolCall(
       s,
-      a: { payload: { name: string; args: string; toolCallID?: string; displayInfo?: ToolCall['displayInfo'] } },
+      a: {
+        payload: {
+          name: string
+          args: string
+          toolCallID?: string
+          displayInfo?: ToolCall['displayInfo']
+          batchId?: string
+          batchIndex?: number
+          batchSize?: number
+          startedAt?: number
+        }
+      },
     ) {
       // A tool call flushes the streaming text accumulator (text after a tool
       // starts a fresh assistant message).
@@ -117,6 +128,11 @@ const chatSlice = createSlice({
         status: 'running',
         timestamp: Date.now(),
         displayInfo: a.payload.displayInfo,
+        batchId: a.payload.batchId,
+        batchIndex: a.payload.batchIndex,
+        batchSize: a.payload.batchSize,
+        // Fallback to the local clock so the live elapsed badge always works.
+        startedAt: a.payload.startedAt ?? Date.now(),
       }
       s.timeline.push({ kind: 'tool', data: tc, seq: nextSeq() })
     },
@@ -129,13 +145,15 @@ const chatSlice = createSlice({
           output?: string
           displayOutput?: string
           error?: string
+          denied?: boolean
+          durationMs?: number
           streams?: ToolCall['streams']
           meta?: ToolCall['meta']
           presentation?: ToolCall['presentation']
         }
       },
     ) {
-      const { toolCallID, name, output, displayOutput, error, streams, meta, presentation } = a.payload
+      const { toolCallID, name, output, displayOutput, error, denied, durationMs, streams, meta, presentation } = a.payload
       // Match by toolCallID (precise) or by the last running tool with this name.
       for (let i = s.timeline.length - 1; i >= 0; i--) {
         const item = s.timeline[i]
@@ -146,8 +164,22 @@ const chatSlice = createSlice({
           item.data.output = output
           item.data.displayOutput = displayOutput
           item.data.error = error
+          // Denied (user rejection) is a distinct state from error; a result
+          // always clears the awaiting-approval highlight.
+          item.data.denied = denied || undefined
+          item.data.awaitingApproval = undefined
           if (streams) item.data.streams = streams
           if (meta) item.data.meta = meta
+          // Merge the event-level duration into meta when meta lacks one
+          // (falling back to the local startedAt delta) so finished rows can
+          // always show an accurate duration badge.
+          const duration =
+            item.data.meta?.duration_ms ??
+            durationMs ??
+            (item.data.startedAt ? Date.now() - item.data.startedAt : undefined)
+          if (duration !== undefined) {
+            item.data.meta = { ...(item.data.meta || {}), duration_ms: duration }
+          }
           if (presentation) {
             item.data.presentation = presentation
             // Merge presentation collapsible/kind into displayInfo for grouping.
@@ -192,10 +224,14 @@ const chatSlice = createSlice({
           break
         }
       }
-      // Mark any lingering running tools as done.
+      // Mark any lingering running tools as done (and drop any stale
+      // awaiting-approval highlight — the run is over).
       for (const item of s.timeline) {
         if (item.kind === 'tool' && item.data.status === 'running') {
           item.data.status = 'done'
+        }
+        if (item.kind === 'tool' && item.data.awaitingApproval) {
+          item.data.awaitingApproval = undefined
         }
       }
       if (a.payload?.error) {
@@ -223,6 +259,17 @@ const chatSlice = createSlice({
     },
     addApprovalRequest(s, a: { payload: Approval }) {
       s.timeline.push({ kind: 'approval', data: a.payload, seq: nextSeq() })
+      // Paint the gated tool row as awaiting approval (warning color) while
+      // the prompt is unresolved.
+      if (a.payload.tool_call_id) {
+        for (let i = s.timeline.length - 1; i >= 0; i--) {
+          const item = s.timeline[i]
+          if (item.kind === 'tool' && item.data.toolCallID === a.payload.tool_call_id) {
+            if (item.data.status === 'running') item.data.awaitingApproval = true
+            break
+          }
+        }
+      }
     },
     attachAskUser(s, a: { payload: { toolName: string; askUserId: string; questions: AskUserQuestion[]; taskId?: string } }) {
       // Arm the matching tool with ask_user state (the tool was added by tool_call).
@@ -289,6 +336,16 @@ const chatSlice = createSlice({
         item.data.resolved = true
         item.data.approved = a.payload.approved
         item.data.resolving = false
+        // Clear the awaiting-approval highlight on the gated tool row (the
+        // denied strikethrough, if any, arrives with the tool_result).
+        if (item.data.tool_call_id) {
+          for (const t of s.timeline) {
+            if (t.kind === 'tool' && t.data.toolCallID === item.data.tool_call_id) {
+              t.data.awaitingApproval = undefined
+              break
+            }
+          }
+        }
       }
     },
   },
@@ -835,6 +892,7 @@ export const reconcilePendingInteractions = createAsyncThunk('chat/reconcilePend
         id: req.id,
         tool_name: req.tool_name,
         tool_args: req.tool_args,
+        tool_call_id: req.tool_call_id,
         is_external: req.is_external,
       }
       ;(approval as Approval & { task_id?: string }).task_id = req.task_id
@@ -904,6 +962,10 @@ export const loadSession = createAsyncThunk(
           status: 'running',
           timestamp: ts(e.timestamp),
           displayInfo: extractToolDisplayInfo(e.name, e.args || ''),
+          batchId: e.batch_id,
+          batchIndex: e.batch_index,
+          batchSize: e.batch_size,
+          startedAt: e.started_at,
         }
         timeline.push({ kind: 'tool', seq: nextSeq(), data: tc })
         if (e.tool_call_id) pendingToolCalls.set(e.tool_call_id, tc)
@@ -915,6 +977,10 @@ export const loadSession = createAsyncThunk(
             tc.output = e.output || ''
             tc.error = e.error || ''
             tc.status = e.error ? 'error' : 'done'
+            tc.denied = e.denied || undefined
+            if (e.duration_ms !== undefined && tc.meta?.duration_ms === undefined) {
+              tc.meta = { ...(tc.meta || {}), duration_ms: e.duration_ms }
+            }
             pendingToolCalls.delete(e.tool_call_id)
             resolved = true
           }
@@ -926,6 +992,10 @@ export const loadSession = createAsyncThunk(
               item.data.output = e.output || ''
               item.data.error = e.error || ''
               item.data.status = e.error ? 'error' : 'done'
+              item.data.denied = e.denied || undefined
+              if (e.duration_ms !== undefined && item.data.meta?.duration_ms === undefined) {
+                item.data.meta = { ...(item.data.meta || {}), duration_ms: e.duration_ms }
+              }
               break
             }
           }
@@ -993,6 +1063,10 @@ export const replaySession = createAsyncThunk(
           status: 'running',
           timestamp: ts(e.timestamp),
           displayInfo: extractToolDisplayInfo(e.name, e.args || ''),
+          batchId: e.batch_id,
+          batchIndex: e.batch_index,
+          batchSize: e.batch_size,
+          startedAt: e.started_at,
         }
         timeline.push({ kind: 'tool', seq: nextSeq(), data: tc })
         if (e.tool_call_id) pendingToolCalls.set(e.tool_call_id, tc)
@@ -1004,6 +1078,10 @@ export const replaySession = createAsyncThunk(
             tc.output = e.output || ''
             tc.error = e.error || ''
             tc.status = e.error ? 'error' : 'done'
+            tc.denied = e.denied || undefined
+            if (e.duration_ms !== undefined && tc.meta?.duration_ms === undefined) {
+              tc.meta = { ...(tc.meta || {}), duration_ms: e.duration_ms }
+            }
             pendingToolCalls.delete(e.tool_call_id)
             resolved = true
           }
@@ -1015,6 +1093,10 @@ export const replaySession = createAsyncThunk(
               item.data.output = e.output || ''
               item.data.error = e.error || ''
               item.data.status = e.error ? 'error' : 'done'
+              item.data.denied = e.denied || undefined
+              if (e.duration_ms !== undefined && item.data.meta?.duration_ms === undefined) {
+                item.data.meta = { ...(item.data.meta || {}), duration_ms: e.duration_ms }
+              }
               break
             }
           }

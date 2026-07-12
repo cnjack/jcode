@@ -33,7 +33,8 @@ const items: ThreadItem[] = [
     data: {
       id: 'm1',
       role: 'assistant',
-      content: '### Exploring group\nAdjacent read/search tools collapse into one summary.',
+      content:
+        '### Activity group — explorative (collapsed)\nAdjacent read/search tools collapse into one `Explored` line; click to expand the bordered row card.',
       timestamp: Date.now(),
     },
   },
@@ -123,6 +124,170 @@ const items: ThreadItem[] = [
       },
       meta: { exit_code: 1, duration_ms: 1820 },
       displayOutput: longStdout + '\n' + longStderr,
+    }),
+  },
+  {
+    kind: 'message',
+    seq: 9.1,
+    data: {
+      id: 'm-act-running',
+      role: 'assistant',
+      content:
+        '### Activity group — running (auto-expanded)\nThree parallel shells (same batchId): 2 done + 1 running with a live elapsed row. Header shows `Running…`; auto-collapses once everything settles.',
+      timestamp: Date.now(),
+    },
+  },
+  {
+    kind: 'tool',
+    seq: 9.2,
+    data: tool({
+      id: 'run-1',
+      name: 'execute',
+      args: JSON.stringify({ command: 'go build ./...', description: 'Build all packages' }),
+      status: 'done',
+      batchId: 'batch-demo',
+      batchIndex: 0,
+      batchSize: 3,
+      startedAt: Date.now() - 9000,
+      displayInfo: { title: 'Shell', subtitle: 'go build ./...', category: 'execution', kind: 'shell' },
+      streams: { stdout: 'ok', stderr: '', aggregated: 'ok' },
+      meta: { exit_code: 0, duration_ms: 3200 },
+      displayOutput: 'ok',
+    }),
+  },
+  {
+    kind: 'tool',
+    seq: 9.3,
+    data: tool({
+      id: 'run-2',
+      name: 'execute',
+      args: JSON.stringify({ command: 'go vet ./...', description: 'Vet all packages' }),
+      status: 'done',
+      batchId: 'batch-demo',
+      batchIndex: 1,
+      batchSize: 3,
+      startedAt: Date.now() - 9000,
+      displayInfo: { title: 'Shell', subtitle: 'go vet ./...', category: 'execution', kind: 'shell' },
+      streams: { stdout: 'ok', stderr: '', aggregated: 'ok' },
+      meta: { exit_code: 0, duration_ms: 2600 },
+      displayOutput: 'ok',
+    }),
+  },
+  {
+    kind: 'tool',
+    seq: 9.4,
+    data: tool({
+      id: 'run-3',
+      name: 'execute',
+      args: JSON.stringify({ command: 'go test ./...', description: 'Run all tests' }),
+      status: 'running',
+      batchId: 'batch-demo',
+      batchIndex: 2,
+      batchSize: 3,
+      startedAt: Date.now() - 65000,
+      displayInfo: { title: 'Shell', subtitle: 'go test ./...', category: 'execution', kind: 'shell' },
+    }),
+  },
+  {
+    kind: 'message',
+    seq: 9.5,
+    data: {
+      id: 'm-act-done',
+      role: 'assistant',
+      content:
+        '### Activity group — completed mixed (collapsed)\nOne muted line `Ran 1 command · read 1 file · edited 1 file`; expand it, then click a row to open that tool\'s full body in place.',
+      timestamp: Date.now(),
+    },
+  },
+  {
+    kind: 'tool',
+    seq: 9.6,
+    data: tool({
+      id: 'act-shell',
+      name: 'execute',
+      args: JSON.stringify({ command: 'pnpm -r build', description: 'Build workspace' }),
+      status: 'done',
+      displayInfo: { title: 'Shell', subtitle: 'pnpm -r build', category: 'execution', kind: 'shell' },
+      streams: { stdout: 'packages built: 3', stderr: '', aggregated: 'packages built: 3' },
+      meta: { exit_code: 0, duration_ms: 5200 },
+      displayOutput: 'packages built: 3',
+    }),
+  },
+  {
+    kind: 'tool',
+    seq: 9.7,
+    data: tool({
+      id: 'act-read',
+      name: 'read',
+      args: JSON.stringify({ file_path: 'src/registry.ts' }),
+      displayInfo: { title: 'Read', subtitle: 'src/registry.ts', category: 'context', kind: 'read', collapsible: true },
+      output: 'export const registry = new Map<string, Renderer>()',
+      displayOutput: 'export const registry = new Map<string, Renderer>()',
+    }),
+  },
+  {
+    kind: 'tool',
+    seq: 9.8,
+    data: tool({
+      id: 'act-edit',
+      name: 'edit',
+      args: JSON.stringify({
+        file_path: 'src/registry.ts',
+        old_string: 'export const registry = new Map<string, Renderer>()',
+        new_string:
+          "export const registry = new Map<string, Renderer>()\nregistry.set('diff', DiffRenderer)",
+      }),
+      displayInfo: { title: 'Edit', subtitle: 'src/registry.ts', category: 'mutation', kind: 'edit' },
+    }),
+  },
+  {
+    kind: 'message',
+    seq: 9.85,
+    data: {
+      id: 'm-act-err',
+      role: 'assistant',
+      content:
+        '### Activity group — failure visible while collapsed\nError icon + `1 failed` (and a muted `1 denied`) stay on the collapsed line.',
+      timestamp: Date.now(),
+    },
+  },
+  {
+    kind: 'tool',
+    seq: 9.86,
+    data: tool({
+      id: 'err-shell-1',
+      name: 'execute',
+      args: JSON.stringify({ command: 'go vet ./...', description: 'Vet all packages' }),
+      status: 'error',
+      displayInfo: { title: 'Shell', subtitle: 'go vet ./...', category: 'execution', kind: 'shell' },
+      streams: { stdout: '', stderr: 'vet: internal/tools/execute.go:12: unused variable', aggregated: 'vet: unused variable' },
+      meta: { exit_code: 1, duration_ms: 2600 },
+      displayOutput: 'vet: internal/tools/execute.go:12: unused variable',
+    }),
+  },
+  {
+    kind: 'tool',
+    seq: 9.87,
+    data: tool({
+      id: 'err-shell-2',
+      name: 'execute',
+      args: JSON.stringify({ command: 'gofmt -l .', description: 'Check formatting' }),
+      status: 'done',
+      displayInfo: { title: 'Shell', subtitle: 'gofmt -l .', category: 'execution', kind: 'shell' },
+      streams: { stdout: '', stderr: '', aggregated: '' },
+      meta: { exit_code: 0, duration_ms: 300 },
+    }),
+  },
+  {
+    kind: 'tool',
+    seq: 9.88,
+    data: tool({
+      id: 'err-denied',
+      name: 'execute',
+      args: JSON.stringify({ command: 'rm -rf dist', description: 'Clean dist' }),
+      status: 'done',
+      denied: true,
+      displayInfo: { title: 'Shell', subtitle: 'rm -rf dist', category: 'execution', kind: 'shell' },
     }),
   },
   {
@@ -274,6 +439,9 @@ createRoot(document.getElementById('root')!).render(<App />)
 setTimeout(() => {
   document.querySelectorAll<HTMLButtonElement>('.jcode-toolcall > button').forEach((btn) => {
     const card = btn.closest('.jcode-toolcall')
+    // Rows inside activity groups stay untouched — collapsed groups must stay
+    // a single line, and the running group's live rows stay headers-only.
+    if (card?.closest('.jcode-activity')) return
     const name = card?.getAttribute('data-tool-name')
     if (name === 'execute' || name === 'subagent') {
       if (card?.getAttribute('data-expanded') !== 'true') btn.click()

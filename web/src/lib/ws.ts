@@ -17,13 +17,30 @@ import { getAuthToken } from './authToken'
 export interface WSHandlers {
   onAgentStart?: () => void
   onAgentText?: (data: { text: string }) => void
-  onToolCall?: (data: { name: string; args: string; tool_call_id?: string; display_info?: { title: string; subtitle?: string; icon?: string; category?: string } }) => void
+  onToolCall?: (data: {
+    name: string
+    args: string
+    tool_call_id?: string
+    display_info?: { title: string; subtitle?: string; icon?: string; category?: string }
+    /** Concurrent-batch grouping (tools issued together by one assistant message). */
+    batch_id?: string
+    /** 0-based position within the batch. */
+    batch_index?: number
+    batch_size?: number
+    /** Wall-clock start (unix ms). */
+    started_at?: number
+  }) => void
   onToolResult?: (data: {
     name: string
     output: string
     display_output?: string
     error?: string
     tool_call_id?: string
+    /** Total tool duration (ms, approval wait subtracted) — merged into
+     *  meta.duration_ms when absent there. */
+    duration_ms?: number
+    /** User rejected the call at the approval prompt (declined ≠ failed). */
+    denied?: boolean
     streams?: import('./types').ToolResultStreams
     meta?: import('./types').ToolResultMeta
     presentation?: import('./types').ToolResultPresentation

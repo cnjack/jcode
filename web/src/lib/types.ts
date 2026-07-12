@@ -40,6 +40,16 @@ export interface SessionEntry {
   tool_call_id?: string
   timestamp?: string
 
+  // tool_call batch fields (concurrent calls from one assistant message)
+  batch_id?: string
+  batch_index?: number
+  batch_size?: number
+  started_at?: number
+  // tool_result duration (ms; approval wait already subtracted)
+  duration_ms?: number
+  // tool_result: user rejected the call at the approval prompt (declined ≠ failed)
+  denied?: boolean
+
   // plan_update fields
   plan_status?: string
   plan_title?: string
@@ -456,6 +466,7 @@ export interface ApprovalRequestData {
   id: string
   tool_name: string
   tool_args: string
+  tool_call_id?: string // gated tool_call's id — marks that row as awaiting approval
   is_external: boolean
   task_id?: string // the task (engine) the approval belongs to; echoed back on resolve
 }
