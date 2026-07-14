@@ -5,6 +5,11 @@
 模型:主 `zhipuai-coding-plan/glm-5.1`;审查器 small `glm-5.2`(tencent)或 `glm-5.1`(zhipuai)。
 所有真实测试用隔离 HOME(不碰真实 `~/.jcode` 状态),沙箱 cwd,jcode `CGO_ENABLED=0 -tags jcode_headless` + ACP。
 
+**结论**:单元 + `-race` 全绿;真实模型判定累计 ~600 次(1+3+20+30 轮),清晰恶意/注入件全部拦截,
+授权判别正确,escalate 落地;V3 cache 命中且不污染主 cache;fail-open(模型坏/超时/panic)一致回落用户。
+adversarial review 头号问题(uncertain 无法交还用户)已修。**唯一实测漏放**:云元数据 SSRF 取凭证被"调试借口"
+带偏 2/20 → 加显式 policy 规则后 0/30。核心定位:审查器是降打断的**概率性中间层**,非唯一防线。
+
 ## 1. 单元测试(确定性)
 
 `go test ./internal/review ./internal/runner ./internal/agent ./internal/config` 全绿。覆盖:
