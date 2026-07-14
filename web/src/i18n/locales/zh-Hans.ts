@@ -367,6 +367,16 @@ export default {
     },
     providers: {
       title: '服务商',
+      roles: {
+        title: '模型角色',
+        smallName: 'Small model',
+        smallDesc: '用于 subagent / workflow / automation 的 "small" 别名路由与会话标题生成。未设置时别名回落主模型,标题使用截断文本。',
+        smallNoProviders: '先添加服务商并启用模型,才能选择 small model。',
+        smallUnset: '未设置(跟随主模型)',
+        smallSaved: '已保存,立即生效',
+        smallSaveFailed: '保存失败:{reason}',
+        smallUnavailable: '不可用',
+      },
       add: '+ 添加服务商',
       selectProvider: '选择服务商',
       selectModel: '选择模型',

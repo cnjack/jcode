@@ -65,7 +65,7 @@ export const api = {
       mode: string
       token?: TokenUpdateData
     }>('/api/status'),
-  config: () => request<{ provider: string; model: string; max_iterations: number }>('/api/config'),
+  config: () => request<{ provider: string; model: string; small_model: string; max_iterations: number }>('/api/config'),
   usageStats: (days = 30) => request<UsageStats>(`/api/usage/stats?days=${days}`),
   taskStats: (id: string) => request<TaskStats>(`/api/tasks/${encodeURIComponent(id)}/stats`),
   todos: () => request<TodoItem[]>('/api/todos'),
@@ -116,6 +116,13 @@ export const api = {
   models: () => request<ModelsResponse>('/api/models'),
   switchModel: (provider: string, model: string) =>
     request<{ status: string }>('/api/model', {
+      method: 'POST',
+      body: JSON.stringify({ provider, model }),
+    }),
+  // Set or clear config.small_model (both empty = clear). Persisted server-side;
+  // takes effect immediately (subagent "small" alias, session titles).
+  setSmallModel: (provider: string, model: string) =>
+    request<{ status: string; small_model: string }>('/api/small-model', {
       method: 'POST',
       body: JSON.stringify({ provider, model }),
     }),

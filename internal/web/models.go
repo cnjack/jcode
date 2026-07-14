@@ -208,8 +208,67 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"provider":       providerName,
 		"model":          modelName,
+		"small_model":    cfg.SmallModel,
 		"max_iterations": cfg.MaxIterations,
 	})
+}
+
+// handleSetSmallModel sets or clears config.small_model (both fields empty =
+// clear). It mutates the live shared config IN PLACE (the pointer captured by
+// buildWebTask's closure and read by ModelFactory/automation at call time) —
+// the s.cfg = fresh reassign pattern would leave those readers on the old
+// value until restart. Same discipline as handleBrowserConfig.
+func (s *Server) handleSetSmallModel(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if (req.Provider == "") != (req.Model == "") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and model must both be set, or both empty to clear"})
+		return
+	}
+
+	ref := ""
+	if req.Provider != "" {
+		ref = req.Provider + "/" + req.Model
+	}
+
+	s.cfgMu.Lock()
+	s.mu.Lock()
+	if s.cfg == nil {
+		s.mu.Unlock()
+		s.cfgMu.Unlock()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config unavailable"})
+		return
+	}
+	if ref != "" {
+		if _, ok := s.cfg.GetProviders()[req.Provider]; !ok {
+			s.mu.Unlock()
+			s.cfgMu.Unlock()
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown provider: " + req.Provider})
+			return
+		}
+	}
+	prev := s.cfg.SmallModel
+	s.cfg.SmallModel = ref
+	err := config.SaveConfig(s.cfg)
+	if err != nil {
+		// Keep memory consistent with disk: a failed save must not leave the
+		// live config advertising a value that won't survive a restart.
+		s.cfg.SmallModel = prev
+	}
+	s.mu.Unlock()
+	s.cfgMu.Unlock()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config: " + err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "small_model": ref})
 }
 
 // handleGetModelState returns the recent, favorite, and visibility settings.

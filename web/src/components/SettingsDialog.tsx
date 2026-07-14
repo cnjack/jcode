@@ -45,7 +45,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
-import { uiActions, modelActions } from '../app/store'
+import { uiActions, modelActions, loadConfig } from '../app/store'
 import { ProviderIcon } from './ProviderIcon'
 import { api } from '../lib/api'
 import { openRemoteConnect } from '../lib/remote'
@@ -397,6 +397,14 @@ function ProvidersTab() {
   const [editing, setEditing] = useState<ProviderDetail | null>(null)
   const [modelForm, setModelForm] = useState<{ providerId: string; target: CustomModelDetail | null } | null>(null)
 
+  // Model roles: config.small_model ("provider/model", '' = unset). Options
+  // come from the chat-picker payload in redux (enabled models only).
+  const smallModel = useAppSelector((s) => s.model.smallModel)
+  const pickerProviders = useAppSelector((s) => s.model.providers)
+  const [smallSaving, setSmallSaving] = useState(false)
+  const [smallError, setSmallError] = useState('')
+  const [smallSaved, setSmallSaved] = useState(false)
+
   // Refresh the chat model picker after provider/model mutations.
   async function refreshModels() {
     try {
@@ -436,8 +444,38 @@ function ProvidersTab() {
     void load()
     // Fetch the registry list for the add-provider picker.
     api.setupProviders().then(setSetupList).catch(() => {})
+    // Fresh enabled-model list + small_model value for the roles section (the
+    // dialog can open long after boot; another client may have changed both).
+    void refreshModels()
+    void dispatch(loadConfig())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Set or clear config.small_model. The select is controlled by redux state,
+  // so a failed save simply never moves it — no manual revert needed.
+  async function changeSmallModel(value: string) {
+    setSmallError('')
+    setSmallSaved(false)
+    let provider = ''
+    let model = ''
+    if (value) {
+      // Provider ids never contain '/'; model ids may (custom endpoints).
+      const i = value.indexOf('/')
+      provider = value.slice(0, i)
+      model = value.slice(i + 1)
+    }
+    setSmallSaving(true)
+    try {
+      await api.setSmallModel(provider, model)
+      dispatch(modelActions.setSmallModel(value))
+      setSmallSaved(true)
+      window.setTimeout(() => setSmallSaved(false), 2000)
+    } catch (err) {
+      setSmallError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSmallSaving(false)
+    }
+  }
 
   async function refreshCatalog(providerId: string) {
     setCatalogLoading(providerId)
@@ -591,8 +629,70 @@ function ProvidersTab() {
     )
   }
 
+  // Enabled models grouped by provider for the small-model picker; providers
+  // with nothing enabled disappear entirely.
+  const roleOptions = pickerProviders
+    .map((p) => ({ ...p, models: p.models.filter((m) => m.enabled) }))
+    .filter((p) => p.models.length > 0)
+  // A configured ref whose model was since disabled/removed still renders (as
+  // its raw ref, marked unavailable) so it can be seen and cleared.
+  const smallModelListed =
+    smallModel === '' || roleOptions.some((p) => p.models.some((m) => `${p.id}/${m.id}` === smallModel))
+
   return (
     <div>
+      <div className="mb-5">
+        <h3 className={`${SECTION_TITLE} mb-2`}>{t('settings.providers.roles.title')}</h3>
+        <div className={ROW}>
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)]">
+            <BoltIcon className="h-4 w-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[12px] font-medium text-[var(--color-foreground)]">
+              {t('settings.providers.roles.smallName')}
+            </div>
+            <div className="text-[11px] text-[var(--color-muted-foreground)]">
+              {roleOptions.length === 0
+                ? t('settings.providers.roles.smallNoProviders')
+                : t('settings.providers.roles.smallDesc')}
+            </div>
+            {smallError && (
+              <div className="mt-1 text-[11px] text-[var(--color-destructive)]">
+                {t('settings.providers.roles.smallSaveFailed', { reason: smallError })}
+              </div>
+            )}
+            {smallSaved && (
+              <div className="mt-1 text-[11px] text-[var(--color-success)]">
+                {t('settings.providers.roles.smallSaved')}
+              </div>
+            )}
+          </div>
+          <select
+            value={smallModel}
+            disabled={smallSaving || (roleOptions.length === 0 && smallModel === '')}
+            onChange={(e) => void changeSmallModel(e.target.value)}
+            className={INPUT_SM}
+            style={{ width: '15rem' }}
+          >
+            <option value="">{t('settings.providers.roles.smallUnset')}</option>
+            {!smallModelListed && (
+              <option value={smallModel}>
+                {smallModel} — {t('settings.providers.roles.smallUnavailable')}
+              </option>
+            )}
+            {roleOptions.map((p) => (
+              <optgroup key={p.id} label={p.name || p.id}>
+                {p.models.map((m) => (
+                  <option key={m.id} value={`${p.id}/${m.id}`}>
+                    {m.name || m.id}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </div>
+      </div>
+
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-baseline gap-2">
           <h3 className={SECTION_TITLE}>{t('settings.providers.title')}</h3>

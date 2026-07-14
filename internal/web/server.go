@@ -327,6 +327,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/tasks/{id}/stats", s.handleTaskStats)
 	mux.HandleFunc("GET /api/models", s.handleListModels)
 	mux.HandleFunc("POST /api/model", s.handleSwitchModel)
+	mux.HandleFunc("POST /api/small-model", s.handleSetSmallModel)
 	mux.HandleFunc("POST /api/mode", s.handleSwitchMode)
 	mux.HandleFunc("POST /api/exec", s.handleExec)
 	mux.HandleFunc("GET /api/diff", s.handleDiff)
