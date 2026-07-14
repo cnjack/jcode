@@ -14,6 +14,7 @@ import (
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/hooks"
 	"github.com/cnjack/jcode/internal/mode"
+	"github.com/cnjack/jcode/internal/review"
 )
 
 // ApprovalState manages whether tool calls require interactive user approval.
@@ -35,6 +36,14 @@ type ApprovalState struct {
 	// for a per-site permission check must come from the live session, not the
 	// args. nil means "unknown origin" (→ prompt). Set by the frontend.
 	browserOrigin func() string
+
+	// reviewer is the optional LLM auto-reviewer consulted for calls that would
+	// otherwise prompt the user (nil → disabled; behavior unchanged). transcriptFn
+	// provides recent conversation context to the reviewer. breaker bounds
+	// consecutive reviewer denials per turn.
+	reviewer     review.Reviewer
+	transcriptFn func() []review.Msg
+	breaker      reviewBreaker
 }
 
 // SetBrowserPermFunc installs the site-permission lookup for browser tools.
@@ -382,9 +391,9 @@ func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs 
 		s.notifyToolInProgress(toolName, toolArgs)
 		return true, nil
 	case decisionPromptExternal:
-		return s.requestUserApproval(ctx, toolName, toolArgs, true)
+		return s.gatedApproval(ctx, toolName, toolArgs, true, "", "")
 	default:
-		return s.requestUserApproval(ctx, toolName, toolArgs, false)
+		return s.gatedApproval(ctx, toolName, toolArgs, false, "", "")
 	}
 }
 
@@ -459,9 +468,9 @@ func (s *ApprovalState) NewTeammateApprovalFunc(workerName, workerColor string) 
 			s.notifyToolInProgress(toolName, toolArgs)
 			return true, nil
 		case decisionPromptExternal:
-			return s.requestUserApprovalWithWorker(ctx, toolName, toolArgs, true, workerName, workerColor)
+			return s.gatedApproval(ctx, toolName, toolArgs, true, workerName, workerColor)
 		default:
-			return s.requestUserApprovalWithWorker(ctx, toolName, toolArgs, false, workerName, workerColor)
+			return s.gatedApproval(ctx, toolName, toolArgs, false, workerName, workerColor)
 		}
 	}
 }

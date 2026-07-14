@@ -27,6 +27,7 @@ import (
 	"github.com/cnjack/jcode/internal/mode"
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/prompts"
+	"github.com/cnjack/jcode/internal/review"
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/skills"
@@ -85,6 +86,37 @@ type acpSession struct {
 }
 
 // Close releases resources held by the session (recorder file handle, tracer).
+// recentTranscript snapshots the tail of the conversation for the approval
+// reviewer, converting eino messages to review.Msg. The system prompt is
+// excluded (it is not evidence of user intent). Bounded so the reviewer prompt
+// stays cheap.
+func (s *acpSession) recentTranscript() []review.Msg {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	const maxN = 24
+	msgs := s.history
+	if len(msgs) > maxN {
+		msgs = msgs[len(msgs)-maxN:]
+	}
+	out := make([]review.Msg, 0, len(msgs))
+	for _, m := range msgs {
+		if m == nil || m.Content == "" {
+			continue
+		}
+		role := "user"
+		switch m.Role {
+		case schema.Assistant:
+			role = "assistant"
+		case schema.Tool:
+			role = "tool"
+		case schema.System:
+			continue
+		}
+		out = append(out, review.Msg{Role: role, Content: m.Content})
+	}
+	return out
+}
+
 func (s *acpSession) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -568,6 +600,15 @@ func (a *acpAgent) buildAgentSession(
 		flowLoader:    flowLoader,
 	}
 
+	// Wire the optional LLM approval reviewer: when enabled it adjudicates calls
+	// that decide() would route to a user prompt, using the recent conversation
+	// as evidence. nil (disabled) leaves approval behavior unchanged.
+	if reviewer := review.BuildFromConfig(cfg, platform); reviewer != nil {
+		approvalState.SetReviewer(reviewer)
+		approvalState.SetTranscriptFunc(sess.recentTranscript)
+		config.Logger().Printf("[acp] approval auto-reviewer enabled for session %s", sessionID)
+	}
+
 	// Reconcile the session's advertised mode when the handler promotes to
 	// Full access via "Allow All", so sess.mode never drifts from the approval
 	// state's source of truth.
@@ -741,6 +782,9 @@ func (a *acpAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Pr
 		hookSessionID = sess.rec.UUID()
 	}
 	promptCtx = hooks.WithDispatcher(promptCtx, hooks.NewSessionDispatcher(config.ConfigDir(), sess.env.Pwd(), hookSessionID, config.Logger().Printf))
+	// Reset per-turn approval-reviewer state (denial circuit breaker) at the
+	// start of each user turn.
+	sess.approvalState.OnTurnStart()
 	resp := runner.Run(promptCtx, sess.ag, history, sess.h, sess.rec, sess.todoStore, sess.env.GoalStore, sess.tracer, sess.tokenUsage)
 
 	sess.mu.Lock()

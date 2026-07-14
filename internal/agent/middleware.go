@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/cloudwego/eino/adk"
@@ -60,6 +61,17 @@ func (m *approvalMiddleware) WrapInvokableToolCall(
 			approved, err := m.approvalFunc(ctx, tCtx.Name, argumentsInJSON)
 
 			if err != nil {
+				// A reviewer denial is not an execution error: surface the
+				// reviewer's rationale to the model with anti-workaround guidance,
+				// distinct from the generic user-rejection message.
+				var reviewDenied *ReviewDeniedError
+				if errors.As(err, &reviewDenied) {
+					msg := reviewDeniedMessage(reviewDenied.Reason)
+					if finishApproval != nil {
+						finishApproval("auto-review-denied")
+					}
+					return msg, nil
+				}
 				msg := fmt.Sprintf("Tool approval error: %v", err)
 				if finishApproval != nil {
 					finishApproval(msg)
@@ -120,6 +132,21 @@ func (m *approvalMiddleware) WrapInvokableToolCall(
 		}
 		return result, nil
 	}, nil
+}
+
+// reviewDeniedMessage renders the agent-visible result when the automatic
+// reviewer denies a call. It names the reviewer (not the user) as the source and
+// blocks workaround attempts, mirroring the anti-circumvention guidance codex's
+// guardian uses.
+func reviewDeniedMessage(reason string) string {
+	r := reason
+	if r == "" {
+		r = "The automatic safety reviewer denied this action due to unacceptable risk."
+	}
+	return "Tool execution was denied by the automatic safety reviewer.\n" +
+		"Reason: " + r + "\n" +
+		"IMPORTANT: Do NOT retry the same action via a workaround, an alternative tool, or a rephrased command. " +
+		"Proceed only with a materially safer alternative, or stop and ask the user for explicit approval after explaining the risk."
 }
 
 // NewTeammateHandlers returns the middleware stack for a teammate agent.

@@ -315,6 +315,44 @@ type Config struct {
 
 	// Browser controls the browser-use capability (CDP-driven page control).
 	Browser *BrowserConfig `json:"browser,omitempty"`
+
+	// ApprovalReview configures the optional LLM auto-reviewer that adjudicates
+	// tool calls which would otherwise prompt the user. Off by default; when
+	// enabled it never sees calls that the rule engine already auto-approves.
+	ApprovalReview *ApprovalReviewConfig `json:"approval_review,omitempty"`
+}
+
+// ApprovalReviewConfig configures jcode's LLM approval reviewer (see
+// internal-doc/approval-review-design.md). It is opt-in: when Enabled is false
+// the reviewer is never constructed and approval behavior is unchanged.
+type ApprovalReviewConfig struct {
+	// Enabled turns the auto-reviewer on. When true, calls that the rule engine
+	// would send to a user prompt are first adjudicated by the reviewer, which
+	// may allow, deny, or escalate them back to the user.
+	Enabled bool `json:"enabled,omitempty"`
+	// Model is the "provider/model" (or "small" alias) the reviewer runs on.
+	// Empty resolves to small_model, then to the main model — so the reviewer
+	// always has a working model even if small_model is unset.
+	Model string `json:"model,omitempty"`
+	// Policy is extra workspace-specific policy text appended to the built-in
+	// risk policy (e.g. trusted internal hosts, stricter deny rules).
+	Policy string `json:"policy,omitempty"`
+	// TimeoutSeconds bounds a single review. 0 uses the built-in default.
+	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
+	// Investigate lets the reviewer run read-only tools (read/grep/glob) to
+	// gather evidence before deciding (V2). Off by default (single-shot).
+	Investigate bool `json:"investigate,omitempty"`
+	// ReuseSession keeps a cached reviewer conversation so the large policy
+	// prefix is served from the provider's prompt cache across reviews (V3).
+	ReuseSession bool `json:"reuse_session,omitempty"`
+	// AuditPath overrides the verdict log location. Empty →
+	// <config dir>/approval-review.jsonl.
+	AuditPath string `json:"audit_path,omitempty"`
+}
+
+// ApprovalReviewEnabled reports whether the auto-reviewer is configured on.
+func (c *Config) ApprovalReviewEnabled() bool {
+	return c.ApprovalReview != nil && c.ApprovalReview.Enabled
 }
 
 // BrowserConfig controls the browser-use capability. See
