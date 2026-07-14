@@ -91,6 +91,10 @@ type interactiveState struct {
 }
 
 func (s *interactiveState) buildAllTools() []tool.BaseTool {
+	// One factory serves subagent + workflow model overrides (incl. the
+	// "small" alias); fallback is the current session model, so it must be
+	// rebuilt here on every agent rebuild (model switches re-enter this func).
+	factory := internalmodel.NewModelFactory(s.cfg, s.chatModel)
 	all := []tool.BaseTool{
 		s.env.NewReadTool(), s.env.NewEditTool(), s.env.NewWriteTool(),
 		s.env.NewExecuteTool(s.bgManager), s.env.NewGrepTool(),
@@ -99,15 +103,16 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 		s.env.NewAutomationCreateTool(),
 		s.env.NewCheckBackgroundTool(s.bgManager),
 		s.env.NewSubagentTool(&tools.SubagentDeps{
-			ChatModel:  s.chatModel,
-			Notifier:   s.subagentNotifier,
-			ProgressFn: s.subagentProgress,
-			TokenFn:    s.subagentTokenFn,
-			Recorder:   s.rec,
-			Tracer:     s.langfuseTracer,
+			ChatModel:    s.chatModel,
+			ModelFactory: factory,
+			Notifier:     s.subagentNotifier,
+			ProgressFn:   s.subagentProgress,
+			TokenFn:      s.subagentTokenFn,
+			Recorder:     s.rec,
+			Tracer:       s.langfuseTracer,
 		}),
 		s.env.NewWorkflowRunTool(&tools.WorkflowToolDeps{
-			ModelFactory: internalmodel.NewModelFactory(s.cfg, s.chatModel),
+			ModelFactory: factory,
 			Recorder:     s.rec,
 			Tracer:       s.langfuseTracer,
 			Loader:       s.flowLoader,
@@ -1047,6 +1052,8 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	planStore := tools.NewPlanStore()
 
 	rec, _ := session.NewRecorder(pwd, providerName, modelName)
+	// LLM session titles ride the small model (checked at fire time).
+	attachTitleRefiner(ctx, rec)
 
 	// Build the transport-agnostic hook dispatcher and inject it into the context
 	// so the tool hook middleware and the runner's continuation loop reach it
@@ -1140,6 +1147,10 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		st.langfuseTracer = telemetry.NewLangfuseTracer(cfg.Telemetry.Langfuse)
 	}
 
+	// teamModelFactory serves per-teammate model overrides through the same
+	// resolution path as subagents/workflows; the fallback (startup model) is
+	// only reached when the "small" alias is unset/invalid.
+	teamModelFactory := internalmodel.NewModelFactory(cfg, chatModel)
 	teamManager := team.NewManager(&team.ManagerDeps{
 		DefaultModel: chatModel,
 		EnvFactory: func(cwd string) any {
@@ -1156,24 +1167,16 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 				e.NewTodoWriteTool(), e.NewTodoReadTool(),
 			}
 		},
+		// Route through the shared factory so teammates get the same model
+		// semantics as subagents/workflows — incl. the "small" alias, baseURL
+		// and effort resolution, and instance caching.
 		ModelFactory: func(mCtx context.Context, mName string) (any, error) {
-			parts := strings.SplitN(mName, "/", 2)
-			if len(parts) != 2 {
-				return nil, fmt.Errorf("invalid model format %q, expected 'provider/model'", mName)
-			}
-			pName, modelID := parts[0], parts[1]
-			pProviders := cfg.GetProviders()
-			pCfg := pProviders[pName]
-			if pCfg == nil {
-				return nil, fmt.Errorf("unknown provider %q", pName)
-			}
-			bURL := pCfg.BaseURL
-			if bURL == "" {
-				bURL = registry.GetProviderAPI(pName)
-			}
-			pEffortCfg := *pCfg
-			pEffortCfg.ReasoningEffort = config.ResolveEffort(pName, modelID, pCfg.ReasoningEffort)
-			return internalmodel.NewChatModelFromProvider(mCtx, modelID, bURL, &pEffortCfg)
+			return teamModelFactory.GetModel(mCtx, mName)
+		},
+		// Usage attribution: resolve the alias and strip the provider prefix so
+		// team events land in the same stat bucket as every other writer.
+		ResolveModelName: func(mName string) string {
+			return internalmodel.BareModelID(teamModelFactory.ResolveRef(mName))
 		},
 		PromptBuilder: func(agentType, agentPwd, agentPlatform string) string {
 			return prompts.GetSystemPrompt(agentPlatform, agentPwd, "local", nil, "")

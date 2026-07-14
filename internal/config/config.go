@@ -133,12 +133,15 @@ type ChannelConfig struct {
 	BLEEnabled bool `json:"ble_enabled,omitempty"`
 }
 
-// CompactionConfig controls automatic context compaction.
+// CompactionConfig controls automatic context compaction. Compaction always
+// runs on the session's main model: summary quality directly bounds the
+// agent's post-compaction performance, so it is deliberately not routed to
+// SmallModel (a former "summary_model" key was parsed but never honored, and
+// has been removed).
 type CompactionConfig struct {
-	Enabled      bool    `json:"enabled,omitempty"`
-	Threshold    float64 `json:"threshold,omitempty"`
-	KeepRecent   int     `json:"keep_recent,omitempty"`
-	SummaryModel string  `json:"summary_model,omitempty"`
+	Enabled    bool    `json:"enabled,omitempty"`
+	Threshold  float64 `json:"threshold,omitempty"`
+	KeepRecent int     `json:"keep_recent,omitempty"`
 }
 
 // PromptConfig controls prompt system behavior.
@@ -166,7 +169,9 @@ type MemoryConfig struct {
 	// Generate gates the offline distillation pipeline (M2+); false keeps the
 	// system a read-only/manual notebook.
 	Generate *bool `json:"generate,omitempty"` // default true
-	// Model for pipeline extraction, "provider/model". Empty → SmallModel → Model.
+	// Model for pipeline extraction, "provider/model". Empty → main Model.
+	// Deliberately not routed through SmallModel: distilled memories persist
+	// across sessions, so extraction quality matters more than the token cost.
 	Model string `json:"model,omitempty"`
 	// DailyTokenBudget caps pipeline token spend per day (BYOM guard).
 	DailyTokenBudget int `json:"daily_token_budget,omitempty"` // default 300000
@@ -254,7 +259,10 @@ type Config struct {
 
 	// Active model in "provider/model" format (e.g. "openai/gpt-4o")
 	Model string `json:"model"`
-	// SmallModel for lightweight tasks (summaries, compaction) in "provider/model" format
+	// SmallModel is an optional lightweight model in "provider/model" format.
+	// It backs the "small" model alias (subagent/flow model params) and LLM
+	// session-title generation. Unset → those paths use the main model /
+	// truncated titles; behavior is unchanged.
 	SmallModel string `json:"small_model,omitempty"`
 
 	// ContextLimits overrides the resolved context window (in tokens) for a model.
@@ -274,7 +282,6 @@ type Config struct {
 	MCPServers    map[string]*MCPServer `json:"mcp_servers,omitempty"`
 	Telemetry     *TelemetryConfig      `json:"telemetry,omitempty"`
 	Budget        *BudgetConfig         `json:"budget,omitempty"`
-	FallbackModel string                `json:"fallback_model,omitempty"`
 	Compaction    *CompactionConfig     `json:"compaction,omitempty"`
 	Prompt        *PromptConfig         `json:"prompt,omitempty"`
 	Subagent      *SubagentConfig       `json:"subagent,omitempty"`
@@ -520,13 +527,6 @@ func (c *Config) migrateProviderIDs() {
 		}
 	}
 
-	// Migrate FallbackModel field
-	for oldID, newID := range migrations {
-		if hasPrefix(c.FallbackModel, oldID+"/") {
-			c.FallbackModel = newID + c.FallbackModel[len(oldID):]
-			Logger().Printf("[config] Migrated fallback_model: %s → %s", oldID, newID)
-		}
-	}
 }
 
 func hasPrefix(s, prefix string) bool {

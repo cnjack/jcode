@@ -372,8 +372,7 @@ Config lives at `~/.jcode/config.json`. Key sections:
 | Section                       | What it controls                                                          |
 | ----------------------------- | ------------------------------------------------------------------------- |
 | `providers`                   | API keys, base URLs, headers, and custom models per provider              |
-| `model` / `small_model`       | Active model and the lightweight model used for summaries/compaction      |
-| `fallback_model`              | Model to fall back to when the primary fails                              |
+| `model` / `small_model`       | Active model, and an optional lightweight model for subagents (`"small"` alias) + session titles |
 | `default_mode`                | Startup session mode: `approval` (default), `plan`, or `full_access`      |
 | `theme`                       | Built-in color theme name; empty auto-selects from the terminal background |
 | `context_limits`              | Per-model context-window overrides (tokens)                               |

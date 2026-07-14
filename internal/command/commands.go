@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/spf13/cobra"
@@ -57,34 +58,29 @@ func runDoctorMode() {
 	fmt.Printf("  ✓ Active model: %s / %s\n", providerName, modelName)
 
 	providers := cfg.GetProviders()
-	providerCfg := providers[providerName]
-	if providerCfg == nil {
+	if providers[providerName] == nil {
 		fmt.Printf("  ✗ Provider %q not found in config\n", providerName)
 		return
 	}
 
-	// Resolve base URL from config or registry
-	baseURL := providerCfg.BaseURL
-	if baseURL == "" {
-		registry := internalmodel.NewModelRegistryWithConfig(cfg)
-		baseURL = registry.GetProviderAPI(providerName)
-	}
-
 	fmt.Println("\n  [1] Model Connection")
-	// Apply a per-model reasoning-effort override (set from the chat picker)
-	// over the provider-level default before constructing the model.
-	docEffortCfg := *providerCfg
-	docEffortCfg.ReasoningEffort = config.ResolveEffort(providerName, modelName, providerCfg.ReasoningEffort)
-	chatModel, err := internalmodel.NewChatModelFromProvider(context.Background(), modelName, baseURL, &docEffortCfg)
-	if err != nil {
-		fmt.Printf("      ✗ Failed to initialize: %v\n", err)
+	// Both probes build through the same ModelFactory path the runtime uses
+	// (baseURL/effort/alias resolution), each bounded by a timeout so a silent
+	// endpoint cannot hang the doctor.
+	factory := internalmodel.NewModelFactory(cfg, nil)
+	if err := doctorProbeModel(context.Background(), factory, providerName+"/"+modelName); err != nil {
+		fmt.Printf("      ✗ %s: %v\n", modelName, err)
 	} else {
-		msg := schema.UserMessage("hi")
-		_, err := chatModel.Generate(context.Background(), []*schema.Message{msg})
-		if err != nil {
-			fmt.Printf("      ✗ Generate error: %v\n", err)
+		fmt.Printf("      ✓ Connection successful (%s)\n", modelName)
+	}
+	// Probe the small model too when configured — it serves subagents (the
+	// "small" alias) and session titles, so a broken ref should surface here
+	// rather than as silently degraded behavior.
+	if cfg.SmallModel != "" {
+		if err := doctorProbeModel(context.Background(), factory, cfg.SmallModel); err != nil {
+			fmt.Printf("      ✗ small_model %s: %v\n", cfg.SmallModel, err)
 		} else {
-			fmt.Printf("      ✓ Connection successful (%s)\n", modelName)
+			fmt.Printf("      ✓ small_model connection successful (%s)\n", cfg.SmallModel)
 		}
 	}
 
@@ -111,6 +107,26 @@ func runDoctorMode() {
 	}
 
 	fmt.Println("\n  All checks complete.")
+}
+
+// doctorProbeTimeout bounds each connectivity probe: a TCP-accepting but
+// silent endpoint must fail the check, not hang the doctor.
+const doctorProbeTimeout = 60 * time.Second
+
+// doctorProbeModel resolves the model through the shared factory — the same
+// construction path the runtime uses — and issues one short generate.
+func doctorProbeModel(ctx context.Context, f *internalmodel.ModelFactory, providerModel string) error {
+	ctx, cancel := context.WithTimeout(ctx, doctorProbeTimeout)
+	defer cancel()
+	cm, err := f.GetModel(ctx, providerModel)
+	if err != nil {
+		return err
+	}
+	if cm == nil {
+		return fmt.Errorf("model %q did not resolve", providerModel)
+	}
+	_, err = cm.Generate(ctx, []*schema.Message{schema.UserMessage("hi")})
+	return err
 }
 
 func handleListSessions() {

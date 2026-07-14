@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/cnjack/jcode/internal/automation"
+	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
+	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/session"
 )
 
@@ -78,14 +80,29 @@ func (s *Server) runAutomation(ctx context.Context, a *automation.Automation, ki
 	sid := eng.taskID
 
 	// Provider/model override (otherwise inherits the foreground/startup model).
-	if a.Provider != "" && eng.createAgent != nil {
+	// The "small" alias resolves to config.small_model so recurring mechanical
+	// automations can ride the lightweight model like subagents do; unset or
+	// invalid small_model degrades to inheriting the current model.
+	prov, mdl := a.Provider, a.Model
+	if mdl == internalmodel.SmallModelAlias {
+		smallRef := ""
+		if s.cfg != nil {
+			smallRef = s.cfg.SmallModel
+		}
+		if sp, sm, err := internalmodel.ParseProviderModel(smallRef); err == nil {
+			prov, mdl = sp, sm
+		} else {
+			config.Logger().Printf("[automation] %s: small model alias unavailable (small_model=%q); inheriting current model", a.ID, smallRef)
+			prov, mdl = "", ""
+		}
+	}
+	if prov != "" && eng.createAgent != nil {
 		_, curMdl, _ := eng.modelSnapshot()
-		mdl := a.Model
 		if mdl == "" {
 			mdl = curMdl
 		}
-		if ag, agErr := eng.createAgent(a.Provider, mdl); agErr == nil {
-			eng.applyModelSwitch(ag, a.Provider, mdl)
+		if ag, agErr := eng.createAgent(prov, mdl); agErr == nil {
+			eng.applyModelSwitch(ag, prov, mdl)
 		}
 	}
 

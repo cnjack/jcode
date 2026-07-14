@@ -164,6 +164,9 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 		if sessionID != "" {
 			rec.SetUUID(sessionID)
 		}
+		if rec != nil && eng.recorderInit != nil {
+			eng.recorderInit(rec)
+		}
 		eng.recorder = rec
 	} else if sessionID != "" && eng.recorder.UUID() != sessionID {
 		// Client is continuing a session that doesn't match the current recorder.
@@ -171,6 +174,9 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 		eng.recorder.Close()
 		rec, _ := session.NewRecorder(eng.pwd, eng.providerName, eng.modelName)
 		rec.SetUUID(sessionID)
+		if rec != nil && eng.recorderInit != nil {
+			eng.recorderInit(rec)
+		}
 		eng.recorder = rec
 	}
 	recorder := eng.recorder

@@ -419,6 +419,9 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		if taskID != "" && trec != nil {
 			trec.SetUUID(taskID)
 		}
+		// LLM session titles ride the small model (checked at fire time).
+		// Resumed tasks (existing session file) never re-trigger titling.
+		attachTitleRefiner(ctx, trec)
 		ttok := &internalmodel.TokenUsage{}
 		tplan := tools.NewPlanStore()
 		tappr := runner.NewApprovalStateWithMode(taskPwd, startMode)
@@ -481,6 +484,9 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		}
 
 		buildAllTools := func(cm model.ToolCallingChatModel) []tool.BaseTool {
+			// One factory serves subagent + workflow model overrides (incl.
+			// the "small" alias); fallback is this task's current model.
+			factory := internalmodel.NewModelFactory(cfg, cm)
 			all := []tool.BaseTool{
 				tenv.NewReadTool(), tenv.NewEditTool(), tenv.NewWriteTool(),
 				tenv.NewExecuteTool(tbg), tenv.NewGrepTool(),
@@ -490,8 +496,9 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 				tenv.NewSwitchEnvTool(),
 				tenv.NewCheckBackgroundTool(tbg),
 				tenv.NewSubagentTool(&tools.SubagentDeps{
-					ChatModel: cm,
-					Recorder:  trec,
+					ChatModel:    cm,
+					ModelFactory: factory,
+					Recorder:     trec,
 					Notifier: func(name, agentType string, done bool, result string, err error) {
 						twh.OnSubagentEvent(name, agentType, done, result, err)
 					},
@@ -500,7 +507,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 					},
 				}),
 				tenv.NewWorkflowRunTool(&tools.WorkflowToolDeps{
-					ModelFactory: internalmodel.NewModelFactory(cfg, cm),
+					ModelFactory: factory,
 					Recorder:     trec,
 					Loader:       taskFlowLoader,
 				}),
@@ -720,6 +727,11 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 			CreateAgent:    createAgent,
 			RebuildForMode: rebuildForMode,
 			FlowLoader:     taskFlowLoader,
+			// Recorders the engine creates later (lazy create / session switch
+			// in chat.go) get the same title hook as trec above.
+			RecorderInit: func(r *session.Recorder) {
+				attachTitleRefiner(ctx, r)
+			},
 		}, nil
 	}
 

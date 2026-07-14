@@ -62,7 +62,7 @@ To auto-approve everything up front, switch to **Full access** mode with **Shift
 | **glob** | Find files by name pattern. |
 | **todowrite** | Manage a live task list. |
 | **todoread** | Read the current task list. |
-| **subagent** | Delegate a task to a child agent. |
+| **subagent** | Delegate a task to a child agent. Can run on a different model — `"small"` targets the configured `small_model` for cheap mechanical subtasks. |
 | **check_background** | Check status of background tasks. |
 | **ask_user** | Ask the user a question with optional choices. |
 | **switch_env** | Switch between local and SSH environments. |

@@ -62,21 +62,39 @@ Press **Ctrl+L** in the TUI or type `/model` to open the model picker. You can s
 
 ## Special Model Roles
 
-jcode supports different models for different purposes:
+jcode supports two model roles:
 
 | Role | Config Key | Purpose |
 |---|---|---|
-| **Primary** | `model` | Main model for agent interactions |
-| **Small** | `small_model` | Lightweight model for summaries and context compaction |
-| **Fallback** | `fallback_model` | Used when the primary model fails |
+| **Primary** | `model` | Main model for agent interactions, compaction, and memory distillation |
+| **Small** | `small_model` | Optional lightweight model for cheap side work |
 
 ```json
 {
   "model": "openai/gpt-4o",
-  "small_model": "openai/gpt-4o-mini",
-  "fallback_model": "anthropic/claude-3-5-sonnet"
+  "small_model": "openai/gpt-4o-mini"
 }
 ```
+
+When `small_model` is set, it powers:
+
+- **Subagent delegation** — the `subagent` tool accepts `"small"` as its
+  `model` value, and the main model is nudged to use it for mechanical,
+  low-stakes subtasks (targeted searches, file inventories, simple
+  extraction). Complex reasoning and code-writing subagents stay on the
+  parent model, and any subagent can still pin an explicit `"provider/model"`.
+  The same `"small"` alias works in workflow specs, `team_spawn`, and the
+  automation model override — anywhere a model ref is accepted.
+- **Session titles** — instead of truncating your first message, jcode asks
+  the small model for a concise title (async and best-effort; failures keep
+  the truncated title).
+
+Everything quality-critical — the main loop, context compaction, memory
+distillation — deliberately stays on the primary model: a lossy summary or a
+bad long-term memory costs more than the tokens it saves. When `small_model`
+is unset nothing changes: subagents inherit the parent model and titles stay
+truncated. `jcode doctor` probes small-model connectivity alongside the
+primary model.
 
 ## Reasoning & Extended Thinking
 

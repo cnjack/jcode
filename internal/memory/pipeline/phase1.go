@@ -428,13 +428,13 @@ func shortUUID(u string) string {
 	return u
 }
 
-// pipelineModel picks the extraction model: memory.model → SmallModel → Model.
+// pipelineModel picks the extraction model: memory.model → Model. The chain
+// deliberately skips SmallModel: distilled memories persist across sessions,
+// so extraction quality outweighs the token savings. Users who accept the
+// trade-off can still point memory.model at a cheap model explicitly.
 func pipelineModel(cfg *config.Config) string {
 	if cfg != nil && cfg.Memory != nil && cfg.Memory.Model != "" {
 		return cfg.Memory.Model
-	}
-	if cfg != nil && cfg.SmallModel != "" {
-		return cfg.SmallModel
 	}
 	if cfg != nil {
 		return cfg.Model

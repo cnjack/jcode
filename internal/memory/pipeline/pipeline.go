@@ -38,6 +38,13 @@ func Run(ctx context.Context, cfg *config.Config, projectDir string, opts Option
 	if !config.MemoryGenerate(cfg) {
 		return fmt.Errorf("memory pipeline disabled by config")
 	}
+	// Distillation deliberately does not ride small_model (persistent memories
+	// deserve extraction quality) — but users who set small_model to keep this
+	// pipeline cheap used to get it implicitly, so leave a breadcrumb about
+	// where the spend now goes and how to restore the old behavior.
+	if cfg != nil && cfg.SmallModel != "" && (cfg.Memory == nil || cfg.Memory.Model == "") {
+		log("memory: distillation runs on the main model %q (small_model is not used); set memory.model to pin a cheaper model", cfg.Model)
+	}
 	scope := memory.ProjectRoot(projectDir)
 	if err := memory.EnsureScope(scope); err != nil {
 		return err

@@ -301,6 +301,8 @@ func (a *acpAgent) NewSession(ctx context.Context, params acp.NewSessionRequest)
 
 	providerName, modelName := cfg.GetProviderModel()
 	rec, _ := session.NewRecorder(pwd, providerName, modelName)
+	// LLM session titles ride the small model (checked at fire time).
+	attachTitleRefiner(ctx, rec)
 	sessionID := acp.SessionId(fmt.Sprintf("sess_%s", rec.UUID()))
 
 	sess, err := a.buildAgentSession(ctx, cfg, pwd, sessionID, rec, nil)
