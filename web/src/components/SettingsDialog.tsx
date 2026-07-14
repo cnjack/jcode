@@ -46,6 +46,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
 import { uiActions, modelActions } from '../app/store'
+import { ProviderIcon } from './ProviderIcon'
 import { api } from '../lib/api'
 import { openRemoteConnect } from '../lib/remote'
 import { LOCALE_LABELS, SUPPORTED_LOCALES, setLocale, type SupportedLocale } from '../i18n'
@@ -359,7 +360,7 @@ export function SettingsDialog() {
           className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-2xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-sm)]"
           style={{ margin: '4px 14px 14px' }}
         >
-          <div className="min-h-0 flex-1 overflow-y-auto px-8 py-7 [&>div]:mx-auto [&>div]:max-w-3xl">
+          <div className="min-h-0 flex-1 overflow-y-auto px-8 py-7 [&>*]:mx-auto [&>*]:max-w-3xl">
             {tab === 'general' && <GeneralTab />}
             {tab === 'appearance' && <AppearanceTab />}
             {tab === 'providers' && <ProvidersTab />}
@@ -700,7 +701,7 @@ function ProviderCard({
       {/* Head */}
       <div className="flex items-center gap-3 border-b border-[var(--color-border)] px-3 py-2.5">
         <div className="grid h-[30px] w-[30px] shrink-0 place-items-center rounded-[var(--radius-md)] bg-[var(--color-secondary)] text-[var(--color-foreground)]">
-          <CpuChipIcon className="h-[18px] w-[18px]" />
+          <ProviderIcon provider={provider.id} custom={provider.custom} size={18} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-[13px] font-semibold text-[var(--color-foreground)]">
@@ -2276,44 +2277,46 @@ function BrowserTab() {
           <div className="mb-2 mt-5 text-[11px] font-medium uppercase tracking-wide text-[var(--color-muted-foreground)]">
             {t('settings.browser.control')}
           </div>
-          <div className={ROW}>
-            <div className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)]">
-              <ComputerDesktopIcon className="h-4 w-4" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.browser.managedChrome')}</div>
-              <div className="text-[11px] text-[var(--color-muted-foreground)]">
-                {st?.chrome_found ? st.chrome_version || st.chrome_path : t('settings.browser.noChromeDetected')}
+          <div className="space-y-2">
+            <div className={ROW}>
+              <div className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)]">
+                <ComputerDesktopIcon className="h-4 w-4" />
               </div>
-            </div>
-            <select
-              value={cfg.backend}
-              onChange={(e) => patch({ backend: e.target.value })}
-              className={INPUT_SM}
-              style={{ width: '8rem' }}
-            >
-              <option value="auto">{t('settings.browser.backendAuto')}</option>
-              <option value="managed">{t('settings.browser.backendManaged')}</option>
-              <option value="extension">{t('settings.browser.backendExtension')}</option>
-            </select>
-          </div>
-          <div className={ROW}>
-            <div className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)]">
-              <GlobeAltIcon className="h-4 w-4" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.browser.extension')}</div>
-              <div className="flex items-center gap-1.5 text-[11px] text-[var(--color-muted-foreground)]">
-                <span
-                  className="h-1.5 w-1.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: st?.extension_online ? 'var(--color-success-fg)' : 'var(--color-border)' }}
-                />
-                {st?.extension_online ? t('settings.browser.connected') : t('settings.browser.notConnected')}
+              <div className="min-w-0 flex-1">
+                <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.browser.managedChrome')}</div>
+                <div className="text-[11px] text-[var(--color-muted-foreground)]">
+                  {st?.chrome_found ? st.chrome_version || st.chrome_path : t('settings.browser.noChromeDetected')}
+                </div>
               </div>
+              <select
+                value={cfg.backend}
+                onChange={(e) => patch({ backend: e.target.value })}
+                className={INPUT_SM}
+                style={{ width: '8rem' }}
+              >
+                <option value="auto">{t('settings.browser.backendAuto')}</option>
+                <option value="managed">{t('settings.browser.backendManaged')}</option>
+                <option value="extension">{t('settings.browser.backendExtension')}</option>
+              </select>
             </div>
-            {st?.extension_online && (
-              <span className={CHIP + ' !bg-[var(--color-success-bg)] !text-[var(--color-success-fg)]'}>{t('settings.browser.online')}</span>
-            )}
+            <div className={ROW}>
+              <div className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)]">
+                <GlobeAltIcon className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.browser.extension')}</div>
+                <div className="flex items-center gap-1.5 text-[11px] text-[var(--color-muted-foreground)]">
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: st?.extension_online ? 'var(--color-success-fg)' : 'var(--color-border)' }}
+                  />
+                  {st?.extension_online ? t('settings.browser.connected') : t('settings.browser.notConnected')}
+                </div>
+              </div>
+              {st?.extension_online && (
+                <span className={CHIP + ' !bg-[var(--color-success-bg)] !text-[var(--color-success-fg)]'}>{t('settings.browser.online')}</span>
+              )}
+            </div>
           </div>
 
           {!st?.chrome_found && (
@@ -2331,33 +2334,35 @@ function BrowserTab() {
           <div className="mb-2 mt-5 text-[11px] font-medium uppercase tracking-wide text-[var(--color-muted-foreground)]">
             {t('settings.browser.approval')}
           </div>
-          <div className={ROW}>
-            <div className="min-w-0 flex-1">
-              <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.browser.navigate')}</div>
+          <div className="space-y-2">
+            <div className={ROW}>
+              <div className="min-w-0 flex-1">
+                <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.browser.navigate')}</div>
+              </div>
+              <select
+                value={cfg.approval?.['navigate'] ?? 'ask'}
+                onChange={(e) => setApproval('navigate', e.target.value)}
+                className={INPUT_SM}
+                style={{ width: '10rem' }}
+              >
+                <option value="ask">{t('settings.browser.askEachSite')}</option>
+                <option value="always_allow">{t('settings.browser.alwaysAllow')}</option>
+              </select>
             </div>
-            <select
-              value={cfg.approval?.['navigate'] ?? 'ask'}
-              onChange={(e) => setApproval('navigate', e.target.value)}
-              className={INPUT_SM}
-              style={{ width: '10rem' }}
-            >
-              <option value="ask">{t('settings.browser.askEachSite')}</option>
-              <option value="always_allow">{t('settings.browser.alwaysAllow')}</option>
-            </select>
-          </div>
-          <div className={ROW}>
-            <div className="min-w-0 flex-1">
-              <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.browser.interact')}</div>
+            <div className={ROW}>
+              <div className="min-w-0 flex-1">
+                <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.browser.interact')}</div>
+              </div>
+              <select
+                value={cfg.approval?.['interact'] ?? 'ask'}
+                onChange={(e) => setApproval('interact', e.target.value)}
+                className={INPUT_SM}
+                style={{ width: '10rem' }}
+              >
+                <option value="ask">{t('settings.browser.askEachSite')}</option>
+                <option value="always_allow">{t('settings.browser.alwaysAllow')}</option>
+              </select>
             </div>
-            <select
-              value={cfg.approval?.['interact'] ?? 'ask'}
-              onChange={(e) => setApproval('interact', e.target.value)}
-              className={INPUT_SM}
-              style={{ width: '10rem' }}
-            >
-              <option value="ask">{t('settings.browser.askEachSite')}</option>
-              <option value="always_allow">{t('settings.browser.alwaysAllow')}</option>
-            </select>
           </div>
 
           <div className="mb-2 mt-5 flex items-center justify-between">
@@ -2368,43 +2373,45 @@ function BrowserTab() {
               <PlusIcon className="h-3.5 w-3.5" /> {t('settings.browser.add')}
             </button>
           </div>
-          {!(cfg.site_permissions?.length ?? 0) && (
-            <div className={ROW}>
-              <div className="text-[11px] text-[var(--color-muted-foreground)]">{t('settings.browser.noSitePermissions')}</div>
-            </div>
-          )}
-          {(cfg.site_permissions ?? []).map((sp, i) => (
-            <div key={i} className={ROW}>
-              <input
-                value={sp.origin}
-                onChange={(e) => updateSitePerm(i, { origin: e.target.value })}
-                className={INPUT_SM}
-                style={{ flex: 1 }}
-                placeholder="https://github.com"
-              />
-              <select
-                value={sp.navigate ?? 'ask'}
-                onChange={(e) => updateSitePerm(i, { navigate: e.target.value })}
-                className={INPUT_SM}
-                style={{ width: '7rem' }}
-              >
-                <option value="ask">{t('settings.browser.navAsk')}</option>
-                <option value="allow">{t('settings.browser.navAllow')}</option>
-              </select>
-              <select
-                value={sp.interact ?? 'ask'}
-                onChange={(e) => updateSitePerm(i, { interact: e.target.value })}
-                className={INPUT_SM}
-                style={{ width: '7rem' }}
-              >
-                <option value="ask">{t('settings.browser.actAsk')}</option>
-                <option value="allow">{t('settings.browser.actAllow')}</option>
-              </select>
-              <button type="button" className={`${BTN_GHOST} ${BTN_SM}`} onClick={() => removeSitePerm(i)}>
-                <TrashIcon className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ))}
+          <div className="space-y-2">
+            {!(cfg.site_permissions?.length ?? 0) && (
+              <div className={ROW}>
+                <div className="text-[11px] text-[var(--color-muted-foreground)]">{t('settings.browser.noSitePermissions')}</div>
+              </div>
+            )}
+            {(cfg.site_permissions ?? []).map((sp, i) => (
+              <div key={i} className={ROW}>
+                <input
+                  value={sp.origin}
+                  onChange={(e) => updateSitePerm(i, { origin: e.target.value })}
+                  className={INPUT_SM}
+                  style={{ flex: 1 }}
+                  placeholder="https://github.com"
+                />
+                <select
+                  value={sp.navigate ?? 'ask'}
+                  onChange={(e) => updateSitePerm(i, { navigate: e.target.value })}
+                  className={INPUT_SM}
+                  style={{ width: '7rem' }}
+                >
+                  <option value="ask">{t('settings.browser.navAsk')}</option>
+                  <option value="allow">{t('settings.browser.navAllow')}</option>
+                </select>
+                <select
+                  value={sp.interact ?? 'ask'}
+                  onChange={(e) => updateSitePerm(i, { interact: e.target.value })}
+                  className={INPUT_SM}
+                  style={{ width: '7rem' }}
+                >
+                  <option value="ask">{t('settings.browser.actAsk')}</option>
+                  <option value="allow">{t('settings.browser.actAllow')}</option>
+                </select>
+                <button type="button" className={`${BTN_GHOST} ${BTN_SM}`} onClick={() => removeSitePerm(i)}>
+                  <TrashIcon className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
 
           <div className="mb-2 mt-5 text-[11px] font-medium uppercase tracking-wide text-[var(--color-muted-foreground)]">
             {t('settings.browser.developerMode')}
