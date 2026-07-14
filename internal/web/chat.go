@@ -230,6 +230,11 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 	agent := eng.agent
 	eng.emu.Unlock()
 
+	// Reset the per-turn approval-reviewer denial breaker.
+	if eng.approvalState != nil {
+		eng.approvalState.OnTurnStart()
+	}
+
 	// Stream response via WebSocket — run agent in background. Each task derives
 	// its own cancellable context so /stop cancels only that task. Fall back to
 	// Background if a run is somehow submitted before Start set the root context.

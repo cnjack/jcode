@@ -31,6 +31,7 @@ import (
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	weixin "github.com/cnjack/jcode/internal/pkg/weixin"
 	"github.com/cnjack/jcode/internal/prompts"
+	"github.com/cnjack/jcode/internal/review"
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/skills"
@@ -405,6 +406,34 @@ func (s *interactiveState) drainModeSwitch(modeSelectCh <-chan mode.SessionMode)
 	}
 }
 
+// recentTranscript snapshots the tail of the conversation for the approval
+// reviewer (system prompt excluded — it is not evidence of user intent).
+// Called only during a turn, when st.history is not being mutated concurrently.
+func (s *interactiveState) recentTranscript() []review.Msg {
+	const maxN = 24
+	msgs := s.history
+	if len(msgs) > maxN {
+		msgs = msgs[len(msgs)-maxN:]
+	}
+	out := make([]review.Msg, 0, len(msgs))
+	for _, m := range msgs {
+		if m == nil || m.Content == "" {
+			continue
+		}
+		role := "user"
+		switch m.Role {
+		case schema.Assistant:
+			role = "assistant"
+		case schema.Tool:
+			role = "tool"
+		case schema.System:
+			continue
+		}
+		out = append(out, review.Msg{Role: role, Content: m.Content})
+	}
+	return out
+}
+
 func (s *interactiveState) handlePrompt(userPrompt string) {
 	s.agentRunning.Store(true)
 	defer s.agentRunning.Store(false)
@@ -458,6 +487,7 @@ func (s *interactiveState) handlePrompt(userPrompt string) {
 	}
 	s.history = append(s.history, schema.UserMessage(userPrompt))
 	s.history = agent.DrainBgNotifications(s.bgManager, s.history)
+	s.approvalState.OnTurnStart() // reset the per-turn reviewer denial breaker
 	resp := runner.Run(runCtx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.env.GoalStore, s.langfuseTracer, s.agentTokenUsage)
 	if resp != "" {
 		s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: resp})
@@ -1197,6 +1227,16 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	})
 	approvalState.SetBrowserOriginFunc(env.CurrentBrowserOrigin)
 	st.approvalState = approvalState
+
+	// Wire the optional LLM approval reviewer (parity with ACP). nil (disabled)
+	// leaves approval behavior unchanged. The transcript provider reads st.history,
+	// which is only mutated between turns on the goroutine that blocks on
+	// runner.Run — so reading it during an approval (which happens inside Run) is
+	// race-free.
+	if reviewer := review.BuildFromConfig(cfg, util.GetSystemInfo()); reviewer != nil {
+		approvalState.SetReviewer(reviewer)
+		approvalState.SetTranscriptFunc(st.recentTranscript)
+	}
 
 	// Wire the `/browser` command to the browser-use subsystem.
 	browserCtl := &tui.BrowserController{

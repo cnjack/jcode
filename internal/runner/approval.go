@@ -403,11 +403,6 @@ func (s *ApprovalState) notifyToolInProgress(toolName, toolArgs string) {
 	}
 }
 
-// requestUserApproval handles the unified approval request process
-func (s *ApprovalState) requestUserApproval(ctx context.Context, toolName, toolArgs string, isExternal bool) (bool, error) {
-	return s.requestUserApprovalWithWorker(ctx, toolName, toolArgs, isExternal, "", "")
-}
-
 // requestUserApprovalWithWorker handles approval with optional worker identity
 func (s *ApprovalState) requestUserApprovalWithWorker(ctx context.Context, toolName, toolArgs string, isExternal bool, workerName, workerColor string) (bool, error) {
 	if s.h == nil {

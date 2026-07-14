@@ -36,6 +36,7 @@ import (
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	weixin "github.com/cnjack/jcode/internal/pkg/weixin"
 	"github.com/cnjack/jcode/internal/prompts"
+	"github.com/cnjack/jcode/internal/review"
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/skills"
@@ -428,6 +429,11 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		twh := handler.NewWebHandler()
 		tnotify := makeNotifyingHandler(twh)
 		tappr.SetHandler(tnotify)
+		// Wire the optional LLM approval reviewer (parity with ACP/TUI). The
+		// engine installs the transcript provider once it is built. nil disables.
+		if reviewer := review.BuildFromConfig(cfg, platform); reviewer != nil {
+			tappr.SetReviewer(reviewer)
+		}
 		// Site-permission lookup for browser tools: an origin marked "allow" for a
 		// class (navigate/interact) is auto-approved. Reads the live config each
 		// call so settings changes take effect without rebuilding the task.

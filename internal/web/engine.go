@@ -8,10 +8,12 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/schema"
 
 	"github.com/cnjack/jcode/internal/flow"
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/model"
+	"github.com/cnjack/jcode/internal/review"
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/tools"
@@ -137,7 +139,7 @@ func newEngine(c *EngineConfig) *Engine {
 	if taskID == "" && c.Recorder != nil {
 		taskID = c.Recorder.UUID()
 	}
-	return &Engine{
+	e := &Engine{
 		taskID:         taskID,
 		pwd:            c.Pwd,
 		mode:           c.Mode,
@@ -157,6 +159,42 @@ func newEngine(c *EngineConfig) *Engine {
 		flowLoader:     c.FlowLoader,
 		recorderInit:   c.RecorderInit,
 	}
+	// Give the approval reviewer (when one is installed on this ApprovalState)
+	// recent conversation context. Harmless when no reviewer is set.
+	if e.approvalState != nil {
+		e.approvalState.SetTranscriptFunc(e.recentTranscript)
+	}
+	return e
+}
+
+// recentTranscript snapshots the tail of the conversation for the approval
+// reviewer (system prompt excluded). Reads eng.history under emu, so it is safe
+// to call from the run goroutine where approvals happen.
+func (e *Engine) recentTranscript() []review.Msg {
+	e.emu.Lock()
+	defer e.emu.Unlock()
+	const maxN = 24
+	msgs := e.history
+	if len(msgs) > maxN {
+		msgs = msgs[len(msgs)-maxN:]
+	}
+	out := make([]review.Msg, 0, len(msgs))
+	for _, m := range msgs {
+		if m == nil || m.Content == "" {
+			continue
+		}
+		role := "user"
+		switch m.Role {
+		case schema.Assistant:
+			role = "assistant"
+		case schema.Tool:
+			role = "tool"
+		case schema.System:
+			continue
+		}
+		out = append(out, review.Msg{Role: role, Content: m.Content})
+	}
+	return out
 }
 
 // activeEngine returns the currently-foregrounded engine (the embedded bootstrap
