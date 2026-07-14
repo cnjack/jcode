@@ -109,7 +109,7 @@ type Engine struct {
 	investigate  bool
 	reuseCache   bool
 	platform     string
-	sessions     *sessionCache // V3; nil when reuseCache is false
+	trunk        *reviewerSession // V3; nil when reuseCache is false
 }
 
 // New builds a reviewer Engine from Options. It never returns nil; a
@@ -136,7 +136,7 @@ func New(opts Options) *Engine {
 		platform:      opts.Platform,
 	}
 	if opts.ReuseCache {
-		e.sessions = newSessionCache()
+		e.trunk = newReviewerSession()
 	}
 	return e
 }
@@ -219,14 +219,24 @@ func (e *Engine) review(ctx context.Context, req Request) (Result, reviewMeta) {
 	tracker := &internalmodel.TokenUsage{}
 	cctx = internalmodel.WithTokenTracker(cctx, tracker)
 
-	// V2/V3 investigation path: a bounded read-only agent loop. Falls through to
-	// the single-call path when disabled.
+	// Investigation (V2) takes precedence: a read-only tool loop can't share the
+	// cached single-shot trunk, so the two features are mutually exclusive per
+	// review.
 	if e.investigate {
 		res, imeta := e.reviewWithTools(cctx, req, cm)
 		e.fillTokenMeta(&imeta, tracker)
 		imeta.model = meta.model
 		imeta.investigated = true
 		return res, imeta
+	}
+
+	// Reused-session path (V3): adjudicate against a cached reviewer conversation
+	// so the policy prefix is served from the provider's prompt cache.
+	if e.trunk != nil {
+		res, cmeta := e.reviewCached(cctx, req, cm)
+		e.fillTokenMeta(&cmeta, tracker)
+		cmeta.model = meta.model
+		return res, cmeta
 	}
 
 	res, cmeta := e.reviewSingleShot(cctx, req, cm)
