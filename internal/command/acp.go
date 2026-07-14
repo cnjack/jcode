@@ -384,6 +384,21 @@ func (a *acpAgent) buildAgentSession(
 		mcpTools, _ = tools.LoadMCPTools(ctx, cfg.MCPServers)
 	}
 
+	// The ACPHandler is created before the tool list so the subagent tool can
+	// bridge its lifecycle/progress callbacks into ACP tool_call_update
+	// notifications (parity with the TUI notifier and the web SSE events).
+	acpHandler := handler.NewACPHandler(a.conn, sessionID, pwd)
+
+	// Langfuse tracer — created before the tools so subagent runs nest child
+	// traces under the session trace.
+	var tracer *telemetry.LangfuseTracer
+	if cfg.Telemetry != nil && cfg.Telemetry.Langfuse != nil {
+		tracer = telemetry.NewLangfuseTracer(cfg.Telemetry.Langfuse)
+	}
+
+	// One factory serves subagent + workflow model overrides (incl. the
+	// "small" alias); fallback is this session's current model.
+	factory := internalmodel.NewModelFactory(cfg, chatModel)
 	allTools := []tool.BaseTool{
 		env.NewReadTool(), env.NewEditTool(), env.NewWriteTool(),
 		env.NewExecuteTool(bgManager), env.NewGrepTool(),
@@ -392,9 +407,18 @@ func (a *acpAgent) buildAgentSession(
 		env.NewAutomationCreateTool(),
 		env.NewSwitchEnvTool(),
 		env.NewCheckBackgroundTool(bgManager),
-		env.NewWorkflowRunTool(&tools.WorkflowToolDeps{
-			ModelFactory: internalmodel.NewModelFactory(cfg, chatModel),
+		env.NewSubagentTool(&tools.SubagentDeps{
+			ChatModel:    chatModel,
+			ModelFactory: factory,
 			Recorder:     rec,
+			Tracer:       tracer,
+			Notifier:     acpHandler.OnSubagentEvent,
+			ProgressFn:   acpHandler.OnSubagentProgress,
+		}),
+		env.NewWorkflowRunTool(&tools.WorkflowToolDeps{
+			ModelFactory: factory,
+			Recorder:     rec,
+			Tracer:       tracer,
 			Loader:       flowLoader,
 		}),
 	}
@@ -427,8 +451,6 @@ func (a *acpAgent) buildAgentSession(
 	startupMode := resolveStartupMode(cfg, false)
 	approvalState := runner.NewApprovalStateWithMode(pwd, startupMode)
 
-	// Create ACPHandler
-	acpHandler := handler.NewACPHandler(a.conn, sessionID, pwd)
 	approvalState.SetHandler(acpHandler)
 
 	// Wire up environment change callback so switch_env properly restores
@@ -457,12 +479,6 @@ func (a *acpAgent) buildAgentSession(
 			rec.RecordTodoSnapshot(snapItems)
 		}
 		env.GoalStore.OnUpdate = tools.GoalRecorderHook(rec)
-	}
-
-	// Langfuse tracer
-	var tracer *telemetry.LangfuseTracer
-	if cfg.Telemetry != nil && cfg.Telemetry.Langfuse != nil {
-		tracer = telemetry.NewLangfuseTracer(cfg.Telemetry.Langfuse)
 	}
 
 	// Build agent with middlewares

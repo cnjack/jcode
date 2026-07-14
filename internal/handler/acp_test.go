@@ -68,6 +68,61 @@ func TestACPToolPresentationWriteIncludesDiffContent(t *testing.T) {
 	}
 }
 
+func TestACPSubagentNameFromArgs(t *testing.T) {
+	if got := subagentNameFromArgs(`{"name":"scan-repo","prompt":"..."}`); got != "scan-repo" {
+		t.Fatalf("name = %q, want scan-repo", got)
+	}
+	if got := subagentNameFromArgs(`not json`); got != "" {
+		t.Fatalf("name = %q, want empty for invalid JSON", got)
+	}
+	if got := subagentNameFromArgs(`{"prompt":"..."}`); got != "" {
+		t.Fatalf("name = %q, want empty when absent", got)
+	}
+}
+
+func TestACPSubagentProgressLine(t *testing.T) {
+	if got := subagentProgressLine("tool_call", "grep", `{"pattern":"foo"}`); got != `→ grep {"pattern":"foo"}` {
+		t.Fatalf("tool_call line = %q", got)
+	}
+	if got := subagentProgressLine("tool_result", "read", "line one\nline two"); got != "← read line one line two" {
+		t.Fatalf("tool_result line = %q", got)
+	}
+	long := strings.Repeat("x", 500)
+	if got := subagentProgressLine("tool_result", "read", long); len(got) > 200 {
+		t.Fatalf("long detail not truncated: len=%d", len(got))
+	}
+}
+
+func TestACPSubagentDoneClearsMappingWithoutUpdate(t *testing.T) {
+	// nil conn: the test passes only if the done path never touches the
+	// connection (it must only clear the progress mapping).
+	h := NewACPHandler(nil, "sess", "/repo")
+	h.subagentCalls["scan-repo"] = "tc_1"
+
+	h.OnSubagentEvent("scan-repo", "explore", true, "result", nil)
+
+	if _, ok := h.subagentCalls["scan-repo"]; ok {
+		t.Fatal("done event did not clear subagent mapping")
+	}
+	// Unknown subagent progress must be a silent no-op (no conn access).
+	h.OnSubagentProgress("scan-repo", "tool_call", "grep", "{}")
+}
+
+func TestACPToolResultClearsStaleSubagentMapping(t *testing.T) {
+	h := NewACPHandler(nil, "sess", "/repo")
+	h.einoToACP["eino_1"] = "tc_1"
+	h.subagentCalls["scan-repo"] = "tc_1"
+	// Terminal status already sent (e.g. permission rejection): OnToolResult
+	// returns before sending, but must still drop the stale mapping.
+	h.toolTerminated["tc_1"] = true
+
+	h.OnToolResult(ToolResultEvent{Name: "subagent", ToolCallID: "eino_1"})
+
+	if _, ok := h.subagentCalls["scan-repo"]; ok {
+		t.Fatal("tool result did not clear stale subagent mapping")
+	}
+}
+
 func TestACPToolFailureOutputDetection(t *testing.T) {
 	cases := []string{
 		"Tool execution failed: exit status 1",
