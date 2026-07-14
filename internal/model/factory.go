@@ -34,9 +34,51 @@ func (f *ModelFactory) Registry() *ModelRegistry {
 	return f.registry
 }
 
+// SmallModelAlias is a special model ref accepted by the model params that
+// resolve through this factory (subagent/flow/team) plus the automation
+// model override. It resolves to cfg.SmallModel; when no small model is
+// configured it degrades to the session default so callers never fail just
+// because the alias is unset.
+const SmallModelAlias = "small"
+
+// SmallModelRef returns the configured small model in "provider/model" format,
+// or "" when unset. Used by tool builders to decide whether to advertise the
+// "small" alias.
+func (f *ModelFactory) SmallModelRef() string {
+	if f.cfg == nil {
+		return ""
+	}
+	return f.cfg.SmallModel
+}
+
+// ResolveRef expands the SmallModelAlias to its concrete "provider/model" ref.
+// Returns "" when the input is empty or the alias is unset (i.e. the caller
+// will use the session default) — useful for attributing usage to the model
+// that actually served the calls.
+func (f *ModelFactory) ResolveRef(providerModel string) string {
+	if providerModel == SmallModelAlias {
+		return f.SmallModelRef()
+	}
+	return providerModel
+}
+
 // GetModel returns a ChatModel for the given "provider/model" identifier.
-// Empty string returns the fallback model.
+// Empty string returns the fallback model. The SmallModelAlias ("small")
+// resolves to the configured small_model; when small_model is unset OR
+// malformed the alias degrades to the session default instead of erroring —
+// a config typo must not fail every delegated task. Direct (non-alias) refs
+// keep hard errors so caller typos surface.
 func (f *ModelFactory) GetModel(ctx context.Context, providerModel string) (einomodel.ToolCallingChatModel, error) {
+	if providerModel == SmallModelAlias {
+		resolved := f.ResolveRef(providerModel)
+		if resolved == "" {
+			config.Logger().Printf("[model-factory] %q alias requested but small_model is not configured; using session model", SmallModelAlias)
+		} else if _, _, err := ParseProviderModel(resolved); err != nil {
+			config.Logger().Printf("[model-factory] small_model %q is invalid (%v); using session model", resolved, err)
+			resolved = ""
+		}
+		providerModel = resolved
+	}
 	if providerModel == "" {
 		return f.fallback, nil
 	}
@@ -92,6 +134,17 @@ func (f *ModelFactory) GetModel(ctx context.Context, providerModel string) (eino
 // Fallback returns the default fallback model.
 func (f *ModelFactory) Fallback() einomodel.ToolCallingChatModel {
 	return f.fallback
+}
+
+// BareModelID returns the model portion of a "provider/model" ref; refs
+// without a provider prefix pass through unchanged. Usage events store bare
+// model ids (runner attribution uses Recorder.Model()) — route every usage
+// writer through this so the same model never splits into two stat buckets.
+func BareModelID(ref string) string {
+	if _, m, err := ParseProviderModel(ref); err == nil {
+		return m
+	}
+	return ref
 }
 
 // ParseProviderModel splits "provider/model" into its components.

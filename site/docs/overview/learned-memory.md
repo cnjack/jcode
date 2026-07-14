@@ -111,9 +111,11 @@ spending a single token.
 
 {: .important }
 > jcode is **bring-your-own-model** — you pay for every token. The pipeline is
-> built for that: it defaults to your cheap `small_model`, is capped by a **daily
-> token budget**, throttled by a cooldown, and can be turned off entirely. It
-> never runs during one-shot (`-p`) runs or for remote (SSH/Docker) sessions.
+> built for that: it is capped by a **daily token budget**, throttled by a
+> cooldown, and can be turned off entirely. It never runs during one-shot
+> (`-p`) runs or for remote (SSH/Docker) sessions. Extraction runs on your main
+> model by default — memories persist across sessions, so quality beats token
+> savings — but `memory.model` can pin any model you like.
 
 ## Where it's stored
 
@@ -211,7 +213,7 @@ Project Memory works with zero configuration. To tune it, add a `memory` block t
 |---|---|---|
 | `enabled` | `true` | Master switch. `false` disables reading **and** writing memory. |
 | `generate` | `true` | `false` still writes online notes and reads/injects memory, but never runs the distillation pipeline (a manual, zero-cost notebook — you or the notes curate the files). |
-| `model` | `""` | Model for extraction. Empty falls back to `small_model`, then `model`. |
+| `model` | `""` | Model for extraction. Empty falls back to the main `model` (not `small_model` — persistent memories deserve extraction quality). |
 | `daily_token_budget` | `300000` | Hard ceiling on tokens the pipeline may spend per day. |
 | `cooldown_hours` | `6` | Minimum gap between automatic pipeline runs. |
 | `max_age_days` | `30` | Only sessions newer than this are considered for extraction. |

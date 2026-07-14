@@ -53,7 +53,6 @@ jcode stores all configuration in a single JSON file at `~/.jcode/config.json`. 
   },
   "model": "openai/gpt-4o",
   "small_model": "openai/gpt-4o-mini",
-  "fallback_model": "anthropic/claude-3-5-sonnet",
   "max_iterations": 1000,
   "default_mode": "approval",
 
@@ -85,8 +84,7 @@ jcode stores all configuration in a single JSON file at `~/.jcode/config.json`. 
   "compaction": {
     "enabled": true,
     "threshold": 0.75,
-    "keep_recent": 6,
-    "summary_model": "openai/gpt-4o-mini"
+    "keep_recent": 6
   },
 
   "prompt": {
@@ -151,8 +149,7 @@ Active model in `"provider/model"` format.
 | Field | Description |
 |---|---|
 | `model` | Primary model for all interactions |
-| `small_model` | Lightweight model for summaries and compaction |
-| `fallback_model` | Used when the primary model fails |
+| `small_model` | Optional lightweight model. Powers the subagent `"small"` model alias (cheap delegated subtasks) and LLM session-title generation. Unset → subagents use the parent model and titles stay truncated first messages |
 | `max_iterations` | Maximum agent iterations per turn (default: 1000) |
 
 ### context_limits
@@ -229,7 +226,10 @@ Auto context compaction settings.
 | `enabled` | false | Enable auto-compaction |
 | `threshold` | 0.75 | Context fraction that triggers compaction |
 | `keep_recent` | 6 | Recent messages to preserve |
-| `summary_model` | — | Model for summaries (uses `small_model` if unset) |
+
+Compaction always runs on the session's main model — summary quality directly
+bounds the agent's post-compaction performance, so it is deliberately not
+routed to `small_model`.
 
 ### subagent
 
@@ -260,7 +260,7 @@ Cross-session learned memory. Works with zero config; all fields optional. See
 |---|---|---|
 | `enabled` | `true` | Master switch for reading and writing memory |
 | `generate` | `true` | `false` keeps notes + reading but disables the distillation pipeline |
-| `model` | `small_model` | Model used for extraction (`provider/model`) |
+| `model` | main `model` | Model used for extraction (`provider/model`). Not routed through `small_model`: memories persist across sessions, so extraction quality matters more than token cost |
 | `daily_token_budget` | `300000` | Hard cap on tokens the pipeline may spend per day |
 | `cooldown_hours` | `6` | Minimum gap between automatic pipeline runs |
 | `max_age_days` | `30` | Only sessions newer than this are extracted |

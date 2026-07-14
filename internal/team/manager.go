@@ -71,6 +71,10 @@ type ManagerDeps struct {
 	ToolBuilder func(env any, agentType string) []tool.BaseTool
 	// ModelFactory returns a chat model for the given model name, or nil for default.
 	ModelFactory func(ctx context.Context, modelName string) (any, error)
+	// ResolveModelName maps a teammate's model ref (possibly an alias like
+	// "small") to the bare model id used for usage attribution. Optional;
+	// when nil the raw ref is recorded.
+	ResolveModelName func(modelName string) string
 	// DefaultModel is the default chat model to use.
 	DefaultModel  any // model.ToolCallingChatModel
 	PromptBuilder func(agentType, pwd, platform string) string
@@ -759,9 +763,15 @@ func (m *Manager) runAgentTurn(ctx context.Context, state *TeammateState) (strin
 		delta := full.Minus(state.LastUsage)
 		state.LastUsage = full
 		if delta.TotalTokens > 0 {
+			// Resolve aliases and strip the provider prefix so team events land
+			// in the same stat bucket as runner/subagent/title events (bare ids).
+			evModel := state.Model
+			if m.deps.ResolveModelName != nil {
+				evModel = m.deps.ResolveModelName(state.Model)
+			}
 			usage.RecordEvent(usage.Event{
 				Session:    m.deps.LeaderSessionUUID,
-				Model:      state.Model,
+				Model:      evModel,
 				Prompt:     delta.PromptTokens,
 				Completion: delta.CompletionTokens,
 				Cached:     delta.CachedTokens,
@@ -769,6 +779,7 @@ func (m *Manager) runAgentTurn(ctx context.Context, state *TeammateState) (strin
 				CacheWrite: delta.CacheWriteTokens,
 				Total:      delta.TotalTokens,
 				Calls:      delta.CallCount,
+				CacheSeen:  state.TokenUsage.CacheObserved(),
 			})
 		}
 	}

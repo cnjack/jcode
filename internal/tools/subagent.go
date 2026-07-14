@@ -63,6 +63,16 @@ type subagentInput struct {
 
 // NewSubagentTool creates the "subagent" tool that delegates tasks to a child agent.
 func (e *Env) NewSubagentTool(deps *SubagentDeps) tool.InvokableTool {
+	// Only advertise the "small" alias when a small model is actually
+	// configured; otherwise the alias silently falls back to the parent model
+	// and the hint would be noise.
+	modelDesc := "Override model for this subagent in 'provider/model' format (optional, uses parent model by default)"
+	if deps.ModelFactory != nil && deps.ModelFactory.SmallModelRef() != "" {
+		modelDesc = "Override model for this subagent (optional, uses parent model by default). " +
+			"Accepts 'provider/model' or 'small' — the configured lightweight model (" + deps.ModelFactory.SmallModelRef() + "). " +
+			"Prefer 'small' for mechanical, low-stakes subtasks: targeted searches, file inventories, simple extraction or verification. " +
+			"Keep complex reasoning, code writing, and open-ended exploration on the parent model."
+	}
 	info := &schema.ToolInfo{
 		Name: "subagent",
 		Desc: "Delegate a task to a subagent that runs in its own context. " +
@@ -82,7 +92,7 @@ func (e *Env) NewSubagentTool(deps *SubagentDeps) tool.InvokableTool {
 				Type: schema.String, Desc: "Agent type: 'explore' (read-only, default), 'general' (full tools), or 'coordinator' (can spawn sub-subagents)", Required: false,
 			},
 			"model": {
-				Type: schema.String, Desc: "Override model for this subagent in 'provider/model' format (optional, uses parent model by default)", Required: false,
+				Type: schema.String, Desc: modelDesc, Required: false,
 			},
 			"run_in_background": {
 				Type: schema.Boolean, Desc: "If true, run asynchronously and return a task ID immediately. Check result later with task_get.", Required: false,
@@ -175,14 +185,20 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 		return "", fmt.Errorf("maximum subagent nesting depth (%d) reached", MaxSubagentDepth)
 	}
 
-	// Resolve model.
+	// Resolve model. usageModel tracks the concrete override ref (alias
+	// expanded) so token usage is attributed to the model that actually ran;
+	// empty means "parent model" and falls back to the recorder's model name.
 	chatModel := s.deps.ChatModel
+	usageModel := ""
 	if input.Model != "" && s.deps.ModelFactory != nil {
 		m, err := s.deps.ModelFactory.GetModel(ctx, input.Model)
 		if err != nil {
 			return "", fmt.Errorf("failed to resolve model %q: %w", input.Model, err)
 		}
 		chatModel = m
+		if ref := s.deps.ModelFactory.ResolveRef(input.Model); ref != "" {
+			usageModel = internalmodel.BareModelID(ref)
+		}
 	}
 
 	config.Logger().Printf("[subagent] start name=%q type=%s depth=%d model=%q bg=%v",
@@ -235,7 +251,7 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 		if err != nil {
 			return "", fmt.Errorf("failed to create subagent: %w", err)
 		}
-		result, runErr := s.runSubagent(runCtx, ag, input)
+		result, runErr := s.runSubagent(runCtx, ag, input, usageModel)
 		if s.deps.Tracer != nil {
 			if runErr != nil {
 				s.deps.Tracer.EndChildTrace(runCtx, fmt.Sprintf("error: %v", runErr))
@@ -294,7 +310,9 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 // assistant text and a non-nil error when the run terminated on a model-layer
 // failure (event.Err) — tool errors never surface here: the
 // safeToolMiddleware already folded them into model-visible strings.
-func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, input subagentInput) (string, error) {
+// usageModel is the bare id of an override model ("" → parent model); usage
+// events are attributed to it.
+func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, input subagentInput, usageModel string) (string, error) {
 	agentInput := &adk.AgentInput{
 		Messages: []adk.Message{
 			schema.UserMessage(input.Prompt),
@@ -322,10 +340,14 @@ func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, 
 		}
 		d := tokenUsage.GetFull()
 		if d.TotalTokens > 0 {
+			evModel := usageModel
+			if evModel == "" {
+				evModel = s.deps.Recorder.Model()
+			}
 			usage.RecordEvent(usage.Event{
 				Session:    s.deps.Recorder.UUID(),
 				Project:    s.deps.Recorder.Project(),
-				Model:      s.deps.Recorder.Model(),
+				Model:      evModel,
 				Prompt:     d.PromptTokens,
 				Completion: d.CompletionTokens,
 				Cached:     d.CachedTokens,
@@ -333,6 +355,7 @@ func (s *subagentTool) runSubagent(ctx context.Context, ag *adk.ChatModelAgent, 
 				CacheWrite: d.CacheWriteTokens,
 				Total:      d.TotalTokens,
 				Calls:      d.CallCount,
+				CacheSeen:  tokenUsage.CacheObserved(),
 			})
 		}
 	}()

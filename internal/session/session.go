@@ -169,6 +169,10 @@ type Recorder struct {
 	resuming bool
 	title    string
 	hasTitle bool // true after title has been generated or when resuming
+	// titleRefiner, when set, is invoked once with the first user message after
+	// the truncated fallback title is persisted. Implementations spawn their own
+	// goroutine for slow work (e.g. LLM title generation) and call SetTitle.
+	titleRefiner func(firstUserMsg string)
 	// pendingSystemPrompt / pendingEnvInfo buffer the system prompt until the
 	// first real message is recorded so that opening and immediately closing
 	// jcode does not leave an empty session on disk.
@@ -284,16 +288,58 @@ func (r *Recorder) HasRecording() bool {
 func (r *Recorder) RecordUser(content string, images ...EntryImage) {
 	r.mu.Lock()
 	needsTitle := !r.hasTitle && !r.resuming
+	var refine func(string)
+	if needsTitle {
+		// Claim atomically: concurrent first messages must generate exactly one
+		// title and fire the refiner exactly once. The refiner is one-shot —
+		// clearing it here also releases its closure (config/factory) for GC.
+		r.hasTitle = true
+		refine = r.titleRefiner
+		r.titleRefiner = nil
+	}
 	r.mu.Unlock()
 	_ = r.writeEntry(Entry{Type: EntryUser, Content: content, Images: images})
 	if needsTitle {
-		title := generateTitle(content)
 		r.mu.Lock()
-		r.title = title
-		r.hasTitle = true
+		id := r.uuid
 		r.mu.Unlock()
-		_ = updateIndexTitle(r.project, r.uuid, title)
+		r.SetTitleFor(id, generateTitle(content))
+		if refine != nil {
+			refine(content)
+		}
 	}
+}
+
+// SetTitleRefiner installs a hook invoked once with the first user message,
+// right after the truncated fallback title is persisted. The hook must not
+// block; it upgrades the title asynchronously via SetTitleFor.
+func (r *Recorder) SetTitleRefiner(fn func(firstUserMsg string)) {
+	r.mu.Lock()
+	r.titleRefiner = fn
+	r.mu.Unlock()
+}
+
+// SetTitleFor overrides the session title and persists it to the shared index
+// — but only while the recorder still records session id. A title computed for
+// one session (e.g. by the async LLM refiner) must never clobber another
+// session's index entry after SetUUID re-points this recorder (the TUI /resume
+// path reuses the live recorder). Empty titles are ignored.
+func (r *Recorder) SetTitleFor(id, title string) {
+	title = strings.TrimSpace(title)
+	if title == "" || id == "" {
+		return
+	}
+	r.mu.Lock()
+	if r.uuid != id {
+		r.mu.Unlock()
+		config.Logger().Printf("[session] dropping stale title for %s (recorder now on %s)", id, r.uuid)
+		return
+	}
+	r.title = title
+	r.hasTitle = true
+	project := r.project
+	r.mu.Unlock()
+	_ = updateIndexTitle(project, id, title)
 }
 
 // RecordAssistant appends an assistant message entry.

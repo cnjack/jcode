@@ -75,6 +75,7 @@ type Engine struct {
 
 	// --- per-task accounting + event emission ---
 	recorder        *session.Recorder
+	recorderInit    func(*session.Recorder) // decorates lazily-created recorders (see EngineConfig.RecorderInit)
 	tokenUsage      *model.TokenUsage
 	sessionSnapshot string // git tree hash at run start, for session-scoped diffs
 	handler         *handler.WebHandler
@@ -118,6 +119,10 @@ type EngineConfig struct {
 	CreateAgent    func(providerName, modelName string) (*adk.ChatModelAgent, error)
 	RebuildForMode func(planMode bool) (*adk.ChatModelAgent, error)
 	FlowLoader     *flow.Loader
+	// RecorderInit decorates recorders this engine creates AFTER build (lazy
+	// creation / session switch in chat.go) so they get the same hooks (e.g.
+	// the LLM title refiner) as the recorder built with the task.
+	RecorderInit func(*session.Recorder)
 }
 
 // newEngine assembles an *Engine from the factory-produced config. The engine's
@@ -150,6 +155,7 @@ func newEngine(c *EngineConfig) *Engine {
 		createAgent:    c.CreateAgent,
 		rebuildForMode: c.RebuildForMode,
 		flowLoader:     c.FlowLoader,
+		recorderInit:   c.RecorderInit,
 	}
 }
 

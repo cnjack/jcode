@@ -161,6 +161,99 @@ func TestGetModel_Caching(t *testing.T) {
 	}
 }
 
+func TestGetModel_SmallAlias(t *testing.T) {
+	fallback := &stubModel{id: "fallback"}
+	f := NewModelFactory(&config.Config{
+		Model:      "test/model-main",
+		SmallModel: "test/model-small",
+		Providers: map[string]*config.ProviderConfig{
+			"test": {APIKey: "sk-test"},
+		},
+	}, fallback)
+
+	// Pre-populate cache for the resolved small model to avoid real API calls.
+	cached := &stubModel{id: "small"}
+	f.mu.Lock()
+	f.cache["test/model-small"] = cached
+	f.mu.Unlock()
+
+	m, err := f.GetModel(context.Background(), SmallModelAlias)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m != cached {
+		t.Error("expected 'small' alias to resolve to the configured small model")
+	}
+}
+
+func TestGetModel_SmallAliasUnsetFallsBack(t *testing.T) {
+	fallback := &stubModel{id: "fallback"}
+	f := NewModelFactory(&config.Config{
+		Model:     "test/model-main",
+		Providers: map[string]*config.ProviderConfig{},
+	}, fallback)
+
+	m, err := f.GetModel(context.Background(), SmallModelAlias)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m != fallback {
+		t.Error("expected 'small' alias without small_model to degrade to the session fallback")
+	}
+}
+
+func TestGetModel_SmallAliasMalformedFallsBack(t *testing.T) {
+	// A slash-less small_model (user typo) must degrade to the session model,
+	// not hard-error every delegated task.
+	fallback := &stubModel{id: "fallback"}
+	f := NewModelFactory(&config.Config{
+		Model:      "test/model-main",
+		SmallModel: "gpt-4o-mini", // missing provider prefix
+		Providers:  map[string]*config.ProviderConfig{},
+	}, fallback)
+
+	m, err := f.GetModel(context.Background(), SmallModelAlias)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m != fallback {
+		t.Error("malformed small_model must degrade the alias to the fallback")
+	}
+}
+
+func TestBareModelID(t *testing.T) {
+	if got := BareModelID("openai/gpt-4o"); got != "gpt-4o" {
+		t.Errorf("got %q", got)
+	}
+	if got := BareModelID("provider/model/extra"); got != "model/extra" {
+		t.Errorf("got %q", got)
+	}
+	if got := BareModelID("bare-id"); got != "bare-id" {
+		t.Errorf("got %q", got)
+	}
+	if got := BareModelID(""); got != "" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestResolveRef(t *testing.T) {
+	f := NewModelFactory(&config.Config{SmallModel: "test/model-small"}, nil)
+	if got := f.ResolveRef(SmallModelAlias); got != "test/model-small" {
+		t.Errorf("ResolveRef(small): got %q, want test/model-small", got)
+	}
+	if got := f.ResolveRef("openai/gpt-4o"); got != "openai/gpt-4o" {
+		t.Errorf("ResolveRef(passthrough): got %q", got)
+	}
+	if got := f.ResolveRef(""); got != "" {
+		t.Errorf("ResolveRef(empty): got %q, want empty", got)
+	}
+
+	unset := NewModelFactory(&config.Config{}, nil)
+	if got := unset.ResolveRef(SmallModelAlias); got != "" {
+		t.Errorf("ResolveRef(small, unset): got %q, want empty", got)
+	}
+}
+
 func TestFallback(t *testing.T) {
 	fallback := &stubModel{id: "fallback"}
 	f := NewModelFactory(&config.Config{}, fallback)
