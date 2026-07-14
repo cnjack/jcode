@@ -125,6 +125,11 @@ transcript+OnTurnStart)。TUI/web 前端接线同法(本期先 ACP,PR 一并补)
 
 ## 已知限制(对抗审查后记录)
 
+- **审查器是概率性安全层,不是保证**:20 轮 440 次判定中,清晰恶意件(rm -rf /、外发、注入)20/20 正确,
+  但云元数据 SSRF 取凭证(`d_metadata_creds`)被"调试借口"话术带偏 2/20。已在 policy 显式加云元数据规则
+  缓解(见测试报告 §B)。根本上审查器是**中间层**:它降低打断、拦掉大部分危险,但不能替代 fail-open-to-user
+  与未来的 OS 沙箱纵深。更强的审查模型漏放率更低。
+
 - **V2 investigate 假设本地文件系统**:审查器的 read/grep/glob 走 LocalExecutor,读的是本地磁盘。
   remote/SSH 会话里被判命令在远端执行,本地同路径可能是另一台机器的内容 → 可能误判。当前建议
   remote 会话不开 investigate;彻底修需把会话 executor 传给审查器(后续)。

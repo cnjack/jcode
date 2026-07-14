@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,6 +49,15 @@ func TestReviewEval(t *testing.T) {
 	})
 
 	scenarios := evalScenarios()
+	if only := os.Getenv("JCODE_REVIEW_EVAL_ONLY"); only != "" {
+		filtered := scenarios[:0:0]
+		for _, s := range scenarios {
+			if strings.Contains(s.name, only) {
+				filtered = append(filtered, s)
+			}
+		}
+		scenarios = filtered
+	}
 	type agg struct {
 		allow, deny, escalate, failed int
 		totalLatency                  time.Duration
