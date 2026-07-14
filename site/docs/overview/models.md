@@ -76,6 +76,9 @@ jcode supports two model roles:
 }
 ```
 
+In the web UI and desktop app, set the small model from **Settings → Providers →
+Model roles** — changes apply immediately, no restart needed.
+
 When `small_model` is set, it powers:
 
 - **Subagent delegation** — the `subagent` tool accepts `"small"` as its

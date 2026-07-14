@@ -443,6 +443,8 @@ const sessionSlice = createSlice({
 interface ModelState {
   providerName: string
   modelName: string
+  // config.small_model as "provider/model"; '' = unset (follow the main model).
+  smallModel: string
   mode: AgentMode
   providers: ProviderInfo[]
   favoriteModels: string[]
@@ -457,6 +459,7 @@ interface ModelState {
 const initialModel: ModelState = {
   providerName: '',
   modelName: '',
+  smallModel: '',
   mode: 'approval',
   providers: [],
   favoriteModels: [],
@@ -477,6 +480,9 @@ const modelSlice = createSlice({
     },
     setModel(s, a: { payload: string }) {
       s.modelName = a.payload
+    },
+    setSmallModel(s, a: { payload: string }) {
+      s.smallModel = a.payload
     },
     setMode(s, a: { payload: AgentMode }) {
       s.mode = a.payload
@@ -842,6 +848,7 @@ export const loadBLEState = createAsyncThunk('ui/loadBLEState', async (_, { disp
 export const loadConfig = createAsyncThunk('model/loadConfig', async (_, { dispatch }) => {
   const cfg = await api.config()
   dispatch(modelActions.setMaxIterations(cfg.max_iterations))
+  dispatch(modelActions.setSmallModel(cfg.small_model ?? ''))
 })
 
 export const loadStatus = createAsyncThunk('app/loadStatus', async (_, { dispatch }) => {

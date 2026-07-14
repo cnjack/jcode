@@ -367,6 +367,16 @@ export default {
     },
     providers: {
       title: 'プロバイダー',
+      roles: {
+        title: 'モデルロール',
+        smallName: 'Small model',
+        smallDesc: 'subagent / workflow / automation の "small" エイリアスのルーティングとセッションタイトル生成に使用します。未設定の場合、エイリアスはメインモデルにフォールバックし、タイトルは切り詰めテキストになります。',
+        smallNoProviders: 'small model を選ぶには、先にプロバイダーを追加してモデルを有効にしてください。',
+        smallUnset: '未設定(メインモデルに従う)',
+        smallSaved: '保存しました。即時反映されます',
+        smallSaveFailed: '保存に失敗しました:{reason}',
+        smallUnavailable: '利用不可',
+      },
       add: '+ プロバイダーを追加',
       selectProvider: 'プロバイダーを選択',
       selectModel: 'モデルを選択',

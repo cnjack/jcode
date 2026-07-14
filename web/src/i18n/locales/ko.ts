@@ -367,6 +367,16 @@ export default {
     },
     providers: {
       title: '프로바이더',
+      roles: {
+        title: '모델 역할',
+        smallName: 'Small model',
+        smallDesc: 'subagent / workflow / automation의 "small" 별칭 라우팅과 세션 제목 생성에 사용됩니다. 설정하지 않으면 별칭은 메인 모델로 대체되고 제목은 잘린 텍스트를 사용합니다.',
+        smallNoProviders: 'small model을 선택하려면 먼저 프로바이더를 추가하고 모델을 활성화하세요.',
+        smallUnset: '설정 안 함(메인 모델 따름)',
+        smallSaved: '저장됨 — 즉시 적용됩니다',
+        smallSaveFailed: '저장 실패: {reason}',
+        smallUnavailable: '사용 불가',
+      },
       add: '+ 프로바이더 추가',
       selectProvider: '프로바이더 선택',
       selectModel: '모델 선택',

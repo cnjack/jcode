@@ -384,6 +384,16 @@ export default {
     },
     providers: {
       title: 'Providers',
+      roles: {
+        title: 'Model roles',
+        smallName: 'Small model',
+        smallDesc: 'Routes the "small" alias (subagents, workflows, automations) and generates session titles. When unset, the alias falls back to the main model and titles use truncated text.',
+        smallNoProviders: 'Add a provider and enable a model to pick a small model.',
+        smallUnset: 'Not set (follow main model)',
+        smallSaved: 'Saved — takes effect immediately',
+        smallSaveFailed: 'Save failed: {reason}',
+        smallUnavailable: 'unavailable',
+      },
       add: '+ Add provider',
       selectProvider: 'Select Provider',
       selectModel: 'Select Model',
