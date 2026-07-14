@@ -52,6 +52,12 @@ guardian 列为对标项,"model roles" 就是给这类新角色留的扩展位�
 最多 `parseAttempts=2` 次(拿不到严格 JSON 就追加"只输出 JSON"再试一次),解析出
 `{risk_level,user_authorization,outcome,rationale}` 映射为 allow/deny/escalate。
 
+**三态 outcome**:`allow` 自动放行;`deny` 直接拦截(给模型带 rationale 的反绕路文案,不弹用户);
+`escalate` 交还用户(走正常审批弹窗)。escalate 是**成功审查**的一等结果(`Failed=false`),
+区别于失败/超时导致的 escalate(`Failed=true`)。policy 指示模型:明确不安全→deny,高风险但拿不准
+用户是否授权→escalate(让人决定,而非硬拦)。这正是"拿不准的交还用户"的落点 —— 早期版本只有
+allow/deny,uncertain 只能靠拒绝熔断间接交还,已在对抗审查后修正为一等 escalate。
+
 模型解析:`override → small_model → 主模型`。`small` 别名未配置时降级主模型,审查器永远有可用模型
 (与 title.go 的降级哲学一致);override 用具体 `provider/model`。
 
@@ -117,10 +123,24 @@ transcript+OnTurnStart)。TUI/web 前端接线同法(本期先 ACP,PR 一并补)
   (本期审查器已带,可推广到全审批)。
 - **P2**:无 OS 级沙箱(审查器是纯 LLM 判断,长期需 seatbelt/landlock 纵深);项目 hooks all-or-nothing 信任。
 
+## 已知限制(对抗审查后记录)
+
+- **V2 investigate 假设本地文件系统**:审查器的 read/grep/glob 走 LocalExecutor,读的是本地磁盘。
+  remote/SSH 会话里被判命令在远端执行,本地同路径可能是另一台机器的内容 → 可能误判。当前建议
+  remote 会话不开 investigate;彻底修需把会话 executor 传给审查器(后续)。
+- **审查器花费计入进程全局 token 计数**:per-session 账目已隔离(审查器用 ctx-local tracker 影子),
+  但 `internalmodel` 的进程级全局 `TokenTracker` 仍累加审查器调用;TUI 聚合读数接线后会把审查器花费
+  算进去。属真实花费,但与"完全独立账目"表述有出入,记录在案。
+- **审查器只看到本 turn 用户消息之前的 transcript**:`sess.history` 在 turn 结束才追加本轮
+  assistant/tool 消息,故审查器拿不到"触发该动作的本轮工具输出"。是上下文缺口,非竞态(读取在锁内)。
+- **拒绝熔断器是会话级、跨主 agent 与 teammate 共享**:并发 teammate 负载下可能提前触发(escalate 到
+  用户,安全);`OnTurnStart` 已在 ACP/TUI/web 三端接线做 per-turn 复位。
+- **reviewer panic 兜底**:`Engine.Review` 有 recover → escalate(fail-open),避免 middleware 的
+  通用 panic 处理把调用 fail-closed 拦掉。
+
 ## 后续
 
-- 把 seam 接到 TUI/web 前端(与 ACP 同法)。
-- V2+V3 合并(带工具的 trunk 复用)。
-- 审查器 metrics/遥测(latency、allow/deny 率、cache 命中)接入 telemetry。
+- V2+V3 合并(带工具的 trunk 复用);investigate 接会话 executor(修上面第 1 条)。
+- 审查器 metrics/遥测(latency、allow/deny/escalate 率、cache 命中)接入 telemetry。
 - provider cache 能力差异:zhipuai 支持前缀缓存(实测命中),tencent-tokenhub 代理不回传缓存;
   reuse_session 的收益取决于 provider。

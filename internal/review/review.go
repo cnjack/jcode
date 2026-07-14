@@ -160,7 +160,16 @@ func (e *Engine) resolveModelRef() string {
 }
 
 // Review adjudicates one tool call and records the verdict to the audit log.
-func (e *Engine) Review(ctx context.Context, req Request) Result {
+// A panic anywhere in the reviewer is recovered and turned into an escalate
+// (fail-open to the human), so a reviewer bug can never fail-closed-block a call
+// via the middleware's generic panic handler.
+func (e *Engine) Review(ctx context.Context, req Request) (result Result) {
+	defer func() {
+		if r := recover(); r != nil {
+			config.Logger().Printf("[review] recovered panic, escalating to user: %v", r)
+			result = Result{Outcome: Escalate, Failed: true}
+		}
+	}()
 	start := time.Now()
 	res, meta := e.review(ctx, req)
 	e.audit.write(auditRecord{
@@ -291,13 +300,18 @@ func (e *Engine) reviewSingleShot(ctx context.Context, req Request, cm einomodel
 	return Result{Outcome: Escalate, Failed: true}, meta
 }
 
-// mapOutcome converts a parsed assessment into a Result.
+// mapOutcome converts a parsed assessment into a Result. "escalate" is a
+// first-class successful verdict (Failed stays false): the reviewer judged the
+// action but wants a human to decide, so the caller falls back to the normal
+// user prompt rather than blocking the action outright (as "deny" does).
 func mapOutcome(a assessment) (Result, bool) {
 	switch strings.ToLower(strings.TrimSpace(a.Outcome)) {
 	case "allow":
 		return Result{Outcome: Allow, RiskLevel: a.RiskLevel, Rationale: a.Rationale}, true
 	case "deny":
 		return Result{Outcome: Deny, RiskLevel: a.RiskLevel, Rationale: a.Rationale}, true
+	case "escalate":
+		return Result{Outcome: Escalate, RiskLevel: a.RiskLevel, Rationale: a.Rationale}, true
 	default:
 		return Result{}, false
 	}

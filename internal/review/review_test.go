@@ -52,6 +52,8 @@ func TestMapOutcome(t *testing.T) {
 		{"allow", Allow, true},
 		{"ALLOW", Allow, true},
 		{" deny ", Deny, true},
+		{"escalate", Escalate, true},
+		{"ESCALATE", Escalate, true},
 		{"maybe", Escalate, false},
 		{"", Escalate, false},
 	}

@@ -42,6 +42,12 @@ func (e *Engine) reviewWithTools(ctx context.Context, req Request, cm einomodel.
 
 	// A read-only Env rooted at the workspace under judgment. No execute tool is
 	// wired, so the reviewer cannot run shell commands or mutate anything.
+	//
+	// LIMITATION: this is always a LocalExecutor, so investigation inspects the
+	// LOCAL filesystem. On a remote/SSH session the judged command runs on the
+	// remote host, and reading the local disk at the same path would gather
+	// evidence about the wrong machine. Keep investigate off for remote sessions
+	// until the reviewer is threaded the session executor (see design doc).
 	env := tools.NewEnv(req.Cwd, e.platform)
 	roTools := []tool.BaseTool{
 		env.NewReadTool(),
