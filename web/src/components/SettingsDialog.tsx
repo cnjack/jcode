@@ -461,8 +461,15 @@ function ProvidersTab() {
     if (value) {
       // Provider ids never contain '/'; model ids may (custom endpoints).
       const i = value.indexOf('/')
-      provider = value.slice(0, i)
-      model = value.slice(i + 1)
+      if (i >= 0) {
+        provider = value.slice(0, i)
+        model = value.slice(i + 1)
+      } else {
+        // Malformed ref without a separator (hand-edited config surfaced via
+        // the "unavailable" option): pass it as model-only so the API rejects
+        // it intact instead of us mangling the provider name.
+        model = value
+      }
     }
     setSmallSaving(true)
     try {
