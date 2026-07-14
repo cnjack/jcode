@@ -45,6 +45,11 @@ type ACPHandler struct {
 	// middleware does not pass the Eino tool call ID, so we match by
 	// (toolName, toolArgs) in arrival order.
 	pendingApprovals []pendingApproval
+	// subagentCalls maps a running subagent's name to the ACP tool call ID of
+	// its "subagent" tool call, so lifecycle/progress callbacks (which only
+	// carry the subagent name) can be forwarded as tool_call_update
+	// notifications on the right call.
+	subagentCalls map[string]acp.ToolCallId
 
 	// onModeChange, when set, is invoked after the handler promotes the session
 	// mode (e.g. "Allow All" → Full access) so the owning session can reconcile its
@@ -73,6 +78,7 @@ func NewACPHandler(conn *acp.AgentSideConnection, sessionID acp.SessionId, workD
 		einoToACP:      make(map[string]acp.ToolCallId),
 		toolArgs:       make(map[acp.ToolCallId]string),
 		toolTerminated: make(map[acp.ToolCallId]bool),
+		subagentCalls:  make(map[string]acp.ToolCallId),
 	}
 }
 
@@ -327,6 +333,11 @@ func (h *ACPHandler) OnToolCall(ev ToolCallEvent) {
 	h.pendingApprovals = append(h.pendingApprovals, pendingApproval{
 		acpID: id, toolName: name, toolArgs: args,
 	})
+	if name == "subagent" {
+		if sub := subagentNameFromArgs(args); sub != "" {
+			h.subagentCalls[sub] = id
+		}
+	}
 	h.mu.Unlock()
 
 	presentation := h.presentationForTool(name, args)
@@ -399,6 +410,13 @@ func (h *ACPHandler) OnToolResult(ev ToolResultEvent) {
 				break
 			}
 		}
+		// Drop the subagent progress mapping for this call in case the done
+		// lifecycle event never fired (rejected permission, tool error).
+		for sub, acpID := range h.subagentCalls {
+			if acpID == id {
+				delete(h.subagentCalls, sub)
+			}
+		}
 	}
 	h.mu.Unlock()
 
@@ -468,6 +486,95 @@ func (h *ACPHandler) OnAgentDone(err error) {
 
 func (h *ACPHandler) OnTokenUpdate(info TokenUsage) {
 	// ACP does not have a standard token update notification.
+}
+
+// --- Subagent events ---
+
+// OnSubagentEvent bridges subagent lifecycle events (tools.SubagentNotifier)
+// onto the "subagent" tool call as tool_call_update notifications. The final
+// status and result ride the regular OnToolResult update; the done event only
+// clears the progress mapping.
+func (h *ACPHandler) OnSubagentEvent(name, agentType string, done bool, result string, err error) {
+	h.mu.Lock()
+	id, ok := h.subagentCalls[name]
+	if done {
+		delete(h.subagentCalls, name)
+	}
+	h.mu.Unlock()
+	if !ok || done {
+		return
+	}
+
+	if updateErr := h.conn.SessionUpdate(context.Background(), acp.SessionNotification{
+		SessionId: h.sessionID,
+		Update: acp.UpdateToolCall(id,
+			acp.WithUpdateStatus(acp.ToolCallStatusInProgress),
+			acp.WithUpdateContent([]acp.ToolCallContent{
+				acp.ToolContent(acp.TextBlock(fmt.Sprintf("%s subagent started", agentType))),
+			}),
+		),
+	}); updateErr != nil {
+		logACPError("SubagentEvent", updateErr)
+	}
+}
+
+// OnSubagentProgress bridges intermediate subagent tool activity
+// (tools.SubagentProgressFn) onto the "subagent" tool call as a rolling
+// content update — ACP replaces the content collection on each update, so the
+// client shows the latest activity line while the subagent runs.
+func (h *ACPHandler) OnSubagentProgress(agentName, event, toolName, detail string) {
+	h.mu.Lock()
+	id, ok := h.subagentCalls[agentName]
+	h.mu.Unlock()
+	if !ok {
+		return
+	}
+
+	if err := h.conn.SessionUpdate(context.Background(), acp.SessionNotification{
+		SessionId: h.sessionID,
+		Update: acp.UpdateToolCall(id,
+			acp.WithUpdateContent([]acp.ToolCallContent{
+				acp.ToolContent(acp.TextBlock(subagentProgressLine(event, toolName, detail))),
+			}),
+		),
+	}); err != nil {
+		logACPError("SubagentProgress", err)
+	}
+}
+
+// subagentNameFromArgs extracts the "name" field from a subagent tool call's
+// raw args JSON ("" when absent or unparsable).
+func subagentNameFromArgs(argsJSON string) string {
+	var args struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return ""
+	}
+	return args.Name
+}
+
+// subagentProgressLine renders one progress event as a short single-line
+// summary ("tool_call" / "tool_result" are the events subagents emit today).
+func subagentProgressLine(event, toolName, detail string) string {
+	prefix := event
+	switch event {
+	case "tool_call":
+		prefix = "→"
+	case "tool_result":
+		prefix = "←"
+	}
+	return strings.TrimSpace(fmt.Sprintf("%s %s %s", prefix, toolName, compactProgressDetail(detail)))
+}
+
+// compactProgressDetail flattens tool args/output to one truncated line.
+func compactProgressDetail(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	const max = 160
+	if len(s) > max {
+		s = strings.ToValidUTF8(s[:max-3], "") + "..."
+	}
+	return s
 }
 
 // --- Approval flow ---
