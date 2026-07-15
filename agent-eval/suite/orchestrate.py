@@ -55,7 +55,7 @@ DEFAULT_REPEATS = {
     "glm-5.2": {"smoke": 1, "core": 2, "stress": 2, "safety": 1, "frontend": 1, "memory": 1},
     "qwen3.5-flash": {"smoke": 1, "core": 1, "stress": 1, "safety": 1, "frontend": 1, "memory": 1},
     "kimi-k2.7-code": {"smoke": 2, "core": 2, "stress": 2, "safety": 2, "frontend": 1, "memory": 2, "computer": 3},
-    "kimi-k2.7-code-highspeed": {"smoke": 2, "core": 2, "stress": 2, "safety": 2, "frontend": 1, "memory": 2, "computer": 3},
+    "kimi-k2.7-code-highspeed": {"smoke": 20, "core": 2, "stress": 2, "safety": 2, "frontend": 1, "memory": 2, "computer": 60},
     "kimi-for-coding": {"smoke": 2, "core": 3, "stress": 3, "safety": 3, "frontend": 2, "memory": 3, "computer": 5},
 }
 
