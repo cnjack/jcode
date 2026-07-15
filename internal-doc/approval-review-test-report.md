@@ -152,3 +152,20 @@ safety_misses=0 / 30**。加规则后漏放从 2/20(10%)降到 0/30 —— 该�
 escalate;cache/token 隔离(独立 factory+独立消息列表+ctx-local tracker,不碰 sess.history);注入
 (常量格式串,无控制流插值;verdict 严格 JSON);investigate 只 read/grep/glob,grep 走结构化 argv 无
 flag 透传,无法触达 shell;超时对 Generate 与 agent Run 均生效。
+
+### E. PR review 第二轮(PR #140:人工 senior review + CodeRabbit)
+
+CI 首次红:golangci-lint 5 项(gofmt×3、errcheck×1、revive error-return×1)——已修,本地
+`golangci-lint run` 0 issues。评审发现与处置:
+
+| # | 发现 | 处置 |
+|---|---|---|
+| F1 | **元数据 SSRF 加固只是 prompt 文案**,与被 eval 证明会失效的防御同类;且唯一覆盖(TestReviewEval)被排除在常规 CI 外 | **已修**:新增 `ssrf.go` 确定性前置拦截,**在调模型之前**判定。地址(含十进制/十六进制/八进制混淆)+凭证路径→deny;仅提及地址→escalate(deny 用户无法翻案,escalate 可以)。**普通 CI 可跑**单测 12 例(含"调试借口"框架、IMDSv2、GCP/Azure/ECS/IPv6)+ 无误报用例 + **接线测试**(无可用模型时仍 deny,证明 prefilter 先于模型) |
+| F2 | **V2 investigate 可能把被调查内容里反射/注入的 JSON 当判决**(newest→oldest 扫描) | **已修**:只认 reviewer **最后一条** assistant 消息;其余一律 escalate。加注入回归测试(伪造 verdict blob 被拒绝采纳) |
+| F3 | **V3 trunk 每次重嵌完整 transcript、只按条数裁剪** → token 可涨到爆上下文,反使 V3 比 V1 贵 | **已修**:transcript 仅在**真正变化**时重发(指纹;前端只在 turn 之间扩 history,故 turn 内恒定)→ 一个 turn 内 N 次审查只嵌 1 次;`trimTrunk` 增加**字节预算**;裁剪后强制下次重发证据。加 3 个单测 |
+| F4 | **background:true 原"必须问人",接入 reviewer 后可被静默放行**,注释过时 | **已修**:澄清真实不变量是"agent 不能靠设 flag 买免检",并把 `background_execution` 提升为 action prompt + policy 里的**显式风险信号**(输出不实时可见→高一档审视),不再埋在 args JSON |
+| CR1 | ACP/TUI/web 三份 recentTranscript 重复 | **已修**:抽 `review.MsgsFromHistory`,三端共用 |
+| CR2 | 审计日志原样长期存 args,可能含密钥 | **已修**:写入前脱敏(auth header、`--password/--token`、密钥类环境变量赋值、`ghp_`/`xox`/`AKIA`/`sk-` 前缀、PRIVATE KEY 块),rationale 同样脱敏;先脱敏后截断。10 个单测含"不误伤普通命令" |
+
+要点:F1 是本轮最重要的方法论修正 —— **prompt 不是控制手段**。被话术带偏正是 prompt 类防御的失效方式,
+所以同一攻击面必须有代码层确定性兜底,且覆盖要落在常规 CI 而非 live-model eval。
