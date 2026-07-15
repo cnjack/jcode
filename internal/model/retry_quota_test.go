@@ -252,3 +252,37 @@ func TestQuotaMessagePrefersTheProvidersOwnURL(t *testing.T) {
 		t.Errorf("a URL was invented for an unknown provider:\n%s", msg)
 	}
 }
+
+// The exact 429 TokenHub returns when a campaign outruns its RPM allowance,
+// captured live on 2026-07-16.
+//
+// It is here for the same reason as the Moonshot 403: this is a *real* payload,
+// and it is the one that must not be confused with money. Note it never says the
+// words "rate limit" — it says "request rate exceeds the current model RPM
+// limit" — so the classifier reaches it via "too many requests" rather than the
+// rate.limit pattern. If someone ever trims that pattern list, this test is what
+// notices.
+const tencentRPM429 = "The request rate exceeds the current model RPM limit 60. " +
+	"Please reduce the request frequency or contact Tencent Cloud support to request a higher limit."
+
+func TestTencentRPMLimitIsRateLimitNotQuota(t *testing.T) {
+	err := apiErr(429, tencentRPM429)
+	if got := ClassifyError(err); got != ErrCategoryRateLimit {
+		t.Fatalf("ClassifyError = %v, want rate_limit — an RPM ceiling is pace, not money", got)
+	}
+	// The distinction that matters: this one clears on its own, so it MUST be
+	// retried. Misfiling it as quota would abandon a turn that a short backoff
+	// would have completed.
+	if !IsRetryable(context.TODO(), err) {
+		t.Error("an RPM limit must be retried; it clears on its own")
+	}
+	msg := FriendlyAPIError(err, "tencent-tokenhub", "kimi-k2.7-code-highspeed")
+	if !strings.Contains(msg, "Rate limited") {
+		t.Errorf("the message does not name the cause:\n%s", msg)
+	}
+	// "contact support to request a higher limit" must not be read as a billing
+	// link and dressed up as a quota problem.
+	if strings.Contains(msg, "Out of quota") || strings.Contains(msg, "credit") {
+		t.Errorf("a pace problem was reported as a money problem:\n%s", msg)
+	}
+}
