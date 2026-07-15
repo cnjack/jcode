@@ -48,6 +48,21 @@ adversarial review 头号问题(uncertain 无法交还用户)已修。**唯一�
 结论:复用 trunk 的稳定前缀被 provider 前缀缓存命中(policy + 历史 verdict 免 prefill),命中后 latency 下降。
 `prompt_tok` 随 trunk 增长 → 证明确实在发送复用会话。tencent-tokenhub 代理 **不回传** 前缀缓存(cached_tok=0),属 provider 能力差异,非代码问题。
 
+**增量 transcript 修复后复测**(PR review F3;同负载同 provider):
+
+| review | prompt_tok | cached_tok | 命中率 | 每次增量 |
+|---|---|---|---|---|
+| 1 | 1616 | 0 | 0%(写缓存) | — |
+| 2 | 1717 | 1600 | 93% | +101 |
+| 3 | 1818 | 1664 | 92% | +101 |
+| 4 | 1919 | 1792 | 93% | +101 |
+| 5 | 2020 | 1856 | 92% | +101 |
+
+命中率 89%→**92-93%**;每次增量固定 **+101 token**(只有 action+verdict,transcript 不再重嵌;修复前 +148)。
+本例 transcript 很短故绝对差小;真实 24 条 transcript 下,修复前每次约 +12K token、修复后仍是 +101 —— 这正是
+F3 指出的"V3 反而比 V1 贵"的根因已消除。(review 1 的 prompt_tok 比修复前高是因为 policy 新增了云元数据与
+background 两段规则,system 前缀变长。)
+
 **不污染主对话 cache**(同一 5-mkdir 负载,主模型 glm-5.1,审查器放到独立 bucket glm-5.2):
 
 | 运行 | 主模型 glm-5.1 命中率 | perm_reqs |
