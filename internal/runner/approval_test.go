@@ -253,3 +253,33 @@ func TestRequestApproval_NoApprovalTools(t *testing.T) {
 		t.Errorf("expected auto-approve for grep")
 	}
 }
+
+func TestApprovalState_AutoModeMapsToManual(t *testing.T) {
+	s := NewApprovalStateWithMode("/tmp/workdir", mode.Auto)
+	if s.GetMode() != handler.ModeManual {
+		t.Errorf("Auto mode should map to Manual approval axis, got %v", s.GetMode())
+	}
+	if s.GetSessionMode() != mode.Auto {
+		t.Errorf("session mode should be Auto, got %v", s.GetSessionMode())
+	}
+}
+
+func TestApprovalState_ReviewerLifecycle(t *testing.T) {
+	s := NewApprovalStateWithMode("/tmp/workdir", mode.Approval)
+	s.SetReviewerConfig(nil, "")
+
+	// Reviewer is nil until entering Auto mode.
+	if s.reviewer != nil {
+		t.Errorf("reviewer should be nil in Approval mode")
+	}
+
+	s.SetSessionMode(mode.Auto)
+	if s.reviewer == nil {
+		t.Errorf("reviewer should be built when entering Auto mode")
+	}
+
+	s.SetSessionMode(mode.Approval)
+	if s.reviewer != nil {
+		t.Errorf("reviewer should be cleared when leaving Auto mode")
+	}
+}

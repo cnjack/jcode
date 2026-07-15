@@ -25,6 +25,10 @@ const (
 	// read-only tool subset, produces a structured plan, then executes on
 	// approval.
 	Plan
+	// Auto uses the full tool set and consults an LLM reviewer for every call
+	// that would otherwise prompt. The reviewer auto-allows low-risk calls,
+	// denies high-risk calls, and escalates uncertain calls back to the user.
+	Auto
 	// FullAccess is end-to-end execution: the full tool set is available and every
 	// tool call is auto-approved with no interruption.
 	FullAccess
@@ -41,6 +45,8 @@ func (m SessionMode) String() string {
 	switch m {
 	case Plan:
 		return "plan"
+	case Auto:
+		return "auto"
 	case FullAccess:
 		return "full_access"
 	default:
@@ -53,6 +59,8 @@ func (m SessionMode) Label() string {
 	switch m {
 	case Plan:
 		return "Plan"
+	case Auto:
+		return "Auto"
 	case FullAccess:
 		return "Full access"
 	default:
@@ -61,12 +69,14 @@ func (m SessionMode) Label() string {
 }
 
 // Next returns the next mode in the selector cycle:
-// Ask for approval → Plan → Full access → Ask for approval.
+// Ask for approval → Plan → Auto → Full access → Ask for approval.
 func (m SessionMode) Next() SessionMode {
 	switch m {
 	case Approval:
 		return Plan
 	case Plan:
+		return Auto
+	case Auto:
 		return FullAccess
 	default:
 		return Approval
@@ -79,6 +89,8 @@ func Parse(s string) SessionMode {
 	switch s {
 	case "plan":
 		return Plan
+	case "auto":
+		return Auto
 	case "full_access":
 		return FullAccess
 	case "approval", "":

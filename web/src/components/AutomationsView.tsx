@@ -108,6 +108,7 @@ function runLabel(r: AutomationRun): string {
 function modeLabel(mode: string | undefined, t: TFunction): string {
   if (mode === 'approval') return t('automations.mode.ask')
   if (mode === 'plan') return t('automations.mode.plan')
+  if (mode === 'auto') return t('automations.mode.auto')
   if (mode === 'full_access') return t('automations.mode.autopilot')
   return mode || t('automations.mode.autopilot')
 }

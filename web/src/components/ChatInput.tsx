@@ -89,13 +89,14 @@ interface ModeDef {
   value: ModeValue
   label: string
   sub: string
-  risk: 'neutral' | 'plan' | 'danger'
+  risk: 'neutral' | 'plan' | 'info' | 'danger'
   Icon: typeof HandRaisedIcon
 }
 
 const MODE_DEFS: ModeDef[] = [
   { value: 'approval', label: 'Ask for approval', sub: 'Agent asks before running tools', risk: 'neutral', Icon: HandRaisedIcon },
   { value: 'plan', label: 'Plan', sub: 'Agent plans, then waits for your go-ahead', risk: 'plan', Icon: ClipboardDocumentListIcon },
+  { value: 'auto', label: 'Auto', sub: 'AI reviewer allows safe tools; uncertain ones ask', risk: 'info', Icon: SparklesIcon },
   { value: 'full_access', label: 'Full access', sub: 'Agent can act without asking', risk: 'danger', Icon: ShieldExclamationIcon },
 ]
 
@@ -823,9 +824,11 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                     className={
                       mode === 'full_access'
                         ? 'text-[color-mix(in_srgb,var(--color-error-fg)_72%,var(--color-background))]'
-                        : mode === 'plan'
-                          ? 'text-[var(--color-success)]'
-                          : ''
+                        : mode === 'auto'
+                          ? 'text-[var(--color-primary)]'
+                          : mode === 'plan'
+                            ? 'text-[var(--color-success)]'
+                            : ''
                     }
                   >
                     {modeLabel(mode)}
@@ -865,9 +868,11 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                               } ${
                                 m.risk === 'danger'
                                   ? 'text-[color-mix(in_srgb,var(--color-error-fg)_72%,var(--color-background))]'
-                                  : m.risk === 'plan'
-                                    ? 'text-[var(--color-success)]'
-                                    : 'text-[var(--color-foreground)]'
+                                  : m.risk === 'info'
+                                    ? 'text-[var(--color-primary)]'
+                                    : m.risk === 'plan'
+                                      ? 'text-[var(--color-success)]'
+                                      : 'text-[var(--color-foreground)]'
                               }`}
                             >
                               {m.label}

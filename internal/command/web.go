@@ -428,6 +428,9 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		twh := handler.NewWebHandler()
 		tnotify := makeNotifyingHandler(twh)
 		tappr.SetHandler(tnotify)
+		// Provide the config/platform needed to lazily build the LLM reviewer when
+		// this task enters Auto mode. The engine installs the transcript provider.
+		tappr.SetReviewerConfig(cfg, platform)
 		// Site-permission lookup for browser tools: an origin marked "allow" for a
 		// class (navigate/interact) is auto-approved. Reads the live config each
 		// call so settings changes take effect without rebuilding the task.

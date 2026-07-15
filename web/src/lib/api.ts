@@ -1,5 +1,5 @@
 // API client for jcode backend — ported from web/src/composables/api.ts.
-import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, CustomModelDetail, ValidateResult, CatalogModel, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData } from './types'
+import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, CustomModelDetail, ValidateResult, CatalogModel, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData, ApprovalReviewConfig, ApprovalReviewConfigResponse } from './types'
 import type { AutomationItem, AutomationRun, AutomationTemplate, AutomationCreate, Automation } from './automation'
 import { apiBase } from './apiBase'
 import { getAuthToken, notifyAuthExpired } from './authToken'
@@ -356,6 +356,11 @@ export const api = {
   browserStatus: () => request<BrowserStatusResponse>('/api/browser/status'),
   browserSaveConfig: (data: BrowserConfig) =>
     request<{ status: string }>('/api/browser/config', { method: 'POST', body: JSON.stringify(data) }),
+
+  // Approval review tuning (Auto session mode)
+  approvalReviewConfig: () => request<ApprovalReviewConfigResponse>('/api/approval-review-config'),
+  setApprovalReviewConfig: (data: ApprovalReviewConfig) =>
+    request<{ status: string }>('/api/approval-review-config', { method: 'POST', body: JSON.stringify(data) }),
 }
 
 export interface BrowserSitePermission {

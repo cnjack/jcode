@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 const (
@@ -315,6 +316,66 @@ type Config struct {
 
 	// Browser controls the browser-use capability (CDP-driven page control).
 	Browser *BrowserConfig `json:"browser,omitempty"`
+
+	// ApprovalReview holds tuning knobs for the LLM approval reviewer used in
+	// Auto session mode. It does not contain an on/off switch — the reviewer is
+	// active whenever the session is in Auto mode.
+	ApprovalReview *ApprovalReviewConfig `json:"approval_review,omitempty"`
+}
+
+// ApprovalReviewConfig holds tuning knobs for jcode's LLM approval reviewer.
+// The reviewer is active only in Auto session mode; these settings control its
+// model, policy, timeout, investigation behavior, prompt-cache reuse, and audit
+// log location. See internal-doc/approval-review-design.md.
+type ApprovalReviewConfig struct {
+	// Model is the "provider/model" (or "small" alias) the reviewer runs on.
+	// Empty resolves to small_model, then to the main model — so the reviewer
+	// always has a working model even if small_model is unset.
+	Model string `json:"model,omitempty"`
+	// Policy is extra workspace-specific policy text appended to the built-in
+	// risk policy (e.g. trusted internal hosts, stricter deny rules).
+	Policy string `json:"policy,omitempty"`
+	// TimeoutSeconds bounds a single review. 0 uses the built-in default.
+	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
+	// Investigate lets the reviewer run read-only tools (read/grep/glob) to
+	// gather evidence before deciding (V2). Off by default (single-shot).
+	Investigate bool `json:"investigate,omitempty"`
+	// ReuseSession keeps a cached reviewer conversation so the large policy
+	// prefix is served from the provider's prompt cache across reviews (V3).
+	ReuseSession bool `json:"reuse_session,omitempty"`
+	// AuditPath overrides the verdict log location. Empty →
+	// <config dir>/approval-review.jsonl.
+	AuditPath string `json:"audit_path,omitempty"`
+}
+
+// approvalReviewMu guards the Config.ApprovalReview pointer against concurrent
+// publish/read. The web settings handler swaps the block in on the live shared
+// Config from an HTTP goroutine, while a task goroutine reads it to build its
+// reviewer on entering Auto mode; those two hold no lock in common, so the
+// pointer needs its own. It is package-level rather than a Config field because
+// Config is copied by value in a few places and an embedded mutex would trip
+// go vet's copylocks check.
+var approvalReviewMu sync.RWMutex
+
+// ApprovalReviewSettings returns a snapshot of the reviewer tuning knobs, or
+// zero values when unset. The copy means callers never hold a pointer into the
+// live config, so a later SetApprovalReview cannot mutate what they read.
+func (c *Config) ApprovalReviewSettings() ApprovalReviewConfig {
+	approvalReviewMu.RLock()
+	defer approvalReviewMu.RUnlock()
+	if c == nil || c.ApprovalReview == nil {
+		return ApprovalReviewConfig{}
+	}
+	return *c.ApprovalReview
+}
+
+// SetApprovalReview publishes a new reviewer tuning block onto the live config
+// so reviewers built after this call pick it up. rc must not be mutated after
+// being handed over.
+func (c *Config) SetApprovalReview(rc *ApprovalReviewConfig) {
+	approvalReviewMu.Lock()
+	defer approvalReviewMu.Unlock()
+	c.ApprovalReview = rc
 }
 
 // BrowserConfig controls the browser-use capability. See

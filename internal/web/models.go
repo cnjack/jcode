@@ -154,11 +154,11 @@ func (s *Server) handleSwitchMode(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	// Accept only the three canonical unified mode ids.
+	// Accept only the four canonical unified mode ids.
 	switch req.Mode {
-	case "approval", "plan", "full_access":
+	case "approval", "plan", "auto", "full_access":
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mode must be 'approval', 'plan', or 'full_access'"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mode must be 'approval', 'plan', 'auto', or 'full_access'"})
 		return
 	}
 	sm := mode.Parse(req.Mode)

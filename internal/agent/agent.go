@@ -16,6 +16,19 @@ const maxIterations = 1000
 
 type ApprovalFunc func(ctx context.Context, toolName, toolArgs string) (bool, error)
 
+// ReviewDeniedError is returned by an ApprovalFunc when the automatic safety
+// reviewer (not the user) denied a call. The approval middleware special-cases
+// it to surface the reviewer's rationale to the model with distinct guidance,
+// instead of the generic "rejected by user" message.
+type ReviewDeniedError struct{ Reason string }
+
+func (e *ReviewDeniedError) Error() string {
+	if e == nil || e.Reason == "" {
+		return "automatic safety reviewer denied the action"
+	}
+	return e.Reason
+}
+
 // NewAgent creates a ChatModelAgent with the following handler stack
 // (outermost to innermost):
 //

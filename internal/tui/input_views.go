@@ -511,16 +511,17 @@ func (m *Model) handleFlowSlashInput(flowName, userInput string, cmds []tea.Cmd)
 	return m, tea.Batch(cmds...)
 }
 
-// renderModePills renders the unified Ask for approval/Plan/Full access mode selector line
-// above the input. The three states map onto distinct pill styles; Shift+Tab
-// cycles between them.
+// renderModePills renders the unified mode selector line above the input. The
+// four states map onto distinct pill styles; Shift+Tab cycles between them.
 func (m Model) renderModePills() string {
 	var modePill string
 	switch m.selectorMode() {
 	case mode.Plan:
 		modePill = modePillPlanStyle.Render(" Plan ")
+	case mode.Auto:
+		modePill = modePillAutoStyle.Render(" Auto ")
 	case mode.FullAccess:
-		modePill = modePillAutoStyle.Render(" Full access ")
+		modePill = modePillFullAccessStyle.Render(" Full access ")
 	default: // Ask for approval
 		modePill = modePillApprovalStyle.Render(" Ask for approval ")
 	}

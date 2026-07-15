@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/cnjack/jcode/internal/agent"
+	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/hooks"
 	"github.com/cnjack/jcode/internal/mode"
+	"github.com/cnjack/jcode/internal/review"
 )
 
 // ApprovalState manages whether tool calls require interactive user approval.
@@ -35,6 +37,19 @@ type ApprovalState struct {
 	// for a per-site permission check must come from the live session, not the
 	// args. nil means "unknown origin" (→ prompt). Set by the frontend.
 	browserOrigin func() string
+
+	// reviewer is the optional LLM auto-reviewer consulted for calls that would
+	// otherwise prompt the user (nil → disabled; behavior unchanged). transcriptFn
+	// provides recent conversation context to the reviewer. breaker bounds
+	// consecutive reviewer denials per turn.
+	reviewer     review.Reviewer
+	transcriptFn func() []review.Msg
+	breaker      reviewBreaker
+
+	// reviewerCfg and reviewerPlatform are used to lazily build the reviewer when
+	// the session enters Auto mode. The reviewer is cleared when leaving Auto.
+	reviewerCfg      *config.Config
+	reviewerPlatform string
 }
 
 // SetBrowserPermFunc installs the site-permission lookup for browser tools.
@@ -81,8 +96,10 @@ func sessionModeFor(autoApprove bool) mode.SessionMode {
 }
 
 // approvalModeFor derives the low-level approval axis from the unified mode.
+// Auto keeps the approval axis on Manual because it can still prompt when the
+// reviewer escalates a call; the reviewer is the additional gate, not a bypass.
 func approvalModeFor(m mode.SessionMode) handler.ApprovalMode {
-	if m.AutoApprove() {
+	if m == mode.FullAccess {
 		return handler.ModeAuto
 	}
 	return handler.ModeManual
@@ -106,9 +123,40 @@ func (s *ApprovalState) SetMode(m handler.ApprovalMode) {
 // by each frontend's agent-rebuild path.
 func (s *ApprovalState) SetSessionMode(m mode.SessionMode) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.sessionMode = m
 	s.mode = approvalModeFor(m)
-	s.mu.Unlock()
+	if m == mode.Auto {
+		s.ensureReviewerLocked()
+	} else {
+		s.clearReviewerLocked()
+	}
+}
+
+// SetReviewerConfig stores the config and platform needed to lazily build the
+// reviewer when the session enters Auto mode.
+func (s *ApprovalState) SetReviewerConfig(cfg *config.Config, platform string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reviewerCfg = cfg
+	s.reviewerPlatform = platform
+	if s.sessionMode == mode.Auto {
+		s.ensureReviewerLocked()
+	}
+}
+
+// ensureReviewerLocked builds the reviewer if it is not already present. The
+// caller must hold s.mu.
+func (s *ApprovalState) ensureReviewerLocked() {
+	if s.reviewer != nil {
+		return
+	}
+	s.reviewer = review.BuildFromConfig(s.reviewerCfg, s.reviewerPlatform)
+}
+
+// clearReviewerLocked drops the reviewer. The caller must hold s.mu.
+func (s *ApprovalState) clearReviewerLocked() {
+	s.reviewer = nil
 }
 
 // GetSessionMode returns the current unified session mode.
@@ -265,9 +313,14 @@ func (s *ApprovalState) decide(toolName, toolArgs string) approvalDecision {
 			Background bool   `json:"background"`
 		}
 		if err := json.Unmarshal([]byte(toolArgs), &input); err == nil {
-			// Background commands always require approval: the agent controls the
-			// flag, so auto-approving them would let any command (including
-			// destructive ones) bypass the gate by setting background=true.
+			// Background commands never take the safe-command shortcut: the agent
+			// controls the flag, so auto-approving them would let any command
+			// (including destructive ones) skip the gate by setting
+			// background=true. They are routed to the gate — which means the
+			// auto-reviewer when one is enabled (it is given the background flag
+			// explicitly and weighs the delayed-visibility risk), and the user
+			// otherwise. The invariant this protects is "the flag cannot buy you a
+			// free pass", not "a human must see every background command".
 			if input.Background {
 				return decisionPrompt
 			}
@@ -382,9 +435,9 @@ func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs 
 		s.notifyToolInProgress(toolName, toolArgs)
 		return true, nil
 	case decisionPromptExternal:
-		return s.requestUserApproval(ctx, toolName, toolArgs, true)
+		return s.gatedApproval(ctx, toolName, toolArgs, true, "", "")
 	default:
-		return s.requestUserApproval(ctx, toolName, toolArgs, false)
+		return s.gatedApproval(ctx, toolName, toolArgs, false, "", "")
 	}
 }
 
@@ -392,11 +445,6 @@ func (s *ApprovalState) notifyToolInProgress(toolName, toolArgs string) {
 	if notifier, ok := s.h.(toolProgressNotifier); ok {
 		notifier.NotifyToolInProgress(toolName, toolArgs)
 	}
-}
-
-// requestUserApproval handles the unified approval request process
-func (s *ApprovalState) requestUserApproval(ctx context.Context, toolName, toolArgs string, isExternal bool) (bool, error) {
-	return s.requestUserApprovalWithWorker(ctx, toolName, toolArgs, isExternal, "", "")
 }
 
 // requestUserApprovalWithWorker handles approval with optional worker identity
@@ -459,9 +507,9 @@ func (s *ApprovalState) NewTeammateApprovalFunc(workerName, workerColor string) 
 			s.notifyToolInProgress(toolName, toolArgs)
 			return true, nil
 		case decisionPromptExternal:
-			return s.requestUserApprovalWithWorker(ctx, toolName, toolArgs, true, workerName, workerColor)
+			return s.gatedApproval(ctx, toolName, toolArgs, true, workerName, workerColor)
 		default:
-			return s.requestUserApprovalWithWorker(ctx, toolName, toolArgs, false, workerName, workerColor)
+			return s.gatedApproval(ctx, toolName, toolArgs, false, workerName, workerColor)
 		}
 	}
 }

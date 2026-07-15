@@ -31,6 +31,7 @@ import (
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	weixin "github.com/cnjack/jcode/internal/pkg/weixin"
 	"github.com/cnjack/jcode/internal/prompts"
+	"github.com/cnjack/jcode/internal/review"
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/skills"
@@ -346,14 +347,35 @@ func (s *interactiveState) reloadMCP() {
 	}
 }
 
+// modeAfterToolSwitch returns the unified session mode that a tool-axis switch
+// leaves the session in. Leaving the plan tool set — which is what an approved
+// plan does on its way to execution — must also leave Plan, or applyModeSwitch
+// would record and display a read-only mode while the agent already holds the
+// full tool set. Approval is the safe landing spot, matching how resume
+// normalizes a saved Plan. Every other mode survives the switch untouched.
+func modeAfterToolSwitch(current mode.SessionMode, newMode tui.AgentMode) mode.SessionMode {
+	if newMode != tui.ModePlanning && current == mode.Plan {
+		return mode.Approval
+	}
+	return current
+}
+
 func (s *interactiveState) applyModeSwitch(newMode tui.AgentMode) {
 	s.agentMode = newMode
 	config.Logger().Printf("[plan] mode switch to %d (0=normal, 1=plan)", newMode)
 
+	// The unified session mode is the source of truth; it survives transient
+	// approval-axis changes. Leaving the plan tool set is the one exception —
+	// see modeAfterToolSwitch.
+	currentMode := s.approvalState.GetSessionMode()
+	if next := modeAfterToolSwitch(currentMode, newMode); next != currentMode {
+		currentMode = next
+		s.approvalState.SetSessionMode(currentMode)
+	}
+
 	if s.rec != nil {
-		// Record the unified session mode derived from both axes (tool/prompt +
-		// approval), not just the tool axis, so resume round-trips the selector.
-		s.rec.RecordModeChange(sessionModeFrom(newMode, s.approvalState.GetMode()).String())
+		// Record the unified session mode so resume round-trips the selector.
+		s.rec.RecordModeChange(currentMode.String())
 	}
 
 	if s.agentMode == tui.ModePlanning {
@@ -377,7 +399,7 @@ func (s *interactiveState) applyModeSwitch(newMode tui.AgentMode) {
 	// Sync the TUI mode pill with the resulting unified mode (covers the
 	// plan-completion revert to Normal, which the user did not trigger directly).
 	if s.p != nil {
-		s.p.Send(tui.ModeSelectedMsg{Mode: sessionModeFrom(newMode, s.approvalState.GetMode())})
+		s.p.Send(tui.ModeSelectedMsg{Mode: currentMode})
 	}
 }
 
@@ -403,6 +425,13 @@ func (s *interactiveState) drainModeSwitch(modeSelectCh <-chan mode.SessionMode)
 			return
 		}
 	}
+}
+
+// recentTranscript snapshots the tail of the conversation for the approval
+// reviewer. Called only during a turn, when st.history is not being mutated
+// concurrently (handlePrompt blocks on runner.Run while approvals happen).
+func (s *interactiveState) recentTranscript() []review.Msg {
+	return review.MsgsFromHistory(s.history)
 }
 
 func (s *interactiveState) handlePrompt(userPrompt string) {
@@ -458,6 +487,7 @@ func (s *interactiveState) handlePrompt(userPrompt string) {
 	}
 	s.history = append(s.history, schema.UserMessage(userPrompt))
 	s.history = agent.DrainBgNotifications(s.bgManager, s.history)
+	s.approvalState.OnTurnStart() // reset the per-turn reviewer denial breaker
 	resp := runner.Run(runCtx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.env.GoalStore, s.langfuseTracer, s.agentTokenUsage)
 	if resp != "" {
 		s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: resp})
@@ -1198,6 +1228,14 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	approvalState.SetBrowserOriginFunc(env.CurrentBrowserOrigin)
 	st.approvalState = approvalState
 
+	// Provide the config/platform needed to lazily build the LLM reviewer when
+	// the session enters Auto mode. The transcript provider reads st.history,
+	// which is only mutated between turns on the goroutine that blocks on
+	// runner.Run — so reading it during an approval (which happens inside Run) is
+	// race-free.
+	approvalState.SetReviewerConfig(cfg, util.GetSystemInfo())
+	approvalState.SetTranscriptFunc(st.recentTranscript)
+
 	// Wire the `/browser` command to the browser-use subsystem.
 	browserCtl := &tui.BrowserController{
 		Status: func() tui.BrowserStatus {
@@ -1440,20 +1478,6 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	fmt.Println()
 
 	return nil
-}
-
-// sessionModeFrom derives the unified selector mode from the two low-level axes
-// (tool/prompt + approval). Plan is determined purely by the tool axis; among the
-// non-plan agent modes (Normal/Executing) the approval axis decides Approval vs
-// Full access. This is the inverse of mode.IsPlan()/AutoApprove().
-func sessionModeFrom(am tui.AgentMode, apm handler.ApprovalMode) mode.SessionMode {
-	if am == tui.ModePlanning {
-		return mode.Plan
-	}
-	if apm == handler.ModeAuto {
-		return mode.FullAccess
-	}
-	return mode.Approval
 }
 
 // resolveStartupMode picks the initial session mode from CLI flags and config.

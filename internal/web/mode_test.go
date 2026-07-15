@@ -51,6 +51,7 @@ func TestWebSwitchMode(t *testing.T) {
 		wantPlanArg  bool // expected planMode passed to rebuildForMode
 	}{
 		{`{"mode":"plan"}`, 200, "plan", mode.Plan, handler.ModeManual, true},
+		{`{"mode":"auto"}`, 200, "auto", mode.Auto, handler.ModeManual, false},
 		{`{"mode":"full_access"}`, 200, "full_access", mode.FullAccess, handler.ModeAuto, false},
 		{`{"mode":"approval"}`, 200, "approval", mode.Approval, handler.ModeManual, false},
 	}
