@@ -95,6 +95,10 @@ type Backend interface {
 	Capture(ctx context.Context, bundleID string) ([]byte, error)
 	// Launch starts or focuses an app.
 	Launch(ctx context.Context, bundleID string) error
+	// ReadClipboard returns the clipboard text. Gated by the clipboard_read
+	// grant, which is deliberately separate from any app grant — the clipboard
+	// belongs to the user, not to the app that happens to be in front.
+	ReadClipboard(ctx context.Context) (string, error)
 	// Perform executes one action. Implementations must auto-wait for the UI to
 	// settle before returning.
 	Perform(ctx context.Context, act Action) error

@@ -503,6 +503,10 @@ func (e *Engine) teardown() {
 		// Close this task's browser session (managed tabs close; extension tabs
 		// are detached back to the user). No-op if the task never used browser.
 		e.env.CloseBrowser()
+		// Same for computer use. This matters more than the browser case: the
+		// session holds the app allowlist, so leaving it open would carry a grant
+		// the user gave one task into the next one. No-op if unused.
+		e.env.CloseComputer()
 	}
 }
 

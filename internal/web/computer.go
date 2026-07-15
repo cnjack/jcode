@@ -45,16 +45,26 @@ func (s *Server) handleComputerConfig(w http.ResponseWriter, r *http.Request) {
 	if req.Backend == "" {
 		req.Backend = "auto"
 	}
-	// Reject a tier the server does not understand rather than storing it and
-	// letting the override quietly evaporate at lookup time. A user who typed a
-	// tier and got a 200 is entitled to believe it took effect.
+	// Reject anything the override layer would silently drop, rather than
+	// storing it and letting it evaporate at lookup time. A user who set a tier
+	// and got a 200 is entitled to believe it took effect; Manager.TierOverrides
+	// keeps only tightenings, so storing a loosening would be answering "saved"
+	// to a request we have no intention of honoring.
 	for _, p := range req.AppPermissions {
 		if p.Tier == "" {
 			continue
 		}
-		if _, ok := computer.ParseTier(p.Tier); !ok {
+		t, ok := computer.ParseTier(p.Tier)
+		if !ok {
 			writeJSON(w, http.StatusBadRequest, map[string]string{
 				"error": "unknown tier " + p.Tier + " for " + p.BundleID + " (want read, click or full)",
+			})
+			return
+		}
+		if def := computer.DefaultTier(p.BundleID); t > def {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": p.BundleID + " is a " + def.String() + "-tier app and cannot be loosened to " +
+					t.String() + ". Tier overrides may only tighten.",
 			})
 			return
 		}

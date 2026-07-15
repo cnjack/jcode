@@ -177,11 +177,21 @@ func (m *Manager) OpenSession(ctx context.Context) (*Session, error) {
 
 	s := newSession(m, b)
 	s.SetTierOverrides(m.TierOverrides())
+
+	// Seed the grant flags from config. Each is an explicit, persistent toggle
+	// the user set in settings — that toggle *is* the approval, and there is no
+	// second one.
+	//
+	// This was `_ = cfg` with a comment claiming the session "starts with none
+	// until an approved request turns them on". Nothing ever turned them on:
+	// Grant is only reached from Open, which passes all three false because an
+	// app grant is not a clipboard grant. So every flag was permanently off and
+	// the settings toggles were decorative. Found by adversarial review.
+	//
+	// They are seeded here rather than through Grant so the per-app path keeps
+	// its property: approving "control Notes" still grants exactly Notes.
 	cfg := m.GetConfig()
-	// Config-level grant flags are the ceiling, not a grant: they say which
-	// flags a session is *allowed* to be given, and the session still starts
-	// with none until an approved request turns them on.
-	_ = cfg
+	s.Grant(nil, cfg.ClipboardRead, cfg.ClipboardWrite, cfg.SystemKeyCombos)
 	return s, nil
 }
 
@@ -207,6 +217,12 @@ type Status struct {
 	// Tiers exposes the built-in tier table for the apps the UI has rows for, so
 	// the settings page never has to reimplement the rules.
 	Tiers map[string]string `json:"tiers,omitempty"`
+	// Grant flags, so the settings switches can render their real state rather
+	// than guessing. Without these the UI shows them off on mount even when
+	// config has them on, and the next save silently revokes them.
+	ClipboardRead   bool `json:"clipboard_read"`
+	ClipboardWrite  bool `json:"clipboard_write"`
+	SystemKeyCombos bool `json:"system_key_combos"`
 }
 
 // Status reports the current state without opening a session.
@@ -217,9 +233,12 @@ func (m *Manager) Status(_ context.Context) Status {
 	m.mu.Unlock()
 
 	st := Status{
-		Enabled:  cfg.Enabled,
-		Backend:  cfg.Backend,
-		MaxBatch: m.MaxBatch(),
+		Enabled:         cfg.Enabled,
+		Backend:         cfg.Backend,
+		MaxBatch:        m.MaxBatch(),
+		ClipboardRead:   cfg.ClipboardRead,
+		ClipboardWrite:  cfg.ClipboardWrite,
+		SystemKeyCombos: cfg.SystemKeyCombos,
 	}
 	if st.Backend == "" {
 		st.Backend = "auto"

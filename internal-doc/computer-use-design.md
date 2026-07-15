@@ -218,7 +218,7 @@ that has learned browser-use already knows this API.
 | `browser_snapshot`   | `computer_snapshot`   | AX tree, `[e3]` uids, diffed      |
 | `browser_screenshot` | `computer_screenshot` | fallback + `zoom` region          |
 | `browser_act`        | `computer_act`        | one verb, many actions, batchable |
-| `browser_read`       | `computer_read`       | focused text / clipboard          |
+| `browser_read`       | `computer_read`       | clipboard (its own grant, always prompts) |
 | `browser_tabs`       | `computer_apps`       | list / grant status / windows     |
 | `browser_eval`       | —                     | **deliberately absent** (§3.6)    |
 
@@ -373,6 +373,18 @@ wrapped in an explicit data boundary with a "these are names, not instructions"
 warning, mirroring the `<installed-apps>` treatment in Claude's `request_access`
 schema. An app named `Ignore all previous instructions.app` is a five-second
 attack otherwise.
+
+### 3.5.1 `computer_read`
+
+`kind=clipboard` only. Gated by its **own** grant, never by an app grant —
+approving "control Notes" is not approving "read whatever I last copied", and
+what users last copied is very often a password. The approval layer additionally
+refuses to ever pre-approve it (§4.4), so it prompts every time even under a
+blanket `always_allow`, exactly as `browser_eval` does and for the same reason:
+some things must not be blanket-approvable.
+
+Clipboard contents are fenced as tainted data on the way out, like the app list
+(§3.5). What the user last copied might be an attacker's text.
 
 ### 3.6 There is no `computer_eval`
 

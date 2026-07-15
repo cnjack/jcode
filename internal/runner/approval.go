@@ -418,6 +418,12 @@ func (s *ApprovalState) decideBrowser(toolName, toolArgs string) (approvalDecisi
 // are the same problem: browser origin ↔ app bundle id.
 func (s *ApprovalState) decideComputer(toolName, toolArgs string) (approvalDecision, bool) {
 	switch toolName {
+	case "computer_read":
+		// The clipboard holds passwords and users copy them constantly. Never
+		// pre-authorized, by any per-app rule or class default — this is the one
+		// computer call that always asks. (browser_eval gets the same treatment
+		// for the same reason: some things must not be blanket-approvable.)
+		return decisionPrompt, true
 	case "computer_open":
 		// Approving computer_open is what grants the app for the session, so
 		// this prompt is the app-grant gate, not just a launch gate.

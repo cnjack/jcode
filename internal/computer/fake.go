@@ -51,6 +51,13 @@ type FakeBackend struct {
 	// is exactly the claim that the tier gate held.
 	journalPath string
 
+	clipboard string
+
+	// FrontmostErr, when set, makes Frontmost fail — used to prove that a locked
+	// screen or a user takeover reported there reaches the tool layer as its
+	// sentinel rather than a generic error the agent would retry.
+	FrontmostErr error
+
 	closed bool
 }
 
@@ -116,6 +123,9 @@ func (f *FakeBackend) ListApps(context.Context) ([]App, error) {
 func (f *FakeBackend) Frontmost(context.Context) (App, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.FrontmostErr != nil {
+		return App{}, f.FrontmostErr
+	}
 	return f.frontmost, nil
 }
 
@@ -157,6 +167,19 @@ func (f *FakeBackend) Launch(_ context.Context, bundleID string) error {
 		}
 	}
 	return fmt.Errorf("fake: unknown app %q", bundleID)
+}
+
+// SetClipboard sets the fake clipboard's contents.
+func (f *FakeBackend) SetClipboard(text string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.clipboard = text
+}
+
+func (f *FakeBackend) ReadClipboard(context.Context) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.clipboard, nil
 }
 
 func (f *FakeBackend) Perform(_ context.Context, act Action) error {

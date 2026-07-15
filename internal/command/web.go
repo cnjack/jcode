@@ -360,6 +360,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 	// backend and one view of what is granted. Off unless config enables it.
 	computerMgr := computer.NewManager(computer.FromConfig(cfg.Computer), "")
 	installFakeComputerBackend(computerMgr, cfg)
+	defer func() { _ = computerMgr.Close() }()
 
 	// Automation store (definitions + scheduler state). Skipped in setup mode.
 	// Created before buildWebTask so every per-task Env shares this one live
