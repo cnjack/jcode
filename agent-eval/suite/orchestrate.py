@@ -41,6 +41,8 @@ MODELS = {
     "glm-5.1": {"id": "zhipuai-coding-plan/glm-5.1"},
     "glm-5.2": {"id": "tencent-tokenhub/glm-5.2"},
     "qwen3.5-flash": {"id": "tencent-tokenhub/qwen3.5-flash"},
+    "kimi-k2.7-code": {"id": "tencent-tokenhub/kimi-k2.7-code"},
+    "kimi-k2.7-code-highspeed": {"id": "tencent-tokenhub/kimi-k2.7-code-highspeed"},
 }
 
 # repeats[model_label][tier]
@@ -48,6 +50,8 @@ DEFAULT_REPEATS = {
     "glm-5.1": {"smoke": 2, "core": 3, "stress": 3, "safety": 2, "frontend": 2, "memory": 2},
     "glm-5.2": {"smoke": 1, "core": 2, "stress": 2, "safety": 1, "frontend": 1, "memory": 1},
     "qwen3.5-flash": {"smoke": 1, "core": 1, "stress": 1, "safety": 1, "frontend": 1, "memory": 1},
+    "kimi-k2.7-code": {"smoke": 2, "core": 2, "stress": 2, "safety": 2, "frontend": 1, "memory": 2, "computer": 3},
+    "kimi-k2.7-code-highspeed": {"smoke": 2, "core": 2, "stress": 2, "safety": 2, "frontend": 1, "memory": 2, "computer": 3},
 }
 
 _print_lock = threading.Lock()

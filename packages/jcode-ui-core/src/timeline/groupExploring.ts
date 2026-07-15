@@ -18,6 +18,9 @@ const COLLAPSIBLE_NAMES = new Set([
   'browser_screenshot',
   'browser_read',
   'browser_tabs',
+  'computer_snapshot',
+  'computer_screenshot',
+  'computer_apps',
 ])
 
 /** True when a tool should join an Exploring/Explored group. */

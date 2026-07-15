@@ -317,6 +317,9 @@ type Config struct {
 	// Browser controls the browser-use capability (CDP-driven page control).
 	Browser *BrowserConfig `json:"browser,omitempty"`
 
+	// Computer controls the computer-use capability (native desktop app control).
+	Computer *ComputerConfig `json:"computer,omitempty"`
+
 	// ApprovalReview holds tuning knobs for the LLM approval reviewer used in
 	// Auto session mode. It does not contain an on/off switch — the reviewer is
 	// active whenever the session is in Auto mode.
@@ -399,6 +402,41 @@ type BrowserConfig struct {
 type BrowserSitePermission struct {
 	Origin   string `json:"origin"`
 	Navigate string `json:"navigate,omitempty"` // ask | allow
+	Interact string `json:"interact,omitempty"` // ask | allow
+}
+
+// ComputerConfig controls the computer-use capability (native desktop app
+// control). See internal-doc/computer-use-design.md.
+//
+// Enabled defaults to false, unlike BrowserConfig: computer use can reach
+// anything on the machine, so it is opt-in.
+type ComputerConfig struct {
+	Enabled bool   `json:"enabled,omitempty"`
+	Backend string `json:"backend,omitempty"` // auto | helper | osa | fake (default auto)
+	// Approval holds per-class defaults: "launch" and "interact" map to
+	// "ask" (default) or "always_allow".
+	Approval map[string]string `json:"approval,omitempty"`
+	// AppPermissions overrides Approval defaults, and optionally the tier, per app.
+	AppPermissions []ComputerAppPermission `json:"app_permissions,omitempty"`
+	// MaxActionsPerBatch bounds a computer_act batch (default 20).
+	MaxActionsPerBatch int `json:"max_actions_per_batch,omitempty"`
+	// Grant flags, orthogonal to the app allowlist. All off by default: an app
+	// grant is not a clipboard grant.
+	ClipboardRead   bool `json:"clipboard_read,omitempty"`
+	ClipboardWrite  bool `json:"clipboard_write,omitempty"`
+	SystemKeyCombos bool `json:"system_key_combos,omitempty"`
+}
+
+// ComputerAppPermission is a per-app approval override.
+//
+// Tier may only tighten the built-in tier for that app; a row that tries to
+// loosen one is ignored (internal/computer.Manager.TierOverrides). Loosening is
+// a deliberate act the settings UI gates behind a warning — a hand-edited config
+// file is not that gate.
+type ComputerAppPermission struct {
+	BundleID string `json:"bundle_id"`
+	Tier     string `json:"tier,omitempty"`     // read | click | full; "" = built-in default
+	Launch   string `json:"launch,omitempty"`   // ask | allow
 	Interact string `json:"interact,omitempty"` // ask | allow
 }
 

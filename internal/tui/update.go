@@ -863,6 +863,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 						return m.handleBrowserInput(prompt, cmds)
 					}
 
+					if prompt == "/computer" || strings.HasPrefix(prompt, "/computer ") {
+						return m.handleComputerInput(prompt, cmds)
+					}
+
 					if prompt == "/memory" || strings.HasPrefix(prompt, "/memory ") {
 						return m.handleMemoryInput(prompt, cmds)
 					}

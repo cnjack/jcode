@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/cnjack/jcode/internal/agent"
+	"github.com/cnjack/jcode/internal/computer"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/flow"
 	"github.com/cnjack/jcode/internal/handler"
@@ -440,6 +441,17 @@ func (a *acpAgent) buildAgentSession(
 			},
 		}))
 	}
+	// Computer-use manager. Off unless config enables it; when it is off,
+	// NewComputerTools returns nil and the tools are simply absent.
+	//
+	// (Browser-use is deliberately not wired here: its extension backend needs
+	// the web server, and the managed backend would launch a Chrome nobody can
+	// see from an ACP client. Computer use has no such dependency.)
+	computerMgr := computer.NewManager(computer.FromConfig(cfg.Computer), "")
+	installFakeComputerBackend(computerMgr, cfg)
+	env.Computer = computerMgr
+	allTools = append(allTools, env.NewComputerTools()...)
+
 	allTools = append(allTools, mcpTools...)
 
 	// Plan mode tools: read-only subset. Goal tools are included — like the
@@ -453,11 +465,16 @@ func (a *acpAgent) buildAgentSession(
 		env.NewTodoWriteTool(), env.NewTodoReadTool(),
 		env.NewGoalSetTool(), env.NewGoalGetTool(), env.NewGoalUpdateTool(),
 	}
+	planTools = append(planTools, env.NewComputerPlanTools()...)
 
 	normalPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
 	planPrompt := prompts.GetPlanSystemPrompt(platform, pwd, "local", envInfo)
 	startupMode := resolveStartupMode(cfg, false)
 	approvalState := runner.NewApprovalStateWithMode(pwd, startupMode)
+	approvalState.SetComputerPermFunc(func(bundleID, class string) bool {
+		return computer.Preapproved(cfg.Computer, bundleID, class)
+	})
+	approvalState.SetComputerAppFunc(env.CurrentComputerApp)
 
 	approvalState.SetHandler(acpHandler)
 

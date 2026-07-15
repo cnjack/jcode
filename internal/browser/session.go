@@ -24,7 +24,11 @@ type Session struct {
 	tabs    map[string]*sessionTab
 	active  string
 	gen     int
-	snaps   map[string]*Snapshot // tabID → latest snapshot
+	// uidSeq is the session-wide monotonic uid counter. uids are never reused,
+	// so a uid absent from the latest snapshot is genuinely stale rather than
+	// silently rebound to a different element. See uitree.Snapshot.
+	uidSeq int
+	snaps  map[string]*Snapshot // tabID → latest snapshot
 }
 
 type sessionTab struct {
@@ -251,7 +255,12 @@ func (s *Session) snapshotLocked(ctx context.Context, t *sessionTab, filter stri
 		return "", err
 	}
 	s.gen++
-	snap := buildSnapshot(nodes, filter, s.gen, maxLines)
+	var known map[int64]string
+	if prev := s.snaps[t.conn.ID()]; prev != nil {
+		known = prev.Refs
+	}
+	snap := buildSnapshot(nodes, filter, s.gen, maxLines, known, s.uidSeq)
+	s.uidSeq = snap.NextUID
 	s.snaps[t.conn.ID()] = snap
 
 	header := fmt.Sprintf("[Page] %s — %s  (tab %s)", title, url, shortID(t.conn.ID()))

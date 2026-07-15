@@ -22,6 +22,7 @@ import (
 	"github.com/cnjack/jcode/internal/agent"
 	"github.com/cnjack/jcode/internal/browser"
 	"github.com/cnjack/jcode/internal/channel"
+	"github.com/cnjack/jcode/internal/computer"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/flow"
 	"github.com/cnjack/jcode/internal/handler"
@@ -141,6 +142,7 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 		}))
 	}
 	all = append(all, s.env.NewBrowserTools()...)
+	all = append(all, s.env.NewComputerTools()...)
 	return append(all, s.mcpTools...)
 }
 
@@ -152,7 +154,8 @@ func (s *interactiveState) buildPlanTools() []tool.BaseTool {
 		s.env.NewTodoWriteTool(), s.env.NewTodoReadTool(),
 		tools.NewAskUserTool(s.askUserDeps),
 	}
-	return append(plan, s.env.NewBrowserPlanTools()...)
+	plan = append(plan, s.env.NewBrowserPlanTools()...)
+	return append(plan, s.env.NewComputerPlanTools()...)
 }
 
 func (s *interactiveState) subagentNotifier(name, agentType string, done bool, result string, err error) {
@@ -1071,6 +1074,13 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	env.Browser = browserMgr
 	defer func() { _ = browserMgr.Close() }()
 
+	// Computer-use manager (native desktop app control). Off unless config
+	// enables it — unlike browser-use, this can reach anything on the machine.
+	computerMgr := computer.NewManager(computer.FromConfig(cfg.Computer), "")
+	installFakeComputerBackend(computerMgr, cfg)
+	env.Computer = computerMgr
+	defer func() { _ = computerMgr.Close() }()
+
 	var mcpTools []tool.BaseTool
 	var mcpStatuses []tui.MCPStatusItem
 	if len(cfg.MCPServers) > 0 {
@@ -1226,6 +1236,10 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		return browserSitePreapproved(cfg, origin, class)
 	})
 	approvalState.SetBrowserOriginFunc(env.CurrentBrowserOrigin)
+	approvalState.SetComputerPermFunc(func(bundleID, class string) bool {
+		return computer.Preapproved(cfg.Computer, bundleID, class)
+	})
+	approvalState.SetComputerAppFunc(env.CurrentComputerApp)
 	st.approvalState = approvalState
 
 	// Provide the config/platform needed to lazily build the LLM reviewer when
@@ -1264,7 +1278,29 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		},
 	}
 
-	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore, tui.WithVersion(Version), tui.WithGoalStore(env.GoalStore), tui.WithStartupMode(startupMode), tui.WithTheme(cfg.Theme), tui.WithBrowser(browserCtl), tui.WithApprovalModeChange(func(enabled bool) {
+	computerCtl := &tui.ComputerController{
+		Status: func() tui.ComputerStatus {
+			s := computerMgr.Status(context.Background())
+			return tui.ComputerStatus{
+				Available:   s.Available,
+				Enabled:     s.Enabled,
+				Backend:     s.Backend,
+				BackendKind: s.BackendKind,
+				Blocker:     s.Blocker,
+				Detail:      s.Detail,
+			}
+		},
+		SetEnabled: func(enable bool) error {
+			if cfg.Computer == nil {
+				cfg.Computer = &config.ComputerConfig{Backend: "auto"}
+			}
+			cfg.Computer.Enabled = enable
+			computerMgr.SetConfig(computer.FromConfig(cfg.Computer))
+			return config.SaveConfig(cfg)
+		},
+	}
+
+	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore, tui.WithVersion(Version), tui.WithGoalStore(env.GoalStore), tui.WithStartupMode(startupMode), tui.WithTheme(cfg.Theme), tui.WithBrowser(browserCtl), tui.WithComputer(computerCtl), tui.WithApprovalModeChange(func(enabled bool) {
 		approvalState.SetSessionApproval(enabled)
 	}))
 	st.p = p

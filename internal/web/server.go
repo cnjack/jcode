@@ -17,6 +17,7 @@ import (
 	"github.com/cnjack/jcode/internal/automation"
 	"github.com/cnjack/jcode/internal/browser"
 	"github.com/cnjack/jcode/internal/channel"
+	"github.com/cnjack/jcode/internal/computer"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/flow"
 	"github.com/cnjack/jcode/internal/handler"
@@ -144,6 +145,11 @@ type Server struct {
 	// agent's browser_* tools drive the same Chrome. nil disables browser use.
 	browserMgr *browser.Manager
 
+	// computerMgr is the process-wide computer-use manager, shared with per-task
+	// Envs so the settings UI and the agent's computer_* tools see one backend and
+	// one view of what is granted. nil disables computer use.
+	computerMgr *computer.Manager
+
 	// bleController toggles the BLE status channel live (from the settings
 	// endpoint) without an app restart. nil when BLE is not compiled in.
 	bleController BLEController
@@ -194,6 +200,7 @@ type ServerConfig struct {
 	AuthToken           string                                                                // bearer token required on non-exempt requests when RequireAuth is set
 	RequireAuth         bool                                                                  // enforce token auth (set when bound to a non-loopback host)
 	BrowserManager      *browser.Manager                                                      // optional: process-wide browser-use manager shared with per-task Envs
+	ComputerManager     *computer.Manager                                                     // optional: process-wide computer-use manager shared with per-task Envs
 	BLEController       BLEController                                                         // optional: live BLE status-channel toggle (desktop builds)
 }
 
@@ -261,6 +268,7 @@ func NewServer(cfg *ServerConfig) *Server {
 		authToken:           cfg.AuthToken,
 		requireAuth:         cfg.RequireAuth,
 		browserMgr:          cfg.BrowserManager,
+		computerMgr:         cfg.ComputerManager,
 		bleController:       cfg.BLEController,
 	}
 	// The bootstrap engine is registered (and its pump started) in Start, once
@@ -358,6 +366,9 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/browser/config", s.handleBrowserConfig)
 	mux.HandleFunc("GET /api/browser/ext/ws", s.handleBrowserExtWS)
 	mux.HandleFunc("GET /api/browser/shots/{id}", s.handleBrowserShot)
+	mux.HandleFunc("GET /api/computer/status", s.handleComputerStatus)
+	mux.HandleFunc("POST /api/computer/config", s.handleComputerConfig)
+	mux.HandleFunc("GET /api/computer/shots/{id}", s.handleComputerShot)
 	mux.HandleFunc("GET /api/approval-review-config", s.handleGetApprovalReviewConfig)
 	mux.HandleFunc("POST /api/approval-review-config", s.handleSetApprovalReviewConfig)
 	mux.HandleFunc("GET /api/skills", s.handleListSkills)
