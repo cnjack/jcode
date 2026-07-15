@@ -499,6 +499,42 @@ func init() {
 // built into the registry. They are added to generatedProviders/generatedProviderOrder
 // at init time so they behave identically to models.dev providers.
 var staticProviders = map[string]*RegistryProvider{
+	// Kimi For Coding is Moonshot's subscription coding plan. models.dev carries a
+	// "kimi-for-coding" record, but its model ids (k2p5/k2p6/k2p7/kimi-k2-thinking)
+	// are undocumented aliases that the vendor's own /models endpoint does not
+	// advertise, so the provider is hand-written here instead of pulled through
+	// generate_models.go. The two ids below are the only ones the official
+	// OpenAI-compatible setup documents. Verified against the live endpoint
+	// 2026-07-15: tool calls work, reasoning_effort is honored, and every model
+	// rejects temperature != 1 (hence Temperature stays false — note models.dev
+	// wrongly reports temperature:true for three of its four ids).
+	"kimi-for-coding": {
+		ID:   "kimi-for-coding",
+		Name: "Kimi For Coding",
+		Env:  []string{"KIMI_API_KEY"},
+		API:  "https://api.kimi.com/coding/v1",
+		Doc:  "https://www.kimi.com/code/docs/third-party-tools/other-coding-agents.html",
+		Models: map[string]*RegistryModel{
+			"kimi-for-coding": {
+				ID: "kimi-for-coding", Name: "Kimi For Coding", Family: "kimi",
+				Attachment: true, Reasoning: true, ToolCall: true,
+				DefaultEnabled: true, Recommended: true,
+				Modalities:       &ModelModalities{Input: []string{"text", "image", "video"}, Output: []string{"text"}},
+				Limit:            &ModelLimit{Context: 262144, Output: 32768},
+				ReasoningOptions: standardEffortOptions(),
+			},
+			// High-speed tier: ~5-6x output speed at ~3x quota burn, and it needs an
+			// Allegretto-or-above subscription, so it is selectable but not starred.
+			"kimi-for-coding-highspeed": {
+				ID: "kimi-for-coding-highspeed", Name: "Kimi For Coding (High-Speed)", Family: "kimi",
+				Attachment: true, Reasoning: true, ToolCall: true,
+				DefaultEnabled:   true,
+				Modalities:       &ModelModalities{Input: []string{"text", "image", "video"}, Output: []string{"text"}},
+				Limit:            &ModelLimit{Context: 262144, Output: 32768},
+				ReasoningOptions: standardEffortOptions(),
+			},
+		},
+	},
 	"tencent-tokenhub-ep": {
 		ID:   "tencent-tokenhub-ep",
 		Name: "Tencent TokenHub Enterprise",
@@ -572,6 +608,7 @@ var staticProviders = map[string]*RegistryProvider{
 // staticProviderOrder defines the display order for static providers.
 // They are appended after the generated providers.
 var staticProviderOrder = []string{
+	"kimi-for-coding",
 	"tencent-tokenhub-ep",
 }
 
