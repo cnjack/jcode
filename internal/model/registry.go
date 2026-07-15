@@ -446,7 +446,8 @@ var recommendedModels = map[string]map[string]bool{
 }
 
 // contextLimitOverrides corrects context windows for built-in models whose
-// models.dev-sourced value understates the model's advertised window. Applied at
+// models.dev-sourced value misstates the model's real window — either understating
+// it (a conservative floor) or overstating it (bad upstream data). Applied at
 // init() so corrections survive `go generate` regeneration of registry_generated.go.
 // Key: provider ID → model ID → context window (tokens). See internal-doc/model-research.md.
 var contextLimitOverrides = map[string]map[string]int{
@@ -454,6 +455,16 @@ var contextLimitOverrides = map[string]map[string]int{
 	// 512K "guaranteed minimum". Use the advertised window for sizing.
 	"minimax":             {"MiniMax-M3": 1_000_000},
 	"minimax-coding-plan": {"MiniMax-M3": 1_000_000},
+	// models.dev's openrouter records carry transposed digits for these two, which
+	// would size the context above the real window and fail requests near the edge.
+	// Both corrected values are what the same models report under their native
+	// providers (google / alibaba-cn), and each is a power of two — 2^20 and 2^17 —
+	// while the upstream 1048756 / 131702 are not. Fixed here rather than in the
+	// generated file, which is overwritten by `make generate`.
+	"openrouter": {
+		"google/gemini-3.1-pro-preview-customtools": 1_048_576,
+		"qwen/qwen3-14b": 131_072,
+	},
 }
 
 // glm52Model builds a fresh GLM-5.2 entry. Returns a new object per call so each

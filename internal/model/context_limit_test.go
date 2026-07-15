@@ -32,6 +32,19 @@ func TestResolveContextLimit(t *testing.T) {
 			provider: "minimax", model: "MiniMax-M3", want: 1_000_000,
 		},
 		{
+			// models.dev ships 1048756 here; a model id drift would make the
+			// override silently miss and hand back the inflated window.
+			name:     "openrouter gemini transposed digits corrected to 2^20",
+			cfg:      nil,
+			provider: "openrouter", model: "google/gemini-3.1-pro-preview-customtools", want: 1_048_576,
+		},
+		{
+			// models.dev ships 131702 here.
+			name:     "openrouter qwen3-14b transposed digits corrected to 2^17",
+			cfg:      nil,
+			provider: "openrouter", model: "qwen/qwen3-14b", want: 131_072,
+		},
+		{
 			name:     "knownModels fallback when registry misses",
 			cfg:      nil,
 			provider: "unknown-provider", model: "gpt-4o", want: 128_000,
