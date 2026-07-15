@@ -73,14 +73,14 @@ func (b *reviewBreaker) reset() {
 // failed, chose to escalate, or the circuit breaker tripped. When handled=true,
 // the returned (approved, err) is the final answer: a denial carries a
 // *agent.ReviewDeniedError so the middleware surfaces the reviewer's rationale.
-func (s *ApprovalState) tryReview(ctx context.Context, toolName, toolArgs string, isExternal bool) (approved bool, err error, handled bool) {
+func (s *ApprovalState) tryReview(ctx context.Context, toolName, toolArgs string, isExternal bool) (approved bool, handled bool, err error) {
 	s.mu.Lock()
 	r := s.reviewer
 	tfn := s.transcriptFn
 	cwd := s.workpath
 	s.mu.Unlock()
 	if r == nil {
-		return false, nil, false
+		return false, false, nil
 	}
 
 	var transcript []review.Msg
@@ -99,15 +99,15 @@ func (s *ApprovalState) tryReview(ctx context.Context, toolName, toolArgs string
 	case review.Allow:
 		s.breaker.recordNonDenial()
 		s.notifyToolInProgress(toolName, toolArgs)
-		return true, nil, true
+		return true, true, nil
 	case review.Deny:
 		if s.breaker.recordDenial() {
 			config.Logger().Printf("[review] denial circuit breaker tripped for %q; escalating to user", toolName)
-			return false, nil, false
+			return false, false, nil
 		}
-		return false, &agent.ReviewDeniedError{Reason: res.Rationale}, true
+		return false, true, &agent.ReviewDeniedError{Reason: res.Rationale}
 	default: // review.Escalate
-		return false, nil, false
+		return false, false, nil
 	}
 }
 
@@ -115,7 +115,7 @@ func (s *ApprovalState) tryReview(ctx context.Context, toolName, toolArgs string
 // settle the call, it falls back to the interactive user prompt. It is shared by
 // the primary and teammate approval paths so the two cannot drift.
 func (s *ApprovalState) gatedApproval(ctx context.Context, toolName, toolArgs string, isExternal bool, workerName, workerColor string) (bool, error) {
-	if approved, err, handled := s.tryReview(ctx, toolName, toolArgs, isExternal); handled {
+	if approved, handled, err := s.tryReview(ctx, toolName, toolArgs, isExternal); handled {
 		return approved, err
 	}
 	return s.requestUserApprovalWithWorker(ctx, toolName, toolArgs, isExternal, workerName, workerColor)

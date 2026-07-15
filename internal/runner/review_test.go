@@ -28,13 +28,13 @@ type countingHandler struct {
 	resp    handler.ApprovalResponse
 }
 
-func (countingHandler) OnAgentText(string)               {}
-func (countingHandler) OnToolCall(handler.ToolCallEvent) {}
+func (countingHandler) OnAgentText(string)                   {}
+func (countingHandler) OnToolCall(handler.ToolCallEvent)     {}
 func (countingHandler) OnToolResult(handler.ToolResultEvent) {}
-func (countingHandler) OnTodoUpdate()                {}
-func (countingHandler) OnAgentStart()                {}
-func (countingHandler) OnAgentDone(error)            {}
-func (countingHandler) OnTokenUpdate(handler.TokenUsage) {}
+func (countingHandler) OnTodoUpdate()                        {}
+func (countingHandler) OnAgentStart()                        {}
+func (countingHandler) OnAgentDone(error)                    {}
+func (countingHandler) OnTokenUpdate(handler.TokenUsage)     {}
 func (h *countingHandler) RequestApproval(context.Context, handler.ApprovalRequest) (handler.ApprovalResponse, error) {
 	h.prompts++
 	return h.resp, nil

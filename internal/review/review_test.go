@@ -9,11 +9,11 @@ import (
 
 func TestParseAssessment(t *testing.T) {
 	cases := []struct {
-		name       string
-		in         string
-		wantOK     bool
-		wantOut    string
-		wantRisk   string
+		name     string
+		in       string
+		wantOK   bool
+		wantOut  string
+		wantRisk string
 	}{
 		{"clean", `{"risk_level":"high","user_authorization":"low","outcome":"deny","rationale":"x"}`, true, "deny", "high"},
 		{"fast-path allow", `{"outcome":"allow"}`, true, "allow", ""},

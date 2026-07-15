@@ -83,18 +83,35 @@ func (e *Engine) reviewWithTools(ctx context.Context, req Request, cm einomodel.
 		return Result{Outcome: Escalate, Failed: true}, meta
 	}
 
-	// The verdict is the last assistant message; scan newest→oldest so tool-call
-	// chatter before the final JSON is ignored.
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if a, ok := parseAssessment(msgs[i]); ok {
-			meta.userAuth = a.UserAuthorization
-			if res, ok := mapOutcome(a); ok {
-				return res, meta
-			}
-		}
+	res, userAuth, ok := verdictFromFinalMessage(msgs)
+	meta.userAuth = userAuth
+	if !ok {
+		meta.failReason = "no parseable verdict in the reviewer's final message"
+		return Result{Outcome: Escalate, Failed: true}, meta
 	}
-	meta.failReason = "no parseable verdict from investigation"
-	return Result{Outcome: Escalate, Failed: true}, meta
+	return res, meta
+}
+
+// verdictFromFinalMessage extracts the verdict from the reviewer's FINAL turn
+// only — nothing earlier.
+//
+// Investigation reads attacker-influenced content (file bodies, command output),
+// so scanning back through earlier turns would let a JSON blob shaped like the
+// verdict schema — echoed or quoted out of investigated evidence — be adopted as
+// the authoritative decision. That would turn "no parseable verdict => escalate"
+// into "trust whatever JSON-shaped text appears anywhere in the transcript",
+// precisely in the mode most exposed to untrusted input. Anything but a clean
+// verdict in the last message escalates to the human.
+func verdictFromFinalMessage(msgs []string) (Result, string, bool) {
+	if len(msgs) == 0 {
+		return Result{}, "", false
+	}
+	a, ok := parseAssessment(msgs[len(msgs)-1])
+	if !ok {
+		return Result{}, "", false
+	}
+	res, ok := mapOutcome(a)
+	return res, a.UserAuthorization, ok
 }
 
 // runReviewerAgent runs one read-only reviewer turn to completion, returning the

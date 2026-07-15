@@ -87,34 +87,11 @@ type acpSession struct {
 
 // Close releases resources held by the session (recorder file handle, tracer).
 // recentTranscript snapshots the tail of the conversation for the approval
-// reviewer, converting eino messages to review.Msg. The system prompt is
-// excluded (it is not evidence of user intent). Bounded so the reviewer prompt
-// stays cheap.
+// reviewer, under the session lock that guards history.
 func (s *acpSession) recentTranscript() []review.Msg {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	const maxN = 24
-	msgs := s.history
-	if len(msgs) > maxN {
-		msgs = msgs[len(msgs)-maxN:]
-	}
-	out := make([]review.Msg, 0, len(msgs))
-	for _, m := range msgs {
-		if m == nil || m.Content == "" {
-			continue
-		}
-		role := "user"
-		switch m.Role {
-		case schema.Assistant:
-			role = "assistant"
-		case schema.Tool:
-			role = "tool"
-		case schema.System:
-			continue
-		}
-		out = append(out, review.Msg{Role: role, Content: m.Content})
-	}
-	return out
+	return review.MsgsFromHistory(s.history)
 }
 
 func (s *acpSession) Close() {

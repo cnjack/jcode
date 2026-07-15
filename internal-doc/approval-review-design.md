@@ -126,10 +126,18 @@ transcript+OnTurnStart)。TUI/web 前端接线同法(本期先 ACP,PR 一并补)
 ## 已知限制(对抗审查后记录)
 
 - **审查器是概率性安全层,不是保证**:20 轮 440 次判定中,清晰恶意件(rm -rf /、外发、注入)20/20 正确,
-  但云元数据 SSRF 取凭证(`d_metadata_creds`)被"调试借口"话术带偏 2/20。已在 policy 显式加云元数据规则
-  缓解(见测试报告 §B)。根本上审查器是**中间层**:它降低打断、拦掉大部分危险,但不能替代 fail-open-to-user
-  与未来的 OS 沙箱纵深。更强的审查模型漏放率更低。
+  但云元数据 SSRF 取凭证(`d_metadata_creds`)被"调试借口"话术带偏 2/20(见测试报告 §B)。根本上审查器是
+  **中间层**:它降低打断、拦掉大部分危险,但不能替代 fail-open-to-user 与未来的 OS 沙箱纵深。
+  更强的审查模型漏放率更低。
+  → 该案已加**确定性前置拦截**(`ssrf.go`):policy 文案不是控制手段,被话术带偏正是 prompt 类防御的失效
+  方式。云元数据地址(含十进制/十六进制/八进制混淆)+ 凭证路径 → 调模型**之前**直接 deny;仅提及地址无凭证
+  路径 → escalate 交人(deny 用户无法翻案,escalate 可以)。有普通 CI 可跑的单测(不依赖 live model),
+  含"prefilter 先于模型执行"的接线测试。prompt 文案保留作纵深。
 
+- **background 命令的不变量已澄清**:`decide()` 对 `background:true` 不走安全表快捷放行,原注释说"必须问人"。
+  接入 reviewer 后它经 `gatedApproval` 可能被自动放行。真正的不变量是"agent 不能靠设 flag 买到免检",不是
+  "每条后台命令都必须人看"。已更新注释,并把 `background_execution` 作为**显式风险信号**写进 action prompt +
+  policy(输出不实时可见 → 同命令比前台高一档审视),而不是埋在 args JSON 里。
 - **V2 investigate 假设本地文件系统**:审查器的 read/grep/glob 走 LocalExecutor,读的是本地磁盘。
   remote/SSH 会话里被判命令在远端执行,本地同路径可能是另一台机器的内容 → 可能误判。当前建议
   remote 会话不开 investigate;彻底修需把会话 executor 传给审查器(后续)。

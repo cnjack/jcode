@@ -274,9 +274,14 @@ func (s *ApprovalState) decide(toolName, toolArgs string) approvalDecision {
 			Background bool   `json:"background"`
 		}
 		if err := json.Unmarshal([]byte(toolArgs), &input); err == nil {
-			// Background commands always require approval: the agent controls the
-			// flag, so auto-approving them would let any command (including
-			// destructive ones) bypass the gate by setting background=true.
+			// Background commands never take the safe-command shortcut: the agent
+			// controls the flag, so auto-approving them would let any command
+			// (including destructive ones) skip the gate by setting
+			// background=true. They are routed to the gate — which means the
+			// auto-reviewer when one is enabled (it is given the background flag
+			// explicitly and weighs the delayed-visibility risk), and the user
+			// otherwise. The invariant this protects is "the flag cannot buy you a
+			// free pass", not "a human must see every background command".
 			if input.Background {
 				return decisionPrompt
 			}

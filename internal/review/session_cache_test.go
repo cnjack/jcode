@@ -3,6 +3,7 @@ package review
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,13 +106,16 @@ func TestReviewCached_FailureDoesNotCorruptTrunk(t *testing.T) {
 	}
 }
 
-func TestTrimTrunk(t *testing.T) {
+func TestTrimTrunk_ByMessageCount(t *testing.T) {
 	// Build 1 system + N pairs beyond the cap.
 	msgs := []*schema.Message{schema.SystemMessage("s")}
 	for i := 0; i < maxTrunkMessages; i++ { // pushes total to 1 + 2*maxTrunkMessages
 		msgs = append(msgs, schema.UserMessage("u"), &schema.Message{Role: schema.Assistant, Content: "a"})
 	}
-	out := trimTrunk(msgs)
+	out, trimmed := trimTrunk(msgs)
+	if !trimmed {
+		t.Fatalf("expected trim to report it dropped pairs")
+	}
 	if len(out) > maxTrunkMessages {
 		t.Fatalf("trimmed to %d, want <= %d", len(out), maxTrunkMessages)
 	}
@@ -121,5 +125,82 @@ func TestTrimTrunk(t *testing.T) {
 	// After system, the transcript must start on a user (action), not mid-pair.
 	if len(out) > 1 && out[1].Role != schema.User {
 		t.Fatalf("trim broke a pair: message after system is %v", out[1].Role)
+	}
+}
+
+func TestTrimTrunk_ByBytes(t *testing.T) {
+	// Few messages, but huge ones: a count-only bound would let this through and
+	// the trunk would grow until it blew the context window.
+	big := strings.Repeat("x", 20_000)
+	msgs := []*schema.Message{schema.SystemMessage("s")}
+	for i := 0; i < 5; i++ { // 11 messages, ~200KB — under the count cap, over bytes
+		msgs = append(msgs, schema.UserMessage(big), &schema.Message{Role: schema.Assistant, Content: big})
+	}
+	if len(msgs) > maxTrunkMessages {
+		t.Fatalf("precondition: this test must stay under the message-count cap")
+	}
+	out, trimmed := trimTrunk(msgs)
+	if !trimmed {
+		t.Fatalf("expected byte budget to trigger a trim")
+	}
+	if trunkBytes(out) > maxTrunkBytes {
+		t.Fatalf("trunk is %d bytes after trim, want <= %d", trunkBytes(out), maxTrunkBytes)
+	}
+	if out[0].Role != schema.System {
+		t.Fatalf("system message must survive trim")
+	}
+}
+
+func TestTranscriptKey(t *testing.T) {
+	a := []Msg{{Role: "user", Content: "hello"}}
+	b := []Msg{{Role: "user", Content: "hello"}}
+	c := []Msg{{Role: "user", Content: "hello"}, {Role: "assistant", Content: "hi"}}
+	if transcriptKey(a) != transcriptKey(b) {
+		t.Errorf("identical transcripts must share a key")
+	}
+	if transcriptKey(a) == transcriptKey(c) {
+		t.Errorf("different transcripts must differ")
+	}
+	if transcriptKey(nil) != "" {
+		t.Errorf("empty transcript key must be empty")
+	}
+	// Role/content boundaries must not be confusable by concatenation.
+	x := []Msg{{Role: "user", Content: "ab"}}
+	y := []Msg{{Role: "usera", Content: "b"}}
+	if transcriptKey(x) == transcriptKey(y) {
+		t.Errorf("role/content boundary collision")
+	}
+}
+
+func TestReviewCached_SkipsUnchangedTranscript(t *testing.T) {
+	e := newCachedEngine()
+	fm := &fakeModel{reply: `{"outcome":"allow"}`}
+	transcript := []Msg{{Role: "user", Content: "UNIQUE-EVIDENCE-MARKER please build"}}
+
+	// Review 1 embeds the transcript.
+	e.reviewCached(context.Background(), Request{ToolName: "execute", ToolArgs: `{"command":"mkdir a"}`, Transcript: transcript}, fm)
+	// Review 2 with the SAME transcript must not re-embed it — within a turn the
+	// frontends hand us an identical transcript, and re-sending it every review
+	// would grow the trunk by a full transcript each time.
+	e.reviewCached(context.Background(), Request{ToolName: "execute", ToolArgs: `{"command":"mkdir b"}`, Transcript: transcript}, fm)
+
+	newUserMsg := fm.gotMessages[1][len(fm.gotMessages[1])-1]
+	if strings.Contains(newUserMsg.Content, "UNIQUE-EVIDENCE-MARKER") {
+		t.Errorf("review 2 re-embedded an unchanged transcript:\n%s", newUserMsg.Content)
+	}
+	if !strings.Contains(newUserMsg.Content, "mkdir b") {
+		t.Errorf("review 2 must still carry the new action")
+	}
+	// The evidence is still available to the model via the cached prefix.
+	if !strings.Contains(fm.gotMessages[1][1].Content, "UNIQUE-EVIDENCE-MARKER") {
+		t.Errorf("transcript should remain in the trunk prefix from review 1")
+	}
+
+	// A CHANGED transcript must be re-sent.
+	grown := append(append([]Msg{}, transcript...), Msg{Role: "user", Content: "SECOND-TURN-MARKER now deploy"})
+	e.reviewCached(context.Background(), Request{ToolName: "execute", ToolArgs: `{"command":"mkdir c"}`, Transcript: grown}, fm)
+	third := fm.gotMessages[2][len(fm.gotMessages[2])-1]
+	if !strings.Contains(third.Content, "SECOND-TURN-MARKER") {
+		t.Errorf("a changed transcript must be re-sent:\n%s", third.Content)
 	}
 }

@@ -407,31 +407,10 @@ func (s *interactiveState) drainModeSwitch(modeSelectCh <-chan mode.SessionMode)
 }
 
 // recentTranscript snapshots the tail of the conversation for the approval
-// reviewer (system prompt excluded — it is not evidence of user intent).
-// Called only during a turn, when st.history is not being mutated concurrently.
+// reviewer. Called only during a turn, when st.history is not being mutated
+// concurrently (handlePrompt blocks on runner.Run while approvals happen).
 func (s *interactiveState) recentTranscript() []review.Msg {
-	const maxN = 24
-	msgs := s.history
-	if len(msgs) > maxN {
-		msgs = msgs[len(msgs)-maxN:]
-	}
-	out := make([]review.Msg, 0, len(msgs))
-	for _, m := range msgs {
-		if m == nil || m.Content == "" {
-			continue
-		}
-		role := "user"
-		switch m.Role {
-		case schema.Assistant:
-			role = "assistant"
-		case schema.Tool:
-			role = "tool"
-		case schema.System:
-			continue
-		}
-		out = append(out, review.Msg{Role: role, Content: m.Content})
-	}
-	return out
+	return review.MsgsFromHistory(s.history)
 }
 
 func (s *interactiveState) handlePrompt(userPrompt string) {

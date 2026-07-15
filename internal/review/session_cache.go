@@ -3,6 +3,8 @@ package review
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
+	"strconv"
 	"sync"
 
 	einomodel "github.com/cloudwego/eino/components/model"
@@ -11,11 +13,18 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 )
 
-// maxTrunkMessages bounds the reused reviewer conversation. When exceeded, the
-// oldest action/verdict pairs are dropped (the system message is always kept).
-// One trim causes a single cache miss on the shifted prefix, so keep it well
-// above a typical session's review count.
-const maxTrunkMessages = 41 // 1 system + 20 (action,verdict) pairs
+const (
+	// maxTrunkMessages bounds the reused reviewer conversation by message count.
+	// When exceeded, the oldest action/verdict pairs are dropped (the system
+	// message is always kept). One trim causes a single cache miss on the shifted
+	// prefix, so keep it well above a typical session's review count.
+	maxTrunkMessages = 41 // 1 system + 20 (action,verdict) pairs
+	// maxTrunkBytes bounds the trunk by SIZE as well. A count-only bound is not
+	// enough: each committed message can carry a rendered transcript, so 20 pairs
+	// could reach hundreds of KB and blow the context window — making V3 more
+	// expensive than V1, the opposite of its purpose. ~60KB ≈ 15k tokens.
+	maxTrunkBytes = 60_000
+)
 
 // reviewerSession is a reused reviewer conversation. Holding the growing message
 // list lets the provider serve the large policy prefix (and prior verdicts) from
@@ -29,6 +38,12 @@ const maxTrunkMessages = 41 // 1 system + 20 (action,verdict) pairs
 type reviewerSession struct {
 	mu       sync.Mutex
 	messages []*schema.Message // [system, user(action1), assistant(verdict1), ...]
+	// lastTranscriptKey fingerprints the conversation evidence already embedded
+	// in the trunk. While it is unchanged, later reviews send only the new action
+	// instead of re-embedding a near-identical transcript every time (the
+	// frontends only extend history between turns, so within a turn this is
+	// stable). Empty means "not in the trunk — send it".
+	lastTranscriptKey string
 }
 
 func newReviewerSession() *reviewerSession { return &reviewerSession{} }
@@ -47,7 +62,17 @@ func (e *Engine) reviewCached(ctx context.Context, req Request, cm einomodel.Too
 		e.trunk.messages = []*schema.Message{schema.SystemMessage(e.system)}
 	}
 	base := e.trunk.messages
-	userMsg := schema.UserMessage(renderUserPrompt(req))
+
+	// Incremental evidence: only re-send the transcript when it actually changed
+	// since the last review in this session. Otherwise it is already in the
+	// cached prefix and re-embedding it would grow the trunk by ~a full
+	// transcript per review for no added information.
+	key := transcriptKey(req.Transcript)
+	userText := renderActionSection(req)
+	if key != e.trunk.lastTranscriptKey {
+		userText = renderTranscriptSection(req.Transcript) + userText
+	}
+	userMsg := schema.UserMessage(userText)
 
 	var lastErr error
 	for attempt := 0; attempt < parseAttempts; attempt++ {
@@ -88,7 +113,15 @@ func (e *Engine) reviewCached(ctx context.Context, req Request, cm einomodel.Too
 		committed := make([]*schema.Message, 0, len(base)+2)
 		committed = append(committed, base...)
 		committed = append(committed, userMsg, verdict)
-		e.trunk.messages = trimTrunk(committed)
+		trimmed, didTrim := trimTrunk(committed)
+		e.trunk.messages = trimmed
+		e.trunk.lastTranscriptKey = key
+		if didTrim {
+			// A trim may have dropped the pair that carried the transcript, so the
+			// evidence is no longer guaranteed to be in the prefix. Force the next
+			// review to re-send it rather than silently reviewing without context.
+			e.trunk.lastTranscriptKey = ""
+		}
 		return res, meta
 	}
 	if lastErr != nil {
@@ -98,24 +131,55 @@ func (e *Engine) reviewCached(ctx context.Context, req Request, cm einomodel.Too
 	return Result{Outcome: Escalate, Failed: true}, meta
 }
 
-// trimTrunk keeps the system message plus the most recent action/verdict pairs
-// within maxTrunkMessages. It drops from the front (after system) in whole pairs
-// so the transcript never starts mid-exchange.
-func trimTrunk(msgs []*schema.Message) []*schema.Message {
-	if len(msgs) <= maxTrunkMessages {
-		return msgs
+// trimTrunk keeps the system message plus the most recent action/verdict pairs,
+// bounded by BOTH message count and total size. It drops from the front (after
+// system) in whole pairs so the transcript never starts mid-exchange. It reports
+// whether anything was dropped.
+func trimTrunk(msgs []*schema.Message) ([]*schema.Message, bool) {
+	if len(msgs) <= maxTrunkMessages && trunkBytes(msgs) <= maxTrunkBytes {
+		return msgs, false
 	}
 	system := msgs[0]
-	rest := msgs[1:]
-	drop := len(msgs) - maxTrunkMessages
-	if drop%2 != 0 {
-		drop++ // drop whole (action,verdict) pairs
+	rest := append([]*schema.Message{}, msgs[1:]...)
+	trimmed := false
+	// Drop oldest whole pairs until both budgets are satisfied. Always keep at
+	// least the newest pair, so a single oversized review still gets judged
+	// rather than being reduced to a bare system prompt.
+	for len(rest) > 2 {
+		out := append([]*schema.Message{system}, rest...)
+		if len(out) <= maxTrunkMessages && trunkBytes(out) <= maxTrunkBytes {
+			break
+		}
+		rest = rest[2:]
+		trimmed = true
 	}
-	if drop > len(rest) {
-		drop = len(rest)
+	return append([]*schema.Message{system}, rest...), trimmed
+}
+
+// trunkBytes approximates the trunk's size by summing message content lengths.
+func trunkBytes(msgs []*schema.Message) int {
+	n := 0
+	for _, m := range msgs {
+		if m != nil {
+			n += len(m.Content)
+		}
 	}
-	out := make([]*schema.Message, 0, 1+len(rest)-drop)
-	out = append(out, system)
-	out = append(out, rest[drop:]...)
-	return out
+	return n
+}
+
+// transcriptKey fingerprints conversation evidence so the cached path can tell
+// "unchanged since the last review" from "new evidence to send". Returns "" for
+// an empty transcript, which never matches a committed key.
+func transcriptKey(msgs []Msg) string {
+	if len(msgs) == 0 {
+		return ""
+	}
+	h := fnv.New64a()
+	for _, m := range msgs {
+		_, _ = h.Write([]byte(m.Role))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(m.Content))
+		_, _ = h.Write([]byte{1})
+	}
+	return strconv.FormatUint(h.Sum64(), 16)
 }

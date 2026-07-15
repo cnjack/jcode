@@ -18,6 +18,7 @@ package review
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -99,17 +100,17 @@ const (
 
 // Engine is the concrete Reviewer.
 type Engine struct {
-	cfg          *config.Config
-	factory      *internalmodel.ModelFactory
+	cfg           *config.Config
+	factory       *internalmodel.ModelFactory
 	modelOverride string
-	system       string // full system prompt (policy + contract)
-	policyExtra  string
-	timeout      time.Duration
-	audit        *auditLog
-	investigate  bool
-	reuseCache   bool
-	platform     string
-	trunk        *reviewerSession // V3; nil when reuseCache is false
+	system        string // full system prompt (policy + contract)
+	policyExtra   string
+	timeout       time.Duration
+	audit         *auditLog
+	investigate   bool
+	reuseCache    bool
+	platform      string
+	trunk         *reviewerSession // V3; nil when reuseCache is false
 }
 
 // New builds a reviewer Engine from Options. It never returns nil; a
@@ -190,6 +191,7 @@ func (e *Engine) Review(ctx context.Context, req Request) (result Result) {
 		CacheSeen:    meta.cacheSeen,
 		Investigated: meta.investigated,
 		ReviewCalls:  meta.calls,
+		Prefilter:    meta.prefilter,
 	})
 	return res
 }
@@ -199,6 +201,7 @@ type reviewMeta struct {
 	model        string
 	userAuth     string
 	failReason   string
+	prefilter    string // non-empty when a deterministic rule decided this call
 	promptTokens int64
 	cachedTokens int64
 	cacheSeen    bool
@@ -208,6 +211,16 @@ type reviewMeta struct {
 
 func (e *Engine) review(ctx context.Context, req Request) (Result, reviewMeta) {
 	meta := reviewMeta{}
+
+	// Deterministic pre-filter first: the highest-signal attacks must not depend
+	// on the model being persuaded correctly (see ssrf.go). Runs before the model
+	// is consulted, so it also costs nothing.
+	if res, rule, fired := metadataProbeVerdict(req); fired {
+		meta.prefilter = rule
+		meta.model = "(prefilter)"
+		return res, meta
+	}
+
 	modelRef := e.resolveModelRef()
 	meta.model = internalmodel.BareModelID(modelRef)
 	if modelRef == "" {
@@ -340,21 +353,41 @@ func (o Outcome) String() string {
 }
 
 // renderUserPrompt builds the evidence message: recent transcript, then the
-// exact planned action.
+// exact planned action. Used by the V1/V2 paths, which send a fresh prompt each
+// review; the V3 cached path composes the two sections separately so it can skip
+// re-sending an unchanged transcript (see reviewCached).
 func renderUserPrompt(req Request) string {
+	return renderTranscriptSection(req.Transcript) + renderActionSection(req)
+}
+
+// renderTranscriptSection renders the conversation evidence block.
+func renderTranscriptSection(msgs []Msg) string {
 	var b strings.Builder
 	b.WriteString("# Recent conversation (untrusted evidence)\n")
-	if len(req.Transcript) == 0 {
+	if len(msgs) == 0 {
 		b.WriteString("(no transcript available)\n")
 	} else {
-		b.WriteString(renderTranscript(req.Transcript))
+		b.WriteString(renderTranscript(msgs))
 	}
+	return b.String()
+}
+
+// renderActionSection renders the exact planned action under judgment.
+func renderActionSection(req Request) string {
+	var b strings.Builder
 	b.WriteString("\n# Planned action to judge\n")
 	fmt.Fprintf(&b, "tool: %s\n", req.ToolName)
 	if req.Cwd != "" {
 		fmt.Fprintf(&b, "cwd: %s\n", req.Cwd)
 	}
 	fmt.Fprintf(&b, "touches_path_outside_workspace: %t\n", req.IsExternal)
+	// Background execution is surfaced explicitly: its output is not shown to the
+	// user as it runs, so side effects land with delayed visibility. The rule
+	// engine used to force these to a human; now that they can route through the
+	// reviewer, the flag must be a first-class signal, not buried in the args blob.
+	if isBackgroundExec(req) {
+		b.WriteString("background_execution: true (output is NOT surfaced to the user in real time)\n")
+	}
 	args := req.ToolArgs
 	if len(args) > maxArgsChars {
 		args = args[:maxArgsChars] + "\n…(truncated)"
@@ -363,6 +396,20 @@ func renderUserPrompt(req Request) string {
 	b.WriteString(args)
 	b.WriteString("\n")
 	return b.String()
+}
+
+// isBackgroundExec reports whether this is an execute call with background=true.
+func isBackgroundExec(req Request) bool {
+	if req.ToolName != "execute" {
+		return false
+	}
+	var in struct {
+		Background bool `json:"background"`
+	}
+	if err := json.Unmarshal([]byte(req.ToolArgs), &in); err != nil {
+		return false
+	}
+	return in.Background
 }
 
 func renderTranscript(msgs []Msg) string {

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/adk"
-	"github.com/cloudwego/eino/schema"
 
 	"github.com/cnjack/jcode/internal/flow"
 	"github.com/cnjack/jcode/internal/handler"
@@ -168,33 +167,12 @@ func newEngine(c *EngineConfig) *Engine {
 }
 
 // recentTranscript snapshots the tail of the conversation for the approval
-// reviewer (system prompt excluded). Reads eng.history under emu, so it is safe
-// to call from the run goroutine where approvals happen.
+// reviewer. Reads eng.history under emu, so it is safe to call from the run
+// goroutine where approvals happen.
 func (e *Engine) recentTranscript() []review.Msg {
 	e.emu.Lock()
 	defer e.emu.Unlock()
-	const maxN = 24
-	msgs := e.history
-	if len(msgs) > maxN {
-		msgs = msgs[len(msgs)-maxN:]
-	}
-	out := make([]review.Msg, 0, len(msgs))
-	for _, m := range msgs {
-		if m == nil || m.Content == "" {
-			continue
-		}
-		role := "user"
-		switch m.Role {
-		case schema.Assistant:
-			role = "assistant"
-		case schema.Tool:
-			role = "tool"
-		case schema.System:
-			continue
-		}
-		out = append(out, review.Msg{Role: role, Content: m.Content})
-	}
-	return out
+	return review.MsgsFromHistory(e.history)
 }
 
 // activeEngine returns the currently-foregrounded engine (the embedded bootstrap
