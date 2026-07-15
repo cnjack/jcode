@@ -303,7 +303,18 @@ func (s *Session) Act(ctx context.Context, steps []ActRequest) (string, error) {
 
 	var log strings.Builder
 	for i, st := range steps {
-		if strings.TrimSpace(st.Action) == "" {
+		// Normalize the action ONCE, here, and use that single value for the
+		// gate, the flag check and the payload alike.
+		//
+		// Not doing this was a real bypass: requiredTier trims and lowercases,
+		// while checkFlags matched with EqualFold(st.Action, "press") — so
+		// {"action":"press ","key":"cmd+q"} was admitted as a press by the tier
+		// gate and then missed the system-combo check entirely, because "press "
+		// is not EqualFold "press". Two functions one line apart disagreeing
+		// about what an action is called is all it takes. Found by adversarial
+		// review; see TestSystemKeyCombosResistPaddedActionNames.
+		st.Action = strings.ToLower(strings.TrimSpace(st.Action))
+		if st.Action == "" {
 			return log.String(), fmt.Errorf("step %d: action is required", i+1)
 		}
 		// Re-gate before every step. See gate().
@@ -359,11 +370,14 @@ func uidSuffix(st ActRequest) string {
 }
 
 // checkFlags enforces the grant flags that are orthogonal to the app allowlist.
+//
+// st.Action must already be normalized by Act. Comparing it differently here
+// than the tier gate does is exactly the bug this signature is meant to prevent.
 func (s *Session) checkFlags(st ActRequest) error {
 	s.mu.Lock()
 	sysKeys := s.systemKeyCombos
 	s.mu.Unlock()
-	if strings.EqualFold(st.Action, "press") && isSystemCombo(st.Key) && !sysKeys {
+	if st.Action == "press" && isSystemCombo(st.Key) && !sysKeys {
 		return fmt.Errorf("key combination %q is a system-level combo and needs the system_key_combos grant", st.Key)
 	}
 	return nil
@@ -373,12 +387,41 @@ func (s *Session) checkFlags(st ActRequest) error {
 // away, or locking the screen. They are gated separately because an agent that
 // can press cmd+Q can close the window a human was about to read.
 func isSystemCombo(key string) bool {
-	k := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(key), " ", ""))
+	// Normalize spelling before matching: "cmd + q", "Cmd+Q" and "CMD  +  Q" are
+	// the same chord, and a gate that only recognizes one spelling is a gate with
+	// a published bypass. Modifier order is normalized too, so "q+cmd" cannot
+	// slip past "cmd+q".
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(key)), "+")
+	cleaned := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			cleaned = append(cleaned, normalizeModifier(p))
+		}
+	}
+	sort.Strings(cleaned)
+	k := strings.Join(cleaned, "+")
 	switch k {
-	case "cmd+q", "cmd+tab", "cmd+ctrl+q", "ctrl+cmd+q", "cmd+opt+esc", "cmd+space", "cmd+h", "cmd+m":
+	// Sorted-canonical forms.
+	case "cmd+q", "cmd+tab", "cmd+ctrl+q", "cmd+esc+opt", "cmd+space", "cmd+h", "cmd+m", "cmd+ctrl+power":
 		return true
 	}
 	return false
+}
+
+// normalizeModifier folds the aliases each platform and each model spells
+// differently onto one name, so the combo table only has to list one.
+func normalizeModifier(p string) string {
+	switch p {
+	case "command", "meta", "super", "win":
+		return "cmd"
+	case "control":
+		return "ctrl"
+	case "option", "alt":
+		return "opt"
+	case "escape":
+		return "esc"
+	}
+	return p
 }
 
 // resolveUID maps a uid to its backend handle, rejecting one minted in an older

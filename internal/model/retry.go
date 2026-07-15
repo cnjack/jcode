@@ -31,6 +31,11 @@ const (
 	ErrCategoryContextOverflow
 	// ErrCategoryAuth — 401/403; permanent until key is fixed.
 	ErrCategoryAuth
+	// ErrCategoryQuota — 402; the account is out of credit or the plan does not
+	// cover this model. Distinct from ErrCategoryRateLimit because waiting does
+	// not help: a rate limit clears on its own, a spent quota never does. Retrying
+	// a 402 just burns the turn and then reports something misleading.
+	ErrCategoryQuota
 	// ErrCategoryFatal — 400 bad request, unknown; do not retry.
 	ErrCategoryFatal
 )
@@ -45,6 +50,8 @@ func (c APIErrorCategory) String() string {
 		return "context_overflow"
 	case ErrCategoryAuth:
 		return "auth"
+	case ErrCategoryQuota:
+		return "quota"
 	case ErrCategoryFatal:
 		return "fatal"
 	default:
@@ -86,6 +93,21 @@ var rateLimitPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)throttl`),
 }
 
+// quotaPatterns match messages that mean "you are out of money/credit", as
+// opposed to "you are going too fast". Providers are wildly inconsistent here —
+// several return 400 or 403 with a billing message rather than 402 — so the text
+// has to be matched, not just the status.
+var quotaPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)payment.required`),
+	regexp.MustCompile(`(?i)insufficient.(balance|credit|quota|funds)`),
+	regexp.MustCompile(`(?i)(quota|credit|balance).*(exhaust|depleted|run out|used up)`),
+	regexp.MustCompile(`(?i)free.trial.*(exhaust|expired|ended)`),
+	regexp.MustCompile(`(?i)billing.*(not enabled|required|disabled)`),
+	regexp.MustCompile(`(?i)exceeded your current quota`), // OpenAI
+	regexp.MustCompile(`(?i)arrearage|owe|unpaid`),
+	regexp.MustCompile(`(?i)账户余额不足|欠费|额度.*(用尽|耗尽|不足)`),
+}
+
 // ClassifyError determines the category of an API error.
 func ClassifyError(err error) APIErrorCategory {
 	if err == nil {
@@ -120,6 +142,14 @@ func ClassifyError(err error) APIErrorCategory {
 			return ErrCategoryContextOverflow
 		}
 	}
+	// Quota is checked before rate limit: several providers word an exhausted
+	// balance in language that also trips the rate-limit patterns, and the two
+	// need opposite handling (back off vs. stop and tell the user).
+	for _, re := range quotaPatterns {
+		if re.MatchString(msg) {
+			return ErrCategoryQuota
+		}
+	}
 	for _, re := range rateLimitPatterns {
 		if re.MatchString(msg) {
 			return ErrCategoryRateLimit
@@ -131,11 +161,26 @@ func ClassifyError(err error) APIErrorCategory {
 
 func classifyByStatus(status int, msg string) APIErrorCategory {
 	switch {
+	case status == 402:
+		return ErrCategoryQuota
 	case status == 429:
+		// A 429 whose body is about money, not pace: some gateways return 429
+		// when a prepaid balance hits zero. Backing off would never clear it.
+		for _, re := range quotaPatterns {
+			if re.MatchString(msg) {
+				return ErrCategoryQuota
+			}
+		}
 		return ErrCategoryRateLimit
 	case status == 529:
 		return ErrCategoryRateLimit // Anthropic "overloaded"
 	case status == 401 || status == 403:
+		// 403 is where several providers put billing failures.
+		for _, re := range quotaPatterns {
+			if re.MatchString(msg) {
+				return ErrCategoryQuota
+			}
+		}
 		return ErrCategoryAuth
 	case status == 408 || status == 409:
 		return ErrCategoryTransient
@@ -228,6 +273,8 @@ const (
 //
 // Context overflow errors are NOT retryable — they need compaction.
 // Auth errors are NOT retryable — they need user action.
+// Quota errors are NOT retryable — a spent balance does not refill on a backoff
+// timer, so retrying only delays telling the user the one thing they can act on.
 func IsRetryable(_ context.Context, err error) bool {
 	cat := ClassifyError(err)
 	switch cat {
@@ -390,7 +437,8 @@ func ParseContextOverflow(err error) *ContextOverflowInfo {
 	return nil
 }
 
-// FormatAPIError produces a user-friendly error message with retry context.
+// FormatAPIError produces a user-friendly progress message while retrying.
+// For the message shown when the turn actually ends, use FriendlyAPIError.
 func FormatAPIError(err error, attempt, maxRetries int) string {
 	cat := ClassifyError(err)
 	switch cat {
@@ -411,7 +459,174 @@ func FormatAPIError(err error, attempt, maxRetries int) string {
 		return "Context overflow: input too long for model. Compaction needed."
 	case ErrCategoryAuth:
 		return "Authentication error. Please check your API key and provider configuration."
+	case ErrCategoryQuota:
+		return "Out of quota. Not retrying — waiting will not help."
 	default:
 		return fmt.Sprintf("API error: %v", err)
 	}
+}
+
+// FriendlyAPIError renders the message a *user* sees when a turn dies on an API
+// error. provider and model may be empty.
+//
+// Three rules, learned from getting this wrong:
+//
+//  1. Name the cause in the first clause. "Rate limited by openai" beats
+//     "Error: 429 status code (429) …". The raw provider payload is for the log.
+//  2. Say what to do. An error the reader cannot act on is just an apology. Rate
+//     limit → wait (and say how long if the provider told us). Quota → top up,
+//     with the console URL when we know it. Auth → fix the key.
+//  3. Never imply the work happened. This function exists because a 402 was
+//     being reported as a clean end_turn, so the agent looked like it had
+//     finished thinking and simply had nothing to say — 310 eval runs scored as
+//     passes on a model that never ran. Silence is the one thing an error must
+//     never look like.
+func FriendlyAPIError(err error, provider, model string) string {
+	if err == nil {
+		return ""
+	}
+	where := ""
+	switch {
+	case provider != "" && model != "":
+		where = fmt.Sprintf(" by %s (%s)", provider, model)
+	case provider != "":
+		where = " by " + provider
+	}
+
+	switch ClassifyError(err) {
+	case ErrCategoryRateLimit:
+		if d := ParseRetryAfter(err); d > 0 {
+			return fmt.Sprintf("Rate limited%s, and retries didn't clear it. The provider asked to wait %v. "+
+				"Nothing was lost — send the message again after that, or switch models with /model.",
+				where, d.Round(time.Second))
+		}
+		return fmt.Sprintf("Rate limited%s, and retries didn't clear it. "+
+			"Nothing was lost — wait a moment and send the message again, or switch models with /model.", where)
+
+	case ErrCategoryQuota:
+		msg := fmt.Sprintf("Out of quota%s — the account has no credit left for this model, "+
+			"so I stopped without running anything.", where)
+		if url := quotaConsoleURL(provider); url != "" {
+			msg += "\nTop up or enable billing: " + url
+		}
+		return msg + "\nOr switch to another configured model with /model."
+
+	case ErrCategoryAuth:
+		return fmt.Sprintf("The API key%s was rejected. Check the key in ~/.jcode/config.json "+
+			"(or the provider's env var), then try again.", where)
+
+	case ErrCategoryContextOverflow:
+		if info := ParseContextOverflow(err); info != nil {
+			return fmt.Sprintf("The conversation is %d tokens, over this model's %d-token limit by %d. "+
+				"Run /compact to summarize the history, or switch to a model with a bigger window.",
+				info.ActualTokens, info.LimitTokens, info.TokenGap)
+		}
+		return "The conversation is too long for this model. Run /compact to summarize the history, " +
+			"or switch to a model with a bigger window."
+
+	case ErrCategoryTransient:
+		return fmt.Sprintf("Could not reach the model%s after several retries: %v\n"+
+			"This is usually temporary — try again.", where, cleanErr(err))
+	}
+	return fmt.Sprintf("The model%s returned an error: %v", where, cleanErr(err))
+}
+
+// FriendlyError wraps a raw API error so that anything printing err.Error()
+// shows the human message instead of the provider's wire payload.
+//
+// It exists because there are three frontends (TUI, web, ACP) and one of them
+// was printing `[NodeRunError] error, status code: 429, status: 429 Too Many
+// Requests, message: ...\nnode path: [node_1, ChatModel]` straight to the user.
+// Fixing that per-frontend means fixing it three times and forgetting the
+// fourth; wrapping at the single choke point in runner.Run fixes it once.
+//
+// The raw error stays reachable via Unwrap, so logs and classification keep the
+// full payload and only the *display* changes.
+type FriendlyError struct {
+	Err      error
+	Message  string
+	Category APIErrorCategory
+}
+
+func (e *FriendlyError) Error() string { return e.Message }
+func (e *FriendlyError) Unwrap() error { return e.Err }
+
+// Raw returns the underlying provider error, for logs.
+func (e *FriendlyError) Raw() error { return e.Err }
+
+// WrapFriendly returns err wrapped with a human-readable message, or err
+// unchanged when it is nil, already wrapped, or a plain context cancellation
+// (which is not a failure and must keep its identity for errors.Is checks).
+func WrapFriendly(err error, provider, model string) error {
+	if err == nil {
+		return nil
+	}
+	var already *FriendlyError
+	if asFriendly(err, &already) {
+		return err
+	}
+	if strings.Contains(err.Error(), "context canceled") ||
+		strings.Contains(err.Error(), "context deadline exceeded") {
+		return err
+	}
+	return &FriendlyError{
+		Err:      err,
+		Message:  FriendlyAPIError(err, provider, model),
+		Category: ClassifyError(err),
+	}
+}
+
+func asFriendly(err error, target **FriendlyError) bool {
+	for err != nil {
+		if fe, ok := err.(*FriendlyError); ok {
+			*target = fe
+			return true
+		}
+		u, ok := err.(interface{ Unwrap() error })
+		if !ok {
+			return false
+		}
+		err = u.Unwrap()
+	}
+	return false
+}
+
+// quotaConsoleURL returns the billing page for providers we know, so the user
+// does not have to go hunting for it. Empty for unknown providers — a wrong URL
+// is worse than none.
+func quotaConsoleURL(provider string) string {
+	switch {
+	case strings.HasPrefix(provider, "tencent-tokenhub"):
+		return "https://console.cloud.tencent.com/tokenhub/inference"
+	case strings.HasPrefix(provider, "openai"):
+		return "https://platform.openai.com/settings/organization/billing"
+	case strings.HasPrefix(provider, "anthropic"):
+		return "https://console.anthropic.com/settings/billing"
+	case strings.HasPrefix(provider, "zhipuai"), strings.HasPrefix(provider, "bigmodel"):
+		return "https://bigmodel.cn/usercenter/financialaccount"
+	case strings.HasPrefix(provider, "moonshot"):
+		return "https://platform.moonshot.cn/console/account"
+	case strings.HasPrefix(provider, "deepseek"):
+		return "https://platform.deepseek.com/usage"
+	case strings.HasPrefix(provider, "alibaba"), strings.HasPrefix(provider, "dashscope"):
+		return "https://bailian.console.aliyun.com"
+	case strings.HasPrefix(provider, "minimax"):
+		return "https://platform.minimaxi.com/user-center/basic-information"
+	}
+	return ""
+}
+
+// cleanErr strips the framework wrapping that makes an error read like a stack
+// trace ("[NodeRunError] error, status code: 402, status: 402 Payment Required,
+// message: ..."). The user wants the message, not the plumbing.
+func cleanErr(err error) string {
+	msg := err.Error()
+	msg = strings.TrimPrefix(msg, "[NodeRunError] ")
+	if i := strings.Index(msg, "message: "); i >= 0 {
+		msg = msg[i+len("message: "):]
+	}
+	if i := strings.Index(msg, "\nnode path:"); i >= 0 {
+		msg = msg[:i]
+	}
+	return strings.TrimSpace(msg)
 }

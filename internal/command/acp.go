@@ -86,6 +86,12 @@ type acpSession struct {
 	planPrompt   string
 	skillLoader  *skills.Loader
 	flowLoader   *flow.Loader
+
+	// providerName/modelName label API errors so the user is told which model
+	// failed — with several providers configured, "rate limited" alone does not
+	// say which one to go look at.
+	providerName string
+	modelName    string
 }
 
 // Close releases resources held by the session (recorder file handle, tracer).
@@ -585,6 +591,8 @@ func (a *acpAgent) buildAgentSession(
 		createAgent:   makeAgent,
 		allTools:      allTools,
 		planTools:     planTools,
+		providerName:  providerName,
+		modelName:     modelName,
 		normalPrompt:  normalPrompt,
 		planPrompt:    planPrompt,
 		skillLoader:   skillLoader,
@@ -783,6 +791,17 @@ func (a *acpAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Pr
 
 	if promptCtx.Err() != nil {
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+	}
+
+	// A turn that died on an API error is not an end_turn. Reporting one is how a
+	// 402 came back as a clean, empty, successful-looking turn — see
+	// ACPHandler.OnAgentDone. Tell the user what happened, in words they can act
+	// on, and end the turn with a reason that is not "success".
+	if turnErr := sess.h.TakeTurnError(); turnErr != nil {
+		friendly := internalmodel.FriendlyAPIError(turnErr, sess.providerName, sess.modelName)
+		config.Logger().Printf("[acp] turn failed: %v", turnErr)
+		sess.h.OnAgentText("\n" + friendly)
+		return acp.PromptResponse{StopReason: acp.StopReasonRefusal}, nil
 	}
 
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil

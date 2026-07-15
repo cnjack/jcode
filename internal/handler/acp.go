@@ -40,6 +40,9 @@ type ACPHandler struct {
 	// status before the Eino tool-result message arrives (for example a
 	// permission rejection converted into an agent-visible tool string).
 	toolTerminated map[acp.ToolCallId]bool
+	// turnErr is the error the current turn died on, recorded by OnAgentDone and
+	// consumed by Prompt via TakeTurnError. Guarded by mu.
+	turnErr error
 	// pendingApprovals is a FIFO queue of ACP tool call IDs that have been
 	// started but not yet matched to a RequestApproval call. The approval
 	// middleware does not pass the Eino tool call ID, so we match by
@@ -480,8 +483,33 @@ func (h *ACPHandler) OnAgentStart() {
 	// ACP does not have a standard "agent started" notification.
 }
 
+// OnAgentDone records how the turn ended so Prompt can report it truthfully.
+//
+// This used to be a no-op, on the reasoning that "the Prompt response is
+// returned by the Prompt method, nothing to send here" — but Prompt had no other
+// way to learn an error had happened, so every failure became StopReasonEndTurn:
+// a clean, successful-looking turn with no text. A 402 from the provider was
+// indistinguishable from an agent that had thought about it and decided to say
+// nothing. In one eval campaign that scored 310 runs as passing on a model that
+// never ran (agent-eval finding F2), and for a real user it is worse: the agent
+// silently does nothing and looks content about it.
+//
+// The error is recorded, not sent — Prompt still owns the response. But it can
+// no longer claim success it did not have.
 func (h *ACPHandler) OnAgentDone(err error) {
-	// Prompt response is returned by the Prompt method; nothing to send here.
+	h.mu.Lock()
+	h.turnErr = err
+	h.mu.Unlock()
+}
+
+// TakeTurnError returns and clears the error recorded for this turn.
+// Prompt calls it to decide the StopReason.
+func (h *ACPHandler) TakeTurnError() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	err := h.turnErr
+	h.turnErr = nil
+	return err
 }
 
 func (h *ACPHandler) OnTokenUpdate(info TokenUsage) {

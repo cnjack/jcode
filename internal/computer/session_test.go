@@ -373,6 +373,63 @@ func TestSystemKeyCombosNeedTheirOwnGrant(t *testing.T) {
 	}
 }
 
+// Found by adversarial review: the tier gate normalized the action name
+// (trim+lower) but checkFlags matched it with EqualFold and no trim, so a
+// padded name was admitted as a press yet skipped the system-combo check.
+func TestSystemKeyCombosResistPaddedActionNames(t *testing.T) {
+	for _, action := range []string{"press", "press ", " press", "PRESS", "Press\t", "  PrEsS  "} {
+		t.Run(action, func(t *testing.T) {
+			s, f := scriptedSession(t)
+			if _, err := s.Open(context.Background(), notesID); err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			f.SetFrontmost(notesApp)
+
+			_, err := s.Act(context.Background(), []ActRequest{{Action: action, Key: "cmd+q"}})
+			if err == nil || !strings.Contains(err.Error(), "system_key_combos") {
+				t.Fatalf("action %q slipped past the system_key_combos gate: %v", action, err)
+			}
+			if len(f.Actions()) != 0 {
+				t.Fatalf("action %q reached the backend: %+v", action, f.Actions())
+			}
+		})
+	}
+}
+
+// A gate that recognizes only one spelling of a chord is a gate with a published
+// bypass.
+func TestSystemComboSpellings(t *testing.T) {
+	blocked := []string{"cmd+q", "Cmd+Q", "CMD + Q", "cmd  +  q", "command+q", "meta+q", "super+q", "q+cmd"}
+	for _, k := range blocked {
+		if !isSystemCombo(k) {
+			t.Errorf("isSystemCombo(%q) = false; this spelling bypasses the grant", k)
+		}
+	}
+	allowed := []string{"cmd+s", "ctrl+c", "Return", "cmd+shift+p", ""}
+	for _, k := range allowed {
+		if isSystemCombo(k) {
+			t.Errorf("isSystemCombo(%q) = true; ordinary chords must not need the grant", k)
+		}
+	}
+}
+
+// The normalized action must be what reaches the backend, or a backend that
+// normalizes differently reintroduces the split.
+func TestNormalizedActionReachesBackend(t *testing.T) {
+	s, f := scriptedSession(t)
+	if _, err := s.Open(context.Background(), notesID); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	f.SetFrontmost(notesApp)
+	if _, err := s.Act(context.Background(), []ActRequest{{Action: "  CLICK ", X: 1, Y: 2}}); err != nil {
+		t.Fatalf("Act: %v", err)
+	}
+	acts := f.Actions()
+	if len(acts) != 1 || acts[0].Kind != "click" {
+		t.Fatalf("backend received Kind=%q, want the normalized \"click\": %+v", acts[0].Kind, acts)
+	}
+}
+
 func TestOpenDoesNotGrantClipboard(t *testing.T) {
 	s, _ := scriptedSession(t)
 	if _, err := s.Open(context.Background(), notesID); err != nil {

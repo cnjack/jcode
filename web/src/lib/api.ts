@@ -359,6 +359,11 @@ export const api = {
   browserSaveConfig: (data: BrowserConfig) =>
     request<{ status: string }>('/api/browser/config', { method: 'POST', body: JSON.stringify(data) }),
 
+  // Computer use
+  computerStatus: () => request<ComputerStatusResponse>('/api/computer/status'),
+  computerSaveConfig: (data: ComputerConfig) =>
+    request<{ status: string }>('/api/computer/config', { method: 'POST', body: JSON.stringify(data) }),
+
   // Approval review tuning (Auto session mode)
   approvalReviewConfig: () => request<ApprovalReviewConfigResponse>('/api/approval-review-config'),
   setApprovalReviewConfig: (data: ApprovalReviewConfig) =>
@@ -394,5 +399,57 @@ export interface BrowserStatusResponse {
     dev_mode: boolean
   }
   site_permissions?: BrowserSitePermission[]
+  approval?: Record<string, string>
+}
+
+// ─── computer use ───────────────────────────────────────────────────────────
+// Hand-mirrored from Go. Sources, in order of authority:
+//   config.ComputerAppPermission / config.ComputerConfig (internal/config/config.go)
+//   computer.Status                                      (internal/computer/manager.go)
+//   web.handleComputerStatus                             (internal/web/computer.go)
+// See internal-doc/computer-use-design.md §5.
+
+/** Per-app override. `tier` may only *tighten* the built-in tier for that app;
+ *  the backend (computer.Manager.TierOverrides) drops a row that tries to
+ *  loosen one, so the UI must never offer a tier above the built-in default. */
+export interface ComputerAppPermission {
+  bundle_id: string
+  tier?: string // read | click | full; '' = built-in default
+  launch?: string // ask | allow
+  interact?: string // ask | allow
+}
+
+export interface ComputerConfig {
+  enabled: boolean
+  backend: string // auto | helper | osa | fake
+  /** Per-class defaults: 'launch' and 'interact' → 'ask' | 'always_allow'.
+   *  Clipboard reads are deliberately absent — they always prompt (design §4.4). */
+  approval?: Record<string, string>
+  app_permissions?: ComputerAppPermission[]
+  max_actions_per_batch?: number
+  clipboard_read?: boolean
+  clipboard_write?: boolean
+  system_key_combos?: boolean
+}
+
+export interface ComputerStatusResponse {
+  /** false when the server has no computer manager at all. */
+  available: boolean
+  status?: {
+    enabled: boolean
+    backend: string
+    /** The backend actually selected: 'helper' | 'osa' | 'fake' | ''. */
+    backend_kind: string
+    available: boolean
+    /** The first shut gate: 'disabled' | 'no_backend' | 'permissions' | ''. */
+    blocker: string
+    detail?: string
+    max_batch: number
+    /** Built-in tier per configured bundle id, so the UI never reimplements the
+     *  rules in internal/computer/tiers.go. Only covers apps that have a config
+     *  row; a freshly typed bundle id is absent until the config round-trips. */
+    tiers?: Record<string, string>
+  }
+  app_permissions?: ComputerAppPermission[]
   approval?: Record<string, string>
 }

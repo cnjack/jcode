@@ -273,8 +273,12 @@ func runInner(
 				h.OnAgentDone(ctx.Err())
 				return assistantText.String(), true
 			}
+			// Log the provider's raw payload, hand the frontends a sentence a
+			// human can act on. This is the single choke point for model errors,
+			// so wrapping here fixes the display in the TUI, the web UI and ACP
+			// at once — and stops the next frontend from having to remember.
 			config.Logger().Printf("[runner] event error: %v", event.Err)
-			h.OnAgentDone(event.Err)
+			h.OnAgentDone(internalmodel.WrapFriendly(event.Err, "", ""))
 			return assistantText.String(), true
 		}
 		if event.Output == nil || event.Output.MessageOutput == nil {

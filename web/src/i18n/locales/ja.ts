@@ -344,6 +344,7 @@ export default {
       mcp: 'MCP サーバー',
       skills: 'スキル',
       browser: 'ブラウザ',
+      computer: 'コンピュータ操作',
       ssh: 'SSH',
       channels: 'チャンネル',
       shortcuts: 'ショートカット',
@@ -539,6 +540,94 @@ export default {
       navAllow: 'nav: 許可',
       actAsk: 'act: 確認',
       actAllow: 'act: 許可',
+    },
+    computer: {
+      title: 'コンピュータ操作',
+      subtitle:
+        'ブラウザでは届かないネイティブアプリを jcode が見て操作できるようにします。このマシン上のあらゆるものに触れられるため、既定ではオフです。',
+      enableTitle: 'コンピュータ操作を有効にする',
+      enableDesc: 'エージェントによるネイティブアプリの読み取りと操作を許可します。',
+      unavailable: 'このサーバーではコンピュータ操作を利用できません。',
+
+      status: 'ステータス',
+      statusLoading: '確認中…',
+      gateEnabled: '有効',
+      gateBackend: 'バックエンド',
+      gatePermission: 'システム権限',
+      gateState: {
+        open: '通過',
+        shut: 'ここで止まっています',
+        unknown: '未到達 — 手前のゲートが閉じています',
+      },
+      ready: '3 つのゲートはすべて開いています。アプリを承認すればエージェントは操作できます。',
+      blockedGeneric: '何かがコンピュータ操作を妨げています。',
+      grantAccessibility: 'アクセシビリティ権限を付与',
+      permissionsHint:
+        'システム設定 → プライバシーとセキュリティ → アクセシビリティ で jcode をオンにしてから戻ってください。このページは自動で再確認します。権限がないと、エラーにならず数分間ハングします。',
+      backendKind: {
+        helper: 'ヘルパーデーモン',
+        osa: 'AppleScript',
+        fake: 'フェイクバックエンド',
+      },
+
+      control: '制御',
+      backend: 'バックエンド',
+      backendDesc: '自動：ヘルパーデーモンが応答すればそれを使い、なければ AppleScript にフォールバックします。',
+      backendAuto: '自動',
+      backendHelper: 'ヘルパーデーモン',
+      backendOsa: 'AppleScript',
+      backendFake: 'フェイク（テスト用）',
+
+      approval: '承認',
+      launch: 'アプリの起動',
+      interact: '操作（クリック / 入力）',
+      askEachApp: 'アプリごとに確認',
+      alwaysAllow: '常に許可',
+      clipboardAlwaysAsks:
+        'クリップボードの読み取りは常に確認され、ここで事前承認することはできません。パスワードがコピーされる場所だからです。',
+
+      appPermissions: 'アプリ権限',
+      add: '追加',
+      noAppPermissions: 'アプリ権限は設定されていません。',
+      bundlePlaceholder: 'com.apple.Notes',
+      launchAsk: '起動: 確認',
+      launchAllow: '起動: 許可',
+      interactAsk: '操作: 確認',
+      interactAllow: '操作: 許可',
+      tierLabel: 'このアプリでエージェントがどこまでできるか',
+      tierPending: 'このアプリの組み込みティアをサーバーが判定中です。',
+      tier: {
+        read: '読み取り',
+        click: 'クリック',
+        full: 'フル',
+      },
+      tierDesc: {
+        read: 'スクリーンショットのみ — クリックも入力もできません。',
+        click: 'クリックとスクロールのみ — 入力もキー操作もできません。',
+        full: 'クリック・入力・キー操作ができます。',
+      },
+      whyBrowser:
+        'ブラウザが「読み取り」に制限されるのは危険だからではなく、jcode により良い手段があるからです。ブラウザ操作はページを読み、リンクの実際の遷移先を確認してから辿れます。ピクセルのクリックにはそれができません — 表示されているリンク文字はページ側が書いたものです。',
+      whyTerminal:
+        'ターミナルと IDE が「クリック」に制限されるのは、そこへ入力すると jcode の承認の仕組みを丸ごと迂回できてしまうからです。実行ボタンを押す・出力をスクロールするのは問題ありませんが、コマンドの入力は別です — それには承認付きの execute ツールがあります。',
+      tierCeilingNote:
+        'ティアは厳しくできますが、組み込みの値より緩めることはできません。受け付けてから黙って無視するのではなく、そもそも選択肢として出しません。',
+      loosenTitle: '制限を緩めようとしています',
+      loosenBody: '{app} でエージェントができることが増えます：{what} 後で厳しくし直せば即座に反映されます。',
+      loosenConfirm: 'それでも緩める',
+      thisApp: 'このアプリ',
+
+      grants: '個別の許可',
+      grantsDesc: 'アプリ一覧とは意図的に分けています。「メモを操作する」の承認は、以下のいずれの承認でもありません。',
+      clipboardRead: 'クリップボードの読み取り',
+      clipboardReadDesc:
+        'クリップボードは、許可したどのアプリにも属していません。そしてパスワードは ⌘C と ⌘V のあいだにそこにあります。',
+      clipboardWrite: 'クリップボードへの書き込み',
+      clipboardWriteDesc:
+        '最後にコピーした内容を、すべてのアプリでまとめて上書きします。次の ⌘V で貼り付くのはあなたのものではなくエージェントのテキストです。',
+      systemKeyCombos: 'システムキー操作',
+      systemKeyCombosDesc:
+        '⌘Space、⌘Tab、Mission Control — これらは許可したアプリではなくマシン全体に効くため、一覧の外にまで届きます。',
     },
     ssh: {
       title: 'SSH',

@@ -344,6 +344,7 @@ export default {
       mcp: 'MCP 서버',
       skills: '스킬',
       browser: '브라우저',
+      computer: '컴퓨터 제어',
       ssh: 'SSH',
       channels: '채널',
       shortcuts: '단축키',
@@ -539,6 +540,93 @@ export default {
       navAllow: 'nav: 허용',
       actAsk: 'act: 묻기',
       actAllow: 'act: 허용',
+    },
+    computer: {
+      title: '컴퓨터 제어',
+      subtitle:
+        '브라우저가 닿지 못하는 네이티브 데스크톱 앱을 jcode가 보고 조작하게 합니다. 이 기기의 무엇이든 건드릴 수 있어 기본값은 꺼짐입니다.',
+      enableTitle: '컴퓨터 제어 켜기',
+      enableDesc: '에이전트가 네이티브 앱을 읽고 조작하도록 허용합니다.',
+      unavailable: '이 서버에서는 컴퓨터 제어를 사용할 수 없습니다.',
+
+      status: '상태',
+      statusLoading: '확인 중…',
+      gateEnabled: '활성화',
+      gateBackend: '백엔드',
+      gatePermission: '시스템 권한',
+      gateState: {
+        open: '통과',
+        shut: '여기서 막혀 있습니다',
+        unknown: '아직 도달하지 않음 — 앞쪽 관문이 닫혀 있습니다',
+      },
+      ready: '세 관문이 모두 열려 있습니다. 앱을 승인하면 에이전트가 작업할 수 있습니다.',
+      blockedGeneric: '무언가가 컴퓨터 제어를 막고 있습니다.',
+      grantAccessibility: '손쉬운 사용 권한 부여',
+      permissionsHint:
+        '시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용에서 jcode를 켠 뒤 돌아오세요. 이 페이지가 알아서 다시 확인합니다. 권한이 없으면 오류가 아니라 몇 분씩 멈춥니다.',
+      backendKind: {
+        helper: '헬퍼 데몬',
+        osa: 'AppleScript',
+        fake: '가짜 백엔드',
+      },
+
+      control: '제어',
+      backend: '백엔드',
+      backendDesc: '자동: 헬퍼 데몬이 응답하면 사용하고, 아니면 AppleScript로 대체합니다.',
+      backendAuto: '자동',
+      backendHelper: '헬퍼 데몬',
+      backendOsa: 'AppleScript',
+      backendFake: '가짜 (테스트용)',
+
+      approval: '승인',
+      launch: '앱 실행',
+      interact: '조작 (클릭 / 입력)',
+      askEachApp: '앱마다 확인',
+      alwaysAllow: '항상 허용',
+      clipboardAlwaysAsks:
+        '클립보드 읽기는 항상 확인하며 여기서 미리 승인할 수 없습니다. 사람들이 비밀번호를 수시로 복사해 두는 곳이기 때문입니다.',
+
+      appPermissions: '앱 권한',
+      add: '추가',
+      noAppPermissions: '설정된 앱 권한이 없습니다.',
+      bundlePlaceholder: 'com.apple.Notes',
+      launchAsk: '실행: 확인',
+      launchAllow: '실행: 허용',
+      interactAsk: '조작: 확인',
+      interactAllow: '조작: 허용',
+      tierLabel: '이 앱에서 에이전트가 어디까지 할 수 있는지',
+      tierPending: '이 앱의 기본 등급을 서버가 판정하는 중입니다.',
+      tier: {
+        read: '읽기',
+        click: '클릭',
+        full: '전체',
+      },
+      tierDesc: {
+        read: '스크린샷만 — 클릭도 입력도 불가.',
+        click: '클릭과 스크롤만 — 입력과 키 조작 불가.',
+        full: '클릭, 입력, 키 조작 가능.',
+      },
+      whyBrowser:
+        '브라우저가 "읽기"로 제한되는 것은 위험해서가 아니라 jcode에 더 나은 도구가 있기 때문입니다. 브라우저 제어는 페이지를 읽고 링크가 실제로 어디로 가는지 확인한 뒤 따라갈 수 있습니다. 픽셀 클릭은 그럴 수 없습니다 — 눈에 보이는 링크 문구는 페이지가 쓴 것입니다.',
+      whyTerminal:
+        '터미널과 IDE가 "클릭"으로 제한되는 것은, 거기에 입력하면 jcode의 승인 체계를 통째로 우회하기 때문입니다. 실행 버튼을 누르거나 출력을 스크롤하는 것은 괜찮지만 명령을 입력하는 것은 다릅니다 — 그건 승인을 거치는 execute 도구가 맡습니다.',
+      tierCeilingNote:
+        '등급은 더 조일 수는 있어도 기본 등급 위로 올릴 수는 없습니다. 받아 놓고 조용히 무시하는 대신 아예 선택지로 제공하지 않습니다.',
+      loosenTitle: '제한을 푸는 중입니다',
+      loosenBody: '{app}에서 에이전트가 할 수 있는 일이 늘어납니다: {what} 다시 조이면 즉시 반영됩니다.',
+      loosenConfirm: '그래도 풀기',
+      thisApp: '이 앱',
+
+      grants: '개별 허용',
+      grantsDesc: '앱 목록과 일부러 분리해 두었습니다. "메모 제어"를 승인했다고 아래 항목이 승인되는 것은 아닙니다.',
+      clipboardRead: '클립보드 읽기',
+      clipboardReadDesc: '클립보드는 허용한 어떤 앱에도 속하지 않습니다 — 그리고 비밀번호는 ⌘C와 ⌘V 사이에 거기 있습니다.',
+      clipboardWrite: '클립보드 쓰기',
+      clipboardWriteDesc:
+        '마지막으로 복사한 내용을 모든 앱에서 한꺼번에 덮어씁니다. 다음 ⌘V로 붙는 것은 당신 것이 아니라 에이전트의 텍스트입니다.',
+      systemKeyCombos: '시스템 단축키',
+      systemKeyCombosDesc:
+        '⌘Space, ⌘Tab, Mission Control — 이들은 허용한 앱이 아니라 기기 전체에 작용하므로 목록 바깥까지 미칩니다.',
     },
     ssh: {
       title: 'SSH',
