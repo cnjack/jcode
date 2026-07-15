@@ -106,6 +106,23 @@ var quotaPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)exceeded your current quota`), // OpenAI
 	regexp.MustCompile(`(?i)arrearage|owe|unpaid`),
 	regexp.MustCompile(`(?i)账户余额不足|欠费|额度.*(用尽|耗尽|不足)`),
+	// Moonshot: "You've reached your usage limit for this billing cycle. Your
+	// quota will be refreshed in the next cycle. To continue now, purchase extra
+	// usage or upgrade your plan". Observed live, on a 403 — and it matched none
+	// of the patterns above, so it was classified as auth and the user was told
+	// to check an API key that was perfectly fine. The lesson generalizes: a
+	// provider's *sentiment* here ("you are out") is far more stable than its
+	// vocabulary, so match on several phrasings rather than one house style.
+	regexp.MustCompile(`(?i)(reached|hit).{0,20}usage.{0,10}limit`),
+	regexp.MustCompile(`(?i)purchase.{0,20}(extra|additional).{0,10}usage`),
+	regexp.MustCompile(`(?i)(usage|plan).{0,10}limit.{0,30}billing cycle`),
+	// NOT "upgrade your plan" on its own: rate-limit copy says it too ("upgrade
+	// your plan for higher rate limits"), and misreading a rate limit as a spent
+	// quota means not retrying something that would have worked in 20 seconds.
+	// The phrase only carries meaning next to a usage/billing word, which the
+	// patterns above already require.
+	regexp.MustCompile(`(?i)out of (credit|quota|balance)`),
+	regexp.MustCompile(`(?i)(用量|用量额度|配额).{0,10}(已达|超出|用尽)`),
 }
 
 // ClassifyError determines the category of an API error.
@@ -506,7 +523,13 @@ func FriendlyAPIError(err error, provider, model string) string {
 	case ErrCategoryQuota:
 		msg := fmt.Sprintf("Out of quota%s — the account has no credit left for this model, "+
 			"so I stopped without running anything.", where)
-		if url := quotaConsoleURL(provider); url != "" {
+		// Prefer a URL the provider itself put in the error over our table: it is
+		// current, it is account-specific, and it is right even for a provider we
+		// have never heard of (a custom endpoint has no table entry at all, and
+		// that is exactly when the user most needs pointing somewhere).
+		if url := urlInError(err); url != "" {
+			msg += "\nTop up or upgrade: " + url
+		} else if url := quotaConsoleURL(provider); url != "" {
 			msg += "\nTop up or enable billing: " + url
 		}
 		return msg + "\nOr switch to another configured model with /model."
@@ -589,6 +612,21 @@ func asFriendly(err error, target **FriendlyError) bool {
 		err = u.Unwrap()
 	}
 	return false
+}
+
+// billingURLRe finds a URL in an error message. Bounded to http(s) and stopped
+// at whitespace or a closing bracket so a trailing "." or ")" is not swallowed.
+var billingURLRe = regexp.MustCompile(`https?://[^\s<>"'\)\]]+`)
+
+// urlInError extracts a URL the provider put in its own error, which is how
+// Moonshot, OpenAI and several others tell you where to pay. It beats our table:
+// it is current, account-specific, and present even for a custom endpoint we
+// have no table entry for — which is precisely when a user is most stuck.
+func urlInError(err error) string {
+	if err == nil {
+		return ""
+	}
+	return billingURLRe.FindString(err.Error())
 }
 
 // quotaConsoleURL returns the billing page for providers we know, so the user

@@ -181,3 +181,74 @@ func TestWrapFriendlyIsIdempotent(t *testing.T) {
 		t.Error("double-wrapping produced a new error; the message would nest")
 	}
 }
+
+// The exact 403 Moonshot's coding endpoint returns when a plan's usage is spent,
+// captured live on 2026-07-15 during the computer-use eval campaign.
+//
+// It is here verbatim because the first version of this classifier got it wrong:
+// none of the quota patterns matched Moonshot's phrasing, so a 403 fell through
+// to auth and the agent told the user "the API key was rejected — check the key
+// in config.json". The key was perfectly fine. Sending someone to audit correct
+// credentials while the real problem is a spent plan is worse than saying
+// nothing, because it looks like a definite answer.
+const moonshotUsageLimit403 = "You've reached your usage limit for this billing cycle. " +
+	"Your quota will be refreshed in the next cycle. To continue now, purchase extra usage " +
+	"or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota"
+
+func TestMoonshotUsageLimitIsQuotaNotAuth(t *testing.T) {
+	err := apiErr(403, moonshotUsageLimit403)
+	if got := ClassifyError(err); got != ErrCategoryQuota {
+		t.Fatalf("ClassifyError = %v, want quota — a spent plan is not a bad key", got)
+	}
+	if IsRetryable(context.TODO(), err) {
+		t.Error("a spent plan must not be retried; the cycle does not refresh on a backoff timer")
+	}
+	msg := FriendlyAPIError(err, "kimi-coding", "kimi-for-coding-highspeed")
+	if strings.Contains(msg, "API key") {
+		t.Errorf("the message still blames the API key:\n%s", msg)
+	}
+	if !strings.Contains(msg, "Out of quota") {
+		t.Errorf("the message does not name the real cause:\n%s", msg)
+	}
+}
+
+// The narrow miss that makes the quota patterns dangerous: "reached your rate
+// limit" is pace and clears on its own; "reached your usage limit" is money and
+// never does. They are one word apart and need opposite handling.
+func TestUsageLimitAndRateLimitAreNotConfused(t *testing.T) {
+	cases := []struct {
+		msg    string
+		status int
+		want   APIErrorCategory
+	}{
+		{"You've reached your usage limit for this billing cycle", 403, ErrCategoryQuota},
+		{"You have reached your rate limit, please slow down", 429, ErrCategoryRateLimit},
+		{"Rate limit reached for requests", 429, ErrCategoryRateLimit},
+		{"Upgrade your plan for higher rate limits", 429, ErrCategoryRateLimit},
+	}
+	for _, c := range cases {
+		if got := ClassifyError(apiErr(c.status, c.msg)); got != c.want {
+			t.Errorf("%q (%d) → %v, want %v", c.msg, c.status, got, c.want)
+		}
+	}
+}
+
+// Moonshot puts the exact top-up link in its 403. Using our table instead would
+// send the user somewhere staler and less specific — and for a custom endpoint
+// (which has no table entry) it would send them nowhere at all.
+func TestQuotaMessagePrefersTheProvidersOwnURL(t *testing.T) {
+	msg := FriendlyAPIError(apiErr(403, moonshotUsageLimit403), "kimi-coding", "kimi-for-coding-highspeed")
+	if !strings.Contains(msg, "https://www.kimi.com/membership/subscription?tab=quota") {
+		t.Errorf("the provider's own top-up URL was dropped:\n%s", msg)
+	}
+	// A known provider with no URL in the payload still gets the table entry.
+	msg = FriendlyAPIError(apiErr(402, "Payment Required"), "tencent-tokenhub", "")
+	if !strings.Contains(msg, "console.cloud.tencent.com/tokenhub") {
+		t.Errorf("the table URL was not used as a fallback:\n%s", msg)
+	}
+	// An unknown provider with no URL anywhere: say nothing rather than guess.
+	msg = FriendlyAPIError(apiErr(402, "Payment Required"), "some-gateway", "")
+	if strings.Contains(msg, "http") {
+		t.Errorf("a URL was invented for an unknown provider:\n%s", msg)
+	}
+}
