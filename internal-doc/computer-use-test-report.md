@@ -243,6 +243,75 @@ and will happily report inflated numbers.
 
 ---
 
+## 4.4 Wave 3 — a third account, a third quota wall, and the fix proving itself
+
+The user supplied a direct Moonshot coding endpoint
+(`api.kimi.com/coding/v1`, `kimi-for-coding-highspeed`), configured in
+`~/.jcode/config.json`. It ran, then hit **403** after ~500 runs:
+
+> "You've reached your usage limit for this billing cycle. Your quota will be
+> refreshed in the next cycle. To continue now, purchase extra usage or upgrade
+> your plan."
+
+**Three accounts, three quota walls.** The ≥3h target was never reachable in this
+session; total real agent wall-clock across all three waves is **~1.14 h**.
+
+| wave | model | launched | **real** | dead | **phantom passes** |
+|---|---|---:|---:|---:|---:|
+| 1 | tokenhub/kimi-k2.7-code | 380 | 67 | 313 | **102** |
+| 2 | tokenhub/…-highspeed | 760 | 93 | 667 | **208** |
+| 3 | kimi.com/coding | 764 | **502** | 262 | **0** ✅ |
+
+**Wave 3's zero is the headline.** Same failure (a provider cutting the account
+off mid-campaign), same blast radius (262 dead runs) — and this time the harness
+scored exactly none of them as passing, because §3 and §5's gates were in by
+then. The same 262 runs in wave 1's harness would have produced roughly 85
+phantom passes.
+
+It also validated the jcode-side fix in production: all 262 dead runs reported
+`stop_reason: refusal`, not `end_turn`. That is F2, closed, observed.
+
+### 4.4.1 Pass rate, wave 3, real runs only
+
+| tier | pass |
+|---|---|
+| smoke | 179/180 (99.4%) |
+| core | 320/322 (99.4%) |
+| **total** | **499/502 (99.4%)** |
+
+10.4M tokens. The campaign died before reaching the `computer` tier, so the
+computer cases' only real-token evidence remains the 6/6 validation pass in §2.
+
+### 4.4.2 The live 403 found a bug in the fix that fixed the live 402
+
+The friendly-error work (§3) shipped with quota patterns written around
+"exhausted" / "insufficient" / "payment required". Moonshot says **"reached your
+usage limit"**, which matched none of them — so its 403 fell through to *auth*,
+and 262 runs told the user:
+
+> "The API key was rejected. Check the key in ~/.jcode/config.json"
+
+The key was fine. **Sending someone to audit correct credentials while the real
+problem is a spent plan is worse than saying nothing**, because it reads as a
+definite answer. Fixed, with the live payload pinned verbatim as a test constant.
+
+Two things fell out of that fix worth keeping:
+
+- Its own test immediately caught an over-correction: `upgrade your plan` also
+  appears in *rate-limit* copy ("upgrade your plan for higher rate limits"), and
+  reading a rate limit as a spent quota means **not retrying something that would
+  have worked in twenty seconds**. One word apart, opposite handling. Pattern
+  dropped.
+- A URL the provider puts in its own error now beats our table — it is current,
+  account-specific, and present even for a custom endpoint that has no table
+  entry, which is exactly when a user is most stuck.
+
+**The generalizable lesson:** a provider's *sentiment* here ("you are out") is
+stable; its *vocabulary* is not. Three providers, three unrelated phrasings, two
+different status codes (402, 403) for the same condition. Any classifier written
+against one house style is wrong about the next provider, and its failure mode is
+to confidently misdirect.
+
 ## 5. A second harness defect: `expect_tool_use` is decorative
 
 `expect_tool_use: true` is declared on ~33 of 39 cases. It is **referenced nowhere** in
