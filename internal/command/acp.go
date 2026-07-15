@@ -415,6 +415,17 @@ func (a *acpAgent) buildAgentSession(
 	// "small" alias); fallback is this session's current model.
 	factory := internalmodel.NewModelFactory(cfg, chatModel)
 	allTools := []tool.BaseTool{
+		// load_skill: ACP puts the skill list in the system prompt (see
+		// skillLoader.Descriptions() below) and the slash-command path literally
+		// instructs the model to "use the load_skill tool" — but the tool itself
+		// was never registered here, unlike in interactive and web.
+		//
+		// The model therefore saw skills advertised, was told to load them, and
+		// had no way to. Observed in a live campaign: it spent 300s and 122 tool
+		// calls trying, degenerating into `echo load_skill` with descriptions
+		// like "Please work" and "Enough", generating enough traffic to trip the
+		// provider's 60 RPM limit and time out. 4 of 400 runs died this way.
+		skills.NewLoadSkillTool(skillLoader),
 		env.NewReadTool(), env.NewEditTool(), env.NewWriteTool(),
 		env.NewExecuteTool(bgManager), env.NewGrepTool(),
 		env.NewTodoWriteTool(), env.NewTodoReadTool(),
