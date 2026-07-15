@@ -324,8 +324,9 @@ def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, max_iter, 
         "rundir": str(rundir), "home": str(rundir / "home"),
         "step_records": step_records,
     }
-    ver = verify.verify_case(case, ctx)
     usage_tot, usage_events = read_usage(rundir / "home")
+    ctx["usage_total"] = usage_tot
+    ver = verify.verify_case(case, ctx)
     # contracts: every prompt step must satisfy the ACP contract, not just the last
     if prompt_contract_sets:
         contracts = []
