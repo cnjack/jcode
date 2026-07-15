@@ -767,23 +767,26 @@ var knownModels = map[string]knownModel{
 	// 2026 long-context flagships (offline fallback when the models.dev registry
 	// is unavailable). Context windows verified against vendor docs / models.dev;
 	// see internal-doc/model-research.md. Pricing left 0 where not confidently known.
-	"MiniMax-M3":             {1000000, 0.60, 2.40},
-	"minimax-m3":             {1000000, 0.60, 2.40},
-	"deepseek-v4-pro":        {1000000, 0, 0},
-	"deepseek-v4-flash":      {1000000, 0, 0},
-	"qwen3.7-max":            {1000000, 2.50, 7.50},
-	"qwen3.7-plus":           {1000000, 0, 0},
-	"qwen3.6-plus":           {1000000, 0, 0},
-	"kimi-k2.6":              {262144, 0, 0},
-	"kimi-k2.7-code":         {262144, 0, 0},
-	"glm-5":                  {200000, 0, 0},
-	"glm-5.1":                {200000, 0, 0},
-	"glm-5.2":                {1000000, 0, 0}, // user-reported 1M; official docs pending
-	"gpt-5.5":                {1050000, 0, 0},
-	"claude-opus-4-8":        {1000000, 0, 0},
-	"claude-sonnet-4-6":      {1000000, 0, 0},
-	"gemini-3.1-pro-preview": {1048576, 0, 0},
-	"gemini-3.5-flash":       {1048576, 0, 0},
+	"MiniMax-M3":        {1000000, 0.60, 2.40},
+	"minimax-m3":        {1000000, 0.60, 2.40},
+	"deepseek-v4-pro":   {1000000, 0, 0},
+	"deepseek-v4-flash": {1000000, 0, 0},
+	"qwen3.7-max":       {1000000, 2.50, 7.50},
+	"qwen3.7-plus":      {1000000, 0, 0},
+	"qwen3.6-plus":      {1000000, 0, 0},
+	"kimi-k2.6":         {262144, 0, 0},
+	"kimi-k2.7-code":    {262144, 0, 0},
+	// Kimi For Coding plan tiers — subscription-metered, so no per-token price.
+	"kimi-for-coding":           {262144, 0, 0},
+	"kimi-for-coding-highspeed": {262144, 0, 0},
+	"glm-5":                     {200000, 0, 0},
+	"glm-5.1":                   {200000, 0, 0},
+	"glm-5.2":                   {1000000, 0, 0}, // user-reported 1M; official docs pending
+	"gpt-5.5":                   {1050000, 0, 0},
+	"claude-opus-4-8":           {1000000, 0, 0},
+	"claude-sonnet-4-6":         {1000000, 0, 0},
+	"gemini-3.1-pro-preview":    {1048576, 0, 0},
+	"gemini-3.5-flash":          {1048576, 0, 0},
 }
 
 // knownModelContextLimits is kept for backward compatibility.

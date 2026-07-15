@@ -446,7 +446,8 @@ var recommendedModels = map[string]map[string]bool{
 }
 
 // contextLimitOverrides corrects context windows for built-in models whose
-// models.dev-sourced value understates the model's advertised window. Applied at
+// models.dev-sourced value misstates the model's real window — either understating
+// it (a conservative floor) or overstating it (bad upstream data). Applied at
 // init() so corrections survive `go generate` regeneration of registry_generated.go.
 // Key: provider ID → model ID → context window (tokens). See internal-doc/model-research.md.
 var contextLimitOverrides = map[string]map[string]int{
@@ -454,6 +455,16 @@ var contextLimitOverrides = map[string]map[string]int{
 	// 512K "guaranteed minimum". Use the advertised window for sizing.
 	"minimax":             {"MiniMax-M3": 1_000_000},
 	"minimax-coding-plan": {"MiniMax-M3": 1_000_000},
+	// models.dev's openrouter records carry transposed digits for these two, which
+	// would size the context above the real window and fail requests near the edge.
+	// Both corrected values are what the same models report under their native
+	// providers (google / alibaba-cn), and each is a power of two — 2^20 and 2^17 —
+	// while the upstream 1048756 / 131702 are not. Fixed here rather than in the
+	// generated file, which is overwritten by `make generate`.
+	"openrouter": {
+		"google/gemini-3.1-pro-preview-customtools": 1_048_576,
+		"qwen/qwen3-14b": 131_072,
+	},
 }
 
 // glm52Model builds a fresh GLM-5.2 entry. Returns a new object per call so each
@@ -499,6 +510,42 @@ func init() {
 // built into the registry. They are added to generatedProviders/generatedProviderOrder
 // at init time so they behave identically to models.dev providers.
 var staticProviders = map[string]*RegistryProvider{
+	// Kimi For Coding is Moonshot's subscription coding plan. models.dev carries a
+	// "kimi-for-coding" record, but its model ids (k2p5/k2p6/k2p7/kimi-k2-thinking)
+	// are undocumented aliases that the vendor's own /models endpoint does not
+	// advertise, so the provider is hand-written here instead of pulled through
+	// generate_models.go. The two ids below are the only ones the official
+	// OpenAI-compatible setup documents. Verified against the live endpoint
+	// 2026-07-15: tool calls work, reasoning_effort is honored, and every model
+	// rejects temperature != 1 (hence Temperature stays false — note models.dev
+	// wrongly reports temperature:true for three of its four ids).
+	"kimi-for-coding": {
+		ID:   "kimi-for-coding",
+		Name: "Kimi For Coding",
+		Env:  []string{"KIMI_API_KEY"},
+		API:  "https://api.kimi.com/coding/v1",
+		Doc:  "https://www.kimi.com/code/docs/third-party-tools/other-coding-agents.html",
+		Models: map[string]*RegistryModel{
+			"kimi-for-coding": {
+				ID: "kimi-for-coding", Name: "Kimi For Coding", Family: "kimi",
+				Attachment: true, Reasoning: true, ToolCall: true,
+				DefaultEnabled: true, Recommended: true,
+				Modalities:       &ModelModalities{Input: []string{"text", "image", "video"}, Output: []string{"text"}},
+				Limit:            &ModelLimit{Context: 262144, Output: 32768},
+				ReasoningOptions: standardEffortOptions(),
+			},
+			// High-speed tier: ~5-6x output speed at ~3x quota burn, and it needs an
+			// Allegretto-or-above subscription, so it is selectable but not starred.
+			"kimi-for-coding-highspeed": {
+				ID: "kimi-for-coding-highspeed", Name: "Kimi For Coding (High-Speed)", Family: "kimi",
+				Attachment: true, Reasoning: true, ToolCall: true,
+				DefaultEnabled:   true,
+				Modalities:       &ModelModalities{Input: []string{"text", "image", "video"}, Output: []string{"text"}},
+				Limit:            &ModelLimit{Context: 262144, Output: 32768},
+				ReasoningOptions: standardEffortOptions(),
+			},
+		},
+	},
 	"tencent-tokenhub-ep": {
 		ID:   "tencent-tokenhub-ep",
 		Name: "Tencent TokenHub Enterprise",
@@ -572,6 +619,7 @@ var staticProviders = map[string]*RegistryProvider{
 // staticProviderOrder defines the display order for static providers.
 // They are appended after the generated providers.
 var staticProviderOrder = []string{
+	"kimi-for-coding",
 	"tencent-tokenhub-ep",
 }
 
