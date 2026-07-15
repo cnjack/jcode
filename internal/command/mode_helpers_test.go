@@ -6,7 +6,6 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/cnjack/jcode/internal/config"
-	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/tui"
 )
@@ -21,6 +20,7 @@ func TestResolveStartupMode(t *testing.T) {
 		{"unsafe forces full access over config", &config.Config{DefaultMode: "approval"}, true, mode.FullAccess},
 		{"unsafe with nil cfg", nil, true, mode.FullAccess},
 		{"default_mode plan", &config.Config{DefaultMode: "plan"}, false, mode.Plan},
+		{"default_mode auto", &config.Config{DefaultMode: "auto"}, false, mode.Auto},
 		{"default_mode full access", &config.Config{DefaultMode: "full_access"}, false, mode.FullAccess},
 		{"default_mode wins over auto_approve", &config.Config{DefaultMode: "approval", AutoApprove: true}, false, mode.Approval},
 		{"legacy auto_approve fallback", &config.Config{AutoApprove: true}, false, mode.FullAccess},
@@ -34,10 +34,36 @@ func TestResolveStartupMode(t *testing.T) {
 	}
 }
 
+func TestModeAfterToolSwitch(t *testing.T) {
+	cases := []struct {
+		name    string
+		current mode.SessionMode
+		newMode tui.AgentMode
+		want    mode.SessionMode
+	}{
+		// An approved plan moves to execution with the full tool set, so the
+		// session must not keep claiming the read-only Plan mode.
+		{"approved plan starts executing", mode.Plan, tui.ModeExecuting, mode.Approval},
+		{"plan reverts to normal after todos done", mode.Plan, tui.ModeNormal, mode.Approval},
+		{"entering plan keeps plan", mode.Plan, tui.ModePlanning, mode.Plan},
+		// Non-plan modes are chosen by the user and survive a tool-axis switch.
+		{"approval survives", mode.Approval, tui.ModeNormal, mode.Approval},
+		{"auto survives", mode.Auto, tui.ModeExecuting, mode.Auto},
+		{"full access survives", mode.FullAccess, tui.ModeExecuting, mode.FullAccess},
+		{"full access survives entering plan", mode.FullAccess, tui.ModePlanning, mode.FullAccess},
+	}
+	for _, c := range cases {
+		if got := modeAfterToolSwitch(c.current, c.newMode); got != c.want {
+			t.Errorf("%s: modeAfterToolSwitch(%v, %v)=%v, want %v", c.name, c.current, c.newMode, got, c.want)
+		}
+	}
+}
+
 func TestACPModeID(t *testing.T) {
 	cases := map[mode.SessionMode]acp.SessionModeId{
 		mode.Approval:   acpModeApproval,
 		mode.Plan:       acpModePlan,
+		mode.Auto:       acpModeAuto,
 		mode.FullAccess: acpModeFullAccess,
 	}
 	for m, want := range cases {
@@ -52,33 +78,13 @@ func TestACPAdvertisedModes(t *testing.T) {
 	if st.CurrentModeId != acpModeApproval {
 		t.Errorf("current=%q, want %q", st.CurrentModeId, acpModeApproval)
 	}
-	want := []acp.SessionModeId{acpModeApproval, acpModePlan, acpModeFullAccess}
+	want := []acp.SessionModeId{acpModeApproval, acpModePlan, acpModeAuto, acpModeFullAccess}
 	if len(st.AvailableModes) != len(want) {
 		t.Fatalf("advertised %d modes, want %d", len(st.AvailableModes), len(want))
 	}
 	for i, w := range want {
 		if st.AvailableModes[i].Id != w {
 			t.Errorf("advertised[%d]=%q, want %q", i, st.AvailableModes[i].Id, w)
-		}
-	}
-}
-
-func TestSessionModeFrom(t *testing.T) {
-	cases := []struct {
-		am   tui.AgentMode
-		apm  handler.ApprovalMode
-		want mode.SessionMode
-	}{
-		{tui.ModeNormal, handler.ModeManual, mode.Approval},
-		{tui.ModeNormal, handler.ModeAuto, mode.FullAccess},
-		{tui.ModeExecuting, handler.ModeManual, mode.Approval}, // transient exec, manual → Approval
-		{tui.ModeExecuting, handler.ModeAuto, mode.FullAccess}, // transient exec, auto → Full access
-		{tui.ModePlanning, handler.ModeManual, mode.Plan},      // plan determined by tool axis
-		{tui.ModePlanning, handler.ModeAuto, mode.Plan},        // plan wins regardless of approval
-	}
-	for _, c := range cases {
-		if got := sessionModeFrom(c.am, c.apm); got != c.want {
-			t.Errorf("sessionModeFrom(%v,%v)=%v, want %v", c.am, c.apm, got, c.want)
 		}
 	}
 }

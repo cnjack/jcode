@@ -6,16 +6,15 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 )
 
-// BuildFromConfig constructs a Reviewer from config, or returns nil when the
-// auto-reviewer is disabled. Frontends call this once per session and, when
-// non-nil, install it on the ApprovalState. Returning a typed nil-free
-// interface is intentional: callers compare the result against nil to decide
-// whether to wire the reviewer at all.
+// BuildFromConfig constructs a Reviewer from config. It never returns nil:
+// when approval_review settings are absent it falls back to sensible defaults
+// (small alias model, default timeout, no investigation, no session reuse).
+// Callers install the returned Reviewer on ApprovalState whenever the session
+// is in Auto mode.
 func BuildFromConfig(cfg *config.Config, platform string) Reviewer {
-	if cfg == nil || !cfg.ApprovalReviewEnabled() {
-		return nil
-	}
-	rc := cfg.ApprovalReview
+	// Snapshot rather than reading cfg.ApprovalReview directly: the web settings
+	// handler can publish a new block on this same live config concurrently.
+	rc := cfg.ApprovalReviewSettings()
 	return New(Options{
 		Config:      cfg,
 		ModelRef:    rc.Model,

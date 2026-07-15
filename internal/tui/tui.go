@@ -160,9 +160,10 @@ type Model struct {
 	approvalSelected    int                      // 0=Approve, 1=ApproveAll, 2=Reject
 	approvalQueue       []ToolApprovalRequestMsg // queued requests when dialog is already active
 
-	envLabel  string
-	agentMode AgentMode
-	bgRunning int // count of running background tasks
+	envLabel    string
+	agentMode   AgentMode
+	sessionMode mode.SessionMode // unified selector mode (source of truth for the pill)
+	bgRunning   int              // count of running background tasks
 
 	// lastAssistantRawText stores the raw (unrendered) text of the last
 	// assistant response, used by Ctrl+Y to copy to clipboard without
@@ -274,7 +275,7 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 		glamour.WithWordWrap(96), // default, recreated on first WindowSizeMsg
 	)
 
-	mode := ModeAgent
+	initialMode := ModeAgent
 	thinking := false
 	var initialLines []contentLine
 	if hasPrompt {
@@ -330,7 +331,7 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 	chl.SetShowHelp(false)
 
 	m := Model{
-		mode:              mode,
+		mode:              initialMode,
 		spinner:           s,
 		thinking:          thinking,
 		mdRenderer:        md,
@@ -361,6 +362,7 @@ func NewModel(hasPrompt bool, pwd string, todoStore *tools.TodoStore) Model {
 		renderPerf:        newTUIRenderPerf(),
 	}
 	m.historyIndex = len(m.history)
+	m.sessionMode = mode.Approval // Default unified selector mode
 
 	if cfg, err := config.LoadConfig(); err == nil {
 		m.activeProvider, m.activeModel = cfg.GetProviderModel()
@@ -437,24 +439,22 @@ func WithStartupMode(sm mode.SessionMode) ModelOption {
 	}
 }
 
-// selectorMode derives the unified selector mode from the two low-level TUI
-// fields (tool axis + approval axis) for display in the mode pill.
+// selectorMode returns the unified selector mode stored in the TUI model.
 func (m Model) selectorMode() mode.SessionMode {
-	if m.agentMode == ModePlanning {
-		return mode.Plan
-	}
-	if m.approvalMode == ModeAuto {
-		return mode.FullAccess
-	}
-	return mode.Approval
+	return m.sessionMode
 }
 
-// applySelectorMode sets the two low-level TUI fields to match a unified mode.
-// Plan leaves the approval field untouched (read-only tools make it moot).
+// applySelectorMode sets the unified session mode and the two low-level TUI
+// fields (tool axis + approval axis) to match it. Plan leaves the approval
+// field untouched (read-only tools make it moot).
 func (m *Model) applySelectorMode(sm mode.SessionMode) {
+	m.sessionMode = sm
 	switch sm {
 	case mode.Plan:
 		m.agentMode = ModePlanning
+	case mode.Auto:
+		m.agentMode = ModeNormal
+		m.approvalMode = ModeManual
 	case mode.FullAccess:
 		m.agentMode = ModeNormal
 		m.approvalMode = ModeAuto
@@ -462,6 +462,23 @@ func (m *Model) applySelectorMode(sm mode.SessionMode) {
 		m.agentMode = ModeNormal
 		m.approvalMode = ModeManual
 	}
+}
+
+// promoteToFullAccess handles the approval dialog's "Approve all": it flips the
+// approval axis to auto and pushes the same change to the backend
+// ApprovalState. The pill's unified mode follows only outside Plan — inside
+// Plan the read-only tool axis still names the mode, and the backend keeps the
+// plan tool set until the plan is approved, at which point applyModeSwitch
+// sends a ModeSelectedMsg carrying the promoted mode.
+func (m *Model) promoteToFullAccess() {
+	m.approvalMode = ModeAuto
+	if m.agentMode != ModePlanning {
+		m.sessionMode = mode.FullAccess
+	}
+	if m.OnApprovalModeChange != nil {
+		m.OnApprovalModeChange(true)
+	}
+	m.invalidateFooterCache()
 }
 
 // WithVersion sets the version string displayed in the bottom hint bar.

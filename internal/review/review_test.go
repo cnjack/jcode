@@ -148,14 +148,14 @@ func TestBuildSystemPrompt_IncludesExtraPolicy(t *testing.T) {
 	}
 }
 
-func TestNew_DefaultsAndDisabledBuild(t *testing.T) {
-	if r := BuildFromConfig(&config.Config{}, "darwin"); r != nil {
-		t.Errorf("expected nil reviewer when disabled")
+func TestNew_BuildFromConfigAlwaysReturnsReviewer(t *testing.T) {
+	if r := BuildFromConfig(&config.Config{}, "darwin"); r == nil {
+		t.Errorf("expected non-nil reviewer with empty config")
 	}
 	if r := BuildFromConfig(&config.Config{
-		ApprovalReview: &config.ApprovalReviewConfig{Enabled: true},
+		ApprovalReview: &config.ApprovalReviewConfig{Model: "small"},
 		Model:          "prov/main",
 	}, "darwin"); r == nil {
-		t.Errorf("expected non-nil reviewer when enabled")
+		t.Errorf("expected non-nil reviewer with approval_review settings")
 	}
 }

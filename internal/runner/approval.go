@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/cnjack/jcode/internal/agent"
+	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/hooks"
 	"github.com/cnjack/jcode/internal/mode"
@@ -44,6 +45,11 @@ type ApprovalState struct {
 	reviewer     review.Reviewer
 	transcriptFn func() []review.Msg
 	breaker      reviewBreaker
+
+	// reviewerCfg and reviewerPlatform are used to lazily build the reviewer when
+	// the session enters Auto mode. The reviewer is cleared when leaving Auto.
+	reviewerCfg      *config.Config
+	reviewerPlatform string
 }
 
 // SetBrowserPermFunc installs the site-permission lookup for browser tools.
@@ -90,8 +96,10 @@ func sessionModeFor(autoApprove bool) mode.SessionMode {
 }
 
 // approvalModeFor derives the low-level approval axis from the unified mode.
+// Auto keeps the approval axis on Manual because it can still prompt when the
+// reviewer escalates a call; the reviewer is the additional gate, not a bypass.
 func approvalModeFor(m mode.SessionMode) handler.ApprovalMode {
-	if m.AutoApprove() {
+	if m == mode.FullAccess {
 		return handler.ModeAuto
 	}
 	return handler.ModeManual
@@ -115,9 +123,40 @@ func (s *ApprovalState) SetMode(m handler.ApprovalMode) {
 // by each frontend's agent-rebuild path.
 func (s *ApprovalState) SetSessionMode(m mode.SessionMode) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.sessionMode = m
 	s.mode = approvalModeFor(m)
-	s.mu.Unlock()
+	if m == mode.Auto {
+		s.ensureReviewerLocked()
+	} else {
+		s.clearReviewerLocked()
+	}
+}
+
+// SetReviewerConfig stores the config and platform needed to lazily build the
+// reviewer when the session enters Auto mode.
+func (s *ApprovalState) SetReviewerConfig(cfg *config.Config, platform string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reviewerCfg = cfg
+	s.reviewerPlatform = platform
+	if s.sessionMode == mode.Auto {
+		s.ensureReviewerLocked()
+	}
+}
+
+// ensureReviewerLocked builds the reviewer if it is not already present. The
+// caller must hold s.mu.
+func (s *ApprovalState) ensureReviewerLocked() {
+	if s.reviewer != nil {
+		return
+	}
+	s.reviewer = review.BuildFromConfig(s.reviewerCfg, s.reviewerPlatform)
+}
+
+// clearReviewerLocked drops the reviewer. The caller must hold s.mu.
+func (s *ApprovalState) clearReviewerLocked() {
+	s.reviewer = nil
 }
 
 // GetSessionMode returns the current unified session mode.

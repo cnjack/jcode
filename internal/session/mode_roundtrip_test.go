@@ -16,9 +16,11 @@ func TestModeChangeRoundTrip(t *testing.T) {
 	}{
 		{[]string{"approval"}, mode.Approval},
 		{[]string{"plan"}, mode.Plan},
+		{[]string{"auto"}, mode.Auto},
 		{[]string{"full_access"}, mode.FullAccess},
-		{[]string{"approval", "plan", "full_access"}, mode.FullAccess}, // last wins
+		{[]string{"approval", "plan", "auto", "full_access"}, mode.FullAccess}, // last wins
 		{[]string{"plan", "approval"}, mode.Approval},
+		{[]string{"auto", "approval"}, mode.Approval},
 	}
 	for _, c := range cases {
 		entries := make([]Entry, 0, len(c.entries))

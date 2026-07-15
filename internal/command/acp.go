@@ -41,6 +41,7 @@ import (
 const (
 	acpModeApproval   acp.SessionModeId = "approval"
 	acpModePlan       acp.SessionModeId = "plan"
+	acpModeAuto       acp.SessionModeId = "auto"
 	acpModeFullAccess acp.SessionModeId = "full_access"
 )
 
@@ -56,6 +57,7 @@ func acpModes(current acp.SessionModeId) *acp.SessionModeState {
 		AvailableModes: []acp.SessionMode{
 			{Id: acpModeApproval, Name: "Ask for approval", Description: acp.Ptr("Ask before each restricted tool call")},
 			{Id: acpModePlan, Name: "Plan", Description: acp.Ptr("Read-only planning mode for analysis")},
+			{Id: acpModeAuto, Name: "Auto", Description: acp.Ptr("LLM reviewer allows safe calls, escalates uncertain ones")},
 			{Id: acpModeFullAccess, Name: "Full access", Description: acp.Ptr("Unrestricted execution without approval prompts")},
 		},
 	}
@@ -577,14 +579,10 @@ func (a *acpAgent) buildAgentSession(
 		flowLoader:    flowLoader,
 	}
 
-	// Wire the optional LLM approval reviewer: when enabled it adjudicates calls
-	// that decide() would route to a user prompt, using the recent conversation
-	// as evidence. nil (disabled) leaves approval behavior unchanged.
-	if reviewer := review.BuildFromConfig(cfg, platform); reviewer != nil {
-		approvalState.SetReviewer(reviewer)
-		approvalState.SetTranscriptFunc(sess.recentTranscript)
-		config.Logger().Printf("[acp] approval auto-reviewer enabled for session %s", sessionID)
-	}
+	// Provide the config/platform needed to lazily build the LLM reviewer when
+	// the session enters Auto mode.
+	approvalState.SetReviewerConfig(cfg, platform)
+	approvalState.SetTranscriptFunc(sess.recentTranscript)
 
 	// Reconcile the session's advertised mode when the handler promotes to
 	// Full access via "Allow All", so sess.mode never drifts from the approval
@@ -808,9 +806,9 @@ func (a *acpAgent) SetSessionMode(_ context.Context, params acp.SetSessionModeRe
 
 	sess.mu.Lock()
 
-	// Accept only the three canonical ids.
+	// Accept only the four canonical ids.
 	switch params.ModeId {
-	case acpModeApproval, acpModePlan, acpModeFullAccess:
+	case acpModeApproval, acpModePlan, acpModeAuto, acpModeFullAccess:
 	default:
 		sess.mu.Unlock()
 		return acp.SetSessionModeResponse{}, fmt.Errorf("unknown mode: %s", params.ModeId)
@@ -823,13 +821,13 @@ func (a *acpAgent) SetSessionMode(_ context.Context, params acp.SetSessionModeRe
 	}
 
 	sess.mode = newMode
-	// Apply the approval axis: Full access flips to auto-approve; Approval and Plan use manual approval.
+	// Apply the approval axis: Full access flips to auto-approve; Approval, Plan, and Auto use manual approval.
 	sess.approvalState.SetSessionMode(sm)
 	if sess.rec != nil {
 		sess.rec.RecordModeChange(sm.String())
 	}
 
-	// Apply the tool/prompt axis: Plan uses the read-only set; Approval and Full access
+	// Apply the tool/prompt axis: Plan uses the read-only set; Approval, Auto, and Full access
 	// share the full set (they differ only on the approval axis above).
 	var sysPrompt string
 	var toolList []tool.BaseTool
@@ -1027,8 +1025,8 @@ func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRe
 		resumeState := session.ReconstructState(entries)
 		history = session.PruneOldToolOutputs(resumeState.History, 2)
 		goalSnap = resumeState.Goal
-		// Restore the saved mode (Full access as-is; Plan normalized to Approval so the
-		// reloaded full-tool agent is not stranded in read-only plan tools).
+		// Restore the saved mode (Approval/Auto/Full access as-is; Plan normalized to
+		// Approval so the reloaded full-tool agent is not stranded in read-only plan tools).
 		restoredMode = mode.Parse(resumeState.Mode)
 		if restoredMode == mode.Plan {
 			restoredMode = mode.Approval

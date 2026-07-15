@@ -1,10 +1,12 @@
-// Package review implements jcode's optional LLM approval reviewer: a
-// background "guardian" that adjudicates tool calls which would otherwise
-// interrupt the user with an approval prompt. It runs a small, dedicated model
-// against a risk policy and returns allow / deny / escalate.
+// Package review implements jcode's LLM approval reviewer: a background
+// "guardian" that adjudicates tool calls which would otherwise interrupt the
+// user with an approval prompt. It runs a small, dedicated model against a risk
+// policy and returns allow / deny / escalate.
 //
-// The reviewer is opt-in (config approval_review.enabled). When it is not
-// configured, ApprovalState never calls it and behavior is identical to before.
+// The reviewer is active in Auto session mode and built lazily by ApprovalState.
+// Settings such as model, policy, timeout, investigate, reuse_session, and
+// audit_path are tunable via the approval_review config block, but there is no
+// on/off switch — Auto mode itself is the switch.
 //
 // Design layers (see internal-doc/approval-review-design.md):
 //   - V1: one non-streaming Generate call, strict-JSON verdict, fail-open to the
@@ -87,8 +89,19 @@ type Options struct {
 	Platform    string // V2: platform string for the read-only Env
 }
 
+// DefaultTimeout is the per-review time budget used when TimeoutSeconds is
+// unset. Exported so settings UIs can show the effective value rather than
+// restating it.
+const DefaultTimeout = 60 * time.Second
+
+// DefaultAuditPath returns the verdict-log location used when AuditPath is
+// unset. Exported for the same reason as DefaultTimeout — a settings UI should
+// show the real resolved path, not a hardcoded guess at it.
+func DefaultAuditPath() string {
+	return filepath.Join(config.ConfigDir(), "approval-review.jsonl")
+}
+
 const (
-	defaultTimeout = 60 * time.Second
 	// transcript / argument caps keep the reviewer prompt bounded and cheap.
 	maxTranscriptMsgs = 24
 	maxMsgChars       = 2000
@@ -118,11 +131,11 @@ type Engine struct {
 func New(opts Options) *Engine {
 	to := opts.Timeout
 	if to <= 0 {
-		to = defaultTimeout
+		to = DefaultTimeout
 	}
 	auditPath := opts.AuditPath
 	if auditPath == "" {
-		auditPath = filepath.Join(config.ConfigDir(), "approval-review.jsonl")
+		auditPath = DefaultAuditPath()
 	}
 	e := &Engine{
 		cfg:           opts.Config,

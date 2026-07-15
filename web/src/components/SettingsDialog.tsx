@@ -19,7 +19,7 @@
  * abandons in-progress sub-flows — mirroring the Vue `watch(activeTab)` reset).
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Cog6ToothIcon,
   ArrowLeftIcon,
@@ -45,12 +45,13 @@ import {
 } from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
-import { uiActions, modelActions, loadConfig } from '../app/store'
+import { uiActions, modelActions, loadConfig, loadModels } from '../app/store'
 import { ProviderIcon } from './ProviderIcon'
 import { api } from '../lib/api'
 import { openRemoteConnect } from '../lib/remote'
 import { LOCALE_LABELS, SUPPORTED_LOCALES, setLocale, type SupportedLocale } from '../i18n'
 import type { BrowserConfig, BrowserStatusResponse, BrowserSitePermission } from '../lib/api'
+import type { ApprovalReviewConfig, ApprovalReviewDefaults } from '../lib/types'
 import type {
   ProviderDetail,
   CustomModelDetail,
@@ -100,6 +101,8 @@ const INPUT =
   'w-full h-8 px-2.5 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] text-xs text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)] placeholder:text-[var(--color-muted-foreground)]'
 const INPUT_SM = INPUT + ' !h-7 text-[11px]'
 const INPUT_MONO = INPUT + ' font-mono'
+const TEXTAREA =
+  'w-full min-h-[5rem] px-2.5 py-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] text-xs text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)] placeholder:text-[var(--color-muted-foreground)] resize-y'
 const BTN =
   'inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-[var(--radius-md)] text-xs font-medium cursor-pointer border border-transparent transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
 const BTN_PRIMARY = BTN + ' bg-[var(--color-primary)] text-[var(--color-on-primary)] hover:opacity-90'
@@ -1499,6 +1502,211 @@ function GeneralTab() {
             </option>
           ))}
         </select>
+      </div>
+
+      {/* Approval review (Auto session mode) */}
+      <ApprovalReviewSection />
+    </div>
+  )
+}
+
+function ApprovalReviewSection() {
+  const { t } = useTranslation()
+  const dispatch = useAppDispatch()
+  const [cfg, setCfg] = useState<ApprovalReviewConfig>({})
+  const [defaults, setDefaults] = useState<ApprovalReviewDefaults | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [loadError, setLoadError] = useState('')
+  const [saved, setSaved] = useState(false)
+
+  // The reviewer model picker offers the same enabled-model list as the chat
+  // picker and the small_model role picker, so a model is chosen the same way
+  // everywhere. This section lives in the General tab, which does not load the
+  // list itself — refresh it here rather than depend on the Providers tab
+  // having been opened first.
+  const pickerProviders = useAppSelector((s) => s.model.providers)
+
+  // Nothing may be saved until a load succeeds: cfg starts empty and the POST
+  // replaces the whole approval_review block, so saving an unloaded form would
+  // wipe the stored model/policy/timeout.
+  const load = useCallback(() => {
+    setLoading(true)
+    setLoadError('')
+    api
+      .approvalReviewConfig()
+      .then(({ defaults: d, ...stored }) => {
+        setCfg(stored)
+        setDefaults(d ?? null)
+      })
+      .catch((err) => setLoadError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    load()
+    void dispatch(loadModels())
+  }, [load, dispatch])
+
+  async function save() {
+    setSaving(true)
+    setError('')
+    setSaved(false)
+    try {
+      await api.setApprovalReviewConfig(cfg)
+      setSaved(true)
+      window.setTimeout(() => setSaved(false), 2000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function update(partial: Partial<ApprovalReviewConfig>) {
+    setCfg((prev) => ({ ...prev, ...partial }))
+  }
+
+  // Enabled models grouped by provider, matching the small_model role picker.
+  const modelOptions = pickerProviders
+    .map((p) => ({ ...p, models: p.models.filter((m) => m.enabled) }))
+    .filter((p) => p.models.length > 0)
+  const storedModel = cfg.model ?? ''
+  // '' and the 'small' alias resolve identically — review.resolveModelRef falls
+  // through to small_model → main model for both — so they share one option
+  // instead of asking the user to choose between two spellings of the same
+  // thing. A config that already says 'small' selects it and keeps that value
+  // until the user actually picks something else.
+  const followsSmallModel = storedModel === '' || storedModel === 'small'
+  const selectedModel = followsSmallModel ? '' : storedModel
+  // A concrete ref whose model was since disabled or removed still renders
+  // (marked unavailable) so it can be seen and cleared rather than silently
+  // snapping to another option.
+  const reviewerModelListed =
+    followsSmallModel || modelOptions.some((p) => p.models.some((m) => `${p.id}/${m.id}` === storedModel))
+
+  if (loading) {
+    return (
+      <div className="space-y-3 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3.5">
+        <div className="animate-pulse py-4 text-center text-xs text-[var(--color-muted-foreground)]">
+          {t('settings.general.approvalReviewLoading')}
+        </div>
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div className="space-y-3 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3.5">
+        <div className="flex items-center gap-2">
+          <ShieldCheckIcon className="h-4 w-4 text-[var(--color-muted-foreground)]" />
+          <h4 className="text-[12px] font-semibold text-[var(--color-foreground)]">{t('settings.general.approvalReviewTitle')}</h4>
+        </div>
+        <div className="text-[11px] text-[var(--color-destructive)]">
+          {t('settings.general.approvalReviewLoadFailed', { reason: loadError })}
+        </div>
+        <div className="flex justify-end">
+          <button type="button" onClick={load} className={`${BTN_SECONDARY} ${BTN_SM}`}>
+            {t('common.retry')}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3.5">
+      <div className="flex items-center gap-2">
+        <ShieldCheckIcon className="h-4 w-4 text-[var(--color-muted-foreground)]" />
+        <h4 className="text-[12px] font-semibold text-[var(--color-foreground)]">{t('settings.general.approvalReviewTitle')}</h4>
+      </div>
+      <p className="text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">{t('settings.general.approvalReviewDesc')}</p>
+
+      <Field label={t('settings.general.approvalReviewModel')}>
+        <select
+          value={selectedModel}
+          onChange={(e) => update({ model: e.target.value })}
+          className={INPUT_SM}
+        >
+          <option value="">{t('settings.general.approvalReviewModelUnset')}</option>
+          {!reviewerModelListed && (
+            <option value={storedModel}>
+              {storedModel} — {t('settings.general.approvalReviewModelUnavailable')}
+            </option>
+          )}
+          {modelOptions.map((p) => (
+            <optgroup key={p.id} label={p.name || p.id}>
+              {p.models.map((m) => (
+                <option key={m.id} value={`${p.id}/${m.id}`}>
+                  {m.name || m.id}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </Field>
+
+      <Field label={t('settings.general.approvalReviewPolicy')}>
+        <textarea
+          value={cfg.policy ?? ''}
+          onChange={(e) => update({ policy: e.target.value })}
+          placeholder={t('settings.general.approvalReviewPolicyPlaceholder')}
+          className={TEXTAREA}
+        />
+      </Field>
+
+      {/* Both fields keep "empty = follow the built-in default"; the resolved
+          default is shown as the placeholder so it stays visible without being
+          frozen into the config on save. */}
+      <div className="grid grid-cols-2 gap-3">
+        <Field label={t('settings.general.approvalReviewTimeout')}>
+          <input
+            type="number"
+            min={0}
+            value={cfg.timeout_seconds ? cfg.timeout_seconds : ''}
+            onChange={(e) => update({ timeout_seconds: e.target.value === '' ? 0 : parseInt(e.target.value, 10) })}
+            placeholder={defaults ? String(defaults.timeout_seconds) : ''}
+            className={INPUT}
+          />
+        </Field>
+        <Field label={t('settings.general.approvalReviewAuditPath')}>
+          <input
+            type="text"
+            value={cfg.audit_path ?? ''}
+            onChange={(e) => update({ audit_path: e.target.value })}
+            placeholder={defaults?.audit_path ?? ''}
+            className={INPUT_MONO}
+          />
+        </Field>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className={ROW}>
+          <div className="min-w-0 flex-1">
+            <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.general.approvalReviewInvestigate')}</div>
+            <div className="text-[11px] text-[var(--color-muted-foreground)]">{t('settings.general.approvalReviewInvestigateDesc')}</div>
+          </div>
+          <Switch on={!!cfg.investigate} onClick={() => update({ investigate: !cfg.investigate })} />
+        </div>
+        <div className={ROW}>
+          <div className="min-w-0 flex-1">
+            <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.general.approvalReviewReuseSession')}</div>
+            <div className="text-[11px] text-[var(--color-muted-foreground)]">{t('settings.general.approvalReviewReuseSessionDesc')}</div>
+          </div>
+          <Switch on={!!cfg.reuse_session} onClick={() => update({ reuse_session: !cfg.reuse_session })} />
+        </div>
+      </div>
+
+      {error && (
+        <div className="text-[11px] text-[var(--color-destructive)]">{t('settings.general.approvalReviewSaveFailed', { reason: error })}</div>
+      )}
+      {saved && <div className="text-[11px] text-[var(--color-success)]">{t('settings.general.approvalReviewSaved')}</div>}
+
+      <div className="flex justify-end">
+        <button type="button" disabled={saving} onClick={() => void save()} className={`${BTN_PRIMARY} ${BTN_SM}`}>
+          {saving ? t('common.loading') : t('common.save')}
+        </button>
       </div>
     </div>
   )

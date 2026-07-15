@@ -103,11 +103,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				case 0: // Approve once
 					m.resolveApproval(ToolApprovalResponse{Approved: true, Mode: ModeManual})
 				case 1: // Approve all
-					m.approvalMode = ModeAuto
+					m.promoteToFullAccess()
 					m.resolveApproval(ToolApprovalResponse{Approved: true, Mode: ModeAuto})
-					if m.OnApprovalModeChange != nil {
-						m.OnApprovalModeChange(true)
-					}
 				case 2: // Reject
 					m.lines = append(m.lines, textLine(fmt.Sprintf("   %s %s — user denied this operation",
 						toolErrorStyle.Render("⚠ Rejected:"),
@@ -120,11 +117,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				m.resolveApproval(ToolApprovalResponse{Approved: true, Mode: ModeManual})
 				return m, tea.Batch(cmds...)
 			case "a", "A":
-				m.approvalMode = ModeAuto
+				m.promoteToFullAccess()
 				m.resolveApproval(ToolApprovalResponse{Approved: true, Mode: ModeAuto})
-				if m.OnApprovalModeChange != nil {
-					m.OnApprovalModeChange(true)
-				}
 				return m, tea.Batch(cmds...)
 			case "n", "N", "esc":
 				// Event: Reject - deny the operation

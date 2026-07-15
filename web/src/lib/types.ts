@@ -500,11 +500,12 @@ export interface AskUserAnswer {
 // UI message types
 export type MessageRole = 'user' | 'assistant' | 'system'
 
-export type AgentMode = 'approval' | 'plan' | 'full_access'
+export type AgentMode = 'approval' | 'plan' | 'auto' | 'full_access'
 
 // normalizeMode maps a backend mode string to the UI's unified AgentMode.
 export function normalizeMode(m?: string): AgentMode {
   if (m === 'plan') return 'plan'
+  if (m === 'auto') return 'auto'
   if (m === 'full_access') return 'full_access'
   return 'approval'
 }
@@ -724,4 +725,29 @@ export interface ModelStateResponse {
   disabled_models: ModelRef[]
   // Per-"provider/model" reasoning-effort choices made from the chat picker.
   effort_overrides?: Record<string, string>
+}
+
+export interface ApprovalReviewConfig {
+  // '' = follow small_model, then the main model. 'small' = the small_model
+  // alias. Otherwise a concrete "provider/model" ref.
+  model?: string
+  policy?: string
+  // 0 = use defaults.timeout_seconds.
+  timeout_seconds?: number
+  investigate?: boolean
+  reuse_session?: boolean
+  // '' = use defaults.audit_path.
+  audit_path?: string
+}
+
+// ApprovalReviewDefaults carries the server's resolved built-in defaults, so
+// the settings form can show what an empty field actually does without
+// hardcoding the values. Never sent back on save.
+export interface ApprovalReviewDefaults {
+  timeout_seconds: number
+  audit_path: string
+}
+
+export interface ApprovalReviewConfigResponse extends ApprovalReviewConfig {
+  defaults?: ApprovalReviewDefaults
 }

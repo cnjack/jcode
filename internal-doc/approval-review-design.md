@@ -19,7 +19,7 @@ guardian 列为对标项,"model roles" 就是给这类新角色留的扩展位�
 
 | 维度 | codex guardian | jcode approval review(本期) |
 |---|---|---|
-| 触发 | `approvals_reviewer=auto_review` + on-request/granular | `approval_review.enabled` + Approval 模式下 `decide()→prompt` |
+| 触发 | `approvals_reviewer=auto_review` + on-request/granular | `Auto` 会话模式;`decide()→prompt` 的调用先过审查器 |
 | 模型 | 专用 `codex-auto-review`(服务端隐藏 slug)+ low effort | 复用 `small` 别名(→ small_model →主模型),可 override |
 | 输出 | 严格 JSON `{risk_level,user_authorization,outcome,rationale}` | 同结构(见下) |
 | 失败语义 | fail-closed(headless,无人可问) | **fail-open 到用户**(jcode 有交互 UI,回落问人更平滑) |
@@ -91,9 +91,10 @@ provider 按前缀命中缓存(大 policy 前缀 + 历史 verdict 免 prefill)�
 
 ## 配置
 
+`approval_review` 块不再包含 `enabled` 开关,它只作为审查器的**调参面板**。审查器在 `Auto` 会话模式下自动启用,在 `Ask for approval` / `Plan` / `Full access` 模式下不运行。
+
 ```jsonc
 "approval_review": {
-  "enabled": true,            // 开关;false=从不构造,行为不变
   "model": "small",           // 空→small_model→主模型;可写 provider/model
   "policy": "…",              // 追加到内置 policy 的 workspace 规则
   "timeout_seconds": 60,
@@ -105,8 +106,16 @@ provider 按前缀命中缓存(大 policy 前缀 + 历史 verdict 免 prefill)�
 
 落地位置:`internal/review/*`(引擎/policy/parse/audit/investigate/session_cache/build),
 `internal/config/config.go`(`ApprovalReviewConfig`),`internal/runner/{approval,review}.go`(seam+熔断),
-`internal/agent/{agent,middleware}.go`(`ReviewDeniedError`+文案),`internal/command/acp.go`(接线+
-transcript+OnTurnStart)。TUI/web 前端接线同法(本期先 ACP,PR 一并补)。
+`internal/agent/{agent,middleware}.go`(`ReviewDeniedError`+文案),`internal/command/{acp,interactive,web}.go`(接线+
+transcript+OnTurnStart)。TUI/web/ACP 前端均提供 `Auto` 模式选择。
+
+## Auto 模式
+
+`Auto` 是 Ask/Plan/Full access 之外的第四模式:
+- 使用完整工具集(同 Ask/Full access)。
+- 审批轴保持 `ModeManual`,因此审查器 escalate 的调用仍会弹窗。
+- 进入 `Auto` 时 `ApprovalState` 按需构建 reviewer;离开 `Auto` 时清除 reviewer,避免在非自动模式下消耗 token。
+- 未配置 `approval_review` 时,`Auto` 使用默认参数(`small` 别名、60s 超时、单发、无 investigate、无 reuse_session)构建 reviewer。
 
 ## 与现状审批机制的对比 / 改进空间
 
