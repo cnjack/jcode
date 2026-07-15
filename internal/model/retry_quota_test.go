@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -63,13 +64,13 @@ func TestClassifyQuotaVsRateLimit(t *testing.T) {
 // Retrying a spent balance just delays telling the user the one thing they can
 // act on.
 func TestQuotaIsNotRetryable(t *testing.T) {
-	if IsRetryable(nil, apiErr(402, "Payment Required")) {
+	if IsRetryable(context.TODO(), apiErr(402, "Payment Required")) {
 		t.Error("a 402 must not be retried — waiting does not refill a balance")
 	}
-	if !IsRetryable(nil, apiErr(429, "Rate limit reached")) {
+	if !IsRetryable(context.TODO(), apiErr(429, "Rate limit reached")) {
 		t.Error("a plain 429 must still be retried")
 	}
-	if IsRetryable(nil, apiErr(429, "You exceeded your current quota")) {
+	if IsRetryable(context.TODO(), apiErr(429, "You exceeded your current quota")) {
 		t.Error("a 429 that is really a quota error must not be retried")
 	}
 }

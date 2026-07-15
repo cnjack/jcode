@@ -205,8 +205,8 @@ func (f *FakeBackend) appendJournal(path string, act Action) {
 	if err != nil {
 		return
 	}
-	defer fh.Close()
 	_, _ = fh.Write(append(line, '\n'))
+	_ = fh.Close()
 }
 
 func (f *FakeBackend) Close() error {

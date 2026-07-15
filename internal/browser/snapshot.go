@@ -46,8 +46,6 @@ type axProp struct {
 // drift; see internal-doc/computer-use-design.md §3.1.
 type Snapshot = uitree.Snapshot
 
-const defaultMaxLines = uitree.DefaultMaxLines
-
 // buildSnapshot adapts a CDP AX tree into the shared uitree form and serializes
 // it. The CDP role vocabulary is already lowercase-ish and matches
 // uitree.InteractiveRoles directly, so no role mapping is needed here.
