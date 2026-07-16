@@ -471,15 +471,29 @@ const initialModel: ModelState = {
   maxIterations: 0,
 }
 
+// Recompute imageSupport from the providers list for the currently selected
+// model. Runs on every provider/model/providers change so the flag can never
+// go stale when the user switches models (picker selectModel, WS
+// model_changed). When the current model isn't in the list yet (providers not
+// loaded), the last value — seeded from /health at startup — is kept.
+function syncImageSupport(s: ModelState) {
+  const cur = s.providers
+    .find((p) => p.id === s.providerName)
+    ?.models.find((m) => m.id === s.modelName)
+  if (cur) s.imageSupport = !!cur.image_support
+}
+
 const modelSlice = createSlice({
   name: 'model',
   initialState: initialModel,
   reducers: {
     setProvider(s, a: { payload: string }) {
       s.providerName = a.payload
+      syncImageSupport(s)
     },
     setModel(s, a: { payload: string }) {
       s.modelName = a.payload
+      syncImageSupport(s)
     },
     setSmallModel(s, a: { payload: string }) {
       s.smallModel = a.payload
@@ -489,6 +503,7 @@ const modelSlice = createSlice({
     },
     setProviders(s, a: { payload: ProviderInfo[] }) {
       s.providers = a.payload
+      syncImageSupport(s)
     },
     setModelState(s, a: { payload: { recent: ModelRef[]; favorite: ModelRef[]; effortOverrides?: Record<string, string> } }) {
       s.recentModels = a.payload.recent

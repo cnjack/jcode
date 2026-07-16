@@ -10,7 +10,7 @@
  * permissions), Remote (SSH aliases), Usage (stats).
  *
  * The Providers tab is the most complete port: list of provider cards, inline
- * add/edit form with advanced fields (base_url, headers, vision, thinking,
+ * add/edit form with advanced fields (base_url, headers, thinking,
  * reasoning_effort), browsable model catalog with add/remove/toggle, and an
  * inline custom-model authoring form. Other tabs are functional CRUD ports of
  * the Vue logic.
@@ -967,7 +967,7 @@ function ProviderCard({
   )
 }
 
-/** Add/edit provider form with advanced config (base_url, headers, vision, thinking, reasoning_effort). */
+/** Add/edit provider form with advanced config (base_url, headers, thinking, reasoning_effort). */
 function ProviderForm({
   editing,
   setupList,
@@ -992,8 +992,17 @@ function ProviderForm({
   const [headers, setHeaders] = useState<{ key: string; value: string }[]>(
     Object.entries(editing?.headers ?? {}).map(([key, value]) => ({ key, value })),
   )
-  const [vision, setVision] = useState(!!editing?.vision)
-  const [thinking, setThinking] = useState(!!editing?.thinking)
+  // Thinking is a tri-state override for the qwen3-style enable_thinking
+  // request kwarg — only meaningful for custom (self-hosted) endpoints, so it
+  // is only shown and sent for custom providers. '' (Default) omits the field
+  // so the backend keeps nil and never sends the kwarg. Vision has no form
+  // control at all: image support is per-model metadata (registry modalities /
+  // custom-model attachment), and a provider-level override only served to
+  // silently strip images. Both fields use update-by-replacement on the
+  // backend, so simply not sending them clears any stale stored override.
+  const [thinking, setThinking] = useState<'' | 'on' | 'off'>(
+    editing?.thinking === true ? 'on' : editing?.thinking === false ? 'off' : '',
+  )
   const [reasoningEffort, setReasoningEffort] = useState(editing?.reasoning_effort ?? '')
   const [advancedOpen, setAdvancedOpen] = useState(
     !!(editing?.base_url || (editing?.headers && Object.keys(editing.headers).length)),
@@ -1005,6 +1014,9 @@ function ProviderForm({
   const availableSetup = setupList.filter((s) => !configuredIds.includes(s.id))
 
   const providerId = isEdit ? editing!.id : mode === 'custom' ? customId.trim() : selId
+  // Custom (non-registry) providers get the enable_thinking knob; registry
+  // providers derive everything from models.dev metadata.
+  const isCustomProvider = isEdit ? !!editing?.custom : mode === 'custom'
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
@@ -1020,13 +1032,16 @@ function ProviderForm({
     setSaving(true)
     try {
       const builtHeaders = buildHeaders(headers)
+      // '' (Default) → undefined so the JSON omits the override entirely.
+      // Vision is never sent: image support comes from model metadata, and
+      // omitting the field clears any stale stored override on save.
+      const thinkingOverride = !isCustomProvider || thinking === '' ? undefined : thinking === 'on'
       if (isEdit) {
         const data: Parameters<typeof api.updateProvider>[1] = {
           name: name || undefined,
           base_url: baseUrl || undefined,
           headers: Object.keys(builtHeaders).length ? builtHeaders : undefined,
-          vision,
-          thinking,
+          thinking: thinkingOverride,
           reasoning_effort: reasoningEffort || undefined,
         }
         if (apiKey.trim()) data.api_key = apiKey.trim()
@@ -1036,8 +1051,7 @@ function ProviderForm({
           id: providerId,
           api_key: apiKey.trim(),
           name: name || undefined,
-          vision,
-          thinking,
+          thinking: thinkingOverride,
           reasoning_effort: reasoningEffort || undefined,
           base_url: baseUrl || undefined,
           headers: Object.keys(builtHeaders).length ? builtHeaders : undefined,
@@ -1193,20 +1207,24 @@ function ProviderForm({
 
               <Field label={t('settings.providers.advanced')}>
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
-                    <div>
-                      <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.providers.supportImage')}</div>
-                      <div className="text-[10px] text-[var(--color-muted-foreground)]">{t('settings.providers.supportImageDesc')}</div>
+                  {isCustomProvider && (
+                    <div className="flex items-center justify-between rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
+                      <div>
+                        <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.providers.customReasoning')}</div>
+                        <div className="text-[10px] text-[var(--color-muted-foreground)]">{t('settings.providers.customReasoningDesc')}</div>
+                      </div>
+                      <select
+                        value={thinking}
+                        onChange={(e) => setThinking(e.target.value as '' | 'on' | 'off')}
+                        className={INPUT_SM}
+                        style={{ width: '8rem' }}
+                      >
+                        <option value="">Default</option>
+                        <option value="on">On</option>
+                        <option value="off">Off</option>
+                      </select>
                     </div>
-                    <Switch on={vision} onClick={() => setVision((v) => !v)} />
-                  </div>
-                  <div className="flex items-center justify-between rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
-                    <div>
-                      <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.providers.customReasoning')}</div>
-                      <div className="text-[10px] text-[var(--color-muted-foreground)]">{t('settings.providers.customReasoningDesc')}</div>
-                    </div>
-                    <Switch on={thinking} onClick={() => setThinking((v) => !v)} />
-                  </div>
+                  )}
                   <div className="flex items-center justify-between rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
                     <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.providers.supportReasoning')}</div>
                     <select
