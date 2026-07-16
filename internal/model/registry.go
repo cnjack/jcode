@@ -545,7 +545,7 @@ var staticProviders = map[string]*RegistryProvider{
 			"kimi-for-coding": {
 				ID: "kimi-for-coding", Name: "Kimi For Coding", Family: "kimi",
 				Attachment: true, Reasoning: true, ToolCall: true,
-				DefaultEnabled: true,
+				DefaultEnabled:   true,
 				Modalities:       &ModelModalities{Input: []string{"text", "image", "video"}, Output: []string{"text"}},
 				Limit:            &ModelLimit{Context: 262144, Output: 32768},
 				ReasoningOptions: standardEffortOptions(),
