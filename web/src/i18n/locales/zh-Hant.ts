@@ -5,6 +5,9 @@
 export default {
   common: {
     ok: '確定',
+    default: '預設',
+    on: '開啟',
+    off: '關閉',
     add: '添加',
     cancel: '取消',
     close: '關閉',

@@ -514,7 +514,7 @@ var staticProviders = map[string]*RegistryProvider{
 	// "kimi-for-coding" record, but its model ids (k2p5/k2p6/k2p7/kimi-k2-thinking)
 	// are undocumented aliases that the vendor's own /models endpoint does not
 	// advertise, so the provider is hand-written here instead of pulled through
-	// generate_models.go. The two ids below are the only ones the official
+	// generate_models.go. The three ids below are the ones the official
 	// OpenAI-compatible setup documents. Verified against the live endpoint
 	// 2026-07-15: tool calls work, reasoning_effort is honored, and every model
 	// rejects temperature != 1 (hence Temperature stays false — note models.dev
@@ -526,10 +526,26 @@ var staticProviders = map[string]*RegistryProvider{
 		API:  "https://api.kimi.com/coding/v1",
 		Doc:  "https://www.kimi.com/code/docs/third-party-tools/other-coding-agents.html",
 		Models: map[string]*RegistryModel{
+			// K3 is Moonshot's newest flagship: a 1,048,576-token context (4x the
+			// kimi-for-coding window) with deep reasoning on by default. Per the docs
+			// its thinking depth is the only one configurable via reasoning_effort,
+			// and only "max" is currently accepted (low/high are documented as
+			// planned but not yet live), so ReasoningOptions offers "max" alone.
+			// Requires a Moderato-or-above subscription (kimi-for-coding also works
+			// on the lower Andante tier). Output limit is unstated in the docs; it
+			// carries the family's 32768 default pending live confirmation.
+			"k3": {
+				ID: "k3", Name: "Kimi K3", Family: "kimi",
+				Attachment: true, Reasoning: true, ToolCall: true,
+				DefaultEnabled: true, Recommended: true,
+				Modalities:       &ModelModalities{Input: []string{"text", "image", "video"}, Output: []string{"text"}},
+				Limit:            &ModelLimit{Context: 1048576, Output: 32768},
+				ReasoningOptions: []ReasoningOption{{Type: "effort", Values: []string{"max"}}},
+			},
 			"kimi-for-coding": {
 				ID: "kimi-for-coding", Name: "Kimi For Coding", Family: "kimi",
 				Attachment: true, Reasoning: true, ToolCall: true,
-				DefaultEnabled: true, Recommended: true,
+				DefaultEnabled:   true,
 				Modalities:       &ModelModalities{Input: []string{"text", "image", "video"}, Output: []string{"text"}},
 				Limit:            &ModelLimit{Context: 262144, Output: 32768},
 				ReasoningOptions: standardEffortOptions(),

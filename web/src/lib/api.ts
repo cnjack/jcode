@@ -296,12 +296,14 @@ export const api = {
   // Provider management
   listProviders: () =>
     request<ProviderDetail[]>('/api/providers'),
-  addProvider: (data: { id: string; api_key: string; name?: string; model?: string; model_reasoning?: boolean; vision?: boolean; thinking?: boolean; reasoning_effort?: string } & ProviderAdvanced) =>
+  // vision is deliberately absent: image support is model metadata, and the
+  // backend treats an omitted field as "clear the stored override".
+  addProvider: (data: { id: string; api_key: string; name?: string; model?: string; model_reasoning?: boolean; thinking?: boolean; reasoning_effort?: string } & ProviderAdvanced) =>
     request<{ status: string }>('/api/providers', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  updateProvider: (id: string, data: { api_key?: string; name?: string; custom_models?: CustomModelDetail[]; vision?: boolean; thinking?: boolean; reasoning_effort?: string } & ProviderAdvanced) =>
+  updateProvider: (id: string, data: { api_key?: string; name?: string; custom_models?: CustomModelDetail[]; thinking?: boolean; reasoning_effort?: string } & ProviderAdvanced) =>
     request<{ status: string }>(`/api/providers/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify(data),

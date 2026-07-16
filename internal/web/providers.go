@@ -641,7 +641,61 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 	s.cfg = cfg
 	s.registry = model.NewModelRegistryWithConfig(cfg)
 
+	// Rebuild the agents of live engines currently running on this provider so
+	// connection-level changes (api_key, base_url, headers, vision, thinking,
+	// reasoning_effort) take effect immediately. The old agent captured a chat
+	// model built from the previous ProviderConfig — without a rebuild, e.g. a
+	// cleared vision override would keep silently stripping images until the
+	// next model/mode switch. createAgent re-reads the config from disk (already
+	// saved above), mirroring the MCP-reload rebuild path.
+	s.rebuildEnginesForProvider(id)
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// rebuildEnginesForProvider rebuilds the agent of every live engine whose
+// current model belongs to the given provider. Rebuild failures are logged and
+// skipped: the engine keeps its previous (stale but working) agent rather than
+// being left without one.
+func (s *Server) rebuildEnginesForProvider(providerID string) {
+	s.tasksMu.RLock()
+	engines := make([]*Engine, 0, len(s.tasks))
+	for _, e := range s.tasks {
+		engines = append(engines, e)
+	}
+	s.tasksMu.RUnlock()
+	if a := s.activeEngine(); a != nil {
+		found := false
+		for _, e := range engines {
+			if e == a {
+				found = true
+				break
+			}
+		}
+		if !found {
+			engines = append(engines, a)
+		}
+	}
+	for _, eng := range engines {
+		if eng.createAgent == nil {
+			continue
+		}
+		prov, mdl, _ := eng.modelSnapshot()
+		if prov != providerID {
+			continue
+		}
+		ag, err := eng.createAgent(prov, mdl)
+		if err != nil {
+			config.Logger().Printf("[web] provider %s update: agent rebuild failed for task %s: %v", providerID, eng.taskID, err)
+			continue
+		}
+		// Conditional install: a model switch that lands while createAgent runs
+		// outside emu built a newer agent from the already-updated config — it
+		// must not be clobbered with this now-stale one.
+		if !eng.setAgentIfModel(ag, prov, mdl) {
+			config.Logger().Printf("[web] provider %s update: task %s switched models mid-rebuild; skipping stale agent", providerID, eng.taskID)
+		}
+	}
 }
 
 // handleDeleteProvider removes a provider from the config.

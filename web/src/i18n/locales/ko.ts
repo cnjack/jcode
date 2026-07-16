@@ -4,6 +4,9 @@
 export default {
   common: {
     ok: '확인',
+    default: '기본값',
+    on: '켬',
+    off: '끔',
     add: '추가',
     cancel: '취소',
     close: '닫기',

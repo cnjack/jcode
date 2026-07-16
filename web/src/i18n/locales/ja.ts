@@ -4,6 +4,9 @@
 export default {
   common: {
     ok: 'OK',
+    default: 'デフォルト',
+    on: 'オン',
+    off: 'オフ',
     add: '追加',
     cancel: 'キャンセル',
     close: '閉じる',
