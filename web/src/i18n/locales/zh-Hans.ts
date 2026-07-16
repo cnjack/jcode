@@ -4,6 +4,9 @@
 export default {
   common: {
     ok: '确定',
+    default: '默认',
+    on: '开启',
+    off: '关闭',
     add: '添加',
     cancel: '取消',
     close: '关闭',

@@ -480,7 +480,14 @@ function syncImageSupport(s: ModelState) {
   const cur = s.providers
     .find((p) => p.id === s.providerName)
     ?.models.find((m) => m.id === s.modelName)
-  if (cur) s.imageSupport = !!cur.image_support
+  if (cur) {
+    s.imageSupport = !!cur.image_support
+  } else if (s.providers.length > 0) {
+    // Providers are loaded but the current model isn't among them (e.g. set
+    // via automation to an unlisted model) — don't carry the previous model's
+    // capability forward.
+    s.imageSupport = false
+  }
 }
 
 const modelSlice = createSlice({

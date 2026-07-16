@@ -9,6 +9,9 @@
 export default {
   common: {
     ok: 'OK',
+    default: 'Default',
+    on: 'On',
+    off: 'Off',
     add: 'Add',
     cancel: 'Cancel',
     close: 'Close',

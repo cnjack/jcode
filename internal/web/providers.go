@@ -689,7 +689,12 @@ func (s *Server) rebuildEnginesForProvider(providerID string) {
 			config.Logger().Printf("[web] provider %s update: agent rebuild failed for task %s: %v", providerID, eng.taskID, err)
 			continue
 		}
-		eng.setAgent(ag)
+		// Conditional install: a model switch that lands while createAgent runs
+		// outside emu built a newer agent from the already-updated config — it
+		// must not be clobbered with this now-stale one.
+		if !eng.setAgentIfModel(ag, prov, mdl) {
+			config.Logger().Printf("[web] provider %s update: task %s switched models mid-rebuild; skipping stale agent", providerID, eng.taskID)
+		}
 	}
 }
 

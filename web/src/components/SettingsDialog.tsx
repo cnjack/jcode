@@ -1219,9 +1219,9 @@ function ProviderForm({
                         className={INPUT_SM}
                         style={{ width: '8rem' }}
                       >
-                        <option value="">Default</option>
-                        <option value="on">On</option>
-                        <option value="off">Off</option>
+                        <option value="">{t('common.default')}</option>
+                        <option value="on">{t('common.on')}</option>
+                        <option value="off">{t('common.off')}</option>
                       </select>
                     </div>
                   )}

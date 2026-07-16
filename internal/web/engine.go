@@ -280,6 +280,20 @@ func (e *Engine) setAgent(ag *adk.ChatModelAgent) {
 	e.agent = ag
 }
 
+// setAgentIfModel installs ag only if the engine is still on provider/model.
+// Rebuild paths construct agents outside emu; if a model switch lands in that
+// window, its (newer) agent must win over the rebuild's stale one. Returns
+// whether the agent was installed.
+func (e *Engine) setAgentIfModel(ag *adk.ChatModelAgent, provider, model string) bool {
+	e.emu.Lock()
+	defer e.emu.Unlock()
+	if e.providerName != provider || e.modelName != model {
+		return false
+	}
+	e.agent = ag
+	return true
+}
+
 // resolveEngine returns the engine for taskID, or the active engine when taskID
 // is empty (legacy / no-task_id callers). Returns nil when taskID is unknown.
 func (s *Server) resolveEngine(taskID string) *Engine {
