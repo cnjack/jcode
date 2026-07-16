@@ -13,7 +13,7 @@ LDFLAGS := -s -w \
 
 export GOFLAGS := -buildvcs=false
 
-.PHONY: build build-binary run doctor version install clean build-web fmt lint lint-go lint-web generate setup-hooks desktop-icons desktop-sidecar desktop-dev desktop-build desktop-clean build-ble
+.PHONY: build build-binary run doctor version install clean build-web fmt lint lint-go lint-web generate setup-hooks desktop-icons desktop-sidecar desktop-dev desktop-build desktop-clean build-ble build-computerd
 
 fmt:
 	@echo "Formatting Go..."
@@ -71,6 +71,18 @@ BLE_CGO := $(if $(filter darwin,$(shell go env GOOS)),1,0)
 build-ble:
 	CGO_ENABLED=$(BLE_CGO) go build -tags ble -ldflags "$(LDFLAGS)" -o $(dir $(BIN))jcode-ble ./cmd/jcode-ble
 
+# Build the native computer-use helper daemon (Swift, macOS only) next to the
+# main binary. It reads accessibility trees, synthesizes input, and captures
+# windows behind the socket protocol in internal/computer/proto.go. macOS-only:
+# the helper is not implemented on other platforms. After this, computer use is
+# available at runtime once enabled in settings — no rebuild needed.
+build-computerd:
+ifeq ($(shell go env GOOS),darwin)
+	swiftc -O -o $(dir $(BIN))jcode-computerd ./cmd/jcode-computerd/main.swift
+else
+	@echo "jcode-computerd is macOS only; skipping on $(shell go env GOOS)"
+endif
+
 install: generate build-web
 	go install -ldflags "$(LDFLAGS)" $(PKG)
 
@@ -121,6 +133,10 @@ desktop-sidecar: generate
 	go build -tags "jcode_headless desktop" -ldflags "$(LDFLAGS)" -o $(SIDECAR_DIR)/jcode-$(RUST_TARGET)$(SIDECAR_EXE) $(PKG)
 	@echo "Building jcode-ble helper for $(RUST_TARGET)..."
 	CGO_ENABLED=$(BLE_CGO) go build -tags ble -ldflags "$(LDFLAGS)" -o $(SIDECAR_DIR)/jcode-ble-$(RUST_TARGET)$(SIDECAR_EXE) ./cmd/jcode-ble
+ifeq ($(shell go env GOOS),darwin)
+	@echo "Building jcode-computerd helper for $(RUST_TARGET)..."
+	swiftc -O -o $(SIDECAR_DIR)/jcode-computerd-$(RUST_TARGET)$(SIDECAR_EXE) ./cmd/jcode-computerd/main.swift
+endif
 
 # Run the desktop app in development (hot window; rebuilds the sidecar first).
 desktop-dev: desktop-sidecar

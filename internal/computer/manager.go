@@ -42,11 +42,15 @@ const defaultMaxBatch = 20
 // close it. (browser/manager.go makes the same split: backends are expensive to
 // start — a Chrome launch, a daemon handshake — and are reused across tasks.)
 type Manager struct {
-	mu      sync.Mutex
-	cfg     Config
-	shotDir string
+	mu        sync.Mutex
+	cfg       Config
+	shotDir   string
+	configDir string // <home>/.jcode — where the helper socket/token live
 
 	backend Backend
+	// helper is the cached daemon connection, reused across sessions (a TCC
+	// prompt should happen once, not once per task). nil until first use.
+	helper *helperBackend
 	// fake is injected by tests and by the agent-eval harness (backend=fake).
 	fake Backend
 }
@@ -57,9 +61,46 @@ func NewManager(cfg Config, home string) *Manager {
 		home, _ = os.UserHomeDir()
 	}
 	return &Manager{
-		cfg:     cfg,
-		shotDir: filepath.Join(home, ".jcode", "computer", "shots"),
+		cfg:       cfg,
+		shotDir:   filepath.Join(home, ".jcode", "computer", "shots"),
+		configDir: filepath.Join(home, ".jcode"),
 	}
+}
+
+// getHelper returns the cached daemon connection, dialing (and spawning the
+// daemon) on first use. The connection is reused across sessions so a TCC prompt
+// happens once, not once per task.
+//
+// TODO(phase 2): liveness — ping the cached connection and re-dial if the daemon
+// crashed, mirroring browser/manager's getManaged alive() loop. For now a dead
+// daemon surfaces as an error on the next call, which the tool layer reports;
+// the reconnect is deferred with the rest of the native work.
+func (m *Manager) getHelper(ctx context.Context) (*helperBackend, error) {
+	m.mu.Lock()
+	if m.helper != nil {
+		h := m.helper
+		m.mu.Unlock()
+		return h, nil
+	}
+	dir := m.configDir
+	m.mu.Unlock()
+
+	hb, err := dialHelper(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	// Another OpenSession may have raced us; keep the first winner.
+	if m.helper == nil {
+		m.helper = hb
+		m.backend = hb
+		m.mu.Unlock()
+		return hb, nil
+	}
+	winner := m.helper
+	m.mu.Unlock()
+	_ = hb.Close() // discard the loser's connection + daemon
+	return winner, nil
 }
 
 // SetConfig hot-swaps the configuration (the settings endpoint calls this, so
@@ -157,16 +198,26 @@ func (m *Manager) OpenSession(ctx context.Context) (*Session, error) {
 		}
 		b = fake
 	case "helper":
-		return nil, fmt.Errorf("the helper backend is not implemented yet; see internal-doc/computer-use-design.md §2.2")
+		hb, err := m.getHelper(ctx)
+		if err != nil {
+			return nil, err
+		}
+		b = hb
 	case "osa":
-		return nil, fmt.Errorf("the osascript backend is not implemented yet; see internal-doc/computer-use-design.md §10.1")
+		return nil, fmt.Errorf("the osascript backend is not implemented; the helper daemon is the shipping path (see internal-doc/computer-helper-design.md §5.1)")
 	case "auto":
+		// Fake wins when injected (agent-eval / tests). Otherwise the helper
+		// daemon is the real backend; on a platform without one, this surfaces a
+		// clear message rather than a dial error.
 		if fake != nil {
 			b = fake
 			break
 		}
-		return nil, fmt.Errorf("no computer-use backend is available on this machine yet " +
-			"(the helper daemon is not implemented; see internal-doc/computer-use-design.md §2.1)")
+		hb, err := m.getHelper(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("no computer-use backend available: %w", err)
+		}
+		b = hb
 	default:
 		return nil, fmt.Errorf("unknown computer backend %q (want auto, helper, osa or fake)", kind)
 	}
@@ -295,8 +346,21 @@ func (m *Manager) ScreenshotPath(id string) (string, error) {
 func (m *Manager) Close() error {
 	m.mu.Lock()
 	b := m.backend
+	h := m.helper
 	m.backend = nil
+	m.helper = nil
 	m.mu.Unlock()
+	// helper and backend may be the same object; close each at most once.
+	if h != nil {
+		err := h.Close()
+		if b == Backend(h) {
+			return err
+		}
+		if b != nil {
+			_ = b.Close()
+		}
+		return err
+	}
 	if b != nil {
 		return b.Close()
 	}
