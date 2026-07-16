@@ -279,56 +279,100 @@ func axString(_ el: AXUIElement, _ attr: String) -> String {
     return ""
 }
 
-func axBool(_ el: AXUIElement, _ attr: String) -> Bool {
-    var v: CFTypeRef?
-    if AXUIElementCopyAttributeValue(el, attr as CFString, &v) == .success, let b = v as? Bool {
-        return b
+// axBatch reads several attributes of one element in a single cross-process call
+// via AXUIElementCopyMultipleAttributeValues — the difference between a snapshot
+// taking 200ms and 2s on a large tree, because each individual attribute read is
+// its own cross-process round-trip (design §3.3). Missing attributes come back as
+// an AXError placeholder, which simply fails the `as?` cast below → default.
+func axBatch(_ el: AXUIElement, _ attrs: [String]) -> [CFTypeRef] {
+    var values: CFArray?
+    let r = AXUIElementCopyMultipleAttributeValues(
+        el, attrs as CFArray, AXCopyMultipleAttributeOptions(rawValue: 0), &values)
+    guard r == .success, let arr = values as? [CFTypeRef], arr.count == attrs.count else {
+        return []
     }
-    return false
+    return arr
 }
 
-// TreeBuilder walks an app's AX tree into flat Nodes, assigning each element a
-// stable-for-this-session Ref backed by a table (design §1.1: AXUIElement is an
-// ephemeral CFTypeRef, so the daemon owns the handle table and the Go side sees
-// only the int64).
+// ElementKey makes an AXUIElement hashable via CFEqual/CFHash so it can key the
+// ref table. Two AXUIElements pointing at the same UI element compare equal, so
+// the same element gets the same Ref across snapshots.
+struct ElementKey: Hashable {
+    let element: AXUIElement
+    static func == (l: ElementKey, r: ElementKey) -> Bool { CFEqual(l.element, r.element) }
+    func hash(into h: inout Hasher) { h.combine(CFHash(element)) }
+}
+
+// ElementRegistry gives each AXUIElement a Ref that is STABLE for the session's
+// lifetime — the same element seen in two snapshots gets the same Ref, and an
+// element that disappears keeps its (now-dead) Ref reserved, never reissued.
+//
+// This is load-bearing, and the naive version (a fresh counter per snapshot)
+// gets it wrong: uitree above the line uses Ref as element identity, so a Ref
+// that changed for the same button would make every uid churn on every snapshot,
+// break the diff, and defeat stale-uid detection. Persisting element→Ref is what
+// lets uitree's "same element keeps its uid, departed element's uid retires"
+// property actually hold (design §1.1, §9.1).
+final class ElementRegistry {
+    private var byElement: [ElementKey: Int64] = [:]
+    private var byRef: [Int64: AXUIElement] = [:]
+    private var nextRef: Int64 = 100
+
+    func refFor(_ el: AXUIElement) -> Int64 {
+        let key = ElementKey(element: el)
+        if let r = byElement[key] { return r }
+        nextRef += 1
+        byElement[key] = nextRef
+        byRef[nextRef] = el
+        return nextRef
+    }
+
+    func element(_ ref: Int64) -> AXUIElement? { byRef[ref] }
+}
+
+// TreeBuilder walks an app's AX tree into flat Nodes, one batched read per node,
+// assigning each actionable element a session-stable Ref from the registry.
 final class TreeBuilder {
     private(set) var nodes: [Node] = []
-    private(set) var refs: [Int64: AXUIElement] = [:]
-    private var nextRef: Int64 = 100
+    private let registry: ElementRegistry
     private var nextID = 0
 
-    func build(_ root: AXUIElement) {
-        _ = walk(root)
-    }
+    // The attributes read per node, in a fixed order axBatch returns them in.
+    private let attrs: [String] = [
+        kAXRoleAttribute, kAXTitleAttribute, kAXValueAttribute,
+        kAXFocusedAttribute, kAXEnabledAttribute, kAXChildrenAttribute,
+    ]
+
+    init(registry: ElementRegistry) { self.registry = registry }
+
+    func build(_ root: AXUIElement) { _ = walk(root) }
 
     private func walk(_ el: AXUIElement) -> String {
         nextID += 1
         let id = String(nextID)
-        let role = axString(el, kAXRoleAttribute)
+
+        let v = axBatch(el, attrs) // one cross-process round-trip for this node
+        let role = v.count > 0 ? (v[0] as? String ?? "") : axString(el, kAXRoleAttribute)
+        let title = v.count > 1 ? (v[1] as? String ?? "") : ""
+        let value = v.count > 2 ? (v[2] as? String ?? "") : ""
+        let focused = v.count > 3 ? (v[3] as? Bool ?? false) : false
+        let enabled = v.count > 4 ? (v[4] as? Bool ?? true) : true
+        let children = v.count > 5 ? (v[5] as? [AXUIElement] ?? []) : []
 
         var ref: Int64 = 0
-        // Only actionable elements get a ref/handle (mirrors uitree: a node the
-        // backend can't resolve should not get a uid).
-        if isActionable(role) {
-            nextRef += 1
-            ref = nextRef
-            refs[ref] = el
-        }
+        // Only actionable elements get a ref (mirrors uitree: a node the backend
+        // can't resolve should not get a uid).
+        if isActionable(role) { ref = registry.refFor(el) }
 
         var childIDs: [String] = []
-        var kids: CFTypeRef?
-        if AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &kids) == .success,
-           let arr = kids as? [AXUIElement] {
-            for k in arr { childIDs.append(walk(k)) }
-        }
+        for k in children { childIDs.append(walk(k)) }
 
         var states: [NodeState] = []
-        if axBool(el, kAXFocusedAttribute) { states.append(NodeState(Name: "focused", Value: "true")) }
-        if !axBool(el, kAXEnabledAttribute) { states.append(NodeState(Name: "disabled", Value: "true")) }
+        if focused { states.append(NodeState(Name: "focused", Value: "true")) }
+        if !enabled { states.append(NodeState(Name: "disabled", Value: "true")) }
 
         nodes.append(Node(
-            ID: id, Role: role, Name: axString(el, kAXTitleAttribute),
-            Value: axString(el, kAXValueAttribute), States: states,
+            ID: id, Role: role, Name: title, Value: value, States: states,
             ChildIDs: childIDs, Ref: ref, Ignored: false))
         return id
     }
@@ -350,11 +394,11 @@ func handleTree(_ req: TreeRequest, _ session: Session) throws -> TreeResult {
         throw DaemonError(code: Code.permissionsNotGranted,
                           message: "Accessibility permission not granted. Grant it in System Settings › Privacy & Security › Accessibility.")
     }
+    try checkScreenUnlocked()
     let app = try runningApp(req.app)
     let axApp = AXUIElementCreateApplication(app.processIdentifier)
-    let builder = TreeBuilder()
+    let builder = TreeBuilder(registry: session.registry(for: req.app))
     builder.build(axApp)
-    session.refTable[req.app] = builder.refs
     session.gen += 1
     return TreeResult(nodes: builder.nodes, gen: session.gen)
 }
@@ -362,16 +406,17 @@ func handleTree(_ req: TreeRequest, _ session: Session) throws -> TreeResult {
 // MARK: - Perform (input synthesis + AX actions)
 
 func handlePerform(_ req: PerformRequest, _ session: Session) throws {
+    try checkScreenUnlocked()
     let a = req.action
     switch a.kind {
     case "set_value":
-        guard let ref = a.ref, let el = session.refTable[a.bundle_id]?[ref] else {
+        guard let ref = a.ref, let el = session.registry(for: a.bundle_id).element(ref) else {
             throw DaemonError(code: Code.accessibilityError, message: "no live element for ref")
         }
         let r = AXUIElementSetAttributeValue(el, kAXValueAttribute as CFString, (a.value ?? "") as CFString)
         if r != .success { throw DaemonError(code: Code.accessibilityError, message: "set_value failed: \(r.rawValue)") }
     case "menu":
-        guard let ref = a.ref, let el = session.refTable[a.bundle_id]?[ref], let name = a.name else {
+        guard let ref = a.ref, let el = session.registry(for: a.bundle_id).element(ref), let name = a.name else {
             throw DaemonError(code: Code.accessibilityError, message: "menu needs a live element and an action name")
         }
         let r = AXUIElementPerformAction(el, name as CFString)
@@ -386,6 +431,32 @@ func handlePerform(_ req: PerformRequest, _ session: Session) throws {
         try synthScroll(a)
     default:
         throw DaemonError(code: Code.unknown, message: "unsupported action: \(a.kind)")
+    }
+
+    // Auto-wait: give the UI a moment to settle before returning, so the next
+    // snapshot the agent takes reflects this action's effect rather than racing
+    // it (design §7: retry-until-settled, ~1s baseline). A fixed short settle is
+    // the pragmatic form; a fuller implementation would poll the tree for
+    // stability and extend under a loading indicator. Reads (list/tree/capture)
+    // do not settle — only actions that mutate the UI.
+    settleUI()
+}
+
+// settleUI blocks briefly to let synthesized input propagate and the UI redraw.
+// Kept small (actions are frequent); the parent design's up-to-5s extension
+// under a loading indicator is phase-2 polish.
+func settleUI() {
+    Thread.sleep(forTimeInterval: 0.6)
+}
+
+// checkScreenUnlocked refuses to act while the screen is locked. An agent
+// driving a machine its owner believes is secured is not a feature (design §8);
+// this is a fail-safe (stop), enforced here because only the daemon can see the
+// live session state.
+func checkScreenUnlocked() throws {
+    if let dict = CGSessionCopyCurrentDictionary() as? [String: Any],
+       let locked = dict["CGSSessionScreenIsLocked"] as? Int, locked == 1 {
+        throw DaemonError(code: Code.screenLocked, message: "the screen is locked")
     }
 }
 
@@ -546,10 +617,20 @@ func handleCapture(_ req: AppRequest, _ session: Session) throws -> CaptureResul
 // MARK: - Session + dispatch
 
 final class Session {
-    var refTable: [String: [Int64: AXUIElement]] = [:]
+    private var registries: [String: ElementRegistry] = [:]
     var gen = 0
     let shotsDir: String
     init(shotsDir: String) { self.shotsDir = shotsDir }
+
+    // registry(for:) returns the per-app element registry, creating it on first
+    // use. It persists across snapshots so an element keeps its Ref (see
+    // ElementRegistry).
+    func registry(for app: String) -> ElementRegistry {
+        if let r = registries[app] { return r }
+        let r = ElementRegistry()
+        registries[app] = r
+        return r
+    }
 }
 
 func dispatch(_ req: Envelope, _ session: Session) -> Envelope {
@@ -661,9 +742,30 @@ func runServer(socketPath: String, tokenFile: String, shotsDir: String) {
     chmod(socketPath, 0o600)
     if listen(fd, 4) < 0 { perror("listen"); exit(1) }
 
-    // Idle self-exit: a crashed jcode must not leave an automation daemon
-    // running. Reset on each accept; bail after the window with no connections.
+    // Idle self-exit: a crashed jcode must not leave an automation daemon running
+    // (design §5, §8 — it bounds the window in which the daemon exists). accept()
+    // is given a receive timeout; if no client connects within the idle window,
+    // the daemon exits. The timeout resets every time a client connects and
+    // disconnects, so an active session keeps it alive.
+    // The idle window is overridable via env (milliseconds) so the timeout is
+    // testable without waiting the full production interval. poll() is used
+    // rather than SO_RCVTIMEO because the latter's effect on accept() is not
+    // reliable across platforms; poll on the listening fd is.
+    let idleMS = Int32(Int(ProcessInfo.processInfo.environment["JCODE_COMPUTERD_IDLE_MS"] ?? "")
+        ?? (idleTimeoutSeconds * 1000))
+
     while true {
+        var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+        let pr = poll(&pfd, 1, idleMS)
+        if pr == 0 {
+            // Idle window elapsed with no connection. Exit cleanly.
+            unlink(socketPath)
+            exit(0)
+        }
+        if pr < 0 {
+            if errno == EINTR { continue }
+            continue
+        }
         let client = accept(fd, nil, nil)
         if client < 0 { continue }
         // One connection at a time — UI automation is a serial resource, and the
@@ -672,6 +774,11 @@ func runServer(socketPath: String, tokenFile: String, shotsDir: String) {
         serveConnection(client, token: token, shotsDir: shotsDir)
     }
 }
+
+// idleTimeoutSeconds bounds how long the daemon waits for a connection before
+// exiting. Long enough that a user pausing between tasks doesn't pay a respawn;
+// short enough that a crashed jcode's daemon doesn't linger.
+let idleTimeoutSeconds = 300
 
 // MARK: - main
 

@@ -1,6 +1,15 @@
 # Computer-Use Helper — Cross-Platform Native Backend Design
 
-Status: proposed · 2026-07-16 · Extends `internal-doc/computer-use-design.md` §2.2, §9
+Status: **partially implemented (macOS)** · 2026-07-16 · Extends
+`internal-doc/computer-use-design.md` §2.2, §9
+
+> **Implementation status.** Phase 1 (Go protocol + `helperBackend` + mock tests)
+> and most of phase 2 (the macOS Swift daemon) are **built and tested** — see §11
+> for the per-requirement matrix. The Go client is fully unit-tested against a
+> mock; the real Swift daemon is proven over a real socket for the no-TCC paths;
+> the AX/CGEvent/SCK paths compile and return correct errors without a grant but
+> are not exercised under a real TCC grant (that needs a manual grant this
+> environment can't automate). Windows is designed here but **not implemented**.
 
 The `computer-use` feature ships today on `FakeBackend` only. This document
 designs the **real** backend: a native helper process that reads accessibility
@@ -121,13 +130,17 @@ ephemeral pointer. The research says both are ephemeral:
 
 - **macOS**: an `AXUIElement` is a `CFTypeRef`. It is *not* serializable and its
   validity across calls is not guaranteed once the tree mutates. So the helper
-  cannot hand the Go side "the element" — it must hand back an **opaque handle it
-  itself keeps a table for**: `Ref int64` → a retained `AXUIElement` in a
-  per-session map, invalidated when the tree is re-read. Staleness is detected by
-  the table, not by the reference: a re-read mints a fresh table, and a handle
-  from an older generation is simply absent — the same "absence = stale" property
-  `uitree` already relies on (parent §3.1). A dead `AXUIElement` also surfaces its
-  own error on use, as a backstop.
+  cannot hand the Go side "the element" — it hands back an **opaque `Ref int64`
+  backed by a per-session table keyed on element identity** (`CFEqual`/`CFHash`).
+  This detail is load-bearing, and my first draft got it wrong: it said the table
+  was *rebuilt fresh each snapshot*. That would churn every uid on every snapshot
+  and defeat stale-uid detection, because uitree above the line uses the Ref *as*
+  the element's identity. The table must instead **persist**: the same element
+  seen in two snapshots gets the same Ref, and a departed element keeps its Ref
+  reserved, never reissued. That is exactly what makes uitree's "same element
+  keeps its uid, departed element's uid retires" hold across the line. A dead
+  `AXUIElement` surfaces its own error on use, as a backstop. (Built as
+  `ElementRegistry` in the daemon; caught during implementation, §11.)
 - **Windows**: `IUIAutomationElement.GetRuntimeId()` returns an int array, but
   Microsoft's own doc says it is **only unique within the desktop session and is
   reused** once an element is destroyed — so it is emphatically *not* a durable
@@ -666,3 +679,43 @@ Remaining lower-stakes details (exact `AXObserver` timing constants, the full
 `kAXRole` → `uitree` role table) are left to implementation phase 2 (§7), where
 they are cheap to pin against the real API.
 </content>
+
+---
+
+## 11. Implementation status (2026-07-16)
+
+Per-requirement, so a reader knows exactly what runs and what is still design.
+
+| Requirement | §ref | Status | Where |
+|---|---|---|---|
+| Wire protocol (framing, envelope, handshake, error taxonomy) | §2,§3 | ✅ built + unit-tested | `internal/computer/proto.go` |
+| `helperBackend` — 9 methods, one-in-flight, ctx honor, token auth | §1,§3,§4 | ✅ built + unit-tested | `internal/computer/helper.go` |
+| dial / lazy-spawn / cache-reuse | §5 | ✅ built (macOS) | `internal/computer/helper_dial.go` |
+| mock daemon over net.Pipe (full client coverage) | §7.1 | ✅ | `internal/computer/helper_test.go` |
+| **Real Go↔Swift integration over a socket** | §7.2 | ✅ tested (no-TCC paths) | `internal/computer/helper_smoke_test.go` |
+| Swift daemon: NSWorkspace apps/frontmost/launch, clipboard | §3.2 | ✅ runs (no TCC needed) | `cmd/jcode-computerd/main.swift` |
+| Swift daemon: AXUIElement tree, set_value, named actions | §3.2 | ✅ compiles, correct error without grant; ⚠ not driven under a grant | ″ |
+| Swift daemon: CGEventPost mouse/keyboard/scroll | §3.2 | ✅ compiles; ⚠ not driven under a grant | ″ |
+| Swift daemon: ScreenCaptureKit window capture | §3.4 | ✅ compiles; ⚠ not driven under a grant | ″ |
+| **Element Ref stable across snapshots** (element→ref table) | §1.1,§9.1 | ✅ built; ⚠ end-to-end needs TCC | `ElementRegistry` in daemon |
+| **Batch attribute read** (`CopyMultipleAttributeValues`) | §3.3 | ✅ built | `axBatch` in daemon |
+| **Auto-wait** (settle after an action) | §7,§9 | ✅ built (fixed settle; loading-indicator extend deferred) | `settleUI` in daemon |
+| **Idle self-exit** | §5,§8 | ✅ built + tested | daemon accept loop; `TestSmokeDaemonIdleExit` |
+| **screenLocked kill switch** | §8 | ✅ built; ⚠ lock-screen path not automatable in test | `checkScreenUnlocked` in daemon |
+| tree diff on the Go side | §3.3 | ✅ (pre-existing) | `Session.Snapshot` |
+| coordinate contract (points; pointPixelScale on capture) | §3.4 | ✅ built | `captureWindow` in daemon |
+| Peer auth: first-frame token | §4 | ✅ built + tested (real daemon rejects bad token) | daemon + client |
+| Peer auth: SecCode/team-id hardening on top of token | §4 | ⬜ deferred | — |
+| liveness / reconnect of a crashed daemon | §5 | ⬜ deferred (TODO in getHelper) | — |
+| Developer ID signing + notarization | §6,§7.3 | ⬜ deferred (phase 3) | — |
+| Info.plist usage-description strings | §6 | ⬜ deferred (phase 3) | — |
+| Windows (named pipe, UIA, SendInput, SDDL/SID auth) | all | ⬜ not implemented (out of scope) | — |
+
+**The honest gaps**, restated plainly: nothing here has been driven under a real
+Accessibility/Screen-Recording grant, so tree/input/capture are "compiles and
+fails correctly without permission" rather than "verified to drive a real app";
+peer auth is the token alone (sound, but the SecCode belt is not on yet); a
+crashed daemon is not yet auto-reconnected; and distribution (signing, Info.plist,
+the settings install button) is phase 3. None of these block the phase-1/2
+architecture, which is proven end to end for everything that does not require a
+human to click Allow in System Settings.

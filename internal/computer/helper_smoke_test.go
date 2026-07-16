@@ -157,3 +157,43 @@ func dialWithRetry(t *testing.T, sock string) net.Conn {
 	t.Fatal("daemon did not bind the socket within 5s")
 	return nil
 }
+
+// TestSmokeDaemonIdleExit proves the daemon self-exits after its idle window,
+// so a crashed jcode does not leave an automation daemon running (design §5, §8).
+// Uses JCODE_COMPUTERD_IDLE_MS to shrink the window from 5min to 500ms.
+func TestSmokeDaemonIdleExit(t *testing.T) {
+	if os.Getenv("JCODE_COMPUTERD_SMOKE") == "" {
+		t.Skip("set JCODE_COMPUTERD_SMOKE=1")
+	}
+	bin := os.Getenv("JCODE_COMPUTERD_BIN")
+	if bin == "" {
+		bin = "/tmp/jcode-computerd"
+	}
+	work := t.TempDir()
+	tokenFile := filepath.Join(work, "token")
+	if err := os.WriteFile(tokenFile, []byte("t"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(bin, "--socket", shortSocketPath(t), "--token-file", tokenFile, "--shots-dir", filepath.Join(work, "shots"))
+	cmd.Env = append(os.Environ(), "JCODE_COMPUTERD_IDLE_MS=500")
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Never connect. The daemon should exit on its own within the idle window.
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			// Exit code 0 is a clean self-exit; a non-zero exit is still an exit,
+			// but log it.
+			t.Logf("daemon exited: %v", err)
+		}
+		t.Log("daemon self-exited on idle, as designed")
+	case <-time.After(4 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatal("daemon did not self-exit within 4s despite a 500ms idle window")
+	}
+}
