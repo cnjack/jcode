@@ -1,0 +1,801 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>jcode · Dynamic Workflow 进度面板设计稿</title>
+<style>
+/* ════════════════════════════════════════════════════════════════════
+   Design Tokens — verbatim copy of web/src/styles/tokens.css (light + dark).
+   所有颜色/圆角/阴影/动效均来自此处，原型不硬编码任何颜色。
+   ════════════════════════════════════════════════════════════════════ */
+:root {
+  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius-xs: 3px; --radius-sm: 4px; --radius-md: 6px;
+  --radius-lg: 8px; --radius-xl: 12px; --radius-2xl: 16px; --radius-pill: 9999px;
+  --shadow-sm: 0 1px 2px rgba(24,20,16,.06);
+  --shadow-md: 0 4px 14px -4px rgba(24,20,16,.12);
+  --shadow-lg: 0 14px 36px -14px rgba(24,20,16,.20);
+  --shadow-xl: 0 1px 2px rgba(24,20,16,.04), 0 24px 56px -28px rgba(24,20,16,.26);
+  --backdrop: rgba(20,18,16,.5);
+  --accent-wash-soft: color-mix(in srgb, var(--color-primary) 8%, transparent);
+  --accent-wash: color-mix(in srgb, var(--color-primary) 11%, transparent);
+  --accent-wash-strong: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  --accent-border: color-mix(in srgb, var(--color-primary) 30%, transparent);
+  --color-accent-neutral: var(--color-foreground);
+  --neutral-wash-soft: color-mix(in srgb, var(--color-foreground) 8%, transparent);
+  --neutral-wash: color-mix(in srgb, var(--color-foreground) 11%, transparent);
+  --neutral-wash-strong: color-mix(in srgb, var(--color-foreground) 16%, transparent);
+  --neutral-border: color-mix(in srgb, var(--color-foreground) 30%, transparent);
+  --color-border-active: var(--color-primary);
+  --icon-stroke: 2;
+  --color-success: #16A34A;
+  --z-sidebar:30; --z-header:20; --z-dropdown:40; --z-modal:50; --z-toast:60;
+  --ease-out: cubic-bezier(.16,1,.3,1);
+  --ease-in: cubic-bezier(.7,0,.84,0);
+  --ease-spring: cubic-bezier(.34,1.56,.64,1);
+  --duration-fast:100ms; --duration-normal:150ms; --duration-slow:300ms; --duration-slower:500ms;
+  --sidebar-width:20rem; --sidebar-collapsed-width:0px; --header-height:3.25rem;
+  /* light */
+  --color-primary:#FF8400; --color-background:#F2F3F0; --color-surface:#FFFFFF;
+  --color-foreground:#111111; --color-muted-foreground:#666666; --color-border:#CBCCC9;
+  --color-muted:#F2F3F0; --color-secondary:#E7E8E5; --color-secondary-foreground:#111111;
+  --color-success-bg:#DFE6E1; --color-success-fg:#004D1A;
+  --color-error-bg:#E5DCDA; --color-error-fg:#8C1C00;
+  --color-warning-bg:#E9E3D8; --color-warning-fg:#804200;
+  --color-info-bg:#DFDFE6; --color-info-fg:#000066;
+  --color-destructive:#D93C15; --color-sidebar-bg:#FAFAF8;
+  --color-on-primary:#FFFFFF; --color-on-destructive:#FFFFFF;
+  --code-bg:#f6f8fa; --code-border:#d0d7de;
+}
+.dark {
+  --color-primary:#FF8400; --color-background:#111111; --color-surface:#1A1A1A;
+  --color-foreground:#FFFFFF; --color-muted-foreground:#B8B9B6; --color-border:#2E2E2E;
+  --color-muted:#2E2E2E; --color-secondary:#2E2E2E; --color-secondary-foreground:#FFFFFF;
+  --color-success-bg:#222924; --color-success-fg:#B6FFCE;
+  --color-error-bg:#24100B; --color-error-fg:#FF5C33;
+  --color-warning-bg:#291C0F; --color-warning-fg:#FF8400;
+  --color-info-bg:#222229; --color-info-fg:#B2B2FF;
+  --color-destructive:#FF5C33; --color-sidebar-bg:#1A1A1A; --color-success:#22C55E;
+  --color-on-primary:#FFFFFF; --color-on-destructive:#FFFFFF;
+  --code-bg:#1A1A1A; --code-border:var(--color-border);
+}
+
+/* ── Page chrome ── */
+*{box-sizing:border-box}
+html{background:var(--color-background);transition:background var(--duration-normal)}
+body{margin:0;font-family:var(--font-sans);color:var(--color-foreground);
+  -webkit-font-smoothing:antialiased;min-height:100vh;
+  display:flex;flex-direction:column;align-items:center;
+  padding:18px 14px 80px}
+
+/* Top toolbar (design-only controls) */
+.toolbar{width:100%;max-width:1180px;display:flex;align-items:center;gap:12px;
+  flex-wrap:wrap;margin-bottom:16px}
+.toolbar h1{font-size:14px;font-weight:600;margin:0;letter-spacing:-.01em;
+  display:flex;align-items:center;gap:8px}
+.toolbar h1 .tag{font-size:10px;font-family:var(--font-mono);font-weight:500;
+  color:var(--color-muted-foreground);background:var(--color-muted);
+  padding:2px 7px;border-radius:var(--radius-pill)}
+.toolbar .spacer{flex:1}
+.scene-bar{display:inline-flex;background:var(--color-surface);border:1px solid var(--color-border);
+  border-radius:var(--radius-md);padding:2px;gap:2px}
+.scene-btn{height:28px;padding:0 12px;border:none;background:transparent;
+  border-radius:var(--radius-sm);font-size:11.5px;font-weight:500;
+  color:var(--color-muted-foreground);cursor:pointer;font-family:var(--font-sans);
+  transition:background var(--duration-fast),color var(--duration-fast)}
+.scene-btn:hover{color:var(--color-foreground)}
+.scene-btn[aria-pressed='true']{background:var(--color-muted);color:var(--color-foreground)}
+.map-toggle{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;
+  border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-foreground);
+  border-radius:var(--radius-md);font-size:11.5px;font-weight:500;cursor:pointer;
+  font-family:var(--font-sans);transition:background var(--duration-fast)}
+.map-toggle:hover{background:var(--color-muted)}
+.map-toggle[aria-pressed='true']{background:var(--accent-wash);border-color:var(--accent-border);color:var(--color-primary)}
+.theme-toggle{width:28px;height:28px;display:grid;place-items:center;border:1px solid var(--color-border);
+  background:var(--color-surface);color:var(--color-foreground);border-radius:var(--radius-md);
+  cursor:pointer;transition:background var(--duration-fast)}
+.theme-toggle:hover{background:var(--color-muted)}
+
+/* ── Mock app shell: chat (left, faded context) + workflow panel (right, focus) ──
+   传达“对话框右边”的放置关系。左侧是对话的简化示意，右侧是焦点面板。 */
+.mock-app{width:100%;max-width:1180px;display:flex;gap:0;height:760px;
+  background:var(--color-surface);border:1px solid var(--color-border);
+  border-radius:var(--radius-2xl);box-shadow:var(--shadow-lg);overflow:hidden}
+
+/* Left: chat context (faded) */
+.chat-context{flex:1;min-width:0;display:flex;flex-direction:column;
+  border-right:1px solid var(--color-border);background:var(--color-sidebar-bg);opacity:.92}
+.chat-context .ctx-head{height:40px;display:flex;align-items:center;gap:8px;
+  padding:0 14px;border-bottom:1px solid var(--color-border);flex-shrink:0}
+.ctx-head .dot{width:10px;height:10px;border-radius:50%;background:var(--color-accent-neutral)}
+.ctx-head .ctx-title{font-size:12px;font-weight:500;color:var(--color-foreground)}
+.ctx-head .ctx-sub{font-size:11px;color:var(--color-muted-foreground)}
+.chat-stream{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:14px}
+.msg{display:flex;flex-direction:column;gap:5px;max-width:88%}
+.msg .role{font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--color-muted-foreground)}
+.msg .body{font-size:13px;line-height:1.5;color:var(--color-foreground);
+  background:var(--color-muted);padding:9px 13px;border-radius:var(--radius-lg);
+  border-top-left-radius:var(--radius-xs)}
+.msg.user .body{background:var(--color-secondary);border-top-left-radius:var(--radius-lg);
+  border-top-right-radius:var(--radius-xs);align-self:flex-end}
+.msg.user{align-self:flex-end;align-items:flex-end}
+/* tool call card (workflow_run) */
+.tool-card{border:1px solid var(--color-border);border-radius:var(--radius-lg);
+  background:var(--color-surface);overflow:hidden;font-size:12px;max-width:88%}
+.tool-card .tc-head{display:flex;align-items:center;gap:8px;padding:9px 12px;
+  background:var(--color-muted);border-bottom:1px solid var(--color-border)}
+.tool-card .tc-name{font-family:var(--font-mono);font-size:11px;font-weight:600;
+  color:var(--color-foreground)}
+.tool-card .tc-status{margin-left:auto;font-size:10px;color:var(--color-success-fg);
+  display:inline-flex;align-items:center;gap:4px}
+.tool-card .tc-body{padding:10px 12px;display:flex;flex-direction:column;gap:7px}
+.tool-card .tc-script{font-family:var(--font-mono);font-size:10.5px;line-height:1.5;
+  color:var(--color-muted-foreground);background:var(--code-bg);border:1px solid var(--code-border);
+  border-radius:var(--radius-sm);padding:8px 10px;white-space:pre;overflow-x:auto}
+.tool-card .tc-script b{color:var(--color-primary);font-weight:600}
+.tool-card .tc-note{font-size:11px;color:var(--color-muted-foreground);
+  display:flex;align-items:center;gap:6px}
+.tool-card .tc-note .arrow{color:var(--color-primary);font-weight:700}
+
+/* ── RIGHT: Workflow progress panel (focus) ── */
+.wf-panel{width:392px;flex-shrink:0;display:flex;flex-direction:column;
+  background:var(--color-background);position:relative}
+.wf-panel .resize-handle{position:absolute;left:0;top:0;bottom:0;width:4px;cursor:col-resize;
+  z-index:10;transition:background var(--duration-normal)}
+.wf-panel .resize-handle:hover{background:color-mix(in srgb,var(--color-accent-neutral) 40%,transparent)}
+
+/* panel header — tabs (mirrors RightPanel.vue) */
+.wf-head{display:flex;align-items:center;justify-content:space-between;padding:0 8px 0 12px;
+  height:40px;border-bottom:1px solid var(--color-border);flex-shrink:0}
+.wf-tabs{display:flex;align-items:center;gap:2px}
+.tab-btn{font-size:12px;font-weight:500;padding:4px 10px;border:none;background:transparent;
+  border-radius:var(--radius-md);color:var(--color-muted-foreground);cursor:pointer;
+  transition:background var(--duration-fast),color var(--duration-fast)}
+.tab-btn:hover{color:var(--color-foreground)}
+.tab-btn.active{color:var(--color-foreground);background:var(--color-muted)}
+.tab-btn .badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;
+  height:16px;padding:0 5px;margin-left:5px;border-radius:var(--radius-pill);
+  font-size:9.5px;font-family:var(--font-mono);font-weight:600;background:var(--color-primary);color:var(--color-on-primary)}
+.close-btn{display:flex;align-items:center;justify-content:center;width:24px;height:24px;
+  border:none;background:transparent;border-radius:var(--radius-sm);
+  color:var(--color-muted-foreground);cursor:pointer}
+.close-btn:hover{background:var(--color-muted);color:var(--color-foreground)}
+
+.wf-body{flex:1;overflow-y:auto}
+.wf-body::-webkit-scrollbar{width:8px}
+.wf-body::-webkit-scrollbar-thumb{background:var(--color-border);border-radius:var(--radius-pill)}
+
+/* ── Run header ── */
+.run-head{padding:14px 14px 12px;border-bottom:1px solid var(--color-border)}
+.run-title-row{display:flex;align-items:flex-start;gap:8px}
+.run-icon{width:22px;height:22px;flex-shrink:0;display:grid;place-items:center;
+  border-radius:var(--radius-md);background:var(--accent-wash);color:var(--color-primary);
+  margin-top:1px}
+.run-name{font-size:14px;font-weight:600;letter-spacing:-.01em;color:var(--color-foreground);
+  display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.run-meta-line{font-family:var(--font-mono);font-size:10.5px;color:var(--color-muted-foreground);
+  margin-top:3px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.run-meta-line .sep{opacity:.5}
+.run-desc{font-size:11.5px;line-height:1.45;color:var(--color-muted-foreground);margin-top:8px}
+
+/* overall progress bar (mirrors .plan-track / .plan-fill) */
+.run-progress{margin-top:11px;display:flex;align-items:center;gap:9px}
+.run-track{flex:1;height:5px;border-radius:var(--radius-pill);background:var(--color-border);overflow:hidden}
+.run-fill{height:100%;border-radius:var(--radius-pill);
+  background:var(--color-accent-neutral);transition:width var(--duration-slow) var(--ease-out)}
+.run-fill.tone-primary{background:var(--color-primary)}
+.run-fill.tone-success{background:var(--color-success)}
+.run-fill.tone-error{background:var(--color-destructive)}
+.run-count{font-family:var(--font-mono);font-size:11px;color:var(--color-muted-foreground);white-space:nowrap}
+
+/* status chip on run */
+.s-chip{display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 8px;
+  border-radius:var(--radius-pill);font-size:10px;font-weight:600;white-space:nowrap}
+.s-chip .sdot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.s-chip.running{background:var(--accent-wash);color:var(--color-primary)}
+.s-chip.running .sdot{animation:pulse-dot 1.2s var(--ease-out) infinite}
+.s-chip.done{background:var(--color-success-bg);color:var(--color-success-fg)}
+.s-chip.failed{background:var(--color-error-bg);color:var(--color-error-fg)}
+.s-chip.pending{background:var(--color-muted);color:var(--color-muted-foreground)}
+.s-chip.stopped{background:var(--color-warning-bg);color:var(--color-warning-fg)}
+@keyframes pulse-dot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.7)}}
+
+/* ── Caps / budget strip ── */
+.caps{display:flex;gap:8px;padding:9px 14px;border-bottom:1px solid var(--color-border);
+  background:var(--color-surface)}
+.cap{flex:1;display:flex;flex-direction:column;gap:3px}
+.cap .cap-label{font-size:9px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--color-muted-foreground);display:flex;justify-content:space-between}
+.cap .cap-val{font-family:var(--font-mono);font-size:11px;color:var(--color-foreground)}
+.cap .cap-track{height:3px;border-radius:var(--radius-pill);background:var(--color-muted);overflow:hidden}
+.cap .cap-fill{height:100%;border-radius:var(--radius-pill);background:var(--color-accent-neutral);
+  transition:width var(--duration-slow) var(--ease-out)}
+.cap .cap-fill.warn{background:var(--color-warning-fg)}
+
+/* ── Phase groups ── */
+.phase-list{padding:6px 6px 8px}
+.phase{border-radius:var(--radius-lg);overflow:hidden;margin:2px 0}
+.phase-head{display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer;
+  border-radius:var(--radius-lg);transition:background var(--duration-fast)}
+.phase-head:hover{background:var(--color-muted)}
+.phase-chev{width:14px;height:14px;flex-shrink:0;color:var(--color-muted-foreground);
+  transition:transform var(--duration-fast) var(--ease-out)}
+.phase.collapsed .phase-chev{transform:rotate(-90deg)}
+.phase-title{font-size:12.5px;font-weight:600;color:var(--color-foreground)}
+.phase-detail{font-size:10.5px;color:var(--color-muted-foreground);margin-top:1px;line-height:1.4}
+.phase-stats{margin-left:auto;display:flex;align-items:center;gap:8px;flex-shrink:0}
+.phase-agentcount{font-family:var(--font-mono);font-size:10.5px;color:var(--color-muted-foreground)}
+.phase-tok{font-family:var(--font-mono);font-size:10px;color:var(--color-muted-foreground);opacity:.8}
+.phase-body{padding:1px 8px 6px 22px;display:flex;flex-direction:column;gap:3px}
+.phase.collapsed .phase-body{display:none}
+
+/* ── Agent rows ── */
+.agent{display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border-radius:var(--radius-md);
+  position:relative;transition:background var(--duration-fast)}
+.agent:hover{background:var(--color-muted)}
+.agent.running{background:var(--accent-wash-soft)}
+.agent.running::before{content:'';position:absolute;left:0;top:5px;bottom:5px;width:2px;
+  border-radius:var(--radius-pill);background:var(--color-primary)}
+.agent.failed{background:var(--color-error-bg)}
+.agent.failed::before{content:'';position:absolute;left:0;top:5px;bottom:5px;width:2px;
+  border-radius:var(--radius-pill);background:var(--color-destructive)}
+
+.a-status{width:15px;height:15px;flex-shrink:0;margin-top:1px;display:grid;place-items:center}
+.a-status.done{color:var(--color-success-fg)}
+.a-status.running{color:var(--color-primary)}
+.a-status.failed{color:var(--color-destructive)}
+.a-status.pending{color:var(--color-muted-foreground)}
+.a-status.running svg{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){
+  .a-status.running svg{animation:none}
+  .s-chip.running .sdot{animation:none}
+}
+
+.a-main{flex:1;min-width:0}
+.a-line1{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.a-id{font-family:var(--font-mono);font-size:9.5px;color:var(--color-muted-foreground);
+  background:var(--color-muted);padding:1px 5px;border-radius:var(--radius-xs)}
+.a-label{font-size:12px;font-weight:500;color:var(--color-foreground);min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.a-type{display:inline-flex;align-items:center;height:15px;padding:0 6px;border-radius:var(--radius-pill);
+  font-size:9px;font-weight:600;letter-spacing:.02em}
+.a-type.explore{background:var(--neutral-wash);color:var(--color-accent-neutral)}
+.a-type.general{background:var(--accent-wash);color:var(--color-primary)}
+.a-type.coordinator{background:var(--color-info-bg);color:var(--color-info-fg)}
+.a-model{font-family:var(--font-mono);font-size:9px;color:var(--color-muted-foreground);opacity:.8}
+.a-tok{margin-left:auto;font-family:var(--font-mono);font-size:10px;color:var(--color-muted-foreground);
+  flex-shrink:0;white-space:nowrap}
+.a-detail{font-size:10.5px;color:var(--color-muted-foreground);margin-top:2px;line-height:1.4;
+  display:flex;align-items:center;gap:5px}
+.a-detail .tool-tag{font-family:var(--font-mono);font-size:9.5px;background:var(--code-bg);
+  border:1px solid var(--code-border);padding:0 4px;border-radius:var(--radius-xs)}
+.a-err{font-size:10.5px;color:var(--color-error-fg);margin-top:3px;line-height:1.4;
+  font-family:var(--font-mono);display:flex;align-items:flex-start;gap:4px}
+
+/* pipeline join glyphs (visualize parallel/pipeline ordering) */
+.a-join{position:absolute;left:14px;top:22px;bottom:-3px;width:2px;background:var(--color-border)}
+.agent:last-child .a-join{display:none}
+
+/* ── Log stream ── */
+.log-section{border-top:1px solid var(--color-border);margin-top:4px}
+.log-head{display:flex;align-items:center;gap:8px;padding:8px 14px 7px;cursor:pointer}
+.log-head:hover{background:var(--color-muted)}
+.log-chev{width:14px;height:14px;color:var(--color-muted-foreground);transition:transform var(--duration-fast)}
+.log-section.collapsed .log-chev{transform:rotate(-90deg)}
+.log-title{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--color-muted-foreground)}
+.log-count{margin-left:auto;font-family:var(--font-mono);font-size:10px;color:var(--color-muted-foreground)}
+.log-body{padding:0 14px 10px;display:flex;flex-direction:column;gap:3px;
+  max-height:150px;overflow-y:auto}
+.log-section.collapsed .log-body{display:none}
+.log-line{font-family:var(--font-mono);font-size:10px;line-height:1.5;display:flex;gap:7px;
+  color:var(--color-muted-foreground)}
+.log-line .lvl{font-weight:600;flex-shrink:0;text-transform:uppercase;letter-spacing:.03em}
+.log-line.info .lvl{color:var(--color-info-fg)}
+.log-line.warn .lvl{color:var(--color-warning-fg)}
+.log-line.error .lvl{color:var(--color-error-fg)}
+
+/* ── Run footer actions ── */
+.wf-foot{border-top:1px solid var(--color-border);padding:9px 12px;display:flex;gap:7px;
+  align-items:center;background:var(--color-surface);flex-shrink:0}
+.wf-foot .elapsed{font-family:var(--font-mono);font-size:11px;color:var(--color-muted-foreground);
+  margin-right:auto;display:flex;align-items:center;gap:6px}
+.wf-foot .elapsed .live-dot{width:6px;height:6px;border-radius:50%;background:var(--color-primary);
+  animation:pulse-dot 1.2s var(--ease-out) infinite}
+
+/* ── Data-map annotation overlay ──
+   切换显示“UI 元素 ← Go struct ← EventSink 方法”的映射标注。 */
+body.show-map .map-pin{display:inline-flex !important}
+.map-pin{display:none !important;position:absolute;font-family:var(--font-mono);font-size:8.5px;
+  font-weight:600;color:var(--color-primary);background:var(--accent-wash-strong);
+  border:1px solid var(--accent-border);padding:1px 5px;border-radius:var(--radius-xs);
+  pointer-events:none;white-space:nowrap;z-index:5;line-height:1.3}
+
+/* legend under the mock */
+.legend{width:100%;max-width:1180px;margin-top:18px;display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.legend-card{background:var(--color-surface);border:1px solid var(--color-border);
+  border-radius:var(--radius-lg);padding:12px 14px}
+.legend-card h3{font-size:11px;font-weight:600;margin:0 0 9px;letter-spacing:.02em;
+  color:var(--color-foreground);display:flex;align-items:center;gap:6px}
+.legend-card h3 .mi{font-family:var(--font-mono);font-size:9px;font-weight:600;
+  color:var(--color-primary);background:var(--accent-wash);padding:1px 5px;border-radius:var(--radius-xs)}
+.legend-card .row{display:flex;align-items:center;gap:8px;font-size:10.5px;line-height:1.5;
+  color:var(--color-muted-foreground);margin:3px 0}
+.legend-card .row b{color:var(--color-foreground);font-weight:600;font-family:var(--font-mono);font-size:10px}
+.legend-card .row code{font-family:var(--font-mono);font-size:9.5px;background:var(--code-bg);
+  border:1px solid var(--code-border);padding:0 4px;border-radius:var(--radius-xs);color:var(--color-foreground)}
+
+/* generic */
+.hidden{display:none !important}
+.icon-sm{width:14px;height:14px}
+.icon-xs{width:11px;height:11px}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+</style>
+</head>
+<body class="dark">
+
+<!-- ═══ Toolbar ═══ -->
+<div class="toolbar">
+  <h1>Dynamic Workflow 进度面板 <span class="tag">design · desktop + web</span></h1>
+  <div class="spacer"></div>
+  <div class="scene-bar" role="group" aria-label="场景">
+    <button class="scene-btn" aria-pressed="true" data-scene="running">运行中</button>
+    <button class="scene-btn" aria-pressed="false" data-scene="done">已完成</button>
+    <button class="scene-btn" aria-pressed="false" data-scene="failed">部分失败</button>
+    <button class="scene-btn" aria-pressed="false" data-scene="confirm">确认闸门</button>
+  </div>
+  <button class="map-toggle" aria-pressed="false" id="mapBtn">⌗ 数据映射</button>
+  <button class="theme-toggle" id="themeBtn" aria-label="切换主题" title="切换明暗">
+    <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+  </button>
+</div>
+
+<!-- ═══ Mock app: chat (left) + workflow panel (right) ═══ -->
+<div class="mock-app">
+
+  <!-- LEFT: chat context (faded) -->
+  <div class="chat-context">
+    <div class="ctx-head">
+      <span class="dot"></span>
+      <span class="ctx-title">auth-audit</span>
+      <span class="ctx-sub">· 会话</span>
+    </div>
+    <div class="chat-stream">
+
+      <div class="msg user">
+        <span class="role">你</span>
+        <div class="body">用 workflow 审计这个仓库的 auth 模块</div>
+      </div>
+
+      <div class="msg assistant">
+        <span class="role">Jcode</span>
+        <div class="body">好的，我用一个动态 workflow 把审计 fan-out 到多个子 agent 并行扫描 auth、session、token 三个维度。</div>
+      </div>
+
+      <!-- workflow_run tool call card -->
+      <div class="tool-card">
+        <div class="tc-head">
+          <svg class="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+          <span class="tc-name">workflow_run</span>
+          <span class="tc-status">
+            <svg class="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>
+            已启动
+          </span>
+        </div>
+        <div class="tc-body">
+<div class="tc-script"><b>export const meta</b> = {
+  name: 'repo-audit',
+  phases: [
+    { title: 'Scan', detail: '索引仓库符号' },
+    { title: 'Analyze', detail: '并行审计各模块' },
+    { title: 'Summarize' }
+  ]
+}
+const r = await <b>parallel</b>([
+  () => agent('audit auth…',  { label: 'audit:auth',    phase: 'Analyze' }),
+  () => agent('audit session…',{ label: 'audit:session', phase: 'Analyze' }),
+  () => agent('audit tokens…', { label: 'audit:tokens',  phase: 'Analyze' })
+])</div>
+          <div class="tc-note">
+            <svg class="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            run <b style="color:var(--color-foreground);font-family:var(--font-mono)">run_8f3a2c</b> 已启动，进度见右侧面板
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- RIGHT: workflow progress panel (focus) -->
+  <div class="wf-panel">
+    <div class="resize-handle" title="拖拽调整宽度"></div>
+
+    <!-- header tabs (mirror RightPanel.vue; new "Workflow" tab) -->
+    <div class="wf-head">
+      <div class="wf-tabs">
+        <button class="tab-btn">Plan</button>
+        <button class="tab-btn">Files</button>
+        <button class="tab-btn">Changes</button>
+        <button class="tab-btn active">Workflow <span class="badge" id="tabBadge">3</span></button>
+      </div>
+      <button class="close-btn" aria-label="关闭">
+        <svg class="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <div class="wf-body" id="wfBody">
+      <!-- ═══ Run header ═══ -->
+      <div class="run-head" style="position:relative">
+        <span class="map-pin" style="top:8px;right:10px">OnRunStart(RunInfo)</span>
+        <div class="run-title-row">
+          <span class="run-icon">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m7 14 3-3 3 3 5-5"/></svg>
+          </span>
+          <div style="flex:1;min-width:0">
+            <div class="run-name">
+              <span id="runName">repo-audit</span>
+              <span class="s-chip running" id="runStatus"><span class="sdot"></span>running</span>
+            </div>
+            <div class="run-meta-line">
+              <span id="runId">run_8f3a2c</span>
+              <span class="sep">·</span>
+              <span id="runScope">inline</span>
+              <span class="sep">·</span>
+              <span id="runAgents">3/6 agents</span>
+              <span class="sep">·</span>
+              <span id="runTok">12.3k tok</span>
+              <span class="sep">·</span>
+              <span id="runElapsed">00:18</span>
+            </div>
+            <div class="run-desc" id="runDesc">审计仓库的 auth 模块，并行扫描 auth / session / token 三个维度并汇总发现。</div>
+          </div>
+        </div>
+        <div class="run-progress" style="position:relative">
+          <span class="map-pin" style="top:-2px;left:-2px">AgentEvent.Status</span>
+          <div class="run-track"><div class="run-fill tone-primary" id="runFill" style="width:50%"></div></div>
+          <span class="run-count" id="runPct">3 / 6</span>
+        </div>
+      </div>
+
+      <!-- ═══ Caps / budget strip ═══ -->
+      <div class="caps" style="position:relative">
+        <span class="map-pin" style="top:-7px;right:10px">run.sema / agentTotal</span>
+        <div class="cap">
+          <div class="cap-label"><span>并发</span><span class="cap-val" id="capConc">5/16</span></div>
+          <div class="cap-track"><div class="cap-fill" id="capConcFill" style="width:31%"></div></div>
+        </div>
+        <div class="cap">
+          <div class="cap-label"><span>总量</span><span class="cap-val" id="capTotal">6/1000</span></div>
+          <div class="cap-track"><div class="cap-fill" id="capTotalFill" style="width:1%"></div></div>
+        </div>
+        <div class="cap">
+          <div class="cap-label"><span>嵌套深度</span><span class="cap-val" id="capDepth">0/1</span></div>
+          <div class="cap-track"><div class="cap-fill" id="capDepthFill" style="width:0%"></div></div>
+        </div>
+      </div>
+
+      <!-- ═══ Phase list ═══ -->
+      <div class="phase-list" style="position:relative">
+        <span class="map-pin" style="top:0;right:8px">OnPhase / Meta.Phases</span>
+
+        <!-- Phase: Scan (done) -->
+        <div class="phase" data-phase="Scan">
+          <div class="phase-head" onclick="togglePhase(this)">
+            <svg class="phase-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+            <div style="flex:1;min-width:0">
+              <div class="phase-title">Scan</div>
+              <div class="phase-detail">索引仓库符号</div>
+            </div>
+            <div class="phase-stats">
+              <span class="a-status done" style="width:14px;height:14px">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>
+              </span>
+              <span class="phase-agentcount">1 agent</span>
+              <span class="phase-tok">2.1k</span>
+            </div>
+          </div>
+          <div class="phase-body" style="position:relative">
+            <span class="map-pin" style="top:-2px;right:0">OnAgentStart/Done</span>
+            <div class="agent done">
+              <span class="a-status done"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg></span>
+              <div class="a-main">
+                <div class="a-line1">
+                  <span class="a-id">agent_1</span>
+                  <span class="a-label">audit:scan</span>
+                  <span class="a-type explore">explore</span>
+                  <span class="a-tok">2.1k tok</span>
+                </div>
+                <div class="a-detail">扫描 42 文件，索引符号表 · <span class="tool-tag">read×8</span> <span class="tool-tag">grep×3</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Phase: Analyze (running) -->
+        <div class="phase" data-phase="Analyze">
+          <div class="phase-head" onclick="togglePhase(this)">
+            <svg class="phase-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+            <div style="flex:1;min-width:0">
+              <div class="phase-title">Analyze</div>
+              <div class="phase-detail">并行审计各模块</div>
+            </div>
+            <div class="phase-stats">
+              <span class="s-chip running" style="height:16px"><span class="sdot"></span>1/3</span>
+              <span class="phase-tok">8.4k</span>
+            </div>
+          </div>
+          <div class="phase-body" style="position:relative">
+            <!-- agent_2 running -->
+            <div class="agent running">
+              <span class="a-join"></span>
+              <span class="a-status running"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg></span>
+              <div class="a-main">
+                <div class="a-line1">
+                  <span class="a-id">agent_2</span>
+                  <span class="a-label">audit:auth</span>
+                  <span class="a-type explore">explore</span>
+                  <span class="a-tok">3.2k tok</span>
+                </div>
+                <div class="a-detail"><span class="tool-tag">read×4</span> <span class="tool-tag">grep×2</span> · 正在追踪 OAuth 回调</div>
+              </div>
+            </div>
+            <!-- agent_3 done -->
+            <div class="agent done">
+              <span class="a-join"></span>
+              <span class="a-status done"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg></span>
+              <div class="a-main">
+                <div class="a-line1">
+                  <span class="a-id">agent_3</span>
+                  <span class="a-label">audit:session</span>
+                  <span class="a-type explore">explore</span>
+                  <span class="a-tok">3.1k tok</span>
+                </div>
+                <div class="a-detail">8 步 · 结构化输出已返回</div>
+              </div>
+            </div>
+            <!-- agent_4 running -->
+            <div class="agent running">
+              <span class="a-join"></span>
+              <span class="a-status running"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg></span>
+              <div class="a-main">
+                <div class="a-line1">
+                  <span class="a-id">agent_4</span>
+                  <span class="a-label">audit:tokens</span>
+                  <span class="a-type general">general</span>
+                  <span class="a-tok">2.1k tok</span>
+                </div>
+                <div class="a-detail"><span class="tool-tag">grep×3</span> · 重试结构化输出 (1/2)</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Phase: Summarize (pending) -->
+        <div class="phase collapsed" data-phase="Summarize">
+          <div class="phase-head" onclick="togglePhase(this)">
+            <svg class="phase-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+            <div style="flex:1;min-width:0">
+              <div class="phase-title" style="color:var(--color-muted-foreground)">Summarize</div>
+              <div class="phase-detail">汇总发现并回写主对话</div>
+            </div>
+            <div class="phase-stats">
+              <span class="a-status pending" style="width:14px;height:14px">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/></svg>
+              </span>
+              <span class="phase-agentcount">待启动</span>
+            </div>
+          </div>
+          <div class="phase-body"></div>
+        </div>
+      </div>
+
+      <!-- ═══ Log stream ═══ -->
+      <div class="log-section" id="logSection" style="position:relative">
+        <span class="map-pin" style="top:6px;right:12px">OnLog(runID, level, msg)</span>
+        <div class="log-head" onclick="toggleLog(this)">
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+          <span class="log-title">Log</span>
+          <span class="log-count" id="logCount">4 条</span>
+        </div>
+        <div class="log-body" id="logBody">
+          <div class="log-line info"><span class="lvl">info</span><span>run started · depth 0 · budget 1000</span></div>
+          <div class="log-line info"><span class="lvl">info</span><span>phase Scan → 1 agent</span></div>
+          <div class="log-line info"><span class="lvl">info</span><span>phase Analyze → 3 agents (parallel)</span></div>
+          <div class="log-line warn"><span class="lvl">warn</span><span>agent_4 结构化输出提取失败，re-prompt 1/2</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Run footer ═══ -->
+    <div class="wf-foot" style="position:relative">
+      <span class="map-pin" style="top:-7px;left:10px">OnRunDone</span>
+      <span class="elapsed"><span class="live-dot" id="liveDot"></span><span id="footElapsed">00:18</span></span>
+      <button class="tab-btn" style="border:1px solid var(--color-border);background:var(--color-surface)">查看脚本</button>
+      <button class="tab-btn" id="cancelBtn" style="border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-error-fg)">停止</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Legend: 数据映射 (UI ← Go struct ← EventSink) ═══ -->
+<div class="legend">
+  <div class="legend-card">
+    <h3>事件源 <span class="mi">flow.EventSink</span></h3>
+    <div class="row"><code>OnRunStart(RunInfo)</code> → run 头部 + 进度条归零</div>
+    <div class="row"><code>OnPhase(runID,title,detail)</code> → 新增 phase 分组</div>
+    <div class="row"><code>OnAgentStart(runID,AgentEvent)</code> → 新增 agent 行，状态 <b>running</b></div>
+    <div class="row"><code>OnAgentDone(runID,AgentEvent)</code> → 更新为 <b>done</b>/<b>failed</b></div>
+    <div class="row"><code>OnLog(runID,level,msg)</code> → 追加日志流</div>
+    <div class="row"><code>OnRunDone(runID,result,err)</code> → run 终态 + 回写主对话</div>
+  </div>
+  <div class="legend-card">
+    <h3>核心结构体 <span class="mi">internal/flow/types.go</span></h3>
+    <div class="row"><b>RunInfo</b>{RunID, Name, Meta} → run 头部</div>
+    <div class="row"><b>Meta</b>{Name, Description, Phases[]} → 标题/描述/分组</div>
+    <div class="row"><b>Phase</b>{Title, Detail} → phase 标题与说明</div>
+    <div class="row"><b>AgentEvent</b>{ID, Label, Phase, Status, Tokens, Detail, Err} → agent 行</div>
+    <div class="row"><b>AgentSpec</b>{AgentType} → explore/general/coordinator 标签</div>
+    <div class="row"><b>run</b>{sema(16), agentTotal(1000), depth} → caps 预算条</div>
+  </div>
+  <div class="legend-card">
+    <h3>状态色 <span class="mi">§4</span></h3>
+    <div class="row"><span class="s-chip running" style="height:15px"><span class="sdot"></span>running</span> 橙色脉冲 / accent</div>
+    <div class="row"><span class="s-chip done" style="height:15px">done</span> 绿色 / success-fg</div>
+    <div class="row"><span class="s-chip failed" style="height:15px">failed</span> 红色 / destructive</div>
+    <div class="row"><span class="s-chip pending" style="height:15px">pending</span> 灰色 / muted</div>
+    <div class="row"><span class="s-chip stopped" style="height:15px">stopped</span> 黄色 / warning</div>
+  </div>
+  <div class="legend-card">
+    <h3>接线点 <span class="mi">P1/P2 待实现</span></h3>
+    <div class="row">Web: <code>handler/web.go</code> 加 <b>OnFlowProgress</b> → emit <code>flow_progress</code> WS</div>
+    <div class="row">前端: <code>ws.ts</code> handlerMap 加 <code>flow_progress</code></div>
+    <div class="row">当前三端 Sink = <b>NopSink</b>（未接线，本稿即该接线点的 UI）</div>
+    <div class="row">RightPanel.vue 新增 <b>Workflow</b> tab（本稿）</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  /* ── theme toggle ── */
+  var themeBtn = document.getElementById('themeBtn');
+  themeBtn.addEventListener('click', function(){
+    document.body.classList.toggle('dark');
+  });
+
+  /* ── data-map overlay toggle ── */
+  var mapBtn = document.getElementById('mapBtn');
+  mapBtn.addEventListener('click', function(){
+    var on = mapBtn.getAttribute('aria-pressed')==='true';
+    mapBtn.setAttribute('aria-pressed', on?'false':'true');
+    document.body.classList.toggle('show-map', !on);
+  });
+
+  /* ── phase collapse ── */
+  window.togglePhase = function(head){
+    head.parentElement.classList.toggle('collapsed');
+  };
+  window.toggleLog = function(head){
+    head.parentElement.classList.toggle('collapsed');
+  };
+
+  /* ── scene data ──
+     每个 scene 对应一种 run 终态/阶段，重渲染右侧面板。 */
+  var scenes = {
+    running: {
+      status: 'running', statusText:'running', tone:'tone-primary',
+      name:'repo-audit', runId:'run_8f3a2c', scope:'inline',
+      agents:'3/6 agents', tok:'12.3k tok', elapsed:'00:18', pct:'3 / 6', fill:50,
+      desc:'审计仓库的 auth 模块，并行扫描 auth / session / token 三个维度并汇总发现。',
+      capConc:'5/16', capConcFill:31, capTotal:'6/1000', capTotalFill:1, capDepth:'0/1', capDepthFill:0,
+      badge:'3'
+    },
+    done: {
+      status:'done', statusText:'done', tone:'tone-success',
+      name:'repo-audit', runId:'run_8f3a2c', scope:'inline',
+      agents:'6/6 agents', tok:'24.7k tok', elapsed:'00:42', pct:'6 / 6', fill:100,
+      desc:'审计仓库的 auth 模块，并行扫描 auth / session / token 三个维度并汇总发现。',
+      capConc:'0/16', capConcFill:0, capTotal:'6/1000', capTotalFill:1, capDepth:'0/1', capDepthFill:0,
+      badge:''
+    },
+    failed: {
+      status:'failed', statusText:'failed', tone:'tone-error',
+      name:'repo-audit', runId:'run_8f3a2c', scope:'inline',
+      agents:'5/6 agents', tok:'19.8k tok', elapsed:'00:31', pct:'5 / 6', fill:83,
+      desc:'审计仓库的 auth 模块，并行扫描 auth / session / token 三个维度并汇总发现。',
+      capConc:'2/16', capConcFill:13, capTotal:'6/1000', capTotalFill:1, capDepth:'0/1', capDepthFill:0,
+      badge:''
+    },
+    confirm: {
+      status:'pending', statusText:'待确认', tone:'tone-primary',
+      name:'repo-audit', runId:'（未启动）', scope:'inline · 草稿',
+      agents:'0 agents', tok:'—', elapsed:'00:00', pct:'0 / 6', fill:0,
+      desc:'主 agent 现场生成脚本，等待你确认后再启动 run。这是非 headless 下唯一的人工闸门（防 prompt 注入）。',
+      capConc:'0/16', capConcFill:0, capTotal:'0/1000', capTotalFill:0, capDepth:'0/1', capDepthFill:0,
+      badge:''
+    }
+  };
+
+  /* apply a scene: only the run header + caps + footer change visibly;
+     phase tree swaps via the failed scene tweaking agent_4 → failed. */
+  // cache the original Analyze phase body so failed-scene mutations can be restored.
+  var analyzePhase = document.querySelector('.phase[data-phase="Analyze"]');
+  var analyzeBodyHTML = analyzePhase ? analyzePhase.querySelector('.phase-body').innerHTML : '';
+
+  var sceneBtns = document.querySelectorAll('.scene-btn');
+  sceneBtns.forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var sc = btn.getAttribute('data-scene');
+      sceneBtns.forEach(function(b){b.setAttribute('aria-pressed','false')});
+      btn.setAttribute('aria-pressed','true');
+      applyScene(sc);
+    });
+  });
+
+  function applyScene(sc){
+    var d = scenes[sc]; if(!d) return;
+    set('runName', d.name);
+    set('runId', d.runId);
+    set('runScope', d.scope);
+    set('runAgents', d.agents);
+    set('runTok', d.tok);
+    set('runElapsed', d.elapsed);
+    set('runPct', d.pct);
+    set('runDesc', d.desc);
+    set('footElapsed', d.elapsed);
+    set('capConc', d.capConc);
+    set('capTotal', d.capTotal);
+    set('capDepth', d.capDepth);
+    set('logCount', sc==='done'?'6 条':sc==='failed'?'5 条':'4 条');
+    var badge = document.getElementById('tabBadge');
+    badge.textContent = d.badge; badge.style.display = d.badge?'':'none';
+
+    var rs = document.getElementById('runStatus');
+    rs.className = 's-chip ' + d.status;
+    rs.innerHTML = '<span class="sdot"></span>' + d.statusText;
+
+    var fill = document.getElementById('runFill');
+    fill.className = 'run-fill ' + d.tone;
+    fill.style.width = d.fill + '%';
+
+    document.getElementById('capConcFill').style.width = d.capConcFill + '%';
+    document.getElementById('capTotalFill').style.width = d.capTotalFill + '%';
+    document.getElementById('capDepthFill').style.width = d.capDepthFill + '%';
+
+    // live dot only for running
+    document.getElementById('liveDot').style.display = (sc==='running')?'':'none';
+
+    // cancel button label
+    var cancelBtn = document.getElementById('cancelBtn');
+    cancelBtn.textContent = (sc==='confirm')?'取消':'停止';
+    cancelBtn.style.display = (sc==='done')?'none':'';
+
+    // failed scene: agent_4 → failed with error (restore cache first so
+    // re-entering other scenes is clean).
+    if(analyzePhase){
+      analyzePhase.querySelector('.phase-body').innerHTML = analyzeBodyHTML;
+    }
+    if(sc==='failed'){
+      var agents = document.querySelectorAll('.phase[data-phase="Analyze"] .agent');
+      var a4 = agents[agents.length-1];
+      if(a4){
+        a4.className = 'agent failed';
+        var st = a4.querySelector('.a-status'); st.className='a-status failed';
+        st.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/><path d="m15 9-6 6M9 9l6 6"/></svg>';
+        var detail = a4.querySelector('.a-detail');
+        if(detail){
+          detail.outerHTML = '<div class="a-err">⚠ extractFlowJSON 重试 2/2 仍失败：模型未返回合法 JSON · error_max_structured_output_retries</div>';
+        }
+      }
+    }
+  }
+  function set(id, txt){ var el = document.getElementById(id); if(el) el.textContent = txt; }
+})();
+</script>
+</body>
+</html>
