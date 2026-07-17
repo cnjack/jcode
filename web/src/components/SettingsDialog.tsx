@@ -1736,12 +1736,12 @@ function ApprovalReviewSection() {
 
 const SHORTCUTS: { keys: string; labelKey: string }[] = [
   { keys: '⌘K', labelKey: 'commandPalette' },
-  { keys: '⌘N', labelKey: 'newChat' },
+  { keys: '⇧⌘O', labelKey: 'newChat' },
   { keys: '⌘,', labelKey: 'openSettings' },
   { keys: '⇧⌘P', labelKey: 'planMode' },
   { keys: '⇧⌘E', labelKey: 'filesPanel' },
   { keys: '⇧⌘G', labelKey: 'changesPanel' },
-  { keys: '⌘`', labelKey: 'toggleTerminal' },
+  { keys: '⌘J', labelKey: 'toggleTerminal' },
   { keys: '⌘L', labelKey: 'focusInput' },
 ]
 

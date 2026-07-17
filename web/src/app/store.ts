@@ -1059,6 +1059,24 @@ export const loadSession = createAsyncThunk(
   },
 )
 
+/**
+ * Start a fresh chat: clear the timeline, switch to the chat view, and ask the
+ * backend for a new session id. Shared by the Sidebar "new task" button and the
+ * ⌘N / ⇧⌘O keyboard shortcuts. The empty session stays out of the sidebar until
+ * the first user message (backend only indexes then).
+ */
+export const startNewChat = createAsyncThunk('session/startNew', async (_, { dispatch }) => {
+  dispatch(chatActions.clearChat())
+  dispatch(sessionActions.setCurrentSession(''))
+  dispatch(uiActions.setView('chat'))
+  try {
+    const resp = await api.newSession()
+    dispatch(sessionActions.setCurrentSession(resp.session_id))
+  } catch {
+    // surfaced via health/gate
+  }
+})
+
 export const replaySession = createAsyncThunk(
   'session/replay',
   async (uuid: string, { dispatch }) => {

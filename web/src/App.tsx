@@ -37,6 +37,7 @@ import {
   loadSession,
   loadWorkspaceState,
   replaySession,
+  startNewChat,
 } from './app/store'
 import { bridgeWS } from './app/wsBridge'
 import { useChatRuntime } from './app/runtime'
@@ -116,18 +117,22 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch])
 
-  // Global keyboard shortcuts: ⌘K (command palette), ⌘N (new chat), Esc (close
-  // overlays). Mirrors the Vue App.vue shortcut wiring.
+  // Global keyboard shortcuts: ⌘K (command palette), ⌘N / ⇧⌘O (new chat), Esc
+  // (close overlays). ⌘N is reserved by browsers (new window) so it only fires
+  // in the desktop app; ⇧⌘O is interceptable everywhere and is the shortcut
+  // shown in the UI.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const meta = e.metaKey || e.ctrlKey
-      if (meta && e.key === 'k') {
+      if (meta && e.key === 'k' && !e.shiftKey) {
         e.preventDefault()
         dispatch(uiActions.setPaletteOpen(true))
-      } else if (meta && e.key === 'n') {
+      } else if (meta && !e.shiftKey && e.key === 'n') {
         e.preventDefault()
-        // New chat: clear + reset session + switch to chat view.
-        dispatch(loadSession('')) // empty → new session flow handled in Sidebar
+        void dispatch(startNewChat())
+      } else if (meta && e.shiftKey && e.key.toLowerCase() === 'o') {
+        e.preventDefault()
+        void dispatch(startNewChat())
       } else if (meta && e.key === ',') {
         e.preventDefault()
         dispatch(uiActions.setSettingsOpen(true))
@@ -207,7 +212,7 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels'
     })
   }, [rightPanelOpen])
 
-  // Panel keyboard shortcuts: ⇧⌘P (plan), ⇧⌘E (files), ⇧⌘G (changes), ⌘` (terminal).
+  // Panel keyboard shortcuts: ⇧⌘P (plan), ⇧⌘E (files), ⇧⌘G (changes), ⌘` / ⌘J (terminal).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const meta = e.metaKey || e.ctrlKey
@@ -217,7 +222,9 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels'
         e.preventDefault(); togglePanel('files')
       } else if (meta && e.shiftKey && e.key.toLowerCase() === 'g') {
         e.preventDefault(); togglePanel('changes')
-      } else if (meta && e.key === '`') {
+      } else if (meta && !e.shiftKey && (e.key === '`' || e.key.toLowerCase() === 'j')) {
+        // ⌘` never reaches the page on macOS (OS window cycling), so ⌘J is the
+        // alias shown in the UI. `!e.shiftKey` keeps ⇧⌘J (DevTools) intact.
         e.preventDefault(); togglePanel('terminal')
       }
     }

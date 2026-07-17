@@ -34,7 +34,7 @@ import {
   HandRaisedIcon,
   ShieldExclamationIcon,
   ClipboardDocumentListIcon,
-  BoltIcon,
+  ViewfinderCircleIcon,
   PlusIcon,
   PaperClipIcon,
   XMarkIcon,
@@ -801,7 +801,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                         goalArmed ? 'bg-[var(--neutral-wash)] text-[var(--color-foreground)]' : ''
                       }`}
                     >
-                      <BoltIcon className={`h-3.5 w-3.5 shrink-0 ${goalArmed ? 'text-[var(--color-primary)]' : 'text-[var(--color-muted-foreground)]'}`} />
+                      <ViewfinderCircleIcon className={`h-3.5 w-3.5 shrink-0 ${goalArmed ? 'text-[var(--color-primary)]' : 'text-[var(--color-muted-foreground)]'}`} />
                       <span>Goal</span>
                     </button>
                   </div>
@@ -906,7 +906,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                     >
                       <XMarkIcon className="h-2.5 w-2.5" />
                     </button>
-                    <BoltIcon className="h-3 w-3" />
+                    <ViewfinderCircleIcon className="h-3 w-3" />
                     <span>Goal</span>
                   </div>
                 </>
