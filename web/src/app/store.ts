@@ -36,7 +36,10 @@ interface ChatState {
   goal: Goal | null
   goalArmed: boolean
   todos: TodoItem[]
-  queued: QueuedMessage[]
+  /** Type-ahead queues keyed by session id — a message queued while an agent
+   *  runs belongs to THAT conversation and must survive switching away and
+   *  back (previously a single global list wiped by clearChat on switch). */
+  queuedBySession: Record<string, QueuedMessage[]>
   slashCommands: SlashCommandInfo[]
 }
 
@@ -47,7 +50,7 @@ const initialChat: ChatState = {
   goal: null,
   goalArmed: false,
   todos: [],
-  queued: [],
+  queuedBySession: {},
   slashCommands: [],
 }
 
@@ -66,7 +69,8 @@ const chatSlice = createSlice({
       s.goal = null
       s.goalArmed = false
       s.todos = []
-      s.queued = []
+      // NOTE: queuedBySession is deliberately NOT cleared here — clearChat runs
+      // on every session switch, and stashed type-ahead queues must survive.
       streamingText = ''
       streamingMsgId = ''
     },
@@ -205,15 +209,27 @@ const chatSlice = createSlice({
     setTodos(s, a: { payload: TodoItem[] }) {
       s.todos = a.payload
     },
-    enqueueMessage(s, a: { payload: QueuedMessage }) {
-      s.queued.push(a.payload)
+    enqueueMessage(s, a: { payload: { sessionId: string; message: QueuedMessage } }) {
+      ;(s.queuedBySession[a.payload.sessionId] ??= []).push(a.payload.message)
     },
-    removeQueued(s, a: { payload: string }) {
-      s.queued = s.queued.filter((q) => q.id !== a.payload)
+    removeQueued(s, a: { payload: { sessionId: string; id: string } }) {
+      const q = s.queuedBySession[a.payload.sessionId]
+      if (!q) return
+      const next = q.filter((m) => m.id !== a.payload.id)
+      if (next.length > 0) s.queuedBySession[a.payload.sessionId] = next
+      else delete s.queuedBySession[a.payload.sessionId]
     },
-    drainQueue(s) {
-      // Pops the first queued message — the App thunk resends it on agentDone.
-      if (s.queued.length > 0) s.queued.shift()
+    shiftQueued(s, a: { payload: string }) {
+      // Pops the first queued message of the given session — the WS bridge
+      // resends it on that session's agentDone.
+      const q = s.queuedBySession[a.payload]
+      if (!q) return
+      q.shift()
+      if (q.length === 0) delete s.queuedBySession[a.payload]
+    },
+    dropSessionQueue(s, a: { payload: string }) {
+      // Session was deleted — its stash can never drain again.
+      delete s.queuedBySession[a.payload]
     },
     agentDone(s, a: { payload: { error?: string; detail?: string } | undefined }) {
       // Stamp duration on the last assistant message.
@@ -634,11 +650,15 @@ export const uiActions = uiSlice.actions
 // Async thunks — wrap API calls + dispatch the right reducers.
 export const sendMessage = createAsyncThunk(
   'chat/send',
-  async (payload: { text: string; images?: import('jcode-ui-core').ChatImage[]; mode?: AgentMode }, { dispatch, getState }) => {
+  async (payload: { text: string; images?: import('jcode-ui-core').ChatImage[]; mode?: AgentMode; sessionId?: string; background?: boolean }, { dispatch, getState }) => {
     const state = getState() as RootState
-    const sessionId = state.session.currentSessionId || undefined
+    // sessionId override targets a specific (possibly background) session —
+    // used when draining a stashed queue after that session's agentDone.
+    const sessionId = payload.sessionId ?? (state.session.currentSessionId || undefined)
     const trimmed = payload.text.trim()
-    if (state.chat.goalArmed && trimmed && !trimmed.startsWith('/')) {
+    // Goal flows are foreground-only: the goal API always targets the active
+    // engine, so a background queue drain sends its text as a plain message.
+    if (!payload.background && state.chat.goalArmed && trimmed && !trimmed.startsWith('/')) {
       dispatch(chatActions.setGoalArmed(false))
       dispatch(chatActions.addMessage({ role: 'user', content: payload.text }))
       const goal = await api.setGoal(trimmed, true)
@@ -647,7 +667,7 @@ export const sendMessage = createAsyncThunk(
       return
     }
     // /goal slash interception (matches Vue store.sendMessage).
-    if (trimmed === '/goal' || trimmed.startsWith('/goal ')) {
+    if (!payload.background && (trimmed === '/goal' || trimmed.startsWith('/goal '))) {
       const objective = trimmed.slice('/goal'.length).trim()
       if (objective === '' || objective === 'status') {
         const goal = await api.goal()
@@ -670,8 +690,12 @@ export const sendMessage = createAsyncThunk(
       dispatch(chatActions.setRunning(true))
       return
     }
-    dispatch(chatActions.addMessage({ role: 'user', content: payload.text, images: payload.images }))
-    dispatch(chatActions.setRunning(true))
+    // Foreground sends echo into the visible timeline; a background drain must
+    // not touch the conversation the user is currently viewing.
+    if (!payload.background) {
+      dispatch(chatActions.addMessage({ role: 'user', content: payload.text, images: payload.images }))
+      dispatch(chatActions.setRunning(true))
+    }
     // First user turn materializes the session on disk — surface it in the
     // sidebar immediately (title + running) before the chat HTTP round-trip.
     if (sessionId) {
@@ -1048,6 +1072,12 @@ export const loadSession = createAsyncThunk(
     const resumedId = resp.session_id || uuid
     const running = !!state.session.tasks.find((t) => t.uuid === resumedId)?.running
     dispatch(chatActions.setRunning(running))
+
+    // Rehydrate server-truth state for the resumed session (token snapshot,
+    // provider/model, mode). clearChat nulled tokenSnapshot, and no
+    // token_update arrives until the session's next LLM call — without this
+    // the context ring stays hidden after switching conversations.
+    await dispatch(loadStatus())
     await dispatch(reconcilePendingInteractions())
 
     // Refresh goal + todos (the backend restored them; no WS push on switch).

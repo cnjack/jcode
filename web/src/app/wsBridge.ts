@@ -62,16 +62,27 @@ export function createWSHandlers(
       ),
     onTokenUpdate: (d) => dispatch(chatActions.setTokenSnapshot(d)),
     onAgentDone: (d) => {
-      dispatch(chatActions.agentDone(d ? { error: d.error, detail: d.detail } : undefined))
+      // agent_done arrives for EVERY session (the ws client lets it through the
+      // foreground filter) so a background session's type-ahead queue can drain
+      // while the user is viewing another conversation. Foreground-only state
+      // (timeline, isRunning) is touched only when the done matches the view.
+      const taskId = d?.task_id
+      const activeId = getState().session.currentSessionId
+      const isForeground = !taskId || taskId === activeId
+      if (isForeground) {
+        dispatch(chatActions.agentDone(d ? { error: d.error, detail: d.detail } : undefined))
+      }
       // Refresh sidebar metadata (title / updated_at / running) after a turn.
       void dispatch(loadTasks() as never)
       void dispatch(loadSessions() as never)
-      // Drain one queued type-ahead message (terminal-style), if any.
-      const queued = getState().chat.queued
-      if (queued.length > 0) {
+      // Drain one queued type-ahead message (terminal-style) from the session
+      // that just finished — wherever the user is currently looking.
+      const key = taskId || activeId
+      const queued = key ? getState().chat.queuedBySession[key] : undefined
+      if (key && queued && queued.length > 0) {
         const next = queued[0]
-        dispatch(chatActions.drainQueue())
-        void dispatch(sendMessage({ text: next.text, images: next.images }) as never)
+        dispatch(chatActions.shiftQueued(key))
+        void dispatch(sendMessage({ text: next.text, images: next.images, sessionId: key, background: !isForeground }) as never)
       }
     },
     onTodoUpdate: () => {

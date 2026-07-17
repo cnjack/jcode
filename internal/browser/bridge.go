@@ -87,8 +87,9 @@ func (b *Bridge) HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	token := hello.Token
 
-	_ = conn.WriteJSON(map[string]any{"type": "welcome", "token": token})
-
+	// Register before writing the welcome so that "welcome received" implies
+	// Connected() == true for the peer; otherwise a client that acts on the
+	// welcome immediately could observe the bridge as still offline.
 	bc := newBridgeConn(conn)
 	b.mu.Lock()
 	if b.conn != nil {
@@ -96,6 +97,18 @@ func (b *Bridge) HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	b.conn = bc
 	b.mu.Unlock()
+
+	// Write the welcome through bc so it serializes with command traffic:
+	// registration above already made the conn usable by Backend() callers.
+	if err := bc.writeJSON(map[string]any{"type": "welcome", "token": token}); err != nil {
+		b.mu.Lock()
+		if b.conn == bc {
+			b.conn = nil
+		}
+		b.mu.Unlock()
+		_ = conn.Close()
+		return
+	}
 
 	config.Logger().Printf("[browser] extension connected")
 	go bc.keepAlive()
@@ -143,11 +156,21 @@ type bridgeEnvelope struct {
 // and the popup flaps to "Reconnecting…". keepAliveWait is the read side: if no
 // frame (pong, alarm ping, or command reply) arrives within two ping periods,
 // treat the extension as dead and tear the socket down.
-// vars, not consts, so tests can shrink them.
+// vars, not consts, so tests can shrink them. Held as atomic nanoseconds:
+// keepAlive/readLoop goroutines outlive the test that spawned their conn, so
+// plain variables would race with a later test re-tuning the values.
 var (
-	keepAlivePing = 15 * time.Second
-	keepAliveWait = 40 * time.Second
+	keepAlivePing = int64(15 * time.Second)
+	keepAliveWait = int64(40 * time.Second)
 )
+
+func keepAlivePingDuration() time.Duration {
+	return time.Duration(atomic.LoadInt64(&keepAlivePing))
+}
+
+func keepAliveWaitDuration() time.Duration {
+	return time.Duration(atomic.LoadInt64(&keepAliveWait))
+}
 
 type bridgeConn struct {
 	ws      *websocket.Conn
@@ -175,7 +198,7 @@ func (c *bridgeConn) writeJSON(v any) error {
 // and the socket stays up between commands. It exits when the read loop closes
 // the conn.
 func (c *bridgeConn) keepAlive() {
-	t := time.NewTicker(keepAlivePing)
+	t := time.NewTicker(keepAlivePingDuration())
 	defer t.Stop()
 	for {
 		select {
@@ -201,7 +224,7 @@ func newBridgeConn(ws *websocket.Conn) *bridgeConn {
 }
 
 func (c *bridgeConn) readLoop() {
-	_ = c.ws.SetReadDeadline(time.Now().Add(keepAliveWait))
+	_ = c.ws.SetReadDeadline(time.Now().Add(keepAliveWaitDuration()))
 	for {
 		var env bridgeEnvelope
 		if err := c.ws.ReadJSON(&env); err != nil {
@@ -216,7 +239,7 @@ func (c *bridgeConn) readLoop() {
 			return
 		}
 		// Any inbound frame proves the extension is alive; extend the window.
-		_ = c.ws.SetReadDeadline(time.Now().Add(keepAliveWait))
+		_ = c.ws.SetReadDeadline(time.Now().Add(keepAliveWaitDuration()))
 		switch env.Type {
 		case "ping", "pong":
 			// Keepalive traffic (the extension's own alarm ping, or a pong to
