@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -149,9 +150,13 @@ func TestBridgeCDPForwarding(t *testing.T) {
 // ping, no command traffic) must still receive server pings; and if it never
 // answers, the read watchdog must eventually drop it.
 func TestBridgeKeepAlivePing(t *testing.T) {
-	oldPing, oldWait := keepAlivePing, keepAliveWait
-	keepAlivePing, keepAliveWait = 20*time.Millisecond, 120*time.Millisecond
-	t.Cleanup(func() { keepAlivePing, keepAliveWait = oldPing, oldWait })
+	oldPing, oldWait := keepAlivePingDuration(), keepAliveWaitDuration()
+	atomic.StoreInt64(&keepAlivePing, int64(20*time.Millisecond))
+	atomic.StoreInt64(&keepAliveWait, int64(120*time.Millisecond))
+	t.Cleanup(func() {
+		atomic.StoreInt64(&keepAlivePing, int64(oldPing))
+		atomic.StoreInt64(&keepAliveWait, int64(oldWait))
+	})
 
 	b, wsURL := bridgeServer(t)
 	token := b.IssueToken()
