@@ -2900,10 +2900,11 @@ function ComputerPermissionRow({
         )}
       </div>
       <span className={CHIP + ' shrink-0'}>{t(`settings.computer.permissionState.${state}`)}</span>
-      {state === 'denied' && (
+      {state !== 'granted' && (
         <button
           type="button"
-          className={`${BTN_SECONDARY} ${BTN_XS} shrink-0`}
+          className={`${BTN_GHOST} ${BTN_XS} shrink-0`}
+          title={t('settings.computer.openSystemSettingsHint')}
           onClick={() => {
             setOpenError(false)
             void openUrl(href).catch((err) => {
@@ -2928,6 +2929,8 @@ function ComputerTab() {
   const [saveWarning, setSaveWarning] = useState('')
   const [loadError, setLoadError] = useState('')
   const [checking, setChecking] = useState(false)
+  const [requesting, setRequesting] = useState(false)
+  const [requestFailed, setRequestFailed] = useState(false)
   // A pending loosen, held until the user clicks through the warning.
   const [loosen, setLoosen] = useState<{ i: number; tier: Tier } | null>(null)
   const saveTimer = useRef<number | null>(null)
@@ -3039,6 +3042,25 @@ function ComputerTab() {
       await load(true)
     } finally {
       setChecking(false)
+    }
+  }
+
+  /** One click surfaces the macOS consent prompts for both grants (Codex-style:
+   *  a single request, not one per permission). The system dialogs are answered
+   *  outside this flow, so states usually stay "denied" until the user acts in
+   *  them — the 3s poll observes the flips. */
+  async function requestPermissions() {
+    if (requesting) return
+    setRequesting(true)
+    setRequestFailed(false)
+    try {
+      await api.computerRequestPermissions({ accessibility: true, screen_recording: true })
+      await load(true)
+    } catch (err) {
+      console.error('Failed to request macOS permissions:', err)
+      setRequestFailed(true)
+    } finally {
+      setRequesting(false)
     }
   }
 
@@ -3339,19 +3361,35 @@ function ComputerTab() {
 
         <div className="flex items-start justify-between gap-3 px-1 pt-1">
           <div
-            className={`min-w-0 text-[10.5px] leading-relaxed ${loadError ? 'text-[var(--color-error-fg)]' : 'text-[var(--color-muted-foreground)]'}`}
+            className={`min-w-0 text-[10.5px] leading-relaxed ${loadError || requestFailed ? 'text-[var(--color-error-fg)]' : 'text-[var(--color-muted-foreground)]'}`}
           >
-            {loadError ? `${t('settings.computer.statusLoadFailed')}: ${loadError}` : readinessDetail}
+            {loadError
+              ? `${t('settings.computer.statusLoadFailed')}: ${loadError}`
+              : requestFailed
+                ? t('settings.computer.requestPermissionFailed')
+                : readinessDetail}
           </div>
-          <button
-            type="button"
-            className={`${BTN_SECONDARY} ${BTN_SM} shrink-0`}
-            onClick={() => void checkAgain()}
-            disabled={checking || saveBusy}
-          >
-            <ArrowPathIcon className={`h-3.5 w-3.5 ${checking ? 'animate-spin' : ''}`} />
-            {checking ? t('settings.computer.checking') : t('settings.computer.checkAgain')}
-          </button>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {helperConnected && !permissionsReady && (
+              <button
+                type="button"
+                className={`${BTN_PRIMARY} ${BTN_SM} shrink-0`}
+                onClick={() => void requestPermissions()}
+                disabled={requesting || checking || saveBusy}
+              >
+                {requesting ? t('settings.computer.requestingPermission') : t('settings.computer.requestPermissions')}
+              </button>
+            )}
+            <button
+              type="button"
+              className={`${BTN_SECONDARY} ${BTN_SM} shrink-0`}
+              onClick={() => void checkAgain()}
+              disabled={checking || saveBusy || requesting}
+            >
+              <ArrowPathIcon className={`h-3.5 w-3.5 ${checking ? 'animate-spin' : ''}`} />
+              {checking ? t('settings.computer.checking') : t('settings.computer.checkAgain')}
+            </button>
+          </div>
         </div>
       </div>
 

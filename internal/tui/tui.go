@@ -542,6 +542,9 @@ type ComputerStatus struct {
 type ComputerController struct {
 	Status     func() ComputerStatus
 	SetEnabled func(bool) error
+	// RequestPermissions surfaces the macOS consent prompts for the helper's
+	// TCC grants (/computer grant). Nil on platforms/transports that cannot ask.
+	RequestPermissions func() error
 }
 
 // WithComputer wires the `/computer` command to the computer-use subsystem.

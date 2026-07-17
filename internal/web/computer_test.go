@@ -234,6 +234,42 @@ func TestComputerAgentRebuildDoesNotOverwriteConcurrentModeSwitch(t *testing.T) 
 	}
 }
 
+func TestComputerPermissionRequestValidation(t *testing.T) {
+	supported := computer.Supported()
+
+	// A server without the manager cannot ask for anything.
+	nilSrv := &Server{cfg: &config.Config{}}
+	rec := httptest.NewRecorder()
+	nilSrv.handleComputerPermissionRequest(rec, httptest.NewRequest(http.MethodPost,
+		"/api/computer/permissions", strings.NewReader(`{"accessibility":true}`)))
+	if supported {
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("nil-manager status=%d body=%s, want 503", rec.Code, rec.Body.String())
+		}
+	} else if rec.Code != http.StatusBadRequest {
+		t.Fatalf("unsupported-platform status=%d body=%s, want 400", rec.Code, rec.Body.String())
+	}
+
+	mgr := computer.NewManager(computer.Config{}, t.TempDir())
+	t.Cleanup(func() { _ = mgr.Close() })
+	s := &Server{cfg: &config.Config{}, computerMgr: mgr}
+	for name, body := range map[string]string{
+		// Rejected before the helper is ever dialed.
+		"empty flags":   `{}`,
+		"malformed":     `{"accessibility":`,
+		"unknown field": `{"a11y":true}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			s.handleComputerPermissionRequest(rec, httptest.NewRequest(http.MethodPost,
+				"/api/computer/permissions", strings.NewReader(body)))
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s, want 400", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestHandleComputerShotServesOpenedFileHandle(t *testing.T) {
 	home := t.TempDir()
 	mgr := computer.NewManager(computer.Config{}, home)

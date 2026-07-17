@@ -670,6 +670,97 @@ they are cheap to pin against the real API.
 
 ---
 
+## 10. First-run onboarding — the branded permission ceremony (2026-07-17)
+
+Bare TCC prompts put *binary names* in System Settings: one row for
+`jcode-computerd` (Accessibility) and another for `jcode-computerd-capture`
+(Screen Recording), each with a generic icon. The fix has two halves, both
+riding the same insight: **the .app bundle is the unit of TCC identity.**
+
+1. **One bundle, one identity, one icon.** `jcode-computerd.app` ("jcode
+   Computer Use", `com.cnjack.jcode.computerd`) holds all three helper
+   executables — daemon, capture worker, onboarding UI — so both grants land
+   on a single branded row. Exactly one helper identity, deliberately: the
+   main jcode app and the helper are separate (a prompt fired from jcode would
+   attribute to jcode/Terminal instead), but the helpers never split further —
+   every extra bundle would be another row the user has to authorize. This is
+   the Codex "Codex" / "Codex Computer Use" shape.
+
+2. **The ceremony runs under the helper's identity.** The onboarding UI
+   (`cmd/jcode-computerd/onboarding`, Rust + AppKit via objc2) is a third
+   executable inside the bundle, spawned by the daemon with the same
+   disclaimed-responsibility SPI as the capture worker, so the TCC calls its
+   Allow buttons fire are attributed to the bundle. Two windows:
+
+   - **Dialog** — "Enable jcode Computer Use": icon, one line of why, and an
+     Allow row per grant (Accessibility, Screen Recording). Allow fires the
+     real consent prompt *and* deep-links the exact Settings pane; rows flip
+     to a green check as the poll (0.5 s) observes grants; when both are held
+     the window dismisses itself.
+   - **Drag bar** — a floating panel that decides *whether to exist* and
+     *where* from the System Settings window's position: shown only while
+     Accessibility is missing **and** System Settings is the frontmost app
+     with a window on screen (polled via `CGWindowListCopyWindowInfo` +
+     `NSWorkspace.frontmostApplication`, both zero-grant APIs — no
+     chicken-and-egg; the frontmost check keeps the bar from hovering over
+     unrelated work while Settings sits buried), re-anchored to the window's
+     bottom edge every tick, hidden when Settings loses focus or the grant
+     lands. The chip inside is an `NSDraggingSource` carrying the .app's file
+     URL, for the previously-denied case where macOS will not re-prompt and
+     dragging the app into the list is the only path.
+
+   The daemon surfaces it from three places — the `request_permissions` RPC
+   and both once-per-launch auto-prompt paths — via `surfaceOnboardingUI()`,
+   which is **bundle-gated**: bare-binary runs (dev builds, unit tests) have
+   no bundle identity worth priming and keep the old direct prompts. A
+   same-uid flock (`$TMPDIR/jcode-computerd-onboarding.lock`) keeps the
+   ceremony single-instance across daemons; the daemon additionally reuses a
+   still-running child instead of respawning.
+
+   The helper's **icon is drawn in code** (`--render-icon`, tiny-skia): a
+   brand-orange gradient tile with a white cursor arrow and the main icon's
+   pixel-square motif in white — family-recognizable, unmistakably not the
+   jcode app icon. `script/render_computerd_icon.sh` regenerates the committed
+   `.icns`; bundle builds just copy it. Dev modes: `--state` (grant JSON),
+   `--demo` (fresh-user layout, no auto-exit), `--demo-shot <dir>` (renders
+   both windows to PNG via `cacheDisplayInRect` — our own view hierarchy, no
+   Screen Recording needed).
+
+   Resolution order is the same three-tier lookup as the other helpers:
+   `$JCODE_COMPUTERD_ONBOARDING` override → suffixed sibling → bare sibling.
+   On the Go side, `helperBinPath` prefers the `.app` bundle daemon over the
+   bare binary, and the dev-glob skips `-capture`/`-onboarding` siblings.
+
+   One accidental-but-valuable confirmation from testing: launched *without*
+   the disclaim (plain `./…-onboarding` from a terminal), the UI reported both
+   grants as already held — it had inherited the terminal's responsible-
+   process identity, which is precisely the mis-attribution the disclaimed
+   spawn (and the bundle) exists to prevent. The E2E test
+   (`TestSmokeBundleOnboardingSpawn`) drives the real RPC against the bundled
+   daemon and asserts the UI child appears.
+
+   **The daemon disclaims itself.** The adversarial review caught the
+   critical inverse of that accident: the *daemon* is spawned by jcode with a
+   plain fork/exec, so its own `AXIsProcessTrusted` would key on jcode's
+   responsible process (Terminal/desktop app) — the ceremony would flip the
+   "jcode Computer Use" row while `requireAccessibilityTrusted` kept
+   consulting Terminal's. So a bundle-resident daemon re-execs itself once
+   through the same disclaim SPI at startup (`maybeReexecSelfResponsible`,
+   env-marker guarded); the original process lingers as a signal-forwarding
+   supervisor so the Go parent's process handle still reaches the real
+   daemon. Bundle residency is verified against the bundle's Info.plist
+   identifier, not path shape (Tauri ships bare sidecars under
+   `jcode.app/Contents/MacOS/`, which must not count), and the
+   `JCODE_COMPUTERD_ONBOARDING` override is honored only from inside the same
+   bundle — an out-of-bundle UI would prime a throwaway identity while the
+   ceremony claims success. All three executables are signed with the
+   bundle's identifier so that, under Developer ID, a grant recorded from one
+   validates for the others; ad-hoc dev builds remain pinned per-binary by
+   cdhash (known dev-mode re-prompt limitation, same as identity churn per
+   rebuild).
+
+---
+
 ## 11. Implementation status (2026-07-16)
 
 Per-requirement, so a reader knows exactly what runs and what is still design.
@@ -693,11 +784,18 @@ Per-requirement, so a reader knows exactly what runs and what is still design.
 | tree diff on the Go side | §3.3 | ✅ (pre-existing) | `Session.Snapshot` |
 | coordinate contract (window points + PNG pixel mapping) | §3.4 | ✅ built + real E2E | daemon/worker metadata + screenshot tool text |
 | Peer auth: expected client PID + first-frame token | §4 | ✅ built; real happy path + bad-token unit coverage | daemon + client |
+| Point-of-need TCC requests (`request_permissions` RPC, worker `--request-permission`, once-per-launch auto-prompt on grant failure) | §4.1 | ✅ built + live-smoke-tested (real socket round-trip) | `requestAccessibilityPermission`/`requestCaptureWorkerPermission` in daemon, `helperBackend.RequestPermissions`, `Manager.RequestPermissions`, `POST /api/computer/permissions`, `/computer grant` |
 | Peer auth: SecCode/team-id hardening on top of token | §4 | ⬜ deferred | — |
 | liveness / reconnect of a crashed daemon | §5 | ✅ reconnect once on next request; mutations never replayed | `helper.go`, `helper_test.go` |
 | macOS packaging + deployment target | §6–7 | ✅ CLI + installer + Tauri; macOS 14 min | `Makefile`, `release.yml`, `install.sh` |
 | Developer ID signing + notarization | §6–7 | ✅ existing optional release path covers bundled helpers | `release.yml` |
 | Non-macOS product gate | all | ✅ status-only explanation; no tools or enablement | `internal/computer/platform.go`, command/web composition |
+| **One-identity .app bundle** (daemon + capture + onboarding, own icon) | §10 | ✅ built; `make build-computerd-bundle`; dial prefers bundle | `script/build_computerd_bundle.sh`, `helper_dial.go` |
+| **Daemon self-responsibility** (disclaim re-exec, supervisor lingers) | §10 | ✅ built + tree/signal-forwarding verified live | `maybeReexecSelfResponsible` in daemon |
+| **Onboarding UI** (dialog + Settings-anchored drag bar, Rust/AppKit) | §10 | ✅ built + E2E (`TestSmokeBundleOnboardingSpawn`); visuals verified via `--demo-shot` | `cmd/jcode-computerd/onboarding/`, `surfaceOnboardingUI` in daemon |
+| Helper icon drawn in code + committed .icns | §10 | ✅ | `onboarding/src/icon.rs`, `script/render_computerd_icon.sh`, `cmd/jcode-computerd/icons/` |
+| Bundle in Tauri desktop packaging (`Contents/Resources/jcode-computerd.app`, bare computerd sidecars removed) | §6,§10 | ✅ `make desktop-sidecar` builds the bundle; dial resolves `../Resources` | `Makefile`, `tauri.macos.conf.json`, `helper_dial.go` |
+| Bundle in CLI release assets (release.yml, install.sh, `make install`) | §6,§10 | ⬜ deferred — CLI installs still ship bare binaries (bare flow keeps working) | — |
 
 **The honest gaps**, restated plainly: daemon-instance PID+token admission is
 built, but a same-uid process can still launch a new authorized helper and mutual

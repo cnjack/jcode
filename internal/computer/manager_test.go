@@ -4,10 +4,45 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
 )
+
+func TestManagerRequestPermissionsWorksBeforeEnablement(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("permission requesting is a macOS helper feature")
+	}
+	var gotRequest requestPermissionsPayload
+	fresh, _ := dialMock(t, func(d *mockDaemon) {
+		d.on(typeRequestPermissions, func(id uint64, payload json.RawMessage) envelope {
+			_ = json.Unmarshal(payload, &gotRequest)
+			return result(id, pongPayload{
+				ServerAPIVersion:          apiVersion,
+				Platform:                  "darwin",
+				AccessibilityPermission:   PermissionGranted,
+				ScreenRecordingPermission: PermissionDenied,
+			})
+		})
+	})
+	// Enabled=false on purpose: the grants are a prerequisite for turning the
+	// feature on, so the request must reach the helper without a session.
+	mgr := NewManager(Config{}, t.TempDir())
+	t.Cleanup(func() { _ = mgr.Close() })
+	mgr.helperDialer = func(context.Context, string) (*helperBackend, error) { return fresh, nil }
+
+	got, err := mgr.RequestPermissions(context.Background(), true, true)
+	if err != nil {
+		t.Fatalf("RequestPermissions: %v", err)
+	}
+	if !gotRequest.Accessibility || !gotRequest.ScreenRecording {
+		t.Fatalf("request payload = %+v, want both grants requested", gotRequest)
+	}
+	if got.Accessibility != PermissionGranted || got.ScreenRecording != PermissionDenied {
+		t.Fatalf("permissions = %+v, want granted/denied", got)
+	}
+}
 
 func TestManagerSingleflightsConcurrentHelperInitialization(t *testing.T) {
 	fresh, _ := dialMock(t, nil)

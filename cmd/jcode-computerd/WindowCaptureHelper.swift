@@ -51,6 +51,17 @@ if CommandLine.arguments.contains("--check-permission") {
     exit(0)
 }
 
+// --request-permission is the point-of-need counterpart of --check-permission:
+// it surfaces the system Screen Recording consent dialog for THIS executable
+// (jcode Settings → Computer Use → Request permission rides it). The call is
+// asynchronous — the dialog outlives this process if the user is slow — and it
+// returns the current state, which is printed exactly like --check-permission.
+if CommandLine.arguments.contains("--request-permission") {
+    let state = CGRequestScreenCaptureAccess() ? "granted" : "denied"
+    FileHandle.standardOutput.write(Data((state + "\n").utf8))
+    exit(0)
+}
+
 func requireScreenUnlocked() {
     guard let dict = CGSessionCopyCurrentDictionary() as? [String: Any],
           let onConsole = dict["kCGSSessionOnConsoleKey"] as? Bool,
@@ -169,7 +180,7 @@ func frameDistance(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
 }
 
 guard let pidText = flag("--pid"), let pid = Int32(pidText), let output = flag("--output") else {
-    fail("usage: jcode-computerd-capture --check-permission | --pid <pid> --output <png-path>")
+    fail("usage: jcode-computerd-capture --check-permission | --request-permission | --pid <pid> --output <png-path>")
 }
 if #available(macOS 14.0, *) {
     runCapture(pid: pid, output: output)

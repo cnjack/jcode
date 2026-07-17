@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -105,6 +106,28 @@ func (h *helperBackend) RefreshPermissionStatus(ctx context.Context) (HelperPerm
 	pong, err := h.requestPong(ctx, token)
 	if err != nil {
 		return h.PermissionStatus(), fmt.Errorf("refresh helper permission status: %w", err)
+	}
+	h.applyPong(pong)
+	return h.PermissionStatus(), nil
+}
+
+// RequestPermissions asks the daemon to surface the macOS consent prompt for
+// the named grants and returns the states observed after the request. The
+// prompts are asynchronous — the user answers in a system dialog — so a
+// "denied" state here means "not granted yet", not "refused"; the settings
+// poll observes the flip to granted.
+func (h *helperBackend) RequestPermissions(ctx context.Context, accessibility, screenRecording bool) (HelperPermissions, error) {
+	var pong pongPayload
+	err := h.roundTripTyped(ctx, typeRequestPermissions, requestPermissionsPayload{
+		Accessibility:   accessibility,
+		ScreenRecording: screenRecording,
+	}, typeResult, &pong)
+	if err != nil {
+		if strings.Contains(err.Error(), "unknown request type") {
+			return h.PermissionStatus(), fmt.Errorf(
+				"the running helper predates permission requests; restart jcode so the updated helper launches, then try again")
+		}
+		return h.PermissionStatus(), fmt.Errorf("request helper permissions: %w", err)
 	}
 	h.applyPong(pong)
 	return h.PermissionStatus(), nil

@@ -1,0 +1,79 @@
+# jcode-computerd-onboarding — the permission-onboarding UI for the computer-use
+# helper bundle (jcode-computerd.app, "jcode Computer Use").
+#
+# Why a third executable, and why Rust: the window that primes TCC consent must
+# run under the *helper's* code identity, not jcode's — a prompt fired from the
+# main app would put "jcode"/"Terminal" in System Settings instead of the
+# branded "jcode Computer Use" row. So the UI ships inside the same .app bundle
+# as the Swift daemon and capture worker (one identity, one authorization), and
+# is spawned by the daemon with disclaimed TCC responsibility. Rust + AppKit
+# (objc2) keeps it a single small static binary with no nib/Xcode project.
+#
+# The same binary doubles as the icon renderer (`--render-icon`): the helper's
+# distinct icon is drawn in code (tiny-skia) so the source of truth is this
+# crate, not a binary asset. See script/render_computerd_icon.sh.
+[package]
+name = "jcode-computerd-onboarding"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Standalone crate — not part of the desktop/src-tauri workspace.
+[workspace]
+
+[dependencies]
+tiny-skia = "0.11"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = [
+    "NSArray",
+    "NSData",
+    "NSDictionary",
+    "NSEnumerator",
+    "NSGeometry",
+    "NSLocale",
+    "NSObjCRuntime",
+    "NSString",
+    "NSThread",
+    "NSTimer",
+    "NSURL",
+    "NSValue",
+    "NSDate",
+] }
+objc2-app-kit = { version = "0.3", features = [
+    "NSApplication",
+    "NSBitmapImageRep",
+    "NSBox",
+    "NSButton",
+    "NSCell",
+    "NSColor",
+    "NSControl",
+    "NSDragging",
+    "NSDraggingItem",
+    "NSDraggingSession",
+    "NSEvent",
+    "NSFont",
+    "NSGraphics",
+    "NSImage",
+    "NSImageRep",
+    "NSImageView",
+    "NSPanel",
+    "NSPasteboard",
+    "NSResponder",
+    "NSRunningApplication",
+    "NSScreen",
+    "NSText",
+    "NSTextField",
+    "NSView",
+    "NSVisualEffectView",
+    "NSWindow",
+    "NSWorkspace",
+    "objc2-core-foundation",
+] }
+objc2-quartz-core = { version = "0.3", features = ["CALayer"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

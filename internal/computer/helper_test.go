@@ -326,6 +326,62 @@ func TestHelperRefreshesPermissionStatusWithAuthenticatedPing(t *testing.T) {
 	}
 }
 
+func TestHelperRequestPermissionsAppliesFreshStates(t *testing.T) {
+	var gotRequest requestPermissionsPayload
+	h, _ := dialMock(t, func(d *mockDaemon) {
+		d.on(typeRequestPermissions, func(id uint64, payload json.RawMessage) envelope {
+			_ = json.Unmarshal(payload, &gotRequest)
+			// The daemon answers with the pong-shaped payload: the prompts are
+			// async, but the user may already have granted between the handshake
+			// and this request, so the states here are the fresh truth.
+			return result(id, pongPayload{
+				ServerAPIVersion:          apiVersion,
+				Platform:                  "darwin",
+				HelperVersion:             "test-1.0",
+				AccessibilityPermission:   PermissionGranted,
+				ScreenRecordingPermission: PermissionGranted,
+			})
+		})
+	})
+
+	// Handshake states: accessibility granted, screen recording denied.
+	if got := h.PermissionStatus(); got.ScreenRecording != PermissionDenied {
+		t.Fatalf("initial permissions = %+v, want screen-recording denied", got)
+	}
+	got, err := h.RequestPermissions(context.Background(), true, true)
+	if err != nil {
+		t.Fatalf("RequestPermissions: %v", err)
+	}
+	if !gotRequest.Accessibility || !gotRequest.ScreenRecording {
+		t.Fatalf("request payload = %+v, want both grants requested", gotRequest)
+	}
+	if got.Accessibility != PermissionGranted || got.ScreenRecording != PermissionGranted {
+		t.Fatalf("post-request permissions = %+v, want granted/granted", got)
+	}
+	// The fresh states stick: the next PermissionStatus read does not fall back
+	// to the handshake snapshot.
+	if again := h.PermissionStatus(); again != got {
+		t.Fatalf("PermissionStatus after request = %+v, want %+v", again, got)
+	}
+}
+
+func TestHelperRequestPermissionsOldDaemonIsActionable(t *testing.T) {
+	h, _ := dialMock(t, func(d *mockDaemon) {
+		// A daemon launched before request_permissions existed answers with the
+		// generic unknown-type error (Swift Code.unknown = -10005). The client
+		// must translate that into "restart to get the new helper", not surface
+		// a raw protocol error.
+		d.on(typeRequestPermissions, func(id uint64, _ json.RawMessage) envelope {
+			return errFrame(id, -10005, "unknown request type: request_permissions")
+		})
+	})
+
+	_, err := h.RequestPermissions(context.Background(), true, false)
+	if err == nil || !strings.Contains(err.Error(), "restart jcode") {
+		t.Fatalf("old-daemon error = %v, want an actionable restart hint", err)
+	}
+}
+
 // --- per-instance admission and action wire fidelity (design §4) ---
 
 func TestActionWirePreservesExplicitZeroCoordinates(t *testing.T) {

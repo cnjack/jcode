@@ -186,6 +186,10 @@ struct ActionWire: Codable {
     var pages: Double?
 }
 struct PerformRequest: Codable { var action: ActionWire }
+struct RequestPermissionsPayload: Codable {
+    var accessibility: Bool?
+    var screen_recording: Bool?
+}
 
 // DaemonError is thrown by handlers and turned into an error frame.
 struct DaemonError: Error {
@@ -333,6 +337,194 @@ func handleLaunch(_ req: AppRequest) throws {
 
 func handleReadClipboard() -> ReadClipboardResult {
     ReadClipboardResult(text: NSPasteboard.general.string(forType: .string) ?? "")
+}
+
+// MARK: - TCC consent prompts (point-of-need permission requests)
+//
+// A grant that can only be discovered by digging through System Settings is a
+// grant users never find (the settings page's "which gate is shut" story only
+// helps once the user opens it). So the daemon can surface the real macOS
+// consent prompt itself: explicitly via the request_permissions RPC (Settings →
+// Computer Use → Request permission and /computer grant both ride it), and
+// automatically the first time a request actually fails for lack of the grant.
+
+// requestAccessibilityPermission triggers the system "jcode-computerd would
+// like to control this computer" alert when the grant is missing. The alert is
+// asynchronous — this returns the current state immediately, never blocks on
+// the user's answer, and is idempotent (macOS will not stack duplicate alerts).
+@discardableResult
+func requestAccessibilityPermission() -> Bool {
+    let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+    return AXIsProcessTrustedWithOptions(options)
+}
+
+// The automatic prompt fires at most once per daemon launch per service, so an
+// agent loop that keeps hitting the missing grant cannot stack alerts. The
+// explicit RPC path above bypasses this gate: a user clicking "Request
+// permission" always gets a fresh prompt.
+var didAutoPromptAccessibility = false
+var didAutoPromptScreenRecording = false
+
+// MARK: - Onboarding UI (the branded permission ceremony)
+//
+// When the helpers run from inside jcode-computerd.app, permission requests
+// surface through the bundled onboarding window (jcode-computerd-onboarding,
+// Rust/AppKit): the "Enable jcode Computer Use" dialog with per-grant Allow
+// buttons, plus a drag-into-Settings affordance that anchors itself to the
+// System Settings window. The UI executable lives in the same bundle, so
+// every TCC call it makes is attributed to the same "jcode Computer Use"
+// identity as this daemon and the capture worker — one identity, one row to
+// authorize. Bare-binary runs (make build-computerd, unit tests) have no
+// bundle identity worth priming, so they keep the direct TCC prompts below.
+
+// The .app bundle is the unit of TCC identity. Outside it (bare dev binaries)
+// the onboarding window would prime a throwaway per-binary identity, so it
+// stays off and callers fall back to the bare prompts. Identity is verified
+// against the bundle's Info.plist, not just the path shape — bare helpers
+// that happen to live in some other app's Contents/MacOS (the Tauri desktop
+// app ships sidecars that way) must not count.
+let helperBundleIdentifier = "com.cnjack.jcode.computerd"
+
+func helperBundleRoot() -> URL? {
+    var dir = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+        .deletingLastPathComponent()
+    guard dir.lastPathComponent == "MacOS" else { return nil }
+    dir.deleteLastPathComponent()
+    guard dir.lastPathComponent == "Contents" else { return nil }
+    dir.deleteLastPathComponent()
+    guard dir.pathExtension == "app",
+          Bundle(url: dir)?.bundleIdentifier == helperBundleIdentifier else { return nil }
+    return dir
+}
+
+func isRunningFromHelperBundle() -> Bool { helperBundleRoot() != nil }
+
+func onboardingHelperURL() -> URL? {
+    if let override = ProcessInfo.processInfo.environment["JCODE_COMPUTERD_ONBOARDING"],
+       FileManager.default.isExecutableFile(atPath: override) {
+        let path = URL(fileURLWithPath: override).standardizedFileURL.path
+        if let root = helperBundleRoot(), path.hasPrefix(root.path + "/") {
+            return URL(fileURLWithPath: path)
+        }
+        // An out-of-bundle UI would prime its own throwaway TCC identity
+        // while the ceremony claims success for "jcode Computer Use" —
+        // refuse it (callers fall back to bare prompts) rather than mislead.
+        FileHandle.standardError.write(
+            "jcode-computerd: ignoring JCODE_COMPUTERD_ONBOARDING outside the helper bundle: \(path)\n"
+                .data(using: .utf8)!)
+    }
+    let daemon = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+    let name = daemon.lastPathComponent
+    let prefix = "jcode-computerd"
+    guard name.hasPrefix(prefix) else { return nil }
+    let suffix = String(name.dropFirst(prefix.count))
+    let sibling = daemon.deletingLastPathComponent()
+        .appendingPathComponent(prefix + "-onboarding" + suffix)
+    if FileManager.default.isExecutableFile(atPath: sibling.path) { return sibling }
+    let unsuffixed = daemon.deletingLastPathComponent()
+        .appendingPathComponent(prefix + "-onboarding")
+    return FileManager.default.isExecutableFile(atPath: unsuffixed.path) ? unsuffixed : nil
+}
+
+// MARK: - Self-responsibility (TCC attribution for the daemon itself)
+//
+// jcode spawns this daemon with a plain fork/exec, so by default it inherits
+// jcode's *responsible process* — Terminal/iTerm for CLI runs, the desktop
+// app for Tauri — and every AXIsProcessTrusted/AX call in this process would
+// key on THAT identity. The onboarding ceremony below obtains the grant for
+// the bundle identity ("jcode Computer Use"); without this step the row the
+// user just enabled would never satisfy requireAccessibilityTrusted. So when
+// running from the helper bundle, re-exec once through the same disclaim SPI
+// the workers use, making the daemon self-responsible (= the bundle). The
+// original process lingers only as a signal-forwarding supervisor so the Go
+// parent's process handle — and its kill on failed dials — still reaches the
+// real daemon.
+
+var reexecChildPID: pid_t = 0
+
+func maybeReexecSelfResponsible() {
+    guard isRunningFromHelperBundle(),
+          ProcessInfo.processInfo.environment["JCODE_COMPUTERD_SELF_DISCLAIMED"] != "1"
+    else { return }
+
+    var attr: posix_spawnattr_t? = nil
+    // Every failure path degrades to running with inherited responsibility —
+    // worse attribution, but a working daemon beats a dead one.
+    guard posix_spawnattr_init(&attr) == 0 else { return }
+    defer { posix_spawnattr_destroy(&attr) }
+    guard responsibility_spawnattrs_setdisclaim(&attr, 1) == 0 else { return }
+
+    var argv: [UnsafeMutablePointer<CChar>?] = CommandLine.arguments.map { strdup($0) } + [nil]
+    defer { for a in argv { free(a) } }
+    var env = ProcessInfo.processInfo.environment
+    env["JCODE_COMPUTERD_SELF_DISCLAIMED"] = "1"
+    var envp: [UnsafeMutablePointer<CChar>?] = env.map { strdup("\($0.key)=\($0.value)") } + [nil]
+    defer { for e in envp { free(e) } }
+
+    var pid = pid_t()
+    let exe = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL.path
+    guard posix_spawn(&pid, exe, nil, &attr, &argv, &envp) == 0 else { return }
+
+    reexecChildPID = pid
+    signal(SIGTERM) { _ in kill(reexecChildPID, SIGTERM) }
+    signal(SIGINT) { _ in kill(reexecChildPID, SIGINT) }
+    var status: Int32 = 0
+    while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
+    if (status & 0x7f) == 0 { exit((status >> 8) & 0xff) }
+    exit(128 + (status & 0x7f))
+}
+
+// Reaped on demand (pollStatus in isRunning) rather than in a background
+// thread: RPC handling is single-threaded, and on-demand reaping keeps
+// isRunning race-free. A finished UI lingers as a zombie only until the next
+// surface call or daemon exit.
+var onboardingProcess: WorkerProcess?
+
+/// Opens the onboarding window, or leaves the already-open one in place.
+/// Returns false when the UI is unavailable (bare binaries, missing
+/// executable, spawn failure) — callers then fall back to bare TCC prompts.
+@discardableResult
+func surfaceOnboardingUI() -> Bool {
+    guard isRunningFromHelperBundle(), let ui = onboardingHelperURL() else { return false }
+    if let running = onboardingProcess, running.isRunning {
+        // An explicit re-request must not be a silent no-op: the accessory-
+        // policy window has no Dock icon to find, so re-front it ourselves.
+        // Best-effort under macOS 14 cooperative activation; the window's
+        // floating level keeps it visible even when activation is denied.
+        NSRunningApplication(processIdentifier: running.pid)?.activate(options: [])
+        return true
+    }
+    do {
+        // Disclaimed for the same reason as the capture worker: the UI's TCC
+        // calls must be attributed to the helper bundle, not to whichever
+        // process launched jcode.
+        onboardingProcess = try spawnDisclaimedWorker(
+            executable: ui, arguments: [], stdout: Pipe(), stderr: Pipe())
+        return true
+    } catch {
+        return false
+    }
+}
+
+func requireAccessibilityTrusted() throws {
+    if AXIsProcessTrusted() { return }
+    if !didAutoPromptAccessibility {
+        didAutoPromptAccessibility = true
+        if !surfaceOnboardingUI() { _ = requestAccessibilityPermission() }
+    }
+    throw DaemonError(
+        code: Code.permissionsNotGranted,
+        message: "Accessibility permission not granted for jcode-computerd. A permission window or macOS consent prompt was shown — approve it, or enable jcode Computer Use under System Settings › Privacy & Security › Accessibility. The user can re-open the prompt from jcode Settings → Computer Use → Request permission, or with /computer grant.")
+}
+
+func handleRequestPermissions(_ req: RequestPermissionsPayload) -> PongPayload {
+    // The onboarding window covers both grants at once; when it cannot be
+    // shown, fire exactly the bare prompts the client asked for.
+    if !surfaceOnboardingUI() {
+        if req.accessibility == true { _ = requestAccessibilityPermission() }
+        if req.screen_recording == true { _ = requestCaptureWorkerPermission() }
+    }
+    return currentPong()
 }
 
 // MARK: - Accessibility (needs the Accessibility TCC grant)
@@ -604,10 +796,7 @@ final class TreeBuilder {
 }
 
 func handleTree(_ req: TreeRequest, _ session: Session) throws -> TreeResult {
-    guard AXIsProcessTrusted() else {
-        throw DaemonError(code: Code.permissionsNotGranted,
-                          message: "Accessibility permission not granted. Grant it in System Settings › Privacy & Security › Accessibility.")
-    }
+    try requireAccessibilityTrusted()
     try checkScreenUnlocked()
     let app = try runningApp(req.app)
     let root = accessibilityRoot(app)
@@ -628,6 +817,7 @@ func handleTree(_ req: TreeRequest, _ session: Session) throws -> TreeResult {
 // MARK: - Perform (input synthesis + AX actions)
 
 func handlePerform(_ req: PerformRequest, _ session: Session) throws {
+    try requireAccessibilityTrusted()
     try checkScreenUnlocked()
     let a = req.action
     // The Go tier gate and this dispatch are separate RPCs. Re-check in the
@@ -992,16 +1182,122 @@ func captureHelperURL() -> URL? {
     return FileManager.default.isExecutableFile(atPath: unsuffixed.path) ? unsuffixed : nil
 }
 
+// MARK: - Disclaimed worker spawn (TCC responsibility)
+//
+// Screen Recording consent is keyed on the *responsible process*, and a
+// spawned child inherits its parent's responsibility by default: launched from
+// the desktop app, the capture worker's prompts and grants land on
+// jcode-desktop; launched from a terminal, on the terminal app — verified
+// against tccd's AttributionChain logging. responsibility_spawnattrs_setdisclaim
+// makes the worker responsible for itself, so Screen Recording consent always
+// attaches to the worker's own code identity (the jcode-computerd.app bundle),
+// no matter which process launched jcode. Chromium ships the same mechanism
+// for its own helpers; the symbol is stable libSystem SPI since long before
+// our macOS 14 floor.
+
+@_silgen_name("responsibility_spawnattrs_setdisclaim")
+func responsibility_spawnattrs_setdisclaim(
+    _ attrs: UnsafeMutablePointer<posix_spawnattr_t?>, _ disclaim: Int32) -> Int32
+
+// _NSGetEnviron returns the C global `environ` (char***) through Foundation's
+// bridge. Swift does not see the symbol directly, so declare it via the linker
+// name — the same mechanism used for the disclaim SPI above.
+@_silgen_name("_NSGetEnviron")
+func _NSGetEnviron() -> UnsafeMutablePointer<UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?>?
+
+final class WorkerProcess {
+    let pid: pid_t
+    private var reaped: Int32?
+
+    init(pid: pid_t) { self.pid = pid }
+
+    /// The raw waitpid status once the child has exited, nil while running.
+    /// Unlike kill(pid, 0) this is zombie-correct: reaping counts as exited.
+    @discardableResult
+    func pollStatus() -> Int32? {
+        if let s = reaped { return s }
+        var status: Int32 = 0
+        if waitpid(pid, &status, WNOHANG) == pid {
+            reaped = status
+            return status
+        }
+        return nil
+    }
+
+    var isRunning: Bool { pollStatus() == nil }
+
+    func terminate() { kill(pid, SIGTERM) }
+    func killNow() { kill(pid, SIGKILL) }
+
+    /// Mirrors Process.terminationStatus (exit code on normal exit, the
+    /// terminating signal otherwise). Blocks until the child is reaped.
+    var terminationStatus: Int32 {
+        while reaped == nil {
+            _ = pollStatus()
+            if reaped == nil { Thread.sleep(forTimeInterval: 0.01) }
+        }
+        let status = reaped!
+        if (status & 0x7f) == 0 { return (status >> 8) & 0xff } // WIFEXITED
+        return status & 0x7f // WTERMSIG
+    }
+
+    /// Reap without blocking this thread. Used when a consent prompt keeps the
+    /// worker alive past the probe bound — killing it would dismiss the system
+    /// dialog the user is about to answer, and not reaping it would zombie.
+    func reapInBackground() {
+        DispatchQueue.global().async { _ = self.terminationStatus }
+    }
+}
+
+// spawnDisclaimedWorker starts the capture worker with its own TCC
+// responsibility (see above). stdout/stderr are wired exactly like
+// Foundation's Process does: the parent's write ends are closed at spawn so
+// the readers observe EOF when the child exits.
+func spawnDisclaimedWorker(
+    executable: URL, arguments: [String], stdout: Pipe, stderr: Pipe
+) throws -> WorkerProcess {
+    // posix_spawnattr_t is void* on macOS, and the Darwin imports want a
+    // pointer to the *optional* form. A stack-local optional gives us that
+    // pointer for free, no manual allocation needed.
+    var attr: posix_spawnattr_t? = nil
+    guard posix_spawnattr_init(&attr) == 0 else {
+        throw DaemonError(code: Code.unknown, message: "posix_spawnattr_init failed")
+    }
+    defer { posix_spawnattr_destroy(&attr) }
+    _ = responsibility_spawnattrs_setdisclaim(&attr, 1)
+
+    var actions: posix_spawn_file_actions_t? = nil
+    guard posix_spawn_file_actions_init(&actions) == 0 else {
+        throw DaemonError(code: Code.unknown, message: "posix_spawn_file_actions_init failed")
+    }
+    defer { posix_spawn_file_actions_destroy(&actions) }
+    posix_spawn_file_actions_adddup2(&actions, stdout.fileHandleForWriting.fileDescriptor, STDOUT_FILENO)
+    posix_spawn_file_actions_adddup2(&actions, stderr.fileHandleForWriting.fileDescriptor, STDERR_FILENO)
+    posix_spawn_file_actions_addclose(&actions, stdout.fileHandleForReading.fileDescriptor)
+    posix_spawn_file_actions_addclose(&actions, stderr.fileHandleForReading.fileDescriptor)
+
+    var argv: [UnsafeMutablePointer<CChar>?] =
+        ([executable.path] + arguments).map { strdup($0) } + [nil]
+    defer { for a in argv { free(a) } }
+    var pid = pid_t()
+    let envp = _NSGetEnviron()!.pointee
+    let rc = posix_spawn(&pid, executable.path, &actions, &attr, &argv, envp)
+    try? stdout.fileHandleForWriting.close()
+    try? stderr.fileHandleForWriting.close()
+    guard rc == 0 else {
+        throw DaemonError(code: Code.unknown,
+                          message: "spawn capture worker: \(String(cString: strerror(rc)))")
+    }
+    return WorkerProcess(pid: pid)
+}
+
 func captureWorkerPermissionState() -> String {
     guard let helper = captureHelperURL() else { return "unknown" }
-    let process = Process()
-    process.executableURL = helper
-    process.arguments = ["--check-permission"]
     let stdout = Pipe()
-    process.standardOutput = stdout
-    process.standardError = Pipe()
+    let process: WorkerProcess
     do {
-        try process.run()
+        process = try spawnDisclaimedWorker(
+            executable: helper, arguments: ["--check-permission"], stdout: stdout, stderr: Pipe())
     } catch {
         return "unknown"
     }
@@ -1011,9 +1307,45 @@ func captureWorkerPermissionState() -> String {
     if process.isRunning {
         process.terminate()
         Thread.sleep(forTimeInterval: 0.05)
-        if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-        process.waitUntilExit()
+        if process.isRunning { process.killNow() }
+        _ = process.terminationStatus
         return "unknown"
+    }
+    let raw = stdout.fileHandleForReading.readDataToEndOfFile()
+    guard process.terminationStatus == 0 else { return "unknown" }
+    let state = String(data: raw, encoding: .utf8)?
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    switch state {
+    case "granted", "denied": return state
+    default: return "unknown"
+    }
+}
+
+// requestCaptureWorkerPermission asks the capture worker to surface the system
+// Screen Recording consent prompt for its own executable identity (the grant
+// belongs to the worker, not this daemon — see WindowCaptureHelper.swift). The
+// prompt is asynchronous. If the worker is still waiting on the dialog past
+// the probe bound it is left running — killing it would dismiss the alert the
+// user is about to answer — and reaped in the background so it cannot zombie.
+// In that case the state is necessarily "denied": an already-granted worker
+// prints "granted" and exits immediately without ever prompting.
+@discardableResult
+func requestCaptureWorkerPermission() -> String {
+    guard let helper = captureHelperURL() else { return "unknown" }
+    let stdout = Pipe()
+    let process: WorkerProcess
+    do {
+        process = try spawnDisclaimedWorker(
+            executable: helper, arguments: ["--request-permission"], stdout: stdout, stderr: Pipe())
+    } catch {
+        return "unknown"
+    }
+
+    let deadline = Date().addingTimeInterval(3)
+    while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
+    if process.isRunning {
+        process.reapInBackground()
+        return "denied"
     }
     let raw = stdout.fileHandleForReading.readDataToEndOfFile()
     guard process.terminationStatus == 0 else { return "unknown" }
@@ -1041,8 +1373,6 @@ func handleCapture(_ req: AppRequest, _ session: Session) throws -> CaptureResul
     let id = UUID().uuidString
     let path = (session.shotsDir as NSString).appendingPathComponent("\(id).png")
     do {
-        let process = Process()
-        process.executableURL = helper
         var arguments = ["--pid", String(app.processIdentifier), "--output", path]
         // The AX tools and screenshot must describe the same target. Pass the
         // focused/main AX window as a title+bounds hint; the capture worker uses
@@ -1061,20 +1391,18 @@ func handleCapture(_ req: AppRequest, _ session: Session) throws -> CaptureResul
                 "--window-height", String(Double(frame.height)),
             ]
         }
-        process.arguments = arguments
         let stdout = Pipe()
-        process.standardOutput = stdout
         let stderr = Pipe()
-        process.standardError = stderr
-        try process.run()
+        let process = try spawnDisclaimedWorker(
+            executable: helper, arguments: arguments, stdout: stdout, stderr: stderr)
 
         let deadline = Date().addingTimeInterval(10)
         while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
         if process.isRunning {
             process.terminate()
             Thread.sleep(forTimeInterval: 0.1)
-            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-            process.waitUntilExit()
+            if process.isRunning { process.killNow() }
+            _ = process.terminationStatus
             try? FileManager.default.removeItem(atPath: path)
             throw DaemonError(code: Code.unknown, message: "window capture helper timed out")
         }
@@ -1084,9 +1412,22 @@ func handleCapture(_ req: AppRequest, _ session: Session) throws -> CaptureResul
         let workerData = stdout.fileHandleForReading.readDataToEndOfFile()
         guard process.terminationStatus == 0 else {
             try? FileManager.default.removeItem(atPath: path)
+            // A failed capture is overwhelmingly a missing Screen Recording
+            // grant. Confirm with a probe (failures like "no capturable window"
+            // must not fire a spurious prompt), then surface the consent dialog
+            // once so the user can fix it in context rather than finding the
+            // right pane by themselves.
+            if !didAutoPromptScreenRecording, captureWorkerPermissionState() == "denied" {
+                didAutoPromptScreenRecording = true
+                if !surfaceOnboardingUI() { _ = requestCaptureWorkerPermission() }
+            }
             let suffix = detail.isEmpty ? "status \(process.terminationStatus)" : detail
+            // Name the identity the user will actually find in System
+            // Settings: the branded bundle row for bundle installs, the bare
+            // binary for dev runs.
+            let identity = isRunningFromHelperBundle() ? "jcode Computer Use" : "jcode-computerd-capture"
             throw DaemonError(code: Code.permissionsNotGranted,
-                              message: "window capture failed — Screen Recording permission may not be granted: \(suffix)")
+                              message: "window capture failed — Screen Recording permission may not be granted for \(identity). A permission window or macOS consent prompt was shown if the grant is missing; approve it or enable \(identity) under System Settings › Privacy & Security › Screen Recording (\(suffix))")
         }
         do {
             try checkScreenUnlocked()
@@ -1206,6 +1547,9 @@ func dispatch(_ req: Envelope, _ session: Session) -> Envelope {
         case "read_clipboard":
             try checkScreenUnlocked()
             return Envelope(type: "result", id: req.id, payload: encodePayload(handleReadClipboard()))
+        case "request_permissions":
+            let r = try decodePayload(RequestPermissionsPayload.self, req.payload)
+            return Envelope(type: "result", id: req.id, payload: encodePayload(handleRequestPermissions(r)))
         case "perform":
             let r = try decodePayload(PerformRequest.self, req.payload)
             try handlePerform(r, session)
@@ -1487,4 +1831,6 @@ guard let socketPath = parseFlag("--socket"),
     FileHandle.standardError.write("usage: jcode-computerd --socket <path> --token-file <path> --shots-dir <path> --client-pid <pid>\n".data(using: .utf8)!)
     exit(2)
 }
+// After flag validation (usage errors print once), before the socket exists.
+maybeReexecSelfResponsible()
 runServer(socketPath: socketPath, tokenFile: tokenFile, shotsDir: shotsDir, clientPID: clientPID)

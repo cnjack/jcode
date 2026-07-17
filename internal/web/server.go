@@ -368,6 +368,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/browser/shots/{id}", s.handleBrowserShot)
 	mux.HandleFunc("GET /api/computer/status", s.handleComputerStatus)
 	mux.HandleFunc("POST /api/computer/config", s.handleComputerConfig)
+	mux.HandleFunc("POST /api/computer/permissions", s.handleComputerPermissionRequest)
 	mux.HandleFunc("GET /api/computer/shots/{id}", s.handleComputerShot)
 	mux.HandleFunc("GET /api/approval-review-config", s.handleGetApprovalReviewConfig)
 	mux.HandleFunc("POST /api/approval-review-config", s.handleSetApprovalReviewConfig)

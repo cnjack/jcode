@@ -523,6 +523,34 @@ func (m *Manager) populateHelperStatus(ctx context.Context, helper *helperBacken
 	st.Detail = "The native computer-use helper is connected and both macOS permissions are granted."
 }
 
+// requestPermissionsTimeout bounds the consent-prompt round trip. The prompts
+// are asynchronous, so this is daemon latency plus the capture worker's probe
+// bound, not the time the user spends answering the system dialog.
+const requestPermissionsTimeout = 15 * time.Second
+
+// RequestPermissions surfaces the macOS consent prompt for the named grants
+// (Settings → Computer Use → Request permission and /computer grant both ride
+// this). It starts the helper if needed and deliberately does NOT require
+// computer use to be enabled: the grants are a prerequisite for enabling the
+// feature, so gating the request on enablement would deadlock the first run.
+//
+// The returned states are what the helper observes immediately after asking.
+// The system dialog is answered later, so "denied" means "not granted yet" —
+// callers should re-poll Status rather than treat it as a refusal.
+func (m *Manager) RequestPermissions(ctx context.Context, accessibility, screenRecording bool) (HelperPermissions, error) {
+	unknown := HelperPermissions{Accessibility: PermissionUnknown, ScreenRecording: PermissionUnknown}
+	if runtime.GOOS != "darwin" {
+		return unknown, fmt.Errorf("%s", UnsupportedReason())
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, requestPermissionsTimeout)
+	defer cancel()
+	hb, err := m.getHelper(reqCtx)
+	if err != nil {
+		return unknown, fmt.Errorf("the native computer-use helper could not be started: %w", err)
+	}
+	return hb.RequestPermissions(reqCtx, accessibility, screenRecording)
+}
+
 // SaveScreenshot writes a PNG and returns its opaque id.
 func (m *Manager) SaveScreenshot(png []byte) (string, error) {
 	if len(png) == 0 || int64(len(png)) > MaxScreenshotBytes {

@@ -13,7 +13,7 @@ LDFLAGS := -s -w \
 
 export GOFLAGS := -buildvcs=false
 
-.PHONY: build build-binary run doctor version install clean build-web fmt lint lint-go lint-web generate setup-hooks desktop-icons desktop-sidecar desktop-dev desktop-build desktop-clean build-ble build-computerd
+.PHONY: build build-binary run doctor version install clean build-web fmt lint lint-go lint-web generate setup-hooks desktop-icons desktop-sidecar desktop-dev desktop-build desktop-clean build-ble build-computerd build-computerd-bundle
 
 # Swift defaults its deployment target to the build host. That made helpers
 # compiled on newer CI hosts unloadable on macOS 14/15. Keep the target explicit
@@ -101,6 +101,18 @@ else
 	@echo "jcode-computerd is macOS only; skipping on $(TARGET_GOOS)"
 endif
 
+# Assemble the full jcode-computerd.app bundle next to the main binary. The
+# bundle is what gives the helpers their own TCC identity ("jcode Computer
+# Use" with its own icon in System Settings) instead of per-binary rows; the
+# runtime prefers it over the bare binaries when both exist (helper_dial.go).
+# Includes the Rust onboarding UI when cargo is available.
+build-computerd-bundle:
+ifeq ($(TARGET_GOOS),darwin)
+	script/build_computerd_bundle.sh $(SWIFT_TARGET) "$(dir $(BIN))"
+else
+	@echo "jcode-computerd is macOS only; skipping on $(TARGET_GOOS)"
+endif
+
 install: generate build-web
 	go install -ldflags "$(LDFLAGS)" $(PKG)
 ifeq ($(TARGET_GOOS),darwin)
@@ -121,6 +133,7 @@ version:
 clean:
 	rm -f $(BIN)
 	rm -f "$(dir $(BIN))jcode-computerd" "$(dir $(BIN))jcode-computerd-capture"
+	rm -rf "$(dir $(BIN))jcode-computerd.app"
 	rm -rf internal/web/dist
 	rm -rf packages/jcode-ui/dist packages/jcode-ui-core/dist
 
@@ -160,10 +173,9 @@ desktop-sidecar: generate
 	@echo "Building jcode-ble helper for $(RUST_TARGET)..."
 	CGO_ENABLED=$(BLE_CGO) go build -tags ble -ldflags "$(LDFLAGS)" -o $(SIDECAR_DIR)/jcode-ble-$(RUST_TARGET)$(SIDECAR_EXE) ./cmd/jcode-ble
 ifeq ($(TARGET_GOOS),darwin)
-	@echo "Building jcode-computerd helper for $(RUST_TARGET)..."
+	@echo "Building jcode-computerd.app helper bundle for $(RUST_TARGET)..."
 	@test -n "$(SWIFT_DESKTOP_ARCH)" || { echo "Unsupported Rust target for Swift helper: $(RUST_TARGET)"; exit 1; }
-	$(SWIFTC) -O -target $(SWIFT_DESKTOP_TARGET) -o "$(SIDECAR_DIR)/jcode-computerd-capture-$(RUST_TARGET)$(SIDECAR_EXE)" ./cmd/jcode-computerd/WindowCaptureHelper.swift
-	$(SWIFTC) -O -target $(SWIFT_DESKTOP_TARGET) -o "$(SIDECAR_DIR)/jcode-computerd-$(RUST_TARGET)$(SIDECAR_EXE)" ./cmd/jcode-computerd/main.swift
+	script/build_computerd_bundle.sh $(SWIFT_DESKTOP_TARGET) $(DESKTOP_DIR)/src-tauri/bundles $(RUST_TARGET)
 endif
 
 # Run the desktop app in development (hot window; rebuilds the sidecar first).
@@ -175,4 +187,4 @@ desktop-build: desktop-sidecar
 	cd $(DESKTOP_DIR) && (pnpm install 2>/dev/null || npm install) && pnpm tauri build
 
 desktop-clean:
-	rm -rf $(SIDECAR_DIR) $(DESKTOP_DIR)/src-tauri/target
+	rm -rf $(SIDECAR_DIR) $(DESKTOP_DIR)/src-tauri/bundles $(DESKTOP_DIR)/src-tauri/target

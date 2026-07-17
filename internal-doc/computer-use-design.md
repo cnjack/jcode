@@ -555,7 +555,9 @@ Mirrors `BrowserTab` (`web/src/components/SettingsDialog.tsx:2488-2748`), tab id
 
 1. **Enable** toggle plus a read-only native-helper health card (installed,
    connected, version). Accessibility and Screen Recording are separate rows,
-   each with its own System Settings deep-link and a **Check again** action.
+   each with a **Request permission** action (triggers the real macOS consent
+   prompt via `POST /api/computer/permissions`) and a System Settings
+   deep-link as the fallback, plus a **Check again** action.
    Unknown permission state is never rendered as ready. On non-macOS servers
    the tab is an informative read-only “requires macOS 14+” state.
 2. **App permissions** table — rows of `bundle id · tier badge · launch · interact`.
@@ -604,10 +606,13 @@ try to fix it here.
 
 ### 6.4 TUI
 
-`/computer` status + `/computer on|off`, mirroring `browser_command.go:12`.
-Injected via a `ComputerController{Status, SetEnabled}` struct and
-`WithComputer(cc)` ModelOption, so the TUI never imports the computer manager —
-same decoupling as `BrowserController` (`tui/tui.go:513-516`).
+`/computer` status + `/computer on|off` + `/computer grant`, mirroring
+`browser_command.go:12`. `grant` surfaces the macOS consent prompts without
+leaving the terminal — the in-run answer to a `permissionsNotGranted` tool
+error. Injected via a `ComputerController{Status, SetEnabled,
+RequestPermissions}` struct and `WithComputer(cc)` ModelOption, so the TUI
+never imports the computer manager — same decoupling as `BrowserController`
+(`tui/tui.go:513-516`).
 
 Rich tool rendering in the TUI is out of scope, matching browser-use's current
 state (TUI has status only).
@@ -617,8 +622,30 @@ state (TUI has status only).
 ```
 GET  /api/computer/status      → supported/platform, canonical config, helper health, two TCC states, tiers
 POST /api/computer/config      → save + hot-reload via Manager.SetConfig
+POST /api/computer/permissions → trigger the macOS consent prompt(s) via the helper (§4.6)
 GET  /api/computer/shots/{id}  → screenshot PNG (uuid re-parsed; verified open handle is served)
 ```
+
+### 4.6 Point-of-need permission requests
+
+The helper can surface the real macOS consent prompts itself, at the moment
+they matter, instead of sending the user hunting through System Settings:
+
+- **Explicit:** `request_permissions` (helper protocol) ←
+  `Manager.RequestPermissions` ← `POST /api/computer/permissions` (Settings →
+  Computer Use → Request permission) or `/computer grant` (TUI). The daemon
+  calls `AXIsProcessTrustedWithOptions(prompt=YES)`; the capture worker calls
+  `CGRequestScreenCaptureAccess()` under `--request-permission` because the
+  Screen Recording grant belongs to its own executable identity. The response
+  reports the states observed immediately — the system dialog is answered
+  later, so "denied" means "not granted yet", and the settings poll observes
+  the flip. The request works with the feature still disabled: the grants are
+  a prerequisite for enabling it, so gating the request on enablement would
+  deadlock the first run.
+- **Automatic:** the first request that actually fails for a missing grant
+  fires the same prompt once per daemon launch (an agent loop cannot stack
+  system alerts), then returns `permissionsNotGranted` with the remediation
+  paths named in the error.
 
 `OpenScreenshot` re-parses the uuid, rejects symlink/reparse-point cache roots,
 opens only canonical `UUID.png` regular files under the cross-process store lock,

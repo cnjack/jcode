@@ -627,10 +627,14 @@ export default {
         denied: 'Not granted',
         unknown: 'Not checked',
       },
+      requestPermissions: 'Request permissions',
+      requestingPermission: 'Requesting…',
+      requestPermissionFailed: 'Could not ask macOS for permission. Check that the helper is installed and connected, then try again.',
       openSystemSettings: 'Open Settings',
+      openSystemSettingsHint: 'Opens the exact Privacy & Security pane — use it if the prompt did not appear or was dismissed.',
       openSystemSettingsFailed: 'Could not open System Settings. Open Privacy & Security manually and select this permission.',
       permissionsHint:
-        'Both permissions must be positively detected before jcode reports ready. Grant them in System Settings, then check again; restart jcode if macOS asks you to reopen it.',
+        'Click Request permission to open the jcode Computer Use permission window (or the macOS consent prompt on bare-binary installs), then allow Accessibility and Screen Recording for "jcode Computer Use". jcode reports ready once both grants are detected.',
       permissionsUnknownHint:
         'Permission status could not be read. Update or reinstall the helper, restart jcode, then check again.',
       readyHint: 'The helper is connected and both macOS permissions are granted.',

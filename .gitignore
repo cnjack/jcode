@@ -2,6 +2,13 @@
 /jcode
 /jcode-new
 /weixin_poc
+
+# computer-use helper build artifacts (bare binaries + assembled bundle)
+/jcode-computerd
+/jcode-computerd-capture
+/jcode-computerd.app/
+cmd/jcode-computerd/onboarding/target/
+desktop/src-tauri/bundles/
 internal/web/dist
 internal/model/registry_generated.go
 web/src/styles/tokens.generated.css

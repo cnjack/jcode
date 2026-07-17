@@ -23,7 +23,7 @@ func (m *Model) handleComputerInput(prompt string, cmds []tea.Cmd) (tea.Model, t
 		return m, tea.Batch(cmds...)
 	}
 
-	// /computer on | off
+	// /computer on | off | grant
 	if len(fields) >= 2 {
 		switch fields[1] {
 		case "on", "off":
@@ -44,8 +44,26 @@ func (m *Model) handleComputerInput(prompt string, cmds []tea.Cmd) (tea.Model, t
 			}
 			m.refreshViewport()
 			return m, tea.Batch(cmds...)
+		case "grant":
+			// Surface the real macOS consent prompts without leaving the
+			// terminal — the in-run answer to "Accessibility permission not
+			// granted". The system dialog is answered by the user; /computer
+			// re-checks the state afterwards.
+			if m.computer.RequestPermissions == nil {
+				m.lines = append(m.lines, textLine("  Cannot request permissions here."))
+				m.refreshViewport()
+				return m, tea.Batch(cmds...)
+			}
+			if err := m.computer.RequestPermissions(); err != nil {
+				m.lines = append(m.lines, textLine("  "+toolLabelStyle.Render("🖥 Computer:")+" permission request failed: "+err.Error()))
+			} else {
+				m.lines = append(m.lines, textLine("  "+toolLabelStyle.Render("🖥 Computer:")+" permission window (or macOS consent prompt) shown for jcode Computer Use."))
+				m.lines = append(m.lines, textLine("  Allow it (or enable \"jcode Computer Use\" under System Settings > Privacy & Security > Accessibility / Screen Recording), then run /computer to re-check."))
+			}
+			m.refreshViewport()
+			return m, tea.Batch(cmds...)
 		default:
-			m.lines = append(m.lines, textLine("  Usage: /computer [on|off]"))
+			m.lines = append(m.lines, textLine("  Usage: /computer [on|off|grant]"))
 			m.refreshViewport()
 			return m, tea.Batch(cmds...)
 		}

@@ -207,7 +207,10 @@ func spawnDaemon(p helperPaths) (*exec.Cmd, error) {
 
 // helperBinPath resolves jcode-computerd next to the running binary, mirroring
 // jcode-ble's resolution (exact name, then the dev-mode target-triple glob),
-// with an env override for the desktop shell.
+// with an env override for the desktop shell. The .app bundle is preferred
+// over the bare binary: only the bundle gives the helpers their own stable
+// TCC identity ("jcode Computer Use", with its own icon) instead of a
+// per-binary row in System Settings.
 func helperBinPath() string {
 	if p := os.Getenv("JCODE_COMPUTERD"); p != "" {
 		if isExecutable(p) {
@@ -219,6 +222,14 @@ func helperBinPath() string {
 		return ""
 	}
 	dir := filepath.Dir(exe)
+	if p := filepath.Join(dir, "jcode-computerd.app", "Contents", "MacOS", "jcode-computerd"); isExecutable(p) {
+		return p
+	}
+	// Desktop shell: jcode runs from jcode-desktop.app/Contents/MacOS and the
+	// helper bundle ships in the app's Resources (tauri.macos.conf.json).
+	if p := filepath.Join(dir, "..", "Resources", "jcode-computerd.app", "Contents", "MacOS", "jcode-computerd"); isExecutable(p) {
+		return p
+	}
 	if p := filepath.Join(dir, "jcode-computerd"); isExecutable(p) {
 		return p
 	}
@@ -232,10 +243,12 @@ func helperBinPath() string {
 
 func selectHelperBin(matches []string) string {
 	for _, match := range matches {
-		// The capture worker intentionally shares the jcode-computerd prefix.
-		// On x86 triples it sorts before the daemon; never try to launch the
-		// short-lived --pid/--output worker as the socket server.
-		if strings.HasPrefix(filepath.Base(match), "jcode-computerd-capture") {
+		// The capture worker and onboarding UI intentionally share the
+		// jcode-computerd prefix. Never try to launch either as the socket
+		// server (on x86 triples they sort before the daemon).
+		if strings.HasPrefix(filepath.Base(match), "jcode-computerd-capture") ||
+			strings.HasPrefix(filepath.Base(match), "jcode-computerd-onboarding") ||
+			strings.HasPrefix(filepath.Base(match), "jcode-computerd.app") {
 			continue
 		}
 		if isExecutable(match) {

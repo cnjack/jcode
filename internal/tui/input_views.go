@@ -37,7 +37,7 @@ func (m Model) getAllCommands() []commandSuggestion {
 		{"/channel", "Manage channels (WeChat etc.)"},
 		{"/mcp", "List MCP servers / log in (/mcp login <name>)"},
 		{"/browser", "Browser use status (/browser on|off)"},
-		{"/computer", "Computer use status (/computer on|off)"},
+		{"/computer", "Computer use status (/computer on|off|grant)"},
 		{"/memory", "Project memory status (/memory sync|clear)"},
 		{"/help", "Show keyboard shortcuts"},
 	}

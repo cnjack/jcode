@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -319,4 +321,121 @@ func TestSmokeDaemonIdleExit(t *testing.T) {
 		_ = cmd.Process.Kill()
 		t.Fatal("daemon did not self-exit within 4s despite a 500ms idle window")
 	}
+}
+
+// TestSmokeBundleOnboardingSpawn proves the request_permissions RPC surfaces
+// the bundled onboarding UI when the daemon runs from inside
+// jcode-computerd.app — the branded permission ceremony instead of bare TCC
+// prompts. Gated separately because it needs the assembled bundle and briefly
+// shows a window on the runner's screen:
+//
+//	make build-computerd-bundle
+//	JCODE_COMPUTERD_SMOKE=1 JCODE_COMPUTERD_BUNDLE=$PWD/jcode-computerd.app \
+//	  go test ./internal/computer/ -run TestSmokeBundleOnboardingSpawn -v
+func TestSmokeBundleOnboardingSpawn(t *testing.T) {
+	if os.Getenv("JCODE_COMPUTERD_SMOKE") == "" {
+		t.Skip("set JCODE_COMPUTERD_SMOKE=1")
+	}
+	bundle := os.Getenv("JCODE_COMPUTERD_BUNDLE")
+	if bundle == "" {
+		t.Skip("set JCODE_COMPUTERD_BUNDLE to an assembled jcode-computerd.app")
+	}
+	bin := filepath.Join(bundle, "Contents", "MacOS", "jcode-computerd")
+	if _, err := os.Stat(bin); err != nil {
+		t.Fatalf("bundle daemon %s not found (make build-computerd-bundle): %v", bin, err)
+	}
+	if _, err := os.Stat(filepath.Join(bundle, "Contents", "MacOS", "jcode-computerd-onboarding")); err != nil {
+		t.Fatalf("bundle has no onboarding UI (was cargo available to the bundle build?): %v", err)
+	}
+
+	work := t.TempDir()
+	sock := shortSocketPath(t)
+	tokenFile := filepath.Join(work, "token")
+	const token = "smoke-token-bundle"
+	if err := os.WriteFile(tokenFile, []byte(token), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(bin, "--socket", sock, "--token-file", tokenFile,
+		"--shots-dir", filepath.Join(work, "shots"),
+		"--client-pid", strconv.Itoa(os.Getpid()))
+	// A private single-instance lock so this run neither collides with a
+	// real ceremony already on the user's screen nor leaves one behind.
+	cmd.Env = append(os.Environ(),
+		"JCODE_COMPUTERD_ONBOARDING_LOCK="+filepath.Join(work, "ui.lock"))
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start bundled daemon: %v", err)
+	}
+	// The bundled daemon re-execs itself disclaimed (self-responsible), so
+	// cmd is a supervisor whose child is the real daemon and the UI is a
+	// grandchild. Kill the whole descendant tree on cleanup.
+	t.Cleanup(func() {
+		for _, p := range descendantPIDs(cmd.Process.Pid) {
+			_ = syscall.Kill(p, syscall.SIGTERM)
+		}
+		_ = cmd.Process.Kill()
+	})
+
+	conn := dialWithRetry(t, sock)
+	h, err := newHelperConn(conn, token)
+	if err != nil {
+		t.Fatalf("handshake with the bundled daemon failed: %v", err)
+	}
+	t.Cleanup(func() { _ = h.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := h.RequestPermissions(ctx, true, true); err != nil {
+		t.Fatalf("RequestPermissions: %v", err)
+	}
+
+	// The real daemon spawns the UI as its own (disclaimed) child; give it a
+	// beat to appear. On a machine where the bundle identity already holds
+	// both grants the window dismisses itself after ~1.4s, so poll fast.
+	deadline := time.Now().Add(3 * time.Second)
+	var uiPIDs []int
+	for time.Now().Before(deadline) {
+		for _, p := range descendantPIDs(cmd.Process.Pid) {
+			if commandNameOf(p) == "jcode-computerd-onboarding" {
+				uiPIDs = append(uiPIDs, p)
+			}
+		}
+		if len(uiPIDs) > 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if len(uiPIDs) == 0 {
+		t.Fatal("request_permissions did not spawn the bundled onboarding UI")
+	}
+	t.Logf("onboarding UI spawned: pids %v", uiPIDs)
+	for _, p := range uiPIDs {
+		_ = syscall.Kill(p, syscall.SIGTERM)
+	}
+}
+
+// descendantPIDs walks pgrep -P transitively from root (excluded).
+func descendantPIDs(root int) []int {
+	var all []int
+	frontier := []int{root}
+	for len(frontier) > 0 {
+		next := []int{}
+		for _, parent := range frontier {
+			out, _ := exec.Command("pgrep", "-P", strconv.Itoa(parent)).Output()
+			for _, f := range strings.Fields(string(out)) {
+				if p, err := strconv.Atoi(f); err == nil {
+					all = append(all, p)
+					next = append(next, p)
+				}
+			}
+		}
+		frontier = next
+	}
+	return all
+}
+
+func commandNameOf(pid int) string {
+	out, _ := exec.Command("ps", "-o", "comm=", "-p", strconv.Itoa(pid)).Output()
+	return filepath.Base(strings.TrimSpace(string(out)))
 }

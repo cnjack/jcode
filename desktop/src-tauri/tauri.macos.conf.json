@@ -1,10 +1,8 @@
 {
   "bundle": {
-    "externalBin": [
-      "binaries/jcode",
-      "binaries/jcode-ble",
-      "binaries/jcode-computerd",
-      "binaries/jcode-computerd-capture"
-    ]
+    "externalBin": ["binaries/jcode", "binaries/jcode-ble"],
+    "resources": {
+      "bundles/jcode-computerd.app": "jcode-computerd.app"
+    }
   }
 }

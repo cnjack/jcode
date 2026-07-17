@@ -41,8 +41,14 @@ const (
 	typeLaunch        = "launch"
 	typeReadClipboard = "read_clipboard"
 	typePerform       = "perform"
-	typeResult        = "result"
-	typeError         = "error"
+	// request_permissions is not a Backend method: it drives the macOS consent
+	// prompts (Settings → Request permission, /computer grant) and answers with
+	// a pong-shaped payload so the client refreshes both grant states in one
+	// round trip. An old daemon answers "unknown request type"; callers map
+	// that to a stale-helper error rather than a protocol failure.
+	typeRequestPermissions = "request_permissions"
+	typeResult             = "result"
+	typeError              = "error"
 )
 
 // envelope is one framed message in either direction.
@@ -204,6 +210,15 @@ func float64Pointer(value float64) *float64 { return &value }
 
 type readClipboardResult struct {
 	Text string `json:"text"`
+}
+
+// requestPermissionsPayload asks the daemon to surface the macOS consent
+// prompt for the named grants. The prompts are asynchronous (the user answers
+// in a system dialog), so the pong-shaped response reports the state at answer
+// time — "denied" means "not granted yet", not "refused".
+type requestPermissionsPayload struct {
+	Accessibility   bool `json:"accessibility,omitempty"`
+	ScreenRecording bool `json:"screen_recording,omitempty"`
 }
 
 // errorPayload carries a daemon-side failure. Code mirrors the parent's error

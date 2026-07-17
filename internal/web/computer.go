@@ -200,6 +200,58 @@ func (s *Server) handleComputerConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+// computerPermissionRequest is the POST /api/computer/permissions body. Each
+// true field asks macOS to surface the consent prompt for that grant; the
+// prompts themselves are system dialogs answered outside this request.
+type computerPermissionRequest struct {
+	Accessibility   bool `json:"accessibility,omitempty"`
+	ScreenRecording bool `json:"screen_recording,omitempty"`
+}
+
+// handleComputerPermissionRequest triggers the macOS consent prompts via the
+// native helper. This is the convenient form of "open System Settings and hunt
+// for the right pane": the system alert names the helper and jumps straight to
+// the correct toggle. The response carries the states observed immediately
+// after asking — the system dialog is answered later, so the settings poll is
+// what observes the flip to granted.
+func (s *Server) handleComputerPermissionRequest(w http.ResponseWriter, r *http.Request) {
+	if !computer.Supported() {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": computer.UnsupportedReason()})
+		return
+	}
+	if s.computerMgr == nil {
+		writeJSON(w, http.StatusServiceUnavailable,
+			map[string]string{"error": "The native Computer Use helper is unavailable in this session"})
+		return
+	}
+	var req computerPermissionRequest
+	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<16))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid permission request: " + err.Error()})
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "request body must contain one JSON object"})
+		return
+	}
+	if !req.Accessibility && !req.ScreenRecording {
+		writeJSON(w, http.StatusBadRequest,
+			map[string]string{"error": "nothing to request: set accessibility and/or screen_recording"})
+		return
+	}
+	permissions, err := s.computerMgr.RequestPermissions(r.Context(), req.Accessibility, req.ScreenRecording)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":           "requested",
+		"accessibility":    permissions.Accessibility,
+		"screen_recording": permissions.ScreenRecording,
+	})
+}
+
 func validateComputerEnable(enabled, supported bool) error {
 	if enabled && !supported {
 		return fmt.Errorf("%s", computer.UnsupportedReason())

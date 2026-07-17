@@ -1342,6 +1342,15 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 			st.ag = newAg
 			return nil
 		},
+		RequestPermissions: func() error {
+			if computerMgr == nil {
+				return fmt.Errorf("%s", computer.UnsupportedReason())
+			}
+			// Ask for both grants at once: the prompts are system dialogs the
+			// user answers, and needing both is the normal case.
+			_, err := computerMgr.RequestPermissions(context.Background(), true, true)
+			return err
+		},
 	}
 
 	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore, tui.WithVersion(Version), tui.WithGoalStore(env.GoalStore), tui.WithStartupMode(startupMode), tui.WithTheme(cfg.Theme), tui.WithBrowser(browserCtl), tui.WithComputer(computerCtl), tui.WithApprovalModeChange(func(enabled bool) {

@@ -363,6 +363,8 @@ export const api = {
   computerStatus: () => request<ComputerStatusResponse>('/api/computer/status'),
   computerSaveConfig: (data: ComputerConfig) =>
     request<ComputerConfigSaveResponse>('/api/computer/config', { method: 'POST', body: JSON.stringify(data) }),
+  computerRequestPermissions: (data: ComputerPermissionRequest) =>
+    request<ComputerPermissionRequestResponse>('/api/computer/permissions', { method: 'POST', body: JSON.stringify(data) }),
 
   // Approval review tuning (Auto session mode)
   approvalReviewConfig: () => request<ApprovalReviewConfigResponse>('/api/approval-review-config'),
@@ -435,6 +437,20 @@ export interface ComputerConfigSaveResponse {
   status: string
   config: ComputerConfig
   warning_code?: 'agent_refresh_failed'
+}
+
+/** Asks macOS to surface the consent prompt for each grant set to true.
+ *  The prompts are system dialogs answered outside this request. */
+export interface ComputerPermissionRequest {
+  accessibility?: boolean
+  screen_recording?: boolean
+}
+
+export interface ComputerPermissionRequestResponse {
+  status: string
+  /** States observed right after asking; 'denied' means 'not granted yet', not 'refused'. */
+  accessibility: ComputerPermissionState
+  screen_recording: ComputerPermissionState
 }
 
 export type ComputerPermissionState = 'granted' | 'denied' | 'unknown'
