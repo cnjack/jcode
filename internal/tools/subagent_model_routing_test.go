@@ -66,7 +66,7 @@ func routingFixture(t *testing.T, srvURL, smallModel string) *subagentTool {
 		SmallModel: smallModel,
 		Providers:  map[string]*config.ProviderConfig{"mock": pc},
 	}
-	parent, err := internalmodel.NewChatModelFromProvider(context.Background(), "main-model", srvURL, pc)
+	parent, err := internalmodel.NewChatModelFromProvider(context.Background(), "mock", "main-model", srvURL, pc)
 	if err != nil {
 		t.Fatalf("build parent model: %v", err)
 	}

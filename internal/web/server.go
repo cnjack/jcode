@@ -469,15 +469,7 @@ func (s *Server) currentModelSupportsImage(eng *Engine) bool {
 	}
 	provider, mdl, _ := eng.modelSnapshot()
 	_, m, ok := s.registry.LookupModel(provider, mdl)
-	if !ok || m == nil || m.Modalities == nil {
-		return false
-	}
-	for _, mod := range m.Modalities.Input {
-		if mod == "image" {
-			return true
-		}
-	}
-	return false
+	return ok && m.SupportsImageInput()
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

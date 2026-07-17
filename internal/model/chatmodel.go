@@ -362,14 +362,24 @@ func NewChatModel(_ context.Context, cfg *ChatModelConfig) (einomodel.ToolCallin
 
 // NewChatModelFromProvider builds a ChatModel from a provider config, applying
 // its advanced settings (custom headers, thinking depth, explicit thinking
-// toggle, and the vision capability — which defaults to enabled). baseURL is the
-// already-resolved endpoint (config override or registry default). This is the
-// single place that maps ProviderConfig → ChatModelConfig so every entrypoint
-// (web, TUI, ACP, subagents) honors the same settings.
-func NewChatModelFromProvider(ctx context.Context, modelName, baseURL string, pc *config.ProviderConfig) (einomodel.ToolCallingChatModel, error) {
+// toggle, and the vision capability). baseURL is the already-resolved endpoint
+// (config override or registry default). This is the single place that maps
+// ProviderConfig → ChatModelConfig so every entrypoint (web, TUI, ACP,
+// subagents) honors the same settings.
+//
+// Vision resolution order: explicit pc.Vision override → registry modalities
+// (a text-only model gets vision disabled so image parts are stripped from
+// requests instead of 400-ing the provider) → default enabled (unknown or
+// custom models keep the historical permissive behavior).
+func NewChatModelFromProvider(ctx context.Context, provider, modelName, baseURL string, pc *config.ProviderConfig) (einomodel.ToolCallingChatModel, error) {
 	vision := true
 	if pc.Vision != nil {
 		vision = *pc.Vision
+	} else if m := lookupStaticModel(provider, modelName); m != nil && m.Modalities != nil {
+		vision = m.SupportsImageInput()
+		if !vision {
+			config.Logger().Printf("[chatmodel] %s/%s has no image input modality; image parts will be stripped", provider, modelName)
+		}
 	}
 	return NewChatModel(ctx, &ChatModelConfig{
 		Model:           modelName,

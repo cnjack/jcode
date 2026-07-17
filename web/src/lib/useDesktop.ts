@@ -40,6 +40,46 @@ export async function openUrl(url: string): Promise<void> {
   }
 }
 
+/**
+ * Route external link clicks out of the app webview.
+ *
+ * Chat markdown renders plain `<a href>` anchors (no target), so in the Tauri
+ * desktop shell a click navigates the app window itself away from the UI, and
+ * `target="_blank"` clicks are dead (new-window creation is denied). One
+ * delegated capture-phase listener covers every current and future anchor:
+ * external http(s) links are opened in the system browser (Tauri) or a new
+ * tab (browser); same-origin and loopback (sidecar API, Bearer-auth'd) links
+ * are left alone.
+ */
+export function initExternalLinks(): void {
+  if (typeof document === 'undefined') return
+  document.addEventListener(
+    'click',
+    (e) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+      const anchor = (e.target as Element | null)?.closest?.('a[href]')
+      if (!anchor) return
+      const href = anchor.getAttribute('href') ?? ''
+      let url: URL
+      try {
+        url = new URL(href, window.location.href)
+      } catch {
+        return
+      }
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return
+      if (url.origin === window.location.origin) return
+      if (isLoopback(url.hostname)) return
+      e.preventDefault()
+      void openUrl(url.href)
+    },
+    true,
+  )
+}
+
+function isLoopback(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname.endsWith('.localhost')
+}
+
 /** Show a native notification (Tauri) or fall back to the Web Notifications API. */
 export async function notify(title: string, body?: string): Promise<void> {
   if (isTauri) {

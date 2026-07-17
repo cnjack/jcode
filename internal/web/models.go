@@ -74,15 +74,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 			}
 			ref := config.ModelRef{Provider: rp.ID, Model: m.ID}
 			enabled := modelState.IsModelEnabled(ref, m.DefaultEnabled)
-			imageSupport := false
-			if m.Modalities != nil {
-				for _, mod := range m.Modalities.Input {
-					if mod == "image" {
-						imageSupport = true
-						break
-					}
-				}
-			}
+			imageSupport := m.SupportsImageInput()
 			pi.Models = append(pi.Models, modelInfo{
 				ID: m.ID, Name: m.Name, ToolCall: m.ToolCall, ContextLimit: ctx,
 				Reasoning: m.Reasoning, Recommended: m.Recommended,
@@ -131,6 +123,29 @@ func (s *Server) handleSwitchModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	eng.applyModelSwitch(ag, req.Provider, req.Model)
+
+	// Persist the selection so a restart resumes on this model — matches the
+	// TUI model picker, which writes cfg.Model on every switch. In-place on the
+	// shared cfg under cfgMu (same discipline as handleSetSmallModel).
+	s.cfgMu.Lock()
+	s.mu.Lock()
+	var persistErr error
+	if s.cfg != nil {
+		prevModel := s.cfg.Model
+		s.cfg.Model = req.Provider + "/" + req.Model
+		if err := config.SaveConfig(s.cfg); err != nil {
+			// Keep memory consistent with disk: a failed save must not leave the
+			// live config advertising a value that won't survive a restart.
+			s.cfg.Model = prevModel
+			persistErr = err
+		}
+	}
+	s.mu.Unlock()
+	s.cfgMu.Unlock()
+	if persistErr != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config: " + persistErr.Error()})
+		return
+	}
 
 	// Track in recent models.
 	if state, err := config.LoadModelState(); err == nil {

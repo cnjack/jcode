@@ -215,7 +215,7 @@ const chatSlice = createSlice({
       // Pops the first queued message — the App thunk resends it on agentDone.
       if (s.queued.length > 0) s.queued.shift()
     },
-    agentDone(s, a: { payload: { error?: string } | undefined }) {
+    agentDone(s, a: { payload: { error?: string; detail?: string } | undefined }) {
       // Stamp duration on the last assistant message.
       for (let i = s.timeline.length - 1; i >= 0; i--) {
         const item = s.timeline[i]
@@ -237,7 +237,14 @@ const chatSlice = createSlice({
       if (a.payload?.error) {
         s.timeline.push({
           kind: 'message',
-          data: { id: genId('sys'), role: 'system', content: a.payload.error, timestamp: Date.now(), level: 'error' },
+          data: {
+            id: genId('sys'),
+            role: 'system',
+            content: a.payload.error,
+            detail: a.payload.detail || undefined,
+            timestamp: Date.now(),
+            level: 'error',
+          },
           seq: nextSeq(),
         })
       }

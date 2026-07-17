@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/tools"
 )
 
@@ -412,9 +413,11 @@ type WebSubagentProgressData struct {
 	Detail    string `json:"detail"`
 }
 
-// WebDoneData signals agent completion.
+// WebDoneData signals agent completion. Error is a short user-facing summary;
+// Detail carries the full raw error text for a collapsible "details" view.
 type WebDoneData struct {
-	Error string `json:"error,omitempty"`
+	Error  string `json:"error,omitempty"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // WebApprovalRequestData carries an approval request. ToolCallID (when known)
@@ -588,11 +591,14 @@ func (h *WebHandler) OnAgentStart() {
 }
 
 func (h *WebHandler) OnAgentDone(err error) {
-	errMsg := ""
-	if err != nil {
-		errMsg = err.Error()
+	if err == nil {
+		h.emit("agent_done", WebDoneData{})
+		return
 	}
-	h.emit("agent_done", WebDoneData{Error: errMsg})
+	// Raw run errors (eino NodeRunError wrapping go-openai API errors) are too
+	// noisy for the timeline — send a one-line summary plus the raw detail.
+	summary, detail := internalmodel.SummarizeRunError(err)
+	h.emit("agent_done", WebDoneData{Error: summary, Detail: detail})
 }
 
 func (h *WebHandler) OnTokenUpdate(info TokenUsage) {

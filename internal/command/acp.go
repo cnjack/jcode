@@ -261,13 +261,8 @@ func (a *acpAgent) Initialize(_ context.Context, params acp.InitializeRequest) (
 	if cfg, err := config.LoadConfig(); err == nil {
 		providerName, modelName := cfg.GetProviderModel()
 		registry := internalmodel.NewModelRegistryWithConfig(cfg)
-		if _, m, ok := registry.LookupModel(providerName, modelName); ok && m != nil && m.Modalities != nil {
-			for _, mod := range m.Modalities.Input {
-				if mod == "image" {
-					imageSupport = true
-					break
-				}
-			}
+		if _, m, ok := registry.LookupModel(providerName, modelName); ok && m != nil {
+			imageSupport = m.SupportsImageInput()
 		}
 	}
 
@@ -378,7 +373,7 @@ func (a *acpAgent) buildAgentSession(
 	// over the provider-level default before constructing the model.
 	acpEffortCfg := *providerCfg
 	acpEffortCfg.ReasoningEffort = config.ResolveEffort(providerName, modelName, providerCfg.ReasoningEffort)
-	chatModel, err := internalmodel.NewChatModelFromProvider(ctx, modelName, baseURL, &acpEffortCfg)
+	chatModel, err := internalmodel.NewChatModelFromProvider(ctx, providerName, modelName, baseURL, &acpEffortCfg)
 	if err != nil {
 		return nil, fmt.Errorf("error creating model: %w", err)
 	}
