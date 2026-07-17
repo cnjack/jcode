@@ -232,7 +232,7 @@ func buildFlowSpawn(ctx context.Context, pwd string) (flow.SpawnFunc, func(strin
 	}
 	effortCfg := *providerCfg
 	effortCfg.ReasoningEffort = config.ResolveEffort(providerName, modelName, providerCfg.ReasoningEffort)
-	chatModel, err := internalmodel.NewChatModelFromProvider(ctx, modelName, baseURL, &effortCfg)
+	chatModel, err := internalmodel.NewChatModelFromProvider(ctx, providerName, modelName, baseURL, &effortCfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create model: %w", err)
 	}

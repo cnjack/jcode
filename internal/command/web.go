@@ -340,7 +340,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		pcEffort := config.ResolveEffort(prov, mod, provCfg.ReasoningEffort)
 		effortCfg := *provCfg
 		effortCfg.ReasoningEffort = pcEffort
-		cm, err := internalmodel.NewChatModelFromProvider(ctx, mod, bURL, &effortCfg)
+		cm, err := internalmodel.NewChatModelFromProvider(ctx, prov, mod, bURL, &effortCfg)
 		if err != nil {
 			return nil, 0, fmt.Errorf("create model %s/%s: %w", prov, mod, err)
 		}

@@ -46,7 +46,7 @@ export interface WSHandlers {
     presentation?: import('./types').ToolResultPresentation
   }) => void
   onTokenUpdate?: (data: import('./types').TokenUpdateData) => void
-  onAgentDone?: (data: { error?: string }) => void
+  onAgentDone?: (data: { error?: string; detail?: string }) => void
   onTodoUpdate?: () => void
   onGoalUpdate?: (data: import('jcode-ui-core').Goal | null) => void
   onApprovalRequest?: (data: import('./types').ApprovalRequestData) => void

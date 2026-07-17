@@ -700,7 +700,7 @@ func (s *interactiveState) handleConfig(cfgMsg *config.Config) {
 	// over the provider-level default before constructing the model.
 	newEffortCfg := *newProvCfg
 	newEffortCfg.ReasoningEffort = config.ResolveEffort(newProvName, newModelName, newProvCfg.ReasoningEffort)
-	newChatModel, err := internalmodel.NewChatModelFromProvider(s.ctx, newModelName, newBaseURL, &newEffortCfg)
+	newChatModel, err := internalmodel.NewChatModelFromProvider(s.ctx, newProvName, newModelName, newBaseURL, &newEffortCfg)
 	if err != nil {
 		return
 	}
@@ -779,7 +779,7 @@ func (s *interactiveState) handleAddModel() {
 	}
 	newEffortCfg2 := *newProvCfg
 	newEffortCfg2.ReasoningEffort = config.ResolveEffort(newProvName, newModelName, newProvCfg.ReasoningEffort)
-	newChatModel, cmErr := internalmodel.NewChatModelFromProvider(s.ctx, newModelName, newBaseURL, &newEffortCfg2)
+	newChatModel, cmErr := internalmodel.NewChatModelFromProvider(s.ctx, newProvName, newModelName, newBaseURL, &newEffortCfg2)
 	if cmErr != nil {
 		return
 	}
@@ -1056,7 +1056,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 
 	effortCfg := *providerCfg
 	effortCfg.ReasoningEffort = config.ResolveEffort(providerName, modelName, providerCfg.ReasoningEffort)
-	chatModel, err := internalmodel.NewChatModelFromProvider(ctx, modelName, baseURL, &effortCfg)
+	chatModel, err := internalmodel.NewChatModelFromProvider(ctx, providerName, modelName, baseURL, &effortCfg)
 	if err != nil {
 		return fmt.Errorf("error creating model: %w", err)
 	}

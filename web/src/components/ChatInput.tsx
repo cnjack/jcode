@@ -55,6 +55,7 @@ import type { ChatImage as RuntimeChatImage } from 'jcode-ui-core'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
 import { chatActions, modelActions } from '../app/store'
 import { api } from '../lib/api'
+import { readDraft, writeDraft } from '../lib/drafts'
 import { BranchPicker } from './BranchPicker'
 import { ProviderIcon } from './ProviderIcon'
 import { WorkspacePicker } from './WorkspacePicker'
@@ -152,8 +153,9 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
   const goalArmed = useAppSelector((s) => s.chat.goalArmed)
   const currentSessionId = useAppSelector((s) => s.session.currentSessionId)
 
-  // Composer-local state.
-  const [input, setInput] = useState('')
+  // Composer-local state. The input text initializes from the saved draft for
+  // this conversation (covers remounts on welcome ↔ conversation crossing).
+  const [input, setInput] = useState(() => readDraft(currentSessionId))
   /** Pending vision images — same shape as jcode-ui `ChatImage` / AttachmentList. */
   const [pendingImages, setPendingImages] = useState<ChatImage[]>([])
   const [showSlashMenu, setShowSlashMenu] = useState(false)
@@ -300,6 +302,29 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
     autoResize()
   }, [input, autoResize])
 
+  // ─── Per-conversation draft persistence ───────────────────────────────────
+  // liveRef always holds the latest {sessionId, text} so the switch effect can
+  // flush the outgoing conversation's draft before loading the incoming one.
+  const draftLiveRef = useRef({ sessionId: currentSessionId, text: input })
+  draftLiveRef.current = { sessionId: currentSessionId, text: input }
+  const draftSessionRef = useRef(currentSessionId)
+
+  useEffect(() => {
+    const prevId = draftSessionRef.current
+    if (prevId === currentSessionId) return
+    // draftLiveRef still holds the outgoing conversation's text at this point.
+    writeDraft(prevId, draftLiveRef.current.text)
+    draftSessionRef.current = currentSessionId
+    setInput(readDraft(currentSessionId))
+  }, [currentSessionId])
+
+  // Flush on unmount (app close / panel teardown).
+  useEffect(() => {
+    return () => {
+      writeDraft(draftLiveRef.current.sessionId, draftLiveRef.current.text)
+    }
+  }, [])
+
   // ─── Send / queue ─────────────────────────────────────────────────────────
 
   const send = useCallback(() => {
@@ -316,10 +341,11 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
       actions.sendMessage(body, images)
     }
     setInput('')
+    writeDraft(currentSessionId, '')
     setPendingImages([])
     setShowSlashMenu(false)
     onSent?.()
-  }, [actions, input, isRunning, onSent, pendingImages])
+  }, [actions, input, isRunning, onSent, pendingImages, currentSessionId])
 
   // ─── Model / mode selection ───────────────────────────────────────────────
 

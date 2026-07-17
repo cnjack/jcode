@@ -69,6 +69,43 @@ type ModelModalities struct {
 	Output []string `json:"output,omitempty"`
 }
 
+// SupportsImageInput reports whether the model advertises "image" among its
+// input modalities. Returns false when modalities are unknown (nil) — callers
+// that need a permissive default for unknown models must handle nil
+// Modalities themselves.
+func (m *RegistryModel) SupportsImageInput() bool {
+	if m == nil || m.Modalities == nil {
+		return false
+	}
+	for _, mod := range m.Modalities.Input {
+		if mod == "image" {
+			return true
+		}
+	}
+	return false
+}
+
+// lookupStaticModel finds a model in the static registry (generated data +
+// init-time merges) without deep-copying it. Read-only lookups only. Custom
+// providers/models merged at runtime are not visible here — callers should
+// treat a miss as "unknown", not "absent".
+func lookupStaticModel(providerID, modelID string) *RegistryModel {
+	prov, ok := generatedProviders[providerID]
+	if !ok {
+		return nil
+	}
+	if m, ok := prov.Models[modelID]; ok {
+		return m
+	}
+	// Mirror LookupModel's partial matching for prefixed model ids.
+	for mid, m := range prov.Models {
+		if strings.HasSuffix(mid, "/"+modelID) || strings.HasPrefix(mid, modelID) {
+			return m
+		}
+	}
+	return nil
+}
+
 // ModelCost describes per-token costs in USD per 1M tokens.
 type ModelCost struct {
 	Input      float64 `json:"input"`

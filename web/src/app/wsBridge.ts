@@ -62,7 +62,7 @@ export function createWSHandlers(
       ),
     onTokenUpdate: (d) => dispatch(chatActions.setTokenSnapshot(d)),
     onAgentDone: (d) => {
-      dispatch(chatActions.agentDone(d ? { error: d.error } : undefined))
+      dispatch(chatActions.agentDone(d ? { error: d.error, detail: d.detail } : undefined))
       // Refresh sidebar metadata (title / updated_at / running) after a turn.
       void dispatch(loadTasks() as never)
       void dispatch(loadSessions() as never)

@@ -118,7 +118,7 @@ func (f *ModelFactory) GetModel(ctx context.Context, providerModel string) (eino
 	// over the provider-level default before constructing the model.
 	facEffortCfg := *providerCfg
 	facEffortCfg.ReasoningEffort = config.ResolveEffort(provider, modelName, providerCfg.ReasoningEffort)
-	m, err := NewChatModelFromProvider(ctx, modelName, baseURL, &facEffortCfg)
+	m, err := NewChatModelFromProvider(ctx, provider, modelName, baseURL, &facEffortCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create model %q: %w", providerModel, err)
 	}
