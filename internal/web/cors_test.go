@@ -1,6 +1,7 @@
 package web
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
 )
@@ -41,5 +42,45 @@ func TestIsAllowedWebOrigin(t *testing.T) {
 				t.Errorf("isAllowedWebOrigin(host=%q, origin=%q) = %v, want %v", c.host, c.origin, got, c.want)
 			}
 		})
+	}
+}
+
+func TestCORSMiddlewareRejectsUntrustedSimpleRequestsBeforeSideEffects(t *testing.T) {
+	called := false
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	})
+	r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/api/computer/config", nil)
+	r.Host = "127.0.0.1:8080"
+	r.Header.Set("Origin", "https://evil.example")
+	// text/plain is a CORS-simple content type and reaches the server without a
+	// preflight when a hostile page uses fetch(..., {mode: 'no-cors'}).
+	r.Header.Set("Content-Type", "text/plain")
+	rec := httptest.NewRecorder()
+	corsMiddleware(inner).ServeHTTP(rec, r)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status=%d, want 403", rec.Code)
+	}
+	if called {
+		t.Fatal("untrusted Origin reached the mutating handler")
+	}
+}
+
+func TestCORSMiddlewareAllowsTrustedOriginsAndNonBrowserClients(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	})
+	for _, origin := range []string{"", "http://localhost:5173", "tauri://localhost"} {
+		r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/api/computer/config", nil)
+		r.Host = "127.0.0.1:8080"
+		if origin != "" {
+			r.Header.Set("Origin", origin)
+		}
+		rec := httptest.NewRecorder()
+		corsMiddleware(inner).ServeHTTP(rec, r)
+		if rec.Code != http.StatusTeapot {
+			t.Errorf("origin=%q status=%d, want passthrough", origin, rec.Code)
+		}
 	}
 }

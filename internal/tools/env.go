@@ -16,6 +16,7 @@ import (
 
 	"github.com/cnjack/jcode/internal/automation"
 	"github.com/cnjack/jcode/internal/browser"
+	"github.com/cnjack/jcode/internal/computer"
 	appconfig "github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/procutil"
 	"golang.org/x/crypto/ssh"
@@ -51,6 +52,18 @@ type Env struct {
 	// closed when the task ends. Guarded by browserMu.
 	browserMu      sync.Mutex
 	browserSession *browser.Session
+
+	// Computer is the process-wide computer-use manager, shared with the web
+	// server (/api/computer routes and the settings UI) so the agent's computer_*
+	// tools and the settings page operate the same backend and app grants.
+	// nil disables the tools. See internal-doc/computer-use-design.md.
+	Computer *computer.Manager
+
+	// computerSession is the lazily-opened per-task computer session (one per
+	// Env). It holds the session app allowlist, so it must not be shared across
+	// tasks: an app the user approved for one task is not approved for the next.
+	computerMu      sync.Mutex
+	computerSession *computer.Session
 
 	// origExec and origPwd remember the initial executor state so that
 	// ResetToLocal can restore the correct local executor after SSH.
@@ -145,6 +158,10 @@ func (e *Env) CloneForSubagent() *Env {
 		FileTracker: e.FileTracker,
 		Depth:       e.Depth + 1,
 		Browser:     e.Browser,
+		// The Manager is shared, but the subagent's session (and therefore its
+		// app allowlist) starts empty: a grant the user gave the parent for one
+		// app is not a grant to every subagent it spawns.
+		Computer: e.Computer,
 	}
 }
 
@@ -179,6 +196,56 @@ func (e *Env) CurrentBrowserOrigin() string {
 		return ""
 	}
 	return sess.CurrentOrigin()
+}
+
+// ComputerSession returns this task's computer session, opening one on first
+// use. It requires a configured, enabled Computer manager.
+func (e *Env) ComputerSession(ctx context.Context) (*computer.Session, error) {
+	if e.Computer == nil {
+		return nil, fmt.Errorf("computer use is not available in this context")
+	}
+	e.computerMu.Lock()
+	defer e.computerMu.Unlock()
+	if e.computerSession != nil {
+		return e.computerSession, nil
+	}
+	sess, err := e.Computer.OpenSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	e.computerSession = sess
+	return sess, nil
+}
+
+// CurrentComputerApp returns the bundle id of the frontmost app, or "" when no
+// session is open. The approval layer uses it to scope per-app permissions for
+// computer_act, whose args carry no app identity — a click is just a click. This
+// is the exact counterpart of CurrentBrowserOrigin, and exists for the same
+// reason.
+func (e *Env) CurrentComputerApp() string {
+	e.computerMu.Lock()
+	sess := e.computerSession
+	e.computerMu.Unlock()
+	if sess == nil {
+		return ""
+	}
+	// Bounded: an unanswered TCC prompt presents as a multi-minute hang, and the
+	// approval path must not be the thing that wedges.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return sess.FrontmostBundle(ctx)
+}
+
+// CloseComputer closes this task's computer session if one was opened. The
+// session allowlist dies with it, which is the point: grants are per-task.
+func (e *Env) CloseComputer() {
+	e.computerMu.Lock()
+	sess := e.computerSession
+	e.computerSession = nil
+	e.computerMu.Unlock()
+	if sess != nil {
+		_ = sess.Close()
+	}
 }
 
 // CloseBrowser closes this task's browser session if one was opened.

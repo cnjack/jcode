@@ -22,6 +22,7 @@ import (
 	"github.com/cnjack/jcode/internal/agent"
 	"github.com/cnjack/jcode/internal/browser"
 	"github.com/cnjack/jcode/internal/channel"
+	"github.com/cnjack/jcode/internal/computer"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/flow"
 	"github.com/cnjack/jcode/internal/handler"
@@ -141,6 +142,7 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 		}))
 	}
 	all = append(all, s.env.NewBrowserTools()...)
+	all = append(all, s.env.NewComputerTools()...)
 	return append(all, s.mcpTools...)
 }
 
@@ -152,7 +154,8 @@ func (s *interactiveState) buildPlanTools() []tool.BaseTool {
 		s.env.NewTodoWriteTool(), s.env.NewTodoReadTool(),
 		tools.NewAskUserTool(s.askUserDeps),
 	}
-	return append(plan, s.env.NewBrowserPlanTools()...)
+	plan = append(plan, s.env.NewBrowserPlanTools()...)
+	return append(plan, s.env.NewComputerPlanTools()...)
 }
 
 func (s *interactiveState) subagentNotifier(name, agentType string, done bool, result string, err error) {
@@ -1071,6 +1074,14 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	env.Browser = browserMgr
 	defer func() { _ = browserMgr.Close() }()
 
+	// Computer-use manager (native desktop app control). Off unless config
+	// enables it — unlike browser-use, this can reach anything on the machine.
+	computerMgr := newComputerManager(cfg, "")
+	env.Computer = computerMgr
+	if computerMgr != nil {
+		defer func() { _ = computerMgr.Close() }()
+	}
+
 	var mcpTools []tool.BaseTool
 	var mcpStatuses []tui.MCPStatusItem
 	if len(cfg.MCPServers) > 0 {
@@ -1226,6 +1237,10 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		return browserSitePreapproved(cfg, origin, class)
 	})
 	approvalState.SetBrowserOriginFunc(env.CurrentBrowserOrigin)
+	approvalState.SetComputerPermFunc(func(bundleID, class string) bool {
+		return computerMgr != nil && computerMgr.Preapproved(bundleID, class)
+	})
+	approvalState.SetComputerAppFunc(env.CurrentComputerApp)
 	st.approvalState = approvalState
 
 	// Provide the config/platform needed to lazily build the LLM reviewer when
@@ -1264,7 +1279,81 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		},
 	}
 
-	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore, tui.WithVersion(Version), tui.WithGoalStore(env.GoalStore), tui.WithStartupMode(startupMode), tui.WithTheme(cfg.Theme), tui.WithBrowser(browserCtl), tui.WithApprovalModeChange(func(enabled bool) {
+	computerCtl := &tui.ComputerController{
+		Status: func() tui.ComputerStatus {
+			if computerMgr == nil {
+				return tui.ComputerStatus{
+					Supported: false,
+					Platform:  platform,
+					Blocker:   "unsupported",
+					Detail:    computer.UnsupportedReason(),
+				}
+			}
+			s := computerMgr.Status(context.Background())
+			return tui.ComputerStatus{
+				Supported:       true,
+				Platform:        platform,
+				Available:       s.Available,
+				Enabled:         s.Enabled,
+				HelperInstalled: s.Helper.Installed,
+				HelperConnected: s.Helper.Connected,
+				HelperVersion:   s.Helper.Version,
+				Accessibility:   string(s.AccessibilityPermission),
+				ScreenRecording: string(s.ScreenRecordingPermission),
+				Blocker:         s.Blocker,
+				Detail:          s.Detail,
+			}
+		},
+		SetEnabled: func(enable bool) error {
+			if computerMgr == nil {
+				return fmt.Errorf("%s", computer.UnsupportedReason())
+			}
+			created := false
+			if cfg.Computer == nil {
+				cfg.Computer = &config.ComputerConfig{}
+				created = true
+			}
+			previousEnabled := cfg.Computer.Enabled
+			cfg.Computer.Enabled = enable
+			if err := config.SaveConfig(cfg); err != nil {
+				// Disk is the commit point. Do not leave the live Manager or the
+				// in-memory config claiming that a failed /computer toggle worked.
+				cfg.Computer.Enabled = previousEnabled
+				if created {
+					cfg.Computer = nil
+				}
+				return err
+			}
+			// Publish only after the durable save. SetConfig waits for any
+			// in-flight native action, so a disable/tightening is effective when
+			// this command returns.
+			computerMgr.SetConfig(computer.FromConfig(cfg.Computer))
+			// Tool schemas are fixed on an agent instance. Rebuild immediately so
+			// /computer on|off takes effect for the current task without restart.
+			if st.agentMode == tui.ModePlanning {
+				st.toolList = st.buildPlanTools()
+			} else {
+				st.toolList = st.buildAllTools()
+			}
+			newAg, err := st.createAgent()
+			if err != nil {
+				return fmt.Errorf("saved setting but could not refresh agent tools: %w", err)
+			}
+			st.ag = newAg
+			return nil
+		},
+		RequestPermissions: func() error {
+			if computerMgr == nil {
+				return fmt.Errorf("%s", computer.UnsupportedReason())
+			}
+			// Ask for both grants at once: the prompts are system dialogs the
+			// user answers, and needing both is the normal case.
+			_, err := computerMgr.RequestPermissions(context.Background(), true, true)
+			return err
+		},
+	}
+
+	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore, tui.WithVersion(Version), tui.WithGoalStore(env.GoalStore), tui.WithStartupMode(startupMode), tui.WithTheme(cfg.Theme), tui.WithBrowser(browserCtl), tui.WithComputer(computerCtl), tui.WithApprovalModeChange(func(enabled bool) {
 		approvalState.SetSessionApproval(enabled)
 	}))
 	st.p = p

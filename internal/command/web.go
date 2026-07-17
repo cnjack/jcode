@@ -354,6 +354,14 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 	// settings page works before providers are configured.
 	browserMgr := browser.NewManager(browserManagerConfig(cfg))
 
+	// Computer-use manager (native desktop app control), process-wide like the
+	// browser one so the settings UI and the agent's computer_* tools share one
+	// backend and one view of what is granted. Off unless config enables it.
+	computerMgr := newComputerManager(cfg, "")
+	if computerMgr != nil {
+		defer func() { _ = computerMgr.Close() }()
+	}
+
 	// Automation store (definitions + scheduler state). Skipped in setup mode.
 	// Created before buildWebTask so every per-task Env shares this one live
 	// store — the automation_create tool must write through it (not a throwaway)
@@ -387,6 +395,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		tenv := tools.NewEnv(taskPwd, platform)
 		tenv.AutomationStore = autoStore
 		tenv.Browser = browserMgr
+		tenv.Computer = computerMgr
 		promptPlatform := platform
 		envLabel := "local"
 		projectKey := taskPwd
@@ -440,6 +449,14 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		// browser_act's args carry no URL, so its per-site permission check needs
 		// the active tab's origin from THIS task's session.
 		tappr.SetBrowserOriginFunc(tenv.CurrentBrowserOrigin)
+
+		// Same shape for computer use: origin ↔ bundle id, and computer_act's
+		// args carry no app identity, so the frontmost app must come from THIS
+		// task's session.
+		tappr.SetComputerPermFunc(func(bundleID, class string) bool {
+			return computerMgr != nil && computerMgr.Preapproved(bundleID, class)
+		})
+		tappr.SetComputerAppFunc(tenv.CurrentComputerApp)
 
 		// Wire THIS task's todo/goal stores to THIS task's recorder + handler, so
 		// todos persist on resume and goal changes reach the task's UI and session
@@ -530,6 +547,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 				}))
 			}
 			all = append(all, tenv.NewBrowserTools()...)
+			all = append(all, tenv.NewComputerTools()...)
 			if mt := mcpToolsPtr.Load(); mt != nil {
 				all = append(all, (*mt)...)
 			}
@@ -553,6 +571,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 			}
 			// Plan mode gets the read-only browser subset (look, don't change).
 			plan = append(plan, tenv.NewBrowserPlanTools()...)
+			plan = append(plan, tenv.NewComputerPlanTools()...)
 			return plan
 		}
 
@@ -801,6 +820,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		AuthToken:          webToken,
 		RequireAuth:        requireAuth,
 		BrowserManager:     browserMgr,
+		ComputerManager:    computerMgr,
 		BLEController:      bleProxy,
 	})
 

@@ -359,6 +359,13 @@ export const api = {
   browserSaveConfig: (data: BrowserConfig) =>
     request<{ status: string }>('/api/browser/config', { method: 'POST', body: JSON.stringify(data) }),
 
+  // Computer use
+  computerStatus: () => request<ComputerStatusResponse>('/api/computer/status'),
+  computerSaveConfig: (data: ComputerConfig) =>
+    request<ComputerConfigSaveResponse>('/api/computer/config', { method: 'POST', body: JSON.stringify(data) }),
+  computerRequestPermissions: (data: ComputerPermissionRequest) =>
+    request<ComputerPermissionRequestResponse>('/api/computer/permissions', { method: 'POST', body: JSON.stringify(data) }),
+
   // Approval review tuning (Auto session mode)
   approvalReviewConfig: () => request<ApprovalReviewConfigResponse>('/api/approval-review-config'),
   setApprovalReviewConfig: (data: ApprovalReviewConfig) =>
@@ -395,4 +402,89 @@ export interface BrowserStatusResponse {
   }
   site_permissions?: BrowserSitePermission[]
   approval?: Record<string, string>
+}
+
+// ─── computer use ───────────────────────────────────────────────────────────
+// Hand-mirrored from Go. Sources, in order of authority:
+//   config.ComputerAppPermission / config.ComputerConfig (internal/config/config.go)
+//   computer.Status                                      (internal/computer/manager.go)
+//   web.handleComputerStatus                             (internal/web/computer.go)
+// See internal-doc/computer-use-design.md §5.
+
+/** Per-app override. `tier` may only *tighten* the built-in tier for that app;
+ *  the backend (computer.Manager.TierOverrides) drops a row that tries to
+ *  loosen one, so the UI must never offer a tier above the built-in default. */
+export interface ComputerAppPermission {
+  bundle_id: string
+  tier?: string // read | click | full; '' = built-in default
+  launch?: string // ask | allow
+  interact?: string // ask | allow
+}
+
+export interface ComputerConfig {
+  enabled: boolean
+  /** Per-class defaults: 'launch' and 'interact' → 'ask' | 'always_allow'.
+   *  Clipboard reads are deliberately absent — they always prompt (design §4.4). */
+  approval?: Record<string, string>
+  app_permissions?: ComputerAppPermission[]
+  max_actions_per_batch?: number
+  clipboard_read?: boolean
+  clipboard_write?: boolean
+  system_key_combos?: boolean
+}
+
+export interface ComputerConfigSaveResponse {
+  status: string
+  config: ComputerConfig
+  warning_code?: 'agent_refresh_failed'
+}
+
+/** Asks macOS to surface the consent prompt for each grant set to true.
+ *  The prompts are system dialogs answered outside this request. */
+export interface ComputerPermissionRequest {
+  accessibility?: boolean
+  screen_recording?: boolean
+}
+
+export interface ComputerPermissionRequestResponse {
+  status: string
+  /** States observed right after asking; 'denied' means 'not granted yet', not 'refused'. */
+  accessibility: ComputerPermissionState
+  screen_recording: ComputerPermissionState
+}
+
+export type ComputerPermissionState = 'granted' | 'denied' | 'unknown'
+export type ComputerBlocker = '' | 'disabled' | 'unsupported' | 'no_helper' | 'permissions'
+
+export interface ComputerHelperStatus {
+  installed: boolean
+  connected: boolean
+  version?: string
+}
+
+export interface ComputerStatusResponse {
+  /** Server-authoritative platform support. Do not infer this from the browser. */
+  supported: boolean
+  /** GOOS of the jcode server, for example 'darwin', 'linux', or 'windows'. */
+  platform: string
+  /** Human-readable reason when `supported` is false. */
+  reason?: string
+  /** Canonical persisted config. The settings page must save this shape back. */
+  config: ComputerConfig
+  status: {
+    enabled: boolean
+    /** True only when the native helper and both required TCC grants are ready. */
+    available: boolean
+    /** The first shut gate: 'disabled' | 'unsupported' | 'no_helper' | 'permissions' | ''. */
+    blocker: ComputerBlocker
+    detail?: string
+    max_batch: number
+    /** Built-in tier per configured bundle id, so the UI never reimplements the
+     *  rules in internal/computer/tiers.go. Only covers apps that have a config
+     *  row; a freshly typed bundle id is absent until the config round-trips. */
+    tiers?: Record<string, string>
+    helper: ComputerHelperStatus
+    accessibility: ComputerPermissionState
+    screen_recording: ComputerPermissionState
+  }
 }

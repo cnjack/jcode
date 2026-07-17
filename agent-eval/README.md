@@ -59,7 +59,7 @@ built with `CGO_ENABLED=0`** — see finding F1.
 
 ```bash
 # 1. build a working jcode + the ACP harness
-CGO_ENABLED=0 go build -o /tmp/jcode-nocgo ./cmd/jcode
+CGO_ENABLED=0 go build -tags jcode_eval -o /tmp/jcode-nocgo ./cmd/jcode
 ( cd agent-eval/harness && go build -o /tmp/acp-harness . )
 
 # 2. run the matrix (isolated, unattended)

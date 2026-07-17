@@ -42,9 +42,10 @@ func entryToUserMessage(e Entry) *schema.Message {
 // toolPlaceholders maps tool names to actionable placeholder messages.
 // These tell the model what happened and how to recover the data.
 var toolPlaceholders = map[string]string{
-	"read":    "[File was read previously. Use the read tool again if needed.]",
-	"grep":    "[Search was performed. Run grep again for current results.]",
-	"execute": "[Command was executed. Run it again if you need fresh output.]",
+	"read":                "[File was read previously. Use the read tool again if needed.]",
+	"grep":                "[Search was performed. Run grep again for current results.]",
+	"execute":             "[Command was executed. Run it again if you need fresh output.]",
+	"computer_screenshot": "[Screenshot was captured previously. Run computer_screenshot again for current visual state.]",
 }
 
 // defaultPlaceholder is used for tools not in the map above.
@@ -94,6 +95,10 @@ func PruneOldToolOutputs(msgs []adk.Message, protectTurns int) []adk.Message {
 			placeholder = defaultPlaceholder
 		}
 		msg.Content = placeholder
+		// Enhanced tool outputs may carry Base64 images here. Once an old
+		// result is replaced, clear every multimodal part as well; otherwise
+		// the pixels survive the placeholder and are resent indefinitely.
+		msg.UserInputMultiContent = nil
 	}
 
 	return msgs

@@ -130,6 +130,28 @@ jobs:
           make build-binary \
             VERSION="${{ steps.get_version.outputs.version }}" \
             BIN="dist/${OUTPUT_NAME}"
+          # Computer Use is implemented by native Swift helpers, so the macOS
+          # CLI release must ship them beside jcode (not only inside Tauri).
+          # The shared suffix lets the daemon resolve its capture sibling.
+          if [ "${{ matrix.goos }}" = "darwin" ]; then
+            case "${{ matrix.goarch }}" in
+              arm64) SWIFT_TARGET="arm64-apple-macos14.0" ;;
+              amd64) SWIFT_TARGET="x86_64-apple-macos14.0" ;;
+              *) echo "unsupported Swift architecture: ${{ matrix.goarch }}" >&2; exit 1 ;;
+            esac
+            swiftc -O -target "$SWIFT_TARGET" \
+              -o "dist/jcode-computerd-capture-${{ matrix.goos }}-${{ matrix.goarch }}" \
+              ./cmd/jcode-computerd/WindowCaptureHelper.swift
+            swiftc -O -target "$SWIFT_TARGET" \
+              -o "dist/jcode-computerd-${{ matrix.goos }}-${{ matrix.goarch }}" \
+              ./cmd/jcode-computerd/main.swift
+            for helper in \
+              "dist/jcode-computerd-capture-${{ matrix.goos }}-${{ matrix.goarch }}" \
+              "dist/jcode-computerd-${{ matrix.goos }}-${{ matrix.goarch }}"; do
+              MINOS="$(vtool -show-build "$helper" | awk '$1 == "minos" { print $2 }')"
+              [ "$MINOS" = "14.0" ] || { echo "$helper has unexpected minos $MINOS" >&2; exit 1; }
+            done
+          fi
 
       - name: Calculate checksum
         run: |
@@ -281,6 +303,28 @@ jobs:
             -ldflags "${LDFLAGS}" \
             -o "desktop/src-tauri/binaries/jcode-ble-${{ matrix.triple }}${{ matrix.ext }}" \
             ./cmd/jcode-ble/
+          # Native computer-use helpers are macOS-only. The long-lived daemon
+          # owns Accessibility; ScreenCaptureKit runs in a separate short-lived
+          # process so a compositor abort cannot break the daemon connection.
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            case "${{ matrix.triple }}" in
+              aarch64-apple-darwin) SWIFT_TARGET="arm64-apple-macos14.0" ;;
+              x86_64-apple-darwin) SWIFT_TARGET="x86_64-apple-macos14.0" ;;
+              *) echo "unsupported Swift target triple: ${{ matrix.triple }}" >&2; exit 1 ;;
+            esac
+            swiftc -O -target "$SWIFT_TARGET" \
+              -o "desktop/src-tauri/binaries/jcode-computerd-capture-${{ matrix.triple }}" \
+              ./cmd/jcode-computerd/WindowCaptureHelper.swift
+            swiftc -O -target "$SWIFT_TARGET" \
+              -o "desktop/src-tauri/binaries/jcode-computerd-${{ matrix.triple }}" \
+              ./cmd/jcode-computerd/main.swift
+            for helper in \
+              "desktop/src-tauri/binaries/jcode-computerd-capture-${{ matrix.triple }}" \
+              "desktop/src-tauri/binaries/jcode-computerd-${{ matrix.triple }}"; do
+              MINOS="$(vtool -show-build "$helper" | awk '$1 == "minos" { print $2 }')"
+              [ "$MINOS" = "14.0" ] || { echo "$helper has unexpected minos $MINOS" >&2; exit 1; }
+            done
+          fi
 
       # macOS signing + notarization. Everything here is optional: with no secrets
       # the build still succeeds and produces an UNSIGNED bundle (Gatekeeper warns
@@ -435,5 +479,3 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-

@@ -51,6 +51,16 @@ jobs:
       - name: Test
         run: go test ./...
 
+      # jcode_eval replaces the native computer-use daemon with the recorded
+      # fixture used by the real agent evaluation harness. Keep this tagged
+      # build in CI so production-only edits cannot silently break eval runs.
+      - name: Build and test jcode_eval
+        env:
+          CGO_ENABLED: 0
+        run: |
+          go build -tags jcode_eval -o /tmp/jcode-eval ./cmd/jcode
+          go test -tags jcode_eval ./internal/command
+
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
@@ -68,6 +78,49 @@ jobs:
           # run; that path doesn't run because pushes target main directly and
           # the gate is meant for PRs.
           args: ${{ github.event_name == 'pull_request' && '--new-from-rev=origin/main' || '' }}
+
+  computer-use-macos:
+    name: Computer Use (Swift · smoke)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+
+      # Release builds compile both architectures. Type-check both here as the
+      # PR gate, then build the runner-native pair for protocol/auth/idle tests
+      # that require neither Accessibility nor Screen Recording permission.
+      - name: Type-check Swift helpers for both macOS architectures
+        run: |
+          for target in arm64-apple-macos14.0 x86_64-apple-macos14.0; do
+            swiftc -typecheck -target "$target" ./cmd/jcode-computerd/main.swift
+            swiftc -typecheck -target "$target" ./cmd/jcode-computerd/WindowCaptureHelper.swift
+          done
+
+      - name: Build native Swift helpers
+        run: |
+          case "$(uname -m)" in
+            arm64) target="arm64-apple-macos14.0" ;;
+            x86_64) target="x86_64-apple-macos14.0" ;;
+            *) echo "unsupported macOS runner architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          swiftc -O -target "$target" -o /tmp/jcode-computerd-capture ./cmd/jcode-computerd/WindowCaptureHelper.swift
+          swiftc -O -target "$target" -o /tmp/jcode-computerd ./cmd/jcode-computerd/main.swift
+          for helper in /tmp/jcode-computerd /tmp/jcode-computerd-capture; do
+            minos="$(vtool -show-build "$helper" | awk '$1 == "minos" { print $2 }')"
+            [ "$minos" = "14.0" ] || { echo "$helper has unexpected minos $minos" >&2; exit 1; }
+          done
+
+      - name: Run no-TCC daemon protocol and lifecycle smoke tests
+        env:
+          JCODE_COMPUTERD_SMOKE: '1'
+          JCODE_COMPUTERD_BIN: /tmp/jcode-computerd
+        run: >-
+          go test ./internal/computer
+          -run 'TestSmokeSwiftDaemonHandshake$|TestSmokeSwiftDaemonRejectsBadToken$|TestSmokeDaemonIdleExit$'
+          -count=1 -v
 
   web:
     name: Web (type-check · build)

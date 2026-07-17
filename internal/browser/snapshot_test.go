@@ -22,7 +22,7 @@ func TestBuildSnapshotAssignsUIDsToInteractiveNodes(t *testing.T) {
 		node("3", "button", "Merge", 102),
 		node("4", "heading", "Pull Request", 0),
 	}
-	snap := buildSnapshot(nodes, "interactive", 1, 100)
+	snap := buildSnapshot(nodes, "interactive", 1, 100, nil, 0)
 
 	if len(snap.UIDs) != 2 {
 		t.Fatalf("expected 2 uids, got %d (%v)", len(snap.UIDs), snap.UIDs)
@@ -53,7 +53,7 @@ func TestBuildSnapshotRendersStates(t *testing.T) {
 	nodes := []axNode{
 		node("1", "RootWebArea", "Doc", 0, "2", "3", "4"), n, tb, cb,
 	}
-	snap := buildSnapshot(nodes, "interactive", 1, 100)
+	snap := buildSnapshot(nodes, "interactive", 1, 100, nil, 0)
 	if !strings.Contains(snap.Text, "(disabled)") {
 		t.Errorf("disabled state missing:\n%s", snap.Text)
 	}
@@ -72,7 +72,7 @@ func TestBuildSnapshotElidesBeyondMaxLines(t *testing.T) {
 		nodes[0].ChildIDs = append(nodes[0].ChildIDs, id)
 		nodes = append(nodes, node(id, "button", "b", int64(100+i)))
 	}
-	snap := buildSnapshot(nodes, "interactive", 1, 3)
+	snap := buildSnapshot(nodes, "interactive", 1, 3, nil, 0)
 	if !strings.Contains(snap.Text, "more nodes elided") {
 		t.Errorf("expected elision marker with maxLines=3:\n%s", snap.Text)
 	}

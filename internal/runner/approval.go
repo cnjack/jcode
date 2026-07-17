@@ -38,6 +38,17 @@ type ApprovalState struct {
 	// args. nil means "unknown origin" (→ prompt). Set by the frontend.
 	browserOrigin func() string
 
+	// computerPerm reports whether a computer action class ("launch"/"interact")
+	// on the given app bundle id is pre-authorized. nil means "always prompt".
+	// The browser/computer pair here is exact: origin ↔ bundle id.
+	computerPerm func(bundleID, class string) bool
+
+	// computerApp reports the bundle id of the frontmost app. computer_act
+	// carries no app identity in its args (a click is just a click), so the app
+	// for a per-app permission check must come from the live session. nil means
+	// "unknown app" (→ prompt). Set by the frontend.
+	computerApp func() string
+
 	// reviewer is the optional LLM auto-reviewer consulted for calls that would
 	// otherwise prompt the user (nil → disabled; behavior unchanged). transcriptFn
 	// provides recent conversation context to the reviewer. breaker bounds
@@ -64,6 +75,21 @@ func (s *ApprovalState) SetBrowserPermFunc(fn func(origin, class string) bool) {
 func (s *ApprovalState) SetBrowserOriginFunc(fn func() string) {
 	s.mu.Lock()
 	s.browserOrigin = fn
+	s.mu.Unlock()
+}
+
+// SetComputerPermFunc installs the per-app permission lookup for computer tools.
+func (s *ApprovalState) SetComputerPermFunc(fn func(bundleID, class string) bool) {
+	s.mu.Lock()
+	s.computerPerm = fn
+	s.mu.Unlock()
+}
+
+// SetComputerAppFunc installs the frontmost-app provider used to scope per-app
+// permissions for computer_act (whose args carry no app identity).
+func (s *ApprovalState) SetComputerAppFunc(fn func() string) {
+	s.mu.Lock()
+	s.computerApp = fn
 	s.mu.Unlock()
 }
 
@@ -215,6 +241,13 @@ var noApprovalNeeded = map[string]bool{
 	"browser_snapshot":   true,
 	"browser_screenshot": true,
 	"browser_read":       true,
+	// Computer read-only tier. These can only observe apps the user has already
+	// approved into the session allowlist (which happens via computer_open, and
+	// that does prompt), so they cannot be a way in — only a way to look at what
+	// the user already said yes to.
+	"computer_snapshot":   true,
+	"computer_screenshot": true,
+	"computer_apps":       true,
 }
 
 // approvalDecision is the outcome of evaluating a tool call in MANUAL mode.
@@ -295,6 +328,10 @@ func (s *ApprovalState) decide(toolName, toolArgs string) approvalDecision {
 		return d
 	}
 
+	if d, ok := s.decideComputer(toolName, toolArgs); ok {
+		return d
+	}
+
 	switch toolName {
 	case "read":
 		var input struct {
@@ -370,6 +407,72 @@ func (s *ApprovalState) decideBrowser(toolName, toolArgs string) (approvalDecisi
 		}
 	}
 	return decisionPrompt, false
+}
+
+// decideComputer applies the computer-use approval classes (see design §4.4). It
+// returns (decision, true) when toolName is a computer tool, else (_, false).
+// The read-only tier (snapshot/screenshot/apps) is handled earlier via
+// noApprovalNeeded, so this covers launch + interact.
+//
+// This deliberately mirrors decideBrowser one-for-one, because the two problems
+// are the same problem: browser origin ↔ app bundle id.
+func (s *ApprovalState) decideComputer(toolName, toolArgs string) (approvalDecision, bool) {
+	switch toolName {
+	case "computer_read":
+		// The clipboard holds passwords and users copy them constantly. Never
+		// pre-authorized, by any per-app rule or class default — this is the one
+		// computer call that always asks. (browser_eval gets the same treatment
+		// for the same reason: some things must not be blanket-approvable.)
+		return decisionPrompt, true
+	case "computer_open":
+		// Approving computer_open is what grants the app for the session, so
+		// this prompt is the app-grant gate, not just a launch gate.
+		var in struct {
+			App string `json:"app"`
+		}
+		_ = json.Unmarshal([]byte(toolArgs), &in)
+		if s.computerPreapproved(strings.TrimSpace(in.App), "launch") {
+			return decisionAutoApprove, true
+		}
+		return decisionPrompt, true
+	case "computer_act":
+		// Interaction. The app comes from the live session (the frontmost
+		// window), not the args — a click carries no bundle id — so a per-app
+		// interact=allow can actually take effect. Same reasoning as
+		// browser_act reading the origin from the session.
+		if s.computerPreapproved(s.computerActiveApp(), "interact") {
+			return decisionAutoApprove, true
+		}
+		return decisionPrompt, true
+	}
+	return decisionPrompt, false
+}
+
+// computerPreapproved consults the per-app permission hook (nil → always
+// prompt). An empty bundle id never pre-approves: if we cannot name the app, we
+// cannot claim the user approved it.
+func (s *ApprovalState) computerPreapproved(bundleID, class string) bool {
+	if strings.TrimSpace(bundleID) == "" {
+		return false
+	}
+	s.mu.Lock()
+	fn := s.computerPerm
+	s.mu.Unlock()
+	if fn == nil {
+		return false
+	}
+	return fn(bundleID, class)
+}
+
+// computerActiveApp returns the frontmost app's bundle id, or "".
+func (s *ApprovalState) computerActiveApp() string {
+	s.mu.Lock()
+	fn := s.computerApp
+	s.mu.Unlock()
+	if fn == nil {
+		return ""
+	}
+	return fn()
 }
 
 // browserPreapproved consults the site-permission hook (nil → always prompt).

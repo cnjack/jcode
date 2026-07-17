@@ -201,6 +201,37 @@ func extractToolDisplayInfo(name, argsJSON string) *ToolDisplayInfo {
 		info.Title = "Browser Eval"
 		info.Icon = "browser"
 		info.Category = "execution"
+	case "computer_open":
+		info.Title = "Open App"
+		info.Icon = "computer"
+		info.Category = "execution"
+		info.Subtitle = getString("app")
+	case "computer_snapshot":
+		info.Title = "App Snapshot"
+		info.Icon = "computer"
+		info.Category = "context"
+		info.Subtitle = getString("app")
+	case "computer_screenshot":
+		info.Title = "App Screenshot"
+		info.Icon = "computer"
+		info.Category = "context"
+		info.Subtitle = getString("app")
+	case "computer_act":
+		info.Title = "Computer Action"
+		info.Icon = "computer"
+		info.Category = "execution"
+		// A batch says how many actions it carries; a single action names itself.
+		// "12 actions" is the thing a reader needs at a glance — the individual
+		// steps are in the renderer.
+		if steps, ok := args["steps"].([]interface{}); ok && len(steps) > 0 {
+			info.Subtitle = fmt.Sprintf("%d actions", len(steps))
+		} else {
+			info.Subtitle = strings.TrimSpace(getString("action") + " " + getString("uid"))
+		}
+	case "computer_apps":
+		info.Title = "List Apps"
+		info.Icon = "computer"
+		info.Category = "context"
 	default:
 		if server, ok := tools.MCPServerForTool(name); ok {
 			// MCP tool, codex-style: "server.tool" title + compact-JSON args

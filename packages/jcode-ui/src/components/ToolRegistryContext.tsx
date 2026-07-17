@@ -22,6 +22,8 @@ import {
   TeamSpawnRenderer,
 } from '../toolRenderers/team.js'
 import { BrowserShotRenderer } from '../toolRenderers/browserShot.js'
+import { ComputerShotRenderer } from '../toolRenderers/computerShot.js'
+import { ComputerActRenderer } from '../toolRenderers/computerAct.js'
 import { FileTreeRenderer } from '../toolRenderers/fileTree.js'
 import { GenericRenderer } from '../toolRenderers/generic.js'
 
@@ -45,6 +47,8 @@ export function createDefaultToolRegistry(): ToolRendererRegistry {
     team_create: TeamCreateRenderer,
     team_spawn: TeamSpawnRenderer,
     browser_screenshot: BrowserShotRenderer,
+    computer_screenshot: ComputerShotRenderer,
+    computer_act: ComputerActRenderer,
     list_dir: FileTreeRenderer,
     glob: FileTreeRenderer,
   }

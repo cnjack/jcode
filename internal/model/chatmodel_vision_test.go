@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/cloudwego/eino/schema"
@@ -114,8 +115,9 @@ func TestVisionDerivation(t *testing.T) {
 				t.Errorf("stripped=%v, want %v (MultiContent=%d, Content=%q)",
 					stripped, tc.wantStrip, len(msg.MultiContent), msg.Content)
 			}
-			if stripped && msg.Content != "hello" {
-				t.Errorf("stripped message should keep text, got %q", msg.Content)
+			if stripped && (!strings.HasPrefix(msg.Content, "hello") ||
+				!strings.Contains(msg.Content, "image omitted")) {
+				t.Errorf("stripped message should keep text and announce the omitted image, got %q", msg.Content)
 			}
 		})
 	}

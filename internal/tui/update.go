@@ -863,6 +863,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 						return m.handleBrowserInput(prompt, cmds)
 					}
 
+					if prompt == "/computer" || strings.HasPrefix(prompt, "/computer ") {
+						return m.handleComputerInput(prompt, cmds)
+					}
+
 					if prompt == "/memory" || strings.HasPrefix(prompt, "/memory ") {
 						return m.handleMemoryInput(prompt, cmds)
 					}
@@ -1839,7 +1843,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				// User-initiated cancellation — show a clean message, not an error.
 				m.lines = append(m.lines, textLine(lipgloss.NewStyle().Foreground(colorMuted).Render("⏹  Agent cancelled.")))
 			} else {
-				m.lines = append(m.lines, textLine(errorStyle.Render("Error: "+msg.Err.Error())))
+				// The runner wraps API errors in model.FriendlyError, so this is
+				// already a sentence aimed at the reader ("Rate limited by X, and
+				// retries didn't clear it. Nothing was lost — …"), often spanning
+				// lines. Render each line so the actionable half is not clipped,
+				// and skip the "Error: " prefix, which only repeats what the red
+				// already says.
+				for _, ln := range strings.Split(msg.Err.Error(), "\n") {
+					m.lines = append(m.lines, textLine(errorStyle.Render(ln)))
+				}
 			}
 		}
 		// Model info line with full-width divider (styled like "── ◇ model via provider 5s ──")

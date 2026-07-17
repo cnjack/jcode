@@ -2,7 +2,7 @@
 set -e
 
 REPO="cnjack/jcode"
-INSTALL_DIR="/usr/local/bin"
+INSTALL_DIR="${JCODE_INSTALL_DIR:-/usr/local/bin}"
 BINARY="jcode"
 
 # Colors
@@ -55,6 +55,33 @@ download() {
     elif command -v wget >/dev/null 2>&1; then
         wget -qO "$OUTPUT" "$URL"
     fi
+}
+
+verify_checksum() {
+    FILE="$1"
+    URL="$2"
+    CHECKSUM_FILE="${FILE}.sha256"
+
+    download "${URL}.sha256" "$CHECKSUM_FILE"
+    EXPECTED=$(awk 'NR == 1 { print $1 }' "$CHECKSUM_FILE")
+    if [ -z "$EXPECTED" ]; then
+        error "Checksum file for $(basename "$FILE") is empty."
+        exit 1
+    fi
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        ACTUAL=$(sha256sum "$FILE" | awk '{ print $1 }')
+    elif command -v shasum >/dev/null 2>&1; then
+        ACTUAL=$(shasum -a 256 "$FILE" | awk '{ print $1 }')
+    else
+        error "Neither sha256sum nor shasum is available for checksum verification."
+        exit 1
+    fi
+    if [ "$ACTUAL" != "$EXPECTED" ]; then
+        error "Checksum verification failed for $(basename "$FILE")."
+        exit 1
+    fi
+    ok "Verified $(basename "$FILE")"
 }
 
 install_ripgrep() {
@@ -175,7 +202,7 @@ main() {
     DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${FILENAME}"
 
     TMPDIR=$(mktemp -d)
-    TMPFILE="${TMPDIR}/${BINARY}${SUFFIX}"
+    TMPFILE="${TMPDIR}/${FILENAME}"
     trap 'rm -rf "$TMPDIR"' EXIT
 
     info "Downloading ${DOWNLOAD_URL}..."
@@ -185,18 +212,55 @@ main() {
         error "Download failed."
         exit 1
     fi
+    verify_checksum "$TMPFILE" "$DOWNLOAD_URL"
+
+    # The macOS accessibility daemon and its isolated capture worker are part
+    # of the CLI runtime, not optional examples. Download and verify the whole
+    # set before installing any file so a partial release cannot leave a mixed
+    # version in the install directory.
+    HELPER_FILE=""
+    CAPTURE_FILE=""
+    if [ "$OS" = "darwin" ]; then
+        HELPER_NAME="jcode-computerd-${OS}-${ARCH}"
+        CAPTURE_NAME="jcode-computerd-capture-${OS}-${ARCH}"
+        HELPER_URL="https://github.com/${REPO}/releases/download/${VERSION}/${HELPER_NAME}"
+        CAPTURE_URL="https://github.com/${REPO}/releases/download/${VERSION}/${CAPTURE_NAME}"
+        HELPER_FILE="${TMPDIR}/${HELPER_NAME}"
+        CAPTURE_FILE="${TMPDIR}/${CAPTURE_NAME}"
+
+        info "Downloading ${HELPER_URL}..."
+        download "$HELPER_URL" "$HELPER_FILE"
+        info "Downloading ${CAPTURE_URL}..."
+        download "$CAPTURE_URL" "$CAPTURE_FILE"
+        verify_checksum "$HELPER_FILE" "$HELPER_URL"
+        verify_checksum "$CAPTURE_FILE" "$CAPTURE_URL"
+    fi
 
     chmod +x "$TMPFILE"
+    if [ "$OS" = "darwin" ]; then
+        chmod +x "$HELPER_FILE" "$CAPTURE_FILE"
+    fi
 
     # Install
     if [ -w "$INSTALL_DIR" ]; then
         mv "$TMPFILE" "${INSTALL_DIR}/${BINARY}${SUFFIX}"
+        if [ "$OS" = "darwin" ]; then
+            mv "$HELPER_FILE" "${INSTALL_DIR}/jcode-computerd"
+            mv "$CAPTURE_FILE" "${INSTALL_DIR}/jcode-computerd-capture"
+        fi
     else
         warn "Need sudo to install to ${INSTALL_DIR}"
         sudo mv "$TMPFILE" "${INSTALL_DIR}/${BINARY}${SUFFIX}"
+        if [ "$OS" = "darwin" ]; then
+            sudo mv "$HELPER_FILE" "${INSTALL_DIR}/jcode-computerd"
+            sudo mv "$CAPTURE_FILE" "${INSTALL_DIR}/jcode-computerd-capture"
+        fi
     fi
 
     ok "Installed ${BINARY} ${VERSION} to ${INSTALL_DIR}/${BINARY}${SUFFIX}"
+    if [ "$OS" = "darwin" ]; then
+        ok "Installed jcode-computerd and jcode-computerd-capture to ${INSTALL_DIR}"
+    fi
     printf "\n"
 
     # Install ripgrep dependency

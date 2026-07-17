@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/cnjack/jcode/internal/agent"
+	"github.com/cnjack/jcode/internal/computer"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/flow"
 	"github.com/cnjack/jcode/internal/handler"
@@ -85,6 +86,12 @@ type acpSession struct {
 	planPrompt   string
 	skillLoader  *skills.Loader
 	flowLoader   *flow.Loader
+
+	// providerName/modelName label API errors so the user is told which model
+	// failed — with several providers configured, "rate limited" alone does not
+	// say which one to go look at.
+	providerName string
+	modelName    string
 }
 
 // Close releases resources held by the session (recorder file handle, tracer).
@@ -98,7 +105,7 @@ func (s *acpSession) recentTranscript() []review.Msg {
 
 func (s *acpSession) Close() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	env := s.env
 	if s.rec != nil {
 		s.rec.Close()
 		s.rec = nil
@@ -106,6 +113,13 @@ func (s *acpSession) Close() {
 	if s.tracer != nil {
 		s.tracer.Flush()
 		s.tracer = nil
+	}
+	s.mu.Unlock()
+	if env != nil {
+		// The Env owns this task's app grants and snapshot/uid bindings. The
+		// process-wide Manager belongs to acpAgent and must remain alive for
+		// every other ACP session.
+		env.CloseComputer()
 	}
 }
 
@@ -115,6 +129,14 @@ type acpAgent struct {
 
 	mu       sync.Mutex
 	sessions map[acp.SessionId]*acpSession
+
+	// Computer Use controls one physical desktop, so all ACP sessions in this
+	// process must share the same Manager. Besides reusing one daemon connection,
+	// this shares the UI serialization lock and mutation epoch that prevent one
+	// task from acting on another task's stale observation.
+	computerMu     sync.Mutex
+	computerMgr    *computer.Manager
+	computerClosed bool
 }
 
 // Ensure acpAgent implements acp.AgentLoader interface.
@@ -144,16 +166,56 @@ func handleACPSubcommand() {
 
 	config.Logger().Printf("[acp] ACP server started on stdio")
 	<-conn.Done()
+	a.close()
 
-	// Clean up all session recorders on connection close.
+	config.Logger().Printf("[acp] ACP connection closed")
+}
+
+// sharedComputerManager returns the one process-wide Computer Use manager for
+// ACP. A newly loaded config is published before the session receives tools, so
+// existing sessions and the new one enforce the same current policy.
+func (a *acpAgent) sharedComputerManager(cfg *config.Config) (*computer.Manager, error) {
+	a.computerMu.Lock()
+	defer a.computerMu.Unlock()
+	if a.computerClosed {
+		return nil, fmt.Errorf("ACP agent is closed")
+	}
+	if a.computerMgr == nil {
+		a.computerMgr = newComputerManager(cfg, "")
+		return a.computerMgr, nil
+	}
+	var stored *config.ComputerConfig
+	if cfg != nil {
+		stored = cfg.Computer
+	}
+	a.computerMgr.SetConfig(computer.FromConfig(stored))
+	return a.computerMgr, nil
+}
+
+// close releases task-scoped sessions first, then the process-wide native
+// helper. Keeping that order ensures no session can retain a live backend after
+// the daemon has been torn down.
+func (a *acpAgent) close() {
 	a.mu.Lock()
+	sessions := make([]*acpSession, 0, len(a.sessions))
 	for id, sess := range a.sessions {
-		sess.Close()
+		sessions = append(sessions, sess)
 		delete(a.sessions, id)
 	}
 	a.mu.Unlock()
 
-	config.Logger().Printf("[acp] ACP connection closed")
+	for _, sess := range sessions {
+		sess.Close()
+	}
+
+	a.computerMu.Lock()
+	a.computerClosed = true
+	mgr := a.computerMgr
+	a.computerMgr = nil
+	a.computerMu.Unlock()
+	if mgr != nil {
+		_ = mgr.Close()
+	}
 }
 
 // availableCommandList builds the slash commands advertised to ACP clients:
@@ -408,6 +470,17 @@ func (a *acpAgent) buildAgentSession(
 	// "small" alias); fallback is this session's current model.
 	factory := internalmodel.NewModelFactory(cfg, chatModel)
 	allTools := []tool.BaseTool{
+		// load_skill: ACP puts the skill list in the system prompt (see
+		// skillLoader.Descriptions() below) and the slash-command path literally
+		// instructs the model to "use the load_skill tool" — but the tool itself
+		// was never registered here, unlike in interactive and web.
+		//
+		// The model therefore saw skills advertised, was told to load them, and
+		// had no way to. Observed in a live campaign: it spent 300s and 122 tool
+		// calls trying, degenerating into `echo load_skill` with descriptions
+		// like "Please work" and "Enough", generating enough traffic to trip the
+		// provider's 60 RPM limit and time out. 4 of 400 runs died this way.
+		skills.NewLoadSkillTool(skillLoader),
 		env.NewReadTool(), env.NewEditTool(), env.NewWriteTool(),
 		env.NewExecuteTool(bgManager), env.NewGrepTool(),
 		env.NewTodoWriteTool(), env.NewTodoReadTool(),
@@ -440,6 +513,19 @@ func (a *acpAgent) buildAgentSession(
 			},
 		}))
 	}
+	// Computer-use manager. Off unless config enables it; when it is off,
+	// NewComputerTools returns nil and the tools are simply absent.
+	//
+	// (Browser-use is deliberately not wired here: its extension backend needs
+	// the web server, and the managed backend would launch a Chrome nobody can
+	// see from an ACP client. Computer use has no such dependency.)
+	computerMgr, err := a.sharedComputerManager(cfg)
+	if err != nil {
+		return nil, err
+	}
+	env.Computer = computerMgr
+	allTools = append(allTools, env.NewComputerTools()...)
+
 	allTools = append(allTools, mcpTools...)
 
 	// Plan mode tools: read-only subset. Goal tools are included — like the
@@ -453,11 +539,16 @@ func (a *acpAgent) buildAgentSession(
 		env.NewTodoWriteTool(), env.NewTodoReadTool(),
 		env.NewGoalSetTool(), env.NewGoalGetTool(), env.NewGoalUpdateTool(),
 	}
+	planTools = append(planTools, env.NewComputerPlanTools()...)
 
 	normalPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
 	planPrompt := prompts.GetPlanSystemPrompt(platform, pwd, "local", envInfo)
 	startupMode := resolveStartupMode(cfg, false)
 	approvalState := runner.NewApprovalStateWithMode(pwd, startupMode)
+	approvalState.SetComputerPermFunc(func(bundleID, class string) bool {
+		return computerMgr != nil && computerMgr.Preapproved(bundleID, class)
+	})
+	approvalState.SetComputerAppFunc(env.CurrentComputerApp)
 
 	approvalState.SetHandler(acpHandler)
 
@@ -568,6 +659,8 @@ func (a *acpAgent) buildAgentSession(
 		createAgent:   makeAgent,
 		allTools:      allTools,
 		planTools:     planTools,
+		providerName:  providerName,
+		modelName:     modelName,
 		normalPrompt:  normalPrompt,
 		planPrompt:    planPrompt,
 		skillLoader:   skillLoader,
@@ -766,6 +859,17 @@ func (a *acpAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Pr
 
 	if promptCtx.Err() != nil {
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+	}
+
+	// A turn that died on an API error is not an end_turn. Reporting one is how a
+	// 402 came back as a clean, empty, successful-looking turn — see
+	// ACPHandler.OnAgentDone. Tell the user what happened, in words they can act
+	// on, and end the turn with a reason that is not "success".
+	if turnErr := sess.h.TakeTurnError(); turnErr != nil {
+		friendly := internalmodel.FriendlyAPIError(turnErr, sess.providerName, sess.modelName)
+		config.Logger().Printf("[acp] turn failed: %v", turnErr)
+		sess.h.OnAgentText("\n" + friendly)
+		return acp.PromptResponse{StopReason: acp.StopReasonRefusal}, nil
 	}
 
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil

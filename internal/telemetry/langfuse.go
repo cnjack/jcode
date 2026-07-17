@@ -3,6 +3,8 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	langfuseacl "github.com/cloudwego/eino-ext/libs/acl/langfuse"
@@ -15,6 +17,8 @@ import (
 )
 
 const defaultFlushTimeout = 3 * time.Second
+
+const telemetryImagePlaceholder = "[image omitted from telemetry]"
 
 type contextKey string
 
@@ -158,10 +162,52 @@ func (mw *langfuseMiddleware) BeforeModelRewriteState(ctx context.Context, state
 			ParentObservationID: parentObsID,
 			StartTime:           time.Now(),
 		},
-		InMessages: state.Messages,
+		// Generation input is shipped to the configured Langfuse host. Enhanced
+		// tool results keep screenshots in UserInputMultiContent, and the
+		// langfuse Eino adapter does not recognize that newer field as media: it
+		// would serialize Base64Data verbatim into the trace event. Build a
+		// detached, text-safe view instead. The live state remains unchanged and
+		// still carries the pixels to the model.
+		InMessages: traceSafeMessages(state.Messages),
 	})
 	_ = adk.SetRunLocalValue(ctx, "langfuse_gen_id", genID)
 	return ctx, state, nil
+}
+
+// traceSafeMessages returns a detached view of messages for an external trace
+// sink. UserInputMultiContent images are replaced in place-order with a plain
+// text marker; neither Base64Data nor a remote/local URL crosses the telemetry
+// boundary. The image-bearing part is deliberately never copied, which avoids
+// making a second large in-memory copy just to redact it.
+func traceSafeMessages(messages []*schema.Message) []*schema.Message {
+	if messages == nil {
+		return nil
+	}
+	out := make([]*schema.Message, len(messages))
+	for i, msg := range messages {
+		if msg == nil {
+			continue
+		}
+		clone := *msg
+		clone.MultiContent = slices.Clone(msg.MultiContent)
+		clone.AssistantGenMultiContent = append([]schema.MessageOutputPart(nil), msg.AssistantGenMultiContent...)
+		clone.ToolCalls = append([]schema.ToolCall(nil), msg.ToolCalls...)
+		if len(msg.UserInputMultiContent) > 0 {
+			clone.UserInputMultiContent = make([]schema.MessageInputPart, 0, len(msg.UserInputMultiContent))
+			for _, part := range msg.UserInputMultiContent {
+				if part.Type == schema.ChatMessagePartTypeImageURL {
+					clone.UserInputMultiContent = append(clone.UserInputMultiContent, schema.MessageInputPart{
+						Type: schema.ChatMessagePartTypeText,
+						Text: telemetryImagePlaceholder,
+					})
+					continue
+				}
+				clone.UserInputMultiContent = append(clone.UserInputMultiContent, part)
+			}
+		}
+		out[i] = &clone
+	}
+	return out
 }
 
 // AfterModelRewriteState closes the generation span and records token usage.
@@ -283,4 +329,94 @@ func (mw *langfuseMiddleware) WrapInvokableToolCall(_ context.Context, endpoint 
 		}
 		return out, err
 	}, nil
+}
+
+// WrapEnhancedInvokableToolCall is the multimodal counterpart of
+// WrapInvokableToolCall. Only text parts are sent to Langfuse: screenshots may
+// contain sensitive pixels and Base64 blobs are both unsafe and unhelpful in a
+// trace. The actual model request still receives every image part.
+func (mw *langfuseMiddleware) WrapEnhancedInvokableToolCall(
+	_ context.Context,
+	endpoint adk.EnhancedInvokableToolCallEndpoint,
+	tCtx *adk.ToolContext,
+) (adk.EnhancedInvokableToolCallEndpoint, error) {
+	t := mw.tracer
+	toolName := ""
+	if tCtx != nil {
+		toolName = tCtx.Name
+	}
+	return func(ctx context.Context, argument *schema.ToolArgument, opts ...tool.Option) (*schema.ToolResult, error) {
+		argumentsInJSON := ""
+		if argument != nil {
+			argumentsInJSON = argument.Text
+		}
+		traceID, _ := ctx.Value(traceIDKey).(string)
+		start := time.Now()
+		var spanID string
+		if traceID != "" {
+			parentObsID := ""
+			if mw.useParentSpan {
+				parentObsID, _ = ctx.Value(parentSpanIDKey).(string)
+			}
+			spanID, _ = t.client.CreateSpan(&langfuseacl.SpanEventBody{
+				BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
+					BaseEventBody:       langfuseacl.BaseEventBody{Name: toolName},
+					TraceID:             traceID,
+					ParentObservationID: parentObsID,
+					Input:               argumentsInJSON,
+					StartTime:           start,
+				},
+			})
+		}
+		if spanID != "" {
+			subSpanFunc := SubSpanFunc(func(name string) func(output string) {
+				childStart := time.Now()
+				childID, _ := t.client.CreateSpan(&langfuseacl.SpanEventBody{
+					BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
+						BaseEventBody:       langfuseacl.BaseEventBody{Name: name},
+						TraceID:             traceID,
+						ParentObservationID: spanID,
+						StartTime:           childStart,
+					},
+				})
+				return func(output string) {
+					if childID != "" {
+						_ = t.client.EndSpan(&langfuseacl.SpanEventBody{
+							BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
+								BaseEventBody: langfuseacl.BaseEventBody{ID: childID},
+								Output:        output,
+							},
+							EndTime: time.Now(),
+						})
+					}
+				}
+			})
+			ctx = context.WithValue(ctx, toolSpanTracerKey, subSpanFunc)
+		}
+
+		out, err := endpoint(ctx, argument, opts...)
+		if spanID != "" {
+			_ = t.client.EndSpan(&langfuseacl.SpanEventBody{
+				BaseObservationEventBody: langfuseacl.BaseObservationEventBody{
+					BaseEventBody: langfuseacl.BaseEventBody{ID: spanID},
+					Output:        enhancedResultText(out),
+				},
+				EndTime: time.Now(),
+			})
+		}
+		return out, err
+	}, nil
+}
+
+func enhancedResultText(result *schema.ToolResult) string {
+	if result == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, part := range result.Parts {
+		if part.Type == schema.ToolPartTypeText {
+			b.WriteString(part.Text)
+		}
+	}
+	return b.String()
 }

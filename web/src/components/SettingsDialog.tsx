@@ -7,7 +7,8 @@
  * centered dialog. Tabs: Providers (full CRUD + catalog + advanced config),
  * Models (state/favorites/effort), MCP (servers CRUD + OAuth login), Skills
  * (enable/disable), Appearance (theme picker), Browser (config + site
- * permissions), Remote (SSH aliases), Usage (stats).
+ * permissions), Computer (config + app permissions + grants), Remote (SSH
+ * aliases), Usage (stats).
  *
  * The Providers tab is the most complete port: list of provider cards, inline
  * add/edit form with advanced fields (base_url, headers, thinking,
@@ -42,6 +43,11 @@ import {
   KeyIcon,
   ArrowRightIcon,
   ChatBubbleOvalLeftIcon,
+  LockClosedIcon,
+  XMarkIcon,
+  MinusIcon,
+  ArrowPathIcon,
+  ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
@@ -49,8 +55,17 @@ import { uiActions, modelActions, loadConfig, loadModels } from '../app/store'
 import { ProviderIcon } from './ProviderIcon'
 import { api } from '../lib/api'
 import { openRemoteConnect } from '../lib/remote'
+import { openUrl } from '../lib/useDesktop'
 import { LOCALE_LABELS, SUPPORTED_LOCALES, setLocale, type SupportedLocale } from '../i18n'
-import type { BrowserConfig, BrowserStatusResponse, BrowserSitePermission } from '../lib/api'
+import type {
+  BrowserConfig,
+  BrowserStatusResponse,
+  BrowserSitePermission,
+  ComputerConfig,
+  ComputerStatusResponse,
+  ComputerAppPermission,
+  ComputerPermissionState,
+} from '../lib/api'
 import type { ApprovalReviewConfig, ApprovalReviewDefaults } from '../lib/types'
 import type {
   ProviderDetail,
@@ -70,7 +85,18 @@ import type {
 //   general, appearance, providers, mcp, skills, browser, ssh, channels,
 //   shortcuts, usage. Note: there is NO standalone Models tab — models live
 //   inside the Providers tab (catalog + custom models), mirroring the Vue app.
-type TabId = 'general' | 'appearance' | 'providers' | 'mcp' | 'skills' | 'browser' | 'ssh' | 'channels' | 'shortcuts' | 'usage'
+type TabId =
+  | 'general'
+  | 'appearance'
+  | 'providers'
+  | 'mcp'
+  | 'skills'
+  | 'browser'
+  | 'computer'
+  | 'ssh'
+  | 'channels'
+  | 'shortcuts'
+  | 'usage'
 
 const TABS: { id: TabId; Icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'general', Icon: Cog6ToothIcon },
@@ -79,6 +105,7 @@ const TABS: { id: TabId; Icon: React.ComponentType<{ className?: string }> }[] =
   { id: 'mcp', Icon: ServerStackIcon },
   { id: 'skills', Icon: SparklesIcon },
   { id: 'browser', Icon: GlobeAltIcon },
+  { id: 'computer', Icon: ComputerDesktopIcon },
   { id: 'ssh', Icon: CommandLineIcon },
   { id: 'channels', Icon: ChatBubbleOvalLeftIcon },
   { id: 'shortcuts', Icon: KeyIcon },
@@ -370,6 +397,7 @@ export function SettingsDialog() {
             {tab === 'mcp' && <MCPTab />}
             {tab === 'skills' && <SkillsTab />}
             {tab === 'browser' && <BrowserTab />}
+            {tab === 'computer' && <ComputerTab />}
             {tab === 'ssh' && <SSHTab />}
             {tab === 'channels' && <ChannelsTab />}
             {tab === 'shortcuts' && <ShortcutsTab />}
@@ -2758,6 +2786,805 @@ function BrowserTab() {
               </div>
             </div>
             <Switch on={!!cfg.dev_mode} onClick={() => patch({ dev_mode: !cfg.dev_mode })} />
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Computer tab — config + app permissions + grants
+// ════════════════════════════════════════════════════════════════════════════
+//
+// Mirrors BrowserTab's poll + debounced-save shape, with two deliberate
+// differences for a native, macOS-only capability:
+//
+//  1. Readiness renders even when the feature is off. Helper installation,
+//     Accessibility, and Screen Recording are separate facts; an unknown TCC
+//     state is never presented as ready.
+//  2. Polling refreshes *status* unconditionally but only re-syncs *config*
+//     when there is no local edit in flight. The user leaves this page to grant
+//     a TCC permission and comes back expecting the status to have noticed —
+//     but a 3s poll must not overwrite a half-typed bundle id.
+
+type Tier = 'read' | 'click' | 'full'
+
+const TIER_ORDER: Tier[] = ['read', 'click', 'full']
+const TIER_RANK: Record<Tier, number> = { read: 0, click: 1, full: 2 }
+
+function isTier(v: string | undefined | null): v is Tier {
+  return v === 'read' || v === 'click' || v === 'full'
+}
+
+// The tier badge is this page's one new visual primitive. Colors are semantic
+// and taken from the existing token contract — no new palette:
+//   read  → neutral wash + muted text (slate: observation only, unremarkable)
+//   click → the warning tokens        (amber: it can now touch things)
+//   full  → accent wash + primary     (accent: it can type; this is the ceiling)
+const TIER_BADGE: Record<Tier, string> = {
+  read: CHIP + ' !bg-[var(--neutral-wash)] !text-[var(--color-muted-foreground)]',
+  click: CHIP + ' !bg-[var(--color-warning-bg)] !text-[var(--color-warning-fg)]',
+  full: CHIP + ' !bg-[var(--accent-wash)] !text-[var(--color-primary)]',
+}
+
+function TierBadge({ tier, locked, title }: { tier: Tier; locked?: boolean; title?: string }) {
+  const { t } = useTranslation()
+  return (
+    <span className={TIER_BADGE[tier] + ' shrink-0'} title={title}>
+      {locked && <LockClosedIcon className="h-2.5 w-2.5 shrink-0" />}
+      {t(`settings.computer.tier.${tier}`)}
+    </span>
+  )
+}
+
+const ACCESSIBILITY_DEEP_LINK = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'
+const SCREEN_RECORDING_DEEP_LINK = 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
+
+const EMPTY_COMPUTER_CONFIG: ComputerConfig = {
+  enabled: false,
+  approval: {},
+  app_permissions: [],
+  clipboard_read: false,
+  clipboard_write: false,
+  system_key_combos: false,
+}
+
+type ComputerSaveState = 'idle' | 'saving' | 'saved' | 'error'
+
+function normalizeComputerConfig(input: ComputerConfig): ComputerConfig {
+  return {
+    ...input,
+    enabled: !!input.enabled,
+    approval: input.approval ?? {},
+    app_permissions: input.app_permissions ?? [],
+    clipboard_read: !!input.clipboard_read,
+    clipboard_write: !!input.clipboard_write,
+    system_key_combos: !!input.system_key_combos,
+  }
+}
+
+function ComputerPermissionRow({
+  label,
+  description,
+  state,
+  href,
+}: {
+  label: string
+  description: string
+  state: ComputerPermissionState
+  href: string
+}) {
+  const { t } = useTranslation()
+  const [openError, setOpenError] = useState(false)
+  const Icon = state === 'granted' ? CheckIcon : state === 'denied' ? XMarkIcon : MinusIcon
+  const iconStyle =
+    state === 'granted'
+      ? { background: 'var(--color-success-bg)', color: 'var(--color-success-fg)' }
+      : state === 'denied'
+        ? { background: 'var(--color-warning-bg)', color: 'var(--color-warning-fg)' }
+        : { background: 'var(--neutral-wash)', color: 'var(--color-muted-foreground)' }
+
+  return (
+    <div className="flex items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 py-3">
+      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)]" style={iconStyle}>
+        <Icon className="h-3.5 w-3.5" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-[12px] font-medium text-[var(--color-foreground)]">{label}</div>
+        <div className="mt-0.5 text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">{description}</div>
+        {openError && (
+          <div className="mt-1 text-[10.5px] leading-relaxed text-[var(--color-error-fg)]">
+            {t('settings.computer.openSystemSettingsFailed')}
+          </div>
+        )}
+      </div>
+      <span className={CHIP + ' shrink-0'}>{t(`settings.computer.permissionState.${state}`)}</span>
+      {state !== 'granted' && (
+        <button
+          type="button"
+          className={`${BTN_GHOST} ${BTN_XS} shrink-0`}
+          title={t('settings.computer.openSystemSettingsHint')}
+          onClick={() => {
+            setOpenError(false)
+            void openUrl(href).catch((err) => {
+              console.error('Failed to open macOS System Settings:', err)
+              setOpenError(true)
+            })
+          }}
+        >
+          {t('settings.computer.openSystemSettings')}
+        </button>
+      )}
+    </div>
+  )
+}
+
+function ComputerTab() {
+  const { t } = useTranslation()
+  const [status, setStatus] = useState<ComputerStatusResponse | null>(null)
+  const [cfg, setCfg] = useState<ComputerConfig>({ ...EMPTY_COMPUTER_CONFIG })
+  const [saveState, setSaveState] = useState<ComputerSaveState>('idle')
+  const [saveError, setSaveError] = useState('')
+  const [saveWarning, setSaveWarning] = useState('')
+  const [loadError, setLoadError] = useState('')
+  const [checking, setChecking] = useState(false)
+  const [requesting, setRequesting] = useState(false)
+  const [requestFailed, setRequestFailed] = useState(false)
+  // A pending loosen, held until the user clicks through the warning.
+  const [loosen, setLoosen] = useState<{ i: number; tier: Tier } | null>(null)
+  const saveTimer = useRef<number | null>(null)
+  const saveResetTimer = useRef<number | null>(null)
+  const pollRef = useRef<number | null>(null)
+  const cfgRef = useRef<ComputerConfig>({ ...EMPTY_COMPUTER_CONFIG })
+  const dirtyRef = useRef(false)
+  const configEpochRef = useRef(0)
+  const loadInFlightRef = useRef<Promise<void> | null>(null)
+  const saveInFlightRef = useRef(false)
+
+  const startLoad = useCallback((): Promise<void> => {
+    const requestEpoch = configEpochRef.current
+    const request = (async () => {
+      try {
+        const response = await api.computerStatus()
+        // A GET can spend seconds probing the helper. If a POST committed while
+        // it was in flight, both its status and config are stale; the forced
+        // post-save load below will replace it.
+        if (requestEpoch !== configEpochRef.current) return
+        setLoadError('')
+        setStatus(response)
+        if (!dirtyRef.current) {
+          const canonical = normalizeComputerConfig(response.config)
+          cfgRef.current = canonical
+          setCfg(canonical)
+        }
+      } catch (err) {
+        if (requestEpoch !== configEpochRef.current) return
+        console.error('Failed to load computer status:', err)
+        setLoadError(err instanceof Error ? err.message : String(err))
+      }
+    })()
+    loadInFlightRef.current = request
+    void request.finally(() => {
+      if (loadInFlightRef.current === request) loadInFlightRef.current = null
+    })
+    return request
+  }, [])
+
+  const load = useCallback(
+    async (forceAfterInflight = false) => {
+      const active = loadInFlightRef.current
+      if (active) {
+        await active
+        if (!forceAfterInflight) return
+      }
+      // A second caller may have started a request while this one awaited. A
+      // manual/post-save refresh waits it out, then always starts a fresh GET.
+      while (loadInFlightRef.current) await loadInFlightRef.current
+      await startLoad()
+    },
+    [startLoad],
+  )
+
+  useEffect(() => {
+    void load()
+    pollRef.current = window.setInterval(() => void load(), 3000)
+    return () => {
+      if (pollRef.current) window.clearInterval(pollRef.current)
+      if (saveTimer.current) window.clearTimeout(saveTimer.current)
+      if (saveResetTimer.current) window.clearTimeout(saveResetTimer.current)
+    }
+  }, [load])
+
+  function save(next: ComputerConfig) {
+    if (!status || saveInFlightRef.current) return
+    dirtyRef.current = true
+    if (saveTimer.current) window.clearTimeout(saveTimer.current)
+    if (saveResetTimer.current) window.clearTimeout(saveResetTimer.current)
+    setSaveError('')
+    setSaveWarning('')
+    setSaveState('idle')
+    saveTimer.current = window.setTimeout(async () => {
+      saveTimer.current = null
+      if (saveInFlightRef.current) return
+      saveInFlightRef.current = true
+      setSaveState('saving')
+      try {
+        const response = await api.computerSaveConfig(next)
+        const canonical = normalizeComputerConfig(response.config)
+        configEpochRef.current++
+        dirtyRef.current = false
+        cfgRef.current = canonical
+        setCfg(canonical)
+        // This must be a new request even when the 3-second poll is still in
+        // flight; otherwise the button could claim success while showing stale
+        // helper/permission state.
+        await load(true)
+        setSaveWarning(response.warning_code ?? '')
+        setSaveState('saved')
+        if (!response.warning_code) {
+          saveResetTimer.current = window.setTimeout(() => setSaveState('idle'), 1800)
+        }
+      } catch (err) {
+        console.error('Failed to save computer config:', err)
+        setSaveError(err instanceof Error ? err.message : String(err))
+        setSaveState('error')
+      } finally {
+        saveInFlightRef.current = false
+      }
+    }, 250)
+  }
+
+  async function checkAgain() {
+    if (checking) return
+    setChecking(true)
+    try {
+      await load(true)
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  /** One click surfaces the macOS consent prompts for both grants (Codex-style:
+   *  a single request, not one per permission). The system dialogs are answered
+   *  outside this flow, so states usually stay "denied" until the user acts in
+   *  them — the 3s poll observes the flips. */
+  async function requestPermissions() {
+    if (requesting) return
+    setRequesting(true)
+    setRequestFailed(false)
+    try {
+      await api.computerRequestPermissions({ accessibility: true, screen_recording: true })
+      await load(true)
+    } catch (err) {
+      console.error('Failed to request macOS permissions:', err)
+      setRequestFailed(true)
+    } finally {
+      setRequesting(false)
+    }
+  }
+
+  function patch(p: Partial<ComputerConfig>) {
+    if (!status || saveInFlightRef.current) return
+    const next = { ...cfgRef.current, ...p }
+    cfgRef.current = next
+    setCfg(next)
+    save(next)
+  }
+
+  function setApproval(cls: string, val: string) {
+    patch({ approval: { ...(cfgRef.current.approval ?? {}), [cls]: val } })
+  }
+
+  function addAppPerm() {
+    patch({ app_permissions: [...(cfgRef.current.app_permissions ?? []), { bundle_id: '', launch: 'ask', interact: 'ask' }] })
+  }
+
+  function removeAppPerm(i: number) {
+    setLoosen(null)
+    patch({ app_permissions: (cfgRef.current.app_permissions ?? []).filter((_, j) => j !== i) })
+  }
+
+  function updateAppPerm(i: number, p: Partial<ComputerAppPermission>) {
+    patch({ app_permissions: (cfgRef.current.app_permissions ?? []).map((ap, j) => (j === i ? { ...ap, ...p } : ap)) })
+  }
+
+  const st = status?.status
+
+  /** The built-in tier for a bundle id, straight from the server's table.
+   *  null = not known yet (empty id, or a freshly typed one that has not round-
+   *  tripped). We render that as pending rather than guessing: guessing "full"
+   *  would briefly offer options that a terminal can never actually have. */
+  function builtinTier(bundleID: string): Tier | null {
+    const id = bundleID.trim()
+    if (!id) return null
+    const raw = st?.tiers?.[id]
+    return isTier(raw) ? raw : null
+  }
+
+  /** What the app *actually* runs at. An override may only tighten, so anything
+   *  looser than the built-in tier is clamped away here exactly as
+   *  computer.Manager.TierOverrides drops it — the badge must show the truth,
+   *  not a stored-but-ignored wish. */
+  function effectiveTier(p: ComputerAppPermission, builtin: Tier): Tier {
+    const want = isTier(p.tier) ? p.tier : builtin
+    return TIER_RANK[want] < TIER_RANK[builtin] ? want : builtin
+  }
+
+  /** Why a family is capped, keyed off the built-in tier alone (browsers are the
+   *  only read family, terminals/IDEs the only click family), so this never
+   *  re-implements the bundle-id tables in internal/computer/tiers.go. */
+  function lockReason(builtin: Tier): string | undefined {
+    if (builtin === 'read') return t('settings.computer.whyBrowser')
+    if (builtin === 'click') return t('settings.computer.whyTerminal')
+    return undefined
+  }
+
+  function requestTier(i: number, tier: Tier) {
+    const p = (cfg.app_permissions ?? [])[i]
+    const builtin = p && builtinTier(p.bundle_id)
+    if (!p || !builtin) return
+    // Tightening is free; loosening is the direction that needs a deliberate act.
+    if (TIER_RANK[tier] > TIER_RANK[effectiveTier(p, builtin)]) {
+      setLoosen({ i, tier })
+      return
+    }
+    applyTier(i, tier, builtin)
+  }
+
+  function applyTier(i: number, tier: Tier, builtin: Tier) {
+    setLoosen(null)
+    // Store "" when the choice is just the built-in default: an override that
+    // restates the table is noise, and the backend drops it anyway.
+    updateAppPerm(i, { tier: tier === builtin ? '' : tier })
+  }
+
+  const saveBusy = saveState === 'saving'
+
+  if (status && !status.supported) {
+    return (
+      <div>
+        <div className="mb-4">
+          <h3 className={SECTION_TITLE}>{t('settings.computer.title')}</h3>
+          <p className="mt-0.5 text-[12px] text-[var(--color-muted-foreground)]">{t('settings.computer.subtitle')}</p>
+        </div>
+        <div className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+          <div className="flex items-start gap-3">
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius-lg)] bg-[var(--neutral-wash)] text-[var(--color-muted-foreground)]">
+              <ComputerDesktopIcon className="h-[18px] w-[18px]" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-[13px] font-semibold text-[var(--color-foreground)]">
+                  {t('settings.computer.macosOnlyTitle')}
+                </div>
+                <span className={CHIP}>macOS 14+</span>
+              </div>
+              <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">
+                {t('settings.computer.macosOnlyDesc', { platform: status.platform || t('settings.computer.unknownPlatform') })}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!status && loadError) {
+    return (
+      <div>
+        <div className="mb-4">
+          <h3 className={SECTION_TITLE}>{t('settings.computer.title')}</h3>
+          <p className="mt-0.5 text-[12px] text-[var(--color-muted-foreground)]">{t('settings.computer.subtitle')}</p>
+        </div>
+        <div className="rounded-[var(--radius-lg)] border border-[var(--color-error-fg)] bg-[var(--color-error-bg)] p-3.5">
+          <div className="flex items-start gap-3">
+            <XMarkIcon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-error-fg)]" />
+            <div className="min-w-0 flex-1">
+              <div className="text-[12px] font-medium text-[var(--color-error-fg)]">
+                {t('settings.computer.statusLoadFailed')}
+              </div>
+              <div className="mt-1 break-words font-mono text-[10.5px] text-[var(--color-muted-foreground)]">{loadError}</div>
+            </div>
+            <button type="button" className={`${BTN_SECONDARY} ${BTN_SM} shrink-0`} onClick={() => void checkAgain()} disabled={checking}>
+              <ArrowPathIcon className={`h-3.5 w-3.5 ${checking ? 'animate-spin' : ''}`} />
+              {checking ? t('settings.computer.checking') : t('settings.computer.checkAgain')}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const perms = cfg.app_permissions ?? []
+  const accessibility = st?.accessibility ?? 'unknown'
+  const screenRecording = st?.screen_recording ?? 'unknown'
+  // Unknown is deliberately not optimistic: pixels are a first-class part of
+  // computer use, so both TCC grants must be positively known before we say ready.
+  const permissionsReady = accessibility === 'granted' && screenRecording === 'granted'
+  const helperInstalled = !!st?.helper?.installed
+  const helperConnected = !!st?.helper?.connected
+  const helperReady = helperConnected
+  const ready = !!st && cfg.enabled && st.available && helperReady && permissionsReady && !st.blocker
+  const readinessDetail = !st
+    ? t('settings.computer.statusLoading')
+    : !cfg.enabled
+      ? t('settings.computer.offHint')
+      : !helperInstalled
+        ? t('settings.computer.helperMissingHint')
+        : !helperConnected
+          ? t('settings.computer.helperDisconnectedHint')
+          : accessibility === 'unknown' || screenRecording === 'unknown'
+            ? t('settings.computer.permissionsUnknownHint')
+            : !permissionsReady
+              ? t('settings.computer.permissionsHint')
+              : t('settings.computer.readyHint')
+
+  return (
+    <div>
+      <div className="mb-4 flex min-h-9 items-start justify-between gap-4">
+        <div>
+          <h3 className={SECTION_TITLE}>{t('settings.computer.title')}</h3>
+          <p className="mt-0.5 text-[12px] text-[var(--color-muted-foreground)]">{t('settings.computer.subtitle')}</p>
+        </div>
+        <div aria-live="polite" className="flex min-h-6 shrink-0 items-center gap-1.5 text-[10.5px]">
+          {saveState === 'saving' && (
+            <span className="inline-flex items-center gap-1.5 text-[var(--color-muted-foreground)]">
+              <ArrowPathIcon className="h-3.5 w-3.5 animate-spin" /> {t('settings.computer.saving')}
+            </span>
+          )}
+          {saveState === 'saved' && (
+            <span
+              className={`inline-flex max-w-72 items-center gap-1.5 ${saveWarning ? 'text-[var(--color-warning-fg)]' : 'text-[var(--color-success-fg)]'}`}
+            >
+              {saveWarning ? <ExclamationTriangleIcon className="h-3.5 w-3.5 shrink-0" /> : <CheckIcon className="h-3.5 w-3.5 shrink-0" />}
+              <span className="truncate">{saveWarning ? t('settings.computer.savedWithWarning') : t('settings.computer.saved')}</span>
+            </span>
+          )}
+          {saveState === 'error' && (
+            <>
+              <span className="inline-flex max-w-52 items-center gap-1.5 truncate text-[var(--color-error-fg)]" title={saveError}>
+                <XMarkIcon className="h-3.5 w-3.5 shrink-0" /> {t('settings.computer.saveFailed')}
+              </span>
+              <button type="button" className={`${BTN_GHOST} ${BTN_XS}`} onClick={() => save(cfgRef.current)} disabled={saveBusy}>
+                {t('settings.computer.retrySave')}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {saveWarning && (
+        <div className="mb-3 flex items-start gap-2.5 rounded-[var(--radius-lg)] border border-[var(--color-warning-fg)] bg-[var(--color-warning-bg)] px-3.5 py-3 text-[11px] text-[var(--color-warning-fg)]">
+          <ExclamationTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" />
+          <span className="min-w-0 flex-1 leading-relaxed">{t('settings.computer.agentRefreshWarning')}</span>
+          <button
+            type="button"
+            className={`${BTN_GHOST} ${BTN_XS} shrink-0`}
+            title={t('common.close')}
+            onClick={() => {
+              setSaveWarning('')
+              setSaveState('idle')
+            }}
+          >
+            <XMarkIcon className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      <div className={ROW}>
+        <div className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)]">
+          <ComputerDesktopIcon className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.computer.enableTitle')}</div>
+          <div className="text-[11px] text-[var(--color-muted-foreground)]">{t('settings.computer.enableDesc')}</div>
+        </div>
+        <Switch on={cfg.enabled} onClick={() => patch({ enabled: !cfg.enabled })} disabled={saveBusy || !status} />
+      </div>
+
+      <div className="mb-2 mt-5 flex items-center justify-between gap-3">
+        <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-muted-foreground)]">
+          {t('settings.computer.readiness')}
+        </div>
+        <span
+          className="inline-flex h-[20px] items-center gap-1 rounded-full px-2 text-[10px] font-semibold"
+          style={
+            ready
+              ? { background: 'var(--color-success-bg)', color: 'var(--color-success-fg)' }
+              : cfg.enabled && st
+                ? { background: 'var(--color-warning-bg)', color: 'var(--color-warning-fg)' }
+                : { background: 'var(--neutral-wash)', color: 'var(--color-muted-foreground)' }
+          }
+        >
+          {ready ? <CheckIcon className="h-3 w-3" /> : cfg.enabled && st ? <XMarkIcon className="h-3 w-3" /> : <MinusIcon className="h-3 w-3" />}
+          {!st
+            ? t('settings.computer.statusLoading')
+            : !cfg.enabled
+              ? t('settings.computer.readinessOff')
+              : ready
+                ? t('settings.computer.readinessReady')
+                : t('settings.computer.readinessNeedsAttention')}
+        </span>
+      </div>
+      <div className="space-y-2">
+        <div className="flex items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 py-3">
+          <span
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)]"
+            style={
+              !st
+                ? { background: 'var(--neutral-wash)', color: 'var(--color-muted-foreground)' }
+                : helperConnected
+                  ? { background: 'var(--color-success-bg)', color: 'var(--color-success-fg)' }
+                  : helperInstalled
+                    ? { background: 'var(--color-warning-bg)', color: 'var(--color-warning-fg)' }
+                    : { background: 'var(--color-error-bg)', color: 'var(--color-error-fg)' }
+            }
+          >
+            {!st ? (
+              <MinusIcon className="h-3.5 w-3.5" />
+            ) : helperConnected ? (
+              <CheckIcon className="h-3.5 w-3.5" />
+            ) : helperInstalled ? (
+              <MinusIcon className="h-3.5 w-3.5" />
+            ) : (
+              <XMarkIcon className="h-3.5 w-3.5" />
+            )}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.computer.nativeHelper')}</div>
+            <div className="mt-0.5 text-[10.5px] text-[var(--color-muted-foreground)]">
+              {!st
+                ? t('settings.computer.statusLoading')
+                : st.helper.connected
+                  ? t('settings.computer.helperConnected')
+                  : st.helper.installed
+                    ? t('settings.computer.helperInstalled')
+                    : t('settings.computer.helperMissing')}
+            </div>
+          </div>
+          {st?.helper.version && <span className={CHIP + ' shrink-0 font-mono'}>{st.helper.version}</span>}
+        </div>
+
+        <ComputerPermissionRow
+          label={t('settings.computer.accessibility')}
+          description={t('settings.computer.accessibilityDesc')}
+          state={accessibility}
+          href={ACCESSIBILITY_DEEP_LINK}
+        />
+        <ComputerPermissionRow
+          label={t('settings.computer.screenRecording')}
+          description={t('settings.computer.screenRecordingDesc')}
+          state={screenRecording}
+          href={SCREEN_RECORDING_DEEP_LINK}
+        />
+
+        <div className="flex items-start justify-between gap-3 px-1 pt-1">
+          <div
+            className={`min-w-0 text-[10.5px] leading-relaxed ${loadError || requestFailed ? 'text-[var(--color-error-fg)]' : 'text-[var(--color-muted-foreground)]'}`}
+          >
+            {loadError
+              ? `${t('settings.computer.statusLoadFailed')}: ${loadError}`
+              : requestFailed
+                ? t('settings.computer.requestPermissionFailed')
+                : readinessDetail}
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {helperConnected && !permissionsReady && (
+              <button
+                type="button"
+                className={`${BTN_PRIMARY} ${BTN_SM} shrink-0`}
+                onClick={() => void requestPermissions()}
+                disabled={requesting || checking || saveBusy}
+              >
+                {requesting ? t('settings.computer.requestingPermission') : t('settings.computer.requestPermissions')}
+              </button>
+            )}
+            <button
+              type="button"
+              className={`${BTN_SECONDARY} ${BTN_SM} shrink-0`}
+              onClick={() => void checkAgain()}
+              disabled={checking || saveBusy || requesting}
+            >
+              <ArrowPathIcon className={`h-3.5 w-3.5 ${checking ? 'animate-spin' : ''}`} />
+              {checking ? t('settings.computer.checking') : t('settings.computer.checkAgain')}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {cfg.enabled && (
+        <>
+          {/* ── Approval defaults ─────────────────────────────────────────────
+              The baseline the per-app rows below override. Clipboard is absent
+              on purpose: reading it always prompts and is not pre-approvable
+              (design §4.4) — it holds passwords too often. */}
+          <div className="mb-2 mt-5 text-[11px] font-medium uppercase tracking-wide text-[var(--color-muted-foreground)]">
+            {t('settings.computer.approval')}
+          </div>
+          <div className="space-y-2">
+            {(['launch', 'interact'] as const).map((cls) => (
+              <div key={cls} className={ROW}>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t(`settings.computer.${cls}`)}</div>
+                </div>
+                <select
+                  value={cfg.approval?.[cls] ?? 'ask'}
+                  onChange={(e) => setApproval(cls, e.target.value)}
+                  disabled={saveBusy}
+                  className={INPUT_SM}
+                  style={{ width: '10rem' }}
+                >
+                  <option value="ask">{t('settings.computer.askEachApp')}</option>
+                  <option value="always_allow">{t('settings.computer.alwaysAllow')}</option>
+                </select>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">
+            {t('settings.computer.clipboardAlwaysAsks')}
+          </div>
+
+          {/* ── App permissions ──────────────────────────────────────────── */}
+          <div className="mb-2 mt-5 flex items-center justify-between">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-muted-foreground)]">
+              {t('settings.computer.appPermissions')}
+            </div>
+            <button type="button" className={`${BTN_SECONDARY} ${BTN_SM}`} onClick={addAppPerm} disabled={saveBusy}>
+              <PlusIcon className="h-3.5 w-3.5" /> {t('settings.computer.add')}
+            </button>
+          </div>
+          <div className="space-y-2">
+            {!perms.length && (
+              <div className={ROW}>
+                <div className="text-[11px] text-[var(--color-muted-foreground)]">{t('settings.computer.noAppPermissions')}</div>
+              </div>
+            )}
+            {perms.map((p, i) => {
+              const builtin = builtinTier(p.bundle_id)
+              const eff = builtin ? effectiveTier(p, builtin) : null
+              const why = builtin ? lockReason(builtin) : undefined
+              // Never offer a tier above the built-in one: the backend would
+              // drop it and the user would be left believing it took effect.
+              const opts = builtin ? TIER_ORDER.filter((x) => TIER_RANK[x] <= TIER_RANK[builtin]) : []
+              return (
+                <div key={i} className="space-y-1">
+                  <div className={ROW}>
+                    <input
+                      value={p.bundle_id}
+                      onChange={(e) => updateAppPerm(i, { bundle_id: e.target.value })}
+                      disabled={saveBusy}
+                      className={INPUT_SM + ' font-mono'}
+                      style={{ flex: 1, minWidth: '8rem' }}
+                      placeholder={t('settings.computer.bundlePlaceholder')}
+                    />
+                    {builtin && eff ? (
+                      <TierBadge tier={eff} locked={builtin !== 'full'} title={why ?? t(`settings.computer.tierDesc.${eff}`)} />
+                    ) : (
+                      <span className={CHIP + ' shrink-0'} title={t('settings.computer.tierPending')}>
+                        —
+                      </span>
+                    )}
+                    <select
+                      value={eff ?? ''}
+                      disabled={saveBusy || !builtin || opts.length <= 1}
+                      onChange={(e) => requestTier(i, e.target.value as Tier)}
+                      className={INPUT_SM}
+                      style={{ width: '5.75rem' }}
+                      title={!builtin ? t('settings.computer.tierPending') : opts.length <= 1 ? why : t('settings.computer.tierLabel')}
+                    >
+                      {!builtin && <option value="">—</option>}
+                      {opts.map((x) => (
+                        <option key={x} value={x}>
+                          {t(`settings.computer.tier.${x}`)}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={p.launch ?? 'ask'}
+                      onChange={(e) => updateAppPerm(i, { launch: e.target.value })}
+                      disabled={saveBusy}
+                      className={INPUT_SM}
+                      style={{ width: '6.5rem' }}
+                    >
+                      <option value="ask">{t('settings.computer.launchAsk')}</option>
+                      <option value="allow">{t('settings.computer.launchAllow')}</option>
+                    </select>
+                    <select
+                      value={p.interact ?? 'ask'}
+                      onChange={(e) => updateAppPerm(i, { interact: e.target.value })}
+                      disabled={saveBusy}
+                      className={INPUT_SM}
+                      style={{ width: '6.5rem' }}
+                    >
+                      <option value="ask">{t('settings.computer.interactAsk')}</option>
+                      <option value="allow">{t('settings.computer.interactAllow')}</option>
+                    </select>
+                    <button type="button" className={`${BTN_GHOST} ${BTN_SM}`} onClick={() => removeAppPerm(i)} disabled={saveBusy}>
+                      <TrashIcon className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+
+                  {/* The "why" for a capped family, spelled out rather than left
+                      to a hover: an unexplained restriction just reads as jcode
+                      being annoying, and the user overrides on reflex. */}
+                  {why && (
+                    <div className="flex items-start gap-1.5 px-3.5 text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">
+                      <LockClosedIcon className="mt-[2px] h-3 w-3 shrink-0" />
+                      <span>{why}</span>
+                    </div>
+                  )}
+
+                  {loosen?.i === i && builtin && (
+                    <div className="rounded-[var(--radius-md)] border border-[var(--color-warning-fg)] bg-[var(--color-warning-bg)] p-2.5">
+                      <div className="text-[12px] font-semibold text-[var(--color-warning-fg)]">
+                        ⚠ {t('settings.computer.loosenTitle')}
+                      </div>
+                      <div className="mt-0.5 text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">
+                        {t('settings.computer.loosenBody', {
+                          app: p.bundle_id || t('settings.computer.thisApp'),
+                          what: t(`settings.computer.tierDesc.${loosen.tier}`),
+                        })}
+                      </div>
+                      <div className="mt-2 flex justify-end gap-1.5">
+                        <button type="button" className={`${BTN_GHOST} ${BTN_XS}`} onClick={() => setLoosen(null)} disabled={saveBusy}>
+                          {t('common.cancel')}
+                        </button>
+                        <button
+                          type="button"
+                          className={`${BTN_SECONDARY} ${BTN_XS}`}
+                          onClick={() => applyTier(i, loosen.tier, builtin)}
+                          disabled={saveBusy}
+                        >
+                          {t('settings.computer.loosenConfirm')}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          <div className="mt-2 text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">
+            {t('settings.computer.tierCeilingNote')}
+          </div>
+
+          {/* ── Grants ───────────────────────────────────────────────────────
+              Orthogonal to the app allowlist, and each caption says why. */}
+          <div className="mb-2 mt-5 text-[11px] font-medium uppercase tracking-wide text-[var(--color-muted-foreground)]">
+            {t('settings.computer.grants')}
+          </div>
+          <div className="mb-2 text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">
+            {t('settings.computer.grantsDesc')}
+          </div>
+          <div className="space-y-2">
+            <div className={ROW}>
+              <div className="min-w-0 flex-1">
+                <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.computer.clipboardRead')}</div>
+                <div className="text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">
+                  {t('settings.computer.clipboardReadDesc')}
+                </div>
+              </div>
+              <Switch on={!!cfg.clipboard_read} onClick={() => patch({ clipboard_read: !cfg.clipboard_read })} disabled={saveBusy} />
+            </div>
+            <div className={ROW}>
+              <div className="min-w-0 flex-1">
+                <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.computer.clipboardWrite')}</div>
+                <div className="text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">
+                  {t('settings.computer.clipboardWriteDesc')}
+                </div>
+              </div>
+              <Switch on={!!cfg.clipboard_write} onClick={() => patch({ clipboard_write: !cfg.clipboard_write })} disabled={saveBusy} />
+            </div>
+            <div className={ROW}>
+              <div className="min-w-0 flex-1">
+                <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.computer.systemKeyCombos')}</div>
+                <div className="text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">
+                  {t('settings.computer.systemKeyCombosDesc')}
+                </div>
+              </div>
+              <Switch on={!!cfg.system_key_combos} onClick={() => patch({ system_key_combos: !cfg.system_key_combos })} disabled={saveBusy} />
+            </div>
           </div>
         </>
       )}

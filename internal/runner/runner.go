@@ -201,6 +201,26 @@ func nextBatchID() string {
 	return fmt.Sprintf("b%d-%d", batchEpoch, batchSeq.Add(1))
 }
 
+// toolMessageText returns the human/model-readable portion of a tool result.
+// Enhanced tools place text next to image parts in UserInputMultiContent and
+// leave Content empty; the UI and session recorder must still receive the text
+// marker (for example image_ref) without ever persisting the Base64 image.
+func toolMessageText(msg *schema.Message) string {
+	if msg == nil {
+		return ""
+	}
+	if msg.Content != "" {
+		return msg.Content
+	}
+	var parts []string
+	for _, part := range msg.UserInputMultiContent {
+		if part.Type == schema.ChatMessagePartTypeText && part.Text != "" {
+			parts = append(parts, part.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
 func runInner(
 	ctx context.Context,
 	ag *adk.ChatModelAgent,
@@ -273,8 +293,12 @@ func runInner(
 				h.OnAgentDone(ctx.Err())
 				return assistantText.String(), true
 			}
+			// Log the provider's raw payload, hand the frontends a sentence a
+			// human can act on. This is the single choke point for model errors,
+			// so wrapping here fixes the display in the TUI, the web UI and ACP
+			// at once — and stops the next frontend from having to remember.
 			config.Logger().Printf("[runner] event error: %v", event.Err)
-			h.OnAgentDone(event.Err)
+			h.OnAgentDone(internalmodel.WrapFriendly(event.Err, "", ""))
 			return assistantText.String(), true
 		}
 		if event.Output == nil || event.Output.MessageOutput == nil {
@@ -288,7 +312,7 @@ func runInner(
 		if mo.Role == schema.Tool {
 			toolName := mo.ToolName
 			if !mo.IsStreaming && mo.Message != nil {
-				output := mo.Message.Content
+				output := toolMessageText(mo.Message)
 				emitToolResult(toolName, output, mo.Message.ToolCallID, nil)
 				if toolName == "todowrite" || toolName == "todoread" {
 					h.OnTodoUpdate()
@@ -308,7 +332,7 @@ func runInner(
 						break
 					}
 					if chunk != nil {
-						sb.WriteString(chunk.Content)
+						sb.WriteString(toolMessageText(chunk))
 						if toolCallID == "" && chunk.ToolCallID != "" {
 							toolCallID = chunk.ToolCallID
 						}

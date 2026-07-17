@@ -141,6 +141,7 @@ type Model struct {
 	todoStore *tools.TodoStore
 	goalStore *tools.GoalStore
 	browser   *BrowserController
+	computer  *ComputerController
 
 	totalTokens       int64
 	modelContextLimit int
@@ -513,6 +514,44 @@ type BrowserStatus struct {
 type BrowserController struct {
 	Status     func() BrowserStatus
 	SetEnabled func(bool) error
+}
+
+// ComputerStatus is a snapshot of the computer-use subsystem for `/computer`.
+//
+// Detail carries the human-readable reason the subsystem is not ready. Computer
+// use has three independent gates (enabled / a working backend / macOS
+// permission) and a status line that cannot say which one is shut leaves the
+// user with nothing to act on.
+type ComputerStatus struct {
+	Supported       bool // false outside macOS
+	Platform        string
+	Available       bool // native helper is connected and permissions are ready
+	Enabled         bool
+	HelperInstalled bool
+	HelperConnected bool
+	HelperVersion   string
+	Accessibility   string // granted | denied | unknown
+	ScreenRecording string // granted | denied | unknown
+	Blocker         string // unsupported | disabled | no_helper | permissions | ""
+	Detail          string
+}
+
+// ComputerController lets the TUI read computer-use status and toggle
+// enablement without depending on the computer manager directly (which lives in
+// the command layer). Nil when computer use is unavailable.
+type ComputerController struct {
+	Status     func() ComputerStatus
+	SetEnabled func(bool) error
+	// RequestPermissions surfaces the macOS consent prompts for the helper's
+	// TCC grants (/computer grant). Nil on platforms/transports that cannot ask.
+	RequestPermissions func() error
+}
+
+// WithComputer wires the `/computer` command to the computer-use subsystem.
+func WithComputer(cc *ComputerController) ModelOption {
+	return func(m *Model) {
+		m.computer = cc
+	}
 }
 
 // WithBrowser wires the `/browser` command to the browser-use subsystem.
