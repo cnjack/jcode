@@ -21,7 +21,11 @@ import {
   editMessage,
   chatActions,
 } from './store'
-import type { ChatImage, AskUserAnswer } from 'jcode-ui-core'
+import type { ChatImage, AskUserAnswer, QueuedMessage } from 'jcode-ui-core'
+
+/** Referentially-stable empty queue for sessions without a stash (keeps the
+ *  runtime selector from re-rendering on every store change). */
+const EMPTY_QUEUE: QueuedMessage[] = []
 
 /** Build the ChatRuntime once. The store singleton is stable, so the runtime
  *  is too. */
@@ -39,13 +43,19 @@ export function useChatRuntime(): ChatRuntime {
         tokenSnapshot: s.chat.tokenSnapshot,
         goal: s.chat.goal,
         todos: s.chat.todos,
-        queued: s.chat.queued,
+        // The composer shows only the FOREGROUND session's type-ahead queue;
+        // other sessions' stashes stay in the store until their agentDone.
+        queued: s.chat.queuedBySession[s.session.currentSessionId] ?? EMPTY_QUEUE,
       }),
       actions: {
         sendMessage: (text, images) => store.dispatch(sendMessage({ text, images: images as ChatImage[] | undefined })),
         enqueueMessage: (text, images) =>
-          store.dispatch(chatActions.enqueueMessage({ id: `q_${Date.now()}`, text, images: images as ChatImage[] | undefined })),
-        removeQueuedMessage: (id) => store.dispatch(chatActions.removeQueued(id)),
+          store.dispatch(chatActions.enqueueMessage({
+            sessionId: store.getState().session.currentSessionId,
+            message: { id: `q_${Date.now()}`, text, images: images as ChatImage[] | undefined },
+          })),
+        removeQueuedMessage: (id) =>
+          store.dispatch(chatActions.removeQueued({ sessionId: store.getState().session.currentSessionId, id })),
         stop: () => store.dispatch(stopAgent()),
         resolveApproval: (id, approved, approveAll) =>
           store.dispatch(resolveApproval({ id, approved, approveAll })),

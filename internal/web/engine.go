@@ -455,6 +455,11 @@ func (s *Server) setActiveEngine(eng *Engine) {
 			s.deleteEngine(prev.taskID)
 		}
 	}
+	// Remember the foregrounded session per project (keyed by the engine's own
+	// pwd, so remote workspaces never clobber the local entry) — health reports
+	// it after a restart so clients return to their last conversation. Runs
+	// outside s.mu: this is best-effort file I/O.
+	session.SaveLastSession(eng.pwd, eng.taskID)
 }
 
 // deleteEngine removes a task engine from the map and tears it down (stops its

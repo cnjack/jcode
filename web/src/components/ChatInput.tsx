@@ -1280,21 +1280,22 @@ function ContextCapacityPopup({
   cached?: number
   reasoning?: number
 }) {
+  const { t } = useTranslation()
   const context = stats?.context
   const effectiveLimit = context?.context_limit || limit
   const rows = context
     ? [
-        { label: 'System prompt', value: context.system_prompt_tokens },
-        { label: 'System tools', value: context.system_tools_tokens },
-        { label: 'MCP tools', value: context.mcp_tools_tokens },
-        { label: 'Skills', value: context.skills_tokens },
-        { label: 'Messages', value: context.messages_tokens },
+        { label: t('contextCapacity.systemPrompt'), value: context.system_prompt_tokens },
+        { label: t('contextCapacity.systemTools'), value: context.system_tools_tokens },
+        { label: t('contextCapacity.mcpTools'), value: context.mcp_tools_tokens },
+        { label: t('contextCapacity.skills'), value: context.skills_tokens },
+        { label: t('contextCapacity.messages'), value: context.messages_tokens },
       ]
     : [
-        { label: 'Input', value: prompt },
-        { label: 'Output', value: completion },
-        { label: 'Cached', value: cached || 0 },
-        { label: 'Reasoning', value: reasoning || 0 },
+        { label: t('contextCapacity.input'), value: prompt },
+        { label: t('contextCapacity.output'), value: completion },
+        { label: t('contextCapacity.cached'), value: cached || 0 },
+        { label: t('contextCapacity.reasoning'), value: reasoning || 0 },
       ]
   const max = Math.max(1, ...rows.map((r) => r.value))
   const percent = effectiveLimit > 0 ? Math.min(100, Math.round((total / effectiveLimit) * 100)) : 0
@@ -1303,9 +1304,9 @@ function ContextCapacityPopup({
     <div className="absolute bottom-full right-0 z-[var(--z-dropdown)] mb-2 w-[280px] rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-[var(--shadow-lg)]">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div>
-          <div className="text-[12px] font-semibold text-[var(--color-foreground)]">Context capacity</div>
+          <div className="text-[12px] font-semibold text-[var(--color-foreground)]">{t('contextCapacity.title')}</div>
           <div className="mt-0.5 font-mono text-[10.5px] text-[var(--color-muted-foreground)]">
-            {formatCompact(total)} / {effectiveLimit > 0 ? formatCompact(effectiveLimit) : '-'} tokens
+            {t('common.tokens', { used: `${formatCompact(total)} / ${effectiveLimit > 0 ? formatCompact(effectiveLimit) : '-'}` })}
           </div>
         </div>
         <span className={`font-mono text-[13px] font-semibold ${percent >= 90 ? 'text-[var(--color-destructive)]' : 'text-[var(--color-primary)]'}`}>
@@ -1316,7 +1317,7 @@ function ContextCapacityPopup({
         <div className="h-full rounded-full bg-[var(--color-primary)]" style={{ width: `${percent}%` }} />
       </div>
       {loading ? (
-        <div className="py-4 text-center text-xs text-[var(--color-muted-foreground)]">Loading...</div>
+        <div className="py-4 text-center text-xs text-[var(--color-muted-foreground)]">{t('common.loading')}</div>
       ) : (
         <div className="space-y-1.5">
           {rows.map((row) => (
@@ -1334,7 +1335,7 @@ function ContextCapacityPopup({
       )}
       {stats?.cache_supported && (
         <div className="mt-2 rounded-[var(--radius-md)] bg-[var(--color-muted)] px-2 py-1.5 text-[10.5px] text-[var(--color-muted-foreground)]">
-          Cache hit rate: <span className="font-mono text-[var(--color-foreground)]">{Math.round(stats.cache_hit_rate * 100)}%</span>
+          {t('contextCapacity.cacheHitRate')}: <span className="font-mono text-[var(--color-foreground)]">{Math.round(stats.cache_hit_rate * 100)}%</span>
         </div>
       )}
     </div>

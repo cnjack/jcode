@@ -496,6 +496,20 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	provider, mdl, modeStr := eng.modelSnapshot()
+	sessionID := eng.recUUID()
+	// After a restart the bootstrap engine is a fresh throwaway (no recording,
+	// not running) whose UUID has no history to restore. Report the project's
+	// last foregrounded session instead so clients boot straight back into the
+	// conversation that was open when the app was closed. Once the live engine
+	// has real state it always reports its own UUID.
+	eng.emu.Lock()
+	throwaway := (eng.recorder == nil || !eng.recorder.HasRecording()) && !eng.running.Load()
+	eng.emu.Unlock()
+	if throwaway {
+		if last := session.LoadLastSession(eng.pwd); last != "" {
+			sessionID = last
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":        "ok",
 		"version":       s.version,
@@ -503,7 +517,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"provider":      provider,
 		"model":         mdl,
 		"mode":          modeStr,
-		"session_id":    eng.recUUID(),
+		"session_id":    sessionID,
 		"running":       eng.running.Load(),
 		"image_support": s.currentModelSupportsImage(eng),
 		"auth_required": s.requireAuth,

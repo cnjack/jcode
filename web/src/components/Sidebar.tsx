@@ -382,6 +382,7 @@ export function Sidebar() {
     }
     dispatch(sessionActions.setSessions(sessions.filter((s) => s.uuid !== row.uuid)))
     dispatch(sessionActions.setTasks(tasks.filter((t) => t.uuid !== row.uuid)))
+    dispatch(chatActions.dropSessionQueue(row.uuid))
     if (wasActive) {
       dispatch(chatActions.clearChat())
       dispatch(sessionActions.setCurrentSession(''))

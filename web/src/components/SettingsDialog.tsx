@@ -2931,7 +2931,7 @@ function UsageTab() {
             {heat.map((cell) => (
               <span
                 key={cell.date}
-                title={cell.future ? '' : cell.tokens > 0 ? `${cell.date} · ${fmtCompact(cell.tokens)} tokens · ${cell.turns} ${t('settings.usageStats.turnsUnit')}` : `${cell.date} · ${t('settings.usageStats.noActivity')}`}
+                title={cell.future ? '' : cell.tokens > 0 ? `${cell.date} · ${t('common.tokens', { used: fmtCompact(cell.tokens) })} · ${cell.turns} ${t('settings.usageStats.turnsUnit')}` : `${cell.date} · ${t('settings.usageStats.noActivity')}`}
                 className="h-[11px] w-[11px] rounded-[2px]"
                 style={{ background: cell.future ? 'transparent' : HEAT_FILL[cell.level] }}
               />
@@ -2947,7 +2947,7 @@ function UsageTab() {
             {trend.map((d) => (
               <div
                 key={d.date}
-                title={`${d.date} · ${fmtCompact(d.tokens)} tokens · ${d.turns} ${t('settings.usageStats.turnsUnit')}`}
+                title={`${d.date} · ${t('chat.tokens', { used: fmtCompact(d.tokens) })} · ${d.turns} ${t('settings.usageStats.turnsUnit')}`}
                 className="min-w-[2px] flex-1 rounded-t-[2px] bg-[var(--accent-fill)] transition-[height]"
                 style={{ height: `${Math.max(2, (d.tokens / maxTokens) * 100)}%`, opacity: d.tokens === 0 ? 0.25 : 0.9 }}
               />

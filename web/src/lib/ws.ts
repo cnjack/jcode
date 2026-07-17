@@ -46,7 +46,7 @@ export interface WSHandlers {
     presentation?: import('./types').ToolResultPresentation
   }) => void
   onTokenUpdate?: (data: import('./types').TokenUpdateData) => void
-  onAgentDone?: (data: { error?: string; detail?: string }) => void
+  onAgentDone?: (data: { error?: string; detail?: string; task_id?: string }) => void
   onTodoUpdate?: () => void
   onGoalUpdate?: (data: import('jcode-ui-core').Goal | null) => void
   onApprovalRequest?: (data: import('./types').ApprovalRequestData) => void
@@ -71,6 +71,9 @@ interface WSMessage {
   task_id?: string
   data?: unknown
 }
+
+/** Event types whose data payload gets the envelope task_id merged in. */
+const TASK_ID_DATA_TYPES = new Set(['approval_request', 'ask_user_request', 'agent_done'])
 
 export class WSClient {
   private ws: WebSocket | null = null
@@ -125,17 +128,15 @@ export class WSClient {
       try {
         const msg: WSMessage = JSON.parse(event.data)
         const active = this.handlers.activeTaskId?.()
-        if (msg.task_id && active && msg.task_id !== active) return
+        // Events tagged with a different task id are dropped so they don't
+        // pollute the active view — EXCEPT agent_done, which the bridge needs
+        // for every session to drain that session's type-ahead queue.
+        if (msg.task_id && active && msg.task_id !== active && msg.type !== 'agent_done') return
         const handler = this.handlerFor(msg.type)
         if (handler) {
           let data = msg.data
-          if (
-            msg.task_id &&
-            (msg.type === 'approval_request' || msg.type === 'ask_user_request') &&
-            data &&
-            typeof data === 'object'
-          ) {
-            data = { ...(data as Record<string, unknown>), task_id: msg.task_id }
+          if (msg.task_id && TASK_ID_DATA_TYPES.has(msg.type)) {
+            data = { ...((data && typeof data === 'object' ? data : {}) as Record<string, unknown>), task_id: msg.task_id }
           }
           handler(data)
         }
