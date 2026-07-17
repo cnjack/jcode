@@ -232,6 +232,50 @@ select:focus-visible {
   min-width: 0;
 }
 
+.chat-panel {
+  position: relative;
+  isolation: isolate;
+}
+
+/* Model-specific artwork stays inside the rounded canvas while the chat panel
+   itself remains overflow-visible for the composer's upward-opening menus. */
+.model-backdrop {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transition:
+    opacity var(--duration-slower) var(--ease-out),
+    visibility 0s linear var(--duration-slower);
+}
+
+[data-theme="jcode-light"] .model-backdrop.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+.model-backdrop-asset {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  object-fit: cover;
+  object-position: right top;
+  user-select: none;
+}
+
+.chat-content-layer {
+  position: relative;
+  z-index: 1;
+}
+
 /* chat-panel must NOT use overflow:hidden — that would clip the composer's
    upward model/slash menus (matches Vue App.vue). page-surface can clip. */
 .page-surface {
@@ -344,6 +388,12 @@ select:focus-visible {
   }
   .welcome-title {
     font-size: 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .model-backdrop {
+    transition: none;
   }
 }
 
