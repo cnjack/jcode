@@ -15,6 +15,15 @@ import { useTranslation } from 'react-i18next'
 import { useAppSelector } from '../app/hooks'
 import { GoalBanner } from './GoalBanner'
 import { ChatInput } from './ChatInput'
+import kimiBackground from '../assets/kimi-light-background.webp'
+import zhipuBackground from '../assets/zhipu-light-background.webp'
+
+const MODEL_BACKGROUNDS = {
+  kimi: kimiBackground,
+  zhipu: zhipuBackground,
+} as const
+
+type ModelBackdropKind = keyof typeof MODEL_BACKGROUNDS
 
 export interface ChatViewProps {
   /** Read-only mode (automation-run replay): no composer, no follow. */
@@ -25,6 +34,11 @@ export function ChatView({ readOnly }: ChatViewProps) {
   const { t } = useTranslation()
   const hasMessages = useAppSelector((s) => s.chat.timeline.length > 0)
   const projectPath = useAppSelector((s) => s.session.projectPath)
+  const backdropKind = useAppSelector((s) => {
+    const provider = s.model.providers.find((candidate) => candidate.id === s.model.providerName)
+    const model = provider?.models.find((candidate) => candidate.id === s.model.modelName)
+    return modelBackdropKind([s.model.providerName, provider?.name, s.model.modelName, model?.name])
+  })
   const project = projectName(projectPath) || 'jcode'
 
   if (readOnly) {
@@ -45,6 +59,7 @@ export function ChatView({ readOnly }: ChatViewProps) {
 
     return (
       <div className="chat-panel welcome flex flex-1 flex-col items-center overflow-y-auto px-6">
+        <ModelBackdrop kind={backdropKind} />
         <div className="welcome-aura" aria-hidden="true" />
         {/* Top half: hero floats above the centered composer. */}
         <div className="welcome-hero flex min-h-0 flex-1 flex-col items-center justify-end pb-10">
@@ -76,15 +91,37 @@ export function ChatView({ readOnly }: ChatViewProps) {
   // message column exactly (same max-width + 20px horizontal inset).
   return (
     <div className="chat-panel flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1">
+      <ModelBackdrop kind={backdropKind} />
+      <div className="chat-content-layer min-h-0 flex-1">
         <Thread overscanBottom={28} />
       </div>
-      <div className="chat-col">
+      <div className="chat-content-layer chat-col">
         <GoalBanner />
         <ChatInput onSent={() => { /* timeline auto-follows via useStreamFollow */ }} />
       </div>
     </div>
   )
+}
+
+function ModelBackdrop({ kind }: { kind: ModelBackdropKind | null }) {
+  return (
+    <div
+      className={`model-backdrop${kind ? ' is-visible' : ''}`}
+      data-model-backdrop={kind ?? undefined}
+      aria-hidden="true"
+    >
+      {kind && <img key={kind} className="model-backdrop-asset" src={MODEL_BACKGROUNDS[kind]} alt="" />}
+    </div>
+  )
+}
+
+function modelBackdropKind(values: Array<string | undefined>): ModelBackdropKind | null {
+  const identity = values.filter(Boolean).join('|').toLowerCase()
+  if (/kimi|moonshot/.test(identity)) return 'kimi'
+  if (/zhipu|bigmodel|(^|[|/ _-])zai(?=$|[|/ _-])|(^|[|/ _-])glm(?=$|[|/ _-])/.test(identity)) {
+    return 'zhipu'
+  }
+  return null
 }
 
 function projectName(path: string): string {
