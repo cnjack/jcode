@@ -54,7 +54,7 @@ done
 log "quota is back — launching the campaign"
 
 # Rebuild so the campaign runs against the current branch, not a stale binary.
-( cd "$REPO" && CGO_ENABLED=0 go build -o "$BIN" ./cmd/jcode ) || { log "jcode build failed"; exit 1; }
+( cd "$REPO" && CGO_ENABLED=0 go build -tags jcode_eval -o "$BIN" ./cmd/jcode ) || { log "jcode eval build failed"; exit 1; }
 ( cd "$REPO/agent-eval/harness" && go build -o "$HARNESS" . ) || { log "harness build failed"; exit 1; }
 
 rm -rf "$RUNS_DIR" && mkdir -p "$RUNS_DIR"

@@ -7,6 +7,7 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/schema"
 
 	"github.com/cnjack/jcode/internal/telemetry"
 	"github.com/cnjack/jcode/internal/tools"
@@ -129,6 +130,100 @@ func (m *approvalMiddleware) WrapInvokableToolCall(
 		}
 		if finishExec != nil {
 			finishExec(result)
+		}
+		return result, nil
+	}, nil
+}
+
+// WrapEnhancedInvokableToolCall mirrors WrapInvokableToolCall for multimodal
+// tools. Keeping this at the approval layer is important even for read-only
+// enhanced tools: it preserves hook pre-approval, tool-call identity, progress
+// notifications, panic containment, and the agent-visible error contract.
+func (m *approvalMiddleware) WrapEnhancedInvokableToolCall(
+	ctx context.Context,
+	endpoint adk.EnhancedInvokableToolCallEndpoint,
+	tCtx *adk.ToolContext,
+) (adk.EnhancedInvokableToolCallEndpoint, error) {
+	return func(ctx context.Context, argument *schema.ToolArgument, opts ...tool.Option) (result *schema.ToolResult, retErr error) {
+		// Match the plain-tool behavior: a buggy tool must not crash the whole
+		// agent loop. A panic has no trustworthy partial result, so replace it.
+		defer func() {
+			if r := recover(); r != nil {
+				result = textToolResult(fmt.Sprintf("Tool execution panicked: %v", r))
+				retErr = nil
+			}
+		}()
+
+		argumentsInJSON := ""
+		if argument != nil {
+			argumentsInJSON = argument.Text
+		}
+
+		// Approval prompts and their wait/denied bookkeeping are keyed by the
+		// model-issued call id, exactly as for plain tools.
+		ctx = WithToolCallID(ctx, tCtx.CallID)
+
+		subSpan := telemetry.SubSpanFromContext(ctx)
+
+		if m.approvalFunc != nil {
+			var finishApproval func(string)
+			if subSpan != nil {
+				finishApproval = subSpan("approval")
+			}
+
+			approved, err := m.approvalFunc(ctx, tCtx.Name, argumentsInJSON)
+			if err != nil {
+				var reviewDenied *ReviewDeniedError
+				if errors.As(err, &reviewDenied) {
+					msg := reviewDeniedMessage(reviewDenied.Reason)
+					if finishApproval != nil {
+						finishApproval("auto-review-denied")
+					}
+					return textToolResult(msg), nil
+				}
+				msg := fmt.Sprintf("Tool approval error: %v", err)
+				if finishApproval != nil {
+					finishApproval(msg)
+				}
+				return textToolResult(msg), nil
+			}
+			if !approved {
+				msg := "Tool execution was rejected by user. " +
+					"IMPORTANT: The user has explicitly denied this operation. " +
+					"Do NOT attempt to perform the same action using alternative tools, different commands, or workarounds. " +
+					"Respect the user's decision and either ask the user how they would like to proceed or move on to a different task."
+				if finishApproval != nil {
+					finishApproval("rejected")
+				}
+				return textToolResult(msg), nil
+			}
+			if finishApproval != nil {
+				finishApproval("approved")
+			}
+		}
+
+		var finishExec func(string)
+		if subSpan != nil {
+			finishExec = subSpan("execution")
+		}
+
+		result, err := endpoint(ctx, argument, opts...)
+		if err != nil {
+			if tools.IsFatal(err) {
+				if finishExec != nil {
+					finishExec("fatal: " + err.Error())
+				}
+				return nil, err
+			}
+			failure := fmt.Sprintf("Tool execution failed: %v", err)
+			result = appendToolResultContext(result, failure)
+			if finishExec != nil {
+				finishExec(toolResultText(result))
+			}
+			return result, nil
+		}
+		if finishExec != nil {
+			finishExec(toolResultText(result))
 		}
 		return result, nil
 	}, nil

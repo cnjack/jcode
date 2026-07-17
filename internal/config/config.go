@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -411,8 +412,15 @@ type BrowserSitePermission struct {
 // Enabled defaults to false, unlike BrowserConfig: computer use can reach
 // anything on the machine, so it is opt-in.
 type ComputerConfig struct {
-	Enabled bool   `json:"enabled,omitempty"`
-	Backend string `json:"backend,omitempty"` // auto | helper | osa | fake (default auto)
+	Enabled bool `json:"enabled,omitempty"`
+	// Backend is retained only to migrate configurations written before computer
+	// use became macOS-helper-only. Runtime backend selection must not consult it.
+	//
+	// Deprecated: safe legacy values (empty, auto, helper) are discarded. Any
+	// other value fails closed via MigrateLegacyBackend so a configuration that
+	// expected a fake screen can never start controlling the real desktop after an
+	// upgrade.
+	Backend string `json:"backend,omitempty"`
 	// Approval holds per-class defaults: "launch" and "interact" map to
 	// "ask" (default) or "always_allow".
 	Approval map[string]string `json:"approval,omitempty"`
@@ -425,6 +433,34 @@ type ComputerConfig struct {
 	ClipboardRead   bool `json:"clipboard_read,omitempty"`
 	ClipboardWrite  bool `json:"clipboard_write,omitempty"`
 	SystemKeyCombos bool `json:"system_key_combos,omitempty"`
+}
+
+// MigrateLegacyBackend removes the obsolete computer backend selector.
+//
+// Empty, auto, and helper all meant the shipping native helper and therefore
+// preserve the surrounding policy. fake, osa, and unknown values are unsafe to
+// reinterpret: mapping an enabled fake configuration to the real helper would
+// unexpectedly turn a test screen into real desktop control. Those values fail
+// closed by disabling computer use and clearing every persisted preapproval and
+// ambient grant. The rejected normalized value is returned for diagnostics.
+func (c *ComputerConfig) MigrateLegacyBackend() (rejected string) {
+	if c == nil {
+		return ""
+	}
+	backend := strings.ToLower(strings.TrimSpace(c.Backend))
+	c.Backend = ""
+	switch backend {
+	case "", "auto", "helper":
+		return ""
+	default:
+		c.Enabled = false
+		c.Approval = nil
+		c.AppPermissions = nil
+		c.ClipboardRead = false
+		c.ClipboardWrite = false
+		c.SystemKeyCombos = false
+		return backend
+	}
 }
 
 // ComputerAppPermission is a per-app approval override.
@@ -553,6 +589,12 @@ func LoadConfig() (*Config, error) {
 
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config file %s: %w", cfgPath, err)
+	}
+
+	if cfg.Computer != nil {
+		if rejected := cfg.Computer.MigrateLegacyBackend(); rejected != "" {
+			Logger().Printf("[config] disabled computer use while removing unsupported legacy backend %q; preapprovals and grants were cleared", rejected)
+		}
 	}
 
 	// Migrate legacy "models" field to "providers"

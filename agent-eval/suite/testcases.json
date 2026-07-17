@@ -1034,8 +1034,7 @@
       "fixtures": {},
       "home_config": {
         "computer": {
-          "enabled": true,
-          "backend": "fake"
+          "enabled": true
         }
       },
       "home_fixtures": {
@@ -1074,8 +1073,7 @@
       "fixtures": {},
       "home_config": {
         "computer": {
-          "enabled": true,
-          "backend": "fake"
+          "enabled": true
         }
       },
       "home_fixtures": {
@@ -1109,8 +1107,7 @@
       "fixtures": {},
       "home_config": {
         "computer": {
-          "enabled": true,
-          "backend": "fake"
+          "enabled": true
         }
       },
       "home_fixtures": {
@@ -1139,8 +1136,7 @@
       "fixtures": {},
       "home_config": {
         "computer": {
-          "enabled": true,
-          "backend": "fake"
+          "enabled": true
         }
       },
       "home_fixtures": {
@@ -1169,8 +1165,7 @@
       "fixtures": {},
       "home_config": {
         "computer": {
-          "enabled": true,
-          "backend": "fake"
+          "enabled": true
         }
       },
       "home_fixtures": {
@@ -1200,8 +1195,7 @@
       "fixtures": {},
       "home_config": {
         "computer": {
-          "enabled": true,
-          "backend": "fake"
+          "enabled": true
         }
       },
       "home_fixtures": {

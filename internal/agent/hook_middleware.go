@@ -6,6 +6,7 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/schema"
 
 	"github.com/cnjack/jcode/internal/hooks"
 )
@@ -45,6 +46,20 @@ func (m *hookToolMiddleware) WrapInvokableToolCall(
 		return m.wrapPost(endpoint, tCtx), nil
 	}
 	return m.wrapPre(endpoint, tCtx), nil
+}
+
+// WrapEnhancedInvokableToolCall gives multimodal tools the same policy-hook
+// semantics as plain string tools. Hook payloads remain text-only so a
+// screenshot is not silently copied into a command hook or log sink.
+func (m *hookToolMiddleware) WrapEnhancedInvokableToolCall(
+	ctx context.Context,
+	endpoint adk.EnhancedInvokableToolCallEndpoint,
+	tCtx *adk.ToolContext,
+) (adk.EnhancedInvokableToolCallEndpoint, error) {
+	if m.post {
+		return m.wrapEnhancedPost(endpoint, tCtx), nil
+	}
+	return m.wrapEnhancedPre(endpoint, tCtx), nil
 }
 
 // wrapPre handles PreToolUse.
@@ -99,6 +114,75 @@ func (m *hookToolMiddleware) wrapPost(endpoint adk.InvokableToolCallEndpoint, tC
 		}
 		if dec.AdditionalContext != "" {
 			result = appendHookContext(result, dec.AdditionalContext)
+		}
+		return result, err
+	}
+}
+
+// wrapEnhancedPre handles PreToolUse for a structured tool result.
+func (m *hookToolMiddleware) wrapEnhancedPre(endpoint adk.EnhancedInvokableToolCallEndpoint, tCtx *adk.ToolContext) adk.EnhancedInvokableToolCallEndpoint {
+	return func(ctx context.Context, argument *schema.ToolArgument, opts ...tool.Option) (*schema.ToolResult, error) {
+		argumentsInJSON := ""
+		if argument != nil {
+			argumentsInJSON = argument.Text
+		}
+		disp := hooks.DispatcherFromContext(ctx)
+		if !disp.Configured(hooks.PreToolUse) {
+			return endpoint(ctx, argument, opts...)
+		}
+		dec := disp.Fire(ctx, hooks.PreToolUse, hooks.Payload{
+			ToolName:  tCtx.Name,
+			ToolInput: json.RawMessage(argumentsInJSON),
+		})
+		if dec.Denied() {
+			return textToolResult(hookDenyMessage(dec.Reason)), nil
+		}
+		if len(dec.UpdatedInput) > 0 {
+			// Do not mutate a ToolArgument owned by an outer middleware; the plain
+			// wrapper's string replacement has value semantics, so mirror that here.
+			argument = &schema.ToolArgument{Text: string(dec.UpdatedInput)}
+		}
+		if dec.Permission == hooks.PermAllow {
+			ctx = hooks.WithPreApproved(ctx)
+		}
+		result, err := endpoint(ctx, argument, opts...)
+		if dec.AdditionalContext != "" {
+			result = appendToolResultContext(result, dec.AdditionalContext)
+		}
+		return result, err
+	}
+}
+
+// wrapEnhancedPost handles PostToolUse / PostToolUseFailure. ModifiedResult is
+// a full replacement, not merely a text-part edit: retaining media after a hook
+// requested redaction would let screenshots bypass that policy. Additional
+// context, by contrast, is additive and therefore preserves existing media.
+func (m *hookToolMiddleware) wrapEnhancedPost(endpoint adk.EnhancedInvokableToolCallEndpoint, tCtx *adk.ToolContext) adk.EnhancedInvokableToolCallEndpoint {
+	return func(ctx context.Context, argument *schema.ToolArgument, opts ...tool.Option) (*schema.ToolResult, error) {
+		result, err := endpoint(ctx, argument, opts...)
+
+		event := hooks.PostToolUse
+		if err != nil {
+			event = hooks.PostToolUseFailure
+		}
+		disp := hooks.DispatcherFromContext(ctx)
+		if !disp.Configured(event) {
+			return result, err
+		}
+		argumentsInJSON := ""
+		if argument != nil {
+			argumentsInJSON = argument.Text
+		}
+		dec := disp.Fire(ctx, event, hooks.Payload{
+			ToolName:     tCtx.Name,
+			ToolInput:    json.RawMessage(argumentsInJSON),
+			ToolResponse: toolResultText(result),
+		})
+		if dec.ModifiedResult != nil {
+			result = textToolResult(*dec.ModifiedResult)
+		}
+		if dec.AdditionalContext != "" {
+			result = appendToolResultContext(result, dec.AdditionalContext)
 		}
 		return result, err
 	}

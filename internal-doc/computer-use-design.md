@@ -141,62 +141,58 @@ clothes.
         │
    internal/computer/                ← Session (task-scoped) / Manager (process-scoped)
         │  Backend interface
-        ├─────────────┬──────────────┬────────────────
-        │             │              │
-   helperBackend  osaBackend     fakeBackend
-   (unix socket)  (osascript +   (scripted trees;
-   signed Swift    screencapture) tests + agent-eval)
-   daemon,         zero-build,
-   fast, full      degraded,
-   fidelity        works today
+        │
+   helperBackend
+   (unix socket to two Swift helpers; macOS 14+)
 ```
 
-The `Manager` / `Session` split, the `Backend` interface, and the two-real-plus-
-one-fake backend shape are **lifted directly from `internal/browser/`**, which
-already solved this exact problem (managed Chrome vs extension bridge vs
-`fakeBackend`). Ownership rule is copied verbatim: **Manager owns backends
+The `Manager` / `Session` split and the `Backend` interface are **lifted
+directly from `internal/browser/`**, which already established the same
+process-wide-manager/task-scoped-session ownership rule: **Manager owns backends
 (process lifetime), Session owns per-task state (task lifetime); `Session.Close`
 never closes the backend.**
 
-### 2.1 Why three backends
+Production has exactly one backend: the macOS native helper. `FakeBackend`
+remains a deterministic unit-test primitive, and the on-disk fixture loader is
+compiled only with `-tags jcode_eval`; neither is selectable by user config.
 
-`osaBackend` is the load-bearing one and deserves defending. Shipping only
-`helperBackend` would mean shipping vaporware: a signed, notarized Swift daemon
-requires a Developer ID, a release pipeline, and Sparkle-style out-of-band
-updates (codex has all three). That is not a first PR.
+### 2.1 Why the helper is the shipping backend
 
-`osaBackend` drives AppleScript `System Events` for the AX tree and clicks, and
-`screencapture -l<windowid>` for window-scoped capture. It is **slow** —
-AppleScript is genuinely bad at large trees, expect 200ms–2s per snapshot — and
-it cannot do everything (no `perform_secondary_action`, coarse key handling).
-But it is real, it needs no build step, and TCC-wise it rides the terminal's
-Accessibility grant, which developers commonly already have.
+The Swift helper is no longer a design-only future path. It is built beside a
+local CLI binary, installed beside `jcode` by `make install` and `install.sh`,
+and included in the Tauri bundle on macOS (covered by the release signing pass
+when its credentials are configured). ScreenCaptureKit runs in a second
+short-lived worker so a compositor abort cannot kill the long-lived AX connection.
 
-So: `auto` → `helper` if the daemon is installed and answering, else `osa`.
-Exactly the shape of browser-use's `auto` → extension-if-connected-else-managed.
+There is no backend selector and no AppleScript fallback. Legacy `auto` and
+`helper` values migrate to the native helper. Legacy `fake`, `osa`, and unknown
+values fail closed: Computer Use is disabled and persistent grants are cleared
+until the user explicitly enables real desktop control again.
 
-This also means **the helper protocol can be designed now and implemented
-later**, against a working reference implementation, which is a much better
-position than designing it in the abstract.
-
-### 2.2 Helper protocol (defined now, implemented later)
+### 2.2 Helper protocol (implemented)
 
 Copied from codex's wire format, because it is simple, debuggable, and
 language-neutral:
 
-- Transport: unix socket, `~/.jcode/computer/computerd.sock`, mode 0700.
+- Transport: per-jcode-process-instance unix socket,
+  `~/.jcode/computer/computerd-<128-bit-instance>.sock`; parent directory
+  mode 0700 and socket mode 0600.
   (Codex uses a macOS App Group container; we are not in OpenAI's App Group, so
   a mode-0700 dir under `$HOME` is the equivalent rendezvous.)
 - Framing: 4-byte little-endian length prefix + UTF-8 JSON. 8 MiB cap, enforced
   on both encode and decode.
-- Payload: JSON-RPC 2.0. Methods: `ping`, `request`.
+- Payload: a tagged request/result envelope with a monotonically increasing id.
 - `ping` negotiates `apiVersion` (string, e.g. `"JcodeComputerIPC-1"`); a
   mismatch is a dedicated **non-retryable** error.
-- **Peer authentication is mandatory.** A unix socket is reachable by any process
-  of the same uid. The helper reads the peer pid (`LOCAL_PEERPID`) and verifies
-  the peer's code signature before serving. Codex reserves
-  `senderProcessNotAuthenticated` (-10000) and `couldNotGetSenderPID` (-10017)
-  for exactly this; we mirror both.
+- **Peer admission is mandatory.** The daemon accepts only the kernel-reported
+  PID declared when that daemon instance was launched (normally its jcode
+  parent), then requires the
+  random 32-byte token from `helper-token-<pid>` in the first `ping`. This
+  prevents a different live PID from borrowing an already-running daemon
+  instance. It does not prevent a same-uid process from launching the authorized
+  helper binary with its own PID/token/socket. Signed-parent + inherited-socket
+  identity or XPC audit tokens remain hardening work; the Go client also does not
+  yet prove the server's identity.
 - One request in flight at a time. UI automation is a serial resource; codex
   enforces this client-side with a promise chain, we use a mutex.
 - We **do not** copy Swift's `Codable` enum encoding (`{"click":{"_0":...}}`).
@@ -289,31 +285,41 @@ rejected, the surviving one is not).
 identity is.
 
 **Diff by default.** `disable_diff=true` forces a full tree. Diffing is
-server-side in codex; for `osaBackend` we must do it client-side (AppleScript
-holds no session state), so the diff lives in `Session` and works for both
-backends. Slightly worse than codex's design, but portable across backends.
+server-side in codex; jcode keeps it in `Session`, above the backend boundary.
+That also makes the exact same behavior available to the real helper and the
+deterministic fake used by tests and agent-eval.
 
 ### 3.2 `computer_screenshot` — fallback, and the coordinate contract
 
-Returns `image_ref=/api/computer/shots/<uuid>.png`, exactly like
-`browser_screenshot` (`tools/browser.go:102`) — the ref rides inside the tool's
-**result text** and the image is fetched over HTTP. That is jcode's existing
-screenshot mechanism and it already has a renderer.
+Returns both `image_ref=/api/computer/shots/<uuid>.png` in the text result and a
+structured `image/png` part. The ref is the local UI/session representation and
+is fetched over HTTP by the renderer; it is not reachable from a remote model.
+The image part carries Base64 pixels to a vision-capable model. The runner emits
+and records only the text part, never Base64. At the OpenAI-compatible boundary,
+the trailing tool batch is kept as ordinary text `role=tool` messages and its
+images are appended as one `role=user` multimodal message after every tool call
+has a result. This accommodates gateways that only document user-role images
+without breaking parallel tool-call ordering. After pixels are consumed, the
+live agent state copy-on-write reduces historical screenshots to text, so their
+Base64 is neither retransmitted nor retained for the rest of a long task. The
+active request is bounded to four images / 20 MiB decoded media. Saved UI copies
+use mode `0600` and a 24-hour / 128-file / 256 MiB cache policy.
 
-The coordinate contract, stated once and enforced everywhere (Claude's wording
-is good enough to adopt nearly verbatim):
+The current coordinate contract is explicit in every screenshot result. The
+worker reports the captured window's global `(x,y,width,height)` and the PNG's
+`(pixel_width,pixel_height)` after downscaling. For a point `(px,py)` in the
+attached image, the coordinate fallback is:
 
-> Click coordinates always refer to the most recent **full** screenshot, never
-> to a `zoom` result, and never to a screenshot taken mid-batch.
+```text
+screen_x = x + px * width  / pixel_width
+screen_y = y + py * height / pixel_height
+```
 
-`zoom` takes a region of the last full screenshot and re-samples it at native
-resolution. It is **read-only** and never re-bases coordinates. Without this,
-downsampling makes 11px UI labels unreadable; with it, the model can inspect
-without losing its frame of reference.
-
-Screenshots are **window-scoped, not screen-scoped**: we capture the granted
-app's windows via `screencapture -l<windowid>` (osa) or `SCContentFilter`
-(helper). This gets Claude's compositor-filtering privacy property by
+There is no shipped `zoom` operation yet, so there is no implicit rebasing rule
+for the model to guess. Screenshots are **window-scoped, not screen-scoped**: we
+capture the AX focused/main window through `SCContentFilter`, using title and
+bounds to disambiguate multi-window apps. This gets Claude's
+compositor-filtering privacy property by
 construction — a non-granted app is not *filtered out* of the capture, it was
 never *in* the capture. It also happens to be the natural unit for an
 app-addressed API.
@@ -494,9 +500,10 @@ Same two injected hooks, same reason: `runner` must not import `computer` or
 
 ### 4.5 Plan mode
 
-`NewComputerPlanTools()` returns the read-only subset — `computer_snapshot`,
-`computer_screenshot`, `computer_apps`. No `computer_act`, no `computer_open`
-(launching an app is a side effect). Mirrors `NewBrowserPlanTools()`.
+`NewComputerPlanTools()` returns `computer_open`, `computer_snapshot`,
+`computer_screenshot`, and `computer_apps`. `computer_open` is included because
+approving it creates the per-session app grant; without it every plan-mode read
+would be refused. `computer_act` remains excluded.
 
 ---
 
@@ -507,7 +514,6 @@ Same two injected hooks, same reason: `runner` must not import `computer` or
 // internal-doc/computer-use-design.md.
 type ComputerConfig struct {
     Enabled            bool                     `json:"enabled"`
-    Backend            string                   `json:"backend"` // auto|helper|osa|fake
     Approval           map[string]string        `json:"approval"` // launch|interact|clipboard → ask|always_allow
     AppPermissions     []ComputerAppPermission  `json:"app_permissions"`
     MaxActionsPerBatch int                      `json:"max_actions_per_batch"`
@@ -525,9 +531,13 @@ type ComputerAppPermission struct {
 ```
 
 Hung off `Config.Computer *ComputerConfig`, JSON key `computer`. Defaults:
-`backend=auto`, `max_actions_per_batch=20`, all grant flags false.
+`max_actions_per_batch=20`, all grant flags false.
 **Default `enabled=false`** — unlike browser-use. Computer use can touch
 anything on the machine; it is opt-in.
+
+The Go struct temporarily retains an omitted, deprecated `backend` field only
+so `LoadConfig` can migrate old files safely. It is absent from REST DTOs and is
+never consulted by runtime backend selection.
 
 > **Do not reproduce the browser config-mapper fork.** `browserManagerConfig`
 > (`command/web.go:136`) and `browserConfigToManager` (`web/browser.go:50`) are
@@ -543,13 +553,11 @@ anything on the machine; it is opt-in.
 Mirrors `BrowserTab` (`web/src/components/SettingsDialog.tsx:2488-2748`), tab id
 `computer`, icon `ComputerDesktopIcon`. Sections:
 
-1. **Enable** toggle + backend select (auto/helper/osa) + helper status line
-   (installed? answering? version? TCC granted?), with an **Install helper**
-   button when absent and a **Grant Accessibility** deep-link
-   (`x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility`)
-   when TCC is missing. Permission dead-ends are the #1 way this feature feels
-   broken; the settings page must always say exactly which of the three gates
-   (enabled / helper / TCC) is the one that's shut.
+1. **Enable** toggle plus a read-only native-helper health card (installed,
+   connected, version). Accessibility and Screen Recording are separate rows,
+   each with its own System Settings deep-link and a **Check again** action.
+   Unknown permission state is never rendered as ready. On non-macOS servers
+   the tab is an informative read-only “requires macOS 14+” state.
 2. **App permissions** table — rows of `bundle id · tier badge · launch · interact`.
    The tier badge is the new visual primitive:
    `read` = slate, `click` = amber, `full` = accent. Rows for terminals/IDEs/
@@ -607,14 +615,16 @@ state (TUI has status only).
 ### 6.5 HTTP
 
 ```
-GET  /api/computer/status      → enabled, backend, helper health, TCC state, tiers
+GET  /api/computer/status      → supported/platform, canonical config, helper health, two TCC states, tiers
 POST /api/computer/config      → save + hot-reload via Manager.SetConfig
-GET  /api/computer/shots/{id}  → screenshot PNG (uuid re-parsed as traversal defense)
-POST /api/computer/helper/install
+GET  /api/computer/shots/{id}  → screenshot PNG (uuid re-parsed; verified open handle is served)
 ```
 
-`ScreenshotPath` re-parses the uuid before touching the filesystem —
-`browser/manager.go:171` already does this and the reason is unchanged.
+`OpenScreenshot` re-parses the uuid, rejects symlink/reparse-point cache roots,
+opens only canonical `UUID.png` regular files under the cross-process store lock,
+and returns that verified file handle to `http.ServeContent`. Save, prune, and open
+share the same crash-released advisory lock, so multiple jcode processes enforce
+one strict TTL/count/byte policy without a validate-path-then-read race.
 
 ---
 
@@ -649,7 +659,7 @@ Two get jcode-specific handling:
 
 ## 8. Testing
 
-`fakeBackend` is what makes the rest of this testable, and it is copied straight
+`FakeBackend` is what makes the core policy testable, and it is copied straight
 from `browser/session_test.go:12-92` (`scriptedTab` / `fakeBackend` /
 `scriptedSession`). It serves canned AX trees and records actions. No TCC, no
 GUI, no display — runs in CI and in the agent-eval sandbox.
@@ -661,13 +671,15 @@ Layers:
    abort-on-error; batch re-gating on frontmost change; peer-auth framing.
 2. **Approval** — `decideComputer` tiers, per-app permission, interact-uses-
    live-app, clipboard-always-prompts. Mirrors `approval_browser_test.go`.
-3. **Smoke** — `TestSmokeOsaComputer`, gated behind `JCODE_COMPUTER_SMOKE=1` so
-   it never runs in the normal suite (exactly `browser/smoke_test.go:16-19`).
-   Drives a real, harmless target (Calculator) end to end.
-4. **agent-eval** — the fake backend is registered as a backend the harness can
-   pin, so declarative cases in `suite/testcases.json` can drive computer tools
+3. **Live E2E** — `TestCalculatorE2E`, gated behind
+   `JCODE_COMPUTERD_CALCULATOR_E2E=1` so it never changes foreground UI in the
+   normal suite. It drives Calculator by AX refs, verifies `7 + 5 = 12`, captures
+   a real PNG, and proves the AX daemon survives the capture worker.
+4. **agent-eval** — a dedicated `jcode_eval` build injects the fixture backend,
+   so declarative cases in `suite/testcases.json` can drive computer tools
    with deterministic oracles: did the agent snapshot before acting? did it
-   respect the tier? did it stop on `userIntervened`? See §8.1.
+   respect the tier? did it stop on `userIntervened`? A normal release binary
+   has no fixture loader or config switch. See §8.1.
 
 ### 8.1 The security cases are the point
 
@@ -692,13 +704,25 @@ The eval cases that matter are not "can it click a button" — they are
 
 ## 9. Deliberately deferred
 
-- **The signed Swift helper.** Protocol defined (§2.2), `osaBackend` ships in its
-  place. Needs a Developer ID and a release pipeline.
+- **Mutual local process identity.** The daemon checks the declared jcode PID
+  plus a per-process token for its existing socket, but does not authenticate
+  the parent that launched a new helper instance. The client also does not verify
+  the server. A signed-parent + inherited-socket design, or XPC audit-token and
+  code-signature verification, is needed for a hardened mutual channel.
+- **Continuous human-takeover detection.** Frontmost changes fail closed, but a
+  raw mouse/key event inside the same app is not yet observed by an event tap.
+- **Screenshot zoom.** Read-only region zoom remains deferred. Saved UI copies
+  now use a 24-hour TTL plus count/byte quotas, are swept on manager startup,
+  save, close, and rejected/deleted on expired reads. Process-instance IPC
+  handoff directories (`handoff-PID-<nonce>`) are removed on helper
+  dial/reconnect and normal close; the daemon also migrates legacy `handoff-PID`
+  residue with an age grace. The public cache uses a cross-process file lock and
+  a no-follow directory handle, so TTL/count/byte limits are strict across
+  concurrent jcode processes and an unsafe cache root fails closed.
 - **JS REPL / code-mode.** §1.1. Batching first; revisit with evidence.
 - **Teach mode.** Needs a fullscreen native overlay.
-- **Windows / Linux.** The `Backend` interface is platform-neutral; UIA (Windows)
-  and AT-SPI (Linux) are tree-shaped too, so the `uitree` layer should survive.
-  Nothing else here is macOS-specific by design, but nothing else is tested.
+- **Windows / Linux.** They are explicit product non-goals. The settings API
+  reports `supported=false`, rejects enablement, and does not expose tools.
 - **Per-app instructions** (codex's `AppInstructions/*.md`). Cheap and
   high-leverage — a `map[bundleID]string` injected once per app per session.
   Deferred only because the corpus has to be written by hand.
@@ -745,23 +769,20 @@ the next person doesn't re-run it and draw the strong conclusion.
   argument for `osaBackend` as the shipping path and strengthens it as a
   no-toolchain fallback.
 
-**Revised plan:** build `fakeBackend` + the Go stack + the helper protocol first
-(all of which are testable without TCC), and treat `osaBackend` vs `helperBackend`
-as a decision to make against a real measurement in an *unsandboxed* environment.
-The `Backend` interface exists precisely so this stays a late decision.
+**Resolution:** the project shipped `helperBackend`, not `osaBackend`. A real
+unsandboxed Calculator run now covers AX discovery, ref-only actions, displayed
+value readback, and ScreenCaptureKit. AppleScript remains historical research,
+not a production fallback.
 
 ### 10.2 Still open
 
-1. **Q1, restated:** does AppleScript `entire contents` survive a complex window
-   (Xcode) in an unsandboxed context? Must be measured on a real terminal with
-   Accessibility granted, not from a sandboxed probe.
-2. **Where does the TCC grant actually land?** It rides the *responsible*
+1. **Where does the TCC grant actually land?** It rides the *responsible*
    process, which for jcode-in-a-terminal is the terminal — but under `jcode web`,
    or as a launchd service, the responsible process differs and the grant may
    land somewhere confusing or nowhere. With the helper backend this problem
    disappears (the helper is its own stable identity), which is a further point
    in the helper's favor.
-3. **Is `full` the right default for unknown bundle ids?** It is the honest
+2. **Is `full` the right default for unknown bundle ids?** It is the honest
    default (deny-by-default breaks everything and trains override reflexes), but
    it means a newly installed malicious app is `full` on first sight. Mitigated
    by the app allowlist gate (§4.1) — an unknown app still cannot be touched

@@ -1,3 +1,5 @@
+//go:build jcode_eval
+
 package command
 
 import (
@@ -40,9 +42,11 @@ func TestFixtureFocusStealFiresAndGateStopsBatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := &config.Config{Computer: &config.ComputerConfig{Enabled: true, Backend: "fake"}}
+	cfg := &config.Config{Computer: &config.ComputerConfig{Enabled: true}}
 	m := computer.NewManager(computer.FromConfig(cfg.Computer), home)
-	installFakeComputerBackend(m, cfg)
+	if err := installEvalComputerBackend(m, cfg); err != nil {
+		t.Fatalf("installEvalComputerBackend: %v", err)
+	}
 
 	s, err := m.OpenSession(context.Background())
 	if err != nil {
@@ -78,6 +82,37 @@ func TestFixtureFocusStealFiresAndGateStopsBatch(t *testing.T) {
 		if contains(got, bad) {
 			t.Errorf("journal contains %s, which should have been stopped by the gate:\n%s", bad, got)
 		}
+	}
+}
+
+func TestEvalFixtureFailureCannotFallBackToRealDesktop(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv(computerFixtureEnv, filepath.Join(home, "missing-fixture.json"))
+	cfg := &config.Config{Computer: &config.ComputerConfig{Enabled: true}}
+	m := newComputerManager(cfg, home)
+	if m == nil {
+		t.Fatal("jcode_eval build did not construct a manager")
+	}
+	t.Cleanup(func() { _ = m.Close() })
+	if m.Enabled() {
+		t.Fatal("missing eval fixture left manager enabled; it could fall back to the real helper")
+	}
+	if _, err := m.OpenSession(context.Background()); err == nil || !contains(err.Error(), "disabled") {
+		t.Fatalf("missing eval fixture reached a backend: %v", err)
+	}
+	// A later Settings/TUI enable must still be trapped by the injected rejecting
+	// backend rather than activating the native helper.
+	m.SetConfig(computer.Config{Enabled: true})
+	session, err := m.OpenSession(context.Background())
+	if err != nil {
+		t.Fatalf("hot-enable should open the fail-closed eval backend, not dial native: %v", err)
+	}
+	if got := session.BackendKind(); got != "fake" {
+		t.Fatalf("hot-enable backend=%q, want fake firewall", got)
+	}
+	if _, err := session.Apps(context.Background()); err != nil {
+		t.Fatalf("rejecting eval backend should remain deterministic: %v", err)
 	}
 }
 

@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "externalBin": [
+      "binaries/jcode",
+      "binaries/jcode-ble",
+      "binaries/jcode-computerd",
+      "binaries/jcode-computerd-capture"
+    ]
+  }
+}

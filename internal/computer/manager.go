@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -18,8 +20,14 @@ import (
 // two near-duplicate mappers that already disagree on a default, and that fork
 // is not being reproduced here.
 type Config struct {
-	Enabled            bool
-	Backend            string // auto|helper|osa|fake
+	Enabled bool
+	// Backend is a compatibility field for internal callers compiled against the
+	// old shape. Runtime selection deliberately ignores it; persisted legacy
+	// values are migrated in config.ComputerConfig before reaching this package.
+	//
+	// Deprecated: inject a FakeBackend explicitly with SetFakeBackend in tests and
+	// evals. Production always uses the native helper.
+	Backend            string
 	Approval           map[string]string
 	AppPermissions     []AppPermission
 	MaxActionsPerBatch int
@@ -42,17 +50,40 @@ const defaultMaxBatch = 20
 // close it. (browser/manager.go makes the same split: backends are expensive to
 // start — a Chrome launch, a daemon handshake — and are reused across tasks.)
 type Manager struct {
-	mu        sync.Mutex
+	mu sync.Mutex
+	// uiMu serializes native observations/mutations across every task Session.
+	// The helper is process-wide, so per-Session locks alone cannot prevent one
+	// task from acting on UI another task changed.
+	uiMu      sync.Mutex
+	uiEpoch   uint64
 	cfg       Config
 	shotDir   string
+	shotMu    sync.Mutex
 	configDir string // <home>/.jcode — where the helper socket/token live
+	closed    bool
 
 	backend Backend
 	// helper is the cached daemon connection, reused across sessions (a TCC
 	// prompt should happen once, not once per task). nil until first use.
 	helper *helperBackend
-	// fake is injected by tests and by the agent-eval harness (backend=fake).
+	// helperInit is the one in-flight helper dial. OpenSession can be called by
+	// parallel agents, but starting two daemons against one socket can associate
+	// a connection with the wrong owning exec.Cmd and make the losing dial kill
+	// the winner's daemon. Every concurrent caller shares this result instead.
+	helperInit *helperInitCall
+	// helperDialer is injectable for the concurrency test. Production leaves it
+	// nil and uses dialHelper.
+	helperDialer func(context.Context, string) (*helperBackend, error)
+	// fake is injected explicitly by tests and the agent-eval harness. Persisted
+	// configuration never selects it.
 	fake Backend
+}
+
+type helperInitCall struct {
+	done   chan struct{}
+	cancel context.CancelFunc
+	helper *helperBackend
+	err    error
 }
 
 // NewManager creates the process-wide manager.
@@ -60,62 +91,114 @@ func NewManager(cfg Config, home string) *Manager {
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
-	return &Manager{
-		cfg:       cfg,
+	m := &Manager{
+		cfg:       cloneConfig(cfg),
 		shotDir:   filepath.Join(home, ".jcode", "computer", "shots"),
 		configDir: filepath.Join(home, ".jcode"),
 	}
+	// Best-effort startup sweep covers screenshots left by a prior crash. Save
+	// and OpenScreenshot surface their own cleanup failures synchronously.
+	_ = m.sweepScreenshotStore(time.Now())
+	return m
+}
+
+func cloneConfig(cfg Config) Config {
+	copy := cfg
+	if cfg.Approval != nil {
+		copy.Approval = make(map[string]string, len(cfg.Approval))
+		for k, v := range cfg.Approval {
+			copy.Approval[k] = v
+		}
+	}
+	copy.AppPermissions = append([]AppPermission(nil), cfg.AppPermissions...)
+	return copy
 }
 
 // getHelper returns the cached daemon connection, dialing (and spawning the
 // daemon) on first use. The connection is reused across sessions so a TCC prompt
 // happens once, not once per task.
 //
-// TODO(phase 2): liveness — ping the cached connection and re-dial if the daemon
-// crashed, mirroring browser/manager's getManaged alive() loop. For now a dead
-// daemon surfaces as an error on the next call, which the tool layer reports;
-// the reconnect is deferred with the rest of the native work.
+// helperBackend repairs a dead transport in place on the request after the one
+// that observed the failure. In-place replacement matters because existing
+// Sessions retain this pointer; replacing only m.helper would strand them on a
+// broken pipe.
 func (m *Manager) getHelper(ctx context.Context) (*helperBackend, error) {
 	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("computer-use manager is closed")
+	}
 	if m.helper != nil {
 		h := m.helper
 		m.mu.Unlock()
 		return h, nil
 	}
+	if call := m.helperInit; call != nil {
+		m.mu.Unlock()
+		select {
+		case <-call.done:
+			return call.helper, call.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	dialCtx, cancel := context.WithCancel(ctx)
+	call := &helperInitCall{done: make(chan struct{}), cancel: cancel}
+	m.helperInit = call
 	dir := m.configDir
+	dialer := m.helperDialer
 	m.mu.Unlock()
 
-	hb, err := dialHelper(ctx, dir)
-	if err != nil {
-		return nil, err
+	if dialer == nil {
+		dialer = dialHelper
 	}
+	hb, err := dialer(dialCtx, dir)
+	cancel()
+
+	var discard *helperBackend
 	m.mu.Lock()
-	// Another OpenSession may have raced us; keep the first winner.
-	if m.helper == nil {
+	if err == nil && m.closed {
+		discard = hb
+		hb = nil
+		err = fmt.Errorf("computer-use manager was closed while connecting the helper")
+	} else if err == nil {
 		m.helper = hb
 		m.backend = hb
-		m.mu.Unlock()
-		return hb, nil
 	}
-	winner := m.helper
+	call.helper = hb
+	call.err = err
+	if m.helperInit == call {
+		m.helperInit = nil
+	}
+	close(call.done)
 	m.mu.Unlock()
-	_ = hb.Close() // discard the loser's connection + daemon
-	return winner, nil
+
+	if discard != nil {
+		_ = discard.Close()
+	}
+	return hb, err
 }
 
 // SetConfig hot-swaps the configuration (the settings endpoint calls this, so
 // no restart is needed).
 func (m *Manager) SetConfig(cfg Config) {
+	// Every native Session operation holds uiMu while checking policy and talking
+	// to the backend. Taking the same lock makes a settings change an atomic
+	// boundary: an action either finishes under the old policy or starts under the
+	// new one; it can never observe a half-updated policy mid-flight.
+	m.uiMu.Lock()
+	defer m.uiMu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.cfg = cfg
+	m.cfg = cloneConfig(cfg)
 }
 
 // GetConfig returns the current configuration.
 func (m *Manager) GetConfig() Config {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.cfg
+	return cloneConfig(m.cfg)
 }
 
 // Enabled reports whether computer use is on. It defaults off, unlike
@@ -130,15 +213,14 @@ func (m *Manager) Enabled() bool {
 func (m *Manager) MaxBatch() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.cfg.MaxActionsPerBatch <= 0 {
-		return defaultMaxBatch
-	}
-	return m.cfg.MaxActionsPerBatch
+	return effectiveMaxBatch(m.cfg.MaxActionsPerBatch)
 }
 
-// SetFakeBackend installs a scripted backend. Used by tests and by the
-// agent-eval harness when config pins backend=fake.
+// SetFakeBackend installs a scripted backend explicitly. Used only by tests and
+// eval wiring; persisted user configuration cannot reach this path.
 func (m *Manager) SetFakeBackend(b Backend) {
+	m.uiMu.Lock()
+	defer m.uiMu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.fake = b
@@ -152,12 +234,43 @@ func (m *Manager) SetFakeBackend(b Backend) {
 // config file is not that gate. An unparseable tier is likewise dropped rather
 // than defaulted, so a typo cannot silently weaken containment.
 func (m *Manager) TierOverrides() map[string]Tier {
-	m.mu.Lock()
-	perms := append([]AppPermission(nil), m.cfg.AppPermissions...)
-	m.mu.Unlock()
+	return tierOverrides(m.GetConfig())
+}
 
+// Preapproved reads the live, mutex-protected policy used by settings hot
+// reload. Approval callbacks can run concurrently with an HTTP config update;
+// reading the shared config.Config pointer directly would race and could retain
+// a stale always-allow decision.
+func (m *Manager) Preapproved(bundleID, class string) bool {
+	if bundleID == "" {
+		return false
+	}
+	cfg := m.GetConfig()
+	if !cfg.Enabled {
+		return false
+	}
+	for _, p := range cfg.AppPermissions {
+		if p.BundleID != bundleID {
+			continue
+		}
+		var value string
+		switch class {
+		case "launch":
+			value = p.Launch
+		case "interact":
+			value = p.Interact
+		}
+		if value != "" {
+			return value == "allow"
+		}
+		break
+	}
+	return cfg.Approval[class] == "always_allow"
+}
+
+func tierOverrides(cfg Config) map[string]Tier {
 	out := map[string]Tier{}
-	for _, p := range perms {
+	for _, p := range cfg.AppPermissions {
 		if p.Tier == "" {
 			continue
 		}
@@ -172,54 +285,57 @@ func (m *Manager) TierOverrides() map[string]Tier {
 	return out
 }
 
+type sessionPolicy struct {
+	enabled         bool
+	maxBatch        int
+	tierOverrides   map[string]Tier
+	clipboardRead   bool
+	clipboardWrite  bool
+	systemKeyCombos bool
+}
+
+// sessionPolicy returns the complete live enforcement policy for an existing
+// Session. Callers hold uiMu, which is also held by SetConfig, so the returned
+// policy and the native operation governed by it share one atomic boundary.
+func (m *Manager) sessionPolicy() sessionPolicy {
+	cfg := m.GetConfig()
+	return sessionPolicy{
+		enabled:         cfg.Enabled,
+		maxBatch:        effectiveMaxBatch(cfg.MaxActionsPerBatch),
+		tierOverrides:   tierOverrides(cfg),
+		clipboardRead:   cfg.ClipboardRead,
+		clipboardWrite:  cfg.ClipboardWrite,
+		systemKeyCombos: cfg.SystemKeyCombos,
+	}
+}
+
 // OpenSession returns a task-scoped Session bound to a Backend.
 //
-// Backend selection mirrors browser-use's auto rule (extension-if-connected,
-// else managed): auto → helper if the daemon answers, else osa.
+// Production always uses the native macOS helper. Tests and eval builds may
+// explicitly inject a deterministic Backend with SetFakeBackend; the deprecated
+// Config.Backend value never participates in this choice.
 func (m *Manager) OpenSession(ctx context.Context) (*Session, error) {
 	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("computer-use manager is closed")
+	}
 	if !m.cfg.Enabled {
 		m.mu.Unlock()
 		return nil, fmt.Errorf("computer use is disabled; enable it in settings")
 	}
-	kind := m.cfg.Backend
 	fake := m.fake
 	m.mu.Unlock()
 
-	if kind == "" {
-		kind = "auto"
-	}
-
 	var b Backend
-	switch kind {
-	case "fake":
-		if fake == nil {
-			return nil, fmt.Errorf("backend=fake but no fake backend is installed")
-		}
+	if fake != nil {
 		b = fake
-	case "helper":
-		hb, err := m.getHelper(ctx)
-		if err != nil {
-			return nil, err
-		}
-		b = hb
-	case "osa":
-		return nil, fmt.Errorf("the osascript backend is not implemented; the helper daemon is the shipping path (see internal-doc/computer-helper-design.md §5.1)")
-	case "auto":
-		// Fake wins when injected (agent-eval / tests). Otherwise the helper
-		// daemon is the real backend; on a platform without one, this surfaces a
-		// clear message rather than a dial error.
-		if fake != nil {
-			b = fake
-			break
-		}
+	} else {
 		hb, err := m.getHelper(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("no computer-use backend available: %w", err)
 		}
 		b = hb
-	default:
-		return nil, fmt.Errorf("unknown computer backend %q (want auto, helper, osa or fake)", kind)
 	}
 
 	m.mu.Lock()
@@ -259,7 +375,7 @@ type Status struct {
 	BackendKind string `json:"backend_kind"`
 	// Available is true when a backend can actually serve a session.
 	Available bool `json:"available"`
-	// Blocker names the first shut gate: "disabled", "no_backend",
+	// Blocker names the first shut gate: "disabled", "no_helper",
 	// "permissions", or "" when nothing is blocking.
 	Blocker string `json:"blocker"`
 	// Detail is a human-readable explanation of Blocker.
@@ -274,77 +390,196 @@ type Status struct {
 	ClipboardRead   bool `json:"clipboard_read"`
 	ClipboardWrite  bool `json:"clipboard_write"`
 	SystemKeyCombos bool `json:"system_key_combos"`
+	// Helper reports installation/connection separately from TCC. A binary on
+	// disk is not a ready backend: Settings actively handshakes before Connected
+	// becomes true.
+	Helper                    HelperStatus    `json:"helper"`
+	AccessibilityPermission   PermissionState `json:"accessibility"`
+	ScreenRecordingPermission PermissionState `json:"screen_recording"`
 }
 
+type HelperStatus struct {
+	Installed bool   `json:"installed"`
+	Connected bool   `json:"connected"`
+	Version   string `json:"version,omitempty"`
+}
+
+const statusProbeTimeout = 3 * time.Second
+
 // Status reports the current state without opening a session.
-func (m *Manager) Status(_ context.Context) Status {
+func (m *Manager) Status(ctx context.Context) Status {
 	m.mu.Lock()
-	cfg := m.cfg
+	cfg := cloneConfig(m.cfg)
 	fake := m.fake
+	helper := m.helper
 	m.mu.Unlock()
 
 	st := Status{
-		Enabled:         cfg.Enabled,
-		Backend:         cfg.Backend,
-		MaxBatch:        m.MaxBatch(),
-		ClipboardRead:   cfg.ClipboardRead,
-		ClipboardWrite:  cfg.ClipboardWrite,
-		SystemKeyCombos: cfg.SystemKeyCombos,
+		Enabled:                   cfg.Enabled,
+		Backend:                   "helper",
+		MaxBatch:                  effectiveMaxBatch(cfg.MaxActionsPerBatch),
+		ClipboardRead:             cfg.ClipboardRead,
+		ClipboardWrite:            cfg.ClipboardWrite,
+		SystemKeyCombos:           cfg.SystemKeyCombos,
+		AccessibilityPermission:   PermissionUnknown,
+		ScreenRecordingPermission: PermissionUnknown,
 	}
-	if st.Backend == "" {
-		st.Backend = "auto"
-	}
-	switch {
-	case !cfg.Enabled:
-		st.Blocker = "disabled"
-		st.Detail = "Computer use is off. It is opt-in because it can reach any app on this machine."
-	case fake != nil && (st.Backend == "fake" || st.Backend == "auto"):
-		st.Available = true
-		st.BackendKind = "fake"
-		st.Detail = "A scripted backend is installed — this is a test rig, not real screen control."
-	default:
-		// The helper daemon is the shipping path and does not exist yet; say so
-		// plainly rather than failing at the first tool call.
-		st.Blocker = "no_backend"
-		st.Detail = "No computer-use backend is available on this machine yet. " +
-			"The helper daemon is not implemented; see internal-doc/computer-use-design.md §2.1."
-	}
-
-	// Report the tier for every app the user has a config row for, plus the
-	// built-in families, so the UI can render badges without duplicating rules.
 	st.Tiers = map[string]string{}
 	for _, p := range cfg.AppPermissions {
 		st.Tiers[p.BundleID] = DefaultTier(p.BundleID).String()
 	}
+	st.Helper.Installed = helper != nil || (runtime.GOOS == "darwin" && helperBinPath() != "")
+	if helper != nil {
+		st.Helper.Connected = true
+		st.Helper.Version = helperVersion(helper)
+		perms := helper.PermissionStatus()
+		st.AccessibilityPermission = perms.Accessibility
+		st.ScreenRecordingPermission = perms.ScreenRecording
+	}
+
+	switch {
+	case !cfg.Enabled:
+		st.Blocker = "disabled"
+		st.Detail = "Computer use is off. It is opt-in because it can reach any app on this machine."
+	case fake != nil:
+		st.Available = true
+		st.BackendKind = "fake"
+		st.AccessibilityPermission = PermissionGranted
+		st.ScreenRecordingPermission = PermissionGranted
+		st.Detail = "A scripted backend is installed — this is a test rig, not real screen control."
+	default:
+		m.populateHelperStatus(ctx, helper, &st)
+	}
 	return st
+}
+
+func effectiveMaxBatch(value int) int {
+	if value <= 0 {
+		return defaultMaxBatch
+	}
+	return value
+}
+
+func helperVersion(h *helperBackend) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.helperVersion
+}
+
+// populateHelperStatus actively connects to an installed helper and refreshes
+// both permission probes. Merely finding a binary is never enough to report
+// ready: a stale/incompatible daemon and missing TCC grants are distinct blockers
+// the user must be able to act on from Settings.
+func (m *Manager) populateHelperStatus(ctx context.Context, helper *helperBackend, st *Status) {
+	if helper == nil {
+		if !st.Helper.Installed {
+			st.Blocker = "no_helper"
+			if runtime.GOOS != "darwin" {
+				st.Detail = "Computer use is supported on macOS only."
+			} else {
+				st.Detail = "The native computer-use helper is not installed."
+			}
+			return
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, statusProbeTimeout)
+		var err error
+		helper, err = m.getHelper(probeCtx)
+		cancel()
+		if err != nil {
+			st.Blocker = "no_helper"
+			st.Detail = "The native computer-use helper could not be started or contacted: " + err.Error()
+			return
+		}
+	}
+
+	st.BackendKind = "helper"
+	st.Helper.Installed = true
+	st.Helper.Connected = true
+	st.Helper.Version = helperVersion(helper)
+	probeCtx, cancel := context.WithTimeout(ctx, statusProbeTimeout)
+	permissions, err := helper.RefreshPermissionStatus(probeCtx)
+	cancel()
+	if err != nil {
+		st.Helper.Connected = false
+		st.Blocker = "no_helper"
+		st.Detail = "The native computer-use helper stopped responding: " + err.Error()
+		st.AccessibilityPermission = PermissionUnknown
+		st.ScreenRecordingPermission = PermissionUnknown
+		return
+	}
+	st.AccessibilityPermission = permissions.Accessibility
+	st.ScreenRecordingPermission = permissions.ScreenRecording
+	if permissions.Accessibility == PermissionUnknown || permissions.ScreenRecording == PermissionUnknown {
+		st.Blocker = "no_helper"
+		st.Detail = "The helper could not verify macOS permissions. Update or reinstall jcode, then check again."
+		return
+	}
+	if permissions.Accessibility != PermissionGranted || permissions.ScreenRecording != PermissionGranted {
+		st.Blocker = "permissions"
+		st.Detail = "Computer use needs both Accessibility and Screen Recording permission in macOS System Settings."
+		return
+	}
+	st.Available = true
+	st.Detail = "The native computer-use helper is connected and both macOS permissions are granted."
 }
 
 // SaveScreenshot writes a PNG and returns its opaque id.
 func (m *Manager) SaveScreenshot(png []byte) (string, error) {
-	if err := os.MkdirAll(m.shotDir, 0o700); err != nil {
-		return "", err
+	if len(png) == 0 || int64(len(png)) > MaxScreenshotBytes {
+		return "", fmt.Errorf("screenshot is %d bytes; expected 1..%d", len(png), MaxScreenshotBytes)
 	}
+	// Native helper handoff PNGs live in a separate process-instance directory.
+	// shotMu serializes this Manager; writeScreenshotToStore adds the advisory
+	// file lock shared by every jcode process using this public cache.
+	m.shotMu.Lock()
+	defer m.shotMu.Unlock()
 	id := uuid.NewString()
-	if err := os.WriteFile(filepath.Join(m.shotDir, id+".png"), png, 0o600); err != nil {
-		return "", err
+	// The textual tool result keeps this opaque reference after its Base64 image
+	// has been consumed. Bound the private backing store on every write while
+	// protecting the just-created file needed by the next model/UI request.
+	if err := writeScreenshotToStore(
+		m.shotDir, id+".png", png, time.Now(), defaultScreenshotStorePolicy,
+	); err != nil {
+		return "", fmt.Errorf("save computer screenshot: %w", err)
 	}
 	return id, nil
 }
 
-// ScreenshotPath resolves an id to a path. The id is re-parsed as a uuid before
-// it touches the filesystem, so a crafted id cannot traverse out of shotDir.
-// (browser/manager.go:171 does the same, for the same reason.)
-func (m *Manager) ScreenshotPath(id string) (string, error) {
+func (m *Manager) sweepScreenshotStore(now time.Time) error {
+	m.shotMu.Lock()
+	defer m.shotMu.Unlock()
+	return pruneScreenshotStore(m.shotDir, "", now, defaultScreenshotStorePolicy)
+}
+
+// OpenScreenshot validates and opens an immutable screenshot while holding the
+// cross-process store lock. Returning the already-open file closes the old
+// validate-path-then-ReadFile race: later pruning may unlink its name, but it
+// cannot change the bytes referenced by this handle.
+func (m *Manager) OpenScreenshot(id string) (*os.File, error) {
 	u, err := uuid.Parse(id)
 	if err != nil {
-		return "", fmt.Errorf("invalid screenshot id")
+		return nil, fmt.Errorf("invalid screenshot id")
 	}
-	return filepath.Join(m.shotDir, u.String()+".png"), nil
+	m.shotMu.Lock()
+	defer m.shotMu.Unlock()
+	return openScreenshotFromStore(
+		m.shotDir, u.String()+".png", time.Now(), defaultScreenshotStorePolicy,
+	)
 }
 
 // Close tears down the backend.
 func (m *Manager) Close() error {
+	// A long-running process may have crossed the TTL without another save.
+	// Sweep before shutdown; a later process startup performs the same pass if
+	// this process is killed and cannot close cleanly.
+	_ = m.sweepScreenshotStore(time.Now())
+	m.uiMu.Lock()
+	defer m.uiMu.Unlock()
 	m.mu.Lock()
+	m.closed = true
+	if m.helperInit != nil {
+		m.helperInit.cancel()
+	}
 	b := m.backend
 	h := m.helper
 	m.backend = nil

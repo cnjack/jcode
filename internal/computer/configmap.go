@@ -19,19 +19,21 @@ func FromConfig(c *config.ComputerConfig) Config {
 	if c == nil {
 		// A nil config is "not configured", which is off — not "on with
 		// defaults". Computer use never turns itself on.
-		return Config{Backend: "auto", MaxActionsPerBatch: defaultMaxBatch}
+		return Config{MaxActionsPerBatch: defaultMaxBatch}
 	}
+	normalized := *c
+	// HTTP/live callers do not necessarily pass through config.LoadConfig. Apply
+	// the legacy-backend migration on a copy so fake/osa/unknown values fail closed
+	// without mutating the caller's shared config behind its lock.
+	normalized.MigrateLegacyBackend()
+	c = &normalized
 	cfg := Config{
 		Enabled:            c.Enabled,
-		Backend:            strings.TrimSpace(c.Backend),
 		Approval:           map[string]string{},
 		MaxActionsPerBatch: c.MaxActionsPerBatch,
 		ClipboardRead:      c.ClipboardRead,
 		ClipboardWrite:     c.ClipboardWrite,
 		SystemKeyCombos:    c.SystemKeyCombos,
-	}
-	if cfg.Backend == "" {
-		cfg.Backend = "auto"
 	}
 	if cfg.MaxActionsPerBatch <= 0 {
 		cfg.MaxActionsPerBatch = defaultMaxBatch
@@ -58,7 +60,13 @@ func FromConfig(c *config.ComputerConfig) Config {
 // basis for claiming the user approved it. (browserSitePreapproved makes the
 // same call for an empty origin, for the same reason.)
 func Preapproved(c *config.ComputerConfig, bundleID, class string) bool {
-	if c == nil || !c.Enabled || strings.TrimSpace(bundleID) == "" {
+	if c == nil || strings.TrimSpace(bundleID) == "" {
+		return false
+	}
+	normalized := *c
+	normalized.MigrateLegacyBackend()
+	c = &normalized
+	if !c.Enabled {
 		return false
 	}
 	for _, p := range c.AppPermissions {

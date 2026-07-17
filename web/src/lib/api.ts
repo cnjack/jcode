@@ -362,7 +362,7 @@ export const api = {
   // Computer use
   computerStatus: () => request<ComputerStatusResponse>('/api/computer/status'),
   computerSaveConfig: (data: ComputerConfig) =>
-    request<{ status: string }>('/api/computer/config', { method: 'POST', body: JSON.stringify(data) }),
+    request<ComputerConfigSaveResponse>('/api/computer/config', { method: 'POST', body: JSON.stringify(data) }),
 
   // Approval review tuning (Auto session mode)
   approvalReviewConfig: () => request<ApprovalReviewConfigResponse>('/api/approval-review-config'),
@@ -421,7 +421,6 @@ export interface ComputerAppPermission {
 
 export interface ComputerConfig {
   enabled: boolean
-  backend: string // auto | helper | osa | fake
   /** Per-class defaults: 'launch' and 'interact' → 'ask' | 'always_allow'.
    *  Clipboard reads are deliberately absent — they always prompt (design §4.4). */
   approval?: Record<string, string>
@@ -432,24 +431,44 @@ export interface ComputerConfig {
   system_key_combos?: boolean
 }
 
+export interface ComputerConfigSaveResponse {
+  status: string
+  config: ComputerConfig
+  warning_code?: 'agent_refresh_failed'
+}
+
+export type ComputerPermissionState = 'granted' | 'denied' | 'unknown'
+export type ComputerBlocker = '' | 'disabled' | 'unsupported' | 'no_helper' | 'permissions'
+
+export interface ComputerHelperStatus {
+  installed: boolean
+  connected: boolean
+  version?: string
+}
+
 export interface ComputerStatusResponse {
-  /** false when the server has no computer manager at all. */
-  available: boolean
-  status?: {
+  /** Server-authoritative platform support. Do not infer this from the browser. */
+  supported: boolean
+  /** GOOS of the jcode server, for example 'darwin', 'linux', or 'windows'. */
+  platform: string
+  /** Human-readable reason when `supported` is false. */
+  reason?: string
+  /** Canonical persisted config. The settings page must save this shape back. */
+  config: ComputerConfig
+  status: {
     enabled: boolean
-    backend: string
-    /** The backend actually selected: 'helper' | 'osa' | 'fake' | ''. */
-    backend_kind: string
+    /** True only when the native helper and both required TCC grants are ready. */
     available: boolean
-    /** The first shut gate: 'disabled' | 'no_backend' | 'permissions' | ''. */
-    blocker: string
+    /** The first shut gate: 'disabled' | 'unsupported' | 'no_helper' | 'permissions' | ''. */
+    blocker: ComputerBlocker
     detail?: string
     max_batch: number
     /** Built-in tier per configured bundle id, so the UI never reimplements the
      *  rules in internal/computer/tiers.go. Only covers apps that have a config
      *  row; a freshly typed bundle id is absent until the config round-trips. */
     tiers?: Record<string, string>
+    helper: ComputerHelperStatus
+    accessibility: ComputerPermissionState
+    screen_recording: ComputerPermissionState
   }
-  app_permissions?: ComputerAppPermission[]
-  approval?: Record<string, string>
 }

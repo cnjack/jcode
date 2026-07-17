@@ -53,10 +53,11 @@ type Engine struct {
 
 	// --- run state (guarded today by Server.mu; gains its own lock in a later
 	// increment once Server.mu's single-run role is gone) ---
-	agent     *adk.ChatModelAgent
-	history   []adk.Message
-	running   atomic.Bool // per-task busy flag (was the global Server.running gate)
-	runCancel context.CancelFunc
+	agent         *adk.ChatModelAgent
+	agentRevision uint64 // invalidates slow agent rebuilds when model/mode changes concurrently
+	history       []adk.Message
+	running       atomic.Bool // per-task busy flag (was the global Server.running gate)
+	runCancel     context.CancelFunc
 	// runGen is bumped (under emu) each time a run installs its runCancel. A run
 	// goroutine captures its generation at start and only tears down (clears
 	// runCancel, releases running, broadcasts idle) if it is still current — so a
@@ -233,6 +234,16 @@ func (e *Engine) modelSnapshot() (provider, model, modeStr string) {
 	return e.providerName, e.modelName, e.mode
 }
 
+// agentBuildSnapshot captures the inputs and revision for an asynchronous
+// agent rebuild. Call installAgentIfRevision with the returned revision: a
+// concurrent model/mode/skill change must win instead of being overwritten by
+// a slower rebuild that used stale inputs.
+func (e *Engine) agentBuildSnapshot() (provider, model, modeStr string, revision uint64) {
+	e.emu.Lock()
+	defer e.emu.Unlock()
+	return e.providerName, e.modelName, e.mode, e.agentRevision
+}
+
 // curMode returns the engine's mode under emu.
 func (e *Engine) curMode() string {
 	e.emu.Lock()
@@ -256,6 +267,7 @@ func (e *Engine) applyModelSwitch(ag *adk.ChatModelAgent, provider, model string
 	e.emu.Lock()
 	defer e.emu.Unlock()
 	e.agent = ag
+	e.agentRevision++
 	e.providerName = provider
 	e.modelName = model
 	if e.recorder != nil {
@@ -271,6 +283,7 @@ func (e *Engine) applyModeSwitch(modeStr string, ag *adk.ChatModelAgent) {
 	if ag != nil {
 		e.agent = ag
 	}
+	e.agentRevision++
 }
 
 // setAgent swaps just the agent under emu (MCP reload, skill toggle, setup).
@@ -278,6 +291,20 @@ func (e *Engine) setAgent(ag *adk.ChatModelAgent) {
 	e.emu.Lock()
 	defer e.emu.Unlock()
 	e.agent = ag
+	e.agentRevision++
+}
+
+// installAgentIfRevision atomically installs a rebuilt agent only if no other
+// operation changed the engine's agent inputs or agent since the build began.
+func (e *Engine) installAgentIfRevision(ag *adk.ChatModelAgent, revision uint64) bool {
+	e.emu.Lock()
+	defer e.emu.Unlock()
+	if e.agentRevision != revision {
+		return false
+	}
+	e.agent = ag
+	e.agentRevision++
+	return true
 }
 
 // setAgentIfModel installs ag only if the engine is still on provider/model.

@@ -375,3 +375,233 @@ Honesty about coverage is the point of the report, so:
 - **Wave 1's aggregate is void**, and wave 2 inherits any 402 risk if the `-highspeed`
   quota also runs out mid-run. Any run with `usage_total.total == 0` must be discarded
   before reading wave 2's numbers — the harness will not do it for you (§3).
+
+---
+
+## 8. 2026-07-16 native daemon + vision addendum
+
+This section supersedes §7's statement that no real macOS backend exists. That statement
+was accurate for the 2026-07-15 campaign; the current branch now has a real Swift AX
+daemon plus an isolated ScreenCaptureKit worker, and both were exercised on a live Mac.
+
+### 8.1 Why AX alone was insufficient
+
+AX and screenshots solve different halves of the problem:
+
+| channel | strong at | cannot prove |
+|---|---|---|
+| Accessibility tree | roles, labels, values, stable refs, direct actions | color, geometry, canvas/custom-drawn content |
+| Window screenshot | visual appearance and custom-drawn content | semantic identity, enabled state, safe/stable element targeting |
+
+The final design deliberately keeps both. `computer_snapshot` remains the default and
+source of actionable uids. `computer_screenshot` is an Eino enhanced tool result with a
+real `image/png` Base64 part, not merely a local `/api/...` URL the remote model cannot
+fetch. The OpenAI-compatible adapter emits all ordinary `role=tool` results first, then
+adds one synthetic `role=user` multimodal message for the completed tool batch. This
+preserves parallel tool-call ordering and works with TokenHub's user-role image input.
+After the next model call consumes an image, the live agent state copy-on-write
+replaces its Base64 with the text/image reference. This prevents both repeated
+provider cost and long-turn heap growth without mutating persisted history.
+
+The screenshot is the AX focused/main window where available. The daemon passes its title
+and bounds to the capture worker, which matches the corresponding ScreenCaptureKit window
+instead of choosing the largest window. The result includes the actual global window
+bounds and downscaled PNG dimensions, plus the pixel-to-screen formula needed for a
+coordinate fallback on custom canvases. The long edge is capped at 2048 pixels and the
+handoff file at 20 MiB.
+
+### 8.2 Real native Calculator E2E
+
+The opt-in test `TestCalculatorE2E` ran against freshly compiled, macOS-14-targeted
+helpers with real Accessibility and Screen Recording grants:
+
+1. discover and launch Calculator;
+2. take a real AX tree;
+3. find `7`, `+`, `5`, `=` and click each by daemon ref, with no coordinates;
+4. verify the fresh AX tree contains `12`;
+5. capture a real PNG and verify its window bounds, pixel dimensions and 2048-pixel cap;
+6. call `ListApps` again to prove the short-lived capture worker did not poison the
+   long-lived AX daemon.
+
+Result:
+
+```text
+=== RUN   TestCalculatorE2E
+--- PASS: TestCalculatorE2E (4.46s)
+PASS
+```
+
+### 8.3 Real TokenHub/Kimi visual E2E
+
+The final model run used the requested
+`tencent-tokenhub/kimi-k2.7-code-highspeed`, the real TokenHub credential, the freshly
+compiled daemon, and Preview showing a no-text fixture. Preview's AX tree exposed only an
+opaque image node; it did not contain the colors or shapes. Kimi called
+`computer_snapshot` and `computer_screenshot`, then returned:
+
+```json
+{
+  "model_task": "visual-only description of shapes and colors in the Preview window",
+  "ax_contains_visual_facts": false,
+  "screenshot_seen": true,
+  "background": "light beige/off-white field filling most of the image area",
+  "top_band": "dark navy blue horizontal bar across the top edge of the image content",
+  "left": "bright lime/yellow-green solid circle",
+  "middle": "solid purple diamond (square rotated 45 degrees)",
+  "right": "solid orange triangle with its base along the bottom and apex pointing upward"
+}
+```
+
+Every visual fact matches the fixture. Because none was present in AX and the prompt
+forbade filesystem/shell/OCR inspection, this is direct evidence that screenshot bytes
+reached the model conversation. The model completed in 12 seconds. No credential is
+recorded in this report.
+
+### 8.4 Comparison with Codex Computer Use
+
+The live Codex path was inspected and exercised in the same conversation. Its
+`get_app_state()` returns AX text plus a local screenshot URL. AX text is printed into
+the model context, but pixels enter the conversation only when the client reads the PNG
+and calls `emitImage`; a `file://` URL alone is not vision. Codex also refreshes app state
+after every action. OpenAI's public guidance describes the same two permission channels:
+[Computer Use](https://learn.chatgpt.com/docs/computer-use) needs Screen Recording to see
+and Accessibility to operate, while [image inputs](https://learn.chatgpt.com/docs/image-inputs)
+provide visual context.
+
+Jcode now follows the same effective pattern:
+
+| Codex | jcode current branch |
+|---|---|
+| AX text from app state | `computer_snapshot` |
+| screenshot URL, then explicit `emitImage` | enhanced `computer_screenshot`, then model adapter image part |
+| fresh state after an action | dirty-state guard requires a fresh snapshot |
+| image used when AX is incomplete | skill directs screenshot use for canvas/visual questions |
+
+Jcode intentionally keeps screenshot capture explicit instead of attaching a PNG to every
+snapshot: always-on pixels add latency, token cost and privacy exposure. The important
+equivalence is not tool shape; it is that the model receives actual pixels when visual
+reasoning is needed.
+
+Inspecting the live conversation makes the image contract clearer than the public API
+shape alone:
+
+1. **Acquire:** AX state and a screenshot reference are returned together, but the
+   reference is only metadata.
+2. **Ground:** the client must explicitly inject decoded image bytes into the active
+   model conversation; otherwise the model has never seen the pixels.
+3. **Act:** semantic AX refs remain preferable to coordinates even after vision has
+   described the scene.
+4. **Refresh:** an image refreshes pixel/coordinate knowledge, not old AX uid validity.
+   Jcode therefore retires AX snapshots after `computer_screenshot`; coordinate actions
+   can use the fresh visual observation, while uid actions require a new snapshot.
+5. **Bound:** old images are reduced to text for later turns, live requests accept at
+   most four images and 20 MiB decoded media in aggregate, individual captures are capped
+   at 20 MiB and 2048 pixels on the long edge, and persisted history/telemetry never keeps
+   the Base64.
+
+### 8.5 Lessons taken from `TheGuyWithoutH/mac-computer-use`
+
+The reference implementation was useful for four concrete choices:
+
+- return text and image content together rather than returning only a path;
+- isolate ScreenCaptureKit in a short-lived worker so compositor failure cannot kill AX;
+- enumerate installed apps beyond only currently running processes;
+- root traversal and capture at the focused/main window.
+
+The current implementation adds jcode-specific constraints on top: app tiers and
+approvals, stable uid/ref discipline, post-action freshness, helper reconnect generation,
+parallel enhanced-tool middleware parity, TokenHub message normalization, telemetry image
+redaction, payload caps, and screenshot coordinate metadata.
+
+### 8.6 Defects fixed during the native/vision pass
+
+- 64-bit AX refs were previously corrupted by JSON number coercion.
+- Closed apps were absent from discovery; launching did not reliably activate them.
+- AX traversal missed focused/main-window semantics and useful labels/actions.
+- A ref click could fall through to `(0,0)` instead of invoking AXPress.
+- A ScreenCaptureKit abort could take down the long-lived daemon.
+- A broken daemon connection stranded existing sessions; reconnect now swaps transport in
+  place and invalidates old refs.
+- Concurrent session actions could share one old snapshot; snapshot/action operations are
+  serialized now.
+- Concurrent helper initialization could spawn/kill the wrong daemon; initialization is
+  singleflight now.
+- The release resolver could select the capture worker as the daemon.
+- CLI releases, `make install`, the curl installer and Tauri packaging omitted one or both
+  helpers; all now ship both and target macOS 14 explicitly.
+- Screenshot results were local-path text only; they now reach the model as image content.
+- Langfuse generation traces could upload screenshot Base64; trace messages now replace
+  images with a safe placeholder without changing the live model input.
+- Non-vision models silently lost the image while the text claimed it was attached; they
+  now receive an explicit image-omitted notice.
+- Screenshot handoff files and provider payloads had no media cap; IPC files are bounded
+  and deleted after reading, and capture is downscaled.
+- The daemon now requires both the protocol token and the kernel-reported PID declared at
+  launch. This prevents a different live process from borrowing the already-running
+  daemon through its socket; it is not signed same-uid process identity.
+- Screenshot capture now uses a desktop-independent single-window filter, removes window
+  shadows, reports actual returned pixel dimensions, and fails closed when title/bounds
+  matching is ambiguous.
+- A screenshot no longer revalidates stale AX uids. Cross-session mutations advance a
+  process-wide UI epoch, and successful visual capture retires the old AX snapshot while
+  allowing coordinate actions based on the new pixels.
+- Every mutating AX/input path rechecks the frontmost app at the mutation boundary. AX
+  timeouts are bounded and reported as outcome-unknown so the model inspects fresh state
+  rather than blindly repeating a possibly completed action.
+- Screen-lock state is checked fail-closed before actions and before/after capture in both
+  the daemon and capture worker.
+- Coordinate presence is explicit on the Go↔Swift wire, so legitimate `x=0`, `y=0` and
+  drag endpoints at zero are no longer erased by JSON `omitempty`.
+- Consumed screenshot Base64 used to remain in live Eino state even though the provider
+  adapter no longer retransmitted it. Historical tool images are now released
+  copy-on-write, the active request has count/byte limits, and tests cover repeated and
+  parallel screenshot batches.
+- Saved screenshot copies used to grow without bound. The private store now enforces a
+  cross-process 24-hour TTL, 128-file limit, and 256 MiB total limit while protecting the
+  image produced by the current call. A symlink/reparse-point root fails closed, only
+  canonical `UUID.png` files are owned, and Web serves the already-verified open handle.
+
+### 8.7 Remaining gaps
+
+This is real and useful, but it is not yet safety-equivalent to a mature signed Computer
+Use runtime:
+
+1. Raw mouse/keyboard takeover inside the same frontmost app is not continuously detected;
+   frontmost changes and explicit interruption errors are handled, but an event-tap based
+   human-takeover detector remains.
+2. PID+token protects an existing daemon instance only. A same-uid process can still
+   launch the TCC-authorized helper binary with its own PID/token/socket, and the Go client
+   does not validate the server either. A signed-parent + inherited-socket design, or XPC
+   audit-token/code-signature identity, is required for a hardened mutual channel.
+3. Focused-window matching is implemented and single-window Calculator/Preview are live
+   tested; a real two-window regression fixture should be added.
+4. Model vision and authenticated Web inline rendering of `image_ref` are proven with a
+   real screenshot card. The Tauri shell has not yet been exercised separately.
+5. The real Calculator test proves AX refs and real capture metadata, but a deterministic
+   live fixture should still prove the full screenshot-pixel → global-coordinate click →
+   visual-state-change loop, including a two-window ambiguity case.
+6. Image bytes are request-bounded, but the context token estimator does not yet price
+   visual tokens; compaction can therefore trigger later than ideal near the context cap.
+
+### 8.8 Final verification after hardening
+
+The final source state was verified again after the lock-screen, cross-session freshness,
+window-matching and frontmost-race fixes:
+
+| check | result |
+|---|---|
+| real daemon smoke (connect, 135 installed apps, live AX tree, bad token, idle exit) | pass |
+| real Calculator `7 + 5 = 12` by AX refs + real PNG + daemon survival | pass, 4.35s |
+| real TokenHub `kimi-k2.7-code-highspeed`: AX had no visual facts; screenshot identified all colors/shapes | pass |
+| authenticated Web `computer_screenshot` card: real `/api/computer/shots/d8c73aa6-cb6e-4c19-8231-ddd20f632969.png` link and pixels rendered | pass |
+| Tauri shell inline rendering of the same `image_ref` | not separately tested |
+| `go test ./... -count=1` | pass |
+| race tests for agent/computer/model/runner/session/telemetry/tools/uitree | pass |
+| Swift typecheck, arm64 + x86_64, macOS 14 | pass |
+| built helper Mach-O deployment target | both `minos 14.0` |
+| React/package typecheck (`make lint-web`) | pass |
+| `actionlint`, `shellcheck`, `sh -n`, JSON parse, `git diff --check` | pass |
+
+`make lint-go` remains non-diagnostic in this repository with the installed
+`golangci-lint 2.12.2`: it exits before package analysis with `no go files to analyze`.
+The full Go suite and selected race suite above both pass.

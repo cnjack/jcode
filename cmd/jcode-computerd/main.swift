@@ -16,7 +16,6 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import Foundation
-import ScreenCaptureKit
 
 // MARK: - Wire protocol (mirrors internal/computer/proto.go)
 
@@ -76,13 +75,17 @@ struct Envelope: Codable {
 // JSONValue is a minimal any-JSON box so Envelope can pass a payload through
 // without knowing its shape.
 indirect enum JSONValue: Codable {
-    case null, bool(Bool), number(Double), string(String)
+    case null, bool(Bool), integer(Int64), number(Double), string(String)
     case array([JSONValue]), object([String: JSONValue])
 
     init(from d: Decoder) throws {
         let c = try d.singleValueContainer()
         if c.decodeNil() { self = .null }
         else if let b = try? c.decode(Bool.self) { self = .bool(b) }
+        // Preserve integral protocol fields (notably AX refs) as integers.
+        // Routing every JSON number through Double loses precision above 2^53
+        // and can emit scientific notation that Go refuses for an int64 field.
+        else if let i = try? c.decode(Int64.self) { self = .integer(i) }
         else if let n = try? c.decode(Double.self) { self = .number(n) }
         else if let s = try? c.decode(String.self) { self = .string(s) }
         else if let a = try? c.decode([JSONValue].self) { self = .array(a) }
@@ -94,6 +97,7 @@ indirect enum JSONValue: Codable {
         switch self {
         case .null: try c.encodeNil()
         case .bool(let b): try c.encode(b)
+        case .integer(let i): try c.encode(i)
         case .number(let n): try c.encode(n)
         case .string(let s): try c.encode(s)
         case .array(let a): try c.encode(a)
@@ -111,6 +115,10 @@ struct PongPayload: Codable {
     var server_api_version: String
     var platform: String
     var helper_version: String
+    // Additive handshake fields. New clients normalize a missing/unknown value
+    // from an older daemon to "unknown" rather than assuming the grant exists.
+    var accessibility_permission: String
+    var screen_recording_permission: String
 }
 struct AppWire: Codable {
     var bundle_id: String
@@ -122,7 +130,24 @@ struct FrontmostResult: Codable { var app: AppWire }
 struct AppRequest: Codable { var app: String }
 struct TreeRequest: Codable { var app: String; var disable_diff: Bool? }
 struct ReadClipboardResult: Codable { var text: String }
-struct CaptureResult: Codable { var ref: String?; var png: Data? }
+struct CaptureResult: Codable {
+    var ref: String?
+    var png: Data?
+    var x: Double?
+    var y: Double?
+    var width: Double?
+    var height: Double?
+    var pixel_width: Int?
+    var pixel_height: Int?
+}
+struct CaptureWorkerResult: Codable {
+    var x: Double
+    var y: Double
+    var width: Double
+    var height: Double
+    var pixel_width: Int
+    var pixel_height: Int
+}
 struct ErrorPayload: Codable { var code: Int; var message: String }
 
 // Node mirrors uitree.Node's JSON (Go exported field names, no tags → PascalCase).
@@ -136,6 +161,8 @@ struct Node: Codable {
     var Name: String
     var Value: String
     var States: [NodeState]
+    var SemanticID: String
+    var Actions: [String]
     var ChildIDs: [String]
     var Ref: Int64
     var Ignored: Bool
@@ -225,12 +252,56 @@ func decodePayload<T: Decodable>(_ t: T.Type, _ data: Data?) throws -> T {
 
 // MARK: - Handlers that need no TCC grant (real, run anywhere)
 
+// The model needs to discover an app before it can launch it. Returning only
+// runningApplications creates a deadlock for every closed app: it is absent from
+// computer_apps, but computer_open requires the bundle id that list was meant to
+// discover. Cache the installed catalog and overlay live process state on each
+// request. Standard application roots are intentionally bounded; package
+// descendants are skipped so this never crawls inside app bundles.
+private var installedAppsCache: [String: AppWire]?
+
+func installedApps() -> [String: AppWire] {
+    if let cached = installedAppsCache { return cached }
+
+    let fm = FileManager.default
+    let home = fm.homeDirectoryForCurrentUser
+    let roots = [
+        URL(fileURLWithPath: "/Applications", isDirectory: true),
+        URL(fileURLWithPath: "/System/Applications", isDirectory: true),
+        URL(fileURLWithPath: "/System/Cryptexes/App/System/Applications", isDirectory: true),
+        home.appendingPathComponent("Applications", isDirectory: true),
+    ]
+    var apps: [String: AppWire] = [:]
+    for root in roots {
+        guard let entries = fm.enumerator(
+            at: root,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { continue }
+        for case let url as URL in entries where url.pathExtension.lowercased() == "app" {
+            guard let bundle = Bundle(url: url), let id = bundle.bundleIdentifier, !id.isEmpty else { continue }
+            let info = bundle.localizedInfoDictionary ?? bundle.infoDictionary ?? [:]
+            let name = (info["CFBundleDisplayName"] as? String)
+                ?? (info["CFBundleName"] as? String)
+                ?? url.deletingPathExtension().lastPathComponent
+            apps[id] = AppWire(bundle_id: id, name: name, running: false)
+        }
+    }
+    installedAppsCache = apps
+    return apps
+}
+
 func handleListApps() -> ListAppsResult {
-    let apps = NSWorkspace.shared.runningApplications.compactMap { app -> AppWire? in
-        guard let bundle = app.bundleIdentifier else { return nil }
+    var byBundle = installedApps()
+    for app in NSWorkspace.shared.runningApplications {
+        guard let bundle = app.bundleIdentifier else { continue }
         // Only regular apps have a UI worth automating; skip agents/daemons.
-        guard app.activationPolicy == .regular else { return nil }
-        return AppWire(bundle_id: bundle, name: app.localizedName ?? bundle, running: true)
+        guard app.activationPolicy == .regular else { continue }
+        byBundle[bundle] = AppWire(bundle_id: bundle, name: app.localizedName ?? bundle, running: true)
+    }
+    let apps = byBundle.values.sorted {
+        if $0.running != $1.running { return $0.running && !$1.running }
+        return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
     }
     return ListAppsResult(apps: apps)
 }
@@ -247,13 +318,16 @@ func handleLaunch(_ req: AppRequest) throws {
         throw DaemonError(code: Code.unknown, message: "app not found: \(req.app)")
     }
     let cfg = NSWorkspace.OpenConfiguration()
+    cfg.activates = true
     let sem = DispatchSemaphore(value: 0)
     var launchErr: Error?
     NSWorkspace.shared.openApplication(at: url, configuration: cfg) { _, err in
         launchErr = err
         sem.signal()
     }
-    _ = sem.wait(timeout: .now() + 10)
+    guard sem.wait(timeout: .now() + 10) == .success else {
+        throw DaemonError(code: Code.unknown, message: "launch timed out after 10 seconds")
+    }
     if let e = launchErr { throw DaemonError(code: Code.unknown, message: e.localizedDescription) }
 }
 
@@ -266,32 +340,135 @@ func handleReadClipboard() -> ReadClipboardResult {
 func runningApp(_ bundleID: String) throws -> NSRunningApplication {
     let matches = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
     if matches.isEmpty { throw DaemonError(code: Code.appNotAllowed, message: bundleID) }
-    if matches.count > 1 { /* pick the frontmost-ish; ambiguity is rare for regular apps */ }
-    return matches[0]
+    if matches.count == 1 { return matches[0] }
+    if let front = NSWorkspace.shared.frontmostApplication,
+       front.bundleIdentifier == bundleID,
+       let exact = matches.first(where: { $0.processIdentifier == front.processIdentifier }) {
+        return exact
+    }
+    throw DaemonError(code: Code.ambiguousApp,
+                      message: "multiple processes are running for \(bundleID); focus the intended one and retry")
 }
 
-// axString reads a string attribute, "" when absent.
+func axValue(_ el: AXUIElement, _ attr: String) -> CFTypeRef? {
+    if currentAXFatalError != nil { return nil }
+    var value: CFTypeRef?
+    let result = AXUIElementCopyAttributeValue(el, attr as CFString, &value)
+    switch result {
+    case .success:
+        return value
+    case .attributeUnsupported, .noValue:
+        return nil
+    case .apiDisabled:
+        currentAXFatalError = DaemonError(
+            code: Code.permissionsNotGranted, message: "Accessibility API is disabled")
+    case .cannotComplete:
+        currentAXFatalError = DaemonError(
+            code: Code.accessibilityError, message: "target app did not answer Accessibility within the timeout")
+    case .invalidUIElement:
+        currentAXFatalError = DaemonError(
+            code: Code.accessibilityError, message: "Accessibility element became invalid; take a fresh snapshot")
+    default:
+        currentAXFatalError = DaemonError(
+            code: Code.accessibilityError, message: "Accessibility read failed: \(result.rawValue)")
+    }
+    return nil
+}
+
+var currentAXFatalError: DaemonError?
+
 func axString(_ el: AXUIElement, _ attr: String) -> String {
-    var v: CFTypeRef?
-    if AXUIElementCopyAttributeValue(el, attr as CFString, &v) == .success, let s = v as? String {
-        return s
+    guard let value = axValue(el, attr) else { return "" }
+    if let string = value as? String { return string }
+    if let number = value as? NSNumber { return number.stringValue }
+    return ""
+}
+
+func axBool(_ el: AXUIElement, _ attr: String, default fallback: Bool = false) -> Bool {
+    guard let value = axValue(el, attr) else { return fallback }
+    if let bool = value as? Bool { return bool }
+    if let number = value as? NSNumber { return number.boolValue }
+    return fallback
+}
+
+func axElement(_ el: AXUIElement, _ attr: String) -> AXUIElement? {
+    guard let value = axValue(el, attr), CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+    return unsafeBitCast(value, to: AXUIElement.self)
+}
+
+func axChildren(_ el: AXUIElement) -> [AXUIElement] {
+    axValue(el, kAXChildrenAttribute) as? [AXUIElement] ?? []
+}
+
+func axSecondaryActions(_ el: AXUIElement) -> [String] {
+    if currentAXFatalError != nil { return [] }
+    var values: CFArray?
+    let result = AXUIElementCopyActionNames(el, &values)
+    guard result == .success else {
+        if result == .cannotComplete {
+            currentAXFatalError = DaemonError(
+                code: Code.accessibilityError,
+                message: "target app did not answer Accessibility within the timeout")
+        } else if result != .actionUnsupported && result != .noValue {
+            currentAXFatalError = DaemonError(
+                code: Code.accessibilityError,
+                message: "Accessibility action lookup failed: \(result.rawValue)")
+        }
+        return []
+    }
+    guard let actions = values as? [String] else { return [] }
+    // AXPress is already the primary click verb. Showing it on every button
+    // wastes tokens; secondary actions are the names computer_act(menu) needs.
+    return actions.filter { $0 != (kAXPressAction as String) }
+}
+
+// AX uses a platform vocabulary (AXButton, AXWindow, ...), while uitree uses
+// the browser-style roles the agent already knows (button, window, ...). The Go
+// renderer intentionally only emits normalized roles; forwarding raw AX roles
+// made a healthy Calculator tree render as "no interactive elements".
+func normalizeRole(_ role: String) -> String {
+    switch role {
+    case "AXButton": return "button"
+    case "AXLink": return "link"
+    case "AXTextField": return "textbox"
+    case "AXTextArea": return "textarea"
+    case "AXCheckBox": return "checkbox"
+    case "AXRadioButton": return "radio"
+    case "AXPopUpButton": return "popupbutton"
+    case "AXMenuButton": return "menubutton"
+    case "AXMenuItem": return "menuitem"
+    case "AXComboBox": return "combobox"
+    case "AXList": return "listbox"
+    case "AXRow": return "row"
+    case "AXCell": return "cell"
+    case "AXSlider": return "slider"
+    case "AXIncrementor": return "incrementor"
+    case "AXDisclosureTriangle": return "disclosuretriangle"
+    case "AXColorWell": return "colorwell"
+    case "AXWindow": return "window"
+    case "AXSheet": return "sheet"
+    case "AXGroup", "AXSplitGroup", "AXScrollArea": return "group"
+    case "AXToolbar": return "toolbar"
+    case "AXStaticText": return "statictext"
+    case "AXImage": return "image"
+    case "AXHeading": return "heading"
+    default: return role
+    }
+}
+
+func elementName(_ el: AXUIElement) -> String {
+    for attr in [kAXTitleAttribute, kAXDescriptionAttribute, kAXHelpAttribute, kAXIdentifierAttribute] {
+        let value = axString(el, attr).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !value.isEmpty { return value }
     }
     return ""
 }
 
-// axBatch reads several attributes of one element in a single cross-process call
-// via AXUIElementCopyMultipleAttributeValues — the difference between a snapshot
-// taking 200ms and 2s on a large tree, because each individual attribute read is
-// its own cross-process round-trip (design §3.3). Missing attributes come back as
-// an AXError placeholder, which simply fails the `as?` cast below → default.
-func axBatch(_ el: AXUIElement, _ attrs: [String]) -> [CFTypeRef] {
-    var values: CFArray?
-    let r = AXUIElementCopyMultipleAttributeValues(
-        el, attrs as CFArray, AXCopyMultipleAttributeOptions(rawValue: 0), &values)
-    guard r == .success, let arr = values as? [CFTypeRef], arr.count == attrs.count else {
-        return []
-    }
-    return arr
+func accessibilityRoot(_ app: NSRunningApplication) -> AXUIElement {
+    let root = AXUIElementCreateApplication(app.processIdentifier)
+    if let focused = axElement(root, kAXFocusedWindowAttribute) { return focused }
+    if let main = axElement(root, kAXMainWindowAttribute) { return main }
+    return root
 }
 
 // ElementKey makes an AXUIElement hashable via CFEqual/CFHash so it can key the
@@ -314,9 +491,23 @@ struct ElementKey: Hashable {
 // lets uitree's "same element keeps its uid, departed element's uid retires"
 // property actually hold (design §1.1, §9.1).
 final class ElementRegistry {
+    let processIdentifier: pid_t
+    let rootWindow: AXUIElement
     private var byElement: [ElementKey: Int64] = [:]
     private var byRef: [Int64: AXUIElement] = [:]
-    private var nextRef: Int64 = 100
+    // A new daemon must not accidentally reuse an old daemon's small ref values:
+    // an existing Go Session may reconnect after a crash. A random per-registry
+    // base makes an old uid fail closed until a fresh snapshot is taken.
+    private var nextRef = Int64.random(in: 1_000_000...(Int64.max / 4))
+
+    init(processIdentifier: pid_t, rootWindow: AXUIElement) {
+        self.processIdentifier = processIdentifier
+        self.rootWindow = rootWindow
+    }
+
+    func matches(processIdentifier: pid_t, rootWindow: AXUIElement) -> Bool {
+        self.processIdentifier == processIdentifier && CFEqual(self.rootWindow, rootWindow)
+    }
 
     func refFor(_ el: AXUIElement) -> Int64 {
         let key = ElementKey(element: el)
@@ -328,60 +519,83 @@ final class ElementRegistry {
     }
 
     func element(_ ref: Int64) -> AXUIElement? { byRef[ref] }
+
+    func retain(activeRefs: Set<Int64>) {
+        byRef = byRef.filter { activeRefs.contains($0.key) }
+        byElement = byElement.filter { activeRefs.contains($0.value) }
+    }
 }
 
-// TreeBuilder walks an app's AX tree into flat Nodes, one batched read per node,
-// assigning each actionable element a session-stable Ref from the registry.
+// TreeBuilder walks an app's AX tree into flat Nodes, assigning each actionable
+// element a session-stable Ref from the registry. AX trees can contain cycles
+// and enormous virtualized subtrees, so traversal is explicitly bounded.
 final class TreeBuilder {
     private(set) var nodes: [Node] = []
+    private(set) var activeRefs: Set<Int64> = []
     private let registry: ElementRegistry
     private var nextID = 0
-
-    // The attributes read per node, in a fixed order axBatch returns them in.
-    private let attrs: [String] = [
-        kAXRoleAttribute, kAXTitleAttribute, kAXValueAttribute,
-        kAXFocusedAttribute, kAXEnabledAttribute, kAXChildrenAttribute,
-    ]
+    private var seen: Set<ElementKey> = []
+    private let maxDepth = 12
+    private let maxNodes = 400
+    private let maxChildren = 120
 
     init(registry: ElementRegistry) { self.registry = registry }
 
-    func build(_ root: AXUIElement) { _ = walk(root) }
+    func build(_ root: AXUIElement) { _ = walk(root, depth: 0) }
 
-    private func walk(_ el: AXUIElement) -> String {
+    private func walk(_ el: AXUIElement, depth: Int) -> String? {
+        guard depth <= maxDepth, nextID < maxNodes else { return nil }
+        let key = ElementKey(element: el)
+        guard !seen.contains(key) else { return nil }
+        seen.insert(key)
+
         nextID += 1
         let id = String(nextID)
 
-        let v = axBatch(el, attrs) // one cross-process round-trip for this node
-        let role = v.count > 0 ? (v[0] as? String ?? "") : axString(el, kAXRoleAttribute)
-        let title = v.count > 1 ? (v[1] as? String ?? "") : ""
-        let value = v.count > 2 ? (v[2] as? String ?? "") : ""
-        let focused = v.count > 3 ? (v[3] as? Bool ?? false) : false
-        let enabled = v.count > 4 ? (v[4] as? Bool ?? true) : true
-        let children = v.count > 5 ? (v[5] as? [AXUIElement] ?? []) : []
+        let role = normalizeRole(axString(el, kAXRoleAttribute))
+        let name = elementName(el)
+        let value = axString(el, kAXValueAttribute)
+        let semanticID = axString(el, kAXIdentifierAttribute)
+        let actions = axSecondaryActions(el)
+        let focused = axBool(el, kAXFocusedAttribute)
+        let enabled = axBool(el, kAXEnabledAttribute, default: true)
+        let selected = axBool(el, kAXSelectedAttribute)
+        let expanded = axBool(el, kAXExpandedAttribute)
 
         var ref: Int64 = 0
         // Only actionable elements get a ref (mirrors uitree: a node the backend
         // can't resolve should not get a uid).
-        if isActionable(role) { ref = registry.refFor(el) }
+        if isActionable(role) {
+            ref = registry.refFor(el)
+            activeRefs.insert(ref)
+        }
 
         var childIDs: [String] = []
-        for k in children { childIDs.append(walk(k)) }
+        for child in axChildren(el).prefix(maxChildren) {
+            if let childID = walk(child, depth: depth + 1) { childIDs.append(childID) }
+        }
 
         var states: [NodeState] = []
         if focused { states.append(NodeState(Name: "focused", Value: "true")) }
         if !enabled { states.append(NodeState(Name: "disabled", Value: "true")) }
+        if selected { states.append(NodeState(Name: "selected", Value: "true")) }
+        if expanded { states.append(NodeState(Name: "expanded", Value: "true")) }
+        if role == "checkbox" || role == "radio" {
+            states.append(NodeState(Name: "checked", Value: axBool(el, kAXValueAttribute) ? "true" : "false"))
+        }
 
         nodes.append(Node(
-            ID: id, Role: role, Name: title, Value: value, States: states,
+            ID: id, Role: role, Name: name, Value: value, States: states,
+            SemanticID: semanticID, Actions: actions,
             ChildIDs: childIDs, Ref: ref, Ignored: false))
         return id
     }
 
     private func isActionable(_ role: String) -> Bool {
         switch role {
-        case kAXButtonRole, kAXTextFieldRole, kAXTextAreaRole, kAXCheckBoxRole,
-             kAXRadioButtonRole, kAXPopUpButtonRole, kAXMenuItemRole,
-             kAXComboBoxRole, kAXSliderRole, "AXLink":
+        case "button", "link", "textbox", "textarea", "checkbox", "radio",
+             "popupbutton", "menubutton", "menuitem", "combobox", "listbox",
+             "slider", "incrementor", "disclosuretriangle", "row", "colorwell":
             return true
         default:
             return false
@@ -396,9 +610,17 @@ func handleTree(_ req: TreeRequest, _ session: Session) throws -> TreeResult {
     }
     try checkScreenUnlocked()
     let app = try runningApp(req.app)
-    let axApp = AXUIElementCreateApplication(app.processIdentifier)
-    let builder = TreeBuilder(registry: session.registry(for: req.app))
-    builder.build(axApp)
+    let root = accessibilityRoot(app)
+    let registry = session.registry(
+        for: req.app, processIdentifier: app.processIdentifier, rootWindow: root)
+    session.bindWindow(req.app, processIdentifier: app.processIdentifier, rootWindow: root)
+    let builder = TreeBuilder(registry: registry)
+    builder.build(root)
+    if let error = currentAXFatalError { throw error }
+    // Retire stale AXUIElement objects after a successful snapshot. nextRef is
+    // monotonic, so removed refs are never reused, while dynamic apps cannot
+    // grow the daemon heap without bound across a long-lived connection.
+    registry.retain(activeRefs: builder.activeRefs)
     session.gen += 1
     return TreeResult(nodes: builder.nodes, gen: session.gen)
 }
@@ -408,27 +630,66 @@ func handleTree(_ req: TreeRequest, _ session: Session) throws -> TreeResult {
 func handlePerform(_ req: PerformRequest, _ session: Session) throws {
     try checkScreenUnlocked()
     let a = req.action
+    // The Go tier gate and this dispatch are separate RPCs. Re-check in the
+    // process that actually posts input so a focus switch in between cannot
+    // route a key/click into an ungranted app.
+    let front = try requireFrontmost(a.bundle_id)
+    let currentRoot = accessibilityRoot(front)
+    guard session.matchesBoundWindow(
+        a.bundle_id, processIdentifier: front.processIdentifier, rootWindow: currentRoot) else {
+        throw DaemonError(code: Code.userIntervened,
+                          message: "process or focused window changed since the last snapshot/screenshot")
+    }
     switch a.kind {
     case "set_value":
-        guard let ref = a.ref, let el = session.registry(for: a.bundle_id).element(ref) else {
+        guard let ref = a.ref, let el = session.boundRegistry(for: a.bundle_id)?.element(ref) else {
             throw DaemonError(code: Code.accessibilityError, message: "no live element for ref")
         }
+        try requireFrontmost(a.bundle_id)
         let r = AXUIElementSetAttributeValue(el, kAXValueAttribute as CFString, (a.value ?? "") as CFString)
-        if r != .success { throw DaemonError(code: Code.accessibilityError, message: "set_value failed: \(r.rawValue)") }
+        if r != .success { throw mutationAXError("set_value", r) }
     case "menu":
-        guard let ref = a.ref, let el = session.registry(for: a.bundle_id).element(ref), let name = a.name else {
+        guard let ref = a.ref, let el = session.boundRegistry(for: a.bundle_id)?.element(ref), let name = a.name else {
             throw DaemonError(code: Code.accessibilityError, message: "menu needs a live element and an action name")
         }
+        try requireFrontmost(a.bundle_id)
         let r = AXUIElementPerformAction(el, name as CFString)
-        if r != .success { throw DaemonError(code: Code.accessibilityError, message: "action \(name) failed") }
+        if r != .success { throw mutationAXError("action \(name)", r) }
     case "click", "dblclick", "rclick":
-        try synthClick(a)
+        try performClick(a, session)
+    case "hover":
+        let point = try actionPoint(a, session)
+        guard let event = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                                  mouseCursorPosition: point, mouseButton: .left) else {
+            throw DaemonError(code: Code.accessibilityError, message: "cannot create hover event")
+        }
+        try requireFrontmost(a.bundle_id)
+        event.post(tap: .cghidEventTap)
+    case "drag":
+        try synthDrag(a, session)
     case "type":
-        try synthType(a.text ?? "")
+        try focusReferencedElement(a, session)
+        try synthType(a.text ?? "", bundleID: a.bundle_id)
     case "press":
-        try synthKey(a.key ?? "")
+        try synthKey(a.key ?? "", bundleID: a.bundle_id)
     case "scroll":
-        try synthScroll(a)
+        try synthScroll(a, session)
+    case "select_text":
+        guard let ref = a.ref, let el = session.boundRegistry(for: a.bundle_id)?.element(ref) else {
+            throw DaemonError(code: Code.accessibilityError, message: "select_text needs a live element")
+        }
+        let text = a.value ?? ""
+        try requireFrontmost(a.bundle_id)
+        var result = AXUIElementSetAttributeValue(el, kAXSelectedTextAttribute as CFString, text as CFString)
+        if result == .cannotComplete { throw mutationAXError("select_text", result) }
+        if result != .success {
+            // Some native selectors expose their selected option as AXValue
+            // rather than AXSelectedText. Try that contract before failing.
+            result = AXUIElementSetAttributeValue(el, kAXValueAttribute as CFString, text as CFString)
+        }
+        if result != .success {
+            throw mutationAXError("select_text", result)
+        }
     default:
         throw DaemonError(code: Code.unknown, message: "unsupported action: \(a.kind)")
     }
@@ -454,25 +715,146 @@ func settleUI() {
 // this is a fail-safe (stop), enforced here because only the daemon can see the
 // live session state.
 func checkScreenUnlocked() throws {
-    if let dict = CGSessionCopyCurrentDictionary() as? [String: Any],
-       let locked = dict["CGSSessionScreenIsLocked"] as? Int, locked == 1 {
+    guard let dict = CGSessionCopyCurrentDictionary() as? [String: Any],
+          let onConsole = dict["kCGSSessionOnConsoleKey"] as? Bool,
+          let loginDone = dict["kCGSessionLoginDoneKey"] as? Bool,
+          onConsole, loginDone else {
+        throw DaemonError(code: Code.screenLocked,
+                          message: "cannot verify an active unlocked console session")
+    }
+    if let locked = dict["CGSSessionScreenIsLocked"] as? Bool, locked {
         throw DaemonError(code: Code.screenLocked, message: "the screen is locked")
     }
 }
 
-// synthClick posts a mouse click at the action's coordinates. Input is delivered
-// to whatever holds focus — the coordinate carries no target identity — which is
+func mutationAXError(_ operation: String, _ result: AXError) -> DaemonError {
+    if result == .cannotComplete {
+        return DaemonError(
+            code: Code.accessibilityError,
+            message: "\(operation) timed out; the outcome is unknown — inspect fresh UI state before retrying")
+    }
+    return DaemonError(
+        code: Code.accessibilityError, message: "\(operation) failed: \(result.rawValue)")
+}
+
+@discardableResult
+func requireFrontmost(_ bundleID: String) throws -> NSRunningApplication {
+    guard let front = NSWorkspace.shared.frontmostApplication,
+          front.bundleIdentifier == bundleID else {
+        throw DaemonError(code: Code.userIntervened,
+                          message: "frontmost app changed before input; expected \(bundleID)")
+    }
+    return front
+}
+
+func focusedWindowFrame(_ bundleID: String) throws -> CGRect {
+    let app = try runningApp(bundleID)
+    guard let frame = elementFrame(accessibilityRoot(app)), frame.width > 1, frame.height > 1 else {
+        throw DaemonError(code: Code.accessibilityError,
+                          message: "cannot resolve focused window bounds for \(bundleID)")
+    }
+    return frame
+}
+
+func requirePointInFocusedWindow(_ point: CGPoint, bundleID: String) throws {
+    let frame = try focusedWindowFrame(bundleID)
+    guard frame.contains(point) else {
+        throw DaemonError(code: Code.accessibilityError,
+                          message: "coordinate (\(point.x),\(point.y)) is outside the focused \(bundleID) window")
+    }
+}
+
+func focusReferencedElement(_ a: ActionWire, _ session: Session) throws {
+    guard let ref = a.ref else { return }
+    guard let el = session.boundRegistry(for: a.bundle_id)?.element(ref) else {
+        throw DaemonError(code: Code.accessibilityError, message: "no live element for ref")
+    }
+    // The handler-level check and the actual AX mutation are separated by ref
+    // lookup. Re-check at the mutation boundary so a user focus switch cannot
+    // make us focus a control in an app that is no longer frontmost.
+    try requireFrontmost(a.bundle_id)
+    let result = AXUIElementSetAttributeValue(el, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    // Not every actionable element exposes AXFocused as settable. Typing into a
+    // ref that cannot be focused is unsafe, so fail instead of sending text to
+    // whichever control happened to be active.
+    if result != .success {
+        throw mutationAXError("focus referenced element", result)
+    }
+}
+
+func elementCenter(_ el: AXUIElement) -> CGPoint? {
+    guard let frame = elementFrame(el) else { return nil }
+    return CGPoint(x: frame.origin.x + frame.size.width / 2,
+                   y: frame.origin.y + frame.size.height / 2)
+}
+
+func elementFrame(_ el: AXUIElement) -> CGRect? {
+    guard let positionValue = axValue(el, kAXPositionAttribute),
+          CFGetTypeID(positionValue) == AXValueGetTypeID(),
+          let sizeValue = axValue(el, kAXSizeAttribute),
+          CFGetTypeID(sizeValue) == AXValueGetTypeID() else { return nil }
+    let axPosition = positionValue as! AXValue
+    let axSize = sizeValue as! AXValue
+    var position = CGPoint.zero
+    var size = CGSize.zero
+    guard AXValueGetValue(axPosition, .cgPoint, &position),
+          AXValueGetValue(axSize, .cgSize, &size) else { return nil }
+    return CGRect(origin: position, size: size)
+}
+
+func actionPoint(_ a: ActionWire, _ session: Session) throws -> CGPoint {
+    if let ref = a.ref {
+        guard let el = session.boundRegistry(for: a.bundle_id)?.element(ref) else {
+            throw DaemonError(code: Code.accessibilityError, message: "no live element for ref")
+        }
+        guard let point = elementCenter(el) else {
+            throw DaemonError(code: Code.accessibilityError, message: "referenced element has no usable bounds")
+        }
+        try requirePointInFocusedWindow(point, bundleID: a.bundle_id)
+        return point
+    }
+    guard let x = a.x, let y = a.y else {
+        throw DaemonError(code: Code.accessibilityError, message: "action needs a live ref or explicit x/y coordinates")
+    }
+    let point = CGPoint(x: x, y: y)
+    try requirePointInFocusedWindow(point, bundleID: a.bundle_id)
+    return point
+}
+
+func performClick(_ a: ActionWire, _ session: Session) throws {
+    if let ref = a.ref {
+        guard let el = session.boundRegistry(for: a.bundle_id)?.element(ref) else {
+            throw DaemonError(code: Code.accessibilityError, message: "no live element for ref")
+        }
+        if a.kind == "click" {
+            try requireFrontmost(a.bundle_id)
+            let result = AXUIElementPerformAction(el, kAXPressAction as CFString)
+            if result == .success { return }
+            if result == .cannotComplete { throw mutationAXError("click", result) }
+        }
+        if a.kind == "rclick" {
+            try requireFrontmost(a.bundle_id)
+            let result = AXUIElementPerformAction(el, kAXShowMenuAction as CFString)
+            if result == .success { return }
+            if result == .cannotComplete { throw mutationAXError("right click", result) }
+        }
+    }
+    try synthClick(kind: a.kind, at: actionPoint(a, session), bundleID: a.bundle_id)
+}
+
+// synthClick posts a mouse click at a resolved point. Input is delivered to
+// whatever holds focus — the coordinate carries no target identity — which is
 // exactly why the Go side re-checks the frontmost app before every action.
-func synthClick(_ a: ActionWire) throws {
-    let pt = CGPoint(x: a.x ?? 0, y: a.y ?? 0)
+func synthClick(kind: String, at pt: CGPoint, bundleID: String) throws {
     let (down, up, button): (CGEventType, CGEventType, CGMouseButton)
-    if a.kind == "rclick" {
+    if kind == "rclick" {
         (down, up, button) = (.rightMouseDown, .rightMouseUp, .right)
     } else {
         (down, up, button) = (.leftMouseDown, .leftMouseUp, .left)
     }
-    let clicks = a.kind == "dblclick" ? 2 : 1
+    let clicks = kind == "dblclick" ? 2 : 1
     for i in 1...clicks {
+        try requireFrontmost(bundleID)
         if let d = CGEvent(mouseEventSource: nil, mouseType: down, mouseCursorPosition: pt, mouseButton: button) {
             d.setIntegerValueField(.mouseEventClickState, value: Int64(i))
             d.post(tap: .cghidEventTap)
@@ -484,8 +866,41 @@ func synthClick(_ a: ActionWire) throws {
     }
 }
 
-func synthType(_ text: String) throws {
+func synthDrag(_ a: ActionWire, _ session: Session) throws {
+    let start = try actionPoint(a, session)
+    guard let toX = a.to_x, let toY = a.to_y else {
+        throw DaemonError(code: Code.accessibilityError, message: "drag needs to_x and to_y")
+    }
+    let end = CGPoint(x: toX, y: toY)
+    try requirePointInFocusedWindow(end, bundleID: a.bundle_id)
+    guard let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown,
+                             mouseCursorPosition: start, mouseButton: .left),
+          let move = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged,
+                             mouseCursorPosition: end, mouseButton: .left),
+          let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp,
+                           mouseCursorPosition: end, mouseButton: .left) else {
+        throw DaemonError(code: Code.accessibilityError, message: "cannot create drag events")
+    }
+    try requireFrontmost(a.bundle_id)
+    down.post(tap: .cghidEventTap)
+    Thread.sleep(forTimeInterval: 0.08)
+    do {
+        try requireFrontmost(a.bundle_id)
+        move.post(tap: .cghidEventTap)
+        Thread.sleep(forTimeInterval: 0.08)
+        try requireFrontmost(a.bundle_id)
+        up.post(tap: .cghidEventTap)
+    } catch {
+        // Never leave the global mouse button logically held if takeover is
+        // detected mid-drag. A lone mouse-up does not apply the intended drag.
+        up.post(tap: .cghidEventTap)
+        throw error
+    }
+}
+
+func synthType(_ text: String, bundleID: String) throws {
     for scalar in text.unicodeScalars {
+        try requireFrontmost(bundleID)
         var ch = UniChar(scalar.value & 0xffff)
         if let d = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true) {
             d.keyboardSetUnicodeString(stringLength: 1, unicodeString: &ch)
@@ -500,7 +915,7 @@ func synthType(_ text: String) throws {
 
 // synthKey handles a chord like "cmd+s". A minimal keymap covers the common
 // keys; a full xdotool-style map is phase-2 polish.
-func synthKey(_ chord: String) throws {
+func synthKey(_ chord: String, bundleID: String) throws {
     let parts = chord.lowercased().split(separator: "+").map(String.init)
     var flags: CGEventFlags = []
     var keyCode: CGKeyCode?
@@ -516,6 +931,7 @@ func synthKey(_ chord: String) throws {
     guard let kc = keyCode else {
         throw DaemonError(code: Code.unknown, message: "unmapped key in chord: \(chord)")
     }
+    try requireFrontmost(bundleID)
     if let d = CGEvent(keyboardEventSource: nil, virtualKey: kc, keyDown: true) {
         d.flags = flags
         d.post(tap: .cghidEventTap)
@@ -526,12 +942,21 @@ func synthKey(_ chord: String) throws {
     }
 }
 
-func synthScroll(_ a: ActionWire) throws {
+func synthScroll(_ a: ActionWire, _ session: Session) throws {
     let dir = a.direction ?? "down"
     let amount: Int32 = (dir == "up" || dir == "left") ? 3 : -3
     let vertical = (dir == "up" || dir == "down")
+    let point: CGPoint
+    if a.ref != nil || (a.x != nil && a.y != nil) {
+        point = try actionPoint(a, session)
+    } else {
+        let frame = try focusedWindowFrame(a.bundle_id)
+        point = CGPoint(x: frame.midX, y: frame.midY)
+    }
+    try requireFrontmost(a.bundle_id)
     if let e = CGEvent(scrollWheelEvent2Source: nil, units: .line,
                        wheelCount: 1, wheel1: vertical ? amount : 0, wheel2: vertical ? 0 : amount, wheel3: 0) {
+        e.location = point
         e.post(tap: .cghidEventTap)
     }
 }
@@ -549,92 +974,218 @@ func keyCodeFor(_ k: String) -> CGKeyCode? {
 
 // MARK: - Capture
 
-// captureWindow grabs one app window via ScreenCaptureKit — the modern, and now
-// only, path (CGWindowListCreateImage was obsoleted in macOS 15). It converts
-// points → pixels via SCWindow.frame × the display scale, honoring the design's
-// coordinate contract (the helper owns the transform; the Go side sees points).
-@available(macOS 14.0, *)
-func captureWindow(bundleID: String) async throws -> CGImage {
-    let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-    guard let window = content.windows.first(where: {
-        $0.owningApplication?.bundleIdentifier == bundleID && $0.isOnScreen
-    }) else {
-        throw DaemonError(code: Code.unknown, message: "no on-screen window for \(bundleID)")
+func captureHelperURL() -> URL? {
+    if let override = ProcessInfo.processInfo.environment["JCODE_COMPUTERD_CAPTURE"],
+       FileManager.default.isExecutableFile(atPath: override) {
+        return URL(fileURLWithPath: override)
     }
-    let filter = SCContentFilter(desktopIndependentWindow: window)
-    let cfg = SCStreamConfiguration()
-    // pointPixelScale maps points to pixels; contentRect is in points.
-    let scale = filter.pointPixelScale
-    cfg.width = Int(filter.contentRect.width * CGFloat(scale))
-    cfg.height = Int(filter.contentRect.height * CGFloat(scale))
-    return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
+    let daemon = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+    let name = daemon.lastPathComponent
+    let prefix = "jcode-computerd"
+    guard name.hasPrefix(prefix) else { return nil }
+    // jcode-computerd-aarch64-apple-darwin ->
+    // jcode-computerd-capture-aarch64-apple-darwin.
+    let suffix = String(name.dropFirst(prefix.count))
+    let sibling = daemon.deletingLastPathComponent().appendingPathComponent(prefix + "-capture" + suffix)
+    if FileManager.default.isExecutableFile(atPath: sibling.path) { return sibling }
+    let unsuffixed = daemon.deletingLastPathComponent().appendingPathComponent(prefix + "-capture")
+    return FileManager.default.isExecutableFile(atPath: unsuffixed.path) ? unsuffixed : nil
+}
+
+func captureWorkerPermissionState() -> String {
+    guard let helper = captureHelperURL() else { return "unknown" }
+    let process = Process()
+    process.executableURL = helper
+    process.arguments = ["--check-permission"]
+    let stdout = Pipe()
+    process.standardOutput = stdout
+    process.standardError = Pipe()
+    do {
+        try process.run()
+    } catch {
+        return "unknown"
+    }
+
+    let deadline = Date().addingTimeInterval(2)
+    while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
+    if process.isRunning {
+        process.terminate()
+        Thread.sleep(forTimeInterval: 0.05)
+        if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+        process.waitUntilExit()
+        return "unknown"
+    }
+    let raw = stdout.fileHandleForReading.readDataToEndOfFile()
+    guard process.terminationStatus == 0 else { return "unknown" }
+    let state = String(data: raw, encoding: .utf8)?
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    switch state {
+    case "granted", "denied": return state
+    default: return "unknown"
+    }
 }
 
 func handleCapture(_ req: AppRequest, _ session: Session) throws -> CaptureResult {
-    _ = try runningApp(req.app) // fail fast if the app isn't running
+    try checkScreenUnlocked()
+    let app = try requireFrontmost(req.app)
 
     guard #available(macOS 14.0, *) else {
         throw DaemonError(code: Code.unknown, message: "screenshot requires macOS 14+")
     }
-
-    // The socket loop is synchronous; bridge to the async SCK API with a
-    // semaphore. One capture in flight (the whole protocol is serial), so no
-    // contention.
-    let sem = DispatchSemaphore(value: 0)
-    var image: CGImage?
-    var captureErr: Error?
-    Task {
-        do { image = try await captureWindow(bundleID: req.app) } catch { captureErr = error }
-        sem.signal()
-    }
-    _ = sem.wait(timeout: .now() + 10)
-    if let e = captureErr {
-        if e is DaemonError { throw e }
-        throw DaemonError(code: Code.permissionsNotGranted,
-                          message: "window capture failed — Screen Recording permission may not be granted: \(e.localizedDescription)")
-    }
-    guard let img = image else {
-        throw DaemonError(code: Code.unknown, message: "capture produced no image")
+    guard let helper = captureHelperURL() else {
+        throw DaemonError(code: Code.unknown,
+                          message: "jcode-computerd-capture not found next to the daemon")
     }
 
-    let rep = NSBitmapImageRep(cgImage: img)
-    guard let png = rep.representation(using: .png, properties: [:]) else {
-        throw DaemonError(code: Code.unknown, message: "PNG encode failed")
-    }
-    // Write to the shared shots dir and return a reference, keeping the image off
-    // the socket (design §3.4).
+    try? FileManager.default.createDirectory(atPath: session.shotsDir, withIntermediateDirectories: true)
     let id = UUID().uuidString
     let path = (session.shotsDir as NSString).appendingPathComponent("\(id).png")
-    try? FileManager.default.createDirectory(atPath: session.shotsDir, withIntermediateDirectories: true)
     do {
-        try png.write(to: URL(fileURLWithPath: path))
-        return CaptureResult(ref: path, png: nil)
+        let process = Process()
+        process.executableURL = helper
+        var arguments = ["--pid", String(app.processIdentifier), "--output", path]
+        // The AX tools and screenshot must describe the same target. Pass the
+        // focused/main AX window as a title+bounds hint; the capture worker uses
+        // it to disambiguate multi-window apps instead of blindly taking the
+        // largest background window. If AX is unavailable, it safely falls
+        // back to the largest app window so screenshot-only diagnosis remains
+        // possible with Screen Recording permission alone.
+        let targetWindow = accessibilityRoot(app)
+        let title = axString(targetWindow, kAXTitleAttribute)
+        if !title.isEmpty { arguments += ["--window-title", title] }
+        if let frame = elementFrame(targetWindow), frame.width > 1, frame.height > 1 {
+            arguments += [
+                "--window-x", String(Double(frame.origin.x)),
+                "--window-y", String(Double(frame.origin.y)),
+                "--window-width", String(Double(frame.width)),
+                "--window-height", String(Double(frame.height)),
+            ]
+        }
+        process.arguments = arguments
+        let stdout = Pipe()
+        process.standardOutput = stdout
+        let stderr = Pipe()
+        process.standardError = stderr
+        try process.run()
+
+        let deadline = Date().addingTimeInterval(10)
+        while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
+        if process.isRunning {
+            process.terminate()
+            Thread.sleep(forTimeInterval: 0.1)
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+            process.waitUntilExit()
+            try? FileManager.default.removeItem(atPath: path)
+            throw DaemonError(code: Code.unknown, message: "window capture helper timed out")
+        }
+
+        let detail = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let workerData = stdout.fileHandleForReading.readDataToEndOfFile()
+        guard process.terminationStatus == 0 else {
+            try? FileManager.default.removeItem(atPath: path)
+            let suffix = detail.isEmpty ? "status \(process.terminationStatus)" : detail
+            throw DaemonError(code: Code.permissionsNotGranted,
+                              message: "window capture failed — Screen Recording permission may not be granted: \(suffix)")
+        }
+        do {
+            try checkScreenUnlocked()
+        } catch {
+            try? FileManager.default.removeItem(atPath: path)
+            throw error
+        }
+        let attrs = try FileManager.default.attributesOfItem(atPath: path)
+        let byteCount = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+        guard byteCount > 0, byteCount <= maxCaptureBytes else {
+            try? FileManager.default.removeItem(atPath: path)
+            throw DaemonError(code: Code.unknown,
+                              message: "capture helper produced \(byteCount) bytes; maximum is \(maxCaptureBytes)")
+        }
+        let file = try FileHandle(forReadingFrom: URL(fileURLWithPath: path))
+        let header = try file.read(upToCount: 8) ?? Data()
+        try? file.close()
+        guard header.elementsEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) else {
+            try? FileManager.default.removeItem(atPath: path)
+            throw DaemonError(code: Code.unknown, message: "capture helper produced an invalid PNG")
+        }
+        guard let metadata = try? JSONDecoder().decode(CaptureWorkerResult.self, from: workerData) else {
+            try? FileManager.default.removeItem(atPath: path)
+            throw DaemonError(code: Code.unknown, message: "capture helper returned invalid window metadata")
+        }
+        let current = try requireFrontmost(req.app)
+        let currentWindow = accessibilityRoot(current)
+        guard current.processIdentifier == app.processIdentifier,
+              CFEqual(currentWindow, targetWindow) else {
+            try? FileManager.default.removeItem(atPath: path)
+            throw DaemonError(code: Code.userIntervened,
+                              message: "process or focused window changed during screenshot capture")
+        }
+        session.bindWindow(
+            req.app, processIdentifier: app.processIdentifier, rootWindow: targetWindow)
+        return CaptureResult(
+            ref: path, png: nil,
+            x: metadata.x, y: metadata.y, width: metadata.width, height: metadata.height,
+            pixel_width: metadata.pixel_width, pixel_height: metadata.pixel_height)
+    } catch let error as DaemonError {
+        throw error
     } catch {
-        return CaptureResult(ref: nil, png: png)
+        try? FileManager.default.removeItem(atPath: path)
+        throw DaemonError(code: Code.unknown, message: "start window capture helper: \(error.localizedDescription)")
     }
 }
+
+let maxCaptureBytes: Int64 = 20 * 1024 * 1024
 
 // MARK: - Session + dispatch
 
 final class Session {
     private var registries: [String: ElementRegistry] = [:]
+    private var windowBindings: [String: WindowBinding] = [:]
     var gen = 0
     let shotsDir: String
     init(shotsDir: String) { self.shotsDir = shotsDir }
 
-    // registry(for:) returns the per-app element registry, creating it on first
-    // use. It persists across snapshots so an element keeps its Ref (see
-    // ElementRegistry).
-    func registry(for app: String) -> ElementRegistry {
-        if let r = registries[app] { return r }
-        let r = ElementRegistry()
+    func registry(
+        for app: String, processIdentifier: pid_t, rootWindow: AXUIElement
+    ) -> ElementRegistry {
+        if let existing = registries[app],
+           existing.matches(processIdentifier: processIdentifier, rootWindow: rootWindow) {
+            return existing
+        }
+        let r = ElementRegistry(processIdentifier: processIdentifier, rootWindow: rootWindow)
         registries[app] = r
         return r
     }
+
+    func boundRegistry(for app: String) -> ElementRegistry? { registries[app] }
+
+    func bindWindow(_ app: String, processIdentifier: pid_t, rootWindow: AXUIElement) {
+        if let registry = registries[app],
+           !registry.matches(processIdentifier: processIdentifier, rootWindow: rootWindow) {
+            // A screenshot may observe a new window without rebuilding its AX
+            // tree. Drop refs from the old window so none can target it later.
+            registries.removeValue(forKey: app)
+        }
+        windowBindings[app] = WindowBinding(
+            processIdentifier: processIdentifier, rootWindow: rootWindow)
+    }
+
+    func matchesBoundWindow(
+        _ app: String, processIdentifier: pid_t, rootWindow: AXUIElement
+    ) -> Bool {
+        guard let binding = windowBindings[app] else { return false }
+        return binding.processIdentifier == processIdentifier && CFEqual(binding.rootWindow, rootWindow)
+    }
+}
+
+struct WindowBinding {
+    let processIdentifier: pid_t
+    let rootWindow: AXUIElement
 }
 
 func dispatch(_ req: Envelope, _ session: Session) -> Envelope {
     do {
+        currentAXFatalError = nil
         switch req.type {
         case "list_apps":
             return Envelope(type: "result", id: req.id, payload: encodePayload(handleListApps()))
@@ -647,10 +1198,13 @@ func dispatch(_ req: Envelope, _ session: Session) -> Envelope {
             let r = try decodePayload(AppRequest.self, req.payload)
             return Envelope(type: "result", id: req.id, payload: encodePayload(try handleCapture(r, session)))
         case "launch":
+            try checkScreenUnlocked()
             let r = try decodePayload(AppRequest.self, req.payload)
             try handleLaunch(r)
+            settleUI()
             return Envelope(type: "result", id: req.id, payload: encodePayload([String: String]()))
         case "read_clipboard":
+            try checkScreenUnlocked()
             return Envelope(type: "result", id: req.id, payload: encodePayload(handleReadClipboard()))
         case "perform":
             let r = try decodePayload(PerformRequest.self, req.payload)
@@ -672,38 +1226,166 @@ func errorEnvelope(_ id: UInt64, _ code: Int, _ msg: String) -> Envelope {
 
 // MARK: - Server (unix socket, token auth)
 
+func currentPong() -> PongPayload {
+    // These calls only inspect TCC state; neither asks the user or opens System
+    // Settings. Accessibility belongs to this long-lived AX daemon. Screen
+    // Recording belongs to the separate executable that actually calls
+    // ScreenCaptureKit, so query that worker instead of sampling this process
+    // and risking a false-green result under identity-scoped TCC.
+    PongPayload(
+        server_api_version: apiVersion,
+        platform: "darwin",
+        helper_version: helperVersion,
+        accessibility_permission: AXIsProcessTrusted() ? "granted" : "denied",
+        screen_recording_permission: captureWorkerPermissionState())
+}
+
+func handlePing(_ req: Envelope, token: String) -> Envelope {
+    guard let ping = try? decodePayload(PingPayload.self, req.payload) else {
+        return errorEnvelope(req.id, Code.unknown, "invalid ping payload")
+    }
+    if ping.token != token {
+        return errorEnvelope(req.id, Code.senderNotAuthenticated, "bad token")
+    }
+    if ping.client_api_version != apiVersion {
+        return errorEnvelope(req.id, Code.incompatibleVersion, "version mismatch")
+    }
+    return Envelope(type: "pong", id: req.id, payload: encodePayload(currentPong()))
+}
+
 func serveConnection(_ fd: Int32, token: String, shotsDir: String) {
     defer { close(fd) }
     let session = Session(shotsDir: shotsDir)
 
-    // First frame must be a ping carrying the token. A unix socket is reachable
-    // by any same-uid process, so nothing is served until the token — which
-    // lived only in a 0600 file — is presented (design §4).
+    // runServer has already checked that the kernel-reported peer PID is the
+    // jcode process that spawned this daemon. The token is a second factor for
+    // protocol authentication; neither a readable same-uid socket nor the
+    // long-lived token file alone is accepted as authority to drive TCC-granted
+    // UI automation.
     guard let first = try? readFrame(fd), first.type == "ping" else {
         return
     }
-    guard let ping = try? decodePayload(PingPayload.self, first.payload) else { return }
-    if ping.token != token {
-        _ = try? writeFrame(fd, errorEnvelope(first.id, Code.senderNotAuthenticated, "bad token"))
-        return
-    }
-    if ping.client_api_version != apiVersion {
-        _ = try? writeFrame(fd, errorEnvelope(first.id, Code.incompatibleVersion, "version mismatch"))
-        return
-    }
-    let pong = PongPayload(server_api_version: apiVersion, platform: "darwin", helper_version: helperVersion)
-    guard (try? writeFrame(fd, Envelope(type: "pong", id: first.id, payload: encodePayload(pong)))) != nil else { return }
+    let firstResponse = handlePing(first, token: token)
+    guard (try? writeFrame(fd, firstResponse)) != nil, firstResponse.type == "pong" else { return }
 
     // Serve requests until the client disconnects.
     while let req = try? readFrame(fd) {
-        let resp = dispatch(req, session)
-        if (try? writeFrame(fd, resp)) == nil { return }
+        if req.type == "ping" {
+            // Re-sample both grants so a settings poll can observe a permission
+            // change without restarting either process. A bad re-authentication
+            // attempt terminates this connection after its error response.
+            let resp = handlePing(req, token: token)
+            if (try? writeFrame(fd, resp)) == nil || resp.type != "pong" { return }
+        } else {
+            let resp = dispatch(req, session)
+            if (try? writeFrame(fd, resp)) == nil { return }
+        }
     }
 }
 
 let helperVersion = "0.1.0"
 
-func runServer(socketPath: String, tokenFile: String, shotsDir: String) {
+func peerPID(_ fd: Int32) -> pid_t? {
+    var value: pid_t = 0
+    var length = socklen_t(MemoryLayout<pid_t>.size)
+    let result = withUnsafeMutablePointer(to: &value) { pointer in
+        getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, pointer, &length)
+    }
+    return result == 0 ? value : nil
+}
+
+func processIsAlive(_ pid: pid_t) -> Bool {
+    errno = 0
+    if kill(pid, 0) == 0 { return true }
+    // EPERM still proves that a process owns the PID; only ESRCH is dead.
+    return errno != ESRCH
+}
+
+let handoffInstanceHexLength = 32
+let legacyHandoffCleanupGrace: TimeInterval = 10 * 60
+
+struct HandoffDirectoryOwner {
+    let pid: pid_t
+    let legacy: Bool
+}
+
+// Accept the migration format handoff-PID and the process-instance format
+// handoff-PID-<128-bit-lowercase-hex>. A strict parser keeps similarly named
+// user files outside this daemon's ownership boundary.
+func parseHandoffDirectoryOwner(_ name: String) -> HandoffDirectoryOwner? {
+    let prefix = "handoff-"
+    guard name.hasPrefix(prefix) else { return nil }
+    let suffix = name.dropFirst(prefix.count)
+    let parts = suffix.split(separator: "-", omittingEmptySubsequences: false)
+    guard parts.count == 1 || parts.count == 2,
+          let owner = Int32(String(parts[0])),
+          owner > 1 else { return nil }
+    if parts.count == 1 {
+        return HandoffDirectoryOwner(pid: owner, legacy: true)
+    }
+    let instance = parts[1]
+    guard instance.utf8.count == handoffInstanceHexLength,
+          instance.utf8.allSatisfy({ byte in
+              (byte >= 48 && byte <= 57) || (byte >= 97 && byte <= 102)
+          }) else { return nil }
+    return HandoffDirectoryOwner(pid: owner, legacy: false)
+}
+
+func legacyHandoffIsOldEnough(_ entry: URL, now: Date = Date()) -> Bool {
+    guard let values = try? entry.resourceValues(forKeys: [.contentModificationDateKey]),
+          let modified = values.contentModificationDate else { return false }
+    return now.timeIntervalSince(modified) >= legacyHandoffCleanupGrace
+}
+
+// Recover process-instance handoff directories left by clients that crashed
+// before their daemon could exit. The exact current path is never swept. New
+// nonce names remain distinct across PID reuse; legacy PID-only names get an
+// age grace and a second liveness check during the migration window.
+func cleanupStaleHandoffDirectories(shotsDir: String, currentClientPID: pid_t) {
+    let manager = FileManager.default
+    let current = URL(fileURLWithPath: shotsDir).standardizedFileURL
+    let parent = current.deletingLastPathComponent()
+    guard let entries = try? manager.contentsOfDirectory(
+        at: parent,
+        includingPropertiesForKeys: nil,
+        options: [.skipsHiddenFiles]
+    ) else { return }
+    for entry in entries {
+        let name = entry.lastPathComponent
+        guard entry.standardizedFileURL.path != current.path,
+              let parsed = parseHandoffDirectoryOwner(name) else { continue }
+        if parsed.pid == currentClientPID {
+            // Same PID but a different nonce/legacy name can only belong to a
+            // previous incarnation; the exact current path was skipped above.
+            try? manager.removeItem(at: entry)
+            continue
+        }
+        guard !processIsAlive(parsed.pid) else { continue }
+        if parsed.legacy && !legacyHandoffIsOldEnough(entry) { continue }
+        // Narrow the legacy dead-check/remove race. Nonce paths do not collide
+        // with a new incarnation even if the numeric PID is reused here.
+        guard !processIsAlive(parsed.pid) else { continue }
+        try? manager.removeItem(at: entry)
+    }
+}
+
+func runServer(socketPath: String, tokenFile: String, shotsDir: String, clientPID: pid_t) {
+    // A canceled Go RPC may close its socket before this process writes the
+    // response. Treat EPIPE as a normal connection failure; the default SIGPIPE
+    // action would otherwise terminate the whole long-lived AX daemon.
+    signal(SIGPIPE, SIG_IGN)
+    // Set the process-wide default used by AX calls. A hung target app must not
+    // pin the serial daemon forever after the Go socket deadline has elapsed.
+    _ = AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 3.0)
+
+    let fileManager = FileManager.default
+    cleanupStaleHandoffDirectories(shotsDir: shotsDir, currentClientPID: clientPID)
+    // This exact path belongs only to one client process instance. Remove a
+    // reconnect orphan before serving, and clean all normal-return paths
+    // (including idle exit).
+    try? fileManager.removeItem(atPath: shotsDir)
+    defer { try? fileManager.removeItem(atPath: shotsDir) }
+
     guard let tokenData = try? String(contentsOfFile: tokenFile, encoding: .utf8) else {
         FileHandle.standardError.write("cannot read token file: \(tokenFile)\n".data(using: .utf8)!)
         exit(1)
@@ -722,6 +1404,10 @@ func runServer(socketPath: String, tokenFile: String, shotsDir: String) {
     unlink(socketPath)
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
     if fd < 0 { perror("socket"); exit(1) }
+    defer {
+        close(fd)
+        unlink(socketPath)
+    }
 
     var addr = sockaddr_un()
     addr.sun_family = sa_family_t(AF_UNIX)
@@ -759,8 +1445,7 @@ func runServer(socketPath: String, tokenFile: String, shotsDir: String) {
         let pr = poll(&pfd, 1, idleMS)
         if pr == 0 {
             // Idle window elapsed with no connection. Exit cleanly.
-            unlink(socketPath)
-            exit(0)
+            return
         }
         if pr < 0 {
             if errno == EINTR { continue }
@@ -768,6 +1453,10 @@ func runServer(socketPath: String, tokenFile: String, shotsDir: String) {
         }
         let client = accept(fd, nil, nil)
         if client < 0 { continue }
+        guard peerPID(client) == clientPID else {
+            close(client)
+            continue
+        }
         // One connection at a time — UI automation is a serial resource, and the
         // Go client already serializes; a second connection would race the AX
         // state. Handle inline rather than spawning a thread.
@@ -792,8 +1481,10 @@ func parseFlag(_ name: String) -> String? {
 
 guard let socketPath = parseFlag("--socket"),
       let tokenFile = parseFlag("--token-file"),
-      let shotsDir = parseFlag("--shots-dir") else {
-    FileHandle.standardError.write("usage: jcode-computerd --socket <path> --token-file <path> --shots-dir <path>\n".data(using: .utf8)!)
+      let shotsDir = parseFlag("--shots-dir"),
+      let clientPIDText = parseFlag("--client-pid"),
+      let clientPID = Int32(clientPIDText), clientPID > 1 else {
+    FileHandle.standardError.write("usage: jcode-computerd --socket <path> --token-file <path> --shots-dir <path> --client-pid <pid>\n".data(using: .utf8)!)
     exit(2)
 }
-runServer(socketPath: socketPath, tokenFile: tokenFile, shotsDir: shotsDir)
+runServer(socketPath: socketPath, tokenFile: tokenFile, shotsDir: shotsDir, clientPID: clientPID)

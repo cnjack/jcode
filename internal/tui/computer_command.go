@@ -11,8 +11,8 @@ import (
 // computer-use status, and `/computer on` / `/computer off` to toggle it.
 //
 // Mirrors handleBrowserInput. The status output leans hard on naming the one
-// gate that is shut, because computer use has three independent ones (enabled /
-// backend / macOS permission) and "it doesn't work" is otherwise unactionable.
+// gate that is shut, because computer use has independent enablement, helper,
+// Accessibility and Screen Recording gates.
 func (m *Model) handleComputerInput(prompt string, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	m.textarea.SetValue("")
 	fields := strings.Fields(prompt)
@@ -59,19 +59,33 @@ func (m *Model) handleComputerInput(prompt string, cmds []tea.Cmd) (tea.Model, t
 		m.lines = append(m.lines, textLine(fmt.Sprintf("  %s  %s", toolNameStyle.Render(label), val)))
 	}
 
+	if !st.Supported {
+		line("support", "unavailable on "+st.Platform)
+		if st.Detail != "" {
+			m.lines = append(m.lines, textLine("  "+st.Detail))
+		}
+		m.refreshViewport()
+		return m, tea.Batch(cmds...)
+	}
+
 	if st.Enabled {
 		line("state  ", "enabled")
 	} else {
 		line("state  ", "disabled  (/computer on to enable)")
 	}
-	backend := st.Backend
-	if backend == "" {
-		backend = "auto"
+	helper := "not installed"
+	if st.HelperInstalled {
+		helper = "installed"
 	}
-	if st.BackendKind != "" && st.BackendKind != backend {
-		backend += " → " + st.BackendKind
+	if st.HelperConnected {
+		helper = "connected"
 	}
-	line("backend", backend)
+	if st.HelperVersion != "" {
+		helper += " (" + st.HelperVersion + ")"
+	}
+	line("helper ", helper)
+	line("access ", permissionLabel(st.Accessibility, st.Enabled))
+	line("screen ", permissionLabel(st.ScreenRecording, st.Enabled))
 
 	if st.Available {
 		line("ready  ", "yes")
@@ -85,4 +99,18 @@ func (m *Model) handleComputerInput(prompt string, cmds []tea.Cmd) (tea.Model, t
 
 	m.refreshViewport()
 	return m, tea.Batch(cmds...)
+}
+
+func permissionLabel(state string, enabled bool) string {
+	switch state {
+	case "granted":
+		return "granted"
+	case "denied":
+		return "not granted — open System Settings > Privacy & Security"
+	default:
+		if !enabled {
+			return "not checked (computer use is off)"
+		}
+		return "unknown — update or reinstall jcode, then check again"
+	}
 }

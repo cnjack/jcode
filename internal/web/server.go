@@ -642,9 +642,15 @@ func isAllowedWebOrigin(r *http.Request) bool {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		// Only reflect CORS headers for trusted origins; a disallowed cross-origin
-		// request gets none, so the browser blocks the response (and its preflight).
-		if origin != "" && isAllowedWebOrigin(r) {
+		// CORS response headers alone are not an authorization boundary: a hostile
+		// page can send a "simple" no-cors POST whose response is unreadable but
+		// whose side effect still happens. Reject an untrusted browser Origin before
+		// any API handler can mutate config, start an agent, or control the Mac.
+		if origin != "" && !isAllowedWebOrigin(r) {
+			http.Error(w, "cross-origin request denied", http.StatusForbidden)
+			return
+		}
+		if origin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")

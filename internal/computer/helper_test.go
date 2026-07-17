@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -70,7 +71,11 @@ func (d *mockDaemon) installDefaults() {
 			return errFrame(id, codeIncompatibleVersion, "version mismatch")
 		}
 		return envelope{Type: typePong, ID: id, Payload: mustJSON(pongPayload{
-			ServerAPIVersion: apiVersion, Platform: "darwin", HelperVersion: "test-1.0",
+			ServerAPIVersion:          apiVersion,
+			Platform:                  "darwin",
+			HelperVersion:             "test-1.0",
+			AccessibilityPermission:   PermissionGranted,
+			ScreenRecordingPermission: PermissionDenied,
 		})}
 	})
 	d.on(typeListApps, func(id uint64, _ json.RawMessage) envelope {
@@ -89,7 +94,10 @@ func (d *mockDaemon) installDefaults() {
 		}})
 	})
 	d.on(typeCapture, func(id uint64, _ json.RawMessage) envelope {
-		return result(id, captureResult{PNG: []byte("\x89PNG\r\n\x1a\nfake")})
+		return result(id, captureResult{
+			PNG: []byte("\x89PNG\r\n\x1a\nfake"),
+			X:   40, Y: 80, Width: 800, Height: 600, PixelWidth: 1600, PixelHeight: 1200,
+		})
 	})
 	d.on(typeLaunch, func(id uint64, _ json.RawMessage) envelope { return result(id, struct{}{}) })
 	d.on(typeReadClipboard, func(id uint64, _ json.RawMessage) envelope {
@@ -184,6 +192,9 @@ func TestHelperHandshakeAndMethods(t *testing.T) {
 	if h.platform != "darwin" || h.helperVersion != "test-1.0" {
 		t.Errorf("handshake did not capture pong fields: platform=%q version=%q", h.platform, h.helperVersion)
 	}
+	if got := h.PermissionStatus(); got.Accessibility != PermissionGranted || got.ScreenRecording != PermissionDenied {
+		t.Errorf("handshake permissions = %+v, want accessibility=granted screen-recording=denied", got)
+	}
 
 	apps, err := h.ListApps(ctx)
 	if err != nil || len(apps) != 2 || apps[0].BundleID != "com.apple.Notes" {
@@ -197,9 +208,10 @@ func TestHelperHandshakeAndMethods(t *testing.T) {
 	if err != nil || len(nodes) != 2 || nodes[1].Ref != 101 {
 		t.Fatalf("Tree = %v, %v", nodes, err)
 	}
-	png, err := h.Capture(ctx, "com.apple.Notes")
-	if err != nil || !strings.HasPrefix(string(png), "\x89PNG") {
-		t.Fatalf("Capture = %q, %v", png, err)
+	shot, err := h.CaptureVisual(ctx, "com.apple.Notes")
+	if err != nil || !strings.HasPrefix(string(shot.PNG), "\x89PNG") ||
+		shot.X != 40 || shot.Width != 800 || shot.PixelWidth != 1600 {
+		t.Fatalf("CaptureVisual = %+v, %v", shot, err)
 	}
 	if err := h.Launch(ctx, "com.apple.Notes"); err != nil {
 		t.Fatalf("Launch: %v", err)
@@ -220,7 +232,138 @@ func TestHelperHandshakeAndMethods(t *testing.T) {
 	}
 }
 
-// --- the token is the actual boundary (design §4) ---
+func TestHelperOldPongDefaultsPermissionsToUnknown(t *testing.T) {
+	h, _ := dialMock(t, func(d *mockDaemon) {
+		d.on(typePing, func(id uint64, _ json.RawMessage) envelope {
+			// The permission fields were added without changing the API version.
+			// Their absence is how a new client recognizes an older daemon.
+			return envelope{Type: typePong, ID: id, Payload: mustJSON(struct {
+				ServerAPIVersion string `json:"server_api_version"`
+				Platform         string `json:"platform"`
+				HelperVersion    string `json:"helper_version"`
+			}{apiVersion, "darwin", "old"})}
+		})
+	})
+
+	if got := h.PermissionStatus(); got.Accessibility != PermissionUnknown || got.ScreenRecording != PermissionUnknown {
+		t.Fatalf("old pong permissions = %+v, want unknown/unknown", got)
+	}
+}
+
+func TestPongPermissionFieldsAreAdditiveForLegacyClients(t *testing.T) {
+	raw := mustJSON(pongPayload{
+		ServerAPIVersion:          apiVersion,
+		Platform:                  "darwin",
+		HelperVersion:             "new",
+		AccessibilityPermission:   PermissionGranted,
+		ScreenRecordingPermission: PermissionDenied,
+	})
+	var legacy struct {
+		ServerAPIVersion string `json:"server_api_version"`
+		Platform         string `json:"platform"`
+		HelperVersion    string `json:"helper_version"`
+	}
+	if err := json.Unmarshal(raw, &legacy); err != nil {
+		t.Fatalf("legacy client rejected additive pong fields: %v", err)
+	}
+	if legacy.ServerAPIVersion != apiVersion || legacy.Platform != "darwin" || legacy.HelperVersion != "new" {
+		t.Fatalf("legacy pong decode lost original fields: %+v", legacy)
+	}
+}
+
+func TestHelperUnrecognizedPermissionStateFailsClosed(t *testing.T) {
+	h, _ := dialMock(t, func(d *mockDaemon) {
+		d.on(typePing, func(id uint64, _ json.RawMessage) envelope {
+			return envelope{Type: typePong, ID: id, Payload: mustJSON(pongPayload{
+				ServerAPIVersion:          apiVersion,
+				Platform:                  "darwin",
+				AccessibilityPermission:   PermissionState("yes"),
+				ScreenRecordingPermission: PermissionState("probably"),
+			})}
+		})
+	})
+
+	if got := h.PermissionStatus(); got.Accessibility != PermissionUnknown || got.ScreenRecording != PermissionUnknown {
+		t.Fatalf("unrecognized pong permissions = %+v, want unknown/unknown", got)
+	}
+}
+
+func TestHelperRefreshesPermissionStatusWithAuthenticatedPing(t *testing.T) {
+	var pings int
+	h, d := dialMock(t, func(d *mockDaemon) {
+		d.on(typePing, func(id uint64, payload json.RawMessage) envelope {
+			var p pingPayload
+			_ = json.Unmarshal(payload, &p)
+			if p.Token != d.token || p.ClientAPIVersion != apiVersion {
+				return errFrame(id, codeSenderNotAuthenticated, "bad refresh credentials")
+			}
+			pings++
+			state := PermissionDenied
+			if pings > 1 {
+				state = PermissionGranted
+			}
+			return envelope{Type: typePong, ID: id, Payload: mustJSON(pongPayload{
+				ServerAPIVersion:          apiVersion,
+				Platform:                  "darwin",
+				AccessibilityPermission:   state,
+				ScreenRecordingPermission: state,
+			})}
+		})
+	})
+
+	if got := h.PermissionStatus(); got.Accessibility != PermissionDenied || got.ScreenRecording != PermissionDenied {
+		t.Fatalf("initial permissions = %+v, want denied/denied", got)
+	}
+	got, err := h.RefreshPermissionStatus(context.Background())
+	if err != nil {
+		t.Fatalf("RefreshPermissionStatus: %v", err)
+	}
+	if got.Accessibility != PermissionGranted || got.ScreenRecording != PermissionGranted {
+		t.Fatalf("refreshed permissions = %+v, want granted/granted", got)
+	}
+	if gotPings := countRequests(d.seen(), typePing); gotPings != 2 {
+		t.Fatalf("ping requests = %d, want handshake + refresh", gotPings)
+	}
+}
+
+// --- per-instance admission and action wire fidelity (design §4) ---
+
+func TestActionWirePreservesExplicitZeroCoordinates(t *testing.T) {
+	wire := actionToWire(Action{
+		Kind: "drag", BundleID: "com.example.Canvas",
+		HasX: true, HasY: true, HasToX: true, HasToY: true,
+	})
+	encoded, err := json.Marshal(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"x", "y", "to_x", "to_y"} {
+		value, ok := fields[name]
+		if !ok || string(value) != "0" {
+			t.Fatalf("explicit zero coordinate %q was lost: %s", name, encoded)
+		}
+	}
+
+	withoutCoordinates, err := json.Marshal(actionToWire(Action{
+		Kind: "press", BundleID: "com.example.Canvas", Key: "escape",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var absent map[string]json.RawMessage
+	if err := json.Unmarshal(withoutCoordinates, &absent); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"x", "y", "to_x", "to_y"} {
+		if _, ok := absent[name]; ok {
+			t.Fatalf("unused coordinate %q was unexpectedly encoded: %s", name, withoutCoordinates)
+		}
+	}
+}
 
 func TestHelperRejectsBadToken(t *testing.T) {
 	client, server := net.Pipe()
@@ -327,6 +470,122 @@ func TestHelperContextDeadlineBoundsHang(t *testing.T) {
 	}
 }
 
+// --- a dead daemon reconnects on the next request, never by replaying one ---
+
+func TestHelperReconnectsAfterEOFWithoutReplayingMutation(t *testing.T) {
+	h, first := dialMock(t, func(d *mockDaemon) {
+		d.on(typePerform, func(id uint64, _ json.RawMessage) envelope {
+			_ = d.conn.Close() // request was received; response is lost
+			return result(id, struct{}{})
+		})
+	})
+
+	var reconnects int
+	var second *mockDaemon
+	h.redial = func(context.Context) (*helperBackend, error) {
+		reconnects++
+		fresh, daemon := dialMock(t, nil)
+		second = daemon
+		return fresh, nil
+	}
+
+	err := h.Perform(context.Background(), Action{Kind: "click", BundleID: "com.apple.Notes", Ref: 101})
+	if err == nil || !strings.Contains(err.Error(), "outcome is unknown") {
+		t.Fatalf("lost Perform response must report an unknown outcome, got %v", err)
+	}
+	if reconnects != 0 {
+		t.Fatalf("failed mutation was replayed/redialed in the same call: reconnects=%d", reconnects)
+	}
+
+	apps, err := h.ListApps(context.Background())
+	if err != nil || len(apps) == 0 {
+		t.Fatalf("next read did not recover the helper: apps=%v err=%v", apps, err)
+	}
+	if reconnects != 1 {
+		t.Fatalf("reconnects=%d, want exactly one", reconnects)
+	}
+	if got := countRequests(first.seen(), typePerform); got != 1 {
+		t.Fatalf("first daemon saw Perform %d times, want 1", got)
+	}
+	if got := countRequests(second.seen(), typePerform); got != 0 {
+		t.Fatalf("replacement daemon saw replayed Perform %d times", got)
+	}
+}
+
+func TestHelperConcurrentCallsShareOneReconnect(t *testing.T) {
+	h, _ := dialMock(t, nil)
+	h.mu.Lock()
+	h.markDeadLocked()
+	h.mu.Unlock()
+
+	var mu sync.Mutex
+	reconnects := 0
+	h.redial = func(context.Context) (*helperBackend, error) {
+		mu.Lock()
+		reconnects++
+		mu.Unlock()
+		fresh, _ := dialMock(t, nil)
+		return fresh, nil
+	}
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := h.ListApps(context.Background()); err != nil {
+				t.Errorf("ListApps after reconnect: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	mu.Lock()
+	defer mu.Unlock()
+	if reconnects != 1 {
+		t.Fatalf("concurrent callers caused %d reconnects, want 1", reconnects)
+	}
+}
+
+func TestSessionInvalidatesUIDsWhenHelperReconnects(t *testing.T) {
+	h, _ := dialMock(t, nil)
+	mgr := NewManager(Config{Enabled: true, MaxActionsPerBatch: 20}, t.TempDir())
+	sess := newSession(mgr, h)
+	sess.Grant([]string{"com.apple.Notes"}, false, false, false)
+
+	text, err := sess.Snapshot(context.Background(), "com.apple.Notes", "interactive", 0, true)
+	if err != nil || !strings.Contains(text, "[e1]") {
+		t.Fatalf("initial snapshot = %q, %v", text, err)
+	}
+
+	h.mu.Lock()
+	h.markDeadLocked()
+	h.mu.Unlock()
+	var second *mockDaemon
+	h.redial = func(context.Context) (*helperBackend, error) {
+		fresh, daemon := dialMock(t, nil) // deliberately reuses Ref 101
+		second = daemon
+		return fresh, nil
+	}
+
+	_, err = sess.Act(context.Background(), []ActRequest{{Action: "click", UID: "e1"}})
+	if err == nil || !strings.Contains(err.Error(), "no snapshot") {
+		t.Fatalf("old uid survived a daemon generation change: %v", err)
+	}
+	if got := countRequests(second.seen(), typePerform); got != 0 {
+		t.Fatalf("replacement daemon received an action for an old uid (%d Perform calls)", got)
+	}
+}
+
+func countRequests(requests []string, want string) int {
+	count := 0
+	for _, request := range requests {
+		if request == want {
+			count++
+		}
+	}
+	return count
+}
+
 // --- a desynced response id is detected, not silently accepted ---
 
 func TestHelperDetectsIDDesync(t *testing.T) {
@@ -334,6 +593,14 @@ func TestHelperDetectsIDDesync(t *testing.T) {
 	_, err := h.ListApps(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "desync") {
 		t.Fatalf("a mismatched response id must be caught, got %v", err)
+	}
+}
+
+func TestHelperMutationIDDesyncReportsUnknownOutcome(t *testing.T) {
+	h, _ := dialMock(t, func(d *mockDaemon) { d.wrongID = true })
+	err := h.Perform(context.Background(), Action{Kind: "click", BundleID: "com.apple.Notes", Ref: 101})
+	if err == nil || !strings.Contains(err.Error(), "desync") || !strings.Contains(err.Error(), "outcome is unknown") {
+		t.Fatalf("mutation protocol desync must report unknown outcome, got %v", err)
 	}
 }
 
@@ -442,4 +709,171 @@ func TestReadShotRefRejectsTraversal(t *testing.T) {
 	if b, err := h.readShotRef(inside); err != nil || string(b) != "png" {
 		t.Errorf("a file inside the shots dir should read: %q %v", b, err)
 	}
+	if _, err := os.Stat(inside); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("IPC screenshot handoff file was not removed after reading: %v", err)
+	}
+}
+
+func TestReadShotRefRejectsOversizedFileAndRemovesHandoff(t *testing.T) {
+	h := &helperBackend{shotsDir: t.TempDir()}
+	inside := filepath.Join(h.shotsDir, "oversized.png")
+	f, err := os.Create(inside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(MaxScreenshotBytes + 1); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.readShotRef(inside); err == nil || !strings.Contains(err.Error(), "maximum") {
+		t.Fatalf("oversized screenshot error=%v, want hard size rejection", err)
+	}
+	if _, err := os.Stat(inside); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("rejected IPC screenshot was not removed: %v", err)
+	}
+}
+
+func TestReadShotRefRejectsSymlink(t *testing.T) {
+	h := &helperBackend{shotsDir: t.TempDir()}
+	target := filepath.Join(t.TempDir(), "private.png")
+	if err := os.WriteFile(target, []byte("private"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(h.shotsDir, "shot.png")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.readShotRef(link); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("symlink screenshot error=%v, want rejection", err)
+	}
+}
+
+func TestSelectHelperBinSkipsCaptureWorker(t *testing.T) {
+	dir := t.TempDir()
+	capture := filepath.Join(dir, "jcode-computerd-capture-x86_64-apple-darwin")
+	daemon := filepath.Join(dir, "jcode-computerd-x86_64-apple-darwin")
+	for _, path := range []string{capture, daemon} {
+		if err := os.WriteFile(path, []byte("test"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Capture sorts before x86_64, reproducing the dev/release directory shape
+	// where the old first-executable logic selected the wrong process.
+	if got := selectHelperBin([]string{capture, daemon}); got != daemon {
+		t.Fatalf("selectHelperBin=%q, want daemon %q", got, daemon)
+	}
+}
+
+func TestComputerPathsAreStableAndIsolatedPerProcessInstance(t *testing.T) {
+	const firstInstance = "00112233445566778899aabbccddeeff"
+	const secondInstance = "ffeeddccbbaa99887766554433221100"
+	root := t.TempDir()
+	first := computerPathsForInstance(root, 1001, firstInstance)
+	reconnect := computerPathsForInstance(root, 1001, firstInstance)
+	second := computerPathsForInstance(root, 1001, secondInstance)
+	if first != reconnect {
+		t.Fatalf("same process instance changed helper paths: first=%+v reconnect=%+v", first, reconnect)
+	}
+	if first.socket == second.socket || first.shotsDir == second.shotsDir {
+		t.Fatalf("process-instance helper rendezvous collided: first=%+v second=%+v", first, second)
+	}
+	if first.tokenFile != second.tokenFile {
+		t.Fatalf("same PID should keep its stable token file: first=%+v second=%+v", first, second)
+	}
+	if !strings.Contains(first.socket, firstInstance) || !strings.Contains(second.socket, secondInstance) ||
+		!strings.Contains(first.shotsDir, "1001-"+firstInstance) ||
+		!strings.Contains(second.shotsDir, "1001-"+secondInstance) {
+		t.Fatalf("helper paths do not identify their process instance: first=%+v second=%+v", first, second)
+	}
+}
+
+func TestHelperProcessInstanceIDIsStableAndCanonical(t *testing.T) {
+	first, err := loadHelperProcessInstanceID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := loadHelperProcessInstanceID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("process instance changed across reconnects: %q != %q", first, second)
+	}
+	if !validHelperHandoffName("handoff-1001-" + first) {
+		t.Fatalf("process instance id is not canonical lowercase hex: %q", first)
+	}
+}
+
+func TestHelperHandoffCleanupIsProcessScoped(t *testing.T) {
+	root := t.TempDir()
+	first := computerPathsForInstance(root, 1001, "00112233445566778899aabbccddeeff").shotsDir
+	second := computerPathsForInstance(root, 1001, "ffeeddccbbaa99887766554433221100").shotsDir
+	if err := os.MkdirAll(first, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(second, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(first, "orphan.png"), []byte("first"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	secondShot := filepath.Join(second, "active.png")
+	if err := os.WriteFile(secondShot, []byte("second"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := removeOwnedHelperHandoffDir(first); err != nil {
+		t.Fatal(err)
+	}
+	requirePathState(t, first, false)
+	requirePathState(t, secondShot, true)
+
+	unsafe := t.TempDir()
+	if err := removeOwnedHelperHandoffDir(unsafe); err == nil {
+		t.Fatal("handoff cleanup accepted a directory without the handoff prefix")
+	}
+	requirePathState(t, unsafe, true)
+	for _, name := range []string{
+		"handoff-1001",
+		"handoff-1001-00112233445566778899aabbccddeeff",
+	} {
+		if !validHelperHandoffName(name) {
+			t.Errorf("validHelperHandoffName(%q)=false", name)
+		}
+	}
+	for _, name := range []string{
+		"handoff-owned", "handoff-1", "handoff-1001-short", "handoff-1001-ABCDEF00112233445566778899AABBCC",
+	} {
+		if validHelperHandoffName(name) {
+			t.Errorf("validHelperHandoffName(%q)=true", name)
+		}
+	}
+}
+
+func TestHelperCloseRemovesOnlyOwnedHandoffDirectory(t *testing.T) {
+	owned := filepath.Join(t.TempDir(), "handoff-1001-00112233445566778899aabbccddeeff")
+	if err := os.MkdirAll(owned, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(owned, "orphan.png"), []byte("pixels"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := &helperBackend{shotsDir: owned, ownsShotsDir: true}
+	if err := h.Close(); err != nil {
+		t.Fatal(err)
+	}
+	requirePathState(t, owned, false)
+
+	unowned := filepath.Join(t.TempDir(), "injected-test-shots")
+	if err := os.MkdirAll(unowned, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	injected := &helperBackend{shotsDir: unowned}
+	if err := injected.Close(); err != nil {
+		t.Fatal(err)
+	}
+	requirePathState(t, unowned, true)
 }

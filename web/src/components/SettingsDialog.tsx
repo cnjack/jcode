@@ -46,6 +46,8 @@ import {
   LockClosedIcon,
   XMarkIcon,
   MinusIcon,
+  ArrowPathIcon,
+  ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
@@ -53,6 +55,7 @@ import { uiActions, modelActions, loadConfig, loadModels } from '../app/store'
 import { ProviderIcon } from './ProviderIcon'
 import { api } from '../lib/api'
 import { openRemoteConnect } from '../lib/remote'
+import { openUrl } from '../lib/useDesktop'
 import { LOCALE_LABELS, SUPPORTED_LOCALES, setLocale, type SupportedLocale } from '../i18n'
 import type {
   BrowserConfig,
@@ -61,6 +64,7 @@ import type {
   ComputerConfig,
   ComputerStatusResponse,
   ComputerAppPermission,
+  ComputerPermissionState,
 } from '../lib/api'
 import type { ApprovalReviewConfig, ApprovalReviewDefaults } from '../lib/types'
 import type {
@@ -2793,17 +2797,16 @@ function BrowserTab() {
 // Computer tab — config + app permissions + grants
 // ════════════════════════════════════════════════════════════════════════════
 //
-// Mirrors BrowserTab (poll + debounced save + patch), with two deliberate
-// divergences, both from internal-doc/computer-use-design.md §6.1:
+// Mirrors BrowserTab's poll + debounced-save shape, with two deliberate
+// differences for a native, macOS-only capability:
 //
-//  1. The status card renders even when the feature is off. BrowserTab hides
-//     everything behind its enable switch; here "which gate is shut" is the
-//     whole point of the page ("permission dead-ends are the #1 way this
-//     feature feels broken"), and "disabled" is one of the three gates.
+//  1. Readiness renders even when the feature is off. Helper installation,
+//     Accessibility, and Screen Recording are separate facts; an unknown TCC
+//     state is never presented as ready.
 //  2. Polling refreshes *status* unconditionally but only re-syncs *config*
 //     when there is no local edit in flight. The user leaves this page to grant
-//     Accessibility in System Settings and comes back expecting the status to
-//     have noticed — but a 3s poll must not overwrite a half-typed bundle id.
+//     a TCC permission and comes back expecting the status to have noticed —
+//     but a 3s poll must not overwrite a half-typed bundle id.
 
 type Tier = 'read' | 'click' | 'full'
 
@@ -2835,67 +2838,150 @@ function TierBadge({ tier, locked, title }: { tier: Tier; locked?: boolean; titl
   )
 }
 
-/** The three gates, in the order the backend checks them. `Status.Blocker`
- *  names the first shut one, so every gate before it is open and every gate
- *  after it was never reached — which is exactly what we must not imply is OK. */
-const GATES = ['gateEnabled', 'gateBackend', 'gatePermission'] as const
+const ACCESSIBILITY_DEEP_LINK = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'
+const SCREEN_RECORDING_DEEP_LINK = 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
 
-function blockedGateIndex(blocker: string): number {
-  switch (blocker) {
-    case 'disabled':
-      return 0
-    case 'no_backend':
-      return 1
-    case 'permissions':
-      return 2
-    default:
-      return -1 // nothing blocking
+const EMPTY_COMPUTER_CONFIG: ComputerConfig = {
+  enabled: false,
+  approval: {},
+  app_permissions: [],
+  clipboard_read: false,
+  clipboard_write: false,
+  system_key_combos: false,
+}
+
+type ComputerSaveState = 'idle' | 'saving' | 'saved' | 'error'
+
+function normalizeComputerConfig(input: ComputerConfig): ComputerConfig {
+  return {
+    ...input,
+    enabled: !!input.enabled,
+    approval: input.approval ?? {},
+    app_permissions: input.app_permissions ?? [],
+    clipboard_read: !!input.clipboard_read,
+    clipboard_write: !!input.clipboard_write,
+    system_key_combos: !!input.system_key_combos,
   }
 }
 
-const ACCESSIBILITY_DEEP_LINK = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'
+function ComputerPermissionRow({
+  label,
+  description,
+  state,
+  href,
+}: {
+  label: string
+  description: string
+  state: ComputerPermissionState
+  href: string
+}) {
+  const { t } = useTranslation()
+  const [openError, setOpenError] = useState(false)
+  const Icon = state === 'granted' ? CheckIcon : state === 'denied' ? XMarkIcon : MinusIcon
+  const iconStyle =
+    state === 'granted'
+      ? { background: 'var(--color-success-bg)', color: 'var(--color-success-fg)' }
+      : state === 'denied'
+        ? { background: 'var(--color-warning-bg)', color: 'var(--color-warning-fg)' }
+        : { background: 'var(--neutral-wash)', color: 'var(--color-muted-foreground)' }
+
+  return (
+    <div className="flex items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 py-3">
+      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)]" style={iconStyle}>
+        <Icon className="h-3.5 w-3.5" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-[12px] font-medium text-[var(--color-foreground)]">{label}</div>
+        <div className="mt-0.5 text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">{description}</div>
+        {openError && (
+          <div className="mt-1 text-[10.5px] leading-relaxed text-[var(--color-error-fg)]">
+            {t('settings.computer.openSystemSettingsFailed')}
+          </div>
+        )}
+      </div>
+      <span className={CHIP + ' shrink-0'}>{t(`settings.computer.permissionState.${state}`)}</span>
+      {state === 'denied' && (
+        <button
+          type="button"
+          className={`${BTN_SECONDARY} ${BTN_XS} shrink-0`}
+          onClick={() => {
+            setOpenError(false)
+            void openUrl(href).catch((err) => {
+              console.error('Failed to open macOS System Settings:', err)
+              setOpenError(true)
+            })
+          }}
+        >
+          {t('settings.computer.openSystemSettings')}
+        </button>
+      )}
+    </div>
+  )
+}
 
 function ComputerTab() {
   const { t } = useTranslation()
   const [status, setStatus] = useState<ComputerStatusResponse | null>(null)
-  const [cfg, setCfg] = useState<ComputerConfig>({
-    enabled: false,
-    backend: 'auto',
-    approval: {},
-    app_permissions: [],
-    clipboard_read: false,
-    clipboard_write: false,
-    system_key_combos: false,
-  })
+  const [cfg, setCfg] = useState<ComputerConfig>({ ...EMPTY_COMPUTER_CONFIG })
+  const [saveState, setSaveState] = useState<ComputerSaveState>('idle')
+  const [saveError, setSaveError] = useState('')
+  const [saveWarning, setSaveWarning] = useState('')
+  const [loadError, setLoadError] = useState('')
+  const [checking, setChecking] = useState(false)
   // A pending loosen, held until the user clicks through the warning.
   const [loosen, setLoosen] = useState<{ i: number; tier: Tier } | null>(null)
   const saveTimer = useRef<number | null>(null)
+  const saveResetTimer = useRef<number | null>(null)
   const pollRef = useRef<number | null>(null)
+  const cfgRef = useRef<ComputerConfig>({ ...EMPTY_COMPUTER_CONFIG })
   const dirtyRef = useRef(false)
+  const configEpochRef = useRef(0)
+  const loadInFlightRef = useRef<Promise<void> | null>(null)
+  const saveInFlightRef = useRef(false)
 
-  const load = useCallback(async () => {
-    try {
-      const st = await api.computerStatus()
-      setStatus(st)
-      // Never clobber an edit the user is still making (see divergence 2).
-      if (st.status && !dirtyRef.current) {
-        setCfg((prev) => ({
-          enabled: st.status!.enabled,
-          backend: st.status!.backend || 'auto',
-          max_actions_per_batch: st.status!.max_batch,
-          approval: st.approval || {},
-          app_permissions: st.app_permissions || [],
-          // /api/computer/status does not report the grant flags, so they can
-          // only be carried in local state. See the note on GrantSwitch below.
-          clipboard_read: prev.clipboard_read,
-          clipboard_write: prev.clipboard_write,
-          system_key_combos: prev.system_key_combos,
-        }))
+  const startLoad = useCallback((): Promise<void> => {
+    const requestEpoch = configEpochRef.current
+    const request = (async () => {
+      try {
+        const response = await api.computerStatus()
+        // A GET can spend seconds probing the helper. If a POST committed while
+        // it was in flight, both its status and config are stale; the forced
+        // post-save load below will replace it.
+        if (requestEpoch !== configEpochRef.current) return
+        setLoadError('')
+        setStatus(response)
+        if (!dirtyRef.current) {
+          const canonical = normalizeComputerConfig(response.config)
+          cfgRef.current = canonical
+          setCfg(canonical)
+        }
+      } catch (err) {
+        if (requestEpoch !== configEpochRef.current) return
+        console.error('Failed to load computer status:', err)
+        setLoadError(err instanceof Error ? err.message : String(err))
       }
-    } catch (err) {
-      console.error('Failed to load computer status:', err)
-    }
+    })()
+    loadInFlightRef.current = request
+    void request.finally(() => {
+      if (loadInFlightRef.current === request) loadInFlightRef.current = null
+    })
+    return request
   }, [])
+
+  const load = useCallback(
+    async (forceAfterInflight = false) => {
+      const active = loadInFlightRef.current
+      if (active) {
+        await active
+        if (!forceAfterInflight) return
+      }
+      // A second caller may have started a request while this one awaited. A
+      // manual/post-save refresh waits it out, then always starts a fresh GET.
+      while (loadInFlightRef.current) await loadInFlightRef.current
+      await startLoad()
+    },
+    [startLoad],
+  )
 
   useEffect(() => {
     void load()
@@ -2903,49 +2989,82 @@ function ComputerTab() {
     return () => {
       if (pollRef.current) window.clearInterval(pollRef.current)
       if (saveTimer.current) window.clearTimeout(saveTimer.current)
+      if (saveResetTimer.current) window.clearTimeout(saveResetTimer.current)
     }
   }, [load])
 
   function save(next: ComputerConfig) {
+    if (!status || saveInFlightRef.current) return
     dirtyRef.current = true
     if (saveTimer.current) window.clearTimeout(saveTimer.current)
+    if (saveResetTimer.current) window.clearTimeout(saveResetTimer.current)
+    setSaveError('')
+    setSaveWarning('')
+    setSaveState('idle')
     saveTimer.current = window.setTimeout(async () => {
+      saveTimer.current = null
+      if (saveInFlightRef.current) return
+      saveInFlightRef.current = true
+      setSaveState('saving')
       try {
-        await api.computerSaveConfig(next)
+        const response = await api.computerSaveConfig(next)
+        const canonical = normalizeComputerConfig(response.config)
+        configEpochRef.current++
+        dirtyRef.current = false
+        cfgRef.current = canonical
+        setCfg(canonical)
+        // This must be a new request even when the 3-second poll is still in
+        // flight; otherwise the button could claim success while showing stale
+        // helper/permission state.
+        await load(true)
+        setSaveWarning(response.warning_code ?? '')
+        setSaveState('saved')
+        if (!response.warning_code) {
+          saveResetTimer.current = window.setTimeout(() => setSaveState('idle'), 1800)
+        }
       } catch (err) {
         console.error('Failed to save computer config:', err)
+        setSaveError(err instanceof Error ? err.message : String(err))
+        setSaveState('error')
       } finally {
-        // Reload either way: the round-trip is how the server tells us the
-        // built-in tier of any bundle id the user just typed.
-        dirtyRef.current = false
-        await load()
+        saveInFlightRef.current = false
       }
     }, 250)
   }
 
+  async function checkAgain() {
+    if (checking) return
+    setChecking(true)
+    try {
+      await load(true)
+    } finally {
+      setChecking(false)
+    }
+  }
+
   function patch(p: Partial<ComputerConfig>) {
-    setCfg((prev) => {
-      const next = { ...prev, ...p }
-      save(next)
-      return next
-    })
+    if (!status || saveInFlightRef.current) return
+    const next = { ...cfgRef.current, ...p }
+    cfgRef.current = next
+    setCfg(next)
+    save(next)
   }
 
   function setApproval(cls: string, val: string) {
-    patch({ approval: { ...(cfg.approval ?? {}), [cls]: val } })
+    patch({ approval: { ...(cfgRef.current.approval ?? {}), [cls]: val } })
   }
 
   function addAppPerm() {
-    patch({ app_permissions: [...(cfg.app_permissions ?? []), { bundle_id: '', launch: 'ask', interact: 'ask' }] })
+    patch({ app_permissions: [...(cfgRef.current.app_permissions ?? []), { bundle_id: '', launch: 'ask', interact: 'ask' }] })
   }
 
   function removeAppPerm(i: number) {
     setLoosen(null)
-    patch({ app_permissions: (cfg.app_permissions ?? []).filter((_, j) => j !== i) })
+    patch({ app_permissions: (cfgRef.current.app_permissions ?? []).filter((_, j) => j !== i) })
   }
 
   function updateAppPerm(i: number, p: Partial<ComputerAppPermission>) {
-    patch({ app_permissions: (cfg.app_permissions ?? []).map((ap, j) => (j === i ? { ...ap, ...p } : ap)) })
+    patch({ app_permissions: (cfgRef.current.app_permissions ?? []).map((ap, j) => (j === i ? { ...ap, ...p } : ap)) })
   }
 
   const st = status?.status
@@ -2998,39 +3117,138 @@ function ComputerTab() {
     updateAppPerm(i, { tier: tier === builtin ? '' : tier })
   }
 
-  if (status && !status.available) {
+  const saveBusy = saveState === 'saving'
+
+  if (status && !status.supported) {
     return (
       <div>
         <div className="mb-4">
           <h3 className={SECTION_TITLE}>{t('settings.computer.title')}</h3>
           <p className="mt-0.5 text-[12px] text-[var(--color-muted-foreground)]">{t('settings.computer.subtitle')}</p>
         </div>
-        <div className={ROW}>
-          <div className="text-[11px] text-[var(--color-muted-foreground)]">{t('settings.computer.unavailable')}</div>
+        <div className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+          <div className="flex items-start gap-3">
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius-lg)] bg-[var(--neutral-wash)] text-[var(--color-muted-foreground)]">
+              <ComputerDesktopIcon className="h-[18px] w-[18px]" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-[13px] font-semibold text-[var(--color-foreground)]">
+                  {t('settings.computer.macosOnlyTitle')}
+                </div>
+                <span className={CHIP}>macOS 14+</span>
+              </div>
+              <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">
+                {t('settings.computer.macosOnlyDesc', { platform: status.platform || t('settings.computer.unknownPlatform') })}
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     )
   }
 
-  const blocker = st?.blocker ?? ''
-  const shutIdx = blockedGateIndex(blocker)
-  const perms = cfg.app_permissions ?? []
-
-  // Until the first status lands, every gate is genuinely unknown. Defaulting a
-  // missing blocker to "" would render three green ticks and claim the agent is
-  // ready — on this page, of all pages, that is the one thing we must not do.
-  function gateState(i: number): 'open' | 'shut' | 'unknown' {
-    if (!st) return 'unknown'
-    if (shutIdx === -1) return 'open'
-    return i < shutIdx ? 'open' : i === shutIdx ? 'shut' : 'unknown'
+  if (!status && loadError) {
+    return (
+      <div>
+        <div className="mb-4">
+          <h3 className={SECTION_TITLE}>{t('settings.computer.title')}</h3>
+          <p className="mt-0.5 text-[12px] text-[var(--color-muted-foreground)]">{t('settings.computer.subtitle')}</p>
+        </div>
+        <div className="rounded-[var(--radius-lg)] border border-[var(--color-error-fg)] bg-[var(--color-error-bg)] p-3.5">
+          <div className="flex items-start gap-3">
+            <XMarkIcon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-error-fg)]" />
+            <div className="min-w-0 flex-1">
+              <div className="text-[12px] font-medium text-[var(--color-error-fg)]">
+                {t('settings.computer.statusLoadFailed')}
+              </div>
+              <div className="mt-1 break-words font-mono text-[10.5px] text-[var(--color-muted-foreground)]">{loadError}</div>
+            </div>
+            <button type="button" className={`${BTN_SECONDARY} ${BTN_SM} shrink-0`} onClick={() => void checkAgain()} disabled={checking}>
+              <ArrowPathIcon className={`h-3.5 w-3.5 ${checking ? 'animate-spin' : ''}`} />
+              {checking ? t('settings.computer.checking') : t('settings.computer.checkAgain')}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
   }
+
+  const perms = cfg.app_permissions ?? []
+  const accessibility = st?.accessibility ?? 'unknown'
+  const screenRecording = st?.screen_recording ?? 'unknown'
+  // Unknown is deliberately not optimistic: pixels are a first-class part of
+  // computer use, so both TCC grants must be positively known before we say ready.
+  const permissionsReady = accessibility === 'granted' && screenRecording === 'granted'
+  const helperInstalled = !!st?.helper?.installed
+  const helperConnected = !!st?.helper?.connected
+  const helperReady = helperConnected
+  const ready = !!st && cfg.enabled && st.available && helperReady && permissionsReady && !st.blocker
+  const readinessDetail = !st
+    ? t('settings.computer.statusLoading')
+    : !cfg.enabled
+      ? t('settings.computer.offHint')
+      : !helperInstalled
+        ? t('settings.computer.helperMissingHint')
+        : !helperConnected
+          ? t('settings.computer.helperDisconnectedHint')
+          : accessibility === 'unknown' || screenRecording === 'unknown'
+            ? t('settings.computer.permissionsUnknownHint')
+            : !permissionsReady
+              ? t('settings.computer.permissionsHint')
+              : t('settings.computer.readyHint')
 
   return (
     <div>
-      <div className="mb-4">
-        <h3 className={SECTION_TITLE}>{t('settings.computer.title')}</h3>
-        <p className="mt-0.5 text-[12px] text-[var(--color-muted-foreground)]">{t('settings.computer.subtitle')}</p>
+      <div className="mb-4 flex min-h-9 items-start justify-between gap-4">
+        <div>
+          <h3 className={SECTION_TITLE}>{t('settings.computer.title')}</h3>
+          <p className="mt-0.5 text-[12px] text-[var(--color-muted-foreground)]">{t('settings.computer.subtitle')}</p>
+        </div>
+        <div aria-live="polite" className="flex min-h-6 shrink-0 items-center gap-1.5 text-[10.5px]">
+          {saveState === 'saving' && (
+            <span className="inline-flex items-center gap-1.5 text-[var(--color-muted-foreground)]">
+              <ArrowPathIcon className="h-3.5 w-3.5 animate-spin" /> {t('settings.computer.saving')}
+            </span>
+          )}
+          {saveState === 'saved' && (
+            <span
+              className={`inline-flex max-w-72 items-center gap-1.5 ${saveWarning ? 'text-[var(--color-warning-fg)]' : 'text-[var(--color-success-fg)]'}`}
+            >
+              {saveWarning ? <ExclamationTriangleIcon className="h-3.5 w-3.5 shrink-0" /> : <CheckIcon className="h-3.5 w-3.5 shrink-0" />}
+              <span className="truncate">{saveWarning ? t('settings.computer.savedWithWarning') : t('settings.computer.saved')}</span>
+            </span>
+          )}
+          {saveState === 'error' && (
+            <>
+              <span className="inline-flex max-w-52 items-center gap-1.5 truncate text-[var(--color-error-fg)]" title={saveError}>
+                <XMarkIcon className="h-3.5 w-3.5 shrink-0" /> {t('settings.computer.saveFailed')}
+              </span>
+              <button type="button" className={`${BTN_GHOST} ${BTN_XS}`} onClick={() => save(cfgRef.current)} disabled={saveBusy}>
+                {t('settings.computer.retrySave')}
+              </button>
+            </>
+          )}
+        </div>
       </div>
+
+      {saveWarning && (
+        <div className="mb-3 flex items-start gap-2.5 rounded-[var(--radius-lg)] border border-[var(--color-warning-fg)] bg-[var(--color-warning-bg)] px-3.5 py-3 text-[11px] text-[var(--color-warning-fg)]">
+          <ExclamationTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" />
+          <span className="min-w-0 flex-1 leading-relaxed">{t('settings.computer.agentRefreshWarning')}</span>
+          <button
+            type="button"
+            className={`${BTN_GHOST} ${BTN_XS} shrink-0`}
+            title={t('common.close')}
+            onClick={() => {
+              setSaveWarning('')
+              setSaveState('idle')
+            }}
+          >
+            <XMarkIcon className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       <div className={ROW}>
         <div className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)]">
@@ -3040,100 +3258,105 @@ function ComputerTab() {
           <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.computer.enableTitle')}</div>
           <div className="text-[11px] text-[var(--color-muted-foreground)]">{t('settings.computer.enableDesc')}</div>
         </div>
-        <Switch on={cfg.enabled} onClick={() => patch({ enabled: !cfg.enabled })} />
+        <Switch on={cfg.enabled} onClick={() => patch({ enabled: !cfg.enabled })} disabled={saveBusy || !status} />
       </div>
 
-      {/* ── Status: which of the three gates is shut ─────────────────────────
-          Rendered whether or not the feature is on. This is the answer to the
-          question the user actually has, and "off" is a legitimate answer. */}
-      <div className="mb-2 mt-5 text-[11px] font-medium uppercase tracking-wide text-[var(--color-muted-foreground)]">
-        {t('settings.computer.status')}
-      </div>
-      <div
-        className="rounded-[var(--radius-lg)] border p-3.5"
-        style={{
-          // "off" is the safe default, not a fault: keep it neutral. A shut
-          // backend or permission gate is what actually wants attention.
-          borderColor: st && shutIdx > 0 ? 'var(--color-warning-fg)' : 'var(--color-border)',
-          background: st && shutIdx > 0 ? 'var(--color-warning-bg)' : 'var(--color-surface)',
-        }}
-      >
-        <div className="flex flex-wrap items-center gap-1.5">
-          {GATES.map((g, i) => {
-            const state = gateState(i)
-            const Icon = state === 'open' ? CheckIcon : state === 'shut' ? XMarkIcon : MinusIcon
-            const style =
-              state === 'open'
-                ? { background: 'var(--color-success-bg)', color: 'var(--color-success-fg)' }
-                : state === 'shut'
-                  ? { background: 'var(--color-warning-fg)', color: 'var(--color-warning-bg)' }
-                  : { background: 'var(--neutral-wash)', color: 'var(--color-muted-foreground)' }
-            return (
-              <span
-                key={g}
-                className="inline-flex h-[22px] items-center gap-1 whitespace-nowrap rounded-full px-2 text-[10.5px] font-semibold"
-                style={style}
-                title={t(`settings.computer.gateState.${state}`)}
-              >
-                <Icon className="h-3 w-3 shrink-0" />
-                {t(`settings.computer.${g}`)}
-              </span>
-            )
-          })}
-          {st && shutIdx === -1 && st.backend_kind && (
-            <span className={CHIP + ' ml-auto'}>{t(`settings.computer.backendKind.${st.backend_kind}`)}</span>
-          )}
+      <div className="mb-2 mt-5 flex items-center justify-between gap-3">
+        <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-muted-foreground)]">
+          {t('settings.computer.readiness')}
         </div>
-
-        <div className="mt-2.5 text-[11px] leading-relaxed text-[var(--color-foreground)]">
+        <span
+          className="inline-flex h-[20px] items-center gap-1 rounded-full px-2 text-[10px] font-semibold"
+          style={
+            ready
+              ? { background: 'var(--color-success-bg)', color: 'var(--color-success-fg)' }
+              : cfg.enabled && st
+                ? { background: 'var(--color-warning-bg)', color: 'var(--color-warning-fg)' }
+                : { background: 'var(--neutral-wash)', color: 'var(--color-muted-foreground)' }
+          }
+        >
+          {ready ? <CheckIcon className="h-3 w-3" /> : cfg.enabled && st ? <XMarkIcon className="h-3 w-3" /> : <MinusIcon className="h-3 w-3" />}
           {!st
             ? t('settings.computer.statusLoading')
-            : st.detail || (shutIdx === -1 ? t('settings.computer.ready') : t('settings.computer.blockedGeneric'))}
-        </div>
-
-        {/* The permission dead-end, and the one-click way out of it. */}
-        {blocker === 'permissions' && (
-          <div className="mt-3">
-            <a
-              href={ACCESSIBILITY_DEEP_LINK}
-              className={`${BTN_SECONDARY} ${BTN_SM} no-underline`}
-              title={t('settings.computer.permissionsHint')}
-            >
-              <ShieldCheckIcon className="h-3.5 w-3.5" /> {t('settings.computer.grantAccessibility')}
-            </a>
-            <div className="mt-1.5 text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">
-              {t('settings.computer.permissionsHint')}
+            : !cfg.enabled
+              ? t('settings.computer.readinessOff')
+              : ready
+                ? t('settings.computer.readinessReady')
+                : t('settings.computer.readinessNeedsAttention')}
+        </span>
+      </div>
+      <div className="space-y-2">
+        <div className="flex items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 py-3">
+          <span
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)]"
+            style={
+              !st
+                ? { background: 'var(--neutral-wash)', color: 'var(--color-muted-foreground)' }
+                : helperConnected
+                  ? { background: 'var(--color-success-bg)', color: 'var(--color-success-fg)' }
+                  : helperInstalled
+                    ? { background: 'var(--color-warning-bg)', color: 'var(--color-warning-fg)' }
+                    : { background: 'var(--color-error-bg)', color: 'var(--color-error-fg)' }
+            }
+          >
+            {!st ? (
+              <MinusIcon className="h-3.5 w-3.5" />
+            ) : helperConnected ? (
+              <CheckIcon className="h-3.5 w-3.5" />
+            ) : helperInstalled ? (
+              <MinusIcon className="h-3.5 w-3.5" />
+            ) : (
+              <XMarkIcon className="h-3.5 w-3.5" />
+            )}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.computer.nativeHelper')}</div>
+            <div className="mt-0.5 text-[10.5px] text-[var(--color-muted-foreground)]">
+              {!st
+                ? t('settings.computer.statusLoading')
+                : st.helper.connected
+                  ? t('settings.computer.helperConnected')
+                  : st.helper.installed
+                    ? t('settings.computer.helperInstalled')
+                    : t('settings.computer.helperMissing')}
             </div>
           </div>
-        )}
+          {st?.helper.version && <span className={CHIP + ' shrink-0 font-mono'}>{st.helper.version}</span>}
+        </div>
+
+        <ComputerPermissionRow
+          label={t('settings.computer.accessibility')}
+          description={t('settings.computer.accessibilityDesc')}
+          state={accessibility}
+          href={ACCESSIBILITY_DEEP_LINK}
+        />
+        <ComputerPermissionRow
+          label={t('settings.computer.screenRecording')}
+          description={t('settings.computer.screenRecordingDesc')}
+          state={screenRecording}
+          href={SCREEN_RECORDING_DEEP_LINK}
+        />
+
+        <div className="flex items-start justify-between gap-3 px-1 pt-1">
+          <div
+            className={`min-w-0 text-[10.5px] leading-relaxed ${loadError ? 'text-[var(--color-error-fg)]' : 'text-[var(--color-muted-foreground)]'}`}
+          >
+            {loadError ? `${t('settings.computer.statusLoadFailed')}: ${loadError}` : readinessDetail}
+          </div>
+          <button
+            type="button"
+            className={`${BTN_SECONDARY} ${BTN_SM} shrink-0`}
+            onClick={() => void checkAgain()}
+            disabled={checking || saveBusy}
+          >
+            <ArrowPathIcon className={`h-3.5 w-3.5 ${checking ? 'animate-spin' : ''}`} />
+            {checking ? t('settings.computer.checking') : t('settings.computer.checkAgain')}
+          </button>
+        </div>
       </div>
 
       {cfg.enabled && (
         <>
-          <div className="mb-2 mt-5 text-[11px] font-medium uppercase tracking-wide text-[var(--color-muted-foreground)]">
-            {t('settings.computer.control')}
-          </div>
-          <div className={ROW}>
-            <div className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)]">
-              <BoltIcon className="h-4 w-4" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.computer.backend')}</div>
-              <div className="text-[11px] text-[var(--color-muted-foreground)]">{t('settings.computer.backendDesc')}</div>
-            </div>
-            <select
-              value={cfg.backend}
-              onChange={(e) => patch({ backend: e.target.value })}
-              className={INPUT_SM}
-              style={{ width: '9rem' }}
-            >
-              <option value="auto">{t('settings.computer.backendAuto')}</option>
-              <option value="helper">{t('settings.computer.backendHelper')}</option>
-              <option value="osa">{t('settings.computer.backendOsa')}</option>
-              <option value="fake">{t('settings.computer.backendFake')}</option>
-            </select>
-          </div>
-
           {/* ── Approval defaults ─────────────────────────────────────────────
               The baseline the per-app rows below override. Clipboard is absent
               on purpose: reading it always prompts and is not pre-approvable
@@ -3150,6 +3373,7 @@ function ComputerTab() {
                 <select
                   value={cfg.approval?.[cls] ?? 'ask'}
                   onChange={(e) => setApproval(cls, e.target.value)}
+                  disabled={saveBusy}
                   className={INPUT_SM}
                   style={{ width: '10rem' }}
                 >
@@ -3168,7 +3392,7 @@ function ComputerTab() {
             <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-muted-foreground)]">
               {t('settings.computer.appPermissions')}
             </div>
-            <button type="button" className={`${BTN_SECONDARY} ${BTN_SM}`} onClick={addAppPerm}>
+            <button type="button" className={`${BTN_SECONDARY} ${BTN_SM}`} onClick={addAppPerm} disabled={saveBusy}>
               <PlusIcon className="h-3.5 w-3.5" /> {t('settings.computer.add')}
             </button>
           </div>
@@ -3191,6 +3415,7 @@ function ComputerTab() {
                     <input
                       value={p.bundle_id}
                       onChange={(e) => updateAppPerm(i, { bundle_id: e.target.value })}
+                      disabled={saveBusy}
                       className={INPUT_SM + ' font-mono'}
                       style={{ flex: 1, minWidth: '8rem' }}
                       placeholder={t('settings.computer.bundlePlaceholder')}
@@ -3204,7 +3429,7 @@ function ComputerTab() {
                     )}
                     <select
                       value={eff ?? ''}
-                      disabled={!builtin || opts.length <= 1}
+                      disabled={saveBusy || !builtin || opts.length <= 1}
                       onChange={(e) => requestTier(i, e.target.value as Tier)}
                       className={INPUT_SM}
                       style={{ width: '5.75rem' }}
@@ -3220,6 +3445,7 @@ function ComputerTab() {
                     <select
                       value={p.launch ?? 'ask'}
                       onChange={(e) => updateAppPerm(i, { launch: e.target.value })}
+                      disabled={saveBusy}
                       className={INPUT_SM}
                       style={{ width: '6.5rem' }}
                     >
@@ -3229,13 +3455,14 @@ function ComputerTab() {
                     <select
                       value={p.interact ?? 'ask'}
                       onChange={(e) => updateAppPerm(i, { interact: e.target.value })}
+                      disabled={saveBusy}
                       className={INPUT_SM}
                       style={{ width: '6.5rem' }}
                     >
                       <option value="ask">{t('settings.computer.interactAsk')}</option>
                       <option value="allow">{t('settings.computer.interactAllow')}</option>
                     </select>
-                    <button type="button" className={`${BTN_GHOST} ${BTN_SM}`} onClick={() => removeAppPerm(i)}>
+                    <button type="button" className={`${BTN_GHOST} ${BTN_SM}`} onClick={() => removeAppPerm(i)} disabled={saveBusy}>
                       <TrashIcon className="h-3.5 w-3.5" />
                     </button>
                   </div>
@@ -3262,13 +3489,14 @@ function ComputerTab() {
                         })}
                       </div>
                       <div className="mt-2 flex justify-end gap-1.5">
-                        <button type="button" className={`${BTN_GHOST} ${BTN_XS}`} onClick={() => setLoosen(null)}>
+                        <button type="button" className={`${BTN_GHOST} ${BTN_XS}`} onClick={() => setLoosen(null)} disabled={saveBusy}>
                           {t('common.cancel')}
                         </button>
                         <button
                           type="button"
                           className={`${BTN_SECONDARY} ${BTN_XS}`}
                           onClick={() => applyTier(i, loosen.tier, builtin)}
+                          disabled={saveBusy}
                         >
                           {t('settings.computer.loosenConfirm')}
                         </button>
@@ -3299,7 +3527,7 @@ function ComputerTab() {
                   {t('settings.computer.clipboardReadDesc')}
                 </div>
               </div>
-              <Switch on={!!cfg.clipboard_read} onClick={() => patch({ clipboard_read: !cfg.clipboard_read })} />
+              <Switch on={!!cfg.clipboard_read} onClick={() => patch({ clipboard_read: !cfg.clipboard_read })} disabled={saveBusy} />
             </div>
             <div className={ROW}>
               <div className="min-w-0 flex-1">
@@ -3308,7 +3536,7 @@ function ComputerTab() {
                   {t('settings.computer.clipboardWriteDesc')}
                 </div>
               </div>
-              <Switch on={!!cfg.clipboard_write} onClick={() => patch({ clipboard_write: !cfg.clipboard_write })} />
+              <Switch on={!!cfg.clipboard_write} onClick={() => patch({ clipboard_write: !cfg.clipboard_write })} disabled={saveBusy} />
             </div>
             <div className={ROW}>
               <div className="min-w-0 flex-1">
@@ -3317,7 +3545,7 @@ function ComputerTab() {
                   {t('settings.computer.systemKeyCombosDesc')}
                 </div>
               </div>
-              <Switch on={!!cfg.system_key_combos} onClick={() => patch({ system_key_combos: !cfg.system_key_combos })} />
+              <Switch on={!!cfg.system_key_combos} onClick={() => patch({ system_key_combos: !cfg.system_key_combos })} disabled={saveBusy} />
             </div>
           </div>
         </>

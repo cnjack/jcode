@@ -10,8 +10,9 @@
 //
 // jcode is built CGO_ENABLED=0 (agent-eval finding F1: cgo SIGABRTs on
 // subprocess fork on macOS 26), so the macOS AX / CGEvent / ScreenCaptureKit
-// calls cannot live in this process. They live behind a Backend — a helper
-// daemon over a unix socket, or osascript, or a scripted fake.
+// calls cannot live in this process. Production delegates them to the native
+// macOS helper over a Unix socket. Tests and explicit jcode_eval builds may
+// inject a scripted backend; persisted settings cannot select one.
 //
 // See internal-doc/computer-use-design.md.
 package computer
@@ -23,6 +24,10 @@ import (
 
 	"github.com/cnjack/jcode/internal/uitree"
 )
+
+// MaxScreenshotBytes bounds both native IPC handoff files and any injected
+// backend result before the tool creates a Base64 copy for the model request.
+const MaxScreenshotBytes int64 = 20 << 20
 
 // ErrControlInterrupted reports that the human took over (moved the mouse,
 // switched apps deliberately, hit a kill switch). The agent must stop rather
@@ -57,23 +62,44 @@ type App struct {
 // structs by value, which gets us most of that, but the discipline is the same:
 // resolve identity once, carry the resolved value.
 type Action struct {
-	Kind      string // click, type, press, set_value, scroll, drag, select_text, menu, hover, dblclick, rclick
-	BundleID  string
-	UID       string
-	Ref       int64 // resolved backend handle for UID
-	Value     string
-	Key       string
-	Text      string
-	Name      string // named AX secondary action for Kind=="menu"
-	X, Y      float64
-	ToX, ToY  float64
-	Direction string
-	Pages     float64
+	Kind     string // click, type, press, set_value, scroll, drag, select_text, menu, hover, dblclick, rclick
+	BundleID string
+	UID      string
+	Ref      int64 // resolved backend handle for UID
+	Value    string
+	Key      string
+	Text     string
+	Name     string // named AX secondary action for Kind=="menu"
+	X, Y     float64
+	ToX, ToY float64
+	// Coordinate presence is separate from value because zero is a valid global
+	// screen coordinate. Without these bits, JSON omitempty turns x=0 into a
+	// missing field at the daemon boundary.
+	HasX, HasY, HasToX, HasToY bool
+	Direction                  string
+	Pages                      float64
 }
 
-// Backend is the platform side of computer use. Implementations: helperBackend
-// (signed daemon over a unix socket), osaBackend (osascript + screencapture),
-// fakeBackend (scripted; tests and agent-eval).
+// Screenshot is a window-scoped visual observation. Bounds are global macOS
+// screen coordinates; PixelWidth/PixelHeight describe the attached PNG after
+// downscaling. Together they let a model map a pixel in custom-drawn UI back to
+// the coordinate fallback accepted by computer_act.
+type Screenshot struct {
+	PNG                     []byte
+	X, Y, Width, Height     float64
+	PixelWidth, PixelHeight int
+}
+
+// VisualCaptureBackend is an optional richer capture contract. Backends that
+// only implement Capture remain valid; native helpers implement this interface
+// so screenshot coordinates are explicit rather than guessed.
+type VisualCaptureBackend interface {
+	CaptureVisual(ctx context.Context, bundleID string) (Screenshot, error)
+}
+
+// Backend is the platform side of computer use. Shipping binaries use
+// helperBackend (the native macOS daemon over a Unix socket). FakeBackend is
+// injectable only by tests and explicit jcode_eval wiring.
 //
 // Every method takes a ctx with a deadline. An unanswered TCC prompt presents as
 // a silent multi-minute hang, not an error, so a missing deadline anywhere here

@@ -32,14 +32,18 @@ type State struct {
 // eligible for a uid when Ref != 0, since a uid the backend cannot resolve back
 // to an element is worse than no uid at all.
 type Node struct {
-	ID       string
-	Role     string
-	Name     string
-	Value    string
-	States   []State
-	ChildIDs []string
-	Ref      int64
-	Ignored  bool
+	ID     string
+	Role   string
+	Name   string
+	Value  string
+	States []State
+	// SemanticID is a backend-provided stable identifier such as an AXIdentifier.
+	// Actions are named secondary accessibility actions; click/AXPress is omitted.
+	SemanticID string
+	Actions    []string
+	ChildIDs   []string
+	Ref        int64
+	Ignored    bool
 }
 
 // Snapshot is one serialized tree state.
@@ -182,6 +186,13 @@ func Build(nodes []Node, filter string, gen int, maxLines int, known map[int64]s
 		if !n.Ignored {
 			role := n.Role
 			name := strings.TrimSpace(n.Name)
+			// Native AXStaticText frequently exposes its visible text only through
+			// AXValue (Calculator's result display is one example). Treat that as
+			// the display name for read-only text instead of silently dropping the
+			// very value the model needs to verify.
+			if name == "" && (role == "statictext" || role == "StaticText" || role == "text") {
+				name = strings.TrimSpace(n.Value)
+			}
 			line := ""
 			switch {
 			case InteractiveRoles[role] && n.Ref != 0:
@@ -195,7 +206,8 @@ func Build(nodes []Node, filter string, gen int, maxLines int, known map[int64]s
 				snap.UIDs[uid] = n.Ref
 				snap.Refs[n.Ref] = uid
 				interactiveCount++
-				line = fmt.Sprintf("[%s] %s %q%s", uid, role, Truncate(name, 120), RenderStates(n))
+				line = fmt.Sprintf("[%s] %s %q%s%s", uid, role, Truncate(name, 120),
+					RenderStates(n), RenderIdentityAndActions(n))
 			case ContextRoles[role] && name != "":
 				line = fmt.Sprintf("- %s %q", role, Truncate(name, 120))
 			case filter == "all" && (role == "StaticText" || role == "text") && name != "":
@@ -262,6 +274,31 @@ func RenderStates(n *Node) string {
 		return ""
 	}
 	return " (" + strings.Join(states, ", ") + ")"
+}
+
+// RenderIdentityAndActions exposes native semantic identifiers and secondary AX
+// actions without making the model guess action names. It is separate from
+// RenderStates so existing state semantics stay unchanged for browser trees.
+func RenderIdentityAndActions(n *Node) string {
+	var metadata []string
+	if id := strings.TrimSpace(n.SemanticID); id != "" {
+		metadata = append(metadata, fmt.Sprintf("id=%q", Truncate(id, 100)))
+	}
+	if len(n.Actions) > 0 {
+		actions := make([]string, 0, len(n.Actions))
+		for _, action := range n.Actions {
+			if action = strings.TrimSpace(action); action != "" {
+				actions = append(actions, action)
+			}
+		}
+		if len(actions) > 0 {
+			metadata = append(metadata, "actions="+strings.Join(actions, ","))
+		}
+	}
+	if len(metadata) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(metadata, ", ") + ")"
 }
 
 // Truncate cuts s to at most n runes, appending an ellipsis when it cuts.

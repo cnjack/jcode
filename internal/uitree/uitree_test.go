@@ -200,3 +200,20 @@ func TestRenderStates(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderIdentityAndActions(t *testing.T) {
+	n := &Node{SemanticID: "Mode: basic", Actions: []string{"AXIncrement", "", "AXShowMenu"}}
+	got := RenderIdentityAndActions(n)
+	for _, want := range []string{`id="Mode: basic"`, "actions=AXIncrement,AXShowMenu"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("RenderIdentityAndActions missing %q: %s", want, got)
+		}
+	}
+}
+
+func TestStaticTextFallsBackToValue(t *testing.T) {
+	snapshot := Build([]Node{{ID: "1", Role: "statictext", Value: "48"}}, "interactive", 1, 0, nil, 0)
+	if !strings.Contains(snapshot.Text, `statictext "48"`) {
+		t.Fatalf("visible AXValue-only text was dropped: %q", snapshot.Text)
+	}
+}

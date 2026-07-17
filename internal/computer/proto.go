@@ -56,18 +56,49 @@ type envelope struct {
 
 type pingPayload struct {
 	ClientAPIVersion string `json:"client_api_version"`
-	// Token authenticates the client to the daemon. A unix socket is reachable
-	// by any process of the same uid, so the daemon serves nothing until it sees
-	// this token, which lived only in a 0600 file and the two legitimate
-	// processes — immune to the pid-reuse races that make a peer-pid check alone
-	// insufficient (design §4).
+	// Token binds a connection to this daemon launch and rejects stale/accidental
+	// rendezvous. The kernel-reported PID is checked separately. Neither is a
+	// hostile same-uid boundary: that uid can read a 0600 file or start a new
+	// helper instance. See the signed-parent/XPC gap in design §4.
 	Token string `json:"token"`
 }
 
 type pongPayload struct {
-	ServerAPIVersion string `json:"server_api_version"`
-	Platform         string `json:"platform"`
-	HelperVersion    string `json:"helper_version"`
+	ServerAPIVersion          string          `json:"server_api_version"`
+	Platform                  string          `json:"platform"`
+	HelperVersion             string          `json:"helper_version"`
+	AccessibilityPermission   PermissionState `json:"accessibility_permission,omitempty"`
+	ScreenRecordingPermission PermissionState `json:"screen_recording_permission,omitempty"`
+}
+
+// PermissionState is the native helper's non-prompting view of a macOS TCC
+// grant. Unknown is intentionally distinct from denied: an older daemon omits
+// the additive pong fields, and treating that absence as granted would make the
+// settings UI claim Computer Use is ready without evidence.
+type PermissionState string
+
+const (
+	PermissionUnknown PermissionState = "unknown"
+	PermissionDenied  PermissionState = "denied"
+	PermissionGranted PermissionState = "granted"
+)
+
+func normalizePermissionState(state PermissionState) PermissionState {
+	switch state {
+	case PermissionGranted, PermissionDenied, PermissionUnknown:
+		return state
+	default:
+		return PermissionUnknown
+	}
+}
+
+// HelperPermissions is the pair of macOS grants needed by the native helper.
+// Accessibility covers AX inspection and input; ScreenRecording covers window
+// pixels. The states are snapshots and can be refreshed with
+// helperBackend.RefreshPermissionStatus.
+type HelperPermissions struct {
+	Accessibility   PermissionState
+	ScreenRecording PermissionState
 }
 
 // --- per-method request/response payloads ---
@@ -113,8 +144,14 @@ type treeResult struct {
 // reference to a file the daemon wrote under the shared shots dir — keeping
 // large images off the socket. Exactly one of Ref/PNG is set.
 type captureResult struct {
-	Ref string `json:"ref,omitempty"`
-	PNG []byte `json:"png,omitempty"`
+	Ref         string  `json:"ref,omitempty"`
+	PNG         []byte  `json:"png,omitempty"`
+	X           float64 `json:"x,omitempty"`
+	Y           float64 `json:"y,omitempty"`
+	Width       float64 `json:"width,omitempty"`
+	Height      float64 `json:"height,omitempty"`
+	PixelWidth  int     `json:"pixel_width,omitempty"`
+	PixelHeight int     `json:"pixel_height,omitempty"`
 }
 
 type performRequest struct {
@@ -124,23 +161,46 @@ type performRequest struct {
 // actionWire is Action on the wire. BundleID is the resolved target pinned at
 // gate time; the daemon never re-resolves an app name (design §4.3).
 type actionWire struct {
-	Kind      string  `json:"kind"`
-	BundleID  string  `json:"bundle_id"`
-	UID       string  `json:"uid,omitempty"`
-	Ref       int64   `json:"ref,omitempty"`
-	Value     string  `json:"value,omitempty"`
-	Key       string  `json:"key,omitempty"`
-	Text      string  `json:"text,omitempty"`
-	Name      string  `json:"name,omitempty"`
-	X         float64 `json:"x,omitempty"`
-	Y         float64 `json:"y,omitempty"`
-	ToX       float64 `json:"to_x,omitempty"`
-	ToY       float64 `json:"to_y,omitempty"`
-	Direction string  `json:"direction,omitempty"`
-	Pages     float64 `json:"pages,omitempty"`
+	Kind      string   `json:"kind"`
+	BundleID  string   `json:"bundle_id"`
+	UID       string   `json:"uid,omitempty"`
+	Ref       int64    `json:"ref,omitempty"`
+	Value     string   `json:"value,omitempty"`
+	Key       string   `json:"key,omitempty"`
+	Text      string   `json:"text,omitempty"`
+	Name      string   `json:"name,omitempty"`
+	X         *float64 `json:"x,omitempty"`
+	Y         *float64 `json:"y,omitempty"`
+	ToX       *float64 `json:"to_x,omitempty"`
+	ToY       *float64 `json:"to_y,omitempty"`
+	Direction string   `json:"direction,omitempty"`
+	Pages     float64  `json:"pages,omitempty"`
 }
 
-func actionToWire(a Action) actionWire { return actionWire(a) }
+func actionToWire(a Action) actionWire {
+	w := actionWire{
+		Kind: a.Kind, BundleID: a.BundleID, UID: a.UID, Ref: a.Ref,
+		Value: a.Value, Key: a.Key, Text: a.Text, Name: a.Name,
+		Direction: a.Direction, Pages: a.Pages,
+	}
+	// Non-zero inference preserves direct Backend callers. Session callers also
+	// carry explicit presence bits so a legitimate zero survives omitempty.
+	if a.HasX || a.X != 0 {
+		w.X = float64Pointer(a.X)
+	}
+	if a.HasY || a.Y != 0 {
+		w.Y = float64Pointer(a.Y)
+	}
+	if a.HasToX || a.ToX != 0 {
+		w.ToX = float64Pointer(a.ToX)
+	}
+	if a.HasToY || a.ToY != 0 {
+		w.ToY = float64Pointer(a.ToY)
+	}
+	return w
+}
+
+func float64Pointer(value float64) *float64 { return &value }
 
 type readClipboardResult struct {
 	Text string `json:"text"`

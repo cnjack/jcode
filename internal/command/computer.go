@@ -1,7 +1,10 @@
+//go:build jcode_eval
+
 package command
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -55,29 +58,30 @@ type computerFixture struct {
 	} `json:"trees"`
 }
 
-// installFakeComputerBackend wires a scripted backend when config pins
-// backend=fake and a fixture is available.
-//
-// It is deliberately inert unless *both* conditions hold. A fixture env var
-// alone must not turn on a fake screen — that would be an environment variable
-// that silently changes what the agent believes it is looking at.
-func installFakeComputerBackend(m *computer.Manager, cfg *config.Config) {
-	if cfg == nil || cfg.Computer == nil || cfg.Computer.Backend != "fake" {
-		return
+// installEvalComputerBackend wires the deterministic fixture backend into a
+// binary built explicitly with -tags jcode_eval. This file is absent from
+// release binaries, so neither a hand-edited config nor an environment variable
+// can replace the user's real desktop with a scripted one in production.
+func installEvalComputerBackend(m *computer.Manager, _ *config.Config) error {
+	if m == nil {
+		return nil
 	}
+	// Install a rejecting in-memory backend before touching the fixture. This is
+	// the permanent native-helper firewall for an eval binary: even if the
+	// fixture is missing and Settings later hot-enables Computer Use, OpenSession
+	// can only reach this injected backend, never the real Mac.
+	m.SetFakeBackend(computer.NewFake())
 	path := os.Getenv(computerFixtureEnv)
 	if path == "" {
 		path = filepath.Join(config.ConfigDir(), "computer", "fixture.json")
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		config.Logger().Printf("[computer] fixture %s unreadable: %v", path, err)
-		return
+		return fmt.Errorf("read eval computer fixture %s: %w", path, err)
 	}
 	var fx computerFixture
 	if err := json.Unmarshal(raw, &fx); err != nil {
-		config.Logger().Printf("[computer] fixture %s invalid: %v", path, err)
-		return
+		return fmt.Errorf("decode eval computer fixture %s: %w", path, err)
 	}
 
 	f := computer.NewFake()
@@ -121,8 +125,11 @@ func installFakeComputerBackend(m *computer.Manager, cfg *config.Config) {
 
 	f.SetJournal(filepath.Join(config.ConfigDir(), computerJournalName))
 	m.SetFakeBackend(f)
-	config.Logger().Printf("[computer] fake backend installed from %s (%d apps)", path, len(apps))
+	config.Logger().Printf("[computer/eval] fixture backend installed from %s (%d apps)", path, len(apps))
+	return nil
 }
+
+func computerEvalEnabled() bool { return true }
 
 // tinyPNG returns a valid 1x1 transparent PNG.
 func tinyPNG() []byte {

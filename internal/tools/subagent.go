@@ -160,6 +160,56 @@ func (m *safeToolMiddleware) WrapInvokableToolCall(
 	}, nil
 }
 
+func (m *safeToolMiddleware) WrapEnhancedInvokableToolCall(
+	ctx context.Context,
+	endpoint adk.EnhancedInvokableToolCallEndpoint,
+	_ *adk.ToolContext,
+) (adk.EnhancedInvokableToolCallEndpoint, error) {
+	return func(ctx context.Context, argument *schema.ToolArgument, opts ...tool.Option) (result *schema.ToolResult, retErr error) {
+		defer func() {
+			if r := recover(); r != nil {
+				result = enhancedTextResult(fmt.Sprintf("Tool execution panicked: %v", r))
+				retErr = nil
+			}
+		}()
+
+		result, err := endpoint(ctx, argument, opts...)
+		if err != nil {
+			if IsFatal(err) {
+				return nil, err
+			}
+			failure := fmt.Sprintf("Tool execution failed: %v", err)
+			if enhancedText(result) != "" {
+				failure = "\n\n" + failure
+			}
+			if result == nil {
+				return enhancedTextResult(failure), nil
+			}
+			parts := append([]schema.ToolOutputPart(nil), result.Parts...)
+			parts = append(parts, schema.ToolOutputPart{Type: schema.ToolPartTypeText, Text: failure})
+			return &schema.ToolResult{Parts: parts}, nil
+		}
+		return result, nil
+	}, nil
+}
+
+func enhancedTextResult(text string) *schema.ToolResult {
+	return &schema.ToolResult{Parts: []schema.ToolOutputPart{{Type: schema.ToolPartTypeText, Text: text}}}
+}
+
+func enhancedText(result *schema.ToolResult) string {
+	if result == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, part := range result.Parts {
+		if part.Type == schema.ToolPartTypeText {
+			b.WriteString(part.Text)
+		}
+	}
+	return b.String()
+}
+
 func (s *subagentTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 	return s.info, nil
 }

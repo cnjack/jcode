@@ -523,12 +523,17 @@ type BrowserController struct {
 // permission) and a status line that cannot say which one is shut leaves the
 // user with nothing to act on.
 type ComputerStatus struct {
-	Available   bool // a backend can actually serve a session
-	Enabled     bool
-	Backend     string // auto | helper | osa | fake (as configured)
-	BackendKind string // what the configured backend actually resolved to
-	Blocker     string // disabled | no_backend | permissions | ""
-	Detail      string
+	Supported       bool // false outside macOS
+	Platform        string
+	Available       bool // native helper is connected and permissions are ready
+	Enabled         bool
+	HelperInstalled bool
+	HelperConnected bool
+	HelperVersion   string
+	Accessibility   string // granted | denied | unknown
+	ScreenRecording string // granted | denied | unknown
+	Blocker         string // unsupported | disabled | no_helper | permissions | ""
+	Detail          string
 }
 
 // ComputerController lets the TUI read computer-use status and toggle

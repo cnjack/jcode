@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cnjack/jcode/internal/uitree"
 )
@@ -20,6 +22,8 @@ var (
 	itermApp  = App{BundleID: itermID, Name: "iTerm", Running: true}
 	chromeApp = App{BundleID: chromeID, Name: "Google Chrome", Running: true}
 )
+
+func floatCoord(value float64) *float64 { return &value }
 
 // notesTree is a small canned AX tree: one button, one text field.
 func notesTree() []uitree.Node {
@@ -148,11 +152,27 @@ func TestTierAllowsClickingTerminal(t *testing.T) {
 	}
 	f.SetFrontmost(itermApp)
 
-	if _, err := s.Act(context.Background(), []ActRequest{{Action: "click", X: 10, Y: 20}}); err != nil {
+	if _, err := s.Act(context.Background(), []ActRequest{{Action: "click", X: floatCoord(10), Y: floatCoord(20)}}); err != nil {
 		t.Fatalf("clicking a terminal was refused: %v", err)
 	}
 	if got := len(f.Actions()); got != 1 {
 		t.Fatalf("expected 1 action to reach the backend, got %d", got)
+	}
+}
+
+func TestZeroCoordinatesRemainExplicit(t *testing.T) {
+	s, f := scriptedSession(t)
+	if _, err := s.Open(context.Background(), notesID); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := s.Act(context.Background(), []ActRequest{{
+		Action: "click", X: floatCoord(0), Y: floatCoord(0),
+	}}); err != nil {
+		t.Fatalf("zero-coordinate click: %v", err)
+	}
+	actions := f.Actions()
+	if len(actions) != 1 || !actions[0].HasX || !actions[0].HasY || actions[0].X != 0 || actions[0].Y != 0 {
+		t.Fatalf("zero-coordinate presence was lost before the backend: %+v", actions)
 	}
 }
 
@@ -163,7 +183,7 @@ func TestTierRefusesClickingBrowserAndPointsAtBrowserUse(t *testing.T) {
 	}
 	f.SetFrontmost(chromeApp)
 
-	_, err := s.Act(context.Background(), []ActRequest{{Action: "click", X: 1, Y: 2}})
+	_, err := s.Act(context.Background(), []ActRequest{{Action: "click", X: floatCoord(1), Y: floatCoord(2)}})
 	var te *TierError
 	if !errors.As(err, &te) {
 		t.Fatalf("clicking a browser was not refused, got %v", err)
@@ -181,7 +201,7 @@ func TestNotAllowedAppIsRefused(t *testing.T) {
 	s, f := scriptedSession(t)
 	f.SetFrontmost(notesApp) // granted by nobody yet
 
-	_, err := s.Act(context.Background(), []ActRequest{{Action: "click", X: 1, Y: 1}})
+	_, err := s.Act(context.Background(), []ActRequest{{Action: "click", X: floatCoord(1), Y: floatCoord(1)}})
 	var na *NotAllowedError
 	if !errors.As(err, &na) {
 		t.Fatalf("acting on an ungranted app was not refused, got %v", err)
@@ -205,6 +225,11 @@ func TestBatchAbortsWhenFrontmostChangesMidBatch(t *testing.T) {
 		t.Fatalf("Open iterm: %v", err)
 	}
 	f.SetFrontmost(notesApp)
+	// Opening another app conservatively invalidates all process-wide UI
+	// observations. Refresh Notes before exercising the within-batch focus gate.
+	if _, err := s.Snapshot(context.Background(), notesID, "", 0, true); err != nil {
+		t.Fatalf("refresh notes: %v", err)
+	}
 
 	// After the 2nd action lands, focus jumps to the terminal.
 	n := 0
@@ -261,7 +286,7 @@ func TestBatchRejectsOversizedBatch(t *testing.T) {
 	s, _ := scriptedSession(t)
 	steps := make([]ActRequest, 21)
 	for i := range steps {
-		steps[i] = ActRequest{Action: "click", X: 1, Y: 1}
+		steps[i] = ActRequest{Action: "click", X: floatCoord(1), Y: floatCoord(1)}
 	}
 	if _, err := s.Act(context.Background(), steps); err == nil ||
 		!strings.Contains(err.Error(), "max_actions_per_batch") {
@@ -270,6 +295,155 @@ func TestBatchRejectsOversizedBatch(t *testing.T) {
 }
 
 // --- Stale uids ---
+
+func TestActionRequiresFreshSnapshotBeforeNextToolCall(t *testing.T) {
+	s, _ := scriptedSession(t)
+	if _, err := s.Open(context.Background(), notesID); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := s.Act(context.Background(), []ActRequest{{Action: "click", UID: "e1"}}); err != nil {
+		t.Fatalf("first action: %v", err)
+	}
+	if _, err := s.Act(context.Background(), []ActRequest{{Action: "click", UID: "e1"}}); err == nil ||
+		!strings.Contains(err.Error(), "computer_snapshot") {
+		t.Fatalf("a second tool call acted without observing the changed UI: %v", err)
+	}
+	if _, err := s.Snapshot(context.Background(), notesID, "", 0, true); err != nil {
+		t.Fatalf("refresh snapshot: %v", err)
+	}
+	if _, err := s.Act(context.Background(), []ActRequest{{Action: "click", UID: "e1"}}); err != nil {
+		t.Fatalf("surviving uid should work after a fresh snapshot: %v", err)
+	}
+}
+
+func TestConcurrentActionsCannotShareOneSnapshot(t *testing.T) {
+	s, f := scriptedSession(t)
+	if _, err := s.Open(context.Background(), notesID); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	firstEntered := make(chan struct{})
+	secondEntered := make(chan struct{})
+	release := make(chan struct{})
+	var performs atomic.Int32
+	f.PerformHook = func(*FakeBackend, Action) error {
+		switch performs.Add(1) {
+		case 1:
+			close(firstEntered)
+		case 2:
+			close(secondEntered)
+		}
+		<-release
+		return nil
+	}
+
+	firstResult := make(chan error, 1)
+	go func() {
+		_, err := s.Act(context.Background(), []ActRequest{{Action: "click", UID: "e1"}})
+		firstResult <- err
+	}()
+	<-firstEntered
+
+	secondResult := make(chan error, 1)
+	go func() {
+		_, err := s.Act(context.Background(), []ActRequest{{Action: "click", UID: "e1"}})
+		secondResult <- err
+	}()
+
+	select {
+	case <-secondEntered:
+		close(release)
+		t.Fatal("a concurrent action reached the backend before the first call marked its snapshot dirty")
+	case <-time.After(150 * time.Millisecond):
+		close(release)
+	}
+
+	if err := <-firstResult; err != nil {
+		t.Fatalf("first action: %v", err)
+	}
+	if err := <-secondResult; err == nil || !strings.Contains(err.Error(), "computer_snapshot") {
+		t.Fatalf("second action did not require a fresh snapshot: %v", err)
+	}
+	if got := performs.Load(); got != 1 {
+		t.Fatalf("backend received %d actions from one snapshot, want 1", got)
+	}
+}
+
+func TestOtherSessionMutationInvalidatesSnapshot(t *testing.T) {
+	fake := NewFake()
+	fake.SetApps(notesApp)
+	fake.SetFrontmost(notesApp)
+	fake.SetTree(notesID, notesTree())
+	fake.SetShot(notesID, []byte("\x89PNG\r\n\x1a\nfake"))
+	mgr := NewManager(Config{Enabled: true, Backend: "fake"}, t.TempDir())
+	mgr.SetFakeBackend(fake)
+
+	s1, err := mgr.OpenSession(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2, err := mgr.OpenSession(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range []*Session{s1, s2} {
+		session.Grant([]string{notesID}, false, false, false)
+		if _, err := session.Snapshot(context.Background(), notesID, "", 0, true); err != nil {
+			t.Fatalf("snapshot: %v", err)
+		}
+	}
+
+	if _, err := s2.Act(context.Background(), []ActRequest{{Action: "click", UID: "e1"}}); err != nil {
+		t.Fatalf("second session action: %v", err)
+	}
+	if _, err := s1.Act(context.Background(), []ActRequest{{Action: "click", UID: "e1"}}); err == nil || !strings.Contains(err.Error(), "another task changed UI") {
+		t.Fatalf("stale cross-session snapshot was not rejected: %v", err)
+	}
+	if got := len(fake.Actions()); got != 1 {
+		t.Fatalf("stale cross-session action reached backend; actions=%d", got)
+	}
+}
+
+func TestScreenshotDoesNotRevalidateStaleAXUID(t *testing.T) {
+	fake := NewFake()
+	fake.SetApps(notesApp)
+	fake.SetFrontmost(notesApp)
+	fake.SetTree(notesID, notesTree())
+	fake.SetShot(notesID, []byte("\x89PNG\r\n\x1a\nfake"))
+	mgr := NewManager(Config{Enabled: true, Backend: "fake"}, t.TempDir())
+	mgr.SetFakeBackend(fake)
+
+	s1, err := mgr.OpenSession(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2, err := mgr.OpenSession(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range []*Session{s1, s2} {
+		session.Grant([]string{notesID}, false, false, false)
+		if _, err := session.Snapshot(context.Background(), notesID, "", 0, true); err != nil {
+			t.Fatalf("snapshot: %v", err)
+		}
+	}
+
+	if _, err := s2.Act(context.Background(), []ActRequest{{Action: "click", UID: "e1"}}); err != nil {
+		t.Fatalf("second session action: %v", err)
+	}
+	if _, err := s1.ScreenshotVisual(context.Background(), notesID); err != nil {
+		t.Fatalf("fresh screenshot: %v", err)
+	}
+	if _, err := s1.Act(context.Background(), []ActRequest{{Action: "click", UID: "e1"}}); err == nil || !strings.Contains(err.Error(), "no snapshot") {
+		t.Fatalf("screenshot revalidated a stale AX uid: %v", err)
+	}
+	if _, err := s1.Act(context.Background(), []ActRequest{{Action: "click", X: floatCoord(10), Y: floatCoord(10)}}); err != nil {
+		t.Fatalf("fresh screenshot should permit a coordinate action: %v", err)
+	}
+	if got := len(fake.Actions()); got != 2 {
+		t.Fatalf("backend actions=%d, want one cross-session uid action and one visual coordinate action", got)
+	}
+}
 
 // A uid names an element, not a position: it survives while its element does,
 // and is retired when the element goes.
@@ -421,7 +595,7 @@ func TestNormalizedActionReachesBackend(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	f.SetFrontmost(notesApp)
-	if _, err := s.Act(context.Background(), []ActRequest{{Action: "  CLICK ", X: 1, Y: 2}}); err != nil {
+	if _, err := s.Act(context.Background(), []ActRequest{{Action: "  CLICK ", X: floatCoord(1), Y: floatCoord(2)}}); err != nil {
 		t.Fatalf("Act: %v", err)
 	}
 	acts := f.Actions()
@@ -488,7 +662,7 @@ func TestUserInterventionStopsWork(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	f.PerformHook = func(*FakeBackend, Action) error { return errors.New("userIntervened") }
-	_, err := s.Act(context.Background(), []ActRequest{{Action: "click", X: 1, Y: 1}})
+	_, err := s.Act(context.Background(), []ActRequest{{Action: "click", X: floatCoord(1), Y: floatCoord(1)}})
 	if !errors.Is(err, ErrControlInterrupted) {
 		t.Fatalf("userIntervened was not mapped to ErrControlInterrupted: %v", err)
 	}
@@ -500,7 +674,7 @@ func TestScreenLockedStopsWork(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	f.PerformHook = func(*FakeBackend, Action) error { return errors.New("screenLocked") }
-	_, err := s.Act(context.Background(), []ActRequest{{Action: "click", X: 1, Y: 1}})
+	_, err := s.Act(context.Background(), []ActRequest{{Action: "click", X: floatCoord(1), Y: floatCoord(1)}})
 	if !errors.Is(err, ErrScreenLocked) {
 		t.Fatalf("screenLocked was not mapped to ErrScreenLocked: %v", err)
 	}
@@ -532,21 +706,24 @@ func TestAppListIsFencedAsData(t *testing.T) {
 	}
 }
 
-// --- Screenshot path traversal ---
+// --- Screenshot id traversal ---
 
-func TestScreenshotPathRejectsTraversal(t *testing.T) {
+func TestOpenScreenshotRejectsTraversal(t *testing.T) {
 	m := NewManager(Config{Enabled: true}, t.TempDir())
 	for _, bad := range []string{"../../etc/passwd", "..", "a/b", ""} {
-		if _, err := m.ScreenshotPath(bad); err == nil {
-			t.Errorf("ScreenshotPath(%q) was accepted; ids must be re-parsed as uuids", bad)
+		if _, err := m.OpenScreenshot(bad); err == nil {
+			t.Errorf("OpenScreenshot(%q) was accepted; ids must be re-parsed as uuids", bad)
 		}
 	}
 	id, err := m.SaveScreenshot([]byte("png"))
 	if err != nil {
 		t.Fatalf("SaveScreenshot: %v", err)
 	}
-	if _, err := m.ScreenshotPath(id); err != nil {
+	f, err := m.OpenScreenshot(id)
+	if err != nil {
 		t.Errorf("a real id was rejected: %v", err)
+	} else {
+		_ = f.Close()
 	}
 }
 
@@ -639,6 +816,150 @@ func TestGrantFlagsComeFromConfig(t *testing.T) {
 	}
 }
 
+func TestOpenSessionRechecksDisabledConfigBeforeEveryOperation(t *testing.T) {
+	s, f := scriptedSession(t)
+	if _, err := s.Open(context.Background(), notesID); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	s.mgr.SetConfig(Config{Enabled: false})
+
+	if _, err := s.Act(context.Background(), []ActRequest{{Action: "click", X: floatCoord(1), Y: floatCoord(1)}}); err == nil ||
+		!strings.Contains(err.Error(), "computer use is disabled") {
+		t.Fatalf("existing Session acted after disable: %v", err)
+	}
+	if _, err := s.Snapshot(context.Background(), notesID, "", 0, true); err == nil ||
+		!strings.Contains(err.Error(), "computer use is disabled") {
+		t.Fatalf("existing Session observed after disable: %v", err)
+	}
+	if _, err := s.Apps(context.Background()); err == nil || !strings.Contains(err.Error(), "computer use is disabled") {
+		t.Fatalf("existing Session listed apps after disable: %v", err)
+	}
+	if got := len(f.Actions()); got != 0 {
+		t.Fatalf("disabled operations reached backend: %+v", f.Actions())
+	}
+}
+
+func TestOpenSessionRechecksLiveMaxBatch(t *testing.T) {
+	s, f := scriptedSession(t)
+	if _, err := s.Open(context.Background(), notesID); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	s.mgr.SetConfig(Config{Enabled: true, MaxActionsPerBatch: 1})
+
+	_, err := s.Act(context.Background(), []ActRequest{
+		{Action: "click", X: floatCoord(1), Y: floatCoord(1)},
+		{Action: "click", X: floatCoord(2), Y: floatCoord(2)},
+	})
+	if err == nil || !strings.Contains(err.Error(), "max_actions_per_batch=1") {
+		t.Fatalf("existing Session kept stale batch limit: %v", err)
+	}
+	if got := len(f.Actions()); got != 0 {
+		t.Fatalf("oversized live-policy batch reached backend: %+v", f.Actions())
+	}
+}
+
+func TestOpenSessionRechecksLiveTierTightening(t *testing.T) {
+	s, f := scriptedSession(t)
+	if _, err := s.Open(context.Background(), notesID); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	s.mgr.SetConfig(Config{
+		Enabled:        true,
+		AppPermissions: []AppPermission{{BundleID: notesID, Tier: "read"}},
+	})
+
+	_, err := s.Act(context.Background(), []ActRequest{{Action: "click", X: floatCoord(1), Y: floatCoord(1)}})
+	var tierErr *TierError
+	if !errors.As(err, &tierErr) {
+		t.Fatalf("existing Session ignored a live tier tightening: %v", err)
+	}
+	if got := len(f.Actions()); got != 0 {
+		t.Fatalf("tier-tightened action reached backend: %+v", f.Actions())
+	}
+}
+
+func TestOpenSessionRechecksLiveGrantRevocation(t *testing.T) {
+	f := NewFake()
+	f.SetApps(notesApp)
+	f.SetFrontmost(notesApp)
+	f.SetTree(notesID, notesTree())
+	f.SetClipboard("hunter2")
+	m := NewManager(Config{
+		Enabled: true, ClipboardRead: true, ClipboardWrite: true, SystemKeyCombos: true,
+	}, t.TempDir())
+	m.SetFakeBackend(f)
+	s, err := m.OpenSession(context.Background())
+	if err != nil {
+		t.Fatalf("OpenSession: %v", err)
+	}
+	if _, err := s.Open(context.Background(), notesID); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	m.SetConfig(Config{Enabled: true})
+	if _, err := s.Read(context.Background(), "clipboard"); err == nil || !strings.Contains(err.Error(), "clipboard_read") {
+		t.Fatalf("existing Session kept revoked clipboard grant: %v", err)
+	}
+	if _, err := s.Act(context.Background(), []ActRequest{{Action: "press", Key: "cmd+q"}}); err == nil ||
+		!strings.Contains(err.Error(), "system_key_combos") {
+		t.Fatalf("existing Session kept revoked system-key grant: %v", err)
+	}
+	s.mu.Lock()
+	clipWrite := s.clipboardWrite
+	s.mu.Unlock()
+	if clipWrite {
+		t.Fatal("existing Session kept revoked clipboard_write grant")
+	}
+	if got := len(f.Actions()); got != 0 {
+		t.Fatalf("grant-revoked action reached backend: %+v", f.Actions())
+	}
+}
+
+func TestSetConfigWaitsForInFlightUIAction(t *testing.T) {
+	s, f := scriptedSession(t)
+	if _, err := s.Open(context.Background(), notesID); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	f.PerformHook = func(*FakeBackend, Action) error {
+		close(entered)
+		<-release
+		return nil
+	}
+
+	actionDone := make(chan error, 1)
+	go func() {
+		_, err := s.Act(context.Background(), []ActRequest{{Action: "click", X: floatCoord(1), Y: floatCoord(1)}})
+		actionDone <- err
+	}()
+	<-entered
+
+	configDone := make(chan struct{})
+	go func() {
+		s.mgr.SetConfig(Config{Enabled: false})
+		close(configDone)
+	}()
+	select {
+	case <-configDone:
+		close(release)
+		t.Fatal("SetConfig crossed an in-flight native action instead of waiting for its UI boundary")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	if err := <-actionDone; err != nil {
+		t.Fatalf("in-flight action: %v", err)
+	}
+	select {
+	case <-configDone:
+	case <-time.After(time.Second):
+		t.Fatal("SetConfig did not resume after the UI action completed")
+	}
+	if s.mgr.Enabled() {
+		t.Fatal("serialized config update was not published")
+	}
+}
+
 func TestClipboardNeedsItsOwnGrant(t *testing.T) {
 	s, f := scriptedSession(t) // config grants no flags
 	f.SetClipboard("hunter2")
@@ -700,7 +1021,7 @@ func TestGateSurfacesScreenLocked(t *testing.T) {
 	}
 	f.FrontmostErr = errors.New("screenLocked")
 
-	_, err := s.Act(context.Background(), []ActRequest{{Action: "click", X: 1, Y: 1}})
+	_, err := s.Act(context.Background(), []ActRequest{{Action: "click", X: floatCoord(1), Y: floatCoord(1)}})
 	if !errors.Is(err, ErrScreenLocked) {
 		t.Fatalf("a locked screen surfaced as %v, not ErrScreenLocked", err)
 	}

@@ -5,12 +5,15 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,26 +23,47 @@ import (
 // which inject a net.Pipe into newHelperConn — the protocol logic is tested
 // there, and this is the thin, platform-specific plumbing around it.
 //
-// macOS only. The design covers Windows (named pipe), but per the current scope
-// the Windows helper is not implemented; dialHelper refuses cleanly elsewhere so
-// the auto backend selection falls through to a clear "no backend" message
-// rather than a confusing dial error.
+// macOS only. There is intentionally no production fallback backend: callers on
+// another platform fail closed before this path, and persisted settings cannot
+// select a mock or AppleScript implementation.
 
 // helperPaths bundles the filesystem rendezvous points, all under the config dir.
 type helperPaths struct {
 	dir       string // <config>/computer
-	socket    string // <config>/computer/computerd.sock
-	tokenFile string // <config>/computer/helper-token  (0600)
-	shotsDir  string // <config>/computer/shots
+	socket    string // <config>/computer/computerd-<process-instance>.sock
+	tokenFile string // <config>/computer/helper-token-<jcode-pid>  (0600)
+	shotsDir  string // <config>/computer/handoff-<jcode-pid>-<process-instance>
 }
 
-func computerPaths(configDir string) helperPaths {
+const helperInstanceIDBytes = 16
+
+var loadHelperProcessInstanceID = sync.OnceValues(func() (string, error) {
+	var raw [helperInstanceIDBytes]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("generate computer helper process instance id: %w", err)
+	}
+	return hex.EncodeToString(raw[:]), nil
+})
+
+func computerPaths(configDir string) (helperPaths, error) {
+	instanceID, err := loadHelperProcessInstanceID()
+	if err != nil {
+		return helperPaths{}, err
+	}
+	return computerPathsForInstance(configDir, os.Getpid(), instanceID), nil
+}
+
+func computerPathsForInstance(configDir string, pid int, instanceID string) helperPaths {
 	dir := filepath.Join(configDir, "computer")
 	return helperPaths{
 		dir:       dir,
-		socket:    filepath.Join(dir, "computerd.sock"),
-		tokenFile: filepath.Join(dir, "helper-token"),
-		shotsDir:  filepath.Join(dir, "shots"),
+		socket:    filepath.Join(dir, fmt.Sprintf("computerd-%s.sock", instanceID)),
+		tokenFile: filepath.Join(dir, fmt.Sprintf("helper-token-%d", pid)),
+		// Native capture files are a short-lived IPC handoff, not the public
+		// screenshot cache. A process-instance nonce prevents PID reuse from
+		// colliding with an old daemon or its handoff directory; reconnects in
+		// this process reuse the same nonce and paths.
+		shotsDir: filepath.Join(dir, fmt.Sprintf("handoff-%d-%s", pid, instanceID)),
 	}
 }
 
@@ -52,9 +76,20 @@ func dialHelper(ctx context.Context, configDir string) (*helperBackend, error) {
 	if runtime.GOOS != "darwin" {
 		return nil, fmt.Errorf("the computer-use helper is implemented on macOS only")
 	}
-	p := computerPaths(configDir)
+	p, err := computerPaths(configDir)
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(p.dir, 0o700); err != nil {
 		return nil, fmt.Errorf("prepare helper dir: %w", err)
+	}
+	// This directory belongs only to the current jcode process instance. Clearing
+	// it before every initial dial/reconnect recovers a handoff left when the
+	// previous daemon died after producing a file but before this client consumed
+	// it. PID reuse cannot redirect this cleanup because the nonce is stable only
+	// for this process lifetime.
+	if err := removeOwnedHelperHandoffDir(p.shotsDir); err != nil {
+		return nil, fmt.Errorf("clean helper screenshot handoff: %w", err)
 	}
 	token, err := loadOrCreateToken(p.tokenFile)
 	if err != nil {
@@ -64,7 +99,7 @@ func dialHelper(ctx context.Context, configDir string) (*helperBackend, error) {
 	// First try: the daemon may already be running (a previous session left it,
 	// or the desktop shell started it).
 	if conn, err := net.DialTimeout("unix", p.socket, 500*time.Millisecond); err == nil {
-		if h, herr := finishDial(conn, token, p.shotsDir, nil); herr == nil {
+		if h, herr := finishDial(ctx, conn, token, p.shotsDir, nil, configDir); herr == nil {
 			return h, nil
 		}
 		// Answered but handshake failed (stale/incompatible daemon) — fall
@@ -81,28 +116,72 @@ func dialHelper(ctx context.Context, configDir string) (*helperBackend, error) {
 	for time.Now().Before(deadline) {
 		if ctx.Err() != nil {
 			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
 			return nil, ctx.Err()
 		}
 		if conn, derr := net.DialTimeout("unix", p.socket, 200*time.Millisecond); derr == nil {
-			return finishDial(conn, token, p.shotsDir, cmd)
+			return finishDial(ctx, conn, token, p.shotsDir, cmd, configDir)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
 	return nil, fmt.Errorf("helper daemon did not answer within 5s of launch")
 }
 
-func finishDial(conn net.Conn, token, shotsDir string, cmd *exec.Cmd) (*helperBackend, error) {
-	h, err := newHelperConn(conn, token)
+func finishDial(ctx context.Context, conn net.Conn, token, shotsDir string, cmd *exec.Cmd, configDir string) (*helperBackend, error) {
+	h, err := newHelperConnContext(ctx, conn, token)
 	if err != nil {
 		if cmd != nil && cmd.Process != nil {
 			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
 		}
 		return nil, err
 	}
 	h.cmd = cmd
 	h.shotsDir = shotsDir
+	h.ownsShotsDir = true
+	h.redial = func(ctx context.Context) (*helperBackend, error) {
+		return dialHelper(ctx, configDir)
+	}
 	return h, nil
+}
+
+func removeOwnedHelperHandoffDir(dir string) error {
+	if dir == "" {
+		return nil
+	}
+	dir = filepath.Clean(dir)
+	if !filepath.IsAbs(dir) || !validHelperHandoffName(filepath.Base(dir)) {
+		return fmt.Errorf("refusing to remove non-handoff path %q", dir)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("remove helper handoff directory: %w", err)
+	}
+	return nil
+}
+
+func validHelperHandoffName(name string) bool {
+	const prefix = "handoff-"
+	if !strings.HasPrefix(name, prefix) {
+		return false
+	}
+	parts := strings.Split(strings.TrimPrefix(name, prefix), "-")
+	if len(parts) != 1 && len(parts) != 2 {
+		return false
+	}
+	pid, err := strconv.Atoi(parts[0])
+	if err != nil || pid <= 1 {
+		return false
+	}
+	if len(parts) == 1 {
+		return true // migration compatibility for handoff-<pid>
+	}
+	if len(parts[1]) != helperInstanceIDBytes*2 {
+		return false
+	}
+	decoded, err := hex.DecodeString(parts[1])
+	return err == nil && len(decoded) == helperInstanceIDBytes && hex.EncodeToString(decoded) == parts[1]
 }
 
 // spawnDaemon launches the native helper. The socket path and the token *file*
@@ -117,6 +196,7 @@ func spawnDaemon(p helperPaths) (*exec.Cmd, error) {
 		"--socket", p.socket,
 		"--token-file", p.tokenFile,
 		"--shots-dir", p.shotsDir,
+		"--client-pid", fmt.Sprintf("%d", os.Getpid()),
 	)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -143,10 +223,23 @@ func helperBinPath() string {
 		return p
 	}
 	if matches, _ := filepath.Glob(filepath.Join(dir, "jcode-computerd-*")); len(matches) > 0 {
-		for _, m := range matches {
-			if isExecutable(m) {
-				return m
-			}
+		if candidate := selectHelperBin(matches); candidate != "" {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func selectHelperBin(matches []string) string {
+	for _, match := range matches {
+		// The capture worker intentionally shares the jcode-computerd prefix.
+		// On x86 triples it sorts before the daemon; never try to launch the
+		// short-lived --pid/--output worker as the socket server.
+		if strings.HasPrefix(filepath.Base(match), "jcode-computerd-capture") {
+			continue
+		}
+		if isExecutable(match) {
+			return match
 		}
 	}
 	return ""
@@ -189,5 +282,43 @@ func (h *helperBackend) readShotRef(ref string) ([]byte, error) {
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return nil, fmt.Errorf("screenshot reference %q is outside the shots dir", ref)
 	}
-	return os.ReadFile(clean)
+	pathInfo, err := os.Lstat(clean)
+	if err != nil {
+		return nil, err
+	}
+	if pathInfo.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("screenshot reference %q is a symbolic link", ref)
+	}
+	f, err := os.Open(clean)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = f.Close()
+		// The tool layer persists its own public copy. This reference is an IPC
+		// handoff file and should not accumulate indefinitely, including when a
+		// malformed/oversized file is rejected.
+		_ = os.Remove(clean)
+	}()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("screenshot reference %q is not a regular file", ref)
+	}
+	if !os.SameFile(pathInfo, info) {
+		return nil, fmt.Errorf("screenshot reference %q changed while opening", ref)
+	}
+	if info.Size() > MaxScreenshotBytes {
+		return nil, fmt.Errorf("screenshot is %d bytes; maximum is %d", info.Size(), MaxScreenshotBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, MaxScreenshotBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > MaxScreenshotBytes {
+		return nil, fmt.Errorf("screenshot exceeds maximum of %d bytes", MaxScreenshotBytes)
+	}
+	return data, nil
 }

@@ -103,3 +103,50 @@ func TestReconstructState_CompactKeptNOverflow(t *testing.T) {
 		t.Errorf("tail = %q,%q, want u1,a1", state.History[1].Content, state.History[2].Content)
 	}
 }
+
+func TestPruneOldToolOutputsClearsScreenshotPixels(t *testing.T) {
+	encoded := "base64-must-not-survive"
+	shot := schema.ToolMessage("", "shot-call", schema.WithToolName("computer_screenshot"))
+	shot.UserInputMultiContent = []schema.MessageInputPart{
+		{Type: schema.ChatMessagePartTypeText, Text: "image_ref=/api/computer/shots/old.png"},
+		{
+			Type: schema.ChatMessagePartTypeImageURL,
+			Image: &schema.MessageInputImage{MessagePartCommon: schema.MessagePartCommon{
+				MIMEType:   "image/png",
+				Base64Data: &encoded,
+			}},
+		},
+	}
+	msgs := []*schema.Message{
+		schema.UserMessage("old request"),
+		{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{ID: "shot-call", Function: schema.FunctionCall{Name: "computer_screenshot"}}}},
+		shot,
+		schema.UserMessage("new request"),
+	}
+
+	PruneOldToolOutputs(msgs, 1)
+	if shot.Content != "[Screenshot was captured previously. Run computer_screenshot again for current visual state.]" {
+		t.Fatalf("unexpected screenshot placeholder: %q", shot.Content)
+	}
+	if shot.UserInputMultiContent != nil {
+		t.Fatalf("old screenshot pixels survived pruning: %#v", shot.UserInputMultiContent)
+	}
+}
+
+func TestPruneOldToolOutputsPreservesRecentScreenshot(t *testing.T) {
+	shot := schema.ToolMessage("", "shot-call", schema.WithToolName("computer_screenshot"))
+	shot.UserInputMultiContent = []schema.MessageInputPart{
+		{Type: schema.ChatMessagePartTypeText, Text: "current shot"},
+	}
+	msgs := []*schema.Message{
+		schema.UserMessage("old request"),
+		schema.UserMessage("current request"),
+		{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{ID: "shot-call", Function: schema.FunctionCall{Name: "computer_screenshot"}}}},
+		shot,
+	}
+
+	PruneOldToolOutputs(msgs, 1)
+	if shot.Content != "" || len(shot.UserInputMultiContent) != 1 {
+		t.Fatalf("recent screenshot was pruned: %#v", shot)
+	}
+}

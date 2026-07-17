@@ -14,11 +14,11 @@ import (
 // FakeBackend is a scripted Backend: canned trees, a settable frontmost app, and
 // a recording of every action that reached it.
 //
-// It lives in the package rather than in a _test.go file on purpose — the
-// agent-eval harness pins backend=fake to drive the computer tools with
-// deterministic oracles, with no TCC, no GUI and no display. The containment
-// claims in the design (tier refusal, batch abort, stale uid) are only worth
-// making if they can be graded, and this is what grades them.
+// It lives in the package rather than in a _test.go file because an explicit
+// `jcode_eval` build injects it through SetFakeBackend to drive deterministic
+// tool oracles with no TCC, GUI, or display. Production config has no path to
+// this type. The containment claims in the design (tier refusal, batch abort,
+// stale uid) are only worth making if they can be graded, and this grades them.
 //
 // Mirrors browser.fakeBackend / scriptedTab (browser/session_test.go).
 type FakeBackend struct {
@@ -27,7 +27,7 @@ type FakeBackend struct {
 	apps      []App
 	frontmost App
 	trees     map[string][]uitree.Node
-	shots     map[string][]byte
+	shots     map[string]Screenshot
 
 	// Performed records every action the gate admitted. Tests assert on this;
 	// the point of tier-terminal-refusal is that nothing lands here.
@@ -72,7 +72,7 @@ func (f *FakeBackend) SetJournal(path string) {
 func NewFake() *FakeBackend {
 	return &FakeBackend{
 		trees: map[string][]uitree.Node{},
-		shots: map[string][]byte{},
+		shots: map[string]Screenshot{},
 	}
 }
 
@@ -104,7 +104,15 @@ func (f *FakeBackend) SetTree(bundleID string, nodes []uitree.Node) {
 func (f *FakeBackend) SetShot(bundleID string, png []byte) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.shots[bundleID] = png
+	f.shots[bundleID] = Screenshot{PNG: append([]byte(nil), png...)}
+}
+
+// SetVisualShot sets a canned PNG and its global-window coordinate mapping.
+func (f *FakeBackend) SetVisualShot(bundleID string, shot Screenshot) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	shot.PNG = append([]byte(nil), shot.PNG...)
+	f.shots[bundleID] = shot
 }
 
 // Actions returns a copy of the recorded actions.
@@ -146,13 +154,19 @@ func (f *FakeBackend) Tree(_ context.Context, bundleID string) ([]uitree.Node, e
 }
 
 func (f *FakeBackend) Capture(_ context.Context, bundleID string) ([]byte, error) {
+	shot, err := f.CaptureVisual(context.Background(), bundleID)
+	return shot.PNG, err
+}
+
+func (f *FakeBackend) CaptureVisual(_ context.Context, bundleID string) (Screenshot, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	png, ok := f.shots[bundleID]
+	shot, ok := f.shots[bundleID]
 	if !ok {
-		return nil, fmt.Errorf("fake: no screenshot for %q", bundleID)
+		return Screenshot{}, fmt.Errorf("fake: no screenshot for %q", bundleID)
 	}
-	return append([]byte(nil), png...), nil
+	shot.PNG = append([]byte(nil), shot.PNG...)
+	return shot, nil
 }
 
 func (f *FakeBackend) Launch(_ context.Context, bundleID string) error {

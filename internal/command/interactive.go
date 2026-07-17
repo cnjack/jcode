@@ -1076,10 +1076,11 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 
 	// Computer-use manager (native desktop app control). Off unless config
 	// enables it — unlike browser-use, this can reach anything on the machine.
-	computerMgr := computer.NewManager(computer.FromConfig(cfg.Computer), "")
-	installFakeComputerBackend(computerMgr, cfg)
+	computerMgr := newComputerManager(cfg, "")
 	env.Computer = computerMgr
-	defer func() { _ = computerMgr.Close() }()
+	if computerMgr != nil {
+		defer func() { _ = computerMgr.Close() }()
+	}
 
 	var mcpTools []tool.BaseTool
 	var mcpStatuses []tui.MCPStatusItem
@@ -1237,7 +1238,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	})
 	approvalState.SetBrowserOriginFunc(env.CurrentBrowserOrigin)
 	approvalState.SetComputerPermFunc(func(bundleID, class string) bool {
-		return computer.Preapproved(cfg.Computer, bundleID, class)
+		return computerMgr != nil && computerMgr.Preapproved(bundleID, class)
 	})
 	approvalState.SetComputerAppFunc(env.CurrentComputerApp)
 	st.approvalState = approvalState
@@ -1280,23 +1281,66 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 
 	computerCtl := &tui.ComputerController{
 		Status: func() tui.ComputerStatus {
+			if computerMgr == nil {
+				return tui.ComputerStatus{
+					Supported: false,
+					Platform:  platform,
+					Blocker:   "unsupported",
+					Detail:    computer.UnsupportedReason(),
+				}
+			}
 			s := computerMgr.Status(context.Background())
 			return tui.ComputerStatus{
-				Available:   s.Available,
-				Enabled:     s.Enabled,
-				Backend:     s.Backend,
-				BackendKind: s.BackendKind,
-				Blocker:     s.Blocker,
-				Detail:      s.Detail,
+				Supported:       true,
+				Platform:        platform,
+				Available:       s.Available,
+				Enabled:         s.Enabled,
+				HelperInstalled: s.Helper.Installed,
+				HelperConnected: s.Helper.Connected,
+				HelperVersion:   s.Helper.Version,
+				Accessibility:   string(s.AccessibilityPermission),
+				ScreenRecording: string(s.ScreenRecordingPermission),
+				Blocker:         s.Blocker,
+				Detail:          s.Detail,
 			}
 		},
 		SetEnabled: func(enable bool) error {
-			if cfg.Computer == nil {
-				cfg.Computer = &config.ComputerConfig{Backend: "auto"}
+			if computerMgr == nil {
+				return fmt.Errorf("%s", computer.UnsupportedReason())
 			}
+			created := false
+			if cfg.Computer == nil {
+				cfg.Computer = &config.ComputerConfig{}
+				created = true
+			}
+			previousEnabled := cfg.Computer.Enabled
 			cfg.Computer.Enabled = enable
+			if err := config.SaveConfig(cfg); err != nil {
+				// Disk is the commit point. Do not leave the live Manager or the
+				// in-memory config claiming that a failed /computer toggle worked.
+				cfg.Computer.Enabled = previousEnabled
+				if created {
+					cfg.Computer = nil
+				}
+				return err
+			}
+			// Publish only after the durable save. SetConfig waits for any
+			// in-flight native action, so a disable/tightening is effective when
+			// this command returns.
 			computerMgr.SetConfig(computer.FromConfig(cfg.Computer))
-			return config.SaveConfig(cfg)
+			// Tool schemas are fixed on an agent instance. Rebuild immediately so
+			// /computer on|off takes effect for the current task without restart.
+			if st.agentMode == tui.ModePlanning {
+				st.toolList = st.buildPlanTools()
+			} else {
+				st.toolList = st.buildAllTools()
+			}
+			newAg, err := st.createAgent()
+			if err != nil {
+				return fmt.Errorf("saved setting but could not refresh agent tools: %w", err)
+			}
+			st.ag = newAg
+			return nil
 		},
 	}
 

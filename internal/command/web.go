@@ -27,7 +27,6 @@ import (
 	"github.com/cnjack/jcode/internal/browser"
 	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/channel/ble"
-	"github.com/cnjack/jcode/internal/computer"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/feature"
 	"github.com/cnjack/jcode/internal/flow"
@@ -358,9 +357,10 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 	// Computer-use manager (native desktop app control), process-wide like the
 	// browser one so the settings UI and the agent's computer_* tools share one
 	// backend and one view of what is granted. Off unless config enables it.
-	computerMgr := computer.NewManager(computer.FromConfig(cfg.Computer), "")
-	installFakeComputerBackend(computerMgr, cfg)
-	defer func() { _ = computerMgr.Close() }()
+	computerMgr := newComputerManager(cfg, "")
+	if computerMgr != nil {
+		defer func() { _ = computerMgr.Close() }()
+	}
 
 	// Automation store (definitions + scheduler state). Skipped in setup mode.
 	// Created before buildWebTask so every per-task Env shares this one live
@@ -454,7 +454,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		// args carry no app identity, so the frontmost app must come from THIS
 		// task's session.
 		tappr.SetComputerPermFunc(func(bundleID, class string) bool {
-			return computer.Preapproved(cfg.Computer, bundleID, class)
+			return computerMgr != nil && computerMgr.Preapproved(bundleID, class)
 		})
 		tappr.SetComputerAppFunc(tenv.CurrentComputerApp)
 

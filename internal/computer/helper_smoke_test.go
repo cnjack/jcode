@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -43,7 +44,8 @@ func TestSmokeSwiftDaemon(t *testing.T) {
 	}
 	shots := filepath.Join(work, "shots")
 
-	cmd := exec.Command(bin, "--socket", sock, "--token-file", tokenFile, "--shots-dir", shots)
+	cmd := exec.Command(bin, "--socket", sock, "--token-file", tokenFile, "--shots-dir", shots,
+		"--client-pid", strconv.Itoa(os.Getpid()))
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start daemon: %v", err)
@@ -61,10 +63,20 @@ func TestSmokeSwiftDaemon(t *testing.T) {
 	if h.platform != "darwin" {
 		t.Errorf("daemon reported platform %q, want darwin", h.platform)
 	}
-	t.Logf("connected to jcode-computerd %s on %s", h.helperVersion, h.platform)
+	permissions := h.PermissionStatus()
+	if permissions.Accessibility == PermissionUnknown || permissions.ScreenRecording == PermissionUnknown {
+		t.Errorf("current daemon omitted permission status: %+v", permissions)
+	}
+	t.Logf("connected to jcode-computerd %s on %s (Accessibility=%s ScreenRecording=%s)",
+		h.helperVersion, h.platform, permissions.Accessibility, permissions.ScreenRecording)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	if refreshed, err := h.RefreshPermissionStatus(ctx); err != nil {
+		t.Fatalf("refresh permission status: %v", err)
+	} else if refreshed.Accessibility == PermissionUnknown || refreshed.ScreenRecording == PermissionUnknown {
+		t.Errorf("refreshed permission status is unknown: %+v", refreshed)
+	}
 
 	// These need no TCC grant, so they must genuinely work end to end.
 	apps, err := h.ListApps(ctx)
@@ -99,6 +111,67 @@ func TestSmokeSwiftDaemon(t *testing.T) {
 	}
 }
 
+// TestSmokeSwiftDaemonHandshake is the CI-safe subset of the real daemon
+// smoke test. It proves the correct-token protocol and permission reporting
+// without assuming the runner has a logged-in GUI session or a frontmost app.
+func TestSmokeSwiftDaemonHandshake(t *testing.T) {
+	if os.Getenv("JCODE_COMPUTERD_SMOKE") == "" {
+		t.Skip("set JCODE_COMPUTERD_SMOKE=1")
+	}
+	bin := os.Getenv("JCODE_COMPUTERD_BIN")
+	if bin == "" {
+		bin = "/tmp/jcode-computerd"
+	}
+	if _, err := os.Stat(bin); err != nil {
+		t.Fatalf("daemon binary %s not found (build it with swiftc): %v", bin, err)
+	}
+
+	work := t.TempDir()
+	sock := shortSocketPath(t)
+	tokenFile := filepath.Join(work, "token")
+	const token = "ci-handshake-token-1c92"
+	if err := os.WriteFile(tokenFile, []byte(token), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(bin, "--socket", sock, "--token-file", tokenFile,
+		"--shots-dir", filepath.Join(work, "shots"), "--client-pid", strconv.Itoa(os.Getpid()))
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start daemon: %v", err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+
+	conn := dialWithRetry(t, sock)
+	h, err := newHelperConn(conn, token)
+	if err != nil {
+		t.Fatalf("handshake with the real daemon failed: %v", err)
+	}
+	t.Cleanup(func() { _ = h.Close() })
+	if h.platform != "darwin" {
+		t.Errorf("daemon reported platform %q, want darwin", h.platform)
+	}
+	if h.helperVersion == "" {
+		t.Error("daemon omitted helper version")
+	}
+	assertKnownHelperPermissions(t, "handshake", h.PermissionStatus())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	refreshed, err := h.RefreshPermissionStatus(ctx)
+	if err != nil {
+		t.Fatalf("refresh permission status: %v", err)
+	}
+	assertKnownHelperPermissions(t, "refresh", refreshed)
+}
+
+func assertKnownHelperPermissions(t *testing.T, stage string, permissions HelperPermissions) {
+	t.Helper()
+	if permissions.Accessibility == PermissionUnknown || permissions.ScreenRecording == PermissionUnknown {
+		t.Errorf("%s permission status is unknown: %+v", stage, permissions)
+	}
+}
+
 // TestSmokeSwiftDaemonRejectsBadToken proves the daemon's own auth boundary: a
 // wrong token is refused by the real daemon, not just by the Go mock.
 func TestSmokeSwiftDaemonRejectsBadToken(t *testing.T) {
@@ -115,7 +188,8 @@ func TestSmokeSwiftDaemonRejectsBadToken(t *testing.T) {
 	if err := os.WriteFile(tokenFile, []byte("the-real-token"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(bin, "--socket", sock, "--token-file", tokenFile, "--shots-dir", filepath.Join(work, "shots"))
+	cmd := exec.Command(bin, "--socket", sock, "--token-file", tokenFile, "--shots-dir", filepath.Join(work, "shots"),
+		"--client-pid", strconv.Itoa(os.Getpid()))
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -125,7 +199,7 @@ func TestSmokeSwiftDaemonRejectsBadToken(t *testing.T) {
 	conn := dialWithRetry(t, sock)
 	_, err := newHelperConn(conn, "a-different-token")
 	if err == nil {
-		t.Fatal("the real daemon accepted a wrong token; the token boundary is broken")
+		t.Fatal("the real daemon accepted a wrong per-instance handshake token")
 	}
 	t.Logf("daemon correctly rejected the bad token: %v", err)
 }
@@ -133,7 +207,7 @@ func TestSmokeSwiftDaemonRejectsBadToken(t *testing.T) {
 // shortSocketPath returns a socket path short enough for sun_path's 104-byte
 // limit. t.TempDir() paths (long, test-name-derived) blow it — a real bug the
 // integration test surfaced that the net.Pipe mock never could. Production uses
-// ~/.jcode/computer/computerd.sock, well under the limit.
+// ~/.jcode/computer/computerd-<instance>.sock, normally under the limit.
 func shortSocketPath(t *testing.T) string {
 	f, err := os.CreateTemp("", "jcc-*.sock")
 	if err != nil {
@@ -174,7 +248,48 @@ func TestSmokeDaemonIdleExit(t *testing.T) {
 	if err := os.WriteFile(tokenFile, []byte("t"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(bin, "--socket", shortSocketPath(t), "--token-file", tokenFile, "--shots-dir", filepath.Join(work, "shots"))
+	const (
+		currentInstance = "00112233445566778899aabbccddeeff"
+		oldInstance     = "ffeeddccbbaa99887766554433221100"
+		deadInstance    = "0123456789abcdef0123456789abcdef"
+	)
+	pidText := strconv.Itoa(os.Getpid())
+	shots := filepath.Join(work, "handoff-"+pidText+"-"+currentInstance)
+	samePIDStale := filepath.Join(work, "handoff-"+pidText+"-"+oldInstance)
+	staleLegacy := filepath.Join(work, "handoff-2147483646")
+	staleNonce := filepath.Join(work, "handoff-2147483646-"+deadInstance)
+	malformed := filepath.Join(work, "handoff-2147483646-short")
+
+	live := exec.Command("sleep", "10")
+	if err := live.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = live.Process.Kill()
+		_ = live.Wait()
+	})
+	livePID := strconv.Itoa(live.Process.Pid)
+	liveLegacy := filepath.Join(work, "handoff-"+livePID)
+	liveNonce := filepath.Join(work, "handoff-"+livePID+"-"+deadInstance)
+
+	removeOnSweep := []string{shots, samePIDStale, staleLegacy, staleNonce}
+	preserveOnSweep := []string{malformed, liveLegacy, liveNonce}
+	for _, dir := range append(removeOnSweep, preserveOnSweep...) {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "orphan.png"), []byte("pixels"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Legacy PID-only directories get a migration grace so a PID-reuse race
+	// cannot immediately remove a new old-client directory.
+	old := time.Now().Add(-11 * time.Minute)
+	if err := os.Chtimes(staleLegacy, old, old); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(bin, "--socket", shortSocketPath(t), "--token-file", tokenFile, "--shots-dir", shots,
+		"--client-pid", strconv.Itoa(os.Getpid()))
 	cmd.Env = append(os.Environ(), "JCODE_COMPUTERD_IDLE_MS=500")
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -187,11 +302,19 @@ func TestSmokeDaemonIdleExit(t *testing.T) {
 	select {
 	case err := <-done:
 		if err != nil {
-			// Exit code 0 is a clean self-exit; a non-zero exit is still an exit,
-			// but log it.
-			t.Logf("daemon exited: %v", err)
+			t.Fatalf("daemon exited with an error instead of its clean idle shutdown: %v", err)
 		}
 		t.Log("daemon self-exited on idle, as designed")
+		for _, dir := range removeOnSweep {
+			if _, statErr := os.Lstat(dir); !os.IsNotExist(statErr) {
+				t.Fatalf("daemon left handoff directory %s behind: %v", dir, statErr)
+			}
+		}
+		for _, dir := range preserveOnSweep {
+			if _, statErr := os.Lstat(dir); statErr != nil {
+				t.Fatalf("daemon removed non-owned/live handoff directory %s: %v", dir, statErr)
+			}
+		}
 	case <-time.After(4 * time.Second):
 		_ = cmd.Process.Kill()
 		t.Fatal("daemon did not self-exit within 4s despite a 500ms idle window")

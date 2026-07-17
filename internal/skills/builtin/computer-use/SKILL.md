@@ -34,7 +34,12 @@ user than driving pixels.
   clicking the wrong thing. Re-snapshot after every action that changes the UI.
 - Prefer the text snapshot over `computer_screenshot`. Take a screenshot when the
   accessibility tree is clearly incomplete (custom-drawn UI, canvases, games) or when
-  the visual layout itself is the question. A screenshot cannot be acted on by uid.
+  the visual layout itself is the question. The PNG is attached to that tool result for
+  direct visual inspection; `image_ref` is only the local UI copy, not the image itself.
+  A screenshot cannot be acted on by uid, so return to a fresh snapshot whenever AX can
+  provide the target. For genuinely custom-drawn controls, the screenshot result reports
+  the focused window's global bounds, image pixel size, and the exact pixel→screen formula;
+  use that mapping rather than treating cropped-image pixels as global coordinates.
 - Use `computer_apps` to resolve a bundle id before `computer_open`. Do not guess bundle
   ids.
 
@@ -99,5 +104,8 @@ via a different app, is working against the user's safety, not around a bug.
 If a tool reports that computer control was interrupted, **the user took over** — they
 moved the mouse, switched apps, or stopped you. Stop computer work and say so plainly
 ("Looks like you took over — I've stopped."). Do not fight for control of the machine
-someone is sitting at. If the screen is locked, stop entirely; an agent driving a machine
-its owner believes is secured is not something to work around.
+someone is sitting at. A frontmost-app change is also a takeover signal and is checked
+before every action. Do not assume every mouse movement inside the same app can be
+detected; observe fresh state and stop if it no longer matches the intended workflow. If
+the screen is locked, stop entirely; an agent driving a machine its owner believes is
+secured is not something to work around.

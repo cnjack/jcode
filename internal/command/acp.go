@@ -105,7 +105,7 @@ func (s *acpSession) recentTranscript() []review.Msg {
 
 func (s *acpSession) Close() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	env := s.env
 	if s.rec != nil {
 		s.rec.Close()
 		s.rec = nil
@@ -113,6 +113,13 @@ func (s *acpSession) Close() {
 	if s.tracer != nil {
 		s.tracer.Flush()
 		s.tracer = nil
+	}
+	s.mu.Unlock()
+	if env != nil {
+		// The Env owns this task's app grants and snapshot/uid bindings. The
+		// process-wide Manager belongs to acpAgent and must remain alive for
+		// every other ACP session.
+		env.CloseComputer()
 	}
 }
 
@@ -122,6 +129,14 @@ type acpAgent struct {
 
 	mu       sync.Mutex
 	sessions map[acp.SessionId]*acpSession
+
+	// Computer Use controls one physical desktop, so all ACP sessions in this
+	// process must share the same Manager. Besides reusing one daemon connection,
+	// this shares the UI serialization lock and mutation epoch that prevent one
+	// task from acting on another task's stale observation.
+	computerMu     sync.Mutex
+	computerMgr    *computer.Manager
+	computerClosed bool
 }
 
 // Ensure acpAgent implements acp.AgentLoader interface.
@@ -151,16 +166,56 @@ func handleACPSubcommand() {
 
 	config.Logger().Printf("[acp] ACP server started on stdio")
 	<-conn.Done()
+	a.close()
 
-	// Clean up all session recorders on connection close.
+	config.Logger().Printf("[acp] ACP connection closed")
+}
+
+// sharedComputerManager returns the one process-wide Computer Use manager for
+// ACP. A newly loaded config is published before the session receives tools, so
+// existing sessions and the new one enforce the same current policy.
+func (a *acpAgent) sharedComputerManager(cfg *config.Config) (*computer.Manager, error) {
+	a.computerMu.Lock()
+	defer a.computerMu.Unlock()
+	if a.computerClosed {
+		return nil, fmt.Errorf("ACP agent is closed")
+	}
+	if a.computerMgr == nil {
+		a.computerMgr = newComputerManager(cfg, "")
+		return a.computerMgr, nil
+	}
+	var stored *config.ComputerConfig
+	if cfg != nil {
+		stored = cfg.Computer
+	}
+	a.computerMgr.SetConfig(computer.FromConfig(stored))
+	return a.computerMgr, nil
+}
+
+// close releases task-scoped sessions first, then the process-wide native
+// helper. Keeping that order ensures no session can retain a live backend after
+// the daemon has been torn down.
+func (a *acpAgent) close() {
 	a.mu.Lock()
+	sessions := make([]*acpSession, 0, len(a.sessions))
 	for id, sess := range a.sessions {
-		sess.Close()
+		sessions = append(sessions, sess)
 		delete(a.sessions, id)
 	}
 	a.mu.Unlock()
 
-	config.Logger().Printf("[acp] ACP connection closed")
+	for _, sess := range sessions {
+		sess.Close()
+	}
+
+	a.computerMu.Lock()
+	a.computerClosed = true
+	mgr := a.computerMgr
+	a.computerMgr = nil
+	a.computerMu.Unlock()
+	if mgr != nil {
+		_ = mgr.Close()
+	}
 }
 
 // availableCommandList builds the slash commands advertised to ACP clients:
@@ -464,8 +519,10 @@ func (a *acpAgent) buildAgentSession(
 	// (Browser-use is deliberately not wired here: its extension backend needs
 	// the web server, and the managed backend would launch a Chrome nobody can
 	// see from an ACP client. Computer use has no such dependency.)
-	computerMgr := computer.NewManager(computer.FromConfig(cfg.Computer), "")
-	installFakeComputerBackend(computerMgr, cfg)
+	computerMgr, err := a.sharedComputerManager(cfg)
+	if err != nil {
+		return nil, err
+	}
 	env.Computer = computerMgr
 	allTools = append(allTools, env.NewComputerTools()...)
 
@@ -489,7 +546,7 @@ func (a *acpAgent) buildAgentSession(
 	startupMode := resolveStartupMode(cfg, false)
 	approvalState := runner.NewApprovalStateWithMode(pwd, startupMode)
 	approvalState.SetComputerPermFunc(func(bundleID, class string) bool {
-		return computer.Preapproved(cfg.Computer, bundleID, class)
+		return computerMgr != nil && computerMgr.Preapproved(bundleID, class)
 	})
 	approvalState.SetComputerAppFunc(env.CurrentComputerApp)
 

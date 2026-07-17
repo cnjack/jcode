@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,13 +17,13 @@ import (
 // has no Computer manager, it returns nil (the tools are simply absent) —
 // mirroring NewBrowserTools.
 func (e *Env) NewComputerTools() []tool.BaseTool {
-	if e.Computer == nil {
+	if e.Computer == nil || !e.Computer.Enabled() {
 		return nil
 	}
 	return []tool.BaseTool{
 		&computerTool{env: e, info: computerOpenInfo()},
 		&computerTool{env: e, info: computerSnapshotInfo()},
-		&computerTool{env: e, info: computerScreenshotInfo()},
+		&computerScreenshotTool{env: e, info: computerScreenshotInfo()},
 		&computerTool{env: e, info: computerActInfo()},
 		&computerTool{env: e, info: computerReadInfo()},
 		&computerTool{env: e, info: computerAppsInfo()},
@@ -41,13 +42,13 @@ func (e *Env) NewComputerTools() []tool.BaseTool {
 // computer_act stays out. Focusing an app is recoverable; clicking things in it
 // is what plan mode exists to prevent.
 func (e *Env) NewComputerPlanTools() []tool.BaseTool {
-	if e.Computer == nil {
+	if e.Computer == nil || !e.Computer.Enabled() {
 		return nil
 	}
 	return []tool.BaseTool{
 		&computerTool{env: e, info: computerOpenInfo()},
 		&computerTool{env: e, info: computerSnapshotInfo()},
-		&computerTool{env: e, info: computerScreenshotInfo()},
+		&computerScreenshotTool{env: e, info: computerScreenshotInfo()},
 		&computerTool{env: e, info: computerAppsInfo()},
 	}
 }
@@ -65,6 +66,46 @@ func (t *computerTool) InvokableRun(ctx context.Context, argsJSON string, _ ...t
 		return "", err
 	}
 	out, err := dispatchComputer(ctx, t.env, sess, t.info.Name, argsJSON)
+	return normalizeComputerResult(out, err)
+}
+
+// computerScreenshotTool is deliberately an EnhancedInvokableTool: a local
+// image_ref is useful to the UI, but a remote model cannot fetch it. Returning
+// the PNG as a structured image part is what makes the screenshot visible to
+// a vision-capable model.
+type computerScreenshotTool struct {
+	env  *Env
+	info *schema.ToolInfo
+}
+
+var _ tool.EnhancedInvokableTool = (*computerScreenshotTool)(nil)
+
+func (t *computerScreenshotTool) Info(_ context.Context) (*schema.ToolInfo, error) {
+	return t.info, nil
+}
+
+func (t *computerScreenshotTool) InvokableRun(
+	ctx context.Context,
+	arg *schema.ToolArgument,
+	_ ...tool.Option,
+) (*schema.ToolResult, error) {
+	argsJSON := ""
+	if arg != nil {
+		argsJSON = arg.Text
+	}
+	sess, err := t.env.ComputerSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	text, png, err := captureComputerScreenshot(ctx, t.env, sess, argsJSON)
+	text, err = normalizeComputerResult(text, err)
+	if err != nil {
+		return nil, err
+	}
+	return computerScreenshotResult(text, png), nil
+}
+
+func normalizeComputerResult(out string, err error) (string, error) {
 	switch {
 	case errors.Is(err, computer.ErrControlInterrupted):
 		// Report naturally; the model should stop rather than retry. If the
@@ -89,6 +130,56 @@ func (t *computerTool) InvokableRun(ctx context.Context, argsJSON string, _ ...t
 		return withPartial(out, "Refused: "+notAllowed.Error()), nil
 	}
 	return out, err
+}
+
+func captureComputerScreenshot(
+	ctx context.Context,
+	env *Env,
+	sess *computer.Session,
+	argsJSON string,
+) (string, []byte, error) {
+	var in struct {
+		App string `json:"app"`
+	}
+	_ = json.Unmarshal([]byte(argsJSON), &in)
+	if strings.TrimSpace(in.App) == "" {
+		return "", nil, fmt.Errorf("app is required")
+	}
+	shot, err := sess.ScreenshotVisual(ctx, in.App)
+	if err != nil {
+		return "", nil, err
+	}
+	id, err := env.Computer.SaveScreenshot(shot.PNG)
+	if err != nil {
+		return "", nil, err
+	}
+	text := fmt.Sprintf(
+		"[screenshot bytes=%d image_ref=/api/computer/shots/%s.png]\nCaptured %s. The PNG is attached for visual inspection. Use computer_snapshot for element ground truth; a screenshot cannot be acted on by uid.",
+		len(shot.PNG), id, in.App,
+	)
+	if shot.Width > 0 && shot.Height > 0 && shot.PixelWidth > 0 && shot.PixelHeight > 0 {
+		text += fmt.Sprintf(
+			"\nWindow bounds (global screen coordinates): x=%.1f y=%.1f width=%.1f height=%.1f; attached image: %dx%d pixels. For custom-drawn UI, map image pixel (px,py) to computer_act coordinates x=%.1f+px*%.1f/%d, y=%.1f+py*%.1f/%d.",
+			shot.X, shot.Y, shot.Width, shot.Height, shot.PixelWidth, shot.PixelHeight,
+			shot.X, shot.Width, shot.PixelWidth, shot.Y, shot.Height, shot.PixelHeight,
+		)
+	}
+	return text, shot.PNG, nil
+}
+
+func computerScreenshotResult(text string, png []byte) *schema.ToolResult {
+	parts := []schema.ToolOutputPart{{Type: schema.ToolPartTypeText, Text: text}}
+	if len(png) > 0 {
+		encoded := base64.StdEncoding.EncodeToString(png)
+		parts = append(parts, schema.ToolOutputPart{
+			Type: schema.ToolPartTypeImage,
+			Image: &schema.ToolOutputImage{MessagePartCommon: schema.MessagePartCommon{
+				MIMEType:   "image/png",
+				Base64Data: &encoded,
+			}},
+		})
+	}
+	return &schema.ToolResult{Parts: parts}
 }
 
 // withPartial prefixes a refusal with whatever already happened, so a partially
@@ -126,26 +217,8 @@ func dispatchComputer(ctx context.Context, env *Env, sess *computer.Session, nam
 		return sess.Snapshot(ctx, in.App, in.Filter, in.MaxLines, in.DisableDiff)
 
 	case "computer_screenshot":
-		var in struct {
-			App string `json:"app"`
-		}
-		_ = json.Unmarshal([]byte(argsJSON), &in)
-		if strings.TrimSpace(in.App) == "" {
-			return "", fmt.Errorf("app is required")
-		}
-		png, err := sess.Screenshot(ctx, in.App)
-		if err != nil {
-			return "", err
-		}
-		id, err := env.Computer.SaveScreenshot(png)
-		if err != nil {
-			return "", err
-		}
-		// The ref rides in the result text and the web UI renders it inline;
-		// text clients see the ref and the size. Same mechanism as
-		// browser_screenshot (tools/browser.go:102).
-		return fmt.Sprintf("[screenshot bytes=%d image_ref=/api/computer/shots/%s.png]\nCaptured %s. Use computer_snapshot for element ground truth; a screenshot cannot be acted on by uid.",
-			len(png), id, in.App), nil
+		text, _, err := captureComputerScreenshot(ctx, env, sess, argsJSON)
+		return text, err
 
 	case "computer_act":
 		return computerAct(ctx, sess, argsJSON)
@@ -222,7 +295,8 @@ func computerScreenshotInfo() *schema.ToolInfo {
 	return &schema.ToolInfo{
 		Name: "computer_screenshot",
 		Desc: "Capture a PNG of an app's windows. Use for visual confirmation or when the accessibility tree is " +
-			"incomplete (custom-drawn UI, canvases); prefer computer_snapshot for element ground truth.",
+			"incomplete (custom-drawn UI, canvases). The PNG is attached to the result for vision-capable models; " +
+			"prefer computer_snapshot for element ground truth and stable uids.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"app": strParam("Bundle id.", true),
 		}),

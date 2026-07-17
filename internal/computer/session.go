@@ -1,6 +1,7 @@
 package computer
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sort"
@@ -18,7 +19,13 @@ import (
 // (browser/session.go:54-58 makes the same split for the same reason: backends
 // are expensive to start and are reused across tasks.)
 type Session struct {
-	mu      sync.Mutex
+	mu sync.Mutex
+	// opMu serializes observations and action tool calls. Eino may execute
+	// sibling tool calls from one assistant turn concurrently; without this
+	// lock, two Act calls can both observe dirty=false and apply the same stale
+	// snapshot before either call marks it dirty. Snapshot also participates so
+	// uidSeq and the snapshot maps are committed as one ordered observation.
+	opMu    sync.Mutex
 	mgr     *Manager
 	backend Backend
 
@@ -37,7 +44,17 @@ type Session struct {
 	snaps map[string]*uitree.Snapshot
 	// prevText holds the previous snapshot text per app, for diffing.
 	prevText map[string]string
-	gen      int
+	// dirty requires a fresh observation after an action tool call. Keeping the
+	// previous snapshot lets surviving elements retain stable uids after that
+	// observation.
+	dirty map[string]bool
+	// observedEpoch records the process-wide UI mutation epoch at which this
+	// Session last observed each app. A different task's action invalidates it.
+	observedEpoch map[string]uint64
+	gen           int
+	// backendGen is the native helper connection generation. A daemon restart
+	// invalidates every AX ref even though this Go Session object survives.
+	backendGen uint64
 	// uidSeq is the session-wide monotonic uid counter, shared across apps. uids
 	// are never reused, so a uid absent from the latest snapshot is genuinely
 	// stale rather than silently rebound to a different element — which is the
@@ -50,14 +67,67 @@ type Session struct {
 
 func newSession(mgr *Manager, b Backend) *Session {
 	return &Session{
-		mgr:          mgr,
-		backend:      b,
-		allow:        map[string]bool{},
-		tierOverride: map[string]Tier{},
-		snaps:        map[string]*uitree.Snapshot{},
-		prevText:     map[string]string{},
-		maxBatch:     mgr.MaxBatch(),
+		mgr:           mgr,
+		backend:       b,
+		allow:         map[string]bool{},
+		tierOverride:  map[string]Tier{},
+		snaps:         map[string]*uitree.Snapshot{},
+		prevText:      map[string]string{},
+		dirty:         map[string]bool{},
+		observedEpoch: map[string]uint64{},
+		backendGen:    backendGeneration(b),
+		maxBatch:      mgr.MaxBatch(),
 	}
+}
+
+// refreshPolicyLocked copies the Manager's current enforcement policy into this
+// already-open Session. The caller holds mgr.uiMu, the same lock SetConfig uses,
+// so policy cannot tighten between this check and the backend operation it
+// governs. Values are replaced, not ORed: turning a grant off in Settings must
+// revoke it for existing Sessions immediately.
+func (s *Session) refreshPolicyLocked() (sessionPolicy, error) {
+	policy := s.mgr.sessionPolicy()
+	s.mu.Lock()
+	s.tierOverride = policy.tierOverrides
+	s.maxBatch = policy.maxBatch
+	s.clipboardRead = policy.clipboardRead
+	s.clipboardWrite = policy.clipboardWrite
+	s.systemKeyCombos = policy.systemKeyCombos
+	s.mu.Unlock()
+	if !policy.enabled {
+		return policy, fmt.Errorf("computer use is disabled; enable it in settings")
+	}
+	return policy, nil
+}
+
+type generationBackend interface {
+	Generation() uint64
+}
+
+func backendGeneration(b Backend) uint64 {
+	if source, ok := b.(generationBackend); ok {
+		return source.Generation()
+	}
+	return 0
+}
+
+// syncBackendGeneration retires uid/ref bindings after the helper reconnects.
+// uidSeq deliberately remains monotonic so an old uid can never be rebound to a
+// new daemon's element.
+func (s *Session) syncBackendGeneration() {
+	current := backendGeneration(s.backend)
+	if current == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.backendGen != 0 && current != s.backendGen {
+		s.snaps = map[string]*uitree.Snapshot{}
+		s.prevText = map[string]string{}
+		s.dirty = map[string]bool{}
+		s.observedEpoch = map[string]uint64{}
+	}
+	s.backendGen = current
 }
 
 // BackendKind reports which backend is serving this session.
@@ -69,6 +139,8 @@ func (s *Session) Close() error {
 	defer s.mu.Unlock()
 	s.snaps = map[string]*uitree.Snapshot{}
 	s.prevText = map[string]string{}
+	s.dirty = map[string]bool{}
+	s.observedEpoch = map[string]uint64{}
 	return nil
 }
 
@@ -134,10 +206,18 @@ func (s *Session) TierFor(bundleID string) Tier {
 // because a click carries no bundle id in its args — exactly the reason
 // browser-use reads the origin from the live session rather than from args.
 func (s *Session) FrontmostBundle(ctx context.Context) string {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	s.mgr.uiMu.Lock()
+	defer s.mgr.uiMu.Unlock()
+	if _, err := s.refreshPolicyLocked(); err != nil {
+		return ""
+	}
 	app, err := s.backend.Frontmost(ctx)
 	if err != nil {
 		return ""
 	}
+	s.syncBackendGeneration()
 	return app.BundleID
 }
 
@@ -164,6 +244,7 @@ func (s *Session) gate(ctx context.Context, action string) (App, error) {
 		}
 		return App{}, fmt.Errorf("cannot determine the frontmost app: %w", err)
 	}
+	s.syncBackendGeneration()
 	s.mu.Lock()
 	allowed := s.allow[front.BundleID]
 	s.mu.Unlock()
@@ -205,16 +286,28 @@ func (s *Session) Open(ctx context.Context, bundleID string) (string, error) {
 	if strings.TrimSpace(bundleID) == "" {
 		return "", fmt.Errorf("bundle id is required")
 	}
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	s.mgr.uiMu.Lock()
+	defer s.mgr.uiMu.Unlock()
+	if _, err := s.refreshPolicyLocked(); err != nil {
+		return "", err
+	}
 	// Launch first, grant second. Granting first left an app allowlisted after a
 	// launch that failed — a grant for something that never opened, which the
 	// next action would then happily act on if the app appeared by other means.
-	if err := s.backend.Launch(ctx, bundleID); err != nil {
+	err := s.backend.Launch(ctx, bundleID)
+	// Launch is mutating and its outcome can be unknown on transport failure.
+	// Conservatively invalidate every other task's observations either way.
+	s.mgr.uiEpoch++
+	if err != nil {
 		return "", interpretErr(err)
 	}
+	s.syncBackendGeneration()
 	s.Grant([]string{bundleID}, false, false, false)
 	// Full tree on open: there is no previous snapshot of this app to diff
 	// against, and a diff against nothing is just the tree with extra noise.
-	return s.Snapshot(ctx, bundleID, "interactive", 0, true)
+	return s.snapshotLocked(ctx, bundleID, "interactive", 0, true)
 }
 
 // Snapshot returns uid-annotated accessibility text for an app.
@@ -226,8 +319,22 @@ func (s *Session) Open(ctx context.Context, bundleID string) (string, error) {
 //
 // Diffing is client-side here, unlike codex (whose service holds session state
 // and diffs server-side). Ours is worse in principle but portable: it works
-// identically for a stateless osascript backend and a stateful helper.
+// identically for injected test backends and the stateful native helper.
 func (s *Session) Snapshot(ctx context.Context, bundleID, filter string, maxLines int, disableDiff bool) (string, error) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	s.mgr.uiMu.Lock()
+	defer s.mgr.uiMu.Unlock()
+	if _, err := s.refreshPolicyLocked(); err != nil {
+		return "", err
+	}
+	return s.snapshotLocked(ctx, bundleID, filter, maxLines, disableDiff)
+}
+
+// snapshotLocked performs one tree observation while the Session operation and
+// process-wide UI locks are held. Open uses it to keep launch, live-policy check,
+// and the initial snapshot inside one SetConfig-serialized boundary.
+func (s *Session) snapshotLocked(ctx context.Context, bundleID, filter string, maxLines int, disableDiff bool) (string, error) {
 	if err := s.checkAllowed(bundleID, bundleID); err != nil {
 		return "", err
 	}
@@ -235,6 +342,7 @@ func (s *Session) Snapshot(ctx context.Context, bundleID, filter string, maxLine
 	if err != nil {
 		return "", interpretErr(err)
 	}
+	s.syncBackendGeneration()
 
 	s.mu.Lock()
 	s.gen++
@@ -256,6 +364,8 @@ func (s *Session) Snapshot(ctx context.Context, bundleID, filter string, maxLine
 	s.uidSeq = snap.NextUID
 	s.snaps[bundleID] = snap
 	s.prevText[bundleID] = snap.Text
+	delete(s.dirty, bundleID)
+	s.observedEpoch[bundleID] = s.mgr.uiEpoch
 	s.mu.Unlock()
 
 	header := fmt.Sprintf("app %q — tier %s", bundleID, s.TierFor(bundleID))
@@ -275,27 +385,70 @@ func (s *Session) Snapshot(ctx context.Context, bundleID, filter string, maxLine
 
 // Screenshot captures an app's windows.
 func (s *Session) Screenshot(ctx context.Context, bundleID string) ([]byte, error) {
-	if err := s.checkAllowed(bundleID, bundleID); err != nil {
-		return nil, err
+	shot, err := s.ScreenshotVisual(ctx, bundleID)
+	return shot.PNG, err
+}
+
+// ScreenshotVisual captures the current app window plus the coordinate mapping
+// required for custom-drawn UI that has no actionable AX node.
+func (s *Session) ScreenshotVisual(ctx context.Context, bundleID string) (Screenshot, error) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	s.mgr.uiMu.Lock()
+	defer s.mgr.uiMu.Unlock()
+	if _, err := s.refreshPolicyLocked(); err != nil {
+		return Screenshot{}, err
 	}
-	png, err := s.backend.Capture(ctx, bundleID)
-	return png, interpretErr(err)
+	if err := s.checkAllowed(bundleID, bundleID); err != nil {
+		return Screenshot{}, err
+	}
+	var shot Screenshot
+	var err error
+	if richer, ok := s.backend.(VisualCaptureBackend); ok {
+		shot, err = richer.CaptureVisual(ctx, bundleID)
+	} else {
+		shot.PNG, err = s.backend.Capture(ctx, bundleID)
+	}
+	if err == nil {
+		s.syncBackendGeneration()
+	}
+	if err != nil {
+		return Screenshot{}, interpretErr(err)
+	}
+	if len(shot.PNG) == 0 || int64(len(shot.PNG)) > MaxScreenshotBytes {
+		return Screenshot{}, fmt.Errorf("screenshot is %d bytes; expected 1..%d", len(shot.PNG), MaxScreenshotBytes)
+	}
+	if !bytes.HasPrefix(shot.PNG, []byte("\x89PNG\r\n\x1a\n")) {
+		return Screenshot{}, fmt.Errorf("screenshot backend returned invalid PNG data")
+	}
+	s.mu.Lock()
+	// A visual observation is fresh enough for coordinate actions, but it does
+	// not revalidate AX refs minted by an older tree. Retire those refs here so a
+	// screenshot cannot accidentally bless a stale uid after another task has
+	// changed the UI. The next AX snapshot starts a full-tree baseline and keeps
+	// uidSeq monotonic, so retired uids are never rebound.
+	delete(s.snaps, bundleID)
+	delete(s.prevText, bundleID)
+	delete(s.dirty, bundleID)
+	s.observedEpoch[bundleID] = s.mgr.uiEpoch
+	s.mu.Unlock()
+	return shot, nil
 }
 
 // ActRequest is one action as the model expressed it.
 type ActRequest struct {
-	Action    string  `json:"action"`
-	UID       string  `json:"uid"`
-	Value     string  `json:"value"`
-	Key       string  `json:"key"`
-	Text      string  `json:"text"`
-	Name      string  `json:"name"`
-	X         float64 `json:"x"`
-	Y         float64 `json:"y"`
-	ToX       float64 `json:"to_x"`
-	ToY       float64 `json:"to_y"`
-	Direction string  `json:"direction"`
-	Pages     float64 `json:"pages"`
+	Action    string   `json:"action"`
+	UID       string   `json:"uid"`
+	Value     string   `json:"value"`
+	Key       string   `json:"key"`
+	Text      string   `json:"text"`
+	Name      string   `json:"name"`
+	X         *float64 `json:"x"`
+	Y         *float64 `json:"y"`
+	ToX       *float64 `json:"to_x"`
+	ToY       *float64 `json:"to_y"`
+	Direction string   `json:"direction"`
+	Pages     float64  `json:"pages"`
 }
 
 // Act performs one or more actions. Every step is independently gated.
@@ -304,12 +457,38 @@ type ActRequest struct {
 // continue-on-error: a sequence whose step 3 failed has an unknown UI state at
 // step 4, and pressing on is how a click lands somewhere unintended.
 func (s *Session) Act(ctx context.Context, steps []ActRequest) (string, error) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	s.mgr.uiMu.Lock()
+	defer s.mgr.uiMu.Unlock()
+	batchEpoch := s.mgr.uiEpoch
+	policy, err := s.refreshPolicyLocked()
+	if err != nil {
+		return "", err
+	}
+
 	if len(steps) == 0 {
 		return "", fmt.Errorf("no actions given")
 	}
-	if len(steps) > s.maxBatch {
-		return "", fmt.Errorf("batch of %d exceeds max_actions_per_batch=%d", len(steps), s.maxBatch)
+	if len(steps) > policy.maxBatch {
+		return "", fmt.Errorf("batch of %d exceeds max_actions_per_batch=%d", len(steps), policy.maxBatch)
 	}
+
+	// Steps inside one explicit batch share the input snapshot, but after any step
+	// may have reached an app, the next action tool call must observe fresh UI
+	// state first. The previous snapshot remains available so surviving elements
+	// keep stable uids after that observation.
+	touched := map[string]bool{}
+	defer func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for bundleID := range touched {
+			s.dirty[bundleID] = true
+		}
+		if len(touched) > 0 {
+			s.mgr.uiEpoch++
+		}
+	}()
 
 	var log strings.Builder
 	for i, st := range steps {
@@ -335,6 +514,28 @@ func (s *Session) Act(ctx context.Context, steps []ActRequest) (string, error) {
 		if err := s.checkFlags(st); err != nil {
 			return log.String(), fmt.Errorf("step %d of %d refused: %w", i+1, len(steps), err)
 		}
+		var resolvedRef int64
+		if st.UID != "" {
+			ref, err := s.resolveUID(front.BundleID, st.UID)
+			if err != nil {
+				return log.String(), fmt.Errorf("step %d of %d: %w", i+1, len(steps), err)
+			}
+			resolvedRef = ref
+		}
+		s.mu.Lock()
+		needsSnapshot := s.dirty[front.BundleID]
+		observedEpoch, observed := s.observedEpoch[front.BundleID]
+		s.mu.Unlock()
+		if needsSnapshot {
+			return log.String(), fmt.Errorf(
+				"step %d of %d: UI state changed after the last action — call computer_snapshot before acting again",
+				i+1, len(steps))
+		}
+		if !observed || observedEpoch != batchEpoch {
+			return log.String(), fmt.Errorf(
+				"step %d of %d: another task changed UI after this session observed it — call computer_snapshot before acting",
+				i+1, len(steps))
+		}
 
 		act := Action{
 			// The target is the *verified* frontmost app, not anything the model
@@ -346,20 +547,19 @@ func (s *Session) Act(ctx context.Context, steps []ActRequest) (string, error) {
 			Key:       st.Key,
 			Text:      st.Text,
 			Name:      st.Name,
-			X:         st.X,
-			Y:         st.Y,
-			ToX:       st.ToX,
-			ToY:       st.ToY,
+			X:         coordinateValue(st.X),
+			Y:         coordinateValue(st.Y),
+			ToX:       coordinateValue(st.ToX),
+			ToY:       coordinateValue(st.ToY),
+			HasX:      st.X != nil,
+			HasY:      st.Y != nil,
+			HasToX:    st.ToX != nil,
+			HasToY:    st.ToY != nil,
 			Direction: st.Direction,
 			Pages:     st.Pages,
 		}
-		if st.UID != "" {
-			ref, err := s.resolveUID(front.BundleID, st.UID)
-			if err != nil {
-				return log.String(), fmt.Errorf("step %d of %d: %w", i+1, len(steps), err)
-			}
-			act.Ref = ref
-		}
+		act.Ref = resolvedRef
+		touched[front.BundleID] = true
 		if err := s.backend.Perform(ctx, act); err != nil {
 			return log.String(), fmt.Errorf("step %d of %d: %w", i+1, len(steps), interpretErr(err))
 		}
@@ -373,10 +573,17 @@ func uidSuffix(st ActRequest) string {
 	switch {
 	case st.UID != "":
 		return " [" + st.UID + "]"
-	case st.X != 0 || st.Y != 0:
-		return fmt.Sprintf(" (%.0f,%.0f)", st.X, st.Y)
+	case st.X != nil && st.Y != nil:
+		return fmt.Sprintf(" (%.0f,%.0f)", *st.X, *st.Y)
 	}
 	return ""
+}
+
+func coordinateValue(value *float64) float64 {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 // checkFlags enforces the grant flags that are orthogonal to the app allowlist.
@@ -459,6 +666,13 @@ func (s *Session) resolveUID(bundleID, uid string) (int64, error) {
 // to ever pre-approve this call (see decideComputer), so it prompts every time
 // even under a blanket always_allow.
 func (s *Session) Read(ctx context.Context, kind string) (string, error) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	s.mgr.uiMu.Lock()
+	defer s.mgr.uiMu.Unlock()
+	if _, err := s.refreshPolicyLocked(); err != nil {
+		return "", err
+	}
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "", "clipboard":
 		s.mu.Lock()
@@ -472,6 +686,7 @@ func (s *Session) Read(ctx context.Context, kind string) (string, error) {
 		if err != nil {
 			return "", interpretErr(err)
 		}
+		s.syncBackendGeneration()
 		if strings.TrimSpace(txt) == "" {
 			return "(the clipboard is empty)", nil
 		}
@@ -490,10 +705,18 @@ func (s *Session) Read(ctx context.Context, kind string) (string, error) {
 // "Ignore previous instructions.app". They are wrapped in an explicit data
 // boundary so a model reading the list is told, in band, not to obey it.
 func (s *Session) Apps(ctx context.Context) (string, error) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	s.mgr.uiMu.Lock()
+	defer s.mgr.uiMu.Unlock()
+	if _, err := s.refreshPolicyLocked(); err != nil {
+		return "", err
+	}
 	apps, err := s.backend.ListApps(ctx)
 	if err != nil {
 		return "", interpretErr(err)
 	}
+	s.syncBackendGeneration()
 	sort.Slice(apps, func(i, j int) bool { return apps[i].Name < apps[j].Name })
 
 	var b strings.Builder

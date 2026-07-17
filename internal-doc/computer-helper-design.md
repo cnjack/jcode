@@ -1,20 +1,21 @@
-# Computer-Use Helper — Cross-Platform Native Backend Design
+# Computer-Use Helper — macOS Native Backend Design
 
 Status: **partially implemented (macOS)** · 2026-07-16 · Extends
 `internal-doc/computer-use-design.md` §2.2, §9
 
-> **Implementation status.** Phase 1 (Go protocol + `helperBackend` + mock tests)
+> **Implementation status.** Phase 1 (Go protocol + `helperBackend` + protocol tests)
 > and most of phase 2 (the macOS Swift daemon) are **built and tested** — see §11
 > for the per-requirement matrix. The Go client is fully unit-tested against a
 > mock; the real Swift daemon is proven over a real socket for the no-TCC paths;
 > the AX/CGEvent/SCK paths compile and return correct errors without a grant but
 > are not exercised under a real TCC grant (that needs a manual grant this
-> environment can't automate). Windows is designed here but **not implemented**.
+> environment can't automate). The shipping product is intentionally macOS 14+
+> only; Windows/Linux are not exposed as partially supported platforms.
 
-The `computer-use` feature ships today on `FakeBackend` only. This document
-designs the **real** backend: a native helper process that reads accessibility
-trees, synthesizes input, and captures windows — on **macOS and Windows**, behind
-one platform-neutral socket protocol.
+The `computer-use` feature ships with one real backend: native Swift helper
+processes that read accessibility trees, synthesize input, and capture windows
+on macOS 14+. Deterministic fakes exist only in unit tests and explicit
+`jcode_eval` builds; there is no production mock or backend selector.
 
 The parent design (`computer-use-design.md`) settled the *shape* — a `Backend`
 interface, a unix-socket JSON-RPC protocol (§2.2), a 9-code error taxonomy (§7).
@@ -56,7 +57,7 @@ document builds on them; it does not revisit them.
    Close() error
    ```
 
-   `FakeBackend` (`internal/computer/fake.go`) is the proof this interface is
+   `FakeBackend` (`internal/computer/fake.go`) is the test proof this interface is
    sufficient. `helperBackend` is "the same nine methods, but each marshals into
    a socket request instead of touching an in-memory map." If a method cannot be
    implemented cleanly over the socket, the interface is wrong — and it is far
@@ -90,14 +91,14 @@ document builds on them; it does not revisit them.
    └──────────┬───────────┘
    ═══════════╪═══════════  ← THE PLATFORM LINE (a socket)
               │
-   ┌──────────┴───────────┐        ┌──────────────────────┐
-   │  jcode-computerd      │        │  jcode-computerd.exe │
-   │  (Swift, macOS)       │        │  (C#/C++, Windows)   │
-   │  AXUIElement          │        │  UI Automation (COM) │
-   │  CGEventPost          │        │  SendInput           │
-   │  ScreenCaptureKit     │        │  Windows.Graphics.   │
-   │  TCC consent          │        │    Capture           │
-   └──────────────────────┘        └──────────────────────┘
+   ┌───────────────────────┐
+   │  jcode-computerd       │
+   │  (Swift, macOS 14+)    │
+   │  AXUIElement           │
+   │  CGEventPost           │
+   │  ScreenCaptureKit      │
+   │  TCC consent           │
+   └───────────────────────┘
 ```
 
 **The line is a socket, and it is drawn deliberately low.** Everything above it —
@@ -170,10 +171,10 @@ code.
 
 | | macOS / Linux | Windows |
 |---|---|---|
-| primary | unix socket, `~/.jcode/computer/computerd.sock`, dir mode 0700 | named pipe, `\\.\pipe\jcode-computerd-<sid>` |
+| primary | per-process-instance unix socket, `~/.jcode/computer/computerd-<nonce>.sock`, dir mode 0700 | named pipe, `\\.\pipe\jcode-computerd-<sid>` |
 | Go dial | `net.Dial("unix", path)` | `winio.DialPipe` (go-winio) |
 | connection-layer guard | dir mode 0700 | **SDDL DACL on the pipe** (only the user's SID may open it) |
-| app-layer peer identity | pid → `SecCode` → team id (§4) | `ImpersonateNamedPipeClient` → token SID + Authenticode (§4) |
+| app-layer peer identity | current: peer PID + token; planned: signed parent / audit token (§4) | `ImpersonateNamedPipeClient` → token SID + Authenticode (§4) |
 
 **Windows 10 1803+ does support AF_UNIX**, and Go's `net.Dial("unix")` works on
 it — tempting, because it keeps the transport literally identical. It is rejected
@@ -282,15 +283,16 @@ kAXValueAttribute, text)` and invokes a named action via
 `ValuePattern.SetValue` and the pattern interfaces (`InvokePattern`,
 `TogglePattern`, …). Same two `Action` kinds (`set_value`, `menu`), two backings.
 
-### 3.4 `capture` — by reference, not by value, when it can be
+### 3.4 `capture` — by reference across IPC, by value into model vision
 
-An 8 MiB frame cap (§2.2) is a soft limit for a full-window PNG. The parent's
-tool layer already writes screenshots to `~/.jcode/computer/shots/<uuid>.png` and
-passes an `image_ref` (`computer-use-design.md` §3.2). So the preferred path is:
-the helper writes the PNG to that directory (it shares the user's filesystem) and
-returns `{png_ref}`; only if that write fails does it inline `{png_base64}`. This
-keeps large images off the socket entirely — the same "pass a file:// url, not
-bytes" discipline codex uses.
+The 8 MiB frame cap (§2.2) applies to protocol JSON, not to the PNG. The capture
+worker writes the PNG atomically in the per-process handoff directory and the
+daemon returns `{png_ref}`. Go opens that exact regular file without following a
+symlink, enforces a 20 MiB limit and a PNG signature, reads it, and removes the
+handoff copy. This keeps binary media off the socket while still allowing the
+tool layer to attach the actual bytes as an Eino `image/png` result. A separate
+mode-0600 UI copy is addressed by `image_ref`; that local URL is for rendering
+and is not mistaken for model vision.
 
 The **coordinate-system alignment** the capture must guarantee is the subtle
 part, and it is platform-specific. The *contract* is fixed regardless:
@@ -318,9 +320,10 @@ coordinates, and the capture's pixels.
   is `SCContentFilter.pointPixelScale` (2.0 on Retina). So the helper's abstract
   coordinate space is **points** — the space AX and CGEvent already share, so
   input synthesis needs no conversion at all — and only the capture path
-  converts: it sets `SCStreamConfiguration.width/height` to
-  `contentRect × pointPixelScale` to grab a full-resolution image, but reports
-  every tree rectangle to the Go side in points. This is cleaner than Windows,
+  converts: it uses a desktop-independent single-window filter, removes window
+  shadows, scales up to `pointPixelScale`, and caps the long edge at 2048 pixels.
+  Metadata reports the actual returned `CGImage` dimensions rather than an
+  assumed scale. Every tree rectangle still reaches Go in points. This is cleaner than Windows,
   where all three spaces are pixels and the burden is instead *declaring* the DPI
   mode so the OS stops virtualizing them. Same contract, opposite chore: macOS
   converts the capture, Windows converts nothing but must opt out of scaling.
@@ -330,12 +333,18 @@ coordinates, and the capture's pixels.
 ## 4. Peer authentication — the security boundary, per platform
 
 A unix socket (or named pipe) is reachable by any process of the same uid. A
-token in a 0600 file (the `tokens.go` `StableToken` pattern, reusable as a
-*belt*) is readable by any process of the same uid too. So the actual boundary,
-as the parent §2.2 insists, is **verifying the peer's code identity** — and this
-is the second place the platforms diverge hard.
+token in a 0600 file is also readable by another process running as that uid, so
+file mode alone is not a same-uid security boundary. The current macOS daemon
+therefore combines two checks: the kernel-reported peer PID must equal the jcode
+PID passed at spawn time, and the first frame must carry the token. This prevents
+a different live PID from borrowing that *already-running daemon instance*. It
+is not a same-uid trust boundary: another process can execute the TCC-authorized
+helper binary itself with its own PID, token and socket. Nor does it give the Go
+client a cryptographic identity for the server. Signed-parent validation plus an
+inherited socket, or XPC audit-token identity, is required for that stronger
+claim.
 
-**macOS** — pid → SecCode → team identifier, with a token as the real boundary:
+**macOS hardening path** — pid → SecCode → team identifier, on top of PID+token:
 1. `getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID)` for the peer pid.
 2. `SecCodeCopyGuestWithAttributes` with `kSecGuestAttributePid` → the peer's
    `SecCode`.
@@ -351,7 +360,8 @@ reading the pid and checking the signature, that pid can be recycled to an
 attacker's process (this is a documented XPC attack class, and it applies a
 fortiori to a socket with no audit token at all).
 
-Two ways to close it, and the design picks the second:
+Two stronger mutual-identity designs remain; neither is claimed by the current
+implementation:
 
 - **Switch macOS to XPC.** XPC gets the audit token, and macOS 13+ has
   `NSXPCConnection.setCodeSigningRequirement` — the strongest possible peer auth.
@@ -360,21 +370,10 @@ Two ways to close it, and the design picks the second:
   lifetime, and the macOS transport would diverge entirely from Windows's pipe.
   Rejected — the security gain does not justify forking the lifecycle model and
   the transport story.
-- **A first-frame one-time token, as the actual boundary — not a belt.** The Go
-  process writes a fresh random token to a 0600 file (the `tokens.go`
-  `StableToken`/`IssueToken` pattern, reused exactly) and the daemon requires it
-  in the connection's first frame. **This is immune to pid reuse by
-  construction**: even an attacker who wins the pid race does not possess the
-  token, which lived only in a 0600 file and the two legitimate processes. The
-  SecCode check (steps 1–3) stays as defense-in-depth, but the token is what
-  actually holds the line.
-
-This reframes the parent §2.2's "token as belt, pid+sig as suspenders": on a bare
-socket the **token is the suspenders** and the pid+sig check is the belt, because
-only the token survives pid reuse. The same reasoning applies to Windows, where
-`GetNamedPipeClientProcessId` is likewise forgeable (§4) — so the first-frame
-token is the one peer-auth mechanism that is sound and identical on both
-platforms, and the platform-specific SID/SecCode checks are the hardening on top.
+- **An inherited socket/socketpair or XPC mutual identity channel.** This would
+  remove the filesystem rendezvous race and let both sides verify whom they are
+  speaking to. Until then, PID+token is a practical containment improvement, not
+  a claim of signed mutual authentication.
 
 **Windows** — two layers, because the obvious one-layer answer (trust the pid) is
 forgeable. My first draft got this exactly backwards, calling Windows
@@ -475,7 +474,11 @@ half. The synthesis:
    and re-spawned, exactly `getManaged`'s `alive()` loop.
 4. **Teardown.** `Manager.Close()` closes the socket and signals the daemon to
    exit. The daemon also self-exits after an idle timeout, so a crashed jcode
-   never leaves an automation daemon running.
+   never leaves an automation daemon running. Its process-instance screenshot
+   handoff (`handoff-PID-<128-bit nonce>`) is cleared on dial/reconnect and normal
+   close; the daemon also removes its own directory on startup/idle exit. It
+   strictly parses and sweeps dead nonce siblings, while legacy `handoff-PID`
+   migration entries require an age grace and a repeated liveness check.
 
 The three "not implemented" returns in `manager.go` (`:160` helper, `:162` osa,
 `:168` auto) are the exact lines this replaces.
@@ -495,16 +498,16 @@ session. If persistent auto-start is ever wanted, the per-platform equivalents
 are a LaunchAgent plist (macOS) and a per-user Scheduled Task with an "at log on"
 trigger (Windows) — *not* a Windows Service, ever.
 
-### 5.1 What happened to `osaBackend`?
+### 5.1 What happened to `osaBackend` and the backend selector?
 
 The parent (§2.1, §10.1) proposed an osascript backend as a no-build-toolchain
 fallback that ships before the signed helper. This design **de-prioritizes it**,
 on evidence: the parent's own §10.1 probe found System Events timing out even for
 the trivial "who is frontmost" query, and while that was a sandboxed probe (not
 conclusive), AppleScript's `entire contents` on a real Xcode window is a known
-multi-second-to-hang operation. Building the helper as the *primary* path on both
-platforms, with the fake as the only fallback, is cleaner than shipping a
-degraded osa backend that works on Calculator and dies on anything real. If a
+multi-second-to-hang operation. Building the helper as the only production path
+is cleaner than shipping a degraded osa backend that works on Calculator and
+dies on anything real. If a
 no-signing dev path is needed on macOS, an **ad-hoc-signed local build of the
 Swift helper** (research confirms `swiftc` is present) is a better fallback than
 osascript — it exercises the real code path, just without a stable TCC identity.
@@ -527,15 +530,12 @@ on **every** `go build` — so it would re-prompt for consent on every update, a
 a tool that asks for Accessibility permission every time is a tool nobody keeps
 enabled. This is the concrete evidence under C2's claim; it is not a preference.
 
-Add `jcode-computerd` as a third `externalBin`
-(`tauri.conf.json:44`); build it in a new CI step (native macOS runner, `swiftc`)
-alongside the existing sidecar builds (`release.yml:260`); it is swept into the
-single `pnpm tauri build` sign+notarize pass under the same Developer ID. The one
-addition: **Accessibility and Screen Recording usage-description strings in
-`Info.plist`** — and this is a known trap, not a hypothetical: the desktop app
-already hit a SIGABRT-on-launch bug from a *missing* Bluetooth usage description
-(memory: `jcode-desktop-app`). The same failure mode awaits a missing
-`NSAccessibilityUsageDescription` / screen-capture description.
+`tauri.macos.conf.json` replaces the base `externalBin` array with all four
+macOS binaries: `jcode`, `jcode-ble`, the AX daemon, and the isolated capture
+worker. The release job compiles both Swift helpers with an explicit macOS 14
+deployment target before the existing `pnpm tauri build` sign/notarize pass.
+Keeping this in a platform config is load-bearing: Windows and Linux must not be
+asked for helpers they cannot build.
 
 **Windows** — cheaper than my first draft feared, because the research corrected
 two assumptions. There is **no Windows signing infrastructure today**
@@ -558,40 +558,26 @@ refinement logged honestly — the same posture the parent takes on every other
 "shipped but degraded" state. (The one place signing *is* an API prerequisite —
 `uiAccess="true"` to automate elevated windows — is a v1 non-goal, §4.1.)
 
-**CLI-only users** (who install the plain `jcode-<os>-<arch>` binary, not the
-desktop app) get no helper from this path. A separate download-on-enable step
-(the settings UI already has an "Install helper" button per
-`computer-use-design.md` §6.1) fetches the signed helper for them. Out of scope
-for v1; noted so the settings-UI button is not mistaken for already wired.
+**CLI-only users** receive matching daemon and capture assets in every macOS
+release. `script/install.sh` downloads and SHA-256-verifies all three binaries
+before installing any of them; `make install` compiles both helpers into the same
+Go bin directory as `jcode`. Runtime discovery therefore remains the same exact
+sibling lookup for local, CLI-release, and Tauri installs.
 
 ---
 
-## 7. Phasing
+## 7. Delivery status
 
-The order is chosen so each phase is independently testable and the riskiest
-platform assumption is measured before the most code is written.
-
-1. **Protocol + `helperBackend` (Go), against a mock daemon.** No native code
-   yet — a throwaway Go "daemon" that serves canned trees over the real socket,
-   so the client, the framing, the ctx handling, and the peer-auth plumbing are
-   all exercised and unit-tested before a line of Swift exists. This is the
-   `FakeBackend`-over-a-real-socket step, and it de-risks the entire Go half.
-2. **macOS helper, ad-hoc signed.** The real Swift daemon: AX tree, CGEvent,
-   ScreenCaptureKit, TCC. Ad-hoc signed, run locally, no distribution — proves
-   the platform APIs work end-to-end. **This is where the highest-risk unknowns
-   resolve** (AX perf on a real tree, coordinate alignment, auto-wait), so it
-   comes before any packaging investment.
-3. **macOS distribution.** Developer ID + notarization via the existing Tauri
-   pipeline; the `Info.plist` strings; the settings-UI install button.
-4. **Windows helper.** UIA + SendInput + Graphics.Capture, over a named pipe.
-   Independently, in parallel with (3) if there's a second pair of hands — the
-   protocol is frozen after phase 1, so the two platforms cannot drift.
-5. **Windows signing + distribution.** The prerequisite from §6. Gates the
-   Windows helper's public release, not its development.
-
-Phase 1 is the keystone: freezing the protocol against a mock is what lets macOS
-and Windows be built by different people at different times without a shared line
-of native code, and it is pure Go — no signing, no TCC, no COM, testable in CI.
+1. **Protocol + `helperBackend`: delivered.** Framing, token auth, deadlines,
+   reconnect, and mutation non-replay are covered against a mock daemon.
+2. **macOS helpers: delivered and live-tested.** The AX daemon plus isolated
+   ScreenCaptureKit worker drive Calculator end to end under real TCC grants.
+3. **macOS distribution: delivered.** Local builds, `make install`, CLI release
+   assets, the shell installer, and Tauri bundles all ship the same pair with a
+   macOS 14 deployment target. Developer-ID signing/notarization is applied by
+   the existing release job when its optional credentials are configured.
+4. **Windows helper and signing: deferred.** UIA, SendInput, named-pipe transport,
+   and its distribution remain future platform work.
 
 ---
 
@@ -605,9 +591,11 @@ line. What the native layer adds is a small, sharp set of its own obligations:
   A compromised helper can do what the OS lets the user's session do — but so can
   any process the user runs; the helper adds no privilege the tier system hasn't
   already gated above it.
-- **Peer auth is the helper's one guard** (§4): it serves only jcode. This is
-  what stops a *different* same-uid process from using the running daemon as a
-  confused deputy to drive the screen.
+- **Instance admission is the helper's one local guard** (§4): PID+token stops a
+  different live process from using the already-running daemon as a confused
+  deputy. It does not authenticate who launched a new helper instance, so this
+  is containment against accidental/cross-process borrowing, not signed local
+  process identity.
 - **Lazy spawn is a security property** (§5.2): no automation daemon exists until
   the user turns the feature on, so the attack surface is absent by default, not
   merely dormant.
@@ -635,11 +623,11 @@ summarized here.
 2. **macOS peer auth over a bare socket** (§4). Resolved, and it changed the
    design: a bare unix socket **cannot** get an audit token (that is an
    XPC/Mach-message property), so the pid+SecCode check has a real pid-reuse
-   TOCTOU. Rather than switch macOS to XPC (which would fork the lifecycle and
-   transport), the **first-frame one-time token becomes the actual boundary** —
-   immune to pid reuse by construction, and identical on both platforms (Windows's
-   pid is likewise forgeable). The platform-specific SecCode/SID checks are
-   hardening on top.
+   TOCTOU. The first-frame random token prevents accidental/stale rendezvous and
+   binds a connection to one launch, but a mode-0600 file is readable by the same
+   uid and therefore is not an adversarial same-uid boundary. A signed-parent +
+   inherited-socket design, or XPC audit tokens, is the remaining hard boundary.
+   The platform-specific SecCode/SID checks are useful hardening on top.
 3. **Coordinate-system alignment** (§3.4). Resolved both platforms: macOS works
    in points (AX and CGEvent already share them) and converts only the capture
    via `SCContentFilter.pointPixelScale`; Windows works in pixels and instead must
@@ -694,28 +682,28 @@ Per-requirement, so a reader knows exactly what runs and what is still design.
 | mock daemon over net.Pipe (full client coverage) | §7.1 | ✅ | `internal/computer/helper_test.go` |
 | **Real Go↔Swift integration over a socket** | §7.2 | ✅ tested (no-TCC paths) | `internal/computer/helper_smoke_test.go` |
 | Swift daemon: NSWorkspace apps/frontmost/launch, clipboard | §3.2 | ✅ runs (no TCC needed) | `cmd/jcode-computerd/main.swift` |
-| Swift daemon: AXUIElement tree, set_value, named actions | §3.2 | ✅ compiles, correct error without grant; ⚠ not driven under a grant | ″ |
-| Swift daemon: CGEventPost mouse/keyboard/scroll | §3.2 | ✅ compiles; ⚠ not driven under a grant | ″ |
-| Swift daemon: ScreenCaptureKit window capture | §3.4 | ✅ compiles; ⚠ not driven under a grant | ″ |
-| **Element Ref stable across snapshots** (element→ref table) | §1.1,§9.1 | ✅ built; ⚠ end-to-end needs TCC | `ElementRegistry` in daemon |
-| **Batch attribute read** (`CopyMultipleAttributeValues`) | §3.3 | ✅ built | `axBatch` in daemon |
+| Swift daemon: AXUIElement tree, ref actions, CGEvent | §3.2 | ✅ real Calculator E2E under Accessibility grant | `cmd/jcode-computerd/main.swift`, `helper_calculator_e2e_test.go` |
+| Swift worker: ScreenCaptureKit window capture | §3.4 | ✅ real PNG + daemon-survival E2E | `WindowCaptureHelper.swift`, `helper_calculator_e2e_test.go` |
+| **Element Ref stable across snapshots** (element→ref table) | §1.1,§9.1 | ✅ built + exercised end to end | `ElementRegistry` in daemon |
+| Per-attribute AX reads with bounded traversal | §3.3 | ✅ built; batch optimization deferred | `axValue`, `TreeBuilder` in daemon |
 | **Auto-wait** (settle after an action) | §7,§9 | ✅ built (fixed settle; loading-indicator extend deferred) | `settleUI` in daemon |
 | **Idle self-exit** | §5,§8 | ✅ built + tested | daemon accept loop; `TestSmokeDaemonIdleExit` |
+| Process-instance screenshot handoff cleanup | §3.4,§5 | ✅ nonce socket/handoff + dial/close + legacy-aware daemon sweep; real idle-exit smoke | daemon lifecycle; `TestHelperHandoffCleanupIsProcessScoped` |
 | **screenLocked kill switch** | §8 | ✅ built; ⚠ lock-screen path not automatable in test | `checkScreenUnlocked` in daemon |
 | tree diff on the Go side | §3.3 | ✅ (pre-existing) | `Session.Snapshot` |
-| coordinate contract (points; pointPixelScale on capture) | §3.4 | ✅ built | `captureWindow` in daemon |
-| Peer auth: first-frame token | §4 | ✅ built + tested (real daemon rejects bad token) | daemon + client |
+| coordinate contract (window points + PNG pixel mapping) | §3.4 | ✅ built + real E2E | daemon/worker metadata + screenshot tool text |
+| Peer auth: expected client PID + first-frame token | §4 | ✅ built; real happy path + bad-token unit coverage | daemon + client |
 | Peer auth: SecCode/team-id hardening on top of token | §4 | ⬜ deferred | — |
-| liveness / reconnect of a crashed daemon | §5 | ⬜ deferred (TODO in getHelper) | — |
-| Developer ID signing + notarization | §6,§7.3 | ⬜ deferred (phase 3) | — |
-| Info.plist usage-description strings | §6 | ⬜ deferred (phase 3) | — |
-| Windows (named pipe, UIA, SendInput, SDDL/SID auth) | all | ⬜ not implemented (out of scope) | — |
+| liveness / reconnect of a crashed daemon | §5 | ✅ reconnect once on next request; mutations never replayed | `helper.go`, `helper_test.go` |
+| macOS packaging + deployment target | §6–7 | ✅ CLI + installer + Tauri; macOS 14 min | `Makefile`, `release.yml`, `install.sh` |
+| Developer ID signing + notarization | §6–7 | ✅ existing optional release path covers bundled helpers | `release.yml` |
+| Non-macOS product gate | all | ✅ status-only explanation; no tools or enablement | `internal/computer/platform.go`, command/web composition |
 
-**The honest gaps**, restated plainly: nothing here has been driven under a real
-Accessibility/Screen-Recording grant, so tree/input/capture are "compiles and
-fails correctly without permission" rather than "verified to drive a real app";
-peer auth is the token alone (sound, but the SecCode belt is not on yet); a
-crashed daemon is not yet auto-reconnected; and distribution (signing, Info.plist,
-the settings install button) is phase 3. None of these block the phase-1/2
-architecture, which is proven end to end for everything that does not require a
-human to click Allow in System Settings.
+**The honest gaps**, restated plainly: daemon-instance PID+token admission is
+built, but a same-uid process can still launch a new authorized helper and mutual
+audit-token/code-signature identity is not built; continuous same-app human
+takeover detection is not built; lock-screen paths are not safely automatable in
+CI. Historical Windows notes elsewhere in this document are research archive,
+not a roadmap or a product fallback. The
+macOS AX/action/capture path has now been driven against a real app with real
+permissions, including recovery after a dead daemon and survival after capture.
