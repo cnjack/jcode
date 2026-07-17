@@ -1,11 +1,11 @@
 /**
  * GoalBanner — active goal display (set via /goal or the Goal toggle).
  * Ported from web/src/components/GoalBanner.vue: a rounded inset card with
- * Bolt/status tint, status label, objective, and clear button — not a full-width
+ * target/status tint, status label, objective, and clear button — not a full-width
  * border-b strip.
  */
 
-import { BoltIcon } from '@heroicons/react/24/outline'
+import { ViewfinderCircleIcon } from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
 import { chatActions } from '../app/store'
@@ -55,7 +55,7 @@ export function GoalBanner() {
       className="mt-2 flex items-start gap-2 rounded-md border px-3 py-2"
       style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-secondary)' }}
     >
-      <BoltIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: statusColor }} />
+      <ViewfinderCircleIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: statusColor }} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span

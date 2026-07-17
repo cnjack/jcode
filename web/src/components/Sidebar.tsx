@@ -31,7 +31,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
-import { uiActions, sessionActions, chatActions, loadSession, loadWorkspaceState } from '../app/store'
+import { uiActions, sessionActions, chatActions, loadSession, loadWorkspaceState, startNewChat } from '../app/store'
 import { api } from '../lib/api'
 import type { TaskItem } from '../lib/types'
 import { ThemeToggle } from './ThemeToggle'
@@ -325,18 +325,9 @@ export function Sidebar() {
 
   // ── Actions ──
 
+  // Shared with the ⌘N / ⇧⌘O shortcuts in App.tsx (see startNewChat in the store).
   async function newChat() {
-    dispatch(chatActions.clearChat())
-    dispatch(sessionActions.setCurrentSession(''))
-    dispatch(uiActions.setView('chat'))
-    try {
-      const resp = await api.newSession()
-      // Keep the welcome screen empty-session out of the sidebar until the
-      // first user message (backend only indexes then; a UUID-only row looks broken).
-      dispatch(sessionActions.setCurrentSession(resp.session_id))
-    } catch {
-      // surfaced via health/gate
-    }
+    await dispatch(startNewChat())
   }
 
   async function openItem(row: SessionRow) {
@@ -517,7 +508,7 @@ export function Sidebar() {
           >
             <PlusIcon className="sb-nav-ic" />
             <span className="sb-nav-name">{t('nav.newTask')}</span>
-            <span className="sb-nav-kbd">⌘ N</span>
+            <span className="sb-nav-kbd">⇧⌘ O</span>
           </button>
           <button
             type="button"
