@@ -694,11 +694,14 @@
 .jcode-file-table tr:hover {
   background: color-mix(in srgb, var(--jcode-color-foreground) 4%, transparent);
 }
-.jcode-file-lineno {
+/* NOTE: must out-specify `.jcode-file-table td` (0-1-1) or `white-space: pre-wrap`
+   + `word-break: break-all` there wins and multi-digit line numbers wrap vertically. */
+.jcode-file-table td.jcode-file-lineno {
   color: color-mix(in srgb, var(--jcode-code-fg, var(--jcode-color-muted-foreground)) 45%, transparent);
   user-select: none;
   text-align: right;
   white-space: nowrap;
+  word-break: normal;
   width: 1px;
   padding: 0.05rem 0.75rem 0.05rem 0.65rem;
   border-right: 1px solid var(--jcode-code-border);
