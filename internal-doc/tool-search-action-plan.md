@@ -35,8 +35,8 @@
 | TS-01 ToolPlan 核心 | 完成 | `be5e701` | 分类、校验、稳定排序与 runtime 安全边界 |
 | TS-02 Eino middleware | 完成 | `0a03ce6` | 客户端 ToolSearch、兼容开关与模型级测试 |
 | TS-03 Transport 接入 | 完成 | `0f55179` | TUI/Web/ACP 共享 policy 与重建路径 |
-| TS-04 MCP 与权限 | 进行中 | `c9cb076`、`1aa128e`、`a316830`、`b1b687f` | team mode 边界待完成 |
-| TS-05 Prompt 与观测 | 未开始 | — | 使用说明、schema/轨迹指标 |
+| TS-04 MCP 与权限 | 完成 | `c9cb076`、`1aa128e`、`a316830`、`b1b687f`、`3b751db` | MCP、Plan、delegation 和 team mode 边界完成 |
+| TS-05 Prompt 与观测 | 进行中 | — | 使用说明、schema/轨迹指标 |
 | TS-06 自动化测试 | 未开始 | — | 单元、集成、fixture 和 routing oracle |
 | TS-07 Kimi A/B | 未开始 | — | 精确模型、静态/渐进式对照 |
 | TS-08 30 分钟回归 | 未开始 | — | 全场景长跑 |
@@ -123,7 +123,7 @@ Plan 模式首轮目标：
 - [x] TS-04.3 MCP 按 server/tool 稳定排序；跨 server 原名可共存，sanitize/长度冲突按 Codex 策略加稳定 hash，内建最终名冲突由 ToolPlan fail closed。
 - [x] TS-04.4 `tool_search`、`load_skill`、`goal_get` 等只读工具免审批。
 - [x] TS-04.5 验证 Deferred 写工具仍按原策略审批，搜索激活不等于授权。
-- [ ] TS-04.6 审计并修正 subagent、workflow、team child agent 的审批和 plan 硬边界，再决定是否接入 ToolSearch。
+- [x] TS-04.6 审计并修正 subagent、workflow、team child agent 的审批和 plan 硬边界，再决定是否接入 ToolSearch。
 
 完成证据：
 
@@ -144,7 +144,11 @@ Plan 模式首轮目标：
 - Workflow：explore 使用 Plan execute；general/coordinator 继承 `workflow_run` 的一次性授权；所有 flow child 都挂 safe-error middleware，不在后台等待交互审批。
 - 测试：subagent/flow tool matrix、schema grant 文案、runner grant/background/malformed matrix、flow error folding；定向、两包 race、`go test ./...`、`make lint-go` 全部通过。
 - 已完成提交：`b1b687f fix(tools): bound delegated child permissions`（TS-04.6 / subagent+workflow 子阶段）。
-- 待完成：TS-04.6；最终 TS-04 汇总提交待填写。
+- Team：`agent_type` 规范为 `explore/general/coder`，`mode` 规范为 `normal/plan/auto`；缺省为 `general+normal`，未知值在启动 goroutine 前 fail closed。Explore 或 Plan child 只有 read/grep/Plan execute；Normal 写调用共享 leader 的逐次审批；仅 general/coder+auto 在父 `team_spawn` 请求一次性授权。
+- Team schema：`agent_type` / `mode` 提供 enum、default 和一次性授权说明；结果回显规范化 type/mode。Manager 的 ToolBuilder、PromptBuilder、HandlersFactory 和持久化状态均携带同一规范化 permission，缺少依赖或 nil 环境时不启动 child。
+- Child ToolSearch 决策：暂不接入。Explore/Plan 只有 3 个、general/coder 只有 7 个 schema，不存在足以抵消 middleware/reminder 开销的 schema 压力；保留静态小集合可使权限 profile 更直接可审计。后续只有 child 工具集显著增长并通过同等权限矩阵后才重新评估。
+- 测试：`go test ./internal/team ./internal/command ./internal/runner ./internal/tools`；`go test -race ./internal/team ./internal/command ./internal/runner ./internal/tools`；`go test ./...`；`make lint-go`；全部通过，race 无异常，lint `0 issues`。
+- 已完成提交：`3b751db fix(team): enforce child permission profiles`（TS-04.6 / team 子阶段，TS-04 完成）。
 
 ## TS-05 Prompt、schema 与观测
 
@@ -247,3 +251,4 @@ Kimi 硬门槛：
 | 2026-07-18 | 完成 TS-04.4～04.5：只读免审、MCP provenance 优先、Deferred 激活不授权 | 定向、race、全量 Go、lint 通过 | `1aa128e` |
 | 2026-07-18 | 完成 TS-04.6 子阶段：Plan execute/Browser 在 endpoint 层硬拒绝越权 | 定向、race、全量 Go、lint 通过 | `a316830` |
 | 2026-07-18 | 完成 TS-04.6 子阶段：subagent/workflow 一次性授权与 observe profile | 定向、race、全量 Go、lint 通过 | `b1b687f` |
+| 2026-07-18 | 完成 TS-04.6 与 TS-04：team child 权限矩阵、fail-closed mode、父级一次性授权；小工具集暂不接 ToolSearch | 聚焦、四包 race、全量 Go、lint 通过 | `3b751db` |
