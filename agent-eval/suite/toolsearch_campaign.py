@@ -53,6 +53,7 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 MAX_CAPTURE_BYTES = 1 << 16
 PUBLICATION_FILES = ("record.json", "trajectory.json", "redaction_report.json")
 SUITE_HASH_KEYS = ("matrix_sha256", "base_suite_sha256")
+JCODE_BUILD_TAGS = ("jcode_eval",)
 
 
 class CampaignError(RuntimeError):
@@ -382,7 +383,10 @@ def build_binaries(
     }
     commands = (
         (
-            ("go", "build", "-trimpath", "-o", str(targets["jcode"]), "./cmd/jcode/"),
+            (
+                "go", "build", "-tags", ",".join(JCODE_BUILD_TAGS),
+                "-trimpath", "-o", str(targets["jcode"]), "./cmd/jcode/",
+            ),
             repo,
             "jcode_build_failed",
         ),
@@ -550,6 +554,7 @@ def build_plan(
         "variants": list(options.variants),
         "repeats": options.repeats,
         "request_parameters": {"temperature": "omitted"},
+        "build": {"jcode_tags": list(JCODE_BUILD_TAGS)},
         "suite_inputs": dict(suite_hashes),
         "supplementary_planned": options.include_supplementary,
         "jobs": [job.publication_record() for job in jobs],
@@ -956,6 +961,7 @@ def _campaign_manifest(
         "model_label": EXACT_MODEL_LABEL,
         "model_id": EXACT_MODEL_ID,
         "request_parameters": {"temperature": "omitted"},
+        "build": {"jcode_tags": list(JCODE_BUILD_TAGS)},
         "git": {"commit": provenance.commit, "dirty": provenance.dirty},
         "binaries": binary_hashes,
         "suite_inputs": suite_hashes,

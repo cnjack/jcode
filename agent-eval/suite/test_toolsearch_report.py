@@ -205,6 +205,7 @@ class SyntheticCampaign:
             "variants": ["static", "deferred"],
             "repeats": self.repeats,
             "request_parameters": {"temperature": "omitted"},
+            "build": {"jcode_tags": ["jcode_eval"]},
             "suite_inputs": suite_hashes,
             "supplementary_planned": True,
             "jobs": self.jobs,
@@ -225,6 +226,7 @@ class SyntheticCampaign:
             "model_label": toolsearch_report.EXACT_MODEL_LABEL,
             "model_id": toolsearch_report.EXACT_MODEL_ID,
             "request_parameters": {"temperature": "omitted"},
+            "build": {"jcode_tags": ["jcode_eval"]},
             "git": {"commit": "a" * 40, "dirty": False},
             "binaries": {
                 "jcode_sha256": "1" * 64,
@@ -389,6 +391,7 @@ class ToolSearchReportTest(unittest.TestCase):
         self.assertIn("ts_browser_loopback_read", document)
         self.assertIn("successful_real_union_at_least_1800s", document)
         self.assertIn("effort=omitted", document)
+        self.assertIn("JCode tags <code>jcode_eval</code>", document)
         self.assertIn('href="plan.json"', document)
         self.assertNotIn(str(self.synthetic.root), document)
         self.assertEqual([], toolsearch_report.scan_report(
@@ -449,6 +452,23 @@ class ToolSearchReportTest(unittest.TestCase):
         first = self.synthetic.jobs[0]["run_id"]
         (self.synthetic.runs / first / "trajectory.json").unlink()
         with self.assertRaisesRegex(toolsearch_report.ReportError, "trajectory"):
+            self.generate()
+
+    def test_missing_or_wrong_jcode_eval_build_tag_fails_closed(self):
+        plan_path = self.synthetic.runs / "plan.json"
+        plan = json.loads(plan_path.read_text())
+        del plan["build"]
+        self.synthetic.write(plan_path, plan)
+        with self.assertRaisesRegex(toolsearch_report.ReportError, "build provenance"):
+            self.generate()
+
+        plan["build"] = {"jcode_tags": ["jcode_eval"]}
+        self.synthetic.write(plan_path, plan)
+        campaign_path = self.synthetic.runs / "campaign.json"
+        campaign = json.loads(campaign_path.read_text())
+        campaign["build"] = {"jcode_tags": []}
+        self.synthetic.write(campaign_path, campaign)
+        with self.assertRaisesRegex(toolsearch_report.ReportError, "jcode_eval build tag"):
             self.generate()
 
     def test_failed_or_nonformal_campaign_is_rejected(self):

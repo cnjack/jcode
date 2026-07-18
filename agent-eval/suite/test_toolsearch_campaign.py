@@ -278,6 +278,9 @@ class ToolSearchCampaignTest(unittest.TestCase):
             plan["models"],
         )
         self.assertEqual({"temperature": "omitted"}, plan["request_parameters"])
+        self.assertEqual(
+            {"jcode_tags": ["jcode_eval"]}, plan["build"],
+        )
         self.assertEqual(suite_hashes, plan["suite_inputs"])
         self.assertNotIn("temperature", plan["jobs"][0])
 
@@ -295,8 +298,19 @@ class ToolSearchCampaignTest(unittest.TestCase):
         )
         self.assertTrue(all(len(value) == 64 for value in binaries.hashes.values()))
         build_calls = [argv for argv, _kwargs in commands.calls if argv[:2] == ("go", "build")]
-        self.assertEqual(3, len(build_calls))
-        self.assertTrue(all("-trimpath" in argv for argv in build_calls))
+        self.assertEqual([
+            (
+                "go", "build", "-tags", "jcode_eval", "-trimpath", "-o",
+                str(binaries.jcode), "./cmd/jcode/",
+            ),
+            (
+                "go", "build", "-trimpath", "-o", str(binaries.harness), ".",
+            ),
+            (
+                "go", "build", "-trimpath", "-o", str(binaries.mcp_fixture),
+                "./agent-eval/fixture/mcp",
+            ),
+        ], build_calls)
         self.assertTrue(all(os.access(path, os.X_OK) for path in (
             binaries.jcode, binaries.harness, binaries.mcp_fixture,
         )))
@@ -350,6 +364,8 @@ class ToolSearchCampaignTest(unittest.TestCase):
         self.assertEqual("a" * 40, manifest["git"]["commit"])
         self.assertFalse(manifest["git"]["dirty"])
         self.assertEqual({"temperature": "omitted"}, manifest["request_parameters"])
+        self.assertEqual({"jcode_tags": ["jcode_eval"]}, plan["build"])
+        self.assertEqual({"jcode_tags": ["jcode_eval"]}, manifest["build"])
         self.assertTrue(all(not path.exists() for path in commands.build_outputs))
 
     def test_partial_failure_never_fabricates_completion(self):

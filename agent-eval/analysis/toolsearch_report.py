@@ -79,6 +79,7 @@ REQUIRED_CAMPAIGN_HASHES = (
     "mcp_fixture_sha256",
 )
 REQUIRED_ENVIRONMENT_FIELDS = ("go_version", "os_arch", "eino_version")
+JCODE_BUILD_TAGS = ("jcode_eval",)
 SUITE_HASH_KEYS = ("matrix_sha256", "base_suite_sha256")
 EXPECTED_SUPPLEMENTARY_COMMANDS = {
     "transport_mode_catalogs",
@@ -267,6 +268,9 @@ def _validate_plan(plan, case_map, suite_hashes):
     parameters = _require_dict(plan.get("request_parameters"), "plan request parameters")
     if parameters != {"temperature": "omitted"}:
         raise ReportError("formal plan must prove temperature was omitted")
+    build = _require_dict(plan.get("build"), "plan build provenance")
+    if build != {"jcode_tags": list(JCODE_BUILD_TAGS)}:
+        raise ReportError("formal plan must prove the jcode_eval build tag")
     if _require_dict(plan.get("suite_inputs"), "plan suite_inputs") != suite_hashes:
         raise ReportError("plan suite input hashes drifted")
     if _require_int(plan.get("workers"), "plan workers", 1) != 1:
@@ -605,6 +609,9 @@ def _validate_campaign(
     parameters = _require_dict(campaign.get("request_parameters"), "campaign request parameters")
     if parameters.get("temperature") != "omitted":
         raise ReportError("campaign must prove temperature was omitted")
+    build = _require_dict(campaign.get("build"), "campaign build provenance")
+    if build != {"jcode_tags": list(JCODE_BUILD_TAGS)}:
+        raise ReportError("formal campaign must prove the jcode_eval build tag")
     if _require_dict(campaign.get("suite_inputs"), "campaign suite_inputs") != suite_hashes:
         raise ReportError("campaign suite input hashes drifted")
 
@@ -1310,6 +1317,7 @@ def render_html(evaluation):
         )
 
     environment = campaign_raw["environment"]
+    build = campaign_raw["build"]
     binaries = campaign_raw["binaries"]
     git = campaign_raw["git"]
     gate_failures = [gate["name"] for gate in evaluation["gates"] if not gate["passed"]]
@@ -1365,7 +1373,8 @@ summary{{cursor:pointer}}ol{{color:#c8d2e7}}.artifact-links{{margin-left:20px}}
 temperature={esc(evaluation['request_parameters']['temperature'])}<br>
 effort={esc(evaluation['request_parameters']['effort'])}</p></div>
 <div><b>Git</b><p><code>{esc(git['commit'])}</code><br>dirty={str(git['dirty']).lower()}</p></div>
-<div><b>Environment</b><p>{esc(environment['go_version'])}<br>{esc(environment['os_arch'])}<br>Eino {esc(environment['eino_version'])}</p></div>
+<div><b>Environment</b><p>{esc(environment['go_version'])}<br>{esc(environment['os_arch'])}<br>Eino {esc(environment['eino_version'])}<br>
+JCode tags <code>{esc(','.join(build['jcode_tags']))}</code></p></div>
 <div><b>Binary SHA-256</b><p>jcode <code>{esc(binaries['jcode_sha256'])}</code><br>
 harness <code>{esc(binaries['harness_sha256'])}</code><br>
 MCP fixture <code>{esc(binaries['mcp_fixture_sha256'])}</code></p></div></div>
