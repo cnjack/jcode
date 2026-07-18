@@ -39,7 +39,7 @@
 | TS-05 Prompt 与观测 | 进行中 | `dbe7ca4`、`69ba9ee`、`f905ae2`、`8675a5b`、`92c2f31` | 使用说明、成功调用去重规则、schema/轨迹指标、凭证文件权限及 Browser 子进程 token 隔离 |
 | TS-06 自动化测试 | 完成 | `77de5fc`、`92e0cb0`、`56fa6eb` | 单元、集成、fixture、routing oracle 与生命周期撤权矩阵 |
 | TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e`、`8675a5b`、`d60000d`、`8c980b1`、`207b313`、`7530b38`、`92c2f31`、`ef66470` | MCP100 Deferred repeat 9/10、跨类小矩阵 12/12；等待 formal pass@10 |
-| TS-08 30 分钟回归 | 进行中 | `9f2889e`、`8c980b1` | formal coordinator、deterministic `jcode_eval` 构建与证据合约完成；尚未运行真实全场景长跑 |
+| TS-08 30 分钟回归 | 进行中 | `9f2889e`、`8c980b1` | formal 首次真实启动在 matrix 前因中文 Browser static 漏 snapshot 严格失败；等待修复后全新完整重跑 |
 | TS-09 HTML 报告 | 进行中 | `ad55a3b`、`92d442e`、`9f2889e`、`8c980b1` | 安全、fail-closed 的九门槛报告器、canonical suite、build-tag 与 supplementary 合约已完成；等待真实 campaign 产物 |
 
 ## TS-00 文档与基线
@@ -330,6 +330,8 @@ Kimi 硬门槛：
 - 安全/失败关闭：每 run 必须有 record/metadata-only trajectory/redaction 三件套，私有目录 owner-only，凭证/host path 扫描；中断、部分失败、Git/suite/binary 漂移均写 failed manifest。supplementary 必须与真实 record 的 language/scenario/routing/real_execution 身份一致，报告要求固定 3 command + 4 Web 记录全部通过。
 - 独立 review 曾发现 report 未强制 complete/formal、binary hash 未复核、formal 可替换小矩阵、supplementary 可身份漂移四类缺口；均已增加 fail-closed 校验和回归测试后才提交。
 - Computer fixture 预检补强：统一 coordinator 现在固定以 `jcode_eval` tag 构建 JCode，plan/campaign 显式记录该 tag；报告验收精确要求同一值，防止普通 release binary 冒充 deterministic Computer campaign。提交 `8c980b1`，Python 全量 91/91。
+- 首次真实 formal 尝试：固定 clean commit `1e9d172`、exact model、`temperature=omitted`、`workers=1`、`jcode_eval` build，计划 300 matrix jobs；三项 deterministic command、Web approval-deny 与 browser-disabled supplementary 均 PASS。中文 success static 完成真实 open/fill/click/read confirmation，但漏掉明确要求的 `browser_snapshot`，external routing 因 required count/order 严格 FAIL；coordinator 在 46.053s、matrix 0/300 时以 `supplementary_web_failed` fail closed，未把该次运行计入 30 分钟门槛，也不复用失败目录。三份 supplementary publish bundle 均 artifact-safe、redaction 0 finding。
+- 根因/下一步：这是 Kimi 对中文线性提示的随机步骤遗漏，与 Browser endpoint、Chrome 或 ToolSearch activation 无关；相同代码的英文 static/deferred 小矩阵刚以完整 proof 通过。把中英文 Browser prompt 改为显式编号的强顺序契约，中文明确标注 `browser_snapshot` 不可省略；通过 supplementary 重复 canary 后，必须用新 clean commit 与全新目录重新完整 formal。
 - 测试：campaign 定向 10/10、修复后定向 23/23、agent-eval Python 全量 90/90、fake formal 可被真实报告器解析且仅 1800 秒 gate 按预期失败；`py_compile`、diff check 通过。
 - 已完成提交：`9f2889e test(eval): coordinate formal ToolSearch campaign`（仅基础设施；TS-08.1～08.6 均未勾选）。
 
@@ -401,3 +403,4 @@ Kimi 硬门槛：
 | 2026-07-18 | 四个 MCP final oracle 改为用户可见 SKU；raw marker/fixture/参数/次数/激活严格 gate 不变 | Python 91/91、相关 45 tests、独立 review 无 blocker | `ef66470` |
 | 2026-07-18 | 新 oracle MCP100 Deferred 独立 10-repeat 严格 9/10，达到 critical 门槛 | 9 条 search=1/target=1；唯一失败先误选 metadata 后纠正，严格 forbidden/external verifier FAIL；无成功循环 | — |
 | 2026-07-18 | 最终 12-job 跨类小矩阵严格 12/12 PASS，可进入 formal | no-tool/exact/MCP10/100/Browser/Computer 两臂全通过；Deferred bypass/same-batch/failed=0；MCP100 首轮 schema 降低 75.2% | — |
+| 2026-07-18 | 首次真实 formal 在 matrix 前 fail closed：中文 Browser static 漏 snapshot | 3 command + deny + disabled PASS；success 完成页面 proof 但 required count/order FAIL；46.053s、0/300，不计 30 分钟 | — |
