@@ -1,5 +1,6 @@
 import json
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -178,6 +179,84 @@ class ToolSearchEvalHarnessTest(unittest.TestCase):
                 (right[0]["id"], right[1], right[3]),
             )
             self.assertEqual({"static", "deferred"}, {left[2], right[2]})
+
+    def test_build_jobs_respects_case_variants_without_splitting_pairs(self):
+        cases = [
+            {"id": "paired", "tier": "core", "variants": ["static", "deferred"]},
+            {"id": "negative", "tier": "core", "variants": ["deferred"]},
+        ]
+        jobs = orchestrate.build_jobs(
+            cases, ["kimi-for-coding"], ["static", "deferred"],
+            seed=71, explicit_repeats=3,
+        )
+        signature = [
+            (case["id"], variant, repeat)
+            for case, _model, variant, repeat in jobs
+        ]
+        self.assertEqual(3, sum(case_id == "negative" for case_id, _variant, _repeat in signature))
+        self.assertTrue(all(
+            variant == "deferred"
+            for case_id, variant, _repeat in signature
+            if case_id == "negative"
+        ))
+        for repeat in range(1, 4):
+            positions = [
+                index for index, (case_id, _variant, actual_repeat) in enumerate(signature)
+                if case_id == "paired" and actual_repeat == repeat
+            ]
+            self.assertEqual(2, len(positions))
+            self.assertEqual(1, positions[1] - positions[0])
+            self.assertEqual(
+                {"static", "deferred"},
+                {signature[index][1] for index in positions},
+            )
+
+    def test_toolsearch_matrix_cli_dry_run_is_acp_only_and_routes_web_explicitly(self):
+        runs = self.root / "matrix-runs"
+        command = [
+            sys.executable,
+            str(Path(orchestrate.__file__).resolve()),
+            "--bin", "/usr/bin/true",
+            "--harness", "/usr/bin/true",
+            "--mcp-fixture", "/usr/bin/true",
+            "--runs-dir", str(runs),
+            "--models", "kimi-for-coding",
+            "--variants", "static,deferred",
+            "--repeats", "1",
+            "--workers", "1",
+            "--toolsearch-matrix", str(orchestrate.toolsearch_cases.DEFAULT_MATRIX),
+            "--dry-run",
+        ]
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=30)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        self.assertIn("requires Web runner", completed.stdout)
+
+        plan = json.loads((runs / "plan.json").read_text())
+        self.assertEqual("toolsearch", plan["suite"])
+        self.assertEqual(
+            [{
+                "case_id": "ts_browser_loopback_read",
+                "surface": "web",
+                "reason": "requires_web_runner",
+            }],
+            plan["skipped_cases"],
+        )
+        self.assertFalse(any(
+            job["case_id"] == "ts_browser_loopback_read" for job in plan["jobs"]
+        ))
+        negative = [
+            job for job in plan["jobs"]
+            if job["case_id"].startswith("ts_negative_")
+        ]
+        self.assertTrue(negative)
+        self.assertEqual({"deferred"}, {job["variant"] for job in negative})
+
+        rejected = subprocess.run(
+            command[:-1] + ["--cases", "ts_browser_loopback_read", "--dry-run"],
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(2, rejected.returncode)
+        self.assertIn("require the Web runner", rejected.stderr)
 
     def test_formal_run_requires_one_worker_and_explicit_paired_repeats(self):
         valid = dict(

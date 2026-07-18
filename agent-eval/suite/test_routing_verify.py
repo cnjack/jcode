@@ -110,6 +110,17 @@ class RoutingVerifierTest(unittest.TestCase):
         self.assertEqual(1, result["counts"]["fixture_matches"])
         self.assertNotIn(f"select:{TARGET}", json.dumps(result))
 
+    def test_static_arm_keeps_fixture_marker_cross_check_without_activation(self):
+        session = self.write_jsonl("session.jsonl", self.target_pair())
+        result = routing_verify.verify_routing(
+            session, self.fixture_log(), self.spec(ARGS), require_activation=False,
+        )
+
+        self.assertTrue(result["passed"], result["violations"])
+        self.assertEqual(0, result["counts"]["search_calls"])
+        self.assertEqual(0, result["counts"]["bypass"])
+        self.assertEqual(1, result["counts"]["fixture_matches"])
+
     def test_deferred_call_before_search_is_bypass(self):
         session = self.write_jsonl("session.jsonl", self.target_pair() + self.search_pair())
         result = routing_verify.verify_routing(session, self.fixture_log(), self.spec(ARGS))

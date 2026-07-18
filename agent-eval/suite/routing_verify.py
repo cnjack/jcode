@@ -359,8 +359,14 @@ def _verify_fixture(calls, results, fixture_entries, fixture_tools, expected_cal
     return {"session_calls": len(session_calls), "matched": matched, "logged": len(fixture_entries)}
 
 
-def verify_routing(session_path, fixture_log_path, spec):
-    """Return a structured, fail-closed routing verdict for one session."""
+def verify_routing(session_path, fixture_log_path, spec, require_activation=True):
+    """Return a structured, fail-closed routing verdict for one session.
+
+    ``require_activation=False`` keeps the deterministic fixture/session/marker
+    cross-checks for the eager static A/B arm without pretending that a static
+    tool needed ToolSearch activation.  The default preserves the strict
+    Deferred behavior used by all existing callers.
+    """
     violations = []
     deferred_value = spec.get("deferred_tools") if isinstance(spec, dict) else None
     if not isinstance(deferred_value, list) or not deferred_value or any(not isinstance(v, str) or not v for v in deferred_value):
@@ -393,25 +399,26 @@ def verify_routing(session_path, fixture_log_path, spec):
 
     activated = set()
     activations = []
-    for search in sorted(
-        (s for s in searches if s["successful"]),
-        key=lambda item: (item["complete_index"], item["call_index"]),
-    ):
-        matched_deferred = set(search["matches"]) & deferred
-        new_tools = sorted(matched_deferred - activated)
-        search["new_tools"] = new_tools
-        if not new_tools:
-            violations.append(_violation(
-                "redundant_search", "successful tool_search activated no new Deferred tools",
-                tool_call_id=search["tool_call_id"],
-            ))
-        for name in new_tools:
-            activations.append({
-                "tool": name,
-                "after_index": search["complete_index"],
-                "search_tool_call_id": search["tool_call_id"],
-            })
-        activated.update(new_tools)
+    if require_activation:
+        for search in sorted(
+            (s for s in searches if s["successful"]),
+            key=lambda item: (item["complete_index"], item["call_index"]),
+        ):
+            matched_deferred = set(search["matches"]) & deferred
+            new_tools = sorted(matched_deferred - activated)
+            search["new_tools"] = new_tools
+            if not new_tools:
+                violations.append(_violation(
+                    "redundant_search", "successful tool_search activated no new Deferred tools",
+                    tool_call_id=search["tool_call_id"],
+                ))
+            for name in new_tools:
+                activations.append({
+                    "tool": name,
+                    "after_index": search["complete_index"],
+                    "search_tool_call_id": search["tool_call_id"],
+                })
+            activated.update(new_tools)
 
     deferred_calls = [c for c in calls if c.get("name") in deferred]
     bypass = 0
@@ -427,28 +434,29 @@ def verify_routing(session_path, fixture_log_path, spec):
             ))
         else:
             deferred_success += 1
-        matching_same_batch = [
-            search for search in searches
-            if search["successful"] and search["batch_key"] == call.get("_batch_key")
-            and name in search["matches"]
-        ]
-        if matching_same_batch:
-            same_batch += 1
-            violations.append(_violation(
-                "same_batch_activation",
-                "Deferred target was called in the same batch as the search that returned it",
-                tool_call_id=call.get("tool_call_id"), tool=name,
-            ))
-        active_before = any(
-            event["tool"] == name and event["after_index"] < call["_index"]
-            for event in activations
-        )
-        if not active_before:
-            bypass += 1
-            violations.append(_violation(
-                "bypass", "Deferred target was called before a completed successful activation batch",
-                tool_call_id=call.get("tool_call_id"), tool=name,
-            ))
+        if require_activation:
+            matching_same_batch = [
+                search for search in searches
+                if search["successful"] and search["batch_key"] == call.get("_batch_key")
+                and name in search["matches"]
+            ]
+            if matching_same_batch:
+                same_batch += 1
+                violations.append(_violation(
+                    "same_batch_activation",
+                    "Deferred target was called in the same batch as the search that returned it",
+                    tool_call_id=call.get("tool_call_id"), tool=name,
+                ))
+            active_before = any(
+                event["tool"] == name and event["after_index"] < call["_index"]
+                for event in activations
+            )
+            if not active_before:
+                bypass += 1
+                violations.append(_violation(
+                    "bypass", "Deferred target was called before a completed successful activation batch",
+                    tool_call_id=call.get("tool_call_id"), tool=name,
+                ))
 
     fixture_entries = _load_jsonl(fixture_log_path, "fixture_log", violations) if fixture_tools else []
     fixture_stats = _verify_fixture(

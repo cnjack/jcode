@@ -30,6 +30,8 @@ import verify  # noqa: E402
 import routing_verify  # noqa: E402
 import artifact_safety  # noqa: E402
 import session_extract  # noqa: E402
+import toolsearch_cases  # noqa: E402
+import toolsearch_expect  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 EVAL_ROOT = HERE.parent
@@ -552,45 +554,52 @@ def _run_one(case, model_label, variant, rep, runs_dir, bin_path, harness_path,
     usage_tot, usage_events = read_usage(rundir / "home")
     ctx["usage_total"] = usage_tot
     ver = verify.verify_case(case, ctx)
+    session_paths = [
+        rundir / "home" / ".jcode" / "sessions" / f"{session_id}.json"
+        for session_id in prompt_session_ids
+    ]
+
+    # The declarative ToolSearch expectation is verified against the raw,
+    # owner-only session before HOME is removed. Its result is metadata-only and
+    # becomes the primary routing verdict used by the acceptance hard gates.
     routing = None
-    if "routing" in case and variant == "deferred":
-        if len(prompt_session_ids) != 1:
-            routing = {
-                "passed": False,
-                "counts": {},
-                "violations": [{
-                    "type": "routing_session_count",
-                    "detail": f"routing cases require exactly one prompt session, got {len(prompt_session_ids)}",
-                }],
-            }
-        elif mcp_fixture is None:
-            routing = {
-                "passed": False,
-                "counts": {},
-                "violations": [{
-                    "type": "routing_fixture_missing",
-                    "detail": "routing case has no mcp_fixture configuration",
-                }],
-            }
+    expected_routing = case.get("expected_routing")
+    if isinstance(expected_routing, dict):
+        expectation = expected_routing.get(variant)
+        if expectation is None:
+            routing = toolsearch_expect.failure_verdict("missing_variant_expectation")
+        elif len(session_paths) != 1:
+            routing = toolsearch_expect.failure_verdict("routing_session_count")
         else:
-            session_path = rundir / "home" / ".jcode" / "sessions" / f"{prompt_session_ids[0]}.json"
-            routing = routing_verify.verify_routing(
-                session_path, mcp_fixture["call_log"], case["routing"],
-            )
-        route_types = [v.get("type") for v in routing.get("violations", [])]
+            routing = toolsearch_expect.verify_expectation(session_paths[0], expectation)
         ver["oracles"].append({
-            "type": "routing",
+            "type": "toolsearch_routing",
             "passed": bool(routing.get("passed")),
-            "detail": f"counts={routing.get('counts', {})} violations={route_types}",
+            "detail": "metadata-only ToolSearch expectation verdict",
         })
         ver["passed"] = bool(ver["passed"] and routing.get("passed"))
-    elif "routing" in case:
-        routing = {
-            "passed": None,
-            "not_applicable": "static variant has no Deferred activation boundary",
-            "counts": {},
-            "violations": [],
-        }
+
+    # MCP cases additionally require the deterministic stdio fixture's raw
+    # endpoint/argument/result marker to agree with the session. Keep the rich
+    # verifier result private and persist only a sanitized projection.
+    mcp_routing = None
+    if "routing" in case:
+        if len(prompt_session_ids) != 1:
+            private_mcp_routing = toolsearch_expect.failure_verdict("routing_session_count")
+        elif mcp_fixture is None:
+            private_mcp_routing = toolsearch_expect.failure_verdict("routing_fixture_missing")
+        else:
+            private_mcp_routing = routing_verify.verify_routing(
+                session_paths[0], mcp_fixture["call_log"], case["routing"],
+                require_activation=variant == "deferred",
+            )
+        mcp_routing = toolsearch_expect.sanitize_external_verdict(private_mcp_routing)
+        ver["oracles"].append({
+            "type": "mcp_fixture_routing",
+            "passed": bool(mcp_routing.get("passed")),
+            "detail": "metadata-only MCP fixture/session marker verdict",
+        })
+        ver["passed"] = bool(ver["passed"] and mcp_routing.get("passed"))
     # contracts: every prompt step must satisfy the ACP contract, not just the last
     if prompt_contract_sets:
         contracts = []
@@ -610,10 +619,6 @@ def _run_one(case, model_label, variant, rep, runs_dir, bin_path, harness_path,
             fp = Path(dp) / f
             box_listing.append(str(fp.relative_to(box)))
 
-    session_paths = [
-        rundir / "home" / ".jcode" / "sessions" / f"{session_id}.json"
-        for session_id in prompt_session_ids
-    ]
     fixture_arg_tools = set()
     routing_spec = case.get("routing")
     if isinstance(routing_spec, dict) and isinstance(routing_spec.get("fixture_tools"), dict):
@@ -663,6 +668,8 @@ def _run_one(case, model_label, variant, rep, runs_dir, bin_path, harness_path,
         "case_title": case["title"],
         "category": case["category"],
         "tier": case["tier"],
+        "surface": case.get("surface", "acp"),
+        "metric_tags": list(case.get("metric_tags", [])),
         "model": model_label,
         "model_id": model_id,
         "effort": home_metadata["effort"],
@@ -700,6 +707,8 @@ def _run_one(case, model_label, variant, rep, runs_dir, bin_path, harness_path,
         "tool_counts": tool_counts,
         "routing": routing,
         "routing_passed": routing.get("passed") if routing else None,
+        "mcp_routing": mcp_routing,
+        "mcp_routing_passed": mcp_routing.get("passed") if mcp_routing else None,
         "mcp_fixture": ({
             "server_name": mcp_fixture["server_name"],
             "tool_count": mcp_fixture["tool_count"],
@@ -779,13 +788,20 @@ def build_jobs(cases, models, variants, seed, explicit_repeats=None,
     for model_label in models:
         resolve_model_id(model_label)
         for case in cases:
+            declared_variants = case.get("variants")
+            effective_variants = [
+                variant for variant in variants
+                if declared_variants is None or variant in declared_variants
+            ]
+            if not effective_variants:
+                continue
             base = (explicit_repeats if explicit_repeats is not None
                     else repeats_by_tier.get(model_label, {}).get(case["tier"], 1))
             count = max(1, int(round(base * repeat_scale)))
             for repeat in range(1, count + 1):
                 block = [
                     (case, model_label, variant, repeat)
-                    for variant in variants
+                    for variant in effective_variants
                 ]
                 rng.shuffle(block)
                 blocks.append(block)
@@ -811,6 +827,34 @@ def validate_formal_run(formal, quick, models, variants, repeats,
         raise ValueError("--formal requires --workers 1")
 
 
+def select_acp_cases(cases, requested_ids=None, toolsearch_matrix=False):
+    """Select cases for this ACP runner and report Web-only hand-offs."""
+    requested_ids = requested_ids or []
+    by_id = {case.get("id"): case for case in cases}
+    unknown = sorted(set(requested_ids) - set(by_id))
+    if unknown:
+        raise ValueError(f"unknown case ids: {unknown}")
+    selected = [by_id[case_id] for case_id in requested_ids] if requested_ids else list(cases)
+    if not toolsearch_matrix:
+        return selected, []
+
+    web_cases = [case for case in selected if case.get("surface") == "web"]
+    if requested_ids and web_cases:
+        names = sorted(case["id"] for case in web_cases)
+        raise ValueError(
+            f"Web-only ToolSearch cases require the Web runner, not ACP: {names}"
+        )
+    skipped = [
+        {
+            "case_id": case["id"],
+            "surface": "web",
+            "reason": "requires_web_runner",
+        }
+        for case in web_cases
+    ]
+    return [case for case in selected if case.get("surface") == "acp"], skipped
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bin", required=True)
@@ -821,6 +865,14 @@ def main():
     ap.add_argument("--models", default="glm-5.1,glm-5.2")
     ap.add_argument("--cases", default="", help="comma-separated case ids (default all)")
     ap.add_argument("--tiers", default="", help="comma-separated tiers (default all)")
+    ap.add_argument(
+        "--toolsearch-matrix", default="",
+        help="explicit dedicated ToolSearch matrix JSON (validated before ACP execution)",
+    )
+    ap.add_argument(
+        "--base-suite", default=str(HERE / "testcases.json"),
+        help="legacy base suite used to materialize ToolSearch fixture reuse",
+    )
     ap.add_argument("--variants", default="static",
                     help="comma-separated static/deferred variants")
     ap.add_argument("--repeats", type=int, default=None,
@@ -837,11 +889,19 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    suite = json.loads((HERE / "testcases.json").read_text())
-    cases = suite["cases"]
-    if args.cases:
-        want = set(args.cases.split(","))
-        cases = [c for c in cases if c["id"] in want]
+    toolsearch_matrix_mode = bool(args.toolsearch_matrix)
+    try:
+        if toolsearch_matrix_mode:
+            suite = toolsearch_cases.load_suite(args.toolsearch_matrix, args.base_suite)
+        else:
+            suite = json.loads((HERE / "testcases.json").read_text())
+        requested_ids = [item.strip() for item in args.cases.split(",") if item.strip()]
+        cases, skipped_cases = select_acp_cases(
+            suite["cases"], requested_ids, toolsearch_matrix=toolsearch_matrix_mode,
+        )
+    except (OSError, json.JSONDecodeError, KeyError, TypeError,
+            ValueError, toolsearch_cases.MatrixError) as exc:
+        ap.error(str(exc))
     if args.tiers:
         wt = set(args.tiers.split(","))
         cases = [c for c in cases if c["tier"] in wt]
@@ -901,6 +961,8 @@ def main():
         ],
         "variants": variants,
         "repeats": args.repeats,
+        "suite": "toolsearch" if toolsearch_matrix_mode else "legacy",
+        "skipped_cases": skipped_cases,
         "jobs": [
             {
                 "run_id": _run_id(case, model_label, variant, repeat),
@@ -918,6 +980,8 @@ def main():
     log(f"== jcode agent eval: {len(jobs)} runs "
         f"({len(cases)} cases x models={models} x variants={variants}) "
         f"workers={args.workers} seed={args.seed} ==")
+    for skipped in skipped_cases:
+        log(f"  skip {skipped['case_id']}: requires Web runner (ACP has no Browser tools)")
     if args.dry_run:
         for c, m, variant, r in jobs:
             log(f"  plan {c['id']} {m} {variant} r{r}")
@@ -958,7 +1022,8 @@ def main():
                           ["run_id", "case_id", "model", "model_id", "effort",
                            "variant", "seed", "tier", "task_passed",
                            "contracts_passed", "stop_reason", "tool_calls",
-                           "tool_counts", "wall_s", "routing_passed"]}) + "\n")
+                           "tool_counts", "wall_s", "routing_passed",
+                           "mcp_routing_passed"]}) + "\n")
                 idx.flush()
     index_path.chmod(0o600)
 
