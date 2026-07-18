@@ -38,7 +38,7 @@
 | TS-04 MCP 与权限 | 完成 | `c9cb076`、`1aa128e`、`a316830`、`b1b687f`、`3b751db` | MCP、Plan、delegation 和 team mode 边界完成 |
 | TS-05 Prompt 与观测 | 进行中 | `dbe7ca4`、`69ba9ee`、`f905ae2` | 使用说明、schema/轨迹指标与凭证文件权限 |
 | TS-06 自动化测试 | 完成 | `77de5fc`、`92e0cb0`、`56fa6eb` | 单元、集成、fixture、routing oracle 与生命周期撤权矩阵 |
-| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef` | 精确模型、静态/渐进式对照、安全产物链、验收矩阵与 Web Browser driver |
+| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d` | 精确模型、静态/渐进式对照、安全产物链、验收矩阵、Web Browser driver 与 ACP routing dispatch |
 | TS-08 30 分钟回归 | 未开始 | — | 全场景长跑 |
 | TS-09 HTML 报告 | 未开始 | — | 生成并审计最终报告 |
 
@@ -246,7 +246,11 @@ Kimi 硬门槛：
 - Web 安全/生命周期：Bearer token 只进最小 child env，stdout 丢弃、stderr 私有后删除；验证 health/model/auth 401+200/Browser status，轮询 running→两次 idle 与 pending approval/ask；超时 stop，最终 SIGTERM/SIGKILL 整个进程组。发布 record 为 allowlist metadata，raw session path 只作进程内 handoff。
 - 测试：Web driver 12 tests + py_compile + diff check 全部通过；覆盖 success、中文 Deferred、static 错搜、缺 search、审批拒绝、Browser disabled、超时、highspeed 拒绝、session canary 与凭证/路径不回显。
 - 已完成提交：`7d713ef test(eval): add authenticated Web Browser driver`（TS-07.6 Web driver 子阶段）。
-- 待完成：TS-07.6 仍需把 expected-routing validator 与 Web driver dispatch 接入实际 orchestrator；TS-07.7 需真实 canary 与重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
+- ACP routing dispatch 子阶段：实际 orchestrator 现在显式加载 ToolSearch matrix，只运行 `surface=acp`，默认把 Web-only Browser case 记录为 handoff，显式把 Browser 交给 ACP 时 fail closed。case 自身 variant 会限制 job；两个负面案例只生成 Deferred job，formal paired block 保持相邻且 `workers=1`。
+- 路由判定：新增 metadata-only expected-routing verifier，逐次校验搜索次数/模式/命中、空结果、必需/可选/禁止调用、exact/contains 参数、调用顺序、call/result 配对、独立 batch 激活、bypass 与 same-batch。MCP static/deferred 两臂均保留 fixture endpoint/args/result marker 交叉验证，只有 Deferred 要求 ToolSearch 激活。
+- 测试：Python suite 51 tests；legacy dry-run 39 jobs；formal ToolSearch dry-run 28 jobs，固定 `kimi-for-coding/kimi-for-coding`、`workers=1`、ACP 15 cases、Browser handoff 1 case；diff check 全部通过。
+- 已完成提交：`f75041d test(eval): enforce ToolSearch routing expectations`（TS-07.6 ACP routing dispatch 子阶段）。
+- 待完成：TS-07.6 仍需把 Web driver dispatch 接入实际 Web orchestrator；TS-07.7 需真实 canary 与重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
 
 ## TS-08 至少 30 分钟全场景回归
 
@@ -302,3 +306,4 @@ Kimi 硬门槛：
 | 2026-07-18 | 完成 TS-07.1～07.5：exact Kimi、无 temperature、paired variants、最小 HOME/env、安全 trajectory 与凭证扫描 | Python 20 tests、legacy/formal dry-run 通过 | `28eae39` |
 | 2026-07-18 | TS-07.6 matrix 子阶段：16 cases/13 critical、ACP15/Web1、固定九项硬门槛与安全 validator | matrix+routing 19 tests、JSON/py_compile 通过 | `3a1ece8` |
 | 2026-07-18 | TS-07.6 Web 子阶段：authenticated Web driver + loopback open/fill/click/read 真值 + approval/disabled/cleanup | Web driver 12 tests、py_compile 通过 | `7d713ef` |
+| 2026-07-18 | TS-07.6 ACP dispatch 子阶段：matrix 实际调度、metadata-only expected-routing、MCP static/deferred fixture 交叉验证 | Python 51 tests、legacy 39/formal 28 dry-run、diff check 通过 | `f75041d` |
