@@ -34,8 +34,8 @@
 | TS-00 文档与基线 | 完成 | `a1d0b13` | 基线 `ca4c8ba6b709`，完整 Go 测试通过 |
 | TS-01 ToolPlan 核心 | 完成 | `be5e701` | 分类、校验、稳定排序与 runtime 安全边界 |
 | TS-02 Eino middleware | 完成 | `0a03ce6` | 客户端 ToolSearch、兼容开关与模型级测试 |
-| TS-03 Transport 接入 | 完成 | 本提交 | TUI/Web/ACP 共享 policy 与重建路径 |
-| TS-04 MCP 与权限 | 进行中 | — | canonical name、审批和安全边界 |
+| TS-03 Transport 接入 | 完成 | `0f55179` | TUI/Web/ACP 共享 policy 与重建路径 |
+| TS-04 MCP 与权限 | 进行中 | `c9cb076`（命名） | canonical name 已完成，审批和 child/plan 边界进行中 |
 | TS-05 Prompt 与观测 | 未开始 | — | 使用说明、schema/轨迹指标 |
 | TS-06 自动化测试 | 未开始 | — | 单元、集成、fixture 和 routing oracle |
 | TS-07 Kimi A/B | 未开始 | — | 精确模型、静态/渐进式对照 |
@@ -114,22 +114,25 @@ Plan 模式首轮目标：
 - 重建：mode、Browser、Computer、MCP、模型配置变化继续重建 Agent；测试验证新一代候选不会继承旧 Browser/MCP runtime。
 - 测试：command policy/matrix 定向测试；`go test -race ./internal/command -run 'TestBuildCommandToolPlan|TestCommandToolPolicy' -count=1`；`go test ./...`；`make lint-go`。
 - 结果：全部通过；TUI/Web/ACP × Normal/Plan、unattended filter、MCP、scope、collision、stable runtime 均覆盖；lint `0 issues`。
-- 提交：本提交；精确 SHA 将在下一次进度更新中回填。
+- 提交：`0f55179 feat(command): defer low-frequency tools across transports`。
 
 ## TS-04 MCP 命名、审批与权限
 
-- [ ] TS-04.1 MCP 模型侧名称改为 `mcp__<server>__<tool>`，保留 UI 展示名和真实 endpoint 映射。
-- [ ] TS-04.2 使用 registry metadata 判断 MCP 来源，不依赖字符串前缀。
-- [ ] TS-04.3 MCP 按 server/tool 稳定排序，拒绝跨 server 及内建工具名称冲突。
+- [x] TS-04.1 MCP 模型侧名称改为 `mcp__<server>__<tool>`，保留 UI 展示名和真实 endpoint 映射。
+- [x] TS-04.2 使用 registry metadata 判断 MCP 来源，不依赖字符串前缀。
+- [x] TS-04.3 MCP 按 server/tool 稳定排序；跨 server 原名可共存，sanitize/长度冲突按 Codex 策略加稳定 hash，内建最终名冲突由 ToolPlan fail closed。
 - [ ] TS-04.4 `tool_search`、`load_skill`、`goal_get` 等只读工具免审批。
 - [ ] TS-04.5 验证 Deferred 写工具仍按原策略审批，搜索激活不等于授权。
 - [ ] TS-04.6 审计并修正 subagent、workflow、team child agent 的审批和 plan 硬边界，再决定是否接入 ToolSearch。
 
 完成证据：
 
-- 测试：待填写
-- 结果：待填写
-- 提交：待填写
+- MCP 命名：仅模型侧 `ToolInfo.Name` 改为 canonical；Invokable/Enhanced endpoint、原始 server/tool、参数、option 和结果保持透传。
+- 来源/UI：canonical registry 同时保存 server、raw endpoint 和 `server.raw_tool`；Web 展示不泄漏 canonical 拼接名；manager 不再用 raw 名污染 provenance。
+- 测试：MCP tools/command/handler 定向测试；三包定向 race；`go test ./...`；`make lint-go`。
+- 结果：全部通过；race 无异常；lint `0 issues`。覆盖同名跨 server、非法字符、sanitize collision、长名、重复 identity、稳定排序、raw endpoint 透传与 UI display。
+- 已完成提交：`c9cb076 feat(tools): canonicalize MCP tool identities`（TS-04.1～TS-04.3）。
+- 待完成：TS-04.4～TS-04.6；最终 TS-04 汇总提交待填写。
 
 ## TS-05 Prompt、schema 与观测
 
@@ -227,4 +230,5 @@ Kimi 硬门槛：
 | 2026-07-18 | 完成 TS-00：创建清单并采集基线 | `git diff --check`、`go test ./...` 通过 | `a1d0b13` |
 | 2026-07-18 | 完成 TS-01：ToolPlan 分类、校验、稳定排序和 Hidden runtime 边界 | 包测试、race、全量 Go、lint 通过 | `be5e701` |
 | 2026-07-18 | 完成 TS-02：接入 Eino 客户端 ToolSearch 与 opt-in 配置 | 模型级、race、全量 Go、lint 通过 | `0a03ce6` |
-| 2026-07-18 | 完成 TS-03：TUI/Web/ACP 共享 tool policy 和重建路径 | 矩阵、race、全量 Go、lint 通过 | 本提交 |
+| 2026-07-18 | 完成 TS-03：TUI/Web/ACP 共享 tool policy 和重建路径 | 矩阵、race、全量 Go、lint 通过 | `0f55179` |
+| 2026-07-18 | 完成 TS-04.1～04.3：MCP canonical identity、稳定消歧、raw endpoint/展示映射 | 定向、race、全量 Go、lint 通过 | `c9cb076` |
