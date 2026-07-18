@@ -1,0 +1,370 @@
+import copy
+import json
+import sys
+import tempfile
+import unittest
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+
+HERE = Path(__file__).resolve().parent
+ANALYSIS = HERE.parent / "analysis"
+sys.path.insert(0, str(ANALYSIS))
+sys.path.insert(0, str(HERE))
+
+import toolsearch_cases
+import toolsearch_report
+
+
+SECRET_CANARY = "sk-report-canary-secret-123456789"
+HOST_CANARY = "/Users/report-owner/private-worktree"
+
+
+class SyntheticCampaign:
+    def __init__(self, root):
+        self.root = Path(root)
+        self.runs = self.root / "runs"
+        self.runs.mkdir()
+        self.suite = toolsearch_cases.load_suite()
+        self.repeats = 10
+        self.seed = 20260718
+        self.jobs = []
+        self.records = []
+        self.intervals = []
+        self._build()
+
+    @staticmethod
+    def write(path, value):
+        path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
+        path.chmod(0o600)
+
+    @staticmethod
+    def tool_counts(searches, variant):
+        schema_tokens = 100 if variant == "static" else 40
+        visible = 24 if variant == "static" else 10
+        calls = {"tool_search": searches} if searches else {}
+        return {
+            "calls_total": searches,
+            "results_total": searches,
+            "calls_by_name": calls,
+            "results_by_status": ({"completed": searches} if searches else {}),
+            "model_requests": 1,
+            "first_visible": visible,
+            "max_visible": visible,
+            "first_schema_tokens_estimate": schema_tokens,
+            "max_schema_tokens_estimate": schema_tokens,
+        }
+
+    def _build(self):
+        started = datetime(2026, 7, 19, 0, 0, tzinfo=timezone.utc)
+        cursor = started
+        for case in self.suite["cases"]:
+            tags = set(case["metric_tags"])
+            for repeat in range(1, self.repeats + 1):
+                for variant in case["variants"]:
+                    run_id = f"{case['id']}__kimi-for-coding__{variant}__r{repeat}"
+                    job = {
+                        "run_id": run_id,
+                        "case_id": case["id"],
+                        "model": toolsearch_report.EXACT_MODEL_LABEL,
+                        "model_id": toolsearch_report.EXACT_MODEL_ID,
+                        "variant": variant,
+                        "repeat": repeat,
+                    }
+                    self.jobs.append(job)
+
+                    searches = 0
+                    deferred_calls = 0
+                    if variant == "deferred" and "deferred_call_accuracy" in tags:
+                        searches = 1
+                        deferred_calls = 1
+                    elif variant == "deferred" and "negative_search" in tags:
+                        searches = 1
+                    tool_counts = self.tool_counts(searches, variant)
+                    routing_counts = {
+                        "bypass": 0,
+                        "same_batch_activation": 0,
+                        "deferred_calls": deferred_calls,
+                        "deferred_call_success": deferred_calls,
+                        "search_calls": searches,
+                    }
+                    routing = {
+                        "passed": True if variant == "deferred" else None,
+                        "counts": routing_counts,
+                        "checks": {},
+                        "violations": [],
+                    }
+                    record_counts = {
+                        **tool_counts,
+                        "declared_deferred": 8,
+                        "mcp_fixture_catalog": (
+                            case.get("mcp_fixture", {}).get("tool_count", 0)
+                        ),
+                    }
+                    record = {
+                        "run_id": run_id,
+                        "case_id": case["id"],
+                        "case_title": case["title"],
+                        "category": case["category"],
+                        "tier": case["tier"],
+                        "surface": case["surface"],
+                        "model": toolsearch_report.EXACT_MODEL_LABEL,
+                        "model_id": toolsearch_report.EXACT_MODEL_ID,
+                        "effort": "",
+                        "variant": variant,
+                        "seed": self.seed,
+                        "request_parameters": {"temperature": "omitted"},
+                        "repeat": repeat,
+                        "task_passed": True,
+                        "contracts_passed": True,
+                        "stop_reason": "end_turn",
+                        "error_present": False,
+                        "wall_s": 6.0,
+                        "tool_counts": record_counts,
+                        "routing": routing,
+                        "routing_passed": routing["passed"],
+                        "artifact_safe": True,
+                    }
+                    trajectory = {
+                        "schema_version": 1,
+                        "payload_policy": "metadata_only_except_declared_fixture_args",
+                        "run_id": run_id,
+                        "variant": variant,
+                        "session_count": 1,
+                        "parse_error_count": 0,
+                        "tool_counts": tool_counts,
+                        "sessions": [{
+                            "session_index": 1,
+                            "source_present": True,
+                            "parse_error_lines": [],
+                            "entries": [{
+                                "sequence": 1,
+                                "type": "tool_observation",
+                                "kind": "model_request",
+                                "model_request_seq": 1,
+                                "visible_count": tool_counts["first_visible"],
+                                "schema_tokens_estimate": tool_counts[
+                                    "first_schema_tokens_estimate"
+                                ],
+                                "newly_visible_deferred": [],
+                            }],
+                        }],
+                    }
+                    redaction = {
+                        "schema_version": 1,
+                        "files_scanned": 3,
+                        "files_redacted": 0,
+                        "redacted_file_names": [],
+                        "replacement_counts": {},
+                        "post_redaction_findings": [],
+                        "safe": True,
+                    }
+                    run_dir = self.runs / run_id
+                    run_dir.mkdir()
+                    self.write(run_dir / "record.json", record)
+                    self.write(run_dir / "trajectory.json", trajectory)
+                    self.write(run_dir / "redaction_report.json", redaction)
+                    self.records.append(record)
+
+                    interval_end = cursor + timedelta(seconds=6)
+                    self.intervals.append({
+                        "run_id": run_id,
+                        "started_at": cursor.isoformat().replace("+00:00", "Z"),
+                        "finished_at": interval_end.isoformat().replace("+00:00", "Z"),
+                        "real_execution": True,
+                        "successful": True,
+                    })
+                    cursor = interval_end
+
+        plan = {
+            "schema_version": 1,
+            "seed": self.seed,
+            "formal": True,
+            "workers": 1,
+            "models": [{
+                "label": toolsearch_report.EXACT_MODEL_LABEL,
+                "id": toolsearch_report.EXACT_MODEL_ID,
+            }],
+            "variants": ["static", "deferred"],
+            "repeats": self.repeats,
+            "jobs": self.jobs,
+        }
+        finished = started + timedelta(seconds=2000)
+        campaign = {
+            "schema_version": 1,
+            "started_at": started.isoformat().replace("+00:00", "Z"),
+            "finished_at": finished.isoformat().replace("+00:00", "Z"),
+            "monotonic_elapsed_s": 2000.0,
+            "planned_run_count": len(self.jobs),
+            "completed_run_count": len(self.records),
+            "workers": 1,
+            "model_label": toolsearch_report.EXACT_MODEL_LABEL,
+            "model_id": toolsearch_report.EXACT_MODEL_ID,
+            "request_parameters": {"temperature": "omitted"},
+            "git": {"commit": "a" * 40, "dirty": False},
+            "binaries": {
+                "jcode_sha256": "1" * 64,
+                "harness_sha256": "2" * 64,
+                "mcp_fixture_sha256": "3" * 64,
+            },
+            "environment": {
+                "go_version": "go1.26.4",
+                "os_arch": "darwin/arm64",
+                "eino_version": "v0.9.9",
+            },
+            "run_intervals": self.intervals,
+        }
+        self.write(self.runs / "plan.json", plan)
+        self.write(self.runs / "all_records.json", self.records)
+        self.write(self.runs / "campaign.json", campaign)
+
+    def update_record(self, run_id, mutate):
+        record_path = self.runs / run_id / "record.json"
+        record = json.loads(record_path.read_text())
+        mutate(record)
+        self.write(record_path, record)
+        records = json.loads((self.runs / "all_records.json").read_text())
+        for index, candidate in enumerate(records):
+            if candidate["run_id"] == run_id:
+                records[index] = copy.deepcopy(record)
+                break
+        self.write(self.runs / "all_records.json", records)
+
+
+class ToolSearchReportTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.synthetic = SyntheticCampaign(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def generate(self):
+        return toolsearch_report.generate_report(
+            toolsearch_cases.DEFAULT_MATRIX,
+            toolsearch_cases.DEFAULT_BASE_SUITE,
+            self.synthetic.runs,
+            secret_values=[SECRET_CANARY],
+            forbidden_paths=[HOST_CANARY],
+        )
+
+    def test_synthetic_pass_generates_one_self_contained_safe_report(self):
+        result = self.generate()
+        self.assertTrue(result["overall_passed"])
+        self.assertEqual(9, len(result["gate_results"]))
+        self.assertTrue(all(result["gate_results"].values()))
+        self.assertTrue(result["campaign_duration_passed"])
+
+        report = self.synthetic.runs / result["output_name"]
+        document = report.read_text()
+        self.assertIn("<style>", document)
+        self.assertNotIn("<script", document)
+        self.assertIn("Critical pass@10", document)
+        self.assertIn("ts_browser_loopback_read", document)
+        self.assertIn("successful_real_union_at_least_1800s", document)
+        self.assertIn("effort=omitted", document)
+        self.assertIn('href="plan.json"', document)
+        self.assertNotIn(str(self.synthetic.root), document)
+        self.assertEqual([], toolsearch_report.scan_report(
+            report, [SECRET_CANARY], [HOST_CANARY],
+        ))
+
+    def test_synthetic_gate_failure_is_visible_and_fails_overall(self):
+        run_id = "ts_exact_select_goal_get__kimi-for-coding__deferred__r1"
+
+        def introduce_bypass(record):
+            record["routing"]["counts"]["bypass"] = 1
+            record["routing"]["passed"] = False
+            record["routing"]["violations"] = [{"type": "deferred_bypass"}]
+
+        self.synthetic.update_record(run_id, introduce_bypass)
+        result = self.generate()
+        self.assertFalse(result["overall_passed"])
+        self.assertFalse(result["gate_results"]["deferred_bypass"])
+        document = (self.synthetic.runs / result["output_name"]).read_text()
+        self.assertIn("deferred_bypass", document)
+        self.assertIn("routing_failed", document)
+        self.assertIn("Acceptance failed", document)
+
+    def test_missing_field_or_artifact_fails_closed(self):
+        campaign_path = self.synthetic.runs / "campaign.json"
+        campaign = json.loads(campaign_path.read_text())
+        del campaign["monotonic_elapsed_s"]
+        self.synthetic.write(campaign_path, campaign)
+        with self.assertRaisesRegex(toolsearch_report.ReportError, "monotonic"):
+            self.generate()
+
+        # Restore the campaign, then prove a missing per-run artifact also fails.
+        campaign["monotonic_elapsed_s"] = 2000.0
+        self.synthetic.write(campaign_path, campaign)
+        first = self.synthetic.jobs[0]["run_id"]
+        (self.synthetic.runs / first / "trajectory.json").unlink()
+        with self.assertRaisesRegex(toolsearch_report.ReportError, "trajectory"):
+            self.generate()
+
+    def test_overlap_or_less_than_30_minutes_fails_duration_proof(self):
+        campaign_path = self.synthetic.runs / "campaign.json"
+        campaign = json.loads(campaign_path.read_text())
+        campaign["monotonic_elapsed_s"] = 1799.0
+        campaign["run_intervals"][1]["started_at"] = (
+            campaign["run_intervals"][0]["started_at"]
+        )
+        self.synthetic.write(campaign_path, campaign)
+
+        result = self.generate()
+        self.assertFalse(result["overall_passed"])
+        self.assertFalse(result["campaign_duration_passed"])
+        document = (self.synthetic.runs / result["output_name"]).read_text()
+        self.assertIn("workers_one_no_interval_overlap", document)
+        self.assertIn("monotonic_at_least_1800s", document)
+
+    def test_canary_payload_is_rejected_and_scanner_never_echoes_match(self):
+        run_id = self.synthetic.jobs[0]["run_id"]
+
+        def inject_raw_prompt(record):
+            record["prompt"] = f"do not publish {SECRET_CANARY} {HOST_CANARY}"
+
+        self.synthetic.update_record(run_id, inject_raw_prompt)
+        with self.assertRaisesRegex(toolsearch_report.ReportError, "raw payload"):
+            self.generate()
+        self.assertFalse((self.synthetic.runs / "toolsearch-report.html").exists())
+
+        unsafe = self.synthetic.runs / "unsafe.html"
+        unsafe.write_text(f"credential={SECRET_CANARY}\npath={HOST_CANARY}\n")
+        findings = toolsearch_report.scan_report(
+            unsafe, [SECRET_CANARY], [HOST_CANARY],
+        )
+        serialized = json.dumps(findings)
+        self.assertIn("exact_credential", serialized)
+        self.assertIn("host_path", serialized)
+        self.assertNotIn(SECRET_CANARY, serialized)
+        self.assertNotIn(HOST_CANARY, serialized)
+
+    def test_highspeed_model_and_unsafe_redaction_report_are_rejected(self):
+        campaign_path = self.synthetic.runs / "campaign.json"
+        campaign = json.loads(campaign_path.read_text())
+        campaign["model_id"] += "-highspeed"
+        self.synthetic.write(campaign_path, campaign)
+        with self.assertRaisesRegex(toolsearch_report.ReportError, "exact Kimi"):
+            self.generate()
+
+        campaign["model_id"] = toolsearch_report.EXACT_MODEL_ID
+        campaign["git"]["dirty"] = True
+        self.synthetic.write(campaign_path, campaign)
+        with self.assertRaisesRegex(toolsearch_report.ReportError, "clean git tree"):
+            self.generate()
+
+        campaign["git"]["dirty"] = False
+        self.synthetic.write(campaign_path, campaign)
+        first = self.synthetic.jobs[0]["run_id"]
+        redaction_path = self.synthetic.runs / first / "redaction_report.json"
+        redaction = json.loads(redaction_path.read_text())
+        redaction["safe"] = False
+        redaction["post_redaction_findings"] = [{"category": "credential_pattern"}]
+        self.synthetic.write(redaction_path, redaction)
+        with self.assertRaisesRegex(toolsearch_report.ReportError, "not safe"):
+            self.generate()
+
+
+if __name__ == "__main__":
+    unittest.main()
