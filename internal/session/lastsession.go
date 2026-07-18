@@ -49,7 +49,7 @@ func SaveLastSession(project, id string) {
 	}
 	f.Projects[project] = id
 
-	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+	if err := ensurePrivateSessionDir(filepath.Dir(p)); err != nil {
 		return
 	}
 	data, err := json.Marshal(&f)
@@ -59,7 +59,7 @@ func SaveLastSession(project, id string) {
 	// tmp + rename (same pattern as the session index) so a crash mid-write
 	// never leaves a truncated file.
 	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
+	if err := writePrivateSessionFile(tmp, data); err != nil {
 		return
 	}
 	_ = os.Rename(tmp, p)

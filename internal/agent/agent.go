@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
@@ -71,6 +72,14 @@ func newAgent(
 	if toolSearchMiddleware != nil {
 		enhanced = append(enhanced, toolSearchMiddleware)
 	}
+	// Observe the final model-visible schema after progressive disclosure has
+	// rewritten it, but before compaction/recovery/approval handlers. The sink is
+	// opt-in through the runner context and records metadata only.
+	toolObservationMiddleware, err := newToolObservationMiddleware(ctx, deferredTools)
+	if err != nil {
+		return nil, fmt.Errorf("agent tool observation: %w", err)
+	}
+	enhanced = append(enhanced, toolObservationMiddleware)
 	enhanced = append(enhanced, handlers...)
 	// PreToolUse hook sits OUTSIDE approval: it can deny, rewrite args, or mark the
 	// call pre-approved (so approval skips its prompt) before the gate runs.
