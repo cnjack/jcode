@@ -81,6 +81,24 @@ class ToolSearchExpectationTest(unittest.TestCase):
             result(TARGET, "target-1"),
         ]
 
+    def empty_search_expectation(self, *, mode="select", query_matcher=None):
+        expected = {
+            "search_calls": {"min": 1, "max": 1},
+            "search_query_modes": [mode],
+            "expected_search_tools": [],
+            "empty_search": "required",
+            "activation_boundary": "no_activation_expected",
+            "bypass_max": 0,
+            "same_batch_max": 0,
+            "required_tool_calls": [],
+            "optional_tool_calls": [],
+            "forbidden_tool_calls": [],
+            "required_call_order": ["tool_search"],
+        }
+        if query_matcher is not None:
+            expected["search_query_matcher"] = query_matcher
+        return expected
+
     def violation_types(self, verdict):
         return {item["type"] for item in verdict["violations"]}
 
@@ -140,6 +158,124 @@ class ToolSearchExpectationTest(unittest.TestCase):
         self.assertEqual(1, rejected["counts"]["search_query_mismatches"])
         self.assertIn("search_query_mismatch", self.violation_types(rejected))
         self.assertNotIn("goal_update", json.dumps(rejected))
+
+    def test_eino_null_and_array_empty_search_results_are_successful(self):
+        select_query = "select:mcp__toolsearch_fixture__does_not_exist"
+        exact = {"match": "exact", "value": select_query}
+        for output in (
+            json.dumps({"matches": None}),
+            json.dumps({"matches": []}),
+        ):
+            with self.subTest(output=output):
+                verdict = self.verify(
+                    [
+                        call("tool_search", "search-1", {
+                            "query": select_query,
+                        }, "search-batch"),
+                        result("tool_search", "search-1", output),
+                    ],
+                    self.empty_search_expectation(query_matcher=exact),
+                )
+                self.assertTrue(verdict["passed"], verdict["violations"])
+                self.assertEqual(1, verdict["counts"]["search_success"])
+                self.assertEqual(0, verdict["counts"]["search_failed"])
+                self.assertEqual(1, verdict["counts"]["empty_searches"])
+                self.assertEqual(1, verdict["counts"]["search_query_matches"])
+
+        keyword = self.verify(
+            [
+                call("tool_search", "search-1", {
+                    "query": "live interplanetary weather radar",
+                }, "search-batch"),
+                result("tool_search", "search-1", json.dumps({"matches": None})),
+            ],
+            self.empty_search_expectation(mode="keyword"),
+        )
+        self.assertTrue(keyword["passed"], keyword["violations"])
+
+    def test_empty_search_still_rejects_malformed_or_failed_results(self):
+        malformed = (
+            "{}",
+            json.dumps({"matches": ""}),
+            json.dumps({"matches": {}}),
+            json.dumps({"matches": [None]}),
+            "not-json",
+            "null",
+            "[]",
+        )
+        expected = self.empty_search_expectation()
+        for output in malformed:
+            with self.subTest(output=output):
+                verdict = self.verify(
+                    [
+                        call("tool_search", "search-1", {
+                            "query": "select:missing",
+                        }, "search-batch"),
+                        result("tool_search", "search-1", output),
+                    ],
+                    expected,
+                )
+                self.assertFalse(verdict["passed"])
+                self.assertEqual(0, verdict["counts"]["search_success"])
+                self.assertEqual(1, verdict["counts"]["search_failed"])
+                self.assertEqual(0, verdict["counts"]["empty_searches"])
+                self.assertIn(
+                    "invalid_or_failed_search", self.violation_types(verdict),
+                )
+
+        for extra in ({"error": "failed"}, {"denied": True}):
+            with self.subTest(extra=extra):
+                verdict = self.verify(
+                    [
+                        call("tool_search", "search-1", {
+                            "query": "select:missing",
+                        }, "search-batch"),
+                        result(
+                            "tool_search", "search-1",
+                            json.dumps({"matches": None}), **extra,
+                        ),
+                    ],
+                    expected,
+                )
+                self.assertFalse(verdict["passed"])
+                self.assertEqual(1, verdict["counts"]["search_failed"])
+                self.assertEqual(0, verdict["counts"]["empty_searches"])
+
+        folded = self.verify(
+            [
+                call("tool_search", "search-1", {
+                    "query": "select:missing",
+                }, "search-batch"),
+                result(
+                    "tool_search", "search-1",
+                    "Tool execution failed: no search result",
+                ),
+            ],
+            expected,
+        )
+        self.assertFalse(folded["passed"])
+        self.assertEqual(1, folded["counts"]["search_failed"])
+
+    def test_valid_empty_search_cannot_satisfy_positive_target_contract(self):
+        verdict = self.verify(
+            [
+                call("tool_search", "search-1", {
+                    "query": f"select:{TARGET}",
+                }, "search-batch"),
+                result(
+                    "tool_search", "search-1",
+                    json.dumps({"matches": None}),
+                ),
+            ],
+            expectation(deferred=True),
+        )
+        self.assertFalse(verdict["passed"])
+        self.assertEqual(1, verdict["counts"]["search_success"])
+        self.assertEqual(1, verdict["counts"]["empty_searches"])
+        self.assertIn("empty_search_forbidden", self.violation_types(verdict))
+        self.assertIn(
+            "expected_search_match_missing", self.violation_types(verdict),
+        )
 
     def test_same_batch_search_and_target_fails(self):
         entries = [

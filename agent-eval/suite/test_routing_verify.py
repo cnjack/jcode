@@ -171,6 +171,56 @@ class RoutingVerifierTest(unittest.TestCase):
         self.assertIn("redundant_search", self.violation_types(result))
         self.assertEqual(1, result["counts"]["redundant_search"])
 
+    def test_eino_null_empty_search_is_valid_but_does_not_activate(self):
+        entries = [
+            tool_call(
+                "tool_search", "search-empty", "search-batch",
+                args={"query": "select:missing"},
+            ),
+            tool_result(
+                "tool_search", "search-empty",
+                json.dumps({"matches": None}),
+            ),
+        ]
+        session = self.write_jsonl("session.jsonl", entries)
+        result = routing_verify.verify_routing(
+            session, self.root / "unused-fixture.jsonl",
+            self.routing_only_spec(),
+        )
+
+        self.assertFalse(result["passed"])
+        self.assertTrue(result["searches"][0]["successful"])
+        self.assertEqual([], result["searches"][0]["matches"])
+        self.assertIn("redundant_search", self.violation_types(result))
+        self.assertNotIn("invalid_search_result", self.violation_types(result))
+        self.assertNotIn("search_failed", self.violation_types(result))
+
+    def test_empty_search_missing_or_invalid_matches_remains_invalid(self):
+        for output in (
+            "{}",
+            json.dumps({"matches": ""}),
+            json.dumps({"matches": [None]}),
+            "null",
+        ):
+            with self.subTest(output=output):
+                entries = [
+                    tool_call(
+                        "tool_search", "search-invalid", "search-batch",
+                        args={"query": "select:missing"},
+                    ),
+                    tool_result("tool_search", "search-invalid", output),
+                ]
+                session = self.write_jsonl("session.jsonl", entries)
+                result = routing_verify.verify_routing(
+                    session, self.root / "unused-fixture.jsonl",
+                    self.routing_only_spec(),
+                )
+                self.assertFalse(result["passed"])
+                self.assertFalse(result["searches"][0]["successful"])
+                self.assertIn(
+                    "invalid_search_result", self.violation_types(result),
+                )
+
     def test_fixture_args_and_marker_mismatch_is_rejected(self):
         wrong_args = {**ARGS, "query": "wrong-sku"}
         session = self.write_jsonl("session.jsonl", self.search_pair() + self.target_pair())

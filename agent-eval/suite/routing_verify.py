@@ -258,8 +258,20 @@ def _search_facts(calls, results, batches, deferred, violations):
             ))
             searches.append(fact)
             continue
-        matches = output.get("matches") if isinstance(output, dict) else None
-        if not isinstance(matches, list) or any(not isinstance(name, str) for name in matches):
+        if not isinstance(output, dict) or "matches" not in output:
+            violations.append(_violation(
+                "invalid_search_result", "tool_search result must contain a string matches array",
+                tool_call_id=call_id,
+            ))
+            searches.append(fact)
+            continue
+        matches = output["matches"]
+        # Eino marshals its nil []string as null for a successful no-match
+        # search. Treat null and [] as the same empty set, while retaining the
+        # strict shape check for every other value.
+        if matches is None:
+            matches = []
+        elif not isinstance(matches, list) or any(not isinstance(name, str) for name in matches):
             violations.append(_violation(
                 "invalid_search_result", "tool_search result must contain a string matches array",
                 tool_call_id=call_id,

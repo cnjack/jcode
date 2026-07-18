@@ -404,9 +404,17 @@ def _search_facts(calls, results, batches, counts, checks, violations):
                 payload = json.loads(result.get("output", ""))
             except (json.JSONDecodeError, TypeError):
                 payload = None
-            candidate = payload.get("matches") if isinstance(payload, dict) else None
-            if isinstance(candidate, list) and all(isinstance(name, str) for name in candidate):
-                matches = candidate
+            if isinstance(payload, dict) and "matches" in payload:
+                candidate = payload["matches"]
+                # Eino's toolSearchResult uses a nil []string when no tools
+                # match, which serializes as JSON null rather than [].  Both
+                # representations are successful empty searches; a missing
+                # key or any other shape remains an invalid result.
+                if candidate is None:
+                    matches = []
+                elif (isinstance(candidate, list)
+                      and all(isinstance(name, str) for name in candidate)):
+                    matches = candidate
         successful = matches is not None
         if successful:
             counts["search_success"] += 1
