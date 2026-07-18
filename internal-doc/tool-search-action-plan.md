@@ -267,7 +267,10 @@ Kimi 硬门槛：
 - Browser 韧性/安全：Chrome 子进程不再继承 `JCODE_WEB_TOKEN`；`browser_open` 在创建 session 前仅接受无 userinfo 且 host 有效的 HTTP(S) URL；每个 Browser tool 有 30 秒总 operation timeout，内部 deadline 转为不含 URL/path 的稳定错误；domain enable 继承父 context。Web driver 只接受裸 UUID 或 `sess_<uuid>`，统一映射 recorder `<uuid>.json` 并拒绝 traversal。
 - 测试：`go test ./internal/browser ./internal/tools`、聚焦 race、Python Web driver 13/13、`py_compile`、gofmt/diff check 及上述真实隔离 Chrome smoke 全部通过。
 - 已完成提交：`8675a5b fix(browser): harden managed Chrome operations`（Web canary 产品/driver 修复；未勾选 TS-07.7）。
-- 待完成：TS-07.7 需用新提交重跑 exact-Kimi Chrome canary 与关键用例重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
+- 修复后 Web Browser exact-Kimi canary（仍为非正式）：固定提交 `e559c41a49cc`、jcode SHA-256 `47799786722dd8933fa16701e115efdb0a361096a760ba3b164859381f675473`；static 14.665s 全链路 PASS，Deferred 24.698s 完成真实 open/fill/click/read proof，但严格结果为 1/2。
+- Deferred 诊断：首轮 12 tools、5458 estimated schema tokens（static 24/7612），3 次 `tool_search` 最终匹配全部 4 个所需 Browser tools，bypass=0、same-batch=0；模型先只披露 open/snapshot，因后续 act/read 尚隐藏而重复 `browser_open` 3 次，其中 1 次失败，故 routing/task gate 正确 FAIL，不能用 proof 最终成功掩盖多余/失败调用。
+- 下一步：参考 Codex namespace 的“一次搜索可返回一组同命名空间工具”语义，为 Browser/Computer 等明确的多步 capability family 增加受控组披露；MCP 仍按搜索实际命中逐工具返回，避免整 server schema 爆炸。修复后重跑 canary，TS-07.7 仍未勾选。
+- 待完成：TS-07.7 需解决上述 Deferred 多步披露问题并运行关键用例重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
 
 ## TS-08 至少 30 分钟全场景回归
 
@@ -344,3 +347,4 @@ Kimi 硬门槛：
 | 2026-07-18 | TS-07/09 canary 指标校准：稳定 goal sentinel；50% schema 门槛固定到完整 100-tool catalog，拒绝 scope 漂移 | ToolSearch discovery 48 tests、py_compile、JSON、diff check 通过 | `92d442e` |
 | 2026-07-18 | Web Browser canary 修复：macOS Chrome system HOME、HTTP(S) 边界、30s timeout、token 隔离及 recorder ID 映射 | Browser/tools Go、race、Python 13/13；隔离 Chrome smoke 0.96s | `8675a5b` |
 | 2026-07-18 | TS-08/09 formal coordinator：canonical full matrix、固定 binary/suite hash、真实 interval、完整 supplementary 与 partial fail-closed | 独立 review；Python 90/90、fake formal/report 合约通过 | `9f2889e` |
+| 2026-07-18 | Browser 修复后 exact-Kimi canary：Chrome 故障解除；static PASS，Deferred proof 成功但重复 open 严格 FAIL | 1/2；Deferred first-visible=12、bypass=0、same-batch=0 | — |
