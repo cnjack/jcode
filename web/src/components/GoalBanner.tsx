@@ -256,33 +256,6 @@ export function GoalBanner() {
               {tokensLabel && <span className="font-mono">{tokensLabel}</span>}
             </div>
 
-            {/* Labeled actions */}
-            <div className="mt-2.5 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setEditing(true)}
-                className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 text-[11px] font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
-              >
-                <PencilSquareIcon className="h-3.5 w-3.5" />
-                {t('goal.edit')}
-              </button>
-              <button
-                type="button"
-                onClick={() => void clear()}
-                className="inline-flex h-7 items-center gap-1.5 rounded-md border-none bg-transparent px-2.5 text-[11px] font-medium text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-muted)] hover:text-[var(--color-error-fg)]"
-              >
-                <TrashIcon className="h-3.5 w-3.5" />
-                {t('goal.clear')}
-              </button>
-              <button
-                type="button"
-                onClick={() => setExpanded(false)}
-                className="ml-auto inline-flex h-7 items-center gap-1 rounded-md border-none bg-transparent px-2 text-[11px] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
-              >
-                <ChevronRightIcon className="h-3.5 w-3.5 rotate-90" />
-                {t('goal.collapse')}
-              </button>
-            </div>
           </div>
         </div>
       </div>
