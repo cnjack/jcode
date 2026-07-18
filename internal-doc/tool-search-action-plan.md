@@ -35,7 +35,7 @@
 | TS-01 ToolPlan 核心 | 完成 | `be5e701` | 分类、校验、稳定排序与 runtime 安全边界 |
 | TS-02 Eino middleware | 完成 | `0a03ce6` | 客户端 ToolSearch、兼容开关与模型级测试 |
 | TS-03 Transport 接入 | 完成 | `0f55179` | TUI/Web/ACP 共享 policy 与重建路径 |
-| TS-04 MCP 与权限 | 进行中 | `c9cb076`（命名）、`1aa128e`（审批） | canonical name/审批已完成，child/plan 边界进行中 |
+| TS-04 MCP 与权限 | 进行中 | `c9cb076`（命名）、`1aa128e`（审批）、`a316830`（Plan） | canonical/审批/Plan endpoint 已完成，child 边界进行中 |
 | TS-05 Prompt 与观测 | 未开始 | — | 使用说明、schema/轨迹指标 |
 | TS-06 自动化测试 | 未开始 | — | 单元、集成、fixture 和 routing oracle |
 | TS-07 Kimi A/B | 未开始 | — | 精确模型、静态/渐进式对照 |
@@ -136,6 +136,10 @@ Plan 模式首轮目标：
 - 授权测试：模型先 search 激活 Deferred 写工具，再由 approval 拒绝；断言真实 endpoint 调用次数为 0，证明 disclosure 不授予权限。
 - 测试：runner/agent 定向测试；两包定向 race；`go test ./...`；`make lint-go`；全部通过，lint `0 issues`。
 - 已完成提交：`1aa128e fix(runner): preserve approval across tool disclosure`（TS-04.4～TS-04.5）。
+- Plan endpoint：新增三 transport 共用的 `NewPlanExecuteTool`，在 executor 前拒绝 background、非 allowlist 命令、shell 注入和危险 git helper/output 参数；runner 复用同一 classifier。
+- Browser Plan：schema 仅广告既有 tab 的 list/select，endpoint 在打开 session 前拒绝 `new_tab=true` 及 new/claim/close；Normal schema/endpoint 不变。
+- 测试：tools/runner/command 定向测试；三包定向 race；`go test ./...`；`make lint-go`；全部通过，lint `0 issues`。拒绝用例断言 executor 调用数不增加。
+- 已完成提交：`a316830 fix(tools): enforce Plan mode at execution boundary`（TS-04.6 / Plan 子阶段）。
 - 待完成：TS-04.6；最终 TS-04 汇总提交待填写。
 
 ## TS-05 Prompt、schema 与观测
@@ -237,3 +241,4 @@ Kimi 硬门槛：
 | 2026-07-18 | 完成 TS-03：TUI/Web/ACP 共享 tool policy 和重建路径 | 矩阵、race、全量 Go、lint 通过 | `0f55179` |
 | 2026-07-18 | 完成 TS-04.1～04.3：MCP canonical identity、稳定消歧、raw endpoint/展示映射 | 定向、race、全量 Go、lint 通过 | `c9cb076` |
 | 2026-07-18 | 完成 TS-04.4～04.5：只读免审、MCP provenance 优先、Deferred 激活不授权 | 定向、race、全量 Go、lint 通过 | `1aa128e` |
+| 2026-07-18 | 完成 TS-04.6 子阶段：Plan execute/Browser 在 endpoint 层硬拒绝越权 | 定向、race、全量 Go、lint 通过 | `a316830` |
