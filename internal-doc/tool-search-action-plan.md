@@ -173,6 +173,7 @@ Plan 模式首轮目标：
 - 结果：全部通过；race 无异常；lint `0 issues`。隐私测试向 query/args/output 注入 canary 并断言 observation 序列化不含 canary；权限测试验证新建、index、last-session 和 resume 文件模式。
 - 已完成提交：`69ba9ee feat(agent): record tool disclosure metadata`（TS-05.4～TS-05.5）。
 - Web 评测安全预审发现 `SaveConfig` 会用 `0755/0644` 保存包含 API key、custom headers、MCP 和 remote 凭证的配置。现已将新建及 legacy 路径在写入前后统一收紧为目录 `0700`、文件 `0600`，覆盖 Browser/Computer/MCP 等所有 Web 配置保存入口。
+- 运行前只读核验发现现有 `~/.jcode` / `config.json` 仍为历史 `0755/0644`；已仅收紧权限为 `0700/0600`，未重写或更改配置内容，随后再次 `stat` 验证生效。
 - 测试：`go test ./internal/config`；`go test -race ./internal/config`；`go test ./...`；`make lint-go`。全部通过，lint `0 issues`。
 - 已完成提交：`f905ae2 fix(config): keep credential files owner-only`（TS-05.6 安全子阶段）。
 - 待完成：TS-05.6 仍需由 TS-07 的隔离 HOME、脱敏 publish bundle 和全产物凭证扫描共同关闭；现阶段已证明 observer 不复制敏感 payload，且配置保存不会降级 owner-only 权限。
@@ -293,5 +294,6 @@ Kimi 硬门槛：
 | 2026-07-18 | 完成 TS-06.1～06.5：首轮/命中/单调增长/fail-closed/参数结果审批/orphan 路由不变量 | agent/runner normal+race、Python 11 tests 通过 | `92e0cb0` |
 | 2026-07-18 | 完成 TS-06.8 与 TS-06：generation/resume/compaction/capability 矩阵，修复 Web MCP 后台任务残留 endpoint | 相关包、三包 race、全量 Go、lint 通过 | `56fa6eb` |
 | 2026-07-18 | TS-05.6 安全子阶段：修复 Web 保存配置把 API key 文件降为 `0644` | config normal/race、全量 Go、lint 通过 | `f905ae2` |
+| 2026-07-18 | TS-05.6 运行前安全：将现有 `~/.jcode` / `config.json` 从历史 `0755/0644` 收紧为 `0700/0600` | `stat` 复核通过，配置内容未改 | — |
 | 2026-07-18 | 完成 TS-07.1～07.5：exact Kimi、无 temperature、paired variants、最小 HOME/env、安全 trajectory 与凭证扫描 | Python 20 tests、legacy/formal dry-run 通过 | `28eae39` |
 | 2026-07-18 | TS-07.6 matrix 子阶段：16 cases/13 critical、ACP15/Web1、固定九项硬门槛与安全 validator | matrix+routing 19 tests、JSON/py_compile 通过 | `3a1ece8` |
