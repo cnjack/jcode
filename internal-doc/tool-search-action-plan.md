@@ -152,18 +152,21 @@ Plan 模式首轮目标：
 
 ## TS-05 Prompt、schema 与观测
 
-- [ ] TS-05.1 System/Plan prompt 只将 Direct 称为当前可用工具，说明 Deferred 搜索语法。
-- [ ] TS-05.2 教会模型使用 `select:name`、关键词、`+required`，并避免重复 search/select。
-- [ ] TS-05.3 删除 `load_skill` schema 与 system prompt 重复的技能目录文本。
+- [x] TS-05.1 System/Plan prompt 只将当前请求实际附带的 function schemas 作为可用工具与参数的唯一真相；Deferred 规则仅在启用时出现。
+- [x] TS-05.2 教会模型使用 `select:name`、关键词、`+required`，并避免重复 search/select 和同 batch 调用新目标。
+- [x] TS-05.3 删除 `load_skill` schema 与 system prompt 重复的技能目录文本。
 - [ ] TS-05.4 记录每次模型请求的可见工具名、schema bytes/token 估算和调用序号。
 - [ ] TS-05.5 记录 search query、结果、激活目标、重复搜索及 Deferred bypass。
 - [ ] TS-05.6 日志和评测产物不得包含 API key、authorization header 或其他凭证。
 
 完成证据：
 
-- 测试：待填写
-- 结果：待填写
-- 提交：待填写
+- Prompt/schema 子阶段：System/Plan 删除静态内建工具库存和无条件 `tool_search` 假设；模型只依据当前请求 schemas 判断工具可用性与参数。Deferred 非空时沿用 Eino v0.9.9 内建的关键词、`select:` 多选、`+required`、命中即加载和禁止重复 search/select 说明，JCode 仅补充 Eino 缺失的“search 与新目标分开 batch”约束。
+- Skill schema：`load_skill` 的 ToolInfo 使用稳定通用描述，不随 loader catalog 改变；缺失或未知名称的运行时结果仍列出当前可用技能。
+- 测试：`go test ./internal/prompts ./internal/skills ./internal/agent`；`go test -race ./internal/prompts ./internal/skills ./internal/agent`；`go test ./...`；`make lint-go`。
+- 结果：全部通过；race 无异常；lint `0 issues`。测试验证基础 prompt 无静态清单、Deferred 条件注入、Eino schema 覆盖全部搜索语法、legacy/no-Deferred 不出现 ToolSearch 规则，以及 skill schema 不随动态目录变化。
+- 已完成提交：`dbe7ca4 feat(agent): align prompts with dynamic tool schemas`（TS-05.1～TS-05.3）。
+- 待完成：TS-05.4～TS-05.6 元数据观测、持久化与隐私门槛。
 
 ## TS-06 自动化测试与 deterministic fixture
 
@@ -252,3 +255,4 @@ Kimi 硬门槛：
 | 2026-07-18 | 完成 TS-04.6 子阶段：Plan execute/Browser 在 endpoint 层硬拒绝越权 | 定向、race、全量 Go、lint 通过 | `a316830` |
 | 2026-07-18 | 完成 TS-04.6 子阶段：subagent/workflow 一次性授权与 observe profile | 定向、race、全量 Go、lint 通过 | `b1b687f` |
 | 2026-07-18 | 完成 TS-04.6 与 TS-04：team child 权限矩阵、fail-closed mode、父级一次性授权；小工具集暂不接 ToolSearch | 聚焦、四包 race、全量 Go、lint 通过 | `3b751db` |
+| 2026-07-18 | 完成 TS-05.1～05.3：prompt 以请求 schemas 为真相、条件 ToolSearch 指引、skill schema 去重 | 聚焦、三包 race、全量 Go、lint 通过 | `dbe7ca4` |
