@@ -38,7 +38,7 @@
 | TS-04 MCP 与权限 | 完成 | `c9cb076`、`1aa128e`、`a316830`、`b1b687f`、`3b751db` | MCP、Plan、delegation 和 team mode 边界完成 |
 | TS-05 Prompt 与观测 | 进行中 | `dbe7ca4`、`69ba9ee`、`f905ae2` | 使用说明、schema/轨迹指标与凭证文件权限 |
 | TS-06 自动化测试 | 完成 | `77de5fc`、`92e0cb0`、`56fa6eb` | 单元、集成、fixture、routing oracle 与生命周期撤权矩阵 |
-| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b` | 精确模型、静态/渐进式对照、安全产物链、验收矩阵、Web Browser driver 与 ACP routing dispatch |
+| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907` | 精确模型、静态/渐进式对照、安全产物链及 ACP/Web 全矩阵 dispatch 完成；等待正式 canary/A-B |
 | TS-08 30 分钟回归 | 未开始 | — | 全场景长跑 |
 | TS-09 HTML 报告 | 进行中 | `ad55a3b` | 安全、fail-closed 的九门槛报告器已完成；等待真实 campaign 产物 |
 
@@ -216,7 +216,7 @@ Plan 模式首轮目标：
 - [x] TS-07.3 修复 isolated HOME 产物保留真实 `config.json` 的凭证泄露风险。
 - [x] TS-07.4 增加 `static` / `deferred` variant、明确 repeats 和随机交错执行。
 - [x] TS-07.5 从 session JSONL 提取真实工具调用序列、batch、args、结果和耗时。
-- [ ] TS-07.6 覆盖 Direct、精确搜索、英文/中文语义、多目标、复杂参数、Browser、Computer、MCP 和负面场景。
+- [x] TS-07.6 覆盖 Direct、精确搜索、英文/中文语义、多目标、复杂参数、Browser、Computer、MCP 和负面场景。
 - [ ] TS-07.7 Canary 通过后运行关键用例至少 10 次，不能用 aggregate 掩盖单项失败。
 
 Kimi 硬门槛：
@@ -254,7 +254,12 @@ Kimi 硬门槛：
 - exact-Kimi 修复后 canary（非正式、不能计入 TS-07.7）：3 cases × static/deferred = 6 runs；6/6 routing verdict 通过、2/2 MCP fixture 交叉验证通过、5/6 task oracle 通过。唯一 task fail 的 ToolSearch→`goal_get` 调用、参数、独立 batch、结果均通过，失败来自 final-text 固定措辞 oracle，需在正式 canary 前消除该评测噪声。
 - 测试：相关 Python 32 tests、全 Python suite 67 tests、`py_compile`、diff check 通过；真实重跑结果如上。
 - 已完成提交：`91bbc8b fix(eval): resolve ACP recorder session paths`（TS-07 canary 基础设施修复；未勾选 TS-07.7）。
-- 待完成：TS-07.6 仍需把 Web driver dispatch 接入实际 Web orchestrator；TS-07.7 需真实 canary 与重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
+- Web dispatch 子阶段：新增独立 Web-only orchestrator，以 authenticated Web driver 运行真实 Browser surface；formal 固定 exact Kimi、单语言、`workers=1` 和相邻 static/deferred pair，ACP case 显式拒绝。标准 record/trajectory/redaction 三件套直接通过报告器 validator，raw session 必须位于 isolated HOME，否则 fail closed。
+- Browser matrix 与真实 driver 对齐为 runner-owned loopback proof form，明示 success 的 navigate/interact preapproval；required/order/Deferred 激活覆盖 `open → snapshot → act(fill) → act(click) → read`，不再用只读静态 body 冒充完整 Browser-use。approval-deny/browser-disabled 为独立 supplementary 场景，使用 driver 真值且不误套 success routing oracle。
+- 安全：只复制 selected provider，最小 HOME、无 temperature、owner-only 文件；driver publication allowlist、session scope、usage、routing、artifact scan 全部在清理 HOME 前完成；异常也不保留 config/session/work。deny/disabled 使用合法 `default_mode=approval`。
+- 测试：Python suite 69 tests、report record/trajectory validators、formal Web dry-run 4 jobs、`py_compile`、diff check 全部通过。
+- 已完成提交：`fe81907 test(eval): dispatch Browser ToolSearch through Web`（TS-07.6 Web dispatch 子阶段；TS-07.6 完成）。
+- 待完成：TS-07.7 需消除 canary oracle 噪声、运行真实 Chrome canary 与关键用例重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
 
 ## TS-08 至少 30 分钟全场景回归
 
@@ -319,3 +324,4 @@ Kimi 硬门槛：
 | 2026-07-18 | TS-07.6 ACP dispatch 子阶段：matrix 实际调度、metadata-only expected-routing、MCP static/deferred fixture 交叉验证 | Python 51 tests、legacy 39/formal 28 dry-run、diff check 通过 | `f75041d` |
 | 2026-07-18 | TS-09 报告器基础设施：固定九门槛、pass@10、三重 1800 秒证明、安全 HTML 与凭证扫描 | Python 58 tests、py_compile、diff check 通过 | `ad55a3b` |
 | 2026-07-18 | TS-07 canary 修复：ACP `sess_<uuid>` 正确映射 recorder `<uuid>.json`，拒绝非法/穿越 ID | Python 67 tests；exact-Kimi 6/6 routing、2/2 MCP、5/6 task | `91bbc8b` |
+| 2026-07-18 | 完成 TS-07.6：Web Browser authenticated dispatch、完整 proof-form 激活边界、supplementary deny/disabled | Python 69 tests、report validators、formal Web dry-run 通过 | `fe81907` |
