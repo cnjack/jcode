@@ -105,15 +105,16 @@ type agentToolSearchApprovalCall struct {
 }
 
 type agentToolSearchApprovalRecorder struct {
-	mu    sync.Mutex
-	calls []agentToolSearchApprovalCall
+	mu       sync.Mutex
+	calls    []agentToolSearchApprovalCall
+	denyName string
 }
 
 func (r *agentToolSearchApprovalRecorder) approve(_ context.Context, name, args string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, agentToolSearchApprovalCall{name: name, args: args})
-	return true, nil
+	return name != r.denyName, nil
 }
 
 func (r *agentToolSearchApprovalRecorder) snapshot() []agentToolSearchApprovalCall {
@@ -186,6 +187,42 @@ func TestNewAgentWithToolPlanActivatesDeferredTool(t *testing.T) {
 	}
 	if !reflect.DeepEqual(approvalCalls, wantApprovalCalls) {
 		t.Fatalf("approval calls = %#v, want %#v", approvalCalls, wantApprovalCalls)
+	}
+}
+
+func TestToolSearchActivationDoesNotAuthorizeDeferredTool(t *testing.T) {
+	direct := &agentToolSearchTestTool{name: "direct_tool"}
+	deferred := &agentToolSearchTestTool{name: "deferred_write"}
+	searchArgs := `{"query":"select:deferred_write"}`
+	deferredArgs := `{"value":"mutate"}`
+	model := &agentToolSearchScriptModel{responses: []*schema.Message{
+		toolCallMessage("search-1", "tool_search", searchArgs),
+		toolCallMessage("deferred-1", "deferred_write", deferredArgs),
+		schema.AssistantMessage("stopped", nil),
+	}}
+	approvals := &agentToolSearchApprovalRecorder{denyName: "deferred_write"}
+	plan := ToolPlan{
+		Direct:   []ToolDescriptor{agentToolSearchDescriptor(direct, ToolExposureDirect)},
+		Deferred: []ToolDescriptor{agentToolSearchDescriptor(deferred, ToolExposureDeferred)},
+	}
+
+	ag, err := NewAgentWithToolPlan(
+		context.Background(), model, plan, "test", approvals.approve, nil, nil,
+	)
+	if err != nil {
+		t.Fatalf("NewAgentWithToolPlan() error = %v", err)
+	}
+	runAgentToolSearchTest(t, ag)
+
+	if got := deferred.arguments(); len(got) != 0 {
+		t.Fatalf("denied deferred endpoint executed with args %v", got)
+	}
+	wantApprovals := []agentToolSearchApprovalCall{
+		{name: "tool_search", args: searchArgs},
+		{name: "deferred_write", args: deferredArgs},
+	}
+	if got := approvals.snapshot(); !reflect.DeepEqual(got, wantApprovals) {
+		t.Fatalf("approval calls = %#v, want %#v", got, wantApprovals)
 	}
 }
 

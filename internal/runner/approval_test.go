@@ -4,8 +4,10 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cnjack/jcode/internal/agent"
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/mode"
+	internaltools "github.com/cnjack/jcode/internal/tools"
 )
 
 // stubHandler is a minimal AgentEventHandler that returns a canned approval
@@ -251,6 +253,54 @@ func TestRequestApproval_NoApprovalTools(t *testing.T) {
 	}
 	if !approved {
 		t.Errorf("expected auto-approve for grep")
+	}
+}
+
+func TestRequestApprovalProgressiveDisclosureReadOnlyTools(t *testing.T) {
+	s := NewApprovalState("/tmp/workdir", false)
+	for _, toolName := range []string{
+		agent.ToolSearchReservedName,
+		"load_skill",
+		"goal_get",
+	} {
+		t.Run(toolName, func(t *testing.T) {
+			approved, err := s.RequestApproval(context.Background(), toolName, `{}`)
+			if err != nil || !approved {
+				t.Fatalf("%s should auto-approve: approved=%v err=%v", toolName, approved, err)
+			}
+		})
+	}
+}
+
+func TestRequestApprovalDeferredMutationStillPrompts(t *testing.T) {
+	s := NewApprovalState("/tmp/workdir", false)
+	for _, toolName := range []string{
+		"goal_set",
+		"goal_update",
+		"automation_create",
+		"memory_note",
+		"workflow_run",
+	} {
+		t.Run(toolName, func(t *testing.T) {
+			if approved, err := s.RequestApproval(context.Background(), toolName, `{}`); err == nil {
+				t.Fatalf("%s should prompt, got approved=%v", toolName, approved)
+			}
+		})
+	}
+}
+
+func TestApprovalMCPProvenancePrecedesBuiltinAllowlist(t *testing.T) {
+	const canonicalName = "mcp__approval_test__goal_get"
+	internaltools.RegisterMCPToolIdentity(canonicalName, "approval-test", "goal_get")
+
+	// Add the canonical name to the internal allowlist as a collision canary.
+	// Provenance must still force a prompt before this table is considered.
+	noApprovalNeeded[canonicalName] = true
+	defer delete(noApprovalNeeded, canonicalName)
+
+	s := NewApprovalState("/tmp/workdir", false)
+	if approved, err := s.RequestApproval(context.Background(), canonicalName, `{}`); err == nil {
+		t.Fatalf("MCP tool should prompt despite allowlist collision, got approved=%v", approved)
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/cnjack/jcode/internal/hooks"
 	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/review"
+	internaltools "github.com/cnjack/jcode/internal/tools"
 )
 
 // ApprovalState manages whether tool calls require interactive user approval.
@@ -224,19 +225,22 @@ func (s *ApprovalState) SetSessionApproval(enabled bool) {
 // MANUAL mode: read-only inspection, the user-facing question tool, and
 // teammate/subagent orchestration (whose own tool calls are gated separately).
 var noApprovalNeeded = map[string]bool{
-	"glob":              true,
-	"grep":              true,
-	"todowrite":         true,
-	"todoread":          true,
-	"ask_user":          true,
-	"webfetch":          true,
-	"subagent":          true,
-	"check_background":  true,
-	"team_create":       true,
-	"team_spawn":        true,
-	"team_send_message": true,
-	"team_list":         true,
-	"team_delete":       true,
+	agent.ToolSearchReservedName: true,
+	"glob":                       true,
+	"grep":                       true,
+	"load_skill":                 true,
+	"goal_get":                   true,
+	"todowrite":                  true,
+	"todoread":                   true,
+	"ask_user":                   true,
+	"webfetch":                   true,
+	"subagent":                   true,
+	"check_background":           true,
+	"team_create":                true,
+	"team_spawn":                 true,
+	"team_send_message":          true,
+	"team_list":                  true,
+	"team_delete":                true,
 	// Browser read-only tier: inspection never mutates external state.
 	"browser_snapshot":   true,
 	"browser_screenshot": true,
@@ -320,6 +324,13 @@ func isSafeCommand(cmd string) bool {
 // how it should be handled. It is the single source of truth shared by the
 // primary approval path and the teammate approval path so the two cannot drift.
 func (s *ApprovalState) decide(toolName, toolArgs string) approvalDecision {
+	// Provenance wins over a coincidentally safe-looking name. MCP tools are
+	// untrusted external endpoints, so they must never inherit an internal
+	// allowlist entry such as goal_get, load_skill, or tool_search.
+	if _, isMCP := internaltools.MCPServerForTool(toolName); isMCP {
+		return decisionPrompt
+	}
+
 	if noApprovalNeeded[toolName] {
 		return decisionAutoApprove
 	}
