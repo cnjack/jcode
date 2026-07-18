@@ -144,7 +144,9 @@ func (s *Server) ReloadMCPInBackground() {
 }
 
 // reloadMCPAndRebuild reconnects MCP servers from the current config and
-// rebuilds the live agent so new tools take effect without a restart.
+// rebuilds every live task agent so additions and revocations take effect
+// without a restart. Rebuilding only the foreground task would leave a
+// background task holding executable endpoints from the previous MCP catalog.
 func (s *Server) reloadMCPAndRebuild() error {
 	if s.reloadMCP != nil {
 		s.mu.RLock()
@@ -162,15 +164,7 @@ func (s *Server) reloadMCPAndRebuild() error {
 		s.mu.Unlock()
 	}
 	if !s.needsSetup {
-		// Rebuild the foreground task's agent so the new MCP tools take effect.
-		if eng := s.activeEngine(); eng != nil && eng.createAgent != nil {
-			prov, mod, _ := eng.modelSnapshot()
-			ag, err := eng.createAgent(prov, mod)
-			if err != nil {
-				return err
-			}
-			eng.setAgent(ag)
-		}
+		return s.rebuildToolAgents()
 	}
 	return nil
 }
