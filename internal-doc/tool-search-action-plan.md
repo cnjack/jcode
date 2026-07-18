@@ -37,7 +37,7 @@
 | TS-03 Transport 接入 | 完成 | `0f55179` | TUI/Web/ACP 共享 policy 与重建路径 |
 | TS-04 MCP 与权限 | 完成 | `c9cb076`、`1aa128e`、`a316830`、`b1b687f`、`3b751db` | MCP、Plan、delegation 和 team mode 边界完成 |
 | TS-05 Prompt 与观测 | 进行中 | — | 使用说明、schema/轨迹指标 |
-| TS-06 自动化测试 | 进行中 | `77de5fc`、`92e0cb0` | 单元、集成、fixture 和 routing oracle |
+| TS-06 自动化测试 | 完成 | `77de5fc`、`92e0cb0`、`56fa6eb` | 单元、集成、fixture、routing oracle 与生命周期撤权矩阵 |
 | TS-07 Kimi A/B | 未开始 | — | 精确模型、静态/渐进式对照 |
 | TS-08 30 分钟回归 | 未开始 | — | 全场景长跑 |
 | TS-09 HTML 报告 | 未开始 | — | 生成并审计最终报告 |
@@ -183,7 +183,7 @@ Plan 模式首轮目标：
 - [x] TS-06.5 集成测试：检测未搜索直接调用、同 batch search+target、orphan tool call。
 - [x] TS-06.6 增加本地 deterministic MCP fixture，覆盖 10/30/50/100 工具规模和相似名称干扰。
 - [x] TS-06.7 增加声明式 routing oracle：工具序列、搜索命中、参数/result marker、禁止冗余搜索。
-- [ ] TS-06.8 覆盖 Browser、Computer、MCP reload、mode switch、compaction/resume 和禁用后撤权。
+- [x] TS-06.8 覆盖 Browser、Computer、MCP reload、mode switch、compaction/resume 和禁用后撤权。
 
 完成证据：
 
@@ -199,7 +199,11 @@ Plan 模式首轮目标：
 - TS-06.5：routing oracle 除 bypass 与 same-batch 外，新增“call 无 result”和“result 早于 call”两个 orphan 拒绝用例；Python suite 由 9 增至 11 个。
 - 测试：`go test ./internal/agent ./internal/runner`；`go test -race ./internal/agent ./internal/runner`；`python3 -m unittest agent-eval/suite/test_routing_verify.py`（11 tests）；全部通过。
 - 已完成提交：`92e0cb0 test(agent): harden deferred routing invariants`（TS-06.1～TS-06.5）。
-- 待完成：TS-06.8 的 Browser/Computer/MCP reload、mode switch、compaction/resume/capability 撤权矩阵。
+- TS-06.8：generation 测试证明新 Agent 不继承旧的隐式激活；未压缩的精确 `tool_search` 结果可在 resume 时恢复，而 compaction 的自然语言摘要不作为 executable capability，必须重新搜索。Browser/Computer capability、Plan mode 和 ACP transport 撤权后，旧 endpoint 不进入 runtime registry，模型猜名执行失败。
+- Static 兼容边界：`tool_search.enabled=false` 只切换为当前 catalog 的 eager/static 暴露，不等同 capability revoke；真正被当前 transport/mode/capability/catalog 移除的 endpoint 在 static 路径同样不可调用。
+- MCP 修复：Web MCP reload 从“只重建 active task”改为重建所有 live task；复用 engine revision guard，慢 reload 不会覆盖并发的 Plan mode 切换。测试覆盖 active/background 去重重建与 stale generation 丢弃。
+- 测试：`go test ./internal/agent ./internal/command ./internal/web ./internal/tools ./internal/session ./internal/runner`；`go test -race ./internal/agent ./internal/command ./internal/web`；`go test ./...`；`make lint-go`。全部通过，race 无异常，lint `0 issues`。
+- 已完成提交：`56fa6eb fix(web): revoke stale tools across agent rebuilds`（TS-06.8，TS-06 完成）。
 
 ## TS-07 Kimi A/B 评测
 
@@ -275,3 +279,4 @@ Kimi 硬门槛：
 | 2026-07-18 | 完成 TS-05.4～05.5：provider-attempt schema 指标、metadata-only search/bypass、session owner-only 权限 | 聚焦、三包 race、全量 Go、lint 通过 | `69ba9ee` |
 | 2026-07-18 | 完成 TS-06.6～06.7：10/30/50/100-tool MCP fixture、session/fixture routing oracle | fixture normal/race、Python 9 tests、全量 Go、lint 通过 | `77de5fc` |
 | 2026-07-18 | 完成 TS-06.1～06.5：首轮/命中/单调增长/fail-closed/参数结果审批/orphan 路由不变量 | agent/runner normal+race、Python 11 tests 通过 | `92e0cb0` |
+| 2026-07-18 | 完成 TS-06.8 与 TS-06：generation/resume/compaction/capability 矩阵，修复 Web MCP 后台任务残留 endpoint | 相关包、三包 race、全量 Go、lint 通过 | `56fa6eb` |
