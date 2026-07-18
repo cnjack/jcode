@@ -44,7 +44,10 @@ VARIANTS = frozenset({"static", "deferred"})
 LANGUAGES = frozenset({"en", "zh"})
 SCENARIOS = frozenset({"success", "approval_deny", "browser_disabled"})
 SAFE_CASE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$")
-SAFE_SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+RECORDER_SESSION_ID = re.compile(
+    r"^(?:sess_)?(?P<uuid>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+)
 MAX_API_BODY = 1 << 20
 MAX_SESSION_BYTES = 16 << 20
 SAFE_EXEC_PATH = ":".join((
@@ -696,10 +699,14 @@ def analyze_browser_session(
 
 
 def _session_path(home: Path, session_id: str) -> Path:
-    if not SAFE_SESSION_ID.fullmatch(session_id):
+    match = RECORDER_SESSION_ID.fullmatch(session_id)
+    if match is None:
         raise DriverFailure("session_id_invalid")
+    # ACP-style public ids use sess_<uuid>, while the authoritative recorder is
+    # always <uuid>.json. Bare canonical UUIDs remain supported for the Web API.
+    recorder_uuid = match.group("uuid").lower()
     root = (home / ".jcode" / "sessions").resolve()
-    path = (root / f"{session_id}.json").resolve()
+    path = (root / f"{recorder_uuid}.json").resolve()
     if path.parent != root:
         raise DriverFailure("session_path_invalid")
     return path
@@ -1037,7 +1044,7 @@ def run_web_browser_case(
         if chat_code != 202 or not isinstance(chat_payload, dict):
             raise DriverFailure("chat_not_accepted")
         session_id = chat_payload.get("session_id")
-        if not isinstance(session_id, str) or not SAFE_SESSION_ID.fullmatch(session_id):
+        if not isinstance(session_id, str) or RECORDER_SESSION_ID.fullmatch(session_id) is None:
             raise DriverFailure("chat_session_id_invalid")
         record["chat"]["accepted"] = chat_payload.get("status") == "processing"
         if not record["chat"]["accepted"]:

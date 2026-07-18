@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -57,24 +59,79 @@ type browserTool struct {
 	planOnly bool
 }
 
+const browserOperationTimeout = 30 * time.Second
+
 func (t *browserTool) Info(_ context.Context) (*schema.ToolInfo, error) { return t.info, nil }
 
 func (t *browserTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
-	if t.planOnly {
-		if err := validatePlanBrowserCall(t.info.Name, argsJSON); err != nil {
-			return "", err
-		}
-	}
-	sess, err := t.env.BrowserSession(ctx)
-	if err != nil {
+	if err := validateBrowserCall(t.info.Name, argsJSON, t.planOnly); err != nil {
 		return "", err
 	}
-	out, err := dispatchBrowser(ctx, t.env, sess, t.info.Name, argsJSON)
-	if errors.Is(err, browser.ErrControlInterrupted) {
-		// Report naturally; the model should stop rather than retry.
-		return "Browser control was interrupted (the extension or user took over). Stopping browser work.", nil
+	return runBrowserOperation(ctx, t.info.Name, browserOperationTimeout, func(operationCtx context.Context) (string, error) {
+		sess, err := t.env.BrowserSession(operationCtx)
+		if err != nil {
+			return "", err
+		}
+		out, err := dispatchBrowser(operationCtx, t.env, sess, t.info.Name, argsJSON)
+		if errors.Is(err, browser.ErrControlInterrupted) {
+			// Report naturally; the model should stop rather than retry.
+			return "Browser control was interrupted (the extension or user took over). Stopping browser work.", nil
+		}
+		return out, err
+	})
+}
+
+func runBrowserOperation(
+	ctx context.Context,
+	toolName string,
+	timeout time.Duration,
+	run func(context.Context) (string, error),
+) (string, error) {
+	operationCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	out, err := run(operationCtx)
+	if parentErr := ctx.Err(); parentErr != nil {
+		return "", parentErr
+	}
+	if errors.Is(operationCtx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+		return "", fmt.Errorf("%s operation timed out", toolName)
 	}
 	return out, err
+}
+
+func validateBrowserCall(name, argsJSON string, planOnly bool) error {
+	if name == "browser_open" {
+		if err := validateBrowserOpenCall(argsJSON, planOnly); err != nil {
+			return err
+		}
+	}
+	if planOnly {
+		return validatePlanBrowserCall(name, argsJSON)
+	}
+	return nil
+}
+
+func validateBrowserOpenCall(argsJSON string, planOnly bool) error {
+	var input struct {
+		URL    string `json:"url"`
+		NewTab bool   `json:"new_tab"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &input); err != nil {
+		return fmt.Errorf("invalid browser_open args: %w", err)
+	}
+	if planOnly && input.NewTab {
+		return fmt.Errorf("browser_open new_tab=true is not allowed in Plan mode")
+	}
+	if input.URL == "" || input.URL != strings.TrimSpace(input.URL) {
+		return fmt.Errorf("browser_open requires an absolute http or https URL with a host and no userinfo")
+	}
+	parsed, err := url.Parse(input.URL)
+	if err != nil ||
+		(!strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https")) ||
+		parsed.Host == "" || parsed.Hostname() == "" || parsed.User != nil {
+		return fmt.Errorf("browser_open requires an absolute http or https URL with a host and no userinfo")
+	}
+	return nil
 }
 
 func validatePlanBrowserCall(name, argsJSON string) error {

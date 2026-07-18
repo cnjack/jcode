@@ -536,6 +536,26 @@ class WebBrowserDriverTest(unittest.TestCase):
         self.assertEqual([], list(runtime_dir.glob("stderr-*.log")))
         self.assertEqual(0o700, stat.S_IMODE(runtime_dir.stat().st_mode))
 
+    def test_session_path_maps_public_prefix_and_rejects_invalid_ids(self):
+        sessions = self.home / ".jcode" / "sessions"
+        expected = (sessions / f"{SESSION_ID}.json").resolve()
+        self.assertEqual(expected, driver._session_path(self.home, SESSION_ID))
+        self.assertEqual(expected, driver._session_path(self.home, f"sess_{SESSION_ID}"))
+
+        for invalid in (
+            "",
+            "sess_",
+            "session-name",
+            "../11111111-2222-3333-4444-555555555555",
+            "sess_../11111111-2222-3333-4444-555555555555",
+            "sess_11111111-2222-3333-4444-555555555555/../../secret",
+            "{11111111-2222-3333-4444-555555555555}",
+            "sess_11111111222233334444555555555555",
+        ):
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(driver.DriverFailure, "session_id_invalid"):
+                    driver._session_path(self.home, invalid)
+
 
 if __name__ == "__main__":
     unittest.main()

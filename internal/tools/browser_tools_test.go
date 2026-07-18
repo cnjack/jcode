@@ -2,8 +2,10 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cnjack/jcode/internal/browser"
 )
@@ -119,5 +121,105 @@ func TestBrowserPlanEndpointRejectsDisallowedOperationsBeforeSession(t *testing.
 		context.Background(), `{"url":"https://example.com","new_tab":true}`,
 	); err == nil || strings.Contains(err.Error(), "Plan mode") {
 		t.Fatalf("normal browser_open should retain new_tab behavior; error=%v", err)
+	}
+}
+
+func TestBrowserOpenRejectsUnsafeURLsBeforeSession(t *testing.T) {
+	tests := []string{
+		`{}`,
+		`{"url":""}`,
+		`{"url":" example.com "}`,
+		`{"url":"example.com/path"}`,
+		`{"url":"file:///etc/passwd"}`,
+		`{"url":"data:text/plain,hello"}`,
+		`{"url":"javascript:alert(1)"}`,
+		`{"url":"ftp://example.com/file"}`,
+		`{"url":"https:///missing-host"}`,
+		`{"url":"https://:443/path"}`,
+		`{"url":"https://user@example.com/private"}`,
+		`{"url":"https://user:password@example.com/private"}`,
+	}
+	for _, args := range tests {
+		for _, planOnly := range []bool{false, true} {
+			endpoint := &browserTool{env: &Env{}, info: browserOpenInfo(), planOnly: planOnly}
+			if planOnly {
+				endpoint.info = browserPlanOpenInfo()
+			}
+			_, err := endpoint.InvokableRun(context.Background(), args)
+			if err == nil {
+				t.Errorf("planOnly=%v args=%s unexpectedly passed", planOnly, args)
+				continue
+			}
+			if strings.Contains(err.Error(), "not available") {
+				t.Errorf("planOnly=%v args=%s reached BrowserSession: %v", planOnly, args, err)
+			}
+			for _, secret := range []string{"/etc/passwd", "password", "javascript:alert"} {
+				if strings.Contains(err.Error(), secret) {
+					t.Errorf("planOnly=%v error exposed URL material %q: %v", planOnly, secret, err)
+				}
+			}
+		}
+	}
+
+	for _, args := range []string{
+		`{"url":"http://localhost:8080/path?q=1"}`,
+		`{"url":"https://example.com/#fragment"}`,
+	} {
+		if err := validateBrowserCall("browser_open", args, false); err != nil {
+			t.Errorf("normal browser_open rejected %s: %v", args, err)
+		}
+		if err := validateBrowserCall("browser_open", args, true); err != nil {
+			t.Errorf("Plan browser_open rejected %s: %v", args, err)
+		}
+	}
+}
+
+func TestRunBrowserOperationBoundsTimeoutAndRedactsInternalError(t *testing.T) {
+	const sensitive = "https://user:password@example.com/private/path"
+	_, err := runBrowserOperation(
+		context.Background(),
+		"browser_snapshot",
+		5*time.Millisecond,
+		func(operationCtx context.Context) (string, error) {
+			<-operationCtx.Done()
+			return "", errors.New("backend timeout while reading " + sensitive)
+		},
+	)
+	if err == nil || err.Error() != "browser_snapshot operation timed out" {
+		t.Fatalf("timeout error = %v", err)
+	}
+	if strings.Contains(err.Error(), sensitive) {
+		t.Fatalf("timeout error exposed internal URL: %v", err)
+	}
+}
+
+func TestRunBrowserOperationPreservesParentCancellation(t *testing.T) {
+	parent, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := runBrowserOperation(
+		parent,
+		"browser_read",
+		30*time.Second,
+		func(operationCtx context.Context) (string, error) {
+			<-operationCtx.Done()
+			return "", operationCtx.Err()
+		},
+	)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("parent cancellation error = %v, want context.Canceled", err)
+	}
+}
+
+func TestRunBrowserOperationNormalizesNestedDeadline(t *testing.T) {
+	_, err := runBrowserOperation(
+		context.Background(),
+		"browser_open",
+		30*time.Second,
+		func(context.Context) (string, error) {
+			return "", errors.Join(errors.New("nested browser deadline"), context.DeadlineExceeded)
+		},
+	)
+	if err == nil || err.Error() != "browser_open operation timed out" {
+		t.Fatalf("nested deadline error = %v", err)
 	}
 }
