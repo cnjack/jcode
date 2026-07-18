@@ -39,8 +39,8 @@
 | TS-05 Prompt 与观测 | 进行中 | `dbe7ca4`、`69ba9ee`、`f905ae2`、`8675a5b` | 使用说明、schema/轨迹指标、凭证文件权限及 Browser 子进程 token 隔离 |
 | TS-06 自动化测试 | 完成 | `77de5fc`、`92e0cb0`、`56fa6eb` | 单元、集成、fixture、routing oracle 与生命周期撤权矩阵 |
 | TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e`、`8675a5b` | 精确模型、静态/渐进式对照、安全产物链及 ACP/Web 全矩阵 dispatch 完成；Browser canary 环境故障已修复并通过隔离 Chrome 对照，等待 exact-Kimi 重跑/A-B |
-| TS-08 30 分钟回归 | 未开始 | — | 全场景长跑 |
-| TS-09 HTML 报告 | 进行中 | `ad55a3b`、`92d442e` | 安全、fail-closed 的九门槛报告器及全功能 schema 指标 scope 已完成；等待真实 campaign 产物 |
+| TS-08 30 分钟回归 | 进行中 | `9f2889e` | formal coordinator 与证据合约完成；尚未运行真实全场景长跑 |
+| TS-09 HTML 报告 | 进行中 | `ad55a3b`、`92d442e`、`9f2889e` | 安全、fail-closed 的九门槛报告器、canonical suite 与 supplementary 合约已完成；等待真实 campaign 产物 |
 
 ## TS-00 文档与基线
 
@@ -285,6 +285,12 @@ Kimi 硬门槛：
 - 场景数/运行数：待填写
 - 结果目录：待填写
 - 提交：待填写
+- Coordinator 基础设施：新增统一 ACP/Web formal campaign，固定 exact Kimi、`workers=1`、每 case 至少 10 repeats、static/deferred 相邻随机 block；一次构建 jcode/ACP harness/MCP fixture 并记录 Git、Go、OS/arch、Eino 与 SHA-256，结束前复核 suite 和三份二进制未漂移。canary/dry-run 明确非 formal，不能作为验收证据。
+- 覆盖/时长：正式 plan 必须是 canonical matrix/base suite 的内容 hash，不能换成缩小矩阵；只把逐个真实 matrix job 的无重叠 interval 交给 1800 秒 gate，固定 TUI/Web/ACP mode/reload/failure Go 覆盖及 Browser deny/disabled/中文 supplementary 明确不计时，禁止 sleep/filler 凑时长。
+- 安全/失败关闭：每 run 必须有 record/metadata-only trajectory/redaction 三件套，私有目录 owner-only，凭证/host path 扫描；中断、部分失败、Git/suite/binary 漂移均写 failed manifest。supplementary 必须与真实 record 的 language/scenario/routing/real_execution 身份一致，报告要求固定 3 command + 4 Web 记录全部通过。
+- 独立 review 曾发现 report 未强制 complete/formal、binary hash 未复核、formal 可替换小矩阵、supplementary 可身份漂移四类缺口；均已增加 fail-closed 校验和回归测试后才提交。
+- 测试：campaign 定向 10/10、修复后定向 23/23、agent-eval Python 全量 90/90、fake formal 可被真实报告器解析且仅 1800 秒 gate 按预期失败；`py_compile`、diff check 通过。
+- 已完成提交：`9f2889e test(eval): coordinate formal ToolSearch campaign`（仅基础设施；TS-08.1～08.6 均未勾选）。
 
 ## TS-09 HTML 测试报告与完成审计
 
@@ -306,6 +312,7 @@ Kimi 硬门槛：
 - 测试：Python suite 58 tests、`py_compile`、`git diff --check` 全部通过；synthetic 覆盖 PASS、单 gate 失败、缺失产物、时长/重叠伪造、credential/path canary、highspeed、dirty tree 和 unsafe redaction。
 - 已完成提交：`ad55a3b test(eval): add ToolSearch acceptance report`（TS-09 报告器基础设施子阶段；TS-09.1～09.5 均须等待真实 campaign 后才能勾选）。
 - 指标 scope 校准提交：`92d442e test(eval): calibrate ToolSearch acceptance scopes`；报告器从 hard-gate 声明读取唯一 `full_schema_disclosure` 代表 case，50% 阈值不变，缺失或不完整配对 fail closed。真实 campaign 前不勾选 TS-09.1～09.5。
+- Formal 合约硬化提交：`9f2889e test(eval): coordinate formal ToolSearch campaign`；报告强制 canonical suite hash、formal/complete/no-failure manifest、固定 binary hash 与完整 supplementary 身份/产物，不接受部分或缩小 campaign。真实 campaign 前仍不勾选 TS-09.1～09.5。
 
 ## 更新日志
 
@@ -336,3 +343,4 @@ Kimi 硬门槛：
 | 2026-07-18 | 完成 TS-07.6：Web Browser authenticated dispatch、完整 proof-form 激活边界、supplementary deny/disabled | Python 69 tests、report validators、formal Web dry-run 通过 | `fe81907` |
 | 2026-07-18 | TS-07/09 canary 指标校准：稳定 goal sentinel；50% schema 门槛固定到完整 100-tool catalog，拒绝 scope 漂移 | ToolSearch discovery 48 tests、py_compile、JSON、diff check 通过 | `92d442e` |
 | 2026-07-18 | Web Browser canary 修复：macOS Chrome system HOME、HTTP(S) 边界、30s timeout、token 隔离及 recorder ID 映射 | Browser/tools Go、race、Python 13/13；隔离 Chrome smoke 0.96s | `8675a5b` |
+| 2026-07-18 | TS-08/09 formal coordinator：canonical full matrix、固定 binary/suite hash、真实 interval、完整 supplementary 与 partial fail-closed | 独立 review；Python 90/90、fake formal/report 合约通过 | `9f2889e` |
