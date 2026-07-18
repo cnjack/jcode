@@ -155,8 +155,8 @@ Plan 模式首轮目标：
 - [x] TS-05.1 System/Plan prompt 只将当前请求实际附带的 function schemas 作为可用工具与参数的唯一真相；Deferred 规则仅在启用时出现。
 - [x] TS-05.2 教会模型使用 `select:name`、关键词、`+required`，并避免重复 search/select 和同 batch 调用新目标。
 - [x] TS-05.3 删除 `load_skill` schema 与 system prompt 重复的技能目录文本。
-- [ ] TS-05.4 记录每次模型请求的可见工具名、schema bytes/token 估算和调用序号。
-- [ ] TS-05.5 记录 search query、结果、激活目标、重复搜索及 Deferred bypass。
+- [x] TS-05.4 记录每次模型请求的可见工具名、schema bytes/token 估算和调用序号。
+- [x] TS-05.5 以 metadata-only 方式记录 search 模式/长度、结果名、激活目标、重复搜索及 Deferred bypass；不持久化原 query。
 - [ ] TS-05.6 日志和评测产物不得包含 API key、authorization header 或其他凭证。
 
 完成证据：
@@ -166,7 +166,13 @@ Plan 模式首轮目标：
 - 测试：`go test ./internal/prompts ./internal/skills ./internal/agent`；`go test -race ./internal/prompts ./internal/skills ./internal/agent`；`go test ./...`；`make lint-go`。
 - 结果：全部通过；race 无异常；lint `0 issues`。测试验证基础 prompt 无静态清单、Deferred 条件注入、Eino schema 覆盖全部搜索语法、legacy/no-Deferred 不出现 ToolSearch 规则，以及 skill schema 不随动态目录变化。
 - 已完成提交：`dbe7ca4 feat(agent): align prompts with dynamic tool schemas`（TS-05.1～TS-05.3）。
-- 待完成：TS-05.4～TS-05.6 元数据观测、持久化与隐私门槛。
+- 观测子阶段：在 Eino ToolSearch rewrite 之后、状态重写/审批之前安装 metadata observer；`WrapModel` 针对每次真实 provider attempt 记录最终可见 canonical tool names、数量、schema bytes、`EstimateTokens` 估算、新披露 Deferred 和单调 request seq。
+- Search/bypass：记录 query mode/bytes、term/required 数、max_results、已验证 select 名、未知 select 数、match/new-match、重复与冗余标志；不记录原 query、完整 args/schema/output/error。Deferred 调用若不在最后一次模型可见集合中，记录 bypass；模型级测试证明同 batch search+target 会被捕获。
+- 持久化：新增 `tool_observation` JSONL entry，runner 每 turn 注入并发安全 sink；resume/replay 忽略新增元数据而不改变历史。Session/teammate/index/last-session 文件改为 owner-only `0600`，目录改为 `0700`，旧的宽松 session 在 append 前收紧。
+- 测试：`go test ./internal/agent ./internal/session ./internal/runner`；`go test -race ./internal/agent ./internal/session ./internal/runner`；`go test ./...`；`make lint-go`。
+- 结果：全部通过；race 无异常；lint `0 issues`。隐私测试向 query/args/output 注入 canary 并断言 observation 序列化不含 canary；权限测试验证新建、index、last-session 和 resume 文件模式。
+- 已完成提交：`69ba9ee feat(agent): record tool disclosure metadata`（TS-05.4～TS-05.5）。
+- 待完成：TS-05.6 需由 TS-07 的隔离 HOME、脱敏 publish bundle 和全产物凭证扫描共同关闭；现阶段只证明新增 observer 不复制敏感 payload。
 
 ## TS-06 自动化测试与 deterministic fixture
 
@@ -256,3 +262,4 @@ Kimi 硬门槛：
 | 2026-07-18 | 完成 TS-04.6 子阶段：subagent/workflow 一次性授权与 observe profile | 定向、race、全量 Go、lint 通过 | `b1b687f` |
 | 2026-07-18 | 完成 TS-04.6 与 TS-04：team child 权限矩阵、fail-closed mode、父级一次性授权；小工具集暂不接 ToolSearch | 聚焦、四包 race、全量 Go、lint 通过 | `3b751db` |
 | 2026-07-18 | 完成 TS-05.1～05.3：prompt 以请求 schemas 为真相、条件 ToolSearch 指引、skill schema 去重 | 聚焦、三包 race、全量 Go、lint 通过 | `dbe7ca4` |
+| 2026-07-18 | 完成 TS-05.4～05.5：provider-attempt schema 指标、metadata-only search/bypass、session owner-only 权限 | 聚焦、三包 race、全量 Go、lint 通过 | `69ba9ee` |
