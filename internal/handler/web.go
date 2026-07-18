@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -446,9 +447,11 @@ type WebSubagentProgressData struct {
 
 // WebDoneData signals agent completion. Error is a short user-facing summary;
 // Detail carries the full raw error text for a collapsible "details" view.
+// Stopped marks a user-initiated stop — the UI shows a calm notice, not an error.
 type WebDoneData struct {
-	Error  string `json:"error,omitempty"`
-	Detail string `json:"detail,omitempty"`
+	Error   string `json:"error,omitempty"`
+	Detail  string `json:"detail,omitempty"`
+	Stopped bool   `json:"stopped,omitempty"`
 }
 
 // WebApprovalRequestData carries an approval request. ToolCallID (when known)
@@ -624,6 +627,12 @@ func (h *WebHandler) OnAgentStart() {
 func (h *WebHandler) OnAgentDone(err error) {
 	if err == nil {
 		h.emit("agent_done", WebDoneData{})
+		return
+	}
+	// User-initiated stop (the runner reports the clean context error): show a
+	// calm "stopped" notice, not a red error card.
+	if errors.Is(err, context.Canceled) {
+		h.emit("agent_done", WebDoneData{Stopped: true})
 		return
 	}
 	// Raw run errors (eino NodeRunError wrapping go-openai API errors) are too

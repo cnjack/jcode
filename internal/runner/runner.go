@@ -238,7 +238,11 @@ func runInner(
 	// toolStarts records when each tool call was announced so results can
 	// carry a call→result latency. The event loop below is the only reader
 	// and writer (single goroutine), so no locking is needed.
-	toolStarts := make(map[string]time.Time)
+	type toolStart struct {
+		at   time.Time
+		name string
+	}
+	toolStarts := make(map[string]toolStart)
 	// meter carries approval wait/denied outcomes from the approval path (see
 	// Run) so the emitted Duration is pure execution time and denied calls are
 	// flagged. emitToolResult also owns session recording so the persisted
@@ -247,13 +251,26 @@ func runInner(
 	emitToolResult := func(name, output, toolCallID string, err error) {
 		ev := handler.ToolResultEvent{Name: name, Output: output, ToolCallID: toolCallID, Err: err}
 		if started, ok := toolStarts[toolCallID]; ok {
-			ev.Duration = time.Since(started)
+			ev.Duration = time.Since(started.at)
 			delete(toolStarts, toolCallID)
 		}
 		applyApprovalOutcome(&ev, meter)
 		h.OnToolResult(ev)
 		if rec != nil {
 			rec.RecordToolResult(name, output, toolCallID, err, ev.Denied, ev.Duration)
+		}
+	}
+	// drainDanglingToolResults backfills a result for every announced tool
+	// call that never produced one (user stop, fatal tool-node failure). The
+	// session must never persist a tool_call without its tool_result: the next
+	// resume would reconstruct a history the model API rejects ("assistant
+	// message with 'tool_calls' must be followed by tool messages..."). The
+	// backfill carries no error: an interrupted call is not a failed call, and
+	// a non-nil Err would paint every front-end's tool row red (raw
+	// "context.Canceled" text) right next to the calm stop notice.
+	drainDanglingToolResults := func() {
+		for id, started := range toolStarts {
+			emitToolResult(started.name, session.InterruptedToolOutput, id, nil)
 		}
 	}
 
@@ -270,6 +287,7 @@ func runInner(
 			// calm "Stopped". runInner owns this OnAgentDone (returns done=true),
 			// so Run does not emit a second one.
 			config.Logger().Printf("[runner] context cancelled, stopping iteration")
+			drainDanglingToolResults()
 			h.OnAgentDone(ctx.Err())
 			return assistantText.String(), true
 		default:
@@ -290,6 +308,7 @@ func runInner(
 				// "[NodeRunError] context canceled"); report the clean context
 				// error instead of the noisy wrapped one.
 				config.Logger().Printf("[runner] event error during cancellation: %v", event.Err)
+				drainDanglingToolResults()
 				h.OnAgentDone(ctx.Err())
 				return assistantText.String(), true
 			}
@@ -298,6 +317,7 @@ func runInner(
 			// so wrapping here fixes the display in the TUI, the web UI and ACP
 			// at once — and stops the next frontend from having to remember.
 			config.Logger().Printf("[runner] event error: %v", event.Err)
+			drainDanglingToolResults()
 			h.OnAgentDone(internalmodel.WrapFriendly(event.Err, "", ""))
 			return assistantText.String(), true
 		}
@@ -401,7 +421,7 @@ func runInner(
 				startedAt := time.Now()
 				for i, idx := range indices {
 					p := pending[idx]
-					toolStarts[p.id] = startedAt
+					toolStarts[p.id] = toolStart{at: startedAt, name: p.name}
 					h.OnToolCall(handler.ToolCallEvent{
 						Name:       p.name,
 						Args:       p.args.String(),
@@ -422,7 +442,7 @@ func runInner(
 				startedAt := time.Now()
 				size := len(mo.Message.ToolCalls)
 				for i, tc := range mo.Message.ToolCalls {
-					toolStarts[tc.ID] = startedAt
+					toolStarts[tc.ID] = toolStart{at: startedAt, name: tc.Function.Name}
 					h.OnToolCall(handler.ToolCallEvent{
 						Name:       tc.Function.Name,
 						Args:       tc.Function.Arguments,

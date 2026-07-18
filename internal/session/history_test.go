@@ -3,8 +3,30 @@ package session
 import (
 	"testing"
 
+	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 )
+
+// assertToolCallInvariant fails the test when any assistant message carries a
+// tool_call that is not answered by a tool message in the group immediately
+// following it — the exact condition model APIs reject with a 400.
+func assertToolCallInvariant(t *testing.T, msgs []adk.Message) {
+	t.Helper()
+	for i, m := range msgs {
+		if m.Role != schema.Assistant || len(m.ToolCalls) == 0 {
+			continue
+		}
+		answered := make(map[string]bool, len(m.ToolCalls))
+		for j := i + 1; j < len(msgs) && msgs[j].Role == schema.Tool; j++ {
+			answered[msgs[j].ToolCallID] = true
+		}
+		for _, tc := range m.ToolCalls {
+			if !answered[tc.ID] {
+				t.Errorf("msg[%d]: tool_call %s(%s) has no answering tool message", i, tc.Function.Name, tc.ID)
+			}
+		}
+	}
+}
 
 // TestReconstructState_CompactKeepsTail verifies that replaying a compact entry
 // keeps the KeptN most recent messages after the summary, matching what the
@@ -101,6 +123,98 @@ func TestReconstructState_CompactKeptNOverflow(t *testing.T) {
 	}
 	if state.History[1].Content != "u1" || state.History[2].Content != "a1" {
 		t.Errorf("tail = %q,%q, want u1,a1", state.History[1].Content, state.History[2].Content)
+	}
+}
+
+// TestReconstructState_ParallelToolResultInSubagentWindow reproduces the
+// session-86e09b12 failure: the main agent issued grep+subagent in one
+// parallel batch and the fast grep's result landed between subagent_start and
+// subagent_result. The old subagentDepth skip window swallowed it, leaving a
+// dangling grep tool_call the model API rejected on resume ("tool_call_ids
+// did not have response messages: grep:53").
+func TestReconstructState_ParallelToolResultInSubagentWindow(t *testing.T) {
+	entries := []Entry{
+		{Type: EntryUser, Content: "u"},
+		{Type: EntryToolCall, Name: "grep", Args: "{}", ToolCallID: "c-grep"},
+		{Type: EntryToolCall, Name: "subagent", Args: "{}", ToolCallID: "c-sub"},
+		{Type: EntrySubagentStart, SubagentName: "s", SubagentType: "explore"},
+		{Type: EntryToolResult, Name: "grep", Output: "grep-out", ToolCallID: "c-grep"},
+		{Type: EntrySubagentResult, SubagentName: "s", Output: "sub-out"},
+		{Type: EntryToolResult, Name: "subagent", Output: "sub-out", ToolCallID: "c-sub"},
+		{Type: EntryAssistant, Content: "done"},
+	}
+	state := ReconstructState(entries)
+
+	assertToolCallInvariant(t, state.History)
+	// Both results must survive, in recorded order, right after the assistant.
+	if len(state.History) != 5 {
+		t.Fatalf("History length = %d, want 5 (user, assistant, 2 tool results, assistant)", len(state.History))
+	}
+	if state.History[2].Role != schema.Tool || state.History[2].ToolCallID != "c-grep" || state.History[2].Content != "grep-out" {
+		t.Errorf("History[2] = %v %q, want grep tool result", state.History[2].Role, state.History[2].Content)
+	}
+	if state.History[3].Role != schema.Tool || state.History[3].ToolCallID != "c-sub" {
+		t.Errorf("History[3] = %v, want subagent tool result", state.History[3].Role)
+	}
+}
+
+// TestReconstructState_BackfillsInterruptedToolCall covers a session recorded
+// mid-run (user stop / process kill): the tool_call is on disk but its result
+// never arrived. Reconstruction must insert a placeholder tool message so the
+// rebuilt history satisfies the model API's tool-call invariant.
+func TestReconstructState_BackfillsInterruptedToolCall(t *testing.T) {
+	entries := []Entry{
+		{Type: EntryUser, Content: "u"},
+		{Type: EntryToolCall, Name: "grep", Args: "{}", ToolCallID: "c1"},
+		{Type: EntryToolCall, Name: "execute", Args: "{}", ToolCallID: "c2"},
+		{Type: EntryToolResult, Name: "grep", Output: "ok", ToolCallID: "c1"},
+		// execute never produced a result.
+	}
+	state := ReconstructState(entries)
+
+	assertToolCallInvariant(t, state.History)
+	if len(state.History) != 4 {
+		t.Fatalf("History length = %d, want 4 (user, assistant, 2 tool messages)", len(state.History))
+	}
+	fill := state.History[3]
+	if fill.Role != schema.Tool || fill.ToolCallID != "c2" || fill.ToolName != "execute" {
+		t.Errorf("backfilled message = %v name=%q id=%q, want execute tool message for c2", fill.Role, fill.ToolName, fill.ToolCallID)
+	}
+	if fill.Content != InterruptedToolOutput {
+		t.Errorf("backfilled content = %q, want %q", fill.Content, InterruptedToolOutput)
+	}
+}
+
+// TestReconstructState_BackfillPreservesFollowingMessages ensures the
+// placeholder lands inside the right tool group when later turns exist.
+func TestReconstructState_BackfillPreservesFollowingMessages(t *testing.T) {
+	entries := []Entry{
+		{Type: EntryUser, Content: "u1"},
+		{Type: EntryToolCall, Name: "grep", Args: "{}", ToolCallID: "c1"},
+		// interrupted here; then the session was resumed and continued.
+		{Type: EntryUser, Content: "u2"},
+		{Type: EntryAssistant, Content: "a2"},
+	}
+	state := ReconstructState(entries)
+
+	assertToolCallInvariant(t, state.History)
+	want := []struct {
+		role    schema.RoleType
+		content string
+	}{
+		{schema.User, "u1"},
+		{schema.Assistant, ""},
+		{schema.Tool, InterruptedToolOutput},
+		{schema.User, "u2"},
+		{schema.Assistant, "a2"},
+	}
+	if len(state.History) != len(want) {
+		t.Fatalf("History length = %d, want %d", len(state.History), len(want))
+	}
+	for i, w := range want {
+		if state.History[i].Role != w.role || state.History[i].Content != w.content {
+			t.Errorf("History[%d] = %v %q, want %v %q", i, state.History[i].Role, state.History[i].Content, w.role, w.content)
+		}
 	}
 }
 
