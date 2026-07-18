@@ -71,6 +71,9 @@ class RoutingVerifierTest(unittest.TestCase):
             spec["expected_calls"] = [{"tool": TARGET, "args": expected_args}]
         return spec
 
+    def routing_only_spec(self):
+        return {"deferred_tools": [TARGET]}
+
     def fixture_log(self, arguments=ARGS, marker=None):
         marker = marker or routing_verify._fixture_marker(RAW_TARGET, arguments)
         return self.write_jsonl("fixture.jsonl", [{
@@ -168,6 +171,37 @@ class RoutingVerifierTest(unittest.TestCase):
         self.assertFalse(result["passed"])
         self.assertIn("tool_result_name_mismatch", self.violation_types(result))
         self.assertIn("deferred_call_failed", self.violation_types(result))
+
+    def test_orphan_tool_call_without_result_is_rejected(self):
+        entries = self.search_pair() + [
+            tool_call(TARGET, "orphan-call", "target-batch", args=ARGS),
+        ]
+        session = self.write_jsonl("session.jsonl", entries)
+        result = routing_verify.verify_routing(
+            session, self.root / "unused-fixture.jsonl", self.routing_only_spec(),
+        )
+
+        self.assertFalse(result["passed"])
+        self.assertIn("missing_tool_result", self.violation_types(result))
+        self.assertEqual(1, result["counts"]["deferred_calls"])
+        self.assertEqual(0, result["counts"]["deferred_call_success"])
+
+    def test_orphan_tool_result_before_its_call_is_rejected(self):
+        marker = routing_verify._fixture_marker(RAW_TARGET, ARGS)
+        entries = self.search_pair() + [
+            tool_result(TARGET, "orphan-result", fixture_result(marker)),
+            tool_call(TARGET, "orphan-result", "target-batch", args=ARGS),
+        ]
+        session = self.write_jsonl("session.jsonl", entries)
+        result = routing_verify.verify_routing(
+            session, self.root / "unused-fixture.jsonl", self.routing_only_spec(),
+        )
+
+        self.assertFalse(result["passed"])
+        types = self.violation_types(result)
+        self.assertIn("orphan_tool_result", types)
+        self.assertIn("missing_tool_result", types)
+        self.assertEqual(1, result["counts"]["paired_tool_calls"])
 
     def test_agent_visible_folded_failure_is_not_counted_as_success(self):
         entries = self.search_pair()

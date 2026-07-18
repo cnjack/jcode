@@ -18,7 +18,8 @@ import (
 )
 
 type agentToolSearchTestTool struct {
-	name string
+	name   string
+	result string
 
 	mu    sync.Mutex
 	calls []string
@@ -38,6 +39,9 @@ func (t *agentToolSearchTestTool) InvokableRun(_ context.Context, args string, _
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.calls = append(t.calls, args)
+	if t.result != "" {
+		return t.result, nil
+	}
 	return `{"ok":true}`, nil
 }
 
@@ -52,7 +56,14 @@ type agentToolSearchScriptModel struct {
 	responses        []*schema.Message
 	visible          [][]string
 	toolDescriptions []map[string]string
+	toolResults      []agentToolSearchToolResult
 	systemTexts      []string
+}
+
+type agentToolSearchToolResult struct {
+	name    string
+	callID  string
+	content string
 }
 
 func (m *agentToolSearchScriptModel) Generate(
@@ -71,12 +82,18 @@ func (m *agentToolSearchScriptModel) Generate(
 	}
 	sort.Strings(names)
 	var systemText strings.Builder
+	var toolResults []agentToolSearchToolResult
 	for _, message := range messages {
 		if message != nil && message.Role == schema.System {
 			if systemText.Len() > 0 {
 				systemText.WriteString("\n")
 			}
 			systemText.WriteString(message.Content)
+		}
+		if message != nil && message.Role == schema.Tool {
+			toolResults = append(toolResults, agentToolSearchToolResult{
+				name: message.ToolName, callID: message.ToolCallID, content: message.Content,
+			})
 		}
 	}
 
@@ -85,6 +102,7 @@ func (m *agentToolSearchScriptModel) Generate(
 	call := len(m.visible)
 	m.visible = append(m.visible, names)
 	m.toolDescriptions = append(m.toolDescriptions, descriptions)
+	m.toolResults = append(m.toolResults, toolResults...)
 	m.systemTexts = append(m.systemTexts, systemText.String())
 	if call >= len(m.responses) {
 		return nil, fmt.Errorf("unexpected model call %d", call+1)
@@ -130,6 +148,18 @@ func (m *agentToolSearchScriptModel) firstSystemText() string {
 		return ""
 	}
 	return m.systemTexts[0]
+}
+
+func (m *agentToolSearchScriptModel) resultsFor(name string) []agentToolSearchToolResult {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var result []agentToolSearchToolResult
+	for _, candidate := range m.toolResults {
+		if candidate.name == name {
+			result = append(result, candidate)
+		}
+	}
+	return result
 }
 
 type agentToolSearchApprovalCall struct {
@@ -228,7 +258,8 @@ func TestToolSearchGuidanceIsConditionalAndOwnedByEinoSchema(t *testing.T) {
 
 func TestNewAgentWithToolPlanActivatesDeferredTool(t *testing.T) {
 	direct := &agentToolSearchTestTool{name: "direct_tool"}
-	deferredA := &agentToolSearchTestTool{name: "deferred_alpha"}
+	const deferredResult = `{"endpoint":"deferred_alpha","preserved":true}`
+	deferredA := &agentToolSearchTestTool{name: "deferred_alpha", result: deferredResult}
 	deferredB := &agentToolSearchTestTool{name: "deferred_beta"}
 	hidden := &agentToolSearchTestTool{name: "hidden_tool"}
 	searchArgs := `{"query":"select:deferred_alpha","max_results":1}`
@@ -260,6 +291,11 @@ func TestNewAgentWithToolPlanActivatesDeferredTool(t *testing.T) {
 	})
 	if got := deferredA.arguments(); !reflect.DeepEqual(got, []string{deferredArgs}) {
 		t.Fatalf("deferred alpha arguments = %v, want %v", got, []string{deferredArgs})
+	}
+	if got := model.resultsFor("deferred_alpha"); !reflect.DeepEqual(got, []agentToolSearchToolResult{{
+		name: "deferred_alpha", callID: "deferred-1", content: deferredResult,
+	}}) {
+		t.Fatalf("deferred alpha results reaching the model = %#v", got)
 	}
 	if got := deferredB.arguments(); len(got) != 0 {
 		t.Fatalf("deferred beta calls = %v, want none", got)
