@@ -173,6 +173,12 @@ func (e *Env) BrowserSession(ctx context.Context) (*browser.Session, error) {
 	}
 	e.browserMu.Lock()
 	defer e.browserMu.Unlock()
+	// Tool schemas are rebuilt after a settings change, but an older agent turn
+	// may still hold a browser tool. Re-check the live manager before returning a
+	// cached session so disabling the capability also revokes execution.
+	if !e.Browser.Enabled() {
+		return nil, fmt.Errorf("browser use is disabled (enable it in settings)")
+	}
 	if e.browserSession != nil {
 		return e.browserSession, nil
 	}

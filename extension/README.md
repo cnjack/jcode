@@ -4,7 +4,7 @@ Lets jcode see and operate **your** Chrome — with your logins and sessions —
 via the Chrome DevTools Protocol. This is the `extension` backend of jcode's
 browser-use feature (the other backend is a managed Chrome jcode launches
 itself; that one needs no extension). See
-[`internal-doc/browser-use-design.md`](../internal-doc/browser-use-design.md).
+[`site/docs/overview/browser-use.md`](../site/docs/overview/browser-use.md).
 
 The extension has a **fixed id** (`ekcnniaefmnhnemnpphikhgfoofnojnd`, pinned by
 the `key` field in `manifest.json`) so the id is stable across machines and

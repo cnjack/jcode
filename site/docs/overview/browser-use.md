@@ -22,12 +22,12 @@ in the web UI chat), but they are not the primary channel.
 
 ## Two backends, one tool set
 
-The same seven tools work over either backend — the model doesn't know or care
-which one is active.
+The same six core tools work over either backend — the model doesn't know or
+care which one is active. Developer mode adds the optional `browser_eval` tool.
 
 | Backend | What it is | Best for |
 | --- | --- | --- |
-| **Managed** (default) | jcode launches its own Chrome/Chromium with an isolated profile under `~/.jcode/browser/`. No extension needed, nothing touches your daily browser. | localhost verification, scraping public pages, anything that doesn't need your logins |
+| **Managed** | jcode launches its own Chrome/Chromium with an isolated profile under `~/.jcode/browser/`. No extension needed, nothing touches your daily browser. | localhost verification, scraping public pages, anything that doesn't need your logins |
 | **Extension** | The **jcode Browser Bridge** Chrome extension connects *your* Chrome to jcode over a local WebSocket. The agent works in your real browser — with your sessions and logins. | tasks on sites you're signed into, taking over a tab you already have open |
 
 With `"backend": "auto"` (the default) jcode prefers the extension when it is
