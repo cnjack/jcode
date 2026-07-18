@@ -12,6 +12,8 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 )
 
+const deferredToolBatchInstruction = "When tool_search is available, call it in a separate tool-call batch and wait for its result before calling any newly loaded target tool."
+
 // NewAgentWithToolPlan creates a ChatModelAgent from a validated exposure plan.
 // Direct tools are disclosed on the first model call. Deferred tools are kept in
 // the executable tool registry but their schemas are disclosed only after the
@@ -32,6 +34,9 @@ func NewAgentWithToolPlan(
 	direct, deferred, err := executableToolsFromPlan(ctx, plan)
 	if err != nil {
 		return nil, err
+	}
+	if len(deferred) > 0 {
+		instruction = strings.TrimRight(instruction, "\n") + "\n\n" + deferredToolBatchInstruction
 	}
 	return newAgent(ctx, chatmodel, direct, deferred, instruction, approvalFunc, middlewares, handlers)
 }

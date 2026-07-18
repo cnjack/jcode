@@ -8,7 +8,7 @@ import (
 	utils "github.com/cnjack/jcode/internal/util"
 )
 
-// TestGetSystemPromptSections asserts the static policy sections that must be
+// TestGetSystemPromptSections asserts the stable policy sections that must be
 // present in the rendered system prompt. A non-empty result also implicitly
 // covers template-syntax regressions.
 func TestGetSystemPromptSections(t *testing.T) {
@@ -44,6 +44,25 @@ func TestGetSystemPromptSections(t *testing.T) {
 				t.Errorf("%s: system prompt missing %q", tc.section, sub)
 			}
 		}
+	}
+}
+
+func TestBasePromptsUseRequestSchemasAsToolSourceOfTruth(t *testing.T) {
+	prompts := map[string]string{
+		"system": GetSystemPrompt("darwin", t.TempDir(), "local", nil, ""),
+		"plan":   GetPlanSystemPrompt("darwin", t.TempDir(), "local", nil),
+	}
+	for name, prompt := range prompts {
+		t.Run(name, func(t *testing.T) {
+			if !strings.Contains(prompt, "function schemas attached to the current model request are the sole source of truth") {
+				t.Fatal("prompt does not identify request function schemas as the source of truth")
+			}
+			for _, stale := range []string{"# Tools Available", "- **read**:", "- **execute**:", "- **grep**:", "tool_search"} {
+				if strings.Contains(prompt, stale) {
+					t.Fatalf("base prompt contains static/deferred tool text %q", stale)
+				}
+			}
+		})
 	}
 }
 

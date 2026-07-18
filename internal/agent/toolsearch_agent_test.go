@@ -48,29 +48,44 @@ func (t *agentToolSearchTestTool) arguments() []string {
 }
 
 type agentToolSearchScriptModel struct {
-	mu        sync.Mutex
-	responses []*schema.Message
-	visible   [][]string
+	mu               sync.Mutex
+	responses        []*schema.Message
+	visible          [][]string
+	toolDescriptions []map[string]string
+	systemTexts      []string
 }
 
 func (m *agentToolSearchScriptModel) Generate(
 	_ context.Context,
-	_ []*schema.Message,
+	messages []*schema.Message,
 	opts ...einomodel.Option,
 ) (*schema.Message, error) {
 	options := einomodel.GetCommonOptions(nil, opts...)
 	names := make([]string, 0, len(options.Tools))
+	descriptions := make(map[string]string, len(options.Tools))
 	for _, info := range options.Tools {
 		if info != nil {
 			names = append(names, info.Name)
+			descriptions[info.Name] = info.Desc
 		}
 	}
 	sort.Strings(names)
+	var systemText strings.Builder
+	for _, message := range messages {
+		if message != nil && message.Role == schema.System {
+			if systemText.Len() > 0 {
+				systemText.WriteString("\n")
+			}
+			systemText.WriteString(message.Content)
+		}
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	call := len(m.visible)
 	m.visible = append(m.visible, names)
+	m.toolDescriptions = append(m.toolDescriptions, descriptions)
+	m.systemTexts = append(m.systemTexts, systemText.String())
 	if call >= len(m.responses) {
 		return nil, fmt.Errorf("unexpected model call %d", call+1)
 	}
@@ -97,6 +112,24 @@ func (m *agentToolSearchScriptModel) visibleTools() [][]string {
 		result[i] = append([]string(nil), m.visible[i]...)
 	}
 	return result
+}
+
+func (m *agentToolSearchScriptModel) firstToolDescription(name string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.toolDescriptions) == 0 {
+		return ""
+	}
+	return m.toolDescriptions[0][name]
+}
+
+func (m *agentToolSearchScriptModel) firstSystemText() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.systemTexts) == 0 {
+		return ""
+	}
+	return m.systemTexts[0]
 }
 
 type agentToolSearchApprovalCall struct {
@@ -136,6 +169,61 @@ func TestNewAgentLegacyDoesNotInjectToolSearch(t *testing.T) {
 	runAgentToolSearchTest(t, ag)
 
 	assertAgentToolSearchVisible(t, model.visibleTools(), [][]string{{"legacy_tool"}})
+	if strings.Contains(model.firstSystemText(), deferredToolBatchInstruction) {
+		t.Fatal("legacy NewAgent unexpectedly injected deferred-tool instructions")
+	}
+}
+
+func TestToolSearchGuidanceIsConditionalAndOwnedByEinoSchema(t *testing.T) {
+	direct := &agentToolSearchTestTool{name: "direct_tool"}
+
+	t.Run("deferred", func(t *testing.T) {
+		model := &agentToolSearchScriptModel{responses: []*schema.Message{schema.AssistantMessage("done", nil)}}
+		plan := ToolPlan{
+			Direct: []ToolDescriptor{agentToolSearchDescriptor(direct, ToolExposureDirect)},
+			Deferred: []ToolDescriptor{agentToolSearchDescriptor(
+				&agentToolSearchTestTool{name: "deferred_tool"}, ToolExposureDeferred,
+			)},
+		}
+		ag, err := NewAgentWithToolPlan(context.Background(), model, plan, "base instruction", nil, nil, nil)
+		if err != nil {
+			t.Fatalf("NewAgentWithToolPlan() error = %v", err)
+		}
+		runAgentToolSearchTest(t, ag)
+
+		if !strings.Contains(model.firstSystemText(), deferredToolBatchInstruction) {
+			t.Fatalf("deferred plan did not inject batch sequencing rule: %q", model.firstSystemText())
+		}
+		desc := model.firstToolDescription(ToolSearchReservedName)
+		for _, want := range []string{
+			"Keyword search",
+			"select:<tool_name>",
+			"select:Read,Edit,Grep",
+			"Required keyword",
+			"immediately available",
+			"Do NOT follow up",
+		} {
+			if !strings.Contains(desc, want) {
+				t.Errorf("Eino tool_search schema missing %q: %q", want, desc)
+			}
+		}
+	})
+
+	t.Run("no deferred", func(t *testing.T) {
+		model := &agentToolSearchScriptModel{responses: []*schema.Message{schema.AssistantMessage("done", nil)}}
+		plan := ToolPlan{Direct: []ToolDescriptor{agentToolSearchDescriptor(direct, ToolExposureDirect)}}
+		ag, err := NewAgentWithToolPlan(context.Background(), model, plan, "base instruction", nil, nil, nil)
+		if err != nil {
+			t.Fatalf("NewAgentWithToolPlan() error = %v", err)
+		}
+		runAgentToolSearchTest(t, ag)
+		if strings.Contains(model.firstSystemText(), deferredToolBatchInstruction) {
+			t.Fatal("plan without deferred tools injected batch sequencing rule")
+		}
+		if desc := model.firstToolDescription(ToolSearchReservedName); desc != "" {
+			t.Fatalf("plan without deferred tools exposed tool_search schema: %q", desc)
+		}
+	})
 }
 
 func TestNewAgentWithToolPlanActivatesDeferredTool(t *testing.T) {
