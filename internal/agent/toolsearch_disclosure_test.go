@@ -98,12 +98,16 @@ func TestToolSearchDisclosureEndpointErrorsFailClosed(t *testing.T) {
 
 func TestRewriteToolSearchExactNameListIsStrictAndPreservesOtherArguments(t *testing.T) {
 	deferred := map[string]bool{
-		"computer_open":     true,
-		"computer_snapshot": true,
-		"computer_act":      true,
-		"computer_apps":     true,
-		"computer_read":     true,
-		"mcp__fixture__one": true,
+		"computer_open":       true,
+		"computer_snapshot":   true,
+		"computer_screenshot": true,
+		"computer_act":        true,
+		"computer_apps":       true,
+		"computer_read":       true,
+		"mcp__fixture__one":   true,
+		"mcp__fixture__two":   true,
+		"mcp__fixture__tri":   true,
+		"mcp__fixture__four":  true,
 	}
 	tests := []struct {
 		name  string
@@ -121,6 +125,18 @@ func TestRewriteToolSearchExactNameListIsStrictAndPreservesOtherArguments(t *tes
 			name:  "five names retain order and null max results",
 			input: `{"max_results":null,"query":"computer_read,computer_apps,computer_act,computer_snapshot,computer_open"}`,
 			want:  `{"max_results":null,"query":"select:computer_read,computer_apps,computer_act,computer_snapshot,computer_open"}`,
+			ok:    true,
+		},
+		{
+			name:  "six-name Computer family is accepted",
+			input: `{"query":"computer_open,computer_snapshot,computer_screenshot,computer_act,computer_read,computer_apps"}`,
+			want:  `{"query":"select:computer_open,computer_snapshot,computer_screenshot,computer_act,computer_read,computer_apps"}`,
+			ok:    true,
+		},
+		{
+			name:  "eight exact names are the hard compatibility ceiling",
+			input: `{"query":"computer_open,computer_snapshot,computer_act,computer_apps,computer_read,mcp__fixture__one,mcp__fixture__two,mcp__fixture__tri"}`,
+			want:  `{"query":"select:computer_open,computer_snapshot,computer_act,computer_apps,computer_read,mcp__fixture__one,mcp__fixture__two,mcp__fixture__tri"}`,
 			ok:    true,
 		},
 		{
@@ -143,7 +159,7 @@ func TestRewriteToolSearchExactNameListIsStrictAndPreservesOtherArguments(t *tes
 		},
 		{name: "existing select", input: `{"query":"select:computer_open,computer_snapshot"}`},
 		{name: "one name", input: `{"query":"computer_open"}`},
-		{name: "six names", input: `{"query":"computer_open,computer_snapshot,computer_act,computer_apps,computer_read,mcp__fixture__one"}`},
+		{name: "nine names", input: `{"query":"computer_open,computer_snapshot,computer_act,computer_apps,computer_read,mcp__fixture__one,mcp__fixture__two,mcp__fixture__tri,mcp__fixture__four"}`},
 		{name: "empty item", input: `{"query":"computer_open,,computer_snapshot"}`},
 		{name: "duplicate", input: `{"query":"computer_open, computer_open"}`},
 		{name: "unknown name", input: `{"query":"computer_open,not_a_tool"}`},

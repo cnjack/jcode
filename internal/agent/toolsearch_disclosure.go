@@ -98,7 +98,9 @@ func (m *toolSearchDisclosureMiddleware) WrapInvokableToolCall(
 
 const (
 	minToolSearchExactListNames = 2
-	maxToolSearchExactListNames = 5
+	// Eight covers the largest built-in Browser/Computer capability family
+	// while keeping malformed catalog-wide comma lists fail closed.
+	maxToolSearchExactListNames = 8
 )
 
 // toolSearchExactListMiddleware handles a narrow client ToolSearch formatting
@@ -151,7 +153,7 @@ func (m *toolSearchExactListMiddleware) WrapInvokableToolCall(
 // rewriteToolSearchExactNameList returns ok only for an unambiguous list of
 // two through five distinct, canonical names in the current effective Deferred
 // catalog. The max_results field is retained byte-for-byte, but Eino deliberately
-// ignores it in direct-selection mode; the five-name compatibility ceiling is
+// ignores it in direct-selection mode; the eight-name compatibility ceiling is
 // therefore the hard disclosure bound here. Unknown JSON fields, duplicate fields,
 // malformed JSON, invalid max_results values, semantic queries, aliases, and
 // out-of-range lists are passed to Eino unchanged (fail closed).
