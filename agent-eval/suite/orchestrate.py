@@ -79,6 +79,11 @@ _print_lock = threading.Lock()
 
 MCP_FIXTURE_TOOL_COUNTS = {10, 30, 50, 100}
 MCP_FIXTURE_SERVER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+ACP_SESSION_ID_RE = re.compile(
+    r"^sess_([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+    r"[89ab][0-9a-f]{3}-[0-9a-f]{12})$",
+    re.IGNORECASE,
+)
 SAFE_EXEC_PATH = ":".join((
     "/opt/homebrew/bin",
     "/usr/local/bin",
@@ -153,6 +158,18 @@ def _write_private_json(path: Path, value):
     with os.fdopen(descriptor, "w") as stream:
         stream.write(payload)
     path.chmod(0o600)
+
+
+def acp_session_file(home_dir: Path, session_id: str) -> Path:
+    """Map an ACP ``sess_<uuid>`` ID to its private recorder JSONL file."""
+    matched = ACP_SESSION_ID_RE.fullmatch(session_id) if isinstance(session_id, str) else None
+    if matched is None:
+        raise ValueError("invalid ACP session id")
+    sessions_dir = (Path(home_dir) / ".jcode" / "sessions").resolve()
+    path = (sessions_dir / f"{matched.group(1).lower()}.json").resolve()
+    if path.parent != sessions_dir:
+        raise ValueError("ACP session path escaped isolated HOME")
+    return path
 
 
 def build_subprocess_env(home_dir: Path):
@@ -555,7 +572,7 @@ def _run_one(case, model_label, variant, rep, runs_dir, bin_path, harness_path,
     ctx["usage_total"] = usage_tot
     ver = verify.verify_case(case, ctx)
     session_paths = [
-        rundir / "home" / ".jcode" / "sessions" / f"{session_id}.json"
+        acp_session_file(rundir / "home", session_id)
         for session_id in prompt_session_ids
     ]
 

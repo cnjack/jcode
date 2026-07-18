@@ -59,6 +59,24 @@ class ToolSearchEvalHarnessTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "non-highspeed|highspeed"):
                 orchestrate.resolve_model_id("kimi-for-coding")
 
+    def test_acp_session_id_maps_to_unprefixed_private_recorder_file(self):
+        home = self.root / "home"
+        session_id = "sess_123e4567-e89b-42d3-a456-426614174000"
+
+        path = orchestrate.acp_session_file(home, session_id)
+
+        self.assertEqual(
+            (home / ".jcode" / "sessions" / "123e4567-e89b-42d3-a456-426614174000.json").resolve(),
+            path,
+        )
+        for invalid in (
+            "123e4567-e89b-42d3-a456-426614174000",
+            "sess_../../config",
+            "sess_not-a-uuid",
+        ):
+            with self.assertRaisesRegex(ValueError, "invalid ACP session id"):
+                orchestrate.acp_session_file(home, invalid)
+
     def test_minimal_home_is_private_selected_only_and_has_no_temperature(self):
         home = self.root / "home"
         home.mkdir(mode=0o700)
