@@ -294,6 +294,37 @@ func TestRequestApprovalDeferredMutationStillPrompts(t *testing.T) {
 	}
 }
 
+func TestSubagentDelegatedWriteGrantDecision(t *testing.T) {
+	if noApprovalNeeded["subagent"] {
+		t.Fatal("subagent must be decided from agent_type, not globally auto-approved")
+	}
+	s := NewApprovalState("/tmp/workdir", false)
+	tests := []struct {
+		name string
+		args string
+		want approvalDecision
+	}{
+		{name: "missing defaults explore", args: `{}`, want: decisionAutoApprove},
+		{name: "empty defaults explore", args: `{"agent_type":""}`, want: decisionAutoApprove},
+		{name: "explore", args: `{"agent_type":"explore"}`, want: decisionAutoApprove},
+		{name: "explore background", args: `{"agent_type":"explore","run_in_background":true}`, want: decisionAutoApprove},
+		{name: "general", args: `{"agent_type":"general"}`, want: decisionPrompt},
+		{name: "general background", args: `{"agent_type":"general","run_in_background":true}`, want: decisionPrompt},
+		{name: "coordinator", args: `{"agent_type":"coordinator"}`, want: decisionPrompt},
+		{name: "invalid", args: `{"agent_type":"writer"}`, want: decisionPrompt},
+		{name: "wrong type", args: `{"agent_type":1}`, want: decisionPrompt},
+		{name: "null", args: `{"agent_type":null}`, want: decisionPrompt},
+		{name: "malformed", args: `{"agent_type":`, want: decisionPrompt},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := s.decide("subagent", tt.args); got != tt.want {
+				t.Fatalf("decide(subagent, %s) = %v, want %v", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestApprovalMCPProvenancePrecedesBuiltinAllowlist(t *testing.T) {
 	const canonicalName = "mcp__approval_test__goal_get"
 	internaltools.RegisterMCPToolIdentity(canonicalName, "approval-test", "goal_get")

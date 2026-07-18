@@ -223,7 +223,7 @@ func (s *ApprovalState) SetSessionApproval(enabled bool) {
 
 // noApprovalNeeded lists tools that never require interactive approval in
 // MANUAL mode: read-only inspection, the user-facing question tool, and
-// teammate/subagent orchestration (whose own tool calls are gated separately).
+// teammate orchestration (whose own tool calls are gated separately).
 var noApprovalNeeded = map[string]bool{
 	agent.ToolSearchReservedName: true,
 	"glob":                       true,
@@ -234,7 +234,6 @@ var noApprovalNeeded = map[string]bool{
 	"todoread":                   true,
 	"ask_user":                   true,
 	"webfetch":                   true,
-	"subagent":                   true,
 	"check_background":           true,
 	"team_create":                true,
 	"team_spawn":                 true,
@@ -291,6 +290,28 @@ func (s *ApprovalState) decide(toolName, toolArgs string) approvalDecision {
 	}
 
 	switch toolName {
+	case "subagent":
+		var input struct {
+			AgentType json.RawMessage `json:"agent_type"`
+		}
+		if err := json.Unmarshal([]byte(toolArgs), &input); err != nil {
+			return decisionPrompt
+		}
+		if len(input.AgentType) == 0 {
+			return decisionAutoApprove
+		}
+		var agentType string
+		if strings.TrimSpace(string(input.AgentType)) == "null" || json.Unmarshal(input.AgentType, &agentType) != nil {
+			return decisionPrompt
+		}
+		switch agentType {
+		case "", internaltools.AgentTypeExplore:
+			return decisionAutoApprove
+		case internaltools.AgentTypeGeneral, internaltools.AgentTypeCoordinator:
+			return decisionPrompt
+		default:
+			return decisionPrompt
+		}
 	case "read":
 		var input struct {
 			FilePath string `json:"file_path"`

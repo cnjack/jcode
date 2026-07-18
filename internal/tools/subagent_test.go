@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -10,6 +11,87 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 )
+
+func TestSubagentToolMatrixUsesPlanExecuteOnlyForExplore(t *testing.T) {
+	env := NewEnv(t.TempDir(), "darwin/arm64")
+	subagent := &subagentTool{deps: &SubagentDeps{}}
+	tests := []struct {
+		agentType       string
+		wantNames       []string
+		wantPlanExecute bool
+	}{
+		{
+			agentType:       AgentTypeExplore,
+			wantNames:       []string{"read", "grep", "execute"},
+			wantPlanExecute: true,
+		},
+		{
+			agentType: AgentTypeGeneral,
+			wantNames: []string{"read", "grep", "execute", "edit", "write", "todowrite", "todoread"},
+		},
+		{
+			agentType: AgentTypeCoordinator,
+			wantNames: []string{"read", "grep", "execute", "edit", "write", "todowrite", "todoread", "subagent"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.agentType, func(t *testing.T) {
+			gotTools := subagent.buildTools(env, tt.agentType)
+			if gotNames := testToolNames(t, gotTools); !reflect.DeepEqual(gotNames, tt.wantNames) {
+				t.Fatalf("tool names = %v, want %v", gotNames, tt.wantNames)
+			}
+			execute := findTestExecuteTool(t, gotTools)
+			if execute.planOnly != tt.wantPlanExecute {
+				t.Fatalf("execute.planOnly = %v, want %v", execute.planOnly, tt.wantPlanExecute)
+			}
+		})
+	}
+}
+
+func TestSubagentSchemaExplainsDelegatedWriteGrant(t *testing.T) {
+	env := NewEnv(t.TempDir(), "darwin/arm64")
+	info, err := env.NewSubagentTool(&SubagentDeps{}).Info(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	jsonSchema, err := info.ToJSONSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentType := jsonSchema.Properties.Value("agent_type")
+	if agentType == nil || !strings.Contains(agentType.Description, "one-time delegated-write grant") {
+		t.Fatalf("agent_type description does not explain grant: %#v", agentType)
+	}
+}
+
+func testToolNames(t *testing.T, tools []tool.BaseTool) []string {
+	t.Helper()
+	names := make([]string, 0, len(tools))
+	for _, base := range tools {
+		info, err := base.Info(context.Background())
+		if err != nil {
+			t.Fatalf("Info() error = %v", err)
+		}
+		names = append(names, info.Name)
+	}
+	return names
+}
+
+func findTestExecuteTool(t *testing.T, tools []tool.BaseTool) *executeTool {
+	t.Helper()
+	for _, base := range tools {
+		info, err := base.Info(context.Background())
+		if err == nil && info.Name == "execute" {
+			execute, ok := base.(*executeTool)
+			if !ok {
+				t.Fatalf("execute type = %T", base)
+			}
+			return execute
+		}
+	}
+	t.Fatal("execute tool not found")
+	return nil
+}
 
 // #10: A panic inside a subagent tool is recovered and folded into a
 // model-visible string instead of killing the subagent (or the process).

@@ -77,7 +77,8 @@ func (e *Env) NewSubagentTool(deps *SubagentDeps) tool.InvokableTool {
 		Name: "subagent",
 		Desc: "Delegate a task to a subagent that runs in its own context. " +
 			"Use for codebase exploration, research, or independent subtasks. " +
-			"The subagent returns only its final answer — intermediate tool calls stay out of your context.",
+			"The subagent returns only its final answer — intermediate tool calls stay out of your context. " +
+			"Selecting general or coordinator requests a one-time delegated-write grant before the child starts.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"name": {
 				Type: schema.String, Desc: "Short name for the subagent task (1-3 words)", Required: true,
@@ -89,7 +90,12 @@ func (e *Env) NewSubagentTool(deps *SubagentDeps) tool.InvokableTool {
 				Type: schema.String, Desc: "Detailed instructions for the subagent. Include all necessary context.", Required: true,
 			},
 			"agent_type": {
-				Type: schema.String, Desc: "Agent type: 'explore' (read-only, default), 'general' (full tools), or 'coordinator' (can spawn sub-subagents)", Required: false,
+				Type: schema.String,
+				Desc: "Agent type: 'explore' (strictly read-only, default), 'general' (write/execute tools), or 'coordinator' " +
+					"(write/execute tools plus sub-subagents). Choosing general or coordinator requests a one-time delegated-write grant " +
+					"at this parent tool call, including when run_in_background=true.",
+				Enum:     []string{AgentTypeExplore, AgentTypeGeneral, AgentTypeCoordinator},
+				Required: false,
 			},
 			"model": {
 				Type: schema.String, Desc: modelDesc, Required: false,
@@ -526,12 +532,17 @@ func (s *subagentTool) notifyProgress(agentName, event, toolName, detail string)
 }
 
 func (s *subagentTool) buildTools(childEnv *Env, agentType string) []tool.BaseTool {
-	// Both explore and plan get read-only tools.
 	tools := []tool.BaseTool{
 		childEnv.NewReadTool(),
 		childEnv.NewGrepTool(),
-		childEnv.NewExecuteTool(nil), // no background in subagent
 	}
+	if agentType != AgentTypeGeneral && agentType != AgentTypeCoordinator {
+		return append(tools, childEnv.NewPlanExecuteTool())
+	}
+
+	// general/coordinator receive arbitrary execute plus write tools under the
+	// one-time delegated-write grant approved on the parent subagent call.
+	tools = append(tools, childEnv.NewExecuteTool(nil))
 
 	if agentType == AgentTypeGeneral {
 		tools = append(tools,
