@@ -79,10 +79,63 @@ REQUIRED_CAMPAIGN_HASHES = (
     "mcp_fixture_sha256",
 )
 REQUIRED_ENVIRONMENT_FIELDS = ("go_version", "os_arch", "eino_version")
+SUITE_HASH_KEYS = ("matrix_sha256", "base_suite_sha256")
+EXPECTED_SUPPLEMENTARY_COMMANDS = {
+    "transport_mode_catalogs",
+    "web_mcp_reload_mode_switch",
+    "deferred_revoke_failure_recovery",
+}
+EXPECTED_SUPPLEMENTARY_WEB = {
+    "web_approval_deny_en": {
+        "variant": "deferred", "language": "en", "scenario": "approval_deny",
+        "routing_applicable": False,
+    },
+    "web_browser_disabled_en": {
+        "variant": "deferred", "language": "en", "scenario": "browser_disabled",
+        "routing_applicable": False,
+    },
+    "web_success_zh_static": {
+        "variant": "static", "language": "zh", "scenario": "success",
+        "routing_applicable": True,
+    },
+    "web_success_zh_deferred": {
+        "variant": "deferred", "language": "zh", "scenario": "success",
+        "routing_applicable": True,
+    },
+}
 
 
 class ReportError(ValueError):
     """Raised when report evidence is missing, unsafe, or ambiguous."""
+
+
+def _file_sha256(path):
+    digest = hashlib.sha256()
+    try:
+        with Path(path).open("rb") as stream:
+            while chunk := stream.read(1 << 20):
+                digest.update(chunk)
+    except OSError as exc:
+        raise ReportError("formal suite input is unavailable") from exc
+    return digest.hexdigest()
+
+
+def _suite_input_hashes(matrix_path, base_suite_path):
+    return {
+        "matrix_sha256": _file_sha256(matrix_path),
+        "base_suite_sha256": _file_sha256(base_suite_path),
+    }
+
+
+def _locked_suite_input_hashes(matrix_path, base_suite_path):
+    selected = _suite_input_hashes(matrix_path, base_suite_path)
+    canonical = _suite_input_hashes(
+        toolsearch_cases.DEFAULT_MATRIX,
+        toolsearch_cases.DEFAULT_BASE_SUITE,
+    )
+    if selected != canonical:
+        raise ReportError("formal suite inputs drifted from the pinned defaults")
+    return selected
 
 
 def _read_json(path, label):
@@ -199,12 +252,23 @@ def _load_matrix(matrix_path, base_suite_path):
     return suite, case_map
 
 
-def _validate_plan(plan, case_map):
+def _validate_plan(plan, case_map, suite_hashes):
     plan = _require_dict(plan, "plan.json")
     if plan.get("schema_version") != 1:
         raise ReportError("plan schema_version must be 1")
     if plan.get("formal") is not True:
         raise ReportError("plan must be a formal run")
+    if plan.get("mode") != "formal" or plan.get("dry_run") is not False:
+        raise ReportError("plan mode must be formal and non-dry-run")
+    if plan.get("suite") != "toolsearch":
+        raise ReportError("plan suite must be toolsearch")
+    if plan.get("supplementary_planned") is not True:
+        raise ReportError("formal plan must include supplementary coverage")
+    parameters = _require_dict(plan.get("request_parameters"), "plan request parameters")
+    if parameters != {"temperature": "omitted"}:
+        raise ReportError("formal plan must prove temperature was omitted")
+    if _require_dict(plan.get("suite_inputs"), "plan suite_inputs") != suite_hashes:
+        raise ReportError("plan suite input hashes drifted")
     if _require_int(plan.get("workers"), "plan workers", 1) != 1:
         raise ReportError("formal plan must use workers=1")
     if set(_require_list(plan.get("variants"), "plan variants")) != EXPECTED_VARIANTS:
@@ -412,11 +476,128 @@ def _validate_record(value, job, case, seed, trajectory_counts):
     return record, routing, routing_counts
 
 
-def _validate_campaign(campaign, jobs, records_by_id):
+def _validate_supplementary(
+    campaign,
+    runs_dir,
+    case_map,
+    seed,
+    campaign_started,
+    campaign_finished,
+):
+    if campaign.get("supplementary_counts_toward_active_duration") is not False:
+        raise ReportError("supplementary coverage must not count toward active duration")
+    raw_records = _require_list(
+        campaign.get("supplementary_records"), "campaign supplementary_records",
+    )
+    expected_ids = EXPECTED_SUPPLEMENTARY_COMMANDS | set(EXPECTED_SUPPLEMENTARY_WEB)
+    if len(raw_records) != len(expected_ids):
+        raise ReportError("formal supplementary coverage is incomplete")
+    by_id = {}
+    for raw in raw_records:
+        item = _require_dict(raw, "supplementary record")
+        record_id = _require_string(
+            item.get("record_id"), "supplementary record_id", RUN_ID_RE,
+        )
+        if record_id in by_id:
+            raise ReportError("supplementary coverage contains duplicate records")
+        by_id[record_id] = item
+    if set(by_id) != expected_ids:
+        raise ReportError("formal supplementary coverage IDs drifted")
+
+    web_cases = [case for case in case_map.values() if case["surface"] == "web"]
+    if len(web_cases) != 1:
+        raise ReportError("formal supplementary coverage requires one Web case")
+    web_case = web_cases[0]
+
+    for record_id, item in by_id.items():
+        if item.get("passed") is not True or item.get("real_execution") is not True:
+            raise ReportError("supplementary coverage did not fully pass as a real execution")
+        if item.get("counts_toward_active_duration") is not False:
+            raise ReportError("supplementary record must not count toward active duration")
+        begin = _parse_utc(item.get("started_at"), "supplementary started_at")
+        end = _parse_utc(item.get("finished_at"), "supplementary finished_at")
+        if begin < campaign_started or end > campaign_finished or end <= begin:
+            raise ReportError("supplementary interval is outside the campaign wall window")
+        _require_number(item.get("wall_s"), "supplementary wall_s", 0)
+
+        if record_id in EXPECTED_SUPPLEMENTARY_COMMANDS:
+            if item.get("kind") != "deterministic_command":
+                raise ReportError("supplementary deterministic command kind drifted")
+            if _require_int(item.get("exit_code"), "supplementary exit_code") != 0:
+                raise ReportError("supplementary deterministic command failed")
+            _require_string(
+                item.get("argv_sha256"), "supplementary argv hash", SHA256_RE,
+            )
+            continue
+
+        expected = EXPECTED_SUPPLEMENTARY_WEB[record_id]
+        if item.get("kind") != "web_browser_canary":
+            raise ReportError("supplementary Web record kind drifted")
+        for name in ("variant", "language", "scenario", "routing_applicable"):
+            if item.get(name) != expected[name]:
+                raise ReportError("supplementary Web identity drifted")
+        for name in ("driver_passed", "task_passed", "artifact_safe", "identity_matches"):
+            if item.get(name) is not True:
+                raise ReportError("supplementary Web evidence did not fully pass")
+
+        run_id = f"supp__{record_id}"
+        run_dir = Path(runs_dir) / "supplementary" / run_id
+        record_value = _read_json(run_dir / "record.json", "supplementary record.json")
+        trajectory_value = _read_json(
+            run_dir / "trajectory.json", "supplementary trajectory.json",
+        )
+        redaction_value = _read_json(
+            run_dir / "redaction_report.json", "supplementary redaction_report.json",
+        )
+        record_hash = _require_string(
+            item.get("record_sha256"), "supplementary record hash", SHA256_RE,
+        )
+        if _file_sha256(run_dir / "record.json") != record_hash:
+            raise ReportError("supplementary Web record hash drifted")
+        _validate_redaction(redaction_value, run_id)
+        job = {
+            "run_id": run_id,
+            "case_id": web_case["id"],
+            "variant": expected["variant"],
+            "repeat": 1,
+        }
+        _trajectory, trajectory_counts = _validate_trajectory(trajectory_value, job)
+        record, _routing, _routing_counts = _validate_record(
+            record_value, job, web_case, seed, trajectory_counts,
+        )
+        if (
+            record.get("language") != expected["language"]
+            or record.get("scenario") != expected["scenario"]
+            or record.get("routing_applicable") is not expected["routing_applicable"]
+            or record.get("real_execution") is not True
+            or record.get("driver_passed") is not True
+            or record.get("task_passed") is not True
+            or record.get("contracts_passed") is not True
+            or record.get("error_present") is not False
+        ):
+            raise ReportError("supplementary Web artifact identity or result drifted")
+
+
+def _validate_campaign(
+    campaign,
+    jobs,
+    records_by_id,
+    runs_dir,
+    case_map,
+    seed,
+    suite_hashes,
+):
     campaign = _require_dict(campaign, "campaign.json")
     _walk_artifact_safety(campaign, "campaign")
     if campaign.get("schema_version") != 1:
         raise ReportError("campaign schema_version must be 1")
+    if (
+        campaign.get("status") != "complete"
+        or campaign.get("formal") is not True
+        or campaign.get("mode") != "formal"
+        or "failure_code" in campaign
+    ):
+        raise ReportError("campaign must be a complete formal run without failure")
     if _require_int(campaign.get("workers"), "campaign workers", 1) != 1:
         raise ReportError("campaign must use workers=1")
     if campaign.get("model_label") != EXACT_MODEL_LABEL or campaign.get("model_id") != EXACT_MODEL_ID:
@@ -424,6 +605,8 @@ def _validate_campaign(campaign, jobs, records_by_id):
     parameters = _require_dict(campaign.get("request_parameters"), "campaign request parameters")
     if parameters.get("temperature") != "omitted":
         raise ReportError("campaign must prove temperature was omitted")
+    if _require_dict(campaign.get("suite_inputs"), "campaign suite_inputs") != suite_hashes:
+        raise ReportError("campaign suite input hashes drifted")
 
     git = _require_dict(campaign.get("git"), "campaign git")
     _require_string(git.get("commit"), "git commit", COMMIT_RE)
@@ -440,6 +623,14 @@ def _validate_campaign(campaign, jobs, records_by_id):
     finished_at = _parse_utc(campaign.get("finished_at"), "campaign finished_at")
     if finished_at <= started_at:
         raise ReportError("campaign finish must be after its start")
+    _validate_supplementary(
+        campaign,
+        runs_dir,
+        case_map,
+        seed,
+        started_at,
+        finished_at,
+    )
     monotonic = _require_number(
         campaign.get("monotonic_elapsed_s"), "campaign monotonic_elapsed_s", 0,
     )
@@ -833,9 +1024,10 @@ def _failure_rows(records, case_map):
 def evaluate(matrix_path, base_suite_path, runs_dir, campaign_path=None):
     """Load all sanitized artifacts and return the acceptance calculation."""
     runs_dir = Path(runs_dir)
+    suite_hashes = _locked_suite_input_hashes(matrix_path, base_suite_path)
     matrix, case_map = _load_matrix(matrix_path, base_suite_path)
     plan = _read_json(runs_dir / "plan.json", "plan.json")
-    jobs, repeats, seed = _validate_plan(plan, case_map)
+    jobs, repeats, seed = _validate_plan(plan, case_map, suite_hashes)
     all_records = _require_list(
         _read_json(runs_dir / "all_records.json", "all_records.json"),
         "all_records.json",
@@ -882,8 +1074,16 @@ def evaluate(matrix_path, base_suite_path, runs_dir, campaign_path=None):
         campaign_path or runs_dir / "campaign.json", "campaign.json",
     )
     campaign = _validate_campaign(
-        campaign_value, jobs, {item["job"]["run_id"]: item for item in records},
+        campaign_value,
+        jobs,
+        {item["job"]["run_id"]: item for item in records},
+        runs_dir,
+        case_map,
+        seed,
+        suite_hashes,
     )
+    if _suite_input_hashes(matrix_path, base_suite_path) != suite_hashes:
+        raise ReportError("formal suite inputs changed while generating the report")
     gates = _evaluate_gates(matrix, case_map, records, repeats)
     summaries = _case_summaries(records, case_map, repeats)
     failures = _failure_rows(records, case_map)

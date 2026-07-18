@@ -63,7 +63,7 @@ class SyntheticCampaign:
 
     def _build(self):
         started = datetime(2026, 7, 19, 0, 0, tzinfo=timezone.utc)
-        cursor = started
+        cursor = started + timedelta(seconds=20)
         for case in self.suite["cases"]:
             tags = set(case["metric_tags"])
             for repeat in range(1, self.repeats + 1):
@@ -186,8 +186,15 @@ class SyntheticCampaign:
                     })
                     cursor = interval_end
 
+        suite_hashes = toolsearch_report._suite_input_hashes(
+            toolsearch_cases.DEFAULT_MATRIX,
+            toolsearch_cases.DEFAULT_BASE_SUITE,
+        )
         plan = {
             "schema_version": 1,
+            "suite": "toolsearch",
+            "mode": "formal",
+            "dry_run": False,
             "seed": self.seed,
             "formal": True,
             "workers": 1,
@@ -197,11 +204,18 @@ class SyntheticCampaign:
             }],
             "variants": ["static", "deferred"],
             "repeats": self.repeats,
+            "request_parameters": {"temperature": "omitted"},
+            "suite_inputs": suite_hashes,
+            "supplementary_planned": True,
             "jobs": self.jobs,
         }
+        supplementary = self._build_supplementary(started)
         finished = started + timedelta(seconds=2000)
         campaign = {
             "schema_version": 1,
+            "status": "complete",
+            "formal": True,
+            "mode": "formal",
             "started_at": started.isoformat().replace("+00:00", "Z"),
             "finished_at": finished.isoformat().replace("+00:00", "Z"),
             "monotonic_elapsed_s": 2000.0,
@@ -217,16 +231,97 @@ class SyntheticCampaign:
                 "harness_sha256": "2" * 64,
                 "mcp_fixture_sha256": "3" * 64,
             },
+            "suite_inputs": suite_hashes,
             "environment": {
                 "go_version": "go1.26.4",
                 "os_arch": "darwin/arm64",
                 "eino_version": "v0.9.9",
             },
             "run_intervals": self.intervals,
+            "supplementary_records": supplementary,
+            "supplementary_counts_toward_active_duration": False,
         }
         self.write(self.runs / "plan.json", plan)
         self.write(self.runs / "all_records.json", self.records)
         self.write(self.runs / "campaign.json", campaign)
+
+    def _build_supplementary(self, campaign_started):
+        records = []
+        cursor = campaign_started + timedelta(seconds=1)
+        for index, record_id in enumerate(
+            sorted(toolsearch_report.EXPECTED_SUPPLEMENTARY_COMMANDS), 1,
+        ):
+            finished = cursor + timedelta(seconds=1)
+            records.append({
+                "kind": "deterministic_command",
+                "record_id": record_id,
+                "argv_sha256": f"{index}" * 64,
+                "started_at": cursor.isoformat().replace("+00:00", "Z"),
+                "finished_at": finished.isoformat().replace("+00:00", "Z"),
+                "wall_s": 1.0,
+                "exit_code": 0,
+                "passed": True,
+                "real_execution": True,
+                "counts_toward_active_duration": False,
+            })
+            cursor = finished
+
+        web_case = next(case for case in self.suite["cases"] if case["surface"] == "web")
+        for index, (record_id, expected) in enumerate(
+            toolsearch_report.EXPECTED_SUPPLEMENTARY_WEB.items(), 4,
+        ):
+            source_id = (
+                f"{web_case['id']}__kimi-for-coding__{expected['variant']}__r1"
+            )
+            source_dir = self.runs / source_id
+            run_id = f"supp__{record_id}"
+            run_dir = self.runs / "supplementary" / run_id
+            run_dir.mkdir(parents=True)
+
+            record = json.loads((source_dir / "record.json").read_text())
+            record.update({
+                "run_id": run_id,
+                "repeat": 1,
+                "language": expected["language"],
+                "scenario": expected["scenario"],
+                "routing_applicable": expected["routing_applicable"],
+                "real_execution": True,
+                "driver_passed": True,
+                "task_passed": True,
+                "contracts_passed": True,
+                "error_present": False,
+            })
+            trajectory = json.loads((source_dir / "trajectory.json").read_text())
+            trajectory["run_id"] = run_id
+            redaction = json.loads((source_dir / "redaction_report.json").read_text())
+            self.write(run_dir / "record.json", record)
+            self.write(run_dir / "trajectory.json", trajectory)
+            self.write(run_dir / "redaction_report.json", redaction)
+
+            finished = cursor + timedelta(seconds=1)
+            records.append({
+                "kind": "web_browser_canary",
+                "record_id": record_id,
+                "scenario": expected["scenario"],
+                "language": expected["language"],
+                "variant": expected["variant"],
+                "record_sha256": toolsearch_report._file_sha256(
+                    run_dir / "record.json"
+                ),
+                "started_at": cursor.isoformat().replace("+00:00", "Z"),
+                "finished_at": finished.isoformat().replace("+00:00", "Z"),
+                "wall_s": 1.0,
+                "driver_passed": True,
+                "routing_applicable": expected["routing_applicable"],
+                "task_passed": True,
+                "artifact_safe": True,
+                "identity_matches": True,
+                "passed": True,
+                "real_execution": True,
+                "counts_toward_active_duration": False,
+            })
+            cursor = finished
+        return records
 
     def update_record(self, run_id, mutate):
         record_path = self.runs / run_id / "record.json"
@@ -354,6 +449,59 @@ class ToolSearchReportTest(unittest.TestCase):
         first = self.synthetic.jobs[0]["run_id"]
         (self.synthetic.runs / first / "trajectory.json").unlink()
         with self.assertRaisesRegex(toolsearch_report.ReportError, "trajectory"):
+            self.generate()
+
+    def test_failed_or_nonformal_campaign_is_rejected(self):
+        campaign_path = self.synthetic.runs / "campaign.json"
+        campaign = json.loads(campaign_path.read_text())
+        campaign["status"] = "failed"
+        campaign["failure_code"] = "git_provenance_changed_during_campaign"
+        self.synthetic.write(campaign_path, campaign)
+        with self.assertRaisesRegex(toolsearch_report.ReportError, "complete formal"):
+            self.generate()
+
+        campaign["status"] = "complete"
+        campaign.pop("failure_code")
+        campaign["formal"] = False
+        campaign["mode"] = "canary"
+        self.synthetic.write(campaign_path, campaign)
+        with self.assertRaisesRegex(toolsearch_report.ReportError, "complete formal"):
+            self.generate()
+
+    def test_supplementary_coverage_is_exact_and_fully_verified(self):
+        campaign_path = self.synthetic.runs / "campaign.json"
+        campaign = json.loads(campaign_path.read_text())
+        complete_campaign = copy.deepcopy(campaign)
+        campaign["supplementary_records"].pop()
+        self.synthetic.write(campaign_path, campaign)
+        with self.assertRaisesRegex(toolsearch_report.ReportError, "supplementary"):
+            self.generate()
+
+        campaign = complete_campaign
+        web_record = next(
+            item for item in campaign["supplementary_records"]
+            if item["kind"] == "web_browser_canary"
+        )
+        web_record["scenario"] = "success"
+        self.synthetic.write(campaign_path, campaign)
+        with self.assertRaisesRegex(toolsearch_report.ReportError, "Web identity"):
+            self.generate()
+
+    def test_formal_suite_inputs_are_content_locked(self):
+        alternate = self.synthetic.root / "alternate-matrix.json"
+        alternate.write_bytes(toolsearch_cases.DEFAULT_MATRIX.read_bytes() + b"\n")
+        with self.assertRaisesRegex(toolsearch_report.ReportError, "pinned defaults"):
+            toolsearch_report.generate_report(
+                alternate,
+                toolsearch_cases.DEFAULT_BASE_SUITE,
+                self.synthetic.runs,
+            )
+
+        campaign_path = self.synthetic.runs / "campaign.json"
+        campaign = json.loads(campaign_path.read_text())
+        campaign["suite_inputs"]["matrix_sha256"] = "f" * 64
+        self.synthetic.write(campaign_path, campaign)
+        with self.assertRaisesRegex(toolsearch_report.ReportError, "suite input hashes"):
             self.generate()
 
     def test_overlap_or_less_than_30_minutes_fails_duration_proof(self):
