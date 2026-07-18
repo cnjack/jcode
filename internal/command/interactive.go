@@ -143,7 +143,7 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 	}
 	all = append(all, s.env.NewBrowserTools()...)
 	all = append(all, s.env.NewComputerTools()...)
-	return append(all, s.mcpTools...)
+	return all
 }
 
 func (s *interactiveState) buildPlanTools() []tool.BaseTool {
@@ -152,6 +152,7 @@ func (s *interactiveState) buildPlanTools() []tool.BaseTool {
 		s.env.NewExecuteTool(nil),
 		s.env.NewGrepTool(),
 		s.env.NewTodoWriteTool(), s.env.NewTodoReadTool(),
+		s.env.NewGoalSetTool(), s.env.NewGoalGetTool(), s.env.NewGoalUpdateTool(),
 		tools.NewAskUserTool(s.askUserDeps),
 	}
 	plan = append(plan, s.env.NewBrowserPlanTools()...)
@@ -306,7 +307,31 @@ func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
 		handlers = append([]adk.ChatModelAgentMiddleware{budgetMw}, handlers...)
 	}
 
-	return agent.NewAgent(s.ctx, s.chatModel, s.toolList, s.systemPrompt, s.approvalState.RequestApproval, middlewares, handlers)
+	if !config.ToolSearchEnabled(s.cfg) {
+		staticTools := s.toolList
+		if s.agentMode != tui.ModePlanning {
+			staticTools = append(append([]tool.BaseTool(nil), staticTools...), s.mcpTools...)
+		}
+		return agent.NewAgent(
+			s.ctx, s.chatModel, staticTools, s.systemPrompt,
+			s.approvalState.RequestApproval, middlewares, handlers,
+		)
+	}
+
+	toolMode := agent.ToolModeNormal
+	if s.agentMode == tui.ModePlanning {
+		toolMode = agent.ToolModePlan
+	}
+	toolPlan, err := buildCommandToolPlan(
+		s.ctx, s.toolList, s.mcpTools, agent.ToolTransportTUI, toolMode,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build TUI tool plan: %w", err)
+	}
+	return agent.NewAgentWithToolPlan(
+		s.ctx, s.chatModel, toolPlan, s.systemPrompt,
+		s.approvalState.RequestApproval, middlewares, handlers,
+	)
 }
 
 // mcpStatusItems converts internal MCP statuses to TUI status items.

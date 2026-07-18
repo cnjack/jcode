@@ -523,9 +523,6 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 			}
 			all = append(all, tenv.NewBrowserTools()...)
 			all = append(all, tenv.NewComputerTools()...)
-			if mt := mcpToolsPtr.Load(); mt != nil {
-				all = append(all, (*mt)...)
-			}
 			// Automation runs are unattended — drop interactive tools that would
 			// otherwise block on a human who isn't there (see dropInteractiveTools).
 			if excludeInteractive {
@@ -540,6 +537,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 				tenv.NewExecuteTool(nil),
 				tenv.NewGrepTool(),
 				tenv.NewTodoWriteTool(), tenv.NewTodoReadTool(),
+				tenv.NewGoalSetTool(), tenv.NewGoalGetTool(), tenv.NewGoalUpdateTool(),
 				tools.NewAskUserTool(&tools.AskUserDeps{
 					BatchRequestFn: twh.RequestAskUser,
 				}),
@@ -628,7 +626,49 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 				prompt = planPrompt
 				toolList = buildPlanTools()
 			}
-			return agent.NewAgent(ctx, cm, toolList, prompt, tappr.RequestApproval, middlewares, handlers)
+
+			// Snapshot MCP exactly once so the candidate catalog and runtime plan
+			// cannot observe different reload generations while an agent is built.
+			var currentMCPTools []tool.BaseTool
+			if mt := mcpToolsPtr.Load(); mt != nil {
+				currentMCPTools = append([]tool.BaseTool(nil), (*mt)...)
+			}
+			if excludeInteractive {
+				currentMCPTools = dropInteractiveTools(currentMCPTools)
+			}
+
+			if !config.ToolSearchEnabled(cfg) {
+				// Preserve the eager/static path. Plan mode has never exposed MCP
+				// tools, while normal mode appends the captured MCP generation.
+				if !planMode {
+					toolList = append(toolList, currentMCPTools...)
+				}
+				return agent.NewAgent(ctx, cm, toolList, prompt, tappr.RequestApproval, middlewares, handlers)
+			}
+
+			toolMode := agent.ToolModeNormal
+			if planMode {
+				toolMode = agent.ToolModePlan
+			}
+			toolPlan, err := buildCommandToolPlan(
+				ctx,
+				toolList,
+				currentMCPTools,
+				agent.ToolTransportWeb,
+				toolMode,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("build web tool plan: %w", err)
+			}
+			return agent.NewAgentWithToolPlan(
+				ctx,
+				cm,
+				toolPlan,
+				prompt,
+				tappr.RequestApproval,
+				middlewares,
+				handlers,
+			)
 		}
 
 		// Per-task chat-model cache so a model/mode switch rebuilds only this task.
@@ -689,10 +729,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 				for _, at := range buildAllTools(cm) {
 					total += estimateToolTokens(ctx, at)
 				}
-				b.SystemToolsTokens = total - b.MCPToolsTokens
-				if b.SystemToolsTokens < 0 {
-					b.SystemToolsTokens = 0
-				}
+				b.SystemToolsTokens = total
 			}
 			return b
 		}

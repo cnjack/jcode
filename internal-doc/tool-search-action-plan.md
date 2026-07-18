@@ -33,9 +33,9 @@
 |---|---|---|---|
 | TS-00 文档与基线 | 完成 | `a1d0b13` | 基线 `ca4c8ba6b709`，完整 Go 测试通过 |
 | TS-01 ToolPlan 核心 | 完成 | `be5e701` | 分类、校验、稳定排序与 runtime 安全边界 |
-| TS-02 Eino middleware | 完成 | 本提交 | 客户端 ToolSearch、兼容开关与模型级测试 |
-| TS-03 Transport 接入 | 进行中 | — | TUI/Web/ACP 统一使用 ToolPlan |
-| TS-04 MCP 与权限 | 未开始 | — | canonical name、审批和安全边界 |
+| TS-02 Eino middleware | 完成 | `0a03ce6` | 客户端 ToolSearch、兼容开关与模型级测试 |
+| TS-03 Transport 接入 | 完成 | 本提交 | TUI/Web/ACP 共享 policy 与重建路径 |
+| TS-04 MCP 与权限 | 进行中 | — | canonical name、审批和安全边界 |
 | TS-05 Prompt 与观测 | 未开始 | — | 使用说明、schema/轨迹指标 |
 | TS-06 自动化测试 | 未开始 | — | 单元、集成、fixture 和 routing oracle |
 | TS-07 Kimi A/B | 未开始 | — | 精确模型、静态/渐进式对照 |
@@ -96,21 +96,25 @@ Plan 模式首轮目标：
 - 安全：Hidden 不注册；`DirectModelOnly` 在当前适配层明确 fail closed；手工构造的非法计划会被重新校验。
 - 测试：Agent/config 定向测试；`go test -race ./internal/agent ./internal/config -run 'ToolSearch|NewAgentLegacy|LegacyConfigWithoutToolSearch' -count=1`；`go test ./...`；`make lint-go`。
 - 结果：全部通过；模型级测试覆盖首轮 schema、search 激活、累积、runtime registry、history rewrite 顺序和原审批 name/args；lint `0 issues`。
-- 提交：本提交；精确 SHA 将在下一次进度更新中回填。
+- 提交：`0a03ce6 feat(agent): add deferred tool search middleware`。
 
 ## TS-03 TUI / Web / ACP 接入
 
-- [ ] TS-03.1 TUI normal/plan 使用统一 ToolPlan。
-- [ ] TS-03.2 Web normal/plan/automation 使用统一 ToolPlan。
-- [ ] TS-03.3 ACP normal/plan 使用统一 ToolPlan，并维持 ACP 不暴露 Browser 的约束。
-- [ ] TS-03.4 Browser、Computer、Memory、MCP、goal、team 状态变化后正确重建计划。
-- [ ] TS-03.5 验证三种 transport 对同一工具分类一致，且 transport 特例明确可测。
+- [x] TS-03.1 TUI normal/plan 使用统一 ToolPlan。
+- [x] TS-03.2 Web normal/plan/automation 使用统一 ToolPlan。
+- [x] TS-03.3 ACP normal/plan 使用统一 ToolPlan，并维持 ACP 不暴露 Browser 的约束。
+- [x] TS-03.4 Browser、Computer、Memory、MCP、goal、team 状态变化后正确重建计划。
+- [x] TS-03.5 验证三种 transport 对同一工具分类一致，且 transport 特例明确可测。
 
 完成证据：
 
-- 测试：待填写
-- 结果：待填写
-- 提交：待填写
+- 实现：新增唯一 `commandToolPolicies` 与 `buildCommandToolPlan`；三 transport 在开关关闭时保持 eager/static，在开启时使用同一分类器。
+- 首轮：TUI/Web Normal 为 11 Direct + `tool_search` = 12；ACP Normal 为 11；TUI/Web Plan 为 7；ACP Plan 为 6。
+- MCP：从 builtin candidates 分离并使用同一代快照；Normal 全部 Deferred，Plan Hidden；跨 builtin/server 重名 fail closed。
+- 重建：mode、Browser、Computer、MCP、模型配置变化继续重建 Agent；测试验证新一代候选不会继承旧 Browser/MCP runtime。
+- 测试：command policy/matrix 定向测试；`go test -race ./internal/command -run 'TestBuildCommandToolPlan|TestCommandToolPolicy' -count=1`；`go test ./...`；`make lint-go`。
+- 结果：全部通过；TUI/Web/ACP × Normal/Plan、unattended filter、MCP、scope、collision、stable runtime 均覆盖；lint `0 issues`。
+- 提交：本提交；精确 SHA 将在下一次进度更新中回填。
 
 ## TS-04 MCP 命名、审批与权限
 
@@ -222,4 +226,5 @@ Kimi 硬门槛：
 |---|---|---|---|
 | 2026-07-18 | 完成 TS-00：创建清单并采集基线 | `git diff --check`、`go test ./...` 通过 | `a1d0b13` |
 | 2026-07-18 | 完成 TS-01：ToolPlan 分类、校验、稳定排序和 Hidden runtime 边界 | 包测试、race、全量 Go、lint 通过 | `be5e701` |
-| 2026-07-18 | 完成 TS-02：接入 Eino 客户端 ToolSearch 与 opt-in 配置 | 模型级、race、全量 Go、lint 通过 | 本提交 |
+| 2026-07-18 | 完成 TS-02：接入 Eino 客户端 ToolSearch 与 opt-in 配置 | 模型级、race、全量 Go、lint 通过 | `0a03ce6` |
+| 2026-07-18 | 完成 TS-03：TUI/Web/ACP 共享 tool policy 和重建路径 | 矩阵、race、全量 Go、lint 通过 | 本提交 |

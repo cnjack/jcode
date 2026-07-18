@@ -79,7 +79,7 @@ type acpSession struct {
 
 	// Mode switching support.
 	mode         acp.SessionModeId
-	createAgent  func(sysPrompt string, toolList []tool.BaseTool) (*adk.ChatModelAgent, error)
+	createAgent  func(sysPrompt string, toolList []tool.BaseTool, planMode bool) (*adk.ChatModelAgent, error)
 	allTools     []tool.BaseTool
 	planTools    []tool.BaseTool
 	normalPrompt string
@@ -526,8 +526,6 @@ func (a *acpAgent) buildAgentSession(
 	env.Computer = computerMgr
 	allTools = append(allTools, env.NewComputerTools()...)
 
-	allTools = append(allTools, mcpTools...)
-
 	// Plan mode tools: read-only subset. Goal tools are included — like the
 	// todo tools they only mutate session metadata, and the continuation
 	// guard runs in every mode, so the agent must be able to inspect and
@@ -634,15 +632,47 @@ func (a *acpAgent) buildAgentSession(
 	if startupMode.IsPlan() {
 		initialPrompt, initialTools = planPrompt, planTools
 	}
-	ag, err := agent.NewAgent(ctx, chatModel, initialTools, initialPrompt, approvalState.RequestApproval, nil, handlers)
+	newSessionAgent := func(
+		agentCtx context.Context,
+		sysPrompt string,
+		toolList []tool.BaseTool,
+		planMode bool,
+	) (*adk.ChatModelAgent, error) {
+		if !config.ToolSearchEnabled(cfg) {
+			staticTools := toolList
+			if !planMode {
+				staticTools = append(append([]tool.BaseTool(nil), staticTools...), mcpTools...)
+			}
+			return agent.NewAgent(
+				agentCtx, chatModel, staticTools, sysPrompt,
+				approvalState.RequestApproval, nil, handlers,
+			)
+		}
+		toolMode := agent.ToolModeNormal
+		if planMode {
+			toolMode = agent.ToolModePlan
+		}
+		toolPlan, planErr := buildCommandToolPlan(
+			agentCtx, toolList, mcpTools, agent.ToolTransportACP, toolMode,
+		)
+		if planErr != nil {
+			return nil, fmt.Errorf("build ACP tool plan: %w", planErr)
+		}
+		return agent.NewAgentWithToolPlan(
+			agentCtx, chatModel, toolPlan, sysPrompt,
+			approvalState.RequestApproval, nil, handlers,
+		)
+	}
+
+	ag, err := newSessionAgent(ctx, initialPrompt, initialTools, startupMode.IsPlan())
 	if err != nil {
 		return nil, fmt.Errorf("error creating agent: %w", err)
 	}
 
 	// createAgent closure for mode switching — rebuilds agent with different prompt/tools.
 	// Uses context.Background() so the agent survives beyond the original request context.
-	makeAgent := func(sysPrompt string, toolList []tool.BaseTool) (*adk.ChatModelAgent, error) {
-		return agent.NewAgent(context.Background(), chatModel, toolList, sysPrompt, approvalState.RequestApproval, nil, handlers)
+	makeAgent := func(sysPrompt string, toolList []tool.BaseTool, planMode bool) (*adk.ChatModelAgent, error) {
+		return newSessionAgent(context.Background(), sysPrompt, toolList, planMode)
 	}
 
 	sess := &acpSession{
@@ -939,7 +969,7 @@ func (a *acpAgent) SetSessionMode(_ context.Context, params acp.SetSessionModeRe
 	}
 
 	if sess.createAgent != nil {
-		if newAg, err := sess.createAgent(sysPrompt, toolList); err == nil {
+		if newAg, err := sess.createAgent(sysPrompt, toolList, sm.IsPlan()); err == nil {
 			sess.ag = newAg
 			config.Logger().Printf("[acp] agent recreated for mode %s", newMode)
 		} else {
