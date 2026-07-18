@@ -38,7 +38,7 @@
 | TS-04 MCP 与权限 | 完成 | `c9cb076`、`1aa128e`、`a316830`、`b1b687f`、`3b751db` | MCP、Plan、delegation 和 team mode 边界完成 |
 | TS-05 Prompt 与观测 | 进行中 | `dbe7ca4`、`69ba9ee`、`f905ae2`、`8675a5b` | 使用说明、schema/轨迹指标、凭证文件权限及 Browser 子进程 token 隔离 |
 | TS-06 自动化测试 | 完成 | `77de5fc`、`92e0cb0`、`56fa6eb` | 单元、集成、fixture、routing oracle 与生命周期撤权矩阵 |
-| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e`、`8675a5b`、`d60000d`、`8c980b1`、`207b313` | Browser capability-family 已验证；Computer eval build 与 Kimi 逗号精确名称兼容已修复，等待完整重跑/A-B |
+| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e`、`8675a5b`、`d60000d`、`8c980b1`、`207b313` | Browser/Computer exact-Kimi canary 4/4 严格通过；等待 12-job 小矩阵与 formal pass@10 |
 | TS-08 30 分钟回归 | 进行中 | `9f2889e`、`8c980b1` | formal coordinator、deterministic `jcode_eval` 构建与证据合约完成；尚未运行真实全场景长跑 |
 | TS-09 HTML 报告 | 进行中 | `ad55a3b`、`92d442e`、`9f2889e`、`8c980b1` | 安全、fail-closed 的九门槛报告器、canonical suite、build-tag 与 supplementary 合约已完成；等待真实 campaign 产物 |
 
@@ -286,7 +286,10 @@ Kimi 硬门槛：
 - 独立 review：两轮只读审查均未发现阻断；补齐真实 hook 顺序、exact-list+group 联动、MCP 精确边界、UTF-8 JSON escape/escaped duplicate key、异常 `max_results`、malformed/trailing 等回归。
 - 测试：focused normal/race、`go test ./internal/agent -count=1`、`go test -race ./internal/agent -count=1`、`go test ./... -count=1`（允许 localhost）、`make lint-go`、`git diff --check` 全部通过，lint `0 issues`。
 - 已完成提交：`207b313 fix(agent): accept exact deferred tool lists`（exact-Kimi routing 兼容；TS-07.7 仍未勾选）。
-- 下一步：先重跑 Browser+Computer exact-Kimi static/deferred canary，再运行 Direct、exact、MCP10/MCP100、Browser、Computer 的小矩阵；全部通过后才启动 formal pass@10。
+- 第三轮 Browser+Computer exact-Kimi canary：4/4 task、contracts、routing、artifact safety 全部 PASS。Browser Deferred 首轮 12 tools、一次 keyword search 即匹配完整 `open/snapshot/act/read` 组，随后 5 个 Deferred endpoint 全部成功；Computer Deferred 首轮 11 tools、一次 keyword search 匹配完整有效组，open/act 及 fixture oracle 全部成功。两者 bypass=0、same-batch=0、failed result=0。
+- 时延：Browser static/deferred 分别 356.562s/17.706s，Computer static/deferred 分别 11.4s/15.8s。Browser static 虽严格通过，但接近 360 秒上限，作为 provider/Web 延迟风险保留观察，不能因最终 PASS 隐去；正式统计仍按真实 interval 计时。该轮 Kimi 使用了 13-byte 有效 Computer keyword，未再次触发逗号 exact-list 兼容路径；兼容路径由模型级、真实 hook 和 endpoint 集成测试证明，后续 formal 继续观测。
+- Canary 结论：产品与 campaign 基础设施已具备进入跨类小矩阵的条件；本结果只是 repeat=1 的非正式 canary，不计入 TS-07.7 pass@10 或 TS-08 的 30 分钟门槛。
+- 下一步：运行 Direct/no-tool、exact、MCP10/MCP100、Browser、Computer 的 12-job 小矩阵；没有系统性失败后才启动 formal pass@10。
 - 待完成：TS-07.7 需用 exact-Kimi canary 验证上述 Deferred 多步披露修复，并运行关键用例重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
 
 ## TS-08 至少 30 分钟全场景回归
@@ -372,3 +375,4 @@ Kimi 硬门槛：
 | 2026-07-18 | 修复 formal/canary JCode 构建：固定 `jcode_eval` tag，plan/campaign/HTML 记录并 fail-closed 校验 | Python 91/91、py_compile、实际 eval build、diff check 通过 | `8c980b1` |
 | 2026-07-18 | 第二轮 4-job exact-Kimi canary：Computer static 与 Browser Deferred PASS；Computer Deferred 漏 `select:` 后补救、Browser static 漏 snapshot，严格 2/4 | Computer 真值完成且无 bypass/same-batch；两项 routing 非合规均未误报 | — |
 | 2026-07-18 | 修复 Kimi 逗号精确名称 query：严格 2～5 个 effective Deferred 名时有界补 `select:`，普通/MCP/权限边界不扩大 | agent normal/race、全量 Go、lint `0 issues`、两轮独立 review 通过 | `207b313` |
+| 2026-07-18 | 第三轮 Browser+Computer exact-Kimi canary 4/4 严格 PASS；两个 Deferred 均一次搜索命中整组 | task/contracts/routing/artifact-safe 全通过；bypass=0、same-batch=0；Browser static 356.562s 延迟风险保留 | — |
