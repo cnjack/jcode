@@ -5,6 +5,9 @@ export default {
   common: {
     ok: '확인',
     default: '기본값',
+    low: '낮음',
+    medium: '중간',
+    high: '높음',
     on: '켬',
     off: '끔',
     add: '추가',
@@ -247,6 +250,7 @@ export default {
       filter: '모델 필터…',
       toggleVisibility: '모델 선택기에 표시할 모델 선택',
       noImages: '현재 모델은 이미지를 지원하지 않습니다',
+      noImageInput: '이미지 입력 미지원',
       reasoning: '추론',
       tools: '도구 사용',
       images: '이미지 입력',
@@ -262,6 +266,9 @@ export default {
       remove: '목표 제거',
     },
     command: '명령어',
+    goalSlashDesc: '목표 모드 활성화 — 다음 메시지가 목표가 됩니다',
+    workflowBadge: '워크플로',
+    attachedImages: '(첨부 이미지 참조)',
     stopped: '중지됨',
     nextMessageGoal: '다음 메시지가 세션의 목표가 됩니다',
     durationSeconds: '{n}초',
@@ -930,17 +937,32 @@ export default {
     },
   },
 
+  pip: {
+    computerUse: '컴퓨터 제어',
+    shots: '스크린샷 {n}장',
+    collapse: '숨기기',
+    expand: '보기',
+    openFull: '확대',
+    shrink: '축소',
+    unavailable: '스크린샷이 만료되었습니다',
+    latest: '최신',
+  },
+
   rightPanel: {
     plan: '계획',
     files: '파일',
     changes: '변경',
     noTasks: '작업이 아직 없습니다',
+    emptyDir: '빈 디렉터리',
+    dirError: '이 디렉터리를 불러올 수 없습니다.',
+    fileError: '{name}을(를) 열 수 없습니다(바이너리이거나, 너무 크거나, 읽을 수 없을 수 있습니다).',
   },
 
   diff: {
     changes: '변경',
     refresh: '↻ 새로 고침',
     noChanges: '변경 없음',
+    loadError: '변경 사항을 불러오지 못했습니다',
     selectFile: '변경을 표시할 파일 선택',
     modes: {
       session: '세션',
@@ -1004,6 +1026,13 @@ export default {
   goal: {
     clearGoal: '목표 지우기',
     clear: '지우기',
+    edit: '편집',
+    editTitle: '목표 편집',
+    collapse: '접기',
+    started: '시작',
+    elapsed: '경과',
+    saveFailed: '목표를 저장하지 못했습니다',
+    durationHours: '{h}시간 {m}분',
     tokens: '{used} 토큰',
     tokensK: '{k}k 토큰',
     status: {

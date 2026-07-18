@@ -277,6 +277,12 @@ export default {
     },
     // Slash-command placeholder shown when the user types "/".
     command: 'Command',
+    // "/goal" pseudo-command in the slash menu — arms Goal mode.
+    goalSlashDesc: 'Arm Goal mode — your next message becomes the objective',
+    // Badge on slash-menu items backed by a dynamic workflow.
+    workflowBadge: 'workflow',
+    // Fallback message body when only images are attached (no text).
+    attachedImages: '(see attached images)',
     stopped: 'Stopped',
     nextMessageGoal: 'Next message becomes the session goal',
     durationSeconds: '{n}s',
@@ -816,6 +822,9 @@ export default {
 
   setup: {
     step: 'Step {n}: {label}',
+    welcomeTitle: 'Welcome to jcode',
+    selectEllipsis: 'Select…',
+    modelLabel: 'Model',
     chooseProvider: 'Choose a Provider',
     enterApiKey: 'Enter API Key',
     allSet: "You're all set!",
@@ -981,11 +990,26 @@ export default {
     },
   },
 
+  // Computer-use picture-in-picture (floating latest-screenshot card).
+  pip: {
+    computerUse: 'Computer use',
+    shots: '{n} shots',
+    collapse: 'Hide',
+    expand: 'Show',
+    openFull: 'Enlarge',
+    shrink: 'Shrink',
+    unavailable: 'Screenshot expired',
+    latest: 'Latest',
+  },
+
   rightPanel: {
     plan: 'Plan',
     files: 'Files',
     changes: 'Changes',
     noTasks: 'No tasks yet',
+    emptyDir: 'Empty directory',
+    dirError: "Couldn't load this directory.",
+    fileError: "Couldn't open {name} (it may be a binary file, too large, or unreadable).",
   },
 
   diff: {
@@ -1055,6 +1079,13 @@ export default {
   goal: {
     clearGoal: 'Clear goal',
     clear: 'Clear',
+    edit: 'Edit',
+    editTitle: 'Edit goal',
+    collapse: 'Collapse',
+    started: 'Started',
+    elapsed: 'Elapsed',
+    saveFailed: 'Could not save the goal',
+    durationHours: '{h}h {m}m',
     tokens: '{used} tokens',
     tokensK: '{k}k tokens',
     status: {

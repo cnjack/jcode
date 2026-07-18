@@ -1,6 +1,7 @@
 /** AuthGate — login form shown when the server requires a token (non-loopback bind). */
 
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { api } from '../lib/api'
 import { normalizeMode } from '../lib/types'
 import { setAuthToken, clearAuthToken } from '../lib/authToken'
@@ -8,6 +9,7 @@ import { useAppDispatch } from '../app/hooks'
 import { chatActions, loadWorkspaceState, modelActions, sessionActions, uiActions } from '../app/store'
 
 export function AuthGate() {
+  const { t } = useTranslation()
   const dispatch = useAppDispatch()
   const [token, setToken] = useState('')
   const [error, setError] = useState('')
@@ -33,10 +35,10 @@ export function AuthGate() {
         await dispatch(loadWorkspaceState())
         dispatch(uiActions.setNeedsAuth(false))
       } else {
-        setError('Invalid token')
+        setError(t('auth.invalid'))
       }
     } catch {
-      setError('Invalid token')
+      setError(t('auth.invalid'))
     } finally {
       setChecking(false)
     }
@@ -51,13 +53,13 @@ export function AuthGate() {
       >
         <h1 className="text-lg font-semibold">jcode</h1>
         <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">
-          This server requires an access token. Enter it below.
+          {t('auth.body')}
         </p>
         <input
           type="password"
           value={token}
           onChange={(e) => setToken(e.target.value)}
-          placeholder="Access token"
+          placeholder={t('auth.placeholder')}
           autoFocus
           className="mt-4 w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-muted)] px-3 py-2 text-sm outline-none focus:border-[var(--color-primary)]"
         />
@@ -67,7 +69,7 @@ export function AuthGate() {
           disabled={checking || !token}
           className="mt-4 w-full rounded-[var(--radius-md)] bg-[var(--color-primary)] px-3 py-2 text-sm font-medium text-[var(--color-on-primary)] disabled:opacity-50"
         >
-          {checking ? 'Checking…' : 'Unlock'}
+          {checking ? t('auth.verifying') : t('auth.submit')}
         </button>
       </form>
     </div>

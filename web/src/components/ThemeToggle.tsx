@@ -8,10 +8,12 @@
  * without per-theme classes.
  */
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { SunIcon, MoonIcon, SwatchIcon } from '@heroicons/react/24/outline'
 import { useTheme, THEME_CHOICES } from '../lib/useTheme'
 
 export function ThemeToggle({ compact = false }: { compact?: boolean }) {
+  const { t } = useTranslation()
   const { theme, resolvedTheme, setTheme, toggleDark } = useTheme()
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -43,8 +45,8 @@ export function ThemeToggle({ compact = false }: { compact?: boolean }) {
       <button
         type="button"
         onClick={compact ? toggleDark : () => setOpen((v) => !v)}
-        title={resolvedTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-        aria-label={resolvedTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+        title={resolvedTheme === 'dark' ? t('nav.switchToLight') : t('nav.switchToDark')}
+        aria-label={resolvedTheme === 'dark' ? t('nav.switchToLight') : t('nav.switchToDark')}
         className={`flex items-center justify-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--neutral-wash-soft)] hover:text-[var(--color-foreground)] ${compact ? 'h-9 w-9 hover:bg-[var(--color-muted)]' : 'h-[34px] w-[34px] hover:bg-[var(--color-muted)]'}`}
       >
         {resolvedTheme === 'dark' ? (
@@ -59,8 +61,8 @@ export function ThemeToggle({ compact = false }: { compact?: boolean }) {
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          title="Themes"
-          aria-label="Choose theme"
+          title={t('nav.toggleTheme')}
+          aria-label={t('nav.toggleTheme')}
           aria-haspopup="menu"
           aria-expanded={open}
           className="flex h-[34px] w-[34px] items-center justify-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"

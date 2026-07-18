@@ -5,6 +5,9 @@ export default {
   common: {
     ok: 'OK',
     default: 'デフォルト',
+    low: '低',
+    medium: '中',
+    high: '高',
     on: 'オン',
     off: 'オフ',
     add: '追加',
@@ -247,6 +250,7 @@ export default {
       filter: 'モデルを絞り込み…',
       toggleVisibility: 'モデルセレクターに表示するモデルを選択',
       noImages: '現在のモデルは画像をサポートしていません',
+      noImageInput: '画像入力非対応',
       reasoning: '推論',
       tools: 'ツール使用',
       images: '画像入力',
@@ -262,6 +266,9 @@ export default {
       remove: '目標を削除',
     },
     command: 'コマンド',
+    goalSlashDesc: '目標モードを有効化 — 次のメッセージが目標になります',
+    workflowBadge: 'ワークフロー',
+    attachedImages: '（添付画像を参照）',
     stopped: '停止しました',
     nextMessageGoal: '次のメッセージがセッションの目標になります',
     durationSeconds: '{n}秒',
@@ -931,17 +938,32 @@ export default {
     },
   },
 
+  pip: {
+    computerUse: 'コンピュータ操作',
+    shots: '{n} 枚',
+    collapse: '隠す',
+    expand: '表示',
+    openFull: '拡大',
+    shrink: '縮小',
+    unavailable: 'スクリーンショットは期限切れです',
+    latest: '最新',
+  },
+
   rightPanel: {
     plan: '計画',
     files: 'ファイル',
     changes: '変更',
     noTasks: 'タスクがまだありません',
+    emptyDir: '空のディレクトリ',
+    dirError: 'このディレクトリを読み込めませんでした。',
+    fileError: '{name} を開けませんでした（バイナリ・サイズ超過・読み取り不可の可能性）。',
   },
 
   diff: {
     changes: '変更',
     refresh: '↻ 更新',
     noChanges: '変更なし',
+    loadError: '変更の読み込みに失敗しました',
     selectFile: '変更を表示するファイルを選択',
     modes: {
       session: 'セッション',
@@ -1005,6 +1027,13 @@ export default {
   goal: {
     clearGoal: '目標をクリア',
     clear: 'クリア',
+    edit: '編集',
+    editTitle: '目標を編集',
+    collapse: '折りたたむ',
+    started: '開始',
+    elapsed: '経過',
+    saveFailed: '目標を保存できませんでした',
+    durationHours: '{h}時間 {m}分',
     tokens: '{used} トークン',
     tokensK: '{k}k トークン',
     status: {

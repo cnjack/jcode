@@ -13,6 +13,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   ArrowPathIcon,
   CheckCircleIcon,
@@ -37,13 +38,15 @@ interface Props {
   onSwitchTab: (tab: Tab) => void
 }
 
-const TAB_LABELS: Record<Tab, string> = {
-  plan: 'Plan',
-  files: 'Files',
-  changes: 'Changes',
+/** i18n keys for the tab strip (resolved with t() at render). */
+const TAB_KEYS: Record<Tab, string> = {
+  plan: 'rightPanel.plan',
+  files: 'rightPanel.files',
+  changes: 'rightPanel.changes',
 } as const
 
 export function RightPanel({ activeTab, onClose, onSwitchTab }: Props) {
+  const { t } = useTranslation()
   // Panel width with a min/max clamp; resized via the left drag handle.
   const [panelWidth, setPanelWidth] = useState(320)
   const projectPath = useAppSelector((s) => s.session.projectPath)
@@ -80,25 +83,25 @@ export function RightPanel({ activeTab, onClose, onSwitchTab }: Props) {
       {/* Header: tab strip + close. */}
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-[var(--color-border)] pl-3 pr-2">
         <div className="flex items-center gap-0.5">
-          {(['plan', 'files', 'changes'] as const).map((t) => (
+          {(['plan', 'files', 'changes'] as const).map((tab) => (
             <button
-              key={t}
+              key={tab}
               type="button"
-              onClick={() => onSwitchTab(t)}
+              onClick={() => onSwitchTab(tab)}
               className={`rounded-[var(--radius-md)] px-2.5 py-1 text-xs font-medium transition-colors ${
-                activeTab === t
+                activeTab === tab
                   ? 'bg-[var(--color-muted)] text-[var(--color-foreground)]'
                   : 'text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]'
               }`}
             >
-              {TAB_LABELS[t]}
+              {t(TAB_KEYS[tab])}
             </button>
           ))}
         </div>
         <button
           type="button"
           onClick={onClose}
-          aria-label="Close panel"
+          aria-label={t('terminal.closePanel')}
           className="flex h-6 w-6 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
         >
           <XMarkIcon className="h-3.5 w-3.5" />
@@ -125,6 +128,7 @@ export function RightPanel({ activeTab, onClose, onSwitchTab }: Props) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function PlanPane() {
+  const { t } = useTranslation()
   const todos = useAppSelector((s) => s.chat.todos)
   const total = todos.length
   const completed = todos.filter((t) => t.status === 'completed').length
@@ -133,7 +137,7 @@ function PlanPane() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center gap-2.5 border-b border-[var(--color-border)] px-3 py-2.5">
-        <span className="text-xs font-medium text-[var(--color-foreground)]">Plan</span>
+        <span className="text-xs font-medium text-[var(--color-foreground)]">{t('rightPanel.plan')}</span>
         <div className="h-[5px] flex-1 overflow-hidden rounded-[var(--radius-pill)] bg-[var(--color-border)]">
           <div
             className="h-full rounded-[var(--radius-pill)] bg-[var(--color-accent-neutral)] transition-[width] duration-[var(--duration-slow)] ease-out"
@@ -145,7 +149,7 @@ function PlanPane() {
         </span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
-        {total > 0 ? <TaskList todos={todos} /> : <div className="px-2 py-4 text-center text-[13px] text-[var(--color-muted-foreground)]">No tasks yet</div>}
+        {total > 0 ? <TaskList todos={todos} /> : <div className="px-2 py-4 text-center text-[13px] text-[var(--color-muted-foreground)]">{t('rightPanel.noTasks')}</div>}
       </div>
     </div>
   )
@@ -231,6 +235,7 @@ function TaskList({ todos }: { todos: TodoItem[] }) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function FileTreePanel() {
+  const { t } = useTranslation()
   const [items, setItems] = useState<FileItem[]>([])
   const [currentPath, setCurrentPath] = useState('')
   const [loading, setLoading] = useState(false)
@@ -249,11 +254,11 @@ function FileTreePanel() {
     } catch (err) {
       console.error('Failed to fetch files:', err)
       setItems([])
-      setDirError("Couldn't load this directory.")
+      setDirError(t('rightPanel.dirError'))
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [t])
 
   // Initial load of the workspace root (the parent keys this component on the
   // project path, so a project switch remounts + re-fetches).
@@ -275,7 +280,7 @@ function FileTreePanel() {
         setPreviewFile(result)
       } catch (err) {
         console.error('Failed to fetch file content:', err)
-        setFileError(`Couldn't open ${item.name} (it may be a binary file, too large, or unreadable).`)
+        setFileError(t('rightPanel.fileError', { name: item.name }))
       }
     }
   }
@@ -362,7 +367,7 @@ function FileTreePanel() {
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto py-1">
           {loading ? (
-            <div className="px-3 py-6 text-center text-xs text-[var(--color-muted-foreground)]">Loading…</div>
+            <div className="px-3 py-6 text-center text-xs text-[var(--color-muted-foreground)]">{t('common.loading')}</div>
           ) : dirError ? (
             <div className="px-3 py-6 text-center text-xs text-[var(--color-error-fg)]">{dirError}</div>
           ) : (
@@ -393,7 +398,7 @@ function FileTreePanel() {
                 </button>
               ))}
               {items.length === 0 && (
-                <div className="px-3 py-6 text-center text-xs text-[var(--color-muted-foreground)]">Empty directory</div>
+                <div className="px-3 py-6 text-center text-xs text-[var(--color-muted-foreground)]">{t('rightPanel.emptyDir')}</div>
               )}
             </>
           )}
@@ -410,11 +415,11 @@ function FileTreePanel() {
 
 type DiffMode = 'working' | 'staged' | 'branch' | 'session'
 
-const DIFF_MODES: { value: DiffMode; label: string }[] = [
-  { value: 'session', label: 'Session' },
-  { value: 'working', label: 'Working' },
-  { value: 'staged', label: 'Staged' },
-  { value: 'branch', label: 'Branch' },
+const DIFF_MODES: { value: DiffMode; labelKey: string }[] = [
+  { value: 'session', labelKey: 'diff.modes.session' },
+  { value: 'working', labelKey: 'diff.modes.working' },
+  { value: 'staged', labelKey: 'diff.modes.staged' },
+  { value: 'branch', labelKey: 'diff.modes.branch' },
 ]
 
 interface ParsedLine {
@@ -450,6 +455,7 @@ const LINE_STYLE: Record<ParsedLine['type'], string> = {
 }
 
 function DiffViewer() {
+  const { t } = useTranslation()
   const [entries, setEntries] = useState<DiffResponse['entries']>([])
   const [mode, setMode] = useState<DiffMode>('working')
   const [loading, setLoading] = useState(false)
@@ -471,14 +477,14 @@ function DiffViewer() {
     } catch (err) {
       console.error('Failed to fetch diff:', err)
       setEntries([])
-      setError('Failed to load changes')
+      setError(t('diff.loadError'))
     } finally {
       setLoading(false)
     }
     // selectedFile is intentionally read from state inside the callback rather
     // than captured, so we don't re-run fetch when the selection changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [t])
 
   useEffect(() => {
     void fetchDiff(mode)
@@ -494,7 +500,7 @@ function DiffViewer() {
       <div className="flex shrink-0 items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-sidebar-bg)] px-3 py-1.5">
         <div className="flex items-center gap-2">
           <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-muted-foreground)]">
-            Changes
+            {t('diff.changes')}
           </span>
           <div className="flex gap-0.5">
             {DIFF_MODES.map((m) => (
@@ -508,7 +514,7 @@ function DiffViewer() {
                     : 'text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]'
                 }`}
               >
-                {m.label}
+                {t(m.labelKey)}
               </button>
             ))}
           </div>
@@ -526,7 +532,7 @@ function DiffViewer() {
             onClick={() => void fetchDiff(mode)}
             className="cursor-pointer text-[10px] font-medium text-[var(--color-muted-foreground)] transition-colors hover:text-[var(--color-foreground)]"
           >
-            ↻ Refresh
+            {t('diff.refresh')}
           </button>
         </div>
       </div>
@@ -539,11 +545,11 @@ function DiffViewer() {
         {/* File list */}
         <div className="max-h-[30%] shrink-0 overflow-y-auto border-b border-[var(--color-border)]">
           {entries.length === 0 && !loading && (
-            <div className="py-6 text-center text-[11px] text-[var(--color-muted-foreground)]">No changes</div>
+            <div className="py-6 text-center text-[11px] text-[var(--color-muted-foreground)]">{t('diff.noChanges')}</div>
           )}
           {loading && (
             <div className="animate-pulse py-6 text-center text-[11px] text-[var(--color-muted-foreground)]">
-              Loading...
+              {t('common.loading')}
             </div>
           )}
           {entries.map((entry) => {

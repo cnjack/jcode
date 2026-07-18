@@ -152,7 +152,7 @@ export function SetupView() {
         onSubmit={complete}
         className="w-full max-w-md rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-md)]"
       >
-        <h1 className="text-lg font-semibold">Welcome to jcode</h1>
+        <h1 className="text-lg font-semibold">{t('setup.welcomeTitle')}</h1>
         <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">
           {t('setup.selectProviderDesc')}
         </p>
@@ -169,7 +169,7 @@ export function SetupView() {
           }}
           className="mt-1 w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-muted)] px-3 py-2 text-sm"
         >
-          <option value="">Select…</option>
+          <option value="">{t('setup.selectEllipsis')}</option>
           {providers.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
@@ -223,13 +223,13 @@ export function SetupView() {
 
         {models.length > 0 && (
           <>
-            <label className="mt-3 block text-xs font-medium text-[var(--color-muted-foreground)]">Model</label>
+            <label className="mt-3 block text-xs font-medium text-[var(--color-muted-foreground)]">{t('setup.modelLabel')}</label>
             <select
               value={model}
               onChange={(e) => setModel(e.target.value)}
               className="mt-1 w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-muted)] px-3 py-2 text-sm"
             >
-              <option value="">Default</option>
+              <option value="">{t('common.default')}</option>
               {models.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.name}

@@ -247,6 +247,7 @@ export default {
       filter: '筛选模型…',
       toggleVisibility: '选择哪些模型显示在模型选择器中',
       noImages: '当前模型不支持图片',
+      noImageInput: '不支持图像输入',
       reasoning: '推理',
       tools: '工具调用',
       images: '图片输入',
@@ -262,6 +263,9 @@ export default {
       remove: '移除目标',
     },
     command: '命令',
+    goalSlashDesc: '开启目标模式 —— 下一条消息将成为目标',
+    workflowBadge: '工作流',
+    attachedImages: '（见附图）',
     stopped: '已停止',
     nextMessageGoal: '下一条消息将成为本次会话的目标',
     durationSeconds: '{n}秒',
@@ -794,6 +798,9 @@ export default {
 
   setup: {
     step: '第 {n} 步：{label}',
+    welcomeTitle: '欢迎使用 jcode',
+    selectEllipsis: '请选择…',
+    modelLabel: '模型',
     chooseProvider: '选择服务商',
     enterApiKey: '输入 API Key',
     allSet: '一切就绪！',
@@ -957,17 +964,32 @@ export default {
     },
   },
 
+  pip: {
+    computerUse: '电脑操控',
+    shots: '{n} 张截图',
+    collapse: '隐藏',
+    expand: '显示',
+    openFull: '放大',
+    shrink: '缩小',
+    unavailable: '截图已过期',
+    latest: '最新',
+  },
+
   rightPanel: {
     plan: '计划',
     files: '文件',
     changes: '变更',
     noTasks: '暂无任务',
+    emptyDir: '空目录',
+    dirError: '无法加载该目录。',
+    fileError: '无法打开 {name}（可能是二进制文件、过大或不可读）。',
   },
 
   diff: {
     changes: '变更',
     refresh: '↻ 刷新',
     noChanges: '无变更',
+    loadError: '加载变更失败',
     selectFile: '选择一个文件以查看变更',
     modes: {
       session: '会话',
@@ -1031,6 +1053,13 @@ export default {
   goal: {
     clearGoal: '清除目标',
     clear: '清除',
+    edit: '编辑',
+    editTitle: '编辑目标',
+    collapse: '收起',
+    started: '开始于',
+    elapsed: '已进行',
+    saveFailed: '保存目标失败',
+    durationHours: '{h}小时 {m}分',
     tokens: '{used} tokens',
     tokensK: '{k}k tokens',
     status: {
