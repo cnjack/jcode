@@ -38,7 +38,7 @@
 | TS-04 MCP 与权限 | 完成 | `c9cb076`、`1aa128e`、`a316830`、`b1b687f`、`3b751db` | MCP、Plan、delegation 和 team mode 边界完成 |
 | TS-05 Prompt 与观测 | 进行中 | `dbe7ca4`、`69ba9ee`、`f905ae2`、`8675a5b` | 使用说明、schema/轨迹指标、凭证文件权限及 Browser 子进程 token 隔离 |
 | TS-06 自动化测试 | 完成 | `77de5fc`、`92e0cb0`、`56fa6eb` | 单元、集成、fixture、routing oracle 与生命周期撤权矩阵 |
-| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e`、`8675a5b` | 精确模型、静态/渐进式对照、安全产物链及 ACP/Web 全矩阵 dispatch 完成；Browser canary 环境故障已修复并通过隔离 Chrome 对照，等待 exact-Kimi 重跑/A-B |
+| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e`、`8675a5b`、`d60000d` | 精确模型、静态/渐进式对照、安全产物链及 ACP/Web 全矩阵 dispatch 完成；Browser/Computer capability-family 披露已实现，等待 exact-Kimi 重跑/A-B |
 | TS-08 30 分钟回归 | 进行中 | `9f2889e` | formal coordinator 与证据合约完成；尚未运行真实全场景长跑 |
 | TS-09 HTML 报告 | 进行中 | `ad55a3b`、`92d442e`、`9f2889e` | 安全、fail-closed 的九门槛报告器、canonical suite 与 supplementary 合约已完成；等待真实 campaign 产物 |
 
@@ -269,8 +269,14 @@ Kimi 硬门槛：
 - 已完成提交：`8675a5b fix(browser): harden managed Chrome operations`（Web canary 产品/driver 修复；未勾选 TS-07.7）。
 - 修复后 Web Browser exact-Kimi canary（仍为非正式）：固定提交 `e559c41a49cc`、jcode SHA-256 `47799786722dd8933fa16701e115efdb0a361096a760ba3b164859381f675473`；static 14.665s 全链路 PASS，Deferred 24.698s 完成真实 open/fill/click/read proof，但严格结果为 1/2。
 - Deferred 诊断：首轮 12 tools、5458 estimated schema tokens（static 24/7612），3 次 `tool_search` 最终匹配全部 4 个所需 Browser tools，bypass=0、same-batch=0；模型先只披露 open/snapshot，因后续 act/read 尚隐藏而重复 `browser_open` 3 次，其中 1 次失败，故 routing/task gate 正确 FAIL，不能用 proof 最终成功掩盖多余/失败调用。
-- 下一步：参考 Codex namespace 的“一次搜索可返回一组同命名空间工具”语义，为 Browser/Computer 等明确的多步 capability family 增加受控组披露；MCP 仍按搜索实际命中逐工具返回，避免整 server schema 爆炸。修复后重跑 canary，TS-07.7 仍未勾选。
-- 待完成：TS-07.7 需解决上述 Deferred 多步披露问题并运行关键用例重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
+- Capability-family 修复：`ToolDescriptor` 新增独立 `DisclosureGroup`；Eino 客户端 `tool_search` 成功命中显式组成员后，把当前 transport/mode/capability gate 后仍为 Deferred 的同组成员稳定追加到 `matches`。扩展结果写入历史，并且只能在下一次模型 generation 生效，因此不会把同 batch 调用合法化。
+- 显式小组严格限定为 Browser `open/snapshot/act/read` 和 Computer `open/snapshot/act/apps`；`browser_eval`、tabs、截图、`computer_read`、截图保持精确披露。MCP 不设置 group，即使同一 canonical server 有 32 个工具也不会命中一个后整 server 展开；首轮 Direct/tool_search 数量和 prompt 均未改变。
+- 权限/生命周期：group map 只从最终有效 Deferred 描述符生成，Hidden、transport/mode/capability-revoked peer 不会被披露或注册；自动披露的 `browser_act` 仍逐次经过 approval，拒绝后 endpoint 0 次；grouped search+target 同 batch 仍记录 bypass。新 Agent 可从已持久化 expanded result 恢复整组，而旧版未扩展历史只恢复原 match。
+- 独立 review：确认 Eino handler 顺序为 ToolSearch → Observation → Disclosure → caller/approval，返回路径由 Disclosure 先扩展、Observation 再记录；未发现阻断、权限泄漏或同批次激活问题。review 提出的历史恢复、grouped same-batch、自动披露写工具审批和同 server MCP 四个测试盲点均已补齐。
+- 测试：`go test ./internal/agent ./internal/command -count=1`；`go test -race ./internal/agent ./internal/command -count=1`；`go test ./... -count=1`（允许 localhost 的环境）；`make lint-go`；`git diff --check`。全部通过，lint `0 issues`。
+- 已完成提交：`d60000d feat(agent): disclose deferred capability groups`（exact-Kimi canary 产品修复；TS-07.7 仍未勾选）。
+- 下一步：先重跑 Browser+Computer exact-Kimi static/deferred canary，再运行 Direct、exact、MCP10/MCP100、Browser、Computer 的小矩阵；全部通过后才启动 formal pass@10。
+- 待完成：TS-07.7 需用 exact-Kimi canary 验证上述 Deferred 多步披露修复，并运行关键用例重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
 
 ## TS-08 至少 30 分钟全场景回归
 
@@ -348,3 +354,4 @@ Kimi 硬门槛：
 | 2026-07-18 | Web Browser canary 修复：macOS Chrome system HOME、HTTP(S) 边界、30s timeout、token 隔离及 recorder ID 映射 | Browser/tools Go、race、Python 13/13；隔离 Chrome smoke 0.96s | `8675a5b` |
 | 2026-07-18 | TS-08/09 formal coordinator：canonical full matrix、固定 binary/suite hash、真实 interval、完整 supplementary 与 partial fail-closed | 独立 review；Python 90/90、fake formal/report 合约通过 | `9f2889e` |
 | 2026-07-18 | Browser 修复后 exact-Kimi canary：Chrome 故障解除；static PASS，Deferred proof 成功但重复 open 严格 FAIL | 1/2；Deferred first-visible=12、bypass=0、same-batch=0 | — |
+| 2026-07-18 | TS-07 capability-family 修复：Browser/Computer 显式组下一轮整体披露；gated peer、审批、same-batch、历史恢复及 MCP 不分组边界 | 两包 normal/race、全量 Go、lint `0 issues`、独立 review 通过 | `d60000d` |
