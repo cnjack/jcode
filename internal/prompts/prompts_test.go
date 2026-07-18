@@ -66,6 +66,25 @@ func TestBasePromptsUseRequestSchemasAsToolSourceOfTruth(t *testing.T) {
 	}
 }
 
+func TestBasePromptsDiscourageRedundantSuccessfulToolCalls(t *testing.T) {
+	prompts := map[string]string{
+		"system": GetSystemPrompt("darwin", t.TempDir(), "local", nil, ""),
+		"plan":   GetPlanSystemPrompt("darwin", t.TempDir(), "local", nil),
+	}
+	for name, prompt := range prompts {
+		t.Run(name, func(t *testing.T) {
+			if !strings.Contains(prompt, "Do not call the same tool again with identical arguments") {
+				t.Fatal("prompt is missing successful tool-call deduplication guidance")
+			}
+			for _, exception := range []string{"incomplete", "polling/retry", "external state has changed"} {
+				if !strings.Contains(prompt, exception) {
+					t.Fatalf("prompt is missing legitimate repeat exception %q", exception)
+				}
+			}
+		})
+	}
+}
+
 func TestBuildEnvDiffBranchChange(t *testing.T) {
 	pwd := t.TempDir()
 	stored := SerializeEnvInfo("darwin", pwd, "local", &utils.EnvInfo{GitBranch: "main"})

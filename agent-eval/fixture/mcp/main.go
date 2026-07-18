@@ -48,6 +48,26 @@ type fixtureCall struct {
 	Marker    string         `json:"marker"`
 }
 
+// fixtureResponse makes successful completion explicit to the model. The
+// campaign evaluates routing, not whether a model can infer completion from an
+// opaque sentinel, so the sentinel remains as evidence while the response also
+// resembles a real structured catalog result.
+type fixtureResponse struct {
+	Status         string        `json:"status"`
+	Complete       bool          `json:"complete"`
+	Authoritative  bool          `json:"authoritative"`
+	RequestID      string        `json:"request_id"`
+	Query          string        `json:"query"`
+	RequestedLimit any           `json:"requested_limit"`
+	Record         fixtureRecord `json:"record"`
+	Marker         string        `json:"marker"`
+}
+
+type fixtureRecord struct {
+	ExternalSKU string `json:"external_sku"`
+	Source      string `json:"source"`
+}
+
 type callLogger struct {
 	mu       sync.Mutex
 	path     string
@@ -124,6 +144,31 @@ func markerFor(toolName string, arguments map[string]any) string {
 	return fmt.Sprintf("JCODE_MCP_FIXTURE_OK:%s:%s:%x", toolName, requestID, sum[:8])
 }
 
+func responseFor(arguments map[string]any, marker string) fixtureResponse {
+	requestID, _ := arguments["request_id"].(string)
+	query, _ := arguments["query"].(string)
+	return fixtureResponse{
+		Status:         "found",
+		Complete:       true,
+		Authoritative:  true,
+		RequestID:      requestID,
+		Query:          query,
+		RequestedLimit: arguments["limit"],
+		Record: fixtureRecord{
+			ExternalSKU: query,
+			Source:      "jcode-toolsearch-fixture",
+		},
+		Marker: marker,
+	}
+}
+
+func resultFor(toolName string, arguments map[string]any, marker string) *mcp.CallToolResult {
+	if toolName != targetToolName {
+		return mcp.NewToolResultText(marker)
+	}
+	return mcp.NewToolResultStructured(responseFor(arguments, marker), marker)
+}
+
 func newFixtureServer(toolCount int, logger *callLogger) (*server.MCPServer, error) {
 	names, err := fixtureToolNames(toolCount)
 	if err != nil {
@@ -144,7 +189,7 @@ func newFixtureServer(toolCount int, logger *callLogger) (*server.MCPServer, err
 			if err := logger.append(toolName, arguments, marker); err != nil {
 				return nil, err
 			}
-			return mcp.NewToolResultText(marker), nil
+			return resultFor(toolName, arguments, marker), nil
 		})
 	}
 	return srv, nil

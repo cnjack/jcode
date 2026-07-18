@@ -324,7 +324,16 @@ class ToolSearchEvalHarnessTest(unittest.TestCase):
             },
             {
                 "type": "tool_result", "name": fixture_tool, "tool_call_id": "f1",
-                "output": "JCODE_MCP_FIXTURE_OK:synthetic", "duration_ms": 12,
+                "output": json.dumps({
+                    "content": [{"type": "text", "text": "JCODE_MCP_FIXTURE_OK:synthetic"}],
+                    "structuredContent": {
+                        "status": "found", "complete": True, "authoritative": True,
+                        "request_id": "req-7", "query": secret,
+                        "record": {"external_sku": secret},
+                        "marker": "JCODE_MCP_FIXTURE_OK:synthetic",
+                    },
+                }),
+                "duration_ms": 12,
             },
             {
                 "type": "tool_observation",

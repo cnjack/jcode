@@ -118,6 +118,44 @@ func TestFixtureServerListsSortedToolsAndLogsTargetCall(t *testing.T) {
 	if err != nil || !strings.Contains(string(rendered), marker) {
 		t.Fatalf("CallTool result=%s error=%v, want marker %q", rendered, err, marker)
 	}
+	if len(result.Content) != 1 {
+		t.Fatalf("CallTool returned %d content items, want 1", len(result.Content))
+	}
+	text, ok := result.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("CallTool content type=%T, want mcp.TextContent", result.Content[0])
+	}
+	if text.Text != marker {
+		t.Fatalf("CallTool fallback text=%q, want exact marker %q", text.Text, marker)
+	}
+	var response fixtureResponse
+	structured, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatalf("Marshal(structured fixture response): %v", err)
+	}
+	if err := json.Unmarshal(structured, &response); err != nil {
+		t.Fatalf("Unmarshal(structured fixture response): %v; value=%s", err, structured)
+	}
+	if response.Status != "found" || !response.Complete || !response.Authoritative {
+		t.Fatalf("fixture completion contract is ambiguous: %#v", response)
+	}
+	if response.Marker != marker || response.Query != "sku-42" || response.RequestID != "req-live" ||
+		response.Record.ExternalSKU != "sku-42" || response.Record.Source != "jcode-toolsearch-fixture" {
+		t.Fatalf("fixture response does not echo the authoritative record: %#v", response)
+	}
+	if got, ok := response.RequestedLimit.(float64); !ok || got != 3 {
+		t.Fatalf("fixture response requested_limit=%#v, want 3", response.RequestedLimit)
+	}
+	distractorArgs := map[string]any{"request_id": "req-distractor", "query": "sku-42", "limit": 3}
+	distractorMarker := markerFor("catalog_lookup_preview", distractorArgs)
+	distractor := resultFor("catalog_lookup_preview", distractorArgs, distractorMarker)
+	if distractor.StructuredContent != nil || len(distractor.Content) != 1 {
+		t.Fatalf("distractor result unexpectedly changed contract: %#v", distractor)
+	}
+	distractorText, ok := distractor.Content[0].(mcp.TextContent)
+	if !ok || distractorText.Text != distractorMarker {
+		t.Fatalf("distractor fallback=%#v, want marker %q", distractor.Content[0], distractorMarker)
+	}
 	secondArguments := map[string]any{"request_id": "req-live-2", "query": "sku-43", "limit": 1}
 	if _, err := cli.CallTool(t.Context(), mcp.CallToolRequest{
 		Request: mcp.Request{Method: "tools/call"},

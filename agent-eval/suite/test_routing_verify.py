@@ -45,8 +45,23 @@ def search_result(target=TARGET):
     return json.dumps({"matches": [target]}, separators=(",", ":"))
 
 
-def fixture_result(marker):
-    return json.dumps({"content": [{"type": "text", "text": marker}]}, separators=(",", ":"))
+def fixture_result(marker, arguments=ARGS):
+    return json.dumps({
+        "content": [{"type": "text", "text": marker}],
+        "structuredContent": {
+            "status": "found",
+            "complete": True,
+            "authoritative": True,
+            "request_id": arguments["request_id"],
+            "query": arguments["query"],
+            "requested_limit": arguments["limit"],
+            "record": {
+                "external_sku": arguments["query"],
+                "source": "jcode-toolsearch-fixture",
+            },
+            "marker": marker,
+        },
+    }, separators=(",", ":"))
 
 
 class RoutingVerifierTest(unittest.TestCase):
