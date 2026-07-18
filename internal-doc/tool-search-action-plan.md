@@ -38,7 +38,7 @@
 | TS-04 MCP 与权限 | 完成 | `c9cb076`、`1aa128e`、`a316830`、`b1b687f`、`3b751db` | MCP、Plan、delegation 和 team mode 边界完成 |
 | TS-05 Prompt 与观测 | 进行中 | `dbe7ca4`、`69ba9ee`、`f905ae2`、`8675a5b`、`92c2f31` | 使用说明、成功调用去重规则、schema/轨迹指标、凭证文件权限及 Browser 子进程 token 隔离 |
 | TS-06 自动化测试 | 完成 | `77de5fc`、`92e0cb0`、`56fa6eb` | 单元、集成、fixture、routing oracle 与生命周期撤权矩阵 |
-| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e`、`8675a5b`、`d60000d`、`8c980b1`、`207b313`、`7530b38`、`92c2f31` | Browser/Computer canary 4/4；MCP100 completion 歧义与成功调用重复规则已修复，等待独立 repeat canary 与 formal pass@10 |
+| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e`、`8675a5b`、`d60000d`、`8c980b1`、`207b313`、`7530b38`、`92c2f31` | MCP100 Deferred repeat 的 tool routing 10/10，旧 final marker oracle 仅 7/10；等待 user-facing oracle 修复与 formal pass@10 |
 | TS-08 30 分钟回归 | 进行中 | `9f2889e`、`8c980b1` | formal coordinator、deterministic `jcode_eval` 构建与证据合约完成；尚未运行真实全场景长跑 |
 | TS-09 HTML 报告 | 进行中 | `ad55a3b`、`92d442e`、`9f2889e`、`8c980b1` | 安全、fail-closed 的九门槛报告器、canonical suite、build-tag 与 supplementary 合约已完成；等待真实 campaign 产物 |
 
@@ -297,7 +297,8 @@ Kimi 硬门槛：
 - 安全/兼容：Eino MCP adapter 会把完整 `CallToolResult` 传给模型；routing verifier 继续递归匹配 marker，required max=1 未放宽。新增真实 structured wire-shape 与嵌套 secret payload 的 sanitizer 回归；trajectory 仍只保存 status/duration/output bytes，不保存 result payload。独立审查无 blocker。
 - 测试：Prompt/fixture focused 与 race、Agent Eval Python 91/91、`py_compile`、全量 `go test ./... -count=1`、`make lint-go`、`git diff --check` 全部通过，lint `0 issues`。
 - 已完成提交：`92c2f31 fix(eval): make MCP completion unambiguous`（MCP100 loop 诱因修复；TS-07.7 仍未勾选）。
-- 下一步：先对 MCP100 Deferred 独立重复运行，要求至少 9/10 严格 PASS 且每次 target call 恰好 1；若仍出现成功调用循环，再实现 turn-scoped LoopGuard。通过后重跑跨类小矩阵，再启动 formal pass@10。
+- MCP100 Deferred 独立 10-repeat：10 条均在 6.153～10.224s 正常 `end_turn`，每条严格为一次 `tool_search` + 一次目标 MCP；routing、MCP external verifier、contracts、artifact safety 全部 10/10，bypass=0、same-batch=0、重复 target=0，证明 142-call loop 已消失。旧 task oracle 只有 7/10，三条失败唯一未过项均为 `final_text_contains` 内部 marker；三条仍有 252～328 字符自然答复，且工具真值全部通过。
+- Oracle 结论：要求用户可见答复复述内部 `JCODE_MCP_FIXTURE_OK` 与产品行为无关，并会惩罚自然呈现 structured record 的正确答案。下一步把四个 MCP case 的 final oracle 改为对应外部 SKU；endpoint marker 仍由 raw session + 0600 fixture log + deterministic recomputation 三方交叉验证，required max=1 继续严格拒绝重复调用。修复后重新运行独立 repeat，再重跑跨类小矩阵与 formal pass@10。
 - 待完成：TS-07.7 需用 exact-Kimi canary 验证上述 Deferred 多步披露修复，并运行关键用例重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
 
 ## TS-08 至少 30 分钟全场景回归
@@ -388,3 +389,4 @@ Kimi 硬门槛：
 | 2026-07-18 | exact-list ceiling 调整到 8，覆盖最大内建 capability family，9+ 仍 fail closed | agent normal/race、全量 Go、lint `0 issues`、6/8/9-name 边界通过 | `7530b38` |
 | 2026-07-18 | 第二轮相同 12-job 小矩阵严格 11/12；Computer Deferred 修复通过，唯一失败转为 MCP100 Deferred 相同成功调用 142 次后 360.1s 超时 | search/select、披露和参数均正确，bypass/same-batch/failed result=0；routing 与外部 fixture oracle 严格拒绝重复调用 | — |
 | 2026-07-18 | MCP target 返回明确 structured completion/authoritative record 且保留 marker；System/Plan 加入成功结果去重规则 | focused/race、Python 91/91、全量 Go、lint `0 issues`、独立 review 通过 | `92c2f31` |
+| 2026-07-18 | MCP100 Deferred 独立 10-repeat：工具 routing/MCP/contracts/artifact 10/10，旧 final marker task oracle 7/10 | 每条 search=1、target=1、6.153～10.224s、无 loop/bypass/same-batch；三条仅未复述内部 marker | — |
