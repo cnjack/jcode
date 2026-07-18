@@ -17,6 +17,7 @@ import argparse
 import concurrent.futures as cf
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -26,6 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import verify  # noqa: E402
+import routing_verify  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 EVAL_ROOT = HERE.parent
@@ -60,6 +62,9 @@ DEFAULT_REPEATS = {
 }
 
 _print_lock = threading.Lock()
+
+MCP_FIXTURE_TOOL_COUNTS = {10, 30, 50, 100}
+MCP_FIXTURE_SERVER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 
 def log(msg):
@@ -136,6 +141,62 @@ def seed_fixtures(box: Path, fixtures: dict):
         fp = box / rel
         fp.parent.mkdir(parents=True, exist_ok=True)
         fp.write_text(content)
+
+
+def inject_mcp_fixture(base_home_config: dict | None, case: dict,
+                       fixture_path: str | None, rundir: Path):
+    """Return (home_config, runtime metadata) for a case-local stdio fixture.
+
+    The case controls only a server label and catalog size. Command, args, and
+    log path come from the orchestrator, so a declarative case cannot smuggle
+    provider credentials, headers, environment variables, or another command
+    into the generated MCP config.
+    """
+    fixture = case.get("mcp_fixture")
+    home_config = json.loads(json.dumps(base_home_config or {}))
+    if fixture is None:
+        return home_config, None
+    if not isinstance(fixture, dict):
+        raise ValueError("mcp_fixture must be an object")
+    unknown = sorted(set(fixture) - {"server_name", "tool_count"})
+    if unknown:
+        raise ValueError(f"mcp_fixture has unsupported fields: {unknown}")
+    if not fixture_path:
+        raise ValueError("case requires mcp_fixture but --mcp-fixture was not provided")
+
+    binary = Path(fixture_path).resolve()
+    if not binary.is_file() or not os.access(binary, os.X_OK):
+        raise ValueError(f"MCP fixture is not an executable file: {binary}")
+    server_name = fixture.get("server_name", "toolsearch_fixture")
+    if not isinstance(server_name, str) or not MCP_FIXTURE_SERVER_RE.fullmatch(server_name):
+        raise ValueError("mcp_fixture.server_name must be a safe 1-64 character identifier")
+    tool_count = fixture.get("tool_count", 10)
+    if not isinstance(tool_count, int) or tool_count not in MCP_FIXTURE_TOOL_COUNTS:
+        raise ValueError("mcp_fixture.tool_count must be one of 10, 30, 50, 100")
+
+    call_log = (rundir / "mcp_fixture_calls.jsonl").resolve()
+    call_log.parent.mkdir(parents=True, exist_ok=True)
+    call_log.touch(mode=0o600, exist_ok=True)
+    servers = home_config.get("mcp_servers") or {}
+    if not isinstance(servers, dict):
+        raise ValueError("home_config.mcp_servers must be an object")
+    servers = json.loads(json.dumps(servers))
+    if server_name in servers:
+        raise ValueError(f"mcp_fixture server {server_name!r} collides with home_config")
+    server_config = {
+        "type": "stdio",
+        "command": str(binary),
+        "args": ["--count", str(tool_count), "--log", str(call_log)],
+    }
+    servers[server_name] = server_config
+    home_config["mcp_servers"] = servers
+    runtime = {
+        "server_name": server_name,
+        "tool_count": tool_count,
+        "call_log": call_log,
+        "server_config": server_config,
+    }
+    return home_config, runtime
 
 
 def contract_checks(result: dict, events_path: Path, jcode_stderr: Path, usage_tot: dict):
@@ -215,7 +276,8 @@ def event_kind_counts(events_path: Path):
     return counts, su_types, parse_errors
 
 
-def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, max_iter, scale_timeout):
+def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, mcp_fixture_path,
+            max_iter, scale_timeout):
     run_id = f"{case['id']}__{model_label}__r{rep}"
     rundir = runs_dir / run_id
     if rundir.exists():
@@ -226,7 +288,10 @@ def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, max_iter, 
     box.mkdir(parents=True)
 
     model_id = MODELS[model_label]["id"]
-    build_home(rundir / "home", model_id, max_iter, case.get("home_config"))
+    home_config, mcp_fixture = inject_mcp_fixture(
+        case.get("home_config"), case, mcp_fixture_path, rundir,
+    )
+    build_home(rundir / "home", model_id, max_iter, home_config)
     seed_fixtures(box, case.get("fixtures", {}))
     seed_home_fixtures(str(bin_path), rundir / "home", box, case.get("home_fixtures", {}))
 
@@ -254,6 +319,7 @@ def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, max_iter, 
     harness_rc = None
     result = {}
     step_records = []
+    prompt_session_ids = []
     prompt_contract_sets = []
     last_events, last_stderr = events_path, stderr_path
     for i, step in enumerate(steps, 1):
@@ -307,9 +373,13 @@ def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, max_iter, 
         usage_now, _ = read_usage(rundir / "home")
         prompt_contract_sets.append(
             contract_checks(result, step_events, step_stderr, usage_now))
+        session_id = result.get("sessionId")
+        if isinstance(session_id, str) and session_id:
+            prompt_session_ids.append(session_id)
         step_records.append({"step": i, "kind": "prompt",
                              "stop_reason": result.get("stop_reason"),
                              "tool_calls": result.get("tool_calls", 0),
+                             "session_id": session_id,
                              "final_text": (result.get("final_text", "") or "")[:1000]})
         if result.get("stop_reason") not in TERMINAL_STOP:
             break  # later steps are meaningless after a broken turn
@@ -332,6 +402,38 @@ def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, max_iter, 
     usage_tot, usage_events = read_usage(rundir / "home")
     ctx["usage_total"] = usage_tot
     ver = verify.verify_case(case, ctx)
+    routing = None
+    if "routing" in case:
+        if len(prompt_session_ids) != 1:
+            routing = {
+                "passed": False,
+                "counts": {},
+                "violations": [{
+                    "type": "routing_session_count",
+                    "detail": f"routing cases require exactly one prompt session, got {len(prompt_session_ids)}",
+                }],
+            }
+        elif mcp_fixture is None:
+            routing = {
+                "passed": False,
+                "counts": {},
+                "violations": [{
+                    "type": "routing_fixture_missing",
+                    "detail": "routing case has no mcp_fixture configuration",
+                }],
+            }
+        else:
+            session_path = rundir / "home" / ".jcode" / "sessions" / f"{prompt_session_ids[0]}.json"
+            routing = routing_verify.verify_routing(
+                session_path, mcp_fixture["call_log"], case["routing"],
+            )
+        route_types = [v.get("type") for v in routing.get("violations", [])]
+        ver["oracles"].append({
+            "type": "routing",
+            "passed": bool(routing.get("passed")),
+            "detail": f"counts={routing.get('counts', {})} violations={route_types}",
+        })
+        ver["passed"] = bool(ver["passed"] and routing.get("passed"))
     # contracts: every prompt step must satisfy the ACP contract, not just the last
     if prompt_contract_sets:
         contracts = []
@@ -397,6 +499,13 @@ def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, max_iter, 
         "harness_rc": harness_rc,
         "debug_tail": dbg_tail,
         "session_id": result.get("sessionId"),
+        "routing": routing,
+        "routing_passed": routing.get("passed") if routing else None,
+        "mcp_fixture": ({
+            "server_name": mcp_fixture["server_name"],
+            "tool_count": mcp_fixture["tool_count"],
+            "call_log": mcp_fixture["call_log"].name,
+        } if mcp_fixture else None),
     }
     (rundir / "record.json").write_text(json.dumps(record, indent=2))
 
@@ -431,6 +540,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bin", required=True)
     ap.add_argument("--harness", required=True)
+    ap.add_argument("--mcp-fixture", default="",
+                    help="path to the deterministic stdio MCP fixture binary")
     ap.add_argument("--runs-dir", required=True)
     ap.add_argument("--models", default="glm-5.1,glm-5.2")
     ap.add_argument("--cases", default="", help="comma-separated case ids (default all)")
@@ -463,6 +574,13 @@ def main():
     runs_dir.mkdir(parents=True, exist_ok=True)
     bin_path = str(Path(args.bin).resolve())
     harness_path = str(Path(args.harness).resolve())
+    mcp_fixture_path = str(Path(args.mcp_fixture).resolve()) if args.mcp_fixture else None
+
+    if any("mcp_fixture" in case for case in cases) and not mcp_fixture_path:
+        ap.error("selected cases require --mcp-fixture")
+    if mcp_fixture_path and (not Path(mcp_fixture_path).is_file()
+                             or not os.access(mcp_fixture_path, os.X_OK)):
+        ap.error(f"--mcp-fixture is not executable: {mcp_fixture_path}")
 
     jobs = []
     for m in models:
@@ -483,7 +601,7 @@ def main():
     index_path = runs_dir / "index.jsonl"
     with index_path.open("w") as idx:
         with cf.ThreadPoolExecutor(max_workers=args.workers) as ex:
-            futs = {ex.submit(run_one, c, m, r, runs_dir, bin_path, harness_path,
+            futs = {ex.submit(run_one, c, m, r, runs_dir, bin_path, harness_path, mcp_fixture_path,
                               args.max_iter, args.timeout_scale): (c, m, r)
                     for (c, m, r) in jobs}
             for fut in cf.as_completed(futs):
@@ -499,7 +617,7 @@ def main():
                 idx.write(json.dumps({k: rec.get(k) for k in
                           ["run_id", "case_id", "model", "tier", "task_passed",
                            "contracts_passed", "stop_reason", "tool_calls",
-                           "wall_s"]}) + "\n")
+                           "wall_s", "routing_passed"]}) + "\n")
                 idx.flush()
 
     passed = sum(1 for r in records if r.get("task_passed"))
