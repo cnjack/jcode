@@ -31,9 +31,9 @@
 
 | 阶段 | 状态 | 提交 | 说明 |
 |---|---|---|---|
-| TS-00 文档与基线 | 完成 | 本提交 | 基线 `ca4c8ba6b709`，完整 Go 测试通过 |
-| TS-01 ToolPlan 核心 | 未开始 | — | 统一 Direct/Deferred/Hidden 分类 |
-| TS-02 Eino middleware | 未开始 | — | 接入客户端 ToolSearch |
+| TS-00 文档与基线 | 完成 | `a1d0b13` | 基线 `ca4c8ba6b709`，完整 Go 测试通过 |
+| TS-01 ToolPlan 核心 | 完成 | 本提交 | 分类、校验、稳定排序与 runtime 安全边界 |
+| TS-02 Eino middleware | 进行中 | — | 接入客户端 ToolSearch |
 | TS-03 Transport 接入 | 未开始 | — | TUI/Web/ACP 统一使用 ToolPlan |
 | TS-04 MCP 与权限 | 未开始 | — | canonical name、审批和安全边界 |
 | TS-05 Prompt 与观测 | 未开始 | — | 使用说明、schema/轨迹指标 |
@@ -54,15 +54,15 @@
 - 环境：`go1.26.4 darwin/arm64`；`github.com/cloudwego/eino v0.9.9`。
 - 测试：`git diff --check`；`go test ./...`。
 - 结果：通过。沙箱内运行因现有 localhost/Go cache 权限受限失败；允许 localhost 的沙箱外重跑完整通过。
-- 提交：本提交；精确 SHA 将在下一次进度更新中回填。
+- 提交：`a1d0b13 docs: track tool search rollout plan`。
 
 ## TS-01 ToolPlan 核心
 
-- [ ] TS-01.1 新增中心化 `ToolDescriptor` / `ToolPlan`。
-- [ ] TS-01.2 支持 `Direct`、`Deferred`、`Hidden`，并预留模型专用暴露等级。
-- [ ] TS-01.3 描述 transport、mode、source、bundle、aliases、enabled predicate、approval class 和真实 endpoint。
-- [ ] TS-01.4 校验 Direct/Deferred 不相交、名称唯一、ToolInfo 非空、`tool_search` 保留名和稳定排序。
-- [ ] TS-01.5 编写表驱动测试覆盖 transport × mode × capability 分类。
+- [x] TS-01.1 新增中心化 `ToolDescriptor` / `ToolPlan`。
+- [x] TS-01.2 支持 `Direct`、`Deferred`、`Hidden`，并预留模型专用暴露等级。
+- [x] TS-01.3 描述 transport、mode、source、bundle、aliases、enabled predicate、approval class 和真实 endpoint。
+- [x] TS-01.4 校验 Direct/Deferred 不相交、名称唯一、ToolInfo 非空、`tool_search` 保留名和稳定排序。
+- [x] TS-01.5 编写表驱动测试覆盖 transport × mode × capability 分类。
 
 普通模式首轮目标不超过 12 个：
 
@@ -74,9 +74,11 @@ Plan 模式首轮目标：
 
 完成证据：
 
-- 测试：待填写
-- 结果：待填写
-- 提交：待填写
+- 实现：`internal/agent/tool_plan.go`、`internal/agent/tool_plan_test.go`。
+- 安全边界：transport/mode/capability gate 产生的 Hidden 工具不进入 runtime registry，防止模型猜名绕过。
+- 测试：`go test ./internal/agent -count=1`；`go test -race ./internal/agent -run '^TestToolPlan' -count=1`；`go test ./...`；`make lint-go`。
+- 结果：全部通过；race 无异常；lint `0 issues`。
+- 提交：本提交；精确 SHA 将在下一次进度更新中回填。
 
 ## TS-02 Eino ToolSearch middleware
 
@@ -216,3 +218,4 @@ Kimi 硬门槛：
 | 时间 | 更新 | 测试 | 提交 |
 |---|---|---|---|
 | 2026-07-18 | 完成 TS-00：创建清单并采集基线 | `git diff --check`、`go test ./...` 通过 | 本提交 |
+| 2026-07-18 | 完成 TS-01：ToolPlan 分类、校验、稳定排序和 Hidden runtime 边界 | 包测试、race、全量 Go、lint 通过 | 本提交 |
