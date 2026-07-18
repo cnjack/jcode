@@ -94,8 +94,9 @@ func TestBuildCommandToolPlanMatrix(t *testing.T) {
 }
 
 func TestBuildCommandToolPlanMCPIsDeferredAndNormalOnly(t *testing.T) {
-	internaltools.RegisterMCPToolServer("catalog_mcp_alpha", "alpha-server")
-	mcp := catalogTools("catalog_mcp_zeta", "catalog_mcp_alpha")
+	internaltools.RegisterMCPToolIdentity("mcp__alpha_server__catalog_alpha", "alpha-server", "catalog-alpha")
+	internaltools.RegisterMCPToolIdentity("mcp__zeta_server__catalog_zeta", "zeta-server", "catalog-zeta")
+	mcp := catalogTools("mcp__zeta_server__catalog_zeta", "mcp__alpha_server__catalog_alpha")
 
 	normal, err := buildCommandToolPlan(context.Background(), catalogTools("read"), mcp,
 		agent.ToolTransportWeb, agent.ToolModeNormal)
@@ -103,7 +104,7 @@ func TestBuildCommandToolPlanMCPIsDeferredAndNormalOnly(t *testing.T) {
 		t.Fatalf("normal plan error = %v", err)
 	}
 	assertCatalogDescriptorNames(t, "deferred MCP", normal.Deferred,
-		[]string{"catalog_mcp_alpha", "catalog_mcp_zeta"})
+		[]string{"mcp__alpha_server__catalog_alpha", "mcp__zeta_server__catalog_zeta"})
 	alpha := normal.Deferred[0]
 	if alpha.Source != "mcp:alpha-server" || alpha.Bundle != "mcp.alpha-server" ||
 		alpha.ApprovalClass != "mcp_unknown" {
@@ -117,7 +118,7 @@ func TestBuildCommandToolPlanMCPIsDeferredAndNormalOnly(t *testing.T) {
 		t.Fatalf("plan plan error = %v", err)
 	}
 	assertCatalogDescriptorNames(t, "hidden MCP", planning.Hidden,
-		[]string{"catalog_mcp_alpha", "catalog_mcp_zeta"})
+		[]string{"mcp__alpha_server__catalog_alpha", "mcp__zeta_server__catalog_zeta"})
 	assertCatalogToolNames(t, "plan runtime", planning.AllRuntimeTools(), []string{"read"})
 }
 

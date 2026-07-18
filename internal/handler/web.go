@@ -234,10 +234,10 @@ func extractToolDisplayInfo(name, argsJSON string) *ToolDisplayInfo {
 		info.Icon = "computer"
 		info.Category = "context"
 	default:
-		if server, ok := tools.MCPServerForTool(name); ok {
+		if displayName, ok := tools.MCPDisplayNameForTool(name); ok {
 			// MCP tool, codex-style: "server.tool" title + compact-JSON args
 			// subtitle ("Calling server.tool(args)").
-			info.Title = server + "." + name
+			info.Title = displayName
 			info.Icon = "mcp"
 			info.Category = ""
 			info.Subtitle = compactToolArgs(argsJSON, 80)
