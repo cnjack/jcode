@@ -149,7 +149,7 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 func (s *interactiveState) buildPlanTools() []tool.BaseTool {
 	plan := []tool.BaseTool{
 		s.env.NewReadTool(),
-		s.env.NewExecuteTool(nil),
+		s.env.NewPlanExecuteTool(),
 		s.env.NewGrepTool(),
 		s.env.NewTodoWriteTool(), s.env.NewTodoReadTool(),
 		s.env.NewGoalSetTool(), s.env.NewGoalGetTool(), s.env.NewGoalUpdateTool(),

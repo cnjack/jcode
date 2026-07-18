@@ -169,6 +169,11 @@ func TestRequestApproval_ShellOperatorInjection(t *testing.T) {
 		`{"command": "lsof"}`,
 		`{"command": "env rm -rf x"}`,
 		`{"command": "git difftool"}`,
+		`{"command": "git diff --output=/tmp/result"}`,
+		`{"command": "git diff --out=/tmp/result"}`,
+		`{"command": "git diff --ext-diff"}`,
+		`{"command": "git diff --textconv"}`,
+		`{"command": "git -c diff.external=evil diff"}`,
 	}
 	for _, args := range mustPrompt {
 		if approved, err := s.RequestApproval(ctx, "execute", args); err == nil {

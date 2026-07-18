@@ -534,7 +534,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		buildPlanTools := func() []tool.BaseTool {
 			plan := []tool.BaseTool{
 				tenv.NewReadTool(),
-				tenv.NewExecuteTool(nil),
+				tenv.NewPlanExecuteTool(),
 				tenv.NewGrepTool(),
 				tenv.NewTodoWriteTool(), tenv.NewTodoReadTool(),
 				tenv.NewGoalSetTool(), tenv.NewGoalGetTool(), tenv.NewGoalUpdateTool(),

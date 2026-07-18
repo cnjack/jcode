@@ -43,22 +43,28 @@ func (e *Env) NewBrowserPlanTools() []tool.BaseTool {
 		return nil
 	}
 	return []tool.BaseTool{
-		&browserTool{env: e, info: browserOpenInfo()},
-		&browserTool{env: e, info: browserSnapshotInfo()},
-		&browserTool{env: e, info: browserScreenshotInfo()},
-		&browserTool{env: e, info: browserReadInfo()},
-		&browserTool{env: e, info: browserTabsInfo()},
+		&browserTool{env: e, info: browserPlanOpenInfo(), planOnly: true},
+		&browserTool{env: e, info: browserSnapshotInfo(), planOnly: true},
+		&browserTool{env: e, info: browserScreenshotInfo(), planOnly: true},
+		&browserTool{env: e, info: browserReadInfo(), planOnly: true},
+		&browserTool{env: e, info: browserPlanTabsInfo(), planOnly: true},
 	}
 }
 
 type browserTool struct {
-	env  *Env
-	info *schema.ToolInfo
+	env      *Env
+	info     *schema.ToolInfo
+	planOnly bool
 }
 
 func (t *browserTool) Info(_ context.Context) (*schema.ToolInfo, error) { return t.info, nil }
 
 func (t *browserTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
+	if t.planOnly {
+		if err := validatePlanBrowserCall(t.info.Name, argsJSON); err != nil {
+			return "", err
+		}
+	}
 	sess, err := t.env.BrowserSession(ctx)
 	if err != nil {
 		return "", err
@@ -69,6 +75,35 @@ func (t *browserTool) InvokableRun(ctx context.Context, argsJSON string, _ ...to
 		return "Browser control was interrupted (the extension or user took over). Stopping browser work.", nil
 	}
 	return out, err
+}
+
+func validatePlanBrowserCall(name, argsJSON string) error {
+	switch name {
+	case "browser_open":
+		var input struct {
+			NewTab bool `json:"new_tab"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &input); err != nil {
+			return fmt.Errorf("invalid browser_open args: %w", err)
+		}
+		if input.NewTab {
+			return fmt.Errorf("browser_open new_tab=true is not allowed in Plan mode")
+		}
+	case "browser_tabs":
+		var input struct {
+			Op string `json:"op"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &input); err != nil {
+			return fmt.Errorf("invalid browser_tabs args: %w", err)
+		}
+		switch input.Op {
+		case "", "list", "select":
+			return nil
+		default:
+			return fmt.Errorf("browser_tabs op %q is not allowed in Plan mode; use list or select", input.Op)
+		}
+	}
+	return nil
 }
 
 func dispatchBrowser(ctx context.Context, env *Env, sess *browser.Session, name, argsJSON string) (string, error) {
@@ -251,6 +286,17 @@ func browserOpenInfo() *schema.ToolInfo {
 	}
 }
 
+func browserPlanOpenInfo() *schema.ToolInfo {
+	return &schema.ToolInfo{
+		Name: "browser_open",
+		Desc: "Open a URL in the currently controlled browser tab and return a snapshot header. " +
+			"Plan mode cannot create a new tab.",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"url": strParam("The URL to open in the active tab (http/https).", true),
+		}),
+	}
+}
+
 func browserSnapshotInfo() *schema.ToolInfo {
 	return &schema.ToolInfo{
 		Name: "browser_snapshot",
@@ -307,6 +353,23 @@ func browserTabsInfo() *schema.ToolInfo {
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"op":     strParam("list (default), new, select, claim, close.", false),
 			"tab_id": strParam("Tab id (short prefix ok) for select/claim/close.", false),
+		}),
+	}
+}
+
+func browserPlanTabsInfo() *schema.ToolInfo {
+	return &schema.ToolInfo{
+		Name: "browser_tabs",
+		Desc: "Inspect or select an existing browser tab in Plan mode. " +
+			"op=list shows tabs and op=select switches to an existing controlled tab.",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"op": {
+				Type:     schema.String,
+				Desc:     "list (default) or select.",
+				Enum:     []string{"list", "select"},
+				Required: false,
+			},
+			"tab_id": strParam("Existing tab id (short prefix ok) for select.", false),
 		}),
 	}
 }

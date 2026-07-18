@@ -7,7 +7,23 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
+
+type countingExecuteExecutor struct {
+	Executor
+	calls int
+}
+
+func (e *countingExecuteExecutor) Exec(
+	context.Context,
+	string,
+	string,
+	time.Duration,
+) (string, string, error) {
+	e.calls++
+	return "ok", "", nil
+}
 
 // execToolRun runs the execute tool against a real LocalExecutor.
 func execToolRun(t *testing.T, args string) string {
@@ -49,6 +65,64 @@ func TestExecute_MissingCommand_Hint(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "Provide the command parameter") {
 		t.Fatalf("expected missing-param hint, got: %s", err.Error())
+	}
+}
+
+func TestPlanExecuteRejectsBackgroundAndNonReadOnlyCommands(t *testing.T) {
+	env := NewEnv(t.TempDir(), runtime.GOOS+"/"+runtime.GOARCH)
+	executor := &countingExecuteExecutor{Executor: env.Exec}
+	env.Exec = executor
+	planExecute := env.NewPlanExecuteTool()
+	if _, err := planExecute.InvokableRun(context.Background(), `{"command":"pwd"}`); err != nil {
+		t.Fatalf("Plan execute rejected allowlisted command: %v", err)
+	}
+	if executor.calls != 1 {
+		t.Fatalf("allowlisted command reached executor %d times, want 1", executor.calls)
+	}
+
+	for _, args := range []string{
+		`{"command":"ls","background":true}`,
+		`{"command":"touch changed"}`,
+		`{"command":"git diff --output=/tmp/leak"}`,
+		`{"command":"git diff --ext-diff"}`,
+		`{"command":"ls; touch changed"}`,
+	} {
+		if _, err := planExecute.InvokableRun(context.Background(), args); err == nil {
+			t.Errorf("Plan execute accepted %s", args)
+		}
+	}
+	if executor.calls != 1 {
+		t.Fatalf("rejected Plan commands reached executor; total calls=%d, want 1", executor.calls)
+	}
+}
+
+func TestPlanExecuteSchemaOmitsBackground(t *testing.T) {
+	env := NewEnv(t.TempDir(), runtime.GOOS+"/"+runtime.GOARCH)
+	planInfo, err := env.NewPlanExecuteTool().Info(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	planSchema, err := planInfo.ToJSONSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if planSchema.Properties.Value("background") != nil {
+		t.Fatal("Plan execute schema advertises background execution")
+	}
+	if planSchema.Properties.Value("command") == nil {
+		t.Fatal("Plan execute schema is missing command")
+	}
+
+	normalInfo, err := env.NewExecuteTool(nil).Info(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalSchema, err := normalInfo.ToJSONSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalSchema.Properties.Value("background") == nil {
+		t.Fatal("normal execute schema unexpectedly lost background")
 	}
 }
 

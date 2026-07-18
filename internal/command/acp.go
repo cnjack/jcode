@@ -532,7 +532,7 @@ func (a *acpAgent) buildAgentSession(
 	// complete/block an active goal here too.
 	planTools := []tool.BaseTool{
 		env.NewReadTool(),
-		env.NewExecuteTool(nil),
+		env.NewPlanExecuteTool(),
 		env.NewGrepTool(),
 		env.NewTodoWriteTool(), env.NewTodoReadTool(),
 		env.NewGoalSetTool(), env.NewGoalGetTool(), env.NewGoalUpdateTool(),

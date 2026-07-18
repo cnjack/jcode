@@ -267,59 +267,6 @@ const (
 	decisionPromptExternal
 )
 
-// safeForegroundCommands are the bare command names that, run in the
-// foreground with no shell operators, only read state and never execute a
-// caller-supplied program. They are auto-approved in MANUAL mode.
-var safeForegroundCommands = map[string]bool{
-	"ls":    true,
-	"pwd":   true,
-	"cat":   true,
-	"echo":  true,
-	"which": true,
-}
-
-// safeGitSubcommands are read-only git subcommands that are auto-approved.
-var safeGitSubcommands = map[string]bool{
-	"status": true,
-	"log":    true,
-	"diff":   true,
-	"show":   true,
-}
-
-// isSafeCommand reports whether a foreground shell command is safe to run
-// without approval. It rejects anything containing shell operators that could
-// chain, redirect, or substitute additional commands (so a "safe" prefix can
-// no longer smuggle a destructive payload), then allows only an explicit set
-// of read-only programs matched on the whole command word (not a prefix, so
-// "lsof" no longer matches "ls").
-func isSafeCommand(cmd string) bool {
-	cmd = strings.TrimSpace(cmd)
-	if cmd == "" {
-		return false
-	}
-	// Reject command chaining / redirection / substitution. Any of these means
-	// the command can run something other than its leading program.
-	if strings.ContainsAny(cmd, ";&|<>`\n\r()") {
-		return false
-	}
-	if strings.Contains(cmd, "$(") || strings.Contains(cmd, "${") {
-		return false
-	}
-	fields := strings.Fields(cmd)
-	prog := fields[0]
-	switch {
-	case safeForegroundCommands[prog]:
-		return true
-	case prog == "env":
-		// Bare `env` prints the environment; `env CMD ...` executes CMD, so it
-		// is only safe with no arguments.
-		return len(fields) == 1
-	case prog == "git":
-		return len(fields) >= 2 && safeGitSubcommands[fields[1]]
-	}
-	return false
-}
-
 // decide evaluates a single tool call against the MANUAL-mode rules and returns
 // how it should be handled. It is the single source of truth shared by the
 // primary approval path and the teammate approval path so the two cannot drift.
@@ -372,7 +319,7 @@ func (s *ApprovalState) decide(toolName, toolArgs string) approvalDecision {
 			if input.Background {
 				return decisionPrompt
 			}
-			if isSafeCommand(input.Command) {
+			if internaltools.IsReadOnlyShellCommand(input.Command) {
 				return decisionAutoApprove
 			}
 		}
