@@ -654,6 +654,13 @@ func isAllowedWebOrigin(r *http.Request) bool {
 	return false
 }
 
+// isBrowserExtensionWS reports whether r is the Chrome extension's WS handshake.
+// The bridge authenticates via its own pairing token (see isAuthExempt), so the
+// Origin gate must not 403 it merely for carrying a chrome-extension:// Origin.
+func isBrowserExtensionWS(r *http.Request) bool {
+	return r.Method == http.MethodGet && r.URL.Path == "/api/browser/ext/ws"
+}
+
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
@@ -661,7 +668,15 @@ func corsMiddleware(next http.Handler) http.Handler {
 		// page can send a "simple" no-cors POST whose response is unreadable but
 		// whose side effect still happens. Reject an untrusted browser Origin before
 		// any API handler can mutate config, start an agent, or control the Mac.
-		if origin != "" && !isAllowedWebOrigin(r) {
+		//
+		// Exception: the extension WS endpoint. Chrome extensions always send
+		// `Origin: chrome-extension://<id>` on the WS handshake, which is never
+		// same-origin, so this gate would otherwise 403 the bridge before its own
+		// pairing-token auth runs (mirrors the isAuthExempt carve-out). This
+		// endpoint only ever upgrades a WS; it performs no config/agent mutation on
+		// a cross-origin simple request, so the exemption does not reopen the
+		// drive-by-POST vector this middleware exists to close.
+		if origin != "" && !isAllowedWebOrigin(r) && !isBrowserExtensionWS(r) {
 			http.Error(w, "cross-origin request denied", http.StatusForbidden)
 			return
 		}
