@@ -1,9 +1,11 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -437,7 +439,61 @@ func (t *canonicalMCPInvokableTool) InvokableRun(
 	argumentsInJSON string,
 	opts ...tool.Option,
 ) (string, error) {
-	return t.endpoint.InvokableRun(ctx, argumentsInJSON, opts...)
+	result, err := t.endpoint.InvokableRun(ctx, argumentsInJSON, opts...)
+	if err != nil {
+		return result, err
+	}
+	return projectMCPResultForModel(result), nil
+}
+
+// projectMCPResultForModel removes the transport envelope serialized by the
+// Eino MCP adapter. Matching Codex's MCP result semantics, structured content
+// takes precedence over the compatibility content when it is present. A
+// result is projected only when it has the required MCP content array so plain
+// text, malformed JSON and unrelated JSON results are left untouched.
+func projectMCPResultForModel(raw string) string {
+	var envelope struct {
+		Content           json.RawMessage `json:"content"`
+		StructuredContent json.RawMessage `json:"structuredContent"`
+		IsError           bool            `json:"isError"`
+	}
+	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
+		return raw
+	}
+	// Eino normally converts MCP error results into Go errors before this
+	// boundary. Preserve the full envelope if a custom endpoint does not.
+	if envelope.IsError {
+		return raw
+	}
+
+	content := bytes.TrimSpace(envelope.Content)
+	if len(content) == 0 || content[0] != '[' {
+		return raw
+	}
+	var contentItems []json.RawMessage
+	if err := json.Unmarshal(content, &contentItems); err != nil {
+		return raw
+	}
+
+	structured := bytes.TrimSpace(envelope.StructuredContent)
+	if len(structured) > 0 && !bytes.Equal(structured, []byte("null")) {
+		if compact, ok := compactMCPJSON(structured); ok {
+			return compact
+		}
+		return raw
+	}
+	if compact, ok := compactMCPJSON(content); ok {
+		return compact
+	}
+	return raw
+}
+
+func compactMCPJSON(raw []byte) (string, bool) {
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, raw); err != nil {
+		return "", false
+	}
+	return compact.String(), true
 }
 
 type canonicalMCPEnhancedInvokableTool struct {

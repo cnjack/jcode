@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -18,6 +19,7 @@ type mcpTestCallOptions struct {
 type recordingMCPInvokableTool struct {
 	info         *schema.ToolInfo
 	result       string
+	err          error
 	arguments    string
 	optionMarker string
 }
@@ -47,7 +49,7 @@ func (t *recordingMCPInvokableTool) InvokableRun(
 	t.arguments = argumentsInJSON
 	callOptions := tool.GetImplSpecificOptions(&mcpTestCallOptions{}, opts...)
 	t.optionMarker = callOptions.marker
-	return t.result, nil
+	return t.result, t.err
 }
 
 type recordingMCPEnhancedTool struct {
@@ -157,6 +159,112 @@ func TestCanonicalizeMCPToolsSupportsEnhancedEndpoint(t *testing.T) {
 	result, err := enhanced.InvokableRun(ctx, argument)
 	if err != nil || result != wantResult || endpoint.argument != argument {
 		t.Fatalf("enhanced delegation result=%p error=%v argument=%p", result, err, endpoint.argument)
+	}
+}
+
+func TestCanonicalMCPToolProjectsStructuredResultForModel(t *testing.T) {
+	tests := []struct {
+		name   string
+		result string
+	}{
+		{
+			name: "compatibility fallback is ignored",
+			result: ` {
+				"content": [{"type":"text","text":"opaque fallback"}],
+				"structuredContent": { "ok": true, "value": 42 }
+			} `,
+		},
+		{
+			name:   "empty content is valid",
+			result: `{"content":[],"structuredContent":{"ok":true,"value":42}}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			endpoint := newRecordingMCPTool("lookup")
+			endpoint.result = tt.result
+			wrapped := canonicalInvokableForTest(ctx, t, endpoint)
+
+			got, err := wrapped.InvokableRun(ctx, `{"value":"raw"}`)
+			if err != nil {
+				t.Fatalf("InvokableRun() error = %v", err)
+			}
+			if want := `{"ok":true,"value":42}`; got != want {
+				t.Fatalf("InvokableRun() = %q, want structured projection %q", got, want)
+			}
+		})
+	}
+}
+
+func TestCanonicalMCPToolProjectsContentWithoutStructuredResult(t *testing.T) {
+	tests := []struct {
+		name   string
+		result string
+	}{
+		{
+			name:   "missing structured content",
+			result: `{"content": [ {"type":"text", "text":"done"} ]}`,
+		},
+		{
+			name:   "null structured content",
+			result: `{"content": [ {"type":"text", "text":"done"} ], "structuredContent": null}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			endpoint := newRecordingMCPTool("lookup")
+			endpoint.result = tt.result
+			wrapped := canonicalInvokableForTest(context.Background(), t, endpoint)
+
+			got, err := wrapped.InvokableRun(context.Background(), `{}`)
+			if err != nil {
+				t.Fatalf("InvokableRun() error = %v", err)
+			}
+			if want := `[{"type":"text","text":"done"}]`; got != want {
+				t.Fatalf("InvokableRun() = %q, want content projection %q", got, want)
+			}
+		})
+	}
+}
+
+func TestCanonicalMCPToolLeavesUnrecognizedResultsUntouched(t *testing.T) {
+	tests := []struct {
+		name   string
+		result string
+	}{
+		{name: "plain text", result: "plain result"},
+		{name: "malformed JSON", result: `{"content":[`},
+		{name: "ordinary JSON", result: `{"ok":true}`},
+		{name: "non-array content", result: `{"content":"done","structuredContent":{"ok":true}}`},
+		{name: "unfolded MCP error", result: `{"content":[],"structuredContent":{"ok":false},"isError":true}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			endpoint := newRecordingMCPTool("lookup")
+			endpoint.result = tt.result
+			wrapped := canonicalInvokableForTest(context.Background(), t, endpoint)
+
+			got, err := wrapped.InvokableRun(context.Background(), `{}`)
+			if err != nil {
+				t.Fatalf("InvokableRun() error = %v", err)
+			}
+			if got != tt.result {
+				t.Fatalf("InvokableRun() = %q, want unchanged %q", got, tt.result)
+			}
+		})
+	}
+}
+
+func TestCanonicalMCPToolPreservesEndpointError(t *testing.T) {
+	endpoint := newRecordingMCPTool("lookup")
+	endpoint.result = `{"content":[],"structuredContent":{"ok":false}}`
+	endpoint.err = errors.New("endpoint failed")
+	wrapped := canonicalInvokableForTest(context.Background(), t, endpoint)
+
+	got, err := wrapped.InvokableRun(context.Background(), `{}`)
+	if !errors.Is(err, endpoint.err) || got != endpoint.result {
+		t.Fatalf("InvokableRun() result=%q error=%v, want original result/error", got, err)
 	}
 }
 
@@ -319,6 +427,25 @@ func modelVisibleMCPToolNames(t *testing.T, tools []tool.BaseTool) []string {
 		assertValidMCPModelName(t, info.Name)
 	}
 	return names
+}
+
+func canonicalInvokableForTest(
+	ctx context.Context,
+	t *testing.T,
+	endpoint *recordingMCPInvokableTool,
+) tool.InvokableTool {
+	t.Helper()
+	tools, _, errs := canonicalizeMCPTools(ctx, []mcpServerToolSet{
+		{serverName: "server", tools: []tool.BaseTool{endpoint}},
+	})
+	if len(errs) != 0 || len(tools) != 1 {
+		t.Fatalf("canonicalizeMCPTools() tools=%d errors=%v", len(tools), errs)
+	}
+	wrapped, ok := tools[0].(tool.InvokableTool)
+	if !ok {
+		t.Fatalf("canonical wrapper type %T is not tool.InvokableTool", tools[0])
+	}
+	return wrapped
 }
 
 func assertValidMCPModelName(t *testing.T, name string) {

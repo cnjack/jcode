@@ -125,9 +125,6 @@ func TestFixtureServerListsSortedToolsAndLogsTargetCall(t *testing.T) {
 	if !ok {
 		t.Fatalf("CallTool content type=%T, want mcp.TextContent", result.Content[0])
 	}
-	if text.Text != marker {
-		t.Fatalf("CallTool fallback text=%q, want exact marker %q", text.Text, marker)
-	}
 	var response fixtureResponse
 	structured, err := json.Marshal(result.StructuredContent)
 	if err != nil {
@@ -145,6 +142,16 @@ func TestFixtureServerListsSortedToolsAndLogsTargetCall(t *testing.T) {
 	}
 	if got, ok := response.RequestedLimit.(float64); !ok || got != 3 {
 		t.Fatalf("fixture response requested_limit=%#v, want 3", response.RequestedLimit)
+	}
+	var fallback, structuredValue any
+	if err := json.Unmarshal([]byte(text.Text), &fallback); err != nil {
+		t.Fatalf("Unmarshal(fallback fixture response): %v; value=%q", err, text.Text)
+	}
+	if err := json.Unmarshal(structured, &structuredValue); err != nil {
+		t.Fatalf("Unmarshal(structured fixture value): %v; value=%s", err, structured)
+	}
+	if !reflect.DeepEqual(fallback, structuredValue) {
+		t.Fatalf("fixture fallback is not equivalent to structured content: fallback=%#v structured=%#v", fallback, structuredValue)
 	}
 	distractorArgs := map[string]any{"request_id": "req-distractor", "query": "sku-42", "limit": 3}
 	distractorMarker := markerFor("catalog_lookup_preview", distractorArgs)

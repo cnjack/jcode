@@ -166,7 +166,7 @@ func resultFor(toolName string, arguments map[string]any, marker string) *mcp.Ca
 	if toolName != targetToolName {
 		return mcp.NewToolResultText(marker)
 	}
-	return mcp.NewToolResultStructured(responseFor(arguments, marker), marker)
+	return mcp.NewToolResultStructuredOnly(responseFor(arguments, marker))
 }
 
 func newFixtureServer(toolCount int, logger *callLogger) (*server.MCPServer, error) {
