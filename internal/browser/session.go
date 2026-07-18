@@ -326,7 +326,7 @@ func (s *Session) Screenshot(ctx context.Context, fullPage bool) ([]byte, error)
 	return base64.StdEncoding.DecodeString(r.Data)
 }
 
-// --- Read (console / network / text) ---
+// --- Read page text ---
 
 // PageText returns document.body innerText (bounded).
 func (s *Session) PageText(ctx context.Context, limit int) (string, error) {

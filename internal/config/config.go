@@ -382,8 +382,8 @@ func (c *Config) SetApprovalReview(rc *ApprovalReviewConfig) {
 	c.ApprovalReview = rc
 }
 
-// BrowserConfig controls the browser-use capability. See
-// internal-doc/browser-use-design.md.
+// BrowserConfig controls the browser-use capability. Browser use is opt-in:
+// an absent block and Enabled=false both keep its tools out of the agent schema.
 type BrowserConfig struct {
 	Enabled    bool   `json:"enabled,omitempty"`
 	Backend    string `json:"backend,omitempty"`     // auto | managed | extension (default auto)
@@ -409,8 +409,8 @@ type BrowserSitePermission struct {
 // ComputerConfig controls the computer-use capability (native desktop app
 // control). See internal-doc/computer-use-design.md.
 //
-// Enabled defaults to false, unlike BrowserConfig: computer use can reach
-// anything on the machine, so it is opt-in.
+// Enabled defaults to false. Like browser use, computer use is opt-in; it also
+// requires native OS permissions because it can reach anything on the machine.
 type ComputerConfig struct {
 	Enabled bool `json:"enabled,omitempty"`
 	// Backend is retained only to migrate configurations written before computer

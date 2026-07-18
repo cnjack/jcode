@@ -16,9 +16,7 @@ import (
 //
 // It deliberately mirrors config.ComputerConfig rather than importing it, so
 // this package does not depend on the config package. Exactly one mapper
-// converts between them (see internal/computer/configmap.go) — browser-use grew
-// two near-duplicate mappers that already disagree on a default, and that fork
-// is not being reproduced here.
+// converts between them (see internal/computer/configmap.go).
 type Config struct {
 	Enabled bool
 	// Backend is a compatibility field for internal callers compiled against the

@@ -12,10 +12,10 @@ import (
 	"github.com/cnjack/jcode/internal/browser"
 )
 
-// NewBrowserTools returns the browser-use tool set for this Env. When the Env
-// has no Browser manager, it returns nil (the tools are simply absent).
+// NewBrowserTools returns the browser-use tool set for this Env. When browser
+// use is unavailable or disabled, the tools are absent from the model schema.
 func (e *Env) NewBrowserTools() []tool.BaseTool {
-	if e.Browser == nil {
+	if e.Browser == nil || !e.Browser.Enabled() {
 		return nil
 	}
 	return []tool.BaseTool{
@@ -32,7 +32,7 @@ func (e *Env) NewBrowserTools() []tool.BaseTool {
 // NewBrowserPlanTools returns the read-only browser subset for plan mode:
 // navigation (GET) + inspection, no interaction or eval.
 func (e *Env) NewBrowserPlanTools() []tool.BaseTool {
-	if e.Browser == nil {
+	if e.Browser == nil || !e.Browser.Enabled() {
 		return nil
 	}
 	return []tool.BaseTool{
