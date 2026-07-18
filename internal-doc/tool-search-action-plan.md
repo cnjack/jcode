@@ -38,7 +38,7 @@
 | TS-04 MCP 与权限 | 完成 | `c9cb076`、`1aa128e`、`a316830`、`b1b687f`、`3b751db` | MCP、Plan、delegation 和 team mode 边界完成 |
 | TS-05 Prompt 与观测 | 进行中 | `dbe7ca4`、`69ba9ee`、`f905ae2`、`8675a5b` | 使用说明、schema/轨迹指标、凭证文件权限及 Browser 子进程 token 隔离 |
 | TS-06 自动化测试 | 完成 | `77de5fc`、`92e0cb0`、`56fa6eb` | 单元、集成、fixture、routing oracle 与生命周期撤权矩阵 |
-| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e`、`8675a5b`、`d60000d`、`8c980b1`、`207b313`、`7530b38` | Browser/Computer canary 4/4；首轮跨类小矩阵 11/12 后已修复 6-tool Computer exact list，等待重跑与 formal pass@10 |
+| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e`、`8675a5b`、`d60000d`、`8c980b1`、`207b313`、`7530b38` | Browser/Computer canary 4/4；第二轮跨类小矩阵确认 Computer 修复，但暴露 MCP100 Deferred 重复调用循环，等待修复与 formal pass@10 |
 | TS-08 30 分钟回归 | 进行中 | `9f2889e`、`8c980b1` | formal coordinator、deterministic `jcode_eval` 构建与证据合约完成；尚未运行真实全场景长跑 |
 | TS-09 HTML 报告 | 进行中 | `ad55a3b`、`92d442e`、`9f2889e`、`8c980b1` | 安全、fail-closed 的九门槛报告器、canonical suite、build-tag 与 supplementary 合约已完成；等待真实 campaign 产物 |
 
@@ -292,7 +292,8 @@ Kimi 硬门槛：
 - 首轮 12-job 跨类小矩阵：no-tool、exact、MCP10、MCP100、Browser 的 static/deferred 与 Computer static 共 11 条全部 PASS；no-tool 两臂均 0 tool，MCP10/100 两臂均命中唯一 fixture endpoint 且未整 server 扩展。唯一失败是 Computer Deferred：任务、open/act、fixture oracle 和全部 endpoint 都成功，bypass=0、same-batch=0，但 Kimi 第一次把完整 6 个 Computer 名称逗号连接（92 bytes）却漏 `select:`，原五名上限拒绝兼容；第二次补 `select:`（99 bytes）后成功，routing 因首个空搜索严格 FAIL，故总计 11/12。
 - 上限修复：兼容 ceiling 从 5 调整为 8，覆盖最大内建 Browser/Computer capability family，并继续拒绝 9+ catalog-wide list；新增 6-name Computer、8-name boundary 与 9-name fail-closed 测试。focused/race、全量 Go、lint `0 issues`、diff check 全部通过。
 - 已完成提交：`7530b38 fix(agent): cover full capability tool lists`（12-job canary routing 修复；TS-07.7 仍未勾选）。
-- 下一步：用相同 12-job 小矩阵验证六名兼容与跨类稳定性；没有系统性失败后才启动 formal pass@10。
+- 第二轮相同 12-job 小矩阵仍严格为 11/12：Computer Deferred 以 4 次调用、11.2s PASS，证明完整 6-tool family 的首次 query 已被兼容；no-tool 两臂继续保持 0 tool，exact、MCP10、Browser、Computer static 及 MCP100 static 均 PASS。唯一失败转为 MCP100 Deferred：一次 `select:` 正确命中唯一目标，bypass=0、same-batch=0、所有 endpoint result 均成功，但 Kimi 随后用完全相同参数连续调用目标 MCP 142 次，360.1s 超时；routing 因 required max=1、外部 fixture calls=142 和非正常终止严格 FAIL。相同提交的上一轮 MCP100 Deferred 曾以 search 1 + endpoint 1、7.942s PASS，说明披露/schema/参数路径一致，失败来自模型随机重复成功调用，而非 server 扩展或 Deferred 绕过。
+- 下一步：加入通用、低误伤的重复成功工具调用恢复机制，并用 MCP100 Deferred 重复 canary 验证；随后再重跑跨类小矩阵，没有系统性失败后才启动 formal pass@10。
 - 待完成：TS-07.7 需用 exact-Kimi canary 验证上述 Deferred 多步披露修复，并运行关键用例重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
 
 ## TS-08 至少 30 分钟全场景回归
@@ -381,3 +382,4 @@ Kimi 硬门槛：
 | 2026-07-18 | 第三轮 Browser+Computer exact-Kimi canary 4/4 严格 PASS；两个 Deferred 均一次搜索命中整组 | task/contracts/routing/artifact-safe 全通过；bypass=0、same-batch=0；Browser static 356.562s 延迟风险保留 | — |
 | 2026-07-18 | 首轮 12-job 小矩阵严格 11/12；唯一失败为 Computer Deferred 逗号列出完整 6-tool family，超过五名兼容上限后再补正 | 其余 no-tool/exact/MCP10/MCP100/Browser/Computer static 全通过；失败未被任务真值掩盖 | — |
 | 2026-07-18 | exact-list ceiling 调整到 8，覆盖最大内建 capability family，9+ 仍 fail closed | agent normal/race、全量 Go、lint `0 issues`、6/8/9-name 边界通过 | `7530b38` |
+| 2026-07-18 | 第二轮相同 12-job 小矩阵严格 11/12；Computer Deferred 修复通过，唯一失败转为 MCP100 Deferred 相同成功调用 142 次后 360.1s 超时 | search/select、披露和参数均正确，bypass/same-batch/failed result=0；routing 与外部 fixture oracle 严格拒绝重复调用 | — |
