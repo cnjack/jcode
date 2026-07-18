@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>jcode · Goal 胶囊浮条 × Composer — 设计稿 v2</title>
+<style>
+/* ════════════════════════════════════════════════════════════════════
+   Design Tokens — verbatim copy of web/src/styles/tokens.css (light + dark).
+   所有颜色/圆角/阴影/动效均来自此处，原型不硬编码任何颜色。
+   ════════════════════════════════════════════════════════════════════ */
+:root {
+  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius-xs: 3px; --radius-sm: 4px; --radius-md: 6px;
+  --radius-lg: 8px; --radius-xl: 12px; --radius-2xl: 16px; --radius-pill: 9999px;
+  --shadow-sm: 0 1px 2px rgba(24,20,16,.06);
+  --shadow-md: 0 4px 14px -4px rgba(24,20,16,.12);
+  --shadow-lg: 0 14px 36px -14px rgba(24,20,16,.20);
+  --shadow-xl: 0 1px 2px rgba(24,20,16,.04), 0 24px 56px -28px rgba(24,20,16,.26);
+  --backdrop: rgba(20,18,16,.5);
+  --accent-wash-soft: color-mix(in srgb, var(--color-primary) 8%, transparent);
+  --accent-wash: color-mix(in srgb, var(--color-primary) 11%, transparent);
+  --accent-wash-strong: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  --accent-border: color-mix(in srgb, var(--color-primary) 30%, transparent);
+  --color-accent-neutral: var(--color-foreground);
+  --neutral-wash-soft: color-mix(in srgb, var(--color-foreground) 8%, transparent);
+  --neutral-wash: color-mix(in srgb, var(--color-foreground) 11%, transparent);
+  --neutral-wash-strong: color-mix(in srgb, var(--color-foreground) 16%, transparent);
+  --neutral-border: color-mix(in srgb, var(--color-foreground) 30%, transparent);
+  --color-border-active: var(--color-primary);
+  --icon-stroke: 2;
+  --color-success: #16A34A;
+  --z-sidebar:30; --z-header:20; --z-dropdown:40; --z-modal:50; --z-toast:60;
+  --ease-out: cubic-bezier(.16,1,.3,1);
+  --ease-in: cubic-bezier(.7,0,.84,0);
+  --ease-spring: cubic-bezier(.34,1.56,.64,1);
+  --duration-fast:100ms; --duration-normal:150ms; --duration-slow:300ms; --duration-slower:500ms;
+  --sidebar-width:20rem; --sidebar-collapsed-width:0px; --header-height:3.25rem;
+  /* light */
+  --color-primary:#FF8400; --color-background:#F2F3F0; --color-surface:#FFFFFF;
+  --color-foreground:#111111; --color-muted-foreground:#666666; --color-border:#CBCCC9;
+  --color-muted:#F2F3F0; --color-secondary:#E7E8E5; --color-secondary-foreground:#111111;
+  --color-success-bg:#DFE6E1; --color-success-fg:#004D1A;
+  --color-error-bg:#E5DCDA; --color-error-fg:#8C1C00;
+  --color-warning-bg:#E9E3D8; --color-warning-fg:#804200;
+  --color-info-bg:#DFDFE6; --color-info-fg:#000066;
+  --color-destructive:#D93C15; --color-sidebar-bg:#FAFAF8;
+  --color-on-primary:#FFFFFF; --color-on-destructive:#FFFFFF;
+  --code-bg:#f6f8fa; --code-border:#d0d7de;
+}
+.dark {
+  --color-primary:#FF8400; --color-background:#111111; --color-surface:#1A1A1A;
+  --color-foreground:#FFFFFF; --color-muted-foreground:#B8B9B6; --color-border:#2E2E2E;
+  --color-muted:#2E2E2E; --color-secondary:#2E2E2E; --color-secondary-foreground:#FFFFFF;
+  --color-success-bg:#222924; --color-success-fg:#B6FFCE;
+  --color-error-bg:#24100B; --color-error-fg:#FF5C33;
+  --color-warning-bg:#291C0F; --color-warning-fg:#FF8400;
+  --color-info-bg:#222229; --color-info-fg:#B2B2FF;
+  --color-destructive:#FF5C33; --color-sidebar-bg:#1A1A1A; --color-success:#22C55E;
+  --color-on-primary:#FFFFFF; --color-on-destructive:#FFFFFF;
+  --code-bg:#1A1A1A; --code-border:var(--color-border);
+}
+
+/* ── Page chrome ── */
+*{box-sizing:border-box}
+html{background:var(--color-background);transition:background var(--duration-normal)}
+body{margin:0;font-family:var(--font-sans);color:var(--color-foreground);
+  -webkit-font-smoothing:antialiased;min-height:100vh;
+  display:flex;flex-direction:column;align-items:center;
+  padding:18px 14px 90px}
+
+.toolbar{width:100%;max-width:960px;display:flex;align-items:center;gap:12px;
+  flex-wrap:wrap;margin-bottom:8px}
+.toolbar h1{font-size:14px;font-weight:600;margin:0;letter-spacing:-.01em;
+  display:flex;align-items:center;gap:8px}
+.toolbar h1 .tag{font-size:10px;font-family:var(--font-mono);font-weight:500;
+  color:var(--color-muted-foreground);background:var(--color-muted);
+  padding:2px 7px;border-radius:var(--radius-pill)}
+.toolbar .spacer{flex:1}
+.focus-toggle{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;
+  border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-foreground);
+  border-radius:var(--radius-md);font-size:11.5px;font-weight:500;cursor:pointer;
+  font-family:var(--font-sans);transition:background var(--duration-fast)}
+.focus-toggle:hover{background:var(--color-muted)}
+.focus-toggle[aria-pressed='true']{background:var(--accent-wash);border-color:var(--accent-border);color:var(--color-primary)}
+.theme-toggle{width:28px;height:28px;display:grid;place-items:center;border:1px solid var(--color-border);
+  background:var(--color-surface);color:var(--color-foreground);border-radius:var(--radius-md);
+  cursor:pointer;transition:background var(--duration-fast)}
+.theme-toggle:hover{background:var(--color-muted)}
+
+.lede{width:100%;max-width:960px;font-size:12.5px;line-height:1.6;
+  color:var(--color-muted-foreground);margin:0 0 22px}
+.lede b{color:var(--color-foreground);font-weight:600}
+
+/* ── Sections ── */
+section{width:100%;max-width:960px;margin:0 0 40px}
+.sec-head{display:flex;align-items:baseline;gap:10px;margin:0 0 4px}
+.sec-head h2{font-size:13px;font-weight:600;margin:0;letter-spacing:-.01em}
+.sec-head .sec-no{font-family:var(--font-mono);font-size:10.5px;font-weight:600;
+  color:var(--color-on-primary);background:var(--color-foreground);
+  border-radius:var(--radius-sm);padding:2px 6px}
+.sec-head .verdict{font-size:10.5px;font-family:var(--font-mono);font-weight:600;
+  padding:2px 7px;border-radius:var(--radius-pill)}
+.verdict.bad{background:var(--color-error-bg);color:var(--color-error-fg)}
+.verdict.good{background:var(--color-success-bg);color:var(--color-success-fg)}
+.verdict.alt{background:var(--color-muted);color:var(--color-muted-foreground)}
+.sec-sub{font-size:12px;line-height:1.55;color:var(--color-muted-foreground);margin:0 0 16px;max-width:760px}
+
+/* Stage */
+.stage{border:1px dashed color-mix(in srgb,var(--color-border) 70%,transparent);
+  border-radius:var(--radius-2xl);padding:26px 26px 30px;
+  background:
+    radial-gradient(1200px 300px at 50% -80px, color-mix(in srgb,var(--color-primary) 4%,transparent), transparent),
+    var(--color-background)}
+.stage-label{font-family:var(--font-mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--color-muted-foreground);margin:0 0 14px;display:flex;align-items:center;gap:8px}
+.stage-label::after{content:'';flex:1;height:1px;background:color-mix(in srgb,var(--color-border) 55%,transparent)}
+.composer-col{max-width:640px;margin:0 auto}
+.stack{display:flex;flex-direction:column;gap:20px}
+
+/* ════════════════════════════════════════════════════════════════════
+   参考图风格 · 浮动 goal 胶囊（floating pill）
+   独立小卡，surface 底 + 极淡边框 + shadow-md 浮起，叠在 composer 上方，
+   负 margin 制造 ~14px 的叠压。无任何分割线、无彩色 tile。
+   ════════════════════════════════════════════════════════════════════ */
+.goal-pill{position:relative;z-index:1;width:calc(100% - 12px);margin:0 auto -14px;
+  /* default: 压在 composer 上方 */
+  display:flex;align-items:center;gap:8px;padding:9px 14px;
+  background:#FFFFFF;
+  border:1px solid #CBCCC98C;
+  border-radius:var(--radius-2xl);
+  box-shadow:0 4px 14px -4px rgba(24,20,16,.12);
+  cursor:pointer;
+  transition:box-shadow var(--duration-normal),transform var(--duration-normal)}
+.dark .goal-pill{background:#1A1A1A;border-color:#2E2E2E8C;box-shadow:0 4px 14px -4px rgba(0,0,0,.4)}
+.goal-pill.pill-below{margin:-14px auto 0;z-index:1}
+.goal-pill:hover{box-shadow:0 14px 36px -14px rgba(24,20,16,.20);transform:translateY(-1px)}
+.dark .goal-pill:hover{box-shadow:0 14px 36px -14px rgba(0,0,0,.55)}
+.goal-pill .g-icon{width:15px;height:15px;flex-shrink:0;color:var(--color-muted-foreground)}
+.goal-pill .g-icon svg{width:15px;height:15px;display:block}
+.goal-pill.tone-active .g-icon{color:var(--color-foreground)}
+.goal-pill.tone-complete .g-icon{color:var(--color-success-fg)}
+.goal-pill.tone-blocked .g-icon{color:var(--color-error-fg)}
+.goal-pill .g-text{min-width:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  font-size:12.5px;line-height:1}
+.goal-pill .g-text .status{font-weight:600;color:var(--color-foreground);margin-right:6px}
+.goal-pill.tone-complete .g-text .status{color:var(--color-success-fg)}
+.goal-pill.tone-blocked .g-text .status{color:var(--color-error-fg)}
+.goal-pill .g-text .objective{color:var(--color-muted-foreground)}
+.goal-pill.tone-active .g-text .objective{color:var(--color-foreground);opacity:.85}
+.goal-pill .g-time{flex-shrink:0;font-family:var(--font-mono);font-size:10.5px;
+  color:var(--color-muted-foreground);font-variant-numeric:tabular-nums}
+.goal-pill .g-actions{display:flex;align-items:center;gap:2px;flex-shrink:0}
+.g-act{width:22px;height:22px;display:grid;place-items:center;border:none;background:transparent;
+  border-radius:var(--radius-sm);color:var(--color-muted-foreground);cursor:pointer;
+  transition:background var(--duration-fast),color var(--duration-fast)}
+.g-act:hover{background:var(--color-muted);color:var(--color-foreground)}
+.g-act.danger:hover{color:var(--color-error-fg)}
+.g-act svg{width:13px;height:13px;display:block}
+.g-act.chev{color:var(--color-muted-foreground)}
+.g-act.chev svg{width:14px;height:14px}
+/* live pulse dot on active (tiny, top-right of the leading icon) */
+.goal-pill.tone-active .g-icon{position:relative}
+.goal-pill.tone-active .g-icon::after{content:'';position:absolute;right:-3px;top:-2px;
+  width:6px;height:6px;border-radius:50%;background:var(--color-primary);
+  border:1.5px solid var(--color-surface);animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+/* expanded detail — 同一张胶囊向下展开，仍是独立浮层 */
+.goal-detail{padding:2px 14px 11px;border-top:1px dashed color-mix(in srgb,var(--color-border) 60%,transparent);
+  margin-top:8px}
+.goal-detail .objective-full{padding-top:9px;font-size:12px;line-height:1.6;color:var(--color-foreground);
+  max-height:160px;overflow-y:auto;white-space:pre-wrap}
+.goal-detail .meta{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px;
+  font-size:10px;color:var(--color-muted-foreground)}
+.goal-detail .meta .mono{font-family:var(--font-mono)}
+.goal-detail .actions{display:flex;align-items:center;gap:8px;margin-top:10px}
+.btn-ghost-sm{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;
+  border:1px solid var(--color-border);border-radius:var(--radius-md);
+  background:var(--color-surface);font-size:11px;font-weight:500;color:var(--color-foreground);
+  cursor:pointer;font-family:var(--font-sans);transition:background var(--duration-fast)}
+.btn-ghost-sm:hover{background:var(--color-muted)}
+.btn-ghost-sm svg{width:12px;height:12px}
+.btn-text-sm{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border:none;
+  border-radius:var(--radius-md);background:transparent;font-size:11px;font-weight:500;
+  color:var(--color-muted-foreground);cursor:pointer;font-family:var(--font-sans);
+  transition:background var(--duration-fast),color var(--duration-fast)}
+.btn-text-sm:hover{background:var(--color-muted);color:var(--color-error-fg)}
+.btn-text-sm svg{width:12px;height:12px}
+
+/* todo progress — 胶囊行内文字后，不用整宽条 */
+.g-progress{flex-shrink:0;display:inline-flex;align-items:center;gap:5px}
+.g-progress .track{width:44px;height:3px;border-radius:var(--radius-pill);overflow:hidden;
+  background:#1111111A}
+.dark .g-progress .track{background:#FFFFFF1A}
+.g-progress .fill{height:100%;border-radius:var(--radius-pill);background:var(--color-primary)}
+.g-progress .frac{font-family:var(--font-mono);font-size:10px;color:var(--color-muted-foreground)}
+
+/* ════════════════════════════════════════════════════════════════════
+   Composer — 独立一张卡，不再与 goal 共边
+   ════════════════════════════════════════════════════════════════════ */
+.composer-card{position:relative;z-index:2;
+  border:1px solid var(--color-border);border-radius:var(--radius-2xl);
+  background:var(--color-surface);box-shadow:var(--shadow-sm);
+  transition:border-color var(--duration-normal);
+  /* 输入框在前（z-index 2），胶囊藏在后面只露出上半截，
+     因此无需任何 padding 补偿 */
+  padding:14px 6px 10px}
+body.sim-focus .composer-card.focusable{border-color:var(--neutral-border)}
+.composer-zone{padding:0 10px}
+/* 胶囊在下方的变体：胶囊同样藏在 composer 后面（z-index 1 < 2），无需补偿 */
+.placeholder{font-size:14px;line-height:1.6;color:var(--color-muted-foreground);min-height:28px}
+.composer-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:10px 10px 2px}
+.tb-left,.tb-right{display:flex;align-items:center;gap:6px;min-width:0}
+.chip-btn{display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 8px;border:none;
+  background:transparent;border-radius:var(--radius-md);font-size:12px;font-weight:500;
+  color:var(--color-muted-foreground);cursor:pointer;font-family:var(--font-sans);
+  transition:background var(--duration-fast),color var(--duration-fast);white-space:nowrap}
+.chip-btn:hover{background:var(--color-secondary);color:var(--color-foreground)}
+.chip-btn svg{width:14px;height:14px}
+.chip-btn .chev{width:12px;height:12px;opacity:.7}
+.chip-btn.mode-danger{color:var(--color-warning-fg)}
+.chip-btn.mode-danger:hover{background:var(--color-warning-bg)}
+.chip-btn .model-name{color:var(--color-foreground)}
+.btn-stop{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 12px;border:none;
+  border-radius:var(--radius-lg);background:var(--color-destructive);color:var(--color-on-destructive);
+  font-size:12px;font-weight:500;cursor:pointer;font-family:var(--font-sans);white-space:nowrap}
+.btn-stop svg{width:13px;height:13px}
+.icon-btn{width:24px;height:24px;display:grid;place-items:center;border:none;background:transparent;
+  border-radius:var(--radius-sm);color:var(--color-muted-foreground);cursor:pointer;
+  transition:background var(--duration-fast),color var(--duration-fast)}
+.icon-btn:hover{background:var(--color-muted);color:var(--color-foreground)}
+.icon-btn svg{width:14px;height:14px}
+.provider-dot{width:15px;height:15px;border-radius:var(--radius-sm);flex-shrink:0;
+  background:var(--neutral-wash);display:grid;place-items:center;
+  font-family:var(--font-mono);font-size:8px;font-weight:700;color:var(--color-foreground)}
+
+/* no-goal composer: normal top padding */
+.composer-card.solo{padding-top:10px}
+
+/* ════════════════════════════════════════════════════════════════════
+   ① CURRENT — 现状还原
+   ════════════════════════════════════════════════════════════════════ */
+.card{border:1px solid var(--color-border);border-radius:var(--radius-xl);
+  background:var(--color-surface);box-shadow:var(--shadow-sm);overflow:hidden}
+.current .goal-row{display:flex;align-items:center;gap:10px;padding:8px 12px;
+  border-bottom:1px solid var(--color-border);cursor:pointer}
+.current .goal-row:hover{background:color-mix(in srgb,var(--color-muted) 45%,transparent)}
+.current .goal-tile{position:relative;width:26px;height:26px;flex-shrink:0;display:grid;place-items:center;
+  border-radius:var(--radius-md);background:var(--accent-wash);color:var(--color-primary)}
+.current .goal-tile svg{width:16px;height:16px}
+.current .pulse{position:absolute;right:-2px;top:-2px;width:8px;height:8px;border-radius:50%;
+  border:1.5px solid var(--color-surface);background:var(--color-primary);
+  animation:pulse 1.6s ease-in-out infinite}
+.current .goal-text{min-width:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}
+.current .goal-text .status{font-weight:600;margin-right:6px;color:var(--color-primary)}
+.current .goal-meta{flex-shrink:0;font-family:var(--font-mono);font-size:10px;
+  color:var(--color-muted-foreground);font-variant-numeric:tabular-nums}
+.current .goal-actions{display:flex;align-items:center;gap:2px;flex-shrink:0}
+.current .composer-outer{padding:4px 6px 10px}
+.current .inner-box{border:1px solid var(--color-border);
+  background:color-mix(in srgb,var(--color-surface) 90%,#000);
+  border-radius:var(--radius-lg);padding:14px 16px 0}
+.current .inner-box .composer-toolbar{padding:10px 0 12px}
+
+/* annotation markers */
+.mark{position:relative}
+.mark::after{content:attr(data-mark);position:absolute;z-index:5;
+  width:18px;height:18px;display:grid;place-items:center;
+  font-family:var(--font-mono);font-size:10px;font-weight:700;border-radius:50%;
+  background:var(--color-destructive);color:var(--color-on-destructive);
+  box-shadow:var(--shadow-md)}
+.mark-1::after{left:-9px;top:calc(50% - 9px)}
+.mark-2::after{left:50%;top:-9px;transform:translateX(-50%)}
+.mark-3::after{left:-9px;top:14px}
+.card-outline-highlight{outline:2px dashed color-mix(in srgb,var(--color-destructive) 65%,transparent);
+  outline-offset:3px}
+.divider-highlight{box-shadow:0 2px 0 0 color-mix(in srgb,var(--color-destructive) 55%,transparent)}
+.inner-highlight{outline:2px dashed color-mix(in srgb,var(--color-destructive) 65%,transparent);
+  outline-offset:2px}
+.legend{display:flex;flex-direction:column;gap:8px;margin:16px auto 0;max-width:640px}
+.legend-item{display:flex;gap:10px;align-items:flex-start;font-size:12px;line-height:1.5;
+  color:var(--color-muted-foreground)}
+.legend-item .n{width:18px;height:18px;flex-shrink:0;display:grid;place-items:center;
+  font-family:var(--font-mono);font-size:10px;font-weight:700;border-radius:50%;
+  background:var(--color-destructive);color:var(--color-on-destructive);margin-top:1px}
+.legend-item code{font-family:var(--font-mono);font-size:10.5px;background:var(--color-muted);
+  border-radius:var(--radius-sm);padding:1px 5px;color:var(--color-foreground)}
+
+/* ── Implementation mapping table ── */
+.map-table{width:100%;border-collapse:collapse;font-size:12px}
+.map-table th,.map-table td{text-align:left;padding:8px 10px;vertical-align:top;
+  border-bottom:1px solid color-mix(in srgb,var(--color-border) 55%,transparent);line-height:1.55}
+.map-table th{font-size:10px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--color-muted-foreground);font-weight:600}
+.map-table td.file{font-family:var(--font-mono);font-size:11px;white-space:nowrap}
+.map-table code{font-family:var(--font-mono);font-size:10.5px;background:var(--color-muted);
+  border-radius:var(--radius-sm);padding:1px 5px;white-space:nowrap}
+.map-table .del{color:var(--color-error-fg);text-decoration:line-through}
+.map-table .add{color:var(--color-success-fg)}
+
+/* acceptance checklist */
+.accept{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px}
+.accept li{display:flex;gap:8px;align-items:flex-start;font-size:12px;line-height:1.5;
+  color:var(--color-muted-foreground)}
+.accept li svg{width:14px;height:14px;flex-shrink:0;color:var(--color-success);margin-top:2px}
+.accept li b{color:var(--color-foreground);font-weight:600}
+
+/* compare table */
+.cmp{width:100%;border-collapse:collapse;font-size:12px}
+.cmp th,.cmp td{text-align:left;padding:7px 10px;border-bottom:1px solid color-mix(in srgb,var(--color-border) 55%,transparent);line-height:1.5;vertical-align:top}
+.cmp th{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--color-muted-foreground);font-weight:600}
+.cmp td:first-child{color:var(--color-muted-foreground);white-space:nowrap}
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <h1>Goal 浮条 × Composer <span class="tag">v2 · 参考 Codex：独立胶囊，浮在输入框上方</span></h1>
+  <div class="spacer"></div>
+  <button class="focus-toggle" id="focusToggle" aria-pressed="false">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7.5 3.75H6A2.25 2.25 0 0 0 3.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0 1 20.25 6v1.5m0 9V18A2.25 2.25 0 0 1 18 20.25h-1.5m-9 0H6A2.25 2.25 0 0 1 3.75 18v-1.5"/></svg>
+    模拟聚焦
+  </button>
+  <button class="theme-toggle" id="themeToggle" aria-label="切换明暗主题"></button>
+</div>
+
+<p class="lede">
+  参考图的做法：goal 条是<b>独立的胶囊小卡</b>——白底、大圆角、柔和阴影，<b>浮在输入框上方并轻微叠压</b>，
+  与输入框之间靠 z 向层级（间隙 + 投影）区分，而不是共享一张卡片。
+  图标是纯线性灰、没有彩色 tile；计时、编辑、删除、› 展开一字排开。
+  对应到我们的改动：<b>拆开 ChatView 外层卡片</b>，GoalBanner 变成浮层胶囊，ChatInput 恢复为独立的单卡 composer —— 两个元素各只有一条轮廓，无分割线。
+</p>
+
+<!-- ════════════════════════════ ① 现状 ════════════════════════════ -->
+<section>
+  <div class="sec-head">
+    <span class="sec-no">01</span><h2>现状还原</h2>
+    <span class="verdict bad">问题：三层边框 + 一块异色底</span>
+  </div>
+  <p class="sec-sub">与截图一一对应：外层卡片边框 ① → banner 底部分割线 ② → 输入区自己的边框 + <code>color-mix(surface 90%, #000)</code> 深色底 ③。</p>
+
+  <div class="stage">
+    <p class="stage-label">current · 会话内 composer（isRunning）</p>
+    <div class="composer-col current">
+      <div class="card card-outline-highlight mark mark-1" data-mark="1">
+        <div class="goal-row divider-highlight mark mark-2" data-mark="2">
+          <span class="goal-tile">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7.5 3.75H6A2.25 2.25 0 0 0 3.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0 1 20.25 6v1.5m0 9V18A2.25 2.25 0 0 1 18 20.25h-1.5m-9 0H6A2.25 2.25 0 0 1 3.75 18v-1.5M12 8.25v7.5M8.25 12h7.5"/></svg>
+            <span class="pulse"></span>
+          </span>
+          <span class="goal-text"><span class="status">进行中</span><span class="objective">设置一个 goal 测试一下当前项目修改</span></span>
+          <span class="goal-meta">8秒</span>
+          <span class="goal-actions">
+            <button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16.862 4.487l1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"/></svg></button>
+            <button class="icon-btn danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg></button>
+            <button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button>
+          </span>
+        </div>
+        <div class="composer-outer">
+          <div class="inner-box inner-highlight mark mark-3" data-mark="3">
+            <div class="placeholder">Agent 正在工作 — 输入将排队，稍后自动发送…</div>
+            <div class="composer-toolbar" style="padding-left:0;padding-right:0">
+              <div class="tb-left">
+                <button class="icon-btn" style="width:30px;height:30px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
+                <button class="chip-btn mode-danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v3.75m0-10.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.75c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.75h-.152c-3.196 0-6.1-1.249-8.25-3.286zm0 13.036h.008v.008H12v-.008z"/></svg>完全访问<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button>
+              </div>
+              <div class="tb-right">
+                <button class="chip-btn"><span class="provider-dot">K</span><span class="model-name">Kimi K3</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button>
+                <button class="chip-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09zM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456z"/></svg>强度<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button>
+                <button class="btn-stop"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>停止</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <div class="legend-item"><span class="n">1</span><span>外层卡片边框（ChatView 包装层）—— v1 想用它把两者"拼"成一体，但这正是卡片套卡片的根源，<b>拆掉</b>。</span></div>
+      <div class="legend-item"><span class="n">2</span><span>GoalBanner 的 <code>border-b</code> 分割线 —— 浮层方案里没有拼接缝，自然消失。</span></div>
+      <div class="legend-item"><span class="n">3</span><span>ChatInput 内层框的 <code>border + 深色底</code> —— docked 模式下去掉，composer 自己就是那一张卡。</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════ ② 方案 A：浮动胶囊 ════════════════════════════ -->
+<section>
+  <div class="sec-head">
+    <span class="sec-no">02</span><h2>方案 A · 浮动胶囊（推荐，还原参考图）</h2>
+    <span class="verdict good">goal 条独立浮起 · composer 单卡</span>
+  </div>
+  <p class="sec-sub">
+    GoalBanner 脱离卡片：自己的 <code>surface + rounded-2xl + shadow-md</code>，宽度比 composer 内缩 12px，
+    底部 <code>-14px</code> 负 margin 让胶囊<b>藏在 composer 上沿后面</b>（胶囊 z-index 1，composer z-index 2），只露出上半截。
+    输入框上沿完整压过胶囊，内容无需任何补偿；聚焦时<b>composer 自己的</b>边框加深（点右上角"模拟聚焦"）。
+    全程无分割线；goal 条上唯一的动态元素是图标右上角的活性小点。
+  </p>
+
+  <div class="stage">
+    <p class="stage-label">A · collapsed — active + todos（参考图还原）</p>
+    <div class="composer-col">
+      <!-- floating pill -->
+      <div class="goal-pill tone-active">
+        <span class="g-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7.5 3.75H6A2.25 2.25 0 0 0 3.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0 1 20.25 6v1.5m0 9V18A2.25 2.25 0 0 1 18 20.25h-1.5m-9 0H6A2.25 2.25 0 0 1 3.75 18v-1.5M12 8.25v7.5M8.25 12h7.5"/></svg>
+        </span>
+        <span class="g-text"><span class="status">进行中</span><span class="objective">设置一个 goal 测试一下当前项目修改，验证 UI 展示效果</span></span>
+        <span class="g-progress"><span class="frac">3/5</span><span class="track"><span class="fill" style="display:block;width:60%"></span></span></span>
+        <span class="g-time">18h 34m 52s</span>
+        <span class="g-actions">
+          <button class="g-act" title="编辑"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16.862 4.487l1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"/></svg></button>
+          <button class="g-act danger" title="清除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg></button>
+          <button class="g-act chev" title="展开"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg></button>
+        </span>
+      </div>
+      <!-- composer card -->
+      <div class="composer-card focusable">
+        <div class="composer-zone">
+          <div class="placeholder">Agent 正在工作 — 输入将排队，稍后自动发送…</div>
+        </div>
+        <div class="composer-toolbar">
+          <div class="tb-left">
+            <button class="icon-btn" style="width:30px;height:30px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
+            <button class="chip-btn mode-danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v3.75m0-10.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.75c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.75h-.152c-3.196 0-6.1-1.249-8.25-3.286zm0 13.036h.008v.008H12v-.008z"/></svg>完全访问<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button>
+          </div>
+          <div class="tb-right">
+            <button class="chip-btn"><span class="provider-dot">K</span><span class="model-name">Kimi K3</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button>
+            <button class="chip-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09zM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456z"/></svg>强度<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button>
+            <button class="btn-stop"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>停止</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stage" style="margin-top:18px">
+    <p class="stage-label">A · collapsed — 胶囊在输入框下方（变体）</p>
+    <div class="composer-col">
+      <!-- composer card first -->
+      <div class="composer-card focusable above-pill">
+        <div class="composer-zone">
+          <div class="placeholder">Agent 正在工作 — 输入将排队，稍后自动发送…</div>
+        </div>
+        <div class="composer-toolbar">
+          <div class="tb-left">
+            <button class="icon-btn" style="width:30px;height:30px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
+            <button class="chip-btn mode-danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v3.75m0-10.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.75c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.75h-.152c-3.196 0-6.1-1.249-8.25-3.286zm0 13.036h.008v.008H12v-.008z"/></svg>完全访问<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button>
+          </div>
+          <div class="tb-right">
+            <button class="chip-btn"><span class="provider-dot">K</span><span class="model-name">Kimi K3</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button>
+            <button class="chip-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09zM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456z"/></svg>强度<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button>
+            <button class="btn-stop"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>停止</button>
+          </div>
+        </div>
+      </div>
+      <!-- floating pill below -->
+      <div class="goal-pill pill-below tone-active">
+        <span class="g-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7.5 3.75H6A2.25 2.25 0 0 0 3.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0 1 20.25 6v1.5m0 9V18A2.25 2.25 0 0 1 18 20.25h-1.5m-9 0H6A2.25 2.25 0 0 1 3.75 18v-1.5M12 8.25v7.5M8.25 12h7.5"/></svg>
+        </span>
+        <span class="g-text"><span class="status">进行中</span><span class="objective">设置一个 goal 测试一下当前项目修改，验证 UI 展示效果</span></span>
+        <span class="g-progress"><span class="frac">3/5</span><span class="track"><span class="fill" style="display:block;width:60%"></span></span></span>
+        <span class="g-time">18h 34m 52s</span>
+        <span class="g-actions">
+          <button class="g-act" title="编辑"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16.862 4.487l1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"/></svg></button>
+          <button class="g-act danger" title="清除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg></button>
+          <button class="g-act chev" title="展开"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg></button>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <div class="stage" style="margin-top:18px">
+    <p class="stage-label">A · expanded — 同一张胶囊向下展开（虚线分隔，仍是浮层）</p>
+    <div class="composer-col">
+      <div class="goal-pill tone-active" style="cursor:default">
+        <div style="width:100%">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="g-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7.5 3.75H6A2.25 2.25 0 0 0 3.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0 1 20.25 6v1.5m0 9V18A2.25 2.25 0 0 1 18 20.25h-1.5m-9 0H6A2.25 2.25 0 0 1 3.75 18v-1.5M12 8.25v7.5M8.25 12h7.5"/></svg>
+            </span>
+            <span class="g-text"><span class="status">进行中</span><span class="objective">设置一个 goal 测试一下当前项目修改，验证 UI 展示效果</span></span>
+            <span class="g-progress"><span class="frac">3/5</span><span class="track"><span class="fill" style="display:block;width:60%"></span></span></span>
+            <span class="g-time">18h 34m 52s</span>
+            <span class="g-actions">
+              <button class="g-act"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16.862 4.487l1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"/></svg></button>
+              <button class="g-act danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg></button>
+              <button class="g-act chev" style="transform:rotate(90deg)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg></button>
+            </span>
+          </div>
+          <div class="goal-detail">
+            <div class="objective-full">设置一个 goal 测试一下当前项目修改，验证 UI 展示效果</div>
+            <div class="meta">
+              <span>开始于 2026/7/17 23:58:04</span>
+              <span>已进行 18h 34m 52s</span>
+              <span class="mono">12.4K tokens</span>
+            </div>
+            <div class="actions">
+              <button class="btn-ghost-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16.862 4.487l1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"/></svg>编辑目标</button>
+              <button class="btn-text-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg>清除目标</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="composer-card focusable">
+        <div class="composer-zone">
+          <div class="placeholder">Agent 正在工作 — 输入将排队，稍后自动发送…</div>
+        </div>
+        <div class="composer-toolbar">
+          <div class="tb-left">
+            <button class="icon-btn" style="width:30px;height:30px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
+            <button class="chip-btn mode-danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v3.75m0-10.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.75c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.75h-.152c-3.196 0-6.1-1.249-8.25-3.286zm0 13.036h.008v.008H12v-.008z"/></svg>完全访问<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button>
+          </div>
+          <div class="tb-right">
+            <button class="chip-btn"><span class="provider-dot">K</span><span class="model-name">Kimi K3</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button>
+            <button class="btn-stop"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>停止</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stage" style="margin-top:18px">
+    <p class="stage-label">A · 其余状态（blocked / complete / 无 goal）</p>
+    <div class="composer-col stack">
+
+      <div>
+        <div class="goal-pill tone-blocked">
+          <span class="g-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+          </span>
+          <span class="g-text"><span class="status">受阻</span><span class="objective">重构 session 存储层 —— 等待确认迁移策略</span></span>
+          <span class="g-time">42m 18s</span>
+          <span class="g-actions">
+            <button class="g-act"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16.862 4.487l1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"/></svg></button>
+            <button class="g-act danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg></button>
+            <button class="g-act chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg></button>
+          </span>
+        </div>
+        <div class="composer-card focusable">
+          <div class="composer-zone"><div class="placeholder">输入消息…</div></div>
+          <div class="composer-toolbar">
+            <div class="tb-left">
+              <button class="icon-btn" style="width:30px;height:30px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
+              <button class="chip-btn mode-danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v3.75m0-10.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.75c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.75h-.152c-3.196 0-6.1-1.249-8.25-3.286zm0 13.036h.008v.008H12v-.008z"/></svg>完全访问<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button>
+            </div>
+            <div class="tb-right">
+              <button class="chip-btn"><span class="provider-dot">K</span><span class="model-name">Kimi K3</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="goal-pill tone-complete">
+          <span class="g-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>
+          </span>
+          <span class="g-text"><span class="status">已完成</span><span class="objective">发布 0.1.2 版本并更新文档站</span></span>
+          <span class="g-time">1h 7m</span>
+          <span class="g-actions">
+            <button class="g-act danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg></button>
+            <button class="g-act chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg></button>
+          </span>
+        </div>
+        <div class="composer-card focusable">
+          <div class="composer-zone"><div class="placeholder">输入消息…</div></div>
+          <div class="composer-toolbar">
+            <div class="tb-left">
+              <button class="icon-btn" style="width:30px;height:30px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
+              <button class="chip-btn mode-danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v3.75m0-10.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.75c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.75h-.152c-3.196 0-6.1-1.249-8.25-3.286zm0 13.036h.008v.008H12v-.008z"/></svg>完全访问<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button>
+            </div>
+            <div class="tb-right">
+              <button class="chip-btn"><span class="provider-dot">K</span><span class="model-name">Kimi K3</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="composer-card focusable solo">
+          <div class="composer-zone"><div class="placeholder">输入消息…</div></div>
+          <div class="composer-toolbar">
+            <div class="tb-left">
+              <button class="icon-btn" style="width:30px;height:30px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
+              <button class="chip-btn mode-danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v3.75m0-10.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.75c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.75h-.152c-3.196 0-6.1-1.249-8.25-3.286zm0 13.036h.008v.008H12v-.008z"/></svg>完全访问<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button>
+            </div>
+            <div class="tb-right">
+              <button class="chip-btn"><span class="provider-dot">K</span><span class="model-name">Kimi K3</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button>
+            </div>
+          </div>
+        </div>
+        <p style="margin:8px 0 0;text-align:center;font-size:11px;color:var(--color-muted-foreground)">无 goal：composer 保持同样的一张卡（顶部不再预留叠压空间）</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════ ③ 方案 B ════════════════════════════ -->
+<section>
+  <div class="sec-head">
+    <span class="sec-no">03</span><h2>方案 B · 备选：胶囊不叠压，纯悬浮（间隙 8px）</h2>
+    <span class="verdict alt">更保守 · 但失去"趴在 input 上"的感觉</span>
+  </div>
+  <p class="sec-sub">同样的胶囊，但不做负 margin 叠压，只是浮在 composer 上方。实现最简单（不需要 composer 顶部补偿），代价是 goal 条和输入框看起来"分家"了。</p>
+
+  <div class="stage">
+    <p class="stage-label">B · collapsed — no overlap</p>
+    <div class="composer-col">
+      <div class="goal-pill tone-active" style="margin-bottom:8px;width:100%">
+        <span class="g-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7.5 3.75H6A2.25 2.25 0 0 0 3.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0 1 20.25 6v1.5m0 9V18A2.25 2.25 0 0 1 18 20.25h-1.5m-9 0H6A2.25 2.25 0 0 1 3.75 18v-1.5M12 8.25v7.5M8.25 12h7.5"/></svg>
+        </span>
+        <span class="g-text"><span class="status">进行中</span><span class="objective">设置一个 goal 测试一下当前项目修改，验证 UI 展示效果</span></span>
+        <span class="g-progress"><span class="frac">3/5</span><span class="track"><span class="fill" style="display:block;width:60%"></span></span></span>
+        <span class="g-time">18h 34m 52s</span>
+        <span class="g-actions">
+          <button class="g-act"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16.862 4.487l1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"/></svg></button>
+          <button class="g-act danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg></button>
+          <button class="g-act chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg></button>
+        </span>
+      </div>
+      <div class="composer-card focusable solo">
+        <div class="composer-zone">
+          <div class="placeholder">Agent 正在工作 — 输入将排队，稍后自动发送…</div>
+        </div>
+        <div class="composer-toolbar">
+          <div class="tb-left">
+            <button class="icon-btn" style="width:30px;height:30px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
+            <button class="chip-btn mode-danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v3.75m0-10.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.75c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.75h-.152c-3.196 0-6.1-1.249-8.25-3.286zm0 13.036h.008v.008H12v-.008z"/></svg>完全访问<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button>
+          </div>
+          <div class="tb-right">
+            <button class="chip-btn"><span class="provider-dot">K</span><span class="model-name">Kimi K3</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg></button>
+            <button class="btn-stop"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>停止</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════ ④ 设计决策对照 ════════════════════════════ -->
+<section>
+  <div class="sec-head">
+    <span class="sec-no">04</span><h2>与参考图的对照 & 取舍</h2>
+  </div>
+  <div class="stage" style="padding:6px 0 0;border-style:solid;border-color:var(--color-border);background:var(--color-surface);border-radius:var(--radius-xl);overflow:hidden">
+    <table class="cmp">
+      <thead><tr><th style="width:130px">维度</th><th>参考图（Codex）</th><th>本设计稿</th></tr></thead>
+      <tbody>
+        <tr><td>层级关系</td><td>独立胶囊，藏在输入框上沿后面（只露出上半截）</td><td>相同：负 margin -14px + shadow-md + z-index（胶囊 1，composer 2）</td></tr>
+        <tr><td>胶囊底/框</td><td>白底无边框 + 投影</td><td>surface 底 + 55% 透明发丝边框（暗色主题下必须有，否则轮廓丢失）+ shadow-md</td></tr>
+        <tr><td>图标</td><td>纯灰线性靶心</td><td>相同；active 时加 6px 橙色活性小点（我们要表达"正在跑"，参考图没有运行态诉求）</td></tr>
+        <tr><td>色彩</td><td>全文黑灰</td><td>状态词黑（blocked 红 / complete 绿）；不用橙色大色块，保持安静</td></tr>
+        <tr><td>展开箭头</td><td>› 向右</td><td>相同（ChevronRight），展开后旋转 90°；点击整行也可展开</td></tr>
+        <tr><td>todo 进度</td><td>无（Codex 把"第1/5步"放聊天流里）</td><td>行内 44px 小进度 + 分数，不进聊天流也不拉整条横幅</td></tr>
+        <tr><td>输入框</td><td>一张卡</td><td>相同：去掉 docked 内层框，composer 自己就是那张卡</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ════════════════════════════ ⑤ 实现映射 ════════════════════════════ -->
+<section>
+  <div class="sec-head">
+    <span class="sec-no">05</span><h2>实现映射（按方案 A）</h2>
+  </div>
+  <div class="stage" style="padding:6px 0 0;border-style:solid;border-color:var(--color-border);background:var(--color-surface);border-radius:var(--radius-xl);overflow:hidden">
+    <table class="map-table">
+      <thead><tr><th style="width:220px">文件</th><th>改动</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="file">web/src/components/ChatView.tsx</td>
+          <td>
+            <span class="del">外层包装卡片 <code>overflow-hidden rounded-xl border bg-surface shadow-sm</code></span>
+            → <span class="add">普通 flex 列容器</span>；GoalBanner 与 ChatInput 恢复为兄弟节点
+          </td>
+        </tr>
+        <tr>
+          <td class="file">web/src/components/GoalBanner.tsx</td>
+          <td>
+            根节点改为浮层胶囊：<span class="add"><code>relative z-10 mx-auto -mb-3.5 w-[calc(100%-12px)] rounded-2xl border border-[color-mix(border,55%)] bg-surface shadow-md</code></span>（藏在 composer 后面，z-index 低于 composer）；
+            彩色 wash tile <span class="del">26px 方块</span> → <span class="add">15px 线性图标 + active 活性小点</span>；
+            状态词颜色收敛（active 用前景色，blocked/complete 才用状态色）；
+            todo 整宽进度条 <span class="del">h-[2px] 全宽</span> → <span class="add">行内 44px 迷你进度 + 分数</span>；
+            ChevronDown <span class="del">⌄</span> → <span class="add">ChevronRight ›（展开时 rotate-90）</span>；
+            展开详情用虚线分隔（浮层内部，不算拼接缝）
+          </td>
+        </tr>
+        <tr>
+          <td class="file">web/src/components/ChatInput.tsx</td>
+          <td>
+            docked（<code>!isElevated</code>）内层框 <span class="del"><code>border + bg-[color-mix(surface 90%,#000)]</code></span> → <span class="add">无边框</span>；
+            外层容器升级为 composer 本体：<span class="add"><code>rounded-2xl border bg-surface shadow-sm focus-within:border-[foreground_30%] relative z-20</code></span>（z-index 高于胶囊，把胶囊下缘遮住）；
+            <span class="del">有 goal 时顶部 padding +24px 承接叠压</span>（输入框在前，无需补偿）；elevated 分支不动
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ════════════════════════════ ⑥ 验收 ════════════════════════════ -->
+<section>
+  <div class="sec-head">
+    <span class="sec-no">06</span><h2>验收标准</h2>
+  </div>
+  <ul class="accept">
+    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>整个区域只有两条轮廓</b>：goal 胶囊一条、composer 一条；没有任何分割线/异色底块。</span></li>
+    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>goal 胶囊<b>藏在 composer 上沿后面</b>（露出上半截，约 14px 被遮住），随 composer 同宽内缩 12px、水平居中。</span></li>
+    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>明暗主题下胶囊轮廓都清晰（暗色靠发丝边框，不靠阴影）。</span></li>
+    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>展开详情时胶囊向下生长，<b>composer 始终在前</b>，遮住关系不变；› 箭头旋转 90°。</span></li>
+    <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>无 goal / 欢迎页 elevated composer 形态不变。</span></li>
+  </ul>
+</section>
+
+<script>
+const root = document.documentElement;
+const themeBtn = document.getElementById('themeToggle');
+const sun = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>';
+const moon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+function paintThemeBtn(){ themeBtn.innerHTML = root.classList.contains('dark') ? sun : moon; }
+themeBtn.addEventListener('click', () => { root.classList.toggle('dark'); paintThemeBtn(); });
+paintThemeBtn();
+
+const focusBtn = document.getElementById('focusToggle');
+focusBtn.addEventListener('click', () => {
+  const on = document.body.classList.toggle('sim-focus');
+  focusBtn.setAttribute('aria-pressed', String(on));
+});
+</script>
+</body>
+</html>

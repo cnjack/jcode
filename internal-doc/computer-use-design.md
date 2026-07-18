@@ -532,17 +532,16 @@ type ComputerAppPermission struct {
 
 Hung off `Config.Computer *ComputerConfig`, JSON key `computer`. Defaults:
 `max_actions_per_batch=20`, all grant flags false.
-**Default `enabled=false`** — unlike browser-use. Computer use can touch
-anything on the machine; it is opt-in.
+**Default `enabled=false`**, matching browser-use. Computer use can touch
+anything on the machine and additionally requires native OS grants.
 
 The Go struct temporarily retains an omitted, deprecated `backend` field only
 so `LoadConfig` can migrate old files safely. It is absent from REST DTOs and is
 never consulted by runtime backend selection.
 
-> **Do not reproduce the browser config-mapper fork.** `browserManagerConfig`
-> (`command/web.go:136`) and `browserConfigToManager` (`web/browser.go:50`) are
-> near-duplicates that already disagree on the viewport default. Computer use
-> gets **one** mapper, in one place, consumed by both call sites.
+> Browser and computer use each have **one** config mapper in their capability
+> package, consumed by every transport. Defaults must not be copied into command
+> or web handlers.
 
 ---
 

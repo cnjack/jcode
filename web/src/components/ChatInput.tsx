@@ -88,24 +88,25 @@ export interface ChatInputProps {
 type ModeValue = AgentMode
 interface ModeDef {
   value: ModeValue
-  label: string
-  sub: string
+  /** i18n keys under chat.modes (resolved with t() at render). */
+  labelKey: string
+  subKey: string
   risk: 'neutral' | 'plan' | 'info' | 'danger'
   Icon: typeof HandRaisedIcon
 }
 
 const MODE_DEFS: ModeDef[] = [
-  { value: 'approval', label: 'Ask for approval', sub: 'Agent asks before running tools', risk: 'neutral', Icon: HandRaisedIcon },
-  { value: 'plan', label: 'Plan', sub: 'Agent plans, then waits for your go-ahead', risk: 'plan', Icon: ClipboardDocumentListIcon },
-  { value: 'auto', label: 'Auto', sub: 'AI reviewer allows safe tools; uncertain ones ask', risk: 'info', Icon: SparklesIcon },
-  { value: 'full_access', label: 'Full access', sub: 'Agent can act without asking', risk: 'danger', Icon: ShieldExclamationIcon },
+  { value: 'approval', labelKey: 'chat.modes.approval', subKey: 'chat.modes.approvalSub', risk: 'neutral', Icon: HandRaisedIcon },
+  { value: 'plan', labelKey: 'chat.modes.plan', subKey: 'chat.modes.planSub', risk: 'plan', Icon: ClipboardDocumentListIcon },
+  { value: 'auto', labelKey: 'chat.modes.auto', subKey: 'chat.modes.autoSub', risk: 'info', Icon: SparklesIcon },
+  { value: 'full_access', labelKey: 'chat.modes.fullAccess', subKey: 'chat.modes.fullAccessSub', risk: 'danger', Icon: ShieldExclamationIcon },
 ]
 
 const STANDARD_EFFORT_OPTIONS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
-function modeLabel(m: string): string {
+function modeLabel(t: (key: string) => string, m: string): string {
   const def = MODE_DEFS.find((d) => d.value === m)
-  return def ? def.label : 'Ask for approval'
+  return t(def ? def.labelKey : 'chat.modes.approval')
 }
 
 // ─── Format helpers ─────────────────────────────────────────────────────────
@@ -127,6 +128,28 @@ function modelSubline(modelId: string, info?: { context_limit?: number }): strin
   const ctx = formatContext(info?.context_limit)
   if (ctx) parts.push(ctx)
   return parts.join(' · ')
+}
+
+/**
+ * Slash token at the cursor: walks back from the caret to the nearest "/" with
+ * no whitespace in between, then decides whether that "/" can start a command.
+ * It can when the char before it is NOT a word/path char [A-Za-z0-9_/.-] — i.e.
+ * start of text, whitespace, CJK, or punctuation. That admits "see /goal" and
+ * "帮我/goal" (CJK text rarely has spaces) while excluding paths and URLs like
+ * "/usr/bin" or "http://x/y". Returns the token start offset plus the filter
+ * text typed after "/".
+ */
+function slashTokenAt(text: string, cursor: number): { start: number; filter: string } | null {
+  for (let i = cursor - 1; i >= 0; i--) {
+    const ch = text[i]
+    if (/\s/.test(ch)) return null
+    if (ch !== '/') continue
+    if (i === 0 || !/[A-Za-z0-9_/.-]/.test(text[i - 1])) {
+      return { start: i, filter: text.slice(i + 1, cursor) }
+    }
+    return null
+  }
+  return null
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -260,10 +283,22 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
   const manageVisibleCount = filteredProviders.reduce((n, p) => n + p.models.length, 0)
   const manageTotalCount = providers.reduce((n, p) => n + p.models.length, 0)
 
+  // Local pseudo-command: "/goal" arms Goal mode (same as the "+" menu entry)
+  // instead of inserting text. Compared by object identity in applySlashCommand.
+  const goalSlashCmd = useMemo<SlashCommandInfo>(
+    () => ({ slash: '/goal', description: t('chat.goalSlashDesc'), type: 'builtin' }),
+    [t],
+  )
+
   const filteredSlashCommands = useMemo(() => {
     const filter = slashFilter.toLowerCase()
-    return slashCommands.filter((s) => s.slash.toLowerCase().startsWith('/' + filter))
-  }, [slashCommands, slashFilter])
+    const backend = slashCommands.filter((s) => s.slash.toLowerCase().startsWith('/' + filter))
+    // Prepend the local /goal entry unless the backend ships a real one.
+    if ('/goal'.startsWith('/' + filter) && !backend.some((s) => s.slash === '/goal')) {
+      return [goalSlashCmd, ...backend]
+    }
+    return backend
+  }, [slashCommands, slashFilter, goalSlashCmd])
 
   // Context-fill ring (token usage %).
   const ctxRingCirc = 2 * Math.PI * 6.4
@@ -334,7 +369,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
       pendingImages.length > 0
         ? pendingImages.map((i) => ({ data: i.data, media_type: i.media_type, name: i.name }))
         : undefined
-    const body = text || '(see attached images)'
+    const body = text || t('chat.attachedImages')
     if (isRunning) {
       actions.enqueueMessage(body, images)
     } else {
@@ -345,7 +380,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
     setPendingImages([])
     setShowSlashMenu(false)
     onSent?.()
-  }, [actions, input, isRunning, onSent, pendingImages, currentSessionId])
+  }, [actions, input, isRunning, onSent, pendingImages, currentSessionId, t])
 
   // ─── Model / mode selection ───────────────────────────────────────────────
 
@@ -408,10 +443,50 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
 
   // ─── Slash commands ───────────────────────────────────────────────────────
 
+  /** Recompute slash-menu visibility from the text + caret (mid-text aware). */
+  function updateSlashState(text: string, cursor: number) {
+    const tok = slashTokenAt(text, cursor)
+    if (tok) {
+      setSlashFilter(tok.filter)
+      setShowSlashMenu(true)
+      setSelectedSlashIdx(0)
+    } else {
+      setShowSlashMenu(false)
+    }
+  }
+
   function applySlashCommand(cmd: SlashCommandInfo) {
-    setInput(cmd.slash + ' ')
+    const el = textareaRef.current
+    const cursor = el ? el.selectionStart : input.length
+    const tok = slashTokenAt(input, cursor)
+    if (cmd === goalSlashCmd) {
+      // "/goal" is a mode toggle, not message text: arm Goal mode and strip the
+      // typed token so the surrounding message stays intact.
+      dispatch(chatActions.setGoalArmed(true))
+      if (tok) {
+        const next = input.slice(0, tok.start) + input.slice(cursor)
+        setInput(next)
+        requestAnimationFrame(() => {
+          el?.focus()
+          el?.setSelectionRange(tok.start, tok.start)
+        })
+      } else {
+        requestAnimationFrame(() => el?.focus())
+      }
+    } else if (tok) {
+      // Replace only the "/filter" token at the caret; keep the rest of the draft.
+      const next = input.slice(0, tok.start) + cmd.slash + ' ' + input.slice(cursor)
+      setInput(next)
+      const pos = tok.start + cmd.slash.length + 1
+      requestAnimationFrame(() => {
+        el?.focus()
+        el?.setSelectionRange(pos, pos)
+      })
+    } else {
+      setInput(cmd.slash + ' ')
+      requestAnimationFrame(() => el?.focus())
+    }
     setShowSlashMenu(false)
-    requestAnimationFrame(() => textareaRef.current?.focus())
   }
 
   function selectFirstFiltered() {
@@ -474,13 +549,13 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
     autoResize()
     const text = e.target.value
     setInput(text)
-    if (text.startsWith('/')) {
-      setSlashFilter(text.slice(1))
-      setShowSlashMenu(true)
-      setSelectedSlashIdx(0)
-    } else {
-      setShowSlashMenu(false)
-    }
+    updateSlashState(text, e.target.selectionStart ?? text.length)
+  }
+
+  /** Keep the menu in sync when the caret moves (click / arrow keys). */
+  function handleSelect(e: React.SyntheticEvent<HTMLTextAreaElement>) {
+    const el = e.currentTarget
+    updateSlashState(el.value, el.selectionStart ?? el.value.length)
   }
 
   function insertToken(char: string) {
@@ -495,11 +570,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
       const pos = start + char.length
       el?.setSelectionRange(pos, pos)
       // Re-run slash-menu logic if "/" was inserted.
-      if (char === '/') {
-        setSlashFilter(next.slice(1))
-        setShowSlashMenu(next.startsWith('/'))
-        setSelectedSlashIdx(0)
-      }
+      if (char === '/') updateSlashState(next, pos)
     })
   }
 
@@ -676,8 +747,8 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
               )}
               <button
                 type="button"
-                title="Remove queued message"
-                aria-label="Remove queued message"
+                title={t('chat.removeQueued')}
+                aria-label={t('chat.removeQueued')}
                 onClick={() => actions.removeQueuedMessage(q.id)}
                 className="grid h-5 w-5 shrink-0 place-items-center rounded-[var(--radius-md)] border-none bg-transparent text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-secondary)] hover:text-[var(--color-foreground)]"
               >
@@ -692,9 +763,9 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
         className={`relative mx-auto flex flex-col ${
           isElevated
             ? 'rounded-[var(--radius-2xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-xl)]'
-            : 'rounded-[var(--radius-xl)] bg-transparent'
+            : 'z-[2] rounded-[var(--radius-2xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-sm)]'
         }`}
-        style={{ padding: isElevated ? '6px 12px 12px' : '4px 6px 10px' }}
+        style={{ padding: isElevated ? '6px 12px 12px' : '14px 16px 10px' }}
       >
         {/* Slash command menu */}
         {showSlashMenu && filteredSlashCommands.length > 0 && (
@@ -712,7 +783,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                 <span className="shrink-0 font-mono text-xs text-[var(--color-primary)]">{cmd.slash}</span>
                 {cmd.type === 'flow' && (
                   <span className="shrink-0 rounded-[var(--radius-pill)] border border-[var(--accent-wash)] bg-[var(--accent-wash)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[var(--color-primary)]">
-                    workflow
+                    {t('chat.workflowBadge')}
                   </span>
                 )}
                 <span className="truncate text-[11px] text-[var(--color-muted-foreground)]">{cmd.description}</span>
@@ -732,10 +803,12 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
         )}
 
         <div
-          className={`border border-[var(--color-border)] bg-[color-mix(in_srgb,var(--color-surface)_90%,#000)] transition-colors focus-within:border-[color-mix(in_srgb,var(--color-foreground)_30%,transparent)] ${
-            isElevated ? 'rounded-[var(--radius-xl)]' : 'rounded-[var(--radius-lg)]'
+          className={`transition-colors ${
+            isElevated
+              ? 'rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[color-mix(in_srgb,var(--color-surface)_90%,#000)] focus-within:border-[color-mix(in_srgb,var(--color-foreground)_30%,transparent)]'
+              : 'rounded-[var(--radius-lg)]'
           }`}
-          style={{ padding: '14px 16px 0' }}
+          style={isElevated ? { padding: '14px 16px 0' } : undefined}
         >
           {/* Textarea + image previews */}
           <div className="pb-2">
@@ -745,13 +818,14 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
               rows={1}
               onChange={handleInput}
               onKeyDown={handleKeyDown}
+              onSelect={handleSelect}
               onPaste={handlePaste}
               placeholder={
                 isRunning
-                  ? 'Queue a message…'
+                  ? t('chat.queuePlaceholder')
                     : goalArmed
-                    ? 'What is your goal?'
-                    : 'Send a message…'
+                    ? t('chat.goalPlaceholder')
+                    : t('chat.placeholder')
               }
               className="block w-full resize-none border-none bg-transparent text-sm leading-relaxed text-[var(--color-foreground)] outline-none"
               style={{ minHeight: 28, maxHeight: 200, fontFamily: 'var(--font-sans)' }}
@@ -784,7 +858,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
               <div className="relative">
                 <button
                   type="button"
-                  title="Add"
+                  title={t('chat.add')}
                   onClick={(e: ReactMouseEvent) => { e.stopPropagation(); openAdd() }}
                   className={`grid h-[30px] w-[30px] place-items-center rounded-[var(--radius-md)] border-none bg-transparent text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-secondary)] hover:text-[var(--color-foreground)] ${
                     showAddMenu ? 'bg-[var(--color-secondary)] text-[var(--color-foreground)]' : ''
@@ -799,14 +873,14 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                     <button
                       type="button"
                       disabled={!imageSupport}
-                      title={!imageSupport ? 'Current model does not accept images' : ''}
+                      title={!imageSupport ? t('chat.model.noImages') : ''}
                       onClick={() => { triggerImageUpload(); setShowAddMenu(false) }}
                       className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)] ${
                         !imageSupport ? 'cursor-default opacity-50' : ''
                       }`}
                     >
                       <PaperClipIcon className="h-3.5 w-3.5 shrink-0 text-[var(--color-muted-foreground)]" />
-                      <span>Attach files</span>
+                      <span>{t('chat.attachFiles')}</span>
                       {pendingImages.length > 0 && (
                         <span className="ml-auto font-mono text-[10px] text-[var(--color-primary)]">{pendingImages.length}</span>
                       )}
@@ -817,18 +891,18 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                       className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
                     >
                       <span className="w-[15px] shrink-0 text-center font-mono text-sm leading-none text-[var(--color-muted-foreground)]">/</span>
-                      <span>Command</span>
+                      <span>{t('chat.command')}</span>
                     </button>
                     <button
                       type="button"
-                      title={goalArmed ? 'Goal is armed — your next message becomes the objective' : 'Arm Goal mode'}
+                      title={goalArmed ? t('chat.goalHint.nextReplaces') : t('chat.goalHint.next')}
                       onClick={() => { dispatch(chatActions.setGoalArmed(!goalArmed)); setShowAddMenu(false) }}
                       className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)] ${
                         goalArmed ? 'bg-[var(--neutral-wash)] text-[var(--color-foreground)]' : ''
                       }`}
                     >
                       <ViewfinderCircleIcon className={`h-3.5 w-3.5 shrink-0 ${goalArmed ? 'text-[var(--color-primary)]' : 'text-[var(--color-muted-foreground)]'}`} />
-                      <span>Goal</span>
+                      <span>{t('chat.goal')}</span>
                     </button>
                   </div>
                 )}
@@ -857,7 +931,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                             : ''
                     }
                   >
-                    {modeLabel(mode)}
+                    {modeLabel(t, mode)}
                   </span>
                   <ChevronDownIcon
                     className={`h-3 w-3 opacity-55 transition-transform ${showModePicker ? 'rotate-180' : ''}`}
@@ -901,10 +975,10 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                                       : 'text-[var(--color-foreground)]'
                               }`}
                             >
-                              {m.label}
+                              {t(m.labelKey)}
                             </span>
                             <span className="mt-px block text-[10.5px] leading-[1.4] text-[var(--color-muted-foreground)]">
-                              {m.sub}
+                              {t(m.subKey)}
                             </span>
                           </span>
                           {active && <CheckIcon className="mt-[3px] h-3.5 w-3.5 shrink-0 text-[var(--color-primary)]" />}
@@ -920,20 +994,20 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                 <>
                   <span aria-hidden="true" className="mx-0.5 h-4 w-px shrink-0 bg-[var(--color-border)]" />
                   <div
-                    title="Goal armed — your next message replaces the current objective"
+                    title={t('chat.goalHint.nextReplaces')}
                     className="inline-flex h-[26px] items-center gap-1.5 rounded-[var(--radius-md)] bg-[var(--neutral-wash)] px-2 text-xs font-medium text-[var(--color-primary)]"
                     style={{ paddingLeft: 4, paddingRight: 9 }}
                   >
                     <button
                       type="button"
-                      title="Disarm Goal"
+                      title={t('chat.goalHint.remove')}
                       onClick={() => dispatch(chatActions.setGoalArmed(false))}
                       className="grid h-4 w-4 place-items-center rounded-[var(--radius-pill)] border-none bg-[color-mix(in_srgb,var(--color-primary)_18%,transparent)] text-[var(--color-primary)] transition-colors hover:bg-[color-mix(in_srgb,var(--color-primary)_34%,transparent)]"
                     >
                       <XMarkIcon className="h-2.5 w-2.5" />
                     </button>
                     <ViewfinderCircleIcon className="h-3 w-3" />
-                    <span>Goal</span>
+                    <span>{t('chat.goal')}</span>
                   </div>
                 </>
               )}
@@ -946,7 +1020,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                 <div className="relative">
                   <button
                     type="button"
-                    title="Context capacity"
+                    title={t('contextCapacity.title')}
                     onClick={(e) => { e.stopPropagation(); void toggleContextPopup() }}
                     className="inline-flex items-center gap-[5px] rounded-[var(--radius-sm)] border-none bg-transparent px-[5px] py-0.5 font-mono text-[10px] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-secondary)] hover:text-[var(--color-foreground)]"
                   >
@@ -1066,7 +1140,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                             selectFirstFiltered()
                           }
                         }}
-                        placeholder="Filter models…"
+                        placeholder={t('chat.model.filter')}
                         className="flex-1 border-none bg-transparent text-[13px] text-[var(--color-foreground)] outline-none"
                       />
                       <kbd className="rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-muted)] px-[5px] py-px font-mono text-[10px] text-[var(--color-muted-foreground)]">/</kbd>
@@ -1075,16 +1149,16 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                     {/* Pinned current row */}
                     {providerName && modelName && (
                       <div className="flex items-center gap-2.5 border-b border-[var(--color-border)] px-3 py-2">
-                        <CheckCircleIcon className="h-[17px] w-[17px] shrink-0 text-[var(--color-primary)]" title="Current model" />
+                        <CheckCircleIcon className="h-[17px] w-[17px] shrink-0 text-[var(--color-primary)]" title={t('chat.model.current')} />
                         <ProviderIcon provider={providerName} custom={providerInfoFor(providerName)?.custom} size={22} />
                         <span className="flex min-w-0 flex-1 flex-col">
                           <span className="truncate text-[12.5px] text-[var(--color-foreground)]">{getModelDisplayName(providerName, modelName)}</span>
                           <span className="mt-px truncate font-mono text-[10px] text-[var(--color-muted-foreground)]">{modelSubline(modelName, currentModelInfo)}</span>
                         </span>
                         <span className="inline-flex shrink-0 items-center gap-1.5">
-                          {currentModelInfo?.reasoning && <SparklesIcon className="h-[15px] w-[15px]" title="Reasoning" strokeWidth={1.9} />}
-                          {currentModelInfo?.tool_call && <WrenchScrewdriverIcon className="h-[15px] w-[15px]" title="Tool use" strokeWidth={1.9} />}
-                          {currentModelInfo?.image_support && <PhotoIcon className="h-[15px] w-[15px]" title="Image input" strokeWidth={1.9} />}
+                          {currentModelInfo?.reasoning && <SparklesIcon className="h-[15px] w-[15px]" title={t('chat.model.reasoning')} strokeWidth={1.9} />}
+                          {currentModelInfo?.tool_call && <WrenchScrewdriverIcon className="h-[15px] w-[15px]" title={t('chat.model.tools')} strokeWidth={1.9} />}
+                          {currentModelInfo?.image_support && <PhotoIcon className="h-[15px] w-[15px]" title={t('chat.model.images')} strokeWidth={1.9} />}
                         </span>
                       </div>
                     )}
@@ -1095,7 +1169,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                       {favoriteModelRefs.length > 0 && (
                         <>
                           <div className="flex items-center gap-2 px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--color-muted-foreground)]">
-                            Favorites
+                            {t('chat.model.favorites')}
                             <span className="font-mono font-normal normal-case tracking-normal opacity-70">{favoriteModelRefs.length}</span>
                           </div>
                           {favoriteModelRefs.map((r) => {
@@ -1113,9 +1187,9 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                                   <span className="mt-px truncate font-mono text-[10px] text-[var(--color-muted-foreground)]">{modelSubline(r.model, info)}</span>
                                 </span>
                                 <span className="inline-flex shrink-0 items-center gap-1.5">
-                                  {info?.reasoning && <SparklesIcon className="h-[15px] w-[15px]" title="Reasoning" strokeWidth={1.9} />}
-                                  {info?.tool_call && <WrenchScrewdriverIcon className="h-[15px] w-[15px]" title="Tool use" strokeWidth={1.9} />}
-                                  {info?.image_support && <PhotoIcon className="h-[15px] w-[15px]" title="Image input" strokeWidth={1.9} />}
+                                  {info?.reasoning && <SparklesIcon className="h-[15px] w-[15px]" title={t('chat.model.reasoning')} strokeWidth={1.9} />}
+                                  {info?.tool_call && <WrenchScrewdriverIcon className="h-[15px] w-[15px]" title={t('chat.model.tools')} strokeWidth={1.9} />}
+                                  {info?.image_support && <PhotoIcon className="h-[15px] w-[15px]" title={t('chat.model.images')} strokeWidth={1.9} />}
                                 </span>
                                 <StarIconSolid
                                   className="h-3.5 w-3.5 shrink-0 text-[var(--color-primary)]"
@@ -1158,13 +1232,13 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                                   <span className="mt-px truncate font-mono text-[10px] text-[var(--color-muted-foreground)]">{modelSubline(m.id, m)}</span>
                                 </span>
                                 {m.recommended && (
-                                  <span className="shrink-0 rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--neutral-wash-strong)] px-1.5 py-px text-[10px] font-semibold text-[var(--color-foreground)]">Recommended</span>
+                                  <span className="shrink-0 rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--neutral-wash-strong)] px-1.5 py-px text-[10px] font-semibold text-[var(--color-foreground)]">{t('common.recommended')}</span>
                                 )}
                                 <span className="inline-flex shrink-0 items-center gap-1.5">
-                                  {m.reasoning && <SparklesIcon className="h-[15px] w-[15px]" title="Reasoning" strokeWidth={1.9} />}
-                                  {m.tool_call && <WrenchScrewdriverIcon className="h-[15px] w-[15px]" title="Tool use" strokeWidth={1.9} />}
-                                  {m.image_support && <PhotoIcon className="h-[15px] w-[15px]" title="Image input" strokeWidth={1.9} />}
-                                  {m.image_support === false && <PhotoIcon className="h-[15px] w-[15px] text-[var(--color-warning-fg)]" title="No image input" strokeWidth={1.9} />}
+                                  {m.reasoning && <SparklesIcon className="h-[15px] w-[15px]" title={t('chat.model.reasoning')} strokeWidth={1.9} />}
+                                  {m.tool_call && <WrenchScrewdriverIcon className="h-[15px] w-[15px]" title={t('chat.model.tools')} strokeWidth={1.9} />}
+                                  {m.image_support && <PhotoIcon className="h-[15px] w-[15px]" title={t('chat.model.images')} strokeWidth={1.9} />}
+                                  {m.image_support === false && <PhotoIcon className="h-[15px] w-[15px] text-[var(--color-warning-fg)]" title={t('chat.model.noImageInput')} strokeWidth={1.9} />}
                                 </span>
                                 {active && <CheckIcon className="h-3.5 w-3.5 shrink-0 text-[var(--color-primary)]" strokeWidth={2} />}
                                 <StarIcon
@@ -1181,7 +1255,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
 
                       {pickerProviders.length === 0 && (
                         <div className="px-2 py-5 text-center text-[13px] text-[var(--color-muted-foreground)]">
-                          {modelFilter ? 'No matching models' : 'No models available'}
+                          {modelFilter ? t('chat.model.noMatch') : t('chat.model.none')}
                         </div>
                       )}
                     </div>
@@ -1194,7 +1268,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                         className="flex w-full items-center gap-2 rounded-[var(--radius-md)] border-none bg-transparent px-2 py-1.5 text-left text-xs text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
                       >
                         <SquaresPlusIcon className="h-3.5 w-3.5" />
-                        Manage models
+                        {t('chat.model.manage')}
                       </button>
                     </div>
                   </div>
@@ -1205,12 +1279,12 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
               {isRunning && (
                 <button
                   type="button"
-                  title={queued.length > 0 ? 'Stop and send next' : 'Stop agent'}
+                  title={queued.length > 0 ? t('chat.stopAndNext') : t('chat.stopAgent')}
                   onClick={() => actions.stop()}
                   className="flex shrink-0 items-center gap-[5px] whitespace-nowrap rounded-[var(--radius-lg)] border-none bg-[var(--color-destructive)] px-3 py-[5px] text-xs font-medium text-[var(--color-on-destructive)]"
                 >
                   <StopIcon className="h-3.5 w-3.5" />
-                  Stop
+                  {t('chat.stop')}
                 </button>
               )}
 
@@ -1219,12 +1293,12 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                 <button
                   type="button"
                   disabled={!canSend}
-                  aria-label={isRunning ? 'Queue message' : 'Send message'}
+                  aria-label={isRunning ? t('chat.queue') : t('chat.send')}
                   onClick={send}
                   className="flex shrink-0 items-center gap-[5px] whitespace-nowrap rounded-[var(--radius-lg)] border-none bg-[var(--color-primary)] px-3 py-[5px] text-xs font-medium text-[var(--color-on-primary)] transition-[opacity,transform] disabled:cursor-not-allowed disabled:opacity-45 enabled:hover:opacity-90"
                 >
                   <PaperAirplaneIcon className="h-3.5 w-3.5" />
-                  {isRunning ? 'Queue' : 'Send'}
+                  {isRunning ? t('chat.queue') : t('chat.send')}
                 </button>
               )}
             </div>
@@ -1370,6 +1444,7 @@ function ManageModelsDialog({
   onClose,
   onToggle,
 }: ManageModelsDialogProps) {
+  const { t } = useTranslation()
   return (
     <div
       className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--backdrop)]"
@@ -1379,7 +1454,7 @@ function ManageModelsDialog({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Manage models"
+        aria-label={t('chat.model.manageTitle')}
         onClick={(e) => e.stopPropagation()}
         className="m-4 flex max-h-[70vh] min-w-0 flex-col overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)]"
         style={{ width: 'min(560px, 94vw)' }}
@@ -1390,14 +1465,14 @@ function ManageModelsDialog({
             <SquaresPlusIcon className="h-4 w-4" />
           </div>
           <div className="min-w-0 flex-1">
-            <h3 className="m-0 text-sm font-semibold tracking-[-0.01em] text-[var(--color-foreground)]">Manage models</h3>
+            <h3 className="m-0 text-sm font-semibold tracking-[-0.01em] text-[var(--color-foreground)]">{t('chat.model.manageTitle')}</h3>
             <p className="mt-0.5 text-[11.5px] leading-[1.45] text-[var(--color-muted-foreground)]">
-              Toggle which models appear in the picker.
+              {t('chat.model.toggleVisibility')}.
             </p>
           </div>
           <button
             type="button"
-            aria-label="Close"
+            aria-label={t('common.close')}
             onClick={onClose}
             className="ml-auto grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] border border-transparent bg-transparent text-[var(--color-muted-foreground)] transition-colors hover:border-[var(--color-border)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
           >
@@ -1412,7 +1487,7 @@ function ManageModelsDialog({
             <input
               value={filter}
               onChange={(e) => onFilter(e.target.value)}
-              placeholder="Filter models…"
+              placeholder={t('chat.model.filter')}
               className="flex-1 border-none bg-transparent text-[12.5px] text-[var(--color-foreground)] outline-none"
             />
           </div>
@@ -1442,13 +1517,13 @@ function ManageModelsDialog({
                       <span className="mt-px font-mono text-[10px] text-[var(--color-muted-foreground)]">{modelSubline(m.id, m)}</span>
                     </span>
                     {m.recommended && (
-                      <span className="shrink-0 rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--neutral-wash-strong)] px-1.5 py-px text-[10px] font-semibold text-[var(--color-foreground)]">Recommended</span>
+                      <span className="shrink-0 rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--neutral-wash-strong)] px-1.5 py-px text-[10px] font-semibold text-[var(--color-foreground)]">{t('common.recommended')}</span>
                     )}
                     <button
                       type="button"
                       role="switch"
                       aria-checked={off ? 'false' : 'true'}
-                      aria-label={off ? 'Enable model' : 'Disable model'}
+                      aria-label={off ? t('common.enable') : t('common.disable')}
                       onClick={() => onToggle(p.id, m.id, off)}
                       className="relative h-[18px] w-8 shrink-0 cursor-pointer rounded-[var(--radius-pill)] border-none bg-[var(--color-border)] transition-colors"
                       style={off ? undefined : { background: 'var(--color-primary)' }}
@@ -1465,7 +1540,7 @@ function ManageModelsDialog({
           ))}
           {providers.length === 0 && (
             <div className="py-8 text-center text-[13px] text-[var(--color-muted-foreground)]">
-              {filter ? 'No matching models' : 'No models available'}
+              {filter ? t('chat.model.noMatch') : t('chat.model.none')}
             </div>
           )}
         </div>
@@ -1473,7 +1548,7 @@ function ManageModelsDialog({
         {/* Footer */}
         <div className="flex items-center justify-between border-t border-[var(--color-border)] bg-[var(--color-muted)] px-[18px] py-3">
           <span className="text-[11px] text-[var(--color-muted-foreground)]">
-            {visibleCount} visible of {totalCount} models
+            {t('chat.model.visibleCount', { visible: visibleCount, total: totalCount })}
           </span>
           <div className="flex gap-2">
             <button
@@ -1481,7 +1556,7 @@ function ManageModelsDialog({
               onClick={onClose}
               className="inline-flex h-[30px] items-center gap-1.5 rounded-[var(--radius-md)] border border-transparent bg-[var(--color-primary)] px-3.5 text-xs font-medium text-[var(--color-on-primary)] transition-colors hover:bg-[color-mix(in_srgb,var(--color-primary)_88%,var(--color-background))]"
             >
-              Done
+              {t('common.done')}
             </button>
           </div>
         </div>

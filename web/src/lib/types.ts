@@ -69,6 +69,9 @@ export interface SessionEntry {
   // compact fields
   summary?: string
   compacted_n?: number
+
+  // user message attachments (base64, no data: prefix) — mirrors session.EntryImage
+  images?: { media_type: string; data: string }[]
 }
 
 export interface ConfigResponse {

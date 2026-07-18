@@ -1,11 +1,14 @@
 ---
 name: browser-use
-description: Discipline for driving the browser well with the browser_* tools (snapshot-first, safe navigation, approvals). Load before any browser work.
+description: Discipline for driving enabled browser_* tools (snapshot-first, safe navigation, approvals). Load when browser tools are available.
 ---
 
 # Browser Use
 
-You can see and operate a browser through the `browser_*` tools. Read this before browser work; it is how you avoid wasting turns and how you stay safe.
+When browser use is enabled, you can see and operate a browser through the
+`browser_*` tools. Read this before using those tools; it is how you avoid
+wasting turns and how you stay safe. If the tools are absent, browser use is
+disabled in this session; do not claim that you can operate a browser.
 
 ## See before you act
 - `browser_snapshot` is your primary way to see the page. It lists interactive elements each tagged with a uid like `[e3]`. `browser_act` targets those uids.

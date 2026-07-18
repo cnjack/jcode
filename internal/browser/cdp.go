@@ -2,7 +2,7 @@
 // the agent can see (text a11y snapshots + screenshots) and operate (click,
 // fill, navigate) behind tiered approvals. Two backends share one TabConn
 // abstraction: a managed Chrome launched by jcode, and the user's own Chrome
-// reached through the jcode extension bridge. See internal-doc/browser-use-design.md.
+// reached through the jcode extension bridge. See site/docs/overview/browser-use.md.
 package browser
 
 import (

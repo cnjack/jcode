@@ -23,10 +23,12 @@ import {
 import {
   RuntimeProvider,
   ToolRegistryProvider,
+  ApiBaseProvider,
   createDefaultToolRegistry,
 } from 'jcode-ui'
 import { WSClient } from './lib/ws'
 import { api } from './lib/api'
+import { apiBase } from './lib/apiBase'
 import { normalizeMode } from './lib/types'
 import { useAppDispatch, useAppSelector } from './app/hooks'
 import {
@@ -51,6 +53,7 @@ import { AuthGate } from './components/AuthGate'
 import { SetupView } from './components/SetupView'
 import { SettingsDialog } from './components/SettingsDialog'
 import { TopBar } from './components/TopBar'
+import { ComputerShotPiP } from './components/ComputerShotPiP'
 import { RightPanel } from './components/RightPanel'
 import { TerminalPanel } from './components/TerminalPanel'
 import { RemoteConnectWizard } from './components/RemoteConnectWizard'
@@ -261,7 +264,12 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels'
 
   return (
     <RuntimeProvider runtime={runtime}>
-      <ToolRegistryProvider registry={registry}>
+      {/* ApiBaseProvider lets tool renderers (browser/computer screenshots)
+          resolve "/api/…" image refs against the real backend origin — required
+          in the Tauri shell, where the page itself is served from tauri://localhost
+          and a bare relative <img src> would 404. '' in browser mode (same-origin). */}
+      <ApiBaseProvider apiBase={apiBase}>
+        <ToolRegistryProvider registry={registry}>
         <div className="app-shell relative flex h-[100dvh] overflow-hidden bg-[var(--color-background)] text-[var(--color-foreground)]">
           {/* Native title-bar drag strip — hidden in browser, shown in Tauri (CSS). */}
           <div className="titlebar-drag" data-tauri-drag-region aria-hidden="true" />
@@ -275,6 +283,9 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels'
               onTogglePanel={togglePanel}
             />
           )}
+          {/* Codex-style computer-use PiP — floats under the TopBar, shows the
+              latest screenshot from the session's computer_screenshot calls. */}
+          {activeView === 'chat' && <ComputerShotPiP />}
 
           {/* Sidebar floats on the shell background — no border, no shared frame
               with the main canvas (matches Vue App.vue). */}
@@ -330,7 +341,8 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels'
             }}
           />
         </div>
-      </ToolRegistryProvider>
+        </ToolRegistryProvider>
+      </ApiBaseProvider>
     </RuntimeProvider>
   )
 }
@@ -426,16 +438,17 @@ function statusClass(status: 'success' | 'error' | 'running'): string {
 }
 
 function ErrorScreen({ message }: { message: string }) {
+  const { t } = useTranslation()
   return (
     <div className="flex h-screen flex-col items-center justify-center gap-2 bg-[var(--color-background)] text-[var(--color-foreground)]">
-      <h1 className="text-xl font-semibold">Can't reach the jcode backend</h1>
+      <h1 className="text-xl font-semibold">{t('connection.errorTitle')}</h1>
       <p className="max-w-md text-center text-sm text-[var(--color-muted-foreground)]">{message}</p>
       <button
         type="button"
         onClick={() => location.reload()}
         className="mt-2 rounded-[var(--radius-md)] bg-[var(--color-primary)] px-3 py-1.5 text-sm text-[var(--color-on-primary)]"
       >
-        Retry
+        {t('common.retry')}
       </button>
     </div>
   )

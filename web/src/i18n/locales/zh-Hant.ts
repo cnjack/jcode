@@ -6,6 +6,9 @@ export default {
   common: {
     ok: '確定',
     default: '預設',
+    low: '低',
+    medium: '中',
+    high: '高',
     on: '開啟',
     off: '關閉',
     add: '添加',
@@ -248,6 +251,7 @@ export default {
       filter: '篩選模型…',
       toggleVisibility: '選擇哪些模型顯示在模型選擇器中',
       noImages: '目前模型不支援圖片',
+      noImageInput: '不支援影像輸入',
       reasoning: '推理',
       tools: '工具呼叫',
       images: '圖片輸入',
@@ -263,6 +267,9 @@ export default {
       remove: '移除目標',
     },
     command: '指令',
+    goalSlashDesc: '開啟目標模式 —— 下一則訊息將成為目標',
+    workflowBadge: '工作流程',
+    attachedImages: '（見附圖）',
     stopped: '已停止',
     nextMessageGoal: '下一則訊息將成為本次工作階段的目標',
     durationSeconds: '{n}秒',
@@ -925,17 +932,32 @@ export default {
     },
   },
 
+  pip: {
+    computerUse: '電腦操控',
+    shots: '{n} 張截圖',
+    collapse: '隱藏',
+    expand: '顯示',
+    openFull: '放大',
+    shrink: '縮小',
+    unavailable: '截圖已過期',
+    latest: '最新',
+  },
+
   rightPanel: {
     plan: '計劃',
     files: '檔案',
     changes: '變更',
     noTasks: '暫無工作',
+    emptyDir: '空目錄',
+    dirError: '無法載入該目錄。',
+    fileError: '無法開啟 {name}（可能是二進位檔案、過大或不可讀）。',
   },
 
   diff: {
     changes: '變更',
     refresh: '↻ 重新整理',
     noChanges: '無變更',
+    loadError: '載入變更失敗',
     selectFile: '選擇一個檔案以查看變更',
     modes: {
       session: '對話',
@@ -999,6 +1021,13 @@ export default {
   goal: {
     clearGoal: '清除目標',
     clear: '清除',
+    edit: '編輯',
+    editTitle: '編輯目標',
+    collapse: '收起',
+    started: '開始於',
+    elapsed: '已進行',
+    saveFailed: '儲存目標失敗',
+    durationHours: '{h}小時 {m}分',
     tokens: '{used} tokens',
     tokensK: '{k}k tokens',
     status: {

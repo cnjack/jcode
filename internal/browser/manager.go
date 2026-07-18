@@ -57,6 +57,13 @@ func (m *Manager) GetConfig() Config {
 	return m.cfg
 }
 
+// Enabled reports whether browser-use tools should be exposed to agents.
+func (m *Manager) Enabled() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.cfg.Enabled
+}
+
 // DevMode reports whether high-risk actions (eval / raw CDP) are unlocked.
 func (m *Manager) DevMode() bool {
 	m.mu.Lock()

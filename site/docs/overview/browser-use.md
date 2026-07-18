@@ -22,12 +22,12 @@ in the web UI chat), but they are not the primary channel.
 
 ## Two backends, one tool set
 
-The same seven tools work over either backend — the model doesn't know or care
-which one is active.
+The same six core tools work over either backend — the model doesn't know or
+care which one is active. Developer mode adds the optional `browser_eval` tool.
 
 | Backend | What it is | Best for |
 | --- | --- | --- |
-| **Managed** (default) | jcode launches its own Chrome/Chromium with an isolated profile under `~/.jcode/browser/`. No extension needed, nothing touches your daily browser. | localhost verification, scraping public pages, anything that doesn't need your logins |
+| **Managed** | jcode launches its own Chrome/Chromium with an isolated profile under `~/.jcode/browser/`. No extension needed, nothing touches your daily browser. | localhost verification, scraping public pages, anything that doesn't need your logins |
 | **Extension** | The **jcode Browser Bridge** Chrome extension connects *your* Chrome to jcode over a local WebSocket. The agent works in your real browser — with your sessions and logins. | tasks on sites you're signed into, taking over a tab you already have open |
 
 With `"backend": "auto"` (the default) jcode prefers the extension when it is
@@ -67,7 +67,7 @@ limited to `127.0.0.1` / `localhost`) and sends nothing to any third party.
 | `browser_snapshot` | Text snapshot of the page — uid-tagged interactive elements; the primary way to "see" |
 | `browser_screenshot` | PNG screenshot; renders inline in the web UI chat, injected as an image for vision models |
 | `browser_act` | One interaction: click / fill / press / hover / scroll / select on a uid from the latest snapshot |
-| `browser_read` | Read page text, console output, or network activity |
+| `browser_read` | Read visible page text, bounded by a configurable character limit |
 | `browser_tabs` | List / open / select / close tabs; `claim` takes over one of your tabs (extension backend) |
 | `browser_eval` | Evaluate a JavaScript expression — requires developer mode |
 
@@ -75,8 +75,8 @@ limited to `127.0.0.1` / `localhost`) and sends nothing to any third party.
 
 Browser actions plug into the standard jcode approval flow, in three tiers:
 
-- **Read-only — no approval.** Snapshots, screenshots, reading text/console/
-  network, listing tabs.
+- **Read-only — no approval.** Snapshots, screenshots, reading visible page
+  text, and listing tabs.
 - **Interaction — ask once per site.** Navigation and page actions prompt the
   first time for each origin; you can answer *just this once* or *always allow
   this site*. Site permissions are stored in config and manageable from the
@@ -117,6 +117,7 @@ In **Plan mode** the browser is read-only: the agent can look but not touch.
 
 | Field | Meaning |
 | --- | --- |
+| `enabled` | Enable browser tools. Off by default; turn it on in Settings or with `/browser on` |
 | `backend` | `auto` (extension if connected, else managed), `managed`, or `extension` |
 | `chrome_path` | Path to a Chrome/Chromium binary; empty = auto-discover |
 | `headless` | Run the managed browser without a visible window |

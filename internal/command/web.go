@@ -131,31 +131,6 @@ func browserSitePreapproved(cfg *config.Config, origin, class string) bool {
 	return false
 }
 
-// browserManagerConfig maps persisted config into the browser manager's Config,
-// applying defaults (backend=auto, viewport=1280x720) when unset.
-func browserManagerConfig(cfg *config.Config) browser.Config {
-	bc := cfg.Browser
-	if bc == nil {
-		return browser.Config{Backend: "auto", Viewport: "1280x720"}
-	}
-	backend := bc.Backend
-	if backend == "" {
-		backend = "auto"
-	}
-	viewport := bc.Viewport
-	if viewport == "" {
-		viewport = "1280x720"
-	}
-	return browser.Config{
-		Enabled:    bc.Enabled,
-		Backend:    backend,
-		ChromePath: bc.ChromePath,
-		Headless:   bc.Headless,
-		Viewport:   viewport,
-		DevMode:    bc.DevMode,
-	}
-}
-
 // resolveWebToken decides the web auth token and whether auth must be enforced.
 //
 // Auth is required when the bind host is non-loopback (exposed to the network),
@@ -352,7 +327,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 	// shared with every per-task Env so the settings UI and the agent's browser_*
 	// tools operate the same Chrome. Created regardless of needsSetup so the
 	// settings page works before providers are configured.
-	browserMgr := browser.NewManager(browserManagerConfig(cfg))
+	browserMgr := browser.NewManager(browser.FromConfig(cfg.Browser))
 
 	// Computer-use manager (native desktop app control), process-wide like the
 	// browser one so the settings UI and the agent's computer_* tools share one

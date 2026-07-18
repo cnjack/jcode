@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { XMarkIcon } from '@heroicons/react/24/outline'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -28,6 +29,7 @@ interface Props {
 }
 
 export function TerminalPanel({ onClose }: Props) {
+  const { t } = useTranslation()
   const termElRef = useRef<HTMLDivElement | null>(null)
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
@@ -207,21 +209,21 @@ export function TerminalPanel({ onClose }: Props) {
             role="button"
             tabIndex={0}
             aria-pressed="true"
-            aria-label="Shell"
+            aria-label={t('terminal.shell', { n: 1 })}
             className="inline-flex h-[22px] shrink-0 items-center gap-1 rounded-[var(--radius-sm)] px-2 font-mono text-[11px] font-medium text-[var(--color-foreground)] transition-[background,color] duration-100"
             style={{
               fontFamily: 'var(--font-mono)',
               background: 'color-mix(in srgb, var(--color-foreground) 10%, transparent)',
             }}
           >
-            <span className="pointer-events-none">Shell</span>
+            <span className="pointer-events-none">{t('terminal.shell', { n: 1 })}</span>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
           <button
             type="button"
             onClick={onCloseRef.current}
-            title="Close panel"
+            title={t('terminal.closePanel')}
             className="flex h-5 w-5 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-muted-foreground)] transition-[background,color] duration-100 hover:bg-[color-mix(in_srgb,var(--color-foreground)_8%,transparent)] hover:text-[var(--color-foreground)]"
           >
             <XMarkIcon className="h-3 w-3" />

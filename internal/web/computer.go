@@ -193,7 +193,7 @@ func (s *Server) handleComputerConfig(w http.ResponseWriter, r *http.Request) {
 	// cfgMu intentionally remains held through live policy publication and tool
 	// rebuild. Without this, concurrent saves can commit B to disk but publish A
 	// to the Manager when A's slower rebuild resumes out of order.
-	if err := s.rebuildComputerAgent(); err != nil {
+	if err := s.rebuildToolAgents(); err != nil {
 		config.Logger().Printf("[computer] config saved but active-agent tool refresh failed: %v", err)
 		response["warning_code"] = "agent_refresh_failed"
 	}
@@ -283,11 +283,11 @@ func validateComputerPermissions(perms []config.ComputerAppPermission) error {
 	return nil
 }
 
-// rebuildComputerAgent refreshes fixed tool schemas for every live task, so
-// enabling or disabling Computer Use takes effect without an app restart or a
-// foreground-task switch. Runtime policy revocation is already immediate; this
-// keeps the model-visible tool surface in sync as well.
-func (s *Server) rebuildComputerAgent() error {
+// rebuildToolAgents refreshes fixed tool schemas for every live task after a
+// process-wide capability changes. Runtime policy publication is immediate;
+// this keeps the model-visible tool surface in sync without an app restart or
+// foreground-task switch.
+func (s *Server) rebuildToolAgents() error {
 	if s.needsSetup {
 		return nil
 	}

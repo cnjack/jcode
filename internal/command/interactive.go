@@ -1070,7 +1070,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	// Browser-use manager (managed Chrome backend; the extension backend needs a
 	// server and is unavailable in the pure TUI). Shared with this session's env
 	// so the browser_* tools work in the terminal.
-	browserMgr := browser.NewManager(browserManagerConfig(cfg))
+	browserMgr := browser.NewManager(browser.FromConfig(cfg.Browser))
 	env.Browser = browserMgr
 	defer func() { _ = browserMgr.Close() }()
 
@@ -1270,12 +1270,34 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 			}
 		},
 		SetEnabled: func(enable bool) error {
+			created := false
 			if cfg.Browser == nil {
 				cfg.Browser = &config.BrowserConfig{Backend: "auto"}
+				created = true
 			}
+			previousEnabled := cfg.Browser.Enabled
 			cfg.Browser.Enabled = enable
-			browserMgr.SetConfig(browserManagerConfig(cfg))
-			return config.SaveConfig(cfg)
+			if err := config.SaveConfig(cfg); err != nil {
+				cfg.Browser.Enabled = previousEnabled
+				if created {
+					cfg.Browser = nil
+				}
+				return err
+			}
+			browserMgr.SetConfig(browser.FromConfig(cfg.Browser))
+			// Tool schemas are fixed on an agent instance. Rebuild immediately so
+			// /browser on|off changes the current task's model-visible tools.
+			if st.agentMode == tui.ModePlanning {
+				st.toolList = st.buildPlanTools()
+			} else {
+				st.toolList = st.buildAllTools()
+			}
+			newAg, err := st.createAgent()
+			if err != nil {
+				return fmt.Errorf("saved setting but could not refresh agent tools: %w", err)
+			}
+			st.ag = newAg
+			return nil
 		},
 	}
 

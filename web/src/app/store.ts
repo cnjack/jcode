@@ -1022,8 +1022,8 @@ export const loadSession = createAsyncThunk(
     const timeline: ThreadItem[] = []
     const pendingToolCalls = new Map<string, ToolCall>()
     for (const e of entries) {
-      if (e.type === 'user' && e.content) {
-        timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('msg'), role: 'user', content: e.content, timestamp: ts(e.timestamp) } })
+      if (e.type === 'user' && (e.content || (e.images && e.images.length > 0))) {
+        timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('msg'), role: 'user', content: e.content || '', timestamp: ts(e.timestamp), images: e.images } })
       } else if (e.type === 'assistant' && e.content) {
         timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('asst'), role: 'assistant', content: e.content, timestamp: ts(e.timestamp) } })
       } else if (e.type === 'tool_call' && e.name) {
@@ -1147,8 +1147,8 @@ export const replaySession = createAsyncThunk(
     const timeline: ThreadItem[] = []
     const pendingToolCalls = new Map<string, ToolCall>()
     for (const e of entries) {
-      if (e.type === 'user' && e.content) {
-        timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('msg'), role: 'user', content: e.content, timestamp: ts(e.timestamp) } })
+      if (e.type === 'user' && (e.content || (e.images && e.images.length > 0))) {
+        timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('msg'), role: 'user', content: e.content || '', timestamp: ts(e.timestamp), images: e.images } })
       } else if (e.type === 'assistant' && e.content) {
         timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('asst'), role: 'assistant', content: e.content, timestamp: ts(e.timestamp) } })
       } else if (e.type === 'tool_call' && e.name) {

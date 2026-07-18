@@ -193,7 +193,7 @@ func TestComputerConfigRebuildsAllLiveTaskToolSchemas(t *testing.T) {
 			"background": background,
 		},
 	}
-	if err := s.rebuildComputerAgent(); err != nil {
+	if err := s.rebuildToolAgents(); err != nil {
 		t.Fatal(err)
 	}
 	if calls["active"] != 1 || calls["background"] != 1 {
@@ -219,7 +219,7 @@ func TestComputerAgentRebuildDoesNotOverwriteConcurrentModeSwitch(t *testing.T) 
 	}
 	s := &Server{Engine: eng}
 	done := make(chan error, 1)
-	go func() { done <- s.rebuildComputerAgent() }()
+	go func() { done <- s.rebuildToolAgents() }()
 	<-started
 	eng.applyModeSwitch("plan", newAgent)
 	close(release)

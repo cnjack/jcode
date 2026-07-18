@@ -1261,10 +1261,10 @@ function ProviderForm({
                       className={INPUT_SM}
                       style={{ width: '8rem' }}
                     >
-                      <option value="">Default</option>
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
+                      <option value="">{t('common.default')}</option>
+                      <option value="low">{t('common.low')}</option>
+                      <option value="medium">{t('common.medium')}</option>
+                      <option value="high">{t('common.high')}</option>
                     </select>
                   </div>
                 </div>
@@ -3823,12 +3823,13 @@ function Breakdown({
   compact: (n: number) => string
   project?: boolean
 }) {
+  const { t } = useTranslation()
   const sorted = [...shares].sort((a, b) => b.tokens - a.tokens).slice(0, 8)
   return (
     <section className={US_PANEL}>
       <div className={US_PANEL_TITLE}>{title}</div>
       <div className="space-y-1.5">
-        {sorted.length === 0 && <div className="text-[11px] text-[var(--color-muted-foreground)]">No data.</div>}
+        {sorted.length === 0 && <div className="text-[11px] text-[var(--color-muted-foreground)]">{t('settings.usageStats.noData')}</div>}
         {sorted.map((s) => (
           <div key={s.name}>
             <div className="flex items-center justify-between text-[11px]">

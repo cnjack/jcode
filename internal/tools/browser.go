@@ -12,27 +12,34 @@ import (
 	"github.com/cnjack/jcode/internal/browser"
 )
 
-// NewBrowserTools returns the browser-use tool set for this Env. When the Env
-// has no Browser manager, it returns nil (the tools are simply absent).
+// NewBrowserTools returns the browser-use tool set for this Env. When browser
+// use is unavailable or disabled, the tools are absent from the model schema.
 func (e *Env) NewBrowserTools() []tool.BaseTool {
 	if e.Browser == nil {
 		return nil
 	}
-	return []tool.BaseTool{
+	cfg := e.Browser.GetConfig()
+	if !cfg.Enabled {
+		return nil
+	}
+	tools := []tool.BaseTool{
 		&browserTool{env: e, info: browserOpenInfo()},
 		&browserTool{env: e, info: browserSnapshotInfo()},
 		&browserTool{env: e, info: browserScreenshotInfo()},
 		&browserTool{env: e, info: browserActInfo()},
 		&browserTool{env: e, info: browserReadInfo()},
 		&browserTool{env: e, info: browserTabsInfo()},
-		&browserTool{env: e, info: browserEvalInfo()},
 	}
+	if cfg.DevMode {
+		tools = append(tools, &browserTool{env: e, info: browserEvalInfo()})
+	}
+	return tools
 }
 
 // NewBrowserPlanTools returns the read-only browser subset for plan mode:
 // navigation (GET) + inspection, no interaction or eval.
 func (e *Env) NewBrowserPlanTools() []tool.BaseTool {
-	if e.Browser == nil {
+	if e.Browser == nil || !e.Browser.Enabled() {
 		return nil
 	}
 	return []tool.BaseTool{
@@ -285,10 +292,9 @@ func browserActInfo() *schema.ToolInfo {
 func browserReadInfo() *schema.ToolInfo {
 	return &schema.ToolInfo{
 		Name: "browser_read",
-		Desc: "Read page content. kind=text returns the visible body text (bounded). console/network are not yet available.",
+		Desc: "Read the current page's visible body text, bounded by a character limit.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"kind":  strParam("text (default). console/network reserved.", false),
-			"limit": intParam("Max characters for kind=text (default 20000)."),
+			"limit": intParam("Maximum characters to return (default 20000)."),
 		}),
 	}
 }

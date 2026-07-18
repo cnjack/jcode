@@ -46,25 +46,6 @@ func (s *Server) SetupNativeMessaging() {
 	}
 }
 
-// browserConfigToManager maps the persisted config into the manager's Config.
-func browserConfigToManager(bc *config.BrowserConfig) browser.Config {
-	if bc == nil {
-		return browser.Config{Backend: "auto"}
-	}
-	backend := bc.Backend
-	if backend == "" {
-		backend = "auto"
-	}
-	return browser.Config{
-		Enabled:    bc.Enabled,
-		Backend:    backend,
-		ChromePath: bc.ChromePath,
-		Headless:   bc.Headless,
-		Viewport:   bc.Viewport,
-		DevMode:    bc.DevMode,
-	}
-}
-
 func (s *Server) handleBrowserStatus(w http.ResponseWriter, r *http.Request) {
 	if s.browserMgr == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"available": false})
@@ -103,28 +84,36 @@ func (s *Server) handleBrowserConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
 	s.mu.Lock()
 	if s.cfg == nil {
 		s.mu.Unlock()
-		s.cfgMu.Unlock()
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config unavailable"})
 		return
 	}
+	previous := s.cfg.Browser
 	s.cfg.Browser = &req
 	err := config.SaveConfig(s.cfg)
+	if err != nil {
+		s.cfg.Browser = previous
+	}
 	s.mu.Unlock()
-	s.cfgMu.Unlock()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	s.browserMgr.SetConfig(browserConfigToManager(&req))
+	s.browserMgr.SetConfig(browser.FromConfig(&req))
 	// Enabling browser use should make native auto-connect available without a
 	// restart: refresh the endpoint file + native-host manifest now.
 	if req.Enabled {
 		s.SetupNativeMessaging()
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	response := map[string]string{"status": "ok"}
+	if err := s.rebuildToolAgents(); err != nil {
+		config.Logger().Printf("[browser] config saved but active-agent tool refresh failed: %v", err)
+		response["warning_code"] = "agent_refresh_failed"
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 // handleBrowserExtWS is the extension bridge websocket. It is auth-exempt (the

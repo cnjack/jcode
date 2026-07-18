@@ -4,11 +4,13 @@
  */
 
 import { Cog6ToothIcon } from '@heroicons/react/24/outline'
+import { useTranslation } from 'react-i18next'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
 import { uiActions } from '../app/store'
 import { ThemeToggle } from './ThemeToggle'
 
 export function ProjectHeader() {
+  const { t } = useTranslation()
   const dispatch = useAppDispatch()
   const projectPath = useAppSelector((s) => s.session.projectPath)
   const provider = useAppSelector((s) => s.model.providerName)
@@ -37,14 +39,14 @@ export function ProjectHeader() {
           type="button"
           onClick={() => dispatch(uiActions.setSettingsOpen(true))}
           className="rounded-[var(--radius-md)] p-1.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--neutral-wash-soft)] hover:text-[var(--color-foreground)]"
-          aria-label="Settings"
-          title="Settings (⌘,)"
+          aria-label={t('nav.settings')}
+          title={t('nav.settingsWithShortcut')}
         >
           <Cog6ToothIcon className="h-4 w-4" />
         </button>
         <span
           className={`h-2 w-2 rounded-full ${wsConnected ? 'bg-[var(--color-success)]' : 'bg-[var(--color-muted-foreground)]'}`}
-          title={wsConnected ? 'connected' : 'disconnected'}
+          title={wsConnected ? t('topbar.status.connected') : t('topbar.status.disconnected')}
         />
       </div>
     </header>

@@ -10,11 +10,8 @@ import (
 // defaults.
 //
 // This is the *only* mapper between the two shapes, and it is deliberately here
-// rather than in the command or web layer. browser-use has two near-duplicate
-// mappers (command/web.go:136 browserManagerConfig and web/browser.go:50
-// browserConfigToManager) which already disagree about the viewport default —
-// a live bug born purely from having two copies. One mapper, one default set,
-// both call sites.
+// rather than in the command or web layer. Keeping one mapper and one default
+// set prevents transport-specific behavior drift.
 func FromConfig(c *config.ComputerConfig) Config {
 	if c == nil {
 		// A nil config is "not configured", which is off — not "on with
