@@ -384,12 +384,18 @@ class WebBrowserDriverTest(unittest.TestCase):
             self.assertNotIn(host_only, kwargs["env"])
         self.assertEqual(0o700, stat.S_IMODE((self.home / "tmp").stat().st_mode))
         self.assertIn("Use only browser_* tools", api.prompt)
+        self.assertIn("all five numbered tool calls", api.prompt)
+        self.assertIn("2. Call browser_snapshot", api.prompt)
+        self.assertIn("none may be skipped", api.prompt)
 
     def test_deferred_chinese_prompt_and_tool_search_evidence(self):
         result, api, *_rest = self.run_fake(variant="deferred", language="zh")
         self.assertTrue(result.record["passed"], result.record)
         self.assertEqual(1, result.record["session_evidence"]["tool_search_call_count"])
         self.assertIn("只使用 browser_* 工具", api.prompt)
+        self.assertIn("五步都不可省略", api.prompt)
+        self.assertIn("2. 调用 browser_snapshot", api.prompt)
+        self.assertIn("尤其不能跳过第 2 步 browser_snapshot", api.prompt)
         self.assertIn("tool_search", api.prompt)
         self.assertNotIn(PROOF_VALUE, json.dumps(result.record))
 
