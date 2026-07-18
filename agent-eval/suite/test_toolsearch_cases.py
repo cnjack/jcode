@@ -28,10 +28,12 @@ class ToolSearchCaseMatrixTest(unittest.TestCase):
         cases = suite["cases"]
         ids = [case["id"] for case in cases]
 
-        self.assertEqual(16, len(cases))
+        self.assertEqual(18, len(cases))
         self.assertEqual(len(ids), len(set(ids)))
-        self.assertGreaterEqual(sum(case["critical"] for case in cases), 10)
+        self.assertEqual(15, sum(case["critical"] for case in cases))
         self.assertEqual({"acp", "web"}, {case["surface"] for case in cases})
+        self.assertEqual(17, sum(case["surface"] == "acp" for case in cases))
+        self.assertEqual(1, sum(case["surface"] == "web" for case in cases))
         self.assertEqual(
             {10, 30, 50, 100},
             {case["mcp_fixture"]["tool_count"] for case in cases if "mcp_fixture" in case},
@@ -43,6 +45,8 @@ class ToolSearchCaseMatrixTest(unittest.TestCase):
             "toolsearch-exact",
             "toolsearch-semantic-en",
             "toolsearch-semantic-zh",
+            "toolsearch-keyword-en",
+            "toolsearch-keyword-zh",
             "toolsearch-multi-target",
             "toolsearch-complex-args",
             "toolsearch-mcp-scale",
@@ -165,6 +169,105 @@ class ToolSearchCaseMatrixTest(unittest.TestCase):
                     self.assertEqual(0, expected["same_batch_max"])
                     self.assertGreaterEqual(expected["search_calls"]["min"], 1)
 
+    def test_query_mode_contracts_and_mode_specific_prompts_are_pinned(self):
+        cases = {case["id"]: case for case in self.validate()["cases"]}
+        self.assertEqual(
+            set(toolsearch_cases.PINNED_QUERY_MODES_BY_CASE), set(cases),
+        )
+        for case_id, modes in toolsearch_cases.PINNED_QUERY_MODES_BY_CASE.items():
+            self.assertEqual(
+                modes,
+                tuple(cases[case_id]["expected_routing"]["deferred"]["search_query_modes"]),
+            )
+
+        self.assertIn(
+            "query exactly select:goal_get",
+            cases["ts_exact_select_goal_get"]["prompt"],
+        )
+        self.assertIn(
+            "query exactly select:mcp__toolsearch_fixture__does_not_exist",
+            cases["ts_negative_unknown_select"]["prompt"],
+        )
+        for case_id in ("ts_keyword_en_goal_get", "ts_keyword_zh_goal_get"):
+            deferred = cases[case_id]["expected_routing"]["deferred"]
+            self.assertEqual(["deferred"], cases[case_id]["variants"])
+            self.assertEqual({"min": 1, "max": 1}, deferred["search_calls"])
+            self.assertEqual(["keyword"], deferred["search_query_modes"])
+            self.assertEqual(
+                {"match": "exact", "value": "+current +usage"},
+                deferred["search_query_matcher"],
+            )
+            self.assertIn("+current +usage", cases[case_id]["prompt"])
+
+    def test_rejects_query_mode_contract_drift(self):
+        for case_id, replacement in (
+            ("ts_semantic_en_goal_get", ["keyword"]),
+            ("ts_complex_automation_weekly", ["keyword"]),
+            ("ts_exact_select_goal_get", ["select", "keyword"]),
+            ("ts_keyword_en_goal_get", ["select", "keyword"]),
+            ("ts_negative_unknown_select", ["select", "keyword"]),
+            ("ts_negative_unrelated_keyword", ["select", "keyword"]),
+        ):
+            def mutate(document, target=case_id, modes=replacement):
+                case = next(item for item in document["cases"] if item["id"] == target)
+                case["expected_routing"]["deferred"]["search_query_modes"] = modes
+
+            with self.subTest(case_id=case_id):
+                with self.assertRaisesRegex(toolsearch_cases.MatrixError, "query mode contract"):
+                    self.validate(mutate)
+
+    def test_rejects_query_matcher_contract_drift(self):
+        for case_id in (
+            "ts_exact_select_goal_get",
+            "ts_keyword_en_goal_get",
+            "ts_keyword_zh_goal_get",
+            "ts_negative_unknown_select",
+        ):
+            def mutate(document, target=case_id):
+                case = next(item for item in document["cases"] if item["id"] == target)
+                case["expected_routing"]["deferred"]["search_query_matcher"]["value"] += " drift"
+
+            with self.subTest(case_id=case_id):
+                with self.assertRaisesRegex(toolsearch_cases.MatrixError, "query matcher contract"):
+                    self.validate(mutate)
+
+    def test_direct_read_uses_declared_fixture_path_matcher(self):
+        direct = {case["id"]: case for case in self.validate()["cases"]}["ts_direct_read"]
+        expected = {
+            "match": "fixture_path",
+            "value": {"file_path": "direct_fixture.txt"},
+        }
+        for variant in ("static", "deferred"):
+            read_specs = [
+                call for call in direct["expected_routing"][variant]["required_tool_calls"]
+                if call["name"] == "read"
+            ]
+            self.assertEqual(1, len(read_specs))
+            self.assertEqual(expected, read_specs[0]["args"])
+
+    def test_rejects_fixture_path_matcher_drift_or_unsafe_target(self):
+        def drift(document):
+            direct = next(item for item in document["cases"] if item["id"] == "ts_direct_read")
+            direct["expected_routing"]["deferred"]["required_tool_calls"][0]["args"]["match"] = "contains"
+
+        with self.assertRaisesRegex(toolsearch_cases.MatrixError, "fixture path contract"):
+            self.validate(drift)
+
+        def undeclared(document):
+            direct = next(item for item in document["cases"] if item["id"] == "ts_direct_read")
+            matcher = direct["expected_routing"]["deferred"]["required_tool_calls"][0]["args"]
+            matcher["value"]["file_path"] = "missing.txt"
+
+        with self.assertRaisesRegex(toolsearch_cases.MatrixError, "fixture_path matcher"):
+            self.validate(undeclared)
+
+        def wrong_tool(document):
+            direct = next(item for item in document["cases"] if item["id"] == "ts_direct_read")
+            direct["expected_routing"]["deferred"]["required_tool_calls"][0]["name"] = "grep"
+
+        with self.assertRaisesRegex(toolsearch_cases.MatrixError, "fixture_path matcher"):
+            self.validate(wrong_tool)
+
     def test_goal_get_cases_use_stable_sentinel_without_relaxing_routing(self):
         cases = {case["id"]: case for case in self.validate()["cases"]}
         for case_id in (
@@ -248,7 +351,11 @@ class ToolSearchCaseMatrixTest(unittest.TestCase):
             ("api_key", "CANARY"),
         ):
             def mutate(document, key=injected_key, injected=value):
-                document["cases"][8]["mcp_fixture"][key] = injected
+                case = next(
+                    item for item in document["cases"]
+                    if item["id"] == "ts_mcp_catalog_10"
+                )
+                case["mcp_fixture"][key] = injected
 
             with self.subTest(injected_key=injected_key):
                 with self.assertRaises(toolsearch_cases.MatrixError):
@@ -256,13 +363,21 @@ class ToolSearchCaseMatrixTest(unittest.TestCase):
 
     def test_rejects_external_url_and_browser_on_acp(self):
         def external_url(document):
-            document["cases"][13]["prompt"] = "Open https://example.invalid"
+            case = next(
+                item for item in document["cases"]
+                if item["id"] == "ts_browser_loopback_read"
+            )
+            case["prompt"] = "Open https://example.invalid"
 
         with self.assertRaisesRegex(toolsearch_cases.MatrixError, "external URL"):
             self.validate(external_url)
 
         def browser_acp(document):
-            document["cases"][13]["surface"] = "acp"
+            case = next(
+                item for item in document["cases"]
+                if item["id"] == "ts_browser_loopback_read"
+            )
+            case["surface"] = "acp"
 
         with self.assertRaisesRegex(toolsearch_cases.MatrixError, "ACP case cannot|Browser fixture must use"):
             self.validate(browser_acp)
@@ -275,7 +390,11 @@ class ToolSearchCaseMatrixTest(unittest.TestCase):
             self.validate(drift)
 
         def unknown_base(document):
-            document["cases"][12]["base_case"] = "missing_computer_fixture"
+            case = next(
+                item for item in document["cases"]
+                if item["id"] == "ts_computer_notes_click"
+            )
+            case["base_case"] = "missing_computer_fixture"
 
         with self.assertRaisesRegex(toolsearch_cases.MatrixError, "unknown base_case"):
             self.validate(unknown_base)

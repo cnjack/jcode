@@ -27,8 +27,9 @@ ACTIVATION_BOUNDARIES = {
     "no_activation_expected",
 }
 QUERY_MODES = {"select", "keyword"}
+QUERY_MATCHES = {"exact"}
 EMPTY_SEARCH_POLICIES = {"forbidden", "allowed", "required"}
-ARG_MATCHES = {"exact", "contains"}
+ARG_MATCHES = {"exact", "contains", "fixture_path"}
 MCP_TOOL_COUNTS = {10, 30, 50, 100}
 MCP_CATALOG_SENTINEL = "$mcp_fixture_catalog"
 MCP_DISTRACTOR_SENTINEL = "$mcp_fixture_distractors"
@@ -41,6 +42,56 @@ BROWSER_FIXTURE_ACTIONS = [
     "browser_read",
 ]
 BROWSER_CONFIRMATION_PREFIX = "JCODE_BROWSER_CONFIRMATION"
+
+PINNED_QUERY_MODES_BY_CASE = {
+    "ts_direct_read": (),
+    "ts_no_tool_irrelevant_en": (),
+    "ts_no_tool_irrelevant_zh": (),
+    "ts_exact_select_goal_get": ("select",),
+    "ts_semantic_en_goal_get": ("select", "keyword"),
+    "ts_semantic_zh_goal_get": ("select", "keyword"),
+    "ts_keyword_en_goal_get": ("keyword",),
+    "ts_keyword_zh_goal_get": ("keyword",),
+    "ts_multi_goal_lifecycle": ("select", "keyword"),
+    "ts_complex_automation_weekly": ("select", "keyword"),
+    "ts_mcp_catalog_10": ("select", "keyword"),
+    "ts_mcp_catalog_30": ("select", "keyword"),
+    "ts_mcp_catalog_50": ("select", "keyword"),
+    "ts_mcp_catalog_100": ("select", "keyword"),
+    "ts_computer_notes_click": ("select", "keyword"),
+    "ts_browser_loopback_read": ("select", "keyword"),
+    "ts_negative_unknown_select": ("select",),
+    "ts_negative_unrelated_keyword": ("keyword",),
+}
+
+PINNED_QUERY_MATCHERS_BY_CASE = {
+    case_id: None for case_id in PINNED_QUERY_MODES_BY_CASE
+}
+PINNED_QUERY_MATCHERS_BY_CASE.update({
+    "ts_exact_select_goal_get": {
+        "match": "exact",
+        "value": "select:goal_get",
+    },
+    "ts_keyword_en_goal_get": {
+        "match": "exact",
+        "value": "+current +usage",
+    },
+    "ts_keyword_zh_goal_get": {
+        "match": "exact",
+        "value": "+current +usage",
+    },
+    "ts_negative_unknown_select": {
+        "match": "exact",
+        "value": "select:mcp__toolsearch_fixture__does_not_exist",
+    },
+})
+
+PINNED_FIXTURE_PATH_ARGS = {
+    "ts_direct_read": {
+        "match": "fixture_path",
+        "value": {"file_path": "direct_fixture.txt"},
+    },
+}
 
 CASE_ID_RE = re.compile(r"^[a-z][a-z0-9_]{2,79}$")
 TOOL_NAME_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
@@ -267,7 +318,8 @@ def _validate_count(case_id, label, value):
         raise MatrixError(f"case {case_id} {label} has invalid bounds")
 
 
-def _validate_call(case_id, label, call):
+def _validate_call(case, label, call):
+    case_id = case["id"]
     if not isinstance(call, dict):
         raise MatrixError(f"case {case_id} {label} entry must be an object")
     unknown = set(call) - {"name", "min", "max", "args"}
@@ -287,6 +339,17 @@ def _validate_call(case_id, label, call):
             raise MatrixError(f"case {case_id} {label} {name} args must contain match/value")
         if matcher["match"] not in ARG_MATCHES or not isinstance(matcher["value"], dict):
             raise MatrixError(f"case {case_id} {label} {name} has invalid args matcher")
+        if matcher["match"] == "fixture_path":
+            expected = matcher["value"]
+            fixture_path = expected.get("file_path") if set(expected) == {"file_path"} else None
+            fixtures = case.get("fixtures") or {}
+            if (name != "read" or not isinstance(fixture_path, str)
+                    or not fixture_path or fixture_path not in fixtures
+                    or Path(fixture_path).is_absolute()
+                    or ".." in Path(fixture_path).parts):
+                raise MatrixError(
+                    f"case {case_id} {label} {name} has invalid fixture_path matcher"
+                )
 
 
 def _validate_expectation(case, variant, expectation):
@@ -294,6 +357,7 @@ def _validate_expectation(case, variant, expectation):
     allowed = {
         "search_calls",
         "search_query_modes",
+        "search_query_matcher",
         "expected_search_tools",
         "empty_search",
         "activation_boundary",
@@ -315,6 +379,25 @@ def _validate_expectation(case, variant, expectation):
     if (not isinstance(modes, list) or len(modes) != len(set(modes))
             or not set(modes) <= QUERY_MODES):
         raise MatrixError(f"case {case_id} expected_routing.{variant} has invalid search_query_modes")
+    query_matcher = expectation.get("search_query_matcher")
+    if query_matcher is not None:
+        if (not isinstance(query_matcher, dict)
+                or set(query_matcher) != {"match", "value"}
+                or query_matcher.get("match") not in QUERY_MATCHES
+                or not isinstance(query_matcher.get("value"), str)
+                or not query_matcher["value"]
+                or query_matcher["value"] != query_matcher["value"].strip()
+                or len(query_matcher["value"]) > 512):
+            raise MatrixError(
+                f"case {case_id} expected_routing.{variant} has invalid search_query_matcher"
+            )
+        matcher_mode = (
+            "select" if query_matcher["value"].startswith("select:") else "keyword"
+        )
+        if matcher_mode not in modes:
+            raise MatrixError(
+                f"case {case_id} expected_routing.{variant} query matcher mode is not allowed"
+            )
     searched = expectation.get("expected_search_tools")
     if (not isinstance(searched, list) or len(searched) != len(set(searched))
             or any(not isinstance(name, str) or not TOOL_NAME_RE.fullmatch(name) for name in searched)):
@@ -334,9 +417,9 @@ def _validate_expectation(case, variant, expectation):
     if not isinstance(required, list) or not isinstance(optional, list):
         raise MatrixError(f"case {case_id} expected_routing.{variant} call lists must be arrays")
     for index, call in enumerate(required):
-        _validate_call(case_id, f"expected_routing.{variant}.required_tool_calls[{index}]", call)
+        _validate_call(case, f"expected_routing.{variant}.required_tool_calls[{index}]", call)
     for index, call in enumerate(optional):
-        _validate_call(case_id, f"expected_routing.{variant}.optional_tool_calls[{index}]", call)
+        _validate_call(case, f"expected_routing.{variant}.optional_tool_calls[{index}]", call)
 
     forbidden = expectation.get("forbidden_tool_calls")
     if (not isinstance(forbidden, list) or len(forbidden) != len(set(forbidden))
@@ -349,6 +432,11 @@ def _validate_expectation(case, variant, expectation):
 
     search_min = expectation["search_calls"]["min"]
     search_max = expectation["search_calls"]["max"]
+    if (search_max == 0 and (modes or query_matcher is not None)
+            or search_min > 0 and not modes):
+        raise MatrixError(
+            f"case {case_id} expected_routing.{variant} search modes disagree with bounds"
+        )
     if variant == "static":
         if search_min != 0 or search_max != 0 or "tool_search" not in forbidden:
             raise MatrixError(f"case {case_id} static variant must forbid tool_search with zero calls")
@@ -516,6 +604,29 @@ def _validate_case(case):
     for variant, expectation in expectations.items():
         _validate_expectation(case, variant, expectation)
 
+    pinned_modes = PINNED_QUERY_MODES_BY_CASE.get(case_id)
+    deferred = expectations.get("deferred")
+    actual_modes = tuple(deferred.get("search_query_modes", [])) if deferred else None
+    if pinned_modes is None or actual_modes != pinned_modes:
+        raise MatrixError(f"case {case_id} Deferred query mode contract drifted")
+    pinned_query_matcher = PINNED_QUERY_MATCHERS_BY_CASE.get(case_id)
+    actual_query_matcher = deferred.get("search_query_matcher") if deferred else None
+    if actual_query_matcher != pinned_query_matcher:
+        raise MatrixError(f"case {case_id} Deferred query matcher contract drifted")
+
+    pinned_fixture_args = PINNED_FIXTURE_PATH_ARGS.get(case_id)
+    if pinned_fixture_args is not None:
+        for variant, expectation in expectations.items():
+            read_specs = [
+                call for call in expectation["required_tool_calls"]
+                if call["name"] == "read"
+            ]
+            if (len(read_specs) != 1
+                    or read_specs[0].get("args") != pinned_fixture_args):
+                raise MatrixError(
+                    f"case {case_id} {variant} fixture path contract drifted"
+                )
+
     required_names = {
         call["name"]
         for expectation in expectations.values()
@@ -591,6 +702,9 @@ def validate_suite(document, base_suite):
     duplicates = sorted({case_id for case_id in ids if ids.count(case_id) > 1})
     if duplicates:
         raise MatrixError(f"duplicate ToolSearch case ids: {duplicates}")
+    if (set(ids) != set(PINNED_QUERY_MODES_BY_CASE)
+            or set(ids) != set(PINNED_QUERY_MATCHERS_BY_CASE)):
+        raise MatrixError("ToolSearch query mode case catalog drifted")
     for required_tag in (
         "paired_task_pass",
         "critical_pass",

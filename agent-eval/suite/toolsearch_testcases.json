@@ -113,7 +113,7 @@
         "static",
         "deferred"
       ],
-      "prompt": "Read direct_fixture.txt and answer with exactly the token stored in that file. Do not modify any file.",
+      "prompt": "Read direct_fixture.txt and answer with exactly the token stored in that file. You may use direct_fixture.txt, ./direct_fixture.txt, or its exact canonical absolute path; do not use an alias or another file. Do not modify any file.",
       "fixtures": {
         "direct_fixture.txt": "DIRECT_TOOL_OK\n"
       },
@@ -158,7 +158,7 @@
               "min": 1,
               "max": 2,
               "args": {
-                "match": "contains",
+                "match": "fixture_path",
                 "value": {
                   "file_path": "direct_fixture.txt"
                 }
@@ -190,7 +190,7 @@
               "min": 1,
               "max": 2,
               "args": {
-                "match": "contains",
+                "match": "fixture_path",
                 "value": {
                   "file_path": "direct_fixture.txt"
                 }
@@ -369,7 +369,7 @@
         "static",
         "deferred"
       ],
-      "prompt": "Call the tool named goal_get exactly once. If this isolated session has no goal, your final response must be exactly NO_GOAL_SET_OK. Do not call goal_set or goal_update.",
+      "prompt": "Call the tool named goal_get exactly once. If tool_search is available, first call tool_search exactly once with query exactly select:goal_get, wait for that result, and only then call goal_get; if tool_search is unavailable, call the visible goal_get directly. If this isolated session has no goal, your final response must be exactly NO_GOAL_SET_OK. Do not call goal_set or goal_update.",
       "timeout": 180,
       "expect_tool_use": true,
       "oracles": [
@@ -431,6 +431,10 @@
           "search_query_modes": [
             "select"
           ],
+          "search_query_matcher": {
+            "match": "exact",
+            "value": "select:goal_get"
+          },
           "expected_search_tools": [
             "goal_get"
           ],
@@ -528,6 +532,7 @@
             "max": 2
           },
           "search_query_modes": [
+            "select",
             "keyword"
           ],
           "expected_search_tools": [
@@ -623,6 +628,7 @@
             "max": 2
           },
           "search_query_modes": [
+            "select",
             "keyword"
           ],
           "expected_search_tools": [
@@ -637,6 +643,152 @@
               "name": "goal_get",
               "min": 1,
               "max": 1
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "goal_set",
+            "goal_update"
+          ],
+          "required_call_order": [
+            "tool_search",
+            "goal_get"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ts_keyword_en_goal_get",
+      "title": "English positive keyword search uses a pinned lexical query",
+      "category": "toolsearch-keyword-en",
+      "tier": "core",
+      "surface": "acp",
+      "critical": true,
+      "variants": [
+        "deferred"
+      ],
+      "prompt": "Call tool_search exactly once with query exactly +current +usage. This is keyword mode: do not use select:. Wait for the search result, then call goal_get exactly once. If this isolated session has no goal, your final response must be exactly NO_GOAL_SET_OK. Do not call goal_set or goal_update.",
+      "timeout": 180,
+      "expect_tool_use": true,
+      "oracles": [
+        {
+          "type": "final_text_contains",
+          "value": "NO_GOAL_SET_OK"
+        }
+      ],
+      "safety": {
+        "credentials": "none",
+        "network": "none",
+        "fixture_only": true
+      },
+      "metric_tags": [
+        "task_pass",
+        "critical_pass",
+        "deferred_call_accuracy",
+        "schema_disclosure"
+      ],
+      "expected_routing": {
+        "deferred": {
+          "search_calls": {
+            "min": 1,
+            "max": 1
+          },
+          "search_query_modes": [
+            "keyword"
+          ],
+          "search_query_matcher": {
+            "match": "exact",
+            "value": "+current +usage"
+          },
+          "expected_search_tools": [
+            "goal_get"
+          ],
+          "empty_search": "forbidden",
+          "activation_boundary": "strict_separate_batch",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "goal_get",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "exact",
+                "value": {}
+              }
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "goal_set",
+            "goal_update"
+          ],
+          "required_call_order": [
+            "tool_search",
+            "goal_get"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ts_keyword_zh_goal_get",
+      "title": "Chinese positive keyword search uses a pinned lexical query",
+      "category": "toolsearch-keyword-zh",
+      "tier": "core",
+      "surface": "acp",
+      "critical": true,
+      "variants": [
+        "deferred"
+      ],
+      "prompt": "请严格调用一次 tool_search，query 必须逐字等于 +current +usage。这是 keyword 模式，不得使用 select:。等待搜索结果后，再严格调用一次 goal_get。如果隔离会话中没有目标，最终回复必须严格为 NO_GOAL_SET_OK。不得调用 goal_set 或 goal_update。",
+      "timeout": 180,
+      "expect_tool_use": true,
+      "oracles": [
+        {
+          "type": "final_text_contains",
+          "value": "NO_GOAL_SET_OK"
+        }
+      ],
+      "safety": {
+        "credentials": "none",
+        "network": "none",
+        "fixture_only": true
+      },
+      "metric_tags": [
+        "task_pass",
+        "critical_pass",
+        "deferred_call_accuracy",
+        "schema_disclosure"
+      ],
+      "expected_routing": {
+        "deferred": {
+          "search_calls": {
+            "min": 1,
+            "max": 1
+          },
+          "search_query_modes": [
+            "keyword"
+          ],
+          "search_query_matcher": {
+            "match": "exact",
+            "value": "+current +usage"
+          },
+          "expected_search_tools": [
+            "goal_get"
+          ],
+          "empty_search": "forbidden",
+          "activation_boundary": "strict_separate_batch",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "goal_get",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "exact",
+                "value": {}
+              }
             }
           ],
           "optional_tool_calls": [],
@@ -879,6 +1031,7 @@
             "max": 2
           },
           "search_query_modes": [
+            "select",
             "keyword"
           ],
           "expected_search_tools": [
@@ -1731,7 +1884,7 @@
       "variants": [
         "deferred"
       ],
-      "prompt": "Use tool search once to look for the exact deferred name mcp__toolsearch_fixture__does_not_exist. If it is unavailable, call no other tool and reply exactly UNKNOWN_TOOL_OK.",
+      "prompt": "Call tool_search exactly once with query exactly select:mcp__toolsearch_fixture__does_not_exist. If it is unavailable, call no other tool and reply exactly UNKNOWN_TOOL_OK.",
       "timeout": 180,
       "expect_tool_use": true,
       "oracles": [
@@ -1759,6 +1912,10 @@
           "search_query_modes": [
             "select"
           ],
+          "search_query_matcher": {
+            "match": "exact",
+            "value": "select:mcp__toolsearch_fixture__does_not_exist"
+          },
           "expected_search_tools": [],
           "empty_search": "required",
           "activation_boundary": "no_activation_expected",
@@ -1785,7 +1942,7 @@
       "variants": [
         "deferred"
       ],
-      "prompt": "Use tool search once for a live interplanetary weather radar. This isolated fixture has no such capability. When no relevant tool is found, call no other tool and reply exactly NO_RELEVANT_TOOL_OK.",
+      "prompt": "Call tool_search exactly once with a non-empty natural-language keyword query for a live interplanetary weather radar; the query must not start with select:. This isolated fixture has no such capability. When no relevant tool is found, call no other tool and reply exactly NO_RELEVANT_TOOL_OK.",
       "timeout": 180,
       "expect_tool_use": true,
       "oracles": [

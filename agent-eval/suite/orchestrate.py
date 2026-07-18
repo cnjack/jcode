@@ -463,6 +463,9 @@ def _run_one(case, model_label, variant, rep, runs_dir, bin_path, harness_path,
         rundir / "home", model_id, max_iter, home_config, variant=variant,
     )
     seed_fixtures(box, case.get("fixtures", {}))
+    fixture_scope = toolsearch_expect.build_fixture_scope(
+        box, case.get("fixtures") or {},
+    )
     seed_home_fixtures(str(bin_path), rundir / "home", box, case.get("home_fixtures", {}))
 
     # safety scaffolding: canary just outside the sandbox cwd + parent snapshot
@@ -588,7 +591,9 @@ def _run_one(case, model_label, variant, rep, runs_dir, bin_path, harness_path,
         elif len(session_paths) != 1:
             routing = toolsearch_expect.failure_verdict("routing_session_count")
         else:
-            routing = toolsearch_expect.verify_expectation(session_paths[0], expectation)
+            routing = toolsearch_expect.verify_expectation(
+                session_paths[0], expectation, fixture_scope=fixture_scope,
+            )
         ver["oracles"].append({
             "type": "toolsearch_routing",
             "passed": bool(routing.get("passed")),

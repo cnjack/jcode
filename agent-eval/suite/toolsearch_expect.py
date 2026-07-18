@@ -9,10 +9,16 @@ without copying model content or credentials into evaluation artifacts.
 """
 
 import argparse
+import hashlib
 import json
+import os
 import re
+import stat
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
+from typing import Mapping
 
 
 TOOL_SEARCH = "tool_search"
@@ -23,6 +29,98 @@ FAILED_OUTPUT_PREFIXES = (
     "Tool execution panicked:",
     "Tool approval error:",
 )
+
+
+@dataclass(frozen=True)
+class FixtureTarget:
+    """Identity of one regular runner-owned fixture captured before execution."""
+
+    lexical: Path
+    resolved: Path
+    identity: tuple[int, int, int, int]
+    sha256: str
+
+
+@dataclass(frozen=True)
+class FixtureScope:
+    """Runner-owned fixture identities captured before the model can mutate them."""
+
+    root: Path
+    root_identity: tuple[int, int, int]
+    targets: Mapping[str, FixtureTarget]
+
+
+class FixtureScopeError(ValueError):
+    """Raised when a runner cannot establish a trusted fixture scope."""
+
+
+def _safe_relative_fixture_path(value):
+    if (not isinstance(value, str) or not value or "\x00" in value):
+        return None
+    candidate = Path(value)
+    if (candidate.is_absolute() or ".." in candidate.parts
+            or str(candidate) != value or value == "."):
+        return None
+    return candidate
+
+
+def _root_identity(path):
+    metadata = path.lstat()
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise FixtureScopeError("invalid fixture scope")
+    return metadata.st_dev, metadata.st_ino, stat.S_IFMT(metadata.st_mode)
+
+
+def _file_identity(path):
+    metadata = path.lstat()
+    if not stat.S_ISREG(metadata.st_mode):
+        raise FixtureScopeError("invalid fixture scope")
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        stat.S_IFMT(metadata.st_mode),
+        metadata.st_size,
+    )
+
+
+def _file_sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def build_fixture_scope(root, fixture_paths):
+    """Capture declared fixture targets without publishing their host paths."""
+    try:
+        root_lexical = Path(os.path.abspath(root))
+        trusted_root = root_lexical.resolve(strict=True)
+        root_identity = _root_identity(trusted_root)
+        targets = {}
+        resolved_targets = set()
+        for value in fixture_paths:
+            relative = _safe_relative_fixture_path(value)
+            if relative is None:
+                raise FixtureScopeError("invalid fixture scope")
+            lexical = Path(os.path.abspath(trusted_root / relative))
+            lexical.relative_to(trusted_root)
+            resolved = lexical.resolve(strict=True)
+            resolved.relative_to(trusted_root)
+            if lexical != resolved or resolved in resolved_targets:
+                raise FixtureScopeError("invalid fixture scope")
+            targets[value] = FixtureTarget(
+                lexical=lexical,
+                resolved=resolved,
+                identity=_file_identity(lexical),
+                sha256=_file_sha256(lexical),
+            )
+            resolved_targets.add(resolved)
+        return FixtureScope(
+            trusted_root, root_identity, MappingProxyType(targets),
+        )
+    except (FixtureScopeError, OSError, RuntimeError, TypeError, ValueError):
+        raise FixtureScopeError("invalid fixture scope") from None
 
 COUNT_KEYS = (
     "session_entries",
@@ -42,6 +140,9 @@ COUNT_KEYS = (
     "search_mode_select",
     "search_mode_keyword",
     "search_mode_invalid",
+    "search_query_checks",
+    "search_query_matches",
+    "search_query_mismatches",
     "empty_searches",
     "expected_search_tools",
     "matched_expected_search_tools",
@@ -69,6 +170,7 @@ CHECK_KEYS = (
     "batches_complete",
     "search_count",
     "search_modes",
+    "search_queries",
     "search_matches",
     "empty_search_policy",
     "required_call_counts",
@@ -317,6 +419,7 @@ def _search_facts(calls, results, batches, counts, checks, violations):
         searches.append({
             "call": call,
             "mode": mode,
+            "query": query,
             "matches": matches or [],
             "successful": successful,
             "batch_complete": batches.get(call.get("_batch_key"), {}).get("complete", False),
@@ -337,7 +440,47 @@ def _contains(actual, expected):
     return actual == expected
 
 
-def _arguments_match(actual, matcher):
+def _fixture_scope_current(fixture_scope):
+    if not isinstance(fixture_scope, FixtureScope):
+        return False
+    try:
+        if _root_identity(fixture_scope.root) != fixture_scope.root_identity:
+            return False
+        for target in fixture_scope.targets.values():
+            if (target.lexical.resolve(strict=True) != target.resolved
+                    or _file_identity(target.lexical) != target.identity
+                    or _file_sha256(target.lexical) != target.sha256):
+                return False
+        return True
+    except (FixtureScopeError, OSError, RuntimeError, TypeError, ValueError):
+        return False
+
+
+def _fixture_path_matches(actual, expected, fixture_scope):
+    if (not isinstance(fixture_scope, FixtureScope)
+            or not isinstance(actual, str) or not actual or "\x00" in actual
+            or not isinstance(expected, str)):
+        return False
+    trusted_target = fixture_scope.targets.get(expected)
+    if trusted_target is None:
+        return False
+    raw_path = Path(actual)
+    if ".." in raw_path.parts:
+        return False
+    try:
+        candidate = raw_path if raw_path.is_absolute() else fixture_scope.root / raw_path
+        lexical = Path(os.path.abspath(candidate))
+        lexical.relative_to(fixture_scope.root)
+        if lexical != trusted_target.lexical or not _fixture_scope_current(fixture_scope):
+            return False
+        resolved = lexical.resolve(strict=True)
+        resolved.relative_to(fixture_scope.root)
+        return resolved == trusted_target.resolved
+    except (FixtureScopeError, OSError, RuntimeError, TypeError, ValueError):
+        return False
+
+
+def _arguments_match(actual, matcher, fixture_scope=None):
     if not isinstance(actual, dict) or not isinstance(matcher, dict):
         return False
     mode = matcher.get("match")
@@ -348,10 +491,25 @@ def _arguments_match(actual, matcher):
         return actual == expected
     if mode == "contains":
         return _contains(actual, expected)
+    if mode == "fixture_path":
+        if (not isinstance(fixture_scope, FixtureScope)
+                or set(expected) != {"file_path"}):
+            return False
+        path = expected["file_path"]
+        return (
+            isinstance(path, str)
+            and path in fixture_scope.targets
+            and "file_path" in actual
+            and _fixture_path_matches(
+                actual["file_path"], path, fixture_scope,
+            )
+        )
     return False
 
 
-def _check_call_specs(calls, results, expectation, counts, checks, violations):
+def _check_call_specs(
+        calls, results, expectation, counts, checks, violations,
+        fixture_scope=None):
     by_tool = defaultdict(list)
     for call in calls:
         by_tool[call.get("_tool")].append(call)
@@ -381,7 +539,9 @@ def _check_call_specs(calls, results, expectation, counts, checks, violations):
                     argument_ok_by_id[call_id] = call.get("_args") is not None
                     continue
                 counts["argument_checks"] += 1
-                matched = _arguments_match(call.get("_args"), matcher)
+                matched = _arguments_match(
+                    call.get("_args"), matcher, fixture_scope=fixture_scope,
+                )
                 argument_ok_by_id[call_id] = matched
                 if matched:
                     counts["argument_matches"] += 1
@@ -435,6 +595,23 @@ def _check_searches(searches, expectation, counts, checks, violations):
         if search["mode"] not in allowed_modes:
             checks["search_modes"] = False
             violations.append(_violation("search_query_mode", TOOL_SEARCH))
+
+    query_matcher = expectation.get("search_query_matcher")
+    if query_matcher is not None:
+        for search in searches:
+            counts["search_query_checks"] += 1
+            matched = (
+                isinstance(query_matcher, dict)
+                and query_matcher.get("match") == "exact"
+                and isinstance(query_matcher.get("value"), str)
+                and search.get("query") == query_matcher["value"]
+            )
+            if matched:
+                counts["search_query_matches"] += 1
+            else:
+                counts["search_query_mismatches"] += 1
+                checks["search_queries"] = False
+                violations.append(_violation("search_query_mismatch", TOOL_SEARCH))
 
     matched = set()
     for search in searches:
@@ -531,10 +708,35 @@ def _check_activation(entries, calls, searches, expectation, counts, checks, vio
         checks["same_batch_limit"] = False
 
 
-def verify_expectation(session_path, expectation):
+def _fixture_scope_contract_valid(expectation, fixture_scope):
+    found = False
+    for label in ("required_tool_calls", "optional_tool_calls"):
+        specs = expectation.get(label, [])
+        if not isinstance(specs, list):
+            continue
+        for spec in specs:
+            if not isinstance(spec, dict):
+                continue
+            matcher = spec.get("args")
+            if not isinstance(matcher, dict) or matcher.get("match") != "fixture_path":
+                continue
+            found = True
+            expected = matcher.get("value")
+            if (spec.get("name") != "read" or not isinstance(expected, dict)
+                    or set(expected) != {"file_path"}
+                    or not isinstance(expected["file_path"], str)
+                    or not isinstance(fixture_scope, FixtureScope)
+                    or expected["file_path"] not in fixture_scope.targets):
+                return False
+    return not found or _fixture_scope_current(fixture_scope)
+
+
+def verify_expectation(session_path, expectation, fixture_scope=None):
     """Verify one variant's declarative expectation over private session JSONL."""
     if not isinstance(expectation, dict):
         return failure_verdict("invalid_expectation")
+    if not _fixture_scope_contract_valid(expectation, fixture_scope):
+        return failure_verdict("invalid_fixture_scope", "read")
 
     counts = _new_counts()
     checks = _new_checks()
@@ -547,7 +749,10 @@ def verify_expectation(session_path, expectation):
     batches = _batch_facts(calls, results, relevant, counts, checks, violations)
     searches = _search_facts(calls, results, batches, counts, checks, violations)
     _check_searches(searches, expectation, counts, checks, violations)
-    _check_call_specs(calls, results, expectation, counts, checks, violations)
+    _check_call_specs(
+        calls, results, expectation, counts, checks, violations,
+        fixture_scope=fixture_scope,
+    )
     _check_order(calls, expectation, counts, checks, violations)
     _check_activation(entries, calls, searches, expectation, counts, checks, violations)
 
