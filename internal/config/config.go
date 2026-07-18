@@ -715,10 +715,15 @@ func SaveConfig(cfg *Config) error {
 		return fmt.Errorf("config file path error: %w", err)
 	}
 
-	// Ensure directory exists
+	// Config may contain provider API keys, custom headers, MCP credentials,
+	// and remote connection details. Keep both newly-created and legacy paths
+	// owner-only before writing any serialized content.
 	dir := filepath.Dir(cfgPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("failed to create config directory %s: %w", dir, err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return fmt.Errorf("failed to secure config directory %s: %w", dir, err)
 	}
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
@@ -726,8 +731,17 @@ func SaveConfig(cfg *Config) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+	// os.WriteFile does not change an existing file's mode. Tighten a legacy
+	// permissive config before truncating it so secrets are never rewritten
+	// while still group/world-readable.
+	if err := os.Chmod(cfgPath, 0o600); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to secure config file %s: %w", cfgPath, err)
+	}
+	if err := os.WriteFile(cfgPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write config file %s: %w", cfgPath, err)
+	}
+	if err := os.Chmod(cfgPath, 0o600); err != nil {
+		return fmt.Errorf("failed to secure config file %s: %w", cfgPath, err)
 	}
 
 	return nil
