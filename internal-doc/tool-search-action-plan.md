@@ -38,9 +38,9 @@
 | TS-04 MCP 与权限 | 完成 | `c9cb076`、`1aa128e`、`a316830`、`b1b687f`、`3b751db` | MCP、Plan、delegation 和 team mode 边界完成 |
 | TS-05 Prompt 与观测 | 进行中 | `dbe7ca4`、`69ba9ee`、`f905ae2`、`8675a5b` | 使用说明、schema/轨迹指标、凭证文件权限及 Browser 子进程 token 隔离 |
 | TS-06 自动化测试 | 完成 | `77de5fc`、`92e0cb0`、`56fa6eb` | 单元、集成、fixture、routing oracle 与生命周期撤权矩阵 |
-| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e`、`8675a5b`、`d60000d` | 精确模型、静态/渐进式对照、安全产物链及 ACP/Web 全矩阵 dispatch 完成；Browser/Computer capability-family 披露已实现，等待 exact-Kimi 重跑/A-B |
-| TS-08 30 分钟回归 | 进行中 | `9f2889e` | formal coordinator 与证据合约完成；尚未运行真实全场景长跑 |
-| TS-09 HTML 报告 | 进行中 | `ad55a3b`、`92d442e`、`9f2889e` | 安全、fail-closed 的九门槛报告器、canonical suite 与 supplementary 合约已完成；等待真实 campaign 产物 |
+| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e`、`8675a5b`、`d60000d`、`8c980b1` | Browser capability-family exact-Kimi 两臂已通过；Computer canary 暴露并修复 eval binary build-tag 缺失，等待完整重跑/A-B |
+| TS-08 30 分钟回归 | 进行中 | `9f2889e`、`8c980b1` | formal coordinator、deterministic `jcode_eval` 构建与证据合约完成；尚未运行真实全场景长跑 |
+| TS-09 HTML 报告 | 进行中 | `ad55a3b`、`92d442e`、`9f2889e`、`8c980b1` | 安全、fail-closed 的九门槛报告器、canonical suite、build-tag 与 supplementary 合约已完成；等待真实 campaign 产物 |
 
 ## TS-00 文档与基线
 
@@ -275,6 +275,11 @@ Kimi 硬门槛：
 - 独立 review：确认 Eino handler 顺序为 ToolSearch → Observation → Disclosure → caller/approval，返回路径由 Disclosure 先扩展、Observation 再记录；未发现阻断、权限泄漏或同批次激活问题。review 提出的历史恢复、grouped same-batch、自动披露写工具审批和同 server MCP 四个测试盲点均已补齐。
 - 测试：`go test ./internal/agent ./internal/command -count=1`；`go test -race ./internal/agent ./internal/command -count=1`；`go test ./... -count=1`（允许 localhost 的环境）；`make lint-go`；`git diff --check`。全部通过，lint `0 issues`。
 - 已完成提交：`d60000d feat(agent): disclose deferred capability groups`（exact-Kimi canary 产品修复；TS-07.7 仍未勾选）。
+- capability-group 后首轮 4-job exact-Kimi canary：Browser static/deferred 均 PASS；Deferred 首轮 12 tools，仅 1 次 `tool_search`，一次即匹配 `open/snapshot/act/read` 四个成员，随后 open 1、snapshot 1、act 2、read 1 全部成功，bypass=0、same-batch=0。static/deferred 分别 11.649s/14.243s，证明重复 open 缺陷已修复。
+- 同轮 Computer static/deferred 均在 `computer_open` 失败，故总体严格结果仅 2/4，未误报 canary 通过。根因是统一 coordinator 构建 JCode 时遗漏 `-tags jcode_eval`，deterministic fake Computer backend 没有编入二进制；两臂同时失败且 Browser 正常，和 ToolSearch/group 路由无关。
+- Campaign 构建修复：JCode 固定使用 `go build -tags jcode_eval -trimpath`；plan/campaign 写入非敏感 `build.jcode_tags=["jcode_eval"]`，报告器精确校验并在 HTML reproducibility 中展示。缺失/错误 tag fail closed；binary hash、canonical suite hash 和 clean-Git 合约不变。
+- 测试：Agent Eval Python 全量 91/91、`py_compile`、实际 `jcode_eval` binary build、`git diff --check` 全部通过。
+- 已完成提交：`8c980b1 fix(eval): build deterministic Computer campaign`（canary infrastructure 修复；TS-07.7 仍未勾选）。
 - 下一步：先重跑 Browser+Computer exact-Kimi static/deferred canary，再运行 Direct、exact、MCP10/MCP100、Browser、Computer 的小矩阵；全部通过后才启动 formal pass@10。
 - 待完成：TS-07.7 需用 exact-Kimi canary 验证上述 Deferred 多步披露修复，并运行关键用例重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
 
@@ -298,6 +303,7 @@ Kimi 硬门槛：
 - 覆盖/时长：正式 plan 必须是 canonical matrix/base suite 的内容 hash，不能换成缩小矩阵；只把逐个真实 matrix job 的无重叠 interval 交给 1800 秒 gate，固定 TUI/Web/ACP mode/reload/failure Go 覆盖及 Browser deny/disabled/中文 supplementary 明确不计时，禁止 sleep/filler 凑时长。
 - 安全/失败关闭：每 run 必须有 record/metadata-only trajectory/redaction 三件套，私有目录 owner-only，凭证/host path 扫描；中断、部分失败、Git/suite/binary 漂移均写 failed manifest。supplementary 必须与真实 record 的 language/scenario/routing/real_execution 身份一致，报告要求固定 3 command + 4 Web 记录全部通过。
 - 独立 review 曾发现 report 未强制 complete/formal、binary hash 未复核、formal 可替换小矩阵、supplementary 可身份漂移四类缺口；均已增加 fail-closed 校验和回归测试后才提交。
+- Computer fixture 预检补强：统一 coordinator 现在固定以 `jcode_eval` tag 构建 JCode，plan/campaign 显式记录该 tag；报告验收精确要求同一值，防止普通 release binary 冒充 deterministic Computer campaign。提交 `8c980b1`，Python 全量 91/91。
 - 测试：campaign 定向 10/10、修复后定向 23/23、agent-eval Python 全量 90/90、fake formal 可被真实报告器解析且仅 1800 秒 gate 按预期失败；`py_compile`、diff check 通过。
 - 已完成提交：`9f2889e test(eval): coordinate formal ToolSearch campaign`（仅基础设施；TS-08.1～08.6 均未勾选）。
 
@@ -322,6 +328,7 @@ Kimi 硬门槛：
 - 已完成提交：`ad55a3b test(eval): add ToolSearch acceptance report`（TS-09 报告器基础设施子阶段；TS-09.1～09.5 均须等待真实 campaign 后才能勾选）。
 - 指标 scope 校准提交：`92d442e test(eval): calibrate ToolSearch acceptance scopes`；报告器从 hard-gate 声明读取唯一 `full_schema_disclosure` 代表 case，50% 阈值不变，缺失或不完整配对 fail closed。真实 campaign 前不勾选 TS-09.1～09.5。
 - Formal 合约硬化提交：`9f2889e test(eval): coordinate formal ToolSearch campaign`；报告强制 canonical suite hash、formal/complete/no-failure manifest、固定 binary hash 与完整 supplementary 身份/产物，不接受部分或缩小 campaign。真实 campaign 前仍不勾选 TS-09.1～09.5。
+- Deterministic build provenance 提交：`8c980b1 fix(eval): build deterministic Computer campaign`；HTML 展示 `jcode_eval` build tag，plan/campaign 缺失或漂移均拒绝生成 PASS。真实 campaign 前仍不勾选 TS-09.1～09.5。
 
 ## 更新日志
 
@@ -355,3 +362,5 @@ Kimi 硬门槛：
 | 2026-07-18 | TS-08/09 formal coordinator：canonical full matrix、固定 binary/suite hash、真实 interval、完整 supplementary 与 partial fail-closed | 独立 review；Python 90/90、fake formal/report 合约通过 | `9f2889e` |
 | 2026-07-18 | Browser 修复后 exact-Kimi canary：Chrome 故障解除；static PASS，Deferred proof 成功但重复 open 严格 FAIL | 1/2；Deferred first-visible=12、bypass=0、same-batch=0 | — |
 | 2026-07-18 | TS-07 capability-family 修复：Browser/Computer 显式组下一轮整体披露；gated peer、审批、same-batch、历史恢复及 MCP 不分组边界 | 两包 normal/race、全量 Go、lint `0 issues`、独立 review 通过 | `d60000d` |
+| 2026-07-18 | capability-group 4-job exact-Kimi canary：Browser 2/2 PASS；Computer 两臂因 coordinator 未编入 eval backend 失败，严格总计 2/4 | Browser search=1、open=1、完整 proof、bypass/same-batch=0；Computer 根因已定位 | — |
+| 2026-07-18 | 修复 formal/canary JCode 构建：固定 `jcode_eval` tag，plan/campaign/HTML 记录并 fail-closed 校验 | Python 91/91、py_compile、实际 eval build、diff check 通过 | `8c980b1` |
