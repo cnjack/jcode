@@ -94,6 +94,13 @@ func newAgent(
 	// PreToolUse hook sits OUTSIDE approval: it can deny, rewrite args, or mark the
 	// call pre-approved (so approval skips its prompt) before the gate runs.
 	enhanced = append(enhanced, newPreHookMiddleware())
+	// Keep this compatibility layer outside approval: observation, caller handlers,
+	// and PreToolUse retain the model-issued query, while approval and Eino's real
+	// ToolSearch endpoint see the same repaired arguments. tool_search is read-only,
+	// so this normalization does not widen authorization.
+	if exactListMiddleware := newToolSearchExactListMiddleware(disclosureGroups.deferred); exactListMiddleware != nil {
+		enhanced = append(enhanced, exactListMiddleware)
+	}
 	enhanced = append(enhanced, newApprovalMiddleware(approvalFunc))
 	// PostToolUse hook sits INSIDE approval, wrapping the raw tool, so it sees the
 	// true execution error and can rewrite the result.

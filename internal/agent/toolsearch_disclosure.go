@@ -11,29 +11,32 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 )
 
-// toolDisclosureGroups contains only descriptors that remain Deferred after
-// transport, mode, and capability gates have been applied. A grouped tool that
-// moved to Hidden is therefore neither returned by tool_search nor registered
-// as an executable peer.
+// toolDisclosureGroups tracks the canonical names that remain Deferred after
+// transport, mode, and capability gates, plus their optional narrow groups. A
+// tool moved to Hidden is therefore neither a compatibility rewrite candidate,
+// nor returned by group expansion, nor registered as an executable peer.
 type toolDisclosureGroups struct {
-	byTool  map[string]string
-	members map[string][]string
+	deferred map[string]bool
+	byTool   map[string]string
+	members  map[string][]string
 }
 
 func disclosureGroupsFromDescriptors(descriptors []ToolDescriptor) toolDisclosureGroups {
 	groups := toolDisclosureGroups{
-		byTool:  make(map[string]string),
-		members: make(map[string][]string),
+		deferred: make(map[string]bool),
+		byTool:   make(map[string]string),
+		members:  make(map[string][]string),
 	}
 	for _, descriptor := range descriptors {
 		if descriptor.Exposure != ToolExposureDeferred {
 			continue
 		}
+		name := strings.TrimSpace(descriptor.Name)
+		groups.deferred[name] = true
 		group := strings.TrimSpace(descriptor.DisclosureGroup)
 		if group == "" {
 			continue
 		}
-		name := strings.TrimSpace(descriptor.Name)
 		groups.byTool[name] = group
 		groups.members[group] = append(groups.members[group], name)
 	}
@@ -91,6 +94,145 @@ func (m *toolSearchDisclosureMiddleware) WrapInvokableToolCall(
 		}
 		return expanded, nil
 	}, nil
+}
+
+const (
+	minToolSearchExactListNames = 2
+	maxToolSearchExactListNames = 5
+)
+
+// toolSearchExactListMiddleware handles a narrow client ToolSearch formatting
+// error seen from some models: they emit several exact Deferred names separated
+// by commas, but omit Eino's required "select:" prefix. It is intentionally
+// placed inside observation, caller handlers, and PreToolUse so those layers
+// retain the model-issued arguments. Approval and the real ToolSearch endpoint
+// both receive the repaired query; tool_search is a read-only operation, so the
+// normalization does not widen authorization.
+type toolSearchExactListMiddleware struct {
+	*adk.BaseChatModelAgentMiddleware
+	deferred map[string]bool
+}
+
+func newToolSearchExactListMiddleware(deferred map[string]bool) adk.ChatModelAgentMiddleware {
+	if len(deferred) < minToolSearchExactListNames {
+		return nil
+	}
+	canonical := make(map[string]bool, len(deferred))
+	for name, enabled := range deferred {
+		if enabled {
+			canonical[name] = true
+		}
+	}
+	if len(canonical) < minToolSearchExactListNames {
+		return nil
+	}
+	return &toolSearchExactListMiddleware{
+		BaseChatModelAgentMiddleware: &adk.BaseChatModelAgentMiddleware{},
+		deferred:                     canonical,
+	}
+}
+
+func (m *toolSearchExactListMiddleware) WrapInvokableToolCall(
+	_ context.Context,
+	endpoint adk.InvokableToolCallEndpoint,
+	tc *adk.ToolContext,
+) (adk.InvokableToolCallEndpoint, error) {
+	if tc == nil || tc.Name != ToolSearchReservedName {
+		return endpoint, nil
+	}
+	return func(ctx context.Context, arguments string, opts ...tool.Option) (string, error) {
+		if rewritten, ok := rewriteToolSearchExactNameList(arguments, m.deferred); ok {
+			arguments = rewritten
+		}
+		return endpoint(ctx, arguments, opts...)
+	}, nil
+}
+
+// rewriteToolSearchExactNameList returns ok only for an unambiguous list of
+// two through five distinct, canonical names in the current effective Deferred
+// catalog. The max_results field is retained byte-for-byte, but Eino deliberately
+// ignores it in direct-selection mode; the five-name compatibility ceiling is
+// therefore the hard disclosure bound here. Unknown JSON fields, duplicate fields,
+// malformed JSON, invalid max_results values, semantic queries, aliases, and
+// out-of-range lists are passed to Eino unchanged (fail closed).
+func rewriteToolSearchExactNameList(arguments string, deferred map[string]bool) (rewritten string, ok bool) {
+	query, start, end, parsed := parseToolSearchExactListEnvelope(arguments)
+	if !parsed || strings.HasPrefix(strings.TrimSpace(query), "select:") {
+		return "", false
+	}
+
+	parts := strings.Split(query, ",")
+	if len(parts) < minToolSearchExactListNames || len(parts) > maxToolSearchExactListNames {
+		return "", false
+	}
+	names := make([]string, len(parts))
+	seen := make(map[string]bool, len(parts))
+	for i, part := range parts {
+		name := strings.TrimSpace(part)
+		if name == "" || !deferred[name] || seen[name] {
+			return "", false
+		}
+		seen[name] = true
+		names[i] = name
+	}
+
+	encoded, err := json.Marshal("select:" + strings.Join(names, ","))
+	if err != nil {
+		return "", false
+	}
+	return arguments[:start] + string(encoded) + arguments[end:], true
+}
+
+func parseToolSearchExactListEnvelope(arguments string) (query string, start, end int, ok bool) {
+	decoder := json.NewDecoder(strings.NewReader(arguments))
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return "", 0, 0, false
+	}
+
+	seen := make(map[string]bool, 2)
+	queryFound := false
+	for decoder.More() {
+		token, err = decoder.Token()
+		key, keyOK := token.(string)
+		if err != nil || !keyOK || seen[key] {
+			return "", 0, 0, false
+		}
+		seen[key] = true
+
+		valuePrefix := int(decoder.InputOffset())
+		var raw json.RawMessage
+		if err = decoder.Decode(&raw); err != nil {
+			return "", 0, 0, false
+		}
+		valueEnd := int(decoder.InputOffset())
+		switch key {
+		case "query":
+			if err = json.Unmarshal(raw, &query); err != nil {
+				return "", 0, 0, false
+			}
+			relativeStart := strings.LastIndex(arguments[valuePrefix:valueEnd], string(raw))
+			if relativeStart < 0 {
+				return "", 0, 0, false
+			}
+			start = valuePrefix + relativeStart
+			end = start + len(raw)
+			queryFound = true
+		case "max_results":
+			var maxResults *int
+			if err = json.Unmarshal(raw, &maxResults); err != nil {
+				return "", 0, 0, false
+			}
+		default:
+			return "", 0, 0, false
+		}
+	}
+
+	token, err = decoder.Token()
+	if err != nil || token != json.Delim('}') || !queryFound || !atJSONEOF(decoder) {
+		return "", 0, 0, false
+	}
+	return query, start, end, true
 }
 
 type toolSearchDisclosureResult struct {
