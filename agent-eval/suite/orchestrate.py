@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Unattended orchestrator for the jcode autonomous-execution test suite.
 
-For every (case x model x repeat) it:
-  1. builds an isolated throwaway HOME (real provider keys, pinned model,
-     copied registry cache) so the run cannot touch the operator's real
-     ~/.jcode, and an isolated sandbox cwd seeded with the case fixtures;
+For every (case x model x repeat x variant) it:
+  1. builds an isolated throwaway HOME containing only the selected provider
+     and a pinned model, plus an isolated sandbox cwd seeded with fixtures;
   2. drives one prompt turn through the ACP harness under an OS-level timeout;
   3. applies the case's deterministic oracles (verify.py) plus ACP
      contract-level checks computed from the recorded event stream;
@@ -17,6 +16,7 @@ import argparse
 import concurrent.futures as cf
 import json
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -28,13 +28,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import verify  # noqa: E402
 import routing_verify  # noqa: E402
+import artifact_safety  # noqa: E402
+import session_extract  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 EVAL_ROOT = HERE.parent
 REAL_HOME = Path(os.path.expanduser("~"))
 REAL_CFG = REAL_HOME / ".jcode" / "config.json"
 REAL_CACHE = REAL_HOME / ".jcode" / "cache" / "models_dev.json"
-REAL_MODELSTATE = REAL_HOME / ".jcode" / "model_state.json"
 
 TERMINAL_STOP = {"end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled"}
 TERMINAL_TOOL_STATUS = {"completed", "failed"}
@@ -45,10 +46,21 @@ MODELS = {
     "qwen3.5-flash": {"id": "tencent-tokenhub/qwen3.5-flash"},
     "kimi-k2.7-code": {"id": "tencent-tokenhub/kimi-k2.7-code"},
     "kimi-k2.7-code-highspeed": {"id": "tencent-tokenhub/kimi-k2.7-code-highspeed"},
-    # Direct Kimi coding endpoint. TokenHub's Kimi SKUs exhausted their free
-    # quota mid-campaign (HTTP 402); this is the same model family on a
-    # different account, so the campaign can actually run.
-    "kimi-for-coding": {"id": "kimi-coding/kimi-for-coding-highspeed"},
+    # This exact provider/model pair is the acceptance target.  It must never
+    # silently drift to the high-speed SKU: those are distinct eval subjects.
+    "kimi-for-coding": {"id": "kimi-for-coding/kimi-for-coding"},
+}
+
+KIMI_ACCEPTANCE_MODEL = "kimi-for-coding/kimi-for-coding"
+EVAL_VARIANTS = ("static", "deferred")
+DEFAULT_SEED = 20260718
+PROTECTED_HOME_CONFIG_KEYS = {
+    "providers", "models", "provider", "model", "telemetry", "temperature",
+    "tool_search",
+}
+PROVIDER_RUNTIME_FIELDS = {
+    "api_key", "base_url", "headers", "vision", "thinking",
+    "reasoning_effort", "custom_models",
 }
 
 # repeats[model_label][tier]
@@ -65,6 +77,17 @@ _print_lock = threading.Lock()
 
 MCP_FIXTURE_TOOL_COUNTS = {10, 30, 50, 100}
 MCP_FIXTURE_SERVER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+SAFE_EXEC_PATH = ":".join((
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/local/go/bin",
+    "/System/Cryptexes/App/usr/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+    "/Library/Apple/usr/bin",
+))
 
 
 def log(msg):
@@ -72,16 +95,111 @@ def log(msg):
         print(msg, flush=True)
 
 
-def build_home(home_dir: Path, model_id: str, max_iter: int, home_config: dict | None = None):
-    (home_dir / ".jcode" / "cache").mkdir(parents=True, exist_ok=True)
+def resolve_model_id(model_label: str) -> str:
+    if model_label not in MODELS:
+        raise ValueError(f"unknown model label: {model_label}")
+    model_id = MODELS[model_label]["id"]
+    if model_label == "kimi-for-coding" and model_id != KIMI_ACCEPTANCE_MODEL:
+        raise ValueError("kimi-for-coding must use the exact non-highspeed acceptance model")
+    if model_label == "kimi-for-coding" and "highspeed" in model_id.lower():
+        raise ValueError("kimi-for-coding highspeed SKU is forbidden")
+    return model_id
+
+
+def _selected_provider_config(cfg: dict, model_id: str):
+    provider_id, separator, model_name = model_id.partition("/")
+    if not separator or not provider_id or not model_name:
+        raise ValueError("model id must be provider/model")
+    providers = cfg.get("providers") or cfg.get("models") or {}
+    if not isinstance(providers, dict) or not isinstance(providers.get(provider_id), dict):
+        raise ValueError(f"selected provider is not configured: {provider_id}")
+    source = providers[provider_id]
+    selected = {
+        key: json.loads(json.dumps(source[key]))
+        for key in PROVIDER_RUNTIME_FIELDS
+        if key in source
+    }
+    custom_models = selected.get("custom_models")
+    if isinstance(custom_models, list):
+        selected["custom_models"] = [
+            item for item in custom_models
+            if isinstance(item, dict) and item.get("id") == model_name
+        ]
+        if not selected["custom_models"]:
+            selected.pop("custom_models")
+    return provider_id, selected
+
+
+def _runtime_secrets(provider: dict):
+    values = []
+    api_key = provider.get("api_key")
+    if isinstance(api_key, str) and api_key:
+        values.append(api_key)
+    headers = provider.get("headers")
+    if isinstance(headers, dict):
+        for value in headers.values():
+            # ProviderConfig documents every extra header value as potentially
+            # secret; do not guess safety from a vendor-specific header name.
+            if isinstance(value, str) and value:
+                values.append(value)
+    return values
+
+
+def _write_private_json(path: Path, value):
+    payload = json.dumps(value, indent=2) + "\n"
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w") as stream:
+        stream.write(payload)
+    path.chmod(0o600)
+
+
+def build_subprocess_env(home_dir: Path):
+    """Return a minimal environment for an untrusted agent subprocess.
+
+    Copying the orchestrator's full environment would expose unrelated API
+    tokens, proxy credentials, SSH agent sockets, and host-specific PATH
+    entries to the model through the execute tool. Provider authentication is
+    supplied only through the owner-only selected-provider config.
+    """
+    temp_dir = home_dir / "tmp"
+    temp_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
+    temp_dir.chmod(0o700)
+    environment = {
+        "HOME": str(home_dir),
+        "TMPDIR": str(temp_dir),
+        "PATH": SAFE_EXEC_PATH,
+        "TERM": "dumb",
+    }
+    for name in ("LANG", "LC_ALL", "LC_CTYPE"):
+        value = os.environ.get(name)
+        if value:
+            environment[name] = value
+    return environment
+
+
+def build_home(home_dir: Path, model_id: str, max_iter: int,
+               home_config: dict | None = None, variant: str = "static"):
+    if variant not in EVAL_VARIANTS:
+        raise ValueError(f"unsupported eval variant: {variant}")
+    overrides = home_config or {}
+    protected = sorted(set(overrides) & PROTECTED_HOME_CONFIG_KEYS)
+    if protected:
+        raise ValueError(f"home_config cannot override protected fields: {protected}")
+
+    jcode_dir = home_dir / ".jcode"
+    cache_dir = jcode_dir / "cache"
+    cache_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
+    jcode_dir.chmod(0o700)
+    cache_dir.chmod(0o700)
     cfg = json.loads(REAL_CFG.read_text())
-    provs = cfg.get("providers") or cfg.get("models") or {}
+    provider_id, selected_provider = _selected_provider_config(cfg, model_id)
     out = {
-        "providers": provs,
+        "providers": {provider_id: selected_provider},
         "model": model_id,
         "auto_approve": True,
         "default_mode": "full_access",
         "max_iterations": max_iter,
+        "tool_search": {"enabled": variant == "deferred"},
         # Memory is ON (read + online notes) but the offline pipeline is OFF by
         # default so M1 cases don't fire a background distillation run (which
         # would race the oracles and burn real API quota). Pipeline cases turn
@@ -89,24 +207,32 @@ def build_home(home_dir: Path, model_id: str, max_iter: int, home_config: dict |
         "memory": {"generate": False},
     }
     # shallow-merge case-level config overrides (e.g. {"memory": {"enabled": false}})
-    for k, v in (home_config or {}).items():
+    for k, v in overrides.items():
         if k == "memory" and isinstance(v, dict) and isinstance(out.get("memory"), dict):
             out["memory"] = {**out["memory"], **v}
         else:
             out[k] = v
-    (home_dir / ".jcode" / "config.json").write_text(json.dumps(out, indent=2))
+    config_path = jcode_dir / "config.json"
+    _write_private_json(config_path, out)
     if REAL_CACHE.exists():
-        shutil.copy(REAL_CACHE, home_dir / ".jcode" / "cache" / "models_dev.json")
-    if REAL_MODELSTATE.exists():
-        shutil.copy(REAL_MODELSTATE, home_dir / ".jcode" / "model_state.json")
+        cache_path = cache_dir / "models_dev.json"
+        shutil.copy(REAL_CACHE, cache_path)
+        cache_path.chmod(0o600)
+    return {
+        "provider_id": provider_id,
+        "effort": (selected_provider.get("reasoning_effort")
+                   if isinstance(selected_provider.get("reasoning_effort"), str)
+                   else ""),
+        "secret_values": _runtime_secrets(selected_provider),
+        "config_path": config_path,
+    }
 
 
 def resolve_project_slug(bin_path: str, home_dir: Path, box: Path) -> str:
     """Ask the jcode binary for the memory project slug of `box`, so python
     never has to replicate the Go slug rule. Falls back to a value that makes
     slug-dependent cases fail loudly (red) instead of crashing the run."""
-    env = dict(os.environ)
-    env["HOME"] = str(home_dir)
+    env = build_subprocess_env(home_dir)
     try:
         p = subprocess.run([bin_path, "memory", "path", "--format=slug"],
                            env=env, cwd=str(box), capture_output=True,
@@ -276,22 +402,47 @@ def event_kind_counts(events_path: Path):
     return counts, su_types, parse_errors
 
 
-def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, mcp_fixture_path,
-            max_iter, scale_timeout):
-    run_id = f"{case['id']}__{model_label}__r{rep}"
+def _run_id(case, model_label, variant, rep):
+    return f"{case['id']}__{model_label}__{variant}__r{rep}"
+
+
+def run_one(case, model_label, variant, rep, runs_dir, bin_path, harness_path,
+            mcp_fixture_path, max_iter, scale_timeout, seed):
+    """Run one job and unconditionally destroy the credential-bearing HOME."""
+    rundir = runs_dir / _run_id(case, model_label, variant, rep)
+    try:
+        return _run_one(
+            case, model_label, variant, rep, runs_dir, bin_path, harness_path,
+            mcp_fixture_path, max_iter, scale_timeout, seed,
+        )
+    except BaseException:
+        _remove_raw_runtime_artifacts(rundir)
+        raise
+    finally:
+        # This also covers setup/oracle/extractor exceptions.  A failed job may
+        # lose raw debugging data, but must never strand a provider key on disk.
+        shutil.rmtree(rundir / "home", ignore_errors=True)
+
+
+def _run_one(case, model_label, variant, rep, runs_dir, bin_path, harness_path,
+             mcp_fixture_path, max_iter, scale_timeout, seed):
+    run_id = _run_id(case, model_label, variant, rep)
     rundir = runs_dir / run_id
     if rundir.exists():
         shutil.rmtree(rundir)
     (rundir / "home").mkdir(parents=True)
+    (rundir / "home").chmod(0o700)
     work = rundir / "work"
     box = work / "box"
     box.mkdir(parents=True)
 
-    model_id = MODELS[model_label]["id"]
+    model_id = resolve_model_id(model_label)
     home_config, mcp_fixture = inject_mcp_fixture(
         case.get("home_config"), case, mcp_fixture_path, rundir,
     )
-    build_home(rundir / "home", model_id, max_iter, home_config)
+    home_metadata = build_home(
+        rundir / "home", model_id, max_iter, home_config, variant=variant,
+    )
     seed_fixtures(box, case.get("fixtures", {}))
     seed_home_fixtures(str(bin_path), rundir / "home", box, case.get("home_fixtures", {}))
 
@@ -307,8 +458,7 @@ def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, mcp_fixtur
     result_path = rundir / "result.json"
     stderr_path = Path(str(events_path) + ".stderr")
 
-    env = dict(os.environ)
-    env["HOME"] = str(rundir / "home")
+    env = build_subprocess_env(rundir / "home")
 
     # A case is a sequence of steps sharing one HOME + one sandbox. Legacy
     # single-prompt cases are a one-step sequence. Prompt steps are separate
@@ -403,7 +553,7 @@ def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, mcp_fixtur
     ctx["usage_total"] = usage_tot
     ver = verify.verify_case(case, ctx)
     routing = None
-    if "routing" in case:
+    if "routing" in case and variant == "deferred":
         if len(prompt_session_ids) != 1:
             routing = {
                 "passed": False,
@@ -434,6 +584,13 @@ def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, mcp_fixtur
             "detail": f"counts={routing.get('counts', {})} violations={route_types}",
         })
         ver["passed"] = bool(ver["passed"] and routing.get("passed"))
+    elif "routing" in case:
+        routing = {
+            "passed": None,
+            "not_applicable": "static variant has no Deferred activation boundary",
+            "counts": {},
+            "violations": [],
+        }
     # contracts: every prompt step must satisfy the ACP contract, not just the last
     if prompt_contract_sets:
         contracts = []
@@ -447,18 +604,58 @@ def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, mcp_fixtur
     kinds, su_types, parse_errors = event_kind_counts(events_path)
     usage_on_acp_stream = bool(result.get("usage_update") or result.get("prompt_usage"))
 
-    # collect the isolated debug.log (trimmed) + session transcript path
-    dbg = rundir / "home" / ".jcode" / "debug.log"
-    dbg_tail = ""
-    if dbg.exists():
-        lines = dbg.read_text(errors="ignore").splitlines()
-        dbg_tail = "\n".join(lines[-60:])
-
     box_listing = []
     for dp, _dn, fn in os.walk(box):
         for f in fn:
             fp = Path(dp) / f
             box_listing.append(str(fp.relative_to(box)))
+
+    session_paths = [
+        rundir / "home" / ".jcode" / "sessions" / f"{session_id}.json"
+        for session_id in prompt_session_ids
+    ]
+    fixture_arg_tools = set()
+    routing_spec = case.get("routing")
+    if isinstance(routing_spec, dict) and isinstance(routing_spec.get("fixture_tools"), dict):
+        fixture_arg_tools.update(routing_spec["fixture_tools"])
+    trajectory = session_extract.extract_trajectory(
+        session_paths, fixture_arg_tools=fixture_arg_tools,
+    )
+    trajectory["run_id"] = run_id
+    trajectory["variant"] = variant
+    session_extract.write_trajectory(rundir / "trajectory.json", trajectory)
+
+    safe_steps = []
+    for step in step_records:
+        safe = {
+            key: step[key]
+            for key in (
+                "step", "kind", "rc", "stop_reason", "tool_calls", "session_id",
+            )
+            if key in step
+        }
+        if isinstance(step.get("final_text"), str):
+            safe["final_text_chars"] = len(step["final_text"])
+        if isinstance(step.get("output_tail"), str):
+            safe["output_chars"] = len(step["output_tail"])
+        safe_steps.append(safe)
+
+    safe_oracles = [
+        {"type": item.get("type"), "passed": bool(item.get("passed"))}
+        for item in ver["oracles"]
+    ]
+    safe_contracts = [
+        {"type": item.get("type"), "passed": bool(item.get("passed"))}
+        for item in contracts
+    ]
+    tool_counts = dict(trajectory["tool_counts"])
+    tool_counts["declared_deferred"] = len(
+        routing_spec.get("deferred_tools", [])
+        if isinstance(routing_spec, dict) else []
+    )
+    tool_counts["mcp_fixture_catalog"] = (
+        mcp_fixture["tool_count"] if mcp_fixture else 0
+    )
 
     record = {
         "run_id": run_id,
@@ -468,16 +665,18 @@ def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, mcp_fixtur
         "tier": case["tier"],
         "model": model_label,
         "model_id": model_id,
+        "effort": home_metadata["effort"],
+        "variant": variant,
+        "seed": seed,
+        "request_parameters": {"temperature": "omitted"},
         "repeat": rep,
-        "prompt": case.get("prompt") or " || ".join(
-            s.get("prompt", "cli:" + " ".join(s.get("cli", []))) for s in steps),
-        "steps": step_records,
+        "steps": safe_steps,
         "task_passed": ver["passed"],
-        "oracles": ver["oracles"],
-        "contracts": contracts,
+        "oracles": safe_oracles,
+        "contracts": safe_contracts,
         "contracts_passed": all(c["passed"] for c in contracts),
         "stop_reason": result.get("stop_reason"),
-        "error": result.get("error"),
+        "error_present": bool(result.get("error")),
         "wall_s": round(wall, 1),
         "elapsed_ms": result.get("elapsed_ms"),
         "tool_calls": result.get("tool_calls", 0),
@@ -489,7 +688,7 @@ def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, mcp_fixtur
         "agent_chunks": result.get("agent_chunks", 0),
         "permission_reqs": result.get("permission_reqs", 0),
         "plans": result.get("plans", 0),
-        "final_text": (result.get("final_text", "") or "")[:4000],
+        "final_text_chars": len(result.get("final_text", "") or ""),
         "usage_total": usage_tot,
         "event_kinds": kinds,
         "session_update_types": su_types,
@@ -497,8 +696,8 @@ def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, mcp_fixtur
         "usage_on_acp_stream": usage_on_acp_stream,
         "box_files": box_listing,
         "harness_rc": harness_rc,
-        "debug_tail": dbg_tail,
         "session_id": result.get("sessionId"),
+        "tool_counts": tool_counts,
         "routing": routing,
         "routing_passed": routing.get("passed") if routing else None,
         "mcp_fixture": ({
@@ -506,11 +705,34 @@ def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, mcp_fixtur
             "tool_count": mcp_fixture["tool_count"],
             "call_log": mcp_fixture["call_log"].name,
         } if mcp_fixture else None),
+        "artifact_safe": True,
     }
-    (rundir / "record.json").write_text(json.dumps(record, indent=2))
+    _write_private_json(rundir / "record.json", record)
 
-    # prune the big isolated HOME to save space, keep the small evidence files
-    _prune_home(rundir / "home")
+    # The raw ACP/session/result files served their verifier/extractor purpose.
+    # Keep only the metadata trajectory, verdict, and deterministic fixture log.
+    _remove_raw_runtime_artifacts(rundir)
+    forbidden_paths = [str(REAL_HOME), str(REAL_CFG)]
+    redaction = artifact_safety.sanitize_artifacts(
+        [rundir],
+        secret_values=home_metadata["secret_values"],
+        forbidden_paths=forbidden_paths,
+    )
+    findings = artifact_safety.scan_artifacts(
+        [rundir],
+        secret_values=home_metadata["secret_values"],
+        forbidden_paths=forbidden_paths,
+    )
+    artifact_safety.write_redaction_report(
+        rundir / "redaction_report.json", redaction, findings,
+    )
+    final_findings = artifact_safety.scan_artifacts(
+        [rundir],
+        secret_values=home_metadata["secret_values"],
+        forbidden_paths=forbidden_paths,
+    )
+    if findings or final_findings:
+        raise RuntimeError("publish artifact safety scan failed")
 
     status = "PASS" if ver["passed"] else "FAIL"
     cstat = "ok" if record["contracts_passed"] else "CONTRACT!"
@@ -520,20 +742,73 @@ def run_one(case, model_label, rep, runs_dir, bin_path, harness_path, mcp_fixtur
     return record
 
 
-def _prune_home(home_dir: Path):
-    keep = {"usage", "sessions", "debug.log", "config.json", "memory"}
-    jc = home_dir / ".jcode"
-    if not jc.exists():
-        return
-    for child in jc.iterdir():
-        if child.name not in keep:
+def _remove_raw_runtime_artifacts(rundir: Path):
+    shutil.rmtree(rundir / "home", ignore_errors=True)
+    shutil.rmtree(rundir / "work", ignore_errors=True)
+    for pattern in ("events*.jsonl", "events*.jsonl.stderr", "result*.json"):
+        for path in rundir.glob(pattern):
             try:
-                if child.is_dir():
-                    shutil.rmtree(child)
-                else:
-                    child.unlink()
-            except Exception:
+                path.unlink()
+            except FileNotFoundError:
                 pass
+
+
+def parse_variants(raw: str):
+    variants = [item.strip() for item in raw.split(",") if item.strip()]
+    if not variants:
+        raise ValueError("at least one eval variant is required")
+    if len(set(variants)) != len(variants):
+        raise ValueError("eval variants must not contain duplicates")
+    unknown = sorted(set(variants) - set(EVAL_VARIANTS))
+    if unknown:
+        raise ValueError(f"unsupported eval variants: {unknown}")
+    return variants
+
+
+def build_jobs(cases, models, variants, seed, explicit_repeats=None,
+               repeat_scale=1.0, repeats_by_tier=None):
+    """Return deterministic paired blocks in randomized execution order.
+
+    Each (case, model, repeat) pair remains adjacent while the order within the
+    static/deferred pair is randomized.  Pair blocks are randomized too.  A
+    formal workers=1 run therefore executes a deterministic paired sequence.
+    """
+    repeats_by_tier = repeats_by_tier or DEFAULT_REPEATS
+    rng = random.Random(seed)
+    blocks = []
+    for model_label in models:
+        resolve_model_id(model_label)
+        for case in cases:
+            base = (explicit_repeats if explicit_repeats is not None
+                    else repeats_by_tier.get(model_label, {}).get(case["tier"], 1))
+            count = max(1, int(round(base * repeat_scale)))
+            for repeat in range(1, count + 1):
+                block = [
+                    (case, model_label, variant, repeat)
+                    for variant in variants
+                ]
+                rng.shuffle(block)
+                blocks.append(block)
+    rng.shuffle(blocks)
+    return [job for block in blocks for job in block]
+
+
+def validate_formal_run(formal, quick, models, variants, repeats,
+                        repeat_scale, workers):
+    if not formal:
+        return
+    if quick:
+        raise ValueError("--formal cannot be combined with --quick")
+    if models != ["kimi-for-coding"]:
+        raise ValueError("--formal requires --models kimi-for-coding")
+    if set(variants) != set(EVAL_VARIANTS) or len(variants) != len(EVAL_VARIANTS):
+        raise ValueError("--formal requires --variants static,deferred")
+    if repeats is None:
+        raise ValueError("--formal requires explicit --repeats")
+    if repeat_scale != 1.0:
+        raise ValueError("--formal does not permit --repeat-scale")
+    if workers != 1:
+        raise ValueError("--formal requires --workers 1")
 
 
 def main():
@@ -546,6 +821,14 @@ def main():
     ap.add_argument("--models", default="glm-5.1,glm-5.2")
     ap.add_argument("--cases", default="", help="comma-separated case ids (default all)")
     ap.add_argument("--tiers", default="", help="comma-separated tiers (default all)")
+    ap.add_argument("--variants", default="static",
+                    help="comma-separated static/deferred variants")
+    ap.add_argument("--repeats", type=int, default=None,
+                    help="explicit repeats per case/model/variant")
+    ap.add_argument("--seed", type=int, default=DEFAULT_SEED,
+                    help="fixed seed for paired randomized interleaving")
+    ap.add_argument("--formal", action="store_true",
+                    help="enforce acceptance-run invariants (exact Kimi, paired variants, workers=1)")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--max-iter", type=int, default=80)
     ap.add_argument("--repeat-scale", type=float, default=1.0)
@@ -563,12 +846,30 @@ def main():
         wt = set(args.tiers.split(","))
         cases = [c for c in cases if c["tier"] in wt]
 
-    models = args.models.split(",")
+    models = [item.strip() for item in args.models.split(",") if item.strip()]
+    try:
+        variants = parse_variants(args.variants)
+    except ValueError as exc:
+        ap.error(str(exc))
     repeats = json.loads(json.dumps(DEFAULT_REPEATS))
     if args.quick:
         models = ["glm-5.1"]
         for m in repeats:
             repeats[m] = {k: 1 for k in repeats[m]}
+    if args.repeats is not None and args.repeats <= 0:
+        ap.error("--repeats must be positive")
+    try:
+        validate_formal_run(
+            args.formal, args.quick, models, variants, args.repeats,
+            args.repeat_scale, args.workers,
+        )
+    except ValueError as exc:
+        ap.error(str(exc))
+    try:
+        for model_label in models:
+            resolve_model_id(model_label)
+    except ValueError as exc:
+        ap.error(str(exc))
 
     runs_dir = Path(args.runs_dir).resolve()
     runs_dir.mkdir(parents=True, exist_ok=True)
@@ -582,18 +883,44 @@ def main():
                              or not os.access(mcp_fixture_path, os.X_OK)):
         ap.error(f"--mcp-fixture is not executable: {mcp_fixture_path}")
 
-    jobs = []
-    for m in models:
-        for c in cases:
-            n = max(1, int(round(repeats.get(m, {}).get(c["tier"], 1) * args.repeat_scale)))
-            for r in range(1, n + 1):
-                jobs.append((c, m, r))
+    jobs = build_jobs(
+        cases, models, variants, args.seed,
+        explicit_repeats=args.repeats,
+        repeat_scale=args.repeat_scale,
+        repeats_by_tier=repeats,
+    )
+
+    plan = {
+        "schema_version": 1,
+        "seed": args.seed,
+        "formal": args.formal,
+        "workers": args.workers,
+        "models": [
+            {"label": model_label, "id": resolve_model_id(model_label)}
+            for model_label in models
+        ],
+        "variants": variants,
+        "repeats": args.repeats,
+        "jobs": [
+            {
+                "run_id": _run_id(case, model_label, variant, repeat),
+                "case_id": case["id"],
+                "model": model_label,
+                "model_id": resolve_model_id(model_label),
+                "variant": variant,
+                "repeat": repeat,
+            }
+            for case, model_label, variant, repeat in jobs
+        ],
+    }
+    _write_private_json(runs_dir / "plan.json", plan)
 
     log(f"== jcode agent eval: {len(jobs)} runs "
-        f"({len(cases)} cases x models={models}) workers={args.workers} ==")
+        f"({len(cases)} cases x models={models} x variants={variants}) "
+        f"workers={args.workers} seed={args.seed} ==")
     if args.dry_run:
-        for c, m, r in jobs:
-            log(f"  plan {c['id']} {m} r{r}")
+        for c, m, variant, r in jobs:
+            log(f"  plan {c['id']} {m} {variant} r{r}")
         log(f"total {len(jobs)} runs")
         return
 
@@ -601,28 +928,43 @@ def main():
     index_path = runs_dir / "index.jsonl"
     with index_path.open("w") as idx:
         with cf.ThreadPoolExecutor(max_workers=args.workers) as ex:
-            futs = {ex.submit(run_one, c, m, r, runs_dir, bin_path, harness_path, mcp_fixture_path,
-                              args.max_iter, args.timeout_scale): (c, m, r)
-                    for (c, m, r) in jobs}
+            futs = {ex.submit(
+                        run_one, c, m, variant, r, runs_dir, bin_path,
+                        harness_path, mcp_fixture_path, args.max_iter,
+                        args.timeout_scale, args.seed,
+                    ): (c, m, variant, r)
+                    for (c, m, variant, r) in jobs}
             for fut in cf.as_completed(futs):
-                c, m, r = futs[fut]
+                c, m, variant, r = futs[fut]
                 try:
                     rec = fut.result()
                 except Exception as e:  # noqa: BLE001
-                    rec = {"run_id": f"{c['id']}__{m}__r{r}", "case_id": c["id"],
-                           "model": m, "tier": c["tier"], "task_passed": False,
-                           "stop_reason": "ORCHESTRATOR_ERROR", "error": str(e)}
-                    log(f"  [ERROR] {rec['run_id']}: {e}")
+                    rec = {
+                        "run_id": _run_id(c, m, variant, r),
+                        "case_id": c["id"],
+                        "model": m,
+                        "model_id": resolve_model_id(m),
+                        "variant": variant,
+                        "seed": args.seed,
+                        "tier": c["tier"],
+                        "task_passed": False,
+                        "stop_reason": "ORCHESTRATOR_ERROR",
+                        "error_present": True,
+                        "error_type": type(e).__name__,
+                    }
+                    log(f"  [ERROR] {rec['run_id']}: {type(e).__name__}")
                 records.append(rec)
                 idx.write(json.dumps({k: rec.get(k) for k in
-                          ["run_id", "case_id", "model", "tier", "task_passed",
+                          ["run_id", "case_id", "model", "model_id", "effort",
+                           "variant", "seed", "tier", "task_passed",
                            "contracts_passed", "stop_reason", "tool_calls",
-                           "wall_s", "routing_passed"]}) + "\n")
+                           "tool_counts", "wall_s", "routing_passed"]}) + "\n")
                 idx.flush()
+    index_path.chmod(0o600)
 
     passed = sum(1 for r in records if r.get("task_passed"))
     log(f"== done: {passed}/{len(records)} task-pass ==")
-    (runs_dir / "all_records.json").write_text(json.dumps(records, indent=2))
+    _write_private_json(runs_dir / "all_records.json", records)
 
 
 if __name__ == "__main__":
