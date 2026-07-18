@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"sort"
 	"strings"
@@ -84,6 +85,18 @@ func TestBuildCommandToolPlanMatrix(t *testing.T) {
 			}
 			assertCatalogDescriptorNames(t, "direct", plan.Direct, tt.direct)
 			assertCatalogDescriptorNames(t, "deferred", plan.Deferred, tt.deferred)
+			assertCatalogDisclosureGroup(
+				t, plan.Deferred, "browser.workflow",
+				orderedIntersection(tt.deferred, []string{
+					"browser_act", "browser_open", "browser_read", "browser_snapshot",
+				}),
+			)
+			assertCatalogDisclosureGroup(
+				t, plan.Deferred, "computer.workflow",
+				orderedIntersection(tt.deferred, []string{
+					"computer_act", "computer_apps", "computer_open", "computer_snapshot",
+				}),
+			)
 			if got, want := len(plan.Direct)+1, len(tt.direct)+1; got != want {
 				t.Fatalf("first-round count including tool_search = %d, want %d", got, want)
 			}
@@ -107,7 +120,7 @@ func TestBuildCommandToolPlanMCPIsDeferredAndNormalOnly(t *testing.T) {
 		[]string{"mcp__alpha_server__catalog_alpha", "mcp__zeta_server__catalog_zeta"})
 	alpha := normal.Deferred[0]
 	if alpha.Source != "mcp:alpha-server" || alpha.Bundle != "mcp.alpha-server" ||
-		alpha.ApprovalClass != "mcp_unknown" {
+		alpha.ApprovalClass != "mcp_unknown" || alpha.DisclosureGroup != "" {
 		t.Fatalf("MCP metadata = source %q bundle %q approval %q",
 			alpha.Source, alpha.Bundle, alpha.ApprovalClass)
 	}
@@ -120,6 +133,120 @@ func TestBuildCommandToolPlanMCPIsDeferredAndNormalOnly(t *testing.T) {
 	assertCatalogDescriptorNames(t, "hidden MCP", planning.Hidden,
 		[]string{"mcp__alpha_server__catalog_alpha", "mcp__zeta_server__catalog_zeta"})
 	assertCatalogToolNames(t, "plan runtime", planning.AllRuntimeTools(), []string{"read"})
+}
+
+func TestBuildCommandToolPlanLargeSameServerMCPNeverFormsDisclosureGroup(t *testing.T) {
+	const (
+		server      = "disclosure-review-server"
+		catalogSize = 32
+	)
+	names := make([]string, 0, catalogSize)
+	for i := 0; i < catalogSize; i++ {
+		name := fmt.Sprintf("mcp__disclosure_review_server__catalog_%02d", i)
+		internaltools.RegisterMCPToolIdentity(name, server, fmt.Sprintf("catalog-%02d", i))
+		names = append(names, name)
+	}
+
+	normal, err := buildCommandToolPlan(
+		context.Background(), catalogTools("read"), catalogTools(names...),
+		agent.ToolTransportWeb, agent.ToolModeNormal,
+	)
+	if err != nil {
+		t.Fatalf("normal plan error = %v", err)
+	}
+	if len(normal.Deferred) != catalogSize {
+		t.Fatalf("normal deferred MCP count = %d, want %d", len(normal.Deferred), catalogSize)
+	}
+	assertSameServerMCPDescriptorsUngrouped(t, normal.Deferred, server)
+
+	planning, err := buildCommandToolPlan(
+		context.Background(), catalogTools("read"), catalogTools(names...),
+		agent.ToolTransportWeb, agent.ToolModePlan,
+	)
+	if err != nil {
+		t.Fatalf("plan mode error = %v", err)
+	}
+	if len(planning.Hidden) != catalogSize {
+		t.Fatalf("plan hidden MCP count = %d, want %d", len(planning.Hidden), catalogSize)
+	}
+	assertSameServerMCPDescriptorsUngrouped(t, planning.Hidden, server)
+}
+
+func assertSameServerMCPDescriptorsUngrouped(
+	t *testing.T,
+	descriptors []agent.ToolDescriptor,
+	server string,
+) {
+	t.Helper()
+	for _, descriptor := range descriptors {
+		if descriptor.Source != "mcp:"+server || descriptor.Bundle != "mcp."+server {
+			t.Errorf(
+				"MCP %q identity = source %q bundle %q, want canonical server %q",
+				descriptor.Name, descriptor.Source, descriptor.Bundle, server,
+			)
+		}
+		if descriptor.DisclosureGroup != "" {
+			t.Errorf(
+				"same-server MCP %q disclosure group = %q, want empty",
+				descriptor.Name, descriptor.DisclosureGroup,
+			)
+		}
+	}
+}
+
+func TestCommandToolDisclosureGroupsAreExplicitAndNarrow(t *testing.T) {
+	want := map[string]string{
+		"browser_open":      "browser.workflow",
+		"browser_snapshot":  "browser.workflow",
+		"browser_act":       "browser.workflow",
+		"browser_read":      "browser.workflow",
+		"computer_open":     "computer.workflow",
+		"computer_snapshot": "computer.workflow",
+		"computer_act":      "computer.workflow",
+		"computer_apps":     "computer.workflow",
+	}
+	for _, name := range []string{
+		"browser_open", "browser_snapshot", "browser_act", "browser_read",
+		"browser_tabs", "browser_screenshot", "browser_eval",
+		"computer_open", "computer_snapshot", "computer_act", "computer_apps",
+		"computer_read", "computer_screenshot",
+	} {
+		if got := commandToolPolicies[name].disclosureGroup; got != want[name] {
+			t.Errorf("tool %q disclosure group = %q, want %q", name, got, want[name])
+		}
+	}
+}
+
+func assertCatalogDisclosureGroup(
+	t *testing.T,
+	descriptors []agent.ToolDescriptor,
+	group string,
+	want []string,
+) {
+	t.Helper()
+	var got []string
+	for _, descriptor := range descriptors {
+		if descriptor.DisclosureGroup == group {
+			got = append(got, descriptor.Name)
+		}
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("disclosure group %q = %v, want %v", group, got, want)
+	}
+}
+
+func orderedIntersection(input, allowed []string) []string {
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, name := range allowed {
+		allowedSet[name] = true
+	}
+	var result []string
+	for _, name := range input {
+		if allowedSet[name] {
+			result = append(result, name)
+		}
+	}
+	return result
 }
 
 func TestBuildCommandToolPlanRejectsUnknownAndCollisions(t *testing.T) {

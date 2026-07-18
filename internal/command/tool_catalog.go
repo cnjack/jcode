@@ -12,12 +12,13 @@ import (
 )
 
 type commandToolPolicy struct {
-	exposure      agent.ToolExposure
-	source        string
-	bundle        string
-	transports    []string
-	modes         []string
-	approvalClass string
+	exposure        agent.ToolExposure
+	source          string
+	bundle          string
+	disclosureGroup string
+	transports      []string
+	modes           []string
+	approvalClass   string
 }
 
 var commandToolPolicies = map[string]commandToolPolicy{
@@ -50,20 +51,20 @@ var commandToolPolicies = map[string]commandToolPolicy{
 	"team_list":         teamPolicy("read"),
 	"team_delete":       teamPolicy("orchestration"),
 
-	"browser_open":       browserPolicy("browser.core", allModes, "browser_navigate"),
-	"browser_snapshot":   browserPolicy("browser.core", allModes, "browser_read"),
+	"browser_open":       groupedBrowserPolicy(allModes, "browser_navigate"),
+	"browser_snapshot":   groupedBrowserPolicy(allModes, "browser_read"),
 	"browser_screenshot": browserPolicy("browser.visual", allModes, "browser_read"),
-	"browser_act":        browserPolicy("browser.core", normalMode, "browser_interact"),
-	"browser_read":       browserPolicy("browser.core", allModes, "browser_read"),
+	"browser_act":        groupedBrowserPolicy(normalMode, "browser_interact"),
+	"browser_read":       groupedBrowserPolicy(allModes, "browser_read"),
 	"browser_tabs":       browserPolicy("browser.core", allModes, "browser_mixed"),
 	"browser_eval":       browserPolicy("browser.dev", normalMode, "browser_high_risk"),
 
-	"computer_open":       computerPolicy("computer.core", allModes, "computer_launch"),
-	"computer_snapshot":   computerPolicy("computer.core", allModes, "computer_read"),
+	"computer_open":       groupedComputerPolicy(allModes, "computer_launch"),
+	"computer_snapshot":   groupedComputerPolicy(allModes, "computer_read"),
 	"computer_screenshot": computerPolicy("computer.visual", allModes, "computer_read"),
-	"computer_act":        computerPolicy("computer.core", normalMode, "computer_interact"),
+	"computer_act":        groupedComputerPolicy(normalMode, "computer_interact"),
 	"computer_read":       computerPolicy("computer.sensitive", normalMode, "computer_sensitive"),
-	"computer_apps":       computerPolicy("computer.core", allModes, "computer_read"),
+	"computer_apps":       groupedComputerPolicy(allModes, "computer_read"),
 }
 
 var (
@@ -93,14 +94,15 @@ func buildCommandToolPlan(
 			return agent.ToolPlan{}, fmt.Errorf("command tool catalog: unknown builtin tool %q", name)
 		}
 		descriptors = append(descriptors, agent.ToolDescriptor{
-			Tool:          candidate,
-			Name:          name,
-			Source:        policy.source,
-			Bundle:        policy.bundle,
-			Exposure:      policy.exposure,
-			Transports:    policy.transports,
-			Modes:         policy.modes,
-			ApprovalClass: policy.approvalClass,
+			Tool:            candidate,
+			Name:            name,
+			Source:          policy.source,
+			Bundle:          policy.bundle,
+			DisclosureGroup: policy.disclosureGroup,
+			Exposure:        policy.exposure,
+			Transports:      policy.transports,
+			Modes:           policy.modes,
+			ApprovalClass:   policy.approvalClass,
 		})
 	}
 
@@ -186,8 +188,20 @@ func browserPolicy(bundle string, modes []string, approvalClass string) commandT
 	return policy
 }
 
+func groupedBrowserPolicy(modes []string, approvalClass string) commandToolPolicy {
+	policy := browserPolicy("browser.core", modes, approvalClass)
+	policy.disclosureGroup = "browser.workflow"
+	return policy
+}
+
 func computerPolicy(bundle string, modes []string, approvalClass string) commandToolPolicy {
 	policy := deferredPolicy(bundle, modes, approvalClass)
 	policy.source = "computer"
+	return policy
+}
+
+func groupedComputerPolicy(modes []string, approvalClass string) commandToolPolicy {
+	policy := computerPolicy("computer.core", modes, approvalClass)
+	policy.disclosureGroup = "computer.workflow"
 	return policy
 }

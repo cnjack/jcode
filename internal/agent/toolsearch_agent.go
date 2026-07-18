@@ -31,14 +31,17 @@ func NewAgentWithToolPlan(
 	middlewares []adk.ChatModelAgentMiddleware,
 	handlers []adk.ChatModelAgentMiddleware,
 ) (*adk.ChatModelAgent, error) {
-	direct, deferred, err := executableToolsFromPlan(ctx, plan)
+	direct, deferred, disclosureGroups, err := executableToolsFromPlan(ctx, plan)
 	if err != nil {
 		return nil, err
 	}
 	if len(deferred) > 0 {
 		instruction = strings.TrimRight(instruction, "\n") + "\n\n" + deferredToolBatchInstruction
 	}
-	return newAgent(ctx, chatmodel, direct, deferred, instruction, approvalFunc, middlewares, handlers)
+	return newAgent(
+		ctx, chatmodel, direct, deferred, disclosureGroups,
+		instruction, approvalFunc, middlewares, handlers,
+	)
 }
 
 func newToolSearchMiddleware(ctx context.Context, deferred []tool.BaseTool) (adk.ChatModelAgentMiddleware, error) {
@@ -56,7 +59,10 @@ func newToolSearchMiddleware(ctx context.Context, deferred []tool.BaseTool) (adk
 	return middleware, nil
 }
 
-func executableToolsFromPlan(ctx context.Context, plan ToolPlan) ([]tool.BaseTool, []tool.BaseTool, error) {
+func executableToolsFromPlan(
+	ctx context.Context,
+	plan ToolPlan,
+) ([]tool.BaseTool, []tool.BaseTool, toolDisclosureGroups, error) {
 	groups := []struct {
 		name     string
 		exposure ToolExposure
@@ -73,7 +79,7 @@ func executableToolsFromPlan(ctx context.Context, plan ToolPlan) ([]tool.BaseToo
 	for _, group := range groups {
 		for _, descriptor := range group.tools {
 			if descriptor.Exposure != group.exposure {
-				return nil, nil, fmt.Errorf(
+				return nil, nil, toolDisclosureGroups{}, fmt.Errorf(
 					"agent tool plan: tool %q is in %s but declares exposure %q",
 					descriptor.Name, group.name, descriptor.Exposure,
 				)
@@ -84,10 +90,10 @@ func executableToolsFromPlan(ctx context.Context, plan ToolPlan) ([]tool.BaseToo
 
 	validated, err := validateDescriptors(ctx, all)
 	if err != nil {
-		return nil, nil, fmt.Errorf("agent tool plan: %w", err)
+		return nil, nil, toolDisclosureGroups{}, fmt.Errorf("agent tool plan: %w", err)
 	}
 	if err := plan.Validate(); err != nil {
-		return nil, nil, fmt.Errorf("agent tool plan: %w", err)
+		return nil, nil, toolDisclosureGroups{}, fmt.Errorf("agent tool plan: %w", err)
 	}
 
 	if len(plan.DirectModelOnly) > 0 {
@@ -96,7 +102,7 @@ func executableToolsFromPlan(ctx context.Context, plan ToolPlan) ([]tool.BaseToo
 			names[i] = strings.TrimSpace(descriptor.Name)
 		}
 		sort.Strings(names)
-		return nil, nil, fmt.Errorf(
+		return nil, nil, toolDisclosureGroups{}, fmt.Errorf(
 			"agent tool plan: direct_model_only tools are unsupported by the chat model path: %s",
 			strings.Join(names, ", "),
 		)
@@ -105,8 +111,9 @@ func executableToolsFromPlan(ctx context.Context, plan ToolPlan) ([]tool.BaseToo
 	directEnd := len(plan.Direct)
 	deferredEnd := directEnd + len(plan.Deferred)
 	direct := descriptorTools(validated[:directEnd])
-	deferred := descriptorTools(validated[directEnd:deferredEnd])
-	return direct, deferred, nil
+	deferredDescriptors := validated[directEnd:deferredEnd]
+	deferred := descriptorTools(deferredDescriptors)
+	return direct, deferred, disclosureGroupsFromDescriptors(deferredDescriptors), nil
 }
 
 func descriptorTools(descriptors []ToolDescriptor) []tool.BaseTool {

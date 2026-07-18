@@ -18,10 +18,14 @@ import (
 // a rebuilt one (mode/capability/MCP reload all rebuild an agent).
 func TestToolSearchLifecycleNewGenerationStartsWithoutImplicitActivation(t *testing.T) {
 	direct := &agentToolSearchTestTool{name: "read"}
-	deferred := &agentToolSearchTestTool{name: "browser_act"}
+	browserAct := &agentToolSearchTestTool{name: "browser_act"}
+	browserSnapshot := &agentToolSearchTestTool{name: "browser_snapshot"}
 	plan := ToolPlan{
-		Direct:   []ToolDescriptor{agentToolSearchDescriptor(direct, ToolExposureDirect)},
-		Deferred: []ToolDescriptor{agentToolSearchDescriptor(deferred, ToolExposureDeferred)},
+		Direct: []ToolDescriptor{agentToolSearchDescriptor(direct, ToolExposureDirect)},
+		Deferred: []ToolDescriptor{
+			groupedAgentToolSearchDescriptor(browserAct, "browser.workflow"),
+			groupedAgentToolSearchDescriptor(browserSnapshot, "browser.workflow"),
+		},
 	}
 
 	firstModel := &agentToolSearchScriptModel{responses: []*schema.Message{
@@ -37,7 +41,7 @@ func TestToolSearchLifecycleNewGenerationStartsWithoutImplicitActivation(t *test
 	}
 	assertAgentToolSearchVisible(t, firstModel.visibleTools(), [][]string{
 		{"read", ToolSearchReservedName},
-		{"browser_act", "read", ToolSearchReservedName},
+		{"browser_act", "browser_snapshot", "read", ToolSearchReservedName},
 	})
 
 	secondModel := &agentToolSearchScriptModel{responses: []*schema.Message{
@@ -81,6 +85,66 @@ func TestToolSearchLifecycleResumeRestoresRecordedSelection(t *testing.T) {
 	assertAgentToolSearchVisible(t, model.visibleTools(), [][]string{
 		{"computer_read", "read", ToolSearchReservedName},
 	})
+}
+
+func TestToolSearchLifecycleResumePreservesExpandedAndLegacyGroupHistory(t *testing.T) {
+	direct := &agentToolSearchTestTool{name: "read"}
+	plan := ToolPlan{
+		Direct: []ToolDescriptor{agentToolSearchDescriptor(direct, ToolExposureDirect)},
+		Deferred: []ToolDescriptor{
+			groupedAgentToolSearchDescriptor(
+				&agentToolSearchTestTool{name: "browser_open"}, "browser.workflow",
+			),
+			groupedAgentToolSearchDescriptor(
+				&agentToolSearchTestTool{name: "browser_snapshot"}, "browser.workflow",
+			),
+			groupedAgentToolSearchDescriptor(
+				&agentToolSearchTestTool{name: "browser_act"}, "browser.workflow",
+			),
+			groupedAgentToolSearchDescriptor(
+				&agentToolSearchTestTool{name: "browser_read"}, "browser.workflow",
+			),
+		},
+	}
+
+	tests := []struct {
+		name    string
+		matches string
+		visible []string
+	}{
+		{
+			name:    "persisted expanded result restores all valid peers",
+			matches: `{"matches":["browser_open","browser_act","browser_read","browser_snapshot"]}`,
+			visible: []string{
+				"browser_act", "browser_open", "browser_read", "browser_snapshot",
+				"read", ToolSearchReservedName,
+			},
+		},
+		{
+			name:    "legacy unexpanded result restores only original match",
+			matches: `{"matches":["browser_open"]}`,
+			visible: []string{"browser_open", "read", ToolSearchReservedName},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			model := &agentToolSearchScriptModel{responses: []*schema.Message{
+				schema.AssistantMessage("resumed", nil),
+			}}
+			ag, err := NewAgentWithToolPlan(
+				context.Background(), model, plan, "test", nil, nil, nil,
+			)
+			if err != nil {
+				t.Fatalf("NewAgentWithToolPlan() error = %v", err)
+			}
+			if err := runToolSearchLifecycle(
+				ag, recordedToolSearchHistoryWithResult("browser_open", tt.matches),
+			); err != nil {
+				t.Fatalf("resumed run error = %v", err)
+			}
+			assertAgentToolSearchVisible(t, model.visibleTools(), [][]string{tt.visible})
+		})
+	}
 }
 
 // TestToolSearchLifecycleCompactedHistoryRequiresFreshSelection is the safe
@@ -276,12 +340,18 @@ func TestToolSearchDisabledUsesCurrentStaticCatalog(t *testing.T) {
 }
 
 func recordedToolSearchHistory(selected string) []adk.Message {
+	return recordedToolSearchHistoryWithResult(
+		selected, `{"matches":["`+selected+`"]}`,
+	)
+}
+
+func recordedToolSearchHistoryWithResult(selected, result string) []adk.Message {
 	const callID = "recorded-search"
 	return []adk.Message{
 		schema.UserMessage("load a tool"),
 		toolCallMessage(callID, ToolSearchReservedName, `{"query":"select:`+selected+`"}`),
 		schema.ToolMessage(
-			`{"matches":["`+selected+`"]}`,
+			result,
 			callID,
 			schema.WithToolName(ToolSearchReservedName),
 		),

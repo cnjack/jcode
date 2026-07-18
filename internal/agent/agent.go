@@ -47,7 +47,10 @@ func NewAgent(
 	middlewares []adk.ChatModelAgentMiddleware,
 	handlers []adk.ChatModelAgentMiddleware,
 ) (*adk.ChatModelAgent, error) {
-	return newAgent(ctx, chatmodel, tools, nil, instruction, approvalFunc, middlewares, handlers)
+	return newAgent(
+		ctx, chatmodel, tools, nil, toolDisclosureGroups{},
+		instruction, approvalFunc, middlewares, handlers,
+	)
 }
 
 func newAgent(
@@ -55,6 +58,7 @@ func newAgent(
 	chatmodel model.ToolCallingChatModel,
 	directTools []tool.BaseTool,
 	deferredTools []tool.BaseTool,
+	disclosureGroups toolDisclosureGroups,
 	instruction string,
 	approvalFunc ApprovalFunc,
 	middlewares []adk.ChatModelAgentMiddleware,
@@ -80,6 +84,12 @@ func newAgent(
 		return nil, fmt.Errorf("agent tool observation: %w", err)
 	}
 	enhanced = append(enhanced, toolObservationMiddleware)
+	// Observation stays outside group expansion so recorded search matches are
+	// exactly the names Eino will recover from history on the next generation.
+	// The wrapper is still outside caller handlers and the approval stack.
+	if disclosureMiddleware := newToolSearchDisclosureMiddleware(disclosureGroups); disclosureMiddleware != nil {
+		enhanced = append(enhanced, disclosureMiddleware)
+	}
 	enhanced = append(enhanced, handlers...)
 	// PreToolUse hook sits OUTSIDE approval: it can deny, rewrite args, or mark the
 	// call pre-approved (so approval skips its prompt) before the gate runs.

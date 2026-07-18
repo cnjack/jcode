@@ -39,6 +39,7 @@ type ToolDescriptor struct {
 	Aliases              []string
 	Source               string
 	Bundle               string
+	DisclosureGroup      string
 	Exposure             ToolExposure
 	Transports           []string
 	Modes                []string
@@ -189,6 +190,13 @@ func validateDescriptors(ctx context.Context, input []ToolDescriptor) ([]ToolDes
 		if !validExposure(descriptor.Exposure) {
 			return nil, fmt.Errorf("tool plan: tool %q has invalid exposure %q", descriptor.Name, descriptor.Exposure)
 		}
+		if descriptor.DisclosureGroup != "" &&
+			descriptor.Exposure != ToolExposureDeferred && descriptor.Exposure != ToolExposureHidden {
+			return nil, fmt.Errorf(
+				"tool plan: tool %q has disclosure group %q but is not deferred or gated",
+				descriptor.Name, descriptor.DisclosureGroup,
+			)
+		}
 		if descriptor.Name == ToolSearchReservedName {
 			return nil, fmt.Errorf("tool plan: name %q is reserved", ToolSearchReservedName)
 		}
@@ -217,6 +225,7 @@ func validateDescriptors(ctx context.Context, input []ToolDescriptor) ([]ToolDes
 }
 
 func cloneDescriptor(descriptor ToolDescriptor) ToolDescriptor {
+	descriptor.DisclosureGroup = strings.TrimSpace(descriptor.DisclosureGroup)
 	descriptor.Aliases = normalizedStrings(descriptor.Aliases)
 	descriptor.Transports = normalizedStrings(descriptor.Transports)
 	descriptor.Modes = normalizedStrings(descriptor.Modes)

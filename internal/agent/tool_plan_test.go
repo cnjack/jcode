@@ -123,7 +123,11 @@ func TestToolPlanBuilderSortsDescriptorsAndMetadata(t *testing.T) {
 	plan, err := NewToolPlanBuilder([]ToolDescriptor{
 		zeta,
 		testDescriptor("alpha", ToolExposureDirect),
-		testDescriptor("middle", ToolExposureDeferred),
+		func() ToolDescriptor {
+			d := testDescriptor("middle", ToolExposureDeferred)
+			d.DisclosureGroup = "  workflow.group  "
+			return d
+		}(),
 	}).Build(context.Background(), ToolPlanContext{
 		Transport: ToolTransportTUI,
 		Mode:      ToolModeNormal,
@@ -136,6 +140,9 @@ func TestToolPlanBuilderSortsDescriptorsAndMetadata(t *testing.T) {
 	}
 	assertDescriptorNames(t, "direct", plan.Direct, []string{"alpha", "zeta"})
 	assertDescriptorNames(t, "deferred", plan.Deferred, []string{"middle"})
+	if got := plan.Deferred[0].DisclosureGroup; got != "workflow.group" {
+		t.Fatalf("disclosure group = %q, want normalized group", got)
+	}
 
 	got := plan.Direct[1]
 	if !reflect.DeepEqual(got.Aliases, []string{"beta", "z"}) {
@@ -267,6 +274,15 @@ func TestToolPlanBuilderRejectsInvalidDescriptors(t *testing.T) {
 			},
 			wantError: "invalid exposure",
 		},
+		{
+			name: "direct tool cannot declare disclosure group",
+			descriptors: []ToolDescriptor{func() ToolDescriptor {
+				d := testDescriptor("read", ToolExposureDirect)
+				d.DisclosureGroup = "files.workflow"
+				return d
+			}()},
+			wantError: "not deferred or gated",
+		},
 	}
 
 	for _, tt := range tests {
@@ -276,6 +292,29 @@ func TestToolPlanBuilderRejectsInvalidDescriptors(t *testing.T) {
 				t.Fatalf("Build() error = %v, want substring %q", err, tt.wantError)
 			}
 		})
+	}
+}
+
+func TestToolPlanDisclosureGroupDoesNotChangeCapabilityScope(t *testing.T) {
+	enabled := testDescriptor("browser_open", ToolExposureDeferred)
+	enabled.DisclosureGroup = "browser.workflow"
+	enabled.RequiredCapabilities = []string{"browser"}
+	revoked := testDescriptor("browser_act", ToolExposureDeferred)
+	revoked.DisclosureGroup = "browser.workflow"
+	revoked.RequiredCapabilities = []string{"browser_interact"}
+
+	plan, err := NewToolPlanBuilder([]ToolDescriptor{enabled, revoked}).Build(
+		context.Background(),
+		ToolPlanContext{Capabilities: map[string]bool{"browser": true}},
+	)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	assertDescriptorNames(t, "deferred", plan.Deferred, []string{"browser_open"})
+	assertDescriptorNames(t, "hidden", plan.Hidden, []string{"browser_act"})
+	if plan.Deferred[0].DisclosureGroup != "browser.workflow" ||
+		plan.Hidden[0].DisclosureGroup != "browser.workflow" {
+		t.Fatalf("gate changed disclosure metadata: deferred=%#v hidden=%#v", plan.Deferred, plan.Hidden)
 	}
 }
 
