@@ -32,6 +32,15 @@ ARG_MATCHES = {"exact", "contains"}
 MCP_TOOL_COUNTS = {10, 30, 50, 100}
 MCP_CATALOG_SENTINEL = "$mcp_fixture_catalog"
 MCP_DISTRACTOR_SENTINEL = "$mcp_fixture_distractors"
+BROWSER_FIXTURE_KIND = "driver_owned_proof_form"
+BROWSER_FIXTURE_ACTIONS = [
+    "browser_open",
+    "browser_snapshot",
+    "browser_act:fill",
+    "browser_act:click",
+    "browser_read",
+]
+BROWSER_CONFIRMATION_PREFIX = "JCODE_BROWSER_CONFIRMATION"
 
 CASE_ID_RE = re.compile(r"^[a-z][a-z0-9_]{2,79}$")
 TOOL_NAME_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
@@ -379,19 +388,69 @@ def _validate_browser_fixture(case):
         return
     if case.get("surface") != "web":
         raise MatrixError(f"case {case['id']} Browser fixture must use the Web surface")
-    if set(fixture) != {"kind", "path", "content_type", "body"}:
+    expected_fields = {
+        "kind",
+        "network",
+        "prompt_owner",
+        "required_actions",
+        "confirmation_prefix",
+    }
+    if set(fixture) != expected_fields:
         raise MatrixError(f"case {case['id']} Browser fixture has unsupported fields")
-    if fixture.get("kind") != "loopback_http" or fixture.get("content_type") != "text/html; charset=utf-8":
-        raise MatrixError(f"case {case['id']} Browser fixture must be loopback HTML")
-    path = fixture.get("path")
-    if (not isinstance(path, str) or not path.startswith("/") or path.startswith("//")
-            or ".." in Path(path).parts):
-        raise MatrixError(f"case {case['id']} Browser fixture has unsafe path")
-    body = fixture.get("body")
-    if not isinstance(body, str) or not body or len(body.encode()) > 32 * 1024:
-        raise MatrixError(f"case {case['id']} Browser fixture body is invalid or too large")
+    if (fixture.get("kind") != BROWSER_FIXTURE_KIND
+            or fixture.get("network") != "loopback"
+            or fixture.get("prompt_owner") != "web_browser_driver"):
+        raise MatrixError(f"case {case['id']} Browser fixture must use the Web driver proof form")
+    if fixture.get("required_actions") != BROWSER_FIXTURE_ACTIONS:
+        raise MatrixError(f"case {case['id']} Browser fixture action contract drifted")
+    if fixture.get("confirmation_prefix") != BROWSER_CONFIRMATION_PREFIX:
+        raise MatrixError(f"case {case['id']} Browser fixture confirmation contract drifted")
+    browser_config = case.get("home_config", {}).get("browser")
+    expected_browser_config = {
+        "enabled": True,
+        "backend": "managed",
+        "headless": True,
+        "approval": {
+            "navigate": "always_allow",
+            "interact": "always_allow",
+        },
+    }
+    if browser_config != expected_browser_config:
+        raise MatrixError(f"case {case['id']} Browser success approval contract drifted")
     if "{BROWSER_FIXTURE_URL}" not in case.get("prompt", ""):
         raise MatrixError(f"case {case['id']} Browser prompt must use the runner URL placeholder")
+
+    required_by_variant = {
+        variant: {
+            call["name"]: (call["min"], call["max"])
+            for call in expectation["required_tool_calls"]
+        }
+        for variant, expectation in case.get("expected_routing", {}).items()
+    }
+    expected_bounds = {
+        "browser_open": (1, 1),
+        "browser_snapshot": (1, 2),
+        "browser_act": (2, 4),
+        "browser_read": (1, 2),
+    }
+    expected_order = [
+        "browser_open",
+        "browser_snapshot",
+        "browser_act",
+        "browser_act",
+        "browser_read",
+    ]
+    for variant, expectation in case.get("expected_routing", {}).items():
+        if required_by_variant.get(variant) != expected_bounds:
+            raise MatrixError(f"case {case['id']} {variant} Browser call bounds drifted")
+        order = expectation.get("required_call_order", [])
+        if variant == "deferred":
+            if order != ["tool_search", *expected_order]:
+                raise MatrixError(f"case {case['id']} deferred Browser order drifted")
+            if set(expectation.get("expected_search_tools", [])) != set(expected_bounds):
+                raise MatrixError(f"case {case['id']} Deferred Browser disclosure is incomplete")
+        elif order != expected_order:
+            raise MatrixError(f"case {case['id']} static Browser order drifted")
 
 
 def _validate_case(case):

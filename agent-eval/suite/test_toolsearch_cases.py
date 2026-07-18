@@ -81,10 +81,66 @@ class ToolSearchCaseMatrixTest(unittest.TestCase):
         self.assertEqual("acp", computer["surface"])
 
         self.assertEqual("web", browser["surface"])
-        self.assertEqual("loopback_http", browser["browser_fixture"]["kind"])
+        self.assertEqual("driver_owned_proof_form", browser["browser_fixture"]["kind"])
+        self.assertEqual("web_browser_driver", browser["browser_fixture"]["prompt_owner"])
+        self.assertEqual(
+            [
+                "browser_open",
+                "browser_snapshot",
+                "browser_act:fill",
+                "browser_act:click",
+                "browser_read",
+            ],
+            browser["browser_fixture"]["required_actions"],
+        )
+        self.assertNotIn("body", browser["browser_fixture"])
+        self.assertEqual(
+            {"navigate": "always_allow", "interact": "always_allow"},
+            browser["home_config"]["browser"]["approval"],
+        )
         self.assertIn("{BROWSER_FIXTURE_URL}", browser["prompt"])
         self.assertNotRegex(json.dumps(browser), r"https?://")
         self.assertFalse(self.raw["runner_contract"]["browser_on_acp"])
+
+    def test_browser_expectations_cover_every_driver_tool_and_activation(self):
+        browser = {
+            case["id"]: case for case in self.validate()["cases"]
+        }["ts_browser_loopback_read"]
+        expected_names = {
+            "browser_open", "browser_snapshot", "browser_act", "browser_read",
+        }
+        for variant in ("static", "deferred"):
+            expectation = browser["expected_routing"][variant]
+            required = {call["name"]: call for call in expectation["required_tool_calls"]}
+            self.assertEqual(expected_names, set(required))
+            self.assertEqual((2, 4), (required["browser_act"]["min"], required["browser_act"]["max"]))
+            self.assertEqual(2, expectation["required_call_order"].count("browser_act"))
+        self.assertEqual(
+            expected_names,
+            set(browser["expected_routing"]["deferred"]["expected_search_tools"]),
+        )
+
+    def test_rejects_browser_driver_or_preapproval_contract_drift(self):
+        mutations = (
+            lambda case: case["home_config"]["browser"]["approval"].update(
+                {"navigate": "ask"},
+            ),
+            lambda case: case["browser_fixture"]["required_actions"].pop(),
+            lambda case: case["expected_routing"]["deferred"][
+                "expected_search_tools"
+            ].remove("browser_act"),
+        )
+        for index, mutation in enumerate(mutations):
+            def mutate(document, apply=mutation):
+                browser = next(
+                    case for case in document["cases"]
+                    if case["id"] == "ts_browser_loopback_read"
+                )
+                apply(browser)
+
+            with self.subTest(index=index):
+                with self.assertRaises(toolsearch_cases.MatrixError):
+                    self.validate(mutate)
 
     def test_variant_expectations_are_explicit_and_separate_activation_is_pinned(self):
         for case in self.validate()["cases"]:

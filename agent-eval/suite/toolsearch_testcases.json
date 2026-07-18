@@ -1565,7 +1565,7 @@
     },
     {
       "id": "ts_browser_loopback_read",
-      "title": "Web-only Browser tools read a loopback fixture",
+      "title": "Web-only Browser tools complete a driver-owned loopback proof form",
       "category": "toolsearch-browser",
       "tier": "core",
       "surface": "web",
@@ -1574,26 +1574,37 @@
         "static",
         "deferred"
       ],
-      "prompt": "Use Browser tools to open the runner-owned local page at {BROWSER_FIXTURE_URL}, then read the page and report its exact verification token. Do not navigate anywhere else.",
+      "prompt": "Use Browser tools to open the driver-owned proof form at {BROWSER_FIXTURE_URL}, snapshot it, fill and submit its one-time proof value, then read the confirmation marker. Do not navigate anywhere else.",
       "home_config": {
         "browser": {
           "enabled": true,
           "backend": "managed",
-          "headless": true
+          "headless": true,
+          "approval": {
+            "navigate": "always_allow",
+            "interact": "always_allow"
+          }
         }
       },
       "browser_fixture": {
-        "kind": "loopback_http",
-        "path": "/toolsearch-browser-fixture",
-        "content_type": "text/html; charset=utf-8",
-        "body": "<!doctype html><html><head><title>ToolSearch Browser Fixture</title></head><body><main><h1>Local fixture</h1><p id=verification>BROWSER_TOOLSEARCH_OK</p></main></body></html>"
+        "kind": "driver_owned_proof_form",
+        "network": "loopback",
+        "prompt_owner": "web_browser_driver",
+        "required_actions": [
+          "browser_open",
+          "browser_snapshot",
+          "browser_act:fill",
+          "browser_act:click",
+          "browser_read"
+        ],
+        "confirmation_prefix": "JCODE_BROWSER_CONFIRMATION"
       },
       "timeout": 360,
       "expect_tool_use": true,
       "oracles": [
         {
-          "type": "final_text_contains",
-          "value": "BROWSER_TOOLSEARCH_OK"
+          "type": "web_browser_driver_proof",
+          "value": "JCODE_BROWSER_CONFIRMATION"
         }
       ],
       "safety": {
@@ -1628,23 +1639,30 @@
               "max": 1
             },
             {
+              "name": "browser_snapshot",
+              "min": 1,
+              "max": 2
+            },
+            {
+              "name": "browser_act",
+              "min": 2,
+              "max": 4
+            },
+            {
               "name": "browser_read",
               "min": 1,
               "max": 2
             }
           ],
-          "optional_tool_calls": [
-            {
-              "name": "browser_snapshot",
-              "min": 0,
-              "max": 2
-            }
-          ],
+          "optional_tool_calls": [],
           "forbidden_tool_calls": [
             "tool_search"
           ],
           "required_call_order": [
             "browser_open",
+            "browser_snapshot",
+            "browser_act",
+            "browser_act",
             "browser_read"
           ]
         },
@@ -1659,6 +1677,8 @@
           ],
           "expected_search_tools": [
             "browser_open",
+            "browser_snapshot",
+            "browser_act",
             "browser_read"
           ],
           "empty_search": "forbidden",
@@ -1672,22 +1692,29 @@
               "max": 1
             },
             {
+              "name": "browser_snapshot",
+              "min": 1,
+              "max": 2
+            },
+            {
+              "name": "browser_act",
+              "min": 2,
+              "max": 4
+            },
+            {
               "name": "browser_read",
               "min": 1,
               "max": 2
             }
           ],
-          "optional_tool_calls": [
-            {
-              "name": "browser_snapshot",
-              "min": 0,
-              "max": 2
-            }
-          ],
+          "optional_tool_calls": [],
           "forbidden_tool_calls": [],
           "required_call_order": [
             "tool_search",
             "browser_open",
+            "browser_snapshot",
+            "browser_act",
+            "browser_act",
             "browser_read"
           ]
         }
