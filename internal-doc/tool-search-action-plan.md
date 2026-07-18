@@ -1,0 +1,218 @@
+# Tool Search 渐进式工具披露实施清单
+
+> 状态：执行中
+>
+> 创建日期：2026-07-18
+>
+> 目标模型：`kimi-for-coding/kimi-for-coding`
+>
+> 参考实现：Codex runtime registry / model-visible spec 分离；Eino ToolSearch middleware
+>
+> 最终交付：实现代码、分阶段提交、至少 30 分钟全场景测试、HTML 测试报告
+
+## 执行规则
+
+1. 每个编号任务完成后，立即将复选框更新为 `[x]`。
+2. 每个编号任务必须填写测试命令、测试结果、提交号；没有证据不得标记完成。
+3. 每个实现阶段单独提交，不混入无关工作树修改。
+4. 最终回归持续时间不得少于 30 分钟，必须覆盖 Direct、Deferred、MCP、Browser、Computer、权限、模式切换和失败路径。
+5. 最终以 HTML 报告记录环境、模型参数、场景、调用轨迹、指标、失败项和结论。
+
+## 关键设计约束
+
+- 运行时工具全集与模型当前可见 schema 分离。
+- `Direct` 首轮可见；`Deferred` 经 `tool_search` 后披露；`Hidden` 不注册或不可搜索。
+- Deferred 仅控制披露，不构成授权；实际调用继续经过现有 approval middleware。
+- Kimi 使用 Eino 客户端 ToolSearch：`UseModelToolSearch: false`。当前模型适配层不支持 Codex 风格原生 deferred wire protocol。
+- 顶层 TUI、Web、ACP 首先接入；child agent 在审批和 plan 权限一致性修复前不接入。
+- MCP 使用稳定的模型侧 canonical name，避免不同 server 及内建工具重名。
+
+## 总体进度
+
+| 阶段 | 状态 | 提交 | 说明 |
+|---|---|---|---|
+| TS-00 文档与基线 | 完成 | 本提交 | 基线 `ca4c8ba6b709`，完整 Go 测试通过 |
+| TS-01 ToolPlan 核心 | 未开始 | — | 统一 Direct/Deferred/Hidden 分类 |
+| TS-02 Eino middleware | 未开始 | — | 接入客户端 ToolSearch |
+| TS-03 Transport 接入 | 未开始 | — | TUI/Web/ACP 统一使用 ToolPlan |
+| TS-04 MCP 与权限 | 未开始 | — | canonical name、审批和安全边界 |
+| TS-05 Prompt 与观测 | 未开始 | — | 使用说明、schema/轨迹指标 |
+| TS-06 自动化测试 | 未开始 | — | 单元、集成、fixture 和 routing oracle |
+| TS-07 Kimi A/B | 未开始 | — | 精确模型、静态/渐进式对照 |
+| TS-08 30 分钟回归 | 未开始 | — | 全场景长跑 |
+| TS-09 HTML 报告 | 未开始 | — | 生成并审计最终报告 |
+
+## TS-00 文档与基线
+
+- [x] TS-00.1 建立本清单，记录执行和更新规则。
+- [x] TS-00.2 保存基线证据：工作树状态、当前提交、Go/Eino 版本、基线测试结果。
+- [x] TS-00.3 提交任务文档。
+
+完成证据：
+
+- 基线：`ca4c8ba6b709e5b3e9ccbd08f0e59929afff3b9d`，开始时工作树干净。
+- 环境：`go1.26.4 darwin/arm64`；`github.com/cloudwego/eino v0.9.9`。
+- 测试：`git diff --check`；`go test ./...`。
+- 结果：通过。沙箱内运行因现有 localhost/Go cache 权限受限失败；允许 localhost 的沙箱外重跑完整通过。
+- 提交：本提交；精确 SHA 将在下一次进度更新中回填。
+
+## TS-01 ToolPlan 核心
+
+- [ ] TS-01.1 新增中心化 `ToolDescriptor` / `ToolPlan`。
+- [ ] TS-01.2 支持 `Direct`、`Deferred`、`Hidden`，并预留模型专用暴露等级。
+- [ ] TS-01.3 描述 transport、mode、source、bundle、aliases、enabled predicate、approval class 和真实 endpoint。
+- [ ] TS-01.4 校验 Direct/Deferred 不相交、名称唯一、ToolInfo 非空、`tool_search` 保留名和稳定排序。
+- [ ] TS-01.5 编写表驱动测试覆盖 transport × mode × capability 分类。
+
+普通模式首轮目标不超过 12 个：
+
+`tool_search`、`read`、`grep`、`edit`、`write`、`execute`、`check_background`、`todowrite`、`todoread`、`ask_user`、`load_skill`、`subagent`。
+
+Plan 模式首轮目标：
+
+`tool_search`、`read`、`grep`、`execute`、`todowrite`、`todoread`、`ask_user`；ACP 去掉 `ask_user`，active goal 可追加 `goal_get` / `goal_update`。
+
+完成证据：
+
+- 测试：待填写
+- 结果：待填写
+- 提交：待填写
+
+## TS-02 Eino ToolSearch middleware
+
+- [ ] TS-02.1 使用当前 Eino 版本提供的 `adk/middlewares/dynamictool/toolsearch`。
+- [ ] TS-02.2 初始 Agent 只传 Direct 工具；Deferred 只传 `DynamicTools`。
+- [ ] TS-02.3 固定 `UseModelToolSearch: false`，Deferred 为空时跳过 middleware。
+- [ ] TS-02.4 保持 approval middleware 最内层，确保 Deferred 工具执行不绕过审批。
+- [ ] TS-02.5 增加 `tool_search.enabled` 配置开关和 static 回退路径。
+- [ ] TS-02.6 测试首轮隐藏、搜索后披露、多次搜索累积和未知搜索。
+
+完成证据：
+
+- 测试：待填写
+- 结果：待填写
+- 提交：待填写
+
+## TS-03 TUI / Web / ACP 接入
+
+- [ ] TS-03.1 TUI normal/plan 使用统一 ToolPlan。
+- [ ] TS-03.2 Web normal/plan/automation 使用统一 ToolPlan。
+- [ ] TS-03.3 ACP normal/plan 使用统一 ToolPlan，并维持 ACP 不暴露 Browser 的约束。
+- [ ] TS-03.4 Browser、Computer、Memory、MCP、goal、team 状态变化后正确重建计划。
+- [ ] TS-03.5 验证三种 transport 对同一工具分类一致，且 transport 特例明确可测。
+
+完成证据：
+
+- 测试：待填写
+- 结果：待填写
+- 提交：待填写
+
+## TS-04 MCP 命名、审批与权限
+
+- [ ] TS-04.1 MCP 模型侧名称改为 `mcp__<server>__<tool>`，保留 UI 展示名和真实 endpoint 映射。
+- [ ] TS-04.2 使用 registry metadata 判断 MCP 来源，不依赖字符串前缀。
+- [ ] TS-04.3 MCP 按 server/tool 稳定排序，拒绝跨 server 及内建工具名称冲突。
+- [ ] TS-04.4 `tool_search`、`load_skill`、`goal_get` 等只读工具免审批。
+- [ ] TS-04.5 验证 Deferred 写工具仍按原策略审批，搜索激活不等于授权。
+- [ ] TS-04.6 审计并修正 subagent、workflow、team child agent 的审批和 plan 硬边界，再决定是否接入 ToolSearch。
+
+完成证据：
+
+- 测试：待填写
+- 结果：待填写
+- 提交：待填写
+
+## TS-05 Prompt、schema 与观测
+
+- [ ] TS-05.1 System/Plan prompt 只将 Direct 称为当前可用工具，说明 Deferred 搜索语法。
+- [ ] TS-05.2 教会模型使用 `select:name`、关键词、`+required`，并避免重复 search/select。
+- [ ] TS-05.3 删除 `load_skill` schema 与 system prompt 重复的技能目录文本。
+- [ ] TS-05.4 记录每次模型请求的可见工具名、schema bytes/token 估算和调用序号。
+- [ ] TS-05.5 记录 search query、结果、激活目标、重复搜索及 Deferred bypass。
+- [ ] TS-05.6 日志和评测产物不得包含 API key、authorization header 或其他凭证。
+
+完成证据：
+
+- 测试：待填写
+- 结果：待填写
+- 提交：待填写
+
+## TS-06 自动化测试与 deterministic fixture
+
+- [ ] TS-06.1 单元测试：首轮仅 Direct + `tool_search`。
+- [ ] TS-06.2 单元测试：搜索后仅披露命中工具，多次搜索集合单调增长。
+- [ ] TS-06.3 单元测试：重名、保留名、空 ToolInfo 和错误配置启动失败。
+- [ ] TS-06.4 集成测试：真实 Deferred endpoint 的参数、结果和审批链保持不变。
+- [ ] TS-06.5 集成测试：检测未搜索直接调用、同 batch search+target、orphan tool call。
+- [ ] TS-06.6 增加本地 deterministic MCP fixture，覆盖 10/30/50/100 工具规模和相似名称干扰。
+- [ ] TS-06.7 增加声明式 routing oracle：工具序列、搜索命中、参数 schema、禁止冗余搜索。
+- [ ] TS-06.8 覆盖 Browser、Computer、MCP reload、mode switch、compaction/resume 和禁用后撤权。
+
+完成证据：
+
+- 测试：待填写
+- 结果：待填写
+- 提交：待填写
+
+## TS-07 Kimi A/B 评测
+
+- [ ] TS-07.1 修正评测映射，精确使用 `kimi-for-coding/kimi-for-coding`，不使用 high-speed SKU。
+- [ ] TS-07.2 不发送 temperature；记录非敏感的实际 model ID、effort、variant 和工具数量。
+- [ ] TS-07.3 修复 isolated HOME 产物保留真实 `config.json` 的凭证泄露风险。
+- [ ] TS-07.4 增加 `static` / `deferred` variant、明确 repeats 和随机交错执行。
+- [ ] TS-07.5 从 session JSONL 提取真实工具调用序列、batch、args、结果和耗时。
+- [ ] TS-07.6 覆盖 Direct、精确搜索、英文/中文语义、多目标、复杂参数、Browser、Computer、MCP 和负面场景。
+- [ ] TS-07.7 Canary 通过后运行关键用例至少 10 次，不能用 aggregate 掩盖单项失败。
+
+Kimi 硬门槛：
+
+- Deferred bypass = 0。
+- Search 与目标工具同 batch = 0。
+- Deferred 参数有效和调用成功率 ≥ 98%。
+- Direct/no-tool 无关搜索率 ≤ 2%。
+- Deferred 任务通过率 ≥ 95%，关键场景至少 9/10。
+- Direct 相对 static 非劣于 -3pp。
+- 首轮普通模式可见工具 ≤ 12，全功能场景 schema token 至少下降 50%。
+
+完成证据：
+
+- 测试：待填写
+- 结果：待填写
+- 提交：待填写
+
+## TS-08 至少 30 分钟全场景回归
+
+- [ ] TS-08.1 构建固定二进制和 fixture，记录 Git SHA、Go 版本、OS、模型和非敏感参数。
+- [ ] TS-08.2 连续测试累计实际运行时间 ≥ 30 分钟。
+- [ ] TS-08.3 覆盖 static/deferred、TUI/Web/ACP 可自动化路径、normal/plan、能力开关及失败恢复。
+- [ ] TS-08.4 覆盖 Direct、Deferred、Browser、Computer、MCP、审批、模式切换和负面场景。
+- [ ] TS-08.5 保存结构化原始结果，确认无凭证残留。
+- [ ] TS-08.6 对所有失败进行分类；硬门槛失败必须修复并重新完整运行。
+
+完成证据：
+
+- 开始/结束：待填写
+- 总耗时：待填写
+- 场景数/运行数：待填写
+- 结果目录：待填写
+- 提交：待填写
+
+## TS-09 HTML 测试报告与完成审计
+
+- [ ] TS-09.1 生成独立 HTML 报告，包含环境、设计、用例矩阵、调用轨迹、指标和失败详情。
+- [ ] TS-09.2 报告明确列出 Direct/Deferred 正确率、bypass、参数有效率、token 和时延对比。
+- [ ] TS-09.3 报告包含不少于 30 分钟运行的起止时间与原始结果链接。
+- [ ] TS-09.4 对 TS-00 至 TS-09 逐项核验证据，确认没有以窄测试代替全范围要求。
+- [ ] TS-09.5 提交报告及最终文档状态。
+
+完成证据：
+
+- HTML：待填写
+- 校验：待填写
+- 提交：待填写
+
+## 更新日志
+
+| 时间 | 更新 | 测试 | 提交 |
+|---|---|---|---|
+| 2026-07-18 | 完成 TS-00：创建清单并采集基线 | `git diff --check`、`go test ./...` 通过 | 本提交 |
