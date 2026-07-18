@@ -76,8 +76,9 @@ export function ChatView({ readOnly }: ChatViewProps) {
             {subtitleAfter}
           </p>
         </div>
-        {/* Centered elevated composer */}
-        <div className="welcome-composer w-full max-w-2xl px-5">
+        {/* Centered elevated composer. z-[2] keeps its upward-opening menus
+            (model picker, slash palette) above the welcome hero text. */}
+        <div className="welcome-composer z-[2] w-full max-w-2xl px-5">
           <ChatInput elevated pickerPlacement="bottom" onSent={() => { /* timeline auto-follows */ }} />
         </div>
         {/* Bottom half balances the center */}
@@ -95,7 +96,8 @@ export function ChatView({ readOnly }: ChatViewProps) {
       <div className="chat-content-layer min-h-0 flex-1">
         <Thread overscanBottom={28} />
       </div>
-      <div className="chat-content-layer chat-col relative">
+      {/* z-[2] keeps the composer’s upward-opening menus above the thread layer. */}
+      <div className="chat-content-layer chat-col relative z-[2]">
         {/* Goal pill floats behind the composer; composer sits on top (higher z-index). */}
         <GoalBanner />
         <ChatInput onSent={() => { /* timeline auto-follows via useStreamFollow */ }} />
