@@ -38,7 +38,7 @@
 | TS-04 MCP 与权限 | 完成 | `c9cb076`、`1aa128e`、`a316830`、`b1b687f`、`3b751db` | MCP、Plan、delegation 和 team mode 边界完成 |
 | TS-05 Prompt 与观测 | 进行中 | `dbe7ca4`、`69ba9ee`、`f905ae2`、`8675a5b`、`92c2f31` | 使用说明、成功调用去重规则、schema/轨迹指标、凭证文件权限及 Browser 子进程 token 隔离 |
 | TS-06 自动化测试 | 完成 | `77de5fc`、`92e0cb0`、`56fa6eb` | 单元、集成、fixture、routing oracle 与生命周期撤权矩阵 |
-| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e`、`8675a5b`、`d60000d`、`8c980b1`、`207b313`、`7530b38`、`92c2f31`、`ef66470` | MCP100 Deferred repeat 的 tool routing 10/10；user-facing SKU oracle 已修复，等待重复验证与 formal pass@10 |
+| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e`、`8675a5b`、`d60000d`、`8c980b1`、`207b313`、`7530b38`、`92c2f31`、`ef66470` | MCP100 Deferred 新 oracle repeat 严格 9/10，达到关键门槛；等待跨类小矩阵与 formal pass@10 |
 | TS-08 30 分钟回归 | 进行中 | `9f2889e`、`8c980b1` | formal coordinator、deterministic `jcode_eval` 构建与证据合约完成；尚未运行真实全场景长跑 |
 | TS-09 HTML 报告 | 进行中 | `ad55a3b`、`92d442e`、`9f2889e`、`8c980b1` | 安全、fail-closed 的九门槛报告器、canonical suite、build-tag 与 supplementary 合约已完成；等待真实 campaign 产物 |
 
@@ -302,7 +302,8 @@ Kimi 硬门槛：
 - 独立审查无 blocker；确认错误 endpoint、参数、结果、重复调用、同批激活或绕过搜索均不能因 SKU oracle 通过而被掩盖。取舍是 SKU 已在 prompt 中，final oracle 本身不再单独证明输出 grounding；grounding 由上述双 raw verifier 负责，避免把内部测试 token 当用户答案契约。
 - 测试：Agent Eval Python 91/91、JSON parse、`py_compile`、相关 oracle/routing 45 tests、`git diff --check` 全部通过。
 - 已完成提交：`ef66470 test(eval): use user-facing MCP result oracles`（task oracle 校准；硬 routing gate 未放宽）。
-- 下一步：用新 suite hash 重新运行 MCP100 Deferred 独立 repeat；通过后重跑跨类小矩阵，再启动 formal pass@10。
+- 新 suite hash 的 MCP100 Deferred 独立 10-repeat 严格 9/10 PASS，达到 critical ≥9/10 门槛。九条 PASS 均为 search 1 + target 1，6.5～10.5s 正常结束；唯一 r9 在 13.876s 内先 `select:` 并调用 forbidden `catalog_lookup_metadata`，再搜索/调用正确 precise，最终答复与 contracts 均正常，但 routing 与 external fixture verifier 因错误 distractor/额外 call 严格 FAIL。整轮无 bypass、same-batch 或成功调用循环。
+- LoopGuard 决策：20 次结构化 completion 后未再出现相同成功调用循环；当前唯一失败是模型工具选择准确率，而非无进展重复。暂不加入会改变正常 polling/重复操作语义的通用 guard；formal 继续以原始 tool calls 严格计分和 360s timeout 控损。下一步重跑跨类小矩阵，再启动 formal pass@10。
 - 待完成：TS-07.7 需用 exact-Kimi canary 验证上述 Deferred 多步披露修复，并运行关键用例重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
 
 ## TS-08 至少 30 分钟全场景回归
@@ -395,3 +396,4 @@ Kimi 硬门槛：
 | 2026-07-18 | MCP target 返回明确 structured completion/authoritative record 且保留 marker；System/Plan 加入成功结果去重规则 | focused/race、Python 91/91、全量 Go、lint `0 issues`、独立 review 通过 | `92c2f31` |
 | 2026-07-18 | MCP100 Deferred 独立 10-repeat：工具 routing/MCP/contracts/artifact 10/10，旧 final marker task oracle 7/10 | 每条 search=1、target=1、6.153～10.224s、无 loop/bypass/same-batch；三条仅未复述内部 marker | — |
 | 2026-07-18 | 四个 MCP final oracle 改为用户可见 SKU；raw marker/fixture/参数/次数/激活严格 gate 不变 | Python 91/91、相关 45 tests、独立 review 无 blocker | `ef66470` |
+| 2026-07-18 | 新 oracle MCP100 Deferred 独立 10-repeat 严格 9/10，达到 critical 门槛 | 9 条 search=1/target=1；唯一失败先误选 metadata 后纠正，严格 forbidden/external verifier FAIL；无成功循环 | — |
