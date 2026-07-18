@@ -62,11 +62,22 @@ class ToolSearchCaseMatrixTest(unittest.TestCase):
             self.assertEqual(count, len(set(catalog)))
             self.assertIn(target, catalog)
             self.assertNotIn(toolsearch_cases.MCP_CATALOG_SENTINEL, catalog)
+            self.assertEqual(
+                [{"type": "final_text_contains", "value": f"SKU-TS-{count}"}],
+                case["oracles"],
+            )
+            self.assertNotIn("JCODE_MCP_FIXTURE_OK", json.dumps(case["oracles"]))
 
             for variant in ("static", "deferred"):
                 forbidden = case["expected_routing"][variant]["forbidden_tool_calls"]
                 self.assertNotIn(toolsearch_cases.MCP_DISTRACTOR_SENTINEL, forbidden)
                 self.assertEqual(count - 1, sum(name in forbidden for name in catalog if name != target))
+                target_specs = [
+                    call for call in case["expected_routing"][variant]["required_tool_calls"]
+                    if call["name"] == target
+                ]
+                self.assertEqual(1, len(target_specs))
+                self.assertEqual((1, 1), (target_specs[0]["min"], target_specs[0]["max"]))
 
     def test_computer_reuses_deterministic_base_and_browser_is_web_only(self):
         cases = {case["id"]: case for case in self.validate()["cases"]}

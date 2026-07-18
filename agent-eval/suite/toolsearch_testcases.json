@@ -952,7 +952,7 @@
       "oracles": [
         {
           "type": "final_text_contains",
-          "value": "JCODE_MCP_FIXTURE_OK:catalog_lookup_precise:mcp-10:"
+          "value": "SKU-TS-10"
         }
       ],
       "safety": {
@@ -1083,7 +1083,7 @@
       "oracles": [
         {
           "type": "final_text_contains",
-          "value": "JCODE_MCP_FIXTURE_OK:catalog_lookup_precise:mcp-30:"
+          "value": "SKU-TS-30"
         }
       ],
       "safety": {
@@ -1214,7 +1214,7 @@
       "oracles": [
         {
           "type": "final_text_contains",
-          "value": "JCODE_MCP_FIXTURE_OK:catalog_lookup_precise:mcp-50:"
+          "value": "SKU-TS-50"
         }
       ],
       "safety": {
@@ -1345,7 +1345,7 @@
       "oracles": [
         {
           "type": "final_text_contains",
-          "value": "JCODE_MCP_FIXTURE_OK:catalog_lookup_precise:mcp-100:"
+          "value": "SKU-TS-100"
         }
       ],
       "safety": {
