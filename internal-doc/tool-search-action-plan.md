@@ -38,7 +38,7 @@
 | TS-04 MCP 与权限 | 完成 | `c9cb076`、`1aa128e`、`a316830`、`b1b687f`、`3b751db` | MCP、Plan、delegation 和 team mode 边界完成 |
 | TS-05 Prompt 与观测 | 进行中 | `dbe7ca4`、`69ba9ee`、`f905ae2` | 使用说明、schema/轨迹指标与凭证文件权限 |
 | TS-06 自动化测试 | 完成 | `77de5fc`、`92e0cb0`、`56fa6eb` | 单元、集成、fixture、routing oracle 与生命周期撤权矩阵 |
-| TS-07 Kimi A/B | 进行中 | `28eae39` | 精确模型、静态/渐进式对照与安全产物链 |
+| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8` | 精确模型、静态/渐进式对照、安全产物链与验收矩阵 |
 | TS-08 30 分钟回归 | 未开始 | — | 全场景长跑 |
 | TS-09 HTML 报告 | 未开始 | — | 生成并审计最终报告 |
 
@@ -237,7 +237,11 @@ Kimi 硬门槛：
 - Artifact safety：新增 exact secret/host path + 高置信 credential redaction、metadata-only findings 和 post-redaction scan；canary 测试证明扫描报告自身不回显凭证或宿主路径。
 - 测试：`python3 -m unittest discover -s agent-eval/suite -p 'test_*.py'`（20 tests）；legacy static dry-run；formal exact-Kimi paired dry-run（4 jobs）；`git diff --check`。全部通过。
 - 已完成提交：`28eae39 test(eval): secure paired ToolSearch campaigns`（TS-07.1～TS-07.5）。
-- 待完成：TS-07.6 场景矩阵、TS-07.7 真实 canary 与重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
+- TS-07.6 矩阵子阶段：新增独立 16-case/13-critical 声明式矩阵，覆盖 Direct、英/中文 no-tool、精确/英/中文语义、多目标、复杂参数、MCP 10/30/50/100+相似名干扰、deterministic Computer、Web-only loopback Browser、unknown/unrelated negative search。ACP 明确 15 cases 且不冒充 Browser，Browser 单独 1 个 Web case。
+- Matrix validator：展开完整 MCP catalog/distractors，复用既有 Computer fixture，校验唯一 ID、variant routing、参数 matcher、separate-batch、metric tags、安全字段和固定 9 项硬门槛；拒绝 credential、command/env 注入与外部 URL。
+- 测试：matrix + routing verifier 19 tests、JSON parse、py_compile、16/13/ACP15/Web1 summary 全部通过。
+- 已完成提交：`3a1ece8 test(eval): define ToolSearch acceptance matrix`（TS-07.6 matrix 子阶段）。
+- 待完成：TS-07.6 仍需把 expected-routing validator 和 Web driver 接入实际 orchestrator；TS-07.7 需真实 canary 与重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
 
 ## TS-08 至少 30 分钟全场景回归
 
@@ -290,3 +294,4 @@ Kimi 硬门槛：
 | 2026-07-18 | 完成 TS-06.8 与 TS-06：generation/resume/compaction/capability 矩阵，修复 Web MCP 后台任务残留 endpoint | 相关包、三包 race、全量 Go、lint 通过 | `56fa6eb` |
 | 2026-07-18 | TS-05.6 安全子阶段：修复 Web 保存配置把 API key 文件降为 `0644` | config normal/race、全量 Go、lint 通过 | `f905ae2` |
 | 2026-07-18 | 完成 TS-07.1～07.5：exact Kimi、无 temperature、paired variants、最小 HOME/env、安全 trajectory 与凭证扫描 | Python 20 tests、legacy/formal dry-run 通过 | `28eae39` |
+| 2026-07-18 | TS-07.6 matrix 子阶段：16 cases/13 critical、ACP15/Web1、固定九项硬门槛与安全 validator | matrix+routing 19 tests、JSON/py_compile 通过 | `3a1ece8` |
