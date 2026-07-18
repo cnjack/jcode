@@ -37,7 +37,7 @@
 | TS-03 Transport 接入 | 完成 | `0f55179` | TUI/Web/ACP 共享 policy 与重建路径 |
 | TS-04 MCP 与权限 | 完成 | `c9cb076`、`1aa128e`、`a316830`、`b1b687f`、`3b751db` | MCP、Plan、delegation 和 team mode 边界完成 |
 | TS-05 Prompt 与观测 | 进行中 | — | 使用说明、schema/轨迹指标 |
-| TS-06 自动化测试 | 进行中 | `77de5fc` | 单元、集成、fixture 和 routing oracle |
+| TS-06 自动化测试 | 进行中 | `77de5fc`、`92e0cb0` | 单元、集成、fixture 和 routing oracle |
 | TS-07 Kimi A/B | 未开始 | — | 精确模型、静态/渐进式对照 |
 | TS-08 30 分钟回归 | 未开始 | — | 全场景长跑 |
 | TS-09 HTML 报告 | 未开始 | — | 生成并审计最终报告 |
@@ -176,11 +176,11 @@ Plan 模式首轮目标：
 
 ## TS-06 自动化测试与 deterministic fixture
 
-- [ ] TS-06.1 单元测试：首轮仅 Direct + `tool_search`。
-- [ ] TS-06.2 单元测试：搜索后仅披露命中工具，多次搜索集合单调增长。
-- [ ] TS-06.3 单元测试：重名、保留名、空 ToolInfo 和错误配置启动失败。
-- [ ] TS-06.4 集成测试：真实 Deferred endpoint 的参数、结果和审批链保持不变。
-- [ ] TS-06.5 集成测试：检测未搜索直接调用、同 batch search+target、orphan tool call。
+- [x] TS-06.1 单元测试：首轮仅 Direct + `tool_search`。
+- [x] TS-06.2 单元测试：搜索后仅披露命中工具，多次搜索集合单调增长。
+- [x] TS-06.3 单元测试：重名、保留名、空 ToolInfo 和错误配置启动失败。
+- [x] TS-06.4 集成测试：真实 Deferred endpoint 的参数、结果和审批链保持不变。
+- [x] TS-06.5 集成测试：检测未搜索直接调用、同 batch search+target、orphan tool call。
 - [x] TS-06.6 增加本地 deterministic MCP fixture，覆盖 10/30/50/100 工具规模和相似名称干扰。
 - [x] TS-06.7 增加声明式 routing oracle：工具序列、搜索命中、参数/result marker、禁止冗余搜索。
 - [ ] TS-06.8 覆盖 Browser、Computer、MCP reload、mode switch、compaction/resume 和禁用后撤权。
@@ -194,7 +194,12 @@ Plan 模式首轮目标：
 - 测试：`go test ./agent-eval/fixture/mcp`；`go test -race ./agent-eval/fixture/mcp`；`python3 -m unittest agent-eval/suite/test_routing_verify.py`（9 tests）；`go test ./...`；`make lint-go`。
 - 结果：全部通过；race 无异常；lint `0 issues`。覆盖正常路由、bypass、same batch、重复 search、fixture args/marker mismatch、call/result 错名、folded failure 和安全注入。
 - 已完成提交：`77de5fc test(agent): add deterministic tool routing oracle`（TS-06.6～TS-06.7）。
-- 待完成：TS-06.1～06.5 的统一证据审计，以及 TS-06.8 的 reload/mode/compaction/resume/capability 撤权矩阵。
+- TS-06.1～06.3：`TestNewAgentWithToolPlanActivatesDeferredTool` 严格断言首轮只有 Direct + `tool_search`，搜索只披露命中项；accumulation/unknown-search 用例覆盖单调增长与未命中不披露；builder/manual-plan 用例覆盖重名、保留名/alias、nil/空/报错 ToolInfo、非法 exposure 和 partition 配置，全部 fail closed。
+- TS-06.4：真实 Deferred endpoint 明确断言原始 JSON 参数、tool call ID/name、确定性原始结果到下一轮模型均不变；approval 用例证明披露不会授权写工具，变更工具仍须审批。
+- TS-06.5：routing oracle 除 bypass 与 same-batch 外，新增“call 无 result”和“result 早于 call”两个 orphan 拒绝用例；Python suite 由 9 增至 11 个。
+- 测试：`go test ./internal/agent ./internal/runner`；`go test -race ./internal/agent ./internal/runner`；`python3 -m unittest agent-eval/suite/test_routing_verify.py`（11 tests）；全部通过。
+- 已完成提交：`92e0cb0 test(agent): harden deferred routing invariants`（TS-06.1～TS-06.5）。
+- 待完成：TS-06.8 的 Browser/Computer/MCP reload、mode switch、compaction/resume/capability 撤权矩阵。
 
 ## TS-07 Kimi A/B 评测
 
@@ -269,3 +274,4 @@ Kimi 硬门槛：
 | 2026-07-18 | 完成 TS-05.1～05.3：prompt 以请求 schemas 为真相、条件 ToolSearch 指引、skill schema 去重 | 聚焦、三包 race、全量 Go、lint 通过 | `dbe7ca4` |
 | 2026-07-18 | 完成 TS-05.4～05.5：provider-attempt schema 指标、metadata-only search/bypass、session owner-only 权限 | 聚焦、三包 race、全量 Go、lint 通过 | `69ba9ee` |
 | 2026-07-18 | 完成 TS-06.6～06.7：10/30/50/100-tool MCP fixture、session/fixture routing oracle | fixture normal/race、Python 9 tests、全量 Go、lint 通过 | `77de5fc` |
+| 2026-07-18 | 完成 TS-06.1～06.5：首轮/命中/单调增长/fail-closed/参数结果审批/orphan 路由不变量 | agent/runner normal+race、Python 11 tests 通过 | `92e0cb0` |
