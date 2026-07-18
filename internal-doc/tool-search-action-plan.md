@@ -35,7 +35,7 @@
 | TS-01 ToolPlan 核心 | 完成 | `be5e701` | 分类、校验、稳定排序与 runtime 安全边界 |
 | TS-02 Eino middleware | 完成 | `0a03ce6` | 客户端 ToolSearch、兼容开关与模型级测试 |
 | TS-03 Transport 接入 | 完成 | `0f55179` | TUI/Web/ACP 共享 policy 与重建路径 |
-| TS-04 MCP 与权限 | 进行中 | `c9cb076`（命名） | canonical name 已完成，审批和 child/plan 边界进行中 |
+| TS-04 MCP 与权限 | 进行中 | `c9cb076`（命名）、`1aa128e`（审批） | canonical name/审批已完成，child/plan 边界进行中 |
 | TS-05 Prompt 与观测 | 未开始 | — | 使用说明、schema/轨迹指标 |
 | TS-06 自动化测试 | 未开始 | — | 单元、集成、fixture 和 routing oracle |
 | TS-07 Kimi A/B | 未开始 | — | 精确模型、静态/渐进式对照 |
@@ -121,8 +121,8 @@ Plan 模式首轮目标：
 - [x] TS-04.1 MCP 模型侧名称改为 `mcp__<server>__<tool>`，保留 UI 展示名和真实 endpoint 映射。
 - [x] TS-04.2 使用 registry metadata 判断 MCP 来源，不依赖字符串前缀。
 - [x] TS-04.3 MCP 按 server/tool 稳定排序；跨 server 原名可共存，sanitize/长度冲突按 Codex 策略加稳定 hash，内建最终名冲突由 ToolPlan fail closed。
-- [ ] TS-04.4 `tool_search`、`load_skill`、`goal_get` 等只读工具免审批。
-- [ ] TS-04.5 验证 Deferred 写工具仍按原策略审批，搜索激活不等于授权。
+- [x] TS-04.4 `tool_search`、`load_skill`、`goal_get` 等只读工具免审批。
+- [x] TS-04.5 验证 Deferred 写工具仍按原策略审批，搜索激活不等于授权。
 - [ ] TS-04.6 审计并修正 subagent、workflow、team child agent 的审批和 plan 硬边界，再决定是否接入 ToolSearch。
 
 完成证据：
@@ -132,7 +132,11 @@ Plan 模式首轮目标：
 - 测试：MCP tools/command/handler 定向测试；三包定向 race；`go test ./...`；`make lint-go`。
 - 结果：全部通过；race 无异常；lint `0 issues`。覆盖同名跨 server、非法字符、sanitize collision、长名、重复 identity、稳定排序、raw endpoint 透传与 UI display。
 - 已完成提交：`c9cb076 feat(tools): canonicalize MCP tool identities`（TS-04.1～TS-04.3）。
-- 待完成：TS-04.4～TS-04.6；最终 TS-04 汇总提交待填写。
+- 审批：MCP registry provenance 在 builtin allowlist 前判定；`tool_search`、`load_skill`、`goal_get` 只读直通；`goal_set/update`、automation、memory、workflow 等仍 fail closed。
+- 授权测试：模型先 search 激活 Deferred 写工具，再由 approval 拒绝；断言真实 endpoint 调用次数为 0，证明 disclosure 不授予权限。
+- 测试：runner/agent 定向测试；两包定向 race；`go test ./...`；`make lint-go`；全部通过，lint `0 issues`。
+- 已完成提交：`1aa128e fix(runner): preserve approval across tool disclosure`（TS-04.4～TS-04.5）。
+- 待完成：TS-04.6；最终 TS-04 汇总提交待填写。
 
 ## TS-05 Prompt、schema 与观测
 
@@ -232,3 +236,4 @@ Kimi 硬门槛：
 | 2026-07-18 | 完成 TS-02：接入 Eino 客户端 ToolSearch 与 opt-in 配置 | 模型级、race、全量 Go、lint 通过 | `0a03ce6` |
 | 2026-07-18 | 完成 TS-03：TUI/Web/ACP 共享 tool policy 和重建路径 | 矩阵、race、全量 Go、lint 通过 | `0f55179` |
 | 2026-07-18 | 完成 TS-04.1～04.3：MCP canonical identity、稳定消歧、raw endpoint/展示映射 | 定向、race、全量 Go、lint 通过 | `c9cb076` |
+| 2026-07-18 | 完成 TS-04.4～04.5：只读免审、MCP provenance 优先、Deferred 激活不授权 | 定向、race、全量 Go、lint 通过 | `1aa128e` |
