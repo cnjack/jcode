@@ -36,9 +36,9 @@
 | TS-02 Eino middleware | 完成 | `0a03ce6` | 客户端 ToolSearch、兼容开关与模型级测试 |
 | TS-03 Transport 接入 | 完成 | `0f55179` | TUI/Web/ACP 共享 policy 与重建路径 |
 | TS-04 MCP 与权限 | 完成 | `c9cb076`、`1aa128e`、`a316830`、`b1b687f`、`3b751db` | MCP、Plan、delegation 和 team mode 边界完成 |
-| TS-05 Prompt 与观测 | 进行中 | `dbe7ca4`、`69ba9ee`、`f905ae2`、`8675a5b` | 使用说明、schema/轨迹指标、凭证文件权限及 Browser 子进程 token 隔离 |
+| TS-05 Prompt 与观测 | 进行中 | `dbe7ca4`、`69ba9ee`、`f905ae2`、`8675a5b`、`92c2f31` | 使用说明、成功调用去重规则、schema/轨迹指标、凭证文件权限及 Browser 子进程 token 隔离 |
 | TS-06 自动化测试 | 完成 | `77de5fc`、`92e0cb0`、`56fa6eb` | 单元、集成、fixture、routing oracle 与生命周期撤权矩阵 |
-| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e`、`8675a5b`、`d60000d`、`8c980b1`、`207b313`、`7530b38` | Browser/Computer canary 4/4；第二轮跨类小矩阵确认 Computer 修复，但暴露 MCP100 Deferred 重复调用循环，等待修复与 formal pass@10 |
+| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e`、`8675a5b`、`d60000d`、`8c980b1`、`207b313`、`7530b38`、`92c2f31` | Browser/Computer canary 4/4；MCP100 completion 歧义与成功调用重复规则已修复，等待独立 repeat canary 与 formal pass@10 |
 | TS-08 30 分钟回归 | 进行中 | `9f2889e`、`8c980b1` | formal coordinator、deterministic `jcode_eval` 构建与证据合约完成；尚未运行真实全场景长跑 |
 | TS-09 HTML 报告 | 进行中 | `ad55a3b`、`92d442e`、`9f2889e`、`8c980b1` | 安全、fail-closed 的九门槛报告器、canonical suite、build-tag 与 supplementary 合约已完成；等待真实 campaign 产物 |
 
@@ -293,7 +293,11 @@ Kimi 硬门槛：
 - 上限修复：兼容 ceiling 从 5 调整为 8，覆盖最大内建 Browser/Computer capability family，并继续拒绝 9+ catalog-wide list；新增 6-name Computer、8-name boundary 与 9-name fail-closed 测试。focused/race、全量 Go、lint `0 issues`、diff check 全部通过。
 - 已完成提交：`7530b38 fix(agent): cover full capability tool lists`（12-job canary routing 修复；TS-07.7 仍未勾选）。
 - 第二轮相同 12-job 小矩阵仍严格为 11/12：Computer Deferred 以 4 次调用、11.2s PASS，证明完整 6-tool family 的首次 query 已被兼容；no-tool 两臂继续保持 0 tool，exact、MCP10、Browser、Computer static 及 MCP100 static 均 PASS。唯一失败转为 MCP100 Deferred：一次 `select:` 正确命中唯一目标，bypass=0、same-batch=0、所有 endpoint result 均成功，但 Kimi 随后用完全相同参数连续调用目标 MCP 142 次，360.1s 超时；routing 因 required max=1、外部 fixture calls=142 和非正常终止严格 FAIL。相同提交的上一轮 MCP100 Deferred 曾以 search 1 + endpoint 1、7.942s PASS，说明披露/schema/参数路径一致，失败来自模型随机重复成功调用，而非 server 扩展或 Deferred 绕过。
-- 下一步：加入通用、低误伤的重复成功工具调用恢复机制，并用 MCP100 Deferred 重复 canary 验证；随后再重跑跨类小矩阵，没有系统性失败后才启动 formal pass@10。
+- MCP completion 修复：目标 fixture 保留原 `content[0].text == marker` 与严格 external oracle，同时新增 `structuredContent` 的 `status=found`、`complete=true`、`authoritative=true`、请求回显和 synthetic record；distractor 继续只返回原 marker。这样评测仍严格衡量唯一工具/参数/次数，但不再要求模型从 opaque hash 猜测“权威记录已取得”。System 与 Plan prompt 同时加入成功调用复用规则，只禁止相同工具+相同参数的无进展重调，并明确豁免 incomplete、poll/retry 与外部状态变化。
+- 安全/兼容：Eino MCP adapter 会把完整 `CallToolResult` 传给模型；routing verifier 继续递归匹配 marker，required max=1 未放宽。新增真实 structured wire-shape 与嵌套 secret payload 的 sanitizer 回归；trajectory 仍只保存 status/duration/output bytes，不保存 result payload。独立审查无 blocker。
+- 测试：Prompt/fixture focused 与 race、Agent Eval Python 91/91、`py_compile`、全量 `go test ./... -count=1`、`make lint-go`、`git diff --check` 全部通过，lint `0 issues`。
+- 已完成提交：`92c2f31 fix(eval): make MCP completion unambiguous`（MCP100 loop 诱因修复；TS-07.7 仍未勾选）。
+- 下一步：先对 MCP100 Deferred 独立重复运行，要求至少 9/10 严格 PASS 且每次 target call 恰好 1；若仍出现成功调用循环，再实现 turn-scoped LoopGuard。通过后重跑跨类小矩阵，再启动 formal pass@10。
 - 待完成：TS-07.7 需用 exact-Kimi canary 验证上述 Deferred 多步披露修复，并运行关键用例重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
 
 ## TS-08 至少 30 分钟全场景回归
@@ -383,3 +387,4 @@ Kimi 硬门槛：
 | 2026-07-18 | 首轮 12-job 小矩阵严格 11/12；唯一失败为 Computer Deferred 逗号列出完整 6-tool family，超过五名兼容上限后再补正 | 其余 no-tool/exact/MCP10/MCP100/Browser/Computer static 全通过；失败未被任务真值掩盖 | — |
 | 2026-07-18 | exact-list ceiling 调整到 8，覆盖最大内建 capability family，9+ 仍 fail closed | agent normal/race、全量 Go、lint `0 issues`、6/8/9-name 边界通过 | `7530b38` |
 | 2026-07-18 | 第二轮相同 12-job 小矩阵严格 11/12；Computer Deferred 修复通过，唯一失败转为 MCP100 Deferred 相同成功调用 142 次后 360.1s 超时 | search/select、披露和参数均正确，bypass/same-batch/failed result=0；routing 与外部 fixture oracle 严格拒绝重复调用 | — |
+| 2026-07-18 | MCP target 返回明确 structured completion/authoritative record 且保留 marker；System/Plan 加入成功结果去重规则 | focused/race、Python 91/91、全量 Go、lint `0 issues`、独立 review 通过 | `92c2f31` |
