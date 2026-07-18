@@ -38,9 +38,9 @@
 | TS-04 MCP 与权限 | 完成 | `c9cb076`、`1aa128e`、`a316830`、`b1b687f`、`3b751db` | MCP、Plan、delegation 和 team mode 边界完成 |
 | TS-05 Prompt 与观测 | 进行中 | `dbe7ca4`、`69ba9ee`、`f905ae2` | 使用说明、schema/轨迹指标与凭证文件权限 |
 | TS-06 自动化测试 | 完成 | `77de5fc`、`92e0cb0`、`56fa6eb` | 单元、集成、fixture、routing oracle 与生命周期撤权矩阵 |
-| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907` | 精确模型、静态/渐进式对照、安全产物链及 ACP/Web 全矩阵 dispatch 完成；等待正式 canary/A-B |
+| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e` | 精确模型、静态/渐进式对照、安全产物链及 ACP/Web 全矩阵 dispatch 完成；canary oracle 与全功能 schema scope 已校准，等待正式 canary/A-B |
 | TS-08 30 分钟回归 | 未开始 | — | 全场景长跑 |
-| TS-09 HTML 报告 | 进行中 | `ad55a3b` | 安全、fail-closed 的九门槛报告器已完成；等待真实 campaign 产物 |
+| TS-09 HTML 报告 | 进行中 | `ad55a3b`、`92d442e` | 安全、fail-closed 的九门槛报告器及全功能 schema 指标 scope 已完成；等待真实 campaign 产物 |
 
 ## TS-00 文档与基线
 
@@ -259,7 +259,10 @@ Kimi 硬门槛：
 - 安全：只复制 selected provider，最小 HOME、无 temperature、owner-only 文件；driver publication allowlist、session scope、usage、routing、artifact scan 全部在清理 HOME 前完成；异常也不保留 config/session/work。deny/disabled 使用合法 `default_mode=approval`。
 - 测试：Python suite 69 tests、report record/trajectory validators、formal Web dry-run 4 jobs、`py_compile`、diff check 全部通过。
 - 已完成提交：`fe81907 test(eval): dispatch Browser ToolSearch through Web`（TS-07.6 Web dispatch 子阶段；TS-07.6 完成）。
-- 待完成：TS-07.7 需消除 canary oracle 噪声、运行真实 Chrome canary 与关键用例重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
+- Canary 指标校准：3 个 `goal_get` case 改用稳定 `NO_GOAL_SET_OK` sentinel，仅消除最终自然语言措辞噪声；工具搜索、调用次数、空参数、call/result 和独立 batch oracle 保持严格。首轮 schema 降低门槛仍为 ≥50%，但 scope 固定为唯一的完整 100-tool catalog 配对 case；普通工具集约 18% 的实际降幅继续逐 case 展示，不能参与稀释或抬高该门槛。validator 会拒绝缺失/重复/unpaired full-schema tag 及 scope 漂移。
+- 测试：ToolSearch discovery 48 tests、`py_compile`、JSON parse、`git diff --check` 全部通过；synthetic 证明普通 case 18% 不影响 full-catalog 60% PASS，full-catalog 回退到 40% 必然 FAIL。
+- 已完成提交：`92d442e test(eval): calibrate ToolSearch acceptance scopes`（正式 canary 前校准；未勾选 TS-07.7 或 TS-09）。
+- 待完成：TS-07.7 需运行真实 Chrome canary 与关键用例重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
 
 ## TS-08 至少 30 分钟全场景回归
 
@@ -297,6 +300,7 @@ Kimi 硬门槛：
 - 指标/展示：固定九项硬门槛、逐 case/variant/transport 结果、关键场景逐项 pass@10、Direct/Deferred schema/token/时延对比、metadata-only 调用轨迹、失败分类和相对 artifact links。
 - 测试：Python suite 58 tests、`py_compile`、`git diff --check` 全部通过；synthetic 覆盖 PASS、单 gate 失败、缺失产物、时长/重叠伪造、credential/path canary、highspeed、dirty tree 和 unsafe redaction。
 - 已完成提交：`ad55a3b test(eval): add ToolSearch acceptance report`（TS-09 报告器基础设施子阶段；TS-09.1～09.5 均须等待真实 campaign 后才能勾选）。
+- 指标 scope 校准提交：`92d442e test(eval): calibrate ToolSearch acceptance scopes`；报告器从 hard-gate 声明读取唯一 `full_schema_disclosure` 代表 case，50% 阈值不变，缺失或不完整配对 fail closed。真实 campaign 前不勾选 TS-09.1～09.5。
 
 ## 更新日志
 
@@ -325,3 +329,4 @@ Kimi 硬门槛：
 | 2026-07-18 | TS-09 报告器基础设施：固定九门槛、pass@10、三重 1800 秒证明、安全 HTML 与凭证扫描 | Python 58 tests、py_compile、diff check 通过 | `ad55a3b` |
 | 2026-07-18 | TS-07 canary 修复：ACP `sess_<uuid>` 正确映射 recorder `<uuid>.json`，拒绝非法/穿越 ID | Python 67 tests；exact-Kimi 6/6 routing、2/2 MCP、5/6 task | `91bbc8b` |
 | 2026-07-18 | 完成 TS-07.6：Web Browser authenticated dispatch、完整 proof-form 激活边界、supplementary deny/disabled | Python 69 tests、report validators、formal Web dry-run 通过 | `fe81907` |
+| 2026-07-18 | TS-07/09 canary 指标校准：稳定 goal sentinel；50% schema 门槛固定到完整 100-tool catalog，拒绝 scope 漂移 | ToolSearch discovery 48 tests、py_compile、JSON、diff check 通过 | `92d442e` |
