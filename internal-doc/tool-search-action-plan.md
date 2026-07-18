@@ -38,7 +38,7 @@
 | TS-04 MCP 与权限 | 完成 | `c9cb076`、`1aa128e`、`a316830`、`b1b687f`、`3b751db` | MCP、Plan、delegation 和 team mode 边界完成 |
 | TS-05 Prompt 与观测 | 进行中 | `dbe7ca4`、`69ba9ee`、`f905ae2` | 使用说明、schema/轨迹指标与凭证文件权限 |
 | TS-06 自动化测试 | 完成 | `77de5fc`、`92e0cb0`、`56fa6eb` | 单元、集成、fixture、routing oracle 与生命周期撤权矩阵 |
-| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8` | 精确模型、静态/渐进式对照、安全产物链与验收矩阵 |
+| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef` | 精确模型、静态/渐进式对照、安全产物链、验收矩阵与 Web Browser driver |
 | TS-08 30 分钟回归 | 未开始 | — | 全场景长跑 |
 | TS-09 HTML 报告 | 未开始 | — | 生成并审计最终报告 |
 
@@ -242,7 +242,11 @@ Kimi 硬门槛：
 - Matrix validator：展开完整 MCP catalog/distractors，复用既有 Computer fixture，校验唯一 ID、variant routing、参数 matcher、separate-batch、metric tags、安全字段和固定 9 项硬门槛；拒绝 credential、command/env 注入与外部 URL。
 - 测试：matrix + routing verifier 19 tests、JSON parse、py_compile、16/13/ACP15/Web1 summary 全部通过。
 - 已完成提交：`3a1ece8 test(eval): define ToolSearch acceptance matrix`（TS-07.6 matrix 子阶段）。
-- 待完成：TS-07.6 仍需把 expected-routing validator 和 Web driver 接入实际 orchestrator；TS-07.7 需真实 canary 与重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
+- Web Browser driver 子阶段：新增独立 authenticated Web driver，固定 exact Kimi，支持 static/deferred、英/中文、success/approval-deny/browser-disabled。真实 loopback HTML form 用 open/fill/click callback 与 session `browser_read` 双证据，且正确提交必须恰好一次。
+- Web 安全/生命周期：Bearer token 只进最小 child env，stdout 丢弃、stderr 私有后删除；验证 health/model/auth 401+200/Browser status，轮询 running→两次 idle 与 pending approval/ask；超时 stop，最终 SIGTERM/SIGKILL 整个进程组。发布 record 为 allowlist metadata，raw session path 只作进程内 handoff。
+- 测试：Web driver 12 tests + py_compile + diff check 全部通过；覆盖 success、中文 Deferred、static 错搜、缺 search、审批拒绝、Browser disabled、超时、highspeed 拒绝、session canary 与凭证/路径不回显。
+- 已完成提交：`7d713ef test(eval): add authenticated Web Browser driver`（TS-07.6 Web driver 子阶段）。
+- 待完成：TS-07.6 仍需把 expected-routing validator 与 Web driver dispatch 接入实际 orchestrator；TS-07.7 需真实 canary 与重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
 
 ## TS-08 至少 30 分钟全场景回归
 
@@ -297,3 +301,4 @@ Kimi 硬门槛：
 | 2026-07-18 | TS-05.6 运行前安全：将现有 `~/.jcode` / `config.json` 从历史 `0755/0644` 收紧为 `0700/0600` | `stat` 复核通过，配置内容未改 | — |
 | 2026-07-18 | 完成 TS-07.1～07.5：exact Kimi、无 temperature、paired variants、最小 HOME/env、安全 trajectory 与凭证扫描 | Python 20 tests、legacy/formal dry-run 通过 | `28eae39` |
 | 2026-07-18 | TS-07.6 matrix 子阶段：16 cases/13 critical、ACP15/Web1、固定九项硬门槛与安全 validator | matrix+routing 19 tests、JSON/py_compile 通过 | `3a1ece8` |
+| 2026-07-18 | TS-07.6 Web 子阶段：authenticated Web driver + loopback open/fill/click/read 真值 + approval/disabled/cleanup | Web driver 12 tests、py_compile 通过 | `7d713ef` |
