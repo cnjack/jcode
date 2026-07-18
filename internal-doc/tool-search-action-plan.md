@@ -40,7 +40,7 @@
 | TS-06 自动化测试 | 完成 | `77de5fc`、`92e0cb0`、`56fa6eb` | 单元、集成、fixture、routing oracle 与生命周期撤权矩阵 |
 | TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d` | 精确模型、静态/渐进式对照、安全产物链、验收矩阵、Web Browser driver 与 ACP routing dispatch |
 | TS-08 30 分钟回归 | 未开始 | — | 全场景长跑 |
-| TS-09 HTML 报告 | 未开始 | — | 生成并审计最终报告 |
+| TS-09 HTML 报告 | 进行中 | `ad55a3b` | 安全、fail-closed 的九门槛报告器已完成；等待真实 campaign 产物 |
 
 ## TS-00 文档与基线
 
@@ -282,6 +282,12 @@ Kimi 硬门槛：
 - HTML：待填写
 - 校验：待填写
 - 提交：待填写
+- 报告器基础设施子阶段：新增独立、无外部 CSS/JS 的 HTML generator；只读取 allowlisted `record.json`、metadata-only `trajectory.json`、`redaction_report.json`、统一 plan/campaign manifest，不读取 raw session、prompt、config、debug log、完整参数或输出。
+- 完整性门槛：精确校验 `kimi-for-coding/kimi-for-coding`、`temperature=omitted`、一致的实际 effort、clean Git、固定二进制 SHA-256、每个 plan job 的三件套及 `all_records` 一致性；任何缺失、highspeed 漂移、脏树、raw payload、凭证/宿主路径或 redaction finding 均 fail closed。
+- 时长证明：同时要求 wall clock、monotonic 和成功 real-run interval 有效并集均 ≥1800 秒，`workers=1` 且区间不重叠；每段可计时长再由对应 `record.wall_s` 封顶，因此 sleep、setup 或 filler 不能凑满 30 分钟。
+- 指标/展示：固定九项硬门槛、逐 case/variant/transport 结果、关键场景逐项 pass@10、Direct/Deferred schema/token/时延对比、metadata-only 调用轨迹、失败分类和相对 artifact links。
+- 测试：Python suite 58 tests、`py_compile`、`git diff --check` 全部通过；synthetic 覆盖 PASS、单 gate 失败、缺失产物、时长/重叠伪造、credential/path canary、highspeed、dirty tree 和 unsafe redaction。
+- 已完成提交：`ad55a3b test(eval): add ToolSearch acceptance report`（TS-09 报告器基础设施子阶段；TS-09.1～09.5 均须等待真实 campaign 后才能勾选）。
 
 ## 更新日志
 
@@ -307,3 +313,4 @@ Kimi 硬门槛：
 | 2026-07-18 | TS-07.6 matrix 子阶段：16 cases/13 critical、ACP15/Web1、固定九项硬门槛与安全 validator | matrix+routing 19 tests、JSON/py_compile 通过 | `3a1ece8` |
 | 2026-07-18 | TS-07.6 Web 子阶段：authenticated Web driver + loopback open/fill/click/read 真值 + approval/disabled/cleanup | Web driver 12 tests、py_compile 通过 | `7d713ef` |
 | 2026-07-18 | TS-07.6 ACP dispatch 子阶段：matrix 实际调度、metadata-only expected-routing、MCP static/deferred fixture 交叉验证 | Python 51 tests、legacy 39/formal 28 dry-run、diff check 通过 | `f75041d` |
+| 2026-07-18 | TS-09 报告器基础设施：固定九门槛、pass@10、三重 1800 秒证明、安全 HTML 与凭证扫描 | Python 58 tests、py_compile、diff check 通过 | `ad55a3b` |
