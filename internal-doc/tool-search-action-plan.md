@@ -35,7 +35,7 @@
 | TS-01 ToolPlan 核心 | 完成 | `be5e701` | 分类、校验、稳定排序与 runtime 安全边界 |
 | TS-02 Eino middleware | 完成 | `0a03ce6` | 客户端 ToolSearch、兼容开关与模型级测试 |
 | TS-03 Transport 接入 | 完成 | `0f55179` | TUI/Web/ACP 共享 policy 与重建路径 |
-| TS-04 MCP 与权限 | 进行中 | `c9cb076`（命名）、`1aa128e`（审批）、`a316830`（Plan） | canonical/审批/Plan endpoint 已完成，child 边界进行中 |
+| TS-04 MCP 与权限 | 进行中 | `c9cb076`、`1aa128e`、`a316830`、`b1b687f` | team mode 边界待完成 |
 | TS-05 Prompt 与观测 | 未开始 | — | 使用说明、schema/轨迹指标 |
 | TS-06 自动化测试 | 未开始 | — | 单元、集成、fixture 和 routing oracle |
 | TS-07 Kimi A/B | 未开始 | — | 精确模型、静态/渐进式对照 |
@@ -140,6 +140,10 @@ Plan 模式首轮目标：
 - Browser Plan：schema 仅广告既有 tab 的 list/select，endpoint 在打开 session 前拒绝 `new_tab=true` 及 new/claim/close；Normal schema/endpoint 不变。
 - 测试：tools/runner/command 定向测试；三包定向 race；`go test ./...`；`make lint-go`；全部通过，lint `0 issues`。拒绝用例断言 executor 调用数不增加。
 - 已完成提交：`a316830 fix(tools): enforce Plan mode at execution boundary`（TS-04.6 / Plan 子阶段）。
+- Subagent：explore 仅注册 read/grep/Plan execute；general/coordinator 的写/任意 execute 由父 `subagent` 调用一次性授权，background 不改变授权位置。
+- Workflow：explore 使用 Plan execute；general/coordinator 继承 `workflow_run` 的一次性授权；所有 flow child 都挂 safe-error middleware，不在后台等待交互审批。
+- 测试：subagent/flow tool matrix、schema grant 文案、runner grant/background/malformed matrix、flow error folding；定向、两包 race、`go test ./...`、`make lint-go` 全部通过。
+- 已完成提交：`b1b687f fix(tools): bound delegated child permissions`（TS-04.6 / subagent+workflow 子阶段）。
 - 待完成：TS-04.6；最终 TS-04 汇总提交待填写。
 
 ## TS-05 Prompt、schema 与观测
@@ -242,3 +246,4 @@ Kimi 硬门槛：
 | 2026-07-18 | 完成 TS-04.1～04.3：MCP canonical identity、稳定消歧、raw endpoint/展示映射 | 定向、race、全量 Go、lint 通过 | `c9cb076` |
 | 2026-07-18 | 完成 TS-04.4～04.5：只读免审、MCP provenance 优先、Deferred 激活不授权 | 定向、race、全量 Go、lint 通过 | `1aa128e` |
 | 2026-07-18 | 完成 TS-04.6 子阶段：Plan execute/Browser 在 endpoint 层硬拒绝越权 | 定向、race、全量 Go、lint 通过 | `a316830` |
+| 2026-07-18 | 完成 TS-04.6 子阶段：subagent/workflow 一次性授权与 observe profile | 定向、race、全量 Go、lint 通过 | `b1b687f` |
