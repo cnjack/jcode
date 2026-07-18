@@ -231,7 +231,7 @@ const chatSlice = createSlice({
       // Session was deleted — its stash can never drain again.
       delete s.queuedBySession[a.payload]
     },
-    agentDone(s, a: { payload: { error?: string; detail?: string } | undefined }) {
+    agentDone(s, a: { payload: { error?: string; detail?: string; stopped?: boolean } | undefined }) {
       // Stamp duration on the last assistant message.
       for (let i = s.timeline.length - 1; i >= 0; i--) {
         const item = s.timeline[i]
@@ -250,7 +250,20 @@ const chatSlice = createSlice({
           item.data.awaitingApproval = undefined
         }
       }
-      if (a.payload?.error) {
+      if (a.payload?.stopped) {
+        // Manual stop — a calm muted notice, not an error card.
+        s.timeline.push({
+          kind: 'message',
+          data: {
+            id: genId('sys'),
+            role: 'system',
+            content: 'Stopped by user',
+            timestamp: Date.now(),
+            level: 'notice',
+          },
+          seq: nextSeq(),
+        })
+      } else if (a.payload?.error) {
         s.timeline.push({
           kind: 'message',
           data: {

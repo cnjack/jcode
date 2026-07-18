@@ -70,7 +70,7 @@ export function createWSHandlers(
       const activeId = getState().session.currentSessionId
       const isForeground = !taskId || taskId === activeId
       if (isForeground) {
-        dispatch(chatActions.agentDone(d ? { error: d.error, detail: d.detail } : undefined))
+        dispatch(chatActions.agentDone(d ? { error: d.error, detail: d.detail, stopped: d.stopped } : undefined))
       }
       // Refresh sidebar metadata (title / updated_at / running) after a turn.
       void dispatch(loadTasks() as never)

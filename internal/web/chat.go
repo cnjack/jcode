@@ -314,8 +314,9 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 		cancel()
 	}
 
-	// Notify clients on that task's channel.
-	eng.handler.OnAgentDone(fmt.Errorf("stopped by user"))
+	// The runner owns the run lifecycle: it observes the cancellation and emits
+	// the single OnAgentDone(context.Canceled), which the web handler surfaces
+	// as a calm "stopped" notice. Emitting one here too would double-report.
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
 }

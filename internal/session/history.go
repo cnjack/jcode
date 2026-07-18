@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"slices"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
@@ -138,7 +139,11 @@ type SessionState struct {
 // It is compact-aware: if a compact entry is found, messages before it are
 // replaced with the compact summary.
 //
-// Subagent-internal entries are skipped.
+// Subagent marker entries (subagent_start/result/async) carry no conversation
+// content and are skipped — but entries BETWEEN them are NOT skipped: subagent
+// internal tool calls are never persisted (only the main runner records
+// tool_call/tool_result), so entries in that window are the main agent's own
+// parallel tool calls and must be kept.
 func ReconstructState(entries []Entry) *SessionState {
 	state := &SessionState{
 		EnvTarget: "local",
@@ -146,25 +151,11 @@ func ReconstructState(entries []Entry) *SessionState {
 
 	var msgs []adk.Message
 	var lastTarget string
-	var subagentDepth int
 
 	for _, e := range entries {
-		// Track subagent boundaries first.
+		// Subagent boundary markers are informational (TUI replay) only.
 		switch e.Type {
-		case EntrySubagentStart:
-			subagentDepth++
-			continue
-		case EntrySubagentResult:
-			if subagentDepth > 0 {
-				subagentDepth--
-			}
-			continue
-		case EntrySubagentAsync:
-			continue
-		}
-
-		// Skip entries that belong to a running subagent.
-		if subagentDepth > 0 {
+		case EntrySubagentStart, EntrySubagentResult, EntrySubagentAsync:
 			continue
 		}
 
@@ -279,6 +270,49 @@ func ReconstructState(entries []Entry) *SessionState {
 		}
 	}
 
-	state.History = msgs
+	state.History = repairDanglingToolCalls(msgs)
 	return state
+}
+
+// InterruptedToolOutput is the placeholder content backfilled for tool calls
+// whose result never made it to disk (user stop, process kill, or a recording
+// gap). It tells the model what happened instead of fabricating an output.
+// The runner records the same marker for interrupted calls so live sessions
+// and reconstructed history stay identical.
+const InterruptedToolOutput = "[Interrupted before result was recorded]"
+
+// repairDanglingToolCalls returns msgs with placeholder tool messages inserted
+// so every assistant tool_call is answered by a matching tool message. A
+// session recorded mid-run (user stop, process kill) otherwise reconstructs
+// into a history the model API rejects: "an assistant message with
+// 'tool_calls' must be followed by tool messages responding to each
+// 'tool_call_id'".
+func repairDanglingToolCalls(msgs []adk.Message) []adk.Message {
+	for i := 0; i < len(msgs); i++ {
+		m := msgs[i]
+		if m.Role != schema.Assistant || len(m.ToolCalls) == 0 {
+			continue
+		}
+		// Collect the call IDs answered by the tool messages of this group.
+		answered := make(map[string]bool, len(m.ToolCalls))
+		j := i + 1
+		for j < len(msgs) && msgs[j].Role == schema.Tool {
+			answered[msgs[j].ToolCallID] = true
+			j++
+		}
+		var fill []adk.Message
+		for _, tc := range m.ToolCalls {
+			if !answered[tc.ID] {
+				fill = append(fill, schema.ToolMessage(
+					InterruptedToolOutput, tc.ID, schema.WithToolName(tc.Function.Name)))
+			}
+		}
+		if len(fill) == 0 {
+			continue
+		}
+		// Insert right after the group's last tool message (or directly after
+		// the assistant message when no result was recorded at all).
+		msgs = slices.Insert(msgs, j, fill...)
+	}
+	return msgs
 }
