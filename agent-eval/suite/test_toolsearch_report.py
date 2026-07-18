@@ -131,6 +131,7 @@ class SyntheticCampaign:
                         "error_present": False,
                         "wall_s": 6.0,
                         "tool_counts": record_counts,
+                        "tool_names": dict(tool_counts["calls_by_name"]),
                         "routing": routing,
                         "routing_passed": routing["passed"],
                         "artifact_safe": True,
@@ -452,6 +453,29 @@ class ToolSearchReportTest(unittest.TestCase):
         first = self.synthetic.jobs[0]["run_id"]
         (self.synthetic.runs / first / "trajectory.json").unlink()
         with self.assertRaisesRegex(toolsearch_report.ReportError, "trajectory"):
+            self.generate()
+
+    def test_display_or_drifted_tool_names_fail_closed(self):
+        run_id = "ts_exact_select_goal_get__kimi-for-coding__deferred__r1"
+
+        def replace_with_display_title(record):
+            record["tool_names"] = {"Search TODO": 1}
+
+        self.synthetic.update_record(run_id, replace_with_display_title)
+        with self.assertRaisesRegex(
+            toolsearch_report.ReportError, "record tool_names",
+        ):
+            self.generate()
+
+        # A syntactically valid tool name is still invalid when it is not the
+        # canonical count map extracted from the private session.
+        def replace_with_other_canonical_name(record):
+            record["tool_names"] = {"read_other": 1}
+
+        self.synthetic.update_record(run_id, replace_with_other_canonical_name)
+        with self.assertRaisesRegex(
+            toolsearch_report.ReportError, "canonical tool counts",
+        ):
             self.generate()
 
     def test_missing_or_wrong_jcode_eval_build_tag_fails_closed(self):

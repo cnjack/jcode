@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 HERE = Path(__file__).resolve().parent
@@ -343,6 +344,9 @@ class WebToolSearchOrchestrateTest(unittest.TestCase):
             self.assertIn("parse_error_lines", trajectory["sessions"][0])
             self.assertIn("entries", trajectory["sessions"][0])
             self.assertEqual(record["tool_counts"], trajectory["tool_counts"])
+            self.assertEqual(
+                record["tool_counts"]["calls_by_name"], record["tool_names"],
+            )
             _trajectory, counts = toolsearch_report._validate_trajectory(
                 trajectory, jobs[record["run_id"]],
             )
@@ -363,6 +367,47 @@ class WebToolSearchOrchestrateTest(unittest.TestCase):
             forbidden_paths=(str(self.provider_config), HOST_PRIVATE_PATH),
         ))
         self.assertEqual(2, len((options.runs_dir / "index.jsonl").read_text().splitlines()))
+
+    def test_publication_path_scope_includes_repo_run_and_build_roots(self):
+        runs = self.root / "scope-runs"
+        rundir = runs / "one-run"
+        build = self.root / "scope-build"
+        binary = build / "bin" / "jcode"
+        extra = self.root / "coordinator-extra"
+        paths = runner._artifact_paths(
+            self.provider_config,
+            runs,
+            rundir,
+            binary,
+            build,
+            extra_paths=(extra,),
+        )
+        for expected in (
+            runner.REPO_ROOT.resolve(),
+            runs.resolve(),
+            rundir.resolve(),
+            build.resolve(),
+            extra.resolve(),
+        ):
+            self.assertIn(str(expected), paths)
+
+    def test_post_scan_failure_revokes_artifact_safe_marker(self):
+        options = self.options("post-scan", variants=("static",))
+        finding = {"file_name": "record.json", "category": "host_path"}
+        with mock.patch.object(
+            runner.artifact_safety,
+            "scan_artifacts",
+            side_effect=[[], [finding]],
+        ):
+            with self.assertRaisesRegex(runner.RunnerError, "artifact_post_scan_failed"):
+                runner.run_campaign(options, driver_fn=FakeDriver())
+
+        plan = json.loads((options.runs_dir / "plan.json").read_text())
+        run_id = plan["jobs"][0]["run_id"]
+        record = json.loads(
+            (options.runs_dir / run_id / "record.json").read_text()
+        )
+        self.assertFalse(record["artifact_safe"])
 
     def test_deferred_routing_fails_when_act_and_snapshot_were_not_disclosed(self):
         fake = FakeDriver(omit_act_disclosure=True)

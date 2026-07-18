@@ -46,6 +46,7 @@ LANGUAGES = ("en", "zh")
 SCENARIOS = ("success", "approval_deny", "browser_disabled")
 DEFAULT_SEED = 20260718
 DEFAULT_REAL_HOME = Path(os.path.expanduser("~"))
+REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PROVIDER_CONFIG = DEFAULT_REAL_HOME / ".jcode" / "config.json"
 DEFAULT_MODEL_CACHE = DEFAULT_REAL_HOME / ".jcode" / "cache" / "models_dev.json"
 MAX_CONFIG_BYTES = 4 << 20
@@ -637,13 +638,24 @@ def _routing_verdict(session_path: Path | None, job: Job) -> dict[str, Any]:
     return toolsearch_expect.sanitize_external_verdict(private)
 
 
-def _artifact_paths(provider_config: Path) -> list[str]:
-    values = [str(DEFAULT_REAL_HOME.resolve())]
-    try:
-        values.append(str(provider_config.resolve()))
-    except OSError:
-        pass
-    return values
+def _artifact_paths(
+    provider_config: Path,
+    *runtime_paths: Path | str,
+    extra_paths=(),
+) -> list[str]:
+    values = {DEFAULT_REAL_HOME.resolve(), REPO_ROOT.resolve()}
+    for raw in (provider_config, *runtime_paths):
+        try:
+            values.add(Path(raw).resolve())
+        except (OSError, TypeError, ValueError):
+            continue
+    for raw in extra_paths or ():
+        try:
+            if str(raw):
+                values.add(Path(raw).resolve())
+        except (OSError, TypeError, ValueError):
+            continue
+    return sorted({str(path) for path in values}, key=len, reverse=True)
 
 
 def run_job(
@@ -652,6 +664,7 @@ def run_job(
     binary: Path,
     *,
     driver_fn: Callable[[web_browser_driver.WebBrowserCase], Any],
+    publication_forbidden_paths=(),
 ) -> dict[str, Any]:
     runs_root = options.runs_dir.resolve()
     rundir = (runs_root / job.run_id).resolve()
@@ -795,6 +808,7 @@ def run_job(
         "usage_reported": usage_reported,
         "session_valid": session_valid,
         "tool_counts": trajectory["tool_counts"],
+        "tool_names": dict(trajectory["tool_counts"]["calls_by_name"]),
         "contracts_passed": contracts_passed,
         "error_present": bool(driver["errors"]),
         "stop_reason": stop_reason,
@@ -805,7 +819,20 @@ def run_job(
     _write_private_json(rundir / "record.json", record)
 
     secrets = home_metadata["secret_values"] if home_metadata else []
-    forbidden_paths = _artifact_paths(options.provider_config)
+    binary_path = Path(binary).resolve()
+    binary_scope = (
+        binary_path.parent.parent
+        if binary_path.parent.name == "bin"
+        else binary_path.parent
+    )
+    forbidden_paths = _artifact_paths(
+        options.provider_config,
+        runs_root,
+        rundir,
+        binary_path,
+        binary_scope,
+        extra_paths=publication_forbidden_paths,
+    )
     redaction = artifact_safety.sanitize_artifacts(
         [rundir], secret_values=secrets, forbidden_paths=forbidden_paths,
     )
@@ -824,6 +851,8 @@ def run_job(
         [rundir], secret_values=secrets, forbidden_paths=forbidden_paths,
     )
     if final_findings:
+        record["artifact_safe"] = False
+        _write_private_json(rundir / "record.json", record)
         raise RunnerError("artifact_post_scan_failed")
     return record
 
@@ -905,7 +934,11 @@ def run_campaign(
     final_findings = artifact_safety.scan_artifacts(
         [runs_dir / "plan.json", index, runs_dir / "all_records.json"],
         secret_values=secret_values,
-        forbidden_paths=_artifact_paths(options.provider_config),
+        forbidden_paths=_artifact_paths(
+            options.provider_config,
+            runs_dir,
+            binary,
+        ),
     )
     if final_findings:
         raise RunnerError("campaign_index_scan_failed")

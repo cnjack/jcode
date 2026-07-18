@@ -348,22 +348,44 @@ def _validate_redaction(value, run_id):
     if findings:
         raise ReportError("redaction report contains post-redaction findings")
     _require_int(report.get("files_scanned"), "redaction files_scanned", 1)
-    _require_int(report.get("files_redacted"), "redaction files_redacted", 0)
-    _require_list(report.get("redacted_file_names"), "redacted file names")
-    _require_dict(report.get("replacement_counts"), "redaction replacement counts")
+    if _require_int(report.get("files_redacted"), "redaction files_redacted", 0) != 0:
+        raise ReportError("successful run redacted publication artifacts")
+    if _require_list(report.get("redacted_file_names"), "redacted file names"):
+        raise ReportError("successful run lists redacted publication artifacts")
+    replacements = _require_dict(
+        report.get("replacement_counts"), "redaction replacement counts",
+    )
+    for count in replacements.values():
+        if _require_int(count, "redaction replacement count", 0) != 0:
+            raise ReportError("successful run contains redaction replacements")
     return report
+
+
+def _validate_named_counts(value, label):
+    counts = _require_dict(value, label)
+    for name, count in counts.items():
+        _require_string(name, f"{label} name", NAME_RE)
+        _require_int(count, f"{label} count", 1)
+    return counts
 
 
 def _validate_tool_counts(value, run_id):
     counts = _require_dict(value, f"tool_counts for {run_id}")
-    for name in ("calls_total", "results_total", "model_requests"):
+    for name in (
+        "calls_total", "results_total", "model_requests", "first_visible",
+        "max_visible", "first_schema_tokens_estimate", "max_schema_tokens_estimate",
+    ):
         _require_int(counts.get(name), f"tool_counts.{name}", 0)
-    calls = _require_dict(counts.get("calls_by_name"), "tool calls_by_name")
-    for name, count in calls.items():
-        _require_string(name, "tool name", NAME_RE)
-        _require_int(count, "tool call count", 0)
-    for name in ("first_visible", "first_schema_tokens_estimate"):
-        _require_int(counts.get(name), f"tool_counts.{name}", 0)
+    calls = _validate_named_counts(
+        counts.get("calls_by_name"), "tool calls_by_name",
+    )
+    statuses = _validate_named_counts(
+        counts.get("results_by_status"), "tool results_by_status",
+    )
+    if sum(calls.values()) != counts["calls_total"]:
+        raise ReportError("tool call totals do not match calls_by_name")
+    if sum(statuses.values()) != counts["results_total"]:
+        raise ReportError("tool result totals do not match results_by_status")
     return counts
 
 
@@ -468,6 +490,11 @@ def _validate_record(value, job, case, seed, trajectory_counts):
     _require_string(record.get("stop_reason"), "record stop_reason", RUN_ID_RE)
     _require_number(record.get("wall_s"), "record wall_s", 0.001)
     record_counts = _validate_tool_counts(record.get("tool_counts"), job["run_id"])
+    tool_names = _validate_named_counts(
+        record.get("tool_names"), "record tool_names",
+    )
+    if tool_names != record_counts["calls_by_name"]:
+        raise ReportError("record tool_names differ from canonical tool counts")
     if _core_tool_counts(record_counts) != _core_tool_counts(trajectory_counts):
         raise ReportError("record and trajectory tool counts differ")
     routing, routing_counts = _validate_routing(record, job["variant"], job["run_id"])

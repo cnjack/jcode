@@ -47,6 +47,7 @@ MODES = ("formal", "canary", "dry-run")
 DEFAULT_SEED = 20260718
 MIN_FORMAL_REPEATS = 10
 SAFE_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,220}$")
+SAFE_TOOL_NAME_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,180}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.+/_-]{0,119}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -166,13 +167,19 @@ class Clock:
 
 
 class JobDispatcher(Protocol):
-    def run_matrix_job(self, job: CampaignJob, runs_dir: Path) -> dict[str, Any]: ...
+    def run_matrix_job(
+        self,
+        job: CampaignJob,
+        runs_dir: Path,
+        forbidden_paths: tuple[str, ...],
+    ) -> dict[str, Any]: ...
 
     def run_supplementary_web(
         self,
         spec: SupplementaryWebSpec,
         case: dict[str, Any],
         runs_dir: Path,
+        forbidden_paths: tuple[str, ...],
     ) -> dict[str, Any]: ...
 
 
@@ -572,19 +579,45 @@ def _load_json(path: Path, code: str) -> dict[str, Any]:
     return value
 
 
-def _validate_tool_counts(counts: Any) -> None:
+def _validate_named_counts(value: Any, code: str) -> dict[str, int]:
+    if not isinstance(value, dict):
+        raise CampaignError(code)
+    for name, count in value.items():
+        if (
+            not isinstance(name, str)
+            or SAFE_TOOL_NAME_RE.fullmatch(name) is None
+            or not isinstance(count, int)
+            or isinstance(count, bool)
+            or count <= 0
+        ):
+            raise CampaignError(code)
+    return value
+
+
+def _validate_tool_counts(counts: Any) -> dict[str, Any]:
     if not isinstance(counts, dict):
         raise CampaignError("tool_counts_invalid")
     for name in (
         "calls_total", "results_total", "model_requests", "first_visible",
         "max_visible", "first_schema_tokens_estimate", "max_schema_tokens_estimate",
     ):
-        if not isinstance(counts.get(name), int) or isinstance(counts.get(name), bool):
+        if (
+            not isinstance(counts.get(name), int)
+            or isinstance(counts.get(name), bool)
+            or counts[name] < 0
+        ):
             raise CampaignError("tool_counts_invalid")
-    if not isinstance(counts.get("calls_by_name"), dict):
+    calls = _validate_named_counts(
+        counts.get("calls_by_name"), "tool_counts_invalid",
+    )
+    statuses = _validate_named_counts(
+        counts.get("results_by_status"), "tool_counts_invalid",
+    )
+    if sum(calls.values()) != counts["calls_total"]:
         raise CampaignError("tool_counts_invalid")
-    if not isinstance(counts.get("results_by_status"), dict):
+    if sum(statuses.values()) != counts["results_total"]:
         raise CampaignError("tool_counts_invalid")
+    return counts
 
 
 def _sanitize_then_scan(
@@ -619,6 +652,11 @@ def validate_run_artifacts(
             raise CampaignError("publication_artifact_missing")
         path.chmod(0o600)
 
+    # Scan before interpreting any untrusted dispatcher output.  A malformed
+    # record must not strand a credential or host path merely because schema
+    # validation failed first.
+    _sanitize_then_scan([rundir], secret_values, forbidden_paths)
+
     stored = _load_json(rundir / "record.json", "record_invalid")
     trajectory = _load_json(rundir / "trajectory.json", "trajectory_invalid")
     redaction = _load_json(rundir / "redaction_report.json", "redaction_invalid")
@@ -644,7 +682,12 @@ def validate_run_artifacts(
     wall = stored.get("wall_s")
     if (not isinstance(wall, (int, float)) or isinstance(wall, bool) or wall <= 0):
         raise CampaignError("record_contract_invalid")
-    _validate_tool_counts(stored.get("tool_counts"))
+    stored_counts = _validate_tool_counts(stored.get("tool_counts"))
+    tool_names = _validate_named_counts(
+        stored.get("tool_names"), "record_tool_names_invalid",
+    )
+    if tool_names != stored_counts["calls_by_name"]:
+        raise CampaignError("record_tool_names_invalid")
 
     if (
         trajectory.get("schema_version") != 1
@@ -657,7 +700,16 @@ def validate_run_artifacts(
         or not trajectory["sessions"]
     ):
         raise CampaignError("trajectory_contract_invalid")
-    _validate_tool_counts(trajectory.get("tool_counts"))
+    trajectory_counts = _validate_tool_counts(trajectory.get("tool_counts"))
+    if stored_counts != {
+        **trajectory_counts,
+        **{
+            key: stored_counts[key]
+            for key in ("declared_deferred", "mcp_fixture_catalog")
+            if key in stored_counts
+        },
+    }:
+        raise CampaignError("record_trajectory_tool_counts_invalid")
     for session in trajectory["sessions"]:
         if (
             not isinstance(session, dict)
@@ -666,11 +718,23 @@ def validate_run_artifacts(
             or not isinstance(session.get("entries"), list)
         ):
             raise CampaignError("trajectory_contract_invalid")
-    if redaction.get("schema_version") != 1 or redaction.get("safe") is not True:
+    replacements = redaction.get("replacement_counts")
+    if (
+        redaction.get("schema_version") != 1
+        or redaction.get("safe") is not True
+        or redaction.get("files_redacted") != 0
+        or redaction.get("redacted_file_names") != []
+        or not isinstance(replacements, dict)
+        or any(
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or value != 0
+            for value in replacements.values()
+        )
+    ):
         raise CampaignError("redaction_contract_invalid")
     if redaction.get("post_redaction_findings") != []:
         raise CampaignError("redaction_contract_invalid")
-    _sanitize_then_scan([rundir], secret_values, forbidden_paths)
 
 
 def _index_record(record: dict[str, Any]) -> dict[str, Any]:
@@ -704,7 +768,12 @@ class DefaultDispatcher:
         self.options = options
         self.binaries = binaries
 
-    def run_matrix_job(self, job: CampaignJob, runs_dir: Path) -> dict[str, Any]:
+    def run_matrix_job(
+        self,
+        job: CampaignJob,
+        runs_dir: Path,
+        forbidden_paths: tuple[str, ...],
+    ) -> dict[str, Any]:
         if job.surface == "acp":
             return orchestrate.run_one(
                 job.case,
@@ -718,6 +787,7 @@ class DefaultDispatcher:
                 self.options.max_iterations,
                 self.options.timeout_scale,
                 self.options.seed,
+                forbidden_paths,
             )
         if job.surface != "web":
             raise CampaignError("surface_not_supported")
@@ -754,6 +824,7 @@ class DefaultDispatcher:
             web_options,
             self.binaries.jcode,
             driver_fn=web_browser_driver.run_web_browser_case,
+            publication_forbidden_paths=forbidden_paths,
         )
 
     def run_supplementary_web(
@@ -761,6 +832,7 @@ class DefaultDispatcher:
         spec: SupplementaryWebSpec,
         case: dict[str, Any],
         runs_dir: Path,
+        forbidden_paths: tuple[str, ...],
     ) -> dict[str, Any]:
         import web_browser_driver
         import web_toolsearch_orchestrate as web_runner
@@ -796,6 +868,7 @@ class DefaultDispatcher:
             web_options,
             self.binaries.jcode,
             driver_fn=web_browser_driver.run_web_browser_case,
+            publication_forbidden_paths=forbidden_paths,
         )
 
 
@@ -859,7 +932,9 @@ def run_supplementary_coverage(
         run_id = f"supp__{spec.record_id}"
         run_dir = web_root / run_id
         try:
-            record = dispatcher.run_supplementary_web(spec, web_case, web_root)
+            record = dispatcher.run_supplementary_web(
+                spec, web_case, web_root, forbidden_paths,
+            )
             synthetic_job = CampaignJob(
                 case=web_case,
                 variant=spec.variant,
@@ -1061,7 +1136,7 @@ def run_campaign(
                 interval_start_mono = clock.monotonic()
                 successful = False
                 try:
-                    record = dispatcher.run_matrix_job(job, runs_dir)
+                    record = dispatcher.run_matrix_job(job, runs_dir, forbidden)
                     validate_run_artifacts(
                         job, runs_dir, record, secrets, forbidden,
                     )

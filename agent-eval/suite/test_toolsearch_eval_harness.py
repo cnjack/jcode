@@ -294,6 +294,7 @@ class ToolSearchEvalHarnessTest(unittest.TestCase):
 
     def test_session_extractor_keeps_routing_metadata_not_raw_payloads(self):
         secret = "sk-session-payload-secret-123456"
+        display_canary = "/private/tmp/display-title-must-not-publish/work/box"
         fixture_tool = "mcp__fixture__catalog_lookup_precise"
         session = self.root / "session.json"
         entries = [
@@ -311,6 +312,7 @@ class ToolSearchEvalHarnessTest(unittest.TestCase):
             {
                 "type": "tool_call", "name": "execute", "tool_call_id": "d1",
                 "args": json.dumps({"command": f"echo {secret}"}),
+                "title": f"Run echo {display_canary}",
                 "batch_id": "b2", "batch_size": 1,
             },
             {
@@ -354,6 +356,7 @@ class ToolSearchEvalHarnessTest(unittest.TestCase):
         self.assertNotIn("select:", serialized)
         self.assertNotIn("JCODE_MCP_FIXTURE_OK", serialized)
         self.assertNotIn("command", serialized)
+        self.assertNotIn(display_canary, serialized)
         fixture_calls = [
             entry
             for entry in trajectory["sessions"][0]["entries"]
@@ -361,6 +364,15 @@ class ToolSearchEvalHarnessTest(unittest.TestCase):
         ]
         self.assertEqual({"request_id": "req-7", "limit": 3}, fixture_calls[0]["fixture_args"])
         self.assertEqual(3, trajectory["tool_counts"]["calls_total"])
+        self.assertEqual({
+            "tool_search": 1,
+            "execute": 1,
+            fixture_tool: 1,
+        }, trajectory["tool_counts"]["calls_by_name"])
+        self.assertEqual(
+            trajectory["tool_counts"]["calls_by_name"],
+            orchestrate.canonical_tool_names(trajectory["tool_counts"]),
+        )
         self.assertEqual(2, trajectory["tool_counts"]["first_visible"])
         self.assertEqual(200, trajectory["tool_counts"]["first_schema_tokens_estimate"])
         default_trajectory = session_extract.extract_trajectory([session])
@@ -369,6 +381,51 @@ class ToolSearchEvalHarnessTest(unittest.TestCase):
             for extracted_session in default_trajectory["sessions"]
             for entry in extracted_session["entries"]
         ))
+
+    def test_publication_scope_rejects_any_path_replacement_before_safe_mark(self):
+        runs = self.root / "formal-runs"
+        rundir = runs / "one-run"
+        rundir.mkdir(parents=True)
+        build = self.root / "formal-build"
+        binary_dir = build / "bin"
+        binary_dir.mkdir(parents=True)
+        jcode = binary_dir / "jcode"
+        harness = binary_dir / "harness"
+        mcp = binary_dir / "mcp-fixture"
+        for path in (jcode, harness, mcp):
+            path.write_text("binary")
+        coordinator_scope = self.root / "coordinator-scope"
+        forbidden = orchestrate.publication_forbidden_paths(
+            runs, rundir, jcode, harness, mcp, (coordinator_scope,),
+        )
+        for expected in (
+            runs.resolve(),
+            rundir.resolve(),
+            build.resolve(),
+            orchestrate.EVAL_ROOT.parent.resolve(),
+            coordinator_scope.resolve(),
+        ):
+            self.assertIn(str(expected), forbidden)
+
+        trajectory = {
+            "tool_counts": {"calls_by_name": {"read": 1}},
+        }
+        session_extract.write_trajectory(rundir / "trajectory.json", trajectory)
+        record = {
+            "tool_names": {"read": 1},
+            "ui_title_canary": f"Read {rundir.resolve()}/work/box",
+            "artifact_safe": False,
+        }
+        with self.assertRaisesRegex(RuntimeError, "allowlist violation"):
+            orchestrate._finalize_publication_artifacts(
+                rundir, record, (), forbidden,
+            )
+
+        published = (rundir / "record.json").read_text()
+        self.assertNotIn(str(rundir.resolve()), published)
+        self.assertFalse(json.loads(published)["artifact_safe"])
+        redaction = json.loads((rundir / "redaction_report.json").read_text())
+        self.assertGreater(redaction["replacement_counts"]["host_path"], 0)
 
     def test_artifact_redaction_and_scanner_do_not_echo_canaries(self):
         publish = self.root / "publish"

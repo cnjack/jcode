@@ -160,6 +160,73 @@ def _write_private_json(path: Path, value):
     path.chmod(0o600)
 
 
+def publication_forbidden_paths(
+    runs_dir: Path,
+    rundir: Path,
+    bin_path: str | Path,
+    harness_path: str | Path,
+    mcp_fixture_path: str | Path | None,
+    extra_paths=(),
+):
+    """Return the complete fail-closed publication path scope for one run."""
+    candidates = {
+        REAL_HOME.resolve(),
+        REAL_CFG.resolve(),
+        EVAL_ROOT.parent.resolve(),
+        Path(runs_dir).resolve(),
+        Path(rundir).resolve(),
+    }
+    for raw in (bin_path, harness_path, mcp_fixture_path):
+        if raw is None:
+            continue
+        resolved = Path(raw).resolve()
+        candidates.update((resolved, resolved.parent))
+        if resolved.parent.name == "bin":
+            candidates.add(resolved.parent.parent)
+    for raw in extra_paths or ():
+        if isinstance(raw, (str, os.PathLike)) and str(raw):
+            candidates.add(Path(raw).resolve())
+    return sorted({str(path) for path in candidates}, key=len, reverse=True)
+
+
+def canonical_tool_names(tool_counts):
+    """Project the authoritative session-derived canonical tool-name map."""
+    return dict(tool_counts["calls_by_name"])
+
+
+def _finalize_publication_artifacts(
+    rundir: Path,
+    record: dict,
+    secret_values,
+    forbidden_paths,
+):
+    """Publish only a zero-redaction record and mark it safe after scanning."""
+    record["artifact_safe"] = False
+    _write_private_json(rundir / "record.json", record)
+    redaction = artifact_safety.sanitize_artifacts(
+        [rundir], secret_values=secret_values, forbidden_paths=forbidden_paths,
+    )
+    findings = artifact_safety.scan_artifacts(
+        [rundir], secret_values=secret_values, forbidden_paths=forbidden_paths,
+    )
+    artifact_safety.write_redaction_report(
+        rundir / "redaction_report.json", redaction, findings,
+    )
+    replacements = redaction.get("replacement_counts", {})
+    if findings or any(replacements.values()):
+        raise RuntimeError("publish artifact safety allowlist violation")
+
+    record["artifact_safe"] = True
+    _write_private_json(rundir / "record.json", record)
+    final_findings = artifact_safety.scan_artifacts(
+        [rundir], secret_values=secret_values, forbidden_paths=forbidden_paths,
+    )
+    if final_findings:
+        record["artifact_safe"] = False
+        _write_private_json(rundir / "record.json", record)
+        raise RuntimeError("publish artifact safety post-scan failed")
+
+
 def acp_session_file(home_dir: Path, session_id: str) -> Path:
     """Map an ACP ``sess_<uuid>`` ID to its private recorder JSONL file."""
     matched = ACP_SESSION_ID_RE.fullmatch(session_id) if isinstance(session_id, str) else None
@@ -426,13 +493,14 @@ def _run_id(case, model_label, variant, rep):
 
 
 def run_one(case, model_label, variant, rep, runs_dir, bin_path, harness_path,
-            mcp_fixture_path, max_iter, scale_timeout, seed):
+            mcp_fixture_path, max_iter, scale_timeout, seed,
+            publication_paths=()):
     """Run one job and unconditionally destroy the credential-bearing HOME."""
     rundir = runs_dir / _run_id(case, model_label, variant, rep)
     try:
         return _run_one(
             case, model_label, variant, rep, runs_dir, bin_path, harness_path,
-            mcp_fixture_path, max_iter, scale_timeout, seed,
+            mcp_fixture_path, max_iter, scale_timeout, seed, publication_paths,
         )
     except BaseException:
         _remove_raw_runtime_artifacts(rundir)
@@ -444,7 +512,8 @@ def run_one(case, model_label, variant, rep, runs_dir, bin_path, harness_path,
 
 
 def _run_one(case, model_label, variant, rep, runs_dir, bin_path, harness_path,
-             mcp_fixture_path, max_iter, scale_timeout, seed):
+             mcp_fixture_path, max_iter, scale_timeout, seed,
+             publication_paths=()):
     run_id = _run_id(case, model_label, variant, rep)
     rundir = runs_dir / run_id
     if rundir.exists():
@@ -710,7 +779,9 @@ def _run_one(case, model_label, variant, rep, runs_dir, bin_path, harness_path,
         "elapsed_ms": result.get("elapsed_ms"),
         "tool_calls": result.get("tool_calls", 0),
         "tool_updates": result.get("tool_updates", 0),
-        "tool_names": result.get("tool_names", {}),
+        # Harness tool_names are ACP presentation titles and may contain tool
+        # arguments.  Session extraction is the authoritative canonical source.
+        "tool_names": canonical_tool_names(tool_counts),
         "tool_kind": result.get("tool_kind", {}),
         "tool_status_end": result.get("tool_status_end", {}),
         "thought_chunks": result.get("thought_chunks", 0),
@@ -736,34 +807,26 @@ def _run_one(case, model_label, variant, rep, runs_dir, bin_path, harness_path,
             "tool_count": mcp_fixture["tool_count"],
             "call_log": mcp_fixture["call_log"].name,
         } if mcp_fixture else None),
-        "artifact_safe": True,
+        "artifact_safe": False,
     }
-    _write_private_json(rundir / "record.json", record)
 
     # The raw ACP/session/result files served their verifier/extractor purpose.
     # Keep only the metadata trajectory, verdict, and deterministic fixture log.
     _remove_raw_runtime_artifacts(rundir)
-    forbidden_paths = [str(REAL_HOME), str(REAL_CFG)]
-    redaction = artifact_safety.sanitize_artifacts(
-        [rundir],
-        secret_values=home_metadata["secret_values"],
-        forbidden_paths=forbidden_paths,
+    forbidden_paths = publication_forbidden_paths(
+        runs_dir,
+        rundir,
+        bin_path,
+        harness_path,
+        mcp_fixture_path,
+        publication_paths,
     )
-    findings = artifact_safety.scan_artifacts(
-        [rundir],
-        secret_values=home_metadata["secret_values"],
-        forbidden_paths=forbidden_paths,
+    _finalize_publication_artifacts(
+        rundir,
+        record,
+        home_metadata["secret_values"],
+        forbidden_paths,
     )
-    artifact_safety.write_redaction_report(
-        rundir / "redaction_report.json", redaction, findings,
-    )
-    final_findings = artifact_safety.scan_artifacts(
-        [rundir],
-        secret_values=home_metadata["secret_values"],
-        forbidden_paths=forbidden_paths,
-    )
-    if findings or final_findings:
-        raise RuntimeError("publish artifact safety scan failed")
 
     status = "PASS" if ver["passed"] else "FAIL"
     cstat = "ok" if record["contracts_passed"] else "CONTRACT!"

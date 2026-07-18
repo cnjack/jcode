@@ -84,6 +84,7 @@ class FakeDispatcher:
         *,
         fail_after=None,
         leak="",
+        tool_names_drift="",
         mutate_binary=False,
         supplementary_identity_drift=False,
     ):
@@ -91,6 +92,7 @@ class FakeDispatcher:
         self.binaries = binaries
         self.fail_after = fail_after
         self.leak = leak
+        self.tool_names_drift = tool_names_drift
         self.mutate_binary = mutate_binary
         self.supplementary_identity_drift = supplementary_identity_drift
         self.calls = 0
@@ -138,6 +140,7 @@ class FakeDispatcher:
             "stop_reason": "end_turn",
             "wall_s": 0.5,
             "tool_counts": counts,
+            "tool_names": dict(counts["calls_by_name"]),
             "routing": {
                 "passed": True,
                 "counts": routing_counts,
@@ -154,6 +157,10 @@ class FakeDispatcher:
             })
         if self.leak:
             record["leak"] = self.leak
+        if self.tool_names_drift == "display":
+            record["tool_names"] = {"Search TODO": 1}
+        elif self.tool_names_drift == "path":
+            record["tool_names"] = {f"Read {run_dir}/work/box": 1}
         trajectory = {
             "schema_version": 1,
             "payload_policy": "metadata_only_except_declared_fixture_args",
@@ -182,7 +189,7 @@ class FakeDispatcher:
         campaign._write_private_json(run_dir / "redaction_report.json", redaction)
         return record
 
-    def run_matrix_job(self, job, runs_dir):
+    def run_matrix_job(self, job, runs_dir, _forbidden_paths):
         if self.fail_after is not None and self.calls >= self.fail_after:
             raise campaign.CampaignError("fake_dispatch_failed")
         self.calls += 1
@@ -192,7 +199,7 @@ class FakeDispatcher:
                 stream.write(b"mutated-after-build")
         return record
 
-    def run_supplementary_web(self, spec, case, runs_dir):
+    def run_supplementary_web(self, spec, case, runs_dir, _forbidden_paths):
         class Job:
             pass
 
@@ -367,6 +374,57 @@ class ToolSearchCampaignTest(unittest.TestCase):
         self.assertEqual({"jcode_tags": ["jcode_eval"]}, plan["build"])
         self.assertEqual({"jcode_tags": ["jcode_eval"]}, manifest["build"])
         self.assertTrue(all(not path.exists() for path in commands.build_outputs))
+        for record in records:
+            self.assertEqual(
+                record["tool_counts"]["calls_by_name"], record["tool_names"],
+            )
+
+    def test_display_tool_title_is_rejected_as_noncanonical(self):
+        case_id = self.suite["cases"][0]["id"]
+        with self.assertRaisesRegex(
+            campaign.CampaignError, "record_tool_names_invalid",
+        ):
+            campaign.run_campaign(
+                self.options(
+                    "display-title", case_ids=(case_id,), variants=("static",),
+                ),
+                command_runner=FakeCommands(),
+                dispatcher_factory=Factory(tool_names_drift="display"),
+                clock=FakeClock(),
+                secret_values=(),
+            )
+        manifest = json.loads(
+            (self.root / "display-title" / "campaign.json").read_text()
+        )
+        self.assertEqual("record_tool_names_invalid", manifest["failure_code"])
+        self.assertEqual(0, manifest["completed_run_count"])
+        self.assertFalse((self.root / "display-title" / "all_records.json").exists())
+
+    def test_tool_title_path_is_sanitized_and_rejected_before_publication(self):
+        case_id = self.suite["cases"][0]["id"]
+        with self.assertRaisesRegex(
+            campaign.CampaignError, "coordinator_artifact_scan_failed",
+        ):
+            campaign.run_campaign(
+                self.options(
+                    "title-path", case_ids=(case_id,), variants=("static",),
+                ),
+                command_runner=FakeCommands(),
+                dispatcher_factory=Factory(tool_names_drift="path"),
+                clock=FakeClock(),
+                secret_values=(),
+            )
+        raw = b"".join(
+            path.read_bytes()
+            for path in (self.root / "title-path").rglob("*")
+            if path.is_file()
+        )
+        self.assertNotIn(str(self.root / "title-path").encode(), raw)
+        manifest = json.loads(
+            (self.root / "title-path" / "campaign.json").read_text()
+        )
+        self.assertEqual("coordinator_artifact_scan_failed", manifest["failure_code"])
+        self.assertEqual(0, manifest["completed_run_count"])
 
     def test_partial_failure_never_fabricates_completion(self):
         cases = tuple(case["id"] for case in self.suite["cases"][:2])
