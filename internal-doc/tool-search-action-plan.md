@@ -36,9 +36,9 @@
 | TS-02 Eino middleware | 完成 | `0a03ce6` | 客户端 ToolSearch、兼容开关与模型级测试 |
 | TS-03 Transport 接入 | 完成 | `0f55179` | TUI/Web/ACP 共享 policy 与重建路径 |
 | TS-04 MCP 与权限 | 完成 | `c9cb076`、`1aa128e`、`a316830`、`b1b687f`、`3b751db` | MCP、Plan、delegation 和 team mode 边界完成 |
-| TS-05 Prompt 与观测 | 进行中 | `dbe7ca4`、`69ba9ee`、`f905ae2` | 使用说明、schema/轨迹指标与凭证文件权限 |
+| TS-05 Prompt 与观测 | 进行中 | `dbe7ca4`、`69ba9ee`、`f905ae2`、`8675a5b` | 使用说明、schema/轨迹指标、凭证文件权限及 Browser 子进程 token 隔离 |
 | TS-06 自动化测试 | 完成 | `77de5fc`、`92e0cb0`、`56fa6eb` | 单元、集成、fixture、routing oracle 与生命周期撤权矩阵 |
-| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e` | 精确模型、静态/渐进式对照、安全产物链及 ACP/Web 全矩阵 dispatch 完成；canary oracle 与全功能 schema scope 已校准，等待正式 canary/A-B |
+| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e`、`8675a5b` | 精确模型、静态/渐进式对照、安全产物链及 ACP/Web 全矩阵 dispatch 完成；Browser canary 环境故障已修复并通过隔离 Chrome 对照，等待 exact-Kimi 重跑/A-B |
 | TS-08 30 分钟回归 | 未开始 | — | 全场景长跑 |
 | TS-09 HTML 报告 | 进行中 | `ad55a3b`、`92d442e` | 安全、fail-closed 的九门槛报告器及全功能 schema 指标 scope 已完成；等待真实 campaign 产物 |
 
@@ -262,7 +262,12 @@ Kimi 硬门槛：
 - Canary 指标校准：3 个 `goal_get` case 改用稳定 `NO_GOAL_SET_OK` sentinel，仅消除最终自然语言措辞噪声；工具搜索、调用次数、空参数、call/result 和独立 batch oracle 保持严格。首轮 schema 降低门槛仍为 ≥50%，但 scope 固定为唯一的完整 100-tool catalog 配对 case；普通工具集约 18% 的实际降幅继续逐 case 展示，不能参与稀释或抬高该门槛。validator 会拒绝缺失/重复/unpaired full-schema tag 及 scope 漂移。
 - 测试：ToolSearch discovery 48 tests、`py_compile`、JSON parse、`git diff --check` 全部通过；synthetic 证明普通 case 18% 不影响 full-catalog 60% PASS，full-catalog 回退到 40% 必然 FAIL。
 - 已完成提交：`92d442e test(eval): calibrate ToolSearch acceptance scopes`（正式 canary 前校准；未勾选 TS-07.7 或 TS-09）。
-- 待完成：TS-07.7 需运行真实 Chrome canary 与关键用例重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
+- 首次 Web Browser exact-Kimi canary（非正式、不能计入 TS-07.7）：static/deferred 均正确进入 Browser 路由，Deferred 首轮 12 tools、无 bypass、无 same-batch 激活，但两臂都在首个 `browser_open` 阻塞至 360 秒后被 driver 安全停止，结果 0/2；因此未把路由部分成功误报为 task pass。
+- 根因 A/B：同一 managed Chrome 代码在正常 HOME 下 `Page.navigate` 约 24ms，在评测隔离 HOME 下稳定超时；macOS Chrome 子进程单独恢复经 `os/user` 校验的系统 HOME 后，JCode 自身隔离 HOME、config/session 和 `--user-data-dir` 均保持不变，完整 open→snapshot→click→screenshot smoke 在相同隔离环境 0.96s 通过。
+- Browser 韧性/安全：Chrome 子进程不再继承 `JCODE_WEB_TOKEN`；`browser_open` 在创建 session 前仅接受无 userinfo 且 host 有效的 HTTP(S) URL；每个 Browser tool 有 30 秒总 operation timeout，内部 deadline 转为不含 URL/path 的稳定错误；domain enable 继承父 context。Web driver 只接受裸 UUID 或 `sess_<uuid>`，统一映射 recorder `<uuid>.json` 并拒绝 traversal。
+- 测试：`go test ./internal/browser ./internal/tools`、聚焦 race、Python Web driver 13/13、`py_compile`、gofmt/diff check 及上述真实隔离 Chrome smoke 全部通过。
+- 已完成提交：`8675a5b fix(browser): harden managed Chrome operations`（Web canary 产品/driver 修复；未勾选 TS-07.7）。
+- 待完成：TS-07.7 需用新提交重跑 exact-Kimi Chrome canary 与关键用例重复 A/B；TS-05.6 待真实 publish bundle 的最终扫描关闭。
 
 ## TS-08 至少 30 分钟全场景回归
 
@@ -330,3 +335,4 @@ Kimi 硬门槛：
 | 2026-07-18 | TS-07 canary 修复：ACP `sess_<uuid>` 正确映射 recorder `<uuid>.json`，拒绝非法/穿越 ID | Python 67 tests；exact-Kimi 6/6 routing、2/2 MCP、5/6 task | `91bbc8b` |
 | 2026-07-18 | 完成 TS-07.6：Web Browser authenticated dispatch、完整 proof-form 激活边界、supplementary deny/disabled | Python 69 tests、report validators、formal Web dry-run 通过 | `fe81907` |
 | 2026-07-18 | TS-07/09 canary 指标校准：稳定 goal sentinel；50% schema 门槛固定到完整 100-tool catalog，拒绝 scope 漂移 | ToolSearch discovery 48 tests、py_compile、JSON、diff check 通过 | `92d442e` |
+| 2026-07-18 | Web Browser canary 修复：macOS Chrome system HOME、HTTP(S) 边界、30s timeout、token 隔离及 recorder ID 映射 | Browser/tools Go、race、Python 13/13；隔离 Chrome smoke 0.96s | `8675a5b` |
