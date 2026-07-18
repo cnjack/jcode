@@ -16,6 +16,7 @@ import (
 	"github.com/cnjack/jcode/internal/hooks"
 	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/review"
+	"github.com/cnjack/jcode/internal/team"
 	internaltools "github.com/cnjack/jcode/internal/tools"
 )
 
@@ -236,7 +237,6 @@ var noApprovalNeeded = map[string]bool{
 	"webfetch":                   true,
 	"check_background":           true,
 	"team_create":                true,
-	"team_spawn":                 true,
 	"team_send_message":          true,
 	"team_list":                  true,
 	"team_delete":                true,
@@ -290,6 +290,39 @@ func (s *ApprovalState) decide(toolName, toolArgs string) approvalDecision {
 	}
 
 	switch toolName {
+	case "team_spawn":
+		var input struct {
+			AgentType json.RawMessage `json:"agent_type"`
+			Mode      json.RawMessage `json:"mode"`
+		}
+		if err := json.Unmarshal([]byte(toolArgs), &input); err != nil {
+			return decisionPrompt
+		}
+		agentTypeRaw, ok := optionalJSONString(input.AgentType)
+		if !ok {
+			return decisionPrompt
+		}
+		permissionRaw, ok := optionalJSONString(input.Mode)
+		if !ok {
+			return decisionPrompt
+		}
+		agentType, err := team.NormalizeAgentType(agentTypeRaw)
+		if err != nil {
+			return decisionPrompt
+		}
+		permission, err := team.NormalizePermission(permissionRaw)
+		if err != nil {
+			return decisionPrompt
+		}
+
+		// Explore and Plan are capability-bounded to read-only tools. Normal
+		// shares the leader's per-call approval gate. Only a write-capable Auto
+		// teammate bypasses per-call approval, so it needs a one-time grant here.
+		if agentType == team.AgentTypeExplore || permission == team.PermissionPlan ||
+			permission == team.PermissionNormal {
+			return decisionAutoApprove
+		}
+		return decisionPrompt
 	case "subagent":
 		var input struct {
 			AgentType json.RawMessage `json:"agent_type"`
@@ -348,6 +381,20 @@ func (s *ApprovalState) decide(toolName, toolArgs string) approvalDecision {
 	}
 
 	return decisionPrompt
+}
+
+func optionalJSONString(raw json.RawMessage) (string, bool) {
+	if len(raw) == 0 {
+		return "", true
+	}
+	if strings.TrimSpace(string(raw)) == "null" {
+		return "", false
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", false
+	}
+	return value, true
 }
 
 // decideBrowser applies the browser-use approval tiers (see design §3.4). It

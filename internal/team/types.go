@@ -1,8 +1,55 @@
 package team
 
 import (
+	"fmt"
+	"strings"
 	"time"
 )
+
+const (
+	AgentTypeExplore = "explore"
+	AgentTypeGeneral = "general"
+	AgentTypeCoder   = "coder"
+
+	PermissionNormal = "normal"
+	PermissionPlan   = "plan"
+	PermissionAuto   = "auto"
+)
+
+// NormalizeAgentType returns the canonical teammate profile. An omitted value
+// preserves the historical full-tool teammate behavior by defaulting to
+// general; unknown profiles are rejected instead of accidentally receiving a
+// broader tool set.
+func NormalizeAgentType(agentType string) (string, error) {
+	agentType = strings.TrimSpace(agentType)
+	if agentType == "" {
+		return AgentTypeGeneral, nil
+	}
+	switch agentType {
+	case AgentTypeExplore, AgentTypeGeneral, AgentTypeCoder:
+		return agentType, nil
+	default:
+		return "", fmt.Errorf("agent_type must be %q, %q, or %q, got %q",
+			AgentTypeExplore, AgentTypeGeneral, AgentTypeCoder, agentType)
+	}
+}
+
+// NormalizePermission returns the canonical teammate permission mode. Empty
+// means normal, where each mutating child call still shares the leader's
+// approval gate. Unknown modes fail closed.
+func NormalizePermission(permission string) (string, error) {
+	permission = strings.TrimSpace(permission)
+	if permission == "" {
+		return PermissionNormal, nil
+	}
+	switch permission {
+	case PermissionNormal, PermissionPlan, PermissionAuto:
+		return permission, nil
+	default:
+		return "", fmt.Errorf("permission mode must be %q, %q, or %q, got %q",
+			PermissionNormal, PermissionPlan, PermissionAuto, permission)
+	}
+}
 
 // TeamFile is the persistent team state, stored at ~/.jcode/teams/{name}/team.json.
 type TeamFile struct {
@@ -17,7 +64,7 @@ type TeamFile struct {
 type TeamMember struct {
 	AgentID    string    `json:"agent_id"`             // "{name}@{team}"
 	Name       string    `json:"name"`                 // display name
-	AgentType  string    `json:"agent_type,omitempty"` // "explorer", "coder", etc.
+	AgentType  string    `json:"agent_type,omitempty"` // "explore", "general", "coder"
 	Model      string    `json:"model,omitempty"`      // model override
 	Prompt     string    `json:"prompt,omitempty"`     // initial task prompt
 	Color      string    `json:"color,omitempty"`      // TUI color

@@ -325,6 +325,44 @@ func TestSubagentDelegatedWriteGrantDecision(t *testing.T) {
 	}
 }
 
+func TestTeamSpawnPermissionDecision(t *testing.T) {
+	if noApprovalNeeded["team_spawn"] {
+		t.Fatal("team_spawn must be decided from its child profile, not globally auto-approved")
+	}
+	s := NewApprovalState("/tmp/workdir", false)
+	tests := []struct {
+		name string
+		args string
+		want approvalDecision
+	}{
+		{name: "missing defaults general normal", args: `{}`, want: decisionAutoApprove},
+		{name: "empty defaults general normal", args: `{"agent_type":"","mode":""}`, want: decisionAutoApprove},
+		{name: "explore normal", args: `{"agent_type":"explore","mode":"normal"}`, want: decisionAutoApprove},
+		{name: "explore plan", args: `{"agent_type":"explore","mode":"plan"}`, want: decisionAutoApprove},
+		{name: "explore auto", args: `{"agent_type":"explore","mode":"auto"}`, want: decisionAutoApprove},
+		{name: "general normal", args: `{"agent_type":"general","mode":"normal"}`, want: decisionAutoApprove},
+		{name: "coder normal", args: `{"agent_type":"coder","mode":"normal"}`, want: decisionAutoApprove},
+		{name: "general plan", args: `{"agent_type":"general","mode":"plan"}`, want: decisionAutoApprove},
+		{name: "coder plan", args: `{"agent_type":"coder","mode":"plan"}`, want: decisionAutoApprove},
+		{name: "general auto one-time grant", args: `{"agent_type":"general","mode":"auto"}`, want: decisionPrompt},
+		{name: "coder auto one-time grant", args: `{"agent_type":"coder","mode":"auto"}`, want: decisionPrompt},
+		{name: "invalid agent type", args: `{"agent_type":"writer","mode":"normal"}`, want: decisionPrompt},
+		{name: "invalid mode", args: `{"agent_type":"explore","mode":"unsafe"}`, want: decisionPrompt},
+		{name: "agent type wrong JSON type", args: `{"agent_type":1,"mode":"normal"}`, want: decisionPrompt},
+		{name: "mode wrong JSON type", args: `{"agent_type":"explore","mode":true}`, want: decisionPrompt},
+		{name: "agent type null", args: `{"agent_type":null,"mode":"normal"}`, want: decisionPrompt},
+		{name: "mode null", args: `{"agent_type":"explore","mode":null}`, want: decisionPrompt},
+		{name: "malformed", args: `{"agent_type":`, want: decisionPrompt},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := s.decide("team_spawn", tt.args); got != tt.want {
+				t.Fatalf("decide(team_spawn, %s) = %v, want %v", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestApprovalMCPProvenancePrecedesBuiltinAllowlist(t *testing.T) {
 	const canonicalName = "mcp__approval_test__goal_get"
 	internaltools.RegisterMCPToolIdentity(canonicalName, "approval-test", "goal_get")

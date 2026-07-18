@@ -67,8 +67,8 @@ type ManagerDeps struct {
 	TuiProgram *tea.Program
 	// EnvFactory creates an isolated Env (any = *tools.Env) given a working directory.
 	EnvFactory func(cwd string) any
-	// ToolBuilder returns tools for a given Env and agent type.
-	ToolBuilder func(env any, agentType string) []tool.BaseTool
+	// ToolBuilder returns tools for a given Env, agent type, and permission mode.
+	ToolBuilder func(env any, agentType, permission string) []tool.BaseTool
 	// ModelFactory returns a chat model for the given model name, or nil for default.
 	ModelFactory func(ctx context.Context, modelName string) (any, error)
 	// ResolveModelName maps a teammate's model ref (possibly an alias like
@@ -77,11 +77,13 @@ type ManagerDeps struct {
 	ResolveModelName func(modelName string) string
 	// DefaultModel is the default chat model to use.
 	DefaultModel  any // model.ToolCallingChatModel
-	PromptBuilder func(agentType, pwd, platform string) string
+	PromptBuilder func(agentType, permission, pwd, platform string) string
 	ApprovalFunc  func(ctx context.Context, toolName, toolArgs string) (bool, error)
 	// HandlersFactory returns agent middleware handlers (including approval) for a teammate.
-	// The workerName and workerColor are used to tag approval prompts.
-	HandlersFactory func(workerName, workerColor string) []adk.ChatModelAgentMiddleware
+	// The workerName and workerColor are used to tag approval prompts. Permission
+	// selects shared per-call approval (normal) or a pre-granted safe-folding-only
+	// handler (plan/auto).
+	HandlersFactory func(workerName, workerColor, permission string) []adk.ChatModelAgentMiddleware
 	// LeaderSessionUUID is used to store teammate transcripts under the leader's session.
 	LeaderSessionUUID string
 	// Tracer is the optional Langfuse tracer for recording teammate agent spans.
@@ -102,6 +104,9 @@ type Manager struct {
 
 // NewManager creates a team manager (without creating a team yet).
 func NewManager(deps *ManagerDeps) *Manager {
+	if deps == nil {
+		deps = &ManagerDeps{}
+	}
 	return &Manager{
 		teammates: make(map[string]*TeammateState),
 		deps:      deps,
@@ -114,7 +119,7 @@ func (m *Manager) SetTuiProgram(p *tea.Program) {
 }
 
 // SetHandlersFactory sets the factory that creates agent middleware handlers for teammates.
-func (m *Manager) SetHandlersFactory(f func(workerName, workerColor string) []adk.ChatModelAgentMiddleware) {
+func (m *Manager) SetHandlersFactory(f func(workerName, workerColor, permission string) []adk.ChatModelAgentMiddleware) {
 	m.deps.HandlersFactory = f
 }
 
@@ -185,6 +190,23 @@ func (m *Manager) CreateTeam(name, description string) error {
 
 // SpawnTeammate starts a new teammate goroutine.
 func (m *Manager) SpawnTeammate(ctx context.Context, cfg SpawnConfig) (string, error) {
+	agentType, err := NormalizeAgentType(cfg.AgentType)
+	if err != nil {
+		return "", err
+	}
+	permission, err := NormalizePermission(cfg.Permission)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(cfg.Name) == "" || strings.TrimSpace(cfg.Prompt) == "" {
+		return "", fmt.Errorf("teammate name and prompt are required")
+	}
+	if err := m.validateSpawnDeps(cfg); err != nil {
+		return "", err
+	}
+	cfg.AgentType = agentType
+	cfg.Permission = permission
+
 	m.mu.Lock()
 
 	if m.teamName == "" {
@@ -207,9 +229,10 @@ func (m *Manager) SpawnTeammate(ctx context.Context, cfg SpawnConfig) (string, e
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	var childEnv any
-	if m.deps.EnvFactory != nil {
-		childEnv = m.deps.EnvFactory(cwd)
+	childEnv := m.deps.EnvFactory(cwd)
+	if childEnv == nil {
+		m.mu.Unlock()
+		return "", fmt.Errorf("spawn teammate: environment factory returned nil")
 	}
 
 	childCtx, cancel := context.WithCancel(context.Background())
@@ -233,8 +256,8 @@ func (m *Manager) SpawnTeammate(ctx context.Context, cfg SpawnConfig) (string, e
 		Cancel:     cancel,
 		Prompt:     cfg.Prompt,
 		Model:      cfg.Model,
-		AgentType:  cfg.AgentType,
-		Permission: cfg.Permission,
+		AgentType:  agentType,
+		Permission: permission,
 		StartedAt:  time.Now(),
 		TokenUsage: &internalmodel.TokenUsage{},
 	}
@@ -251,14 +274,14 @@ func (m *Manager) SpawnTeammate(ctx context.Context, cfg SpawnConfig) (string, e
 	m.teamFile.Members = append(m.teamFile.Members, TeamMember{
 		AgentID:    agentID,
 		Name:       cfg.Name,
-		AgentType:  cfg.AgentType,
+		AgentType:  agentType,
 		Model:      cfg.Model,
 		Prompt:     cfg.Prompt,
 		Color:      color,
 		Cwd:        cwd,
 		JoinedAt:   time.Now(),
 		IsActive:   true,
-		Permission: cfg.Permission,
+		Permission: permission,
 	})
 	_ = m.writeTeamFile(m.teamFile)
 
@@ -277,8 +300,34 @@ func (m *Manager) SpawnTeammate(ctx context.Context, cfg SpawnConfig) (string, e
 		})
 	}
 
-	config.Logger().Printf("[team] spawned teammate %q (type=%s, model=%s)", cfg.Name, cfg.AgentType, cfg.Model)
+	config.Logger().Printf("[team] spawned teammate %q (type=%s, permission=%s, model=%s)",
+		cfg.Name, agentType, permission, cfg.Model)
 	return agentID, nil
+}
+
+func (m *Manager) validateSpawnDeps(cfg SpawnConfig) error {
+	if m == nil || m.deps == nil {
+		return fmt.Errorf("spawn teammate: manager dependencies are not configured")
+	}
+	if m.deps.EnvFactory == nil {
+		return fmt.Errorf("spawn teammate: environment factory is not configured")
+	}
+	if m.deps.ToolBuilder == nil {
+		return fmt.Errorf("spawn teammate: tool builder is not configured")
+	}
+	if m.deps.PromptBuilder == nil {
+		return fmt.Errorf("spawn teammate: prompt builder is not configured")
+	}
+	if m.deps.HandlersFactory == nil {
+		return fmt.Errorf("spawn teammate: handlers factory is not configured")
+	}
+	if _, ok := m.deps.DefaultModel.(einomodel.ToolCallingChatModel); !ok {
+		return fmt.Errorf("spawn teammate: default chat model is not configured")
+	}
+	if cfg.Model != "" && m.deps.ModelFactory == nil {
+		return fmt.Errorf("spawn teammate: model factory is required for model override %q", cfg.Model)
+	}
+	return nil
 }
 
 // SendMessage sends a message to a specific teammate's mailbox.
@@ -538,15 +587,11 @@ func (m *Manager) runAgentTurn(ctx context.Context, state *TeammateState) (strin
 		}
 	}
 
-	// Build tools.
+	// SpawnTeammate stores only normalized values, so every turn uses the same
+	// permission profile that was approved at the parent boundary.
 	agentType := state.AgentType
-	if agentType == "" {
-		agentType = "general"
-	}
-	var childTools []tool.BaseTool
-	if m.deps.ToolBuilder != nil {
-		childTools = m.deps.ToolBuilder(state.Env, agentType)
-	}
+	permission := state.Permission
+	childTools := m.deps.ToolBuilder(state.Env, agentType, permission)
 
 	cwd := ""
 	if cfg, ok := state.Env.(interface{ Pwd() string }); ok {
@@ -555,9 +600,7 @@ func (m *Manager) runAgentTurn(ctx context.Context, state *TeammateState) (strin
 
 	// Build system prompt. Include spawn prompt as context/role description.
 	systemPrompt := ""
-	if m.deps.PromptBuilder != nil {
-		systemPrompt = m.deps.PromptBuilder(agentType, cwd, cwd)
-	}
+	systemPrompt = m.deps.PromptBuilder(agentType, permission, cwd, cwd)
 	if systemPrompt == "" {
 		systemPrompt = fmt.Sprintf("You are %q, a teammate in team %q. Your role: %s.",
 			state.Identity.AgentName, state.Identity.TeamName, agentType)
@@ -578,9 +621,8 @@ func (m *Manager) runAgentTurn(ctx context.Context, state *TeammateState) (strin
 		ctx = m.deps.Tracer.WithChildTrace(ctx, fmt.Sprintf("teammate-%s", state.Identity.AgentName))
 		handlers = append(handlers, m.deps.Tracer.ChildAgentMiddleware())
 	}
-	if m.deps.HandlersFactory != nil {
-		handlers = append(handlers, m.deps.HandlersFactory(state.Identity.AgentName, state.Identity.Color)...)
-	}
+	handlers = append(handlers, m.deps.HandlersFactory(
+		state.Identity.AgentName, state.Identity.Color, permission)...)
 
 	ag, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:        fmt.Sprintf("teammate-%s", state.Identity.AgentName),

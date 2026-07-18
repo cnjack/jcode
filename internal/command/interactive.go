@@ -92,6 +92,56 @@ type interactiveState struct {
 	runCtx     context.Context    // per-run context, non-nil while agent is running
 }
 
+func teamChildUsesPlanProfile(agentType, permission string) bool {
+	return agentType == team.AgentTypeExplore || permission == team.PermissionPlan
+}
+
+// buildTeamChildTools is the single hard boundary for teammate capabilities.
+// Explore agents and every Plan-mode teammate get only inspection tools plus
+// the endpoint-enforced Plan execute variant. A write-capable profile is
+// available only to normalized general/coder teammates in normal or auto mode.
+func buildTeamChildTools(childEnv any, agentType, permission string) []tool.BaseTool {
+	e, ok := childEnv.(*tools.Env)
+	if !ok || e == nil {
+		return nil
+	}
+	normalizedType, err := team.NormalizeAgentType(agentType)
+	if err != nil {
+		return nil
+	}
+	normalizedPermission, err := team.NormalizePermission(permission)
+	if err != nil {
+		return nil
+	}
+	if teamChildUsesPlanProfile(normalizedType, normalizedPermission) {
+		return []tool.BaseTool{
+			e.NewReadTool(),
+			e.NewGrepTool(),
+			e.NewPlanExecuteTool(),
+		}
+	}
+	return []tool.BaseTool{
+		e.NewReadTool(), e.NewEditTool(), e.NewWriteTool(),
+		e.NewExecuteTool(nil), e.NewGrepTool(),
+		e.NewTodoWriteTool(), e.NewTodoReadTool(),
+	}
+}
+
+func buildTeamChildPrompt(agentType, permission, platform, pwd string) string {
+	normalizedType, err := team.NormalizeAgentType(agentType)
+	if err != nil {
+		return ""
+	}
+	normalizedPermission, err := team.NormalizePermission(permission)
+	if err != nil {
+		return ""
+	}
+	if teamChildUsesPlanProfile(normalizedType, normalizedPermission) {
+		return prompts.GetPlanSystemPrompt(platform, pwd, "local", nil)
+	}
+	return prompts.GetSystemPrompt(platform, pwd, "local", nil, "")
+}
+
 func (s *interactiveState) buildAllTools() []tool.BaseTool {
 	// One factory serves subagent + workflow model overrides (incl. the
 	// "small" alias); fallback is the current session model, so it must be
@@ -1222,17 +1272,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		EnvFactory: func(cwd string) any {
 			return tools.NewEnv(cwd, platform)
 		},
-		ToolBuilder: func(childEnv any, agentType string) []tool.BaseTool {
-			e, ok := childEnv.(*tools.Env)
-			if !ok {
-				return nil
-			}
-			return []tool.BaseTool{
-				e.NewReadTool(), e.NewEditTool(), e.NewWriteTool(),
-				e.NewExecuteTool(nil), e.NewGrepTool(),
-				e.NewTodoWriteTool(), e.NewTodoReadTool(),
-			}
-		},
+		ToolBuilder: buildTeamChildTools,
 		// Route through the shared factory so teammates get the same model
 		// semantics as subagents/workflows — incl. the "small" alias, baseURL
 		// and effort resolution, and instance caching.
@@ -1244,8 +1284,8 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		ResolveModelName: func(mName string) string {
 			return internalmodel.BareModelID(teamModelFactory.ResolveRef(mName))
 		},
-		PromptBuilder: func(agentType, agentPwd, agentPlatform string) string {
-			return prompts.GetSystemPrompt(agentPlatform, agentPwd, "local", nil, "")
+		PromptBuilder: func(agentType, permission, agentPwd, _ string) string {
+			return buildTeamChildPrompt(agentType, permission, platform, agentPwd)
 		},
 		LeaderSessionUUID: rec.UUID(),
 		Tracer:            st.langfuseTracer,
@@ -1437,8 +1477,14 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	st.h = notifyingH
 	approvalState.SetHandler(notifyingH)
 
-	teamManager.SetHandlersFactory(func(workerName, workerColor string) []adk.ChatModelAgentMiddleware {
-		return agent.NewTeammateHandlers(approvalState.NewTeammateApprovalFunc(workerName, workerColor))
+	teamManager.SetHandlersFactory(func(workerName, workerColor, permission string) []adk.ChatModelAgentMiddleware {
+		if permission == team.PermissionNormal {
+			return agent.NewTeammateHandlers(
+				approvalState.NewTeammateApprovalFunc(workerName, workerColor))
+		}
+		// Plan has an endpoint-enforced read-only tool set. Auto received its
+		// one-time grant at team_spawn. Both retain safe panic/error folding.
+		return agent.NewTeammateHandlers(nil)
 	})
 
 	askUserDeps.NotifyFn = func(question string, options []string) {
