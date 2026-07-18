@@ -315,6 +315,10 @@ type Config struct {
 	// system-prompt descriptions, and the load_skill tool).
 	DisabledSkills []string `json:"disabled_skills,omitempty"`
 
+	// ToolSearch controls progressive tool disclosure. It is opt-in so existing
+	// configurations keep exposing the complete static tool set.
+	ToolSearch *ToolSearchConfig `json:"tool_search,omitempty"`
+
 	// Browser controls the browser-use capability (CDP-driven page control).
 	Browser *BrowserConfig `json:"browser,omitempty"`
 
@@ -380,6 +384,19 @@ func (c *Config) SetApprovalReview(rc *ApprovalReviewConfig) {
 	approvalReviewMu.Lock()
 	defer approvalReviewMu.Unlock()
 	c.ApprovalReview = rc
+}
+
+// ToolSearchConfig controls progressive tool disclosure. Enabled is a pointer
+// so config round-trips preserve an explicitly disabled value while an absent
+// value remains distinguishable for future compatibility.
+type ToolSearchConfig struct {
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
+// ToolSearchEnabled reports whether progressive tool disclosure is enabled.
+// It is disabled by default, including for absent config blocks and nil values.
+func ToolSearchEnabled(c *Config) bool {
+	return c != nil && c.ToolSearch != nil && c.ToolSearch.Enabled != nil && *c.ToolSearch.Enabled
 }
 
 // BrowserConfig controls the browser-use capability. Browser use is opt-in:

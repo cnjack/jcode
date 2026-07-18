@@ -34,7 +34,9 @@ func (e *ReviewDeniedError) Error() string {
 //
 //	Handlers: [langfuse tracing, ...caller handlers, approval+safeTool]
 //
-// ModelRetryConfig is always enabled (3 retries with default exponential backoff).
+// All tools passed to this compatibility entry point are disclosed directly to
+// the model. Use NewAgentWithToolPlan to progressively disclose deferred tools.
+// ModelRetryConfig is always enabled (5 retries with smart backoff).
 func NewAgent(
 	ctx context.Context,
 	chatmodel model.ToolCallingChatModel,
@@ -44,10 +46,31 @@ func NewAgent(
 	middlewares []adk.ChatModelAgentMiddleware,
 	handlers []adk.ChatModelAgentMiddleware,
 ) (*adk.ChatModelAgent, error) {
+	return newAgent(ctx, chatmodel, tools, nil, instruction, approvalFunc, middlewares, handlers)
+}
+
+func newAgent(
+	ctx context.Context,
+	chatmodel model.ToolCallingChatModel,
+	directTools []tool.BaseTool,
+	deferredTools []tool.BaseTool,
+	instruction string,
+	approvalFunc ApprovalFunc,
+	middlewares []adk.ChatModelAgentMiddleware,
+	handlers []adk.ChatModelAgentMiddleware,
+) (*adk.ChatModelAgent, error) {
 	// Handler order is outermost → innermost: tracing middlewares first, then the
-	// caller's handlers, then the hook + approval + safe-tool-error stack innermost
-	// so that summarization/reduction see the raw tool output first.
+	// tool-search middleware, then the caller's state-rewriting handlers, and
+	// finally the hook + approval + safe-tool-error stack. Tool search must inspect
+	// its result before summarization/reduction can remove that result from history.
 	enhanced := append([]adk.ChatModelAgentMiddleware{}, middlewares...)
+	toolSearchMiddleware, err := newToolSearchMiddleware(ctx, deferredTools)
+	if err != nil {
+		return nil, err
+	}
+	if toolSearchMiddleware != nil {
+		enhanced = append(enhanced, toolSearchMiddleware)
+	}
 	enhanced = append(enhanced, handlers...)
 	// PreToolUse hook sits OUTSIDE approval: it can deny, rewrite args, or mark the
 	// call pre-approved (so approval skips its prompt) before the gate runs.
@@ -67,7 +90,7 @@ func NewAgent(
 		Model:       chatmodel,
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
-				Tools: tools,
+				Tools: append([]tool.BaseTool(nil), directTools...),
 			},
 		},
 		MaxIterations: maxIterations,

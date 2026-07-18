@@ -32,9 +32,9 @@
 | 阶段 | 状态 | 提交 | 说明 |
 |---|---|---|---|
 | TS-00 文档与基线 | 完成 | `a1d0b13` | 基线 `ca4c8ba6b709`，完整 Go 测试通过 |
-| TS-01 ToolPlan 核心 | 完成 | 本提交 | 分类、校验、稳定排序与 runtime 安全边界 |
-| TS-02 Eino middleware | 进行中 | — | 接入客户端 ToolSearch |
-| TS-03 Transport 接入 | 未开始 | — | TUI/Web/ACP 统一使用 ToolPlan |
+| TS-01 ToolPlan 核心 | 完成 | `be5e701` | 分类、校验、稳定排序与 runtime 安全边界 |
+| TS-02 Eino middleware | 完成 | 本提交 | 客户端 ToolSearch、兼容开关与模型级测试 |
+| TS-03 Transport 接入 | 进行中 | — | TUI/Web/ACP 统一使用 ToolPlan |
 | TS-04 MCP 与权限 | 未开始 | — | canonical name、审批和安全边界 |
 | TS-05 Prompt 与观测 | 未开始 | — | 使用说明、schema/轨迹指标 |
 | TS-06 自动化测试 | 未开始 | — | 单元、集成、fixture 和 routing oracle |
@@ -78,22 +78,25 @@ Plan 模式首轮目标：
 - 安全边界：transport/mode/capability gate 产生的 Hidden 工具不进入 runtime registry，防止模型猜名绕过。
 - 测试：`go test ./internal/agent -count=1`；`go test -race ./internal/agent -run '^TestToolPlan' -count=1`；`go test ./...`；`make lint-go`。
 - 结果：全部通过；race 无异常；lint `0 issues`。
-- 提交：本提交；精确 SHA 将在下一次进度更新中回填。
+- 提交：`be5e701 feat(agent): add progressive tool exposure plan`。
 
 ## TS-02 Eino ToolSearch middleware
 
-- [ ] TS-02.1 使用当前 Eino 版本提供的 `adk/middlewares/dynamictool/toolsearch`。
-- [ ] TS-02.2 初始 Agent 只传 Direct 工具；Deferred 只传 `DynamicTools`。
-- [ ] TS-02.3 固定 `UseModelToolSearch: false`，Deferred 为空时跳过 middleware。
-- [ ] TS-02.4 保持 approval middleware 最内层，确保 Deferred 工具执行不绕过审批。
-- [ ] TS-02.5 增加 `tool_search.enabled` 配置开关和 static 回退路径。
-- [ ] TS-02.6 测试首轮隐藏、搜索后披露、多次搜索累积和未知搜索。
+- [x] TS-02.1 使用当前 Eino 版本提供的 `adk/middlewares/dynamictool/toolsearch`。
+- [x] TS-02.2 初始 Agent 只传 Direct 工具；Deferred 只传 `DynamicTools`。
+- [x] TS-02.3 固定 `UseModelToolSearch: false`，Deferred 为空时跳过 middleware。
+- [x] TS-02.4 保持 approval middleware 最内层，确保 Deferred 工具执行不绕过审批。
+- [x] TS-02.5 增加 `tool_search.enabled` 配置开关和 static 回退路径。
+- [x] TS-02.6 测试首轮隐藏、搜索后披露、多次搜索累积和未知搜索。
 
 完成证据：
 
-- 测试：待填写
-- 结果：待填写
-- 提交：待填写
+- 实现：保留 legacy `NewAgent`；新增 `NewAgentWithToolPlan`，并将 Eino ToolSearch 放在 caller middleware 之后、history rewrite handlers 和 approval 之前。
+- 配置：`tool_search.enabled` 当前为 opt-in；缺省、nil、显式 false 均保持原 eager/static 行为。
+- 安全：Hidden 不注册；`DirectModelOnly` 在当前适配层明确 fail closed；手工构造的非法计划会被重新校验。
+- 测试：Agent/config 定向测试；`go test -race ./internal/agent ./internal/config -run 'ToolSearch|NewAgentLegacy|LegacyConfigWithoutToolSearch' -count=1`；`go test ./...`；`make lint-go`。
+- 结果：全部通过；模型级测试覆盖首轮 schema、search 激活、累积、runtime registry、history rewrite 顺序和原审批 name/args；lint `0 issues`。
+- 提交：本提交；精确 SHA 将在下一次进度更新中回填。
 
 ## TS-03 TUI / Web / ACP 接入
 
@@ -217,5 +220,6 @@ Kimi 硬门槛：
 
 | 时间 | 更新 | 测试 | 提交 |
 |---|---|---|---|
-| 2026-07-18 | 完成 TS-00：创建清单并采集基线 | `git diff --check`、`go test ./...` 通过 | 本提交 |
-| 2026-07-18 | 完成 TS-01：ToolPlan 分类、校验、稳定排序和 Hidden runtime 边界 | 包测试、race、全量 Go、lint 通过 | 本提交 |
+| 2026-07-18 | 完成 TS-00：创建清单并采集基线 | `git diff --check`、`go test ./...` 通过 | `a1d0b13` |
+| 2026-07-18 | 完成 TS-01：ToolPlan 分类、校验、稳定排序和 Hidden runtime 边界 | 包测试、race、全量 Go、lint 通过 | `be5e701` |
+| 2026-07-18 | 完成 TS-02：接入 Eino 客户端 ToolSearch 与 opt-in 配置 | 模型级、race、全量 Go、lint 通过 | 本提交 |
