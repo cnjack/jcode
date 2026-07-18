@@ -154,6 +154,74 @@ class ToolSearchCaseMatrixTest(unittest.TestCase):
                     self.assertEqual(0, expected["same_batch_max"])
                     self.assertGreaterEqual(expected["search_calls"]["min"], 1)
 
+    def test_goal_get_cases_use_stable_sentinel_without_relaxing_routing(self):
+        cases = {case["id"]: case for case in self.validate()["cases"]}
+        for case_id in (
+            "ts_exact_select_goal_get",
+            "ts_semantic_en_goal_get",
+            "ts_semantic_zh_goal_get",
+        ):
+            case = cases[case_id]
+            self.assertIn("NO_GOAL_SET_OK", case["prompt"])
+            self.assertEqual(
+                [{"type": "final_text_contains", "value": "NO_GOAL_SET_OK"}],
+                case["oracles"],
+            )
+            for variant in ("static", "deferred"):
+                goal_specs = [
+                    call for call in case["expected_routing"][variant]["required_tool_calls"]
+                    if call["name"] == "goal_get"
+                ]
+                self.assertEqual(1, len(goal_specs))
+                self.assertEqual((1, 1), (goal_specs[0]["min"], goal_specs[0]["max"]))
+            deferred = case["expected_routing"]["deferred"]
+            self.assertEqual("strict_separate_batch", deferred["activation_boundary"])
+            self.assertEqual(["goal_get"], deferred["expected_search_tools"])
+
+        exact = cases["ts_exact_select_goal_get"]
+        exact_args = exact["expected_routing"]["deferred"]["required_tool_calls"][0]["args"]
+        self.assertEqual({"match": "exact", "value": {}}, exact_args)
+
+    def test_full_schema_gate_is_pinned_to_one_paired_full_catalog_case(self):
+        suite = self.validate()
+        tagged = [
+            case for case in suite["cases"]
+            if "full_schema_disclosure" in case["metric_tags"]
+        ]
+        self.assertEqual(["ts_mcp_catalog_100"], [case["id"] for case in tagged])
+        self.assertEqual({"static", "deferred"}, set(tagged[0]["variants"]))
+        self.assertEqual(
+            {"metric_tag": "full_schema_disclosure"},
+            suite["hard_gates"]["first_schema_token_reduction"]["scope"],
+        )
+
+    def test_rejects_missing_unpaired_or_wrong_scope_full_schema_tag(self):
+        def missing(document):
+            case = next(
+                item for item in document["cases"] if item["id"] == "ts_mcp_catalog_100"
+            )
+            case["metric_tags"].remove("full_schema_disclosure")
+
+        with self.assertRaisesRegex(toolsearch_cases.MatrixError, "full_schema_disclosure"):
+            self.validate(missing)
+
+        def unpaired(document):
+            case = next(
+                item for item in document["cases"] if item["id"] == "ts_negative_unknown_select"
+            )
+            case["metric_tags"].append("full_schema_disclosure")
+
+        with self.assertRaisesRegex(toolsearch_cases.MatrixError, "paired variants"):
+            self.validate(unpaired)
+
+        def wrong_scope(document):
+            document["hard_gates"]["first_schema_token_reduction"]["scope"] = {
+                "metric_tag": "paired_task_pass",
+            }
+
+        with self.assertRaisesRegex(toolsearch_cases.MatrixError, "scope drifted"):
+            self.validate(wrong_scope)
+
     def test_rejects_duplicate_case_id(self):
         def mutate(document):
             duplicate = copy.deepcopy(document["cases"][0])

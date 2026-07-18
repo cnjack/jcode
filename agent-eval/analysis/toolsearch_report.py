@@ -656,15 +656,22 @@ def _evaluate_gates(matrix, case_map, records, repeats):
     if not first_visible:
         raise ReportError("schema disclosure gate has no observations")
 
+    schema_scope = specs["first_schema_token_reduction"]["scope"]
+    schema_tag = schema_scope.get("metric_tag")
+    if not isinstance(schema_tag, str) or not schema_tag:
+        raise ReportError("schema token reduction gate has no metric tag scope")
+    schema_records = _scoped(records, case_map, tag=schema_tag)
     static_tokens = []
     deferred_tokens = []
     by_pair = defaultdict(dict)
-    for item in paired:
+    for item in schema_records:
         key = (item["job"]["case_id"], item["job"]["repeat"])
         token_count = item["tool_counts"]["first_schema_tokens_estimate"]
         if token_count <= 0:
             raise ReportError("schema token evidence must be positive")
         by_pair[key][item["job"]["variant"]] = token_count
+    if not by_pair:
+        raise ReportError("schema token reduction gate has no scoped pairs")
     for pair in by_pair.values():
         if set(pair) != EXPECTED_VARIANTS:
             raise ReportError("schema metric has incomplete static/deferred pairs")

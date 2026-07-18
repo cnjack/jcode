@@ -39,8 +39,14 @@ class SyntheticCampaign:
         path.chmod(0o600)
 
     @staticmethod
-    def tool_counts(searches, variant):
-        schema_tokens = 100 if variant == "static" else 40
+    def tool_counts(searches, variant, full_schema=False):
+        if variant == "static":
+            schema_tokens = 100
+        else:
+            # Ordinary cases mirror the calibrated ~18% canary reduction.
+            # Only the representative complete 100-tool catalog is expected
+            # to meet the pinned >=50% full-feature gate.
+            schema_tokens = 40 if full_schema else 82
         visible = 24 if variant == "static" else 10
         calls = {"tool_search": searches} if searches else {}
         return {
@@ -80,7 +86,11 @@ class SyntheticCampaign:
                         deferred_calls = 1
                     elif variant == "deferred" and "negative_search" in tags:
                         searches = 1
-                    tool_counts = self.tool_counts(searches, variant)
+                    tool_counts = self.tool_counts(
+                        searches,
+                        variant,
+                        full_schema="full_schema_disclosure" in tags,
+                    )
                     routing_counts = {
                         "bypass": 0,
                         "same_batch_activation": 0,
@@ -230,6 +240,27 @@ class SyntheticCampaign:
                 break
         self.write(self.runs / "all_records.json", records)
 
+    def update_schema_tokens(self, case_id, variant, value):
+        records = json.loads((self.runs / "all_records.json").read_text())
+        for record in records:
+            if record["case_id"] != case_id or record["variant"] != variant:
+                continue
+            run_id = record["run_id"]
+            record["tool_counts"]["first_schema_tokens_estimate"] = value
+            record["tool_counts"]["max_schema_tokens_estimate"] = value
+            self.write(self.runs / run_id / "record.json", record)
+
+            trajectory_path = self.runs / run_id / "trajectory.json"
+            trajectory = json.loads(trajectory_path.read_text())
+            trajectory["tool_counts"]["first_schema_tokens_estimate"] = value
+            trajectory["tool_counts"]["max_schema_tokens_estimate"] = value
+            for session in trajectory["sessions"]:
+                for entry in session["entries"]:
+                    if entry.get("kind") == "model_request":
+                        entry["schema_tokens_estimate"] = value
+            self.write(trajectory_path, trajectory)
+        self.write(self.runs / "all_records.json", records)
+
 
 class ToolSearchReportTest(unittest.TestCase):
     def setUp(self):
@@ -268,6 +299,29 @@ class ToolSearchReportTest(unittest.TestCase):
         self.assertEqual([], toolsearch_report.scan_report(
             report, [SECRET_CANARY], [HOST_CANARY],
         ))
+
+    def test_full_schema_gate_uses_only_full_catalog_and_keeps_50_percent(self):
+        evaluation = toolsearch_report.evaluate(
+            toolsearch_cases.DEFAULT_MATRIX,
+            toolsearch_cases.DEFAULT_BASE_SUITE,
+            self.synthetic.runs,
+        )
+        summaries = {item["case_id"]: item for item in evaluation["case_summaries"]}
+        self.assertAlmostEqual(0.18, summaries["ts_exact_select_goal_get"]["schema_reduction"])
+        self.assertAlmostEqual(0.60, summaries["ts_mcp_catalog_100"]["schema_reduction"])
+        gate = next(
+            item for item in evaluation["gates"]
+            if item["name"] == "first_schema_token_reduction"
+        )
+        self.assertAlmostEqual(0.60, gate["value"])
+        self.assertEqual(0.50, gate["threshold"])
+        self.assertTrue(gate["passed"])
+
+        # A full-catalog regression cannot be rescued by ordinary cases.
+        self.synthetic.update_schema_tokens("ts_mcp_catalog_100", "deferred", 60)
+        result = self.generate()
+        self.assertFalse(result["overall_passed"])
+        self.assertFalse(result["gate_results"]["first_schema_token_reduction"])
 
     def test_synthetic_gate_failure_is_visible_and_fails_overall(self):
         run_id = "ts_exact_select_goal_get__kimi-for-coding__deferred__r1"

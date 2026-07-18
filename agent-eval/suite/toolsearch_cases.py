@@ -70,6 +70,7 @@ METRIC_TAGS = {
     "irrelevant_search",
     "mcp_distractor_accuracy",
     "schema_disclosure",
+    "full_schema_disclosure",
     "negative_search",
     "browser_routing",
     "computer_routing",
@@ -100,6 +101,12 @@ REQUIRED_HARD_GATES = {
     "paired_noninferiority": ("difference", "gte", -0.03),
     "normal_first_visible_tools": ("max", "lte", 12),
     "first_schema_token_reduction": ("ratio", "gte", 0.50),
+}
+
+REQUIRED_GATE_SCOPES = {
+    "first_schema_token_reduction": {
+        "metric_tag": "full_schema_disclosure",
+    },
 }
 
 
@@ -498,6 +505,10 @@ def _validate_case(case):
         raise MatrixError(f"case {case_id} paired variants require paired_task_pass metric tag")
     if set(variants) != VARIANTS and "paired_task_pass" in tags:
         raise MatrixError(f"case {case_id} unpaired variants cannot use paired_task_pass")
+    if "full_schema_disclosure" in tags and set(variants) != VARIANTS:
+        raise MatrixError(
+            f"case {case_id} full_schema_disclosure requires paired variants"
+        )
 
     expectations = case.get("expected_routing")
     if not isinstance(expectations, dict) or set(expectations) != set(variants):
@@ -543,6 +554,9 @@ def _validate_hard_gates(document):
         variant = gate["scope"].get("variant")
         if variant is not None and variant not in VARIANTS:
             raise MatrixError(f"hard gate {name} references unknown variant {variant!r}")
+        expected_scope = REQUIRED_GATE_SCOPES.get(name)
+        if expected_scope is not None and gate["scope"] != expected_scope:
+            raise MatrixError(f"hard gate {name} scope drifted")
 
 
 def validate_suite(document, base_suite):
@@ -584,12 +598,17 @@ def validate_suite(document, base_suite):
         "deferred_call_accuracy",
         "irrelevant_search",
         "mcp_distractor_accuracy",
+        "full_schema_disclosure",
         "negative_search",
         "browser_routing",
         "computer_routing",
     ):
         if counts[required_tag] == 0:
             raise MatrixError(f"matrix has no cases contributing to {required_tag}")
+    if counts["full_schema_disclosure"] != 1:
+        raise MatrixError(
+            "matrix must have exactly one full_schema_disclosure representative"
+        )
     return materialized
 
 

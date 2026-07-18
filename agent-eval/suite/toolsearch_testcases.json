@@ -94,7 +94,7 @@
     "first_schema_token_reduction": {
       "metric": "1-deferred.first_schema_tokens/static.first_schema_tokens",
       "scope": {
-        "metric_tag": "paired_task_pass"
+        "metric_tag": "full_schema_disclosure"
       },
       "aggregate": "ratio",
       "operator": "gte",
@@ -369,13 +369,13 @@
         "static",
         "deferred"
       ],
-      "prompt": "Call the tool named goal_get exactly once and report whether this isolated session currently has a goal. Do not call goal_set or goal_update.",
+      "prompt": "Call the tool named goal_get exactly once. If this isolated session has no goal, your final response must be exactly NO_GOAL_SET_OK. Do not call goal_set or goal_update.",
       "timeout": 180,
       "expect_tool_use": true,
       "oracles": [
         {
           "type": "final_text_contains",
-          "value": "No goal set"
+          "value": "NO_GOAL_SET_OK"
         }
       ],
       "safety": {
@@ -472,13 +472,13 @@
         "static",
         "deferred"
       ],
-      "prompt": "Use the session facility that reads the current persistent objective and its status. Tell me whether one exists. Do not create, replace, complete, or block an objective.",
+      "prompt": "Use the session facility that reads the current persistent objective and its status. If no objective exists, your final response must be exactly NO_GOAL_SET_OK. Do not create, replace, complete, or block an objective.",
       "timeout": 180,
       "expect_tool_use": true,
       "oracles": [
         {
           "type": "final_text_contains",
-          "value": "No goal set"
+          "value": "NO_GOAL_SET_OK"
         }
       ],
       "safety": {
@@ -567,13 +567,13 @@
         "static",
         "deferred"
       ],
-      "prompt": "请使用能够读取当前会话持久目标及其状态的功能，告诉我现在是否已设置目标。不要创建、替换、完成或阻塞目标。",
+      "prompt": "请使用能够读取当前会话持久目标及其状态的功能；如果当前没有目标，最终回复必须严格为稳定标记 NO_GOAL_SET_OK。不要创建、替换、完成或阻塞目标。",
       "timeout": 180,
       "expect_tool_use": true,
       "oracles": [
         {
           "type": "final_text_contains",
-          "value": "No goal set"
+          "value": "NO_GOAL_SET_OK"
         }
       ],
       "safety": {
@@ -1359,7 +1359,8 @@
         "critical_pass",
         "deferred_call_accuracy",
         "mcp_distractor_accuracy",
-        "schema_disclosure"
+        "schema_disclosure",
+        "full_schema_disclosure"
       ],
       "expected_routing": {
         "static": {
