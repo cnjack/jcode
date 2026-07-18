@@ -38,8 +38,8 @@
 | TS-04 MCP 与权限 | 完成 | `c9cb076`、`1aa128e`、`a316830`、`b1b687f`、`3b751db` | MCP、Plan、delegation 和 team mode 边界完成 |
 | TS-05 Prompt 与观测 | 进行中 | `dbe7ca4`、`69ba9ee`、`f905ae2`、`8675a5b`、`92c2f31`、`f101b18` | 使用说明、成功调用去重规则、schema/轨迹指标、凭证文件权限、Browser token 隔离及零替换发布门禁 |
 | TS-06 自动化测试 | 完成 | `77de5fc`、`92e0cb0`、`56fa6eb` | 单元、集成、fixture、routing oracle 与生命周期撤权矩阵 |
-| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e`、`8675a5b`、`d60000d`、`8c980b1`、`207b313`、`7530b38`、`92c2f31`、`ef66470`、`f101b18` | MCP100 Deferred repeat 9/10、跨类小矩阵 12/12；发布路径缺陷已修复，等待新 canary 与 formal pass@10 |
-| TS-08 30 分钟回归 | 进行中 | `9f2889e`、`8c980b1`、`b97734d`、`f101b18` | 第四次 formal 在 250/320 被发布路径门禁终止；canonical 发布与 per-run 同级门禁已修复，等待新 canary 与全新完整重跑 |
+| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e`、`8675a5b`、`d60000d`、`8c980b1`、`207b313`、`7530b38`、`92c2f31`、`ef66470`、`f101b18` | MCP100 Deferred repeat 9/10、跨类小矩阵 12/12、publication canary 20/20；等待 formal pass@10 |
+| TS-08 30 分钟回归 | 进行中 | `9f2889e`、`8c980b1`、`b97734d`、`f101b18` | 第四次 formal 发布路径缺陷已修复且 20-job canary 通过；等待从新 clean commit/新目录完整重跑 |
 | TS-09 HTML 报告 | 进行中 | `ad55a3b`、`92d442e`、`9f2889e`、`8c980b1`、`f101b18` | 安全、fail-closed 的九门槛报告器已要求 canonical tool_names 与零替换产物；等待真实 campaign 产物 |
 
 ## TS-00 文档与基线
@@ -353,6 +353,8 @@ Kimi 硬门槛：
 - 第四次 formal 安全根因：250 个 matrix record 与 7 项 supplementary 的任务阶段完成后，strong coordinator scan 在 `ts_complex_automation_weekly` Deferred r10 的 `record.tool_names` 发现一处 sandbox host path；该 run 额外调用 `read`，ACP harness 把带参数的 UI title 聚合为 `tool_names` 并由 runner 原样发布，而同 run 的 trajectory/calls_by_name 仍是安全 canonical `read`。Coordinator 已将唯一一处替换为 `$REAL_HOME` 后终止；251 份既有 redaction report 均 safe/0 finding、未发现 credential，但它们的旧 per-run forbidden-path scope 没覆盖该路径。该结果属于真实 publication contract 缺陷，不作误报豁免。下一步须让 record/tool-name 聚合只发布 canonical 名称，并让 per-run 与 coordinator 使用同等 host-path scope，补泄露 canary 后从新 clean commit/new dir 重跑。
 - 第四次 formal publication 修复：保留 ACP UI title，但 publish `record.tool_names` 的唯一来源改为 session-derived canonical `tool_counts.calls_by_name`；Web 采用同一字段合约。Coordinator 的完整 forbidden scope 现在显式传给 ACP/Web per-run，二者再覆盖 repo、runs/rundir 与 build/binary；任何 sanitizer replacement 均失败，只有零替换、零 finding 后才写 `artifact_safe=true`，post-scan 失败会撤回该标志。Campaign/report 同时拒绝 display title、合法格式但与 trajectory 漂移的工具名、总量不一致及声称 safe 却发生过 replacement 的产物。
 - 修复验证：路径/display-title/canonical MCP 名称、scope parity、replacement failure、record/trajectory/report 一致性回归均通过；Python 全量 115/115、独立 harness module、根 module 聚焦 Go、允许 loopback 的全量 Go、`py_compile`、`git diff --check` 全部通过；独立终审无 blocker。代码提交 `f101b18`。该修复只恢复 formal 的发布前提，不计 TS-07.7、TS-08 或 TS-09；下一步必须从记录本证据后的 clean commit、全新 repo-external 目录先做 exact-Kimi 定向 canary，再完整重跑 320 jobs。
+- Canonical publication exact-Kimi canary（非正式）：从 clean commit `2793be575b5f890cf761ed6b12d212ad97959d67`、全新目录启动；固定 `kimi-for-coding/kimi-for-coding`、`temperature=omitted`、`workers=1`、`jcode_eval`，JCode SHA-256 `ae469351424a7641379f745e6eef8ac7dae76a759966967e903e42b00e205860`。复杂 automation static/deferred 各 10 repeats，共 20/20 task/contracts/artifact-safe PASS；起止 `2026-07-18T22:28:04.687735Z`～`22:30:05.356244Z`，monotonic 120.669s。
+- Canary 路由/发布细节：10 个 Deferred 均为 search=1、target=1、success=1，bypass=0、same-batch=0，首轮最多 11 tools。static r8 真实出现额外 `execute` 后再调用 `automation_create`，其 record/trajectory 均只发布 canonical `execute:1 + automation_create:1`，20 条 `tool_names == calls_by_name`，未发布 ACP command/title。20 份 redaction report 全部 safe、0 finding、0 redacted file、0 replacement；结果目录仅有 plan/campaign/index/all_records 与每 run 三件套，已验证不含 repo/run 绝对路径。脱敏目录：`/private/tmp/jcode-toolsearch-publication-canary-2793be5`。该结果只放行全新 formal，不计 TS-07.7、TS-08 或 TS-09。
 - 测试：campaign 定向 10/10、修复后定向 23/23、agent-eval Python 全量 90/90、fake formal 可被真实报告器解析且仅 1800 秒 gate 按预期失败；`py_compile`、diff check 通过。
 - 已完成提交：`9f2889e test(eval): coordinate formal ToolSearch campaign`（仅基础设施；TS-08.1～08.6 均未勾选）。
 
@@ -436,3 +438,4 @@ Kimi 硬门槛：
 | 2026-07-18 | Empty-search 修复后两个 negative case exact-Kimi 各 10 次严格全通过，可重启 full formal | 20/20；success/empty=20、failed=0、query 10/10、bypass/same-batch/target=0、redaction safe | — |
 | 2026-07-18 | 第四次 formal 在 250/320、1935.949s 时由 coordinator artifact gate fail closed：发布 `tool_names` 含一处 sandbox path | 245 PASS/5 task FAIL、7 supplementary PASS；路径已替换，未发现 credential；不计 TS-08 | — |
 | 2026-07-18 | 修复 formal publication：仅发布 canonical tool_names，ACP/Web per-run 继承 coordinator 全 scope，零替换后才可标记 safe，campaign/report 双重校验 | Python 115/115、独立 harness、聚焦与全量 Go、py_compile、diff check、独立终审通过 | `f101b18` |
+| 2026-07-18 | Canonical publication exact-Kimi 定向 canary 全通过，可进入全新 full formal | 20/20；Deferred search/target 10/10、bypass/same-batch=0；extra execute 仍仅发布 canonical 名；redaction 20/20 零替换 | — |
