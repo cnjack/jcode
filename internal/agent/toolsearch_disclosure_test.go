@@ -146,6 +146,18 @@ func TestRewriteToolSearchExactNameListIsStrictAndPreservesOtherArguments(t *tes
 			ok:    true,
 		},
 		{
+			name:  "one guessed identifier is dropped after two canonical names",
+			input: `{"query":"computer_open,computer_snapshot,computer_click"}`,
+			want:  `{"query":"select:computer_open,computer_snapshot"}`,
+			ok:    true,
+		},
+		{
+			name:  "cross-group MCP and builtin anchors survive one hidden-like unknown",
+			input: `{"query":"mcp__fixture__one,computer_open,hidden_tool"}`,
+			want:  `{"query":"select:mcp__fixture__one,computer_open"}`,
+			ok:    true,
+		},
+		{
 			name:  "escaped comma is replaced at byte-accurate JSON offsets",
 			input: `{"query":"computer_open\u002ccomputer_snapshot"}`,
 			want:  `{"query":"select:computer_open,computer_snapshot"}`,
@@ -163,6 +175,10 @@ func TestRewriteToolSearchExactNameListIsStrictAndPreservesOtherArguments(t *tes
 		{name: "empty item", input: `{"query":"computer_open,,computer_snapshot"}`},
 		{name: "duplicate", input: `{"query":"computer_open, computer_open"}`},
 		{name: "unknown name", input: `{"query":"computer_open,not_a_tool"}`},
+		{name: "two unknown names", input: `{"query":"computer_open,computer_snapshot,unknown_one,unknown_two"}`},
+		{name: "unknown with internal space", input: `{"query":"computer_open,computer_snapshot,not a tool"}`},
+		{name: "unknown with unsafe punctuation", input: `{"query":"computer_open,computer_snapshot,../computer_click"}`},
+		{name: "duplicate unknown", input: `{"query":"computer_open,computer_snapshot,computer_click,computer_click"}`},
 		{name: "ordinary semantic query", input: `{"query":"open browser, take snapshot"}`},
 		{name: "Chinese comma", input: `{"query":"computer_open，computer_snapshot"}`},
 		{name: "unknown JSON field fails closed", input: `{"query":"computer_open,computer_snapshot","future":true}`},
@@ -214,6 +230,14 @@ func TestToolSearchExactNameListWrapperChangesOnlyRealEndpointArguments(t *testi
 	}
 	if result != `{"matches":["computer_open","computer_snapshot"]}` {
 		t.Fatalf("real endpoint result = %q", result)
+	}
+
+	nearExactArgs := `{"query":"computer_open,computer_snapshot,computer_click"}`
+	if _, err = wrapped(context.Background(), nearExactArgs); err != nil {
+		t.Fatalf("near-exact endpoint error = %v", err)
+	}
+	if want := `{"query":"select:computer_open,computer_snapshot"}`; endpointArgs != want {
+		t.Fatalf("near-exact endpoint arguments = %q, want %q", endpointArgs, want)
 	}
 
 	unknownFieldArgs := `{"query":"computer_open,computer_snapshot","future":true}`
@@ -347,13 +371,13 @@ func TestToolSearchExactNameListFeedsHistoryWhileObservationSeesOriginal(t *test
 	}
 }
 
-func TestToolSearchExactNameListThenDisclosureGroupLoadsEffectivePeers(t *testing.T) {
+func TestToolSearchNearExactNameListThenDisclosureGroupLoadsEffectivePeers(t *testing.T) {
 	direct := &agentToolSearchTestTool{name: "read"}
 	browserOpen := &agentToolSearchTestTool{name: "browser_open"}
 	browserSnapshot := &agentToolSearchTestTool{name: "browser_snapshot"}
 	browserAct := &agentToolSearchTestTool{name: "browser_act"}
 	browserRead := &agentToolSearchTestTool{name: "browser_read"}
-	searchArgs := `{"query":"browser_open, browser_snapshot","max_results":1}`
+	searchArgs := `{"query":"browser_open,browser_snapshot,browser_click","max_results":1}`
 	model := &agentToolSearchScriptModel{responses: []*schema.Message{
 		toolCallMessage("search-browser-list", ToolSearchReservedName, searchArgs),
 		schema.AssistantMessage("whole group visible", nil),
@@ -367,7 +391,10 @@ func TestToolSearchExactNameListThenDisclosureGroupLoadsEffectivePeers(t *testin
 			groupedAgentToolSearchDescriptor(browserRead, "browser.workflow"),
 		},
 	}
-	ag, err := NewAgentWithToolPlan(context.Background(), model, plan, "test", nil, nil, nil)
+	approvals := &agentToolSearchApprovalRecorder{}
+	ag, err := NewAgentWithToolPlan(
+		context.Background(), model, plan, "test", approvals.approve, nil, nil,
+	)
 	if err != nil {
 		t.Fatalf("NewAgentWithToolPlan() error = %v", err)
 	}
@@ -401,13 +428,22 @@ func TestToolSearchExactNameListThenDisclosureGroupLoadsEffectivePeers(t *testin
 			break
 		}
 	}
-	originalQuery := "browser_open, browser_snapshot"
+	originalQuery := "browser_open,browser_snapshot,browser_click"
 	if searchObservation == nil || searchObservation.QueryMode != "keyword" ||
 		searchObservation.QueryBytes != len(originalQuery) || searchObservation.MaxResults != 1 ||
+		searchObservation.RepeatedQuery || searchObservation.Redundant ||
 		len(searchObservation.ValidatedSelectNames) != 0 ||
 		strings.Join(searchObservation.MatchNames, ",") != "browser_act,browser_open,browser_read,browser_snapshot" ||
 		strings.Join(searchObservation.NewMatchNames, ",") != "browser_act,browser_open,browser_read,browser_snapshot" {
 		t.Fatalf("grouped exact-list observation = %#v", searchObservation)
+	}
+
+	wantApprovals := []agentToolSearchApprovalCall{{
+		name: ToolSearchReservedName,
+		args: `{"query":"select:browser_open,browser_snapshot","max_results":1}`,
+	}}
+	if got := approvals.snapshot(); !reflect.DeepEqual(got, wantApprovals) {
+		t.Fatalf("approval calls = %#v, want repaired near-exact arguments %#v", got, wantApprovals)
 	}
 }
 

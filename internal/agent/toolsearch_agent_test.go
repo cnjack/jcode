@@ -236,7 +236,10 @@ func TestToolSearchGuidanceIsConditionalAndOwnedByEinoSchema(t *testing.T) {
 		for _, want := range []string{
 			"may be deferred when its schema is not attached",
 			"before substituting execute",
-			"use select:<tool_name>",
+			"system-provided <available-deferred-tools> block",
+			"make a single select:<tool_name> call for that discovery step using only those known names",
+			"do not guess names",
+			"short space-separated capability keyword",
 			"separate tool-call batch",
 			"Use a legitimate already-attached alternative when appropriate",
 		} {

@@ -14,7 +14,7 @@ import (
 
 const deferredToolBatchInstruction = `When tool_search is available:
 - A purpose-built capability required by the user's task or an applicable loaded skill may be deferred when its schema is not attached. Search for it before substituting execute or another generic tool.
-- If the user or an applicable loaded skill gives exact tool names, use select:<tool_name> (comma-separate a small related set); otherwise use a short capability keyword.
+- Names inside the system-provided <available-deferred-tools> block are exact catalog candidates, not attached schemas. If suitable exact names appear there or are supplied by the user or an applicable loaded skill, make a single select:<tool_name> call for that discovery step using only those known names (comma-separate a small related set); do not guess names or send an exact-name comma list without select:. Otherwise use a short space-separated capability keyword.
 - Call tool_search in a separate tool-call batch and wait for its result before calling any newly loaded target tool. If search returns no match, do not repeat the same search or imitate the missing capability with a shell/UI workaround. Use a legitimate already-attached alternative when appropriate; otherwise report the capability as unavailable.`
 
 // NewAgentWithToolPlan creates a ChatModelAgent from a validated exposure plan.

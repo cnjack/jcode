@@ -101,6 +101,10 @@ const (
 	// Eight covers the largest built-in Browser/Computer capability family
 	// while keeping malformed catalog-wide comma lists fail closed.
 	maxToolSearchExactListNames = 8
+	// One guessed identifier is tolerated only when the model also supplied at
+	// least two exact effective names. It is dropped rather than treated as an
+	// alias, matching Eino select's result without widening the catalog.
+	maxToolSearchExactListUnknownNames = 1
 )
 
 // toolSearchExactListMiddleware handles a narrow client ToolSearch formatting
@@ -150,13 +154,19 @@ func (m *toolSearchExactListMiddleware) WrapInvokableToolCall(
 	}, nil
 }
 
-// rewriteToolSearchExactNameList returns ok only for an unambiguous list of
-// two through five distinct, canonical names in the current effective Deferred
-// catalog. The max_results field is retained byte-for-byte, but Eino deliberately
-// ignores it in direct-selection mode; the eight-name compatibility ceiling is
-// therefore the hard disclosure bound here. Unknown JSON fields, duplicate fields,
-// malformed JSON, invalid max_results values, semantic queries, aliases, and
-// out-of-range lists are passed to Eino unchanged (fail closed).
+// rewriteToolSearchExactNameList returns ok only for an unambiguous list of two
+// through eight distinct identifiers containing at least two canonical names in
+// the current effective Deferred catalog. At most one syntactically tool-like
+// unknown may be present; it is discarded, never mapped to an alias. This mirrors
+// Eino's explicit select semantics (unknown names are ignored) while feeding only
+// exact effective names from the model-issued list into select. Any later group
+// expansion remains plan-gated, and target approval is unchanged.
+//
+// The max_results field is retained byte-for-byte, but Eino deliberately ignores
+// it in direct-selection mode; the eight-name compatibility ceiling is therefore
+// the hard disclosure bound here. Unknown JSON fields, duplicate fields, malformed
+// JSON, invalid max_results values, semantic queries, unsafe unknown identifiers,
+// and out-of-range lists are passed to Eino unchanged (fail closed).
 func rewriteToolSearchExactNameList(arguments string, deferred map[string]bool) (rewritten string, ok bool) {
 	query, start, end, parsed := parseToolSearchExactListEnvelope(arguments)
 	if !parsed || strings.HasPrefix(strings.TrimSpace(query), "select:") {
@@ -167,15 +177,29 @@ func rewriteToolSearchExactNameList(arguments string, deferred map[string]bool) 
 	if len(parts) < minToolSearchExactListNames || len(parts) > maxToolSearchExactListNames {
 		return "", false
 	}
-	names := make([]string, len(parts))
+	names := make([]string, 0, len(parts))
 	seen := make(map[string]bool, len(parts))
-	for i, part := range parts {
+	unknownCount := 0
+	for _, part := range parts {
 		name := strings.TrimSpace(part)
-		if name == "" || !deferred[name] || seen[name] {
+		if name == "" || seen[name] {
 			return "", false
 		}
 		seen[name] = true
-		names[i] = name
+		if deferred[name] {
+			names = append(names, name)
+			continue
+		}
+		if !isToolSearchUnknownIdentifier(name) {
+			return "", false
+		}
+		unknownCount++
+		if unknownCount > maxToolSearchExactListUnknownNames {
+			return "", false
+		}
+	}
+	if len(names) < minToolSearchExactListNames {
+		return "", false
 	}
 
 	encoded, err := json.Marshal("select:" + strings.Join(names, ","))
@@ -183,6 +207,18 @@ func rewriteToolSearchExactNameList(arguments string, deferred map[string]bool) 
 		return "", false
 	}
 	return arguments[:start] + string(encoded) + arguments[end:], true
+}
+
+func isToolSearchUnknownIdentifier(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if !isToolNameByte(name[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func parseToolSearchExactListEnvelope(arguments string) (query string, start, end int, ok bool) {
