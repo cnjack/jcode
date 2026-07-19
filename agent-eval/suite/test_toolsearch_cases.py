@@ -1,6 +1,7 @@
 import copy
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -9,6 +10,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import toolsearch_cases
+import verify
 
 
 class ToolSearchCaseMatrixTest(unittest.TestCase):
@@ -93,12 +95,53 @@ class ToolSearchCaseMatrixTest(unittest.TestCase):
         fixture = computer["home_fixtures"][".jcode/computer/fixture.json"]
         self.assertIn("com.apple.Notes", fixture)
         self.assertTrue(any(oracle["type"] == "home_file_contains" for oracle in computer["oracles"]))
+        self.assertIn(
+            {
+                "type": "home_file_contains",
+                "glob": ".jcode/computer/actions.jsonl",
+                "value": '"action":"click","bundle_id":"com.apple.Notes","uid":"e1"',
+            },
+            computer["oracles"],
+        )
+        self.assertIn(
+            {
+                "type": "home_grep_absent",
+                "root_glob": ".jcode/computer/actions.jsonl",
+                "pattern": r"\n\s*\{",
+            },
+            computer["oracles"],
+        )
         self.assertEqual("acp", computer["surface"])
+        prompt = computer["prompt"]
+        for required in (
+            "complete these exact steps in order",
+            "exactly once",
+            "Do not finish before the click reports success",
+            "stop using tools immediately",
+            "do not inspect or click again",
+        ):
+            self.assertIn(required, prompt)
+        for coached_name in (
+            "tool_search",
+            "select:",
+            "computer_open",
+            "computer_snapshot",
+            "computer_act",
+        ):
+            self.assertNotIn(coached_name, prompt)
         for variant in ("static", "deferred"):
+            expectation = computer["expected_routing"][variant]
             self.assertIn(
                 "execute",
-                computer["expected_routing"][variant]["forbidden_tool_calls"],
+                expectation["forbidden_tool_calls"],
             )
+            required_counts = {
+                call["name"]: (call["min"], call["max"])
+                for call in expectation["required_tool_calls"]
+            }
+            self.assertEqual((1, 1), required_counts["computer_open"])
+            self.assertEqual((1, 1), required_counts["computer_act"])
+            self.assertEqual(1, expectation["required_call_order"].count("computer_act"))
         self.assertEqual(
             {"min": 1, "max": 1},
             computer["expected_routing"]["deferred"]["search_calls"],
@@ -125,6 +168,43 @@ class ToolSearchCaseMatrixTest(unittest.TestCase):
         self.assertIn("{BROWSER_FIXTURE_URL}", browser["prompt"])
         self.assertNotRegex(json.dumps(browser), r"https?://")
         self.assertFalse(self.raw["runner_contract"]["browser_on_acp"])
+
+    def test_computer_artifact_oracles_require_one_uid_click(self):
+        computer = {case["id"]: case for case in self.validate()["cases"]}[
+            "ts_computer_notes_click"
+        ]
+        uid_click = next(
+            oracle for oracle in computer["oracles"]
+            if oracle.get("value")
+            == '"action":"click","bundle_id":"com.apple.Notes","uid":"e1"'
+        )
+        only_one_action = next(
+            oracle for oracle in computer["oracles"]
+            if oracle.get("pattern") == r"\n\s*\{"
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            journal = home / ".jcode" / "computer" / "actions.jsonl"
+            journal.parent.mkdir(parents=True)
+            context = {"sandbox": str(home), "home": str(home), "result": {}}
+            one_click = (
+                '{"action":"click","bundle_id":"com.apple.Notes","uid":"e1"}\n'
+            )
+
+            journal.write_text(one_click)
+            self.assertTrue(verify.check_oracle(uid_click, computer, context)[0])
+            self.assertTrue(verify.check_oracle(only_one_action, computer, context)[0])
+
+            journal.write_text(one_click + one_click)
+            self.assertTrue(verify.check_oracle(uid_click, computer, context)[0])
+            self.assertFalse(verify.check_oracle(only_one_action, computer, context)[0])
+
+            journal.write_text(
+                '{"action":"click","bundle_id":"com.apple.Notes","x":10,"y":20}\n'
+            )
+            self.assertFalse(verify.check_oracle(uid_click, computer, context)[0])
+            self.assertTrue(verify.check_oracle(only_one_action, computer, context)[0])
 
     def test_browser_expectations_cover_every_driver_tool_and_activation(self):
         browser = {

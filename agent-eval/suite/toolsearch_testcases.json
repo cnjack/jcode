@@ -1605,7 +1605,7 @@
         "static",
         "deferred"
       ],
-      "prompt": "Using the deterministic native-computer fixture, open Notes (com.apple.Notes), inspect its current UI, and click the New Note button using its current uid. Browser tools are intentionally unavailable on this ACP surface.",
+      "prompt": "Using the deterministic native-computer fixture, complete these exact steps in order: (1) open Notes (com.apple.Notes) once; (2) inspect the current UI returned by opening it; (3) click the New Note button exactly once using its current uid. Do not finish before the click reports success. Once it succeeds, stop using tools immediately and briefly report completion; do not inspect or click again. Browser tools are intentionally unavailable on this ACP surface.",
       "timeout": 300,
       "expect_tool_use": true,
       "safety": {
