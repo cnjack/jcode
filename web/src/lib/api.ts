@@ -370,6 +370,106 @@ export const api = {
   approvalReviewConfig: () => request<ApprovalReviewConfigResponse>('/api/approval-review-config'),
   setApprovalReviewConfig: (data: ApprovalReviewConfig) =>
     request<{ status: string }>('/api/approval-review-config', { method: 'POST', body: JSON.stringify(data) }),
+
+  // Progressive tool disclosure
+  toolSearchStatus: () => request<ToolSearchStatusResponse>('/api/tool-search/status'),
+  toolSearchConfig: (data: ToolSearchConfig) =>
+    request<ToolSearchConfigResponse>('/api/tool-search/config', { method: 'POST', body: JSON.stringify(data) }),
+
+  // Project memory and background consolidation (Dream)
+  memoryStatus: () => request<MemoryStatusResponse>('/api/memory/status'),
+  memoryConfig: (data: MemoryConfig) =>
+    request<MemoryConfigResponse>('/api/memory/config', { method: 'POST', body: JSON.stringify(data) }),
+  memorySync: (project: string) =>
+    request<MemoryActionResponse>('/api/memory/sync', { method: 'POST', body: JSON.stringify({ project }) }),
+  memoryClear: (project: string) =>
+    request<MemoryActionResponse>(`/api/memory?scope=project&project=${encodeURIComponent(project)}`, { method: 'DELETE' }),
+}
+
+export interface ToolSearchConfig {
+  enabled: boolean
+}
+
+export interface ToolSearchStatusResponse {
+  available?: boolean
+  supported?: boolean
+  enabled: boolean
+  direct_count?: number
+  deferred_count?: number
+  mcp_deferred_count?: number
+  refresh_warning?: string
+  warning?: string
+}
+
+export interface ToolSearchConfigResponse extends ToolSearchStatusResponse {
+  status?: string
+  warning_code?: string
+}
+
+export interface MemoryConfig {
+  enabled: boolean
+  generate: boolean
+  /** Empty follows the main chat model. */
+  model?: string
+  daily_token_budget: number
+  cooldown_hours: number
+  max_age_days: number
+  max_unused_days: number
+  phase2_top_n: number
+  summary_inject_tokens: number
+}
+
+export interface MemoryStatusResponse {
+  available?: boolean
+  supported?: boolean
+  remote?: boolean
+  reason?: string
+  error?: string
+  config?: Partial<MemoryConfig>
+  enabled?: boolean
+  generate?: boolean
+  /** Effective pipeline state after applying the master memory switch. */
+  effective_generate?: boolean
+  model?: string
+  project?: string
+  project_root?: string
+  memory_path?: string
+  running?: boolean
+  busy?: boolean
+  today_tokens?: number
+  daily_token_budget?: number
+  notes_count?: number
+  inbox_count?: number
+  tracked_files?: number
+  extracted_count?: number
+  failed_count?: number
+  summary_size?: number
+  summary_bytes?: number
+  summary_exists?: boolean
+  summary_modified_at?: string
+  last_pipeline_at?: string
+  last_consolidation_at?: string
+  last_consolidation?: string
+  last_consolidation_noop?: boolean
+  last_consolidation_decisions?: Record<string, number>
+  warning?: string
+}
+
+export interface MemoryConfigResponse {
+  status?: string
+  config?: Partial<MemoryConfig>
+  warning?: string
+  warning_code?: string
+}
+
+export interface MemoryActionResponse {
+  status?: string
+  scope?: string
+  running?: boolean
+  busy?: boolean
+  message?: string
+  warning?: string
+  warning_code?: string
 }
 
 export interface BrowserSitePermission {

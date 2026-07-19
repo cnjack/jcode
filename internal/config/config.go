@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -168,8 +169,8 @@ type SubagentConfig struct {
 // their default is true.
 type MemoryConfig struct {
 	Enabled *bool `json:"enabled,omitempty"` // default true; false disables read+write
-	// Generate gates the offline distillation pipeline (M2+); false keeps the
-	// system a read-only/manual notebook.
+	// Generate gates only the offline distillation pipeline (M2+). When false,
+	// reading/injection and memory_note inbox writes remain available.
 	Generate *bool `json:"generate,omitempty"` // default true
 	// Model for pipeline extraction, "provider/model". Empty → main Model.
 	// Deliberately not routed through SmallModel: distilled memories persist
@@ -185,12 +186,86 @@ type MemoryConfig struct {
 	SummaryInjectTokens int `json:"summary_inject_tokens,omitempty"` // default 1200
 }
 
+// memoryMu guards publication of Config.Memory. Settings handlers replace the
+// complete block rather than mutating it in place, and readers take a detached
+// copy so background work cannot retain a pointer into the live configuration.
+// It is package-level because Config is copied by value in a few places.
+var memoryMu sync.RWMutex
+
+func cloneBool(v *bool) *bool {
+	if v == nil {
+		return nil
+	}
+	copy := *v
+	return &copy
+}
+
+func cloneMemoryConfig(mc *MemoryConfig) *MemoryConfig {
+	if mc == nil {
+		return nil
+	}
+	copy := *mc
+	copy.Enabled = cloneBool(mc.Enabled)
+	copy.Generate = cloneBool(mc.Generate)
+	return &copy
+}
+
+// MemorySettings returns a detached snapshot of the memory settings. A zero
+// value represents an absent block and is interpreted by the helpers below
+// using the documented defaults.
+func (c *Config) MemorySettings() MemoryConfig {
+	memoryMu.RLock()
+	defer memoryMu.RUnlock()
+	if c == nil || c.Memory == nil {
+		return MemoryConfig{}
+	}
+	return *cloneMemoryConfig(c.Memory)
+}
+
+// MemoryConfigSnapshot returns a detached copy of the stored block while
+// preserving the distinction between an absent block and an explicit empty
+// block. Settings handlers use it for exact rollback when persistence fails.
+func (c *Config) MemoryConfigSnapshot() *MemoryConfig {
+	memoryMu.RLock()
+	defer memoryMu.RUnlock()
+	if c == nil {
+		return nil
+	}
+	return cloneMemoryConfig(c.Memory)
+}
+
+// SetMemory atomically publishes a detached copy of mc. Callers may safely
+// reuse or mutate mc after this method returns. Passing nil removes the block.
+func (c *Config) SetMemory(mc *MemoryConfig) {
+	if c == nil {
+		return
+	}
+	memoryMu.Lock()
+	defer memoryMu.Unlock()
+	c.Memory = cloneMemoryConfig(mc)
+}
+
+// MemoryPipelineSnapshot returns a Config copy whose Memory block is detached
+// from the live settings. A pipeline run may retain this snapshot for its whole
+// lifetime without racing a Settings update or observing a half-updated block.
+func (c *Config) MemoryPipelineSnapshot() *Config {
+	if c == nil {
+		return nil
+	}
+	memoryMu.RLock()
+	defer memoryMu.RUnlock()
+	copy := *c
+	copy.Memory = cloneMemoryConfig(c.Memory)
+	return &copy
+}
+
 // MemoryEnabled reports whether the memory system is on (default true).
 func MemoryEnabled(c *Config) bool {
-	if c == nil || c.Memory == nil || c.Memory.Enabled == nil {
+	mc := c.MemorySettings()
+	if mc.Enabled == nil {
 		return true
 	}
-	return *c.Memory.Enabled
+	return *mc.Enabled
 }
 
 // MemoryGenerate reports whether the distillation pipeline may run (default true).
@@ -198,56 +273,64 @@ func MemoryGenerate(c *Config) bool {
 	if !MemoryEnabled(c) {
 		return false
 	}
-	if c == nil || c.Memory == nil || c.Memory.Generate == nil {
+	return MemoryGenerateSetting(c)
+}
+
+// MemoryGenerateSetting reports the stored auto-distillation preference
+// independently of the master Memory switch. Settings UIs must use this value
+// so temporarily disabling Memory does not erase the user's Dream preference.
+func MemoryGenerateSetting(c *Config) bool {
+	mc := c.MemorySettings()
+	if mc.Generate == nil {
 		return true
 	}
-	return *c.Memory.Generate
+	return *mc.Generate
 }
 
 // MemorySummaryInjectTokens returns the summary injection cap (default 1200).
 func MemorySummaryInjectTokens(c *Config) int {
-	if c != nil && c.Memory != nil && c.Memory.SummaryInjectTokens > 0 {
-		return c.Memory.SummaryInjectTokens
+	if n := c.MemorySettings().SummaryInjectTokens; n > 0 {
+		return n
 	}
 	return 1200
 }
 
 // MemoryDailyTokenBudget returns the pipeline daily token budget (default 300k).
 func MemoryDailyTokenBudget(c *Config) int {
-	if c != nil && c.Memory != nil && c.Memory.DailyTokenBudget > 0 {
-		return c.Memory.DailyTokenBudget
+	if n := c.MemorySettings().DailyTokenBudget; n > 0 {
+		return n
 	}
 	return 300000
 }
 
 // MemoryCooldownHours returns the pipeline cooldown (default 6).
 func MemoryCooldownHours(c *Config) int {
-	if c != nil && c.Memory != nil && c.Memory.CooldownHours > 0 {
-		return c.Memory.CooldownHours
+	if n := c.MemorySettings().CooldownHours; n > 0 {
+		return n
 	}
 	return 6
 }
 
 // MemoryMaxAgeDays returns the extraction window (default 30).
 func MemoryMaxAgeDays(c *Config) int {
-	if c != nil && c.Memory != nil && c.Memory.MaxAgeDays > 0 {
-		return c.Memory.MaxAgeDays
+	if n := c.MemorySettings().MaxAgeDays; n > 0 {
+		return n
 	}
 	return 30
 }
 
 // MemoryMaxUnusedDays returns the unused-expiry window (default 45).
 func MemoryMaxUnusedDays(c *Config) int {
-	if c != nil && c.Memory != nil && c.Memory.MaxUnusedDays > 0 {
-		return c.Memory.MaxUnusedDays
+	if n := c.MemorySettings().MaxUnusedDays; n > 0 {
+		return n
 	}
 	return 45
 }
 
 // MemoryPhase2TopN returns the consolidation input cap (default 40).
 func MemoryPhase2TopN(c *Config) int {
-	if c != nil && c.Memory != nil && c.Memory.Phase2TopN > 0 {
-		return c.Memory.Phase2TopN
+	if n := c.MemorySettings().Phase2TopN; n > 0 {
+		return n
 	}
 	return 40
 }
@@ -393,10 +476,58 @@ type ToolSearchConfig struct {
 	Enabled *bool `json:"enabled,omitempty"`
 }
 
+// toolSearchMu guards publication of Config.ToolSearch. As with Memory, the
+// block is swapped atomically and snapshots never expose the live pointer.
+var toolSearchMu sync.RWMutex
+
+func cloneToolSearchConfig(tc *ToolSearchConfig) *ToolSearchConfig {
+	if tc == nil {
+		return nil
+	}
+	copy := *tc
+	copy.Enabled = cloneBool(tc.Enabled)
+	return &copy
+}
+
+// ToolSearchSettings returns a detached settings snapshot. Its zero value is
+// the disabled-by-default configuration.
+func (c *Config) ToolSearchSettings() ToolSearchConfig {
+	toolSearchMu.RLock()
+	defer toolSearchMu.RUnlock()
+	if c == nil || c.ToolSearch == nil {
+		return ToolSearchConfig{}
+	}
+	return *cloneToolSearchConfig(c.ToolSearch)
+}
+
+// ToolSearchConfigSnapshot returns a detached copy of the stored block while
+// preserving nil. This lets a failed Settings save restore the exact prior
+// representation rather than replacing an absent block with an empty one.
+func (c *Config) ToolSearchConfigSnapshot() *ToolSearchConfig {
+	toolSearchMu.RLock()
+	defer toolSearchMu.RUnlock()
+	if c == nil {
+		return nil
+	}
+	return cloneToolSearchConfig(c.ToolSearch)
+}
+
+// SetToolSearch atomically publishes a detached copy of tc. Passing nil removes
+// the block and restores the disabled default.
+func (c *Config) SetToolSearch(tc *ToolSearchConfig) {
+	if c == nil {
+		return
+	}
+	toolSearchMu.Lock()
+	defer toolSearchMu.Unlock()
+	c.ToolSearch = cloneToolSearchConfig(tc)
+}
+
 // ToolSearchEnabled reports whether progressive tool disclosure is enabled.
 // It is disabled by default, including for absent config blocks and nil values.
 func ToolSearchEnabled(c *Config) bool {
-	return c != nil && c.ToolSearch != nil && c.ToolSearch.Enabled != nil && *c.ToolSearch.Enabled
+	tc := c.ToolSearchSettings()
+	return tc.Enabled != nil && *tc.Enabled
 }
 
 // BrowserConfig controls the browser-use capability. Browser use is opt-in:
@@ -710,6 +841,15 @@ func containsSlash(s string) bool {
 
 // SaveConfig writes the config to $HOME/.jcode/config.json.
 func SaveConfig(cfg *Config) error {
+	return saveConfig(cfg, os.Rename)
+}
+
+// saveConfig writes through an owner-only temporary file in the destination
+// directory, then atomically replaces config.json. Keeping the temporary file
+// beside the destination makes the final rename stay on one filesystem. The
+// rename function is a parameter so failure handling can be tested without
+// relying on platform-specific permission behavior.
+func saveConfig(cfg *Config, rename func(string, string) error) error {
 	cfgPath, err := configFilePath()
 	if err != nil {
 		return fmt.Errorf("config file path error: %w", err)
@@ -731,18 +871,41 @@ func SaveConfig(cfg *Config) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	// os.WriteFile does not change an existing file's mode. Tighten a legacy
-	// permissive config before truncating it so secrets are never rewritten
-	// while still group/world-readable.
-	if err := os.Chmod(cfgPath, 0o600); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to secure config file %s: %w", cfgPath, err)
+	tmp, err := os.CreateTemp(dir, "."+configFile+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary config file in %s: %w", dir, err)
 	}
-	if err := os.WriteFile(cfgPath, data, 0o600); err != nil {
-		return fmt.Errorf("failed to write config file %s: %w", cfgPath, err)
+	tmpPath := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		if tmpPath != "" {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	// CreateTemp currently creates 0600 files, but set the mode explicitly so
+	// the security invariant does not depend on that implementation detail.
+	if err := tmp.Chmod(0o600); err != nil {
+		return fmt.Errorf("failed to secure temporary config file %s: %w", tmpPath, err)
 	}
-	if err := os.Chmod(cfgPath, 0o600); err != nil {
-		return fmt.Errorf("failed to secure config file %s: %w", cfgPath, err)
+	if n, err := tmp.Write(data); err != nil {
+		return fmt.Errorf("failed to write temporary config file %s: %w", tmpPath, err)
+	} else if n != len(data) {
+		return fmt.Errorf("failed to write temporary config file %s: %w", tmpPath, io.ErrShortWrite)
 	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("failed to sync temporary config file %s: %w", tmpPath, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("failed to close temporary config file %s: %w", tmpPath, err)
+	}
+	if err := rename(tmpPath, cfgPath); err != nil {
+		return fmt.Errorf("failed to replace config file %s: %w", cfgPath, err)
+	}
+	// The path now owns the temporary file. Disable deferred removal; there are
+	// no fallible operations after the commit point, so an error always leaves
+	// the previous config intact.
+	tmpPath = ""
 
 	return nil
 }

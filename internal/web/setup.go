@@ -202,6 +202,12 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Serialize the complete load/merge/save/publish transaction with every
+	// Settings writer. In setup mode the on-disk config may not yet pass normal
+	// validation, so fall back to a detached copy of the live config rather than
+	// dropping settings that were saved before the first provider.
+	s.cfgMu.Lock()
+
 	// Resolve the active model. An explicit model always wins; otherwise try to
 	// auto-pick a default for registry providers. Custom providers (not in the
 	// registry) cannot infer a model and require one from the caller.
@@ -209,6 +215,7 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	isCustom := s.registry == nil || !s.registry.HasProvider(req.Provider)
 	if resolvedModel == "" {
 		if isCustom {
+			s.cfgMu.Unlock()
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "model is required for custom providers"})
 			return
 		}
@@ -217,6 +224,7 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if resolvedModel == "" {
+		s.cfgMu.Unlock()
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no default model available for this provider; please choose one"})
 		return
 	}
@@ -225,10 +233,15 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	var cfg *config.Config
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		// First time — create fresh config.
-		cfg = &config.Config{
-			MaxIterations: 1000,
+		cfg, err = cloneConfigForSetup(s.cfg)
+		if err != nil {
+			s.cfgMu.Unlock()
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to prepare config: " + err.Error()})
+			return
 		}
+	}
+	if cfg.MaxIterations <= 0 {
+		cfg.MaxIterations = 1000
 	}
 
 	if cfg.Providers == nil {
@@ -258,9 +271,15 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	cfg.Model = req.Provider + "/" + resolvedModel
 
 	if err := config.SaveConfig(cfg); err != nil {
+		s.cfgMu.Unlock()
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config: " + err.Error()})
 		return
 	}
+	// Publish at the same commit point as the disk write so a concurrent Settings
+	// request cannot save against an obsolete config pointer.
+	s.cfg = cfg
+	s.registry = model.NewModelRegistryWithConfig(cfg)
+	s.cfgMu.Unlock()
 
 	// Create the foreground task's agent with the new config.
 	eng := s.activeEngine()
@@ -268,19 +287,15 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "no active task to configure"})
 		return
 	}
+	eng.rebuildMu.Lock()
 	ag, err := eng.createAgent(req.Provider, resolvedModel)
 	if err != nil {
+		eng.rebuildMu.Unlock()
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create agent: " + err.Error()})
 		return
 	}
 	eng.applyModelSwitch(ag, req.Provider, resolvedModel)
-	// Publish the new config + registry to the live server so endpoints
-	// (/api/models, context-limit, etc.) reflect the just-configured provider
-	// without a restart.
-	s.cfgMu.Lock()
-	s.cfg = cfg
-	s.registry = model.NewModelRegistryWithConfig(cfg)
-	s.cfgMu.Unlock()
+	eng.rebuildMu.Unlock()
 	s.mu.Lock()
 	s.needsSetup = false
 	s.mu.Unlock()
@@ -296,4 +311,19 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 		"provider": req.Provider,
 		"model":    resolvedModel,
 	})
+}
+
+func cloneConfigForSetup(in *config.Config) (*config.Config, error) {
+	if in == nil {
+		return &config.Config{MaxIterations: 1000}, nil
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		return nil, err
+	}
+	var out config.Config
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }

@@ -107,7 +107,8 @@ type Server struct {
 	// reloadMCP re-establishes MCP connections from the given server map and
 	// swaps in the fresh tool set (the agent is rebuilt by the caller). nil
 	// when MCP hot-reload is unavailable. Returns per-server statuses.
-	reloadMCP func(servers map[string]*config.MCPServer) ([]tools.MCPStatus, error)
+	reloadMCP   func(servers map[string]*config.MCPServer) ([]tools.MCPStatus, error)
+	mcpReloadMu sync.Mutex // preserves config/catalog publication order across startup and settings reloads
 
 	// mcpStatuses is the most recent per-server connection status, used by the
 	// management UI. Guarded by mu.
@@ -149,6 +150,14 @@ type Server struct {
 	// Envs so the settings UI and the agent's computer_* tools see one backend and
 	// one view of what is granted. nil disables computer use.
 	computerMgr *computer.Manager
+
+	// memoryStart synchronously acquires the pipeline lease and returns its
+	// asynchronous completion. The command layer owns the pipeline dependency;
+	// the web layer coordinates one memory operation per local project.
+	memoryStart    func(context.Context, string) (<-chan error, error)
+	memoryRunMu    sync.Mutex
+	memoryRuns     map[string]bool
+	memoryWarnings map[string]string
 
 	// bleController toggles the BLE status channel live (from the settings
 	// endpoint) without an app restart. nil when BLE is not compiled in.
@@ -196,11 +205,13 @@ type ServerConfig struct {
 	NeedsSetup          bool                                                                  // true when no providers are configured (setup mode)
 	TokenUsage          *model.TokenUsage                                                     // optional: shared token tracker (created when nil)
 	ContextBreakdownFn  func() usage.ContextBreakdown                                         // optional: live per-task context breakdown
+	ToolSearchStats     func() ToolSearchCounts                                               // optional: effective ToolSearch catalog counts for the bootstrap task
 	Automations         *automation.Store                                                     // optional: automation store (nil in setup mode)
 	AuthToken           string                                                                // bearer token required on non-exempt requests when RequireAuth is set
 	RequireAuth         bool                                                                  // enforce token auth (set when bound to a non-loopback host)
 	BrowserManager      *browser.Manager                                                      // optional: process-wide browser-use manager shared with per-task Envs
 	ComputerManager     *computer.Manager                                                     // optional: process-wide computer-use manager shared with per-task Envs
+	MemoryStart         func(context.Context, string) (<-chan error, error)                   // optional: acquire and start one manual local-project memory distillation
 	BLEController       BLEController                                                         // optional: live BLE status-channel toggle (desktop builds)
 }
 
@@ -216,21 +227,22 @@ func NewServer(cfg *ServerConfig) *Server {
 	}
 	// The bootstrap Engine carries the per-task run state of the initial session.
 	boot := &Engine{
-		pwd:            cfg.Pwd,
-		handler:        h,
-		agent:          cfg.Agent,
-		todoStore:      cfg.TodoStore,
-		recorder:       cfg.Recorder,
-		env:            cfg.Env,
-		providerName:   cfg.ProviderName,
-		modelName:      cfg.ModelName,
-		mode:           mode.Parse(cfg.InitialMode).String(),
-		approvalState:  cfg.ApprovalState,
-		eventHandler:   eh,
-		tokenUsage:     cfg.TokenUsage,
-		breakdownFn:    cfg.ContextBreakdownFn,
-		createAgent:    cfg.CreateAgent,
-		rebuildForMode: cfg.RebuildForMode,
+		pwd:             cfg.Pwd,
+		handler:         h,
+		agent:           cfg.Agent,
+		todoStore:       cfg.TodoStore,
+		recorder:        cfg.Recorder,
+		env:             cfg.Env,
+		providerName:    cfg.ProviderName,
+		modelName:       cfg.ModelName,
+		mode:            mode.Parse(cfg.InitialMode).String(),
+		approvalState:   cfg.ApprovalState,
+		eventHandler:    eh,
+		tokenUsage:      cfg.TokenUsage,
+		breakdownFn:     cfg.ContextBreakdownFn,
+		toolSearchStats: cfg.ToolSearchStats,
+		createAgent:     cfg.CreateAgent,
+		rebuildForMode:  cfg.RebuildForMode,
 	}
 	if boot.tokenUsage == nil {
 		boot.tokenUsage = &model.TokenUsage{}
@@ -269,6 +281,9 @@ func NewServer(cfg *ServerConfig) *Server {
 		requireAuth:         cfg.RequireAuth,
 		browserMgr:          cfg.BrowserManager,
 		computerMgr:         cfg.ComputerManager,
+		memoryStart:         cfg.MemoryStart,
+		memoryRuns:          make(map[string]bool),
+		memoryWarnings:      make(map[string]string),
 		bleController:       cfg.BLEController,
 	}
 	// The bootstrap engine is registered (and its pump started) in Start, once
@@ -370,6 +385,12 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/computer/config", s.handleComputerConfig)
 	mux.HandleFunc("POST /api/computer/permissions", s.handleComputerPermissionRequest)
 	mux.HandleFunc("GET /api/computer/shots/{id}", s.handleComputerShot)
+	mux.HandleFunc("GET /api/tool-search/status", s.handleToolSearchStatus)
+	mux.HandleFunc("POST /api/tool-search/config", s.handleToolSearchConfig)
+	mux.HandleFunc("GET /api/memory/status", s.handleMemoryStatus)
+	mux.HandleFunc("POST /api/memory/config", s.handleMemoryConfig)
+	mux.HandleFunc("POST /api/memory/sync", s.handleMemorySync)
+	mux.HandleFunc("DELETE /api/memory", s.handleMemoryClear)
 	mux.HandleFunc("GET /api/approval-review-config", s.handleGetApprovalReviewConfig)
 	mux.HandleFunc("POST /api/approval-review-config", s.handleSetApprovalReviewConfig)
 	mux.HandleFunc("GET /api/skills", s.handleListSkills)

@@ -86,9 +86,11 @@ func (s *Server) runAutomation(ctx context.Context, a *automation.Automation, ki
 	prov, mdl := a.Provider, a.Model
 	if mdl == internalmodel.SmallModelAlias {
 		smallRef := ""
+		s.cfgMu.Lock()
 		if s.cfg != nil {
 			smallRef = s.cfg.SmallModel
 		}
+		s.cfgMu.Unlock()
 		if sp, sm, err := internalmodel.ParseProviderModel(smallRef); err == nil {
 			prov, mdl = sp, sm
 		} else {
@@ -101,9 +103,11 @@ func (s *Server) runAutomation(ctx context.Context, a *automation.Automation, ki
 		if mdl == "" {
 			mdl = curMdl
 		}
+		eng.rebuildMu.Lock()
 		if ag, agErr := eng.createAgent(prov, mdl); agErr == nil {
 			eng.applyModelSwitch(ag, prov, mdl)
 		}
+		eng.rebuildMu.Unlock()
 	}
 
 	// Wrap the event handler to capture the run's terminal error without

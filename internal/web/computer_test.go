@@ -8,7 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cnjack/jcode/internal/computer"
@@ -232,6 +235,80 @@ func TestComputerAgentRebuildDoesNotOverwriteConcurrentModeSwitch(t *testing.T) 
 	if eng.agent != newAgent || eng.mode != "plan" {
 		t.Fatalf("stale rebuild overwrote concurrent switch: agent=%p mode=%q", eng.agent, eng.mode)
 	}
+}
+
+func TestAgentRebuildsAreSerializedPerEngine(t *testing.T) {
+	firstAgent := new(adk.ChatModelAgent)
+	secondAgent := new(adk.ChatModelAgent)
+	firstStarted := make(chan struct{})
+	secondStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var calls atomic.Int32
+	eng := &Engine{
+		taskID:       "active",
+		providerName: "provider-a",
+		modelName:    "model-a",
+		createAgent: func(_, _ string) (*adk.ChatModelAgent, error) {
+			switch calls.Add(1) {
+			case 1:
+				close(firstStarted)
+				<-releaseFirst
+				return firstAgent, nil
+			default:
+				close(secondStarted)
+				return secondAgent, nil
+			}
+		},
+	}
+	s := &Server{Engine: eng}
+	firstDone := make(chan error, 1)
+	secondDone := make(chan error, 1)
+	go func() { firstDone <- s.rebuildToolAgents() }()
+	<-firstStarted
+	go func() { secondDone <- s.rebuildToolAgents() }()
+
+	select {
+	case <-secondStarted:
+		t.Fatal("second rebuild entered createAgent before the first completed")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseFirst)
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-secondDone; err != nil {
+		t.Fatal(err)
+	}
+
+	eng.emu.Lock()
+	defer eng.emu.Unlock()
+	if calls.Load() != 2 || eng.agent != secondAgent {
+		t.Fatalf("calls=%d agent=%p, want two ordered rebuilds ending at %p", calls.Load(), eng.agent, secondAgent)
+	}
+}
+
+func TestRebuildToolAgentsNeedsSetupAccessIsSynchronized(t *testing.T) {
+	s := &Server{Engine: &Engine{}}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			s.mu.Lock()
+			s.needsSetup = i%2 == 0
+			s.mu.Unlock()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			if err := s.rebuildToolAgents(); err != nil {
+				t.Errorf("rebuildToolAgents() error = %v", err)
+				return
+			}
+		}
+	}()
+	wg.Wait()
 }
 
 func TestComputerPermissionRequestValidation(t *testing.T) {

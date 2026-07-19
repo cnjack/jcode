@@ -2,12 +2,14 @@ package memory
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/cnjack/jcode/internal/config"
@@ -287,6 +289,81 @@ func TestClearScope(t *testing.T) {
 	// clearing a non-existent scope is a no-op success.
 	if busy, cerr := ClearScope(scope); busy || cerr != nil {
 		t.Errorf("clearing missing scope should succeed, got busy=%v err=%v", busy, cerr)
+	}
+}
+
+func TestPipelineLockLivesOutsideDeletedScope(t *testing.T) {
+	setHome(t)
+	scope := ProjectRoot(t.TempDir())
+	lock := pipelineLockPath(scope)
+	rel, err := filepath.Rel(scope, lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		t.Fatalf("pipeline lock %q is inside deletable scope %q", lock, scope)
+	}
+}
+
+func TestClearScopeLockErrorDoesNotDelete(t *testing.T) {
+	setHome(t)
+	project := t.TempDir()
+	scope := ProjectRoot(project)
+	if _, err := WriteNote(Note{Text: "must survive", Cwd: project}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(Root(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(Root(), ".locks")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(Root(), ".locks"), []byte("blocks lock directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	busy, err := ClearScope(scope)
+	if busy || err == nil {
+		t.Fatalf("ClearScope() = busy %v, err %v; want lock error", busy, err)
+	}
+	if !fileExists(scope) {
+		t.Fatal("scope was deleted after lock acquisition failed")
+	}
+}
+
+func TestClearScopeWaitsForScopeMutation(t *testing.T) {
+	setHome(t)
+	project := t.TempDir()
+	scope := ProjectRoot(project)
+	if _, err := WriteNote(Note{Text: "must not be recreated", Cwd: project}); err != nil {
+		t.Fatal(err)
+	}
+
+	operation, err := acquireScopeOperation(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		busy, clearErr := ClearScope(scope)
+		if busy {
+			done <- errors.New("clear unexpectedly reported busy")
+			return
+		}
+		done <- clearErr
+	}()
+
+	select {
+	case err := <-done:
+		operation.release()
+		t.Fatalf("ClearScope completed while a scope mutation lock was held: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	operation.release()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if fileExists(scope) {
+		t.Fatal("scope still exists after coordinated clear")
 	}
 }
 

@@ -51,6 +51,11 @@ func WriteNote(n Note) (string, error) {
 	}
 
 	scopeRoot := ScopeRootFor(n.Scope, n.Cwd)
+	operation, err := acquireScopeOperation(scopeRoot)
+	if err != nil {
+		return "", err
+	}
+	defer operation.release()
 	if err := EnsureScope(scopeRoot); err != nil {
 		return "", err
 	}

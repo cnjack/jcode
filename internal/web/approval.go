@@ -111,7 +111,14 @@ func (s *Server) syncModeAfterApproval(eng *Engine, approved, approveAll bool) {
 		return
 	}
 	sm := mode.FullAccess
+	// An approve-all promotion changes the mode/revision while preserving the
+	// current agent. Serialize it with schema/prompt rebuilds so a rebuild that
+	// already captured the previous revision can finish and publish its refreshed
+	// agent before the promotion advances the revision. Without this lock, the
+	// rebuild is discarded as stale and the task keeps its old tool schema.
+	eng.rebuildMu.Lock()
 	eng.applyModeSwitch(sm.String(), nil)
+	eng.rebuildMu.Unlock()
 	s.wsBroker.Broadcast(WSEvent{Type: "mode_changed", TaskID: eng.taskID, Data: map[string]string{
 		"mode": sm.String(),
 	}})

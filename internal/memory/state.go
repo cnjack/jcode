@@ -1,6 +1,8 @@
 package memory
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -56,14 +58,34 @@ type ConsolidationRecord struct {
 func statePath(scopeRoot string) string { return filepath.Join(scopeRoot, StateFile) }
 func lockPath(scopeRoot string) string  { return filepath.Join(scopeRoot, ".state.lock") }
 
+func scopeLockPath(scopeRoot, kind string) string {
+	sum := sha256.Sum256([]byte(filepath.Clean(scopeRoot)))
+	return filepath.Join(Root(), ".locks", hex.EncodeToString(sum[:])+"."+kind+".lock")
+}
+
+func pipelineLockPath(scopeRoot string) string { return scopeLockPath(scopeRoot, "pipeline") }
+
+// acquireScopeOperation serializes ordinary scope mutations with destructive
+// clear operations, including across jcode processes. Pipeline work is already
+// protected by pipelineLockPath; note/state writes take this shorter lock so a
+// clear cannot return successfully while a concurrent writer recreates files.
+func acquireScopeOperation(scopeRoot string) (*fileLock, error) {
+	path := scopeLockPath(scopeRoot, "operation")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	return acquireLock(path)
+}
+
 // TryLockPipeline takes the scope's non-blocking pipeline lock. Returns a
 // release func and whether the lock was acquired (false = another process is
 // already running the pipeline).
 func TryLockPipeline(scopeRoot string) (func(), bool, error) {
-	if err := os.MkdirAll(scopeRoot, 0o755); err != nil {
+	path := pipelineLockPath(scopeRoot)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, false, err
 	}
-	l, ok, err := tryAcquireLock(filepath.Join(scopeRoot, ".pipeline.lock"))
+	l, ok, err := tryAcquireLock(path)
 	if err != nil || !ok {
 		return func() {}, ok, err
 	}
@@ -74,25 +96,23 @@ func TryLockPipeline(scopeRoot string) (func(), bool, error) {
 // lock so a running distillation cannot resurrect a half-cleared scope.
 //
 // It reports busy=true (deleting nothing) if the pipeline currently holds the
-// lock — the caller should ask the user to retry. Otherwise it holds the lock
-// across the delete (a concurrent pipeline's non-blocking TryLockPipeline keeps
-// failing), which closes the release-then-delete race the naive version had.
-// On Windows RemoveAll can hit a sharing violation on the still-open lock file;
-// once the handle is released a retry succeeds, so we release then retry.
+// lock. The lock lives outside scopeRoot, so deleting the scope cannot unlink
+// the locked inode and let a concurrent process create a replacement lock.
 func ClearScope(scopeRoot string) (busy bool, err error) {
-	release, ok, lerr := TryLockPipeline(scopeRoot)
-	if lerr == nil && !ok {
+	release, ok, err := TryLockPipeline(scopeRoot)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
 		return true, nil
 	}
-	err = os.RemoveAll(scopeRoot)
-	if release != nil {
-		release()
-	}
+	defer release()
+	operation, err := acquireScopeOperation(scopeRoot)
 	if err != nil {
-		// Retry after the lock handle is closed (Windows).
-		err = os.RemoveAll(scopeRoot)
+		return false, err
 	}
-	return false, err
+	defer operation.release()
+	return false, os.RemoveAll(scopeRoot)
 }
 
 // LoadState reads state.json without locking (callers that mutate must use
@@ -117,6 +137,12 @@ func LoadState(scopeRoot string) *State {
 // and persists the result atomically. Lost updates are prevented by
 // re-reading inside the lock.
 func UpdateState(scopeRoot string, fn func(*State) error) error {
+	operation, err := acquireScopeOperation(scopeRoot)
+	if err != nil {
+		return err
+	}
+	defer operation.release()
+
 	if err := os.MkdirAll(scopeRoot, 0o755); err != nil {
 		return err
 	}

@@ -55,12 +55,12 @@ func (s *Server) handleBrowserStatus(w http.ResponseWriter, r *http.Request) {
 	// Merge the persisted site permissions/approval so the UI can render them.
 	var sitePerms []config.BrowserSitePermission
 	var approval map[string]string
-	s.mu.Lock()
+	s.cfgMu.Lock()
 	if s.cfg != nil && s.cfg.Browser != nil {
 		sitePerms = s.cfg.Browser.SitePermissions
 		approval = s.cfg.Browser.Approval
 	}
-	s.mu.Unlock()
+	s.cfgMu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"available":        true,
 		"status":           st,

@@ -74,7 +74,7 @@ func NewWebCmd() *cobra.Command {
 		Short:        "Start the web server",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWebServer(port, host, openBrowser, authToken)
+			return runWebServer(cmd.Context(), port, host, openBrowser, authToken)
 		},
 	}
 	cmd.Flags().IntVar(&port, "port", 8080, "HTTP server port")
@@ -188,7 +188,7 @@ func generateWebToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b[:]), nil
 }
 
-func runWebServer(port int, host string, openBrowser bool, authToken string) error {
+func runWebServer(parent context.Context, port int, host string, openBrowser bool, authToken string) error {
 	// Check if we need setup (no providers configured).
 	needsSetup := config.NeedsSetup()
 
@@ -206,7 +206,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		}
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, cancel := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
 	pwd := util.GetWorkDir()
@@ -361,6 +361,20 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 	// ask_user would otherwise block on the WS channel forever (no client resolves
 	// it) and stall the run until the liveness ceiling cancels it.
 	buildWebTask := func(taskID, taskPwd, modeStr string, exec tools.RemoteExecutor, excludeInteractive bool) (*web.EngineConfig, error) {
+		// Per-task config snapshot, so a live task is insulated from mid-run
+		// edits (the shared copy in internal/web is guarded by cfgMu). In setup
+		// mode there is no valid config on disk yet — LoadConfig always fails —
+		// so fall back to the minimal startup config. Setup mode exists to serve
+		// the settings UI so the user can finish setup; hard-failing here aborts
+		// the bootstrap engine before the server ever listens, making first-run
+		// setup unreachable.
+		taskCfg, err := config.LoadConfig()
+		if err != nil {
+			if !needsSetup {
+				return nil, fmt.Errorf("load task config: %w", err)
+			}
+			taskCfg = cfg
+		}
 		startMode := startupMode
 		if modeStr != "" {
 			startMode = mode.Parse(modeStr)
@@ -379,7 +393,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		// so concurrent tasks in different projects don't bleed each other's project
 		// skills into one shared accumulator. (The process-wide skillLoader stays
 		// for the path-agnostic slash/list/toggle management UI.)
-		taskLoader := skills.NewLoaderWithDisabled(cfg.DisabledSkills)
+		taskLoader := skills.NewLoaderWithDisabled(taskCfg.DisabledSkills)
 		if exec != nil {
 			tenv.SetRemote(exec, taskPwd)
 			promptPlatform = exec.Platform()
@@ -414,12 +428,13 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		tappr.SetHandler(tnotify)
 		// Provide the config/platform needed to lazily build the LLM reviewer when
 		// this task enters Auto mode. The engine installs the transcript provider.
-		tappr.SetReviewerConfig(cfg, platform)
+		tappr.SetReviewerConfig(taskCfg, platform)
 		// Site-permission lookup for browser tools: an origin marked "allow" for a
 		// class (navigate/interact) is auto-approved. Reads the live config each
 		// call so settings changes take effect without rebuilding the task.
 		tappr.SetBrowserPermFunc(func(origin, class string) bool {
-			return browserSitePreapproved(cfg, origin, class)
+			currentCfg, loadErr := config.LoadConfig()
+			return loadErr == nil && browserSitePreapproved(currentCfg, origin, class)
 		})
 		// browser_act's args carry no URL, so its per-site permission check needs
 		// the active tab's origin from THIS task's session.
@@ -464,24 +479,40 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		// the local machine, so a remote path would just create a junk scope
 		// and never match any sessions.
 		if exec == nil {
-			mempipeline.MaybeStartBackground(cfg, taskPwd)
+			mempipeline.MaybeStartBackground(taskCfg, taskPwd)
 		}
 
-		// Per-task system/plan prompts (rendered for this task's pwd).
-		skillDescs := taskLoader.Descriptions()
-		var systemPrompt, planPrompt string
-		if exec != nil {
-			systemPrompt = prompts.GetSystemPrompt(promptPlatform, taskPwd, envLabel, nil, skillDescs)
-			planPrompt = prompts.GetPlanSystemPrompt(promptPlatform, taskPwd, envLabel, nil)
-		} else {
-			systemPrompt = prompts.GetSystemPrompt(platform, taskPwd, "local", taskEnvInfo, skillDescs)
-			planPrompt = prompts.GetPlanSystemPrompt(platform, taskPwd, "local", taskEnvInfo)
+		// Re-render prompts on every agent build. Memory settings and curated
+		// summaries can change while the web server is running; rebuilding an agent
+		// must therefore refresh both schema and prompt, not reuse a startup string.
+		renderPrompts := func() (string, string) {
+			skillDescs := taskLoader.Descriptions()
+			if exec != nil {
+				return prompts.GetSystemPrompt(promptPlatform, taskPwd, envLabel, nil, skillDescs),
+					prompts.GetPlanSystemPrompt(promptPlatform, taskPwd, envLabel, nil)
+			}
+			return prompts.GetSystemPrompt(platform, taskPwd, "local", taskEnvInfo, skillDescs),
+				prompts.GetPlanSystemPrompt(platform, taskPwd, "local", taskEnvInfo)
 		}
 
-		buildAllTools := func(cm model.ToolCallingChatModel) []tool.BaseTool {
+		toolSearchCounts := func(plan agent.ToolPlan) web.ToolSearchCounts {
+			mcpDeferred := 0
+			for _, descriptor := range plan.Deferred {
+				if descriptor.Source == "mcp" || strings.HasPrefix(descriptor.Source, "mcp:") {
+					mcpDeferred++
+				}
+			}
+			return web.ToolSearchCounts{
+				DirectCount:      len(plan.Direct),
+				DeferredCount:    len(plan.Deferred),
+				MCPDeferredCount: mcpDeferred,
+			}
+		}
+
+		buildAllTools := func(cm model.ToolCallingChatModel, agentCfg *config.Config) []tool.BaseTool {
 			// One factory serves subagent + workflow model overrides (incl.
 			// the "small" alias); fallback is this task's current model.
-			factory := internalmodel.NewModelFactory(cfg, cm)
+			factory := internalmodel.NewModelFactory(agentCfg, cm)
 			all := []tool.BaseTool{
 				tenv.NewReadTool(), tenv.NewEditTool(), tenv.NewWriteTool(),
 				tenv.NewExecuteTool(tbg), tenv.NewGrepTool(),
@@ -511,7 +542,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 				}),
 				skills.NewLoadSkillTool(taskLoader),
 			}
-			if config.MemoryEnabled(cfg) {
+			if config.MemoryEnabled(agentCfg) {
 				all = append(all, tenv.NewMemoryNoteTool(&tools.MemoryNoteDeps{
 					SessionIDFn: func() string {
 						if trec != nil {
@@ -560,6 +591,10 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		_ = os.MkdirAll(reductionRoot, 0o755)
 
 		makeAgent := func(cm model.ToolCallingChatModel, ctxLimit int, planMode bool) (*adk.ChatModelAgent, error) {
+			agentCfg, loadErr := config.LoadConfig()
+			if loadErr != nil {
+				return nil, fmt.Errorf("reload agent config: %w", loadErr)
+			}
 			var middlewares []adk.ChatModelAgentMiddleware
 			if langfuseTracer != nil {
 				middlewares = append(middlewares, langfuseTracer.AgentMiddleware())
@@ -567,7 +602,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 
 			var handlers []adk.ChatModelAgentMiddleware
 
-			compactThreshold := cfg.CompactionThreshold()
+			compactThreshold := agentCfg.CompactionThreshold()
 
 			summMw, err := summarization.New(ctx, &summarization.Config{
 				Model: cm,
@@ -620,8 +655,9 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 			}, ttok)
 			handlers = append(handlers, reminderMw)
 
+			systemPrompt, planPrompt := renderPrompts()
 			prompt := systemPrompt
-			toolList := buildAllTools(cm)
+			toolList := buildAllTools(cm, agentCfg)
 			if planMode {
 				prompt = planPrompt
 				toolList = buildPlanTools()
@@ -637,7 +673,7 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 				currentMCPTools = dropInteractiveTools(currentMCPTools)
 			}
 
-			if !config.ToolSearchEnabled(cfg) {
+			if !config.ToolSearchEnabled(agentCfg) {
 				// Preserve the eager/static path. Plan mode has never exposed MCP
 				// tools, while normal mode appends the captured MCP generation.
 				if !planMode {
@@ -678,6 +714,48 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		var currentCtxLimit int
 		currentPlanMode := startMode.IsPlan()
 
+		// ToolSearch counts are derived on demand from the latest persisted policy,
+		// MCP catalog and task mode. Candidate agents can be discarded by revision
+		// checks during concurrent model/settings rebuilds; publishing counts while
+		// building such a candidate would make Settings describe an agent that was
+		// never installed.
+		toolSearchStats := func() web.ToolSearchCounts {
+			cmMu.Lock()
+			cm, planMode := currentCM, currentPlanMode
+			cmMu.Unlock()
+			if cm == nil {
+				return web.ToolSearchCounts{}
+			}
+			agentCfg, loadErr := config.LoadConfig()
+			if loadErr != nil {
+				return web.ToolSearchCounts{}
+			}
+			toolList := buildAllTools(cm, agentCfg)
+			toolMode := agent.ToolModeNormal
+			if planMode {
+				toolList = buildPlanTools()
+				toolMode = agent.ToolModePlan
+			}
+			var currentMCPTools []tool.BaseTool
+			if mt := mcpToolsPtr.Load(); mt != nil {
+				currentMCPTools = append([]tool.BaseTool(nil), (*mt)...)
+			}
+			if excludeInteractive {
+				currentMCPTools = dropInteractiveTools(currentMCPTools)
+			}
+			plan, planErr := buildCommandToolPlan(
+				ctx,
+				toolList,
+				currentMCPTools,
+				agent.ToolTransportWeb,
+				toolMode,
+			)
+			if planErr != nil {
+				return web.ToolSearchCounts{}
+			}
+			return toolSearchCounts(plan)
+		}
+
 		createAgent := func(prov, mod string) (*adk.ChatModelAgent, error) {
 			cm, ctxLimit, err := newChatModel(prov, mod)
 			if err != nil {
@@ -699,19 +777,33 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 
 		rebuildForMode := func(planMode bool) (*adk.ChatModelAgent, error) {
 			cmMu.Lock()
+			previousPlanMode := currentPlanMode
 			currentPlanMode = planMode
 			cm, ctxLimit := currentCM, currentCtxLimit
 			cmMu.Unlock()
 			if cm == nil {
-				return createAgent(providerName, modelName)
+				ag, createErr := createAgent(providerName, modelName)
+				if createErr != nil {
+					cmMu.Lock()
+					currentPlanMode = previousPlanMode
+					cmMu.Unlock()
+				}
+				return ag, createErr
 			}
-			return makeAgent(cm, ctxLimit, planMode)
+			ag, makeErr := makeAgent(cm, ctxLimit, planMode)
+			if makeErr != nil {
+				cmMu.Lock()
+				currentPlanMode = previousPlanMode
+				cmMu.Unlock()
+			}
+			return ag, makeErr
 		}
 
 		breakdownFn := func() usage.ContextBreakdown {
 			var b usage.ContextBreakdown
 			skillDesc := taskLoader.Descriptions()
 			b.SkillsTokens = usage.Estimate(skillDesc)
+			systemPrompt, _ := renderPrompts()
 			b.SystemPromptTokens = usage.Estimate(systemPrompt) - b.SkillsTokens
 			if b.SystemPromptTokens < 0 {
 				b.SystemPromptTokens = 0
@@ -725,8 +817,12 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 			cm := currentCM
 			cmMu.Unlock()
 			if cm != nil {
+				currentCfg, loadErr := config.LoadConfig()
+				if loadErr != nil {
+					return b
+				}
 				total := 0
-				for _, at := range buildAllTools(cm) {
+				for _, at := range buildAllTools(cm, currentCfg) {
 					total += estimateToolTokens(ctx, at)
 				}
 				b.SystemToolsTokens = total
@@ -744,23 +840,24 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		}
 
 		return &web.EngineConfig{
-			TaskID:         taskID,
-			Pwd:            taskPwd,
-			Mode:           startMode.String(),
-			ProviderName:   providerName,
-			ModelName:      modelName,
-			Agent:          ag,
-			Env:            tenv,
-			TodoStore:      tenv.TodoStore,
-			Recorder:       trec,
-			TokenUsage:     ttok,
-			ApprovalState:  tappr,
-			Handler:        twh,
-			EventHandler:   tnotify,
-			BreakdownFn:    breakdownFn,
-			CreateAgent:    createAgent,
-			RebuildForMode: rebuildForMode,
-			FlowLoader:     taskFlowLoader,
+			TaskID:          taskID,
+			Pwd:             taskPwd,
+			Mode:            startMode.String(),
+			ProviderName:    providerName,
+			ModelName:       modelName,
+			Agent:           ag,
+			Env:             tenv,
+			TodoStore:       tenv.TodoStore,
+			Recorder:        trec,
+			TokenUsage:      ttok,
+			ApprovalState:   tappr,
+			Handler:         twh,
+			EventHandler:    tnotify,
+			BreakdownFn:     breakdownFn,
+			ToolSearchStats: toolSearchStats,
+			CreateAgent:     createAgent,
+			RebuildForMode:  rebuildForMode,
+			FlowLoader:      taskFlowLoader,
 			// Recorders the engine creates later (lazy create / session switch
 			// in chat.go) get the same title hook as trec above.
 			RecorderInit: func(r *session.Recorder) {
@@ -828,12 +925,26 @@ func runWebServer(port int, host string, openBrowser bool, authToken string) err
 		NeedsSetup:         needsSetup,
 		TokenUsage:         bootEC.TokenUsage,
 		ContextBreakdownFn: bootEC.BreakdownFn,
+		ToolSearchStats:    bootEC.ToolSearchStats,
 		Automations:        autoStore,
 		AuthToken:          webToken,
 		RequireAuth:        requireAuth,
 		BrowserManager:     browserMgr,
 		ComputerManager:    computerMgr,
-		BLEController:      bleProxy,
+		MemoryStart: func(runCtx context.Context, project string) (<-chan error, error) {
+			currentCfg, loadErr := config.LoadConfig()
+			if loadErr != nil {
+				return nil, fmt.Errorf("load memory config: %w", loadErr)
+			}
+			return mempipeline.Start(runCtx, currentCfg, project, mempipeline.Options{
+				IncludeRecent:  true,
+				IgnoreCooldown: true,
+				Log: func(format string, args ...any) {
+					config.Logger().Printf("[memory] "+format, args...)
+				},
+			})
+		},
+		BLEController: bleProxy,
 	})
 
 	// Start the periodic automation scheduler. A single process owns periodic

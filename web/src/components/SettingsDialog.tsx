@@ -6,7 +6,7 @@
  * inset surface content panel — the same geometry as the chat page, NOT a small
  * centered dialog. Tabs: Providers (full CRUD + catalog + advanced config),
  * Models (state/favorites/effort), MCP (servers CRUD + OAuth login), Skills
- * (enable/disable), Appearance (theme picker), Browser (config + site
+ * (enable/disable), Appearance (theme picker), Memory (status + consolidation), Browser (config + site
  * permissions), Computer (config + app permissions + grants), Remote (SSH
  * aliases), Usage (stats).
  *
@@ -48,6 +48,7 @@ import {
   MinusIcon,
   ArrowPathIcon,
   ExclamationTriangleIcon,
+  CircleStackIcon,
 } from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
@@ -65,6 +66,9 @@ import type {
   ComputerStatusResponse,
   ComputerAppPermission,
   ComputerPermissionState,
+  ToolSearchStatusResponse,
+  MemoryConfig,
+  MemoryStatusResponse,
 } from '../lib/api'
 import type { ApprovalReviewConfig, ApprovalReviewDefaults } from '../lib/types'
 import type {
@@ -81,16 +85,15 @@ import type {
 
 // ─── tab config ────────────────────────────────────────────────────────────
 
-// Matches the Vue SettingsDialog tab list exactly (line 106):
-//   general, appearance, providers, mcp, skills, browser, ssh, channels,
-//   shortcuts, usage. Note: there is NO standalone Models tab — models live
-//   inside the Providers tab (catalog + custom models), mirroring the Vue app.
+// Models live inside Providers (catalog + custom models); Memory is a React
+// settings surface backed by the project-scoped memory APIs.
 type TabId =
   | 'general'
   | 'appearance'
   | 'providers'
   | 'mcp'
   | 'skills'
+  | 'memory'
   | 'browser'
   | 'computer'
   | 'ssh'
@@ -104,6 +107,7 @@ const TABS: { id: TabId; Icon: React.ComponentType<{ className?: string }> }[] =
   { id: 'providers', Icon: CpuChipIcon },
   { id: 'mcp', Icon: ServerStackIcon },
   { id: 'skills', Icon: SparklesIcon },
+  { id: 'memory', Icon: CircleStackIcon },
   { id: 'browser', Icon: GlobeAltIcon },
   { id: 'computer', Icon: ComputerDesktopIcon },
   { id: 'ssh', Icon: CommandLineIcon },
@@ -153,11 +157,13 @@ function Switch({
   on,
   onClick,
   title,
+  ariaLabel,
   disabled,
 }: {
   on: boolean
   onClick: () => void
   title?: string
+  ariaLabel?: string
   disabled?: boolean
 }) {
   return (
@@ -165,6 +171,7 @@ function Switch({
       type="button"
       role="switch"
       aria-checked={on}
+      aria-label={ariaLabel}
       disabled={disabled}
       onClick={onClick}
       title={title}
@@ -396,6 +403,7 @@ export function SettingsDialog() {
             {tab === 'providers' && <ProvidersTab />}
             {tab === 'mcp' && <MCPTab />}
             {tab === 'skills' && <SkillsTab />}
+            {tab === 'memory' && <MemoryTab />}
             {tab === 'browser' && <BrowserTab />}
             {tab === 'computer' && <ComputerTab />}
             {tab === 'ssh' && <SSHTab />}
@@ -1550,8 +1558,126 @@ function GeneralTab() {
         </select>
       </div>
 
-      {/* Approval review (Auto session mode) */}
+      {/* Agent behavior and approval review (Auto session mode) */}
+      <ToolSearchSection />
       <ApprovalReviewSection />
+    </div>
+  )
+}
+
+function ToolSearchSection() {
+  const { t } = useTranslation()
+  const [status, setStatus] = useState<ToolSearchStatusResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const load = useCallback(() => {
+    setLoading(true)
+    setError('')
+    api
+      .toolSearchStatus()
+      .then(setStatus)
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => load(), [load])
+
+  async function toggle() {
+    if (!status || saving || status.available === false || status.supported === false) return
+    setSaving(true)
+    setError('')
+    try {
+      const saved = await api.toolSearchConfig({ enabled: !status.enabled })
+      setStatus((current) => (current ? { ...current, ...saved } : saved))
+      try {
+        const refreshed = await api.toolSearchStatus()
+        setStatus({ ...refreshed, refresh_warning: saved.refresh_warning })
+      } catch {
+        // The mutation already committed. Keep the new value visible and make
+        // only the follow-up status refresh a warning, so retrying cannot
+        // accidentally toggle the setting a second time.
+        setStatus((current) =>
+          current ? { ...current, refresh_warning: t('settings.general.toolSearchStatusRefreshFailed') } : current,
+        )
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const unavailable = status?.available === false || status?.supported === false
+  const warning = status?.refresh_warning || status?.warning
+
+  return (
+    <div className="space-y-3 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3.5">
+      <div className="flex items-center gap-2">
+        <ServerStackIcon className="h-4 w-4 text-[var(--color-muted-foreground)]" />
+        <h4 className="text-[12px] font-semibold text-[var(--color-foreground)]">
+          {t('settings.general.toolSearchTitle')}
+        </h4>
+        {status && !unavailable && (
+          <span className={status.enabled ? CHIP_ACCENT : CHIP}>
+            {t(status.enabled ? 'settings.general.toolSearchModeProgressive' : 'settings.general.toolSearchModeEager')}
+          </span>
+        )}
+      </div>
+      <p className="text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">
+        {t('settings.general.toolSearchDesc')}
+      </p>
+
+      <div className={ROW}>
+        <div className="min-w-0 flex-1">
+          <div className="text-[12px] font-medium text-[var(--color-foreground)]">
+            {t('settings.general.toolSearchToggle')}
+          </div>
+          <div className="text-[11px] text-[var(--color-muted-foreground)]">
+            {unavailable ? t('settings.general.toolSearchUnavailable') : t('settings.general.toolSearchToggleDesc')}
+          </div>
+        </div>
+        <Switch
+          on={status?.enabled ?? false}
+          onClick={() => void toggle()}
+          ariaLabel={t('settings.general.toolSearchToggle')}
+          disabled={loading || saving || !status || unavailable}
+        />
+      </div>
+
+      {status && !unavailable && (
+        <div className="grid grid-cols-3 gap-2">
+          {([
+            ['direct_count', 'toolSearchDirect'],
+            ['deferred_count', 'toolSearchDeferred'],
+            ['mcp_deferred_count', 'toolSearchMCP'],
+          ] as const).map(([field, label]) => (
+            <div key={field} className="rounded-[var(--radius-md)] bg-[var(--color-muted)] px-3 py-2.5">
+              <div className="font-mono text-[15px] font-semibold text-[var(--color-foreground)]">
+                {status[field] ?? '—'}
+              </div>
+              <div className="text-[10px] text-[var(--color-muted-foreground)]">
+                {t(`settings.general.${label}`)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {warning && (
+        <div role="status" aria-live="polite" className="text-[11px] text-[var(--color-warning-fg)]">
+          {warning}
+        </div>
+      )}
+      {error && (
+        <div role="alert" aria-live="assertive" className="flex items-center justify-between gap-3 text-[11px] text-[var(--color-destructive)]">
+          <span>{t('settings.general.toolSearchFailed', { reason: error })}</span>
+          <button type="button" className={`${BTN_SECONDARY} ${BTN_XS}`} onClick={load}>
+            {t('common.retry')}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -2418,6 +2544,469 @@ function SkillsTab() {
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Memory tab — project memory, Dream consolidation, metadata and actions
+// ════════════════════════════════════════════════════════════════════════════
+
+const MEMORY_DEFAULTS: MemoryConfig = {
+  enabled: true,
+  generate: true,
+  model: '',
+  daily_token_budget: 300000,
+  cooldown_hours: 6,
+  max_age_days: 30,
+  max_unused_days: 45,
+  phase2_top_n: 40,
+  summary_inject_tokens: 1200,
+}
+
+function formatBytes(value?: number): string {
+  if (value == null || !Number.isFinite(value)) return '—'
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(value < 10240 ? 1 : 0)} KB`
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function MemoryTab() {
+  const { t, i18n } = useTranslation()
+  const [status, setStatus] = useState<MemoryStatusResponse | null>(null)
+  const [cfg, setCfg] = useState<MemoryConfig>(MEMORY_DEFAULTS)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [dirty, setDirty] = useState(false)
+  const [action, setAction] = useState<'sync' | 'clear' | ''>('')
+  const [advanced, setAdvanced] = useState(false)
+  const [error, setError] = useState('')
+  const [warning, setWarning] = useState('')
+  const [message, setMessage] = useState('')
+  const [pollError, setPollError] = useState('')
+  const [pollingPaused, setPollingPaused] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const next = await api.memoryStatus()
+      setStatus(next)
+      setPollError('')
+      setPollingPaused(false)
+      setCfg({
+        ...MEMORY_DEFAULTS,
+        ...next.config,
+        enabled: next.config?.enabled ?? next.enabled ?? MEMORY_DEFAULTS.enabled,
+        generate: next.config?.generate ?? next.generate ?? MEMORY_DEFAULTS.generate,
+        model: next.config?.model ?? next.model ?? '',
+        daily_token_budget:
+          next.config?.daily_token_budget ?? next.daily_token_budget ?? MEMORY_DEFAULTS.daily_token_budget,
+      })
+      setDirty(false)
+      return true
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      return false
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  // Manual consolidation runs asynchronously. Refresh metadata without
+  // replacing the draft form, then stop polling as soon as the run completes.
+  useEffect(() => {
+    if (!status?.running || pollingPaused) return
+    const timer = window.setInterval(() => {
+      void api
+        .memoryStatus()
+        .then(setStatus)
+        .catch((err) => {
+          const reason = err instanceof Error ? err.message : String(err)
+          setPollError(t('settings.memory.pollFailed', { reason }))
+          // Pause without claiming the server-side run stopped. Keeping the
+          // last known busy state prevents duplicate sync/clear actions until a
+          // successful status retry establishes the real terminal state.
+          setPollingPaused(true)
+        })
+    }, 2000)
+    return () => window.clearInterval(timer)
+  }, [pollingPaused, status?.running, t])
+
+  async function retryPoll() {
+    try {
+      const next = await api.memoryStatus()
+      setStatus(next)
+      setPollError('')
+      setPollingPaused(false)
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err)
+      setPollError(t('settings.memory.pollFailed', { reason }))
+      setPollingPaused(true)
+    }
+  }
+
+  function patch(next: Partial<MemoryConfig>) {
+    setCfg((prev) => ({ ...prev, ...next }))
+    setDirty(true)
+    setWarning('')
+    setMessage('')
+  }
+
+  function numberPatch(field: keyof MemoryConfig, raw: string) {
+    const value = Number.parseInt(raw, 10)
+    if (Number.isFinite(value)) patch({ [field]: value })
+  }
+
+  async function save() {
+    setSaving(true)
+    setError('')
+    setWarning('')
+    setMessage('')
+    try {
+      const response = await api.memoryConfig(cfg)
+      setDirty(false)
+      if (response.config) setCfg((current) => ({ ...current, ...response.config }))
+      const refreshed = await load()
+      if (!refreshed) {
+        setError('')
+        setWarning(t('settings.memory.refreshAfterAction'))
+      } else if (response.warning || response.warning_code) {
+        setWarning(response.warning || t('settings.memory.refreshWarning'))
+      } else {
+        setMessage(t('settings.memory.saved'))
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function syncNow() {
+    setAction('sync')
+    setError('')
+    setWarning('')
+    setMessage('')
+    try {
+      if (!status?.project) throw new Error(t('settings.memory.projectChanged'))
+      const response = await api.memorySync(status.project)
+      setMessage(response.message || t('settings.memory.syncStarted'))
+      const refreshed = await load()
+      if (!refreshed) {
+        setError('')
+        setWarning(t('settings.memory.refreshAfterAction'))
+      } else if (response.warning || response.warning_code) {
+        setWarning(response.warning || t('settings.memory.refreshWarning'))
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setAction('')
+    }
+  }
+
+  async function clearProject() {
+    if (!window.confirm(t('settings.memory.clearConfirm', { project: status?.project || '—' }))) return
+    setAction('clear')
+    setError('')
+    setWarning('')
+    setMessage('')
+    try {
+      if (!status?.project) throw new Error(t('settings.memory.projectChanged'))
+      const response = await api.memoryClear(status.project)
+      setMessage(response.message || t('settings.memory.cleared'))
+      const refreshed = await load()
+      if (!refreshed) {
+        setError('')
+        setWarning(t('settings.memory.refreshAfterAction'))
+      } else if (response.warning || response.warning_code) {
+        setWarning(response.warning || t('settings.memory.refreshWarning'))
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setAction('')
+    }
+  }
+
+  const projectUnavailable = !status || status.supported === false || status.remote === true
+  const configUnavailable = !status || status.available === false
+  const busy = !!status?.running || !!status?.busy
+  const controlsDisabled = loading || configUnavailable || saving || action !== ''
+  const memoryActive = status?.config?.enabled ?? status?.enabled ?? false
+  const generationActive =
+    status?.effective_generate ??
+    ((status?.config?.enabled ?? status?.enabled ?? false) && (status?.config?.generate ?? status?.generate ?? false))
+  const todayTokens = status?.today_tokens ?? 0
+  const budget = status?.config?.daily_token_budget ?? status?.daily_token_budget ?? cfg.daily_token_budget
+  const budgetPct = budget > 0 ? Math.min(100, Math.round((todayTokens / budget) * 100)) : 0
+  const notes = status?.notes_count ?? status?.inbox_count
+  const summarySize = status?.summary_size ?? status?.summary_bytes
+  const lastPipeline = status?.last_pipeline_at
+  const lastConsolidation = status?.last_consolidation_at ?? status?.last_consolidation
+  const initialLoadFailed = !status && !!error
+
+  function formatTime(value?: string) {
+    if (!value) return t('settings.memory.never')
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    return new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+  }
+
+  if (loading && !status) {
+    return (
+      <div className="animate-pulse py-12 text-center text-xs text-[var(--color-muted-foreground)]">
+        {t('common.loading')}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <div className="flex items-center gap-2">
+          <h3 className={SECTION_TITLE}>{t('settings.memory.title')}</h3>
+          {busy && <span className={CHIP_ACCENT}>{t('settings.memory.running')}</span>}
+        </div>
+        <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">
+          {t('settings.memory.subtitle')}
+        </p>
+      </div>
+
+      {projectUnavailable && (
+        <div className="flex items-start gap-2 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-muted)] p-3 text-[11px] text-[var(--color-muted-foreground)]">
+          <ExclamationTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <div role={initialLoadFailed ? 'alert' : undefined} aria-live={initialLoadFailed ? 'assertive' : undefined}>
+              {initialLoadFailed
+                ? t('settings.memory.loadFailed', { reason: error })
+                : status?.reason ||
+                  status?.error ||
+                  t(status?.remote ? 'settings.memory.remoteUnavailable' : 'settings.memory.unavailable')}
+            </div>
+            {initialLoadFailed && (
+              <button type="button" className={`${BTN_SECONDARY} ${BTN_XS} mt-2`} onClick={() => void load()}>
+                {t('common.retry')}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {status?.project && (
+        <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3.5">
+          <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.memory.currentProjectTitle')}</div>
+          <div className="mt-0.5 text-[11px] text-[var(--color-muted-foreground)]">{t('settings.memory.currentProjectDesc')}</div>
+          <div className="mt-1.5 truncate font-mono text-[10px] text-[var(--color-muted-foreground)]" title={status.project}>
+            {status.project}
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] p-3">
+          <div className="font-mono text-[15px] font-semibold text-[var(--color-foreground)]">{notes ?? '—'}</div>
+          <div className="text-[10px] text-[var(--color-muted-foreground)]">{t('settings.memory.inboxNotes')}</div>
+        </div>
+        <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] p-3">
+          <div className="font-mono text-[15px] font-semibold text-[var(--color-foreground)]">{formatBytes(summarySize)}</div>
+          <div className="text-[10px] text-[var(--color-muted-foreground)]">{t('settings.memory.summary')}</div>
+        </div>
+        <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] p-3">
+          <div className="font-mono text-[15px] font-semibold text-[var(--color-foreground)]">
+            {status?.tracked_files ?? '—'}
+          </div>
+          <div className="text-[10px] text-[var(--color-muted-foreground)]">{t('settings.memory.trackedFiles')}</div>
+        </div>
+        <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] p-3">
+          <div className="font-mono text-[15px] font-semibold text-[var(--color-foreground)]">
+            {status?.extracted_count ?? '—'}
+            {(status?.failed_count ?? 0) > 0 && (
+              <span className="ml-1 text-[10px] text-[var(--color-destructive)]">/{status?.failed_count}</span>
+            )}
+          </div>
+          <div className="text-[10px] text-[var(--color-muted-foreground)]">{t('settings.memory.extracted')}</div>
+        </div>
+      </div>
+
+      <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] p-3.5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.memory.todayBudget')}</div>
+            <div className="mt-0.5 font-mono text-[10px] text-[var(--color-muted-foreground)]">
+              {todayTokens.toLocaleString()} / {budget.toLocaleString()} tokens
+            </div>
+          </div>
+          <span className="font-mono text-[11px] text-[var(--color-muted-foreground)]">{budgetPct}%</span>
+        </div>
+        <div
+          role="progressbar"
+          aria-label={t('settings.memory.todayBudget')}
+          aria-valuemin={0}
+          aria-valuemax={budget}
+          aria-valuenow={Math.min(todayTokens, budget)}
+          aria-valuetext={`${todayTokens.toLocaleString()} / ${budget.toLocaleString()} tokens`}
+          className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--color-muted)]"
+        >
+          <div
+            className="h-full rounded-full transition-all"
+            style={{
+              width: `${budgetPct}%`,
+              backgroundColor: budgetPct > 90 ? 'var(--color-destructive)' : 'var(--color-accent-neutral)',
+            }}
+          />
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-3 text-[10px] text-[var(--color-muted-foreground)]">
+          <div>
+            <div>{t('settings.memory.lastPipeline')}</div>
+            <div className="mt-0.5 text-[var(--color-foreground)]">{formatTime(lastPipeline)}</div>
+          </div>
+          <div>
+            <div>{t('settings.memory.lastConsolidation')}</div>
+            <div className="mt-0.5 text-[var(--color-foreground)]">{formatTime(lastConsolidation)}</div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h4 className="text-[12px] font-semibold text-[var(--color-foreground)]">{t('settings.memory.globalSettingsTitle')}</h4>
+        <p className="mt-0.5 text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">
+          {t('settings.memory.globalSettingsDesc')}
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <div className={ROW}>
+          <div className="min-w-0 flex-1">
+            <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.memory.enableTitle')}</div>
+            <div className="text-[11px] text-[var(--color-muted-foreground)]">{t('settings.memory.enableDesc')}</div>
+          </div>
+          <Switch
+            on={cfg.enabled}
+            onClick={() => patch({ enabled: !cfg.enabled })}
+            ariaLabel={t('settings.memory.enableTitle')}
+            disabled={controlsDisabled}
+          />
+        </div>
+        <div className={ROW}>
+          <div className="min-w-0 flex-1">
+            <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.memory.dreamTitle')}</div>
+            <div className="text-[11px] text-[var(--color-muted-foreground)]">{t('settings.memory.dreamDesc')}</div>
+          </div>
+          <Switch
+            on={cfg.generate}
+            onClick={() => patch({ generate: !cfg.generate })}
+            ariaLabel={t('settings.memory.dreamTitle')}
+            disabled={controlsDisabled || !cfg.enabled}
+          />
+        </div>
+      </div>
+
+      <Field label={t('settings.memory.model')}>
+        <input
+          value={cfg.model ?? ''}
+          onChange={(e) => patch({ model: e.target.value })}
+          disabled={controlsDisabled}
+          aria-label={t('settings.memory.model')}
+          placeholder={t('settings.memory.modelPlaceholder')}
+          className={INPUT_MONO}
+        />
+        <div className="mt-1 text-[10px] text-[var(--color-muted-foreground)]">{t('settings.memory.modelHint')}</div>
+      </Field>
+
+      <button
+        type="button"
+        className="flex w-full items-center justify-between rounded-[var(--radius-md)] py-1 text-[11px] font-medium text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
+        onClick={() => setAdvanced((v) => !v)}
+        aria-expanded={advanced}
+      >
+        {t('settings.memory.advanced')}
+        <ChevronDownIcon className={`h-3.5 w-3.5 transition-transform ${advanced ? 'rotate-180' : ''}`} />
+      </button>
+
+      {advanced && (
+        <div className="grid grid-cols-2 gap-x-3 rounded-[var(--radius-lg)] border border-[var(--color-border)] p-3.5">
+          {([
+            ['daily_token_budget', 'dailyBudget', 1, 10000000],
+            ['cooldown_hours', 'cooldownHours', 1, 720],
+            ['max_age_days', 'maxAgeDays', 1, 3650],
+            ['max_unused_days', 'maxUnusedDays', 1, 3650],
+            ['phase2_top_n', 'phase2TopN', 1, 1000],
+            ['summary_inject_tokens', 'injectTokens', 64, 100000],
+          ] as const).map(([field, label, min, max]) => (
+            <Field key={field} label={t(`settings.memory.${label}`)}>
+              <input
+                type="number"
+                min={min}
+                max={max}
+                value={cfg[field] as number}
+                disabled={controlsDisabled}
+                aria-label={t(`settings.memory.${label}`)}
+                onChange={(e) => numberPatch(field, e.target.value)}
+                className={INPUT}
+              />
+            </Field>
+          ))}
+        </div>
+      )}
+
+      {(status?.warning || warning || pollError || (!initialLoadFailed && error) || message) && (
+        <div
+          role={error && !initialLoadFailed ? 'alert' : 'status'}
+          aria-live={error && !initialLoadFailed ? 'assertive' : 'polite'}
+          className="flex items-center justify-between gap-3 text-[11px]"
+          style={{
+            color:
+              error && !initialLoadFailed
+                ? 'var(--color-destructive)'
+                : status?.warning || warning || pollError
+                  ? 'var(--color-warning-fg)'
+                  : 'var(--color-success)',
+          }}
+        >
+          <span>
+            {error && !initialLoadFailed
+              ? t('settings.memory.failed', { reason: error })
+              : status?.warning || warning || pollError || message}
+          </span>
+          {pollError && (
+            <button type="button" className={`${BTN_SECONDARY} ${BTN_XS}`} onClick={() => void retryPoll()}>
+              {t('common.retry')}
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--color-border)] pt-4">
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className={`${BTN_SECONDARY} ${BTN_SM}`}
+            disabled={controlsDisabled || projectUnavailable || dirty || busy || !memoryActive || !generationActive}
+            onClick={() => void syncNow()}
+          >
+            <ArrowPathIcon className={`h-3.5 w-3.5 ${action === 'sync' ? 'animate-spin' : ''}`} />
+            {action === 'sync' ? t('settings.memory.syncing') : t('settings.memory.syncNow')}
+          </button>
+          <button
+            type="button"
+            className={`${BTN_GHOST} ${BTN_SM} text-[var(--color-destructive)]`}
+            disabled={controlsDisabled || projectUnavailable || dirty || busy}
+            onClick={() => void clearProject()}
+          >
+            <TrashIcon className="h-3.5 w-3.5" />
+            {action === 'clear' ? t('settings.memory.clearing') : t('settings.memory.clearProject')}
+          </button>
+        </div>
+        <button type="button" className={`${BTN_PRIMARY} ${BTN_SM}`} disabled={controlsDisabled || !dirty} onClick={() => void save()}>
+          {saving ? t('common.loading') : t('common.save')}
+        </button>
+      </div>
     </div>
   )
 }

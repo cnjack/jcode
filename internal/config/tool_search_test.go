@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -104,4 +105,59 @@ func TestLoadLegacyConfigWithoutToolSearchDefaultsDisabled(t *testing.T) {
 	if ToolSearchEnabled(cfg) {
 		t.Fatal("legacy config without tool_search unexpectedly enabled tool search")
 	}
+}
+
+func TestToolSearchSettingsAreDetached(t *testing.T) {
+	enabled := true
+	input := &ToolSearchConfig{Enabled: &enabled}
+	cfg := &Config{}
+	if cfg.ToolSearchConfigSnapshot() != nil {
+		t.Fatal("absent ToolSearch block did not remain distinguishable")
+	}
+	cfg.SetToolSearch(input)
+
+	// Publishing clones the caller's pointer.
+	enabled = false
+	if !ToolSearchEnabled(cfg) {
+		t.Fatal("mutating SetToolSearch input changed the published settings")
+	}
+
+	// Reading also returns a detached pointer.
+	snapshot := cfg.ToolSearchSettings()
+	*snapshot.Enabled = false
+	if !ToolSearchEnabled(cfg) {
+		t.Fatal("mutating ToolSearchSettings snapshot changed live settings")
+	}
+	stored := cfg.ToolSearchConfigSnapshot()
+	*stored.Enabled = false
+	if !ToolSearchEnabled(cfg) {
+		t.Fatal("mutating ToolSearchConfigSnapshot changed live settings")
+	}
+
+	cfg.SetToolSearch(nil)
+	if ToolSearchEnabled(cfg) {
+		t.Fatal("nil ToolSearch block did not restore disabled default")
+	}
+}
+
+func TestToolSearchSettingsConcurrentPublishRead(t *testing.T) {
+	cfg := &Config{}
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(2)
+		go func(value bool) {
+			defer wg.Done()
+			for range 500 {
+				cfg.SetToolSearch(&ToolSearchConfig{Enabled: &value})
+			}
+		}(i%2 == 0)
+		go func() {
+			defer wg.Done()
+			for range 500 {
+				_ = cfg.ToolSearchSettings()
+				_ = ToolSearchEnabled(cfg)
+			}
+		}()
+	}
+	wg.Wait()
 }

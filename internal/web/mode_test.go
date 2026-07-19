@@ -194,3 +194,66 @@ func TestWebHandleApprovalAllowAllSyncsMode(t *testing.T) {
 		t.Errorf("approve_once: s.mode=%q, want %q (single allow must not flip the selector)", s.mode, mode.Approval.String())
 	}
 }
+
+func TestApproveAllWaitsForAgentRebuildAndPreservesRefreshedAgent(t *testing.T) {
+	oldAgent := new(adk.ChatModelAgent)
+	refreshedAgent := new(adk.ChatModelAgent)
+	rebuildStarted := make(chan struct{})
+	releaseRebuild := make(chan struct{})
+	eng := &Engine{
+		taskID:       "active",
+		agent:        oldAgent,
+		mode:         mode.Approval.String(),
+		providerName: "provider-a",
+		modelName:    "model-a",
+		createAgent: func(_, _ string) (*adk.ChatModelAgent, error) {
+			close(rebuildStarted)
+			<-releaseRebuild
+			return refreshedAgent, nil
+		},
+	}
+	s := &Server{Engine: eng, wsBroker: NewWSBroker()}
+
+	rebuildDone := make(chan error, 1)
+	go func() { rebuildDone <- s.rebuildToolAgents() }()
+	<-rebuildStarted
+
+	approveStarted := make(chan struct{})
+	approveDone := make(chan struct{})
+	go func() {
+		close(approveStarted)
+		s.syncModeAfterApproval(eng, true, true)
+		close(approveDone)
+	}()
+	<-approveStarted
+
+	select {
+	case <-approveDone:
+		t.Fatal("approve-all completed while an agent rebuild held rebuildMu")
+	case <-time.After(100 * time.Millisecond):
+	}
+	eng.emu.Lock()
+	agentBefore, modeBefore, revisionBefore := eng.agent, eng.mode, eng.agentRevision
+	eng.emu.Unlock()
+	if agentBefore != oldAgent || modeBefore != mode.Approval.String() || revisionBefore != 0 {
+		t.Fatalf("approve-all changed engine before rebuild completed: agent=%p mode=%q revision=%d",
+			agentBefore, modeBefore, revisionBefore)
+	}
+
+	close(releaseRebuild)
+	if err := <-rebuildDone; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-approveDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("approve-all did not resume after the agent rebuild completed")
+	}
+
+	eng.emu.Lock()
+	defer eng.emu.Unlock()
+	if eng.agent != refreshedAgent || eng.mode != mode.FullAccess.String() || eng.agentRevision != 2 {
+		t.Fatalf("final engine agent=%p mode=%q revision=%d, want refreshed agent=%p mode=%q revision=2",
+			eng.agent, eng.mode, eng.agentRevision, refreshedAgent, mode.FullAccess.String())
+	}
+}

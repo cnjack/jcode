@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -296,13 +297,45 @@ func TestRunRespectsCooldownAndLock(t *testing.T) {
 	}
 	defer release()
 	logs = nil
-	if err := Run(context.Background(), cfg, proj, Options{IgnoreCooldown: true, Log: func(f string, a ...any) {
+	err = Run(context.Background(), cfg, proj, Options{IgnoreCooldown: true, Log: func(f string, a ...any) {
 		logs = append(logs, fmt.Sprintf(f, a...))
-	}}); err != nil {
-		t.Fatal(err)
+	}})
+	if !errors.Is(err, ErrAlreadyRunning) {
+		t.Fatalf("Run() error = %v, want ErrAlreadyRunning", err)
 	}
 	if !strings.Contains(strings.Join(logs, "\n"), "already running") {
 		t.Errorf("expected lock skip, logs: %v", logs)
+	}
+	done, startErr := Start(context.Background(), cfg, proj, Options{IgnoreCooldown: true})
+	if done != nil || !errors.Is(startErr, ErrAlreadyRunning) {
+		t.Fatalf("Start() = (%v, %v), want nil, ErrAlreadyRunning", done, startErr)
+	}
+}
+
+func TestStartBusyDoesNotCreateScope(t *testing.T) {
+	setHome(t)
+	proj := filepath.Join(t.TempDir(), "not-yet-created-project")
+	scope := memory.ProjectRoot(proj)
+	if _, err := os.Stat(scope); !os.IsNotExist(err) {
+		t.Fatalf("scope exists before test: %v", err)
+	}
+
+	// The stable pipeline lock is outside scope, so another process can own it
+	// while the project memory directory is still absent. A losing Start must not
+	// create the scope before discovering that owner; doing so reopens the
+	// clear-then-recreate race this lock ordering is meant to close.
+	release, ok, err := memory.TryLockPipeline(scope)
+	if err != nil || !ok {
+		t.Fatalf("take pipeline lock: ok=%v err=%v", ok, err)
+	}
+	defer release()
+
+	done, startErr := Start(context.Background(), &config.Config{}, proj, Options{IgnoreCooldown: true})
+	if done != nil || !errors.Is(startErr, ErrAlreadyRunning) {
+		t.Fatalf("Start() = (%v, %v), want nil, ErrAlreadyRunning", done, startErr)
+	}
+	if _, err := os.Stat(scope); !os.IsNotExist(err) {
+		t.Fatalf("busy Start created scope %q: %v", scope, err)
 	}
 }
 
