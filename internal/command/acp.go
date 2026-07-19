@@ -459,10 +459,15 @@ func (a *acpAgent) buildAgentSession(
 	// notifications (parity with the TUI notifier and the web SSE events).
 	acpHandler := handler.NewACPHandler(a.conn, sessionID, pwd)
 
+	// Publish the developer logging toggle (Settings → Developer) before the
+	// first logger / tracer is built. Tracing also respects the developer
+	// toggle; both take effect on this startup only.
+	config.SetLoggingEnabled(config.LoggingEnabled(cfg))
+
 	// Langfuse tracer — created before the tools so subagent runs nest child
 	// traces under the session trace.
 	var tracer *telemetry.LangfuseTracer
-	if cfg.Telemetry != nil && cfg.Telemetry.Langfuse != nil {
+	if config.TracingEnabled(cfg) && cfg.Telemetry != nil && cfg.Telemetry.Langfuse != nil {
 		tracer = telemetry.NewLangfuseTracer(cfg.Telemetry.Langfuse)
 	}
 

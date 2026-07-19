@@ -49,6 +49,7 @@ import {
   ArrowPathIcon,
   ExclamationTriangleIcon,
   CircleStackIcon,
+  WrenchScrewdriverIcon,
 } from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
@@ -69,6 +70,7 @@ import type {
   ToolSearchStatusResponse,
   MemoryConfig,
   MemoryStatusResponse,
+  DevOptionsStatusResponse,
 } from '../lib/api'
 import type { ApprovalReviewConfig, ApprovalReviewDefaults } from '../lib/types'
 import type {
@@ -100,6 +102,7 @@ type TabId =
   | 'channels'
   | 'shortcuts'
   | 'usage'
+  | 'developer'
 
 const TABS: { id: TabId; Icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'general', Icon: Cog6ToothIcon },
@@ -114,6 +117,7 @@ const TABS: { id: TabId; Icon: React.ComponentType<{ className?: string }> }[] =
   { id: 'channels', Icon: ChatBubbleOvalLeftIcon },
   { id: 'shortcuts', Icon: KeyIcon },
   { id: 'usage', Icon: ChartBarIcon },
+  { id: 'developer', Icon: WrenchScrewdriverIcon },
 ]
 
 const THEMES: { id: string; label: string; appearance: 'dark' | 'light' }[] = [
@@ -410,6 +414,7 @@ export function SettingsDialog() {
             {tab === 'channels' && <ChannelsTab />}
             {tab === 'shortcuts' && <ShortcutsTab />}
             {tab === 'usage' && <UsageTab />}
+            {tab === 'developer' && <DeveloperTab />}
           </div>
         </div>
       </div>
@@ -1881,6 +1886,346 @@ function ApprovalReviewSection() {
         </button>
       </div>
     </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Developer tab — logging + tracing (Langfuse) toggles.
+// Both switches take effect on the next app start; the running process keeps
+// its current logger / tracer. Mirrors the BLE toggle's "restart required"
+// semantics in GeneralTab.
+// ════════════════════════════════════════════════════════════════════════════
+
+function DeveloperTab() {
+  const { t } = useTranslation()
+  const [status, setStatus] = useState<DevOptionsStatusResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [savingField, setSavingField] = useState<'' | 'logging' | 'tracing'>('')
+  const [error, setError] = useState('')
+
+  const load = useCallback(() => {
+    setLoading(true)
+    setError('')
+    api
+      .devOptionsStatus()
+      .then(setStatus)
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => load(), [load])
+
+  async function toggle(field: 'logging' | 'tracing') {
+    if (!status || savingField || status.available === false) return
+    setSavingField(field)
+    setError('')
+    try {
+      const next = field === 'logging' ? !status.logging_enabled : !status.tracing_enabled
+      const saved = await api.devOptionsConfig(
+        field === 'logging' ? { logging_enabled: next } : { tracing_enabled: next },
+      )
+      setStatus((current) =>
+        current
+          ? {
+              ...current,
+              logging_enabled: saved.logging_enabled,
+              tracing_enabled: saved.tracing_enabled,
+            }
+          : current,
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSavingField('')
+    }
+  }
+
+  const unavailable = status?.available === false
+  const langfuseConfigured = !!status?.langfuse_configured
+
+  return (
+    <div className="space-y-5">
+      <h3 className={SECTION_TITLE}>{t('settings.tabs.developer')}</h3>
+
+      {/* Logging */}
+      <div className="space-y-3 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3.5">
+        <div className="flex items-center gap-2">
+          <CommandLineIcon className="h-4 w-4 text-[var(--color-muted-foreground)]" />
+          <h4 className="text-[12px] font-semibold text-[var(--color-foreground)]">
+            {t('settings.developer.loggingTitle')}
+          </h4>
+        </div>
+        <p className="text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">
+          {t('settings.developer.loggingDesc')}
+        </p>
+        <div className={ROW}>
+          <div className="min-w-0 flex-1">
+            <div className="text-[12px] font-medium text-[var(--color-foreground)]">
+              {t('settings.developer.loggingToggle')}
+            </div>
+            <div className="text-[11px] text-[var(--color-muted-foreground)]">
+              {t('settings.developer.loggingToggleDesc')}
+            </div>
+          </div>
+          <Switch
+            on={status?.logging_enabled ?? true}
+            onClick={() => void toggle('logging')}
+            ariaLabel={t('settings.developer.loggingToggle')}
+            disabled={loading || savingField !== '' || !status || unavailable}
+          />
+        </div>
+      </div>
+
+      {/* Tracing */}
+      <div className="space-y-3 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3.5">
+        <div className="flex items-center gap-2">
+          <BoltIcon className="h-4 w-4 text-[var(--color-muted-foreground)]" />
+          <h4 className="text-[12px] font-semibold text-[var(--color-foreground)]">
+            {t('settings.developer.tracingTitle')}
+          </h4>
+        </div>
+        <p className="text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">
+          {t('settings.developer.tracingDesc')}
+        </p>
+        <div className={ROW}>
+          <div className="min-w-0 flex-1">
+            <div className="text-[12px] font-medium text-[var(--color-foreground)]">
+              {t('settings.developer.tracingToggle')}
+            </div>
+            <div className="text-[11px] text-[var(--color-muted-foreground)]">
+              {unavailable
+                ? t('settings.developer.tracingUnavailable')
+                : !langfuseConfigured && status
+                  ? t('settings.developer.tracingNotConfigured')
+                  : t('settings.developer.tracingToggleDesc')}
+            </div>
+          </div>
+          <Switch
+            on={status?.tracing_enabled ?? true}
+            onClick={() => void toggle('tracing')}
+            ariaLabel={t('settings.developer.tracingToggle')}
+            disabled={loading || savingField !== '' || !status || unavailable}
+          />
+        </div>
+      </div>
+
+      {/* Langfuse credentials */}
+      <LangfuseConfigCard
+        status={status}
+        disabled={loading || savingField !== '' || unavailable}
+        onChanged={load}
+      />
+
+      {error && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="flex items-center justify-between gap-3 text-[11px] text-[var(--color-destructive)]"
+        >
+          <span>{t('settings.developer.failed', { reason: error })}</span>
+          <button type="button" className={`${BTN_SECONDARY} ${BTN_XS}`} onClick={load}>
+            {t('common.retry')}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// LangfuseConfigCard renders the credentials form for the Langfuse tracer.
+// Mirrors the ProviderForm secret-input discipline: host is seeded from the
+// stored value (non-secret), public_key/secret_key start blank on edit and
+// are only sent when the user types something — the backend keeps the prior
+// value when they are empty. A dedicated "Clear" button wipes the block.
+function LangfuseConfigCard({
+  status,
+  disabled,
+  onChanged,
+}: {
+  status: DevOptionsStatusResponse | null
+  disabled: boolean
+  onChanged: () => void
+}) {
+  const { t } = useTranslation()
+  const lf = status?.langfuse
+  const configured = !!status?.langfuse_configured
+
+  const [host, setHost] = useState('')
+  const [publicKey, setPublicKey] = useState('')
+  const [secretKey, setSecretKey] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [clearing, setClearing] = useState(false)
+  const [error, setError] = useState('')
+  const [confirmClear, setConfirmClear] = useState(false)
+  const [seeded, setSeeded] = useState(false)
+
+  // Seed host from the loaded status (non-secret). The secret inputs stay
+  // blank and only show a placeholder hinting at the stored (masked) value.
+  useEffect(() => {
+    if (lf && !seeded) {
+      setHost(lf.host ?? '')
+      setSeeded(true)
+    }
+  }, [lf, seeded])
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault()
+    if (saving || clearing || disabled) return
+    // require both keys when nothing is configured yet; allow partial edits otherwise
+    if (!configured && (!publicKey.trim() || !secretKey.trim())) {
+      setError(t('settings.developer.langfuseBothKeysRequired'))
+      return
+    }
+    setSaving(true)
+    setError('')
+    try {
+      const payload: Parameters<typeof api.devOptionsConfig>[0] = {
+        langfuse: {
+          host: host.trim(),
+          public_key: publicKey.trim(),
+          secret_key: secretKey.trim(),
+        },
+      }
+      await api.devOptionsConfig(payload)
+      setPublicKey('')
+      setSecretKey('')
+      setSeeded(false)
+      onChanged()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function clear() {
+    if (clearing || !configured) return
+    setClearing(true)
+    setError('')
+    try {
+      await api.devOptionsConfig({ langfuse_clear: true })
+      setHost('')
+      setPublicKey('')
+      setSecretKey('')
+      setSeeded(false)
+      setConfirmClear(false)
+      onChanged()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setClearing(false)
+    }
+  }
+
+  const busy = saving || clearing || disabled
+
+  return (
+    <form
+      onSubmit={save}
+      className="space-y-3 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3.5"
+    >
+      <div className="flex items-center gap-2">
+        <KeyIcon className="h-4 w-4 text-[var(--color-muted-foreground)]" />
+        <h4 className="text-[12px] font-semibold text-[var(--color-foreground)]">
+          {t('settings.developer.langfuseTitle')}
+        </h4>
+        {configured && <span className={CHIP_ACCENT}>{t('settings.developer.langfuseConfiguredBadge')}</span>}
+      </div>
+      <p className="text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">
+        {t('settings.developer.langfuseDesc')}
+      </p>
+
+      <Field label={t('settings.developer.langfuseHost')}>
+        <input
+          value={host}
+          onChange={(e) => setHost(e.target.value)}
+          type="text"
+          autoComplete="url"
+          spellCheck={false}
+          placeholder={lf?.default_host || 'https://cloud.langfuse.com'}
+          className={INPUT_MONO}
+        />
+      </Field>
+
+      <Field label={t('settings.developer.langfusePublicKey')}>
+        <input
+          value={publicKey}
+          onChange={(e) => setPublicKey(e.target.value)}
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder={
+            configured && lf?.public_key_set
+              ? `${lf?.public_key ?? '••••'} — ${t('settings.developer.langfuseUnchanged')}`
+              : 'pk-lf-…'
+          }
+          className={INPUT_MONO}
+        />
+      </Field>
+
+      <Field label={t('settings.developer.langfuseSecretKey')}>
+        <input
+          value={secretKey}
+          onChange={(e) => setSecretKey(e.target.value)}
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder={
+            configured && lf?.secret_key_set
+              ? `${t('settings.developer.langfuseUnchanged')}`
+              : 'sk-lf-…'
+          }
+          className={INPUT_MONO}
+        />
+      </Field>
+
+      {error && (
+        <div role="alert" aria-live="assertive" className="text-[11px] text-[var(--color-destructive)]">
+          {t('settings.developer.failed', { reason: error })}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-[11px] text-[var(--color-muted-foreground)]">
+          {t('settings.developer.langfuseRestartHint')}
+        </div>
+        <div className="flex items-center gap-2">
+          {configured &&
+            (confirmClear ? (
+              <>
+                <button
+                  type="button"
+                  className={`${BTN_GHOST} ${BTN_XS}`}
+                  disabled={busy}
+                  onClick={() => setConfirmClear(false)}
+                >
+                  {t('common.cancel')}
+                </button>
+                <button
+                  type="button"
+                  className={`${BTN_DANGER} ${BTN_XS}`}
+                  disabled={busy}
+                  onClick={() => void clear()}
+                >
+                  {clearing ? t('common.loading') : t('settings.developer.langfuseClearConfirm')}
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className={`${BTN_GHOST} ${BTN_XS}`}
+                disabled={busy}
+                onClick={() => setConfirmClear(true)}
+              >
+                {t('settings.developer.langfuseClear')}
+              </button>
+            ))}
+          <button type="submit" className={`${BTN_PRIMARY} ${BTN_XS}`} disabled={busy}>
+            {saving ? t('common.loading') : t('common.save')}
+          </button>
+        </div>
+      </div>
+    </form>
   )
 }
 

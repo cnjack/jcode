@@ -387,6 +387,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/computer/shots/{id}", s.handleComputerShot)
 	mux.HandleFunc("GET /api/tool-search/status", s.handleToolSearchStatus)
 	mux.HandleFunc("POST /api/tool-search/config", s.handleToolSearchConfig)
+	mux.HandleFunc("GET /api/dev-options/status", s.handleDevOptionsStatus)
+	mux.HandleFunc("POST /api/dev-options/config", s.handleDevOptionsConfig)
 	mux.HandleFunc("GET /api/memory/status", s.handleMemoryStatus)
 	mux.HandleFunc("POST /api/memory/config", s.handleMemoryConfig)
 	mux.HandleFunc("POST /api/memory/sync", s.handleMemorySync)

@@ -1259,7 +1259,11 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		}
 	}
 
-	if cfg.Telemetry != nil && cfg.Telemetry.Langfuse != nil {
+	// Publish the developer logging toggle (Settings → Developer) before the
+	// first logger / tracer is built. Tracing also respects the developer
+	// toggle; both take effect on this startup only.
+	config.SetLoggingEnabled(config.LoggingEnabled(cfg))
+	if config.TracingEnabled(cfg) && cfg.Telemetry != nil && cfg.Telemetry.Langfuse != nil {
 		st.langfuseTracer = telemetry.NewLangfuseTracer(cfg.Telemetry.Langfuse)
 	}
 
