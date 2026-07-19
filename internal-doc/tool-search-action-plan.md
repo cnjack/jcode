@@ -1,6 +1,6 @@
 # Tool Search 渐进式工具披露实施清单
 
-> 状态：执行中
+> 状态：已收尾（实现完成，最终正式验收未通过）
 >
 > 创建日期：2026-07-18
 >
@@ -38,9 +38,9 @@
 | TS-04 MCP 与权限 | 完成 | `c9cb076`、`1aa128e`、`a316830`、`b1b687f`、`3b751db` | MCP、Plan、delegation 和 team mode 边界完成 |
 | TS-05 Prompt 与观测 | 进行中 | `dbe7ca4`、`69ba9ee`、`f905ae2`、`8675a5b`、`92c2f31`、`f101b18`、`503bef8`、`e3e1f7c` | 使用说明、skill→Deferred 路由桥接、schema/轨迹指标、凭证文件权限、Browser token 隔离、零替换发布门禁及 MCP structured result 投影 |
 | TS-06 自动化测试 | 完成 | `77de5fc`、`92e0cb0`、`56fa6eb` | 单元、集成、fixture、routing oracle 与生命周期撤权矩阵 |
-| TS-07 Kimi A/B | 进行中 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e`、`8675a5b`、`d60000d`、`8c980b1`、`207b313`、`7530b38`、`92c2f31`、`ef66470`、`f101b18`、`503bef8`、`e3e1f7c`、`38bdd47`、`4ff93a8` | near-exact 修复后的 exact-Kimi Computer repeat canary 已 40/40 全绿；等待唯一一次完整 formal pass@10 |
-| TS-08 30 分钟回归 | 进行中 | `9f2889e`、`8c980b1`、`b97734d`、`f101b18`、`503bef8`、`e3e1f7c` | Computer/Browser exact-Kimi repeat canary 已通过；第八次 formal 因主机执行会话中断在 101/320 fail closed，下一步从记录本证据后的 clean commit 和全新目录重跑 |
-| TS-09 HTML 报告 | 进行中 | `ad55a3b`、`92d442e`、`9f2889e`、`8c980b1`、`f101b18` | 安全、fail-closed 的九门槛报告器已要求 canonical tool_names 与零替换产物；等待真实 campaign 产物 |
+| TS-07 Kimi A/B | 未通过 | `28eae39`、`3a1ece8`、`7d713ef`、`f75041d`、`91bbc8b`、`fe81907`、`92d442e`、`8675a5b`、`d60000d`、`8c980b1`、`207b313`、`7530b38`、`92c2f31`、`ef66470`、`f101b18`、`503bef8`、`e3e1f7c`、`38bdd47`、`4ff93a8` | 放行 canary 已通过；最终 formal 在中文 no-tool Deferred 两次文本哨兵失败后 fail closed，未取得完整 pass@10 |
+| TS-08 30 分钟回归 | 未通过 | `9f2889e`、`8c980b1`、`b97734d`、`f101b18`、`503bef8`、`e3e1f7c` | 最终 formal 完成 204/320、1588.014s；未满足完整性和 1800s 门槛 |
+| TS-09 HTML 报告 | 完成（失败状态） | `ad55a3b`、`92d442e`、`9f2889e`、`8c980b1`、`f101b18`、`64c8922` | 正式 PASS 报告按设计拒绝不完整 campaign；已生成自包含失败状态 HTML，明确不得作为发布依据 |
 
 ## TS-00 文档与基线
 
@@ -323,11 +323,11 @@ Kimi 硬门槛：
 
 完成证据：
 
-- 开始/结束：待填写
-- 总耗时：待填写
-- 场景数/运行数：待填写
-- 结果目录：待填写
-- 提交：待填写
+- 开始/结束：`2026-07-19T05:35:40.607841Z` ～ `06:02:08.667937Z`（最终 formal，失败关闭）。
+- 总耗时：1588.014s；成功真实区间 1505.794s，未达到 1800s。
+- 场景数/运行数：canonical 18 cases / 15 critical，完成 204/320 matrix；7/7 supplementary PASS。
+- 结果目录：`/private/tmp/jcode-toolsearch-formal-final4.8gO0fu`（失败 campaign，不得复用或作为 PASS 证据）。
+- 提交：被测 clean commit `39fd738be42c72e2606d9918c039be4ae8aae097`。
 - Coordinator 基础设施：新增统一 ACP/Web formal campaign，固定 exact Kimi、`workers=1`、每 case 至少 10 repeats、static/deferred 相邻随机 block；一次构建 jcode/ACP harness/MCP fixture 并记录 Git、Go、OS/arch、Eino 与 SHA-256，结束前复核 suite 和三份二进制未漂移。canary/dry-run 明确非 formal，不能作为验收证据。
 - 覆盖/时长：正式 plan 必须是 canonical matrix/base suite 的内容 hash，不能换成缩小矩阵；只把逐个真实 matrix job 的无重叠 interval 交给 1800 秒 gate，固定 TUI/Web/ACP mode/reload/failure Go 覆盖及 Browser deny/disabled/中文 supplementary 明确不计时，禁止 sleep/filler 凑时长。
 - 安全/失败关闭：每 run 必须有 record/metadata-only trajectory/redaction 三件套，私有目录 owner-only，凭证/host path 扫描；中断、部分失败、Git/suite/binary 漂移均写 failed manifest。supplementary 必须与真实 record 的 language/scenario/routing/real_execution 身份一致，报告要求固定 3 command + 4 Web 记录全部通过。
@@ -387,22 +387,25 @@ Kimi 硬门槛：
 - Canary 路由/动作/安全：static 与 Deferred 均 20/20；`computer_open=40`、`computer_act=40`、`execute=0`，120/120 tool result 成功。Deferred 20 次 search 全部一次成功且 0 empty，40/40 Deferred target call 与 40/40 参数检查匹配；bypass=0、observed bypass=0、same-batch=0、failed result=0、invalid args=0。Deferred/static 首轮工具数 11/23、schema 估算 4906/7456 tokens。40 份 redaction report 全部 safe，扫描 80 个允许产物，0 finding、0 redacted file、0 replacement；目录 `/private/tmp/jcode-toolsearch-near-exact-canary-54e18e4.MP991d`。这是 formal 前放行 canary，仍不计 TS-07.7/TS-08/TS-09；下一步立即从记录本证据后的 clean commit、全新 repo-external 目录启动唯一一次完整 formal。
 - 第八次真实 formal 尝试：从 clean commit `49f60690acc05abf7d044d607c8f68d8e667b6cd`、全新外部目录启动，exact model、`temperature=omitted`、`workers=1`、`jcode_eval`；7/7 supplementary PASS。计划 320 jobs，起止 `2026-07-19T02:02:43.921865Z`～`02:15:48.101776Z`，monotonic 784.190s；主机执行会话在用户消息 steering 时终止，campaign 以 `unexpected_failure` fail closed，仅完成 101/320，因此不能计入 TS-07.7/TS-08/TS-09，也不得复用目录：`/private/tmp/jcode-toolsearch-formal-final.F1cEJi`。JCode/harness/MCP fixture SHA-256 分别为 `a8f1059e11bec52eb910cce32b0716260171f98eb4f10e1ba3cdb38abc1184d1`、`ec84fb7a232c867da5082a39c9e727265f8150bfc7e4f1287e44387c6b6fc569`、`c40ea1c8fe6cef8f4b0e26ba5784b6fd32a718483715da48e8029bebf9303e73`。
 - 第八次 formal 安全投影：101 条 matrix 中 99 task/routing PASS、101/101 contracts/artifact-safe；static 43/44、Deferred 56/57。55/55 Deferred target call 成功，48/48 search endpoint 成功，bypass=0、same-batch=0、invalid args=0。两个任务失败仍分属不同格：Direct read static r10 最终答案/无写入正确但 2 个 read result 失败且参数/count 严格 FAIL；MCP50 Deferred r6 search 与答案正确但成功 target 重复调用 2 次。末条 MCP30 Deferred r8 的已发布 record 则 task/contracts/routing/artifact 全部 PASS、search1+target1、参数与结果全成功，只有 campaign interval 因主机会话层异常标为 unsuccessful；不把它误算为模型失败。106 份 redaction report 全部 safe，扫描 241 个允许产物，0 post finding、0 redacted file、0 replacement。下一步只从记录本证据后的 clean commit、全新 repo-external 目录重新运行完整 formal。
+- 最终 formal 收尾：从 clean commit `39fd738be42c72e2606d9918c039be4ae8aae097`、全新外部目录运行 exact model、`temperature=omitted`、`workers=1`、`jcode_eval`；7/7 supplementary PASS。计划 320 jobs，完成 204 后主动中止：202 task PASS，204/204 contracts/routing/artifact-safe；static 89/89、Deferred 113/115。119/119 Deferred target、96/96 search endpoint、138/138 参数检查成功；bypass=0、same-batch=0、failed result=0、invalid args=0。
+- 最终 formal 唯一失败格为 `ts_no_tool_irrelevant_zh/deferred` 的 r1/r8：两条均 0 工具、正常 `end_turn`、contracts/routing/artifact-safe 全过，仅 `final_text_contains` 哨兵未命中。该 critical 格即使剩余任务全过也最多 8/10，故在 1588.014s、204/320 时以 `interrupted` fail closed，不继续消耗剩余模型调用；不能计入 TS-07.7/TS-08。208 份 redaction report 全部 safe，扫描 474 个允许产物，0 post finding、0 redacted file、0 replacement。
+- 报告器真实产物兼容修复：安全 walker 原先仅按字段名把合法 `usage_total.prompt` 数值与 `routing.checks.arguments` 布尔值误判为 raw payload。现只允许这两个 exact root path 且分别限制为非负整数/布尔值，独立 routing 扫描显式携带 root；其他位置、嵌套位置、错误类型与全局 raw `prompt`/`arguments` 继续 fail closed。Agent Eval Python 117/117、`py_compile`、`git diff --check` 全部通过，独立审查无 blocker；代码提交 `64c8922 fix(eval): distinguish safe report metadata`。修复后正式报告器因 partial `all_records` 与 plan 不一致而正确拒绝生成 PASS 报告。
 - 测试：campaign 定向 10/10、修复后定向 23/23、agent-eval Python 全量 90/90、fake formal 可被真实报告器解析且仅 1800 秒 gate 按预期失败；`py_compile`、diff check 通过。
 - 已完成提交：`9f2889e test(eval): coordinate formal ToolSearch campaign`（仅基础设施；TS-08.1～08.6 均未勾选）。
 
 ## TS-09 HTML 测试报告与完成审计
 
-- [ ] TS-09.1 生成独立 HTML 报告，包含环境、设计、用例矩阵、调用轨迹、指标和失败详情。
-- [ ] TS-09.2 报告明确列出 Direct/Deferred 正确率、bypass、参数有效率、token 和时延对比。
+- [x] TS-09.1 生成独立 HTML 报告，包含环境、设计、用例矩阵、调用轨迹、指标和失败详情（明确标注为失败状态报告）。
+- [x] TS-09.2 报告明确列出 Direct/Deferred 正确率、bypass、参数有效率、token 和时延对比。
 - [ ] TS-09.3 报告包含不少于 30 分钟运行的起止时间与原始结果链接。
-- [ ] TS-09.4 对 TS-00 至 TS-09 逐项核验证据，确认没有以窄测试代替全范围要求。
-- [ ] TS-09.5 提交报告及最终文档状态。
+- [x] TS-09.4 对 TS-00 至 TS-09 逐项核验证据，确认没有以窄测试代替全范围要求；因此 TS-07.7、TS-08 与 TS-09.3 保持未完成。
+- [x] TS-09.5 提交失败状态报告及最终文档状态，不冒充正式 PASS 报告。
 
 完成证据：
 
-- HTML：待填写
-- 校验：待填写
-- 提交：待填写
+- HTML：`internal-doc/tool-search-final-status.html`（自包含失败状态摘要；正式 PASS 报告未生成）。
+- 校验：HTML parser 通过、文件非空、无外部 URL/JavaScript；SHA-256 `7922c9fac5299e4025a00c2c3bad544315b067ee290256ac797cba408e3dbb80`。
+- 提交：报告器代码 `64c8922`；HTML 与最终清单为本次文档提交。
 - 报告器基础设施子阶段：新增独立、无外部 CSS/JS 的 HTML generator；只读取 allowlisted `record.json`、metadata-only `trajectory.json`、`redaction_report.json`、统一 plan/campaign manifest，不读取 raw session、prompt、config、debug log、完整参数或输出。
 - 完整性门槛：精确校验 `kimi-for-coding/kimi-for-coding`、`temperature=omitted`、一致的实际 effort、clean Git、固定二进制 SHA-256、每个 plan job 的三件套及 `all_records` 一致性；任何缺失、highspeed 漂移、脏树、raw payload、凭证/宿主路径或 redaction finding 均 fail closed。
 - 时长证明：同时要求 wall clock、monotonic 和成功 real-run interval 有效并集均 ≥1800 秒，`workers=1` 且区间不重叠；每段可计时长再由对应 `record.wall_s` 封顶，因此 sleep、setup 或 filler 不能凑满 30 分钟。
@@ -413,6 +416,8 @@ Kimi 硬门槛：
 - Formal 合约硬化提交：`9f2889e test(eval): coordinate formal ToolSearch campaign`；报告强制 canonical suite hash、formal/complete/no-failure manifest、固定 binary hash 与完整 supplementary 身份/产物，不接受部分或缩小 campaign。真实 campaign 前仍不勾选 TS-09.1～09.5。
 - Deterministic build provenance 提交：`8c980b1 fix(eval): build deterministic Computer campaign`；HTML 展示 `jcode_eval` build tag，plan/campaign 缺失或漂移均拒绝生成 PASS。真实 campaign 前仍不勾选 TS-09.1～09.5。
 - Canonical publication 提交：`f101b18 fix(eval): publish canonical tool names safely`；报告器要求 `record.tool_names` 是安全 canonical name→positive count map，且与 record/trajectory `calls_by_name` 精确相等；成功 redaction report 必须为零 replacement、零 redacted file、零 finding。真实完整 campaign 前仍不勾选 TS-09.1～09.5。
+- 真实字段兼容提交：`64c8922 fix(eval): distinguish safe report metadata`；只放行 exact-root `usage_total.prompt` 非负整数与 `routing.checks.arguments` 布尔值，其他 raw payload key 继续拒绝。117/117 测试及独立审查通过。最终 incomplete campaign 仍因 204/320 与 plan 不一致 fail closed，证明兼容修复没有绕过完整性门槛。
+- 最终报告决策：官方验收生成器不接受 failed/incomplete campaign，因此没有伪造 PASS HTML。另生成自包含 `tool-search-final-status.html`，展示 204/320、1588.014s、critical 8/10 上限、全部调用/安全指标和未通过结论；TS-09.3 保持未勾选。
 
 ## 更新日志
 
@@ -483,3 +488,5 @@ Kimi 硬门槛：
 | 2026-07-19 | 修复 near-exact search：2～8 项中至少 2 effective known、最多 1 identifier unknown；known-only select，unknown 不映射，协议提示对齐 Eino name block | Agent normal/race、全量 Go、Python 116/116、lint 0 issues、两路审查+adversarial 终审无 blocker | `4ff93a8` |
 | 2026-07-19 | near-exact exact-Kimi repeat canary 40/40 全绿，放行最终 formal | static/deferred 各 20/20；20/20 search 一次命中、0 empty；open/act exactly-once 40/40，execute/bypass/same-batch/failed/invalid=0；40 redaction safe | — |
 | 2026-07-19 | 第八次 formal 因主机执行会话中断在 101/320 以 `unexpected_failure` fail closed | 99 task/routing、101 contracts/artifact；7/7 supplementary；55/55 Deferred target，bypass/same-batch=0；106 redaction 全部零替换；784.190s，不计 TS-07.7/TS-08/TS-09 | — |
+| 2026-07-19 | 最终 formal 在 204/320 主动 fail closed：中文 no-tool Deferred r1/r8 两次仅文本哨兵失败，使 critical 最多 8/10 | 202 task、204 contracts/routing/artifact；119/119 Deferred、138/138 args；bypass/same-batch/failed/invalid=0；208 redaction 零替换；1588.014s，不计 TS-07.7/TS-08 | — |
+| 2026-07-19 | 修复报告器对安全数值/布尔元数据的字段名假阳性，并生成明确未通过的自包含 HTML 状态报告 | Python 117/117、py_compile、diff check、独立审查无 blocker；官方报告器继续因 partial plan fail closed；HTML parse/无外链无脚本/SHA-256 校验通过 | `64c8922` |
