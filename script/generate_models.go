@@ -34,6 +34,7 @@ var wantedProviders = []string{
 	// Chinese providers
 	"alibaba-cn",
 	"alibaba-coding-plan-cn",
+	"alibaba-token-plan-cn",
 	"moonshotai",
 	"minimax",
 	"minimax-coding-plan",
