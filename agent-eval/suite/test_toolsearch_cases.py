@@ -94,6 +94,15 @@ class ToolSearchCaseMatrixTest(unittest.TestCase):
         self.assertIn("com.apple.Notes", fixture)
         self.assertTrue(any(oracle["type"] == "home_file_contains" for oracle in computer["oracles"]))
         self.assertEqual("acp", computer["surface"])
+        for variant in ("static", "deferred"):
+            self.assertIn(
+                "execute",
+                computer["expected_routing"][variant]["forbidden_tool_calls"],
+            )
+        self.assertEqual(
+            {"min": 1, "max": 1},
+            computer["expected_routing"]["deferred"]["search_calls"],
+        )
 
         self.assertEqual("web", browser["surface"])
         self.assertEqual("driver_owned_proof_form", browser["browser_fixture"]["kind"])
@@ -133,6 +142,15 @@ class ToolSearchCaseMatrixTest(unittest.TestCase):
         self.assertEqual(
             expected_names,
             set(browser["expected_routing"]["deferred"]["expected_search_tools"]),
+        )
+        for variant in ("static", "deferred"):
+            self.assertIn(
+                "execute",
+                browser["expected_routing"][variant]["forbidden_tool_calls"],
+            )
+        self.assertEqual(
+            {"min": 1, "max": 1},
+            browser["expected_routing"]["deferred"]["search_calls"],
         )
 
     def test_rejects_browser_driver_or_preapproval_contract_drift(self):

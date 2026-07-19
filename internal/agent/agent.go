@@ -76,6 +76,20 @@ func newAgent(
 	if toolSearchMiddleware != nil {
 		enhanced = append(enhanced, toolSearchMiddleware)
 	}
+	// A loaded skill can name a purpose-built endpoint whose schema is still
+	// Deferred. Add a narrow routing note to that same tool result so the next
+	// model request bridges the gap through tool_search instead of treating a
+	// prominent generic tool such as execute as a substitute. Keeping the note
+	// in the tool-result role avoids promoting user/project skill content to a
+	// system instruction. This never authorizes, executes, caches, or suppresses
+	// a tool call.
+	toolSearchSkillReminder, err := newToolSearchSkillReminderMiddleware(ctx, deferredTools)
+	if err != nil {
+		return nil, fmt.Errorf("agent tool search skill reminder: %w", err)
+	}
+	if toolSearchSkillReminder != nil {
+		enhanced = append(enhanced, toolSearchSkillReminder)
+	}
 	// Observe the final model-visible schema after progressive disclosure has
 	// rewritten it, but before compaction/recovery/approval handlers. The sink is
 	// opt-in through the runner context and records metadata only.

@@ -1,14 +1,24 @@
 ---
 name: browser-use
-description: Discipline for driving enabled browser_* tools (snapshot-first, safe navigation, approvals). Load when browser tools are available.
+description: Discipline for driving browser_* tools, including deferred ToolSearch discovery, snapshot-first navigation, and approvals. Load for browser tasks.
 ---
 
 # Browser Use
 
 When browser use is enabled, you can see and operate a browser through the
 `browser_*` tools. Read this before using those tools; it is how you avoid
-wasting turns and how you stay safe. If the tools are absent, browser use is
-disabled in this session; do not claim that you can operate a browser.
+wasting turns and how you stay safe.
+
+## Tool availability and deferred discovery
+
+The function schemas attached to the current request are the source of truth. If a
+browser task needs `browser_*` but those schemas are absent while `tool_search` is
+attached, search once in a separate tool-call batch and wait for its result. This skill
+provides exact names, so select only the workflow tools you need, such as
+`select:browser_open,browser_snapshot,browser_act,browser_read`. Do not use `execute` to
+launch or control a browser as a substitute. If `tool_search` is absent or the search
+returns no match, report that browser control is unavailable; do not claim that you can
+operate it.
 
 ## See before you act
 - `browser_snapshot` is your primary way to see the page. It lists interactive elements each tagged with a uid like `[e3]`. `browser_act` targets those uids.

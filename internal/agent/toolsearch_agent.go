@@ -12,7 +12,10 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 )
 
-const deferredToolBatchInstruction = "When tool_search is available, call it in a separate tool-call batch and wait for its result before calling any newly loaded target tool."
+const deferredToolBatchInstruction = `When tool_search is available:
+- A purpose-built capability required by the user's task or an applicable loaded skill may be deferred when its schema is not attached. Search for it before substituting execute or another generic tool.
+- If the user or an applicable loaded skill gives exact tool names, use select:<tool_name> (comma-separate a small related set); otherwise use a short capability keyword.
+- Call tool_search in a separate tool-call batch and wait for its result before calling any newly loaded target tool. If search returns no match, do not repeat the same search or imitate the missing capability with a shell/UI workaround. Use a legitimate already-attached alternative when appropriate; otherwise report the capability as unavailable.`
 
 // NewAgentWithToolPlan creates a ChatModelAgent from a validated exposure plan.
 // Direct tools are disclosed on the first model call. Deferred tools are kept in

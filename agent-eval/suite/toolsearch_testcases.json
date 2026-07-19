@@ -1659,7 +1659,8 @@
             }
           ],
           "forbidden_tool_calls": [
-            "tool_search"
+            "tool_search",
+            "execute"
           ],
           "required_call_order": [
             "computer_open",
@@ -1669,7 +1670,7 @@
         "deferred": {
           "search_calls": {
             "min": 1,
-            "max": 3
+            "max": 1
           },
           "search_query_modes": [
             "select",
@@ -1708,7 +1709,9 @@
               "max": 2
             }
           ],
-          "forbidden_tool_calls": [],
+          "forbidden_tool_calls": [
+            "execute"
+          ],
           "required_call_order": [
             "tool_search",
             "computer_open",
@@ -1810,7 +1813,8 @@
           ],
           "optional_tool_calls": [],
           "forbidden_tool_calls": [
-            "tool_search"
+            "tool_search",
+            "execute"
           ],
           "required_call_order": [
             "browser_open",
@@ -1823,7 +1827,7 @@
         "deferred": {
           "search_calls": {
             "min": 1,
-            "max": 3
+            "max": 1
           },
           "search_query_modes": [
             "select",
@@ -1862,7 +1866,9 @@
             }
           ],
           "optional_tool_calls": [],
-          "forbidden_tool_calls": [],
+          "forbidden_tool_calls": [
+            "execute"
+          ],
           "required_call_order": [
             "tool_search",
             "browser_open",

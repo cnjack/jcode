@@ -150,6 +150,15 @@ func (m *agentToolSearchScriptModel) firstSystemText() string {
 	return m.systemTexts[0]
 }
 
+func (m *agentToolSearchScriptModel) systemTextAt(index int) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if index < 0 || index >= len(m.systemTexts) {
+		return ""
+	}
+	return m.systemTexts[index]
+}
+
 func (m *agentToolSearchScriptModel) resultsFor(name string) []agentToolSearchToolResult {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -223,6 +232,17 @@ func TestToolSearchGuidanceIsConditionalAndOwnedByEinoSchema(t *testing.T) {
 
 		if !strings.Contains(model.firstSystemText(), deferredToolBatchInstruction) {
 			t.Fatalf("deferred plan did not inject batch sequencing rule: %q", model.firstSystemText())
+		}
+		for _, want := range []string{
+			"may be deferred when its schema is not attached",
+			"before substituting execute",
+			"use select:<tool_name>",
+			"separate tool-call batch",
+			"Use a legitimate already-attached alternative when appropriate",
+		} {
+			if !strings.Contains(model.firstSystemText(), want) {
+				t.Errorf("deferred routing guidance missing %q: %q", want, model.firstSystemText())
+			}
 		}
 		desc := model.firstToolDescription(ToolSearchReservedName)
 		for _, want := range []string{
@@ -311,6 +331,61 @@ func TestNewAgentWithToolPlanActivatesDeferredTool(t *testing.T) {
 	}
 	if !reflect.DeepEqual(approvalCalls, wantApprovalCalls) {
 		t.Fatalf("approval calls = %#v, want %#v", approvalCalls, wantApprovalCalls)
+	}
+}
+
+func TestLoadedSkillRemindsBeforeDeferredSearch(t *testing.T) {
+	loadSkill := &agentToolSearchTestTool{
+		name:   loadSkillToolName,
+		result: "<skill>For native UI use `computer_open`.</skill>",
+	}
+	computerOpen := &agentToolSearchTestTool{name: "computer_open"}
+	model := &agentToolSearchScriptModel{responses: []*schema.Message{
+		toolCallMessage("skill-1", loadSkillToolName, `{"value":"computer-use"}`),
+		toolCallMessage("search-1", ToolSearchReservedName, `{"query":"select:computer_open"}`),
+		toolCallMessage("open-1", "computer_open", `{"value":"com.apple.Notes"}`),
+		schema.AssistantMessage("done", nil),
+	}}
+	plan := ToolPlan{
+		Direct:   []ToolDescriptor{agentToolSearchDescriptor(loadSkill, ToolExposureDirect)},
+		Deferred: []ToolDescriptor{agentToolSearchDescriptor(computerOpen, ToolExposureDeferred)},
+	}
+	ag, err := NewAgentWithToolPlan(context.Background(), model, plan, "test", nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewAgentWithToolPlan() error = %v", err)
+	}
+	runAgentToolSearchTest(t, ag)
+
+	assertAgentToolSearchVisible(t, model.visibleTools(), [][]string{
+		{loadSkillToolName, ToolSearchReservedName},
+		{loadSkillToolName, ToolSearchReservedName},
+		{"computer_open", loadSkillToolName, ToolSearchReservedName},
+		{"computer_open", loadSkillToolName, ToolSearchReservedName},
+	})
+	if strings.Contains(model.systemTextAt(1), "one or more purpose-built tools whose schemas are still deferred") {
+		t.Fatalf("skill routing note was promoted to system text: %q", model.systemTextAt(1))
+	}
+	results := model.resultsFor(loadSkillToolName)
+	if len(results) == 0 {
+		t.Fatal("model history omitted load_skill result")
+	}
+	for _, want := range []string{
+		"<tool-routing-reminder>",
+		"one or more purpose-built tools whose schemas are still deferred",
+		"before substituting execute",
+	} {
+		if !strings.Contains(results[0].content, want) {
+			t.Errorf("load_skill result missing %q: %q", want, results[0].content)
+		}
+	}
+	if got := strings.Count(results[0].content, "<tool-routing-reminder>"); got != 1 {
+		t.Fatalf("load_skill routing note count = %d, want 1: %q", got, results[0].content)
+	}
+	if got := loadSkill.arguments(); len(got) != 1 {
+		t.Fatalf("load_skill calls = %v, want one", got)
+	}
+	if got := computerOpen.arguments(); len(got) != 1 {
+		t.Fatalf("computer_open calls = %v, want one", got)
 	}
 }
 
