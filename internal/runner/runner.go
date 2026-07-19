@@ -438,6 +438,14 @@ func runInner(
 					h.OnAgentText(chunk.Content)
 				}
 			}
+			// Flush assistant text at the end of each assistant message so the
+			// session file preserves the true message/tool interleaving. Without
+			// this, the whole run accumulates into a single assistant entry and
+			// replay collapses all surrounding tool calls into one big group.
+			if rec != nil && assistantText.Len() > 0 {
+				rec.RecordAssistant(assistantText.String())
+				assistantText.Reset()
+			}
 			// Notify and record accumulated tool calls in index order.
 			// All tool calls from this assistant message form one batch.
 			indices := make([]int, 0, len(pending))
@@ -490,9 +498,17 @@ func runInner(
 				assistantText.WriteString(mo.Message.Content)
 				h.OnAgentText(mo.Message.Content)
 			}
+			// Flush non-streaming assistant text immediately so each assistant
+			// message is a distinct session entry with its surrounding tool calls.
+			if rec != nil && assistantText.Len() > 0 {
+				rec.RecordAssistant(assistantText.String())
+				assistantText.Reset()
+			}
 		}
 	}
 
+	// Final safety flush for any remaining text (e.g. returns above that skip
+	// the per-message flush, or trailing content after the last tool batch).
 	if rec != nil && assistantText.Len() > 0 {
 		rec.RecordAssistant(assistantText.String())
 	}
