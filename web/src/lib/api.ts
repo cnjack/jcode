@@ -376,6 +376,11 @@ export const api = {
   toolSearchConfig: (data: ToolSearchConfig) =>
     request<ToolSearchConfigResponse>('/api/tool-search/config', { method: 'POST', body: JSON.stringify(data) }),
 
+  // Developer options (logging + tracing)
+  devOptionsStatus: () => request<DevOptionsStatusResponse>('/api/dev-options/status'),
+  devOptionsConfig: (data: DevOptionsConfig) =>
+    request<DevOptionsConfigResponse>('/api/dev-options/config', { method: 'POST', body: JSON.stringify(data) }),
+
   // Project memory and background consolidation (Dream)
   memoryStatus: () => request<MemoryStatusResponse>('/api/memory/status'),
   memoryConfig: (data: MemoryConfig) =>
@@ -404,6 +409,40 @@ export interface ToolSearchStatusResponse {
 export interface ToolSearchConfigResponse extends ToolSearchStatusResponse {
   status?: string
   warning_code?: string
+}
+
+export interface DevOptionsConfig {
+  logging_enabled?: boolean
+  tracing_enabled?: boolean
+  langfuse?: {
+    host?: string
+    public_key?: string
+    secret_key?: string
+  }
+  langfuse_clear?: boolean
+}
+
+export interface DevOptionsLangfuseStatus {
+  host: string
+  public_key: string
+  public_key_set: boolean
+  secret_key_set: boolean
+  default_host: string
+}
+
+export interface DevOptionsStatusResponse {
+  available?: boolean
+  logging_enabled: boolean
+  tracing_enabled: boolean
+  langfuse_configured?: boolean
+  langfuse?: DevOptionsLangfuseStatus
+}
+
+export interface DevOptionsConfigResponse {
+  status?: string
+  logging_enabled: boolean
+  tracing_enabled: boolean
+  restart_required?: boolean
 }
 
 export interface MemoryConfig {

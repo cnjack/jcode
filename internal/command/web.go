@@ -244,9 +244,15 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 
 	startupMode := resolveStartupMode(cfg, false)
 
-	// Langfuse tracer (shared across tasks).
+	// Publish the developer toggles (Settings → Developer) before the first
+	// logger / tracer is built. Both take effect on this startup; runtime
+	// toggling is not supported and the UI marks them as "restart required".
+	config.SetLoggingEnabled(config.LoggingEnabled(cfg))
+
+	// Langfuse tracer (shared across tasks). Respects Settings → Developer →
+	// Enable Langfuse tracing; an absent block keeps the historical behavior.
 	var langfuseTracer *telemetry.LangfuseTracer
-	if cfg.Telemetry != nil && cfg.Telemetry.Langfuse != nil {
+	if config.TracingEnabled(cfg) && cfg.Telemetry != nil && cfg.Telemetry.Langfuse != nil {
 		langfuseTracer = telemetry.NewLangfuseTracer(cfg.Telemetry.Langfuse)
 	}
 

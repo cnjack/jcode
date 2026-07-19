@@ -412,6 +412,12 @@ type Config struct {
 	// Auto session mode. It does not contain an on/off switch — the reviewer is
 	// active whenever the session is in Auto mode.
 	ApprovalReview *ApprovalReviewConfig `json:"approval_review,omitempty"`
+
+	// Developer holds developer-only toggles surfaced under the Settings →
+	// Developer tab: debug logging and Langfuse tracing. Pointer fields keep an
+	// explicitly-disabled value distinguishable from an absent one. Both take
+	// effect on the next process start (like the BLE toggle).
+	Developer *DeveloperConfig `json:"developer,omitempty"`
 }
 
 // ApprovalReviewConfig holds tuning knobs for jcode's LLM approval reviewer.
@@ -528,6 +534,159 @@ func (c *Config) SetToolSearch(tc *ToolSearchConfig) {
 func ToolSearchEnabled(c *Config) bool {
 	tc := c.ToolSearchSettings()
 	return tc.Enabled != nil && *tc.Enabled
+}
+
+// DeveloperConfig holds developer-only toggles (debug logging, tracing).
+// Pointer fields preserve an explicitly-disabled value through config
+// round-trips while a nil value remains the platform default (enabled).
+type DeveloperConfig struct {
+	EnableLogging *bool `json:"enable_logging,omitempty"`
+	EnableTracing *bool `json:"enable_tracing,omitempty"`
+}
+
+// developerMu guards publication of Config.Developer. As with ToolSearch, the
+// block is swapped atomically and snapshots never expose the live pointer. The
+// mutex is package-level because Config is copied by value in a few places and
+// an embedded mutex would trip go vet's copylocks check.
+var developerMu sync.RWMutex
+
+func cloneDeveloperConfig(dc *DeveloperConfig) *DeveloperConfig {
+	if dc == nil {
+		return nil
+	}
+	copy := *dc
+	copy.EnableLogging = cloneBool(dc.EnableLogging)
+	copy.EnableTracing = cloneBool(dc.EnableTracing)
+	return &copy
+}
+
+// DeveloperSettings returns a detached snapshot. Its zero value is the
+// platform default (both toggles enabled).
+func (c *Config) DeveloperSettings() DeveloperConfig {
+	developerMu.RLock()
+	defer developerMu.RUnlock()
+	if c == nil || c.Developer == nil {
+		return DeveloperConfig{}
+	}
+	return *cloneDeveloperConfig(c.Developer)
+}
+
+// DeveloperConfigSnapshot returns a detached copy of the stored block while
+// preserving nil. This lets a failed save restore the exact prior
+// representation rather than replacing an absent block with an empty one.
+func (c *Config) DeveloperConfigSnapshot() *DeveloperConfig {
+	developerMu.RLock()
+	defer developerMu.RUnlock()
+	if c == nil {
+		return nil
+	}
+	return cloneDeveloperConfig(c.Developer)
+}
+
+// SetDeveloper atomically publishes a detached copy of dc. Passing nil removes
+// the block and restores the platform defaults.
+func (c *Config) SetDeveloper(dc *DeveloperConfig) {
+	if c == nil {
+		return
+	}
+	developerMu.Lock()
+	defer developerMu.Unlock()
+	c.Developer = cloneDeveloperConfig(dc)
+}
+
+// LoggingEnabled reports whether debug logging to ~/.jcode/debug.log is on.
+// The platform default is enabled (absent block or nil pointer → true) to
+// preserve the historical always-on behavior.
+func LoggingEnabled(c *Config) bool {
+	if c == nil {
+		return true
+	}
+	dc := c.DeveloperSettings()
+	if dc.EnableLogging == nil {
+		return true
+	}
+	return *dc.EnableLogging
+}
+
+// TracingEnabled reports whether Langfuse tracing may be started. The platform
+// default is enabled (absent block or nil pointer → true); callers still need
+// to check for configured Langfuse credentials before constructing a tracer.
+func TracingEnabled(c *Config) bool {
+	if c == nil {
+		return true
+	}
+	dc := c.DeveloperSettings()
+	if dc.EnableTracing == nil {
+		return true
+	}
+	return *dc.EnableTracing
+}
+
+// langfuseMu guards Config.Telemetry.Langfuse against concurrent publish/read.
+// The web settings handler swaps the block in from an HTTP goroutine while the
+// startup path in internal/command/{web,interactive,acp}.go reads it once to
+// build a tracer; package-level mutex mirrors developerMu / toolSearchMu
+// because Config is copied by value in a few places.
+var langfuseMu sync.RWMutex
+
+// LangfuseSettings returns a detached snapshot of the Langfuse credentials, or
+// a zero LangfuseConfig when unset. Callers never hold a pointer into the live
+// config, so a later SetLangfuse cannot mutate what they read.
+func (c *Config) LangfuseSettings() LangfuseConfig {
+	langfuseMu.RLock()
+	defer langfuseMu.RUnlock()
+	if c == nil || c.Telemetry == nil || c.Telemetry.Langfuse == nil {
+		return LangfuseConfig{}
+	}
+	return *c.Telemetry.Langfuse
+}
+
+// LangfuseSnapshot returns a detached pointer to the stored Langfuse block
+// while preserving nil. Lets a failed save restore the exact prior block.
+func (c *Config) LangfuseSnapshot() *LangfuseConfig {
+	langfuseMu.RLock()
+	defer langfuseMu.RUnlock()
+	if c == nil {
+		return nil
+	}
+	if c.Telemetry == nil || c.Telemetry.Langfuse == nil {
+		return nil
+	}
+	copy := *c.Telemetry.Langfuse
+	return &copy
+}
+
+// SetLangfuse atomically publishes lc. A non-nil value always replaces the
+// block (including a zero-value block, which clears the credentials); passing
+// nil removes the Langfuse block entirely.
+func (c *Config) SetLangfuse(lc *LangfuseConfig) {
+	if c == nil {
+		return
+	}
+	langfuseMu.Lock()
+	defer langfuseMu.Unlock()
+	if lc == nil {
+		if c.Telemetry != nil {
+			c.Telemetry.Langfuse = nil
+		}
+		return
+	}
+	if c.Telemetry == nil {
+		c.Telemetry = &TelemetryConfig{}
+	}
+	copy := *lc
+	c.Telemetry.Langfuse = &copy
+}
+
+// LangfuseConfigured reports whether both required Langfuse credentials are
+// non-empty (Host is optional — the tracer falls back to Langfuse Cloud when
+// unset). Used by the Developer settings status endpoint.
+func LangfuseConfigured(c *Config) bool {
+	if c == nil {
+		return false
+	}
+	lc := c.LangfuseSettings()
+	return lc.PublicKey != "" && lc.SecretKey != ""
 }
 
 // BrowserConfig controls the browser-use capability. Browser use is opt-in:
