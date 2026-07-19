@@ -524,6 +524,29 @@ func glm52Model() *RegistryModel {
 	}
 }
 
+// qwen38MaxPreviewModel builds a fresh Qwen3.8-Max-Preview entry. Returns a new
+// object per call so each provider gets its own instance (deep-copied again per
+// ModelRegistry).
+//
+// Qwen3.8-Max-Preview is an early-access flagship exposed only on Alibaba's
+// Token Plan endpoints (alibaba-token-plan-cn / alibaba-token-plan). It is not
+// on models.dev yet, so it can't come through registry_generated.go. Parameters
+// mirror qwen3.7-max for now (same window, pricing shape, reasoning options);
+// official specs pending. See internal-doc/model-research.md.
+func qwen38MaxPreviewModel() *RegistryModel {
+	return &RegistryModel{
+		ID: "qwen3.8-max-preview", Name: "Qwen3.8 Max Preview", Family: "qwen",
+		Reasoning: true, ToolCall: true, Temperature: true,
+		Modalities: &ModelModalities{Input: []string{"text"}, Output: []string{"text"}},
+		Cost:       &ModelCost{Input: 2.5, Output: 7.5, CacheRead: 0.5, CacheWrite: 3.125},
+		Limit:      &ModelLimit{Context: 1_000_000, Output: 65_536},
+		ReasoningOptions: []ReasoningOption{
+			{Type: "toggle"},
+			{Type: "budget_tokens", Max: intPtr(262144)},
+		},
+	}
+}
+
 // additionalModels injects models into EXISTING generated providers when a model is
 // released before models.dev publishes it. Applied at init() and MERGED in — an
 // entry is skipped if the provider already defines that model id, so once the
@@ -534,6 +557,9 @@ var additionalModels = map[string]map[string]*RegistryModel{
 	"zhipuai-coding-plan": {"glm-5.2": glm52Model()},
 	"zai":                 {"glm-5.2": glm52Model()},
 	"zai-coding-plan":     {"glm-5.2": glm52Model()},
+	// Qwen3.8-Max-Preview is exclusive to Alibaba Token Plan endpoints for now.
+	"alibaba-token-plan-cn": {"qwen3.8-max-preview": qwen38MaxPreviewModel()},
+	"alibaba-token-plan":    {"qwen3.8-max-preview": qwen38MaxPreviewModel()},
 }
 
 func init() {
