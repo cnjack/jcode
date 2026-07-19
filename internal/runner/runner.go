@@ -12,6 +12,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
+	internalagent "github.com/cnjack/jcode/internal/agent"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/hooks"
@@ -38,6 +39,34 @@ func Run(
 ) string {
 	if tracer != nil {
 		ctx = tracer.WithNewTrace(ctx, "coding_agent")
+	}
+	if rec != nil {
+		ctx = internalagent.WithToolObservationSink(ctx, func(observation internalagent.ToolObservation) {
+			rec.RecordToolObservation(session.ToolObservation{
+				Kind:                 string(observation.Kind),
+				ModelRequestSeq:      observation.ModelRequestSeq,
+				VisibleNames:         observation.VisibleNames,
+				VisibleCount:         observation.VisibleCount,
+				SchemaBytes:          observation.SchemaBytes,
+				SchemaTokensEstimate: observation.SchemaTokensEstimate,
+				NewlyVisibleDeferred: observation.NewlyVisibleDeferred,
+				ToolCallID:           observation.ToolCallID,
+				QueryMode:            observation.QueryMode,
+				QueryBytes:           observation.QueryBytes,
+				TermCount:            observation.TermCount,
+				RequiredTermCount:    observation.RequiredTermCount,
+				MaxResults:           observation.MaxResults,
+				ValidatedSelectNames: observation.ValidatedSelectNames,
+				UnknownSelectCount:   observation.UnknownSelectCount,
+				MatchNames:           observation.MatchNames,
+				NewMatchNames:        observation.NewMatchNames,
+				RepeatedQuery:        observation.RepeatedQuery,
+				Redundant:            observation.Redundant,
+				Success:              observation.Success,
+				ToolName:             observation.ToolName,
+				Reason:               observation.Reason,
+			})
+		})
 	}
 	// Per-run approval meter: the approval path (blocked inside tool execution)
 	// records wait time + denied verdicts into it via ctx, and runInner's

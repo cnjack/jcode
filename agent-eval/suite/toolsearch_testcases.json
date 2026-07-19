@@ -1,0 +1,1994 @@
+{
+  "schema_version": 1,
+  "_comment": "Dedicated paired ToolSearch matrix. Cases contain no credentials, commands, environment injection, or external URLs. Browser is deliberately Web-only and receives a runner-owned loopback fixture URL; ACP deliberately has no Browser tools.",
+  "runner_contract": {
+    "variants": [
+      "static",
+      "deferred"
+    ],
+    "default_surface": "acp",
+    "browser_surface": "web",
+    "browser_on_acp": false,
+    "network_policy": "fixtures only; Browser loopback only"
+  },
+  "hard_gates": {
+    "deferred_bypass": {
+      "metric": "routing.counts.bypass",
+      "scope": {
+        "variant": "deferred",
+        "metric_tag": "deferred_call_accuracy"
+      },
+      "aggregate": "sum",
+      "operator": "eq",
+      "threshold": 0
+    },
+    "same_batch_activation": {
+      "metric": "routing.counts.same_batch_activation",
+      "scope": {
+        "variant": "deferred",
+        "metric_tag": "deferred_call_accuracy"
+      },
+      "aggregate": "sum",
+      "operator": "eq",
+      "threshold": 0
+    },
+    "deferred_argument_success_rate": {
+      "metric": "routing.counts.deferred_call_success/routing.counts.deferred_calls",
+      "scope": {
+        "variant": "deferred",
+        "metric_tag": "deferred_call_accuracy"
+      },
+      "aggregate": "ratio",
+      "operator": "gte",
+      "threshold": 0.98
+    },
+    "irrelevant_search_rate": {
+      "metric": "trajectory.tool_search_calls/runs",
+      "scope": {
+        "variant": "deferred",
+        "metric_tag": "irrelevant_search"
+      },
+      "aggregate": "ratio",
+      "operator": "lte",
+      "threshold": 0.02
+    },
+    "deferred_task_pass_rate": {
+      "metric": "record.task_passed",
+      "scope": {
+        "variant": "deferred",
+        "metric_tag": "task_pass"
+      },
+      "aggregate": "ratio",
+      "operator": "gte",
+      "threshold": 0.95
+    },
+    "critical_deferred_pass_rate": {
+      "metric": "record.task_passed",
+      "scope": {
+        "variant": "deferred",
+        "metric_tag": "critical_pass"
+      },
+      "aggregate": "ratio",
+      "operator": "gte",
+      "threshold": 0.9
+    },
+    "paired_noninferiority": {
+      "metric": "deferred.task_pass_rate-static.task_pass_rate",
+      "scope": {
+        "metric_tag": "paired_task_pass"
+      },
+      "aggregate": "difference",
+      "operator": "gte",
+      "threshold": -0.03
+    },
+    "normal_first_visible_tools": {
+      "metric": "trajectory.first_model_request.visible_tool_count",
+      "scope": {
+        "variant": "deferred",
+        "metric_tag": "schema_disclosure"
+      },
+      "aggregate": "max",
+      "operator": "lte",
+      "threshold": 12
+    },
+    "first_schema_token_reduction": {
+      "metric": "1-deferred.first_schema_tokens/static.first_schema_tokens",
+      "scope": {
+        "metric_tag": "full_schema_disclosure"
+      },
+      "aggregate": "ratio",
+      "operator": "gte",
+      "threshold": 0.5
+    }
+  },
+  "cases": [
+    {
+      "id": "ts_direct_read",
+      "title": "Direct tool succeeds without ToolSearch",
+      "category": "toolsearch-direct",
+      "tier": "core",
+      "surface": "acp",
+      "critical": true,
+      "variants": [
+        "static",
+        "deferred"
+      ],
+      "prompt": "Read direct_fixture.txt and answer with exactly the token stored in that file. You may use direct_fixture.txt, ./direct_fixture.txt, or its exact canonical absolute path; do not use an alias or another file. Do not modify any file.",
+      "fixtures": {
+        "direct_fixture.txt": "DIRECT_TOOL_OK\n"
+      },
+      "timeout": 180,
+      "expect_tool_use": true,
+      "oracles": [
+        {
+          "type": "final_text_contains",
+          "value": "DIRECT_TOOL_OK"
+        },
+        {
+          "type": "no_mutation"
+        }
+      ],
+      "safety": {
+        "credentials": "none",
+        "network": "none",
+        "fixture_only": true
+      },
+      "metric_tags": [
+        "task_pass",
+        "paired_task_pass",
+        "critical_pass",
+        "direct_routing",
+        "schema_disclosure"
+      ],
+      "expected_routing": {
+        "static": {
+          "search_calls": {
+            "min": 0,
+            "max": 0
+          },
+          "search_query_modes": [],
+          "expected_search_tools": [],
+          "empty_search": "forbidden",
+          "activation_boundary": "not_applicable",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "read",
+              "min": 1,
+              "max": 2,
+              "args": {
+                "match": "fixture_path",
+                "value": {
+                  "file_path": "direct_fixture.txt"
+                }
+              }
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "tool_search"
+          ],
+          "required_call_order": [
+            "read"
+          ]
+        },
+        "deferred": {
+          "search_calls": {
+            "min": 0,
+            "max": 0
+          },
+          "search_query_modes": [],
+          "expected_search_tools": [],
+          "empty_search": "forbidden",
+          "activation_boundary": "not_applicable",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "read",
+              "min": 1,
+              "max": 2,
+              "args": {
+                "match": "fixture_path",
+                "value": {
+                  "file_path": "direct_fixture.txt"
+                }
+              }
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "tool_search"
+          ],
+          "required_call_order": [
+            "read"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ts_no_tool_irrelevant_en",
+      "title": "Irrelevant English request uses no tools",
+      "category": "toolsearch-negative-direct",
+      "tier": "core",
+      "surface": "acp",
+      "critical": true,
+      "variants": [
+        "static",
+        "deferred"
+      ],
+      "prompt": "Reply with exactly NO_TOOL_OK. This is a self-contained response: do not inspect files and do not call any tool.",
+      "timeout": 120,
+      "expect_tool_use": false,
+      "oracles": [
+        {
+          "type": "final_text_contains",
+          "value": "NO_TOOL_OK"
+        },
+        {
+          "type": "bounded_tool_calls",
+          "max": 0
+        }
+      ],
+      "safety": {
+        "credentials": "none",
+        "network": "none",
+        "fixture_only": true
+      },
+      "metric_tags": [
+        "task_pass",
+        "paired_task_pass",
+        "critical_pass",
+        "direct_routing",
+        "irrelevant_search",
+        "schema_disclosure"
+      ],
+      "expected_routing": {
+        "static": {
+          "search_calls": {
+            "min": 0,
+            "max": 0
+          },
+          "search_query_modes": [],
+          "expected_search_tools": [],
+          "empty_search": "forbidden",
+          "activation_boundary": "not_applicable",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "tool_search"
+          ],
+          "required_call_order": []
+        },
+        "deferred": {
+          "search_calls": {
+            "min": 0,
+            "max": 0
+          },
+          "search_query_modes": [],
+          "expected_search_tools": [],
+          "empty_search": "forbidden",
+          "activation_boundary": "not_applicable",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "tool_search"
+          ],
+          "required_call_order": []
+        }
+      }
+    },
+    {
+      "id": "ts_no_tool_irrelevant_zh",
+      "title": "Irrelevant Chinese request uses no tools",
+      "category": "toolsearch-negative-direct",
+      "tier": "core",
+      "surface": "acp",
+      "critical": false,
+      "variants": [
+        "static",
+        "deferred"
+      ],
+      "prompt": "只回复精确文本：无需工具。这个问题不需要读取文件，也不要调用任何工具。",
+      "timeout": 120,
+      "expect_tool_use": false,
+      "oracles": [
+        {
+          "type": "final_text_contains",
+          "value": "无需工具"
+        },
+        {
+          "type": "bounded_tool_calls",
+          "max": 0
+        }
+      ],
+      "safety": {
+        "credentials": "none",
+        "network": "none",
+        "fixture_only": true
+      },
+      "metric_tags": [
+        "task_pass",
+        "paired_task_pass",
+        "direct_routing",
+        "irrelevant_search",
+        "schema_disclosure"
+      ],
+      "expected_routing": {
+        "static": {
+          "search_calls": {
+            "min": 0,
+            "max": 0
+          },
+          "search_query_modes": [],
+          "expected_search_tools": [],
+          "empty_search": "forbidden",
+          "activation_boundary": "not_applicable",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "tool_search"
+          ],
+          "required_call_order": []
+        },
+        "deferred": {
+          "search_calls": {
+            "min": 0,
+            "max": 0
+          },
+          "search_query_modes": [],
+          "expected_search_tools": [],
+          "empty_search": "forbidden",
+          "activation_boundary": "not_applicable",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "tool_search"
+          ],
+          "required_call_order": []
+        }
+      }
+    },
+    {
+      "id": "ts_exact_select_goal_get",
+      "title": "Exact select discovers one Deferred tool",
+      "category": "toolsearch-exact",
+      "tier": "core",
+      "surface": "acp",
+      "critical": true,
+      "variants": [
+        "static",
+        "deferred"
+      ],
+      "prompt": "Call the tool named goal_get exactly once. If tool_search is available, first call tool_search exactly once with query exactly select:goal_get, wait for that result, and only then call goal_get; if tool_search is unavailable, call the visible goal_get directly. If this isolated session has no goal, your final response must be exactly NO_GOAL_SET_OK. Do not call goal_set or goal_update.",
+      "timeout": 180,
+      "expect_tool_use": true,
+      "oracles": [
+        {
+          "type": "final_text_contains",
+          "value": "NO_GOAL_SET_OK"
+        }
+      ],
+      "safety": {
+        "credentials": "none",
+        "network": "none",
+        "fixture_only": true
+      },
+      "metric_tags": [
+        "task_pass",
+        "paired_task_pass",
+        "critical_pass",
+        "deferred_call_accuracy",
+        "schema_disclosure"
+      ],
+      "expected_routing": {
+        "static": {
+          "search_calls": {
+            "min": 0,
+            "max": 0
+          },
+          "search_query_modes": [],
+          "expected_search_tools": [],
+          "empty_search": "forbidden",
+          "activation_boundary": "not_applicable",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "goal_get",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "exact",
+                "value": {}
+              }
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "tool_search",
+            "goal_set",
+            "goal_update"
+          ],
+          "required_call_order": [
+            "goal_get"
+          ]
+        },
+        "deferred": {
+          "search_calls": {
+            "min": 1,
+            "max": 1
+          },
+          "search_query_modes": [
+            "select"
+          ],
+          "search_query_matcher": {
+            "match": "exact",
+            "value": "select:goal_get"
+          },
+          "expected_search_tools": [
+            "goal_get"
+          ],
+          "empty_search": "forbidden",
+          "activation_boundary": "strict_separate_batch",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "goal_get",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "exact",
+                "value": {}
+              }
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "goal_set",
+            "goal_update"
+          ],
+          "required_call_order": [
+            "tool_search",
+            "goal_get"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ts_semantic_en_goal_get",
+      "title": "English semantic search discovers goal status",
+      "category": "toolsearch-semantic-en",
+      "tier": "core",
+      "surface": "acp",
+      "critical": true,
+      "variants": [
+        "static",
+        "deferred"
+      ],
+      "prompt": "Use the session facility that reads the current persistent objective and its status. If no objective exists, your final response must be exactly NO_GOAL_SET_OK. Do not create, replace, complete, or block an objective.",
+      "timeout": 180,
+      "expect_tool_use": true,
+      "oracles": [
+        {
+          "type": "final_text_contains",
+          "value": "NO_GOAL_SET_OK"
+        }
+      ],
+      "safety": {
+        "credentials": "none",
+        "network": "none",
+        "fixture_only": true
+      },
+      "metric_tags": [
+        "task_pass",
+        "paired_task_pass",
+        "critical_pass",
+        "deferred_call_accuracy",
+        "schema_disclosure"
+      ],
+      "expected_routing": {
+        "static": {
+          "search_calls": {
+            "min": 0,
+            "max": 0
+          },
+          "search_query_modes": [],
+          "expected_search_tools": [],
+          "empty_search": "forbidden",
+          "activation_boundary": "not_applicable",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "goal_get",
+              "min": 1,
+              "max": 1
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "tool_search",
+            "goal_set",
+            "goal_update"
+          ],
+          "required_call_order": [
+            "goal_get"
+          ]
+        },
+        "deferred": {
+          "search_calls": {
+            "min": 1,
+            "max": 2
+          },
+          "search_query_modes": [
+            "select",
+            "keyword"
+          ],
+          "expected_search_tools": [
+            "goal_get"
+          ],
+          "empty_search": "forbidden",
+          "activation_boundary": "strict_separate_batch",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "goal_get",
+              "min": 1,
+              "max": 1
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "goal_set",
+            "goal_update"
+          ],
+          "required_call_order": [
+            "tool_search",
+            "goal_get"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ts_semantic_zh_goal_get",
+      "title": "Chinese semantic search discovers goal status",
+      "category": "toolsearch-semantic-zh",
+      "tier": "core",
+      "surface": "acp",
+      "critical": true,
+      "variants": [
+        "static",
+        "deferred"
+      ],
+      "prompt": "请使用能够读取当前会话持久目标及其状态的功能；如果当前没有目标，最终回复必须严格为稳定标记 NO_GOAL_SET_OK。不要创建、替换、完成或阻塞目标。",
+      "timeout": 180,
+      "expect_tool_use": true,
+      "oracles": [
+        {
+          "type": "final_text_contains",
+          "value": "NO_GOAL_SET_OK"
+        }
+      ],
+      "safety": {
+        "credentials": "none",
+        "network": "none",
+        "fixture_only": true
+      },
+      "metric_tags": [
+        "task_pass",
+        "paired_task_pass",
+        "critical_pass",
+        "deferred_call_accuracy",
+        "schema_disclosure"
+      ],
+      "expected_routing": {
+        "static": {
+          "search_calls": {
+            "min": 0,
+            "max": 0
+          },
+          "search_query_modes": [],
+          "expected_search_tools": [],
+          "empty_search": "forbidden",
+          "activation_boundary": "not_applicable",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "goal_get",
+              "min": 1,
+              "max": 1
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "tool_search",
+            "goal_set",
+            "goal_update"
+          ],
+          "required_call_order": [
+            "goal_get"
+          ]
+        },
+        "deferred": {
+          "search_calls": {
+            "min": 1,
+            "max": 2
+          },
+          "search_query_modes": [
+            "select",
+            "keyword"
+          ],
+          "expected_search_tools": [
+            "goal_get"
+          ],
+          "empty_search": "forbidden",
+          "activation_boundary": "strict_separate_batch",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "goal_get",
+              "min": 1,
+              "max": 1
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "goal_set",
+            "goal_update"
+          ],
+          "required_call_order": [
+            "tool_search",
+            "goal_get"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ts_keyword_en_goal_get",
+      "title": "English positive keyword search uses a pinned lexical query",
+      "category": "toolsearch-keyword-en",
+      "tier": "core",
+      "surface": "acp",
+      "critical": true,
+      "variants": [
+        "deferred"
+      ],
+      "prompt": "Call tool_search exactly once with query exactly +current +usage. This is keyword mode: do not use select:. Wait for the search result, then call goal_get exactly once. If this isolated session has no goal, your final response must be exactly NO_GOAL_SET_OK. Do not call goal_set or goal_update.",
+      "timeout": 180,
+      "expect_tool_use": true,
+      "oracles": [
+        {
+          "type": "final_text_contains",
+          "value": "NO_GOAL_SET_OK"
+        }
+      ],
+      "safety": {
+        "credentials": "none",
+        "network": "none",
+        "fixture_only": true
+      },
+      "metric_tags": [
+        "task_pass",
+        "critical_pass",
+        "deferred_call_accuracy",
+        "schema_disclosure"
+      ],
+      "expected_routing": {
+        "deferred": {
+          "search_calls": {
+            "min": 1,
+            "max": 1
+          },
+          "search_query_modes": [
+            "keyword"
+          ],
+          "search_query_matcher": {
+            "match": "exact",
+            "value": "+current +usage"
+          },
+          "expected_search_tools": [
+            "goal_get"
+          ],
+          "empty_search": "forbidden",
+          "activation_boundary": "strict_separate_batch",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "goal_get",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "exact",
+                "value": {}
+              }
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "goal_set",
+            "goal_update"
+          ],
+          "required_call_order": [
+            "tool_search",
+            "goal_get"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ts_keyword_zh_goal_get",
+      "title": "Chinese positive keyword search uses a pinned lexical query",
+      "category": "toolsearch-keyword-zh",
+      "tier": "core",
+      "surface": "acp",
+      "critical": true,
+      "variants": [
+        "deferred"
+      ],
+      "prompt": "请严格调用一次 tool_search，query 必须逐字等于 +current +usage。这是 keyword 模式，不得使用 select:。等待搜索结果后，再严格调用一次 goal_get。如果隔离会话中没有目标，最终回复必须严格为 NO_GOAL_SET_OK。不得调用 goal_set 或 goal_update。",
+      "timeout": 180,
+      "expect_tool_use": true,
+      "oracles": [
+        {
+          "type": "final_text_contains",
+          "value": "NO_GOAL_SET_OK"
+        }
+      ],
+      "safety": {
+        "credentials": "none",
+        "network": "none",
+        "fixture_only": true
+      },
+      "metric_tags": [
+        "task_pass",
+        "critical_pass",
+        "deferred_call_accuracy",
+        "schema_disclosure"
+      ],
+      "expected_routing": {
+        "deferred": {
+          "search_calls": {
+            "min": 1,
+            "max": 1
+          },
+          "search_query_modes": [
+            "keyword"
+          ],
+          "search_query_matcher": {
+            "match": "exact",
+            "value": "+current +usage"
+          },
+          "expected_search_tools": [
+            "goal_get"
+          ],
+          "empty_search": "forbidden",
+          "activation_boundary": "strict_separate_batch",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "goal_get",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "exact",
+                "value": {}
+              }
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "goal_set",
+            "goal_update"
+          ],
+          "required_call_order": [
+            "tool_search",
+            "goal_get"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ts_multi_goal_lifecycle",
+      "title": "Multi-target goal lifecycle preserves activation boundary",
+      "category": "toolsearch-multi-target",
+      "tier": "core",
+      "surface": "acp",
+      "critical": true,
+      "variants": [
+        "static",
+        "deferred"
+      ],
+      "prompt": "Set the persistent session objective to exactly MULTI_TARGET_GOAL_OK, read it back to verify it, and then mark it complete. Perform those three operations in that dependency order.",
+      "timeout": 240,
+      "expect_tool_use": true,
+      "oracles": [
+        {
+          "type": "final_text_contains",
+          "value": "MULTI_TARGET_GOAL_OK"
+        }
+      ],
+      "safety": {
+        "credentials": "none",
+        "network": "none",
+        "fixture_only": true
+      },
+      "metric_tags": [
+        "task_pass",
+        "paired_task_pass",
+        "critical_pass",
+        "deferred_call_accuracy",
+        "schema_disclosure"
+      ],
+      "expected_routing": {
+        "static": {
+          "search_calls": {
+            "min": 0,
+            "max": 0
+          },
+          "search_query_modes": [],
+          "expected_search_tools": [],
+          "empty_search": "forbidden",
+          "activation_boundary": "not_applicable",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "goal_set",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "exact",
+                "value": {
+                  "objective": "MULTI_TARGET_GOAL_OK"
+                }
+              }
+            },
+            {
+              "name": "goal_get",
+              "min": 1,
+              "max": 1
+            },
+            {
+              "name": "goal_update",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "exact",
+                "value": {
+                  "status": "complete"
+                }
+              }
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "tool_search"
+          ],
+          "required_call_order": [
+            "goal_set",
+            "goal_get",
+            "goal_update"
+          ]
+        },
+        "deferred": {
+          "search_calls": {
+            "min": 1,
+            "max": 3
+          },
+          "search_query_modes": [
+            "select",
+            "keyword"
+          ],
+          "expected_search_tools": [
+            "goal_set",
+            "goal_get",
+            "goal_update"
+          ],
+          "empty_search": "forbidden",
+          "activation_boundary": "strict_separate_batch",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "goal_set",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "exact",
+                "value": {
+                  "objective": "MULTI_TARGET_GOAL_OK"
+                }
+              }
+            },
+            {
+              "name": "goal_get",
+              "min": 1,
+              "max": 1
+            },
+            {
+              "name": "goal_update",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "exact",
+                "value": {
+                  "status": "complete"
+                }
+              }
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [],
+          "required_call_order": [
+            "tool_search",
+            "goal_set",
+            "goal_get",
+            "goal_update"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ts_complex_automation_weekly",
+      "title": "Deferred tool receives complex weekly schedule arguments",
+      "category": "toolsearch-complex-args",
+      "tier": "core",
+      "surface": "acp",
+      "critical": true,
+      "variants": [
+        "static",
+        "deferred"
+      ],
+      "prompt": "Propose a disabled weekly automation named TS_WEEKLY_COMPLEX_OK. Its task prompt must be exactly REVIEW_FIXTURE_ONLY. Schedule it every Monday at 09:35 in the current isolated project. Do not enable or run it.",
+      "timeout": 240,
+      "expect_tool_use": true,
+      "oracles": [
+        {
+          "type": "home_file_contains",
+          "glob": ".jcode/automations.json",
+          "value": "TS_WEEKLY_COMPLEX_OK"
+        },
+        {
+          "type": "home_file_contains",
+          "glob": ".jcode/automations.json",
+          "value": "REVIEW_FIXTURE_ONLY"
+        },
+        {
+          "type": "home_file_contains",
+          "glob": ".jcode/automations.json",
+          "value": "weekly"
+        }
+      ],
+      "safety": {
+        "credentials": "none",
+        "network": "none",
+        "fixture_only": true
+      },
+      "metric_tags": [
+        "task_pass",
+        "paired_task_pass",
+        "critical_pass",
+        "deferred_call_accuracy",
+        "schema_disclosure"
+      ],
+      "expected_routing": {
+        "static": {
+          "search_calls": {
+            "min": 0,
+            "max": 0
+          },
+          "search_query_modes": [],
+          "expected_search_tools": [],
+          "empty_search": "forbidden",
+          "activation_boundary": "not_applicable",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "automation_create",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "contains",
+                "value": {
+                  "name": "TS_WEEKLY_COMPLEX_OK",
+                  "prompt": "REVIEW_FIXTURE_ONLY",
+                  "cadence": "weekly",
+                  "weekday": 1,
+                  "hour": 9,
+                  "minute": 35
+                }
+              }
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "tool_search"
+          ],
+          "required_call_order": [
+            "automation_create"
+          ]
+        },
+        "deferred": {
+          "search_calls": {
+            "min": 1,
+            "max": 2
+          },
+          "search_query_modes": [
+            "select",
+            "keyword"
+          ],
+          "expected_search_tools": [
+            "automation_create"
+          ],
+          "empty_search": "forbidden",
+          "activation_boundary": "strict_separate_batch",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "automation_create",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "contains",
+                "value": {
+                  "name": "TS_WEEKLY_COMPLEX_OK",
+                  "prompt": "REVIEW_FIXTURE_ONLY",
+                  "cadence": "weekly",
+                  "weekday": 1,
+                  "hour": 9,
+                  "minute": 35
+                }
+              }
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [],
+          "required_call_order": [
+            "tool_search",
+            "automation_create"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ts_mcp_catalog_10",
+      "title": "MCP exact routing among 10 similar tools",
+      "category": "toolsearch-mcp-scale",
+      "tier": "core",
+      "surface": "acp",
+      "critical": true,
+      "variants": [
+        "static",
+        "deferred"
+      ],
+      "prompt": "Fetch the authoritative exact catalog record for external SKU SKU-TS-10. Do not use preview, full-text search, inventory, metadata, price, policy, recent, supplier, or customer lookup. Use request id mcp-10 and request a limit of exactly 3.",
+      "mcp_fixture": {
+        "server_name": "toolsearch_fixture",
+        "tool_count": 10
+      },
+      "routing": {
+        "deferred_tools": "$mcp_fixture_catalog",
+        "fixture_tools": {
+          "mcp__toolsearch_fixture__catalog_lookup_precise": "catalog_lookup_precise"
+        },
+        "expected_calls": [
+          {
+            "tool": "mcp__toolsearch_fixture__catalog_lookup_precise",
+            "args": {
+              "request_id": "mcp-10",
+              "query": "SKU-TS-10",
+              "limit": 3
+            }
+          }
+        ]
+      },
+      "timeout": 240,
+      "expect_tool_use": true,
+      "oracles": [
+        {
+          "type": "final_text_contains",
+          "value": "SKU-TS-10"
+        }
+      ],
+      "safety": {
+        "credentials": "none",
+        "network": "none",
+        "fixture_only": true
+      },
+      "metric_tags": [
+        "task_pass",
+        "paired_task_pass",
+        "critical_pass",
+        "deferred_call_accuracy",
+        "mcp_distractor_accuracy",
+        "schema_disclosure"
+      ],
+      "expected_routing": {
+        "static": {
+          "search_calls": {
+            "min": 0,
+            "max": 0
+          },
+          "search_query_modes": [],
+          "expected_search_tools": [],
+          "empty_search": "forbidden",
+          "activation_boundary": "not_applicable",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "mcp__toolsearch_fixture__catalog_lookup_precise",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "exact",
+                "value": {
+                  "request_id": "mcp-10",
+                  "query": "SKU-TS-10",
+                  "limit": 3
+                }
+              }
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "tool_search",
+            "$mcp_fixture_distractors"
+          ],
+          "required_call_order": [
+            "mcp__toolsearch_fixture__catalog_lookup_precise"
+          ]
+        },
+        "deferred": {
+          "search_calls": {
+            "min": 1,
+            "max": 2
+          },
+          "search_query_modes": [
+            "select",
+            "keyword"
+          ],
+          "expected_search_tools": [
+            "mcp__toolsearch_fixture__catalog_lookup_precise"
+          ],
+          "empty_search": "forbidden",
+          "activation_boundary": "strict_separate_batch",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "mcp__toolsearch_fixture__catalog_lookup_precise",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "exact",
+                "value": {
+                  "request_id": "mcp-10",
+                  "query": "SKU-TS-10",
+                  "limit": 3
+                }
+              }
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "$mcp_fixture_distractors"
+          ],
+          "required_call_order": [
+            "tool_search",
+            "mcp__toolsearch_fixture__catalog_lookup_precise"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ts_mcp_catalog_30",
+      "title": "MCP exact routing among 30 similar and filler tools",
+      "category": "toolsearch-mcp-scale",
+      "tier": "core",
+      "surface": "acp",
+      "critical": true,
+      "variants": [
+        "static",
+        "deferred"
+      ],
+      "prompt": "Fetch the authoritative exact catalog record for external SKU SKU-TS-30. Do not use a preview, full-text search, inventory lookup, or any generic utility. Use request id mcp-30 and request a limit of exactly 3.",
+      "mcp_fixture": {
+        "server_name": "toolsearch_fixture",
+        "tool_count": 30
+      },
+      "routing": {
+        "deferred_tools": "$mcp_fixture_catalog",
+        "fixture_tools": {
+          "mcp__toolsearch_fixture__catalog_lookup_precise": "catalog_lookup_precise"
+        },
+        "expected_calls": [
+          {
+            "tool": "mcp__toolsearch_fixture__catalog_lookup_precise",
+            "args": {
+              "request_id": "mcp-30",
+              "query": "SKU-TS-30",
+              "limit": 3
+            }
+          }
+        ]
+      },
+      "timeout": 240,
+      "expect_tool_use": true,
+      "oracles": [
+        {
+          "type": "final_text_contains",
+          "value": "SKU-TS-30"
+        }
+      ],
+      "safety": {
+        "credentials": "none",
+        "network": "none",
+        "fixture_only": true
+      },
+      "metric_tags": [
+        "task_pass",
+        "paired_task_pass",
+        "critical_pass",
+        "deferred_call_accuracy",
+        "mcp_distractor_accuracy",
+        "schema_disclosure"
+      ],
+      "expected_routing": {
+        "static": {
+          "search_calls": {
+            "min": 0,
+            "max": 0
+          },
+          "search_query_modes": [],
+          "expected_search_tools": [],
+          "empty_search": "forbidden",
+          "activation_boundary": "not_applicable",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "mcp__toolsearch_fixture__catalog_lookup_precise",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "exact",
+                "value": {
+                  "request_id": "mcp-30",
+                  "query": "SKU-TS-30",
+                  "limit": 3
+                }
+              }
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "tool_search",
+            "$mcp_fixture_distractors"
+          ],
+          "required_call_order": [
+            "mcp__toolsearch_fixture__catalog_lookup_precise"
+          ]
+        },
+        "deferred": {
+          "search_calls": {
+            "min": 1,
+            "max": 2
+          },
+          "search_query_modes": [
+            "select",
+            "keyword"
+          ],
+          "expected_search_tools": [
+            "mcp__toolsearch_fixture__catalog_lookup_precise"
+          ],
+          "empty_search": "forbidden",
+          "activation_boundary": "strict_separate_batch",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "mcp__toolsearch_fixture__catalog_lookup_precise",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "exact",
+                "value": {
+                  "request_id": "mcp-30",
+                  "query": "SKU-TS-30",
+                  "limit": 3
+                }
+              }
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "$mcp_fixture_distractors"
+          ],
+          "required_call_order": [
+            "tool_search",
+            "mcp__toolsearch_fixture__catalog_lookup_precise"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ts_mcp_catalog_50",
+      "title": "MCP exact routing among 50 similar and filler tools",
+      "category": "toolsearch-mcp-scale",
+      "tier": "core",
+      "surface": "acp",
+      "critical": true,
+      "variants": [
+        "static",
+        "deferred"
+      ],
+      "prompt": "Fetch the authoritative exact catalog record for external SKU SKU-TS-50. Do not use a preview, full-text search, inventory lookup, or any generic utility. Use request id mcp-50 and request a limit of exactly 3.",
+      "mcp_fixture": {
+        "server_name": "toolsearch_fixture",
+        "tool_count": 50
+      },
+      "routing": {
+        "deferred_tools": "$mcp_fixture_catalog",
+        "fixture_tools": {
+          "mcp__toolsearch_fixture__catalog_lookup_precise": "catalog_lookup_precise"
+        },
+        "expected_calls": [
+          {
+            "tool": "mcp__toolsearch_fixture__catalog_lookup_precise",
+            "args": {
+              "request_id": "mcp-50",
+              "query": "SKU-TS-50",
+              "limit": 3
+            }
+          }
+        ]
+      },
+      "timeout": 300,
+      "expect_tool_use": true,
+      "oracles": [
+        {
+          "type": "final_text_contains",
+          "value": "SKU-TS-50"
+        }
+      ],
+      "safety": {
+        "credentials": "none",
+        "network": "none",
+        "fixture_only": true
+      },
+      "metric_tags": [
+        "task_pass",
+        "paired_task_pass",
+        "critical_pass",
+        "deferred_call_accuracy",
+        "mcp_distractor_accuracy",
+        "schema_disclosure"
+      ],
+      "expected_routing": {
+        "static": {
+          "search_calls": {
+            "min": 0,
+            "max": 0
+          },
+          "search_query_modes": [],
+          "expected_search_tools": [],
+          "empty_search": "forbidden",
+          "activation_boundary": "not_applicable",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "mcp__toolsearch_fixture__catalog_lookup_precise",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "exact",
+                "value": {
+                  "request_id": "mcp-50",
+                  "query": "SKU-TS-50",
+                  "limit": 3
+                }
+              }
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "tool_search",
+            "$mcp_fixture_distractors"
+          ],
+          "required_call_order": [
+            "mcp__toolsearch_fixture__catalog_lookup_precise"
+          ]
+        },
+        "deferred": {
+          "search_calls": {
+            "min": 1,
+            "max": 2
+          },
+          "search_query_modes": [
+            "select",
+            "keyword"
+          ],
+          "expected_search_tools": [
+            "mcp__toolsearch_fixture__catalog_lookup_precise"
+          ],
+          "empty_search": "forbidden",
+          "activation_boundary": "strict_separate_batch",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "mcp__toolsearch_fixture__catalog_lookup_precise",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "exact",
+                "value": {
+                  "request_id": "mcp-50",
+                  "query": "SKU-TS-50",
+                  "limit": 3
+                }
+              }
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "$mcp_fixture_distractors"
+          ],
+          "required_call_order": [
+            "tool_search",
+            "mcp__toolsearch_fixture__catalog_lookup_precise"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ts_mcp_catalog_100",
+      "title": "MCP exact routing among 100 similar and filler tools",
+      "category": "toolsearch-mcp-scale",
+      "tier": "core",
+      "surface": "acp",
+      "critical": true,
+      "variants": [
+        "static",
+        "deferred"
+      ],
+      "prompt": "Fetch the authoritative exact catalog record for external SKU SKU-TS-100. Do not use a preview, full-text search, inventory lookup, or any generic utility. Use request id mcp-100 and request a limit of exactly 3.",
+      "mcp_fixture": {
+        "server_name": "toolsearch_fixture",
+        "tool_count": 100
+      },
+      "routing": {
+        "deferred_tools": "$mcp_fixture_catalog",
+        "fixture_tools": {
+          "mcp__toolsearch_fixture__catalog_lookup_precise": "catalog_lookup_precise"
+        },
+        "expected_calls": [
+          {
+            "tool": "mcp__toolsearch_fixture__catalog_lookup_precise",
+            "args": {
+              "request_id": "mcp-100",
+              "query": "SKU-TS-100",
+              "limit": 3
+            }
+          }
+        ]
+      },
+      "timeout": 360,
+      "expect_tool_use": true,
+      "oracles": [
+        {
+          "type": "final_text_contains",
+          "value": "SKU-TS-100"
+        }
+      ],
+      "safety": {
+        "credentials": "none",
+        "network": "none",
+        "fixture_only": true
+      },
+      "metric_tags": [
+        "task_pass",
+        "paired_task_pass",
+        "critical_pass",
+        "deferred_call_accuracy",
+        "mcp_distractor_accuracy",
+        "schema_disclosure",
+        "full_schema_disclosure"
+      ],
+      "expected_routing": {
+        "static": {
+          "search_calls": {
+            "min": 0,
+            "max": 0
+          },
+          "search_query_modes": [],
+          "expected_search_tools": [],
+          "empty_search": "forbidden",
+          "activation_boundary": "not_applicable",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "mcp__toolsearch_fixture__catalog_lookup_precise",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "exact",
+                "value": {
+                  "request_id": "mcp-100",
+                  "query": "SKU-TS-100",
+                  "limit": 3
+                }
+              }
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "tool_search",
+            "$mcp_fixture_distractors"
+          ],
+          "required_call_order": [
+            "mcp__toolsearch_fixture__catalog_lookup_precise"
+          ]
+        },
+        "deferred": {
+          "search_calls": {
+            "min": 1,
+            "max": 2
+          },
+          "search_query_modes": [
+            "select",
+            "keyword"
+          ],
+          "expected_search_tools": [
+            "mcp__toolsearch_fixture__catalog_lookup_precise"
+          ],
+          "empty_search": "forbidden",
+          "activation_boundary": "strict_separate_batch",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "mcp__toolsearch_fixture__catalog_lookup_precise",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "exact",
+                "value": {
+                  "request_id": "mcp-100",
+                  "query": "SKU-TS-100",
+                  "limit": 3
+                }
+              }
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "$mcp_fixture_distractors"
+          ],
+          "required_call_order": [
+            "tool_search",
+            "mcp__toolsearch_fixture__catalog_lookup_precise"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ts_computer_notes_click",
+      "base_case": "computer_snapshot_then_act",
+      "title": "Computer fixture routes open and act through Deferred disclosure",
+      "category": "toolsearch-computer",
+      "tier": "core",
+      "surface": "acp",
+      "critical": true,
+      "variants": [
+        "static",
+        "deferred"
+      ],
+      "prompt": "Using the deterministic native-computer fixture, complete these exact steps in order: (1) open Notes (com.apple.Notes) once; (2) inspect the current UI returned by opening it; (3) click the New Note button exactly once using its current uid. Do not finish before the click reports success. Once it succeeds, stop using tools immediately and briefly report completion; do not inspect or click again. Browser tools are intentionally unavailable on this ACP surface.",
+      "timeout": 300,
+      "expect_tool_use": true,
+      "safety": {
+        "credentials": "none",
+        "network": "none",
+        "fixture_only": true
+      },
+      "metric_tags": [
+        "task_pass",
+        "paired_task_pass",
+        "critical_pass",
+        "deferred_call_accuracy",
+        "computer_routing",
+        "schema_disclosure"
+      ],
+      "expected_routing": {
+        "static": {
+          "search_calls": {
+            "min": 0,
+            "max": 0
+          },
+          "search_query_modes": [],
+          "expected_search_tools": [],
+          "empty_search": "forbidden",
+          "activation_boundary": "not_applicable",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "computer_open",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "exact",
+                "value": {
+                  "app": "com.apple.Notes"
+                }
+              }
+            },
+            {
+              "name": "computer_act",
+              "min": 1,
+              "max": 1
+            }
+          ],
+          "optional_tool_calls": [
+            {
+              "name": "computer_snapshot",
+              "min": 0,
+              "max": 2
+            }
+          ],
+          "forbidden_tool_calls": [
+            "tool_search",
+            "execute"
+          ],
+          "required_call_order": [
+            "computer_open",
+            "computer_act"
+          ]
+        },
+        "deferred": {
+          "search_calls": {
+            "min": 1,
+            "max": 1
+          },
+          "search_query_modes": [
+            "select",
+            "keyword"
+          ],
+          "expected_search_tools": [
+            "computer_open",
+            "computer_act"
+          ],
+          "empty_search": "forbidden",
+          "activation_boundary": "strict_separate_batch",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "computer_open",
+              "min": 1,
+              "max": 1,
+              "args": {
+                "match": "exact",
+                "value": {
+                  "app": "com.apple.Notes"
+                }
+              }
+            },
+            {
+              "name": "computer_act",
+              "min": 1,
+              "max": 1
+            }
+          ],
+          "optional_tool_calls": [
+            {
+              "name": "computer_snapshot",
+              "min": 0,
+              "max": 2
+            }
+          ],
+          "forbidden_tool_calls": [
+            "execute"
+          ],
+          "required_call_order": [
+            "tool_search",
+            "computer_open",
+            "computer_act"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ts_browser_loopback_read",
+      "title": "Web-only Browser tools complete a driver-owned loopback proof form",
+      "category": "toolsearch-browser",
+      "tier": "core",
+      "surface": "web",
+      "critical": true,
+      "variants": [
+        "static",
+        "deferred"
+      ],
+      "prompt": "Use Browser tools to open the driver-owned proof form at {BROWSER_FIXTURE_URL}, snapshot it, fill and submit its one-time proof value, then read the confirmation marker. Do not navigate anywhere else.",
+      "home_config": {
+        "browser": {
+          "enabled": true,
+          "backend": "managed",
+          "headless": true,
+          "approval": {
+            "navigate": "always_allow",
+            "interact": "always_allow"
+          }
+        }
+      },
+      "browser_fixture": {
+        "kind": "driver_owned_proof_form",
+        "network": "loopback",
+        "prompt_owner": "web_browser_driver",
+        "required_actions": [
+          "browser_open",
+          "browser_snapshot",
+          "browser_act:fill",
+          "browser_act:click",
+          "browser_read"
+        ],
+        "confirmation_prefix": "JCODE_BROWSER_CONFIRMATION"
+      },
+      "timeout": 360,
+      "expect_tool_use": true,
+      "oracles": [
+        {
+          "type": "web_browser_driver_proof",
+          "value": "JCODE_BROWSER_CONFIRMATION"
+        }
+      ],
+      "safety": {
+        "credentials": "none",
+        "network": "loopback",
+        "fixture_only": true
+      },
+      "metric_tags": [
+        "task_pass",
+        "paired_task_pass",
+        "critical_pass",
+        "deferred_call_accuracy",
+        "browser_routing",
+        "schema_disclosure"
+      ],
+      "expected_routing": {
+        "static": {
+          "search_calls": {
+            "min": 0,
+            "max": 0
+          },
+          "search_query_modes": [],
+          "expected_search_tools": [],
+          "empty_search": "forbidden",
+          "activation_boundary": "not_applicable",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "browser_open",
+              "min": 1,
+              "max": 1
+            },
+            {
+              "name": "browser_snapshot",
+              "min": 1,
+              "max": 2
+            },
+            {
+              "name": "browser_act",
+              "min": 2,
+              "max": 4
+            },
+            {
+              "name": "browser_read",
+              "min": 1,
+              "max": 2
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "tool_search",
+            "execute"
+          ],
+          "required_call_order": [
+            "browser_open",
+            "browser_snapshot",
+            "browser_act",
+            "browser_act",
+            "browser_read"
+          ]
+        },
+        "deferred": {
+          "search_calls": {
+            "min": 1,
+            "max": 1
+          },
+          "search_query_modes": [
+            "select",
+            "keyword"
+          ],
+          "expected_search_tools": [
+            "browser_open",
+            "browser_snapshot",
+            "browser_act",
+            "browser_read"
+          ],
+          "empty_search": "forbidden",
+          "activation_boundary": "strict_separate_batch",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [
+            {
+              "name": "browser_open",
+              "min": 1,
+              "max": 1
+            },
+            {
+              "name": "browser_snapshot",
+              "min": 1,
+              "max": 2
+            },
+            {
+              "name": "browser_act",
+              "min": 2,
+              "max": 4
+            },
+            {
+              "name": "browser_read",
+              "min": 1,
+              "max": 2
+            }
+          ],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "execute"
+          ],
+          "required_call_order": [
+            "tool_search",
+            "browser_open",
+            "browser_snapshot",
+            "browser_act",
+            "browser_act",
+            "browser_read"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ts_negative_unknown_select",
+      "title": "Unknown exact select fails closed without target execution",
+      "category": "toolsearch-negative-search",
+      "tier": "core",
+      "surface": "acp",
+      "critical": false,
+      "variants": [
+        "deferred"
+      ],
+      "prompt": "Call tool_search exactly once with query exactly select:mcp__toolsearch_fixture__does_not_exist. If it is unavailable, call no other tool and reply exactly UNKNOWN_TOOL_OK.",
+      "timeout": 180,
+      "expect_tool_use": true,
+      "oracles": [
+        {
+          "type": "final_text_contains",
+          "value": "UNKNOWN_TOOL_OK"
+        }
+      ],
+      "safety": {
+        "credentials": "none",
+        "network": "none",
+        "fixture_only": true
+      },
+      "metric_tags": [
+        "task_pass",
+        "negative_search",
+        "schema_disclosure"
+      ],
+      "expected_routing": {
+        "deferred": {
+          "search_calls": {
+            "min": 1,
+            "max": 1
+          },
+          "search_query_modes": [
+            "select"
+          ],
+          "search_query_matcher": {
+            "match": "exact",
+            "value": "select:mcp__toolsearch_fixture__does_not_exist"
+          },
+          "expected_search_tools": [],
+          "empty_search": "required",
+          "activation_boundary": "no_activation_expected",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [
+            "mcp__toolsearch_fixture__does_not_exist"
+          ],
+          "required_call_order": [
+            "tool_search"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ts_negative_unrelated_keyword",
+      "title": "Unrelated keyword search activates no Deferred tool",
+      "category": "toolsearch-negative-search",
+      "tier": "core",
+      "surface": "acp",
+      "critical": false,
+      "variants": [
+        "deferred"
+      ],
+      "prompt": "Call tool_search exactly once with a non-empty natural-language keyword query for a live interplanetary weather radar; the query must not start with select:. This isolated fixture has no such capability. When no relevant tool is found, call no other tool and reply exactly NO_RELEVANT_TOOL_OK.",
+      "timeout": 180,
+      "expect_tool_use": true,
+      "oracles": [
+        {
+          "type": "final_text_contains",
+          "value": "NO_RELEVANT_TOOL_OK"
+        }
+      ],
+      "safety": {
+        "credentials": "none",
+        "network": "none",
+        "fixture_only": true
+      },
+      "metric_tags": [
+        "task_pass",
+        "negative_search",
+        "schema_disclosure"
+      ],
+      "expected_routing": {
+        "deferred": {
+          "search_calls": {
+            "min": 1,
+            "max": 1
+          },
+          "search_query_modes": [
+            "keyword"
+          ],
+          "expected_search_tools": [],
+          "empty_search": "required",
+          "activation_boundary": "no_activation_expected",
+          "bypass_max": 0,
+          "same_batch_max": 0,
+          "required_tool_calls": [],
+          "optional_tool_calls": [],
+          "forbidden_tool_calls": [],
+          "required_call_order": [
+            "tool_search"
+          ]
+        }
+      }
+    }
+  ]
+}

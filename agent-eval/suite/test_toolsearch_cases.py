@@ -1,0 +1,502 @@
+import copy
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+
+import toolsearch_cases
+import verify
+
+
+class ToolSearchCaseMatrixTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.raw = json.loads(toolsearch_cases.DEFAULT_MATRIX.read_text())
+        cls.base = json.loads(toolsearch_cases.DEFAULT_BASE_SUITE.read_text())
+
+    def validate(self, mutate=None):
+        document = copy.deepcopy(self.raw)
+        if mutate is not None:
+            mutate(document)
+        return toolsearch_cases.validate_suite(document, self.base)
+
+    def test_full_matrix_validates_and_has_unique_coverage(self):
+        suite = self.validate()
+        cases = suite["cases"]
+        ids = [case["id"] for case in cases]
+
+        self.assertEqual(18, len(cases))
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(15, sum(case["critical"] for case in cases))
+        self.assertEqual({"acp", "web"}, {case["surface"] for case in cases})
+        self.assertEqual(17, sum(case["surface"] == "acp" for case in cases))
+        self.assertEqual(1, sum(case["surface"] == "web" for case in cases))
+        self.assertEqual(
+            {10, 30, 50, 100},
+            {case["mcp_fixture"]["tool_count"] for case in cases if "mcp_fixture" in case},
+        )
+
+        categories = {case["category"] for case in cases}
+        for required in (
+            "toolsearch-direct",
+            "toolsearch-exact",
+            "toolsearch-semantic-en",
+            "toolsearch-semantic-zh",
+            "toolsearch-keyword-en",
+            "toolsearch-keyword-zh",
+            "toolsearch-multi-target",
+            "toolsearch-complex-args",
+            "toolsearch-mcp-scale",
+            "toolsearch-computer",
+            "toolsearch-browser",
+            "toolsearch-negative-search",
+        ):
+            self.assertIn(required, categories)
+
+    def test_mcp_catalog_and_distractor_sentinels_materialize(self):
+        cases = {case["id"]: case for case in self.validate()["cases"]}
+        for count in (10, 30, 50, 100):
+            case = cases[f"ts_mcp_catalog_{count}"]
+            catalog = case["routing"]["deferred_tools"]
+            target = "mcp__toolsearch_fixture__catalog_lookup_precise"
+            self.assertEqual(count, len(catalog))
+            self.assertEqual(count, len(set(catalog)))
+            self.assertIn(target, catalog)
+            self.assertNotIn(toolsearch_cases.MCP_CATALOG_SENTINEL, catalog)
+            self.assertEqual(
+                [{"type": "final_text_contains", "value": f"SKU-TS-{count}"}],
+                case["oracles"],
+            )
+            self.assertNotIn("JCODE_MCP_FIXTURE_OK", json.dumps(case["oracles"]))
+
+            for variant in ("static", "deferred"):
+                forbidden = case["expected_routing"][variant]["forbidden_tool_calls"]
+                self.assertNotIn(toolsearch_cases.MCP_DISTRACTOR_SENTINEL, forbidden)
+                self.assertEqual(count - 1, sum(name in forbidden for name in catalog if name != target))
+                target_specs = [
+                    call for call in case["expected_routing"][variant]["required_tool_calls"]
+                    if call["name"] == target
+                ]
+                self.assertEqual(1, len(target_specs))
+                self.assertEqual((1, 1), (target_specs[0]["min"], target_specs[0]["max"]))
+
+    def test_computer_reuses_deterministic_base_and_browser_is_web_only(self):
+        cases = {case["id"]: case for case in self.validate()["cases"]}
+        computer = cases["ts_computer_notes_click"]
+        browser = cases["ts_browser_loopback_read"]
+
+        self.assertNotIn("base_case", computer)
+        self.assertTrue(computer["home_config"]["computer"]["enabled"])
+        fixture = computer["home_fixtures"][".jcode/computer/fixture.json"]
+        self.assertIn("com.apple.Notes", fixture)
+        self.assertTrue(any(oracle["type"] == "home_file_contains" for oracle in computer["oracles"]))
+        self.assertIn(
+            {
+                "type": "home_file_contains",
+                "glob": ".jcode/computer/actions.jsonl",
+                "value": '"action":"click","bundle_id":"com.apple.Notes","uid":"e1"',
+            },
+            computer["oracles"],
+        )
+        self.assertIn(
+            {
+                "type": "home_grep_absent",
+                "root_glob": ".jcode/computer/actions.jsonl",
+                "pattern": r"\n\s*\{",
+            },
+            computer["oracles"],
+        )
+        self.assertEqual("acp", computer["surface"])
+        prompt = computer["prompt"]
+        for required in (
+            "complete these exact steps in order",
+            "exactly once",
+            "Do not finish before the click reports success",
+            "stop using tools immediately",
+            "do not inspect or click again",
+        ):
+            self.assertIn(required, prompt)
+        for coached_name in (
+            "tool_search",
+            "select:",
+            "computer_open",
+            "computer_snapshot",
+            "computer_act",
+        ):
+            self.assertNotIn(coached_name, prompt)
+        for variant in ("static", "deferred"):
+            expectation = computer["expected_routing"][variant]
+            self.assertIn(
+                "execute",
+                expectation["forbidden_tool_calls"],
+            )
+            required_counts = {
+                call["name"]: (call["min"], call["max"])
+                for call in expectation["required_tool_calls"]
+            }
+            self.assertEqual((1, 1), required_counts["computer_open"])
+            self.assertEqual((1, 1), required_counts["computer_act"])
+            self.assertEqual(1, expectation["required_call_order"].count("computer_act"))
+        self.assertEqual(
+            {"min": 1, "max": 1},
+            computer["expected_routing"]["deferred"]["search_calls"],
+        )
+
+        self.assertEqual("web", browser["surface"])
+        self.assertEqual("driver_owned_proof_form", browser["browser_fixture"]["kind"])
+        self.assertEqual("web_browser_driver", browser["browser_fixture"]["prompt_owner"])
+        self.assertEqual(
+            [
+                "browser_open",
+                "browser_snapshot",
+                "browser_act:fill",
+                "browser_act:click",
+                "browser_read",
+            ],
+            browser["browser_fixture"]["required_actions"],
+        )
+        self.assertNotIn("body", browser["browser_fixture"])
+        self.assertEqual(
+            {"navigate": "always_allow", "interact": "always_allow"},
+            browser["home_config"]["browser"]["approval"],
+        )
+        self.assertIn("{BROWSER_FIXTURE_URL}", browser["prompt"])
+        self.assertNotRegex(json.dumps(browser), r"https?://")
+        self.assertFalse(self.raw["runner_contract"]["browser_on_acp"])
+
+    def test_computer_artifact_oracles_require_one_uid_click(self):
+        computer = {case["id"]: case for case in self.validate()["cases"]}[
+            "ts_computer_notes_click"
+        ]
+        uid_click = next(
+            oracle for oracle in computer["oracles"]
+            if oracle.get("value")
+            == '"action":"click","bundle_id":"com.apple.Notes","uid":"e1"'
+        )
+        only_one_action = next(
+            oracle for oracle in computer["oracles"]
+            if oracle.get("pattern") == r"\n\s*\{"
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            journal = home / ".jcode" / "computer" / "actions.jsonl"
+            journal.parent.mkdir(parents=True)
+            context = {"sandbox": str(home), "home": str(home), "result": {}}
+            one_click = (
+                '{"action":"click","bundle_id":"com.apple.Notes","uid":"e1"}\n'
+            )
+
+            journal.write_text(one_click)
+            self.assertTrue(verify.check_oracle(uid_click, computer, context)[0])
+            self.assertTrue(verify.check_oracle(only_one_action, computer, context)[0])
+
+            journal.write_text(one_click + one_click)
+            self.assertTrue(verify.check_oracle(uid_click, computer, context)[0])
+            self.assertFalse(verify.check_oracle(only_one_action, computer, context)[0])
+
+            journal.write_text(
+                '{"action":"click","bundle_id":"com.apple.Notes","x":10,"y":20}\n'
+            )
+            self.assertFalse(verify.check_oracle(uid_click, computer, context)[0])
+            self.assertTrue(verify.check_oracle(only_one_action, computer, context)[0])
+
+    def test_browser_expectations_cover_every_driver_tool_and_activation(self):
+        browser = {
+            case["id"]: case for case in self.validate()["cases"]
+        }["ts_browser_loopback_read"]
+        expected_names = {
+            "browser_open", "browser_snapshot", "browser_act", "browser_read",
+        }
+        for variant in ("static", "deferred"):
+            expectation = browser["expected_routing"][variant]
+            required = {call["name"]: call for call in expectation["required_tool_calls"]}
+            self.assertEqual(expected_names, set(required))
+            self.assertEqual((2, 4), (required["browser_act"]["min"], required["browser_act"]["max"]))
+            self.assertEqual(2, expectation["required_call_order"].count("browser_act"))
+        self.assertEqual(
+            expected_names,
+            set(browser["expected_routing"]["deferred"]["expected_search_tools"]),
+        )
+        for variant in ("static", "deferred"):
+            self.assertIn(
+                "execute",
+                browser["expected_routing"][variant]["forbidden_tool_calls"],
+            )
+        self.assertEqual(
+            {"min": 1, "max": 1},
+            browser["expected_routing"]["deferred"]["search_calls"],
+        )
+
+    def test_rejects_browser_driver_or_preapproval_contract_drift(self):
+        mutations = (
+            lambda case: case["home_config"]["browser"]["approval"].update(
+                {"navigate": "ask"},
+            ),
+            lambda case: case["browser_fixture"]["required_actions"].pop(),
+            lambda case: case["expected_routing"]["deferred"][
+                "expected_search_tools"
+            ].remove("browser_act"),
+        )
+        for index, mutation in enumerate(mutations):
+            def mutate(document, apply=mutation):
+                browser = next(
+                    case for case in document["cases"]
+                    if case["id"] == "ts_browser_loopback_read"
+                )
+                apply(browser)
+
+            with self.subTest(index=index):
+                with self.assertRaises(toolsearch_cases.MatrixError):
+                    self.validate(mutate)
+
+    def test_variant_expectations_are_explicit_and_separate_activation_is_pinned(self):
+        for case in self.validate()["cases"]:
+            self.assertEqual(set(case["variants"]), set(case["expected_routing"]))
+            for variant, expected in case["expected_routing"].items():
+                if variant == "static":
+                    self.assertEqual({"min": 0, "max": 0}, expected["search_calls"])
+                    self.assertIn("tool_search", expected["forbidden_tool_calls"])
+                if expected["activation_boundary"] == "strict_separate_batch":
+                    self.assertEqual(0, expected["bypass_max"])
+                    self.assertEqual(0, expected["same_batch_max"])
+                    self.assertGreaterEqual(expected["search_calls"]["min"], 1)
+
+    def test_query_mode_contracts_and_mode_specific_prompts_are_pinned(self):
+        cases = {case["id"]: case for case in self.validate()["cases"]}
+        self.assertEqual(
+            set(toolsearch_cases.PINNED_QUERY_MODES_BY_CASE), set(cases),
+        )
+        for case_id, modes in toolsearch_cases.PINNED_QUERY_MODES_BY_CASE.items():
+            self.assertEqual(
+                modes,
+                tuple(cases[case_id]["expected_routing"]["deferred"]["search_query_modes"]),
+            )
+
+        self.assertIn(
+            "query exactly select:goal_get",
+            cases["ts_exact_select_goal_get"]["prompt"],
+        )
+        self.assertIn(
+            "query exactly select:mcp__toolsearch_fixture__does_not_exist",
+            cases["ts_negative_unknown_select"]["prompt"],
+        )
+        for case_id in ("ts_keyword_en_goal_get", "ts_keyword_zh_goal_get"):
+            deferred = cases[case_id]["expected_routing"]["deferred"]
+            self.assertEqual(["deferred"], cases[case_id]["variants"])
+            self.assertEqual({"min": 1, "max": 1}, deferred["search_calls"])
+            self.assertEqual(["keyword"], deferred["search_query_modes"])
+            self.assertEqual(
+                {"match": "exact", "value": "+current +usage"},
+                deferred["search_query_matcher"],
+            )
+            self.assertIn("+current +usage", cases[case_id]["prompt"])
+
+    def test_rejects_query_mode_contract_drift(self):
+        for case_id, replacement in (
+            ("ts_semantic_en_goal_get", ["keyword"]),
+            ("ts_complex_automation_weekly", ["keyword"]),
+            ("ts_exact_select_goal_get", ["select", "keyword"]),
+            ("ts_keyword_en_goal_get", ["select", "keyword"]),
+            ("ts_negative_unknown_select", ["select", "keyword"]),
+            ("ts_negative_unrelated_keyword", ["select", "keyword"]),
+        ):
+            def mutate(document, target=case_id, modes=replacement):
+                case = next(item for item in document["cases"] if item["id"] == target)
+                case["expected_routing"]["deferred"]["search_query_modes"] = modes
+
+            with self.subTest(case_id=case_id):
+                with self.assertRaisesRegex(toolsearch_cases.MatrixError, "query mode contract"):
+                    self.validate(mutate)
+
+    def test_rejects_query_matcher_contract_drift(self):
+        for case_id in (
+            "ts_exact_select_goal_get",
+            "ts_keyword_en_goal_get",
+            "ts_keyword_zh_goal_get",
+            "ts_negative_unknown_select",
+        ):
+            def mutate(document, target=case_id):
+                case = next(item for item in document["cases"] if item["id"] == target)
+                case["expected_routing"]["deferred"]["search_query_matcher"]["value"] += " drift"
+
+            with self.subTest(case_id=case_id):
+                with self.assertRaisesRegex(toolsearch_cases.MatrixError, "query matcher contract"):
+                    self.validate(mutate)
+
+    def test_direct_read_uses_declared_fixture_path_matcher(self):
+        direct = {case["id"]: case for case in self.validate()["cases"]}["ts_direct_read"]
+        expected = {
+            "match": "fixture_path",
+            "value": {"file_path": "direct_fixture.txt"},
+        }
+        for variant in ("static", "deferred"):
+            read_specs = [
+                call for call in direct["expected_routing"][variant]["required_tool_calls"]
+                if call["name"] == "read"
+            ]
+            self.assertEqual(1, len(read_specs))
+            self.assertEqual(expected, read_specs[0]["args"])
+
+    def test_rejects_fixture_path_matcher_drift_or_unsafe_target(self):
+        def drift(document):
+            direct = next(item for item in document["cases"] if item["id"] == "ts_direct_read")
+            direct["expected_routing"]["deferred"]["required_tool_calls"][0]["args"]["match"] = "contains"
+
+        with self.assertRaisesRegex(toolsearch_cases.MatrixError, "fixture path contract"):
+            self.validate(drift)
+
+        def undeclared(document):
+            direct = next(item for item in document["cases"] if item["id"] == "ts_direct_read")
+            matcher = direct["expected_routing"]["deferred"]["required_tool_calls"][0]["args"]
+            matcher["value"]["file_path"] = "missing.txt"
+
+        with self.assertRaisesRegex(toolsearch_cases.MatrixError, "fixture_path matcher"):
+            self.validate(undeclared)
+
+        def wrong_tool(document):
+            direct = next(item for item in document["cases"] if item["id"] == "ts_direct_read")
+            direct["expected_routing"]["deferred"]["required_tool_calls"][0]["name"] = "grep"
+
+        with self.assertRaisesRegex(toolsearch_cases.MatrixError, "fixture_path matcher"):
+            self.validate(wrong_tool)
+
+    def test_goal_get_cases_use_stable_sentinel_without_relaxing_routing(self):
+        cases = {case["id"]: case for case in self.validate()["cases"]}
+        for case_id in (
+            "ts_exact_select_goal_get",
+            "ts_semantic_en_goal_get",
+            "ts_semantic_zh_goal_get",
+        ):
+            case = cases[case_id]
+            self.assertIn("NO_GOAL_SET_OK", case["prompt"])
+            self.assertEqual(
+                [{"type": "final_text_contains", "value": "NO_GOAL_SET_OK"}],
+                case["oracles"],
+            )
+            for variant in ("static", "deferred"):
+                goal_specs = [
+                    call for call in case["expected_routing"][variant]["required_tool_calls"]
+                    if call["name"] == "goal_get"
+                ]
+                self.assertEqual(1, len(goal_specs))
+                self.assertEqual((1, 1), (goal_specs[0]["min"], goal_specs[0]["max"]))
+            deferred = case["expected_routing"]["deferred"]
+            self.assertEqual("strict_separate_batch", deferred["activation_boundary"])
+            self.assertEqual(["goal_get"], deferred["expected_search_tools"])
+
+        exact = cases["ts_exact_select_goal_get"]
+        exact_args = exact["expected_routing"]["deferred"]["required_tool_calls"][0]["args"]
+        self.assertEqual({"match": "exact", "value": {}}, exact_args)
+
+    def test_full_schema_gate_is_pinned_to_one_paired_full_catalog_case(self):
+        suite = self.validate()
+        tagged = [
+            case for case in suite["cases"]
+            if "full_schema_disclosure" in case["metric_tags"]
+        ]
+        self.assertEqual(["ts_mcp_catalog_100"], [case["id"] for case in tagged])
+        self.assertEqual({"static", "deferred"}, set(tagged[0]["variants"]))
+        self.assertEqual(
+            {"metric_tag": "full_schema_disclosure"},
+            suite["hard_gates"]["first_schema_token_reduction"]["scope"],
+        )
+
+    def test_rejects_missing_unpaired_or_wrong_scope_full_schema_tag(self):
+        def missing(document):
+            case = next(
+                item for item in document["cases"] if item["id"] == "ts_mcp_catalog_100"
+            )
+            case["metric_tags"].remove("full_schema_disclosure")
+
+        with self.assertRaisesRegex(toolsearch_cases.MatrixError, "full_schema_disclosure"):
+            self.validate(missing)
+
+        def unpaired(document):
+            case = next(
+                item for item in document["cases"] if item["id"] == "ts_negative_unknown_select"
+            )
+            case["metric_tags"].append("full_schema_disclosure")
+
+        with self.assertRaisesRegex(toolsearch_cases.MatrixError, "paired variants"):
+            self.validate(unpaired)
+
+        def wrong_scope(document):
+            document["hard_gates"]["first_schema_token_reduction"]["scope"] = {
+                "metric_tag": "paired_task_pass",
+            }
+
+        with self.assertRaisesRegex(toolsearch_cases.MatrixError, "scope drifted"):
+            self.validate(wrong_scope)
+
+    def test_rejects_duplicate_case_id(self):
+        def mutate(document):
+            duplicate = copy.deepcopy(document["cases"][0])
+            document["cases"].append(duplicate)
+
+        with self.assertRaisesRegex(toolsearch_cases.MatrixError, "duplicate ToolSearch case ids"):
+            self.validate(mutate)
+
+    def test_rejects_mcp_process_or_credential_injection(self):
+        for injected_key, value in (
+            ("command", "/bin/false"),
+            ("env", {"X": "Y"}),
+            ("api_key", "CANARY"),
+        ):
+            def mutate(document, key=injected_key, injected=value):
+                case = next(
+                    item for item in document["cases"]
+                    if item["id"] == "ts_mcp_catalog_10"
+                )
+                case["mcp_fixture"][key] = injected
+
+            with self.subTest(injected_key=injected_key):
+                with self.assertRaises(toolsearch_cases.MatrixError):
+                    self.validate(mutate)
+
+    def test_rejects_external_url_and_browser_on_acp(self):
+        def external_url(document):
+            case = next(
+                item for item in document["cases"]
+                if item["id"] == "ts_browser_loopback_read"
+            )
+            case["prompt"] = "Open https://example.invalid"
+
+        with self.assertRaisesRegex(toolsearch_cases.MatrixError, "external URL"):
+            self.validate(external_url)
+
+        def browser_acp(document):
+            case = next(
+                item for item in document["cases"]
+                if item["id"] == "ts_browser_loopback_read"
+            )
+            case["surface"] = "acp"
+
+        with self.assertRaisesRegex(toolsearch_cases.MatrixError, "ACP case cannot|Browser fixture must use"):
+            self.validate(browser_acp)
+
+    def test_rejects_hard_gate_drift_and_unknown_base_case(self):
+        def drift(document):
+            document["hard_gates"]["deferred_argument_success_rate"]["threshold"] = 0.97
+
+        with self.assertRaisesRegex(toolsearch_cases.MatrixError, "drifted"):
+            self.validate(drift)
+
+        def unknown_base(document):
+            case = next(
+                item for item in document["cases"]
+                if item["id"] == "ts_computer_notes_click"
+            )
+            case["base_case"] = "missing_computer_fixture"
+
+        with self.assertRaisesRegex(toolsearch_cases.MatrixError, "unknown base_case"):
+            self.validate(unknown_base)
+
+
+if __name__ == "__main__":
+    unittest.main()

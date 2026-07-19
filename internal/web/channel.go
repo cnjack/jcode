@@ -112,9 +112,11 @@ func (s *Server) handleChannelDisable(w http.ResponseWriter, r *http.Request) {
 // preference, which takes effect on the next launch.
 func (s *Server) handleChannelBLEStatus(w http.ResponseWriter, r *http.Request) {
 	enabled := false
+	s.cfgMu.Lock()
 	if s.cfg != nil && s.cfg.Channel != nil {
 		enabled = s.cfg.Channel.BLEEnabled
 	}
+	s.cfgMu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": enabled, "available": feature.BLE})
 }
 
@@ -133,22 +135,26 @@ func (s *Server) handleSetChannelBLE(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	s.mu.Lock()
+	s.cfgMu.Lock()
 	if s.cfg == nil {
-		s.mu.Unlock()
+		s.cfgMu.Unlock()
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config unavailable"})
 		return
 	}
-	if s.cfg.Channel == nil {
-		s.cfg.Channel = &config.ChannelConfig{}
+	previous := s.cfg.Channel
+	updated := &config.ChannelConfig{}
+	if previous != nil {
+		*updated = *previous
 	}
-	s.cfg.Channel.BLEEnabled = req.Enabled
+	updated.BLEEnabled = req.Enabled
+	s.cfg.Channel = updated
 	if err := config.SaveConfig(s.cfg); err != nil {
-		s.mu.Unlock()
+		s.cfg.Channel = previous
+		s.cfgMu.Unlock()
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	s.mu.Unlock()
+	s.cfgMu.Unlock()
 
 	// Apply live: start/stop the BLE helper now so the toggle takes effect
 	// without an app restart (and the macOS Bluetooth prompt / device connect

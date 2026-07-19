@@ -207,8 +207,10 @@ func (s *Server) handleSetApprovalMode(w http.ResponseWriter, r *http.Request) {
 	// reported mode from the live agent).
 	var newAg *adk.ChatModelAgent
 	if eng.rebuildForMode != nil {
+		eng.rebuildMu.Lock()
 		ag, err := eng.rebuildForMode(false)
 		if err != nil {
+			eng.rebuildMu.Unlock()
 			config.Logger().Printf("[web] approval mode agent rebuild error: %v", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to set approval mode"})
 			return
@@ -219,6 +221,9 @@ func (s *Server) handleSetApprovalMode(w http.ResponseWriter, r *http.Request) {
 		eng.approvalState.SetSessionMode(sm)
 	}
 	eng.applyModeSwitch(sm.String(), newAg)
+	if eng.rebuildForMode != nil {
+		eng.rebuildMu.Unlock()
+	}
 	// Persist as the default startup mode so the preference survives restarts —
 	// resolveStartupMode reads cfg.DefaultMode. cfgMu serializes the config RMW.
 	s.cfgMu.Lock()

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -190,6 +191,54 @@ type LaunchOptions struct {
 
 var devtoolsRe = regexp.MustCompile(`DevTools listening on (ws://[^\s]+)`)
 
+// managedChromeEnv returns the child environment for managed Chrome. On macOS,
+// Chromium consults HOME for framework/runtime resources in addition to the
+// explicitly isolated --user-data-dir. jcode evaluation and server processes
+// may intentionally run with an isolated HOME, so use the OS account home for
+// Chrome only. Other platforms (and invalid account homes) retain their HOME.
+// The Web bearer token is never needed by Chrome and must not cross this process
+// boundary.
+func managedChromeEnv(goos string, environ []string, systemHome string) []string {
+	useSystemHome := goos == "darwin" && systemHome == strings.TrimSpace(systemHome) && filepath.IsAbs(systemHome)
+	result := make([]string, 0, len(environ)+1)
+	for _, entry := range environ {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok && key == "JCODE_WEB_TOKEN" {
+			continue
+		}
+		if useSystemHome && ok && key == "HOME" {
+			continue
+		}
+		result = append(result, entry)
+	}
+	if useSystemHome {
+		result = append(result, "HOME="+systemHome)
+	}
+	return result
+}
+
+func existingHomeDir(path string) string {
+	if path == "" || path != strings.TrimSpace(path) || !filepath.IsAbs(path) {
+		return ""
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		return ""
+	}
+	return path
+}
+
+func managedChromeProcessEnv() []string {
+	systemHome := ""
+	if current, err := user.Current(); err == nil {
+		// Validate the account database result before allowing it to replace HOME.
+		// managedChromeEnv stays a pure transformer and defensively rechecks its
+		// shape; filesystem existence belongs at this OS-facing boundary.
+		systemHome = existingHomeDir(current.HomeDir)
+	}
+	return managedChromeEnv(runtime.GOOS, os.Environ(), systemHome)
+}
+
 // Launch starts Chrome with --remote-debugging-port=0, waits for the DevTools
 // websocket announcement on stderr, and returns a connected managed backend.
 func Launch(ctx context.Context, opts LaunchOptions) (Backend, error) {
@@ -224,6 +273,7 @@ func Launch(ctx context.Context, opts LaunchOptions) (Backend, error) {
 	args = append(args, "about:blank")
 
 	cmd := exec.Command(chrome, args...)
+	cmd.Env = managedChromeProcessEnv()
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return nil, err

@@ -11,9 +11,10 @@ import (
 // registered MCP tool gets "server.tool" as its title and its compacted args
 // as subtitle; unknown tools keep the raw-name fallback.
 func TestExtractToolDisplayInfoMCP(t *testing.T) {
-	tools.RegisterMCPToolServer("resolve_library_id", "context7")
+	const canonicalName = "mcp__context7__resolve_library_id"
+	tools.RegisterMCPToolIdentity(canonicalName, "context7", "resolve_library_id")
 
-	info := extractToolDisplayInfo("resolve_library_id", "{ \"library\": \"react\",\n  \"version\": 18 }")
+	info := extractToolDisplayInfo(canonicalName, "{ \"library\": \"react\",\n  \"version\": 18 }")
 	if info.Title != "context7.resolve_library_id" {
 		t.Errorf("MCP title = %q, want context7.resolve_library_id", info.Title)
 	}

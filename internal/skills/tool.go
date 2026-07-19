@@ -24,12 +24,10 @@ type loadSkillTool struct {
 }
 
 func (t *loadSkillTool) Info(_ context.Context) (*schema.ToolInfo, error) {
-	skillList := t.loader.Descriptions()
-	desc := "Load a skill's full instructions by name. Available skills:\n" + skillList +
-		"\nUse this when you need detailed instructions for a specific task domain."
 	return &schema.ToolInfo{
 		Name: "load_skill",
-		Desc: desc,
+		Desc: "Load the full instructions for one available skill by its exact name. " +
+			"Use this when a task matches a specialized skill domain and you need its detailed workflow.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"name": {
 				Type:     schema.String,

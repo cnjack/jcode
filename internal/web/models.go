@@ -117,12 +117,15 @@ func (s *Server) handleSwitchModel(w http.ResponseWriter, r *http.Request) {
 
 	// Rebuild THIS task's agent for the new model and swap it in under eng.emu
 	// (the same lock submitMessage uses to read the agent). Keep history.
+	eng.rebuildMu.Lock()
 	ag, err := eng.createAgent(req.Provider, req.Model)
 	if err != nil {
+		eng.rebuildMu.Unlock()
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	eng.applyModelSwitch(ag, req.Provider, req.Model)
+	eng.rebuildMu.Unlock()
 
 	// Persist the selection so a restart resumes on this model — matches the
 	// TUI model picker, which writes cfg.Model on every switch. In-place on the
@@ -192,8 +195,10 @@ func (s *Server) handleSwitchMode(w http.ResponseWriter, r *http.Request) {
 	// a write-capable agent stays live.
 	var newAg *adk.ChatModelAgent
 	if eng.rebuildForMode != nil {
+		eng.rebuildMu.Lock()
 		ag, err := eng.rebuildForMode(sm.IsPlan())
 		if err != nil {
+			eng.rebuildMu.Unlock()
 			config.Logger().Printf("[web] mode switch agent rebuild error: %v", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to switch mode"})
 			return
@@ -204,6 +209,9 @@ func (s *Server) handleSwitchMode(w http.ResponseWriter, r *http.Request) {
 		eng.approvalState.SetSessionMode(sm) // approval axis (Full access → auto)
 	}
 	eng.applyModeSwitch(sm.String(), newAg)
+	if eng.rebuildForMode != nil {
+		eng.rebuildMu.Unlock()
+	}
 
 	s.wsBroker.Broadcast(WSEvent{Type: "mode_changed", TaskID: eng.taskID, Data: map[string]string{
 		"mode": sm.String(),

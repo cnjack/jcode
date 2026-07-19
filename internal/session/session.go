@@ -18,6 +18,11 @@ import (
 type EntryType string
 
 const (
+	privateSessionDirMode  os.FileMode = 0o700
+	privateSessionFileMode os.FileMode = 0o600
+)
+
+const (
 	EntrySessionStart EntryType = "session_start"
 	EntryUser         EntryType = "user"
 	EntryAssistant    EntryType = "assistant"
@@ -25,17 +30,49 @@ const (
 	EntryToolResult   EntryType = "tool_result"
 
 	// Extended entry types for structured state tracking.
-	EntryPlanUpdate     EntryType = "plan_update"
-	EntryTodoSnapshot   EntryType = "todo_snapshot"
-	EntrySubagentStart  EntryType = "subagent_start"
-	EntrySubagentResult EntryType = "subagent_result"
-	EntrySubagentAsync  EntryType = "subagent_async"
-	EntryModeChange     EntryType = "mode_change"
-	EntryCompact        EntryType = "compact"
-	EntryBudgetWarning  EntryType = "budget_warning"
-	EntrySystemPrompt   EntryType = "system_prompt"
-	EntryGoalUpdate     EntryType = "goal_update"
+	EntryPlanUpdate      EntryType = "plan_update"
+	EntryTodoSnapshot    EntryType = "todo_snapshot"
+	EntrySubagentStart   EntryType = "subagent_start"
+	EntrySubagentResult  EntryType = "subagent_result"
+	EntrySubagentAsync   EntryType = "subagent_async"
+	EntryModeChange      EntryType = "mode_change"
+	EntryCompact         EntryType = "compact"
+	EntryBudgetWarning   EntryType = "budget_warning"
+	EntrySystemPrompt    EntryType = "system_prompt"
+	EntryGoalUpdate      EntryType = "goal_update"
+	EntryToolObservation EntryType = "tool_observation"
 )
+
+// ToolObservation stores metadata-only evidence about progressive tool
+// disclosure. It intentionally contains no raw query, arguments, schema,
+// output, model content, or error text.
+type ToolObservation struct {
+	Kind string `json:"kind"`
+
+	ModelRequestSeq      int      `json:"model_request_seq,omitempty"`
+	VisibleNames         []string `json:"visible_names,omitempty"`
+	VisibleCount         int      `json:"visible_count,omitempty"`
+	SchemaBytes          int      `json:"schema_bytes,omitempty"`
+	SchemaTokensEstimate int64    `json:"schema_tokens_estimate,omitempty"`
+	NewlyVisibleDeferred []string `json:"newly_visible_deferred,omitempty"`
+
+	ToolCallID           string   `json:"tool_call_id,omitempty"`
+	QueryMode            string   `json:"query_mode,omitempty"`
+	QueryBytes           int      `json:"query_bytes,omitempty"`
+	TermCount            int      `json:"term_count,omitempty"`
+	RequiredTermCount    int      `json:"required_term_count,omitempty"`
+	MaxResults           int      `json:"max_results,omitempty"`
+	ValidatedSelectNames []string `json:"validated_select_names,omitempty"`
+	UnknownSelectCount   int      `json:"unknown_select_count,omitempty"`
+	MatchNames           []string `json:"match_names,omitempty"`
+	NewMatchNames        []string `json:"new_match_names,omitempty"`
+	RepeatedQuery        bool     `json:"repeated_query,omitempty"`
+	Redundant            bool     `json:"redundant,omitempty"`
+	Success              bool     `json:"success,omitempty"`
+
+	ToolName string `json:"tool_name,omitempty"`
+	Reason   string `json:"reason,omitempty"`
+}
 
 // TodoSnapshotItem is a single todo entry stored in a todo_snapshot event.
 type TodoSnapshotItem struct {
@@ -114,6 +151,9 @@ type Entry struct {
 	GoalTokensUsed int64  `json:"goal_tokens_used,omitempty"`
 	GoalCreatedAt  int64  `json:"goal_created_at,omitempty"`
 	GoalUpdatedAt  int64  `json:"goal_updated_at,omitempty"`
+
+	// tool_observation fields
+	ToolObservation *ToolObservation `json:"tool_observation,omitempty"`
 }
 
 // SessionMeta is stored in the index for fast listing.
@@ -147,6 +187,27 @@ type SessionMeta struct {
 // sessionIndex is the on-disk structure of session.json.
 type sessionIndex struct {
 	Sessions map[string][]SessionMeta `json:"sessions"` // project path → metas
+}
+
+func ensurePrivateSessionDir(path string) error {
+	if err := os.MkdirAll(path, privateSessionDirMode); err != nil {
+		return err
+	}
+	return os.Chmod(path, privateSessionDirMode)
+}
+
+func writePrivateSessionFile(path string, data []byte) error {
+	if err := os.WriteFile(path, data, privateSessionFileMode); err != nil {
+		return err
+	}
+	return os.Chmod(path, privateSessionFileMode)
+}
+
+func openPrivateSessionAppend(path string) (*os.File, error) {
+	if err := os.Chmod(path, privateSessionFileMode); err != nil {
+		return nil, err
+	}
+	return os.OpenFile(path, os.O_APPEND|os.O_WRONLY, privateSessionFileMode)
 }
 
 // Recorder appends events to a JSONL session file synchronously.
@@ -373,6 +434,11 @@ func (r *Recorder) RecordToolResult(name, output, toolCallID string, err error, 
 	})
 }
 
+// RecordToolObservation appends metadata-only progressive-disclosure evidence.
+func (r *Recorder) RecordToolObservation(observation ToolObservation) {
+	_ = r.writeEntry(Entry{Type: EntryToolObservation, ToolObservation: &observation})
+}
+
 // RecordPlanUpdate appends a plan state change entry.
 func (r *Recorder) RecordPlanUpdate(status, title, content, feedback string) {
 	_ = r.writeEntry(Entry{
@@ -520,7 +586,7 @@ func (r *Recorder) TruncateAtUserMessage(beforeCount int) error {
 	if len(keep) > 0 {
 		content += "\n"
 	}
-	if err := os.WriteFile(tmpPath, []byte(content), 0644); err != nil {
+	if err := writePrivateSessionFile(tmpPath, []byte(content)); err != nil {
 		return fmt.Errorf("write truncated session: %w", err)
 	}
 	if err := os.Rename(tmpPath, filePath); err != nil {
@@ -528,7 +594,7 @@ func (r *Recorder) TruncateAtUserMessage(beforeCount int) error {
 	}
 
 	// Reopen for append so subsequent writes go to the correct file.
-	f, err := os.OpenFile(filePath, os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := openPrivateSessionAppend(filePath)
 	if err != nil {
 		return fmt.Errorf("reopen session for append: %w", err)
 	}
@@ -578,26 +644,30 @@ func (r *Recorder) ensureFile() error {
 	if err != nil {
 		return err
 	}
+	if err := ensurePrivateSessionDir(dir); err != nil {
+		return fmt.Errorf("secure sessions dir: %w", err)
+	}
 
 	var filePath string
 	if r.agentID != "" {
 		// Teammate recorder: ~/.jcode/sessions/{leaderUUID}/subagents/agent-{agentID}.jsonl
-		subDir := filepath.Join(dir, r.customDir, "subagents")
-		if err := os.MkdirAll(subDir, 0755); err != nil {
+		leaderDir := filepath.Join(dir, r.customDir)
+		if err := ensurePrivateSessionDir(leaderDir); err != nil {
+			return fmt.Errorf("create leader session dir: %w", err)
+		}
+		subDir := filepath.Join(leaderDir, "subagents")
+		if err := ensurePrivateSessionDir(subDir); err != nil {
 			return fmt.Errorf("create subagents dir: %w", err)
 		}
 		filePath = filepath.Join(subDir, "agent-"+r.agentID+".jsonl")
 	} else {
 		// Leader recorder: ~/.jcode/sessions/{uuid}.json
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("create sessions dir: %w", err)
-		}
 		filePath = filepath.Join(dir, r.uuid+".json")
 	}
 
 	// When resuming an existing session, open the file for append instead of creating new.
 	if r.resuming {
-		f, err := os.OpenFile(filePath, os.O_APPEND|os.O_WRONLY, 0644)
+		f, err := openPrivateSessionAppend(filePath)
 		if err != nil {
 			return fmt.Errorf("open session file for append: %w", err)
 		}
@@ -605,7 +675,7 @@ func (r *Recorder) ensureFile() error {
 		return nil
 	}
 
-	f, err := os.Create(filePath)
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, privateSessionFileMode)
 	if err != nil {
 		return fmt.Errorf("create session file: %w", err)
 	}
@@ -692,7 +762,7 @@ func addToIndex(project string, meta SessionMeta) error {
 		return err
 	}
 	// Ensure parent dir exists
-	if err := os.MkdirAll(filepath.Dir(indexPath), 0755); err != nil {
+	if err := ensurePrivateSessionDir(filepath.Dir(indexPath)); err != nil {
 		return err
 	}
 
@@ -712,7 +782,7 @@ func addToIndex(project string, meta SessionMeta) error {
 	// Atomic write: write to temp file then rename to prevent corruption
 	// from concurrent writes or interrupted I/O.
 	tmpPath := indexPath + ".tmp"
-	if err := os.WriteFile(tmpPath, newData, 0644); err != nil {
+	if err := writePrivateSessionFile(tmpPath, newData); err != nil {
 		return err
 	}
 	return os.Rename(tmpPath, indexPath)
@@ -767,7 +837,7 @@ func updateIndexTitle(project, uuid, title string) error {
 		return err
 	}
 	tmpPath := indexPath + ".tmp"
-	if err := os.WriteFile(tmpPath, newData, 0644); err != nil {
+	if err := writePrivateSessionFile(tmpPath, newData); err != nil {
 		return err
 	}
 	return os.Rename(tmpPath, indexPath)
@@ -817,7 +887,7 @@ func DeleteSessionByUUID(uuid string) (bool, error) {
 		return true, err
 	}
 	tmpPath := indexPath + ".tmp"
-	if err := os.WriteFile(tmpPath, newData, 0644); err != nil {
+	if err := writePrivateSessionFile(tmpPath, newData); err != nil {
 		return true, err
 	}
 	if err := os.Rename(tmpPath, indexPath); err != nil {
@@ -885,7 +955,7 @@ func UpdateSessionMeta(uuid string, mutate func(*SessionMeta)) (*SessionMeta, er
 					return nil, err
 				}
 				tmpPath := indexPath + ".tmp"
-				if err := os.WriteFile(tmpPath, newData, 0644); err != nil {
+				if err := writePrivateSessionFile(tmpPath, newData); err != nil {
 					return nil, err
 				}
 				if err := os.Rename(tmpPath, indexPath); err != nil {

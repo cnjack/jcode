@@ -16,6 +16,8 @@ import (
 	"github.com/cnjack/jcode/internal/hooks"
 	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/review"
+	"github.com/cnjack/jcode/internal/team"
+	internaltools "github.com/cnjack/jcode/internal/tools"
 )
 
 // ApprovalState manages whether tool calls require interactive user approval.
@@ -222,21 +224,22 @@ func (s *ApprovalState) SetSessionApproval(enabled bool) {
 
 // noApprovalNeeded lists tools that never require interactive approval in
 // MANUAL mode: read-only inspection, the user-facing question tool, and
-// teammate/subagent orchestration (whose own tool calls are gated separately).
+// teammate orchestration (whose own tool calls are gated separately).
 var noApprovalNeeded = map[string]bool{
-	"glob":              true,
-	"grep":              true,
-	"todowrite":         true,
-	"todoread":          true,
-	"ask_user":          true,
-	"webfetch":          true,
-	"subagent":          true,
-	"check_background":  true,
-	"team_create":       true,
-	"team_spawn":        true,
-	"team_send_message": true,
-	"team_list":         true,
-	"team_delete":       true,
+	agent.ToolSearchReservedName: true,
+	"glob":                       true,
+	"grep":                       true,
+	"load_skill":                 true,
+	"goal_get":                   true,
+	"todowrite":                  true,
+	"todoread":                   true,
+	"ask_user":                   true,
+	"webfetch":                   true,
+	"check_background":           true,
+	"team_create":                true,
+	"team_send_message":          true,
+	"team_list":                  true,
+	"team_delete":                true,
 	// Browser read-only tier: inspection never mutates external state.
 	"browser_snapshot":   true,
 	"browser_screenshot": true,
@@ -263,63 +266,17 @@ const (
 	decisionPromptExternal
 )
 
-// safeForegroundCommands are the bare command names that, run in the
-// foreground with no shell operators, only read state and never execute a
-// caller-supplied program. They are auto-approved in MANUAL mode.
-var safeForegroundCommands = map[string]bool{
-	"ls":    true,
-	"pwd":   true,
-	"cat":   true,
-	"echo":  true,
-	"which": true,
-}
-
-// safeGitSubcommands are read-only git subcommands that are auto-approved.
-var safeGitSubcommands = map[string]bool{
-	"status": true,
-	"log":    true,
-	"diff":   true,
-	"show":   true,
-}
-
-// isSafeCommand reports whether a foreground shell command is safe to run
-// without approval. It rejects anything containing shell operators that could
-// chain, redirect, or substitute additional commands (so a "safe" prefix can
-// no longer smuggle a destructive payload), then allows only an explicit set
-// of read-only programs matched on the whole command word (not a prefix, so
-// "lsof" no longer matches "ls").
-func isSafeCommand(cmd string) bool {
-	cmd = strings.TrimSpace(cmd)
-	if cmd == "" {
-		return false
-	}
-	// Reject command chaining / redirection / substitution. Any of these means
-	// the command can run something other than its leading program.
-	if strings.ContainsAny(cmd, ";&|<>`\n\r()") {
-		return false
-	}
-	if strings.Contains(cmd, "$(") || strings.Contains(cmd, "${") {
-		return false
-	}
-	fields := strings.Fields(cmd)
-	prog := fields[0]
-	switch {
-	case safeForegroundCommands[prog]:
-		return true
-	case prog == "env":
-		// Bare `env` prints the environment; `env CMD ...` executes CMD, so it
-		// is only safe with no arguments.
-		return len(fields) == 1
-	case prog == "git":
-		return len(fields) >= 2 && safeGitSubcommands[fields[1]]
-	}
-	return false
-}
-
 // decide evaluates a single tool call against the MANUAL-mode rules and returns
 // how it should be handled. It is the single source of truth shared by the
 // primary approval path and the teammate approval path so the two cannot drift.
 func (s *ApprovalState) decide(toolName, toolArgs string) approvalDecision {
+	// Provenance wins over a coincidentally safe-looking name. MCP tools are
+	// untrusted external endpoints, so they must never inherit an internal
+	// allowlist entry such as goal_get, load_skill, or tool_search.
+	if _, isMCP := internaltools.MCPServerForTool(toolName); isMCP {
+		return decisionPrompt
+	}
+
 	if noApprovalNeeded[toolName] {
 		return decisionAutoApprove
 	}
@@ -333,6 +290,61 @@ func (s *ApprovalState) decide(toolName, toolArgs string) approvalDecision {
 	}
 
 	switch toolName {
+	case "team_spawn":
+		var input struct {
+			AgentType json.RawMessage `json:"agent_type"`
+			Mode      json.RawMessage `json:"mode"`
+		}
+		if err := json.Unmarshal([]byte(toolArgs), &input); err != nil {
+			return decisionPrompt
+		}
+		agentTypeRaw, ok := optionalJSONString(input.AgentType)
+		if !ok {
+			return decisionPrompt
+		}
+		permissionRaw, ok := optionalJSONString(input.Mode)
+		if !ok {
+			return decisionPrompt
+		}
+		agentType, err := team.NormalizeAgentType(agentTypeRaw)
+		if err != nil {
+			return decisionPrompt
+		}
+		permission, err := team.NormalizePermission(permissionRaw)
+		if err != nil {
+			return decisionPrompt
+		}
+
+		// Explore and Plan are capability-bounded to read-only tools. Normal
+		// shares the leader's per-call approval gate. Only a write-capable Auto
+		// teammate bypasses per-call approval, so it needs a one-time grant here.
+		if agentType == team.AgentTypeExplore || permission == team.PermissionPlan ||
+			permission == team.PermissionNormal {
+			return decisionAutoApprove
+		}
+		return decisionPrompt
+	case "subagent":
+		var input struct {
+			AgentType json.RawMessage `json:"agent_type"`
+		}
+		if err := json.Unmarshal([]byte(toolArgs), &input); err != nil {
+			return decisionPrompt
+		}
+		if len(input.AgentType) == 0 {
+			return decisionAutoApprove
+		}
+		var agentType string
+		if strings.TrimSpace(string(input.AgentType)) == "null" || json.Unmarshal(input.AgentType, &agentType) != nil {
+			return decisionPrompt
+		}
+		switch agentType {
+		case "", internaltools.AgentTypeExplore:
+			return decisionAutoApprove
+		case internaltools.AgentTypeGeneral, internaltools.AgentTypeCoordinator:
+			return decisionPrompt
+		default:
+			return decisionPrompt
+		}
 	case "read":
 		var input struct {
 			FilePath string `json:"file_path"`
@@ -361,7 +373,7 @@ func (s *ApprovalState) decide(toolName, toolArgs string) approvalDecision {
 			if input.Background {
 				return decisionPrompt
 			}
-			if isSafeCommand(input.Command) {
+			if internaltools.IsReadOnlyShellCommand(input.Command) {
 				return decisionAutoApprove
 			}
 		}
@@ -369,6 +381,20 @@ func (s *ApprovalState) decide(toolName, toolArgs string) approvalDecision {
 	}
 
 	return decisionPrompt
+}
+
+func optionalJSONString(raw json.RawMessage) (string, bool) {
+	if len(raw) == 0 {
+		return "", true
+	}
+	if strings.TrimSpace(string(raw)) == "null" {
+		return "", false
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", false
+	}
+	return value, true
 }
 
 // decideBrowser applies the browser-use approval tiers (see design §3.4). It

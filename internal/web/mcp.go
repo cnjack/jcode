@@ -116,13 +116,27 @@ func cloneMCPServers(in map[string]*config.MCPServer) map[string]*config.MCPServ
 			}
 		}
 		if srv.OAuth != nil {
-			oa := *srv.OAuth
-			oa.Scopes = append([]string(nil), srv.OAuth.Scopes...)
-			cp.OAuth = &oa
+			cp.OAuth = cloneMCPOAuth(srv.OAuth)
 		}
 		out[name] = &cp
 	}
 	return out
+}
+
+func cloneMCPOAuth(in *config.MCPOAuthConfig) *config.MCPOAuthConfig {
+	if in == nil {
+		return nil
+	}
+	cp := *in
+	cp.Scopes = append([]string(nil), in.Scopes...)
+	return &cp
+}
+
+func cloneMCPServer(srv *config.MCPServer) *config.MCPServer {
+	if srv == nil {
+		return nil
+	}
+	return cloneMCPServers(map[string]*config.MCPServer{"server": srv})["server"]
 }
 
 // ReloadMCPInBackground connects configured MCP servers without blocking web
@@ -144,12 +158,24 @@ func (s *Server) ReloadMCPInBackground() {
 }
 
 // reloadMCPAndRebuild reconnects MCP servers from the current config and
-// rebuilds the live agent so new tools take effect without a restart.
+// rebuilds every live task agent so additions and revocations take effect
+// without a restart. Rebuilding only the foreground task would leave a
+// background task holding executable endpoints from the previous MCP catalog.
 func (s *Server) reloadMCPAndRebuild() error {
+	// Reload publishes process-wide MCP tools before rebuilding live agents. Keep
+	// the entire snapshot -> catalog -> status -> agent sequence ordered so a
+	// slow startup reload cannot finish after a newer Settings reload and restore
+	// tools that the user has already revoked.
+	s.mcpReloadMu.Lock()
+	defer s.mcpReloadMu.Unlock()
+
 	if s.reloadMCP != nil {
-		s.mu.RLock()
-		servers := cloneMCPServers(s.cfg.MCPServers)
-		s.mu.RUnlock()
+		s.cfgMu.Lock()
+		var servers map[string]*config.MCPServer
+		if s.cfg != nil {
+			servers = cloneMCPServers(s.cfg.MCPServers)
+		}
+		s.cfgMu.Unlock()
 		statuses, err := s.reloadMCP(servers)
 		if err != nil {
 			return err
@@ -161,16 +187,11 @@ func (s *Server) reloadMCPAndRebuild() error {
 		}
 		s.mu.Unlock()
 	}
-	if !s.needsSetup {
-		// Rebuild the foreground task's agent so the new MCP tools take effect.
-		if eng := s.activeEngine(); eng != nil && eng.createAgent != nil {
-			prov, mod, _ := eng.modelSnapshot()
-			ag, err := eng.createAgent(prov, mod)
-			if err != nil {
-				return err
-			}
-			eng.setAgent(ag)
-		}
+	s.mu.RLock()
+	needsSetup := s.needsSetup
+	s.mu.RUnlock()
+	if !needsSetup {
+		return s.rebuildToolAgents()
 	}
 	return nil
 }
@@ -197,27 +218,35 @@ func (s *Server) mcpServerStatus(name string, srv *config.MCPServer) (status, er
 }
 
 func (s *Server) handleListMCP(w http.ResponseWriter, r *http.Request) {
+	s.cfgMu.Lock()
+	var configured map[string]*config.MCPServer
+	if s.cfg != nil {
+		configured = cloneMCPServers(s.cfg.MCPServers)
+	}
+	s.cfgMu.Unlock()
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	servers := make(map[string]mcpServerView)
-	if s.cfg != nil {
-		for name, srv := range s.cfg.MCPServers {
-			status, errMsg := s.mcpServerStatus(name, srv)
-			servers[name] = mcpServerView{
-				Name:    name,
-				Type:    srv.Type,
-				URL:     srv.URL,
-				Command: srv.Command,
-				Args:    srv.Args,
-				Env:     srv.Env,
-				Headers: srv.Headers,
-				Timeout: srv.TimeoutSeconds,
-				Enabled: !srv.Disabled,
-				OAuth:   srv.OAuth != nil && srv.OAuth.Enabled,
-				HasAuth: tools.HasMCPOAuthToken(name),
-				Status:  status,
-				Error:   errMsg,
-			}
+	for name, srv := range configured {
+		if srv == nil {
+			continue
+		}
+		status, errMsg := s.mcpServerStatus(name, srv)
+		servers[name] = mcpServerView{
+			Name:    name,
+			Type:    srv.Type,
+			URL:     srv.URL,
+			Command: srv.Command,
+			Args:    srv.Args,
+			Env:     srv.Env,
+			Headers: srv.Headers,
+			Timeout: srv.TimeoutSeconds,
+			Enabled: !srv.Disabled,
+			OAuth:   srv.OAuth != nil && srv.OAuth.Enabled,
+			HasAuth: tools.HasMCPOAuthToken(name),
+			Status:  status,
+			Error:   errMsg,
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"servers": servers})
@@ -238,22 +267,29 @@ func (s *Server) handleCreateMCP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	s.mu.Lock()
+	s.cfgMu.Lock()
+	if s.cfg == nil {
+		s.cfgMu.Unlock()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config unavailable"})
+		return
+	}
+	previous := cloneMCPServers(s.cfg.MCPServers)
 	if s.cfg.MCPServers == nil {
 		s.cfg.MCPServers = make(map[string]*config.MCPServer)
 	}
 	if _, exists := s.cfg.MCPServers[req.Name]; exists {
-		s.mu.Unlock()
+		s.cfgMu.Unlock()
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "a server with that name already exists"})
 		return
 	}
 	s.cfg.MCPServers[req.Name] = srv
 	if err := config.SaveConfig(s.cfg); err != nil {
-		s.mu.Unlock()
+		s.cfg.MCPServers = previous
+		s.cfgMu.Unlock()
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	s.mu.Unlock()
+	s.cfgMu.Unlock()
 
 	if err := s.reloadMCPAndRebuild(); err != nil {
 		config.Logger().Printf("[web] mcp create reload failed: %v", err)
@@ -274,13 +310,19 @@ func (s *Server) handleUpdateMCP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	s.mu.Lock()
+	s.cfgMu.Lock()
+	if s.cfg == nil {
+		s.cfgMu.Unlock()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config unavailable"})
+		return
+	}
 	existing, ok := s.cfg.MCPServers[name]
 	if !ok {
-		s.mu.Unlock()
+		s.cfgMu.Unlock()
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "server not found"})
 		return
 	}
+	previous := cloneMCPServers(s.cfg.MCPServers)
 	// Preserve disabled flag and any already-obtained OAuth client id/secret so
 	// editing other fields doesn't drop a working registration.
 	srv.Disabled = existing.Disabled
@@ -294,11 +336,12 @@ func (s *Server) handleUpdateMCP(w http.ResponseWriter, r *http.Request) {
 	}
 	s.cfg.MCPServers[name] = srv
 	if err := config.SaveConfig(s.cfg); err != nil {
-		s.mu.Unlock()
+		s.cfg.MCPServers = previous
+		s.cfgMu.Unlock()
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	s.mu.Unlock()
+	s.cfgMu.Unlock()
 
 	if err := s.reloadMCPAndRebuild(); err != nil {
 		config.Logger().Printf("[web] mcp update reload failed: %v", err)
@@ -309,20 +352,30 @@ func (s *Server) handleUpdateMCP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteMCP(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	s.mu.Lock()
+	s.cfgMu.Lock()
+	if s.cfg == nil {
+		s.cfgMu.Unlock()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config unavailable"})
+		return
+	}
 	if _, ok := s.cfg.MCPServers[name]; !ok {
-		s.mu.Unlock()
+		s.cfgMu.Unlock()
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "server not found"})
 		return
 	}
+	previous := cloneMCPServers(s.cfg.MCPServers)
 	delete(s.cfg.MCPServers, name)
-	delete(s.mcpStatuses, name)
-	delete(s.mcpLogins, name)
 	if err := config.SaveConfig(s.cfg); err != nil {
-		s.mu.Unlock()
+		s.cfg.MCPServers = previous
+		s.cfgMu.Unlock()
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	s.cfgMu.Unlock()
+
+	s.mu.Lock()
+	delete(s.mcpStatuses, name)
+	delete(s.mcpLogins, name)
 	s.mu.Unlock()
 
 	_ = tools.DeleteMCPOAuthToken(name)
@@ -346,20 +399,29 @@ func (s *Server) handleToggleMCP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	s.mu.Lock()
+	s.cfgMu.Lock()
+	if s.cfg == nil {
+		s.cfgMu.Unlock()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config unavailable"})
+		return
+	}
 	srv, ok := s.cfg.MCPServers[name]
 	if !ok {
-		s.mu.Unlock()
+		s.cfgMu.Unlock()
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "server not found"})
 		return
 	}
-	srv.Disabled = !req.Enabled
+	previous := cloneMCPServers(s.cfg.MCPServers)
+	updated := cloneMCPServer(srv)
+	updated.Disabled = !req.Enabled
+	s.cfg.MCPServers[name] = updated
 	if err := config.SaveConfig(s.cfg); err != nil {
-		s.mu.Unlock()
+		s.cfg.MCPServers = previous
+		s.cfgMu.Unlock()
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	s.mu.Unlock()
+	s.cfgMu.Unlock()
 
 	if err := s.reloadMCPAndRebuild(); err != nil {
 		config.Logger().Printf("[web] mcp toggle reload failed: %v", err)
@@ -372,25 +434,26 @@ func (s *Server) handleToggleMCP(w http.ResponseWriter, r *http.Request) {
 // handleMCPLoginStatus.
 func (s *Server) handleMCPLogin(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	s.mu.Lock()
-	srv, ok := s.cfg.MCPServers[name]
-	if !ok {
-		s.mu.Unlock()
+	s.cfgMu.Lock()
+	var srv *config.MCPServer
+	if s.cfg != nil {
+		srv = cloneMCPServer(s.cfg.MCPServers[name])
+	}
+	s.cfgMu.Unlock()
+	if srv == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "server not found"})
 		return
 	}
 	if srv.URL == "" || (srv.Type != "http" && srv.Type != "sse") {
-		s.mu.Unlock()
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "OAuth login only applies to http/sse servers"})
 		return
 	}
+
+	s.mu.Lock()
 	if existing := s.mcpLogins[name]; existing != nil && existing.Status == "pending" {
 		s.mu.Unlock()
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "a login is already in progress"})
 		return
-	}
-	if srv.OAuth == nil {
-		srv.OAuth = &config.MCPOAuthConfig{Enabled: true}
 	}
 	s.mcpLogins[name] = &mcpLoginState{Status: "pending"}
 	s.mu.Unlock()
@@ -412,15 +475,26 @@ func (s *Server) setMCPLogin(name, status, msg string) {
 }
 
 func (s *Server) runMCPLogin(name string) {
-	ctx, cancel := context.WithTimeout(s.rootCtx(), 5*time.Minute)
+	root := s.rootCtx()
+	if root == nil {
+		root = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(root, 5*time.Minute)
 	defer cancel()
 
-	s.mu.RLock()
-	srv := s.cfg.MCPServers[name]
-	s.mu.RUnlock()
+	s.cfgMu.Lock()
+	var srv *config.MCPServer
+	if s.cfg != nil {
+		srv = cloneMCPServer(s.cfg.MCPServers[name])
+	}
+	s.cfgMu.Unlock()
 	if srv == nil {
 		s.setMCPLogin(name, "error", "server not found")
 		return
+	}
+	startedOAuth := cloneMCPOAuth(srv.OAuth)
+	if startedOAuth == nil {
+		startedOAuth = &config.MCPOAuthConfig{}
 	}
 
 	err := tools.PerformMCPOAuthLogin(ctx, name, srv, func(authURL string) {
@@ -442,12 +516,47 @@ func (s *Server) runMCPLogin(name string) {
 		return
 	}
 
-	// Persist the (possibly dynamically registered) client id and enabled flag.
-	s.mu.Lock()
-	if saveErr := config.SaveConfig(s.cfg); saveErr != nil {
-		config.Logger().Printf("[web] mcp login %q: save config failed: %v", name, saveErr)
+	// Merge only values learned by the OAuth exchange into the latest live
+	// server. The user may have edited transport/scopes while the browser flow was
+	// open; those newer fields must not be replaced by the login's old snapshot.
+	s.cfgMu.Lock()
+	var saveErr error
+	var live *config.MCPServer
+	if s.cfg != nil {
+		live = s.cfg.MCPServers[name]
 	}
-	s.mu.Unlock()
+	if live == nil {
+		s.cfgMu.Unlock()
+		_ = tools.DeleteMCPOAuthToken(name)
+		s.setMCPLogin(name, "error", "server was removed during OAuth login")
+		return
+	}
+	previousOAuth := cloneMCPOAuth(live.OAuth)
+	if live.OAuth == nil {
+		live.OAuth = &config.MCPOAuthConfig{}
+	}
+	if srv.OAuth != nil {
+		live.OAuth.Enabled = srv.OAuth.Enabled
+		// Dynamic registration may learn credentials while the browser is open.
+		// Publish them only if the corresponding live value is still empty and
+		// therefore was not edited by the user after this flow started.
+		if startedOAuth.ClientID == "" && live.OAuth.ClientID == "" && srv.OAuth.ClientID != "" {
+			live.OAuth.ClientID = srv.OAuth.ClientID
+		}
+		if startedOAuth.ClientSecret == "" && live.OAuth.ClientSecret == "" && srv.OAuth.ClientSecret != "" {
+			live.OAuth.ClientSecret = srv.OAuth.ClientSecret
+		}
+	}
+	if saveErr = config.SaveConfig(s.cfg); saveErr != nil {
+		live.OAuth = previousOAuth
+	}
+	s.cfgMu.Unlock()
+	if saveErr != nil {
+		_ = tools.DeleteMCPOAuthToken(name)
+		s.setMCPLogin(name, "error", "failed to save OAuth configuration")
+		config.Logger().Printf("[web] mcp login %q: save config failed: %v", name, saveErr)
+		return
+	}
 
 	if reErr := s.reloadMCPAndRebuild(); reErr != nil {
 		config.Logger().Printf("[web] mcp login %q: reload failed: %v", name, reErr)
@@ -460,10 +569,14 @@ func (s *Server) handleMCPLoginStatus(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	s.mu.RLock()
 	st := s.mcpLogins[name]
+	var snapshot mcpLoginState
+	if st != nil {
+		snapshot = *st
+	}
 	s.mu.RUnlock()
 	if st == nil {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "idle"})
 		return
 	}
-	writeJSON(w, http.StatusOK, st)
+	writeJSON(w, http.StatusOK, snapshot)
 }

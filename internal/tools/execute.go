@@ -81,10 +81,41 @@ func (e *Env) NewExecuteTool(bm *BackgroundManager) tool.InvokableTool {
 	return &executeTool{env: e, bm: bm, info: info}
 }
 
+// NewPlanExecuteTool returns the Plan-mode execute endpoint. Its schema omits
+// background execution and the endpoint itself enforces the shared strict
+// read-only shell policy, so hand-written or stale-schema calls cannot bypass
+// the mode boundary.
+func (e *Env) NewPlanExecuteTool() tool.InvokableTool {
+	info := &schema.ToolInfo{
+		Name: "execute",
+		Desc: "Runs a strictly read-only foreground shell command for repository inspection. " +
+			"Only the small documented allowlist is accepted; shell syntax, background execution, writes, and helper execution are rejected.",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"command": {
+				Type:     schema.String,
+				Desc:     "A strictly read-only foreground command (for example: ls, cat, git status, git log, git diff, or git show).",
+				Required: true,
+			},
+			"timeout": {
+				Type:     schema.Integer,
+				Desc:     "Optional timeout in milliseconds (max 600000ms / 10 minutes). Default is 120000ms (2 minutes).",
+				Required: false,
+			},
+			"description": {
+				Type:     schema.String,
+				Desc:     "Short description of the read-only inspection.",
+				Required: false,
+			},
+		}),
+	}
+	return &executeTool{env: e, info: info, planOnly: true}
+}
+
 type executeTool struct {
-	env  *Env
-	bm   *BackgroundManager
-	info *schema.ToolInfo
+	env      *Env
+	bm       *BackgroundManager
+	info     *schema.ToolInfo
+	planOnly bool
 }
 
 func (et *executeTool) Info(_ context.Context) (*schema.ToolInfo, error) {
@@ -99,6 +130,22 @@ func (et *executeTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 
 	if input.Command == "" {
 		return "", toolErrf("missing_param", missingParamHint("command"), "command is required")
+	}
+	if et.planOnly {
+		if input.Background {
+			return "", toolErrf(
+				"plan_read_only",
+				"Run the command in the foreground or leave Plan mode before starting background work.",
+				"background execution is not allowed in Plan mode",
+			)
+		}
+		if !IsReadOnlyShellCommand(input.Command) {
+			return "", toolErrf(
+				"plan_read_only",
+				"Use read/grep or a simple allowlisted inspection command; leave Plan mode for mutations or arbitrary shell execution.",
+				"command is not allowed by the Plan read-only shell policy",
+			)
+		}
 	}
 
 	// Sleep detection: block dangerous sleep commands.

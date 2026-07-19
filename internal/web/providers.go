@@ -684,8 +684,10 @@ func (s *Server) rebuildEnginesForProvider(providerID string) {
 		if prov != providerID {
 			continue
 		}
+		eng.rebuildMu.Lock()
 		ag, err := eng.createAgent(prov, mdl)
 		if err != nil {
+			eng.rebuildMu.Unlock()
 			config.Logger().Printf("[web] provider %s update: agent rebuild failed for task %s: %v", providerID, eng.taskID, err)
 			continue
 		}
@@ -695,6 +697,7 @@ func (s *Server) rebuildEnginesForProvider(providerID string) {
 		if !eng.setAgentIfModel(ag, prov, mdl) {
 			config.Logger().Printf("[web] provider %s update: task %s switched models mid-rebuild; skipping stale agent", providerID, eng.taskID)
 		}
+		eng.rebuildMu.Unlock()
 	}
 }
 

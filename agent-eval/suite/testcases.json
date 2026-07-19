@@ -1183,6 +1183,16 @@
           "type": "home_file_contains",
           "glob": ".jcode/computer/actions.jsonl",
           "value": "com.apple.Notes"
+        },
+        {
+          "type": "home_file_contains",
+          "glob": ".jcode/computer/actions.jsonl",
+          "value": "\"action\":\"click\",\"bundle_id\":\"com.apple.Notes\",\"uid\":\"e1\""
+        },
+        {
+          "type": "home_grep_absent",
+          "root_glob": ".jcode/computer/actions.jsonl",
+          "pattern": "\\n\\s*\\{"
         }
       ]
     },

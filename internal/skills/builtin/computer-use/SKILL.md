@@ -1,6 +1,6 @@
 ---
 name: computer-use
-description: Discipline for driving native desktop apps well with the computer_* tools (snapshot-first, tiers, batching, approvals). Load before any computer-use work.
+description: Discipline for driving native desktop apps with computer_* tools, including deferred ToolSearch discovery. Load before any computer-use work.
 ---
 
 # Computer Use
@@ -9,6 +9,20 @@ You can see and operate native macOS applications through the `computer_*` tools
 things a browser cannot reach: Finder, Notes, Xcode, Photoshop, System Settings. Read
 this before computer work; it is how you avoid wasting turns and how you stay safe.
 
+## Tool availability and deferred discovery
+
+The function schemas attached to the current request are the source of truth. If a
+native-UI task needs `computer_*` but those schemas are absent while `tool_search` is
+attached, search once in a separate tool-call batch and wait for its result. This skill
+provides exact names, so for the common open → inspect → act workflow prefer
+`select:computer_open,computer_snapshot,computer_act`. If `tool_search` is absent or the
+search returns no match, report that computer control is unavailable.
+
+Do **not** use `execute`, `osascript`, AppleScript, Shortcuts, `cliclick`, or another
+shell/CLI UI-automation route as a substitute for `computer_*`. `execute` remains the
+right choice for genuine file, build, and process work; it is not a native-UI control
+fallback.
+
 ## Reach for the right tool first
 
 Computer use is the **last** resort, not the first. In order:
@@ -16,8 +30,9 @@ Computer use is the **last** resort, not the first. In order:
 1. **A dedicated tool or MCP server** for the app — API-backed, fast, precise.
 2. **`browser_*`** if the target is a web page. Always. Even if the browser is right
    there on screen.
-3. **`execute`** for anything a shell command can do. Reading a file, running a build,
-   moving something on disk — all of these are `execute`, not clicking through Finder.
+3. **`execute`** for genuine file, build, and process work. Reading a file, running a
+   build, moving something on disk — all of these are `execute`, not clicking through
+   Finder. Never use shell UI automation to control a native app.
 4. **`computer_*`** only for native app UI with no better interface.
 
 This is not bureaucracy. Each tier up is faster, more reliable, and more legible to the

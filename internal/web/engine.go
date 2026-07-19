@@ -41,6 +41,11 @@ type Engine struct {
 	// sessionSnapshot). Named emu — not mu — so it does not collide with the
 	// promoted Server.mu when Engine is embedded in Server.
 	emu sync.Mutex
+	// rebuildMu serializes schema/prompt rebuilds for this engine. Revision checks
+	// protect model/mode switches, while this lock ensures two process-wide
+	// settings refreshes cannot both build from one revision and discard whichever
+	// configuration happened to finish second.
+	rebuildMu sync.Mutex
 
 	// taskID is the task identity (== the recorder's session UUID once a message
 	// has been recorded). Empty for a freshly created, not-yet-messaged engine.
@@ -83,6 +88,7 @@ type Engine struct {
 	handler         *handler.WebHandler
 	eventHandler    handler.AgentEventHandler // runner handler (may wrap handler in a NotifyingHandler)
 	breakdownFn     func() usage.ContextBreakdown
+	toolSearchStats func() ToolSearchCounts
 
 	// per-task agent rebuild closures (bound to THIS task's env/model/prompt), so
 	// a model or mode switch rebuilds only this task's agent.
@@ -104,23 +110,24 @@ type Engine struct {
 // command package hands them over through this exported struct and the server
 // assembles the Engine via newEngine.
 type EngineConfig struct {
-	TaskID         string
-	Pwd            string
-	Mode           string
-	ProviderName   string
-	ModelName      string
-	Agent          *adk.ChatModelAgent
-	Env            *tools.Env
-	TodoStore      *tools.TodoStore
-	Recorder       *session.Recorder
-	TokenUsage     *model.TokenUsage
-	ApprovalState  *runner.ApprovalState
-	Handler        *handler.WebHandler
-	EventHandler   handler.AgentEventHandler
-	BreakdownFn    func() usage.ContextBreakdown
-	CreateAgent    func(providerName, modelName string) (*adk.ChatModelAgent, error)
-	RebuildForMode func(planMode bool) (*adk.ChatModelAgent, error)
-	FlowLoader     *flow.Loader
+	TaskID          string
+	Pwd             string
+	Mode            string
+	ProviderName    string
+	ModelName       string
+	Agent           *adk.ChatModelAgent
+	Env             *tools.Env
+	TodoStore       *tools.TodoStore
+	Recorder        *session.Recorder
+	TokenUsage      *model.TokenUsage
+	ApprovalState   *runner.ApprovalState
+	Handler         *handler.WebHandler
+	EventHandler    handler.AgentEventHandler
+	BreakdownFn     func() usage.ContextBreakdown
+	ToolSearchStats func() ToolSearchCounts
+	CreateAgent     func(providerName, modelName string) (*adk.ChatModelAgent, error)
+	RebuildForMode  func(planMode bool) (*adk.ChatModelAgent, error)
+	FlowLoader      *flow.Loader
 	// RecorderInit decorates recorders this engine creates AFTER build (lazy
 	// creation / session switch in chat.go) so they get the same hooks (e.g.
 	// the LLM title refiner) as the recorder built with the task.
@@ -140,24 +147,25 @@ func newEngine(c *EngineConfig) *Engine {
 		taskID = c.Recorder.UUID()
 	}
 	e := &Engine{
-		taskID:         taskID,
-		pwd:            c.Pwd,
-		mode:           c.Mode,
-		providerName:   c.ProviderName,
-		modelName:      c.ModelName,
-		agent:          c.Agent,
-		env:            c.Env,
-		todoStore:      c.TodoStore,
-		recorder:       c.Recorder,
-		tokenUsage:     tu,
-		approvalState:  c.ApprovalState,
-		handler:        c.Handler,
-		eventHandler:   c.EventHandler,
-		breakdownFn:    c.BreakdownFn,
-		createAgent:    c.CreateAgent,
-		rebuildForMode: c.RebuildForMode,
-		flowLoader:     c.FlowLoader,
-		recorderInit:   c.RecorderInit,
+		taskID:          taskID,
+		pwd:             c.Pwd,
+		mode:            c.Mode,
+		providerName:    c.ProviderName,
+		modelName:       c.ModelName,
+		agent:           c.Agent,
+		env:             c.Env,
+		todoStore:       c.TodoStore,
+		recorder:        c.Recorder,
+		tokenUsage:      tu,
+		approvalState:   c.ApprovalState,
+		handler:         c.Handler,
+		eventHandler:    c.EventHandler,
+		breakdownFn:     c.BreakdownFn,
+		toolSearchStats: c.ToolSearchStats,
+		createAgent:     c.CreateAgent,
+		rebuildForMode:  c.RebuildForMode,
+		flowLoader:      c.FlowLoader,
+		recorderInit:    c.RecorderInit,
 	}
 	// Give the approval reviewer (when one is installed on this ApprovalState)
 	// recent conversation context. Harmless when no reviewer is set.

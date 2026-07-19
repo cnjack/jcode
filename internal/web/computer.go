@@ -84,13 +84,13 @@ func (p computerConfigPayload) storedConfig() *config.ComputerConfig {
 
 func (s *Server) handleComputerStatus(w http.ResponseWriter, r *http.Request) {
 	supported := computer.Supported()
-	s.mu.RLock()
+	s.cfgMu.Lock()
 	var stored *config.ComputerConfig
 	if s.cfg != nil {
 		stored = s.cfg.Computer
 	}
 	apiConfig := computerConfigForAPI(stored)
-	s.mu.RUnlock()
+	s.cfgMu.Unlock()
 
 	response := map[string]any{
 		"supported": supported,
@@ -288,7 +288,10 @@ func validateComputerPermissions(perms []config.ComputerAppPermission) error {
 // this keeps the model-visible tool surface in sync without an app restart or
 // foreground-task switch.
 func (s *Server) rebuildToolAgents() error {
-	if s.needsSetup {
+	s.mu.RLock()
+	needsSetup := s.needsSetup
+	s.mu.RUnlock()
+	if needsSetup {
 		return nil
 	}
 	seen := map[*Engine]struct{}{}
@@ -315,16 +318,19 @@ func (s *Server) rebuildToolAgents() error {
 		if eng.createAgent == nil {
 			continue
 		}
+		eng.rebuildMu.Lock()
 		provider, modelName, _, revision := eng.agentBuildSnapshot()
 		ag, err := eng.createAgent(provider, modelName)
 		if err != nil {
 			rebuildErrors = append(rebuildErrors, fmt.Errorf("task %s: %w", eng.taskID, err))
+			eng.rebuildMu.Unlock()
 			continue
 		}
 		// A concurrent model/mode/skill switch already installed an agent built
 		// from newer inputs. Discard this stale result instead of rolling that
 		// task back to the old tool schema.
 		eng.installAgentIfRevision(ag, revision)
+		eng.rebuildMu.Unlock()
 	}
 	return errors.Join(rebuildErrors...)
 }

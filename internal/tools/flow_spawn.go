@@ -82,6 +82,7 @@ func NewFlowSpawn(deps FlowSpawnDeps) flow.SpawnFunc {
 				Model:         cm,
 				ToolsConfig:   adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: agentTools}},
 				MaxIterations: flowAgentMaxIter,
+				Handlers:      flowAgentHandlers(),
 				ModelRetryConfig: &adk.ModelRetryConfig{
 					MaxRetries:  3,
 					IsRetryAble: internalmodel.IsRetryable,
@@ -124,18 +125,27 @@ func flowTools(env *Env, agentType string) []tool.BaseTool {
 	ts := []tool.BaseTool{
 		env.NewReadTool(),
 		env.NewGrepTool(),
-		env.NewExecuteTool(nil),
 	}
 	switch agentType {
 	case "general", "coordinator":
 		ts = append(ts,
+			env.NewExecuteTool(nil),
 			env.NewEditTool(),
 			env.NewWriteTool(),
 			env.NewTodoWriteTool(),
 			env.NewTodoReadTool(),
 		)
+	default:
+		ts = append(ts, env.NewPlanExecuteTool())
 	}
 	return ts
+}
+
+func flowAgentHandlers() []adk.ChatModelAgentMiddleware {
+	// Flow agents have no approval middleware of their own: the workflow_run
+	// parent call is the one-time grant. They still need the same innermost
+	// panic/non-fatal error folding as direct subagents.
+	return []adk.ChatModelAgentMiddleware{newSafeToolMiddleware()}
 }
 
 // runFlowAgent runs one agent turn to completion, returning accumulated assistant

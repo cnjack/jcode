@@ -433,8 +433,8 @@ func shortUUID(u string) string {
 // so extraction quality outweighs the token savings. Users who accept the
 // trade-off can still point memory.model at a cheap model explicitly.
 func pipelineModel(cfg *config.Config) string {
-	if cfg != nil && cfg.Memory != nil && cfg.Memory.Model != "" {
-		return cfg.Memory.Model
+	if memoryModel := cfg.MemorySettings().Model; memoryModel != "" {
+		return memoryModel
 	}
 	if cfg != nil {
 		return cfg.Model

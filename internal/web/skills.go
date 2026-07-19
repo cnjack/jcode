@@ -96,10 +96,12 @@ func (s *Server) handleToggleSkill(w http.ResponseWriter, r *http.Request) {
 	// and load_skill tool reflect the change on the next run.
 	if !s.needsSetup {
 		if eng := s.activeEngine(); eng != nil && eng.createAgent != nil {
+			eng.rebuildMu.Lock()
 			prov, mod, _ := eng.modelSnapshot()
 			if ag, err := eng.createAgent(prov, mod); err == nil {
 				eng.setAgent(ag)
 			}
+			eng.rebuildMu.Unlock()
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "name": name, "enabled": req.Enabled})

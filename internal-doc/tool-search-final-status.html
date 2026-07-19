@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JCode ToolSearch 最终验收状态</title>
+  <style>
+    :root { color-scheme: light; --ink:#172033; --muted:#617087; --line:#dbe2ea; --bg:#f4f7fb; --card:#fff; --bad:#b42318; --bad-bg:#fef3f2; --good:#067647; --good-bg:#ecfdf3; --warn:#b54708; --warn-bg:#fffaeb; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { width:min(1080px,calc(100% - 32px)); margin:32px auto 64px; }
+    h1 { margin:0 0 8px; font-size:30px; letter-spacing:-.02em; }
+    h2 { margin:30px 0 12px; font-size:19px; }
+    p { margin:8px 0; }
+    code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.92em; }
+    .muted { color:var(--muted); }
+    .banner { margin:22px 0; padding:18px 20px; border:1px solid #fecdca; border-radius:12px; background:var(--bad-bg); }
+    .banner strong { color:var(--bad); font-size:18px; }
+    .grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+    .card { padding:16px; border:1px solid var(--line); border-radius:12px; background:var(--card); box-shadow:0 1px 2px rgb(16 24 40 / 4%); }
+    .metric { font-size:25px; font-weight:700; }
+    .label { color:var(--muted); font-size:13px; }
+    table { width:100%; border-collapse:collapse; overflow:hidden; border:1px solid var(--line); border-radius:12px; background:var(--card); }
+    th,td { padding:11px 12px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { background:#f8fafc; color:#475467; font-size:13px; }
+    tr:last-child td { border-bottom:0; }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-weight:650; font-size:12px; }
+    .pass { color:var(--good); background:var(--good-bg); }
+    .fail { color:var(--bad); background:var(--bad-bg); }
+    .partial { color:var(--warn); background:var(--warn-bg); }
+    .note { padding:14px 16px; border-left:4px solid #f79009; background:var(--warn-bg); }
+    ul { margin:8px 0; padding-left:20px; }
+    footer { margin-top:32px; color:var(--muted); font-size:13px; }
+    @media (max-width:760px) { .grid { grid-template-columns:repeat(2,minmax(0,1fr)); } th:nth-child(3),td:nth-child(3) { display:none; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>ToolSearch 渐进式披露：最终验收状态</h1>
+    <p class="muted">JCode · exact Kimi formal campaign · 2026-07-19</p>
+  </header>
+
+  <section class="banner">
+    <strong>未通过正式验收</strong>
+    <p>本次正式 campaign 在关键格已不可恢复后主动 fail-closed。它只完成 204/320 个矩阵任务、持续 1588.014 秒，因此不得作为 30 分钟完整验收或发布依据。</p>
+  </section>
+
+  <section class="grid" aria-label="核心指标">
+    <div class="card"><div class="metric">202/204</div><div class="label">任务通过 · 99.02%</div></div>
+    <div class="card"><div class="metric">119/119</div><div class="label">Deferred 调用成功 · 100%</div></div>
+    <div class="card"><div class="metric">0 / 0</div><div class="label">bypass / same-batch</div></div>
+    <div class="card"><div class="metric">208/208</div><div class="label">脱敏报告安全</div></div>
+  </section>
+
+  <h2>执行身份与完整性</h2>
+  <table>
+    <tbody>
+      <tr><th>模型</th><td><code>kimi-for-coding/kimi-for-coding</code></td></tr>
+      <tr><th>请求参数</th><td><code>temperature=omitted</code>，<code>workers=1</code>，<code>jcode_eval</code></td></tr>
+      <tr><th>被测提交</th><td><code>39fd738be42c72e2606d9918c039be4ae8aae097</code>，启动时 clean</td></tr>
+      <tr><th>时间</th><td>2026-07-19 05:35:40Z ～ 06:02:08Z；monotonic 1588.014s</td></tr>
+      <tr><th>有效区间</th><td>204 个成功真实区间，共 1505.794s；另有 1 个中止区间</td></tr>
+      <tr><th>覆盖</th><td>矩阵 204/320；supplementary 7/7 PASS</td></tr>
+      <tr><th>状态</th><td><code>failed / interrupted</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2>设计、矩阵与调用轨迹</h2>
+  <div class="grid">
+    <div class="card"><div class="metric">Direct</div><div class="label">首次只附高频工具 schema</div></div>
+    <div class="card"><div class="metric">Deferred</div><div class="label">低频 Browser / Computer / MCP 按需搜索</div></div>
+    <div class="card"><div class="metric">18 / 15</div><div class="label">声明式 cases / critical cases</div></div>
+    <div class="card"><div class="metric">320 + 7</div><div class="label">计划矩阵任务 + supplementary</div></div>
+  </div>
+  <p>调用边界为“模型请求 → <code>tool_search</code> → 下一次模型请求才可调用新披露工具”；Hidden 工具不进入 runtime registry，原审批规则不因披露而变化。矩阵覆盖 ACP 17 cases 与 Web Browser 1 case，并包含 Direct、Browser、Computer、MCP 10/30/50/100、双语 no-tool、模式/审批补充场景。</p>
+  <table>
+    <thead><tr><th>metadata-only 轨迹</th><th>次数</th><th>结果</th></tr></thead>
+    <tbody>
+      <tr><td><code>tool_search</code></td><td>96</td><td>96/96 endpoint success</td></tr>
+      <tr><td>Deferred target calls</td><td>119</td><td>119/119 success</td></tr>
+      <tr><td>参数检查</td><td>138</td><td>138/138 match</td></tr>
+      <tr><td>越权边界</td><td>0 bypass / 0 same-batch</td><td>未发现违规</td></tr>
+    </tbody>
+  </table>
+
+  <h2>硬门槛审计</h2>
+  <table>
+    <thead><tr><th>门槛</th><th>结果</th><th>证据</th></tr></thead>
+    <tbody>
+      <tr><td>完整 canonical matrix</td><td><span class="pill fail">FAIL</span></td><td>204/320，未完成</td></tr>
+      <tr><td>真实运行不少于 1800s</td><td><span class="pill fail">FAIL</span></td><td>monotonic 1588.014s；成功区间 1505.794s</td></tr>
+      <tr><td>每个 critical case 至少 9/10</td><td><span class="pill fail">FAIL</span></td><td><code>ts_no_tool_irrelevant_zh/deferred</code> 已有 r1、r8 两次失败，最高 8/10</td></tr>
+      <tr><td>Deferred bypass = 0</td><td><span class="pill pass">PASS</span></td><td>0</td></tr>
+      <tr><td>same-batch activation = 0</td><td><span class="pill pass">PASS</span></td><td>0</td></tr>
+      <tr><td>Deferred 调用成功率 ≥98%</td><td><span class="pill pass">PASS</span></td><td>119/119，100%</td></tr>
+      <tr><td>参数有效率 ≥98%</td><td><span class="pill pass">PASS</span></td><td>138/138，100%</td></tr>
+      <tr><td>协议、路由、产物安全</td><td><span class="pill pass">PASS</span></td><td>204/204；失败结果与无效参数均为 0</td></tr>
+      <tr><td>正式总体验收</td><td><span class="pill fail">FAIL</span></td><td>完整性、时长、critical pass@10 未满足</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Direct 与 Deferred（部分 campaign，仅供诊断）</h2>
+  <table>
+    <thead><tr><th>Variant</th><th>任务正确率</th><th>首轮可见工具</th><th>首轮 schema tokens</th><th>平均时延</th><th>累计 tokens</th></tr></thead>
+    <tbody>
+      <tr><td>Direct / static</td><td>89/89 · 100%</td><td>31.12</td><td>8016.58</td><td>6.37s</td><td>1,204,643</td></tr>
+      <tr><td>Deferred</td><td>113/115 · 98.26%</td><td>11.04</td><td>4930.00</td><td>8.13s</td><td>1,609,429</td></tr>
+    </tbody>
+  </table>
+  <p class="muted">因为任务顺序随机且 campaign 未完成，两组样本数不相等；这些均值不能替代正式配对 A/B 门槛。</p>
+
+  <h2>失败分类</h2>
+  <table>
+    <thead><tr><th>Run</th><th>工具与路由</th><th>失败点</th></tr></thead>
+    <tbody>
+      <tr><td><code>ts_no_tool_irrelevant_zh/deferred/r1</code></td><td>0 工具；contracts/routing/artifact-safe 全通过</td><td><code>final_text_contains</code> 未命中</td></tr>
+      <tr><td><code>ts_no_tool_irrelevant_zh/deferred/r8</code></td><td>0 工具；contracts/routing/artifact-safe 全通过</td><td><code>final_text_contains</code> 未命中</td></tr>
+    </tbody>
+  </table>
+  <div class="note">
+    两次失败都没有误用 ToolSearch、没有无关工具调用、没有 bypass，也没有协议或安全错误；但严格 pass@10 合约仍必须判失败，不能通过放宽验收口径掩盖。
+  </div>
+
+  <h2>安全与报告器</h2>
+  <ul>
+    <li>208/208 份 redaction report 为 safe；扫描 474 个允许产物。</li>
+    <li>post finding、redacted file、replacement 均为 0。</li>
+    <li>报告器安全 walker 已在 <code>64c8922</code> 修复两类合法数值/布尔元数据假阳性；117/117 Python 测试通过。</li>
+    <li>正式报告器随后因 <code>all_records</code> 与完整 plan 不一致而正确拒绝生成 PASS 报告。本页是明确标注的失败状态摘要，不是正式通过报告。</li>
+  </ul>
+
+  <footer>
+    结论：渐进式 ToolSearch 的已完成样本在调用准确性、权限边界和产物安全上表现稳定，但本轮不满足完整运行、30 分钟和 critical pass@10 三项硬门槛。
+  </footer>
+</main>
+</body>
+</html>

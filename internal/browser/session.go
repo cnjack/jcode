@@ -92,11 +92,11 @@ func (s *Session) ensureActive(ctx context.Context) (*sessionTab, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.registerTab(conn, true), nil
+	return s.registerTab(ctx, conn, true), nil
 }
 
 // registerTab wires event handling and enables the domains we rely on.
-func (s *Session) registerTab(conn TabConn, created bool) *sessionTab {
+func (s *Session) registerTab(parent context.Context, conn TabConn, created bool) *sessionTab {
 	id := conn.ID()
 	t := &sessionTab{conn: conn, created: created}
 	s.tabs[id] = t
@@ -104,7 +104,7 @@ func (s *Session) registerTab(conn TabConn, created bool) *sessionTab {
 	conn.SetEventHandler(func(method string, params json.RawMessage) {
 		s.onEvent(id, method, params)
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
 	_, _ = conn.Send(ctx, "Page.enable", nil)
 	_, _ = conn.Send(ctx, "DOM.enable", nil)
@@ -150,7 +150,7 @@ func (s *Session) Open(ctx context.Context, url string, newTab bool) (string, er
 		if err != nil {
 			return "", err
 		}
-		t = s.registerTab(conn, true)
+		t = s.registerTab(ctx, conn, true)
 	} else {
 		var err error
 		t, err = s.ensureActive(ctx)
@@ -422,7 +422,7 @@ func (s *Session) NewTab(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	s.registerTab(conn, true)
+	s.registerTab(ctx, conn, true)
 	return conn.ID(), nil
 }
 
@@ -439,7 +439,7 @@ func (s *Session) SelectTab(ctx context.Context, tabID string) error {
 	if err != nil {
 		return err
 	}
-	s.registerTab(conn, false)
+	s.registerTab(ctx, conn, false)
 	return nil
 }
 

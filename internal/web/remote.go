@@ -338,12 +338,13 @@ func (s *Server) handleRemoteSaveAlias(w http.ResponseWriter, r *http.Request) {
 	// Mutate + persist under the lock (the config save must be atomic with the
 	// in-memory edit), but release it before writing the HTTP response so a slow
 	// client cannot stall other handlers — mirrors handleCreateMCP/handleToggleSkill.
-	s.mu.Lock()
+	s.cfgMu.Lock()
 	if s.cfg == nil {
-		s.mu.Unlock()
+		s.cfgMu.Unlock()
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config unavailable"})
 		return
 	}
+	previous := append([]config.SSHAlias(nil), s.cfg.SSHAliases...)
 	updated := false
 	for i := range s.cfg.SSHAliases {
 		if s.cfg.SSHAliases[i].Name == req.Name {
@@ -357,7 +358,10 @@ func (s *Server) handleRemoteSaveAlias(w http.ResponseWriter, r *http.Request) {
 		s.cfg.SSHAliases = append(s.cfg.SSHAliases, config.SSHAlias{Name: req.Name, Addr: req.Addr, Path: req.Path})
 	}
 	err := config.SaveConfig(s.cfg)
-	s.mu.Unlock()
+	if err != nil {
+		s.cfg.SSHAliases = previous
+	}
+	s.cfgMu.Unlock()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -382,12 +386,13 @@ func (s *Server) handleRemoteSaveDockerAlias(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	s.mu.Lock()
+	s.cfgMu.Lock()
 	if s.cfg == nil {
-		s.mu.Unlock()
+		s.cfgMu.Unlock()
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config unavailable"})
 		return
 	}
+	previous := append([]config.DockerAlias(nil), s.cfg.DockerAliases...)
 	updated := false
 	for i := range s.cfg.DockerAliases {
 		if s.cfg.DockerAliases[i].Name == req.Name {
@@ -401,7 +406,10 @@ func (s *Server) handleRemoteSaveDockerAlias(w http.ResponseWriter, r *http.Requ
 		s.cfg.DockerAliases = append(s.cfg.DockerAliases, config.DockerAlias{Name: req.Name, Container: req.Container, Path: req.Path})
 	}
 	err := config.SaveConfig(s.cfg)
-	s.mu.Unlock()
+	if err != nil {
+		s.cfg.DockerAliases = previous
+	}
+	s.cfgMu.Unlock()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -419,6 +427,7 @@ func (s *Server) handleListSSH(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var items []sshItem
+	s.cfgMu.Lock()
 	if s.cfg != nil {
 		for _, a := range s.cfg.SSHAliases {
 			items = append(items, sshItem{
@@ -428,6 +437,7 @@ func (s *Server) handleListSSH(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
+	s.cfgMu.Unlock()
 	if items == nil {
 		items = []sshItem{}
 	}
