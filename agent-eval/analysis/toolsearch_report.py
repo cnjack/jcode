@@ -215,7 +215,16 @@ def _parse_utc(value, label):
     return parsed
 
 
-def _walk_artifact_safety(value, label):
+def _is_typed_safe_metadata_key(path, key, value):
+    full_path = (*path, key)
+    if full_path == ("usage_total", "prompt"):
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+    if full_path == ("routing", "checks", "arguments"):
+        return isinstance(value, bool)
+    return False
+
+
+def _walk_artifact_safety(value, label, path=()):
     """Reject payload-shaped keys, credentials, and host paths.
 
     The validated testcase matrix is intentionally not passed here: it owns the
@@ -225,12 +234,15 @@ def _walk_artifact_safety(value, label):
     if isinstance(value, dict):
         for key, child in value.items():
             folded = str(key).lower()
-            if folded in RAW_PAYLOAD_KEYS:
+            if (
+                folded in RAW_PAYLOAD_KEYS
+                and not _is_typed_safe_metadata_key(path, folded, child)
+            ):
                 raise ReportError(f"{label} contains forbidden raw payload field")
-            _walk_artifact_safety(child, label)
+            _walk_artifact_safety(child, label, (*path, folded))
     elif isinstance(value, list):
         for child in value:
-            _walk_artifact_safety(child, label)
+            _walk_artifact_safety(child, label, path)
     elif isinstance(value, str):
         if ABSOLUTE_PATH_RE.search(value):
             raise ReportError(f"{label} contains a host path")
@@ -440,7 +452,7 @@ def _validate_trajectory(value, job):
 
 def _validate_routing(record, variant, run_id):
     routing = _require_dict(record.get("routing"), f"routing for {run_id}")
-    _walk_artifact_safety(routing, "routing verdict")
+    _walk_artifact_safety(routing, "routing verdict", ("routing",))
     counts = _require_dict(routing.get("counts"), "routing counts")
     if variant == "deferred":
         _require_bool(routing.get("passed"), "deferred routing passed")

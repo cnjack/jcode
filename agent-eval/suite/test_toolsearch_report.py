@@ -101,7 +101,7 @@ class SyntheticCampaign:
                     routing = {
                         "passed": True if variant == "deferred" else None,
                         "counts": routing_counts,
-                        "checks": {},
+                        "checks": {"arguments": True},
                         "violations": [],
                     }
                     record_counts = {
@@ -135,6 +135,11 @@ class SyntheticCampaign:
                         "routing": routing,
                         "routing_passed": routing["passed"],
                         "artifact_safe": True,
+                        "usage_total": {
+                            "prompt": 1000,
+                            "completion": 100,
+                            "total": 1100,
+                        },
                     }
                     trajectory = {
                         "schema_version": 1,
@@ -585,6 +590,31 @@ class ToolSearchReportTest(unittest.TestCase):
         self.assertIn("host_path", serialized)
         self.assertNotIn(SECRET_CANARY, serialized)
         self.assertNotIn(HOST_CANARY, serialized)
+
+    def test_safe_metric_names_require_exact_path_and_type(self):
+        run_id = self.synthetic.jobs[0]["run_id"]
+
+        def replace_prompt_token_count_with_payload(record):
+            record["usage_total"]["prompt"] = "raw prompt payload"
+
+        self.synthetic.update_record(run_id, replace_prompt_token_count_with_payload)
+        with self.assertRaisesRegex(toolsearch_report.ReportError, "raw payload"):
+            self.generate()
+
+        with self.assertRaisesRegex(toolsearch_report.ReportError, "raw payload"):
+            toolsearch_report._walk_artifact_safety(
+                {"arguments": True}, "wrong-path metadata",
+            )
+        with self.assertRaisesRegex(toolsearch_report.ReportError, "raw payload"):
+            toolsearch_report._walk_artifact_safety(
+                {"nested": {"usage_total": {"prompt": 1}}},
+                "nested prompt metric",
+            )
+        with self.assertRaisesRegex(toolsearch_report.ReportError, "raw payload"):
+            toolsearch_report._walk_artifact_safety(
+                {"nested": {"routing": {"checks": {"arguments": True}}}},
+                "nested argument check",
+            )
 
     def test_highspeed_model_and_unsafe_redaction_report_are_rejected(self):
         campaign_path = self.synthetic.runs / "campaign.json"
