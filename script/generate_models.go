@@ -35,6 +35,7 @@ var wantedProviders = []string{
 	"alibaba-cn",
 	"alibaba-coding-plan-cn",
 	"alibaba-token-plan-cn",
+	"alibaba-token-plan",
 	"moonshotai",
 	"minimax",
 	"minimax-coding-plan",
