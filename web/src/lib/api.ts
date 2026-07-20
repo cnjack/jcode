@@ -1,5 +1,5 @@
 // API client for jcode backend — ported from web/src/composables/api.ts.
-import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, CustomModelDetail, ValidateResult, CatalogModel, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData, ApprovalReviewConfig, ApprovalReviewConfigResponse } from './types'
+import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, ProjectInfo, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, CustomModelDetail, ValidateResult, CatalogModel, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData, ApprovalReviewConfig, ApprovalReviewConfigResponse } from './types'
 import type { AutomationItem, AutomationRun, AutomationTemplate, AutomationCreate, Automation } from './automation'
 import { apiBase } from './apiBase'
 import { getAuthToken, notifyAuthExpired } from './authToken'
@@ -148,6 +148,7 @@ export const api = {
       body: JSON.stringify({ branch, create, strategy }),
     }),
   tasks: () => request<TaskItem[]>('/api/tasks'),
+  projects: () => request<ProjectInfo[]>('/api/projects'),
   updateTask: (id: string, patch: TaskMetaPatch) =>
     request<TaskItem>(`/api/tasks/${encodeURIComponent(id)}`, {
       method: 'PATCH',

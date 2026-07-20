@@ -58,7 +58,7 @@ export interface WSHandlers {
   onSubagentEvent?: (data: import('./types').SubagentEventData) => void
   onSubagentProgress?: (data: import('./types').SubagentProgressData) => void
   onUserMessage?: (data: { content: string; source: string }) => void
-  onTaskStatus?: (taskId: string, running: boolean) => void
+  onTaskStatus?: (taskId: string, running: boolean, project?: string, updatedAt?: string) => void
   /** Fired when the socket opens/closes so the UI can show online/offline. */
   onConnectionChange?: (connected: boolean) => void
   /** Returns the task currently shown in the foreground. Events tagged with a
@@ -239,7 +239,7 @@ export class WSClient {
         subagent_event: (d) => h.onSubagentEvent?.(d),
         subagent_progress: (d) => h.onSubagentProgress?.(d),
         user_message: (d) => h.onUserMessage?.(d),
-        task_status: (d) => h.onTaskStatus?.(d?.task_id, !!d?.running),
+        task_status: (d) => h.onTaskStatus?.(d?.task_id, !!d?.running, d?.project, d?.updated_at),
         pong: () => {},
       }
     }

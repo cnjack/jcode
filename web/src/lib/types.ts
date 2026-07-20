@@ -196,6 +196,14 @@ export interface TaskMetaPatch {
   title?: string
 }
 
+// A project's persisted last-activity timestamp (bumped on session create /
+// turn start / turn end). Deliberately NOT derived from surviving sessions:
+// deleting a conversation must not move its project in the sidebar ordering.
+export interface ProjectInfo {
+  path: string
+  updated_at?: string
+}
+
 // MCP types
 export interface MCPServerInfo {
   name: string

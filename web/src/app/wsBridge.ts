@@ -133,7 +133,18 @@ export function createWSHandlers(
       dispatch(chatActions.addMessage({ role: 'user', content: d.content, source: d.source }))
       dispatch(chatActions.setRunning(true))
     },
-    onTaskStatus: (taskId, running) => dispatch(sessionActions.setTaskRunning({ taskId, running })),
+    onTaskStatus: (taskId, running, project, updatedAt) => {
+      dispatch(sessionActions.setTaskRunning({ taskId, running }))
+      // A status flip means real activity (a turn started/ended) — the server
+      // bumps the project-level timestamp in the same write and sends both the
+      // project path and its exact timestamp, so mirror them with the SERVER's
+      // values (never the browser clock, which may be skewed). Fall back to the
+      // local task list only for older servers that omit the fields.
+      const path = project || getState().session.tasks.find((t) => t.uuid === taskId)?.project
+      if (path) {
+        dispatch(sessionActions.touchProjectTime({ path, ts: updatedAt || new Date().toISOString() }))
+      }
+    },
     onSessionReset: () => dispatch(chatActions.clearChat()),
   }
 }
