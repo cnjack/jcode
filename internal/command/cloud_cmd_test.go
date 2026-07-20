@@ -316,3 +316,32 @@ func TestCloudCommandsRequireLogin(t *testing.T) {
 		t.Error("status without login succeeded, want error")
 	}
 }
+
+func TestCloudGuideOutput(t *testing.T) {
+	var out bytes.Buffer
+	if err := runCloudGuide(&out); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	// The guide must stay consistent with the actual CLI surface (verified
+	// against each command's --help, M7) and point at the full doc.
+	for _, want := range []string{
+		"jcode login",
+		"jcode login --status",
+		"jcode logout",
+		"https://cloud.j-code.net",
+		"jcode cloud pairings",
+		"jcode cloud approve",
+		"jcode cloud deny",
+		"jcode cloud key show-phrase",
+		"jcode cloud key recover",
+		"jcode cloud rotate-key",
+		"jcode cloud status",
+		"e2ee",
+		"docs/cloud.md",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("guide output missing %q", want)
+		}
+	}
+}

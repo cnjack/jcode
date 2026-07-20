@@ -79,8 +79,56 @@ func NewCloudCmd() *cobra.Command {
 		newCloudStatusCmd(),
 		newCloudKeyCmd(),
 		newCloudRotateKeyCmd(),
+		newCloudGuideCmd(),
 	)
 	return cmd
+}
+
+// newCloudGuideCmd prints the condensed quick-start (M7): the same core
+// content as docs/cloud.md, for users who discover the feature from the CLI.
+func newCloudGuideCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "guide",
+		Short: "Print the cloud quick-start guide (condensed docs/cloud.md)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCloudGuide(cmd.OutOrStdout())
+		},
+	}
+}
+
+func runCloudGuide(w io.Writer) error {
+	_, _ = fmt.Fprint(w, `jcode 云端（jcloud）快速上手
+============================
+
+1. 登录设备
+   jcode login                 默认登录 https://cloud.j-code.net；浏览器确认后自动连接
+   jcode login --cloud <url>   self-host 云端（必须 https；仅 localhost 开发允许 http）
+   jcode login --status        查看当前登录状态
+   jcode logout                退出登录：吊销设备令牌并清除本地凭据
+
+2. 远程使用
+   登录后，在 cloud 控制台（/devices）或手机 app 中选择设备：发起会话、
+   实时查看、停止运行、处理权限审批。设备离线时可翻看历史，但不能操作。
+
+3. 新客户端配对（端到端加密）
+   会话内容端到端加密，云端只见密文。新浏览器/手机首次使用需配对：
+   在客户端发起后，于设备上 10 分钟内批准。
+   jcode cloud pairings        查看待批准的配对请求
+   jcode cloud approve <id>    批准（拒绝对应 jcode cloud deny <id>）
+
+4. 密钥与恢复
+   jcode cloud key show-phrase 显示 24 词恢复短语（请离线妥善保存）
+   jcode cloud key recover     全部设备丢失后，用短语恢复密钥
+   jcode cloud rotate-key      更换密钥（已配对客户端需重新配对）
+
+5. 状态与开关
+   jcode cloud status          云端地址 / 设备 id / 密钥代数 / 连通性
+   端到端加密默认开启；排查时可在 ~/.jcode/config.json 设置
+   "cloud": { "e2ee": false } 并重启 jcode web（明文上行）。
+
+完整文档见 docs/cloud.md。
+`)
+	return nil
 }
 
 func newCloudPairingsCmd() *cobra.Command {
