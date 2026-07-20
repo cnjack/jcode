@@ -554,7 +554,10 @@ func (e *Engine) teardown() {
 // can mark the task running/idle live) and best-effort persists Status +
 // UpdatedAt so recency survives a reload. The broadcast carries the task id in
 // its DATA (not the envelope TaskID) so it is delivered to all clients, not
-// filtered to the task's subscribers.
+// filtered to the task's subscribers. It also carries the task's project path
+// and the exact server-side timestamp being persisted, so clients can bump the
+// project-level "last activity" clock with the server's value (not the
+// browser's clock) without re-deriving either from their local task list.
 func (s *Server) setTaskStatus(eng *Engine, running bool) {
 	if eng == nil || eng.taskID == "" {
 		return
@@ -563,17 +566,20 @@ func (s *Server) setTaskStatus(eng *Engine, running bool) {
 	if running {
 		status = "running"
 	}
+	now := time.Now().Format(time.RFC3339)
 	s.wsBroker.Broadcast(WSEvent{Type: "task_status", Data: map[string]any{
-		"task_id": eng.taskID,
-		"running": running,
-		"status":  status,
+		"task_id":    eng.taskID,
+		"running":    running,
+		"status":     status,
+		"project":    eng.pwd,
+		"updated_at": now,
 	}})
-	go func(id, st string) {
+	go func(id, st, ts string) {
 		_, _ = session.UpdateSessionMeta(id, func(m *session.SessionMeta) {
 			m.Status = st
-			m.UpdatedAt = time.Now().Format(time.RFC3339)
+			m.UpdatedAt = ts
 		})
-	}(eng.taskID, status)
+	}(eng.taskID, status, now)
 }
 
 // CloseAllEngines tears down every live engine. Called on server shutdown.

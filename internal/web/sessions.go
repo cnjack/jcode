@@ -94,6 +94,32 @@ func (s *Server) handleListAllTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
+// projectItem is the sidebar's view of a project: its path plus the persisted
+// last-activity timestamp. The timestamp lives at the project level (bumped on
+// session create / turn start / turn end) and is deliberately NOT recomputed
+// from the surviving sessions, so deleting a conversation never reorders the
+// project list.
+type projectItem struct {
+	Path      string `json:"path"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+}
+
+// handleListProjects returns every project that has persisted metadata (last
+// activity timestamp) so the sidebar can order project groups by a stable,
+// delete-resistant timestamp instead of re-deriving it from child sessions.
+func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
+	meta, err := session.ListProjectMeta()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	items := make([]projectItem, 0, len(meta))
+	for path, pm := range meta {
+		items = append(items, projectItem{Path: path, UpdatedAt: pm.UpdatedAt})
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
 // handleUpdateTask applies a partial metadata update (pin/archive/unread/title)
 // to a task by uuid across all projects.
 func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {

@@ -184,9 +184,122 @@ type SessionMeta struct {
 	ErrorReason    string `json:"error_reason,omitempty"`
 }
 
+// ProjectMeta is project-level metadata kept in its own file (projects.json,
+// alongside the session index). UpdatedAt is the project's "last activity"
+// timestamp: it is bumped when a session is created or when a session's own
+// UpdatedAt moves (a real turn), and — deliberately — is NEVER rolled back
+// when a session is deleted. The sidebar sorts projects by this timestamp, so
+// deleting a conversation must not reorder the project list.
+//
+// Stored separately from session.json on purpose: older binaries rewriting
+// the index don't know this data exists, and would silently drop an embedded
+// "projects" section on their next read-modify-write (the index is shared
+// across processes — desktop sidecar + CLI may run different versions). A
+// sidecar file they never touch is immune; losing it only degrades the
+// sidebar to session-derived recency, and the next turn re-stamps it.
+type ProjectMeta struct {
+	UpdatedAt string `json:"updated_at,omitempty"` // RFC3339
+}
+
 // sessionIndex is the on-disk structure of session.json.
 type sessionIndex struct {
 	Sessions map[string][]SessionMeta `json:"sessions"` // project path → metas
+}
+
+// isNewerTimestamp reports whether candidate is a strictly newer instant than
+// current, comparing parsed RFC3339 instants — NOT raw strings. String
+// comparison breaks across UTC offsets ("05:00Z" is the same instant as
+// "13:00+08:00" yet compares smaller), and the index mixes local-offset
+// writes (time.Now().Format(time.RFC3339)) with UTC ones. Unparseable
+// candidates never win; any candidate beats an unparseable current value.
+func isNewerTimestamp(candidate, current string) bool {
+	ca, err := time.Parse(time.RFC3339, candidate)
+	if err != nil {
+		return false
+	}
+	if current == "" {
+		return true
+	}
+	cur, err := time.Parse(time.RFC3339, current)
+	if err != nil {
+		return true
+	}
+	return ca.After(cur)
+}
+
+// touchProjectLocked bumps the project's persisted last-activity timestamp to
+// ts when ts is a newer instant than the stored value (monotonic max — an
+// out-of-order write never moves the timestamp backwards). Callers must hold
+// indexMu, which serializes every read-modify-rename writer of BOTH the
+// session index and the projects file.
+func touchProjectLocked(project, ts string) error {
+	if project == "" || ts == "" {
+		return nil
+	}
+	projects, err := loadProjectsLocked()
+	if err != nil {
+		return err
+	}
+	if projects == nil {
+		projects = make(map[string]ProjectMeta)
+	}
+	if !isNewerTimestamp(ts, projects[project].UpdatedAt) {
+		return nil
+	}
+	projects[project] = ProjectMeta{UpdatedAt: ts}
+	return saveProjectsLocked(projects)
+}
+
+// projectsFilePath returns the path of the per-project metadata file that
+// lives next to the session index.
+func projectsFilePath() (string, error) {
+	dir, err := config.SessionsDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "projects.json"), nil
+}
+
+// loadProjectsLocked reads the projects file. A missing file (legacy install,
+// no activity since upgrade) yields a nil map, not an error.
+func loadProjectsLocked() (map[string]ProjectMeta, error) {
+	path, err := projectsFilePath()
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var projects map[string]ProjectMeta
+	if err := json.Unmarshal(data, &projects); err != nil {
+		return nil, err
+	}
+	return projects, nil
+}
+
+// saveProjectsLocked atomically persists the projects map (temp + rename,
+// private mode — same discipline as the session index writers).
+func saveProjectsLocked(projects map[string]ProjectMeta) error {
+	path, err := projectsFilePath()
+	if err != nil {
+		return err
+	}
+	if err := ensurePrivateSessionDir(filepath.Dir(path)); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(projects, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmpPath := path + ".tmp"
+	if err := writePrivateSessionFile(tmpPath, data); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
 func ensurePrivateSessionDir(path string) error {
@@ -785,7 +898,15 @@ func addToIndex(project string, meta SessionMeta) error {
 	if err := writePrivateSessionFile(tmpPath, newData); err != nil {
 		return err
 	}
-	return os.Rename(tmpPath, indexPath)
+	if err := os.Rename(tmpPath, indexPath); err != nil {
+		return err
+	}
+	// A new session is project activity: bump the project-level timestamp so
+	// the sidebar's project ordering reflects it. Best-effort AFTER the index
+	// write succeeded — a projects-file hiccup must not fail session creation
+	// (the sidebar falls back to session-derived recency).
+	_ = touchProjectLocked(project, meta.StartTime)
+	return nil
 }
 
 // generateTitle creates a human-readable session title from the first user message.
@@ -878,6 +999,10 @@ func DeleteSessionByUUID(uuid string) (bool, error) {
 			filtered = append(filtered, m)
 		}
 		idx.Sessions[project] = filtered
+		// Deliberately do NOT touch the projects file here: the project-level
+		// timestamp records "last activity", and a deletion is not activity.
+		// Leaving it alone keeps the sidebar's project ordering stable across
+		// deletes (deleting the newest conversation must not sink its project).
 	}
 	if !found {
 		return false, nil
@@ -948,6 +1073,7 @@ func UpdateSessionMeta(uuid string, mutate func(*SessionMeta)) (*SessionMeta, er
 	for project, metas := range idx.Sessions {
 		for i := range metas {
 			if metas[i].UUID == uuid {
+				beforeUpdatedAt := metas[i].UpdatedAt
 				mutate(&metas[i])
 				idx.Sessions[project] = metas
 				newData, err := json.MarshalIndent(&idx, "", "  ")
@@ -960,6 +1086,15 @@ func UpdateSessionMeta(uuid string, mutate func(*SessionMeta)) (*SessionMeta, er
 				}
 				if err := os.Rename(tmpPath, indexPath); err != nil {
 					return nil, err
+				}
+				// A moved UpdatedAt means real activity (a turn started/finished —
+				// the web layer's setTaskStatus). Mirror it onto the project-level
+				// timestamp so the sidebar's project ordering tracks activity.
+				// Metadata-only edits (pin/archive/rename) deliberately leave
+				// UpdatedAt untouched, so they never reorder projects either.
+				// Best-effort, like addToIndex: the index write already succeeded.
+				if metas[i].UpdatedAt != beforeUpdatedAt {
+					_ = touchProjectLocked(project, metas[i].UpdatedAt)
 				}
 				updated := metas[i]
 				// The index keys sessions by project, so the stored meta may not
@@ -991,6 +1126,15 @@ func ListAllSessions() (map[string][]SessionMeta, error) {
 		return nil, err
 	}
 	return idx.Sessions, nil
+}
+
+// ListProjectMeta returns the per-project metadata (last-activity timestamps)
+// keyed by project path. A nil map (legacy install: no projects.json yet) is
+// returned as-is; callers fall back to deriving recency from sessions.
+// Lock-free like ListSessions/ListAllSessions: writers persist via atomic
+// rename, so readers always observe a complete file.
+func ListProjectMeta() (map[string]ProjectMeta, error) {
+	return loadProjectsLocked()
 }
 
 // LoadSession reads all entries from a session JSONL file identified by uuid.

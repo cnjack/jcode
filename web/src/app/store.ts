@@ -16,13 +16,27 @@ import { configureStore, createSlice, createAsyncThunk } from '@reduxjs/toolkit'
 import type { ThreadItem, Message, ToolCall, Approval, TokenSnapshot, Goal, TodoItem, QueuedMessage, AskUserQuestion } from 'jcode-ui-core'
 import { api } from '../lib/api'
 import { extractToolDisplayInfo } from '../lib/toolInfo'
-import { normalizeMode, type AgentMode, type ProviderInfo, type SessionItem, type TaskItem, type SlashCommandInfo, type SessionEntry, type ModelRef } from '../lib/types'
+import { normalizeMode, type AgentMode, type ProviderInfo, type SessionItem, type TaskItem, type ProjectInfo, type SlashCommandInfo, type SessionEntry, type ModelRef } from '../lib/types'
 
 // ─── seq counter (stable DOM identity across streaming updates) ───
 let _seq = 0
 const nextSeq = () => ++_seq
 function genId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+}
+
+/** True when `candidate` is a strictly newer instant than `current` (either
+ *  may be undefined). Compares PARSED instants, not raw strings: RFC3339
+ *  string order breaks across UTC offsets ("05:00Z" < "13:00+08:00" though
+ *  they're the same instant), and the data mixes server-local and UTC writes.
+ *  An unparseable candidate never wins. */
+function isNewerTs(candidate: string, current: string | undefined): boolean {
+  const ct = Date.parse(candidate)
+  if (Number.isNaN(ct)) return false
+  if (!current) return true
+  const cur = Date.parse(current)
+  if (Number.isNaN(cur)) return true
+  return ct > cur
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -394,6 +408,11 @@ const chatSlice = createSlice({
 interface SessionState {
   sessions: SessionItem[]
   tasks: TaskItem[]
+  /** Per-project last-activity timestamp (RFC3339), keyed by project path.
+   *  Persisted server-side and bumped on session create / turn start / turn
+   *  end — never on delete — so the sidebar's project ordering is stable
+   *  across conversation deletions. */
+  projectTimes: Record<string, string>
   currentSessionId: string
   projectPath: string
   wsConnected: boolean
@@ -402,6 +421,7 @@ interface SessionState {
 const initialSession: SessionState = {
   sessions: [],
   tasks: [],
+  projectTimes: {},
   currentSessionId: '',
   projectPath: '',
   wsConnected: false,
@@ -443,6 +463,23 @@ const sessionSlice = createSlice({
     setTaskRunning(s, a: { payload: { taskId: string; running: boolean } }) {
       const t = s.tasks.find((x) => x.uuid === a.payload.taskId)
       if (t) t.running = a.payload.running
+    },
+    /** Merge the server's per-project timestamps (GET /api/projects). Merges
+     *  with a monotonic max per key instead of replacing: a live touch that
+     *  lands while the fetch is in flight must not be clobbered by the stale
+     *  snapshot. */
+    setProjectTimes(s, a: { payload: ProjectInfo[] }) {
+      for (const p of a.payload) {
+        if (!p.path || !p.updated_at) continue
+        if (isNewerTs(p.updated_at, s.projectTimes[p.path])) s.projectTimes[p.path] = p.updated_at
+      }
+    },
+    /** Live-bump one project's timestamp (a turn started/ended there). Mirrors
+     *  the server-side touch: monotonic max, never moves backwards. */
+    touchProjectTime(s, a: { payload: { path: string; ts: string } }) {
+      const { path, ts } = a.payload
+      if (!path || !ts) return
+      if (isNewerTs(ts, s.projectTimes[path])) s.projectTimes[path] = ts
     },
     /** Insert or merge a task so the sidebar shows it immediately. */
     upsertTask(s, a: { payload: TaskItem }) {
@@ -869,6 +906,11 @@ export const loadTasks = createAsyncThunk('tasks/load', async (_, { dispatch }) 
   dispatch(sessionActions.setTasks(tasks))
 })
 
+export const loadProjects = createAsyncThunk('projects/load', async (_, { dispatch }) => {
+  const projects = await api.projects()
+  dispatch(sessionActions.setProjectTimes(projects))
+})
+
 export const loadSlashCommands = createAsyncThunk('chat/loadSlash', async (_, { dispatch }) => {
   const cmds = await api.slashCommands()
   dispatch(chatActions.setSlashCommands(cmds))
@@ -983,6 +1025,7 @@ export const loadWorkspaceState = createAsyncThunk('app/loadWorkspaceState', asy
     dispatch(loadModelState()),
     dispatch(loadSessions()),
     dispatch(loadTasks()),
+    dispatch(loadProjects()),
     dispatch(loadSlashCommands()),
     dispatch(loadApprovalMode()),
     dispatch(loadChannelState()),

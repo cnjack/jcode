@@ -345,6 +345,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/git/branches", s.handleGitBranches)
 	mux.HandleFunc("POST /api/git/checkout", s.handleGitCheckout)
 	mux.HandleFunc("GET /api/tasks", s.handleListAllTasks)
+	mux.HandleFunc("GET /api/projects", s.handleListProjects)
 	mux.HandleFunc("PATCH /api/tasks/{id}", s.handleUpdateTask)
 	mux.HandleFunc("GET /api/usage/stats", s.handleUsageStats)
 	mux.HandleFunc("GET /api/tasks/{id}/stats", s.handleTaskStats)

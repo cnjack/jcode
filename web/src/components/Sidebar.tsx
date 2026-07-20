@@ -90,6 +90,7 @@ export function Sidebar() {
   const dispatch = useAppDispatch()
   const sessions = useAppSelector((s) => s.session.sessions)
   const tasks = useAppSelector((s) => s.session.tasks)
+  const projectTimes = useAppSelector((s) => s.session.projectTimes)
   const currentSessionId = useAppSelector((s) => s.session.currentSessionId)
   const activePath = useAppSelector((s) => s.session.projectPath)
   const activeView = useAppSelector((s) => s.ui.activeView)
@@ -276,7 +277,7 @@ export function Sidebar() {
         label: projectName(path),
         items: map.get(path) || [],
       }))
-      return projectGroups.sort((a, b) => compareProjectGroups(a, b, activePath))
+      return projectGroups.sort((a, b) => compareProjectGroups(a, b, activePath, projectTimes))
     }
 
     const map = new Map<string, SessionRow[]>()
@@ -292,7 +293,7 @@ export function Sidebar() {
       label: t(`sidebar.dateBucket.${k}`),
       items: map.get(k)!,
     }))
-  }, [sorted, filters.groupBy, filters.status, filters.lastActivity, projectFilter, activePath, now, t])
+  }, [sorted, filters.groupBy, filters.status, filters.lastActivity, projectFilter, activePath, projectTimes, now, t])
 
   const duplicateProjectNames = useMemo(() => {
     const counts = new Map<string, number>()
@@ -569,6 +570,9 @@ export function Sidebar() {
                     {g.path && duplicateProjectNames.has(g.label) && !isRemotePath(g.path) && (
                       <span className="sb-project-hint">{projectParentHint(g.path)}</span>
                     )}
+                    <span className="sb-project-time">
+                      {relativeTime((g.path && projectTimes[g.path]) || aggregate(g.items).lastTs, now, t)}
+                    </span>
                     {!open && g.items.some((row) => row.running) && (
                       <span className="sb-ring sb-project-ring" title={t('sidebar.running')} aria-hidden="true" />
                     )}
@@ -748,6 +752,11 @@ export function Sidebar() {
         .sb-project-count {
           flex-shrink:0; color:var(--color-muted-foreground); font-family:var(--font-mono); font-size:10px;
         }
+        .sb-project-time {
+          flex-shrink:0; color:var(--color-muted-foreground); font-family:var(--font-mono); font-size:10px;
+          line-height:1; opacity:0.75;
+        }
+        .sb-project-time:empty { display:none; }
         .sb-project-add {
           display:grid; place-items:center; width:20px; height:20px; flex-shrink:0;
           border:none; border-radius:var(--radius-sm); background:transparent;
@@ -955,7 +964,7 @@ function projectParentHint(path: string): string {
   return parts[parts.length - 2] || ''
 }
 
-function compareProjectGroups(a: SidebarGroup, b: SidebarGroup, activePath: string): number {
+function compareProjectGroups(a: SidebarGroup, b: SidebarGroup, activePath: string, projectTimes: Record<string, string>): number {
   // Fallback ONLY for an empty active project: a freshly-opened project with no
   // sessions has no activity timestamp, so pure lastTs ordering would sink it to
   // the bottom. Float just that case to the top so the project you're in stays in
@@ -969,15 +978,35 @@ function compareProjectGroups(a: SidebarGroup, b: SidebarGroup, activePath: stri
   const B = aggregate(b.items)
   // Otherwise order projects purely by last activity — most recent first. A live
   // run floats its project up (and a run only starts from a sent prompt).
-  // Deliberately NOT by the active/current project or by unread: selecting a
-  // session — or marking it read on open — must never reorder its project.
-  // Activity means a sent prompt (which bumps lastTs), never opening a project.
+  // Prefer the persisted project-level timestamp: it survives conversation
+  // deletions (the server never rolls it back on delete), so removing a session
+  // can't reorder the list. Legacy indexes without project metadata fall back
+  // to deriving recency from the surviving child sessions.
   if (A.running !== B.running) return A.running ? -1 : 1
-  if (A.lastTs !== B.lastTs) return B.lastTs.localeCompare(A.lastTs)
+  const aTs = (a.path && projectTimes[a.path]) || A.lastTs
+  const bTs = (b.path && projectTimes[b.path]) || B.lastTs
+  // Compare parsed instants, not strings: RFC3339 string order breaks across
+  // UTC offsets (the index mixes server-local "+08:00" writes with UTC "Z").
+  const byActivity = tsCmp(aTs, bTs)
+  if (byActivity !== 0) return byActivity > 0 ? -1 : 1
   const byLabel = a.label.localeCompare(b.label)
   // Stable final tiebreaker (path) so equal-label groups don't reshuffle when
   // /api/tasks is re-fetched in a non-deterministic order.
   return byLabel !== 0 ? byLabel : (a.path || '').localeCompare(b.path || '')
+}
+
+/** Chronological compare for RFC3339 strings: negative if a is older, positive
+ *  if newer. Valid instants beat unparseable/empty ones (treated as oldest);
+ *  two invalid values compare equal so the label/path tiebreakers decide. */
+function tsCmp(a: string, b: string): number {
+  const at = a ? Date.parse(a) : Number.NaN
+  const bt = b ? Date.parse(b) : Number.NaN
+  const aOk = !Number.isNaN(at)
+  const bOk = !Number.isNaN(bt)
+  if (!aOk && !bOk) return 0
+  if (!aOk) return -1
+  if (!bOk) return 1
+  return at - bt
 }
 
 function aggregate(items: SessionRow[]) {
