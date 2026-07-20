@@ -212,6 +212,7 @@ export default {
     stop: '중지',
     stopAgent: '에이전트 중지 (Esc)',
     thinking: '생각 중…',
+    loadingConversation: '대화 불러오는 중…',
     attachFiles: '파일 첨부',
     goal: '목표',
     add: '추가',

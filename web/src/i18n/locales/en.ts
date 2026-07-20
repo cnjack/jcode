@@ -222,6 +222,7 @@ export default {
     stop: 'Stop',
     stopAgent: 'Stop agent (Esc)',
     thinking: 'Thinking…',
+    loadingConversation: 'Loading conversation…',
     attachFiles: 'Attach files',
     goal: 'Goal',
     add: 'Add',
