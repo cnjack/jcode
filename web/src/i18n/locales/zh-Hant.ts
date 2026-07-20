@@ -1018,6 +1018,25 @@ export default {
     },
   },
 
+  // 雲端中繼狀態徽章 + 彈出面板（側邊欄底部）。
+  cloud: {
+    badge: '雲端狀態',
+    title: '雲端中繼',
+    status: {
+      online: '已連線',
+      connecting: '連線中…',
+      offline: '未連線',
+      error: '連線錯誤',
+    },
+    notLoggedIn: '未登入',
+    loginHint: '在終端機中執行以下指令登入：',
+    autoConnect: '自動連線',
+    autoConnectHint: '啟動時自動連線雲端中繼',
+    server: '伺服器',
+    device: '本機',
+    saveFailed: '更新失敗：{message}',
+  },
+
   pip: {
     computerUse: '電腦操控',
     shots: '{n} 張截圖',

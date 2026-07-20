@@ -61,6 +61,14 @@ const (
 	defaultBatchMax          = 20
 )
 
+// Connector states surfaced via Status (supervisor → GET /api/cloud/status).
+const (
+	StateOffline    = "offline"
+	StateConnecting = "connecting"
+	StateOnline     = "online"
+	StateError      = "error"
+)
+
 // Connector is the cloud relay client. Construct with NewConnector, then Run.
 type Connector struct {
 	cfg    ConnectorConfig
@@ -70,6 +78,12 @@ type Connector struct {
 	text   *agentTextBuffers
 	token  string
 	cipher *EnvelopeCipher // nil = plaintext uplink (grey period)
+
+	// statusMu guards state/lastError, the live connection snapshot exposed
+	// via Status. Written by Run's loops, read by the web status endpoint.
+	statusMu sync.Mutex
+	state    string
+	lastErr  string
 }
 
 // NewConnector builds a Connector from cfg.
@@ -92,7 +106,39 @@ func NewConnector(cfg ConnectorConfig) *Connector {
 		text:   newAgentTextBuffers(),
 		token:  token,
 		cipher: cfg.Cipher,
+		state:  StateOffline,
 	}
+}
+
+// setState publishes a connection-state transition (see the State* constants).
+func (c *Connector) setState(state, lastErr string) {
+	c.statusMu.Lock()
+	c.state = state
+	c.lastErr = lastErr
+	c.statusMu.Unlock()
+}
+
+// clearError returns the state to online after a failed loop recovers. It is
+// a no-op unless the current state is StateError, so it never masks a fresh
+// transition made by another loop.
+func (c *Connector) clearError() {
+	c.statusMu.Lock()
+	if c.state == StateError {
+		c.state = StateOnline
+		c.lastErr = ""
+	}
+	c.statusMu.Unlock()
+}
+
+// Status returns the current connection state and the last error message
+// (empty when none). Safe to call from any goroutine, including before Run.
+func (c *Connector) Status() (state string, lastErr string) {
+	c.statusMu.Lock()
+	defer c.statusMu.Unlock()
+	if c.state == "" {
+		return StateOffline, ""
+	}
+	return c.state, c.lastErr
 }
 
 func (c *Connector) heartbeatInterval() time.Duration {
@@ -183,6 +229,9 @@ func (c *Connector) Run(ctx context.Context) {
 		c.logf("connector not started: no device credentials")
 		return
 	}
+	// Stopping (ctx cancel) always lands back on offline, whatever the loops
+	// were doing.
+	defer c.setState(StateOffline, "")
 	// E2E (M5): lazily initialize the CEK cipher. Before the CEK exists the
 	// connector stays on the plaintext grey path; once generated, everything
 	// uplink is sealed. A failure here must never stop the connector — fall
@@ -248,23 +297,38 @@ func (c *Connector) registerLoop(ctx context.Context) error {
 		name = hostname
 	}
 	for {
+		c.setState(StateConnecting, "")
 		err := c.client.RegisterDevice(ctx, c.token, RegisterDeviceRequest{
 			Name:         name,
 			Hostname:     hostname,
 			JcodeVersion: c.cfg.Version,
 			PubKey:       c.cfg.Credentials.PublicKey,
+			Platform:     detectPlatform(),
 		})
 		if err == nil {
+			c.setState(StateOnline, "")
 			return nil
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		c.setState(StateError, err.Error())
 		c.logf("device register failed: %v", err)
 		if werr := bo.Wait(ctx); werr != nil {
 			return werr
 		}
 	}
+}
+
+// detectPlatform reports how this jcode instance was launched, sent as the
+// `platform` field at device register. The desktop app spawns `jcode web` as
+// a Tauri sidecar with JCODE_DESKTOP=1 in its environment (set in
+// desktop/src-tauri/src/sidecar.rs); every other launch is the CLI.
+func detectPlatform() string {
+	if os.Getenv("JCODE_DESKTOP") == "1" {
+		return "desktop"
+	}
+	return "cli"
 }
 
 // heartbeatLoop POSTs a heartbeat every heartbeatInterval.
@@ -276,8 +340,13 @@ func (c *Connector) heartbeatLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := c.client.Heartbeat(ctx, c.token); err != nil && ctx.Err() == nil {
+			err := c.client.Heartbeat(ctx, c.token)
+			if err != nil && ctx.Err() == nil {
+				c.setState(StateError, err.Error())
 				c.logf("heartbeat failed: %v", err)
+			}
+			if err == nil {
+				c.clearError() // heartbeat recovery: back to online
 			}
 		}
 	}
@@ -293,6 +362,7 @@ func (c *Connector) pollLoop(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
+			c.setState(StateError, err.Error())
 			c.logf("poll failed: %v", err)
 			if werr := bo.Wait(ctx); werr != nil {
 				return
@@ -300,6 +370,7 @@ func (c *Connector) pollLoop(ctx context.Context) {
 			continue
 		}
 		bo.Reset()
+		c.clearError() // poll recovery: back to online
 		if !ok {
 			continue // 204: no commands, poll again right away
 		}

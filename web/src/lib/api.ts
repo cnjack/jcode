@@ -389,6 +389,24 @@ export const api = {
     request<MemoryActionResponse>('/api/memory/sync', { method: 'POST', body: JSON.stringify({ project }) }),
   memoryClear: (project: string) =>
     request<MemoryActionResponse>(`/api/memory?scope=project&project=${encodeURIComponent(project)}`, { method: 'DELETE' }),
+
+  // Cloud relay (device ↔ cloud connection). Save returns the fresh status.
+  cloudStatus: () => request<CloudStatusResponse>('/api/cloud/status'),
+  cloudSaveConfig: (autoConnect: boolean) =>
+    request<CloudStatusResponse>('/api/cloud/config', {
+      method: 'POST',
+      body: JSON.stringify({ auto_connect: autoConnect }),
+    }),
+}
+
+export interface CloudStatusResponse {
+  logged_in: boolean
+  auto_connect: boolean
+  state: 'offline' | 'connecting' | 'online' | 'error'
+  device_name?: string
+  cloud_url?: string
+  // Present only when state === 'error'.
+  error?: string
 }
 
 export interface ToolSearchConfig {

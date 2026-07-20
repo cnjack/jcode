@@ -884,6 +884,11 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		config.Logger().Printf("[web] token auth enabled for non-loopback bind %q", host)
 	}
 
+	// The cloud relay supervisor is constructed before the server so the cloud
+	// status/config API can reach it; it is started below, once the rest of the
+	// server is wired.
+	cloudSup := newCloudSupervisor(cfg, port, webToken)
+
 	// Bootstrap engine for the initial task.
 	bootEC, err := buildWebTask("", pwd, startupMode.String(), nil, false)
 	if err != nil {
@@ -950,7 +955,8 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 				},
 			})
 		},
-		BLEController: bleProxy,
+		BLEController:   bleProxy,
+		CloudSupervisor: cloudSup,
 	})
 
 	// Start the periodic automation scheduler. A single process owns periodic
@@ -1003,7 +1009,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 	// logged warning — the local web server is never affected. Its context is
 	// the server's shutdown context, so Ctrl+C tears it down with everything
 	// else.
-	startCloudConnector(ctx, cfg, port, webToken)
+	cloudSup.Start(ctx)
 
 	if err := srv.Start(ctx); err != nil {
 		return fmt.Errorf("server error: %w", err)

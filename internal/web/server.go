@@ -17,6 +17,7 @@ import (
 	"github.com/cnjack/jcode/internal/automation"
 	"github.com/cnjack/jcode/internal/browser"
 	"github.com/cnjack/jcode/internal/channel"
+	"github.com/cnjack/jcode/internal/cloud"
 	"github.com/cnjack/jcode/internal/computer"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/flow"
@@ -162,6 +163,11 @@ type Server struct {
 	// bleController toggles the BLE status channel live (from the settings
 	// endpoint) without an app restart. nil when BLE is not compiled in.
 	bleController BLEController
+
+	// cloudSupervisor backs the cloud relay status/config endpoints. nil
+	// (headless builds, tests) synthesizes an offline status from the on-disk
+	// credentials.
+	cloudSupervisor CloudSupervisor
 }
 
 // BLEController lets the settings endpoint start/stop the BLE status channel at
@@ -170,6 +176,14 @@ type Server struct {
 type BLEController interface {
 	Enable()
 	Disable()
+}
+
+// CloudSupervisor exposes the cloud relay status and the live auto_connect
+// toggle to the cloud API endpoints. Implemented by *cloud.Supervisor; kept
+// as an interface so this package does not depend on the connector lifecycle.
+type CloudSupervisor interface {
+	Status() cloud.Status
+	SetAutoConnect(bool) error
 }
 
 // ServerConfig holds the configuration for creating a new Server.
@@ -213,6 +227,7 @@ type ServerConfig struct {
 	ComputerManager     *computer.Manager                                                     // optional: process-wide computer-use manager shared with per-task Envs
 	MemoryStart         func(context.Context, string) (<-chan error, error)                   // optional: acquire and start one manual local-project memory distillation
 	BLEController       BLEController                                                         // optional: live BLE status-channel toggle (desktop builds)
+	CloudSupervisor     CloudSupervisor                                                       // optional: cloud relay status + live auto_connect toggle
 }
 
 // NewServer creates a new web server.
@@ -285,6 +300,7 @@ func NewServer(cfg *ServerConfig) *Server {
 		memoryRuns:          make(map[string]bool),
 		memoryWarnings:      make(map[string]string),
 		bleController:       cfg.BLEController,
+		cloudSupervisor:     cfg.CloudSupervisor,
 	}
 	// The bootstrap engine is registered (and its pump started) in Start, once
 	// the root context exists.
@@ -387,6 +403,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/computer/shots/{id}", s.handleComputerShot)
 	mux.HandleFunc("GET /api/tool-search/status", s.handleToolSearchStatus)
 	mux.HandleFunc("POST /api/tool-search/config", s.handleToolSearchConfig)
+	mux.HandleFunc("GET /api/cloud/status", s.handleCloudStatus)
+	mux.HandleFunc("POST /api/cloud/config", s.handleCloudConfig)
 	mux.HandleFunc("GET /api/dev-options/status", s.handleDevOptionsStatus)
 	mux.HandleFunc("POST /api/dev-options/config", s.handleDevOptionsConfig)
 	mux.HandleFunc("GET /api/memory/status", s.handleMemoryStatus)

@@ -1076,6 +1076,25 @@ export default {
     },
   },
 
+  // Cloud relay status badge + popover (Sidebar footer).
+  cloud: {
+    badge: 'Cloud status',
+    title: 'Cloud relay',
+    status: {
+      online: 'Connected',
+      connecting: 'Connecting…',
+      offline: 'Disconnected',
+      error: 'Connection error',
+    },
+    notLoggedIn: 'Not logged in',
+    loginHint: 'Run this command in a terminal to log in:',
+    autoConnect: 'Auto-connect',
+    autoConnectHint: 'Connect to the cloud relay on startup',
+    server: 'Server',
+    device: 'This device',
+    saveFailed: 'Failed to update: {message}',
+  },
+
   // Computer-use picture-in-picture (floating latest-screenshot card).
   pip: {
     computerUse: 'Computer use',

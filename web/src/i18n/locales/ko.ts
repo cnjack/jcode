@@ -1023,6 +1023,25 @@ export default {
     },
   },
 
+  // 클라우드 릴리 상태 배지 + 팝오버 (사이드바 하단).
+  cloud: {
+    badge: '클라우드 상태',
+    title: '클라우드 릴리',
+    status: {
+      online: '연결됨',
+      connecting: '연결 중…',
+      offline: '연결 끊김',
+      error: '연결 오류',
+    },
+    notLoggedIn: '로그인되지 않음',
+    loginHint: '터미널에서 다음 명령을 실행하여 로그인하세요:',
+    autoConnect: '자동 연결',
+    autoConnectHint: '시작 시 클라우드 릴리에 자동으로 연결',
+    server: '서버',
+    device: '이 기기',
+    saveFailed: '업데이트 실패: {message}',
+  },
+
   pip: {
     computerUse: '컴퓨터 제어',
     shots: '스크린샷 {n}장',

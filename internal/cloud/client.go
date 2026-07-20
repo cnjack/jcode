@@ -121,6 +121,9 @@ type RegisterDeviceRequest struct {
 	Hostname     string `json:"hostname"`
 	JcodeVersion string `json:"jcode_version"`
 	PubKey       string `json:"pubkey"` // X25519 public key, base64
+	// Platform is how this jcode instance was launched ("desktop" | "cli");
+	// see detectPlatform in connector.go.
+	Platform string `json:"platform,omitempty"`
 }
 
 // post issues one JSON POST request and decodes the response envelope. token,

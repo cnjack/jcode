@@ -157,7 +157,9 @@ const SECTION_TITLE = 'text-[13px] font-semibold tracking-tight text-[var(--colo
 
 // ─── small shared components ────────────────────────────────────────────────
 
-function Switch({
+// Exported so other lightweight popovers (e.g. CloudBadge) can reuse the same
+// switch styling instead of duplicating it.
+export function Switch({
   on,
   onClick,
   title,

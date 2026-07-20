@@ -1050,6 +1050,25 @@ export default {
     },
   },
 
+  // 云中继状态徽标 + 弹层（侧边栏底部）。
+  cloud: {
+    badge: '云端状态',
+    title: '云中继',
+    status: {
+      online: '已连接',
+      connecting: '连接中…',
+      offline: '未连接',
+      error: '连接错误',
+    },
+    notLoggedIn: '未登录',
+    loginHint: '在终端中运行以下命令登录：',
+    autoConnect: '自动连接',
+    autoConnectHint: '启动时自动连接云中继',
+    server: '服务器',
+    device: '本设备',
+    saveFailed: '更新失败：{message}',
+  },
+
   pip: {
     computerUse: '电脑操控',
     shots: '{n} 张截图',

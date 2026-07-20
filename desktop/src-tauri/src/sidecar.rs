@@ -126,7 +126,11 @@ pub fn start(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             "127.0.0.1",
             "--open=false",
         ])
-        .current_dir(workdir);
+        .current_dir(workdir)
+        // Marks the process as desktop-launched: the sidecar reports
+        // platform="desktop" at cloud device register (JCODE_DESKTOP detection
+        // in internal/cloud/connector.go).
+        .env("JCODE_DESKTOP", "1");
 
     // GUI launches hand us launchd's minimal environment — no Homebrew, no
     // profile PATH — so the sidecar can't find `rg`, `git`, node, etc. Overlay

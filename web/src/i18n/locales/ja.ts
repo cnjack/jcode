@@ -1024,6 +1024,25 @@ export default {
     },
   },
 
+  // クラウドリレーのステータスバッジ + ポップオーバー（サイドバー下部）。
+  cloud: {
+    badge: 'クラウドステータス',
+    title: 'クラウドリレー',
+    status: {
+      online: '接続済み',
+      connecting: '接続中…',
+      offline: '未接続',
+      error: '接続エラー',
+    },
+    notLoggedIn: '未ログイン',
+    loginHint: 'ターミナルで次のコマンドを実行してログインしてください：',
+    autoConnect: '自動接続',
+    autoConnectHint: '起動時にクラウドリレーへ自動接続する',
+    server: 'サーバー',
+    device: 'このデバイス',
+    saveFailed: '更新に失敗しました：{message}',
+  },
+
   pip: {
     computerUse: 'コンピュータ操作',
     shots: '{n} 枚',

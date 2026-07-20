@@ -8,7 +8,8 @@
  * (Pin / Archive / Mark read / Delete) backed by `api.updateTask`.
  *
  * Kept from the prior React version: the nav buttons, the "New chat" button,
- * the footer (ThemeToggle + settings), and the `loadSession` thunk on click.
+ * the footer (CloudBadge + ThemeToggle + settings), and the `loadSession`
+ * thunk on click.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -35,6 +36,7 @@ import { uiActions, sessionActions, chatActions, loadSession, loadWorkspaceState
 import { api } from '../lib/api'
 import type { TaskItem } from '../lib/types'
 import { ThemeToggle } from './ThemeToggle'
+import { CloudBadge } from './CloudBadge'
 import {
   DEFAULT_FILTERS,
   SidebarFilterMenu,
@@ -652,6 +654,7 @@ export function Sidebar() {
       </div>
 
       <div className="sb-footer relative flex shrink-0 items-center justify-end gap-1.5 px-3">
+        <CloudBadge />
         <ThemeToggle compact />
         <button
           type="button"
