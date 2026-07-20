@@ -24,13 +24,6 @@ func newCloudSupervisor(cfg *config.Config, port int, webToken string) *cloud.Su
 	return sup
 }
 
-// newCloudConnector is the pure start decision + construction behind the
-// supervisor: nil when the connector should not run (not logged in, or
-// auto_connect explicitly disabled).
-func newCloudConnector(cfg *config.Config, creds *cloud.Credentials, port int, webToken string) *cloud.Connector {
-	return newCloudSupervisor(cfg, port, webToken).BuildConnector(creds)
-}
-
 // --- `jcode cloud` command group (M5: pairing approval + CEK management) ---
 
 // NewCloudCmd returns the `jcode cloud` command group: pairing approval and
