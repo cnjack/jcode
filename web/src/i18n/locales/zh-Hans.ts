@@ -1025,6 +1025,7 @@ export default {
       markRead: '标记为已读',
       markUnread: '标记为未读',
       delete: '删除',
+      deleteWhileRunning: '请先停止运行中的 Agent，再删除此会话',
       taskActions: '任务操作',
     },
     relativeTime: {

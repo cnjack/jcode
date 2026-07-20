@@ -999,6 +999,7 @@ export default {
       markRead: '既読にする',
       markUnread: '未読にする',
       delete: '削除',
+      deleteWhileRunning: '削除する前にエージェントを停止してください',
       taskActions: 'タスク操作',
     },
     relativeTime: {

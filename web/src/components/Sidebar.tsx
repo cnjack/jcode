@@ -380,12 +380,14 @@ export function Sidebar() {
   }
 
   async function deleteItem(row: SessionRow) {
+    // Running tasks must not be deleted — backend also returns 409. Stop first.
+    if (row.running) return
     const wasActive = row.uuid === currentSessionId
     if (wasActive) {
       // Drop queued type-ahead for this session BEFORE the delete round-trip:
-      // the cancelled run's agent_done reaches the client before the DELETE
-      // response, and would otherwise drain the queue back into the deleted
-      // session — resurrecting its file + index entry on disk.
+      // a late agent_done (from a prior cancel/stop) can arrive before the
+      // DELETE response and would otherwise drain the queue back into the
+      // deleted session — resurrecting its file + index entry on disk.
       dispatch(chatActions.dropSessionQueue(row.uuid))
     }
     try {
@@ -480,6 +482,8 @@ export function Sidebar() {
           icon={TrashIcon}
           label={t('sidebar.actions.delete')}
           danger
+          disabled={row.running}
+          title={row.running ? t('sidebar.actions.deleteWhileRunning') : undefined}
           onClick={() => { void deleteItem(row); closeCtx() }}
         />
       </>
@@ -879,19 +883,34 @@ function CtxItem({
   label,
   onClick,
   danger,
+  disabled,
+  title,
 }: {
   icon: React.ComponentType<{ className?: string }>
   label: string
   onClick: () => void
   danger?: boolean
+  disabled?: boolean
+  title?: string
 }) {
   return (
     <button
       type="button"
       role="menuitem"
-      onClick={onClick}
-      className={`flex w-full items-center gap-2 rounded-[var(--radius-md)] px-2 py-1.5 text-left text-[12.5px] transition-colors hover:bg-[var(--color-muted)] ${
-        danger ? 'text-[var(--color-destructive)]' : 'text-[var(--color-foreground)]'
+      disabled={disabled}
+      title={title}
+      aria-disabled={disabled || undefined}
+      onClick={disabled ? undefined : onClick}
+      className={`flex w-full items-center gap-2 rounded-[var(--radius-md)] px-2 py-1.5 text-left text-[12.5px] transition-colors ${
+        disabled
+          ? 'cursor-not-allowed opacity-45'
+          : 'hover:bg-[var(--color-muted)]'
+      } ${
+        danger && !disabled
+          ? 'text-[var(--color-destructive)]'
+          : disabled
+            ? 'text-[var(--color-muted-foreground)]'
+            : 'text-[var(--color-foreground)]'
       }`}
     >
       <Icon className="h-3.5 w-3.5" />

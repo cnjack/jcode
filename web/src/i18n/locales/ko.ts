@@ -998,6 +998,7 @@ export default {
       markRead: '읽음으로 표시',
       markUnread: '안 읽음으로 표시',
       delete: '삭제',
+      deleteWhileRunning: '삭제하기 전에 실행 중인 에이전트를 중지하세요',
       taskActions: '작업 동작',
     },
     relativeTime: {

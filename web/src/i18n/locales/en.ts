@@ -1050,6 +1050,7 @@ export default {
       markRead: 'Mark read',
       markUnread: 'Mark unread',
       delete: 'Delete',
+      deleteWhileRunning: 'Stop the agent before deleting this conversation',
       taskActions: 'Task actions',
     },
     relativeTime: {
