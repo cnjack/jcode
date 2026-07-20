@@ -998,6 +998,13 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 	// use is enabled). Lets the extension connect with zero manual steps.
 	srv.SetupNativeMessaging()
 
+	// Start the jcloud relay connector in the background (best-effort): it runs
+	// only when logged in with cloud.auto_connect enabled, and any failure is a
+	// logged warning — the local web server is never affected. Its context is
+	// the server's shutdown context, so Ctrl+C tears it down with everything
+	// else.
+	startCloudConnector(ctx, cfg, port, webToken)
+
 	if err := srv.Start(ctx); err != nil {
 		return fmt.Errorf("server error: %w", err)
 	}

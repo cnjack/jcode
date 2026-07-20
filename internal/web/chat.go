@@ -28,6 +28,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		Images    []chatImage `json:"images,omitempty"`     // optional: base64-encoded images
 		Mode      string      `json:"mode,omitempty"`       // "build" or "plan"
 		SessionID string      `json:"session_id,omitempty"` // optional: the task (session) to run
+		// Source is an optional channel label (e.g. "console"/"mobile" from the
+		// cloud relay connector) propagated to the user_message event, exactly
+		// like SubmitMessage's source ("wechat"). Empty = web-originated.
+		Source string `json:"source,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 20<<20)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
@@ -58,7 +62,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID := s.submitMessage(eng, req.Message, modeStr, "", req.SessionID, req.Images)
+	sessionID := s.submitMessage(eng, req.Message, modeStr, req.Source, req.SessionID, req.Images)
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "processing", "session_id": sessionID})
 }
 

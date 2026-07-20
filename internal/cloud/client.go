@@ -126,6 +126,11 @@ type RegisterDeviceRequest struct {
 // post issues one JSON POST request and decodes the response envelope. token,
 // when non-empty, is sent as a Bearer credential. out may be nil for responses
 // whose body is irrelevant. Non-2xx responses become *APIError.
+//
+// M5 (E2E) note: relay payloads are plain JSON at this stage. When envelope
+// encryption ships, the wrap/unwrap happens HERE (and in get) — callers pass
+// plaintext and this layer seals it into the {enc, key_gen, nonce, ct}
+// envelope before marshal.
 func (c *Client) post(ctx context.Context, path, token string, body, out any) error {
 	var reader io.Reader
 	if body != nil {
@@ -177,6 +182,55 @@ func (c *Client) post(ctx context.Context, path, token string, body, out any) er
 		}
 	}
 	return nil
+}
+
+// get issues one GET request and returns the HTTP status code, decoding a
+// 2xx JSON body into out (out may be nil). Non-2xx responses (except 204,
+// which is returned as-is with no error) become *APIError.
+func (c *Client) get(ctx context.Context, path, token string, out any) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
+	if err != nil {
+		return 0, fmt.Errorf("build request GET %s: %w", path, err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("GET %s: %w", path, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNoContent {
+		return resp.StatusCode, nil
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return resp.StatusCode, fmt.Errorf("GET %s: read response: %w", path, err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		apiErr := &APIError{StatusCode: resp.StatusCode, Message: http.StatusText(resp.StatusCode)}
+		var envelope struct {
+			Error *APIError `json:"error"`
+		}
+		if json.Unmarshal(data, &envelope) == nil && envelope.Error != nil {
+			apiErr = envelope.Error
+			apiErr.StatusCode = resp.StatusCode
+		} else if trimmed := strings.TrimSpace(string(data)); trimmed != "" {
+			apiErr.Message = trimmed
+		}
+		return resp.StatusCode, apiErr
+	}
+
+	if out != nil && len(data) > 0 {
+		if err := json.Unmarshal(data, out); err != nil {
+			return resp.StatusCode, fmt.Errorf("GET %s: decode response: %w", path, err)
+		}
+	}
+	return resp.StatusCode, nil
 }
 
 // RequestDeviceCode starts the device authorization flow (RFC 8628 §3.1):
