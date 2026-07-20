@@ -326,6 +326,20 @@ jobs:
             done
           fi
 
+      # Assemble the jcode-computerd.app bundle (macOS resource declared in
+      # tauri.macos.conf.json). The script compiles the Swift helpers + Rust
+      # onboarding UI into a signed .app at desktop/src-tauri/bundles/.
+      - name: Build computerd bundle
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          case "${{ matrix.triple }}" in
+            aarch64-apple-darwin) SWIFT_TARGET="arm64-apple-macos14.0" ;;
+            x86_64-apple-darwin) SWIFT_TARGET="x86_64-apple-macos14.0" ;;
+          esac
+          mkdir -p desktop/src-tauri/bundles
+          script/build_computerd_bundle.sh "$SWIFT_TARGET" "desktop/src-tauri/bundles" "${{ matrix.triple }}"
+
       # macOS signing + notarization. Everything here is optional: with no secrets
       # the build still succeeds and produces an UNSIGNED bundle (Gatekeeper warns
       # on first launch). When the secrets are present, the Tauri CLI imports the
