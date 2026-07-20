@@ -30,6 +30,34 @@ export interface ChatViewProps {
   readOnly?: boolean
 }
 
+/** Pending ("Thinking…") row — breathing ring + i18n label. The library's
+ *  default is English-only; we override it here so the label follows the
+ *  active locale (chat.thinking). Ring style lives in jcode-ui's CSS.
+ *
+ *  Rendered as `<PendingIndicator />` (NOT called as a render function) so
+ *  its useTranslation hook stays on its own fiber — calling it directly as
+ *  renderPending() would attach the hook to VirtualizedThread and trip the
+ *  Rules of Hooks when the pending slot mounts/unmounts. */
+function PendingIndicator() {
+  const { t } = useTranslation()
+  const label = t('chat.thinking')
+  return (
+    <div
+      className="jcode-pending jcode-chat-col"
+      role="status"
+      aria-live="polite"
+      aria-label={label}
+    >
+      <div className="jcode-pending__inner jcode-gutter">
+        <span className="jcode-pending__ring" aria-hidden="true">
+          <span className="jcode-pending-ring" />
+        </span>
+        <span className="jcode-pending__label">{label}</span>
+      </div>
+    </div>
+  )
+}
+
 export function ChatView({ readOnly }: ChatViewProps) {
   const { t } = useTranslation()
   const hasMessages = useAppSelector((s) => s.chat.timeline.length > 0)
@@ -45,7 +73,7 @@ export function ChatView({ readOnly }: ChatViewProps) {
     return (
       <div className="chat-panel flex min-h-0 flex-1 flex-col">
         <div className="min-h-0 flex-1">
-          <Thread overscanBottom={8} />
+          <Thread overscanBottom={8} renderPending={() => <PendingIndicator />} />
         </div>
       </div>
     )
@@ -94,7 +122,7 @@ export function ChatView({ readOnly }: ChatViewProps) {
     <div className="chat-panel flex min-h-0 flex-1 flex-col">
       <ModelBackdrop kind={backdropKind} />
       <div className="chat-content-layer min-h-0 flex-1">
-        <Thread overscanBottom={28} />
+        <Thread overscanBottom={28} renderPending={() => <PendingIndicator />} />
       </div>
       {/* z-[2] keeps the composer’s upward-opening menus above the thread layer. */}
       <div className="chat-content-layer chat-col relative z-[2]">
