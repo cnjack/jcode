@@ -30,6 +30,7 @@ import (
 var eventDurability = map[string]bool{
 	// --- durable: complete message-level events ---
 	"user_message":     true, // user message (carries the channel source marker)
+	"agent_message":    true, // full assistant message; never emitted by internal/web — the connector synthesizes it at agent_done from the accumulated agent_text deltas (see handleWSEvent)
 	"tool_call":        true, // tool invocation (name + args)
 	"tool_result":      true, // tool completion (output / error / denied)
 	"approval_request": true, // approval prompt awaiting a decision
@@ -106,6 +107,80 @@ func (a *seqAllocator) Resync(sid string, maxSeq int64) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.next[sid] = maxSeq + 1
+}
+
+// agentTextBufCap bounds one session's accumulated agent_text buffer so a
+// runaway session cannot grow connector memory without limit. Beyond the cap
+// the buffer stops growing and the synthesized agent_message is marked
+// truncated.
+const agentTextBufCap = 256 * 1024
+
+// agentTextBuffers accumulates the ephemeral agent_text deltas per session so
+// the connector can synthesize a durable agent_message event (the full
+// assistant message) when the run finishes: agent_text is token-level and
+// lossy, so without this the cloud replay has no assistant text at all. The
+// buffer is in-memory only — a connector restart loses any not-yet-finalized
+// text (acceptable: the live SSE stream carried the same deltas).
+type agentTextBuffers struct {
+	mu   sync.Mutex
+	bufs map[string]*agentTextBuf
+}
+
+type agentTextBuf struct {
+	sb        strings.Builder
+	truncated bool
+}
+
+func newAgentTextBuffers() *agentTextBuffers {
+	return &agentTextBuffers{bufs: make(map[string]*agentTextBuf)}
+}
+
+// append folds one agent_text delta into the session's buffer.
+func (b *agentTextBuffers) append(sid, delta string) {
+	if delta == "" {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	buf := b.bufs[sid]
+	if buf == nil {
+		buf = &agentTextBuf{}
+		b.bufs[sid] = buf
+	}
+	if buf.sb.Len() >= agentTextBufCap {
+		buf.truncated = true
+		return
+	}
+	if room := agentTextBufCap - buf.sb.Len(); len(delta) > room {
+		buf.sb.WriteString(delta[:room])
+		buf.truncated = true
+		return
+	}
+	buf.sb.WriteString(delta)
+}
+
+// take returns the accumulated text (empty when nothing was buffered) and
+// clears the session's buffer.
+func (b *agentTextBuffers) take(sid string) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	buf := b.bufs[sid]
+	if buf == nil {
+		return ""
+	}
+	delete(b.bufs, sid)
+	text := buf.sb.String()
+	if buf.truncated {
+		text += "\n\n[…truncated by the device connector at 256KB]"
+	}
+	return text
+}
+
+// clear drops the session's buffer without reading it (session_reset).
+func (b *agentTextBuffers) clear(sid string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.bufs, sid)
 }
 
 // eventBatcher accumulates durable events per session and flushes them on a
@@ -282,6 +357,16 @@ func (c *Connector) handleWSEvent(ctx context.Context, batcher *eventBatcher, ms
 	}
 
 	if !isDurableEvent(ev.Type) {
+		// Accumulate agent_text deltas so a durable agent_message can be
+		// synthesized when the run finishes (see agentTextBuffers).
+		if ev.Type == "agent_text" {
+			var d struct {
+				Text string `json:"text"`
+			}
+			if json.Unmarshal(ev.Data, &d) == nil {
+				c.text.append(sid, d.Text)
+			}
+		}
 		// Ephemeral: forward immediately, drop on failure — never retried.
 		if err := c.client.SendEphemeral(ctx, c.token, sid, ev.Type, msg); err != nil && ctx.Err() == nil {
 			c.logf("ephemeral event %q for session %s dropped: %v", ev.Type, sid, err)
@@ -291,4 +376,31 @@ func (c *Connector) handleWSEvent(ctx context.Context, batcher *eventBatcher, ms
 	// Durable: assign the per-session seq and batch. The payload is the full
 	// original WS message JSON (type + task_id + data), as-is (明文阶段).
 	batcher.add(ctx, sid, EventUpload{Seq: c.seq.Next(sid), Kind: ev.Type, Payload: json.RawMessage(msg)})
+
+	switch ev.Type {
+	case "agent_done":
+		// Synthesize the durable full-text assistant message from the
+		// accumulated agent_text deltas, batched right after agent_done.
+		if text := c.text.take(sid); text != "" {
+			var done struct {
+				Error   string `json:"error"`
+				Stopped bool   `json:"stopped"`
+			}
+			_ = json.Unmarshal(ev.Data, &done)
+			payload, err := json.Marshal(map[string]any{
+				"type":    "agent_message",
+				"task_id": sid,
+				"data": map[string]any{
+					"text":    text,
+					"error":   done.Error,
+					"stopped": done.Stopped,
+				},
+			})
+			if err == nil {
+				batcher.add(ctx, sid, EventUpload{Seq: c.seq.Next(sid), Kind: "agent_message", Payload: payload})
+			}
+		}
+	case "session_reset":
+		c.text.clear(sid)
+	}
 }

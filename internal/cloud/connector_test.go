@@ -586,6 +586,101 @@ func TestEventPumpOverRealWS(t *testing.T) {
 	}
 }
 
+// TestEventPumpSynthesizesAgentMessage pins the durable assistant-text path:
+// ephemeral agent_text deltas accumulate per session and, when agent_done
+// arrives, the connector synthesizes a durable agent_message event carrying
+// the full text, batched right after agent_done. A done with no buffered
+// text synthesizes nothing.
+func TestEventPumpSynthesizesAgentMessage(t *testing.T) {
+	cloud := newMockCloud()
+	cloudSrv := httptest.NewServer(cloud.handler())
+	t.Cleanup(cloudSrv.Close)
+
+	conn := newTestConnector(cloudSrv.URL, "http://127.0.0.1:1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	batcher := newEventBatcher(conn)
+
+	// Deltas are ephemeral (still forwarded live) AND buffered.
+	conn.handleWSEvent(ctx, batcher, wsMsg(t, "agent_text", "s1", map[string]string{"text": "Hello, "}))
+	conn.handleWSEvent(ctx, batcher, wsMsg(t, "agent_text", "s1", map[string]string{"text": "world"}))
+	conn.handleWSEvent(ctx, batcher, wsMsg(t, "agent_done", "s1", map[string]any{}))
+	batcher.flushAll(ctx)
+
+	events := cloud.allEvents()
+	if len(events) != 2 {
+		t.Fatalf("uploaded events = %d, want 2 (agent_done + agent_message)", len(events))
+	}
+	if events[0].Kind != "agent_done" || events[1].Kind != "agent_message" {
+		t.Fatalf("kinds = %q, %q; want agent_done followed by agent_message", events[0].Kind, events[1].Kind)
+	}
+	if events[0].Seq != 1 || events[1].Seq != 2 {
+		t.Fatalf("seqs = %d, %d; want 1, 2", events[0].Seq, events[1].Seq)
+	}
+	var payload struct {
+		Type string `json:"type"`
+		Data struct {
+			Text string `json:"text"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(events[1].Payload, &payload); err != nil {
+		t.Fatalf("agent_message payload: %v", err)
+	}
+	if payload.Type != "agent_message" || payload.Data.Text != "Hello, world" {
+		t.Fatalf("agent_message payload = %s, want data.text %q", events[1].Payload, "Hello, world")
+	}
+
+	// The buffer was consumed: a second done without deltas adds no message.
+	conn.handleWSEvent(ctx, batcher, wsMsg(t, "agent_done", "s1", map[string]any{}))
+	batcher.flushAll(ctx)
+	if got := len(cloud.allEvents()); got != 3 {
+		t.Fatalf("uploaded events after empty done = %d, want 3 (bare agent_done)", got)
+	}
+}
+
+// TestEventPumpSessionResetClearsAgentText pins that session_reset drops any
+// buffered deltas, so a reset followed by done synthesizes no agent_message.
+func TestEventPumpSessionResetClearsAgentText(t *testing.T) {
+	cloud := newMockCloud()
+	cloudSrv := httptest.NewServer(cloud.handler())
+	t.Cleanup(cloudSrv.Close)
+
+	conn := newTestConnector(cloudSrv.URL, "http://127.0.0.1:1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	batcher := newEventBatcher(conn)
+	conn.handleWSEvent(ctx, batcher, wsMsg(t, "agent_text", "s1", map[string]string{"text": "partial"}))
+	conn.handleWSEvent(ctx, batcher, wsMsg(t, "session_reset", "s1", map[string]any{}))
+	conn.handleWSEvent(ctx, batcher, wsMsg(t, "agent_done", "s1", map[string]any{}))
+	batcher.flushAll(ctx)
+
+	for _, ev := range cloud.allEvents() {
+		if ev.Kind == "agent_message" {
+			t.Fatalf("agent_message uploaded after session_reset cleared the buffer: %s", ev.Payload)
+		}
+	}
+}
+
+// TestAgentTextBufferCap pins the 256KB per-session cap: the buffer stops
+// growing past the cap and take marks the text truncated.
+func TestAgentTextBufferCap(t *testing.T) {
+	bufs := newAgentTextBuffers()
+	bufs.append("s1", strings.Repeat("a", agentTextBufCap+1024))
+	text := bufs.take("s1")
+	if !strings.HasSuffix(text, "[…truncated by the device connector at 256KB]") {
+		t.Fatalf("capped text missing truncation marker (len=%d)", len(text))
+	}
+	if !strings.HasPrefix(text, strings.Repeat("a", agentTextBufCap)) {
+		t.Fatal("capped text must keep the first 256KB of deltas")
+	}
+	// take cleared the buffer.
+	if got := bufs.take("s1"); got != "" {
+		t.Fatalf("second take = %q, want empty", got)
+	}
+}
+
 // --- session sync tests ---
 
 func TestSyncSessionsUpsert(t *testing.T) {

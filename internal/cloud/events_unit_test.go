@@ -8,7 +8,7 @@ import "testing"
 func TestEventDurabilityClassification(t *testing.T) {
 	durable := []string{
 		// complete message-level events
-		"user_message", "tool_call", "tool_result",
+		"user_message", "agent_message", "tool_call", "tool_result",
 		"approval_request", "ask_user_request",
 		// session state changes
 		"agent_start", "agent_done", "task_status",

@@ -59,6 +59,7 @@ type Connector struct {
 	client *Client
 	local  *localControlPlane
 	seq    *seqAllocator
+	text   *agentTextBuffers
 	token  string
 }
 
@@ -79,6 +80,7 @@ func NewConnector(cfg ConnectorConfig) *Connector {
 		client: client,
 		local:  &localControlPlane{base: strings.TrimRight(cfg.LocalBase, "/"), token: cfg.LocalToken, http: hc},
 		seq:    newSeqAllocator(),
+		text:   newAgentTextBuffers(),
 		token:  token,
 	}
 }
