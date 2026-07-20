@@ -13,10 +13,10 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 )
 
-// supervisorTestCreds writes a logged-in device identity to the temp HOME and
-// returns it. CloudURL points at an unreachable loopback address so any
-// started connector exercises the offline-retry path without network access.
-func supervisorTestCreds(t *testing.T) *Credentials {
+// supervisorTestCreds writes a logged-in device identity to the temp HOME.
+// CloudURL points at an unreachable loopback address so any started connector
+// exercises the offline-retry path without network access.
+func supervisorTestCreds(t *testing.T) {
 	t.Helper()
 	creds := &Credentials{
 		CloudURL:    "http://127.0.0.1:1",
@@ -27,7 +27,6 @@ func supervisorTestCreds(t *testing.T) *Credentials {
 	if err := SaveCredentials(creds); err != nil {
 		t.Fatal(err)
 	}
-	return creds
 }
 
 func readPersistedAutoConnect(t *testing.T, home string) *bool {
