@@ -81,7 +81,24 @@ export const api = {
   deleteSession: (id: string) =>
     request<{ status: string }>(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   newSession: (sessionId?: string) =>
-    request<{ status: string; session_id: string }>('/api/sessions', {
+    request<{
+      status: string
+      session_id: string
+      /** One-shot resume payload (present when resuming against a current
+       *  server): everything the client needs to repaint the conversation —
+       *  the raw JSONL entries plus goal/todos/status. `entries` is omitted
+       *  if the server could not read the session file (client falls back to
+       *  GET /api/sessions/{id}); all fields are absent on older servers. */
+      entries?: SessionEntry[] | null
+      goal?: Goal | null
+      todos?: TodoItem[]
+      running?: boolean
+      pwd?: string
+      provider?: string
+      model?: string
+      mode?: string
+      token?: TokenUpdateData
+    }>('/api/sessions', {
       method: 'POST',
       body: sessionId ? JSON.stringify({ session_id: sessionId }) : undefined,
     }),

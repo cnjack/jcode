@@ -324,6 +324,34 @@ func (s *Server) handleTruncateHistory(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// writeResumeReply answers a resume request (POST /api/sessions with a
+// session_id) with everything the client needs to repaint the conversation in
+// ONE round trip: the raw JSONL entries it replays into its timeline, plus the
+// server-truth state it would otherwise fetch with four more serial requests
+// (status / goal / todos). entries is omitted when the session file could not
+// be read; the client then falls back to GET /api/sessions/{id}. The server
+// already loads the entries to reconstruct the engine state, so this reuses
+// that read instead of doing a second one for the client.
+func (s *Server) writeResumeReply(w http.ResponseWriter, eng *Engine, entries []session.Entry) {
+	resp := s.statusSnapshot(eng)
+	resp["status"] = "ok"
+	resp["session_id"] = eng.taskID
+	if entries != nil {
+		resp["entries"] = entries
+	}
+	if eng.env != nil && eng.env.GoalStore != nil {
+		resp["goal"] = eng.env.GoalStore.Get()
+	} else {
+		resp["goal"] = nil
+	}
+	if eng.todoStore != nil {
+		resp["todos"] = eng.todoStore.Items()
+	} else {
+		resp["todos"] = []any{}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	// Parse optional resume session ID + project. Creating a task no longer
 	// blocks on "is the agent running" — tasks run concurrently.
@@ -342,7 +370,13 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	if req.SessionID != "" {
 		if eng := s.resolveEngine(req.SessionID); eng != nil {
 			s.setActiveEngine(eng)
-			writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "session_id": eng.taskID})
+			// Best-effort: a read failure only drops the embedded entries —
+			// the client falls back to GET /api/sessions/{id}.
+			entries, err := session.LoadSession(req.SessionID)
+			if err != nil {
+				config.Logger().Printf("[web] resume: embedded entries unavailable for %s (client falls back to GET): %v", req.SessionID, err)
+			}
+			s.writeResumeReply(w, eng, entries)
 			return
 		}
 	}
@@ -367,8 +401,10 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resume: hydrate the fresh engine with the persisted conversation/todos/goal.
+	var entries []session.Entry
 	if req.SessionID != "" {
-		entries, lerr := session.LoadSession(req.SessionID)
+		var lerr error
+		entries, lerr = session.LoadSession(req.SessionID)
 		if lerr != nil {
 			// Stale/nonexistent session id: don't silently register a phantom empty
 			// engine under it — tear the just-built engine down and report not-found.
@@ -400,7 +436,11 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	// Brand-new task: tell its view to start clean.
 	if req.SessionID == "" {
 		s.wsBroker.Broadcast(WSEvent{TaskID: eng.taskID, Type: "session_reset", Data: map[string]string{}})
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "session_id": eng.taskID})
+		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "session_id": eng.taskID})
+	// Resume: one-shot reply (entries + goal + todos + status) so the client
+	// repaints without follow-up round trips.
+	s.writeResumeReply(w, eng, entries)
 }

@@ -338,7 +338,10 @@ export function Sidebar() {
 
   async function openItem(row: SessionRow) {
     dispatch(uiActions.setView('chat'))
-    if (row.unread) await patchTask(row.uuid, { unread: false })
+    // Marking read is metadata bookkeeping — fire-and-forget so it never sits
+    // on the resume critical path (an awaited PATCH here delayed the replay
+    // by a full round trip on every unread open).
+    if (row.unread) void patchTask(row.uuid, { unread: false })
     if (row.project && activePath && row.project !== activePath) {
       // Remote workspaces need the wizard (prefill + optional load task).
       if (isRemotePath(row.project)) {

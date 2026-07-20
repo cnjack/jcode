@@ -46,6 +46,9 @@ function isNewerTs(candidate: string, current: string | undefined): boolean {
 interface ChatState {
   timeline: ThreadItem[]
   isRunning: boolean
+  /** A session resume (replay) is in flight — the chat pane shows a skeleton
+   *  so the switch feels instant instead of blank-until-ready. */
+  sessionLoading: boolean
   tokenSnapshot: TokenSnapshot | null
   goal: Goal | null
   goalArmed: boolean
@@ -60,6 +63,7 @@ interface ChatState {
 const initialChat: ChatState = {
   timeline: [],
   isRunning: false,
+  sessionLoading: false,
   tokenSnapshot: null,
   goal: null,
   goalArmed: false,
@@ -90,6 +94,9 @@ const chatSlice = createSlice({
     },
     setRunning(s, a: { payload: boolean }) {
       s.isRunning = a.payload
+    },
+    setSessionLoading(s, a: { payload: boolean }) {
+      s.sessionLoading = a.payload
     },
     addMessage(
       s,
@@ -1045,117 +1052,141 @@ export const loadWorkspaceState = createAsyncThunk('app/loadWorkspaceState', asy
 })
 
 /**
- * Load (replay) a session's history into the timeline. Ported from the Vue
- * store's loadSession: fetches the JSONL entries, tells the backend to resume
- * that session, clears the UI, then rebuilds the timeline by walking the entries
- * (user/assistant → messages; tool_call+tool_result → resolved tool calls).
+ * Load (replay) a session's history into the timeline.
+ *
+ * Fast path: a SINGLE POST /api/sessions round trip both resumes the session
+ * server-side and returns everything the view needs to repaint — the raw
+ * JSONL entries (the server reuses its own reconstructing read; the file is
+ * not read twice) plus goal/todos/status. The pane swaps to a skeleton the
+ * instant the click lands, so perceived latency is ~0 and the old flow's
+ * four serial follow-up GETs (status, ask/approval pending, goal, todos)
+ * are gone. Legacy fallback (older server): fetch the entries via GET and
+ * the rest individually, in parallel, without gating the repaint.
  */
 export const loadSession = createAsyncThunk(
   'session/loadOne',
   async (uuid: string, { dispatch, getState }) => {
-    // Fetch the session's history. A 404 means the session has no JSONL yet
-    // (fresh, never-used session) — return without rebuilding so the caller can
-    // fall back to a different session.
-    let entries: SessionEntry[]
+    // Immediate skeleton: the pane reacts to the click, not to the network.
+    dispatch(chatActions.setSessionLoading(true))
     try {
-      entries = await api.session(uuid)
-    } catch {
-      return
-    }
-    // Tell the backend to switch to (resume) this session.
-    const resp = await api.newSession(uuid)
-    dispatch(sessionActions.setCurrentSession(resp.session_id || uuid))
+      const resp = await api.newSession(uuid)
+      dispatch(sessionActions.setCurrentSession(resp.session_id || uuid))
 
-    // Clear the UI before rebuilding.
-    dispatch(chatActions.clearChat())
-
-    // Rebuild the timeline from entries.
-    const timeline: ThreadItem[] = []
-    const pendingToolCalls = new Map<string, ToolCall>()
-    for (const e of entries) {
-      if (e.type === 'user' && (e.content || (e.images && e.images.length > 0))) {
-        timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('msg'), role: 'user', content: e.content || '', timestamp: ts(e.timestamp), images: e.images } })
-      } else if (e.type === 'assistant' && e.content) {
-        timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('asst'), role: 'assistant', content: e.content, timestamp: ts(e.timestamp) } })
-      } else if (e.type === 'tool_call' && e.name) {
-        const tc: ToolCall = {
-          id: genId('tc'),
-          toolCallID: e.tool_call_id,
-          name: e.name,
-          args: e.args || '',
-          status: 'running',
-          timestamp: ts(e.timestamp),
-          displayInfo: extractToolDisplayInfo(e.name, e.args || ''),
-          batchId: e.batch_id,
-          batchIndex: e.batch_index,
-          batchSize: e.batch_size,
-          startedAt: e.started_at,
+      // One-shot resume payload (entries + goal + todos + status). `provider`
+      // discriminates an older server without the one-shot payload at all;
+      // `entries` is omitted when the server could not read the session file
+      // — fall back to the dedicated endpoint then (a transient read failure
+      // must not blank a conversation that has history).
+      const oneShot = resp.provider !== undefined
+      let entries: SessionEntry[] | null | undefined = resp.entries
+      if (entries === undefined) {
+        // Older server (no one-shot payload) OR current server with an
+        // unreadable session file. A 404 means the session has no JSONL yet
+        // (fresh, never-used session) — return without rebuilding so the
+        // caller can fall back to a different session.
+        try {
+          entries = await api.session(uuid)
+        } catch {
+          return
         }
-        timeline.push({ kind: 'tool', seq: nextSeq(), data: tc })
-        if (e.tool_call_id) pendingToolCalls.set(e.tool_call_id, tc)
-      } else if (e.type === 'tool_result') {
-        let resolved = false
-        if (e.tool_call_id) {
-          const tc = pendingToolCalls.get(e.tool_call_id)
-          if (tc) {
-            tc.output = e.output || ''
-            tc.error = e.error || ''
-            tc.status = e.error ? 'error' : 'done'
-            tc.denied = e.denied || undefined
-            if (e.duration_ms !== undefined && tc.meta?.duration_ms === undefined) {
-              tc.meta = { ...(tc.meta || {}), duration_ms: e.duration_ms }
-            }
-            pendingToolCalls.delete(e.tool_call_id)
-            resolved = true
+      }
+
+      // Clear the UI before rebuilding.
+      dispatch(chatActions.clearChat())
+
+      // Rebuild the timeline from entries.
+      const timeline: ThreadItem[] = []
+      const pendingToolCalls = new Map<string, ToolCall>()
+      for (const e of entries || []) {
+        if (e.type === 'user' && (e.content || (e.images && e.images.length > 0))) {
+          timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('msg'), role: 'user', content: e.content || '', timestamp: ts(e.timestamp), images: e.images } })
+        } else if (e.type === 'assistant' && e.content) {
+          timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('asst'), role: 'assistant', content: e.content, timestamp: ts(e.timestamp) } })
+        } else if (e.type === 'tool_call' && e.name) {
+          const tc: ToolCall = {
+            id: genId('tc'),
+            toolCallID: e.tool_call_id,
+            name: e.name,
+            args: e.args || '',
+            status: 'running',
+            timestamp: ts(e.timestamp),
+            displayInfo: extractToolDisplayInfo(e.name, e.args || ''),
+            batchId: e.batch_id,
+            batchIndex: e.batch_index,
+            batchSize: e.batch_size,
+            startedAt: e.started_at,
           }
-        }
-        if (!resolved && e.name) {
-          for (let i = timeline.length - 1; i >= 0; i--) {
-            const item = timeline[i]
-            if (item.kind === 'tool' && item.data.name === e.name && item.data.status === 'running') {
-              item.data.output = e.output || ''
-              item.data.error = e.error || ''
-              item.data.status = e.error ? 'error' : 'done'
-              item.data.denied = e.denied || undefined
-              if (e.duration_ms !== undefined && item.data.meta?.duration_ms === undefined) {
-                item.data.meta = { ...(item.data.meta || {}), duration_ms: e.duration_ms }
+          timeline.push({ kind: 'tool', seq: nextSeq(), data: tc })
+          if (e.tool_call_id) pendingToolCalls.set(e.tool_call_id, tc)
+        } else if (e.type === 'tool_result') {
+          let resolved = false
+          if (e.tool_call_id) {
+            const tc = pendingToolCalls.get(e.tool_call_id)
+            if (tc) {
+              tc.output = e.output || ''
+              tc.error = e.error || ''
+              tc.status = e.error ? 'error' : 'done'
+              tc.denied = e.denied || undefined
+              if (e.duration_ms !== undefined && tc.meta?.duration_ms === undefined) {
+                tc.meta = { ...(tc.meta || {}), duration_ms: e.duration_ms }
               }
-              break
+              pendingToolCalls.delete(e.tool_call_id)
+              resolved = true
+            }
+          }
+          if (!resolved && e.name) {
+            for (let i = timeline.length - 1; i >= 0; i--) {
+              const item = timeline[i]
+              if (item.kind === 'tool' && item.data.name === e.name && item.data.status === 'running') {
+                item.data.output = e.output || ''
+                item.data.error = e.error || ''
+                item.data.status = e.error ? 'error' : 'done'
+                item.data.denied = e.denied || undefined
+                if (e.duration_ms !== undefined && item.data.meta?.duration_ms === undefined) {
+                  item.data.meta = { ...(item.data.meta || {}), duration_ms: e.duration_ms }
+                }
+                break
+              }
             }
           }
         }
       }
-    }
-    // Any tool calls that never got a result (interrupted session) → done.
-    for (const tc of pendingToolCalls.values()) tc.status = 'done'
+      // Any tool calls that never got a result (interrupted session) → done.
+      for (const tc of pendingToolCalls.values()) tc.status = 'done'
 
-    dispatch(chatActions.setTimeline(timeline))
+      dispatch(chatActions.setTimeline(timeline))
 
-    // Seed isRunning from the task list (a resumed task may still be running).
-    const state = getState() as RootState
-    const resumedId = resp.session_id || uuid
-    const running = !!state.session.tasks.find((t) => t.uuid === resumedId)?.running
-    dispatch(chatActions.setRunning(running))
-
-    // Rehydrate server-truth state for the resumed session (token snapshot,
-    // provider/model, mode). clearChat nulled tokenSnapshot, and no
-    // token_update arrives until the session's next LLM call — without this
-    // the context ring stays hidden after switching conversations.
-    await dispatch(loadStatus())
-    await dispatch(reconcilePendingInteractions())
-
-    // Refresh goal + todos (the backend restored them; no WS push on switch).
-    try {
-      const goal = await api.goal()
-      dispatch(chatActions.setGoal(goal))
-    } catch {
-      // ignore
-    }
-    try {
-      const todos = await api.todos()
-      dispatch(chatActions.setTodos(todos))
-    } catch {
-      // ignore
+      if (oneShot) {
+        // Hydrate server-truth state from the SAME response — the old flow
+        // spent four extra serial round trips here (status, ask/approval
+        // pending, goal, todos). clearChat nulled tokenSnapshot, and no
+        // token_update arrives until the session's next LLM call — without
+        // this the context ring stays hidden after switching conversations.
+        dispatch(chatActions.setRunning(!!resp.running))
+        if (resp.pwd) dispatch(sessionActions.setProjectPath(resp.pwd))
+        dispatch(modelActions.setProvider(resp.provider || ''))
+        dispatch(modelActions.setModel(resp.model || ''))
+        dispatch(modelActions.setMode(normalizeMode(resp.mode || '')))
+        if (resp.token) dispatch(chatActions.setTokenSnapshot(resp.token))
+        dispatch(chatActions.setGoal(resp.goal ?? null))
+        dispatch(chatActions.setTodos(resp.todos ?? []))
+      } else {
+        // Older server: seed isRunning from the task list (a resumed task may
+        // still be running), then fetch the rest individually — in parallel,
+        // and none of it gates the timeline repaint.
+        const state = getState() as RootState
+        const resumedId = resp.session_id || uuid
+        const running = !!state.session.tasks.find((t) => t.uuid === resumedId)?.running
+        dispatch(chatActions.setRunning(running))
+        void dispatch(loadStatus())
+        void dispatch(loadGoal())
+        void dispatch(loadTodos())
+      }
+      // Pending approval/ask interactions only add interactive blocks — they
+      // never gate the repaint, so don't await them.
+      void dispatch(reconcilePendingInteractions())
+    } finally {
+      dispatch(chatActions.setSessionLoading(false))
     }
   },
 )

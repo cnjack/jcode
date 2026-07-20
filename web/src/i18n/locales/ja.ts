@@ -212,6 +212,7 @@ export default {
     stop: '停止',
     stopAgent: 'エージェントを停止 (Esc)',
     thinking: '考え中…',
+    loadingConversation: '会話を読み込み中…',
     attachFiles: 'ファイルを添付',
     goal: '目標',
     add: '追加',

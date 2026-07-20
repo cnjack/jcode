@@ -61,6 +61,7 @@ function PendingIndicator() {
 export function ChatView({ readOnly }: ChatViewProps) {
   const { t } = useTranslation()
   const hasMessages = useAppSelector((s) => s.chat.timeline.length > 0)
+  const sessionLoading = useAppSelector((s) => s.chat.sessionLoading)
   const projectPath = useAppSelector((s) => s.session.projectPath)
   const backdropKind = useAppSelector((s) => {
     const provider = s.model.providers.find((candidate) => candidate.id === s.model.providerName)
@@ -74,6 +75,27 @@ export function ChatView({ readOnly }: ChatViewProps) {
       <div className="chat-panel flex min-h-0 flex-1 flex-col">
         <div className="min-h-0 flex-1">
           <Thread overscanBottom={8} renderPending={() => <PendingIndicator />} />
+        </div>
+      </div>
+    )
+  }
+
+  // Resume in flight: swap to a skeleton the instant the click lands, so the
+  // switch feels immediate instead of blank-until-ready (the old flow showed
+  // nothing until the full history had fetched AND rebuilt).
+  if (sessionLoading) {
+    const label = t('chat.loadingConversation')
+    return (
+      <div className="chat-panel flex min-h-0 flex-1 flex-col">
+        <div className="resume-skeleton jcode-chat-col" role="status" aria-live="polite" aria-label={label}>
+          <div className="resume-skeleton__rows jcode-gutter">
+            <div className="rs-row rs-row--user"><div className="rs-bar" style={{ width: '46%' }} /></div>
+            <div className="rs-row"><div className="rs-bar" style={{ width: '78%' }} /></div>
+            <div className="rs-row"><div className="rs-bar" style={{ width: '62%' }} /></div>
+            <div className="rs-row rs-row--user"><div className="rs-bar" style={{ width: '38%' }} /></div>
+            <div className="rs-row"><div className="rs-bar" style={{ width: '70%' }} /></div>
+          </div>
+          <span className="resume-skeleton__label">{label}</span>
         </div>
       </div>
     )

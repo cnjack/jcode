@@ -209,6 +209,7 @@ export default {
     stop: '停止',
     stopAgent: '停止 Agent (Esc)',
     thinking: '思考中…',
+    loadingConversation: '加载会话中…',
     attachFiles: '添加附件',
     goal: '目标',
     add: '添加',
