@@ -227,19 +227,42 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		if eng != s.activeEngine() {
 			s.deleteEngine(id)
 		} else {
-			// Active task: wait for the cancelled run to drain so its final
-			// RecordAssistant/usage writes land before we close + reset the recorder
-			// (a post-close write would re-create and truncate the file).
+			// Active task: wait (bounded) for the cancelled run to drain so its
+			// final RecordAssistant/usage writes land before we close + reset
+			// the recorder (a post-close write would re-create and truncate the
+			// file).
 			for i := 0; i < 200 && eng.running.Load(); i++ {
 				time.Sleep(5 * time.Millisecond)
 			}
-			eng.emu.Lock()
-			if eng.recorder != nil && eng.recorder.UUID() == id {
-				eng.recorder.Close()
-				eng.recorder = nil
-				eng.history = nil
+			if drained := !eng.running.Load(); drained {
+				eng.emu.Lock()
+				if eng.recorder != nil && eng.recorder.UUID() == id {
+					eng.recorder.Close()
+					eng.recorder = nil
+					eng.history = nil
+				}
+				eng.emu.Unlock()
+			} else {
+				// The run is still draining (a ctx-ignoring tool, a slow LLM
+				// tail). Closing the recorder now would let the live writer
+				// resurrect the session file this handler is about to delete.
+				// Defer the close until the run actually finishes, then re-run
+				// the deletion to sweep up anything the tail wrote in between
+				// (same discipline as the automation-run teardown).
+				go func() {
+					for i := 0; i < 6000 && eng.running.Load(); i++ {
+						time.Sleep(5 * time.Millisecond)
+					}
+					eng.emu.Lock()
+					if eng.recorder != nil && eng.recorder.UUID() == id {
+						eng.recorder.Close()
+						eng.recorder = nil
+						eng.history = nil
+					}
+					eng.emu.Unlock()
+					_, _ = session.DeleteSessionByUUID(id)
+				}()
 			}
-			eng.emu.Unlock()
 		}
 	}
 

@@ -92,6 +92,11 @@ export function Sidebar() {
   const tasks = useAppSelector((s) => s.session.tasks)
   const projectTimes = useAppSelector((s) => s.session.projectTimes)
   const currentSessionId = useAppSelector((s) => s.session.currentSessionId)
+  // Latest currentSessionId readable from async handlers (deleteItem) after an
+  // await, when the render-scope value is stale: if the user navigated away
+  // while the DELETE was in flight, the delete must not yank the foreground.
+  const currentSessionRef = useRef(currentSessionId)
+  currentSessionRef.current = currentSessionId
   const activePath = useAppSelector((s) => s.session.projectPath)
   const activeView = useAppSelector((s) => s.ui.activeView)
 
@@ -376,19 +381,37 @@ export function Sidebar() {
 
   async function deleteItem(row: SessionRow) {
     const wasActive = row.uuid === currentSessionId
+    if (wasActive) {
+      // Drop queued type-ahead for this session BEFORE the delete round-trip:
+      // the cancelled run's agent_done reaches the client before the DELETE
+      // response, and would otherwise drain the queue back into the deleted
+      // session — resurrecting its file + index entry on disk.
+      dispatch(chatActions.dropSessionQueue(row.uuid))
+    }
     try {
       await api.deleteSession(row.uuid)
     } catch {
       return
     }
-    dispatch(sessionActions.setSessions(sessions.filter((s) => s.uuid !== row.uuid)))
-    dispatch(sessionActions.setTasks(tasks.filter((t) => t.uuid !== row.uuid)))
-    dispatch(chatActions.dropSessionQueue(row.uuid))
-    if (wasActive) {
-      dispatch(chatActions.clearChat())
-      dispatch(sessionActions.setCurrentSession(''))
-      dispatch(chatActions.setRunning(false))
+    // Filter inside the reducer: the render-scope sessions/tasks copies are
+    // stale after the await (a WS update or refresh may have landed since),
+    // and a whole-list setTasks would clobber it.
+    dispatch(sessionActions.removeSession(row.uuid))
+    if (!wasActive) {
+      dispatch(chatActions.dropSessionQueue(row.uuid))
+      return
     }
+    // The user may have navigated to another session while the DELETE was in
+    // flight (their click's loadSession wins) — only take over the foreground
+    // if we're still on the deleted session.
+    if (currentSessionRef.current !== row.uuid) return
+    // Land on the welcome page with a FRESH session. Merely clearing the UI
+    // would strand the backend on the deleted task's engine: the next
+    // message would run on that stale engine, whose events are stamped with
+    // the deleted task id and dropped by the WS filter (a conversation that
+    // appears dead). startNewChat provisions a consistent new engine/task —
+    // and reclaims the stale one (its recorder was reset on delete).
+    await dispatch(startNewChat())
   }
 
   function openContext(e: React.MouseEvent, row: SessionRow) {
