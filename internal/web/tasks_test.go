@@ -196,6 +196,34 @@ func TestUpdateTaskMetaResponseShape(t *testing.T) {
 	}
 }
 
+// Running tasks must not be deleted: cancel+delete races the recorder and is
+// the wrong product behaviour (stop first, then delete).
+func TestDeleteSessionRejectsRunning(t *testing.T) {
+	seedIndex(t, map[string][]session.SessionMeta{
+		"/work/p": {{UUID: "run-1", Project: "/work/p"}},
+	})
+	eng := &Engine{taskID: "run-1", pwd: "/work/p"}
+	eng.running.Store(true)
+	s := &Server{Engine: eng, tasks: map[string]*Engine{"run-1": eng}}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/run-1", nil)
+	req.SetPathValue("id", "run-1")
+	s.handleDeleteSession(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("delete while running: code=%d body=%q, want 409", rec.Code, rec.Body.String())
+	}
+	all, err := session.ListAllSessions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all["/work/p"]) != 1 || all["/work/p"][0].UUID != "run-1" {
+		t.Fatalf("running session must remain indexed, got %+v", all["/work/p"])
+	}
+	if !eng.running.Load() {
+		t.Fatal("delete must not clear the running flag")
+	}
+}
+
 // Regression: deleting a task that belongs to a project OTHER than the active
 // one (s.pwd) must still remove it from the index — the sidebar tree can delete
 // across projects. Previously this silently no-op'd, leaving a ghost task.

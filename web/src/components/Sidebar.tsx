@@ -92,6 +92,11 @@ export function Sidebar() {
   const tasks = useAppSelector((s) => s.session.tasks)
   const projectTimes = useAppSelector((s) => s.session.projectTimes)
   const currentSessionId = useAppSelector((s) => s.session.currentSessionId)
+  // Latest currentSessionId readable from async handlers (deleteItem) after an
+  // await, when the render-scope value is stale: if the user navigated away
+  // while the DELETE was in flight, the delete must not yank the foreground.
+  const currentSessionRef = useRef(currentSessionId)
+  currentSessionRef.current = currentSessionId
   const activePath = useAppSelector((s) => s.session.projectPath)
   const activeView = useAppSelector((s) => s.ui.activeView)
 
@@ -375,20 +380,40 @@ export function Sidebar() {
   }
 
   async function deleteItem(row: SessionRow) {
+    // Running tasks must not be deleted — backend also returns 409. Stop first.
+    if (row.running) return
     const wasActive = row.uuid === currentSessionId
+    if (wasActive) {
+      // Drop queued type-ahead for this session BEFORE the delete round-trip:
+      // a late agent_done (from a prior cancel/stop) can arrive before the
+      // DELETE response and would otherwise drain the queue back into the
+      // deleted session — resurrecting its file + index entry on disk.
+      dispatch(chatActions.dropSessionQueue(row.uuid))
+    }
     try {
       await api.deleteSession(row.uuid)
     } catch {
       return
     }
-    dispatch(sessionActions.setSessions(sessions.filter((s) => s.uuid !== row.uuid)))
-    dispatch(sessionActions.setTasks(tasks.filter((t) => t.uuid !== row.uuid)))
-    dispatch(chatActions.dropSessionQueue(row.uuid))
-    if (wasActive) {
-      dispatch(chatActions.clearChat())
-      dispatch(sessionActions.setCurrentSession(''))
-      dispatch(chatActions.setRunning(false))
+    // Filter inside the reducer: the render-scope sessions/tasks copies are
+    // stale after the await (a WS update or refresh may have landed since),
+    // and a whole-list setTasks would clobber it.
+    dispatch(sessionActions.removeSession(row.uuid))
+    if (!wasActive) {
+      dispatch(chatActions.dropSessionQueue(row.uuid))
+      return
     }
+    // The user may have navigated to another session while the DELETE was in
+    // flight (their click's loadSession wins) — only take over the foreground
+    // if we're still on the deleted session.
+    if (currentSessionRef.current !== row.uuid) return
+    // Land on the welcome page with a FRESH session. Merely clearing the UI
+    // would strand the backend on the deleted task's engine: the next
+    // message would run on that stale engine, whose events are stamped with
+    // the deleted task id and dropped by the WS filter (a conversation that
+    // appears dead). startNewChat provisions a consistent new engine/task —
+    // and reclaims the stale one (its recorder was reset on delete).
+    await dispatch(startNewChat())
   }
 
   function openContext(e: React.MouseEvent, row: SessionRow) {
@@ -457,6 +482,8 @@ export function Sidebar() {
           icon={TrashIcon}
           label={t('sidebar.actions.delete')}
           danger
+          disabled={row.running}
+          title={row.running ? t('sidebar.actions.deleteWhileRunning') : undefined}
           onClick={() => { void deleteItem(row); closeCtx() }}
         />
       </>
@@ -856,19 +883,34 @@ function CtxItem({
   label,
   onClick,
   danger,
+  disabled,
+  title,
 }: {
   icon: React.ComponentType<{ className?: string }>
   label: string
   onClick: () => void
   danger?: boolean
+  disabled?: boolean
+  title?: string
 }) {
   return (
     <button
       type="button"
       role="menuitem"
-      onClick={onClick}
-      className={`flex w-full items-center gap-2 rounded-[var(--radius-md)] px-2 py-1.5 text-left text-[12.5px] transition-colors hover:bg-[var(--color-muted)] ${
-        danger ? 'text-[var(--color-destructive)]' : 'text-[var(--color-foreground)]'
+      disabled={disabled}
+      title={title}
+      aria-disabled={disabled || undefined}
+      onClick={disabled ? undefined : onClick}
+      className={`flex w-full items-center gap-2 rounded-[var(--radius-md)] px-2 py-1.5 text-left text-[12.5px] transition-colors ${
+        disabled
+          ? 'cursor-not-allowed opacity-45'
+          : 'hover:bg-[var(--color-muted)]'
+      } ${
+        danger && !disabled
+          ? 'text-[var(--color-destructive)]'
+          : disabled
+            ? 'text-[var(--color-muted-foreground)]'
+            : 'text-[var(--color-foreground)]'
       }`}
     >
       <Icon className="h-3.5 w-3.5" />

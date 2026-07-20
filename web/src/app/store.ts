@@ -497,6 +497,14 @@ const sessionSlice = createSlice({
       const { uuid: _uuid, ...rest } = a.payload
       Object.assign(t, rest)
     },
+    /** Remove a deleted session from BOTH lists, inside the reducer (operates
+     *  on the latest state — a component-side filter over render-scope copies
+     *  would clobber any list update that landed during the delete round-trip,
+     *  and unlike setTasks/setSessions this never re-adds anything). */
+    removeSession(s, a: { payload: string }) {
+      s.sessions = s.sessions.filter((x) => x.uuid !== a.payload)
+      s.tasks = s.tasks.filter((x) => x.uuid !== a.payload)
+    },
     /** Insert or merge a session for the active-project fallback list. */
     upsertSession(s, a: { payload: SessionItem }) {
       const i = s.sessions.findIndex((x) => x.uuid === a.payload.uuid)

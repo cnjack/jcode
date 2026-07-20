@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/cnjack/jcode/internal/config"
@@ -213,10 +212,17 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "session id is required"})
 		return
 	}
-	// Tear down the live engine for this task (if any) so its run is cancelled and
-	// resources reclaimed. The active foreground engine is left in place — but its
-	// recorder is reset to a fresh session so post-delete writes don't land in the
-	// now-unlinked file (silent data loss).
+	// Refuse while the agent is mid-run. Cancelling + deleting a live task races
+	// the recorder (file/index resurrection) and is a bad UX for an intentional
+	// stop — the user should stop the run first, then delete.
+	if eng := s.resolveEngine(id); eng != nil && eng.running.Load() {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is currently running"})
+		return
+	}
+	// Tear down the live engine for this task (if any) so leftover cancel state
+	// is cleared and resources reclaimed. The active foreground engine is left
+	// in place — but its recorder is reset so post-delete writes don't land in
+	// the now-unlinked file (silent data loss).
 	if eng := s.resolveEngine(id); eng != nil {
 		eng.emu.Lock()
 		cancel := eng.runCancel
@@ -227,12 +233,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		if eng != s.activeEngine() {
 			s.deleteEngine(id)
 		} else {
-			// Active task: wait for the cancelled run to drain so its final
-			// RecordAssistant/usage writes land before we close + reset the recorder
-			// (a post-close write would re-create and truncate the file).
-			for i := 0; i < 200 && eng.running.Load(); i++ {
-				time.Sleep(5 * time.Millisecond)
-			}
+			// Not running (guarded above): safe to close the recorder now.
 			eng.emu.Lock()
 			if eng.recorder != nil && eng.recorder.UUID() == id {
 				eng.recorder.Close()

@@ -993,6 +993,7 @@ export default {
       markRead: '標記為已讀',
       markUnread: '標記為未讀',
       delete: '刪除',
+      deleteWhileRunning: '請先停止執行中的 Agent，再刪除此對話',
       taskActions: '工作操作',
     },
     relativeTime: {
