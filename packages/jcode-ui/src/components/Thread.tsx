@@ -41,6 +41,10 @@ export interface ThreadProps {
   suggestions?: ReactNode
   /** Override the pending ("Thinking…") indicator. */
   renderPending?: () => ReactNode
+  /** Label for the default pending indicator ("Thinking"). Ignored when
+   *  renderPending is set. The library has no i18n; hosts pass a translated
+   *  string here. */
+  pendingLabel?: string
   /** className passthrough for the scroll container. */
   className?: string
   /** Extra bottom padding (px) to clear a sticky composer. */
@@ -52,6 +56,7 @@ export function Thread({
   emptyState,
   suggestions,
   renderPending,
+  pendingLabel,
   className,
   overscanBottom,
 }: ThreadProps): ReactNode {
@@ -71,7 +76,7 @@ export function Thread({
       overscanBottom={overscanBottom ?? 24}
       mapItems={mapItems}
       renderItem={(item) => renderItem(item, isRunning)}
-      renderPending={renderPending ?? DefaultPending}
+      renderPending={renderPending ?? (() => <DefaultPending label={pendingLabel} />)}
       renderEmpty={emptyState ? () => emptyState : undefined}
       renderFooter={
         suggestions
@@ -143,21 +148,20 @@ function renderItem(item: ThreadItem, isRunning: boolean): ReactNode {
   return null
 }
 
-function DefaultPending(): ReactNode {
+function DefaultPending({ label }: { label?: string }): ReactNode {
+  const text = label ?? 'Thinking'
   return (
     <div
       className="jcode-pending jcode-chat-col"
       role="status"
       aria-live="polite"
-      aria-label="Thinking…"
+      aria-label={text}
     >
       <div className="jcode-pending__inner jcode-gutter">
-        <span className="jcode-pending__dots" aria-hidden="true">
-          <span className="jcode-pending-dot" />
-          <span className="jcode-pending-dot" />
-          <span className="jcode-pending-dot" />
+        <span className="jcode-pending__ring" aria-hidden="true">
+          <span className="jcode-pending-ring" />
         </span>
-        <span className="jcode-pending__label">Thinking</span>
+        <span className="jcode-pending__label">{text}</span>
       </div>
     </div>
   )

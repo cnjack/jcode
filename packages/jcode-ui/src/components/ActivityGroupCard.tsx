@@ -22,6 +22,7 @@ import { ChevronDownIcon } from '@heroicons/react/24/outline'
 import type { ActivityGroup } from 'jcode-ui-core'
 import { summarizeActivityCounts, countActivityFlags } from 'jcode-ui-core'
 import { ToolRow } from './ToolRow.js'
+import { ToolIcon } from './toolIcons.js'
 
 export interface ActivityGroupCardProps {
   group: ActivityGroup
@@ -40,6 +41,10 @@ export const ActivityGroupCard = memo(function ActivityGroupCard({
   const counts = useMemo(() => summarizeActivityCounts(group.tools), [group.tools])
   const { failed, denied } = useMemo(() => countActivityFlags(group.tools), [group.tools])
   const hasError = failed > 0
+  // Latest tool drives the running header line (icon + title + subtitle).
+  // group.tools is append-ordered, so the last entry is the currently-running
+  // step (or, once settled, the most recent one).
+  const latest = running ? group.tools[group.tools.length - 1] : undefined
 
   return (
     <div
@@ -55,50 +60,85 @@ export const ActivityGroupCard = memo(function ActivityGroupCard({
         onClick={() => setUserOverride(!expanded)}
         className="jcode-activity__header flex w-full max-w-full cursor-pointer items-center gap-1.5 bg-transparent text-left"
       >
-        <span
-          className={`jcode-toolbatch__status shrink-0 text-[10px] ${running ? 'animate-pulse' : ''}`}
-          style={{
-            color: running
-              ? 'var(--jcode-color-primary)'
-              : hasError
-                ? 'var(--jcode-color-error-fg)'
-                : 'var(--jcode-color-success-fg)',
-          }}
-          aria-hidden
-        >
-          {running ? '●' : hasError ? '✗' : '✓'}
-        </span>
         {running ? (
-          <span
-            className="shimmer-running shrink-0 text-xs font-medium tracking-wide"
-            style={{ color: 'var(--jcode-color-muted-foreground)' }}
-          >
-            Running…
-          </span>
-        ) : group.explorative ? (
+          // Running: tool icon + latest tool name (+ subtitle) + scan-line
+          // shimmer on the title. The live status dot is pushed to the right
+          // (ml-auto) so settled groups keep their ✗/✓ on the left.
           <>
+            {latest && (
+              <ToolIcon
+                kind={latest.displayInfo?.kind}
+                name={latest.name}
+                className="h-3 w-3 shrink-0"
+                style={{ color: 'var(--jcode-color-muted-foreground)', opacity: 0.8 }}
+                aria-hidden
+              />
+            )}
             <span
-              className="shrink-0 text-xs font-medium tracking-wide"
+              className="shimmer-running min-w-0 shrink-0 truncate font-mono text-[0.78rem] font-medium tracking-wide"
               style={{ color: 'var(--jcode-color-muted-foreground)' }}
             >
-              Explored
+              {latest ? (latest.displayInfo?.title ?? latest.name) : 'Running…'}
             </span>
-            {counts && (
+            {latest?.displayInfo?.subtitle && (
               <span
-                className="min-w-0 truncate font-mono text-[0.72rem]"
+                className="jcode-toolcall__subtitle min-w-0 truncate font-mono text-[0.72rem]"
                 style={{ color: 'var(--jcode-color-foreground)', opacity: 0.88 }}
               >
-                {counts}
+                · {latest.displayInfo.subtitle}
+              </span>
+            )}
+            <span
+              className="ml-auto flex shrink-0 items-center"
+              aria-hidden
+            >
+              <span
+                className="animate-pulse text-[10px]"
+                style={{ color: 'var(--jcode-color-primary)' }}
+              >
+                ●
+              </span>
+            </span>
+          </>
+        ) : (
+          <>
+            <span
+              className="jcode-toolbatch__status shrink-0 text-[10px]"
+              style={{
+                color: hasError
+                  ? 'var(--jcode-color-error-fg)'
+                  : 'var(--jcode-color-success-fg)',
+              }}
+              aria-hidden
+            >
+              {hasError ? '✗' : '✓'}
+            </span>
+            {group.explorative ? (
+              <>
+                <span
+                  className="shrink-0 text-xs font-medium tracking-wide"
+                  style={{ color: 'var(--jcode-color-muted-foreground)' }}
+                >
+                  Explored
+                </span>
+                {counts && (
+                  <span
+                    className="min-w-0 truncate font-mono text-[0.72rem]"
+                    style={{ color: 'var(--jcode-color-foreground)', opacity: 0.88 }}
+                  >
+                    {counts}
+                  </span>
+                )}
+              </>
+            ) : (
+              <span
+                className="min-w-0 truncate text-xs font-medium tracking-wide"
+                style={{ color: 'var(--jcode-color-muted-foreground)' }}
+              >
+                {counts || `${group.tools.length} tool calls`}
               </span>
             )}
           </>
-        ) : (
-          <span
-            className="min-w-0 truncate text-xs font-medium tracking-wide"
-            style={{ color: 'var(--jcode-color-muted-foreground)' }}
-          >
-            {counts || `${group.tools.length} tool calls`}
-          </span>
         )}
         {failed > 0 && (
           <span

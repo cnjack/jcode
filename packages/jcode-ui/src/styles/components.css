@@ -1182,7 +1182,8 @@
 }
 
 /* ─── Thread pending ("Thinking") ───
- * Align under message body gutter; neutral dots (not brand orange). */
+ * Align under message body gutter; breathing ring in brand color (matches
+ * the conversation sidebar's running indicator). */
 .jcode-pending {
   padding-top: 0.35rem;
   padding-bottom: 0.85rem;
@@ -1193,24 +1194,21 @@
   gap: 0.55rem;
   min-height: 1.5rem;
 }
-.jcode-pending__dots {
+.jcode-pending__ring {
   display: inline-flex;
   align-items: center;
-  gap: 0.28rem;
+  justify-content: center;
+  width: 11px;
+  height: 11px;
 }
-.jcode-pending-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--jcode-color-muted-foreground);
-  opacity: 0.45;
-  animation: jcode-think-dot 1.2s ease-in-out infinite both;
-}
-.jcode-pending-dot:nth-child(2) {
-  animation-delay: 0.15s;
-}
-.jcode-pending-dot:nth-child(3) {
-  animation-delay: 0.3s;
+.jcode-pending-ring {
+  display: block;
+  width: 9px;
+  height: 9px;
+  border: 1.6px solid var(--jcode-color-primary);
+  border-radius: 9999px;
+  background: transparent;
+  animation: jcode-think-ring 1.6s ease-in-out infinite;
 }
 .jcode-pending__label {
   font-size: 0.8rem;
@@ -1220,16 +1218,15 @@
   opacity: 0.9;
 }
 
-@keyframes jcode-think-dot {
+@keyframes jcode-think-ring {
   0%,
-  80%,
   100% {
-    opacity: 0.3;
-    transform: translateY(0);
+    opacity: 0.35;
+    transform: scale(0.78);
   }
-  40% {
-    opacity: 0.95;
-    transform: translateY(-1.5px);
+  50% {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 
@@ -1238,9 +1235,10 @@
   .jcode-ask-user .jcode-interactive-card {
     animation: none;
   }
-  .jcode-pending-dot {
+  .jcode-pending-ring {
     animation: none;
-    opacity: 0.6;
+    opacity: 1;
+    transform: none;
   }
 }
 
