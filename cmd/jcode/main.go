@@ -51,6 +51,8 @@ func main() {
 		command.NewSessionsCmd(),
 		command.NewUpdateCmd(),
 		command.NewMemoryCmd(),
+		command.NewLoginCmd(),
+		command.NewLogoutCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
