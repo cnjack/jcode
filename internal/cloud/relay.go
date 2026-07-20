@@ -2,8 +2,10 @@
 // (cloud/docs/17-jcode-device-relay.md §4): long-poll command delivery,
 // command acks, heartbeats, session-index upserts and event uploads.
 //
-// All payloads are plain JSON at this stage (明文阶段). M5 will seal payloads
-// into E2E envelopes inside Client.post / Client.get — see the note there.
+// Payload fields are opaque to the server: since M5 they are E2E envelopes
+// (see crypto.go) whenever the device's CEK cipher is active, plaintext
+// during the pre-CEK grey period. Sealing/opening happens in the Connector
+// (sealUplink / openDownlink), not in these transport helpers.
 package cloud
 
 import (

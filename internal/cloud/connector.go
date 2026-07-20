@@ -43,6 +43,14 @@ type ConnectorConfig struct {
 	// override them to point at a temp dir.
 	IndexPathFn    func() (string, error)
 	ListSessionsFn func() (map[string][]session.SessionMeta, error)
+
+	// Cipher, when non-nil, seals uplink payloads (events/ephemeral payload,
+	// sessions meta, ack result) and opens downlink command payloads. Nil
+	// means plaintext uplink (pre-CEK grey period; see crypto.go). Run lazily
+	// initializes it from ~/.jcode/cloud.json when left nil; tests inject one
+	// explicitly (or set CipherDisabled to force the plaintext path).
+	Cipher         *EnvelopeCipher
+	CipherDisabled bool
 }
 
 const (
@@ -61,6 +69,7 @@ type Connector struct {
 	seq    *seqAllocator
 	text   *agentTextBuffers
 	token  string
+	cipher *EnvelopeCipher // nil = plaintext uplink (grey period)
 }
 
 // NewConnector builds a Connector from cfg.
@@ -82,6 +91,7 @@ func NewConnector(cfg ConnectorConfig) *Connector {
 		seq:    newSeqAllocator(),
 		text:   newAgentTextBuffers(),
 		token:  token,
+		cipher: cfg.Cipher,
 	}
 }
 
@@ -131,12 +141,59 @@ func (c *Connector) logf(format string, args ...any) {
 	config.Logger().Printf("[cloud] "+format, args...)
 }
 
+// sealUplink encrypts one uplink payload field when the CEK cipher is active;
+// on the plaintext grey path (or on seal failure, which must never block the
+// relay) it returns the input unchanged.
+func (c *Connector) sealUplink(plaintext json.RawMessage) json.RawMessage {
+	if c.cipher == nil || len(plaintext) == 0 {
+		return plaintext
+	}
+	sealed, err := c.cipher.Seal(plaintext)
+	if err != nil {
+		c.logf("seal failed, sending plaintext: %v", err)
+		return plaintext
+	}
+	return sealed
+}
+
+// openDownlink decrypts a downlink command payload when it is an envelope;
+// plaintext payloads pass through unchanged (grey rule). An envelope that
+// fails to decrypt is a hard error — the command must not run.
+func (c *Connector) openDownlink(payload json.RawMessage) (json.RawMessage, error) {
+	if len(payload) == 0 {
+		return payload, nil
+	}
+	if c.cipher == nil {
+		if IsEnvelope(payload) {
+			return nil, fmt.Errorf("received encrypted command but no CEK is initialized on this device")
+		}
+		return payload, nil
+	}
+	plain, _, err := c.cipher.OpenMaybe(payload)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt downlink payload: %w", err)
+	}
+	return plain, nil
+}
+
 // Run starts the connector and blocks until ctx is cancelled (web server
 // shutdown). It never returns an error — all failures are logged as warnings.
 func (c *Connector) Run(ctx context.Context) {
 	if c.cfg.Credentials == nil || c.token == "" {
 		c.logf("connector not started: no device credentials")
 		return
+	}
+	// E2E (M5): lazily initialize the CEK cipher. Before the CEK exists the
+	// connector stays on the plaintext grey path; once generated, everything
+	// uplink is sealed. A failure here must never stop the connector — fall
+	// back to plaintext with a warning.
+	if c.cipher == nil && !c.cfg.CipherDisabled {
+		if cipher, err := EnsureCEK(); err != nil {
+			c.logf("CEK initialization failed, staying on plaintext uplink: %v", err)
+		} else {
+			c.cipher = cipher
+			c.logf("E2E encryption active (key_gen=%d)", cipher.KeyGen())
+		}
 	}
 	// The long poll holds a request open for pollWait; make sure the HTTP
 	// client's own timeout gives the server room to answer.
@@ -253,16 +310,35 @@ func (c *Connector) pollLoop(ctx context.Context) {
 }
 
 // executeAndAck runs one downlink command against the local control plane and
-// posts the ack. The ack itself is best-effort (warned on failure).
+// posts the ack. The ack itself is best-effort (warned on failure). Downlink
+// payloads are decrypted (envelope) before dispatch; the ack result is sealed
+// when the CEK cipher is active.
 func (c *Connector) executeAndAck(ctx context.Context, cmd DeviceCommand) {
+	payload, err := c.openDownlink(cmd.Payload)
+	if err != nil {
+		c.logf("command %s (%s) rejected: %v", cmd.ID, cmd.Kind, err)
+		c.ack(ctx, cmd.ID, "error", map[string]string{"error": err.Error()})
+		return
+	}
+	cmd.Payload = payload
 	status, result := c.executeCommand(ctx, cmd)
 	if status == "error" {
 		c.logf("command %s (%s) failed: %v", cmd.ID, cmd.Kind, result)
 	} else {
 		c.logf("command %s (%s) executed", cmd.ID, cmd.Kind)
 	}
-	if err := c.client.AckCommand(ctx, c.token, cmd.ID, CommandAck{Status: status, Result: result}); err != nil && ctx.Err() == nil {
-		c.logf("ack for command %s failed: %v", cmd.ID, err)
+	c.ack(ctx, cmd.ID, status, result)
+}
+
+// ack posts one command ack, sealing the result when encryption is active.
+func (c *Connector) ack(ctx context.Context, id, status string, result any) {
+	if c.cipher != nil && result != nil {
+		if plain, err := json.Marshal(result); err == nil {
+			result = c.sealUplink(plain)
+		}
+	}
+	if err := c.client.AckCommand(ctx, c.token, id, CommandAck{Status: status, Result: result}); err != nil && ctx.Err() == nil {
+		c.logf("ack for command %s failed: %v", id, err)
 	}
 }
 

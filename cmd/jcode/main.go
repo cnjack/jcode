@@ -53,6 +53,7 @@ func main() {
 		command.NewMemoryCmd(),
 		command.NewLoginCmd(),
 		command.NewLogoutCmd(),
+		command.NewCloudCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {

@@ -17,7 +17,9 @@ import (
 
 // collectSessions builds the upsert list from the local session index.
 // Status is "running" only for sessions the local web layer marked running;
-// everything else reports "idle". Meta is the SessionMeta JSON, as-is.
+// everything else reports "idle". Meta is the SessionMeta JSON, sealed into
+// an E2E envelope when the CEK cipher is active (plaintext otherwise — the
+// server stores it opaquely either way).
 func (c *Connector) collectSessions() ([]SessionUpsert, error) {
 	listFn := c.cfg.ListSessionsFn
 	if listFn == nil {
@@ -44,7 +46,7 @@ func (c *Connector) collectSessions() ([]SessionUpsert, error) {
 			upserts = append(upserts, SessionUpsert{
 				SessionID: m.UUID,
 				Status:    status,
-				Meta:      metaJSON,
+				Meta:      c.sealUplink(metaJSON),
 			})
 		}
 	}

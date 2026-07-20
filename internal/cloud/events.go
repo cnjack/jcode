@@ -208,8 +208,10 @@ func newEventBatcher(c *Connector) *eventBatcher {
 }
 
 // add buffers one event, flushing the session's batch inline when it hits the
-// size cap.
+// size cap. The payload is sealed once here (when encryption is active) so a
+// requeued batch keeps the same ciphertext across retries.
 func (b *eventBatcher) add(ctx context.Context, sid string, ev EventUpload) {
+	ev.Payload = b.c.sealUplink(ev.Payload)
 	b.mu.Lock()
 	b.pending[sid] = append(b.pending[sid], ev)
 	full := len(b.pending[sid]) >= b.max
@@ -368,13 +370,14 @@ func (c *Connector) handleWSEvent(ctx context.Context, batcher *eventBatcher, ms
 			}
 		}
 		// Ephemeral: forward immediately, drop on failure — never retried.
-		if err := c.client.SendEphemeral(ctx, c.token, sid, ev.Type, msg); err != nil && ctx.Err() == nil {
+		if err := c.client.SendEphemeral(ctx, c.token, sid, ev.Type, c.sealUplink(msg)); err != nil && ctx.Err() == nil {
 			c.logf("ephemeral event %q for session %s dropped: %v", ev.Type, sid, err)
 		}
 		return
 	}
 	// Durable: assign the per-session seq and batch. The payload is the full
-	// original WS message JSON (type + task_id + data), as-is (明文阶段).
+	// original WS message JSON (type + task_id + data); the batcher seals it
+	// into an E2E envelope when encryption is active.
 	batcher.add(ctx, sid, EventUpload{Seq: c.seq.Next(sid), Kind: ev.Type, Payload: json.RawMessage(msg)})
 
 	switch ev.Type {

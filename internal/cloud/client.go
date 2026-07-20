@@ -127,10 +127,8 @@ type RegisterDeviceRequest struct {
 // when non-empty, is sent as a Bearer credential. out may be nil for responses
 // whose body is irrelevant. Non-2xx responses become *APIError.
 //
-// M5 (E2E) note: relay payloads are plain JSON at this stage. When envelope
-// encryption ships, the wrap/unwrap happens HERE (and in get) — callers pass
-// plaintext and this layer seals it into the {enc, key_gen, nonce, ct}
-// envelope before marshal.
+// E2E (M5): payload sealing happens above this transport layer — callers
+// (Connector.sealUplink/openDownlink) pass already-sealed envelope JSON.
 func (c *Client) post(ctx context.Context, path, token string, body, out any) error {
 	var reader io.Reader
 	if body != nil {

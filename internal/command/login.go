@@ -180,6 +180,7 @@ func runLogout(ctx context.Context) error {
 	if err := cloud.DeleteCredentials(); err != nil {
 		return err
 	}
+	cloud.ResetCEKCache()
 
 	if err := updateConfigCloud("", false); err != nil {
 		fmt.Printf("Warning: failed to update %s: %v\n", config.ConfigPath(), err)
@@ -206,8 +207,8 @@ func runLoginStatus() error {
 }
 
 // updateConfigCloud sets config.cloud while preserving the stored url (when
-// the url argument is empty, i.e. logout) and the user's auto_connect
-// preference. Login/logout must not require a fully configured provider set,
+// the url argument is empty, i.e. logout) and the user's auto_connect/e2ee
+// preferences. Login/logout must not require a fully configured provider set,
 // so a LoadConfig failure falls back to a best-effort raw read of the file
 // (unknown fields may be dropped in that case).
 func updateConfigCloud(url string, enabled bool) error {
@@ -222,7 +223,12 @@ func updateConfigCloud(url string, enabled bool) error {
 	if url == "" {
 		url = current.URL
 	}
-	cfg.SetCloud(&config.CloudConfig{Enabled: enabled, URL: url, AutoConnect: current.AutoConnect})
+	cfg.SetCloud(&config.CloudConfig{
+		Enabled:     enabled,
+		URL:         url,
+		AutoConnect: current.AutoConnect,
+		E2EE:        current.E2EE,
+	})
 	return config.SaveConfig(cfg)
 }
 

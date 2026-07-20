@@ -7,7 +7,7 @@ import (
 
 func TestCloudSettingsDefaults(t *testing.T) {
 	c := &Config{}
-	if got := c.CloudSettings(); got.Enabled || got.URL != "" || got.AutoConnect != nil {
+	if got := c.CloudSettings(); got.Enabled || got.URL != "" || got.AutoConnect != nil || got.E2EE != nil {
 		t.Fatalf("CloudSettings() on absent block = %+v, want zero value", got)
 	}
 	if !CloudAutoConnect(c) {
@@ -15,6 +15,12 @@ func TestCloudSettingsDefaults(t *testing.T) {
 	}
 	if !CloudAutoConnect(nil) {
 		t.Fatal("CloudAutoConnect(nil) = false, want default true")
+	}
+	if !CloudE2EE(c) {
+		t.Fatal("CloudE2EE() on absent block = false, want default true")
+	}
+	if !CloudE2EE(nil) {
+		t.Fatal("CloudE2EE(nil) = false, want default true")
 	}
 }
 
@@ -61,5 +67,46 @@ func TestSetCloudNilRemovesBlock(t *testing.T) {
 	}
 	if got := c.CloudSettings(); got.Enabled || got.URL != "" {
 		t.Fatalf("CloudSettings() after removal = %+v", got)
+	}
+}
+
+func TestCloudE2EEDisableRoundTrip(t *testing.T) {
+	off := false
+	c := &Config{}
+	c.SetCloud(&CloudConfig{Enabled: true, URL: "https://cloud.j-code.net", E2EE: &off})
+
+	if CloudE2EE(c) {
+		t.Fatal("CloudE2EE() = true, want explicit false")
+	}
+	got := c.CloudSettings()
+	if got.E2EE == nil || *got.E2EE {
+		t.Fatalf("CloudSettings().E2EE = %v, want explicit false", got.E2EE)
+	}
+
+	// Mutating the snapshot must not leak into the live config.
+	*got.E2EE = true
+	if CloudE2EE(c) {
+		t.Fatal("snapshot mutation leaked into live config")
+	}
+
+	// JSON round-trip keeps the documented `e2ee` key and the explicit false.
+	data, err := json.Marshal(c.CloudSettings())
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if v, ok := raw["e2ee"]; !ok || v != false {
+		t.Fatalf("marshaled cloud block missing e2ee=false: %v", raw)
+	}
+
+	// An explicit true survives too (distinguishable from absent in the JSON,
+	// equivalent for CloudE2EE).
+	on := true
+	c.SetCloud(&CloudConfig{Enabled: true, E2EE: &on})
+	if !CloudE2EE(c) {
+		t.Fatal("CloudE2EE() = false, want explicit true")
 	}
 }

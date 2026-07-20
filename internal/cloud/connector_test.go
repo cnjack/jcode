@@ -35,8 +35,9 @@ type mockCloud struct {
 }
 
 type ephemeralRecord struct {
-	sid  string
-	kind string
+	sid     string
+	kind    string
+	payload json.RawMessage
 }
 
 func newMockCloud() *mockCloud {
@@ -129,11 +130,12 @@ func (m *mockCloud) handler() http.Handler {
 	})
 	mux.HandleFunc("POST /internal/v1/device/sessions/{sid}/ephemeral", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Kind string `json:"kind"`
+			Kind    string          `json:"kind"`
+			Payload json.RawMessage `json:"payload"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		m.mu.Lock()
-		m.ephemeral = append(m.ephemeral, ephemeralRecord{sid: r.PathValue("sid"), kind: req.Kind})
+		m.ephemeral = append(m.ephemeral, ephemeralRecord{sid: r.PathValue("sid"), kind: req.Kind, payload: req.Payload})
 		m.mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	})

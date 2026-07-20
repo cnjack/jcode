@@ -1,8 +1,13 @@
 package command
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
+	"strings"
+
+	"github.com/spf13/cobra"
 
 	"github.com/cnjack/jcode/internal/cloud"
 	"github.com/cnjack/jcode/internal/config"
@@ -51,5 +56,281 @@ func newCloudConnector(cfg *config.Config, creds *cloud.Credentials, port int, w
 		LocalBase:  fmt.Sprintf("http://127.0.0.1:%d", port),
 		LocalToken: webToken,
 		Version:    Version,
+		// cloud.e2ee=false keeps the M5 plaintext grey path: the connector
+		// skips CEK initialization entirely.
+		CipherDisabled: !config.CloudE2EE(cfg),
 	})
+}
+
+// --- `jcode cloud` command group (M5: pairing approval + CEK management) ---
+
+// NewCloudCmd returns the `jcode cloud` command group: pairing approval and
+// E2E key management against the jcloud orchestrator. Like `jcode login` it
+// prints to plain stdout — no TUI involved.
+func NewCloudCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "cloud",
+		Short: "Manage the jcloud device relay (pairings, E2E key, status)",
+	}
+	cmd.AddCommand(
+		newCloudPairingsCmd(),
+		newCloudApproveCmd(),
+		newCloudDenyCmd(),
+		newCloudStatusCmd(),
+		newCloudKeyCmd(),
+		newCloudRotateKeyCmd(),
+	)
+	return cmd
+}
+
+func newCloudPairingsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "pairings",
+		Short: "List pending pairing requests",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCloudPairings(cmd.Context(), cmd.OutOrStdout())
+		},
+	}
+}
+
+func newCloudApproveCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "approve <pairing_id>",
+		Short: "Approve a pairing request (wraps the CEK for the requester)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCloudApprove(cmd.Context(), cmd.OutOrStdout(), args[0])
+		},
+	}
+}
+
+func newCloudDenyCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "deny <pairing_id>",
+		Short: "Deny a pairing request",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCloudDeny(cmd.Context(), cmd.OutOrStdout(), args[0])
+		},
+	}
+}
+
+func newCloudStatusCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "status",
+		Short: "Show cloud relay and E2E key status",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCloudStatus(cmd.Context(), cmd.OutOrStdout())
+		},
+	}
+}
+
+func newCloudKeyCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "key",
+		Short: "Manage the account E2E encryption key (CEK)",
+	}
+	cmd.AddCommand(
+		&cobra.Command{
+			Use:   "show-phrase",
+			Short: "Show the 24-word recovery phrase for the CEK",
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return runCloudKeyShowPhrase(cmd.OutOrStdout(), cmd.InOrStdin())
+			},
+		},
+		&cobra.Command{
+			Use:   "recover",
+			Short: "Rebuild the CEK from a 24-word recovery phrase",
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return runCloudKeyRecover(cmd.OutOrStdout(), cmd.InOrStdin())
+			},
+		},
+	)
+	return cmd
+}
+
+func newCloudRotateKeyCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "rotate-key",
+		Short: "Generate a new CEK (key_gen+1); paired clients must re-pair",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCloudRotateKey(cmd.OutOrStdout(), cmd.InOrStdin())
+		},
+	}
+}
+
+// loadDeviceClient loads the device credentials and builds an orchestrator
+// client. Errors when not logged in.
+func loadDeviceClient() (*cloud.Credentials, *cloud.Client, error) {
+	creds, err := cloud.LoadCredentials()
+	if err != nil {
+		return nil, nil, err
+	}
+	if creds == nil {
+		return nil, nil, fmt.Errorf("not logged in: run `jcode login` first")
+	}
+	return creds, cloud.NewClient(creds.CloudURL), nil
+}
+
+// confirm prints prompt and returns true only when the user answers "yes".
+func confirm(w io.Writer, in *bufio.Reader, prompt string) bool {
+	_, _ = fmt.Fprintf(w, "%s [type 'yes' to continue]: ", prompt)
+	line, _ := in.ReadString('\n')
+	return strings.TrimSpace(line) == "yes"
+}
+
+func runCloudPairings(ctx context.Context, w io.Writer) error {
+	creds, client, err := loadDeviceClient()
+	if err != nil {
+		return err
+	}
+	pairings, err := client.ListPairings(ctx, creds.DeviceToken, "pending")
+	if err != nil {
+		return fmt.Errorf("list pairings: %w", err)
+	}
+	if len(pairings) == 0 {
+		_, _ = fmt.Fprintln(w, "No pending pairing requests.")
+		return nil
+	}
+	_, _ = fmt.Fprintln(w, "Pending pairing requests:")
+	for _, p := range pairings {
+		_, _ = fmt.Fprintf(w, "  %s  %-24s  %s\n", p.ID, p.Label, p.CreatedAt)
+	}
+	_, _ = fmt.Fprintln(w, "\nApprove with `jcode cloud approve <id>`, deny with `jcode cloud deny <id>`.")
+	return nil
+}
+
+func runCloudApprove(ctx context.Context, w io.Writer, id string) error {
+	creds, client, err := loadDeviceClient()
+	if err != nil {
+		return err
+	}
+	pairing, err := client.GetPairing(ctx, creds.DeviceToken, id)
+	if err != nil {
+		return fmt.Errorf("get pairing %s: %w", id, err)
+	}
+	if pairing.PubKey == "" {
+		return fmt.Errorf("pairing %s has no requester pubkey", id)
+	}
+	cipher, err := cloud.EnsureCEK()
+	if err != nil {
+		return err
+	}
+	wrap, err := cloud.WrapCEK(pairing.PubKey, cipher.CEK(), cipher.KeyGen())
+	if err != nil {
+		return fmt.Errorf("wrap CEK for pairing %s: %w", id, err)
+	}
+	if err := client.RespondPairing(ctx, creds.DeviceToken, id, true, wrap); err != nil {
+		return fmt.Errorf("respond to pairing %s: %w", id, err)
+	}
+	_, _ = fmt.Fprintf(w, "Approved pairing %s (label %q) — CEK key_gen=%d wrapped for the requester.\n", id, pairing.Label, cipher.KeyGen())
+	return nil
+}
+
+func runCloudDeny(ctx context.Context, w io.Writer, id string) error {
+	creds, client, err := loadDeviceClient()
+	if err != nil {
+		return err
+	}
+	if err := client.RespondPairing(ctx, creds.DeviceToken, id, false, nil); err != nil {
+		return fmt.Errorf("respond to pairing %s: %w", id, err)
+	}
+	_, _ = fmt.Fprintf(w, "Denied pairing %s.\n", id)
+	return nil
+}
+
+func runCloudStatus(ctx context.Context, w io.Writer) error {
+	creds, client, err := loadDeviceClient()
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(w, "cloud url:   %s\n", creds.CloudURL)
+	_, _ = fmt.Fprintf(w, "device name: %s\n", creds.DeviceName)
+	_, _ = fmt.Fprintf(w, "device id:   %s\n", creds.DeviceID)
+	_, _ = fmt.Fprintf(w, "key gen:     %d\n", creds.KeyGen)
+	cekStatus := "not initialized (plaintext uplink)"
+	if creds.CEK != "" {
+		cekStatus = "initialized (E2E encryption active)"
+	}
+	_, _ = fmt.Fprintf(w, "cek:         %s\n", cekStatus)
+	if err := client.Heartbeat(ctx, creds.DeviceToken); err != nil {
+		_, _ = fmt.Fprintf(w, "online:      no (heartbeat failed: %v)\n", err)
+	} else {
+		_, _ = fmt.Fprintln(w, "online:      yes (heartbeat ok)")
+	}
+	return nil
+}
+
+func runCloudKeyShowPhrase(w io.Writer, in io.Reader) error {
+	cipher, err := cloud.EnsureCEK()
+	if err != nil {
+		return err
+	}
+	reader := bufio.NewReader(in)
+	_, _ = fmt.Fprintln(w, "WARNING: the recovery phrase decrypts ALL synced content of this account.")
+	_, _ = fmt.Fprintln(w, "Anyone who sees it can read your sessions. Do not share it, store it safely.")
+	if !confirm(w, reader, "Reveal the 24-word recovery phrase?") {
+		_, _ = fmt.Fprintln(w, "Aborted.")
+		return nil
+	}
+	phrase, err := cloud.CEKToPhrase(cipher.CEK())
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(w, "\nRecovery phrase (key_gen=%d):\n\n    %s\n\n", cipher.KeyGen(), phrase)
+	_, _ = fmt.Fprintln(w, "Write it down and keep it offline. It is NOT stored anywhere else.")
+	return nil
+}
+
+func runCloudKeyRecover(w io.Writer, in io.Reader) error {
+	if _, _, err := loadDeviceClient(); err != nil {
+		return err
+	}
+	reader := bufio.NewReader(in)
+	_, _ = fmt.Fprintln(w, "Paste the 24-word recovery phrase (single line, space separated):")
+	line, err := reader.ReadString('\n')
+	if err != nil && line == "" {
+		return fmt.Errorf("read recovery phrase: %w", err)
+	}
+	phrase := strings.TrimSpace(line)
+	if _, err := cloud.CEKFromPhrase(phrase); err != nil {
+		return err
+	}
+	if creds, err := cloud.LoadCredentials(); err != nil {
+		return err
+	} else if creds != nil && creds.CEK != "" {
+		_, _ = fmt.Fprintln(w, "WARNING: a CEK already exists on this device. Recovering OVERWRITES it.")
+		_, _ = fmt.Fprintln(w, "Content encrypted with the current key becomes unreadable for this device.")
+		if !confirm(w, reader, "Overwrite the existing CEK with the recovered one?") {
+			_, _ = fmt.Fprintln(w, "Aborted.")
+			return nil
+		}
+	}
+	cipher, err := cloud.RecoverCEK(phrase)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(w, "CEK recovered (key_gen=%d). Uplink is now encrypted with the recovered key.\n", cipher.KeyGen())
+	return nil
+}
+
+func runCloudRotateKey(w io.Writer, in io.Reader) error {
+	if _, _, err := loadDeviceClient(); err != nil {
+		return err
+	}
+	reader := bufio.NewReader(in)
+	_, _ = fmt.Fprintln(w, "Rotating the CEK generates a new key (key_gen+1).")
+	_, _ = fmt.Fprintln(w, "Already-paired clients keep the old key and CANNOT read new content until they re-pair.")
+	if !confirm(w, reader, "Rotate the CEK now?") {
+		_, _ = fmt.Fprintln(w, "Aborted.")
+		return nil
+	}
+	cipher, err := cloud.RotateCEK()
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(w, "CEK rotated. New key_gen=%d.\n", cipher.KeyGen())
+	_, _ = fmt.Fprintln(w, "Note: authorized clients (console / mobile) must pair again to receive the new key.")
+	_, _ = fmt.Fprintln(w, "Consider saving the new recovery phrase: `jcode cloud key show-phrase`.")
+	return nil
 }

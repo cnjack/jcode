@@ -437,6 +437,11 @@ type CloudConfig struct {
 	// AutoConnect gates starting the relay connector on `jcode web` startup.
 	// nil ⇒ true.
 	AutoConnect *bool `json:"auto_connect,omitempty"`
+	// E2EE gates the M5 end-to-end encryption layer: nil/true ⇒ the connector
+	// lazily generates the account CEK and seals everything uplink; false ⇒ it
+	// stays on the plaintext grey path (CipherDisabled) for the gradual
+	// roll-out. Pointer so an explicit false survives config round-trips.
+	E2EE *bool `json:"e2ee,omitempty"`
 }
 
 // cloudMu guards publication of Config.Cloud. As with Memory/ToolSearch, the
@@ -450,6 +455,7 @@ func cloneCloudConfig(cc *CloudConfig) *CloudConfig {
 	}
 	copy := *cc
 	copy.AutoConnect = cloneBool(cc.AutoConnect)
+	copy.E2EE = cloneBool(cc.E2EE)
 	return &copy
 }
 
@@ -483,6 +489,17 @@ func CloudAutoConnect(c *Config) bool {
 		return true
 	}
 	return *cc.AutoConnect
+}
+
+// CloudE2EE reports whether the device relay seals uplink payloads with the
+// account CEK (M5 E2E encryption). Default true for absent blocks and nil
+// values; an explicit false keeps the connector on the plaintext grey path.
+func CloudE2EE(c *Config) bool {
+	cc := c.CloudSettings()
+	if cc.E2EE == nil {
+		return true
+	}
+	return *cc.E2EE
 }
 
 // ApprovalReviewConfig holds tuning knobs for jcode's LLM approval reviewer.

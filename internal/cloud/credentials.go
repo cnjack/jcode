@@ -30,9 +30,12 @@ type Credentials struct {
 	// the orchestrator for later E2E key exchange (CEK wrapping).
 	PublicKey  string `json:"public_key"`
 	PrivateKey string `json:"private_key"`
-	// KeyGen is the current CEK generation this device holds (1 until E2E
-	// key rotation ships).
+	// KeyGen is the current CEK generation this device holds.
 	KeyGen int `json:"key_gen"`
+	// CEK is the account-level AES-256-GCM content encryption key, base64.
+	// Empty means "not initialized yet" (pre-M5 credentials file); it is
+	// lazily generated on first need (see crypto.go EnsureCEK).
+	CEK string `json:"cek,omitempty"`
 }
 
 // GenerateIdentityKeyPair creates a fresh X25519 device identity key pair and
