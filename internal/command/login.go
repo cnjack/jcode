@@ -50,8 +50,12 @@ func NewLogoutCmd() *cobra.Command {
 }
 
 // openBrowser opens url in the system browser. It is a variable so tests can
-// stub it out.
+// stub it out. JCODE_NO_BROWSER=1 disables it entirely (e2e rigs, headless
+// environments) — the verification URL is always printed regardless.
 var openBrowser = func(url string) error {
+	if os.Getenv("JCODE_NO_BROWSER") == "1" {
+		return nil
+	}
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
