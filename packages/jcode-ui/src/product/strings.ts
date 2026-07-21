@@ -44,6 +44,8 @@ export interface ProductComposerStrings {
   modeAutoSub: string
   modeFullAccess: string
   modeFullAccessSub: string
+  /** Shown in the mode picker when the host restricts `allowedModes` (M20). */
+  modeCeilingHint: string
 
   // ── model picker / manage dialog ──
   modelFilter: string
@@ -168,6 +170,7 @@ export const defaultProductComposerStrings: ProductComposerStrings = {
   modeAutoSub: 'AI reviewer allows safe tools; uncertain ones ask.',
   modeFullAccess: 'Full access',
   modeFullAccessSub: 'Act freely — no approval prompts.',
+  modeCeilingHint: 'This host limits which modes are available',
 
   modelFilter: 'Filter models…',
   modelCurrent: 'Current',

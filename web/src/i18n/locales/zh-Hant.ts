@@ -229,6 +229,7 @@ export default {
       autoSub: 'AI 審查器自動放行安全工具；不確定的再詢問。',
       fullAccess: '完全存取',
       fullAccessSub: '自由操作——不再彈出確認。',
+      ceilingHint: '此宿主限制了可用模式',
     },
     roles: {
       you: '你',
@@ -1050,6 +1051,10 @@ export default {
     offerExpiresIn: '{time} 後過期',
     regenerate: '重新產生',
     close: '關閉',
+    copy: '複製',
+    copied: '已複製',
+    copyLink: '複製連結',
+    copyPairLink: '複製配對連結',
     autoConnect: '自動連線',
     autoConnectHint: '啟動時自動連線雲端中繼',
     server: '伺服器',

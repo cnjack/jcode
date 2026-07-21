@@ -58,6 +58,7 @@ function buildStrings(t: (key: string, opts?: Record<string, unknown>) => string
     modeAutoSub: t('chat.modes.autoSub'),
     modeFullAccess: t('chat.modes.fullAccess'),
     modeFullAccessSub: t('chat.modes.fullAccessSub'),
+    modeCeilingHint: t('chat.modes.ceilingHint'),
 
     modelFilter: t('chat.model.filter'),
     modelCurrent: t('chat.model.current'),

@@ -38,6 +38,13 @@ export interface ProductComposerHost {
   providerName: string
   modelName: string
   mode: AgentMode
+  /**
+   * Modes the host allows in the mode picker, in pick order. Absent ⇒ all
+   * four modes (the desktop default). Cloud hosts cap cloud-originated
+   * sessions at auto (M20), so they pass `['approval', 'plan', 'auto']` and
+   * a `modeCeilingHint` string explaining the ceiling.
+   */
+  allowedModes?: AgentMode[]
   providers: ProviderInfo[]
   /** Favorite refs as "provider/model" keys. */
   favoriteModels: string[]

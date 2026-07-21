@@ -228,6 +228,7 @@ export default {
       autoSub: 'AI レビューが安全なツールを許可し、不確実なものは確認します。',
       fullAccess: 'フルアクセス',
       fullAccessSub: '自由に実行—確認は不要です。',
+      ceilingHint: 'このホストでは利用可能なモードが制限されています',
     },
     roles: {
       you: 'あなた',
@@ -1056,6 +1057,10 @@ export default {
     offerExpiresIn: '有効期限まで {time}',
     regenerate: '再生成',
     close: '閉じる',
+    copy: 'コピー',
+    copied: 'コピーしました',
+    copyLink: 'リンクをコピー',
+    copyPairLink: 'ペアリングリンクをコピー',
     autoConnect: '自動接続',
     autoConnectHint: '起動時にクラウドリレーへ自動接続する',
     server: 'サーバー',

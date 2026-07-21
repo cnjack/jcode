@@ -228,6 +228,7 @@ export default {
       autoSub: 'AI 리뷰어가 안전한 도구를 허용하고 불확실한 경우 묻습니다.',
       fullAccess: '전체 액세스',
       fullAccessSub: '자유롭게 실행—승인 프롬프트가 없습니다.',
+      ceilingHint: '이 호스트에서는 사용 가능한 모드가 제한됩니다',
     },
     roles: {
       you: '나',
@@ -1055,6 +1056,10 @@ export default {
     offerExpiresIn: '{time} 후 만료',
     regenerate: '다시 생성',
     close: '닫기',
+    copy: '복사',
+    copied: '복사됨',
+    copyLink: '링크 복사',
+    copyPairLink: '페어링 링크 복사',
     autoConnect: '자동 연결',
     autoConnectHint: '시작 시 클라우드 릴리에 자동으로 연결',
     server: '서버',

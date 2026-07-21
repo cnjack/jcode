@@ -566,6 +566,18 @@ func (p *chatSendPayload) needsCompose() bool {
 	return p.ProjectPath != "" || p.Model != nil || p.Effort != "" || p.Goal != "" || len(p.Attachments) > 0
 }
 
+// cloudForbiddenMode reports whether a cloud chat.send asks for unrestricted
+// execution. Cloud-originated sessions are capped at auto (M20): full_access —
+// under any alias — is refused at the protocol layer (ack error
+// mode_not_allowed_for_cloud) instead of relying on the client to self-censor.
+func cloudForbiddenMode(m string) bool {
+	switch strings.ToLower(strings.TrimSpace(m)) {
+	case "full_access", "full-access", "fullaccess", "bypass", "bypass_permissions", "bypasspermissions":
+		return true
+	}
+	return false
+}
+
 // chatImage mirrors web.chatImage (base64 image in a chat request); name is
 // the optional original filename (file picker / paste), passed through
 // losslessly — the local /api/chat handler ignores it.
@@ -602,6 +614,12 @@ func (c *Connector) execChatSend(ctx context.Context, cmd DeviceCommand) (string
 	var p chatSendPayload
 	if err := json.Unmarshal(cmd.Payload, &p); err != nil {
 		return "error", map[string]string{"error": fmt.Sprintf("invalid chat.send payload: %v", err)}
+	}
+	// M20 mode ceiling: a cloud-originated session may not run full_access
+	// (bypass). Rejected before any side effect — even a goal_armed payload
+	// that declares the intent is refused.
+	if cloudForbiddenMode(p.Mode) {
+		return "error", map[string]string{"error": fmt.Sprintf("mode_not_allowed_for_cloud: %q (cloud sessions are capped at auto)", p.Mode)}
 	}
 	// goal_armed wins over everything: text is the goal objective and the
 	// command only arms the goal — /api/chat and all compose facets

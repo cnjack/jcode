@@ -34,6 +34,7 @@ import {
   ArrowPathIcon,
   ArrowRightOnRectangleIcon,
   CheckIcon,
+  ClipboardDocumentIcon,
   CloudIcon,
   QrCodeIcon,
   XMarkIcon,
@@ -94,6 +95,42 @@ function fmtCountdown(ms: number): string {
   const m = Math.floor(total / 60)
   const s = total % 60
   return `${m}:${String(s).padStart(2, '0')}`
+}
+
+/**
+ * CopyButton — one-click clipboard copy with transient "copied" feedback
+ * (M17). With `label` it renders as a subtle bordered text button; without,
+ * as a compact icon button. Clipboard failures degrade silently — the text
+ * stays selectable.
+ */
+function CopyButton({ text, label }: { text: string; label?: string }) {
+  const { t } = useTranslation()
+  const [copied, setCopied] = useState(false)
+  const caption = copied ? t('cloud.copied') : (label ?? t('cloud.copy'))
+  return (
+    <button
+      type="button"
+      aria-label={caption}
+      title={caption}
+      onClick={() => {
+        navigator.clipboard
+          .writeText(text)
+          .then(() => {
+            setCopied(true)
+            window.setTimeout(() => setCopied(false), 1500)
+          })
+          .catch(() => {})
+      }}
+      className={
+        label !== undefined
+          ? 'inline-flex items-center gap-1 rounded-[var(--radius-md)] border border-[var(--color-border)] px-2 py-1 text-[11.5px] text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]'
+          : 'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]'
+      }
+    >
+      {copied ? <CheckIcon className="h-3 w-3" /> : <ClipboardDocumentIcon className="h-3 w-3" />}
+      {label !== undefined && <span>{caption}</span>}
+    </button>
+  )
 }
 
 export function CloudBadge() {
@@ -472,6 +509,7 @@ export function CloudBadge() {
                         {t('cloud.regenerate')}
                       </button>
                     )}
+                    <CopyButton text={offer.qr} label={t('cloud.copyPairLink')} />
                     <div className="text-center text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">
                       {t('cloud.scanPairHint')}
                     </div>
@@ -513,13 +551,19 @@ export function CloudBadge() {
                   {loginPanel.verification_uri}
                 </a>
               )}
-              <div
-                className="rounded-[var(--radius-md)] bg-[var(--color-muted)] px-3 py-1.5 text-[18px] font-semibold tracking-[0.2em] text-[var(--color-foreground)]"
-                style={{ fontFamily: 'var(--font-mono)' }}
-              >
-                {loginPanel.user_code}
+              <div className="flex items-center gap-1.5">
+                <div
+                  className="rounded-[var(--radius-md)] bg-[var(--color-muted)] px-3 py-1.5 text-[18px] font-semibold tracking-[0.2em] text-[var(--color-foreground)]"
+                  style={{ fontFamily: 'var(--font-mono)' }}
+                >
+                  {loginPanel.user_code}
+                </div>
+                <CopyButton text={loginPanel.user_code} />
               </div>
               {loginPanel.verification_uri && <QRImage text={loginPanel.verification_uri} size={140} />}
+              {loginPanel.verification_uri && (
+                <CopyButton text={loginPanel.verification_uri} label={t('cloud.copyLink')} />
+              )}
               <div className="inline-flex items-center gap-1.5 text-[11.5px] text-[var(--color-muted-foreground)]">
                 <ArrowPathIcon className="h-3.5 w-3.5 animate-spin" />
                 {t('cloud.loginWaiting')}

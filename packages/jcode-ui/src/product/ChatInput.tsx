@@ -167,6 +167,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
     providerName,
     modelName,
     mode,
+    allowedModes,
     providers,
     favoriteModels,
     recentModels,
@@ -674,6 +675,9 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
   const canSend = input.trim().length > 0 || pendingImages.length > 0
   const showSend = !isRunning || input.trim().length > 0 || pendingImages.length > 0
   const currentModeDef = MODE_DEFS.find((m) => m.value === mode) ?? MODE_DEFS[0]
+  // Host-restricted mode list (M20 cloud ceiling): absent ⇒ all four modes.
+  const modeDefs = allowedModes ? MODE_DEFS.filter((d) => allowedModes.includes(d.value)) : MODE_DEFS
+  const modeRestricted = modeDefs.length < MODE_DEFS.length
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -872,6 +876,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                 <button
                   type="button"
                   aria-expanded={showModePicker}
+                  title={modeRestricted ? strings.modeCeilingHint : undefined}
                   onClick={(e: ReactMouseEvent) => { e.stopPropagation(); openMode() }}
                   className="inline-flex h-7 items-center gap-[7px] rounded-[var(--radius-lg)] border border-transparent bg-transparent px-2 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
                   style={{ paddingLeft: 6 }}
@@ -898,7 +903,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                 </button>
                 {showModePicker && (
                   <div className="absolute bottom-full left-0 z-[var(--z-dropdown)] mb-1 w-[264px] rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-1 shadow-[var(--shadow-lg)]">
-                    {MODE_DEFS.map((m) => {
+                    {modeDefs.map((m) => {
                       const active = mode === m.value
                       return (
                         <button
@@ -944,6 +949,11 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                         </button>
                       )
                     })}
+                    {modeRestricted && (
+                      <div className="border-t border-[var(--color-border)] px-2.5 pb-1.5 pt-2 text-[10.5px] leading-[1.4] text-[var(--color-muted-foreground)]">
+                        {strings.modeCeilingHint}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
