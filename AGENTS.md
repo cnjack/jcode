@@ -203,6 +203,35 @@ Checklist before publish:
 - **Don't skip `env.ResolvePath()`.** Raw path concatenation can escape the working directory without warning.
 - **Don't import `internal/tui` from non-TUI packages.** The handler interface is the decoupling boundary.
 - **Don't depend on `jcode-ui` / `jcode-ui-core` via `file:` or `workspace:*`.** Consumers and `packages/jcode-ui`→core must use registry version ranges so publish and local installs match.
+- **Don't let tests read the real HOME.** The pre-push hook runs the full suite; tests must `t.Setenv("HOME", t.TempDir())` whenever code under test resolves `config.ConfigDir()` (a real `~/.jcode/AGENTS.md` breaks `internal/prompts`).
+
+---
+
+## Cloud relay (`internal/cloud/`)
+
+jcode can log into jcloud (device code) and be remote-controlled via an
+outbound-only relay; design contract lives in the cloud repo
+(`docs/17-jcode-device-relay.md`). Durable rules:
+
+- **Layout:** `credentials.go` (~/.jcode/cloud.json, 0600), `client.go`
+  (transport, 32MB response cap — attachment commands are large),
+  `connector.go` + `supervisor.go` (lifecycle, runtime auto_connect toggle),
+  `events.go` (WS event pump: durable vs ephemeral classification +
+  `agent_message` synthesis), `sessions.go` (index + capabilities mirror),
+  `crypto.go` (CEK, AES-256-GCM envelopes, P-256 ECIES, BIP39),
+  `pairing_inbox.go` (pairing approvals; QR offers auto-approve).
+- **E2EE is the default.** All relay payloads are sealed once a CEK exists;
+  gray plaintext is only for pre-CEK or `cloud.e2ee:false`. Never add an
+  uplink path that bypasses `sealUplink`/`openDownlink`.
+- **The connector is a client of the local control plane** (`/api/*` on
+  loopback) — it must never change engine behavior or block `jcode web`;
+  failures log and back off (≤60s).
+- **Contract changes are cross-repo:** bump the cloud orchestrator first
+  (strict decode rejects unknown fields), keep `docs/17` in sync, and extend
+  the matching e2e journey in the cloud repo (`e2e/j7`–`j11`).
+- **Cross-implementation crypto vectors** live outside the repos at
+  `jcode-cloud-relay/shared/test-vectors.json`; `TestSharedVectorsFile` skips
+  cleanly when the sibling dir is absent.
 
 ---
 
