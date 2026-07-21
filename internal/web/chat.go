@@ -28,6 +28,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		Images    []chatImage `json:"images,omitempty"`     // optional: base64-encoded images
 		Mode      string      `json:"mode,omitempty"`       // "build" or "plan"
 		SessionID string      `json:"session_id,omitempty"` // optional: the task (session) to run
+		// Source is an optional channel label (e.g. "console"/"mobile" from the
+		// cloud relay connector) propagated to the user_message event, exactly
+		// like SubmitMessage's source ("wechat"). Empty = web-originated.
+		Source string `json:"source,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 20<<20)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
@@ -58,7 +62,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID := s.submitMessage(eng, req.Message, modeStr, "", req.SessionID, req.Images)
+	sessionID := s.submitMessage(eng, req.Message, modeStr, req.Source, req.SessionID, req.Images)
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "processing", "session_id": sessionID})
 }
 
@@ -146,6 +150,16 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 	// matching TUI/ACP. The mode arg is retained for the recorder/event context.
 	_ = mode
 
+	// M19: stamp the receiving session's sync opt-in BEFORE the user_message
+	// Emit below — the connector's event pump gates uploads on the opt-in, so
+	// a cloud-originated first message would otherwise race uplink and be
+	// dropped (J8-S3: user_message missing from the durable log). Keyed on
+	// eng.taskID, the WS event task_id the gate checks; it coincides with the
+	// recorder UUID for local engines, and the recorder-based stamp below
+	// covers the resume/replace branch. SetIfAbsent makes repeat stamps
+	// (every message lands here) harmless.
+	s.stampCloudSync(eng.taskID, source, sessionID == "")
+
 	// Emit user_message event for external sources (e.g. WeChat) so web clients see it.
 	// Web-originated messages are already added by the frontend's sendMessage().
 	if source != "" {
@@ -158,6 +172,10 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 	// Ensure a recorder exists (lazy creation on first message).
 	// If the client provided a session_id and the current recorder differs,
 	// resume the client's session to prevent creating a duplicate.
+	// stampNew captures whether THIS call minted the recording session (for
+	// the M19 sync stamp below; the store write happens after eng.emu is
+	// released).
+	var stampNew bool
 	eng.emu.Lock()
 	if eng.recorder == nil {
 		rec, _ := session.NewRecorder(eng.pwd, eng.providerName, eng.modelName)
@@ -168,6 +186,8 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 			eng.recorderInit(rec)
 		}
 		eng.recorder = rec
+		// sessionID == "" means the recorder just minted a new UUID.
+		stampNew = rec != nil && sessionID == ""
 	} else if sessionID != "" && eng.recorder.UUID() != sessionID {
 		// Client is continuing a session that doesn't match the current recorder.
 		// Resume the client's session to keep all messages together.
@@ -181,6 +201,16 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 	}
 	recorder := eng.recorder
 	eng.emu.Unlock()
+	// M19: stamp the receiving session's initial cloud-sync state on EVERY
+	// submitted message, not only when this call created the recorder — the
+	// bootstrap engine already has a recorder at startup, and a cloud
+	// chat.send landing on it (the J8 regression) must still opt the session
+	// in. stampCloudSync is a no-op for local sources unless the session is
+	// brand-new (then cloud.sync_default applies), and never overwrites an
+	// explicit user toggle.
+	if recorder != nil {
+		s.stampCloudSync(recorder.UUID(), source, stampNew)
+	}
 
 	// Record user message.
 	if recorder != nil {

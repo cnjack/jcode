@@ -4,7 +4,8 @@
  * Keyed by session id in localStorage so drafts survive conversation switches,
  * composer remounts (welcome ↔ conversation layout), and full app restarts
  * (desktop). All access is try/catch-guarded: localStorage may be unavailable
- * in hardened webviews (same discipline as Sidebar filters / authToken).
+ * in hardened webviews. The key prefix matches the historical jcode web app so
+ * existing drafts carry over.
  */
 
 const KEY_PREFIX = 'jcode-composer-draft:'

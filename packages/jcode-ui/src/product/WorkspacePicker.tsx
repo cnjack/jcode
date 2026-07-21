@@ -1,3 +1,12 @@
+/**
+ * WorkspacePicker — project/workspace switcher pill for the composer header.
+ *
+ * Ported from the jcode web product UI. All backend/store side effects go
+ * through `ProductComposerHost` (validateWorkspacePaths / browseFolders /
+ * switchWorkspace / pickFolder / openRemoteConnect); `isRunning` comes from
+ * the ChatRuntime like every other composer surface.
+ */
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeftIcon,
@@ -9,12 +18,10 @@ import {
   PlusIcon,
   ServerIcon,
 } from '@heroicons/react/24/outline'
-import { useTranslation } from 'react-i18next'
-import { useAppDispatch, useAppSelector } from '../app/hooks'
-import { chatActions, loadWorkspaceState, sessionActions } from '../app/store'
-import { api } from '../lib/api'
-import { isRemotePath, openRemoteConnect, parseRemoteLabel } from '../lib/remote'
-import { isTauri, pickFolder } from '../lib/useDesktop'
+import { useRuntimeState } from 'jcode-ui-core/runtime'
+import type { ProductComposerHost } from './host.js'
+import { useComposerStrings } from './useComposerStrings.js'
+import { isRemotePath, parseRemoteLabel, workspaceName } from './remote.js'
 
 interface WorkspaceNode {
   path: string
@@ -27,12 +34,11 @@ interface BrowseFolder {
   path: string
 }
 
-export function WorkspacePicker({ placement = 'top' }: { placement?: 'top' | 'bottom' }) {
-  const { t } = useTranslation()
-  const dispatch = useAppDispatch()
-  const activePath = useAppSelector((s) => s.session.projectPath)
-  const tasks = useAppSelector((s) => s.session.tasks)
-  const isRunning = useAppSelector((s) => s.chat.isRunning)
+export function WorkspacePicker({ host, placement = 'top' }: { host: ProductComposerHost; placement?: 'top' | 'bottom' }) {
+  const strings = useComposerStrings(host)
+  const activePath = host.projectPath
+  const tasks = host.tasks
+  const { isRunning } = useRuntimeState()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [missing, setMissing] = useState<Set<string>>(new Set())
@@ -63,7 +69,7 @@ export function WorkspacePicker({ placement = 'top' }: { placement?: 'top' | 'bo
       })
   }, [activePath, tasks, missing, query])
 
-  const activeName = activePath ? workspaceName(activePath) : t('workspace.none')
+  const activeName = activePath ? workspaceName(activePath) : strings.workspaceNone
   const activeRemote = isRemotePath(activePath)
 
   const validateKnownPaths = useCallback(async () => {
@@ -71,12 +77,12 @@ export function WorkspacePicker({ placement = 'top' }: { placement?: 'top' | 'bo
     if (activePath && !isRemotePath(activePath)) localPaths.push(activePath)
     if (localPaths.length === 0) return
     try {
-      const res = await api.validatePaths([...new Set(localPaths)])
-      setMissing(new Set(res.missing || []))
+      const missingPaths = await host.validateWorkspacePaths([...new Set(localPaths)])
+      setMissing(new Set(missingPaths || []))
     } catch {
       // The picker remains usable; failed validation should not hide paths.
     }
-  }, [activePath, tasks])
+  }, [activePath, tasks, host])
 
   useEffect(() => {
     void validateKnownPaths()
@@ -111,13 +117,13 @@ export function WorkspacePicker({ placement = 'top' }: { placement?: 'top' | 'bo
     setLoadingFolders(true)
     setError('')
     try {
-      const res = await api.browse(path)
+      const res = await host.browseFolders(path)
       setBrowsePath(res.current)
       setPathInput(res.current)
       setFolders(res.folders || [])
       setBrowserOpen(true)
     } catch (e) {
-      setError(e instanceof Error ? e.message : t('workspace.openError'))
+      setError(e instanceof Error ? e.message : strings.workspaceOpenError)
     } finally {
       setLoadingFolders(false)
     }
@@ -132,25 +138,13 @@ export function WorkspacePicker({ placement = 'top' }: { placement?: 'top' | 'bo
       if (isRemotePath(path)) {
         const meta = parseRemoteLabel(path)
         reset()
-        openRemoteConnect(meta ?? undefined)
+        host.openRemoteConnect?.(meta ?? undefined)
         return
       }
-      if (path === activePath) {
-        const resp = await api.newSession()
-        dispatch(chatActions.clearChat())
-        dispatch(sessionActions.setCurrentSession(resp.session_id))
-        await dispatch(loadWorkspaceState())
-        reset()
-        return
-      }
-      const resp = await api.switchProject(path)
-      dispatch(chatActions.clearChat())
-      dispatch(sessionActions.setCurrentSession(''))
-      dispatch(sessionActions.setProjectPath(resp.pwd || path))
-      await dispatch(loadWorkspaceState())
+      await host.switchWorkspace(path)
       reset()
     } catch (e) {
-      setError(e instanceof Error ? e.message : t('workspace.openError'))
+      setError(e instanceof Error ? e.message : strings.workspaceOpenError)
     } finally {
       setSwitching(false)
     }
@@ -158,9 +152,9 @@ export function WorkspacePicker({ placement = 'top' }: { placement?: 'top' | 'bo
 
   /** "Open folder": native picker on desktop, in-app browser in web. */
   async function openFolderAction() {
-    if (isTauri) {
+    if (host.pickFolder) {
       try {
-        const path = await pickFolder(activePath && !isRemotePath(activePath) ? activePath : undefined)
+        const path = await host.pickFolder(activePath && !isRemotePath(activePath) ? activePath : undefined)
         if (path) await switchTo(path)
         return
       } catch {
@@ -172,7 +166,7 @@ export function WorkspacePicker({ placement = 'top' }: { placement?: 'top' | 'bo
 
   function openRemote() {
     reset()
-    openRemoteConnect()
+    host.openRemoteConnect?.()
   }
 
   function reset() {
@@ -227,7 +221,7 @@ export function WorkspacePicker({ placement = 'top' }: { placement?: 'top' | 'bo
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') void loadFolders(pathInput)
                   }}
-                  placeholder={t('projectSwitcher.pathPlaceholder')}
+                  placeholder={strings.workspacePathPlaceholder}
                   className="ws-path-input"
                 />
               </div>
@@ -238,9 +232,9 @@ export function WorkspacePicker({ placement = 'top' }: { placement?: 'top' | 'bo
                   </button>
                 )}
                 {loadingFolders ? (
-                  <div className="ws-hint">{t('workspace.loading')}</div>
+                  <div className="ws-hint">{strings.workspaceLoading}</div>
                 ) : folders.length === 0 ? (
-                  <div className="ws-hint">{t('workspace.noFolders')}</div>
+                  <div className="ws-hint">{strings.workspaceNoFolders}</div>
                 ) : (
                   folders.map((folder) => (
                     <button key={folder.path} type="button" className="ws-row ws-folder" onClick={() => void loadFolders(folder.path)}>
@@ -254,7 +248,7 @@ export function WorkspacePicker({ placement = 'top' }: { placement?: 'top' | 'bo
               <div className="ws-browser-foot">
                 <span className="ws-cur-path">{browsePath || '~'}</span>
                 <button type="button" className="ws-open-btn" disabled={!browsePath || switching} onClick={() => void switchTo(browsePath)}>
-                  {t('workspace.open')}
+                  {strings.workspaceOpen}
                 </button>
               </div>
             </div>
@@ -262,11 +256,11 @@ export function WorkspacePicker({ placement = 'top' }: { placement?: 'top' | 'bo
             <div className="ws-listview">
               <div className="ws-search">
                 <MagnifyingGlassIcon className="h-3 w-3 ws-search-icon" />
-                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('workspace.search')} className="ws-search-input" />
+                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={strings.workspaceSearch} className="ws-search-input" />
               </div>
               <div className="ws-list">
                 {workspaces.length === 0 ? (
-                  <div className="ws-hint">{t('workspace.nonePlural')}</div>
+                  <div className="ws-hint">{strings.workspaceNonePlural}</div>
                 ) : (
                   workspaces.map((node) => {
                     const active = node.path === activePath
@@ -292,11 +286,11 @@ export function WorkspacePicker({ placement = 'top' }: { placement?: 'top' | 'bo
               <div className="ws-actions">
                 <button type="button" className="ws-action" onClick={() => void openFolderAction()}>
                   <PlusIcon className="h-3.5 w-3.5" />
-                  <span>{t('workspace.openFolder')}</span>
+                  <span>{strings.workspaceOpenFolder}</span>
                 </button>
                 <button type="button" className="ws-action" onClick={openRemote}>
                   <ServerIcon className="h-3.5 w-3.5" />
-                  <span>{t('nav.remoteConnect')}</span>
+                  <span>{strings.remoteConnect}</span>
                 </button>
               </div>
             </div>
@@ -519,20 +513,3 @@ const WS_CSS = `
 .ws-open-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .ws-open-btn:hover:not(:disabled) { opacity: 0.9; }
 `
-
-function workspaceName(path: string): string {
-  if (!path) return ''
-  if (path.startsWith('docker://')) {
-    const rest = path.slice('docker://'.length)
-    return rest.split('/')[0] || path
-  }
-  if (path.startsWith('ssh://')) {
-    const rest = path.slice('ssh://'.length)
-    const slash = rest.indexOf('/')
-    const host = slash >= 0 ? rest.slice(0, slash) : rest
-    const tail = slash >= 0 ? rest.slice(slash).split('/').filter(Boolean).at(-1) : ''
-    return tail ? `${tail} (${host})` : host
-  }
-  const parts = path.split('/').filter(Boolean)
-  return parts.at(-1) || path
-}

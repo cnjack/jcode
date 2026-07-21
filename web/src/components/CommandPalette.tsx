@@ -81,7 +81,7 @@ export function CommandPalette() {
     { id: 'automations', group: t('commandPalette.groups.actions'), label: t('nav.automations'), Icon: ChatBubbleLeftIcon, run: () => dispatch(uiActions.setView('automations')) },
     { id: 'channels', group: t('commandPalette.groups.actions'), label: t('nav.channels'), Icon: ChatBubbleLeftIcon, run: () => dispatch(uiActions.setView('channels')) },
     { id: 'remote', group: t('commandPalette.groups.actions'), label: t('nav.remoteConnect'), Icon: ServerIcon, run: () => openRemoteConnect() },
-    { id: 'settings', group: t('commandPalette.groups.actions'), label: t('nav.openSettings'), Icon: Cog6ToothIcon, run: () => dispatch(uiActions.setSettingsOpen(true)) },
+    { id: 'settings', group: t('commandPalette.groups.actions'), label: t('nav.openSettings'), Icon: Cog6ToothIcon, run: () => dispatch(uiActions.setView('settings')) },
     { id: 'folder', group: t('commandPalette.groups.actions'), label: t('nav.openProject'), Icon: FolderOpenIcon, run: () => {
       dispatch(uiActions.setView('chat'))
       setTimeout(() => window.dispatchEvent(new Event('jcode:open-workspace-picker')), 0)

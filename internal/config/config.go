@@ -418,6 +418,101 @@ type Config struct {
 	// explicitly-disabled value distinguishable from an absent one. Both take
 	// effect on the next process start (like the BLE toggle).
 	Developer *DeveloperConfig `json:"developer,omitempty"`
+
+	// Cloud controls the jcloud device-relay connection (see
+	// cloud/docs/17-jcode-device-relay.md). It is written by `jcode login` /
+	// `jcode logout`; credentials themselves live in ~/.jcode/cloud.json.
+	Cloud *CloudConfig `json:"cloud,omitempty"`
+}
+
+// CloudConfig controls the jcloud device-relay connection. AutoConnect is a
+// pointer so an explicitly-disabled value survives config round-trips while an
+// absent value keeps the platform default (connect automatically).
+type CloudConfig struct {
+	// Enabled is true once this device completed `jcode login`.
+	Enabled bool `json:"enabled,omitempty"`
+	// URL is the orchestrator base URL (https required; localhost http is
+	// allowed for development).
+	URL string `json:"url,omitempty"`
+	// AutoConnect gates starting the relay connector on `jcode web` startup.
+	// nil ⇒ true.
+	AutoConnect *bool `json:"auto_connect,omitempty"`
+	// E2EE gates the M5 end-to-end encryption layer: nil/true ⇒ the connector
+	// lazily generates the account CEK and seals everything uplink; false ⇒ it
+	// stays on the plaintext grey path (CipherDisabled) for the gradual
+	// roll-out. Pointer so an explicit false survives config round-trips.
+	E2EE *bool `json:"e2ee,omitempty"`
+	// SyncDefault (M19) is the global default for NEW sessions: when true, the
+	// web layer stamps each newly created session as cloud-synced (an explicit
+	// entry in ~/.jcode/cloud-sessions.json). Existing sessions are never
+	// touched retroactively. Absent/false ⇒ new sessions do not sync.
+	SyncDefault bool `json:"sync_default,omitempty"`
+}
+
+// cloudMu guards publication of Config.Cloud. As with Memory/ToolSearch, the
+// block is swapped atomically and snapshots never expose the live pointer. The
+// mutex is package-level because Config is copied by value in a few places.
+var cloudMu sync.RWMutex
+
+func cloneCloudConfig(cc *CloudConfig) *CloudConfig {
+	if cc == nil {
+		return nil
+	}
+	copy := *cc
+	copy.AutoConnect = cloneBool(cc.AutoConnect)
+	copy.E2EE = cloneBool(cc.E2EE)
+	return &copy
+}
+
+// CloudSettings returns a detached snapshot of the cloud settings. A zero
+// value represents an absent block (logged out / never configured).
+func (c *Config) CloudSettings() CloudConfig {
+	cloudMu.RLock()
+	defer cloudMu.RUnlock()
+	if c == nil || c.Cloud == nil {
+		return CloudConfig{}
+	}
+	return *cloneCloudConfig(c.Cloud)
+}
+
+// SetCloud atomically publishes a detached copy of cc. Callers may safely
+// reuse or mutate cc after this method returns. Passing nil removes the block.
+func (c *Config) SetCloud(cc *CloudConfig) {
+	if c == nil {
+		return
+	}
+	cloudMu.Lock()
+	defer cloudMu.Unlock()
+	c.Cloud = cloneCloudConfig(cc)
+}
+
+// CloudAutoConnect reports whether the relay connector should start
+// automatically (default true for absent blocks and nil values).
+func CloudAutoConnect(c *Config) bool {
+	cc := c.CloudSettings()
+	if cc.AutoConnect == nil {
+		return true
+	}
+	return *cc.AutoConnect
+}
+
+// CloudE2EE reports whether the device relay seals uplink payloads with the
+// account CEK (M5 E2E encryption). Default true for absent blocks and nil
+// values; an explicit false keeps the connector on the plaintext grey path.
+func CloudE2EE(c *Config) bool {
+	cc := c.CloudSettings()
+	if cc.E2EE == nil {
+		return true
+	}
+	return *cc.E2EE
+}
+
+// CloudSyncDefault reports whether NEW sessions are stamped as cloud-synced
+// at creation time (M19). Default false for absent blocks: nothing syncs
+// unless the user opts a session in. Existing sessions are unaffected either
+// way — the value is consulted only at session-creation stamping.
+func CloudSyncDefault(c *Config) bool {
+	return c.CloudSettings().SyncDefault
 }
 
 // ApprovalReviewConfig holds tuning knobs for jcode's LLM approval reviewer.

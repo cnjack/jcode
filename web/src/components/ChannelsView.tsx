@@ -8,7 +8,7 @@
  *   RIGHT — a static, purely-decorative phone mockup showing a fake WeChat
  *           conversation (approval card + done summary pill). No logic.
  *
- * No BLE here (BLE lives in SettingsDialog). The QR flow mirrors the Vue
+ * No BLE here (BLE lives in SettingsView). The QR flow mirrors the Vue
  * original: login → render QR → poll channel status every 2s (capped at 3m)
  * → detect scan → online → logout. The view owns its own scan lifecycle.
  *

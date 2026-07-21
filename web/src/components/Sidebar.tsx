@@ -8,7 +8,8 @@
  * (Pin / Archive / Mark read / Delete) backed by `api.updateTask`.
  *
  * Kept from the prior React version: the nav buttons, the "New chat" button,
- * the footer (ThemeToggle + settings), and the `loadSession` thunk on click.
+ * the footer (CloudBadge + ThemeToggle + settings), and the `loadSession`
+ * thunk on click.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -35,6 +36,7 @@ import { uiActions, sessionActions, chatActions, loadSession, loadWorkspaceState
 import { api } from '../lib/api'
 import type { TaskItem } from '../lib/types'
 import { ThemeToggle } from './ThemeToggle'
+import { CloudBadge } from './CloudBadge'
 import {
   DEFAULT_FILTERS,
   SidebarFilterMenu,
@@ -686,12 +688,15 @@ export function Sidebar() {
       </div>
 
       <div className="sb-footer relative flex shrink-0 items-center justify-end gap-1.5 px-3">
+        <CloudBadge />
         <ThemeToggle compact />
         <button
           type="button"
-          onClick={() => dispatch(uiActions.setSettingsOpen(true))}
+          onClick={() => dispatch(uiActions.setView('settings'))}
           className="sb-footer-btn flex h-9 w-9 items-center justify-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
+          style={activeView === 'settings' ? { backgroundColor: 'var(--color-muted)', color: 'var(--color-foreground)' } : undefined}
           aria-label="Settings"
+          aria-current={activeView === 'settings' ? 'page' : undefined}
           title={t('nav.settingsWithShortcut')}
         >
           <Cog6ToothIcon className="h-[18px] w-[18px]" />

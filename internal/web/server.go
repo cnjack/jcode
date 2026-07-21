@@ -17,6 +17,7 @@ import (
 	"github.com/cnjack/jcode/internal/automation"
 	"github.com/cnjack/jcode/internal/browser"
 	"github.com/cnjack/jcode/internal/channel"
+	"github.com/cnjack/jcode/internal/cloud"
 	"github.com/cnjack/jcode/internal/computer"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/flow"
@@ -162,6 +163,22 @@ type Server struct {
 	// bleController toggles the BLE status channel live (from the settings
 	// endpoint) without an app restart. nil when BLE is not compiled in.
 	bleController BLEController
+
+	// cloudSupervisor backs the cloud relay status/config endpoints. nil
+	// (headless builds, tests) synthesizes an offline status from the on-disk
+	// credentials.
+	cloudSupervisor CloudSupervisor
+
+	// cloudLogin is the lazy-initialized device-code login flow behind
+	// /api/cloud/login* (lazy because tests construct Server literals).
+	cloudLoginMu sync.Mutex
+	cloudLogin   *cloudLoginFlow
+
+	// cloudSyncStore is the lazy per-session sync gate store behind
+	// /api/cloud/sync* (M19; lazy for the same reason as cloudLogin).
+	cloudSyncMu    sync.Mutex
+	cloudSyncStore *cloud.SyncStore
+	cloudSyncErr   error // sticky load failure
 }
 
 // BLEController lets the settings endpoint start/stop the BLE status channel at
@@ -170,6 +187,23 @@ type Server struct {
 type BLEController interface {
 	Enable()
 	Disable()
+}
+
+// CloudSupervisor exposes the cloud relay status, the live auto_connect
+// toggle, the credential-change hook (web login/logout) and the pairing inbox
+// to the cloud API endpoints. Implemented by *cloud.Supervisor; kept as an
+// interface so this package does not depend on the connector lifecycle.
+type CloudSupervisor interface {
+	Status() cloud.Status
+	SetAutoConnect(bool) error
+	// SyncCredentials reconciles the connector with the on-disk credentials
+	// after a web login/logout.
+	SyncCredentials()
+	// Pairing inbox (pending requests arrive via the connector's poll loop).
+	PendingPairings() []cloud.PendingPairing
+	ApprovePairing(ctx context.Context, id string) error
+	DenyPairing(ctx context.Context, id string) error
+	LastPaired() (cloud.PairedInfo, bool)
 }
 
 // ServerConfig holds the configuration for creating a new Server.
@@ -213,6 +247,7 @@ type ServerConfig struct {
 	ComputerManager     *computer.Manager                                                     // optional: process-wide computer-use manager shared with per-task Envs
 	MemoryStart         func(context.Context, string) (<-chan error, error)                   // optional: acquire and start one manual local-project memory distillation
 	BLEController       BLEController                                                         // optional: live BLE status-channel toggle (desktop builds)
+	CloudSupervisor     CloudSupervisor                                                       // optional: cloud relay status + live auto_connect toggle
 }
 
 // NewServer creates a new web server.
@@ -285,6 +320,7 @@ func NewServer(cfg *ServerConfig) *Server {
 		memoryRuns:          make(map[string]bool),
 		memoryWarnings:      make(map[string]string),
 		bleController:       cfg.BLEController,
+		cloudSupervisor:     cfg.CloudSupervisor,
 	}
 	// The bootstrap engine is registered (and its pump started) in Start, once
 	// the root context exists.
@@ -388,6 +424,18 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/computer/shots/{id}", s.handleComputerShot)
 	mux.HandleFunc("GET /api/tool-search/status", s.handleToolSearchStatus)
 	mux.HandleFunc("POST /api/tool-search/config", s.handleToolSearchConfig)
+	mux.HandleFunc("GET /api/cloud/status", s.handleCloudStatus)
+	mux.HandleFunc("POST /api/cloud/config", s.handleCloudConfig)
+	mux.HandleFunc("POST /api/cloud/login", s.handleCloudLogin)
+	mux.HandleFunc("GET /api/cloud/login/status", s.handleCloudLoginStatus)
+	mux.HandleFunc("POST /api/cloud/logout", s.handleCloudLogout)
+	mux.HandleFunc("GET /api/cloud/pairings", s.handleCloudPairings)
+	mux.HandleFunc("POST /api/cloud/pairings/{id}/approve", s.handleCloudPairingApprove)
+	mux.HandleFunc("POST /api/cloud/pairings/{id}/deny", s.handleCloudPairingDeny)
+	mux.HandleFunc("POST /api/cloud/pairing-offer", s.handleCloudPairingOffer)
+	mux.HandleFunc("GET /api/cloud/sync", s.handleCloudSync)
+	mux.HandleFunc("POST /api/cloud/sync/default", s.handleCloudSyncDefault)
+	mux.HandleFunc("POST /api/cloud/sync/{session_id}", s.handleCloudSyncSession)
 	mux.HandleFunc("GET /api/dev-options/status", s.handleDevOptionsStatus)
 	mux.HandleFunc("POST /api/dev-options/config", s.handleDevOptionsConfig)
 	mux.HandleFunc("GET /api/memory/status", s.handleMemoryStatus)

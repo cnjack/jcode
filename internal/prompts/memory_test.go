@@ -196,6 +196,10 @@ func TestMemoryLoader_TotalCharLimit(t *testing.T) {
 func TestMemoryLoader_EmptyDir(t *testing.T) {
 	dir := t.TempDir()
 
+	// Isolate HOME so a real global ~/.jcode/AGENTS.md on the developer
+	// machine cannot leak into the loader (it always reads ConfigDir()).
+	t.Setenv("HOME", t.TempDir())
+
 	loader := NewMemoryLoader(MemoryConfig{MaxTotalChars: 40000, MaxIncDepth: 5})
 	result, err := loader.Load(dir)
 	if err != nil {

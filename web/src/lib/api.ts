@@ -407,6 +407,109 @@ export const api = {
     request<MemoryActionResponse>('/api/memory/sync', { method: 'POST', body: JSON.stringify({ project }) }),
   memoryClear: (project: string) =>
     request<MemoryActionResponse>(`/api/memory?scope=project&project=${encodeURIComponent(project)}`, { method: 'DELETE' }),
+
+  // Cloud relay (device ↔ cloud connection). Save returns the fresh status.
+  cloudStatus: () => request<CloudStatusResponse>('/api/cloud/status'),
+  cloudSaveConfig: (autoConnect: boolean) =>
+    request<CloudStatusResponse>('/api/cloud/config', {
+      method: 'POST',
+      body: JSON.stringify({ auto_connect: autoConnect }),
+    }),
+
+  // In-app device-code login (M11-W1): start returns the user-facing code +
+  // verification URI; poll cloudLoginStatus until success/error/expired.
+  cloudLogin: (cloudUrl?: string) =>
+    request<CloudLoginStartResponse>('/api/cloud/login', {
+      method: 'POST',
+      body: JSON.stringify(cloudUrl ? { cloud_url: cloudUrl } : {}),
+    }),
+  cloudLoginStatus: () => request<CloudLoginStatusResponse>('/api/cloud/login/status'),
+  // Logout returns the fresh (logged-out) status.
+  cloudLogout: () => request<CloudStatusResponse>('/api/cloud/logout', { method: 'POST' }),
+
+  // Pairing approvals (pending requests parked by the relay connector).
+  cloudPairings: () => request<CloudPairingsResponse>('/api/cloud/pairings'),
+  cloudApprovePairing: (id: string) =>
+    request<CloudPairingsResponse>(`/api/cloud/pairings/${encodeURIComponent(id)}/approve`, { method: 'POST' }),
+  cloudDenyPairing: (id: string) =>
+    request<CloudPairingsResponse>(`/api/cloud/pairings/${encodeURIComponent(id)}/deny`, { method: 'POST' }),
+  // QR pairing offer: qr is the jcode://pair URL to render as a QR code.
+  cloudPairingOffer: () => request<CloudPairingOfferResponse>('/api/cloud/pairing-offer', { method: 'POST' }),
+
+  // Per-session cloud sync switches + the new-session default (M19).
+  cloudSync: () => request<CloudSyncResponse>('/api/cloud/sync'),
+  cloudSetSyncDefault: (enabled: boolean) =>
+    request<CloudSyncResponse>('/api/cloud/sync/default', {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    }),
+  cloudSetSessionSync: (sessionId: string, enabled: boolean) =>
+    request<CloudSessionSyncResponse>(`/api/cloud/sync/${encodeURIComponent(sessionId)}`, {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    }),
+}
+
+export interface CloudStatusResponse {
+  logged_in: boolean
+  auto_connect: boolean
+  state: 'offline' | 'connecting' | 'online' | 'error'
+  device_name?: string
+  cloud_url?: string
+  // Present only when state === 'error'.
+  error?: string
+}
+
+export interface CloudLoginStartResponse {
+  user_code: string
+  verification_uri: string
+  expires_at: string
+}
+
+export interface CloudLoginStatusResponse {
+  state: 'idle' | 'pending' | 'success' | 'error' | 'expired'
+  user_code?: string
+  verification_uri?: string
+  expires_at?: string
+  error?: string
+}
+
+export interface CloudPendingPairing {
+  pairing_id: string
+  label: string
+  received_at: string
+}
+
+export interface CloudPairedInfo {
+  pairing_id: string
+  label: string
+  /** true when approved automatically via a QR offer claim. */
+  auto: boolean
+  paired_at: string
+}
+
+export interface CloudPairingsResponse {
+  pairings: CloudPendingPairing[]
+  last_paired?: CloudPairedInfo
+}
+
+export interface CloudPairingOfferResponse {
+  /** jcode://pair?cloud=…&device=…&offer=…&secret=… — render as QR code. */
+  qr: string
+  offer_id: string
+  expires_at: string
+}
+
+/** GET /api/cloud/sync — per-session sync opt-ins + the new-session default (M19). */
+export interface CloudSyncResponse {
+  sync_default: boolean
+  /** Explicit per-session entries only; a missing session id means "not synced". */
+  sessions: Record<string, boolean>
+}
+
+export interface CloudSessionSyncResponse {
+  session_id: string
+  enabled: boolean
 }
 
 export interface ToolSearchConfig {
