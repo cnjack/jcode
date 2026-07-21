@@ -208,3 +208,84 @@ func (s *Supervisor) stopLocked() {
 	s.conn = nil
 	s.cancel = nil
 }
+
+// SyncCredentials re-reads the on-disk credentials after a login/logout (web
+// API or another process) and reconciles the connector: logged out (or
+// auto_connect off) stops it; fresh or replaced credentials (re)start it.
+// Like everything cloud-side it is best-effort — a credentials read failure
+// is logged and leaves the current state untouched.
+func (s *Supervisor) SyncCredentials() {
+	creds, err := LoadCredentials()
+	if err != nil {
+		config.Logger().Printf("[cloud] failed to load credentials, relay connector state unchanged: %v", err)
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	previous := s.creds
+	s.creds = creds
+	if !ShouldConnect(config.CloudAutoConnect(s.cfg), creds) {
+		s.stopLocked()
+		return
+	}
+	if s.rootCtx == nil {
+		return
+	}
+	// Restart when the identity changed under a running connector (logout +
+	// login as a different device); otherwise start only when idle.
+	identityChanged := previous == nil ||
+		previous.DeviceID != creds.DeviceID || previous.DeviceToken != creds.DeviceToken
+	if identityChanged {
+		s.stopLocked()
+	}
+	if s.conn == nil {
+		s.startLocked()
+	}
+}
+
+// --- pairing inbox delegation (M11-W1 web approval endpoints) ---
+
+// PendingPairings returns the live connector's pending pairing inbox, empty
+// when the connector is not running.
+func (s *Supervisor) PendingPairings() []PendingPairing {
+	s.mu.Lock()
+	conn := s.conn
+	s.mu.Unlock()
+	if conn == nil {
+		return nil
+	}
+	return conn.PendingPairings()
+}
+
+// LastPaired reports the live connector's most recent pairing approval.
+func (s *Supervisor) LastPaired() (PairedInfo, bool) {
+	s.mu.Lock()
+	conn := s.conn
+	s.mu.Unlock()
+	if conn == nil {
+		return PairedInfo{}, false
+	}
+	return conn.LastPaired()
+}
+
+// ApprovePairing approves a pending pairing through the live connector.
+func (s *Supervisor) ApprovePairing(ctx context.Context, id string) error {
+	s.mu.Lock()
+	conn := s.conn
+	s.mu.Unlock()
+	if conn == nil {
+		return fmt.Errorf("cloud relay is not connected")
+	}
+	return conn.ApprovePairing(ctx, id)
+}
+
+// DenyPairing denies a pending pairing through the live connector.
+func (s *Supervisor) DenyPairing(ctx context.Context, id string) error {
+	s.mu.Lock()
+	conn := s.conn
+	s.mu.Unlock()
+	if conn == nil {
+		return fmt.Errorf("cloud relay is not connected")
+	}
+	return conn.DenyPairing(ctx, id)
+}

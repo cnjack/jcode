@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -189,12 +190,37 @@ type fakeCloudSupervisor struct {
 	status   cloud.Status
 	err      error
 	setCalls []bool
+
+	syncCalls  int
+	pairings   []cloud.PendingPairing
+	lastPaired *cloud.PairedInfo
+	pairingErr error
+	approved   []string
+	denied     []string
 }
 
 func (f *fakeCloudSupervisor) Status() cloud.Status { return f.status }
 func (f *fakeCloudSupervisor) SetAutoConnect(enabled bool) error {
 	f.setCalls = append(f.setCalls, enabled)
 	return f.err
+}
+func (f *fakeCloudSupervisor) SyncCredentials() { f.syncCalls++ }
+func (f *fakeCloudSupervisor) PendingPairings() []cloud.PendingPairing {
+	return f.pairings
+}
+func (f *fakeCloudSupervisor) ApprovePairing(_ context.Context, id string) error {
+	f.approved = append(f.approved, id)
+	return f.pairingErr
+}
+func (f *fakeCloudSupervisor) DenyPairing(_ context.Context, id string) error {
+	f.denied = append(f.denied, id)
+	return f.pairingErr
+}
+func (f *fakeCloudSupervisor) LastPaired() (cloud.PairedInfo, bool) {
+	if f.lastPaired == nil {
+		return cloud.PairedInfo{}, false
+	}
+	return *f.lastPaired, true
 }
 
 func readPersistedCloudAutoConnect(t *testing.T, home string) *bool {

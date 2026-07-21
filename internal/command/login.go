@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -148,7 +147,7 @@ func runLogin(ctx context.Context, rawURL, name string) error {
 		return err
 	}
 
-	if err := updateConfigCloud(baseURL, true); err != nil {
+	if err := cloud.UpdateConfigCloud(baseURL, true); err != nil {
 		fmt.Printf("Warning: failed to update %s: %v\n", config.ConfigPath(), err)
 	}
 
@@ -168,22 +167,10 @@ func runLogout(ctx context.Context) error {
 		return nil
 	}
 
-	// Remote revocation is best effort: the revoke endpoint may not exist yet
-	// on the orchestrator, and a network failure must not trap the local
-	// credentials on disk.
-	client := cloud.NewClient(creds.CloudURL)
-	if err := client.RevokeDevice(ctx, creds.DeviceToken); err != nil {
-		fmt.Printf("Warning: failed to revoke device token on %s: %v\n", creds.CloudURL, err)
-		fmt.Println("Clearing local credentials anyway.")
-	}
-
-	if err := cloud.DeleteCredentials(); err != nil {
+	if err := cloud.Logout(ctx, func(format string, args ...any) {
+		fmt.Printf("Warning: "+format+"\n", args...)
+	}); err != nil {
 		return err
-	}
-	cloud.ResetCEKCache()
-
-	if err := updateConfigCloud("", false); err != nil {
-		fmt.Printf("Warning: failed to update %s: %v\n", config.ConfigPath(), err)
 	}
 
 	fmt.Println("Logged out. Local device credentials removed.")
@@ -204,32 +191,6 @@ func runLoginStatus() error {
 	fmt.Printf("device id:   %s\n", creds.DeviceID)
 	fmt.Printf("key gen:     %d\n", creds.KeyGen)
 	return nil
-}
-
-// updateConfigCloud sets config.cloud while preserving the stored url (when
-// the url argument is empty, i.e. logout) and the user's auto_connect/e2ee
-// preferences. Login/logout must not require a fully configured provider set,
-// so a LoadConfig failure falls back to a best-effort raw read of the file
-// (unknown fields may be dropped in that case).
-func updateConfigCloud(url string, enabled bool) error {
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		cfg = &config.Config{}
-		if data, readErr := os.ReadFile(config.ConfigPath()); readErr == nil {
-			_ = json.Unmarshal(data, cfg)
-		}
-	}
-	current := cfg.CloudSettings()
-	if url == "" {
-		url = current.URL
-	}
-	cfg.SetCloud(&config.CloudConfig{
-		Enabled:     enabled,
-		URL:         url,
-		AutoConnect: current.AutoConnect,
-		E2EE:        current.E2EE,
-	})
-	return config.SaveConfig(cfg)
 }
 
 func credentialsPathForDisplay() string {

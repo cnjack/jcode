@@ -84,6 +84,13 @@ type Connector struct {
 	statusMu sync.Mutex
 	state    string
 	lastErr  string
+
+	// pairMu guards the pairing inbox (pending approvals + the last-paired
+	// notification), written by pairing.request commands and read/mutated by
+	// the web pairing endpoints (via the Supervisor).
+	pairMu     sync.Mutex
+	pending    []PendingPairing
+	lastPaired *PairedInfo
 }
 
 // NewConnector builds a Connector from cfg.
@@ -479,6 +486,8 @@ func (c *Connector) executeCommand(ctx context.Context, cmd DeviceCommand) (stri
 		return c.execChatStop(ctx, cmd)
 	case "approval.respond":
 		return c.execApprovalRespond(ctx, cmd)
+	case "pairing.request":
+		return c.execPairingRequest(ctx, cmd)
 	default:
 		return "error", map[string]string{"error": fmt.Sprintf("unknown command kind %q", cmd.Kind)}
 	}

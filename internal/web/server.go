@@ -168,6 +168,11 @@ type Server struct {
 	// (headless builds, tests) synthesizes an offline status from the on-disk
 	// credentials.
 	cloudSupervisor CloudSupervisor
+
+	// cloudLogin is the lazy-initialized device-code login flow behind
+	// /api/cloud/login* (lazy because tests construct Server literals).
+	cloudLoginMu sync.Mutex
+	cloudLogin   *cloudLoginFlow
 }
 
 // BLEController lets the settings endpoint start/stop the BLE status channel at
@@ -178,12 +183,21 @@ type BLEController interface {
 	Disable()
 }
 
-// CloudSupervisor exposes the cloud relay status and the live auto_connect
-// toggle to the cloud API endpoints. Implemented by *cloud.Supervisor; kept
-// as an interface so this package does not depend on the connector lifecycle.
+// CloudSupervisor exposes the cloud relay status, the live auto_connect
+// toggle, the credential-change hook (web login/logout) and the pairing inbox
+// to the cloud API endpoints. Implemented by *cloud.Supervisor; kept as an
+// interface so this package does not depend on the connector lifecycle.
 type CloudSupervisor interface {
 	Status() cloud.Status
 	SetAutoConnect(bool) error
+	// SyncCredentials reconciles the connector with the on-disk credentials
+	// after a web login/logout.
+	SyncCredentials()
+	// Pairing inbox (pending requests arrive via the connector's poll loop).
+	PendingPairings() []cloud.PendingPairing
+	ApprovePairing(ctx context.Context, id string) error
+	DenyPairing(ctx context.Context, id string) error
+	LastPaired() (cloud.PairedInfo, bool)
 }
 
 // ServerConfig holds the configuration for creating a new Server.
@@ -405,6 +419,13 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/tool-search/config", s.handleToolSearchConfig)
 	mux.HandleFunc("GET /api/cloud/status", s.handleCloudStatus)
 	mux.HandleFunc("POST /api/cloud/config", s.handleCloudConfig)
+	mux.HandleFunc("POST /api/cloud/login", s.handleCloudLogin)
+	mux.HandleFunc("GET /api/cloud/login/status", s.handleCloudLoginStatus)
+	mux.HandleFunc("POST /api/cloud/logout", s.handleCloudLogout)
+	mux.HandleFunc("GET /api/cloud/pairings", s.handleCloudPairings)
+	mux.HandleFunc("POST /api/cloud/pairings/{id}/approve", s.handleCloudPairingApprove)
+	mux.HandleFunc("POST /api/cloud/pairings/{id}/deny", s.handleCloudPairingDeny)
+	mux.HandleFunc("POST /api/cloud/pairing-offer", s.handleCloudPairingOffer)
 	mux.HandleFunc("GET /api/dev-options/status", s.handleDevOptionsStatus)
 	mux.HandleFunc("POST /api/dev-options/config", s.handleDevOptionsConfig)
 	mux.HandleFunc("GET /api/memory/status", s.handleMemoryStatus)
