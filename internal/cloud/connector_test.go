@@ -24,6 +24,7 @@ type mockCloud struct {
 	eventBatches map[string][]EventUpload
 	ephemeral    []ephemeralRecord
 	sessionReqs  [][]SessionUpsert
+	capsReqs     []json.RawMessage
 	lastSeq      map[string]int64
 
 	pollScripts [][]DeviceCommand // consumed in order; afterwards 204
@@ -85,11 +86,13 @@ func (m *mockCloud) handler() http.Handler {
 	})
 	mux.HandleFunc("POST /internal/v1/device/sessions", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Sessions []SessionUpsert `json:"sessions"`
+			Sessions     []SessionUpsert `json:"sessions"`
+			Capabilities json.RawMessage `json:"capabilities"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		m.mu.Lock()
 		m.sessionReqs = append(m.sessionReqs, req.Sessions)
+		m.capsReqs = append(m.capsReqs, req.Capabilities)
 		resp := SessionsUpsertResponse{}
 		for _, s := range req.Sessions {
 			resp.Sessions = append(resp.Sessions, SessionSeqInfo{SessionID: s.SessionID, LastSeq: m.lastSeq[s.SessionID]})

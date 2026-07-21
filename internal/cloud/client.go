@@ -22,6 +22,11 @@ const (
 	defaultPollExpiry   = 10 * time.Minute
 )
 
+// maxResponseBytes bounds any single API response body. Poll responses carry
+// chat.send commands whose attachments can be 5×2MB decoded (~14MB base64
+// inside the encrypted envelope), so the cap must clear that with headroom.
+const maxResponseBytes = 32 << 20
+
 // Sentinel errors for terminal device-token polling outcomes.
 var (
 	// ErrAuthorizationDenied is returned when the user denies the user_code on
@@ -158,7 +163,7 @@ func (c *Client) post(ctx context.Context, path, token string, body, out any) er
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
 		return fmt.Errorf("POST %s: read response: %w", path, err)
 	}
@@ -207,7 +212,7 @@ func (c *Client) get(ctx context.Context, path, token string, out any) (int, err
 		return resp.StatusCode, nil
 	}
 
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
 		return resp.StatusCode, fmt.Errorf("GET %s: read response: %w", path, err)
 	}

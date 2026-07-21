@@ -54,13 +54,22 @@ func (c *Connector) collectSessions() ([]SessionUpsert, error) {
 }
 
 // syncSessions performs one upsert round and seeds the seq allocator from the
-// server's last_seq answers.
+// server's last_seq answers. The M12 capabilities mirror rides the same
+// request (top-level `capabilities` field), sealed like the session meta when
+// the CEK cipher is active. Capabilities collection is best-effort: a failure
+// there must not fail the session sync.
 func (c *Connector) syncSessions(ctx context.Context) error {
 	upserts, err := c.collectSessions()
 	if err != nil {
 		return err
 	}
-	resp, err := c.client.UpsertSessions(ctx, c.token, upserts)
+	var capsJSON json.RawMessage
+	if caps := c.collectCapabilities(); caps != nil {
+		if data, err := json.Marshal(caps); err == nil {
+			capsJSON = c.sealUplink(data)
+		}
+	}
+	resp, err := c.client.UpsertSessions(ctx, c.token, upserts, capsJSON)
 	if err != nil {
 		return err
 	}

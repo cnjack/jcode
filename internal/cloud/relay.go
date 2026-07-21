@@ -99,12 +99,15 @@ func (c *Client) AckCommand(ctx context.Context, token, id string, ack CommandAc
 
 // UpsertSessions mirrors the local session index to the cloud: POST
 // /internal/v1/device/sessions. The response carries each session's last_seq
-// for event-pump seq resumption.
-func (c *Client) UpsertSessions(ctx context.Context, token string, sessions []SessionUpsert) (*SessionsUpsertResponse, error) {
+// for event-pump seq resumption. capabilities is the M12 device-capabilities
+// mirror (DeviceCapabilities JSON, sealed when the CEK cipher is active),
+// stored by the orchestrator in devices.capabilities; nil omits the field.
+func (c *Client) UpsertSessions(ctx context.Context, token string, sessions []SessionUpsert, capabilities json.RawMessage) (*SessionsUpsertResponse, error) {
 	var out SessionsUpsertResponse
 	body := struct {
-		Sessions []SessionUpsert `json:"sessions"`
-	}{Sessions: sessions}
+		Sessions     []SessionUpsert `json:"sessions"`
+		Capabilities json.RawMessage `json:"capabilities,omitempty"`
+	}{Sessions: sessions, Capabilities: capabilities}
 	if err := c.post(ctx, "/internal/v1/device/sessions", token, body, &out); err != nil {
 		return nil, err
 	}

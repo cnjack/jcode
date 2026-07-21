@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +44,13 @@ type ConnectorConfig struct {
 	// override them to point at a temp dir.
 	IndexPathFn    func() (string, error)
 	ListSessionsFn func() (map[string][]session.SessionMeta, error)
+
+	// InboxDir is the root under which chat attachments land
+	// (<InboxDir>/<session_id>/<filename>). Empty → ~/.jcode/inbox.
+	InboxDir string
+	// ModelCapabilitiesFn overrides the model/effort facet of the capabilities
+	// mirror (default: config + model registry); tests inject a fixed list.
+	ModelCapabilitiesFn func() ([]CapabilityModel, []string, error)
 
 	// Cipher, when non-nil, seals uplink payloads (events/ephemeral payload,
 	// sessions meta, ack result) and opens downlink command payloads. Nil
@@ -436,7 +444,16 @@ func (l *localControlPlane) postJSON(ctx context.Context, path string, body any)
 	if err != nil {
 		return 0, nil, fmt.Errorf("marshal local request: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, l.base+path, bytes.NewReader(data))
+	return l.doJSON(ctx, http.MethodPost, path, bytes.NewReader(data))
+}
+
+// getJSON GETs the local control plane and returns the status and raw body.
+func (l *localControlPlane) getJSON(ctx context.Context, path string) (int, []byte, error) {
+	return l.doJSON(ctx, http.MethodGet, path, nil)
+}
+
+func (l *localControlPlane) doJSON(ctx context.Context, method, path string, body io.Reader) (int, []byte, error) {
+	req, err := http.NewRequestWithContext(ctx, method, l.base+path, body)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -446,22 +463,42 @@ func (l *localControlPlane) postJSON(ctx context.Context, path string, body any)
 	}
 	resp, err := l.http.Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("POST %s: %w", path, err)
+		return 0, nil, fmt.Errorf("%s %s: %w", method, path, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return resp.StatusCode, nil, fmt.Errorf("POST %s: read response: %w", path, err)
+		return resp.StatusCode, nil, fmt.Errorf("%s %s: read response: %w", method, path, err)
 	}
 	return resp.StatusCode, respBody, nil
 }
 
-// chatSendPayload is the (plaintext) payload of a chat.send command.
+// chatSendPayload is the (plaintext) payload of a chat.send command. Beyond
+// the original text/images/mode/channel it carries the M12 compose facets —
+// project_path, model, effort, goal, attachments — all optional.
 type chatSendPayload struct {
-	Text    string      `json:"text"`
-	Images  []chatImage `json:"images,omitempty"`
-	Mode    string      `json:"mode,omitempty"`
-	Channel string      `json:"channel,omitempty"` // "console" | "mobile"
+	Text        string           `json:"text"`
+	Images      []chatImage      `json:"images,omitempty"`
+	Mode        string           `json:"mode,omitempty"`
+	Channel     string           `json:"channel,omitempty"` // "console" | "mobile"
+	ProjectPath string           `json:"project_path,omitempty"`
+	Model       *chatModelRef    `json:"model,omitempty"`
+	Effort      string           `json:"effort,omitempty"`
+	Goal        string           `json:"goal,omitempty"`
+	Attachments []chatAttachment `json:"attachments,omitempty"`
+}
+
+// chatModelRef is the model facet of a compose chat.send.
+type chatModelRef struct {
+	Provider string `json:"provider"`
+	ID       string `json:"id"`
+}
+
+// needsCompose reports whether the payload carries any M12 compose facet and
+// therefore goes through the ordered compose pipeline instead of the plain
+// one-shot /api/chat call.
+func (p *chatSendPayload) needsCompose() bool {
+	return p.ProjectPath != "" || p.Model != nil || p.Effort != "" || p.Goal != "" || len(p.Attachments) > 0
 }
 
 // chatImage mirrors web.chatImage (base64 image in a chat request).
@@ -498,9 +535,20 @@ func (c *Connector) execChatSend(ctx context.Context, cmd DeviceCommand) (string
 	if err := json.Unmarshal(cmd.Payload, &p); err != nil {
 		return "error", map[string]string{"error": fmt.Sprintf("invalid chat.send payload: %v", err)}
 	}
-	if strings.TrimSpace(p.Text) == "" {
+	// Attachments alone are a valid message (their reference list becomes the
+	// text); truly empty input is not.
+	if strings.TrimSpace(p.Text) == "" && len(p.Attachments) == 0 {
 		return "error", map[string]string{"error": "chat.send: empty text"}
 	}
+	if p.needsCompose() {
+		return c.execChatSendCompose(ctx, cmd, &p)
+	}
+	return c.execChatSendLegacy(ctx, cmd, &p)
+}
+
+// execChatSendLegacy is the pre-M12 one-shot path: a single /api/chat call,
+// optionally continuing cmd.SessionID.
+func (c *Connector) execChatSendLegacy(ctx context.Context, cmd DeviceCommand, p *chatSendPayload) (string, any) {
 	// The local /api/chat request. session_id is omitted for a NEW session
 	// (the server mints the UUID); source carries the relay channel through
 	// the same mechanism WeChat uses (submitMessage's source label).
@@ -531,6 +579,171 @@ func (c *Connector) execChatSend(ctx context.Context, cmd DeviceCommand) (string
 	}
 	_ = json.Unmarshal(body, &resp)
 	return "ok", map[string]string{"session_id": resp.SessionID}
+}
+
+// execChatSendCompose runs the M12 ordered compose pipeline against the local
+// control plane: create/focus the session (project_path) → land attachments →
+// model → effort → mode → goal → send the message with the attachment
+// reference list appended. Every step failure acks error naming the facet —
+// unsupported facets are never silently ignored.
+func (c *Connector) execChatSendCompose(ctx context.Context, cmd DeviceCommand, p *chatSendPayload) (string, any) {
+	errResult := func(err error) (string, any) {
+		return "error", map[string]string{"error": err.Error()}
+	}
+
+	// 0. Validate and decode attachments BEFORE any side effect, so a limit
+	// breach leaves no trace.
+	decoded, err := decodeAttachments(p.Attachments)
+	if err != nil {
+		return errResult(err)
+	}
+
+	// 1. Create/focus the session. POST /api/sessions makes the task the
+	// active engine — the model/mode/goal endpoints all target the active
+	// engine — and returns its id, which the attachments dir and the chat
+	// call both need.
+	sessReq := map[string]string{}
+	if cmd.SessionID != "" {
+		sessReq["session_id"] = cmd.SessionID
+	}
+	if p.ProjectPath != "" {
+		sessReq["pwd"] = p.ProjectPath
+	}
+	status, body, err := c.local.postJSON(ctx, "/api/sessions", sessReq)
+	if err != nil {
+		return errResult(err)
+	}
+	if status != http.StatusOK {
+		return errResult(errUnexpectedStatus("/api/sessions", status, string(body)))
+	}
+	var sessResp struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(body, &sessResp); err != nil || sessResp.SessionID == "" {
+		return errResult(fmt.Errorf("/api/sessions: no session_id in response: %s", body))
+	}
+	sid := sessResp.SessionID
+
+	// 2. Land attachments at <inbox>/<sid>/.
+	var refs []attachmentRef
+	if len(p.Attachments) > 0 {
+		refs, err = writeInboxAttachments(c.inboxRoot(), sid, p.Attachments, decoded)
+		if err != nil {
+			return errResult(err)
+		}
+	}
+
+	// 3. Model, then effort (the effort endpoint is keyed by provider+model).
+	if p.Model != nil {
+		if p.Model.Provider == "" || p.Model.ID == "" {
+			return errResult(fmt.Errorf("model: provider and id are both required"))
+		}
+		if err := c.postLocalOK(ctx, "/api/model", map[string]string{
+			"provider": p.Model.Provider, "model": p.Model.ID,
+		}); err != nil {
+			return errResult(fmt.Errorf("model: %w", err))
+		}
+	}
+	if p.Effort != "" {
+		provider, modelID := "", ""
+		if p.Model != nil {
+			provider, modelID = p.Model.Provider, p.Model.ID
+		} else {
+			provider, modelID, err = c.currentModel(ctx)
+			if err != nil {
+				return errResult(fmt.Errorf("effort: cannot resolve current model: %w", err))
+			}
+		}
+		if provider == "" || modelID == "" {
+			return errResult(fmt.Errorf("effort: no current model to apply effort %q to", p.Effort))
+		}
+		if err := c.postLocalOK(ctx, "/api/model-state/effort", map[string]string{
+			"provider": provider, "model": modelID, "effort": p.Effort,
+		}); err != nil {
+			return errResult(fmt.Errorf("effort: %w", err))
+		}
+	}
+	// Mode: the chat endpoint's mode field only applies to engines IT builds;
+	// the compose session already exists, so switch it on the focused engine.
+	if p.Mode != "" {
+		m := p.Mode
+		if m == "build" { // legacy chat-mode alias for the approval mode
+			m = "approval"
+		}
+		if err := c.postLocalOK(ctx, "/api/mode", map[string]string{"mode": m}); err != nil {
+			return errResult(fmt.Errorf("mode: %w", err))
+		}
+	}
+
+	// 4. Goal (start=false: the message below kicks the run off itself).
+	if p.Goal != "" {
+		if err := c.postLocalOK(ctx, "/api/goal", map[string]any{
+			"objective": p.Goal, "start": false,
+		}); err != nil {
+			return errResult(fmt.Errorf("goal: %w", err))
+		}
+	}
+
+	// 5. Send the message with the attachment reference list appended.
+	req := map[string]any{
+		"message":    p.Text + attachmentReferenceList(refs),
+		"session_id": sid,
+	}
+	if len(p.Images) > 0 {
+		req["images"] = p.Images
+	}
+	if p.Channel != "" {
+		req["source"] = p.Channel
+	}
+	status, body, err = c.local.postJSON(ctx, "/api/chat", req)
+	if err != nil {
+		return errResult(err)
+	}
+	if status != http.StatusAccepted && status != http.StatusOK {
+		return errResult(errUnexpectedStatus("/api/chat", status, string(body)))
+	}
+	return "ok", map[string]string{"session_id": sid}
+}
+
+// postLocalOK POSTs to the local control plane expecting a 200 OK.
+func (c *Connector) postLocalOK(ctx context.Context, path string, body any) error {
+	status, respBody, err := c.local.postJSON(ctx, path, body)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return errUnexpectedStatus(path, status, string(respBody))
+	}
+	return nil
+}
+
+// currentModel resolves the active engine's provider/model via GET
+// /api/health (used to key an effort override when the command did not name
+// a model).
+func (c *Connector) currentModel(ctx context.Context) (provider, modelID string, err error) {
+	status, body, err := c.local.getJSON(ctx, "/api/health")
+	if err != nil {
+		return "", "", err
+	}
+	if status != http.StatusOK {
+		return "", "", errUnexpectedStatus("/api/health", status, string(body))
+	}
+	var health struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+	}
+	if err := json.Unmarshal(body, &health); err != nil {
+		return "", "", fmt.Errorf("/api/health: invalid response: %w", err)
+	}
+	return health.Provider, health.Model, nil
+}
+
+// inboxRoot returns the attachment inbox root (default ~/.jcode/inbox).
+func (c *Connector) inboxRoot() string {
+	if c.cfg.InboxDir != "" {
+		return c.cfg.InboxDir
+	}
+	return filepath.Join(config.ConfigDir(), "inbox")
 }
 
 func (c *Connector) execChatStop(ctx context.Context, cmd DeviceCommand) (string, any) {
