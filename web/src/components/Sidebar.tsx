@@ -658,9 +658,11 @@ export function Sidebar() {
         <ThemeToggle compact />
         <button
           type="button"
-          onClick={() => dispatch(uiActions.setSettingsOpen(true))}
+          onClick={() => dispatch(uiActions.setView('settings'))}
           className="sb-footer-btn flex h-9 w-9 items-center justify-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
+          style={activeView === 'settings' ? { backgroundColor: 'var(--color-muted)', color: 'var(--color-foreground)' } : undefined}
           aria-label="Settings"
+          aria-current={activeView === 'settings' ? 'page' : undefined}
           title={t('nav.settingsWithShortcut')}
         >
           <Cog6ToothIcon className="h-[18px] w-[18px]" />

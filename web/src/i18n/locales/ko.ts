@@ -348,6 +348,7 @@ export default {
     title: '설정',
     tabs: {
       general: '일반',
+      cloud: '클라우드',
       appearance: '모양',
       providers: '프로바이더',
       mcp: 'MCP 서버',
@@ -1071,6 +1072,7 @@ export default {
     syncNeedLogin: '로그인하면 세션을 클라우드에 동기화할 수 있습니다',
     syncDefaultTitle: '새 세션을 클라우드에 기본 동기화',
     syncDefaultDesc: '이후에 생성되는 세션이 클라우드 콘솔과 모바일 앱에 표시됩니다. 기존 세션에는 영향이 없습니다.',
+    pairingSection: '기기 페어링',
   },
 
   pip: {

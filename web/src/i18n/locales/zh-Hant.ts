@@ -349,6 +349,7 @@ export default {
     title: '設定',
     tabs: {
       general: '一般',
+      cloud: '雲端',
       appearance: '外觀',
       providers: '服務商',
       mcp: 'MCP 伺服器',
@@ -1066,6 +1067,7 @@ export default {
     syncNeedLogin: '登入後可將工作階段同步到雲端',
     syncDefaultTitle: '新工作階段預設同步到雲端',
     syncDefaultDesc: '之後新建的工作階段將在雲端控制台和行動端可見；現有工作階段不受影響。',
+    pairingSection: '裝置配對',
   },
 
   pip: {

@@ -1,20 +1,22 @@
 /**
- * SettingsDialog — React port of web/src/components/SettingsDialog.vue.
+ * SettingsView — the standalone settings page (M18; formerly the SettingsDialog
+ * full-screen overlay, itself a React port of web/src/components/SettingsDialog.vue).
  *
- * Full-screen app-like overlay (mirrors the Vue .settings-shell): a `fixed
- * inset-0` surface with an opaque background and its own left nav rail + an
- * inset surface content panel — the same geometry as the chat page, NOT a small
- * centered dialog. Tabs: Providers (full CRUD + catalog + advanced config),
+ * A first-class app view (`ui.activeView === 'settings'`) rendered inside the
+ * workspace main column: its own left nav rail + an inset surface content
+ * panel — the same geometry as the chat page, NOT a small centered dialog.
+ * Tabs: General (server/token/auto-approve/language + the M19 cloud-sync
+ * default), Cloud (M18: account/connection state, auto-connect, pairing
+ * approvals + QR offer, device-code login, logout — moved out of the
+ * CloudBadge popover), Providers (full CRUD + catalog + advanced config),
  * Models (state/favorites/effort), MCP (servers CRUD + OAuth login), Skills
- * (enable/disable), Appearance (theme picker), Memory (status + consolidation), Browser (config + site
- * permissions), Computer (config + app permissions + grants), Remote (SSH
- * aliases), Usage (stats).
+ * (enable/disable), Appearance (theme picker), Memory (status + consolidation),
+ * Browser (config + site permissions), Computer (config + app permissions +
+ * grants), Remote (SSH aliases), Usage (stats).
  *
- * The Providers tab is the most complete port: list of provider cards, inline
- * add/edit form with advanced fields (base_url, headers, thinking,
- * reasoning_effort), browsable model catalog with add/remove/toggle, and an
- * inline custom-model authoring form. Other tabs are functional CRUD ports of
- * the Vue logic.
+ * The active tab lives in the redux store (`ui.settingsTab`) so other surfaces
+ * can deep-link — e.g. the CloudBadge popover's "Open settings" routes here
+ * with the Cloud tab active.
  *
  * State is per-tab (each tab remounts on activation, so switching tabs naturally
  * abandons in-progress sub-flows — mirroring the Vue `watch(activeTab)` reset).
@@ -54,8 +56,30 @@ import {
 } from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
-import { uiActions, modelActions, loadConfig, loadModels } from '../app/store'
+import { uiActions, modelActions, loadConfig, loadModels, type SettingsTab } from '../app/store'
 import { ProviderIcon } from './ProviderIcon'
+import { CloudTab } from './settings/CloudTab'
+import {
+  BTN_DANGER,
+  BTN_GHOST,
+  BTN_PRIMARY,
+  BTN_SECONDARY,
+  BTN_SM,
+  BTN_XS,
+  CHIP,
+  CHIP_ACCENT,
+  EmptyState,
+  Field,
+  INPUT,
+  INPUT_MONO,
+  INPUT_SM,
+  LABEL,
+  ROW,
+  SECTION_TITLE,
+  Segmented,
+  Switch,
+  TEXTAREA,
+} from './settings/atoms'
 import { api } from '../lib/api'
 import { openRemoteConnect } from '../lib/remote'
 import { openUrl } from '../lib/useDesktop'
@@ -89,24 +113,13 @@ import type {
 // ─── tab config ────────────────────────────────────────────────────────────
 
 // Models live inside Providers (catalog + custom models); Memory is a React
-// settings surface backed by the project-scoped memory APIs.
-type TabId =
-  | 'general'
-  | 'appearance'
-  | 'providers'
-  | 'mcp'
-  | 'skills'
-  | 'memory'
-  | 'browser'
-  | 'computer'
-  | 'ssh'
-  | 'channels'
-  | 'shortcuts'
-  | 'usage'
-  | 'developer'
+// settings surface backed by the project-scoped memory APIs. The tab id type
+// (SettingsTab) lives in the store so other surfaces can deep-link to a tab.
+type TabId = SettingsTab
 
 const TABS: { id: TabId; Icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'general', Icon: Cog6ToothIcon },
+  { id: 'cloud', Icon: CloudIcon },
   { id: 'appearance', Icon: SwatchIcon },
   { id: 'providers', Icon: CpuChipIcon },
   { id: 'mcp', Icon: ServerStackIcon },
@@ -130,128 +143,6 @@ const THEMES: { id: string; label: string; appearance: 'dark' | 'light' }[] = [
   { id: 'github-light', label: 'GitHub Light', appearance: 'light' },
   { id: 'solarized-light', label: 'Solarized Light', appearance: 'light' },
 ]
-
-// ─── shared class atoms (mirror the Vue .s-* design tokens) ─────────────────
-
-const INPUT =
-  'w-full h-8 px-2.5 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] text-xs text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)] placeholder:text-[var(--color-muted-foreground)]'
-const INPUT_SM = INPUT + ' !h-7 text-[11px]'
-const INPUT_MONO = INPUT + ' font-mono'
-const TEXTAREA =
-  'w-full min-h-[5rem] px-2.5 py-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] text-xs text-[var(--color-foreground)] outline-none focus:border-[var(--color-primary)] placeholder:text-[var(--color-muted-foreground)] resize-y'
-const BTN =
-  'inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-[var(--radius-md)] text-xs font-medium cursor-pointer border border-transparent transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-const BTN_PRIMARY = BTN + ' bg-[var(--color-primary)] text-[var(--color-on-primary)] hover:opacity-90'
-const BTN_SECONDARY =
-  BTN + ' bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-foreground)] hover:bg-[var(--color-secondary)]'
-const BTN_GHOST = BTN + ' bg-transparent text-[var(--color-foreground)] hover:bg-[var(--color-secondary)]'
-const BTN_DANGER = BTN + ' bg-[var(--color-destructive)] text-[var(--color-on-destructive)] hover:opacity-90'
-const BTN_SM = '!h-7 !px-2.5 !text-[11px] !rounded-[var(--radius-sm)]'
-const BTN_XS = '!h-[22px] !px-2 !text-[10px] !rounded-[var(--radius-sm)]'
-const ROW =
-  'flex items-center gap-3 px-3.5 py-2.5 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-[var(--radius-lg)]'
-const LABEL = 'block text-[11px] font-medium text-[var(--color-foreground)] mb-1.5'
-const CHIP =
-  'inline-flex items-center gap-1 h-[18px] px-2 rounded-full text-[10px] font-medium bg-[var(--color-muted)] text-[var(--color-muted-foreground)] whitespace-nowrap'
-const CHIP_ACCENT = CHIP + ' !bg-[var(--neutral-wash)] !text-[var(--color-accent-neutral)]'
-const SECTION_TITLE = 'text-[13px] font-semibold tracking-tight text-[var(--color-foreground)]'
-
-// ─── small shared components ────────────────────────────────────────────────
-
-// Exported so other lightweight popovers (e.g. CloudBadge) can reuse the same
-// switch styling instead of duplicating it.
-export function Switch({
-  on,
-  onClick,
-  title,
-  ariaLabel,
-  disabled,
-}: {
-  on: boolean
-  onClick: () => void
-  title?: string
-  ariaLabel?: string
-  disabled?: boolean
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      aria-label={ariaLabel}
-      disabled={disabled}
-      onClick={onClick}
-      title={title}
-      className="relative h-5 w-[34px] shrink-0 rounded-full border-none p-0 transition-colors disabled:opacity-50"
-      style={{ backgroundColor: on ? 'var(--color-accent-neutral)' : 'var(--color-border)' }}
-    >
-      <span
-        className="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-[var(--color-surface)] shadow-[var(--shadow-sm)] transition-transform"
-        style={{ transform: on ? 'translateX(14px)' : 'translateX(0)' }}
-      />
-    </button>
-  )
-}
-
-function Segmented<T extends string>({
-  value,
-  options,
-  onChange,
-}: {
-  value: T
-  options: { value: T; label: string }[]
-  onChange: (v: T) => void
-}) {
-  return (
-    <div className="inline-flex gap-0.5 rounded-[var(--radius-md)] bg-[var(--color-muted)] p-0.5">
-      {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          aria-pressed={value === o.value}
-          onClick={() => onChange(o.value)}
-          className="h-6 cursor-pointer rounded-[var(--radius-sm)] px-2.5 text-[11px] font-medium transition-colors"
-          style={
-            value === o.value
-              ? { background: 'var(--color-surface)', color: 'var(--color-foreground)' }
-              : { background: 'transparent', color: 'var(--color-muted-foreground)' }
-          }
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="mb-3.5 last:mb-0">
-      <label className={LABEL}>{label}</label>
-      {children}
-    </div>
-  )
-}
-
-function EmptyState({
-  Icon,
-  title,
-  hint,
-}: {
-  Icon: React.ComponentType<{ className?: string }>
-  title: string
-  hint: string
-}) {
-  return (
-    <div className="flex flex-col items-center justify-center gap-2.5 py-12 text-center">
-      <div className="grid h-9 w-9 place-items-center rounded-lg bg-[var(--color-secondary)] text-[var(--color-muted-foreground)]">
-        <Icon className="h-4 w-4" />
-      </div>
-      <div className="text-[13px] font-medium text-[var(--color-foreground)]">{title}</div>
-      <div className="max-w-[240px] text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">{hint}</div>
-    </div>
-  )
-}
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -318,42 +209,29 @@ function mcpStatusColor(info: MCPServerInfo): string {
   }
 }
 
-// ─── main dialog ────────────────────────────────────────────────────────────
+// ─── main view ──────────────────────────────────────────────────────────────
 
-export function SettingsDialog() {
-  const open = useAppSelector((s) => s.ui.settingsOpen)
+export function SettingsView() {
   const dispatch = useAppDispatch()
   const { t } = useTranslation()
-  const [tab, setTab] = useState<TabId>('general')
+  // The active tab lives in the store so other surfaces (CloudBadge, command
+  // palette) can deep-link to a specific section.
+  const tab = useAppSelector((s) => s.ui.settingsTab)
+  const setTab = (id: TabId) => dispatch(uiActions.setSettingsTab(id))
 
-  // Esc closes (App.tsx also binds a global Esc, but this is self-contained).
-  useEffect(() => {
-    if (!open) return
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') dispatch(uiActions.setSettingsOpen(false))
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, dispatch])
-
-  if (!open) return null
-
-  const close = () => dispatch(uiActions.setSettingsOpen(false))
+  const back = () => dispatch(uiActions.setView('chat'))
 
   return (
-    // Full-screen app-like overlay (mirrors the Vue .settings-shell): opaque
-    // background covering the entire window, with its own left rail + inset
-    // content panel — NOT a small centered dialog. z-modal covers the TopBar.
-    <div
-      className="settings-shell fixed inset-0 box-border flex overflow-hidden"
-      style={{ backgroundColor: 'var(--color-background)', zIndex: 'var(--z-modal)' }}
-    >
-      <div className="titlebar-drag" data-tauri-drag-region aria-hidden="true" />
-      {/* Left rail: shell tone, same width as the workspace sidebar, no border.
-          Holds the vertical section nav (full-width buttons, active one
-          highlighted) with a "Close" action pinned to the bottom. */}
+    // First-class view inside the workspace main column (M18): the global
+    // Sidebar stays visible; this surface brings its own section rail + inset
+    // content panel, same geometry as the chat page.
+    <div className="settings-shell flex min-h-0 flex-1 overflow-hidden bg-[var(--color-background)] text-[var(--color-foreground)]">
+      {/* Section rail: shell tone, no border. Holds the vertical section nav
+          (full-width buttons, active one highlighted) with a "Back" action
+          pinned to the bottom. */}
       <nav
-        className="flex w-[var(--sidebar-width,20rem)] shrink-0 flex-col gap-0.5 overflow-y-auto p-3"
+        aria-label={t('nav.settings')}
+        className="flex w-52 shrink-0 flex-col gap-0.5 overflow-y-auto p-3"
         style={{ backgroundColor: 'var(--color-background)' }}
       >
         {TABS.map((tabItem) => {
@@ -362,6 +240,7 @@ export function SettingsDialog() {
             <button
               key={tabItem.id}
               type="button"
+              aria-current={active ? 'page' : undefined}
               onClick={() => setTab(tabItem.id)}
               className="relative flex h-8 w-full items-center gap-2.5 rounded-[var(--radius-md)] px-2.5 text-left text-[13px] transition-colors duration-[var(--duration-fast,150ms)] hover:bg-[var(--color-secondary)]"
               style={
@@ -382,12 +261,11 @@ export function SettingsDialog() {
           )
         })}
 
-        {/* Close action pinned to the bottom of the rail — settings is opened
-            from the sidebar's bottom gear, so returning shouldn't require
-            traveling all the way back to the top. */}
+        {/* Back action pinned to the bottom of the rail — returning shouldn't
+            require traveling all the way back to the top. */}
         <button
           type="button"
-          onClick={close}
+          onClick={back}
           title={`${t('settings.backToWorkspace')} (Esc)`}
           className="group mt-auto flex h-9 items-center gap-1.5 rounded-[var(--radius-md)] px-2.5 text-[13px] font-medium text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-secondary)] hover:text-[var(--color-foreground)]"
         >
@@ -402,10 +280,11 @@ export function SettingsDialog() {
       <div className="flex min-w-0 flex-1 flex-col">
         <div
           className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--radius-2xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-sm)]"
-          style={{ margin: '4px 14px 14px' }}
+          style={{ margin: '4px 14px 14px 4px' }}
         >
           <div className="min-h-0 flex-1 overflow-y-auto px-8 py-7 [&>*]:mx-auto [&>*]:max-w-3xl">
             {tab === 'general' && <GeneralTab />}
+            {tab === 'cloud' && <CloudTab />}
             {tab === 'appearance' && <AppearanceTab />}
             {tab === 'providers' && <ProvidersTab />}
             {tab === 'mcp' && <MCPTab />}
@@ -2358,7 +2237,6 @@ function ChannelsTab() {
           className={`${BTN_SECONDARY} ${BTN_SM}`}
           onClick={() => {
             dispatch(uiActions.setView('channels'))
-            dispatch(uiActions.setSettingsOpen(false))
           }}
         >
           {t('settings.channels.openPage')} <ArrowRightIcon className="h-3.5 w-3.5" />

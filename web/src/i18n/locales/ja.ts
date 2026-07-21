@@ -348,6 +348,7 @@ export default {
     title: '設定',
     tabs: {
       general: '一般',
+      cloud: 'クラウド',
       appearance: '外観',
       providers: 'プロバイダー',
       mcp: 'MCP サーバー',
@@ -1072,6 +1073,7 @@ export default {
     syncNeedLogin: 'ログインするとセッションをクラウドに同期できます',
     syncDefaultTitle: '新しいセッションをクラウドに同期',
     syncDefaultDesc: 'この設定以降に作成されたセッションがクラウドコンソールとモバイルアプリに表示されます。既存のセッションには影響しません。',
+    pairingSection: 'デバイスペアリング',
   },
 
   pip: {

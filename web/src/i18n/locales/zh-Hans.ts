@@ -345,6 +345,7 @@ export default {
     title: '设置',
     tabs: {
       general: '通用',
+      cloud: '云',
       appearance: '外观',
       providers: '服务商',
       mcp: 'MCP 服务器',
@@ -1097,6 +1098,8 @@ export default {
     syncNeedLogin: '登录后可将会话同步到云端',
     syncDefaultTitle: '新会话默认同步到云端',
     syncDefaultDesc: '之后新建的会话将在云控制台和移动端可见；已有会话不受影响。',
+    pairingSection: '设备配对',
+    autoConnect: '自动连接',
   },
 
   pip: {

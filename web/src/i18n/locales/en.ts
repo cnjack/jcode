@@ -364,6 +364,7 @@ export default {
     title: 'Settings',
     tabs: {
       general: 'General',
+      cloud: 'Cloud',
       appearance: 'Appearance',
       providers: 'Providers',
       mcp: 'MCP Servers',
@@ -1123,6 +1124,8 @@ export default {
     syncNeedLogin: 'Log in to sync this session to the cloud',
     syncDefaultTitle: 'Sync new sessions to the cloud',
     syncDefaultDesc: 'Sessions created later become visible in the cloud console and mobile app. Existing sessions are not affected.',
+    pairingSection: 'Device pairing',
+    autoConnect: 'Auto-connect',
   },
 
   // Computer-use picture-in-picture (floating latest-screenshot card).

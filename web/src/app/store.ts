@@ -585,11 +585,31 @@ const modelSlice = createSlice({
 // App UI slice — view routing, dialog open states
 // ═══════════════════════════════════════════════════════════════════════════
 
-type View = 'chat' | 'automations' | 'channels' | 'automation-run'
+// M18: settings is a first-class view (its own full-page surface), not an
+// overlay dialog — the bottom-left gear / ⌘, / CloudBadge all route here.
+type View = 'chat' | 'automations' | 'channels' | 'automation-run' | 'settings'
+
+// Sections of the settings view. Deep links (e.g. CloudBadge → Cloud) set this
+// together with setView('settings').
+export type SettingsTab =
+  | 'general'
+  | 'cloud'
+  | 'appearance'
+  | 'providers'
+  | 'mcp'
+  | 'skills'
+  | 'memory'
+  | 'browser'
+  | 'computer'
+  | 'ssh'
+  | 'channels'
+  | 'shortcuts'
+  | 'usage'
+  | 'developer'
 
 interface UiState {
   activeView: View
-  settingsOpen: boolean
+  settingsTab: SettingsTab
   paletteOpen: boolean
   needsAuth: boolean
   needsSetup: boolean
@@ -603,7 +623,7 @@ interface UiState {
 
 const initialUi: UiState = {
   activeView: 'chat',
-  settingsOpen: false,
+  settingsTab: 'general',
   paletteOpen: false,
   needsAuth: false,
   needsSetup: false,
@@ -622,8 +642,8 @@ const uiSlice = createSlice({
     setView(s, a: { payload: View }) {
       s.activeView = a.payload
     },
-    setSettingsOpen(s, a: { payload: boolean }) {
-      s.settingsOpen = a.payload
+    setSettingsTab(s, a: { payload: SettingsTab }) {
+      s.settingsTab = a.payload
     },
     setPaletteOpen(s, a: { payload: boolean }) {
       s.paletteOpen = a.payload

@@ -37,7 +37,7 @@ export function ProjectHeader() {
         <ThemeToggle />
         <button
           type="button"
-          onClick={() => dispatch(uiActions.setSettingsOpen(true))}
+          onClick={() => dispatch(uiActions.setView('settings'))}
           className="rounded-[var(--radius-md)] p-1.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--neutral-wash-soft)] hover:text-[var(--color-foreground)]"
           aria-label={t('nav.settings')}
           title={t('nav.settingsWithShortcut')}

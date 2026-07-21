@@ -51,7 +51,7 @@ import { ChannelsView } from './components/ChannelsView'
 import { CommandPalette } from './components/CommandPalette'
 import { AuthGate } from './components/AuthGate'
 import { SetupView } from './components/SetupView'
-import { SettingsDialog } from './components/SettingsDialog'
+import { SettingsView } from './components/SettingsView'
 import { TopBar } from './components/TopBar'
 import { CloudSyncToggle } from './components/CloudSyncToggle'
 import { ComputerShotPiP } from './components/ComputerShotPiP'
@@ -139,15 +139,15 @@ export default function App() {
         void dispatch(startNewChat())
       } else if (meta && e.key === ',') {
         e.preventDefault()
-        dispatch(uiActions.setSettingsOpen(true))
+        dispatch(uiActions.setView('settings'))
       } else if (e.key === 'Escape') {
         dispatch(uiActions.setPaletteOpen(false))
-        dispatch(uiActions.setSettingsOpen(false))
+        if (activeView === 'settings') dispatch(uiActions.setView('chat'))
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [dispatch])
+  }, [dispatch, activeView])
 
   // Gate screens take precedence.
   if (connectionError) {
@@ -172,7 +172,7 @@ function store_getState() {
 
 type PanelType = 'terminal' | 'files' | 'changes' | 'plan'
 
-function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels' | 'automation-run' }) {
+function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels' | 'automation-run' | 'settings' }) {
   const dispatch = useAppDispatch()
   const runtime = useChatRuntime()
   const registry = useRef(createDefaultToolRegistry()).current
@@ -304,6 +304,8 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels'
             {activeView === 'automation-run' && (
               <AutomationRunReplay run={activeRun} onBack={closeRun} />
             )}
+            {/* M18: settings is a first-class view, not an overlay dialog. */}
+            {activeView === 'settings' && <SettingsView />}
 
             {/* Bottom panel (terminal) — lives under the inset surface. */}
             {bottomPanel === 'terminal' && (
@@ -329,7 +331,6 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels'
           )}
 
           {paletteOpen && <CommandPalette />}
-          <SettingsDialog />
           <RemoteConnectWizard
             open={remoteWizardOpen}
             prefill={remotePrefill}
@@ -340,7 +341,7 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels'
             onBound={() => {
               setRemoteWizardOpen(false)
               setRemotePrefill(null)
-              dispatch(uiActions.setSettingsOpen(false))
+              dispatch(uiActions.setView('chat'))
             }}
           />
         </div>
