@@ -1,3 +1,10 @@
+/**
+ * BranchPicker — git branch switcher pill for the composer header.
+ *
+ * Ported from the jcode web product UI; the backend calls go through
+ * `ProductComposerHost.fetchBranches` / `checkoutBranch`.
+ */
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CheckIcon,
@@ -6,9 +13,8 @@ import {
   MagnifyingGlassIcon,
   PlusIcon,
 } from '@heroicons/react/24/outline'
-import { useTranslation } from 'react-i18next'
-import { api } from '../lib/api'
-import { useAppSelector } from '../app/hooks'
+import type { ProductComposerHost } from './host.js'
+import { useComposerStrings } from './useComposerStrings.js'
 
 interface PendingSwitch {
   branch: string
@@ -18,9 +24,9 @@ interface PendingSwitch {
 
 const MAX_FILES = 8
 
-export function BranchPicker({ placement = 'top' }: { placement?: 'top' | 'bottom' }) {
-  const { t } = useTranslation()
-  const projectPath = useAppSelector((s) => s.session.projectPath)
+export function BranchPicker({ host, placement = 'top' }: { host: ProductComposerHost; placement?: 'top' | 'bottom' }) {
+  const strings = useComposerStrings(host)
+  const projectPath = host.projectPath
   const [current, setCurrent] = useState('')
   const [branches, setBranches] = useState<string[]>([])
   const [open, setOpen] = useState(false)
@@ -35,14 +41,14 @@ export function BranchPicker({ placement = 'top' }: { placement?: 'top' | 'botto
 
   const refresh = useCallback(async () => {
     try {
-      const res = await api.gitBranches()
+      const res = await host.fetchBranches()
       setCurrent(res.current || '')
       setBranches(res.branches || [])
     } catch {
       setCurrent('')
       setBranches([])
     }
-  }, [])
+  }, [host])
 
   useEffect(() => {
     void refresh()
@@ -105,7 +111,7 @@ export function BranchPicker({ placement = 'top' }: { placement?: 'top' | 'botto
     setSwitching(true)
     setError('')
     try {
-      const res = await api.gitCheckout(branch.trim(), create, strategy)
+      const res = await host.checkoutBranch(branch.trim(), create, strategy)
       if (res.blocked) {
         setPending({ branch: branch.trim(), create, files: res.files || [] })
         return
@@ -115,7 +121,7 @@ export function BranchPicker({ placement = 'top' }: { placement?: 'top' | 'botto
       await refresh()
       reset()
     } catch (e) {
-      setError(e instanceof Error ? e.message : t('errors.branchSwitch'))
+      setError(e instanceof Error ? e.message : strings.branchSwitchError)
     } finally {
       setSwitching(false)
     }
@@ -132,7 +138,7 @@ export function BranchPicker({ placement = 'top' }: { placement?: 'top' | 'botto
       <button
         type="button"
         disabled={switching}
-        title={t('branches.current').replace('{name}', current)}
+        title={strings.branchCurrent(current)}
         onClick={(e) => {
           e.stopPropagation()
           setOpen((v) => !v)
@@ -150,9 +156,9 @@ export function BranchPicker({ placement = 'top' }: { placement?: 'top' | 'botto
         }`}>
           {pending ? (
             <div className="flex flex-col gap-2 p-1">
-              <div className="text-xs font-semibold text-[var(--color-foreground)]">{t('branches.confirmTitle')}</div>
+              <div className="text-xs font-semibold text-[var(--color-foreground)]">{strings.branchConfirmTitle}</div>
               <div className="text-[11.5px] text-[var(--color-muted-foreground)]">
-                {t('branches.confirmIntro').replace('{branch}', pending.branch)}
+                {strings.branchConfirmIntro(pending.branch)}
               </div>
               {pending.files.length > 0 && (
                 <ul className="max-h-32 overflow-y-auto rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-muted)] p-2 font-mono text-[10.5px] text-[var(--color-foreground)]">
@@ -161,7 +167,7 @@ export function BranchPicker({ placement = 'top' }: { placement?: 'top' | 'botto
                   ))}
                   {pending.files.length > MAX_FILES && (
                     <li className="text-[var(--color-muted-foreground)]">
-                      {t('branches.confirmMore').replace('{count}', String(pending.files.length - MAX_FILES))}
+                      {strings.branchConfirmMore(pending.files.length - MAX_FILES)}
                     </li>
                   )}
                 </ul>
@@ -169,16 +175,16 @@ export function BranchPicker({ placement = 'top' }: { placement?: 'top' | 'botto
               {error && <div className="text-[11px] text-[var(--color-destructive)]">{error}</div>}
               <div className="flex flex-wrap gap-1.5">
                 <button type="button" disabled={switching} onClick={() => void checkout(pending.branch, pending.create, 'stash')} className="rounded-[var(--radius-md)] bg-[var(--color-primary)] px-2 py-1 text-[11.5px] font-medium text-[var(--color-on-primary)] disabled:opacity-50">
-                  {t('branches.confirmStash')}
+                  {strings.branchConfirmStash}
                 </button>
                 <button type="button" disabled={switching} onClick={() => void checkout(pending.branch, pending.create, 'force')} className="rounded-[var(--radius-md)] bg-[var(--color-destructive)] px-2 py-1 text-[11.5px] font-medium text-[var(--color-on-destructive)] disabled:opacity-50">
-                  {t('branches.confirmDiscard')}
+                  {strings.branchConfirmDiscard}
                 </button>
                 <button type="button" disabled={switching} onClick={() => setPending(null)} className="rounded-[var(--radius-md)] border border-[var(--color-border)] px-2 py-1 text-[11.5px] text-[var(--color-foreground)] disabled:opacity-50">
-                  {t('branches.confirmCancel')}
+                  {strings.branchConfirmCancel}
                 </button>
               </div>
-              <div className="text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">{t('branches.confirmHint')}</div>
+              <div className="text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">{strings.branchConfirmHint}</div>
             </div>
           ) : (
             <>
@@ -187,16 +193,16 @@ export function BranchPicker({ placement = 'top' }: { placement?: 'top' | 'botto
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder={t('branches.search')}
+                  placeholder={strings.branchSearch}
                   className="min-w-0 flex-1 border-none bg-transparent text-[12.5px] text-[var(--color-foreground)] outline-none"
                 />
               </div>
               <div className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--color-muted-foreground)]">
-                {t('branches.title')}
+                {strings.branchesTitle}
               </div>
               <div className="max-h-56 overflow-y-auto">
                 {filtered.length === 0 ? (
-                  <div className="px-2 py-3 text-xs text-[var(--color-muted-foreground)]">{t('branches.none')}</div>
+                  <div className="px-2 py-3 text-xs text-[var(--color-muted-foreground)]">{strings.branchesNone}</div>
                 ) : (
                   filtered.map((branch) => (
                     <button
@@ -220,7 +226,7 @@ export function BranchPicker({ placement = 'top' }: { placement?: 'top' | 'botto
                 {!creating ? (
                   <button type="button" onClick={startCreate} className="flex w-full items-center gap-2 rounded-[var(--radius-md)] px-2 py-1.5 text-left text-xs text-[var(--color-foreground)] hover:bg-[var(--color-muted)]">
                     <PlusIcon className="h-3.5 w-3.5" />
-                    {t('branches.create')}
+                    {strings.branchCreate}
                   </button>
                 ) : (
                   <div className="flex gap-1.5">
@@ -232,11 +238,11 @@ export function BranchPicker({ placement = 'top' }: { placement?: 'top' | 'botto
                         if (e.key === 'Enter') void checkout(newName, true)
                         if (e.key === 'Escape') setCreating(false)
                       }}
-                      placeholder={t('branches.newName')}
+                      placeholder={strings.branchNewName}
                       className="min-w-0 flex-1 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-background)] px-2 py-1.5 text-xs text-[var(--color-foreground)] outline-none"
                     />
                     <button type="button" disabled={!newName.trim() || switching} onClick={() => void checkout(newName, true)} className="rounded-[var(--radius-md)] bg-[var(--color-primary)] px-2 py-1.5 text-xs font-medium text-[var(--color-on-primary)] disabled:opacity-50">
-                      {t('branches.createBtn')}
+                      {strings.branchCreateBtn}
                     </button>
                   </div>
                 )}

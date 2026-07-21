@@ -86,6 +86,7 @@ Plus `ThreadWelcome` + `Suggestions` (empty state & follow-ups), `ConnectionBann
 | `jcode-ui/canvas` (+`canvas.css`) | Agent workflow canvas on `@xyflow/react` — status-aware nodes, animated edges, `toolTreeToGraph` |
 | `jcode-ui/voice` (+`voice.css`) | SpeechInput, Transcription, AudioPlayer, VoiceVisualizer — browser APIs only |
 | `jcode-ui/plugins/mermaid` / `plugins/katex` | Diagram/math rendering via dynamic-import peers (zero cost unused) |
+| `jcode-ui/product` | The jcode **product composer** (`ChatInput`, `WorkspacePicker`, `BranchPicker`, `GoalBanner`) — the exact desktop input experience, driven by a `ProductComposerHost` prop (state + actions + i18n strings + provider icons). Uses the product theme tokens (`--color-*`), not the scoped `--jcode-*` library tokens |
 | `createAGUIRuntime` (core) | Drive everything from any AG-UI backend — LangGraph, CrewAI, Mastra, … |
 
 ## Custom tool renderers

@@ -1,10 +1,10 @@
 /**
- * ChatInput — the product composer (ported from web/src/components/ChatInput.vue).
+ * ChatInput — the jcode product composer.
  *
- * Layers jcode product UI on top of the runtime actions:
+ * Layers the jcode product UI on top of the ChatRuntime actions:
  *   - autosizing textarea, send / queue / stop, IME-safe Enter
  *   - slash-command menu (keyboard-navigable)
- *   - MODE picker (approval / plan / full_access)
+ *   - MODE picker (approval / plan / auto / full_access)
  *   - MODEL picker (current / favorites / all-providers with capability dots,
  *     context-limit subline, and a Manage Models dialog)
  *   - EFFORT picker (per-model reasoning effort)
@@ -14,9 +14,10 @@
  *   - keyboard shortcuts (⌘L focus, Esc to close dialogs)
  *   - click-outside handling
  *
- * Send/stop/queue come from the jcode-ui runtime actions; provider/model/mode
- * state + the model catalog come from the Redux model slice; the slash command
- * list comes from the chat slice (fetched at boot in App.tsx).
+ * Send/stop/queue + token snapshot come from the jcode-ui ChatRuntime
+ * (RuntimeProvider); provider/model/mode state, slash commands, workspace and
+ * goal actions arrive through the `ProductComposerHost` prop, so the component
+ * carries no Redux / fetch / Tauri / i18next imports of its own.
  */
 
 import {
@@ -29,7 +30,6 @@ import {
 } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { useTranslation } from 'react-i18next'
 import {
   HandRaisedIcon,
   ShieldExclamationIcon,
@@ -50,27 +50,29 @@ import {
   SparklesIcon,
 } from '@heroicons/react/24/outline'
 import { StarIcon as StarIconSolid, CheckCircleIcon } from '@heroicons/react/24/solid'
-import { AttachmentList, useRuntimeActions, useRuntimeState } from 'jcode-ui'
+import { useRuntimeActions, useRuntimeState } from 'jcode-ui-core/runtime'
 import type { ChatImage as RuntimeChatImage } from 'jcode-ui-core'
-import { useAppDispatch, useAppSelector } from '../app/hooks'
-import { chatActions, modelActions } from '../app/store'
-import { api } from '../lib/api'
-import { readDraft, writeDraft } from '../lib/drafts'
-import { BranchPicker } from './BranchPicker'
-import { ProviderIcon } from './ProviderIcon'
-import { WorkspacePicker } from './WorkspacePicker'
+import { AttachmentList } from '../components/Attachment.js'
+import type { ProductComposerHost } from './host.js'
+import type { ProductComposerStrings } from './strings.js'
+import { useComposerStrings } from './useComposerStrings.js'
+import { readDraft, writeDraft } from './drafts.js'
+import { BranchPicker } from './BranchPicker.js'
+import { ProviderIcon } from './ProviderIcon.js'
+import { WorkspacePicker } from './WorkspacePicker.js'
 import type {
   AgentMode,
-  ChatImage,
   ModelInfo,
   ProviderInfo,
   SlashCommandInfo,
   TaskStats,
-} from '../lib/types'
+} from './types.js'
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 
-export interface ChatInputProps {
+export interface ProductChatInputProps {
+  /** Host state + actions projection (see host.ts). */
+  host: ProductComposerHost
   /** Fired when the user dispatches a message (sent now or queued mid-turn). */
   onSent?: () => void
   /** Direction for workspace/branch panels. Welcome opens downward. */
@@ -78,7 +80,6 @@ export interface ChatInputProps {
   /**
    * Elevate the whole composer into a bordered, shadowed card (welcome /
    * new-task screen). Docked conversation composers stay recessed.
-   * Mirrors Vue's `.composer-elevated` on `.chat-input-card`.
    */
   elevated?: boolean
 }
@@ -88,25 +89,25 @@ export interface ChatInputProps {
 type ModeValue = AgentMode
 interface ModeDef {
   value: ModeValue
-  /** i18n keys under chat.modes (resolved with t() at render). */
-  labelKey: string
-  subKey: string
+  /** Keys into ProductComposerStrings (resolved at render). */
+  labelKey: 'modeApproval' | 'modePlan' | 'modeAuto' | 'modeFullAccess'
+  subKey: 'modeApprovalSub' | 'modePlanSub' | 'modeAutoSub' | 'modeFullAccessSub'
   risk: 'neutral' | 'plan' | 'info' | 'danger'
   Icon: typeof HandRaisedIcon
 }
 
 const MODE_DEFS: ModeDef[] = [
-  { value: 'approval', labelKey: 'chat.modes.approval', subKey: 'chat.modes.approvalSub', risk: 'neutral', Icon: HandRaisedIcon },
-  { value: 'plan', labelKey: 'chat.modes.plan', subKey: 'chat.modes.planSub', risk: 'plan', Icon: ClipboardDocumentListIcon },
-  { value: 'auto', labelKey: 'chat.modes.auto', subKey: 'chat.modes.autoSub', risk: 'info', Icon: SparklesIcon },
-  { value: 'full_access', labelKey: 'chat.modes.fullAccess', subKey: 'chat.modes.fullAccessSub', risk: 'danger', Icon: ShieldExclamationIcon },
+  { value: 'approval', labelKey: 'modeApproval', subKey: 'modeApprovalSub', risk: 'neutral', Icon: HandRaisedIcon },
+  { value: 'plan', labelKey: 'modePlan', subKey: 'modePlanSub', risk: 'plan', Icon: ClipboardDocumentListIcon },
+  { value: 'auto', labelKey: 'modeAuto', subKey: 'modeAutoSub', risk: 'info', Icon: SparklesIcon },
+  { value: 'full_access', labelKey: 'modeFullAccess', subKey: 'modeFullAccessSub', risk: 'danger', Icon: ShieldExclamationIcon },
 ]
 
 const STANDARD_EFFORT_OPTIONS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
-function modeLabel(t: (key: string) => string, m: string): string {
+function modeLabel(strings: ProductComposerStrings, m: string): string {
   const def = MODE_DEFS.find((d) => d.value === m)
-  return t(def ? def.labelKey : 'chat.modes.approval')
+  return strings[def ? def.labelKey : 'modeApproval']
 }
 
 // ─── Format helpers ─────────────────────────────────────────────────────────
@@ -154,33 +155,34 @@ function slashTokenAt(text: string, cursor: number): { start: number; filter: st
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }: ChatInputProps) {
-  const { t } = useTranslation()
-  const dispatch = useAppDispatch()
+export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = false }: ProductChatInputProps) {
+  const strings = useComposerStrings(host)
 
   // Runtime (timeline/queue + send/stop actions).
   const actions = useRuntimeActions()
   const { isRunning, queued, tokenSnapshot } = useRuntimeState()
 
-  // Model slice state.
-  const providerName = useAppSelector((s) => s.model.providerName)
-  const modelName = useAppSelector((s) => s.model.modelName)
-  const mode = useAppSelector((s) => s.model.mode)
-  const providers = useAppSelector((s) => s.model.providers)
-  const favoriteModels = useAppSelector((s) => s.model.favoriteModels)
-  const recentModels = useAppSelector((s) => s.model.recentModels)
-  const imageSupport = useAppSelector((s) => s.model.imageSupport)
-  const effortOverrides = useAppSelector((s) => s.model.effortOverrides)
-  const slashCommands = useAppSelector((s) => s.chat.slashCommands)
-  const hasMessages = useAppSelector((s) => s.chat.timeline.length > 0)
-  const goalArmed = useAppSelector((s) => s.chat.goalArmed)
-  const currentSessionId = useAppSelector((s) => s.session.currentSessionId)
+  // Host (model/chat/workspace) state.
+  const {
+    providerName,
+    modelName,
+    mode,
+    providers,
+    favoriteModels,
+    recentModels,
+    imageSupport,
+    effortOverrides,
+    slashCommands,
+    hasMessages,
+    goalArmed,
+    sessionId: currentSessionId,
+  } = host
 
   // Composer-local state. The input text initializes from the saved draft for
   // this conversation (covers remounts on welcome ↔ conversation crossing).
   const [input, setInput] = useState(() => readDraft(currentSessionId))
-  /** Pending vision images — same shape as jcode-ui `ChatImage` / AttachmentList. */
-  const [pendingImages, setPendingImages] = useState<ChatImage[]>([])
+  /** Pending vision images — same shape as the ChatRuntime `ChatImage` / AttachmentList. */
+  const [pendingImages, setPendingImages] = useState<RuntimeChatImage[]>([])
   const [showSlashMenu, setShowSlashMenu] = useState(false)
   const [slashFilter, setSlashFilter] = useState('')
   const [selectedSlashIdx, setSelectedSlashIdx] = useState(0)
@@ -286,8 +288,8 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
   // Local pseudo-command: "/goal" arms Goal mode (same as the "+" menu entry)
   // instead of inserting text. Compared by object identity in applySlashCommand.
   const goalSlashCmd = useMemo<SlashCommandInfo>(
-    () => ({ slash: '/goal', description: t('chat.goalSlashDesc'), type: 'builtin' }),
-    [t],
+    () => ({ slash: '/goal', description: strings.goalSlashDesc, type: 'builtin' }),
+    [strings],
   )
 
   const filteredSlashCommands = useMemo(() => {
@@ -313,14 +315,9 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
     setShowContextPopup((v) => !v)
     if (!showContextPopup && currentSessionId) {
       setTaskStatsLoading(true)
-      try {
-        const stats = await api.taskStats(currentSessionId)
-        setTaskStats(stats)
-      } catch {
-        setTaskStats(null)
-      } finally {
-        setTaskStatsLoading(false)
-      }
+      const stats = await host.fetchTaskStats(currentSessionId)
+      setTaskStats(stats)
+      setTaskStatsLoading(false)
     }
   }
 
@@ -369,7 +366,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
       pendingImages.length > 0
         ? pendingImages.map((i) => ({ data: i.data, media_type: i.media_type, name: i.name }))
         : undefined
-    const body = text || t('chat.attachedImages')
+    const body = text || strings.attachedImages
     if (isRunning) {
       actions.enqueueMessage(body, images)
     } else {
@@ -380,7 +377,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
     setPendingImages([])
     setShowSlashMenu(false)
     onSent?.()
-  }, [actions, input, isRunning, onSent, pendingImages, currentSessionId, t])
+  }, [actions, input, isRunning, onSent, pendingImages, currentSessionId, strings])
 
   // ─── Model / mode selection ───────────────────────────────────────────────
 
@@ -388,57 +385,19 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
     setShowModelPicker(false)
     setShowEffortPicker(false)
     setModelFilter('')
-    try {
-      await api.switchModel(provider, model)
-      dispatch(modelActions.setProvider(provider))
-      dispatch(modelActions.setModel(model))
-    } catch {
-      /* ignore — the next status poll reconciles */
-    }
+    // The host persists + updates its store; failures are reconciled by the
+    // next status poll.
+    await host.selectModel(provider, model)
   }
 
   async function selectMode(next: ModeValue) {
     setShowModePicker(false)
-    try {
-      await api.switchMode(next)
-    } catch {
-      /* ignore */
-    }
-    dispatch(modelActions.setMode(next))
+    await host.selectMode(next)
   }
 
   async function pickEffort(effort: string) {
     setShowEffortPicker(false)
-    dispatch(modelActions.setEffortOverride({ provider: providerName, model: modelName, effort }))
-    try {
-      await api.setModelEffort(providerName, modelName, effort)
-    } catch {
-      dispatch(modelActions.setEffortOverride({ provider: providerName, model: modelName, effort: currentEffort }))
-    }
-  }
-
-  async function toggleFavorite(provider: string, model: string) {
-    try {
-      const result = await api.toggleFavorite(provider, model)
-      dispatch(modelActions.setFavorite({ provider, model, favorite: result.favorite }))
-    } catch {
-      /* ignore */
-    }
-  }
-
-  async function toggleModelEnabled(provider: string, model: string, enabled: boolean) {
-    try {
-      await api.toggleModelEnabled(provider, model, enabled)
-      // Reflect locally so the Manage dialog toggles immediately.
-      const nextProviders = providers.map((p) =>
-        p.id === provider
-          ? { ...p, models: p.models.map((m) => (m.id === model ? { ...m, enabled } : m)) }
-          : p,
-      )
-      dispatch(modelActions.setProviders(nextProviders))
-    } catch {
-      /* ignore */
-    }
+    await host.setEffort(providerName, modelName, effort)
   }
 
   // ─── Slash commands ───────────────────────────────────────────────────────
@@ -462,7 +421,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
     if (cmd === goalSlashCmd) {
       // "/goal" is a mode toggle, not message text: arm Goal mode and strip the
       // typed token so the surrounding message stays intact.
-      dispatch(chatActions.setGoalArmed(true))
+      host.setGoalArmed(true)
       if (tok) {
         const next = input.slice(0, tok.start) + input.slice(cursor)
         setInput(next)
@@ -721,8 +680,8 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
   // Welcome/new-task elevates the whole card; docked conversation stays flat.
   const isElevated = elevated || !hasMessages
 
-  // Horizontal inset comes from the parent (`.chat-col` or welcome `px-5`) so
-  // the composer width matches the message column exactly.
+  // Horizontal inset comes from the parent so the composer width matches the
+  // message column exactly.
   return (
     <div ref={containerRef} className="relative w-full bg-transparent" style={{ padding: '8px 0 14px' }}>
       {/* Type-ahead queue */}
@@ -747,8 +706,8 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
               )}
               <button
                 type="button"
-                title={t('chat.removeQueued')}
-                aria-label={t('chat.removeQueued')}
+                title={strings.removeQueued}
+                aria-label={strings.removeQueued}
                 onClick={() => actions.removeQueuedMessage(q.id)}
                 className="grid h-5 w-5 shrink-0 place-items-center rounded-[var(--radius-md)] border-none bg-transparent text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-secondary)] hover:text-[var(--color-foreground)]"
               >
@@ -783,7 +742,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                 <span className="shrink-0 font-mono text-xs text-[var(--color-primary)]">{cmd.slash}</span>
                 {cmd.type === 'flow' && (
                   <span className="shrink-0 rounded-[var(--radius-pill)] border border-[var(--accent-wash)] bg-[var(--accent-wash)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[var(--color-primary)]">
-                    {t('chat.workflowBadge')}
+                    {strings.workflowBadge}
                   </span>
                 )}
                 <span className="truncate text-[11px] text-[var(--color-muted-foreground)]">{cmd.description}</span>
@@ -797,8 +756,8 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
             className="flex min-w-0 items-center gap-1.5"
             style={{ padding: isElevated ? '2px 4px 9px' : '0 2px 5px' }}
           >
-            <WorkspacePicker placement={pickerPlacement} />
-            <BranchPicker placement={pickerPlacement} />
+            <WorkspacePicker host={host} placement={pickerPlacement} />
+            <BranchPicker host={host} placement={pickerPlacement} />
           </div>
         )}
 
@@ -822,10 +781,10 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
               onPaste={handlePaste}
               placeholder={
                 isRunning
-                  ? t('chat.queuePlaceholder')
+                  ? strings.queuePlaceholder
                     : goalArmed
-                    ? t('chat.goalPlaceholder')
-                    : t('chat.placeholder')
+                    ? strings.goalPlaceholder
+                    : strings.placeholder
               }
               className="block w-full resize-none border-none bg-transparent text-sm leading-relaxed text-[var(--color-foreground)] outline-none"
               style={{ minHeight: 28, maxHeight: 200, fontFamily: 'var(--font-sans)' }}
@@ -858,7 +817,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
               <div className="relative">
                 <button
                   type="button"
-                  title={t('chat.add')}
+                  title={strings.add}
                   onClick={(e: ReactMouseEvent) => { e.stopPropagation(); openAdd() }}
                   className={`grid h-[30px] w-[30px] place-items-center rounded-[var(--radius-md)] border-none bg-transparent text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-secondary)] hover:text-[var(--color-foreground)] ${
                     showAddMenu ? 'bg-[var(--color-secondary)] text-[var(--color-foreground)]' : ''
@@ -873,14 +832,14 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                     <button
                       type="button"
                       disabled={!imageSupport}
-                      title={!imageSupport ? t('chat.model.noImages') : ''}
+                      title={!imageSupport ? strings.modelNoImages : ''}
                       onClick={() => { triggerImageUpload(); setShowAddMenu(false) }}
                       className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)] ${
                         !imageSupport ? 'cursor-default opacity-50' : ''
                       }`}
                     >
                       <PaperClipIcon className="h-3.5 w-3.5 shrink-0 text-[var(--color-muted-foreground)]" />
-                      <span>{t('chat.attachFiles')}</span>
+                      <span>{strings.attachFiles}</span>
                       {pendingImages.length > 0 && (
                         <span className="ml-auto font-mono text-[10px] text-[var(--color-primary)]">{pendingImages.length}</span>
                       )}
@@ -891,18 +850,18 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                       className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
                     >
                       <span className="w-[15px] shrink-0 text-center font-mono text-sm leading-none text-[var(--color-muted-foreground)]">/</span>
-                      <span>{t('chat.command')}</span>
+                      <span>{strings.command}</span>
                     </button>
                     <button
                       type="button"
-                      title={goalArmed ? t('chat.goalHint.nextReplaces') : t('chat.goalHint.next')}
-                      onClick={() => { dispatch(chatActions.setGoalArmed(!goalArmed)); setShowAddMenu(false) }}
+                      title={goalArmed ? strings.goalHintNextReplaces : strings.goalHintNext}
+                      onClick={() => { host.setGoalArmed(!goalArmed); setShowAddMenu(false) }}
                       className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)] ${
                         goalArmed ? 'bg-[var(--neutral-wash)] text-[var(--color-foreground)]' : ''
                       }`}
                     >
                       <ViewfinderCircleIcon className={`h-3.5 w-3.5 shrink-0 ${goalArmed ? 'text-[var(--color-primary)]' : 'text-[var(--color-muted-foreground)]'}`} />
-                      <span>{t('chat.goal')}</span>
+                      <span>{strings.goal}</span>
                     </button>
                   </div>
                 )}
@@ -931,7 +890,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                             : ''
                     }
                   >
-                    {modeLabel(t, mode)}
+                    {modeLabel(strings, mode)}
                   </span>
                   <ChevronDownIcon
                     className={`h-3 w-3 opacity-55 transition-transform ${showModePicker ? 'rotate-180' : ''}`}
@@ -975,10 +934,10 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                                       : 'text-[var(--color-foreground)]'
                               }`}
                             >
-                              {t(m.labelKey)}
+                              {strings[m.labelKey]}
                             </span>
                             <span className="mt-px block text-[10.5px] leading-[1.4] text-[var(--color-muted-foreground)]">
-                              {t(m.subKey)}
+                              {strings[m.subKey]}
                             </span>
                           </span>
                           {active && <CheckIcon className="mt-[3px] h-3.5 w-3.5 shrink-0 text-[var(--color-primary)]" />}
@@ -994,20 +953,20 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                 <>
                   <span aria-hidden="true" className="mx-0.5 h-4 w-px shrink-0 bg-[var(--color-border)]" />
                   <div
-                    title={t('chat.goalHint.nextReplaces')}
+                    title={strings.goalHintNextReplaces}
                     className="inline-flex h-[26px] items-center gap-1.5 rounded-[var(--radius-md)] bg-[var(--neutral-wash)] px-2 text-xs font-medium text-[var(--color-primary)]"
                     style={{ paddingLeft: 4, paddingRight: 9 }}
                   >
                     <button
                       type="button"
-                      title={t('chat.goalHint.remove')}
-                      onClick={() => dispatch(chatActions.setGoalArmed(false))}
+                      title={strings.goalHintRemove}
+                      onClick={() => host.setGoalArmed(false)}
                       className="grid h-4 w-4 place-items-center rounded-[var(--radius-pill)] border-none bg-[color-mix(in_srgb,var(--color-primary)_18%,transparent)] text-[var(--color-primary)] transition-colors hover:bg-[color-mix(in_srgb,var(--color-primary)_34%,transparent)]"
                     >
                       <XMarkIcon className="h-2.5 w-2.5" />
                     </button>
                     <ViewfinderCircleIcon className="h-3 w-3" />
-                    <span>{t('chat.goal')}</span>
+                    <span>{strings.goal}</span>
                   </div>
                 </>
               )}
@@ -1020,7 +979,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                 <div className="relative">
                   <button
                     type="button"
-                    title={t('contextCapacity.title')}
+                    title={strings.contextTitle}
                     onClick={(e) => { e.stopPropagation(); void toggleContextPopup() }}
                     className="inline-flex items-center gap-[5px] rounded-[var(--radius-sm)] border-none bg-transparent px-[5px] py-0.5 font-mono text-[10px] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-secondary)] hover:text-[var(--color-foreground)]"
                   >
@@ -1049,8 +1008,9 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                     </svg>
                     <span className="tabular-nums">{tokenPct}%</span>
                   </button>
-                  {showContextPopup && (
+                  {showContextPopup && tokenSnapshot && (
                     <ContextCapacityPopup
+                      strings={strings}
                       loading={taskStatsLoading}
                       stats={taskStats}
                       total={tokenSnapshot.total_tokens}
@@ -1072,7 +1032,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                   onClick={(e: ReactMouseEvent) => { e.stopPropagation(); openModel() }}
                   className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-lg)] border border-transparent bg-transparent px-2 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
                 >
-                  {providerName && <ProviderIcon provider={providerName} custom={providerInfoFor(providerName)?.custom} size={16} />}
+                  {providerName && <ProviderIcon provider={providerName} custom={providerInfoFor(providerName)?.custom} size={16} resolveIcon={host.resolveProviderIcon} />}
                   {modelName ? getModelDisplayName(providerName, modelName) : 'model'}
                   <ChevronDownIcon
                     className={`h-3 w-3 opacity-55 transition-transform ${showModelPicker ? 'rotate-180' : ''}`}
@@ -1084,14 +1044,14 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                   <button
                     type="button"
                     aria-expanded={showEffortPicker}
-                    title={t('chat.model.effortTitle')}
+                    title={strings.effortTitle}
                     onClick={(e: ReactMouseEvent) => { e.stopPropagation(); openEffort() }}
                     className={`inline-flex h-7 items-center gap-1 rounded-[var(--radius-lg)] border border-transparent bg-transparent px-2 text-xs font-medium transition-colors hover:bg-[var(--color-muted)] ${
                       currentEffort ? 'text-[var(--color-primary)]' : 'text-[var(--color-foreground)]'
                     }`}
                   >
                     <SparklesIcon className="h-3 w-3" />
-                    <span>{currentEffort || t('chat.model.effort')}</span>
+                    <span>{currentEffort || strings.effort}</span>
                     <ChevronDownIcon
                       className={`effort-chev h-3 w-3 opacity-55 transition-transform ${showEffortPicker ? 'rotate-180' : ''}`}
                     />
@@ -1106,7 +1066,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                         !currentEffort ? 'font-semibold text-[var(--color-primary)]' : ''
                       }`}
                     >
-                      <span>{t('chat.model.effortDefault')}</span>
+                      <span>{strings.effortDefault}</span>
                       {!currentEffort && <CheckIcon className="h-3.5 w-3.5 text-[var(--color-primary)]" />}
                     </button>
                     {currentEffortOptions.map((opt) => (
@@ -1140,7 +1100,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                             selectFirstFiltered()
                           }
                         }}
-                        placeholder={t('chat.model.filter')}
+                        placeholder={strings.modelFilter}
                         className="flex-1 border-none bg-transparent text-[13px] text-[var(--color-foreground)] outline-none"
                       />
                       <kbd className="rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-muted)] px-[5px] py-px font-mono text-[10px] text-[var(--color-muted-foreground)]">/</kbd>
@@ -1149,16 +1109,16 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                     {/* Pinned current row */}
                     {providerName && modelName && (
                       <div className="flex items-center gap-2.5 border-b border-[var(--color-border)] px-3 py-2">
-                        <CheckCircleIcon className="h-[17px] w-[17px] shrink-0 text-[var(--color-primary)]" title={t('chat.model.current')} />
-                        <ProviderIcon provider={providerName} custom={providerInfoFor(providerName)?.custom} size={22} />
+                        <CheckCircleIcon className="h-[17px] w-[17px] shrink-0 text-[var(--color-primary)]" title={strings.modelCurrent} />
+                        <ProviderIcon provider={providerName} custom={providerInfoFor(providerName)?.custom} size={22} resolveIcon={host.resolveProviderIcon} />
                         <span className="flex min-w-0 flex-1 flex-col">
                           <span className="truncate text-[12.5px] text-[var(--color-foreground)]">{getModelDisplayName(providerName, modelName)}</span>
                           <span className="mt-px truncate font-mono text-[10px] text-[var(--color-muted-foreground)]">{modelSubline(modelName, currentModelInfo)}</span>
                         </span>
                         <span className="inline-flex shrink-0 items-center gap-1.5">
-                          {currentModelInfo?.reasoning && <SparklesIcon className="h-[15px] w-[15px]" title={t('chat.model.reasoning')} strokeWidth={1.9} />}
-                          {currentModelInfo?.tool_call && <WrenchScrewdriverIcon className="h-[15px] w-[15px]" title={t('chat.model.tools')} strokeWidth={1.9} />}
-                          {currentModelInfo?.image_support && <PhotoIcon className="h-[15px] w-[15px]" title={t('chat.model.images')} strokeWidth={1.9} />}
+                          {currentModelInfo?.reasoning && <SparklesIcon className="h-[15px] w-[15px]" title={strings.modelReasoning} strokeWidth={1.9} />}
+                          {currentModelInfo?.tool_call && <WrenchScrewdriverIcon className="h-[15px] w-[15px]" title={strings.modelTools} strokeWidth={1.9} />}
+                          {currentModelInfo?.image_support && <PhotoIcon className="h-[15px] w-[15px]" title={strings.modelImages} strokeWidth={1.9} />}
                         </span>
                       </div>
                     )}
@@ -1169,7 +1129,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                       {favoriteModelRefs.length > 0 && (
                         <>
                           <div className="flex items-center gap-2 px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--color-muted-foreground)]">
-                            {t('chat.model.favorites')}
+                            {strings.modelFavorites}
                             <span className="font-mono font-normal normal-case tracking-normal opacity-70">{favoriteModelRefs.length}</span>
                           </div>
                           {favoriteModelRefs.map((r) => {
@@ -1181,19 +1141,19 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                                 onClick={() => selectModel(r.provider, r.model)}
                                 className="group flex w-full items-center gap-2.5 rounded-[var(--radius-md)] border-none bg-transparent px-2 py-1.5 text-left transition-colors hover:bg-[var(--color-muted)]"
                               >
-                                <ProviderIcon provider={r.provider} custom={providerInfoFor(r.provider)?.custom} size={22} />
+                                <ProviderIcon provider={r.provider} custom={providerInfoFor(r.provider)?.custom} size={22} resolveIcon={host.resolveProviderIcon} />
                                 <span className="flex min-w-0 flex-1 flex-col">
                                   <span className="truncate text-[12.5px] text-[var(--color-foreground)]">{getModelDisplayName(r.provider, r.model)}</span>
                                   <span className="mt-px truncate font-mono text-[10px] text-[var(--color-muted-foreground)]">{modelSubline(r.model, info)}</span>
                                 </span>
                                 <span className="inline-flex shrink-0 items-center gap-1.5">
-                                  {info?.reasoning && <SparklesIcon className="h-[15px] w-[15px]" title={t('chat.model.reasoning')} strokeWidth={1.9} />}
-                                  {info?.tool_call && <WrenchScrewdriverIcon className="h-[15px] w-[15px]" title={t('chat.model.tools')} strokeWidth={1.9} />}
-                                  {info?.image_support && <PhotoIcon className="h-[15px] w-[15px]" title={t('chat.model.images')} strokeWidth={1.9} />}
+                                  {info?.reasoning && <SparklesIcon className="h-[15px] w-[15px]" title={strings.modelReasoning} strokeWidth={1.9} />}
+                                  {info?.tool_call && <WrenchScrewdriverIcon className="h-[15px] w-[15px]" title={strings.modelTools} strokeWidth={1.9} />}
+                                  {info?.image_support && <PhotoIcon className="h-[15px] w-[15px]" title={strings.modelImages} strokeWidth={1.9} />}
                                 </span>
                                 <StarIconSolid
                                   className="h-3.5 w-3.5 shrink-0 text-[var(--color-primary)]"
-                                  onClick={(e: ReactMouseEvent) => { e.stopPropagation(); void toggleFavorite(r.provider, r.model) }}
+                                  onClick={(e: ReactMouseEvent) => { e.stopPropagation(); void host.toggleFavorite(r.provider, r.model) }}
                                 />
                               </button>
                             )
@@ -1226,26 +1186,26 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                                   active ? 'bg-[var(--neutral-wash)]' : ''
                                 }`}
                               >
-                                <ProviderIcon provider={p.id} custom={p.custom} size={22} />
+                                <ProviderIcon provider={p.id} custom={p.custom} size={22} resolveIcon={host.resolveProviderIcon} />
                                 <span className="flex min-w-0 flex-1 flex-col">
                                   <span className={`truncate text-[12.5px] leading-snug text-[var(--color-foreground)] ${active ? 'font-semibold text-[var(--color-primary)]' : ''}`}>{m.name || m.id}</span>
                                   <span className="mt-px truncate font-mono text-[10px] text-[var(--color-muted-foreground)]">{modelSubline(m.id, m)}</span>
                                 </span>
                                 {m.recommended && (
-                                  <span className="shrink-0 rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--neutral-wash-strong)] px-1.5 py-px text-[10px] font-semibold text-[var(--color-foreground)]">{t('common.recommended')}</span>
+                                  <span className="shrink-0 rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--neutral-wash-strong)] px-1.5 py-px text-[10px] font-semibold text-[var(--color-foreground)]">{strings.commonRecommended}</span>
                                 )}
                                 <span className="inline-flex shrink-0 items-center gap-1.5">
-                                  {m.reasoning && <SparklesIcon className="h-[15px] w-[15px]" title={t('chat.model.reasoning')} strokeWidth={1.9} />}
-                                  {m.tool_call && <WrenchScrewdriverIcon className="h-[15px] w-[15px]" title={t('chat.model.tools')} strokeWidth={1.9} />}
-                                  {m.image_support && <PhotoIcon className="h-[15px] w-[15px]" title={t('chat.model.images')} strokeWidth={1.9} />}
-                                  {m.image_support === false && <PhotoIcon className="h-[15px] w-[15px] text-[var(--color-warning-fg)]" title={t('chat.model.noImageInput')} strokeWidth={1.9} />}
+                                  {m.reasoning && <SparklesIcon className="h-[15px] w-[15px]" title={strings.modelReasoning} strokeWidth={1.9} />}
+                                  {m.tool_call && <WrenchScrewdriverIcon className="h-[15px] w-[15px]" title={strings.modelTools} strokeWidth={1.9} />}
+                                  {m.image_support && <PhotoIcon className="h-[15px] w-[15px]" title={strings.modelImages} strokeWidth={1.9} />}
+                                  {m.image_support === false && <PhotoIcon className="h-[15px] w-[15px] text-[var(--color-warning-fg)]" title={strings.modelNoImageInput} strokeWidth={1.9} />}
                                 </span>
                                 {active && <CheckIcon className="h-3.5 w-3.5 shrink-0 text-[var(--color-primary)]" strokeWidth={2} />}
                                 <StarIcon
                                   className={`h-3.5 w-3.5 shrink-0 cursor-pointer border-none bg-transparent transition-opacity hover:text-[var(--color-primary)] ${
                                     isFav ? 'text-[var(--color-primary)] opacity-100' : 'text-[var(--color-muted-foreground)] opacity-0 group-hover:opacity-100'
                                   }`}
-                                  onClick={(e: ReactMouseEvent) => { e.stopPropagation(); void toggleFavorite(p.id, m.id) }}
+                                  onClick={(e: ReactMouseEvent) => { e.stopPropagation(); void host.toggleFavorite(p.id, m.id) }}
                                 />
                               </div>
                             )
@@ -1255,7 +1215,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
 
                       {pickerProviders.length === 0 && (
                         <div className="px-2 py-5 text-center text-[13px] text-[var(--color-muted-foreground)]">
-                          {modelFilter ? t('chat.model.noMatch') : t('chat.model.none')}
+                          {modelFilter ? strings.modelNoMatch : strings.modelNone}
                         </div>
                       )}
                     </div>
@@ -1268,7 +1228,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                         className="flex w-full items-center gap-2 rounded-[var(--radius-md)] border-none bg-transparent px-2 py-1.5 text-left text-xs text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
                       >
                         <SquaresPlusIcon className="h-3.5 w-3.5" />
-                        {t('chat.model.manage')}
+                        {strings.modelManage}
                       </button>
                     </div>
                   </div>
@@ -1279,12 +1239,12 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
               {isRunning && (
                 <button
                   type="button"
-                  title={queued.length > 0 ? t('chat.stopAndNext') : t('chat.stopAgent')}
+                  title={queued.length > 0 ? strings.stopAndNext : strings.stopAgent}
                   onClick={() => actions.stop()}
                   className="flex shrink-0 items-center gap-[5px] whitespace-nowrap rounded-[var(--radius-lg)] border-none bg-[var(--color-destructive)] px-3 py-[5px] text-xs font-medium text-[var(--color-on-destructive)]"
                 >
                   <StopIcon className="h-3.5 w-3.5" />
-                  {t('chat.stop')}
+                  {strings.stop}
                 </button>
               )}
 
@@ -1293,12 +1253,12 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
                 <button
                   type="button"
                   disabled={!canSend}
-                  aria-label={isRunning ? t('chat.queue') : t('chat.send')}
+                  aria-label={isRunning ? strings.queue : strings.send}
                   onClick={send}
                   className="flex shrink-0 items-center gap-[5px] whitespace-nowrap rounded-[var(--radius-lg)] border-none bg-[var(--color-primary)] px-3 py-[5px] text-xs font-medium text-[var(--color-on-primary)] transition-[opacity,transform] disabled:cursor-not-allowed disabled:opacity-45 enabled:hover:opacity-90"
                 >
                   <PaperAirplaneIcon className="h-3.5 w-3.5" />
-                  {isRunning ? t('chat.queue') : t('chat.send')}
+                  {isRunning ? strings.queue : strings.send}
                 </button>
               )}
             </div>
@@ -1306,9 +1266,11 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
         </div>
       </div>
 
-      {/* Manage Models dialog (portal to body, like Vue Teleport) */}
+      {/* Manage Models dialog (portal to body) */}
       {showManageModels && createPortal(
         <ManageModelsDialog
+          strings={strings}
+          resolveIcon={host.resolveProviderIcon}
           providers={filteredProviders}
           filter={modelFilter}
           onFilter={setModelFilter}
@@ -1317,15 +1279,10 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
           onClose={async () => {
             setShowManageModels(false)
             setModelFilter('')
-            // Re-hydrate the catalog (matches Vue store.fetchModels()).
-            try {
-              const resp = await api.models()
-              dispatch(modelActions.setProviders(resp.providers))
-            } catch {
-              /* ignore */
-            }
+            // Re-hydrate the catalog.
+            await host.refreshModels()
           }}
-          onToggle={toggleModelEnabled}
+          onToggle={(provider, model, enabled) => host.setModelEnabled(provider, model, enabled)}
         />,
         document.body,
       )}
@@ -1336,6 +1293,7 @@ export function ChatInput({ onSent, pickerPlacement = 'top', elevated = false }:
 // ─── Context capacity popup ─────────────────────────────────────────────────
 
 function ContextCapacityPopup({
+  strings,
   loading,
   stats,
   total,
@@ -1345,6 +1303,7 @@ function ContextCapacityPopup({
   cached,
   reasoning,
 }: {
+  strings: ProductComposerStrings
   loading: boolean
   stats: TaskStats | null
   total: number
@@ -1354,22 +1313,21 @@ function ContextCapacityPopup({
   cached?: number
   reasoning?: number
 }) {
-  const { t } = useTranslation()
   const context = stats?.context
   const effectiveLimit = context?.context_limit || limit
   const rows = context
     ? [
-        { label: t('contextCapacity.systemPrompt'), value: context.system_prompt_tokens },
-        { label: t('contextCapacity.systemTools'), value: context.system_tools_tokens },
-        { label: t('contextCapacity.mcpTools'), value: context.mcp_tools_tokens },
-        { label: t('contextCapacity.skills'), value: context.skills_tokens },
-        { label: t('contextCapacity.messages'), value: context.messages_tokens },
+        { label: strings.contextSystemPrompt, value: context.system_prompt_tokens },
+        { label: strings.contextSystemTools, value: context.system_tools_tokens },
+        { label: strings.contextMcpTools, value: context.mcp_tools_tokens },
+        { label: strings.contextSkills, value: context.skills_tokens },
+        { label: strings.contextMessages, value: context.messages_tokens },
       ]
     : [
-        { label: t('contextCapacity.input'), value: prompt },
-        { label: t('contextCapacity.output'), value: completion },
-        { label: t('contextCapacity.cached'), value: cached || 0 },
-        { label: t('contextCapacity.reasoning'), value: reasoning || 0 },
+        { label: strings.contextInput, value: prompt },
+        { label: strings.contextOutput, value: completion },
+        { label: strings.contextCached, value: cached || 0 },
+        { label: strings.contextReasoning, value: reasoning || 0 },
       ]
   const max = Math.max(1, ...rows.map((r) => r.value))
   const percent = effectiveLimit > 0 ? Math.min(100, Math.round((total / effectiveLimit) * 100)) : 0
@@ -1378,9 +1336,9 @@ function ContextCapacityPopup({
     <div className="absolute bottom-full right-0 z-[var(--z-dropdown)] mb-2 w-[280px] rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-[var(--shadow-lg)]">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div>
-          <div className="text-[12px] font-semibold text-[var(--color-foreground)]">{t('contextCapacity.title')}</div>
+          <div className="text-[12px] font-semibold text-[var(--color-foreground)]">{strings.contextTitle}</div>
           <div className="mt-0.5 font-mono text-[10.5px] text-[var(--color-muted-foreground)]">
-            {t('common.tokens', { used: `${formatCompact(total)} / ${effectiveLimit > 0 ? formatCompact(effectiveLimit) : '-'}` })}
+            {strings.commonTokens(`${formatCompact(total)} / ${effectiveLimit > 0 ? formatCompact(effectiveLimit) : '-'}`)}
           </div>
         </div>
         <span className={`font-mono text-[13px] font-semibold ${percent >= 90 ? 'text-[var(--color-destructive)]' : 'text-[var(--color-primary)]'}`}>
@@ -1391,7 +1349,7 @@ function ContextCapacityPopup({
         <div className="h-full rounded-full bg-[var(--color-primary)]" style={{ width: `${percent}%` }} />
       </div>
       {loading ? (
-        <div className="py-4 text-center text-xs text-[var(--color-muted-foreground)]">{t('common.loading')}</div>
+        <div className="py-4 text-center text-xs text-[var(--color-muted-foreground)]">{strings.commonLoading}</div>
       ) : (
         <div className="space-y-1.5">
           {rows.map((row) => (
@@ -1409,7 +1367,7 @@ function ContextCapacityPopup({
       )}
       {stats?.cache_supported && (
         <div className="mt-2 rounded-[var(--radius-md)] bg-[var(--color-muted)] px-2 py-1.5 text-[10.5px] text-[var(--color-muted-foreground)]">
-          {t('contextCapacity.cacheHitRate')}: <span className="font-mono text-[var(--color-foreground)]">{Math.round(stats.cache_hit_rate * 100)}%</span>
+          {strings.contextCacheHitRate}: <span className="font-mono text-[var(--color-foreground)]">{Math.round(stats.cache_hit_rate * 100)}%</span>
         </div>
       )}
     </div>
@@ -1426,6 +1384,8 @@ function formatCompact(n: number): string {
 // ─── Manage Models dialog ────────────────────────────────────────────────────
 
 interface ManageModelsDialogProps {
+  strings: ProductComposerStrings
+  resolveIcon?: (provider: string, custom?: boolean) => string | null
   providers: ProviderInfo[]
   filter: string
   onFilter: (v: string) => void
@@ -1436,6 +1396,8 @@ interface ManageModelsDialogProps {
 }
 
 function ManageModelsDialog({
+  strings,
+  resolveIcon,
   providers,
   filter,
   onFilter,
@@ -1444,7 +1406,6 @@ function ManageModelsDialog({
   onClose,
   onToggle,
 }: ManageModelsDialogProps) {
-  const { t } = useTranslation()
   return (
     <div
       className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-[var(--backdrop)]"
@@ -1454,7 +1415,7 @@ function ManageModelsDialog({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={t('chat.model.manageTitle')}
+        aria-label={strings.modelManageTitle}
         onClick={(e) => e.stopPropagation()}
         className="m-4 flex max-h-[70vh] min-w-0 flex-col overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)]"
         style={{ width: 'min(560px, 94vw)' }}
@@ -1465,14 +1426,14 @@ function ManageModelsDialog({
             <SquaresPlusIcon className="h-4 w-4" />
           </div>
           <div className="min-w-0 flex-1">
-            <h3 className="m-0 text-sm font-semibold tracking-[-0.01em] text-[var(--color-foreground)]">{t('chat.model.manageTitle')}</h3>
+            <h3 className="m-0 text-sm font-semibold tracking-[-0.01em] text-[var(--color-foreground)]">{strings.modelManageTitle}</h3>
             <p className="mt-0.5 text-[11.5px] leading-[1.45] text-[var(--color-muted-foreground)]">
-              {t('chat.model.toggleVisibility')}.
+              {strings.modelToggleVisibility}.
             </p>
           </div>
           <button
             type="button"
-            aria-label={t('common.close')}
+            aria-label={strings.commonClose}
             onClick={onClose}
             className="ml-auto grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] border border-transparent bg-transparent text-[var(--color-muted-foreground)] transition-colors hover:border-[var(--color-border)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
           >
@@ -1487,7 +1448,7 @@ function ManageModelsDialog({
             <input
               value={filter}
               onChange={(e) => onFilter(e.target.value)}
-              placeholder={t('chat.model.filter')}
+              placeholder={strings.modelFilter}
               className="flex-1 border-none bg-transparent text-[12.5px] text-[var(--color-foreground)] outline-none"
             />
           </div>
@@ -1499,7 +1460,7 @@ function ManageModelsDialog({
           {providers.map((p) => (
             <div key={`mgr-${p.id}`}>
               <div className="sticky top-0 z-[1] flex items-center gap-2 bg-[var(--color-surface)] px-2 pb-1.5 pt-3">
-                <ProviderIcon provider={p.id} custom={p.custom} size={18} />
+                <ProviderIcon provider={p.id} custom={p.custom} size={18} resolveIcon={resolveIcon} />
                 <span className="text-[11px] font-semibold text-[var(--color-foreground)]">{p.name}</span>
                 <span className="font-mono text-[10px] text-[var(--color-muted-foreground)]">{p.id}</span>
                 <span className="ml-auto font-mono text-[10px] text-[var(--color-muted-foreground)]">{p.models.length}</span>
@@ -1511,19 +1472,19 @@ function ManageModelsDialog({
                     key={`mgr-${p.id}-${m.id}`}
                     className={`flex items-center gap-2.5 rounded-[var(--radius-md)] px-2 py-2 transition-colors hover:bg-[var(--color-muted)] ${off ? 'opacity-50' : ''}`}
                   >
-                    <ProviderIcon provider={p.id} custom={p.custom} size={18} />
+                    <ProviderIcon provider={p.id} custom={p.custom} size={18} resolveIcon={resolveIcon} />
                     <span className="flex min-w-0 flex-1 flex-col">
                       <span className={`text-[12.5px] leading-snug ${off ? 'text-[var(--color-muted-foreground)]' : 'text-[var(--color-foreground)]'}`}>{m.name || m.id}</span>
                       <span className="mt-px font-mono text-[10px] text-[var(--color-muted-foreground)]">{modelSubline(m.id, m)}</span>
                     </span>
                     {m.recommended && (
-                      <span className="shrink-0 rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--neutral-wash-strong)] px-1.5 py-px text-[10px] font-semibold text-[var(--color-foreground)]">{t('common.recommended')}</span>
+                      <span className="shrink-0 rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--neutral-wash-strong)] px-1.5 py-px text-[10px] font-semibold text-[var(--color-foreground)]">{strings.commonRecommended}</span>
                     )}
                     <button
                       type="button"
                       role="switch"
                       aria-checked={off ? 'false' : 'true'}
-                      aria-label={off ? t('common.enable') : t('common.disable')}
+                      aria-label={off ? strings.commonEnable : strings.commonDisable}
                       onClick={() => onToggle(p.id, m.id, off)}
                       className="relative h-[18px] w-8 shrink-0 cursor-pointer rounded-[var(--radius-pill)] border-none bg-[var(--color-border)] transition-colors"
                       style={off ? undefined : { background: 'var(--color-primary)' }}
@@ -1540,7 +1501,7 @@ function ManageModelsDialog({
           ))}
           {providers.length === 0 && (
             <div className="py-8 text-center text-[13px] text-[var(--color-muted-foreground)]">
-              {filter ? t('chat.model.noMatch') : t('chat.model.none')}
+              {filter ? strings.modelNoMatch : strings.modelNone}
             </div>
           )}
         </div>
@@ -1548,7 +1509,7 @@ function ManageModelsDialog({
         {/* Footer */}
         <div className="flex items-center justify-between border-t border-[var(--color-border)] bg-[var(--color-muted)] px-[18px] py-3">
           <span className="text-[11px] text-[var(--color-muted-foreground)]">
-            {t('chat.model.visibleCount', { visible: visibleCount, total: totalCount })}
+            {strings.modelVisibleCount(visibleCount, totalCount)}
           </span>
           <div className="flex gap-2">
             <button
@@ -1556,7 +1517,7 @@ function ManageModelsDialog({
               onClick={onClose}
               className="inline-flex h-[30px] items-center gap-1.5 rounded-[var(--radius-md)] border border-transparent bg-[var(--color-primary)] px-3.5 text-xs font-medium text-[var(--color-on-primary)] transition-colors hover:bg-[color-mix(in_srgb,var(--color-primary)_88%,var(--color-background))]"
             >
-              {t('common.done')}
+              {strings.commonDone}
             </button>
           </div>
         </div>

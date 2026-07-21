@@ -208,10 +208,10 @@ func newFakeLocal(t *testing.T) (*fakeLocal, *httptest.Server) {
 	return f, srv
 }
 
-func (f *fakeLocal) chatBody(i int) map[string]any {
+func (f *fakeLocal) chatBody() map[string]any {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.chatBodies[i]
+	return f.chatBodies[0]
 }
 
 // --- helpers ---
@@ -273,7 +273,7 @@ func TestChatSendNewSession(t *testing.T) {
 	if !ok || res["session_id"] != local.chatSessionID {
 		t.Fatalf("ack result = %v, want session_id %q", result, local.chatSessionID)
 	}
-	body := local.chatBody(0)
+	body := local.chatBody()
 	if body["message"] != "hello" {
 		t.Errorf("message = %v, want hello", body["message"])
 	}
@@ -302,7 +302,7 @@ func TestChatSendExistingSession(t *testing.T) {
 	if status != "ok" {
 		t.Fatalf("status = %q, result = %v", status, result)
 	}
-	body := local.chatBody(0)
+	body := local.chatBody()
 	if body["session_id"] != "sess-42" {
 		t.Errorf("session_id = %v, want sess-42", body["session_id"])
 	}

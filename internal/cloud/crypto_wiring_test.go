@@ -240,7 +240,7 @@ func TestDownlinkPlaintextAcceptedWithCipherActive(t *testing.T) {
 	if status != "ok" {
 		t.Fatalf("plaintext command with active cipher = %q, want ok", status)
 	}
-	if body := local.chatBody(0); body["message"] != "plain still ok" {
+	if body := local.chatBody(); body["message"] != "plain still ok" {
 		t.Fatalf("local chat body = %v", body)
 	}
 }

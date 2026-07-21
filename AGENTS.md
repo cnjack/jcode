@@ -261,3 +261,4 @@ outbound-only relay; design contract lives in the cloud repo
 - **Colors:** every color must come from a CSS custom property (jcode-ui tokens / `tokens.generated.css`). Never hardcode hex/rgb/`#fff`/`white` in components.
 - **Themes:** edit `internal/theme/palette.go` and run `make generate` — never edit `tokens.generated.css` or `themes.generated.ts` by hand.
 - **Reusable chat UI:** import from the `jcode-ui` package (registry); implement/fix library code under `packages/jcode-ui` and publish.
+- **Product composer:** the desktop input experience (`ChatInput` + `WorkspacePicker` / `BranchPicker` / `GoalBanner`) lives in `packages/jcode-ui/src/product/` and is consumed as `jcode-ui/product`. The components are Redux/fetch/Tauri/i18next-free — hosts inject a `ProductComposerHost` (state + actions + strings + icons); the web adapter is `web/src/app/composerHost.ts`. Package tests: `cd packages/jcode-ui && pnpm test` (vitest).

@@ -521,3 +521,191 @@ func TestCollectModelCapabilitiesFallbackEfforts(t *testing.T) {
 		t.Errorf("efforts = %v, want the standard fallback set", efforts)
 	}
 }
+
+// --- M14: slash_commands capability, goal_armed, images passthrough ---
+
+func TestSyncSessionsReportsSlashCommands(t *testing.T) {
+	cloud := newMockCloud()
+	cloudSrv := httptest.NewServer(cloud.handler())
+	t.Cleanup(cloudSrv.Close)
+
+	conn := newTestConnector(cloudSrv.URL, "http://127.0.0.1:1")
+	conn.cfg.ListSessionsFn = func() (map[string][]session.SessionMeta, error) {
+		return map[string][]session.SessionMeta{"/proj": {{UUID: "s1", Status: "idle"}}}, nil
+	}
+	conn.cfg.ModelCapabilitiesFn = func() ([]CapabilityModel, []string, error) {
+		return nil, nil, fmt.Errorf("models down") // best-effort: must not break the upsert
+	}
+	conn.cfg.SlashCommandsFn = func() ([]CapabilitySlashCommand, error) {
+		return []CapabilitySlashCommand{
+			{Slash: "/review", Description: "评审改动", Type: "skill"},
+			{Slash: "/deploy", Description: "部署", Type: "flow"},
+		}, nil
+	}
+
+	if err := conn.syncSessions(context.Background()); err != nil {
+		t.Fatalf("syncSessions: %v", err)
+	}
+
+	cloud.mu.Lock()
+	caps := cloud.capsReqs
+	cloud.mu.Unlock()
+	if len(caps) != 1 {
+		t.Fatalf("capabilities payloads = %d, want 1", len(caps))
+	}
+	var got DeviceCapabilities
+	if err := json.Unmarshal(caps[0], &got); err != nil {
+		t.Fatalf("capabilities JSON: %v", err)
+	}
+	if len(got.SlashCommands) != 2 {
+		t.Fatalf("slash_commands = %+v, want 2 entries", got.SlashCommands)
+	}
+	if got.SlashCommands[0].Slash != "/review" || got.SlashCommands[0].Type != "skill" ||
+		got.SlashCommands[1].Slash != "/deploy" || got.SlashCommands[1].Type != "flow" {
+		t.Errorf("slash_commands = %+v", got.SlashCommands)
+	}
+	// The failed model facet reported empty but did not fail the sync.
+	if len(got.Models) != 0 || len(got.Efforts) != 0 {
+		t.Errorf("models/efforts = %+v/%v, want empty on facet failure", got.Models, got.Efforts)
+	}
+}
+
+// TestCollectSlashCommandsDefault exercises the default facet path against a
+// fake local control plane: GET /api/slash-commands answers a bare JSON
+// array; an unreachable server degrades to an empty list (never an error).
+func TestCollectSlashCommandsDefault(t *testing.T) {
+	localSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/slash-commands" || r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]string{
+			{"slash": "/commit", "description": "提交", "type": "skill"},
+		})
+	}))
+	t.Cleanup(localSrv.Close)
+
+	conn := newTestConnector("http://127.0.0.1:1", localSrv.URL)
+	cmds, err := conn.collectSlashCommands(context.Background())
+	if err != nil {
+		t.Fatalf("collectSlashCommands: %v", err)
+	}
+	if len(cmds) != 1 || cmds[0].Slash != "/commit" || cmds[0].Type != "skill" {
+		t.Fatalf("slash commands = %+v", cmds)
+	}
+
+	// Unreachable control plane → error (the caller logs and reports empty).
+	connDown := newTestConnector("http://127.0.0.1:1", "http://127.0.0.1:1")
+	if _, err := connDown.collectSlashCommands(context.Background()); err == nil {
+		t.Fatal("unreachable control plane: want error")
+	}
+}
+
+func TestChatSendGoalArmed(t *testing.T) {
+	local, localSrv := newFakeComposeLocal(t)
+	conn := newTestConnector("http://127.0.0.1:1", localSrv.URL)
+
+	cmd := DeviceCommand{
+		ID:   "cmd-goal-armed",
+		Kind: "chat.send",
+		Payload: mustPayload(t, map[string]any{
+			"text":       "交付 M14",
+			"goal_armed": true,
+			// Compose facets are ignored when goal_armed is set.
+			"mode":   "plan",
+			"goal":   "ignored",
+			"images": []map[string]string{{"data": "aGk=", "media_type": "image/png"}},
+		}),
+	}
+	status, result := conn.executeCommand(context.Background(), cmd)
+	if status != "ok" {
+		t.Fatalf("status = %q, result = %v", status, result)
+	}
+
+	calls, bodies := local.snapshot()
+	if strings.Join(calls, ",") != "/api/goal" {
+		t.Fatalf("local calls = %v, want only /api/goal (no /api/chat, no compose steps)", calls)
+	}
+	goal := bodies["/api/goal"][0]
+	if goal["objective"] != "交付 M14" || goal["start"] != true {
+		t.Errorf("goal body = %v, want {objective, start:true}", goal)
+	}
+
+	// goal_armed with an empty objective is rejected without side effects.
+	local2, localSrv2 := newFakeComposeLocal(t)
+	conn2 := newTestConnector("http://127.0.0.1:1", localSrv2.URL)
+	empty := DeviceCommand{
+		ID:      "cmd-goal-empty",
+		Kind:    "chat.send",
+		Payload: mustPayload(t, map[string]any{"text": "  ", "goal_armed": true}),
+	}
+	if status, result := conn2.executeCommand(context.Background(), empty); status != "error" {
+		t.Fatalf("empty objective: status = %q, result = %v; want error", status, result)
+	}
+	if calls, _ := local2.snapshot(); len(calls) != 0 {
+		t.Fatalf("empty objective: local calls = %v, want none", calls)
+	}
+}
+
+func TestChatSendImagesForwarded(t *testing.T) {
+	// Legacy path: images (incl. the optional name) reach /api/chat as-is.
+	local, localSrv := newFakeLocal(t)
+	conn := newTestConnector("http://127.0.0.1:1", localSrv.URL)
+
+	cmd := DeviceCommand{
+		ID:   "cmd-imgs",
+		Kind: "chat.send",
+		Payload: mustPayload(t, map[string]any{
+			"text": "看图",
+			"images": []map[string]string{
+				{"data": "aGk=", "media_type": "image/png", "name": "shot.png"},
+				{"data": "aGky", "media_type": "image/jpeg"},
+			},
+		}),
+	}
+	status, result := conn.executeCommand(context.Background(), cmd)
+	if status != "ok" {
+		t.Fatalf("status = %q, result = %v", status, result)
+	}
+	imgs, ok := local.chatBody()["images"].([]any)
+	if !ok || len(imgs) != 2 {
+		t.Fatalf("images = %v, want 2 entries", local.chatBody()["images"])
+	}
+	first, _ := imgs[0].(map[string]any)
+	if first["data"] != "aGk=" || first["media_type"] != "image/png" || first["name"] != "shot.png" {
+		t.Errorf("images[0] = %v, want data/media_type/name preserved", first)
+	}
+	second, _ := imgs[1].(map[string]any)
+	if second["media_type"] != "image/jpeg" {
+		t.Errorf("images[1] = %v", second)
+	}
+	if _, has := second["name"]; has {
+		t.Errorf("images[1] = %v, want name omitted when empty", second)
+	}
+
+	// Compose path: images ride the same /api/chat call.
+	compLocal, compSrv := newFakeComposeLocal(t)
+	conn2 := newTestConnector("http://127.0.0.1:1", compSrv.URL)
+	cmd2 := DeviceCommand{
+		ID:   "cmd-imgs-compose",
+		Kind: "chat.send",
+		Payload: mustPayload(t, map[string]any{
+			"text":         "看图",
+			"project_path": "/tmp/proj",
+			"images":       []map[string]string{{"data": "aGk=", "media_type": "image/png", "name": "shot.png"}},
+		}),
+	}
+	status, result = conn2.executeCommand(context.Background(), cmd2)
+	if status != "ok" {
+		t.Fatalf("compose: status = %q, result = %v", status, result)
+	}
+	_, bodies := compLocal.snapshot()
+	cimgs, ok := bodies["/api/chat"][0]["images"].([]any)
+	if !ok || len(cimgs) != 1 {
+		t.Fatalf("compose chat images = %v, want 1 entry", bodies["/api/chat"][0])
+	}
+	cimg, _ := cimgs[0].(map[string]any)
+	if cimg["name"] != "shot.png" || cimg["media_type"] != "image/png" {
+		t.Errorf("compose images[0] = %v", cimg)
+	}
+}

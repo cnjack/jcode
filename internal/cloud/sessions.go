@@ -64,7 +64,7 @@ func (c *Connector) syncSessions(ctx context.Context) error {
 		return err
 	}
 	var capsJSON json.RawMessage
-	if caps := c.collectCapabilities(); caps != nil {
+	if caps := c.collectCapabilities(ctx); caps != nil {
 		if data, err := json.Marshal(caps); err == nil {
 			capsJSON = c.sealUplink(data)
 		}

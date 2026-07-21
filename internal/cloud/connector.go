@@ -51,6 +51,10 @@ type ConnectorConfig struct {
 	// ModelCapabilitiesFn overrides the model/effort facet of the capabilities
 	// mirror (default: config + model registry); tests inject a fixed list.
 	ModelCapabilitiesFn func() ([]CapabilityModel, []string, error)
+	// SlashCommandsFn overrides the slash-commands facet of the capabilities
+	// mirror (default: GET /api/slash-commands on the local control plane);
+	// tests inject a fixed list.
+	SlashCommandsFn func() ([]CapabilitySlashCommand, error)
 
 	// Cipher, when non-nil, seals uplink payloads (events/ephemeral payload,
 	// sessions meta, ack result) and opens downlink command payloads. Nil
@@ -484,7 +488,10 @@ func (l *localControlPlane) doJSON(ctx context.Context, method, path string, bod
 
 // chatSendPayload is the (plaintext) payload of a chat.send command. Beyond
 // the original text/images/mode/channel it carries the M12 compose facets —
-// project_path, model, effort, goal, attachments — all optional.
+// project_path, model, effort, goal, attachments — all optional. goal_armed
+// (M14) flips the meaning of text: it is a goal objective and the command
+// only arms the goal (POST /api/goal with start=true), skipping /api/chat and
+// every other compose step.
 type chatSendPayload struct {
 	Text        string           `json:"text"`
 	Images      []chatImage      `json:"images,omitempty"`
@@ -494,6 +501,7 @@ type chatSendPayload struct {
 	Model       *chatModelRef    `json:"model,omitempty"`
 	Effort      string           `json:"effort,omitempty"`
 	Goal        string           `json:"goal,omitempty"`
+	GoalArmed   bool             `json:"goal_armed,omitempty"`
 	Attachments []chatAttachment `json:"attachments,omitempty"`
 }
 
@@ -510,10 +518,13 @@ func (p *chatSendPayload) needsCompose() bool {
 	return p.ProjectPath != "" || p.Model != nil || p.Effort != "" || p.Goal != "" || len(p.Attachments) > 0
 }
 
-// chatImage mirrors web.chatImage (base64 image in a chat request).
+// chatImage mirrors web.chatImage (base64 image in a chat request); name is
+// the optional original filename (file picker / paste), passed through
+// losslessly — the local /api/chat handler ignores it.
 type chatImage struct {
 	Data     string `json:"data"`
 	MimeType string `json:"media_type"`
+	Name     string `json:"name,omitempty"`
 }
 
 // approvalRespondPayload is the payload of an approval.respond command.
@@ -544,6 +555,12 @@ func (c *Connector) execChatSend(ctx context.Context, cmd DeviceCommand) (string
 	if err := json.Unmarshal(cmd.Payload, &p); err != nil {
 		return "error", map[string]string{"error": fmt.Sprintf("invalid chat.send payload: %v", err)}
 	}
+	// goal_armed wins over everything: text is the goal objective and the
+	// command only arms the goal — /api/chat and all compose facets
+	// (mode/images/session/attachments/…) are ignored.
+	if p.GoalArmed {
+		return c.execChatSendGoalArmed(ctx, &p)
+	}
 	// Attachments alone are a valid message (their reference list becomes the
 	// text); truly empty input is not.
 	if strings.TrimSpace(p.Text) == "" && len(p.Attachments) == 0 {
@@ -553,6 +570,26 @@ func (c *Connector) execChatSend(ctx context.Context, cmd DeviceCommand) (string
 		return c.execChatSendCompose(ctx, cmd, &p)
 	}
 	return c.execChatSendLegacy(ctx, cmd, &p)
+}
+
+// execChatSendGoalArmed arms the session goal on the active engine via
+// POST /api/goal with start=true (mirroring the web UI's setGoal default),
+// which kicks off the agent run itself — no /api/chat call follows.
+func (c *Connector) execChatSendGoalArmed(ctx context.Context, p *chatSendPayload) (string, any) {
+	objective := strings.TrimSpace(p.Text)
+	if objective == "" {
+		return "error", map[string]string{"error": "chat.send: goal_armed with empty objective"}
+	}
+	status, body, err := c.local.postJSON(ctx, "/api/goal", map[string]any{
+		"objective": objective, "start": true,
+	})
+	if err != nil {
+		return "error", map[string]string{"error": err.Error()}
+	}
+	if status != http.StatusOK {
+		return "error", map[string]string{"error": errUnexpectedStatus("/api/goal", status, string(body)).Error()}
+	}
+	return "ok", json.RawMessage(body)
 }
 
 // execChatSendLegacy is the pre-M12 one-shot path: a single /api/chat call,

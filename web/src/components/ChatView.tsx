@@ -11,10 +11,10 @@
  */
 
 import { Thread } from 'jcode-ui'
+import { GoalBanner, ChatInput } from 'jcode-ui/product'
 import { useTranslation } from 'react-i18next'
 import { useAppSelector } from '../app/hooks'
-import { GoalBanner } from './GoalBanner'
-import { ChatInput } from './ChatInput'
+import { useProductComposerHost } from '../app/composerHost'
 import kimiBackground from '../assets/kimi-light-background.webp'
 import zhipuBackground from '../assets/zhipu-light-background.webp'
 
@@ -60,6 +60,7 @@ function PendingIndicator() {
 
 export function ChatView({ readOnly }: ChatViewProps) {
   const { t } = useTranslation()
+  const host = useProductComposerHost()
   const hasMessages = useAppSelector((s) => s.chat.timeline.length > 0)
   const projectPath = useAppSelector((s) => s.session.projectPath)
   const backdropKind = useAppSelector((s) => {
@@ -107,7 +108,7 @@ export function ChatView({ readOnly }: ChatViewProps) {
         {/* Centered elevated composer. z-[2] keeps its upward-opening menus
             (model picker, slash palette) above the welcome hero text. */}
         <div className="welcome-composer z-[2] w-full max-w-2xl px-5">
-          <ChatInput elevated pickerPlacement="bottom" onSent={() => { /* timeline auto-follows */ }} />
+          <ChatInput host={host} elevated pickerPlacement="bottom" onSent={() => { /* timeline auto-follows */ }} />
         </div>
         {/* Bottom half balances the center */}
         <div className="min-h-0 flex-1" aria-hidden="true" />
@@ -127,8 +128,8 @@ export function ChatView({ readOnly }: ChatViewProps) {
       {/* z-[2] keeps the composer’s upward-opening menus above the thread layer. */}
       <div className="chat-content-layer chat-col relative z-[2]">
         {/* Goal pill floats behind the composer; composer sits on top (higher z-index). */}
-        <GoalBanner />
-        <ChatInput onSent={() => { /* timeline auto-follows via useStreamFollow */ }} />
+        <GoalBanner host={host} />
+        <ChatInput host={host} onSent={() => { /* timeline auto-follows via useStreamFollow */ }} />
       </div>
     </div>
   )

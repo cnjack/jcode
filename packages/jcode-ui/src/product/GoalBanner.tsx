@@ -14,11 +14,13 @@
  * (higher z-index) so the pill looks like a tag peeking from behind.
  * Status icon is a simple line icon with a tiny active dot; the expand
  * arrow points right (ChevronRight) and rotates down when expanded.
+ *
+ * Goal + todos come from the ChatRuntime; mutations go through
+ * `ProductComposerHost.setGoal` / `clearGoal`.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useTranslation } from 'react-i18next'
 import {
   CheckCircleIcon,
   ChevronRightIcon,
@@ -28,35 +30,32 @@ import {
   ViewfinderCircleIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
-import { useAppDispatch, useAppSelector } from '../app/hooks'
-import { chatActions } from '../app/store'
-import { api } from '../lib/api'
-import type { GoalStatus } from '../lib/types'
+import { useRuntimeState } from 'jcode-ui-core/runtime'
+import type { GoalStatus } from 'jcode-ui-core'
+import type { ProductComposerHost } from './host.js'
+import type { ProductComposerStrings } from './strings.js'
+import { useComposerStrings } from './useComposerStrings.js'
 
 // ─── Status presentation ────────────────────────────────────────────────────
 
-const STATUS_STYLE: Record<GoalStatus, { labelKey: string; Icon: typeof ViewfinderCircleIcon }> = {
-  active: {
-    labelKey: 'goal.status.active',
-    Icon: ViewfinderCircleIcon,
-  },
-  complete: {
-    labelKey: 'goal.status.completed',
-    Icon: CheckCircleIcon,
-  },
-  blocked: {
-    labelKey: 'goal.status.blocked',
-    Icon: ExclamationTriangleIcon,
-  },
+const STATUS_ICON: Record<GoalStatus, typeof ViewfinderCircleIcon> = {
+  active: ViewfinderCircleIcon,
+  complete: CheckCircleIcon,
+  blocked: ExclamationTriangleIcon,
+}
+
+function statusLabel(status: GoalStatus, strings: ProductComposerStrings): string {
+  if (status === 'active') return strings.goalStatusActive
+  if (status === 'complete') return strings.goalStatusCompleted
+  if (status === 'blocked') return strings.goalStatusBlocked
+  return String(status || '').replace(/_/g, ' ')
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export function GoalBanner() {
-  const { t } = useTranslation()
-  const dispatch = useAppDispatch()
-  const goal = useAppSelector((s) => s.chat.goal)
-  const todos = useAppSelector((s) => s.chat.todos)
+export function GoalBanner({ host }: { host: ProductComposerHost }) {
+  const strings = useComposerStrings(host)
+  const { goal, todos } = useRuntimeState()
   const [expanded, setExpanded] = useState(false)
   const [editing, setEditing] = useState(false)
 
@@ -81,28 +80,23 @@ export function GoalBanner() {
 
   if (!goal) return null
 
-  const style = STATUS_STYLE[goal.status] ?? STATUS_STYLE.active
-  const statusLabel = STATUS_STYLE[goal.status]
-    ? t(style.labelKey)
-    : String(goal.status || '').replace(/_/g, ' ')
+  const Icon = STATUS_ICON[goal.status] ?? ViewfinderCircleIcon
+  const label = statusLabel(goal.status, strings)
 
   const startMs = (goal.created_at ?? 0) * 1000
   const hasTimes = startMs > 0
   const endMs = isActive ? nowMs : (goal.updated_at ?? 0) * 1000
   const elapsedSec = hasTimes ? Math.max(0, Math.floor((endMs - startMs) / 1000)) : 0
-  const elapsedLabel = hasTimes ? formatElapsed(elapsedSec, t) : ''
+  const elapsedLabel = hasTimes ? formatElapsed(elapsedSec, strings) : ''
 
   const used = goal.tokens_used ?? 0
   const tokensLabel =
-    used <= 0 ? '' : used < 1000 ? t('goal.tokens', { used }) : t('goal.tokensK', { k: (used / 1000).toFixed(1) })
+    used <= 0 ? '' : used < 1000 ? strings.goalTokens(used) : strings.goalTokensK((used / 1000).toFixed(1))
 
   async function clear() {
-    try {
-      await api.clearGoal()
-    } catch {
-      // still clear local so the banner dismisses
-    }
-    dispatch(chatActions.setGoal(null))
+    // The host clears local state even when the backend call fails, so the
+    // banner always dismisses.
+    await host.clearGoal()
   }
 
   const showProgress = isActive && totalCount > 0
@@ -138,7 +132,7 @@ export function GoalBanner() {
       >
         {/* Leading icon + active dot */}
         <span className="relative shrink-0 text-[var(--color-muted-foreground)]">
-          <style.Icon className="h-[15px] w-[15px]" strokeWidth={1.8} />
+          <Icon className="h-[15px] w-[15px]" strokeWidth={1.8} />
           {isActive && (
             <span
               aria-hidden="true"
@@ -151,7 +145,7 @@ export function GoalBanner() {
         {/* Status label + objective (single truncated line) */}
         <span className="min-w-0 flex-1 truncate text-[12.5px] leading-none">
           <span className="mr-1.5 font-semibold" style={{ color: statusColor }}>
-            {statusLabel}
+            {label}
           </span>
           <span
             className={
@@ -186,7 +180,7 @@ export function GoalBanner() {
         {elapsedLabel && (
           <span
             className="shrink-0 font-mono text-[10px] tabular-nums text-[var(--color-muted-foreground)]"
-            title={t('goal.elapsed')}
+            title={strings.goalElapsed}
           >
             {elapsedLabel}
           </span>
@@ -196,8 +190,8 @@ export function GoalBanner() {
         <span className="flex shrink-0 items-center gap-0.5">
           <button
             type="button"
-            title={t('goal.edit')}
-            aria-label={t('goal.edit')}
+            title={strings.goalEdit}
+            aria-label={strings.goalEdit}
             onClick={(e) => {
               e.stopPropagation()
               setEditing(true)
@@ -208,8 +202,8 @@ export function GoalBanner() {
           </button>
           <button
             type="button"
-            title={t('goal.clearGoal')}
-            aria-label={t('goal.clearGoal')}
+            title={strings.goalClear}
+            aria-label={strings.goalClear}
             onClick={(e) => {
               e.stopPropagation()
               void clear()
@@ -246,10 +240,10 @@ export function GoalBanner() {
               {hasTimes && (
                 <>
                   <span>
-                    {t('goal.started')} {new Date(startMs).toLocaleString()}
+                    {strings.goalStarted} {new Date(startMs).toLocaleString()}
                   </span>
                   <span>
-                    {t('goal.elapsed')} {elapsedLabel}
+                    {strings.goalElapsed} {elapsedLabel}
                   </span>
                 </>
               )}
@@ -260,16 +254,24 @@ export function GoalBanner() {
         </div>
       </div>
 
-      {editing && <EditGoalDialog initial={goal.objective} onClose={() => setEditing(false)} />}
+      {editing && <EditGoalDialog host={host} strings={strings} initial={goal.objective} onClose={() => setEditing(false)} />}
     </div>
   )
 }
 
 // ─── Edit dialog ────────────────────────────────────────────────────────────
 
-function EditGoalDialog({ initial, onClose }: { initial: string; onClose: () => void }) {
-  const { t } = useTranslation()
-  const dispatch = useAppDispatch()
+function EditGoalDialog({
+  host,
+  strings,
+  initial,
+  onClose,
+}: {
+  host: ProductComposerHost
+  strings: ProductComposerStrings
+  initial: string
+  onClose: () => void
+}) {
   const [text, setText] = useState(initial)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -296,11 +298,10 @@ function EditGoalDialog({ initial, onClose }: { initial: string; onClose: () => 
     setError('')
     try {
       // start=false: editing the objective must not kick off another agent run.
-      const goal = await api.setGoal(text.trim(), false)
-      dispatch(chatActions.setGoal(goal))
+      await host.setGoal(text.trim(), false)
       onClose()
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('goal.saveFailed'))
+      setError(err instanceof Error ? err.message : strings.goalSaveFailed)
     } finally {
       setSaving(false)
     }
@@ -315,7 +316,7 @@ function EditGoalDialog({ initial, onClose }: { initial: string; onClose: () => 
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={t('goal.editTitle')}
+        aria-label={strings.goalEditTitle}
         onClick={(e) => e.stopPropagation()}
         className="m-4 flex min-w-0 flex-col overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)]"
         style={{ width: 'min(520px, 94vw)' }}
@@ -326,11 +327,11 @@ function EditGoalDialog({ initial, onClose }: { initial: string; onClose: () => 
             <ViewfinderCircleIcon className="h-4 w-4" />
           </div>
           <h3 className="m-0 flex-1 text-sm font-semibold tracking-[-0.01em] text-[var(--color-foreground)]">
-            {t('goal.editTitle')}
+            {strings.goalEditTitle}
           </h3>
           <button
             type="button"
-            aria-label={t('common.close')}
+            aria-label={strings.commonClose}
             onClick={onClose}
             className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] border border-transparent bg-transparent text-[var(--color-muted-foreground)] transition-colors hover:border-[var(--color-border)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
           >
@@ -348,7 +349,7 @@ function EditGoalDialog({ initial, onClose }: { initial: string; onClose: () => 
             className="w-full resize-y rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-muted)] px-3 py-2.5 text-[13px] leading-relaxed text-[var(--color-foreground)] outline-none transition-colors focus:border-[var(--color-primary)]"
           />
           <p className="mt-2 text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">
-            {t('chat.goalHint.replace')}
+            {strings.goalHintReplace}
           </p>
           {error && <p className="mt-2 text-[11px] text-[var(--color-error-fg)]">{error}</p>}
         </div>
@@ -360,7 +361,7 @@ function EditGoalDialog({ initial, onClose }: { initial: string; onClose: () => 
             onClick={onClose}
             className="inline-flex h-[30px] items-center rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
           >
-            {t('common.cancel')}
+            {strings.commonCancel}
           </button>
           <button
             type="button"
@@ -368,7 +369,7 @@ function EditGoalDialog({ initial, onClose }: { initial: string; onClose: () => 
             onClick={() => void save()}
             className="inline-flex h-[30px] items-center gap-1.5 rounded-[var(--radius-md)] border border-transparent bg-[var(--color-primary)] px-3.5 text-xs font-medium text-[var(--color-on-primary)] transition-colors enabled:hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
           >
-            {saving ? t('common.loading') : t('common.save')}
+            {saving ? strings.commonLoading : strings.commonSave}
           </button>
         </div>
       </div>
@@ -379,11 +380,11 @@ function EditGoalDialog({ initial, onClose }: { initial: string; onClose: () => 
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function formatElapsed(totalSec: number, t: (key: string, opts?: Record<string, unknown>) => string): string {
+function formatElapsed(totalSec: number, strings: ProductComposerStrings): string {
   const s = Math.max(0, totalSec)
-  if (s < 60) return t('chat.durationSeconds', { n: s })
+  if (s < 60) return strings.durationSeconds(s)
   const m = Math.floor(s / 60)
-  if (m < 60) return t('chat.durationMinutes', { m, s: s % 60 })
+  if (m < 60) return strings.durationMinutes(m, s % 60)
   const h = Math.floor(m / 60)
-  return t('goal.durationHours', { h, m: m % 60 })
+  return strings.durationHours(h, m % 60)
 }

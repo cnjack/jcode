@@ -42,6 +42,10 @@
       "types": "./dist/canvas/index.d.ts",
       "import": "./dist/canvas/index.js"
     },
+    "./product": {
+      "types": "./dist/product/index.d.ts",
+      "import": "./dist/product/index.js"
+    },
     "./canvas.css": "./dist/canvas/canvas.css",
     "./voice": {
       "types": "./dist/voice/index.d.ts",
@@ -76,6 +80,7 @@
     "dev:css": "tailwindcss -i src/styles/entry.css -o dist/styles.css --watch",
     "dev": "pnpm dev:css & tsc -p tsconfig.build.json --watch --preserveWatchOutput",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
     "generate:api-docs": "node ../../script/generate_jcode_ui_api_docs.mjs",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
@@ -108,12 +113,15 @@
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.1.0",
+    "@testing-library/react": "^16.3.0",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@xyflow/react": "^12.11.2",
+    "jsdom": "^26.1.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tailwindcss": "^4.1.0",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
   }
 }
