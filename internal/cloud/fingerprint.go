@@ -72,7 +72,7 @@ func machineID(d fingerprintDeps) string {
 		if err != nil {
 			return ""
 		}
-		return parseMachineGuid(string(out))
+		return parseMachineGUID(string(out))
 	}
 	return ""
 }
@@ -95,11 +95,11 @@ func parseIOPlatformUUID(out string) string {
 	return ""
 }
 
-// parseMachineGuid extracts the guid from `reg query ... /v MachineGuid`
+// parseMachineGUID extracts the guid from `reg query ... /v MachineGuid`
 // output: a line like
 //
 //	MachineGuid    REG_SZ    1a2b3c4d-....
-func parseMachineGuid(out string) string {
+func parseMachineGUID(out string) string {
 	fields := strings.Fields(out)
 	for i, f := range fields {
 		if f == "MachineGuid" && i+2 < len(fields) && strings.EqualFold(fields[i+1], "REG_SZ") {
