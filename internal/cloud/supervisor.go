@@ -118,6 +118,7 @@ func (s *Supervisor) SetAutoConnect(enabled bool) error {
 		URL:         previous.URL,
 		AutoConnect: &enabled,
 		E2EE:        previous.E2EE,
+		SyncDefault: previous.SyncDefault,
 	})
 	if err := config.SaveConfig(s.cfg); err != nil {
 		if previous == (config.CloudConfig{}) {

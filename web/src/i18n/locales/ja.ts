@@ -1061,6 +1061,12 @@ export default {
     server: 'サーバー',
     device: 'このデバイス',
     saveFailed: '更新に失敗しました：{message}',
+    syncSession: 'このセッションのクラウド同期',
+    syncOn: 'クラウドに同期中——クリックで停止',
+    syncOff: 'クラウドに未同期——クリックで同期',
+    syncNeedLogin: 'ログインするとセッションをクラウドに同期できます',
+    syncDefaultTitle: '新しいセッションをクラウドに同期',
+    syncDefaultDesc: 'この設定以降に作成されたセッションがクラウドコンソールとモバイルアプリに表示されます。既存のセッションには影響しません。',
   },
 
   pip: {

@@ -226,7 +226,7 @@ func TestRegisterLoopSendsPlatform(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	conn := newTestConnector(srv.URL, "http://127.0.0.1:1")
+	conn := newTestConnector(t, srv.URL, "http://127.0.0.1:1")
 	if err := conn.registerLoop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestRegisterLoopSendsE2EE(t *testing.T) {
 			}))
 			t.Cleanup(srv.Close)
 
-			conn := newTestConnector(srv.URL, "http://127.0.0.1:1")
+			conn := newTestConnector(t, srv.URL, "http://127.0.0.1:1")
 			conn.cipher = tc.cipher
 			conn.cfg.CipherDisabled = tc.disabled
 			if err := conn.registerLoop(context.Background()); err != nil {
@@ -284,7 +284,7 @@ func TestRegisterLoopSendsE2EE(t *testing.T) {
 // unreachable, offline after ctx cancel (graceful stop).
 func TestConnectorStatusTransitions(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	conn := newTestConnector("http://127.0.0.1:1", "http://127.0.0.1:1")
+	conn := newTestConnector(t, "http://127.0.0.1:1", "http://127.0.0.1:1")
 	if state, _ := conn.Status(); state != StateOffline {
 		t.Fatalf("state before Run = %q, want offline", state)
 	}

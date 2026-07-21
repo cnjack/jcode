@@ -442,6 +442,11 @@ type CloudConfig struct {
 	// stays on the plaintext grey path (CipherDisabled) for the gradual
 	// roll-out. Pointer so an explicit false survives config round-trips.
 	E2EE *bool `json:"e2ee,omitempty"`
+	// SyncDefault (M19) is the global default for NEW sessions: when true, the
+	// web layer stamps each newly created session as cloud-synced (an explicit
+	// entry in ~/.jcode/cloud-sessions.json). Existing sessions are never
+	// touched retroactively. Absent/false ⇒ new sessions do not sync.
+	SyncDefault bool `json:"sync_default,omitempty"`
 }
 
 // cloudMu guards publication of Config.Cloud. As with Memory/ToolSearch, the
@@ -500,6 +505,14 @@ func CloudE2EE(c *Config) bool {
 		return true
 	}
 	return *cc.E2EE
+}
+
+// CloudSyncDefault reports whether NEW sessions are stamped as cloud-synced
+// at creation time (M19). Default false for absent blocks: nothing syncs
+// unless the user opts a session in. Existing sessions are unaffected either
+// way — the value is consulted only at session-creation stamping.
+func CloudSyncDefault(c *Config) bool {
+	return c.CloudSettings().SyncDefault
 }
 
 // ApprovalReviewConfig holds tuning knobs for jcode's LLM approval reviewer.

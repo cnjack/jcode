@@ -89,6 +89,15 @@ func runLogin(ctx context.Context, rawURL, name string) error {
 		name = "jcode-device"
 	}
 
+	// M16: resolve the stable machine fingerprint up front; its sha256 rides
+	// the token poll (login dedup) and the register call, and the SOURCE is
+	// persisted into cloud.json so it never changes once set.
+	fpSource, err := cloud.ResolveFingerprintSource()
+	if err != nil {
+		return fmt.Errorf("failed to resolve the machine fingerprint: %w", err)
+	}
+	fpHash := cloud.FingerprintHash(fpSource)
+
 	client := cloud.NewClient(baseURL)
 
 	dc, err := client.RequestDeviceCode(ctx, "jcode CLI "+Version)
@@ -112,7 +121,7 @@ func runLogin(ctx context.Context, rawURL, name string) error {
 
 	interval := time.Duration(dc.Interval) * time.Second
 	expiresIn := time.Duration(dc.ExpiresIn) * time.Second
-	tok, err := client.PollForToken(ctx, dc.DeviceCode, interval, expiresIn)
+	tok, err := client.PollForToken(ctx, dc.DeviceCode, fpHash, interval, expiresIn)
 	if err != nil {
 		switch {
 		case errors.Is(err, cloud.ErrAuthorizationDenied):
@@ -134,6 +143,7 @@ func runLogin(ctx context.Context, rawURL, name string) error {
 		Hostname:     hostname,
 		JcodeVersion: Version,
 		PubKey:       pubKey,
+		Fingerprint:  fpHash,
 	}); err != nil {
 		return fmt.Errorf("failed to register device: %w", err)
 	}
@@ -146,6 +156,7 @@ func runLogin(ctx context.Context, rawURL, name string) error {
 		PublicKey:   pubKey,
 		PrivateKey:  privKey,
 		KeyGen:      1,
+		Fingerprint: fpSource,
 	}
 	if err := cloud.SaveCredentials(creds); err != nil {
 		return err
@@ -156,6 +167,9 @@ func runLogin(ctx context.Context, rawURL, name string) error {
 	}
 
 	fmt.Println()
+	if tok.Deduped {
+		fmt.Printf("This machine was recognized (fingerprint %s) — reusing the existing device registration.\n", fpHash[:8])
+	}
 	fmt.Printf("Signed in to %s as device %q (%s).\n", baseURL, name, tok.DeviceID)
 	fmt.Printf("Credentials saved to %s\n", credentialsPathForDisplay())
 	return nil
@@ -194,6 +208,16 @@ func runLoginStatus() error {
 	fmt.Printf("device name: %s\n", creds.DeviceName)
 	fmt.Printf("device id:   %s\n", creds.DeviceID)
 	fmt.Printf("key gen:     %d\n", creds.KeyGen)
+	// M16: show the fingerprint hash prefix (the form the server knows).
+	// Pre-M16 files lack the persisted source — fall back to the hardware id,
+	// never to a fresh random (that would print an unstable value).
+	fpSource := creds.Fingerprint
+	if fpSource == "" {
+		fpSource = cloud.HardwareFingerprintSource()
+	}
+	if fpSource != "" {
+		fmt.Printf("fingerprint: %s\n", cloud.FingerprintHash(fpSource)[:8])
+	}
 	return nil
 }
 

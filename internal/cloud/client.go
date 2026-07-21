@@ -118,6 +118,9 @@ type DeviceTokenResponse struct {
 	AccessToken string `json:"access_token"`
 	TokenType   string `json:"token_type"`
 	DeviceID    string `json:"device_id"`
+	// Deduped is true when the orchestrator recognized the machine fingerprint
+	// and reused the existing devices row (M16) instead of minting a new one.
+	Deduped bool `json:"deduped"`
 }
 
 // RegisterDeviceRequest is the body of POST /internal/v1/device/register.
@@ -133,6 +136,9 @@ type RegisterDeviceRequest struct {
 	// when the CEK cipher is active and cloud.e2ee did not disable it. The
 	// orchestrator gates plaintext downlink on it (docs/17 §6.7).
 	E2EE bool `json:"e2ee,omitempty"`
+	// Fingerprint is the sha256 of the machine fingerprint (M16): it backfills
+	// rows minted without one so a later login dedups onto this device.
+	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
 // post issues one JSON POST request and decodes the response envelope. token,
@@ -257,12 +263,18 @@ func (c *Client) RequestDeviceCode(ctx context.Context, clientName string) (*Dev
 }
 
 // PollDeviceToken makes a single token poll attempt: POST /auth/device/token.
+// fingerprint is the sha256 machine-fingerprint hash (M16; "" for none) — the
+// orchestrator uses it to dedup a re-login onto the existing devices row.
 // Pending authorization surfaces as an *APIError with Code
 // "authorization_pending" (or "slow_down"); terminal failures use
 // "access_denied" / "expired_token".
-func (c *Client) PollDeviceToken(ctx context.Context, deviceCode string) (*DeviceTokenResponse, error) {
+func (c *Client) PollDeviceToken(ctx context.Context, deviceCode, fingerprint string) (*DeviceTokenResponse, error) {
 	var out DeviceTokenResponse
-	if err := c.post(ctx, "/auth/device/token", "", map[string]string{"device_code": deviceCode}, &out); err != nil {
+	body := map[string]string{"device_code": deviceCode}
+	if fingerprint != "" {
+		body["fingerprint"] = fingerprint
+	}
+	if err := c.post(ctx, "/auth/device/token", "", body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -270,8 +282,9 @@ func (c *Client) PollDeviceToken(ctx context.Context, deviceCode string) (*Devic
 
 // PollForToken polls POST /auth/device/token every interval until the user
 // authorizes, the deadline (now+expiresIn) passes, or ctx is cancelled. Zero
-// interval/expiresIn fall back to RFC 8628 defaults.
-func (c *Client) PollForToken(ctx context.Context, deviceCode string, interval, expiresIn time.Duration) (*DeviceTokenResponse, error) {
+// interval/expiresIn fall back to RFC 8628 defaults. fingerprint rides every
+// poll (M16, see PollDeviceToken).
+func (c *Client) PollForToken(ctx context.Context, deviceCode, fingerprint string, interval, expiresIn time.Duration) (*DeviceTokenResponse, error) {
 	if interval <= 0 {
 		interval = defaultPollInterval
 	}
@@ -281,7 +294,7 @@ func (c *Client) PollForToken(ctx context.Context, deviceCode string, interval, 
 	deadline := time.Now().Add(expiresIn)
 
 	for {
-		tok, err := c.PollDeviceToken(ctx, deviceCode)
+		tok, err := c.PollDeviceToken(ctx, deviceCode, fingerprint)
 		if err == nil {
 			return tok, nil
 		}

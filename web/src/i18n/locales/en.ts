@@ -1113,6 +1113,12 @@ export default {
     server: 'Server',
     device: 'This device',
     saveFailed: 'Failed to update: {message}',
+    syncSession: 'Cloud sync for this session',
+    syncOn: 'Syncing to the cloud — click to stop',
+    syncOff: 'Not syncing to the cloud — click to sync',
+    syncNeedLogin: 'Log in to sync this session to the cloud',
+    syncDefaultTitle: 'Sync new sessions to the cloud',
+    syncDefaultDesc: 'Sessions created later become visible in the cloud console and mobile app. Existing sessions are not affected.',
   },
 
   // Computer-use picture-in-picture (floating latest-screenshot card).

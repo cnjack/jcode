@@ -173,6 +173,12 @@ type Server struct {
 	// /api/cloud/login* (lazy because tests construct Server literals).
 	cloudLoginMu sync.Mutex
 	cloudLogin   *cloudLoginFlow
+
+	// cloudSyncStore is the lazy per-session sync gate store behind
+	// /api/cloud/sync* (M19; lazy for the same reason as cloudLogin).
+	cloudSyncMu    sync.Mutex
+	cloudSyncStore *cloud.SyncStore
+	cloudSyncErr   error // sticky load failure
 }
 
 // BLEController lets the settings endpoint start/stop the BLE status channel at
@@ -426,6 +432,9 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/cloud/pairings/{id}/approve", s.handleCloudPairingApprove)
 	mux.HandleFunc("POST /api/cloud/pairings/{id}/deny", s.handleCloudPairingDeny)
 	mux.HandleFunc("POST /api/cloud/pairing-offer", s.handleCloudPairingOffer)
+	mux.HandleFunc("GET /api/cloud/sync", s.handleCloudSync)
+	mux.HandleFunc("POST /api/cloud/sync/default", s.handleCloudSyncDefault)
+	mux.HandleFunc("POST /api/cloud/sync/{session_id}", s.handleCloudSyncSession)
 	mux.HandleFunc("GET /api/dev-options/status", s.handleDevOptionsStatus)
 	mux.HandleFunc("POST /api/dev-options/config", s.handleDevOptionsConfig)
 	mux.HandleFunc("GET /api/memory/status", s.handleMemoryStatus)

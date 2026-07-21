@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -216,7 +218,8 @@ func (f *fakeLocal) chatBody() map[string]any {
 
 // --- helpers ---
 
-func newTestConnector(cloudURL, localBase string) *Connector {
+func newTestConnector(t *testing.T, cloudURL, localBase string) *Connector {
+	t.Helper()
 	return NewConnector(ConnectorConfig{
 		CloudURL:          cloudURL,
 		Credentials:       &Credentials{DeviceID: "dev-1", DeviceToken: "tok", DeviceName: "test"},
@@ -228,7 +231,34 @@ func newTestConnector(cloudURL, localBase string) *Connector {
 		BatchWindow:       10 * time.Millisecond,
 		BatchMax:          20,
 		Backoff:           NewBackoff(5*time.Millisecond, 40*time.Millisecond),
+		// M19: without an explicit opt-in the connector syncs nothing. Tests
+		// pre-opt-in the sids they exercise ("s1"/"s2"); filter-specific tests
+		// build their own store via newTestSyncStore.
+		SyncStore: newTestSyncStore(t, "s1", "s2"),
 	})
+}
+
+// newTestSyncStore writes a temp sync-store file with the given sessions
+// opted in and loads it.
+func newTestSyncStore(t *testing.T, ids ...string) *SyncStore {
+	t.Helper()
+	entries := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		entries[id] = true
+	}
+	path := filepath.Join(t.TempDir(), "cloud-sessions.json")
+	data, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := LoadSyncStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store
 }
 
 // waitFor polls cond until it holds, failing the test after a fixed deadline.
@@ -257,7 +287,7 @@ func mustPayload(t *testing.T, v any) json.RawMessage {
 
 func TestChatSendNewSession(t *testing.T) {
 	local, localSrv := newFakeLocal(t)
-	conn := newTestConnector("http://127.0.0.1:1", localSrv.URL)
+	conn := newTestConnector(t, "http://127.0.0.1:1", localSrv.URL)
 
 	cmd := DeviceCommand{
 		ID:   "cmd-1",
@@ -287,7 +317,7 @@ func TestChatSendNewSession(t *testing.T) {
 
 func TestChatSendExistingSession(t *testing.T) {
 	local, localSrv := newFakeLocal(t)
-	conn := newTestConnector("http://127.0.0.1:1", localSrv.URL)
+	conn := newTestConnector(t, "http://127.0.0.1:1", localSrv.URL)
 
 	cmd := DeviceCommand{
 		ID:        "cmd-2",
@@ -320,7 +350,7 @@ func TestChatSendExistingSession(t *testing.T) {
 
 func TestChatSendEmptyTextRejected(t *testing.T) {
 	_, localSrv := newFakeLocal(t)
-	conn := newTestConnector("http://127.0.0.1:1", localSrv.URL)
+	conn := newTestConnector(t, "http://127.0.0.1:1", localSrv.URL)
 	cmd := DeviceCommand{ID: "cmd-3", Kind: "chat.send", Payload: mustPayload(t, map[string]any{"text": "  "})}
 	if status, _ := conn.executeCommand(context.Background(), cmd); status != "error" {
 		t.Fatalf("status = %q, want error for empty text", status)
@@ -329,7 +359,7 @@ func TestChatSendEmptyTextRejected(t *testing.T) {
 
 func TestChatStop(t *testing.T) {
 	local, localSrv := newFakeLocal(t)
-	conn := newTestConnector("http://127.0.0.1:1", localSrv.URL)
+	conn := newTestConnector(t, "http://127.0.0.1:1", localSrv.URL)
 
 	cmd := DeviceCommand{ID: "cmd-4", Kind: "chat.stop", SessionID: "sess-7"}
 	status, result := conn.executeCommand(context.Background(), cmd)
@@ -345,7 +375,7 @@ func TestChatStop(t *testing.T) {
 
 func TestApprovalRespond(t *testing.T) {
 	local, localSrv := newFakeLocal(t)
-	conn := newTestConnector("http://127.0.0.1:1", localSrv.URL)
+	conn := newTestConnector(t, "http://127.0.0.1:1", localSrv.URL)
 
 	cases := []struct {
 		decision              string
@@ -386,7 +416,7 @@ func TestApprovalRespond(t *testing.T) {
 }
 
 func TestUnknownCommandKind(t *testing.T) {
-	conn := newTestConnector("http://127.0.0.1:1", "http://127.0.0.1:1")
+	conn := newTestConnector(t, "http://127.0.0.1:1", "http://127.0.0.1:1")
 	status, result := conn.executeCommand(context.Background(), DeviceCommand{ID: "c", Kind: "nope"})
 	if status != "error" {
 		t.Fatalf("status = %q, want error", status)
@@ -408,7 +438,7 @@ func TestPollLoopExecutesAndAcks(t *testing.T) {
 		{ID: "cmd-1", Kind: "chat.send", Payload: mustPayload(t, map[string]any{"text": "hi", "channel": "console"})},
 	}}
 
-	conn := newTestConnector(cloudSrv.URL, localSrv.URL)
+	conn := newTestConnector(t, cloudSrv.URL, localSrv.URL)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go conn.pollLoop(ctx)
@@ -432,7 +462,7 @@ func TestPollLoopBackoffOnError(t *testing.T) {
 	cloudSrv := httptest.NewServer(cloud.handler())
 	t.Cleanup(cloudSrv.Close)
 
-	conn := newTestConnector(cloudSrv.URL, "http://127.0.0.1:1")
+	conn := newTestConnector(t, cloudSrv.URL, "http://127.0.0.1:1")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go conn.pollLoop(ctx)
@@ -461,7 +491,7 @@ func TestEventPumpDurableAndEphemeral(t *testing.T) {
 	cloudSrv := httptest.NewServer(cloud.handler())
 	t.Cleanup(cloudSrv.Close)
 
-	conn := newTestConnector(cloudSrv.URL, "http://127.0.0.1:1")
+	conn := newTestConnector(t, cloudSrv.URL, "http://127.0.0.1:1")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -504,7 +534,7 @@ func TestEventPumpLastSeqResumeAndConflictResync(t *testing.T) {
 	cloudSrv := httptest.NewServer(cloud.handler())
 	t.Cleanup(cloudSrv.Close)
 
-	conn := newTestConnector(cloudSrv.URL, "http://127.0.0.1:1")
+	conn := newTestConnector(t, cloudSrv.URL, "http://127.0.0.1:1")
 	conn.cfg.ListSessionsFn = func() (map[string][]session.SessionMeta, error) {
 		return map[string][]session.SessionMeta{
 			"/proj": {{UUID: "s1", Project: "/proj", Status: "idle"}},
@@ -577,7 +607,7 @@ func TestEventPumpOverRealWS(t *testing.T) {
 	}))
 	t.Cleanup(wsSrv.Close)
 
-	conn := newTestConnector(cloudSrv.URL, wsSrv.URL)
+	conn := newTestConnector(t, cloudSrv.URL, wsSrv.URL)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	batcher := newEventBatcher(conn)
@@ -601,7 +631,7 @@ func TestEventPumpSynthesizesAgentMessage(t *testing.T) {
 	cloudSrv := httptest.NewServer(cloud.handler())
 	t.Cleanup(cloudSrv.Close)
 
-	conn := newTestConnector(cloudSrv.URL, "http://127.0.0.1:1")
+	conn := newTestConnector(t, cloudSrv.URL, "http://127.0.0.1:1")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -651,7 +681,7 @@ func TestEventPumpSessionResetClearsAgentText(t *testing.T) {
 	cloudSrv := httptest.NewServer(cloud.handler())
 	t.Cleanup(cloudSrv.Close)
 
-	conn := newTestConnector(cloudSrv.URL, "http://127.0.0.1:1")
+	conn := newTestConnector(t, cloudSrv.URL, "http://127.0.0.1:1")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -693,7 +723,7 @@ func TestSyncSessionsUpsert(t *testing.T) {
 	cloudSrv := httptest.NewServer(cloud.handler())
 	t.Cleanup(cloudSrv.Close)
 
-	conn := newTestConnector(cloudSrv.URL, "http://127.0.0.1:1")
+	conn := newTestConnector(t, cloudSrv.URL, "http://127.0.0.1:1")
 	conn.cfg.ListSessionsFn = func() (map[string][]session.SessionMeta, error) {
 		return map[string][]session.SessionMeta{
 			"/proj": {

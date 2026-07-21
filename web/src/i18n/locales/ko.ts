@@ -1060,6 +1060,12 @@ export default {
     server: '서버',
     device: '이 기기',
     saveFailed: '업데이트 실패: {message}',
+    syncSession: '이 세션의 클라우드 동기화',
+    syncOn: '클라우드와 동기화 중 — 클릭하여 중지',
+    syncOff: '클라우드와 동기화 안 됨 — 클릭하여 동기화',
+    syncNeedLogin: '로그인하면 세션을 클라우드에 동기화할 수 있습니다',
+    syncDefaultTitle: '새 세션을 클라우드에 기본 동기화',
+    syncDefaultDesc: '이후에 생성되는 세션이 클라우드 콘솔과 모바일 앱에 표시됩니다. 기존 세션에는 영향이 없습니다.',
   },
 
   pip: {

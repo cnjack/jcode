@@ -417,6 +417,19 @@ export const api = {
     request<CloudPairingsResponse>(`/api/cloud/pairings/${encodeURIComponent(id)}/deny`, { method: 'POST' }),
   // QR pairing offer: qr is the jcode://pair URL to render as a QR code.
   cloudPairingOffer: () => request<CloudPairingOfferResponse>('/api/cloud/pairing-offer', { method: 'POST' }),
+
+  // Per-session cloud sync switches + the new-session default (M19).
+  cloudSync: () => request<CloudSyncResponse>('/api/cloud/sync'),
+  cloudSetSyncDefault: (enabled: boolean) =>
+    request<CloudSyncResponse>('/api/cloud/sync/default', {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    }),
+  cloudSetSessionSync: (sessionId: string, enabled: boolean) =>
+    request<CloudSessionSyncResponse>(`/api/cloud/sync/${encodeURIComponent(sessionId)}`, {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    }),
 }
 
 export interface CloudStatusResponse {
@@ -467,6 +480,18 @@ export interface CloudPairingOfferResponse {
   qr: string
   offer_id: string
   expires_at: string
+}
+
+/** GET /api/cloud/sync — per-session sync opt-ins + the new-session default (M19). */
+export interface CloudSyncResponse {
+  sync_default: boolean
+  /** Explicit per-session entries only; a missing session id means "not synced". */
+  sessions: Record<string, boolean>
+}
+
+export interface CloudSessionSyncResponse {
+  session_id: string
+  enabled: boolean
 }
 
 export interface ToolSearchConfig {

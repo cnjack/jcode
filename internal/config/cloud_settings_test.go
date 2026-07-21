@@ -110,3 +110,37 @@ func TestCloudE2EEDisableRoundTrip(t *testing.T) {
 		t.Fatal("CloudE2EE() = false, want explicit true")
 	}
 }
+
+func TestCloudSyncDefaultRoundTrip(t *testing.T) {
+	c := &Config{}
+	if CloudSyncDefault(c) {
+		t.Fatal("CloudSyncDefault() on absent block = true, want default false")
+	}
+	if CloudSyncDefault(nil) {
+		t.Fatal("CloudSyncDefault(nil) = true, want default false")
+	}
+
+	c.SetCloud(&CloudConfig{Enabled: true, SyncDefault: true})
+	if !CloudSyncDefault(c) {
+		t.Fatal("CloudSyncDefault() = false, want explicit true")
+	}
+	// Snapshot independence + JSON round-trip.
+	data, err := json.Marshal(c.CloudSettings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := raw["sync_default"]; !ok || v != true {
+		t.Fatalf("marshaled cloud block missing sync_default=true: %v", raw)
+	}
+
+	// Explicit false is indistinguishable from absent (both mean default OFF)
+	// but must survive a read/modify/write of the block.
+	c.SetCloud(&CloudConfig{Enabled: true, SyncDefault: false})
+	if CloudSyncDefault(c) {
+		t.Fatal("CloudSyncDefault() = true, want explicit false")
+	}
+}

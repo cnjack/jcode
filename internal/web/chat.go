@@ -150,6 +150,16 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 	// matching TUI/ACP. The mode arg is retained for the recorder/event context.
 	_ = mode
 
+	// M19: stamp the receiving session's sync opt-in BEFORE the user_message
+	// Emit below — the connector's event pump gates uploads on the opt-in, so
+	// a cloud-originated first message would otherwise race uplink and be
+	// dropped (J8-S3: user_message missing from the durable log). Keyed on
+	// eng.taskID, the WS event task_id the gate checks; it coincides with the
+	// recorder UUID for local engines, and the recorder-based stamp below
+	// covers the resume/replace branch. SetIfAbsent makes repeat stamps
+	// (every message lands here) harmless.
+	s.stampCloudSync(eng.taskID, source, sessionID == "")
+
 	// Emit user_message event for external sources (e.g. WeChat) so web clients see it.
 	// Web-originated messages are already added by the frontend's sendMessage().
 	if source != "" {
@@ -162,6 +172,10 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 	// Ensure a recorder exists (lazy creation on first message).
 	// If the client provided a session_id and the current recorder differs,
 	// resume the client's session to prevent creating a duplicate.
+	// stampNew captures whether THIS call minted the recording session (for
+	// the M19 sync stamp below; the store write happens after eng.emu is
+	// released).
+	var stampNew bool
 	eng.emu.Lock()
 	if eng.recorder == nil {
 		rec, _ := session.NewRecorder(eng.pwd, eng.providerName, eng.modelName)
@@ -172,6 +186,8 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 			eng.recorderInit(rec)
 		}
 		eng.recorder = rec
+		// sessionID == "" means the recorder just minted a new UUID.
+		stampNew = rec != nil && sessionID == ""
 	} else if sessionID != "" && eng.recorder.UUID() != sessionID {
 		// Client is continuing a session that doesn't match the current recorder.
 		// Resume the client's session to keep all messages together.
@@ -185,6 +201,16 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 	}
 	recorder := eng.recorder
 	eng.emu.Unlock()
+	// M19: stamp the receiving session's initial cloud-sync state on EVERY
+	// submitted message, not only when this call created the recorder — the
+	// bootstrap engine already has a recorder at startup, and a cloud
+	// chat.send landing on it (the J8 regression) must still opt the session
+	// in. stampCloudSync is a no-op for local sources unless the session is
+	// brand-new (then cloud.sync_default applies), and never overwrites an
+	// explicit user toggle.
+	if recorder != nil {
+		s.stampCloudSync(recorder.UUID(), source, stampNew)
+	}
 
 	// Record user message.
 	if recorder != nil {

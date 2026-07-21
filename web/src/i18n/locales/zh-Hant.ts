@@ -1055,6 +1055,12 @@ export default {
     server: '伺服器',
     device: '本機',
     saveFailed: '更新失敗：{message}',
+    syncSession: '此工作階段的雲端同步',
+    syncOn: '正在同步到雲端——點擊停止',
+    syncOff: '未同步到雲端——點擊開啟同步',
+    syncNeedLogin: '登入後可將工作階段同步到雲端',
+    syncDefaultTitle: '新工作階段預設同步到雲端',
+    syncDefaultDesc: '之後新建的工作階段將在雲端控制台和行動端可見；現有工作階段不受影響。',
   },
 
   pip: {

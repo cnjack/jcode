@@ -46,6 +46,10 @@ func loginTestServer(t *testing.T, registered *bool, revoked *int) *httptest.Ser
 		if req.Name != "test-device" || req.PubKey == "" || req.JcodeVersion == "" {
 			t.Errorf("register: unexpected body %+v", req)
 		}
+		// M16: the register body carries the sha256 machine-fingerprint hash.
+		if len(req.Fingerprint) != 64 {
+			t.Errorf("register: fingerprint = %q, want 64 hex chars", req.Fingerprint)
+		}
 		*registered = true
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{}`))
@@ -96,6 +100,12 @@ func TestRunLoginEndToEnd(t *testing.T) {
 	if creds.PublicKey == "" || creds.PrivateKey == "" || creds.KeyGen != 1 {
 		t.Fatalf("credentials keys = %+v", creds)
 	}
+	// M16: the fingerprint SOURCE is persisted (never sent over the wire) and
+	// a second login attempt reuses it.
+	if creds.Fingerprint == "" {
+		t.Fatalf("credentials missing fingerprint: %+v", creds)
+	}
+	fpSource := creds.Fingerprint
 
 	// The config block must be enabled and point at the cloud URL. Read the
 	// file raw: LoadConfig requires providers, which login does not.
@@ -114,6 +124,11 @@ func TestRunLoginEndToEnd(t *testing.T) {
 	// Logging in again without logout is a no-op.
 	if err := runLogin(context.Background(), srv.URL, "test-device"); err != nil {
 		t.Fatalf("runLogin() again error = %v", err)
+	}
+	// The no-op re-login must not touch the persisted fingerprint.
+	creds, err = cloud.LoadCredentials()
+	if err != nil || creds == nil || creds.Fingerprint != fpSource {
+		t.Fatalf("fingerprint changed after no-op re-login: %+v, %v", creds, err)
 	}
 
 	if err := runLogout(context.Background()); err != nil {

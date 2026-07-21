@@ -66,7 +66,7 @@ func TestPairingRequestParksPending(t *testing.T) {
 	pubB64, _ := p256Requester(t)
 	mock, srv := newPairingMock(t)
 	defer srv.Close()
-	conn := newTestConnector(srv.URL, "http://127.0.0.1:1")
+	conn := newTestConnector(t, srv.URL, "http://127.0.0.1:1")
 
 	status, result := conn.executeCommand(context.Background(), pairingRequestCmd(t, "p1", "jcode mobile", pubB64, ""))
 	if status != "ok" {
@@ -98,7 +98,7 @@ func TestPairingRequestOfferAutoApproves(t *testing.T) {
 	mock, srv := newPairingMock(t)
 	defer srv.Close()
 
-	conn := newTestConnector(srv.URL, "http://127.0.0.1:1")
+	conn := newTestConnector(t, srv.URL, "http://127.0.0.1:1")
 	cek, err := GenerateCEK()
 	if err != nil {
 		t.Fatal(err)
@@ -144,7 +144,7 @@ func TestApproveDenyPairing(t *testing.T) {
 	mock, srv := newPairingMock(t)
 	defer srv.Close()
 
-	conn := newTestConnector(srv.URL, "http://127.0.0.1:1")
+	conn := newTestConnector(t, srv.URL, "http://127.0.0.1:1")
 	cek, err := GenerateCEK()
 	if err != nil {
 		t.Fatal(err)
@@ -199,7 +199,7 @@ func TestApproveDenyPairing(t *testing.T) {
 func TestPairingRequestInvalid(t *testing.T) {
 	_, srv := newPairingMock(t)
 	defer srv.Close()
-	conn := newTestConnector(srv.URL, "http://127.0.0.1:1")
+	conn := newTestConnector(t, srv.URL, "http://127.0.0.1:1")
 
 	if status, _ := conn.executeCommand(context.Background(), DeviceCommand{ID: "c", Kind: "pairing.request", Payload: mustPayload(t, map[string]string{"label": "x"})}); status != "error" {
 		t.Fatalf("missing ids: status = %q, want error", status)

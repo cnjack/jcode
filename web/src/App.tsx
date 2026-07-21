@@ -53,6 +53,7 @@ import { AuthGate } from './components/AuthGate'
 import { SetupView } from './components/SetupView'
 import { SettingsDialog } from './components/SettingsDialog'
 import { TopBar } from './components/TopBar'
+import { CloudSyncToggle } from './components/CloudSyncToggle'
 import { ComputerShotPiP } from './components/ComputerShotPiP'
 import { RightPanel } from './components/RightPanel'
 import { TerminalPanel } from './components/TerminalPanel'
@@ -283,6 +284,8 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels'
               onTogglePanel={togglePanel}
             />
           )}
+          {/* Per-session cloud sync switch (M19) — floated left of the TopBar. */}
+          {activeView === 'chat' && <CloudSyncToggle />}
           {/* Codex-style computer-use PiP — floats under the TopBar, shows the
               latest screenshot from the session's computer_screenshot calls. */}
           {activeView === 'chat' && <ComputerShotPiP />}

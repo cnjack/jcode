@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -167,7 +168,16 @@ func (f *cloudLoginFlow) start(parentCtx context.Context, rawURL string) (cloudL
 // persists the device identity (same steps as `jcode login`): identity key
 // pair → device register → credentials file → config.cloud.
 func (f *cloudLoginFlow) pollAndFinish(ctx context.Context, client *cloud.Client, baseURL, deviceCode string, interval, expiresIn time.Duration) {
-	tok, err := client.PollForToken(ctx, deviceCode, interval, expiresIn)
+	// M16: the machine fingerprint hash rides the poll (login dedup) and the
+	// register call; the source is persisted into cloud.json.
+	fpSource, err := cloud.ResolveFingerprintSource()
+	if err != nil {
+		f.fail(fmt.Errorf("failed to resolve the machine fingerprint: %w", err))
+		return
+	}
+	fpHash := cloud.FingerprintHash(fpSource)
+
+	tok, err := client.PollForToken(ctx, deviceCode, fpHash, interval, expiresIn)
 	if err != nil {
 		f.fail(err)
 		return
@@ -188,6 +198,7 @@ func (f *cloudLoginFlow) pollAndFinish(ctx context.Context, client *cloud.Client
 		Hostname:     hostname,
 		JcodeVersion: f.version,
 		PubKey:       pubKey,
+		Fingerprint:  fpHash,
 	}); err != nil {
 		f.fail(err)
 		return
@@ -200,6 +211,7 @@ func (f *cloudLoginFlow) pollAndFinish(ctx context.Context, client *cloud.Client
 		PublicKey:   pubKey,
 		PrivateKey:  privKey,
 		KeyGen:      1,
+		Fingerprint: fpSource,
 	}); err != nil {
 		f.fail(err)
 		return

@@ -36,6 +36,12 @@ type Credentials struct {
 	// Empty means "not initialized yet" (pre-M5 credentials file); it is
 	// lazily generated on first need (see crypto.go EnsureCEK).
 	CEK string `json:"cek,omitempty"`
+	// Fingerprint is the stable machine fingerprint SOURCE (M16): the OS
+	// machine id, or a "fallback:<hostname>:<random>" string generated once.
+	// It never leaves the machine — only its sha256 (FingerprintHash) is sent
+	// to the orchestrator for login dedup. Empty on pre-M16 files; resolved
+	// on the fly then (see ResolveFingerprintSource).
+	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
 // GenerateIdentityKeyPair creates a fresh X25519 device identity key pair and

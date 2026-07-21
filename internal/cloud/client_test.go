@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -136,7 +137,7 @@ func TestPollForTokenPendingThenSuccess(t *testing.T) {
 	})
 	defer srv.Close()
 
-	tok, err := NewClient(srv.URL).PollForToken(context.Background(), "dev-code-123", time.Millisecond, 10*time.Second)
+	tok, err := NewClient(srv.URL).PollForToken(context.Background(), "dev-code-123", "", time.Millisecond, 10*time.Second)
 	if err != nil {
 		t.Fatalf("PollForToken() error = %v", err)
 	}
@@ -154,7 +155,7 @@ func TestPollForTokenDenied(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, err := NewClient(srv.URL).PollForToken(context.Background(), "dev-code-123", time.Millisecond, 10*time.Second)
+	_, err := NewClient(srv.URL).PollForToken(context.Background(), "dev-code-123", "", time.Millisecond, 10*time.Second)
 	if !errors.Is(err, ErrAuthorizationDenied) {
 		t.Fatalf("PollForToken() error = %v, want ErrAuthorizationDenied", err)
 	}
@@ -166,7 +167,7 @@ func TestPollForTokenExpired(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, err := NewClient(srv.URL).PollForToken(context.Background(), "dev-code-123", time.Millisecond, 10*time.Second)
+	_, err := NewClient(srv.URL).PollForToken(context.Background(), "dev-code-123", "", time.Millisecond, 10*time.Second)
 	if !errors.Is(err, ErrDeviceCodeExpired) {
 		t.Fatalf("PollForToken() error = %v, want ErrDeviceCodeExpired", err)
 	}
@@ -179,7 +180,7 @@ func TestPollForTokenOverallDeadline(t *testing.T) {
 	defer srv.Close()
 
 	start := time.Now()
-	_, err := NewClient(srv.URL).PollForToken(context.Background(), "dev-code-123", 5*time.Millisecond, 20*time.Millisecond)
+	_, err := NewClient(srv.URL).PollForToken(context.Background(), "dev-code-123", "", 5*time.Millisecond, 20*time.Millisecond)
 	if !errors.Is(err, ErrDeviceCodeExpired) {
 		t.Fatalf("PollForToken() error = %v, want ErrDeviceCodeExpired", err)
 	}
@@ -196,7 +197,7 @@ func TestPollForTokenContextCancel(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := NewClient(srv.URL).PollForToken(ctx, "dev-code-123", time.Second, time.Minute)
+	_, err := NewClient(srv.URL).PollForToken(ctx, "dev-code-123", "", time.Second, time.Minute)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("PollForToken() error = %v, want context.Canceled", err)
 	}
@@ -259,5 +260,62 @@ func TestErrorEnvelopeParsing(t *testing.T) {
 	}
 	if apiErr.Code != "some_code" || apiErr.Message != "something went wrong" || apiErr.StatusCode != http.StatusBadRequest {
 		t.Fatalf("APIError = %+v", apiErr)
+	}
+}
+
+// TestPollForTokenSendsFingerprint covers the M16 contract: the sha256
+// fingerprint hash rides every token poll, and a deduped=true response
+// decodes.
+func TestPollForTokenSendsFingerprint(t *testing.T) {
+	const fp = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	srv := deviceAuthServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			DeviceCode  string `json:"device_code"`
+			Fingerprint string `json:"fingerprint"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode token body: %v", err)
+		}
+		if body.Fingerprint != fp {
+			t.Errorf("fingerprint = %q, want %q", body.Fingerprint, fp)
+		}
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"access_token": "dev-token-abc",
+			"token_type":   "device",
+			"device_id":    "device-42",
+			"deduped":      true,
+		})
+	})
+	defer srv.Close()
+
+	tok, err := NewClient(srv.URL).PollForToken(context.Background(), "dev-code-123", fp, time.Millisecond, 10*time.Second)
+	if err != nil {
+		t.Fatalf("PollForToken() error = %v", err)
+	}
+	if !tok.Deduped {
+		t.Fatalf("PollForToken() Deduped = false, want true (%+v)", tok)
+	}
+}
+
+// TestRegisterDeviceSendsFingerprint: the register body carries the hash for
+// the server-side backfill (M16).
+func TestRegisterDeviceSendsFingerprint(t *testing.T) {
+	const fp = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := io.ReadAll(r.Body)
+		gotBody = string(data)
+		writeJSON(t, w, http.StatusOK, map[string]any{"server_time": "2026-07-20T00:00:00Z"})
+	}))
+	defer srv.Close()
+
+	err := NewClient(srv.URL).RegisterDevice(context.Background(), "tok", RegisterDeviceRequest{
+		Name: "x", PubKey: "cHVia2V5", Fingerprint: fp,
+	})
+	if err != nil {
+		t.Fatalf("RegisterDevice() error = %v", err)
+	}
+	if !strings.Contains(gotBody, `"fingerprint":"`+fp+`"`) {
+		t.Fatalf("register body %s missing fingerprint", gotBody)
 	}
 }

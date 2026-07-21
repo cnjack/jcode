@@ -63,6 +63,12 @@ type ConnectorConfig struct {
 	// explicitly (or set CipherDisabled to force the plaintext path).
 	Cipher         *EnvelopeCipher
 	CipherDisabled bool
+
+	// SyncStore is the M19 per-session cloud-sync gate (~/.jcode/cloud-sessions.json):
+	// only sessions with an explicit opt-in are upserted / have their events
+	// uploaded. Nil lazily loads the default path on first use; a load failure
+	// fails CLOSED (nothing syncs). Tests inject a temp-file store.
+	SyncStore *SyncStore
 }
 
 const (
@@ -103,6 +109,11 @@ type Connector struct {
 	pairMu     sync.Mutex
 	pending    []PendingPairing
 	lastPaired *PairedInfo
+
+	// syncStoreMu guards the lazily loaded M19 per-session sync gate.
+	syncStoreMu    sync.Mutex
+	syncStore      *SyncStore
+	syncStoreTried bool // load attempted (failure is sticky: fail closed)
 }
 
 // NewConnector builds a Connector from cfg.
@@ -126,6 +137,9 @@ func NewConnector(cfg ConnectorConfig) *Connector {
 		token:  token,
 		cipher: cfg.Cipher,
 		state:  StateOffline,
+		// An injected store is used as-is; nil lazy-loads the default path on
+		// first gate check (see syncGate).
+		syncStore: cfg.SyncStore,
 	}
 }
 
@@ -204,6 +218,39 @@ func (c *Connector) backoff() *Backoff {
 
 func (c *Connector) logf(format string, args ...any) {
 	config.Logger().Printf("[cloud] "+format, args...)
+}
+
+// syncGate returns the M19 per-session sync store, lazily loading the default
+// path on first use. A load failure is sticky and fails CLOSED (nil): with no
+// readable opt-in state the connector must not upload anything. The store
+// itself transparently re-reads its file on change, so API toggles take
+// effect without restarting the connector.
+func (c *Connector) syncGate() *SyncStore {
+	c.syncStoreMu.Lock()
+	defer c.syncStoreMu.Unlock()
+	if c.syncStore != nil || c.syncStoreTried {
+		return c.syncStore
+	}
+	c.syncStoreTried = true
+	path, err := SyncStorePath()
+	if err != nil {
+		c.logf("sync store path unavailable, no sessions will sync: %v", err)
+		return nil
+	}
+	store, err := LoadSyncStore(path)
+	if err != nil {
+		c.logf("sync store unreadable, no sessions will sync: %v", err)
+		return nil
+	}
+	c.syncStore = store
+	return store
+}
+
+// syncEnabled reports whether the session's metadata/events may be uploaded:
+// only sessions with an explicit opt-in entry sync (M19 default OFF).
+func (c *Connector) syncEnabled(sessionID string) bool {
+	store := c.syncGate()
+	return store != nil && store.Enabled(sessionID)
 }
 
 // sealUplink encrypts one uplink payload field when the CEK cipher is active;
@@ -324,6 +371,7 @@ func (c *Connector) registerLoop(ctx context.Context) error {
 			PubKey:       c.cfg.Credentials.PublicKey,
 			Platform:     detectPlatform(),
 			E2EE:         c.e2eeActive(),
+			Fingerprint:  fingerprintHashForCreds(c.cfg.Credentials),
 		})
 		if err == nil {
 			c.setState(StateOnline, "")
@@ -654,6 +702,12 @@ func (c *Connector) execChatSendCompose(ctx context.Context, cmd DeviceCommand, 
 	}
 	if p.ProjectPath != "" {
 		sessReq["pwd"] = p.ProjectPath
+	}
+	if p.Channel != "" {
+		// The web layer stamps cloud-originated sessions as cloud-synced at
+		// creation (M19): a session created from the cloud must be visible
+		// there.
+		sessReq["source"] = p.Channel
 	}
 	status, body, err := c.local.postJSON(ctx, "/api/sessions", sessReq)
 	if err != nil {

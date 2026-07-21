@@ -69,6 +69,7 @@ func UpdateConfigCloud(url string, enabled bool) error {
 		URL:         url,
 		AutoConnect: current.AutoConnect,
 		E2EE:        current.E2EE,
+		SyncDefault: current.SyncDefault,
 	})
 	return config.SaveConfig(cfg)
 }

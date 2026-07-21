@@ -34,7 +34,7 @@ func TestDurableEventSealedWhenCipherActive(t *testing.T) {
 	mock := newMockCloud()
 	srv := httptest.NewServer(mock.handler())
 	defer srv.Close()
-	conn := withCipher(newTestConnector(srv.URL, "http://127.0.0.1:1"), wiringCipher(t))
+	conn := withCipher(newTestConnector(t, srv.URL, "http://127.0.0.1:1"), wiringCipher(t))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -62,7 +62,7 @@ func TestDurableEventPlaintextWithoutCipher(t *testing.T) {
 	mock := newMockCloud()
 	srv := httptest.NewServer(mock.handler())
 	defer srv.Close()
-	conn := newTestConnector(srv.URL, "http://127.0.0.1:1") // no cipher: grey path
+	conn := newTestConnector(t, srv.URL, "http://127.0.0.1:1") // no cipher: grey path
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -86,7 +86,7 @@ func TestEphemeralSealedWhenCipherActive(t *testing.T) {
 	mock := newMockCloud()
 	srv := httptest.NewServer(mock.handler())
 	defer srv.Close()
-	conn := withCipher(newTestConnector(srv.URL, "http://127.0.0.1:1"), wiringCipher(t))
+	conn := withCipher(newTestConnector(t, srv.URL, "http://127.0.0.1:1"), wiringCipher(t))
 
 	ctx := context.Background()
 	batcher := newEventBatcher(conn)
@@ -110,7 +110,7 @@ func TestEphemeralSealedWhenCipherActive(t *testing.T) {
 }
 
 func TestSessionsMetaSealedWhenCipherActive(t *testing.T) {
-	conn := withCipher(newTestConnector("http://127.0.0.1:1", "http://127.0.0.1:1"), wiringCipher(t))
+	conn := withCipher(newTestConnector(t, "http://127.0.0.1:1", "http://127.0.0.1:1"), wiringCipher(t))
 	conn.cfg.ListSessionsFn = func() (map[string][]session.SessionMeta, error) {
 		return map[string][]session.SessionMeta{
 			"proj": {{UUID: "s1", Title: "secret title", Status: "idle"}},
@@ -140,7 +140,7 @@ func TestSessionsMetaSealedWhenCipherActive(t *testing.T) {
 }
 
 func TestSessionsMetaPlaintextWithoutCipher(t *testing.T) {
-	conn := newTestConnector("http://127.0.0.1:1", "http://127.0.0.1:1")
+	conn := newTestConnector(t, "http://127.0.0.1:1", "http://127.0.0.1:1")
 	conn.cfg.ListSessionsFn = func() (map[string][]session.SessionMeta, error) {
 		return map[string][]session.SessionMeta{"proj": {{UUID: "s1"}}}, nil
 	}
@@ -158,7 +158,7 @@ func TestAckResultSealedWhenCipherActive(t *testing.T) {
 	mock := newMockCloud()
 	cloudSrv := httptest.NewServer(mock.handler())
 	defer cloudSrv.Close()
-	conn := withCipher(newTestConnector(cloudSrv.URL, localSrv.URL), wiringCipher(t))
+	conn := withCipher(newTestConnector(t, cloudSrv.URL, localSrv.URL), wiringCipher(t))
 
 	cmd := DeviceCommand{
 		ID:      "cmd-enc-1",
@@ -201,7 +201,7 @@ func TestDownlinkEncryptedPayloadDecrypted(t *testing.T) {
 	cloudSrv := httptest.NewServer(mock.handler())
 	defer cloudSrv.Close()
 	cipher := wiringCipher(t)
-	conn := withCipher(newTestConnector(cloudSrv.URL, localSrv.URL), cipher)
+	conn := withCipher(newTestConnector(t, cloudSrv.URL, localSrv.URL), cipher)
 
 	// The console seals the command payload with the account CEK.
 	sealed, err := cipher.Seal(mustPayload(t, map[string]any{"text": "encrypted hello", "channel": "console"}))
@@ -232,7 +232,7 @@ func TestDownlinkEncryptedPayloadDecrypted(t *testing.T) {
 
 func TestDownlinkPlaintextAcceptedWithCipherActive(t *testing.T) {
 	local, localSrv := newFakeLocal(t)
-	conn := withCipher(newTestConnector("http://127.0.0.1:1", localSrv.URL), wiringCipher(t))
+	conn := withCipher(newTestConnector(t, "http://127.0.0.1:1", localSrv.URL), wiringCipher(t))
 
 	// Grey rule: a plaintext (no `enc`) downlink payload still dispatches.
 	cmd := DeviceCommand{ID: "cmd-grey-1", Kind: "chat.send", Payload: mustPayload(t, map[string]any{"text": "plain still ok"})}
@@ -249,7 +249,7 @@ func TestDownlinkEnvelopeWithoutCipherRejected(t *testing.T) {
 	mock := newMockCloud()
 	cloudSrv := httptest.NewServer(mock.handler())
 	defer cloudSrv.Close()
-	conn := newTestConnector(cloudSrv.URL, "http://127.0.0.1:1") // no cipher
+	conn := newTestConnector(t, cloudSrv.URL, "http://127.0.0.1:1") // no cipher
 
 	sealed, err := wiringCipher(t).Seal(mustPayload(t, map[string]any{"text": "hi"}))
 	if err != nil {

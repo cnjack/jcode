@@ -303,6 +303,10 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		SessionID string `json:"session_id,omitempty"`
 		Pwd       string `json:"pwd,omitempty"`
+		// Source is the optional channel label ("console"/"mobile") the cloud
+		// relay passes through when the session is created from the cloud —
+		// such sessions are always stamped as cloud-synced (M19).
+		Source string `json:"source,omitempty"`
 	}
 	// The body is optional (empty = brand-new task → EOF), but a non-empty
 	// malformed body should be rejected rather than creating a zero-value task.
@@ -370,9 +374,12 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 
 	s.setActiveEngine(eng)
 
-	// Brand-new task: tell its view to start clean.
+	// Brand-new task: tell its view to start clean, and stamp its initial
+	// cloud-sync state (M19): cloud-originated sessions always sync, local
+	// ones follow cloud.sync_default. Resume never stamps.
 	if req.SessionID == "" {
 		s.wsBroker.Broadcast(WSEvent{TaskID: eng.taskID, Type: "session_reset", Data: map[string]string{}})
+		s.stampCloudSync(eng.taskID, req.Source, true)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "session_id": eng.taskID})

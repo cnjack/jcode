@@ -35,6 +35,13 @@ func (c *Connector) collectSessions() ([]SessionUpsert, error) {
 			if m.UUID == "" {
 				continue
 			}
+			// M19: only sessions with an explicit sync opt-in are reported.
+			// Unsynced sessions simply never appear cloud-side; nothing is
+			// deleted remotely either — history uploaded while the session was
+			// enabled stays on the orchestrator when the user turns sync off.
+			if !c.syncEnabled(m.UUID) {
+				continue
+			}
 			status := "idle"
 			if m.Status == "running" {
 				status = "running"
@@ -81,6 +88,10 @@ func (c *Connector) syncSessions(ctx context.Context) error {
 }
 
 // sessionSyncLoop re-upserts whenever the session index file's mtime changes.
+// It also watches the M19 sync store (~/.jcode/cloud-sessions.json): toggling
+// a session's sync switch does not touch the session index, so without this
+// an opt-in would only surface on the next index write — with it the freshly
+// enabled session's metadata is upserted within one poll interval.
 func (c *Connector) sessionSyncLoop(ctx context.Context) {
 	pathFn := c.cfg.IndexPathFn
 	if pathFn == nil {
@@ -99,6 +110,18 @@ func (c *Connector) sessionSyncLoop(ctx context.Context) {
 		lastMod = fi.ModTime()
 	}
 
+	// Sync-store watch baseline (empty when the gate failed to load — nothing
+	// syncs anyway, so there is nothing to react to).
+	syncPath := ""
+	var syncMod time.Time
+	var syncSize int64 = -1
+	if store := c.syncGate(); store != nil {
+		syncPath = store.Path()
+		if fi, err := os.Stat(syncPath); err == nil {
+			syncMod, syncSize = fi.ModTime(), fi.Size()
+		}
+	}
+
 	ticker := time.NewTicker(c.indexPollInterval())
 	defer ticker.Stop()
 	for {
@@ -106,14 +129,25 @@ func (c *Connector) sessionSyncLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			fi, err := os.Stat(path)
-			if err != nil {
-				continue // index may not exist yet
+			changed := false
+			if fi, err := os.Stat(path); err == nil {
+				if !fi.ModTime().Equal(lastMod) {
+					lastMod = fi.ModTime()
+					changed = true
+				}
 			}
-			if fi.ModTime().Equal(lastMod) {
+			// index may not exist yet: not an error, just no change.
+			if syncPath != "" {
+				if fi, err := os.Stat(syncPath); err == nil {
+					if !fi.ModTime().Equal(syncMod) || fi.Size() != syncSize {
+						syncMod, syncSize = fi.ModTime(), fi.Size()
+						changed = true
+					}
+				}
+			}
+			if !changed {
 				continue
 			}
-			lastMod = fi.ModTime()
 			if err := c.syncSessions(ctx); err != nil && ctx.Err() == nil {
 				c.logf("session upsert failed: %v", err)
 			}

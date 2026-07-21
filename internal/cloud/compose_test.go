@@ -214,7 +214,7 @@ func (f *fakeComposeLocal) snapshot() ([]string, map[string][]map[string]any) {
 
 func TestChatSendComposeOrder(t *testing.T) {
 	local, localSrv := newFakeComposeLocal(t)
-	conn := newTestConnector("http://127.0.0.1:1", localSrv.URL)
+	conn := newTestConnector(t, "http://127.0.0.1:1", localSrv.URL)
 	conn.cfg.InboxDir = t.TempDir()
 
 	cmd := DeviceCommand{
@@ -285,7 +285,7 @@ func TestChatSendComposeOrder(t *testing.T) {
 
 func TestChatSendComposeExistingSessionAndEffortFromHealth(t *testing.T) {
 	local, localSrv := newFakeComposeLocal(t)
-	conn := newTestConnector("http://127.0.0.1:1", localSrv.URL)
+	conn := newTestConnector(t, "http://127.0.0.1:1", localSrv.URL)
 
 	cmd := DeviceCommand{
 		ID:        "cmd-effort",
@@ -319,7 +319,7 @@ func TestChatSendComposeExistingSessionAndEffortFromHealth(t *testing.T) {
 
 func TestChatSendComposeAttachmentsOnly(t *testing.T) {
 	local, localSrv := newFakeComposeLocal(t)
-	conn := newTestConnector("http://127.0.0.1:1", localSrv.URL)
+	conn := newTestConnector(t, "http://127.0.0.1:1", localSrv.URL)
 	conn.cfg.InboxDir = t.TempDir()
 
 	cmd := DeviceCommand{
@@ -344,7 +344,7 @@ func TestChatSendComposeAttachmentsOnly(t *testing.T) {
 
 func TestChatSendAttachmentLimitBreachHasNoSideEffects(t *testing.T) {
 	local, localSrv := newFakeComposeLocal(t)
-	conn := newTestConnector("http://127.0.0.1:1", localSrv.URL)
+	conn := newTestConnector(t, "http://127.0.0.1:1", localSrv.URL)
 	conn.cfg.InboxDir = filepath.Join(t.TempDir(), "inbox")
 
 	atts := make([]map[string]string, maxAttachmentCount+1)
@@ -377,7 +377,7 @@ func TestChatSendAttachmentLimitBreachHasNoSideEffects(t *testing.T) {
 func TestChatSendComposeFacetErrorNamesField(t *testing.T) {
 	local, localSrv := newFakeComposeLocal(t)
 	local.failPaths["/api/model"] = http.StatusInternalServerError
-	conn := newTestConnector("http://127.0.0.1:1", localSrv.URL)
+	conn := newTestConnector(t, "http://127.0.0.1:1", localSrv.URL)
 
 	cmd := DeviceCommand{
 		ID:   "cmd-bad-model",
@@ -409,7 +409,7 @@ func TestSyncSessionsReportsCapabilities(t *testing.T) {
 	cloudSrv := httptest.NewServer(cloud.handler())
 	t.Cleanup(cloudSrv.Close)
 
-	conn := newTestConnector(cloudSrv.URL, "http://127.0.0.1:1")
+	conn := newTestConnector(t, cloudSrv.URL, "http://127.0.0.1:1")
 	conn.cfg.ListSessionsFn = func() (map[string][]session.SessionMeta, error) {
 		return map[string][]session.SessionMeta{
 			"/proj-b": {{UUID: "s2", Status: "idle"}},
@@ -529,7 +529,7 @@ func TestSyncSessionsReportsSlashCommands(t *testing.T) {
 	cloudSrv := httptest.NewServer(cloud.handler())
 	t.Cleanup(cloudSrv.Close)
 
-	conn := newTestConnector(cloudSrv.URL, "http://127.0.0.1:1")
+	conn := newTestConnector(t, cloudSrv.URL, "http://127.0.0.1:1")
 	conn.cfg.ListSessionsFn = func() (map[string][]session.SessionMeta, error) {
 		return map[string][]session.SessionMeta{"/proj": {{UUID: "s1", Status: "idle"}}}, nil
 	}
@@ -585,7 +585,7 @@ func TestCollectSlashCommandsDefault(t *testing.T) {
 	}))
 	t.Cleanup(localSrv.Close)
 
-	conn := newTestConnector("http://127.0.0.1:1", localSrv.URL)
+	conn := newTestConnector(t, "http://127.0.0.1:1", localSrv.URL)
 	cmds, err := conn.collectSlashCommands(context.Background())
 	if err != nil {
 		t.Fatalf("collectSlashCommands: %v", err)
@@ -595,7 +595,7 @@ func TestCollectSlashCommandsDefault(t *testing.T) {
 	}
 
 	// Unreachable control plane → error (the caller logs and reports empty).
-	connDown := newTestConnector("http://127.0.0.1:1", "http://127.0.0.1:1")
+	connDown := newTestConnector(t, "http://127.0.0.1:1", "http://127.0.0.1:1")
 	if _, err := connDown.collectSlashCommands(context.Background()); err == nil {
 		t.Fatal("unreachable control plane: want error")
 	}
@@ -603,7 +603,7 @@ func TestCollectSlashCommandsDefault(t *testing.T) {
 
 func TestChatSendGoalArmed(t *testing.T) {
 	local, localSrv := newFakeComposeLocal(t)
-	conn := newTestConnector("http://127.0.0.1:1", localSrv.URL)
+	conn := newTestConnector(t, "http://127.0.0.1:1", localSrv.URL)
 
 	cmd := DeviceCommand{
 		ID:   "cmd-goal-armed",
@@ -633,7 +633,7 @@ func TestChatSendGoalArmed(t *testing.T) {
 
 	// goal_armed with an empty objective is rejected without side effects.
 	local2, localSrv2 := newFakeComposeLocal(t)
-	conn2 := newTestConnector("http://127.0.0.1:1", localSrv2.URL)
+	conn2 := newTestConnector(t, "http://127.0.0.1:1", localSrv2.URL)
 	empty := DeviceCommand{
 		ID:      "cmd-goal-empty",
 		Kind:    "chat.send",
@@ -650,7 +650,7 @@ func TestChatSendGoalArmed(t *testing.T) {
 func TestChatSendImagesForwarded(t *testing.T) {
 	// Legacy path: images (incl. the optional name) reach /api/chat as-is.
 	local, localSrv := newFakeLocal(t)
-	conn := newTestConnector("http://127.0.0.1:1", localSrv.URL)
+	conn := newTestConnector(t, "http://127.0.0.1:1", localSrv.URL)
 
 	cmd := DeviceCommand{
 		ID:   "cmd-imgs",
@@ -685,7 +685,7 @@ func TestChatSendImagesForwarded(t *testing.T) {
 
 	// Compose path: images ride the same /api/chat call.
 	compLocal, compSrv := newFakeComposeLocal(t)
-	conn2 := newTestConnector("http://127.0.0.1:1", compSrv.URL)
+	conn2 := newTestConnector(t, "http://127.0.0.1:1", compSrv.URL)
 	cmd2 := DeviceCommand{
 		ID:   "cmd-imgs-compose",
 		Kind: "chat.send",
