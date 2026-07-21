@@ -16,13 +16,27 @@ import { configureStore, createSlice, createAsyncThunk } from '@reduxjs/toolkit'
 import type { ThreadItem, Message, ToolCall, Approval, TokenSnapshot, Goal, TodoItem, QueuedMessage, AskUserQuestion } from 'jcode-ui-core'
 import { api } from '../lib/api'
 import { extractToolDisplayInfo } from '../lib/toolInfo'
-import { normalizeMode, type AgentMode, type ProviderInfo, type SessionItem, type TaskItem, type SlashCommandInfo, type SessionEntry, type ModelRef } from '../lib/types'
+import { normalizeMode, type AgentMode, type ProviderInfo, type SessionItem, type TaskItem, type ProjectInfo, type SlashCommandInfo, type SessionEntry, type ModelRef } from '../lib/types'
 
 // ─── seq counter (stable DOM identity across streaming updates) ───
 let _seq = 0
 const nextSeq = () => ++_seq
 function genId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+}
+
+/** True when `candidate` is a strictly newer instant than `current` (either
+ *  may be undefined). Compares PARSED instants, not raw strings: RFC3339
+ *  string order breaks across UTC offsets ("05:00Z" < "13:00+08:00" though
+ *  they're the same instant), and the data mixes server-local and UTC writes.
+ *  An unparseable candidate never wins. */
+function isNewerTs(candidate: string, current: string | undefined): boolean {
+  const ct = Date.parse(candidate)
+  if (Number.isNaN(ct)) return false
+  if (!current) return true
+  const cur = Date.parse(current)
+  if (Number.isNaN(cur)) return true
+  return ct > cur
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -32,6 +46,9 @@ function genId(prefix: string) {
 interface ChatState {
   timeline: ThreadItem[]
   isRunning: boolean
+  /** A session resume (replay) is in flight — the chat pane shows a skeleton
+   *  so the switch feels instant instead of blank-until-ready. */
+  sessionLoading: boolean
   tokenSnapshot: TokenSnapshot | null
   goal: Goal | null
   goalArmed: boolean
@@ -46,6 +63,7 @@ interface ChatState {
 const initialChat: ChatState = {
   timeline: [],
   isRunning: false,
+  sessionLoading: false,
   tokenSnapshot: null,
   goal: null,
   goalArmed: false,
@@ -76,6 +94,9 @@ const chatSlice = createSlice({
     },
     setRunning(s, a: { payload: boolean }) {
       s.isRunning = a.payload
+    },
+    setSessionLoading(s, a: { payload: boolean }) {
+      s.sessionLoading = a.payload
     },
     addMessage(
       s,
@@ -394,6 +415,11 @@ const chatSlice = createSlice({
 interface SessionState {
   sessions: SessionItem[]
   tasks: TaskItem[]
+  /** Per-project last-activity timestamp (RFC3339), keyed by project path.
+   *  Persisted server-side and bumped on session create / turn start / turn
+   *  end — never on delete — so the sidebar's project ordering is stable
+   *  across conversation deletions. */
+  projectTimes: Record<string, string>
   currentSessionId: string
   projectPath: string
   wsConnected: boolean
@@ -402,6 +428,7 @@ interface SessionState {
 const initialSession: SessionState = {
   sessions: [],
   tasks: [],
+  projectTimes: {},
   currentSessionId: '',
   projectPath: '',
   wsConnected: false,
@@ -444,6 +471,23 @@ const sessionSlice = createSlice({
       const t = s.tasks.find((x) => x.uuid === a.payload.taskId)
       if (t) t.running = a.payload.running
     },
+    /** Merge the server's per-project timestamps (GET /api/projects). Merges
+     *  with a monotonic max per key instead of replacing: a live touch that
+     *  lands while the fetch is in flight must not be clobbered by the stale
+     *  snapshot. */
+    setProjectTimes(s, a: { payload: ProjectInfo[] }) {
+      for (const p of a.payload) {
+        if (!p.path || !p.updated_at) continue
+        if (isNewerTs(p.updated_at, s.projectTimes[p.path])) s.projectTimes[p.path] = p.updated_at
+      }
+    },
+    /** Live-bump one project's timestamp (a turn started/ended there). Mirrors
+     *  the server-side touch: monotonic max, never moves backwards. */
+    touchProjectTime(s, a: { payload: { path: string; ts: string } }) {
+      const { path, ts } = a.payload
+      if (!path || !ts) return
+      if (isNewerTs(ts, s.projectTimes[path])) s.projectTimes[path] = ts
+    },
     /** Insert or merge a task so the sidebar shows it immediately. */
     upsertTask(s, a: { payload: TaskItem }) {
       const i = s.tasks.findIndex((t) => t.uuid === a.payload.uuid)
@@ -459,6 +503,14 @@ const sessionSlice = createSlice({
       if (!t) return
       const { uuid: _uuid, ...rest } = a.payload
       Object.assign(t, rest)
+    },
+    /** Remove a deleted session from BOTH lists, inside the reducer (operates
+     *  on the latest state — a component-side filter over render-scope copies
+     *  would clobber any list update that landed during the delete round-trip,
+     *  and unlike setTasks/setSessions this never re-adds anything). */
+    removeSession(s, a: { payload: string }) {
+      s.sessions = s.sessions.filter((x) => x.uuid !== a.payload)
+      s.tasks = s.tasks.filter((x) => x.uuid !== a.payload)
     },
     /** Insert or merge a session for the active-project fallback list. */
     upsertSession(s, a: { payload: SessionItem }) {
@@ -889,6 +941,11 @@ export const loadTasks = createAsyncThunk('tasks/load', async (_, { dispatch }) 
   dispatch(sessionActions.setTasks(tasks))
 })
 
+export const loadProjects = createAsyncThunk('projects/load', async (_, { dispatch }) => {
+  const projects = await api.projects()
+  dispatch(sessionActions.setProjectTimes(projects))
+})
+
 export const loadSlashCommands = createAsyncThunk('chat/loadSlash', async (_, { dispatch }) => {
   const cmds = await api.slashCommands()
   dispatch(chatActions.setSlashCommands(cmds))
@@ -1003,6 +1060,7 @@ export const loadWorkspaceState = createAsyncThunk('app/loadWorkspaceState', asy
     dispatch(loadModelState()),
     dispatch(loadSessions()),
     dispatch(loadTasks()),
+    dispatch(loadProjects()),
     dispatch(loadSlashCommands()),
     dispatch(loadApprovalMode()),
     dispatch(loadChannelState()),
@@ -1014,117 +1072,141 @@ export const loadWorkspaceState = createAsyncThunk('app/loadWorkspaceState', asy
 })
 
 /**
- * Load (replay) a session's history into the timeline. Ported from the Vue
- * store's loadSession: fetches the JSONL entries, tells the backend to resume
- * that session, clears the UI, then rebuilds the timeline by walking the entries
- * (user/assistant → messages; tool_call+tool_result → resolved tool calls).
+ * Load (replay) a session's history into the timeline.
+ *
+ * Fast path: a SINGLE POST /api/sessions round trip both resumes the session
+ * server-side and returns everything the view needs to repaint — the raw
+ * JSONL entries (the server reuses its own reconstructing read; the file is
+ * not read twice) plus goal/todos/status. The pane swaps to a skeleton the
+ * instant the click lands, so perceived latency is ~0 and the old flow's
+ * four serial follow-up GETs (status, ask/approval pending, goal, todos)
+ * are gone. Legacy fallback (older server): fetch the entries via GET and
+ * the rest individually, in parallel, without gating the repaint.
  */
 export const loadSession = createAsyncThunk(
   'session/loadOne',
   async (uuid: string, { dispatch, getState }) => {
-    // Fetch the session's history. A 404 means the session has no JSONL yet
-    // (fresh, never-used session) — return without rebuilding so the caller can
-    // fall back to a different session.
-    let entries: SessionEntry[]
+    // Immediate skeleton: the pane reacts to the click, not to the network.
+    dispatch(chatActions.setSessionLoading(true))
     try {
-      entries = await api.session(uuid)
-    } catch {
-      return
-    }
-    // Tell the backend to switch to (resume) this session.
-    const resp = await api.newSession(uuid)
-    dispatch(sessionActions.setCurrentSession(resp.session_id || uuid))
+      const resp = await api.newSession(uuid)
+      dispatch(sessionActions.setCurrentSession(resp.session_id || uuid))
 
-    // Clear the UI before rebuilding.
-    dispatch(chatActions.clearChat())
-
-    // Rebuild the timeline from entries.
-    const timeline: ThreadItem[] = []
-    const pendingToolCalls = new Map<string, ToolCall>()
-    for (const e of entries) {
-      if (e.type === 'user' && (e.content || (e.images && e.images.length > 0))) {
-        timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('msg'), role: 'user', content: e.content || '', timestamp: ts(e.timestamp), images: e.images } })
-      } else if (e.type === 'assistant' && e.content) {
-        timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('asst'), role: 'assistant', content: e.content, timestamp: ts(e.timestamp) } })
-      } else if (e.type === 'tool_call' && e.name) {
-        const tc: ToolCall = {
-          id: genId('tc'),
-          toolCallID: e.tool_call_id,
-          name: e.name,
-          args: e.args || '',
-          status: 'running',
-          timestamp: ts(e.timestamp),
-          displayInfo: extractToolDisplayInfo(e.name, e.args || ''),
-          batchId: e.batch_id,
-          batchIndex: e.batch_index,
-          batchSize: e.batch_size,
-          startedAt: e.started_at,
+      // One-shot resume payload (entries + goal + todos + status). `provider`
+      // discriminates an older server without the one-shot payload at all;
+      // `entries` is omitted when the server could not read the session file
+      // — fall back to the dedicated endpoint then (a transient read failure
+      // must not blank a conversation that has history).
+      const oneShot = resp.provider !== undefined
+      let entries: SessionEntry[] | null | undefined = resp.entries
+      if (entries === undefined) {
+        // Older server (no one-shot payload) OR current server with an
+        // unreadable session file. A 404 means the session has no JSONL yet
+        // (fresh, never-used session) — return without rebuilding so the
+        // caller can fall back to a different session.
+        try {
+          entries = await api.session(uuid)
+        } catch {
+          return
         }
-        timeline.push({ kind: 'tool', seq: nextSeq(), data: tc })
-        if (e.tool_call_id) pendingToolCalls.set(e.tool_call_id, tc)
-      } else if (e.type === 'tool_result') {
-        let resolved = false
-        if (e.tool_call_id) {
-          const tc = pendingToolCalls.get(e.tool_call_id)
-          if (tc) {
-            tc.output = e.output || ''
-            tc.error = e.error || ''
-            tc.status = e.error ? 'error' : 'done'
-            tc.denied = e.denied || undefined
-            if (e.duration_ms !== undefined && tc.meta?.duration_ms === undefined) {
-              tc.meta = { ...(tc.meta || {}), duration_ms: e.duration_ms }
-            }
-            pendingToolCalls.delete(e.tool_call_id)
-            resolved = true
+      }
+
+      // Clear the UI before rebuilding.
+      dispatch(chatActions.clearChat())
+
+      // Rebuild the timeline from entries.
+      const timeline: ThreadItem[] = []
+      const pendingToolCalls = new Map<string, ToolCall>()
+      for (const e of entries || []) {
+        if (e.type === 'user' && (e.content || (e.images && e.images.length > 0))) {
+          timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('msg'), role: 'user', content: e.content || '', timestamp: ts(e.timestamp), images: e.images } })
+        } else if (e.type === 'assistant' && e.content) {
+          timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('asst'), role: 'assistant', content: e.content, timestamp: ts(e.timestamp) } })
+        } else if (e.type === 'tool_call' && e.name) {
+          const tc: ToolCall = {
+            id: genId('tc'),
+            toolCallID: e.tool_call_id,
+            name: e.name,
+            args: e.args || '',
+            status: 'running',
+            timestamp: ts(e.timestamp),
+            displayInfo: extractToolDisplayInfo(e.name, e.args || ''),
+            batchId: e.batch_id,
+            batchIndex: e.batch_index,
+            batchSize: e.batch_size,
+            startedAt: e.started_at,
           }
-        }
-        if (!resolved && e.name) {
-          for (let i = timeline.length - 1; i >= 0; i--) {
-            const item = timeline[i]
-            if (item.kind === 'tool' && item.data.name === e.name && item.data.status === 'running') {
-              item.data.output = e.output || ''
-              item.data.error = e.error || ''
-              item.data.status = e.error ? 'error' : 'done'
-              item.data.denied = e.denied || undefined
-              if (e.duration_ms !== undefined && item.data.meta?.duration_ms === undefined) {
-                item.data.meta = { ...(item.data.meta || {}), duration_ms: e.duration_ms }
+          timeline.push({ kind: 'tool', seq: nextSeq(), data: tc })
+          if (e.tool_call_id) pendingToolCalls.set(e.tool_call_id, tc)
+        } else if (e.type === 'tool_result') {
+          let resolved = false
+          if (e.tool_call_id) {
+            const tc = pendingToolCalls.get(e.tool_call_id)
+            if (tc) {
+              tc.output = e.output || ''
+              tc.error = e.error || ''
+              tc.status = e.error ? 'error' : 'done'
+              tc.denied = e.denied || undefined
+              if (e.duration_ms !== undefined && tc.meta?.duration_ms === undefined) {
+                tc.meta = { ...(tc.meta || {}), duration_ms: e.duration_ms }
               }
-              break
+              pendingToolCalls.delete(e.tool_call_id)
+              resolved = true
+            }
+          }
+          if (!resolved && e.name) {
+            for (let i = timeline.length - 1; i >= 0; i--) {
+              const item = timeline[i]
+              if (item.kind === 'tool' && item.data.name === e.name && item.data.status === 'running') {
+                item.data.output = e.output || ''
+                item.data.error = e.error || ''
+                item.data.status = e.error ? 'error' : 'done'
+                item.data.denied = e.denied || undefined
+                if (e.duration_ms !== undefined && item.data.meta?.duration_ms === undefined) {
+                  item.data.meta = { ...(item.data.meta || {}), duration_ms: e.duration_ms }
+                }
+                break
+              }
             }
           }
         }
       }
-    }
-    // Any tool calls that never got a result (interrupted session) → done.
-    for (const tc of pendingToolCalls.values()) tc.status = 'done'
+      // Any tool calls that never got a result (interrupted session) → done.
+      for (const tc of pendingToolCalls.values()) tc.status = 'done'
 
-    dispatch(chatActions.setTimeline(timeline))
+      dispatch(chatActions.setTimeline(timeline))
 
-    // Seed isRunning from the task list (a resumed task may still be running).
-    const state = getState() as RootState
-    const resumedId = resp.session_id || uuid
-    const running = !!state.session.tasks.find((t) => t.uuid === resumedId)?.running
-    dispatch(chatActions.setRunning(running))
-
-    // Rehydrate server-truth state for the resumed session (token snapshot,
-    // provider/model, mode). clearChat nulled tokenSnapshot, and no
-    // token_update arrives until the session's next LLM call — without this
-    // the context ring stays hidden after switching conversations.
-    await dispatch(loadStatus())
-    await dispatch(reconcilePendingInteractions())
-
-    // Refresh goal + todos (the backend restored them; no WS push on switch).
-    try {
-      const goal = await api.goal()
-      dispatch(chatActions.setGoal(goal))
-    } catch {
-      // ignore
-    }
-    try {
-      const todos = await api.todos()
-      dispatch(chatActions.setTodos(todos))
-    } catch {
-      // ignore
+      if (oneShot) {
+        // Hydrate server-truth state from the SAME response — the old flow
+        // spent four extra serial round trips here (status, ask/approval
+        // pending, goal, todos). clearChat nulled tokenSnapshot, and no
+        // token_update arrives until the session's next LLM call — without
+        // this the context ring stays hidden after switching conversations.
+        dispatch(chatActions.setRunning(!!resp.running))
+        if (resp.pwd) dispatch(sessionActions.setProjectPath(resp.pwd))
+        dispatch(modelActions.setProvider(resp.provider || ''))
+        dispatch(modelActions.setModel(resp.model || ''))
+        dispatch(modelActions.setMode(normalizeMode(resp.mode || '')))
+        if (resp.token) dispatch(chatActions.setTokenSnapshot(resp.token))
+        dispatch(chatActions.setGoal(resp.goal ?? null))
+        dispatch(chatActions.setTodos(resp.todos ?? []))
+      } else {
+        // Older server: seed isRunning from the task list (a resumed task may
+        // still be running), then fetch the rest individually — in parallel,
+        // and none of it gates the timeline repaint.
+        const state = getState() as RootState
+        const resumedId = resp.session_id || uuid
+        const running = !!state.session.tasks.find((t) => t.uuid === resumedId)?.running
+        dispatch(chatActions.setRunning(running))
+        void dispatch(loadStatus())
+        void dispatch(loadGoal())
+        void dispatch(loadTodos())
+      }
+      // Pending approval/ask interactions only add interactive blocks — they
+      // never gate the repaint, so don't await them.
+      void dispatch(reconcilePendingInteractions())
+    } finally {
+      dispatch(chatActions.setSessionLoading(false))
     }
   },
 )

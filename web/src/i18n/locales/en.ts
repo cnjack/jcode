@@ -222,6 +222,7 @@ export default {
     stop: 'Stop',
     stopAgent: 'Stop agent (Esc)',
     thinking: 'Thinking…',
+    loadingConversation: 'Loading conversation…',
     attachFiles: 'Attach files',
     goal: 'Goal',
     add: 'Add',
@@ -1052,6 +1053,7 @@ export default {
       markRead: 'Mark read',
       markUnread: 'Mark unread',
       delete: 'Delete',
+      deleteWhileRunning: 'Stop the agent before deleting this conversation',
       taskActions: 'Task actions',
     },
     relativeTime: {

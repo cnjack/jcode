@@ -92,7 +92,13 @@ export function Sidebar() {
   const dispatch = useAppDispatch()
   const sessions = useAppSelector((s) => s.session.sessions)
   const tasks = useAppSelector((s) => s.session.tasks)
+  const projectTimes = useAppSelector((s) => s.session.projectTimes)
   const currentSessionId = useAppSelector((s) => s.session.currentSessionId)
+  // Latest currentSessionId readable from async handlers (deleteItem) after an
+  // await, when the render-scope value is stale: if the user navigated away
+  // while the DELETE was in flight, the delete must not yank the foreground.
+  const currentSessionRef = useRef(currentSessionId)
+  currentSessionRef.current = currentSessionId
   const activePath = useAppSelector((s) => s.session.projectPath)
   const activeView = useAppSelector((s) => s.ui.activeView)
 
@@ -278,7 +284,7 @@ export function Sidebar() {
         label: projectName(path),
         items: map.get(path) || [],
       }))
-      return projectGroups.sort((a, b) => compareProjectGroups(a, b, activePath))
+      return projectGroups.sort((a, b) => compareProjectGroups(a, b, activePath, projectTimes))
     }
 
     const map = new Map<string, SessionRow[]>()
@@ -294,7 +300,7 @@ export function Sidebar() {
       label: t(`sidebar.dateBucket.${k}`),
       items: map.get(k)!,
     }))
-  }, [sorted, filters.groupBy, filters.status, filters.lastActivity, projectFilter, activePath, now, t])
+  }, [sorted, filters.groupBy, filters.status, filters.lastActivity, projectFilter, activePath, projectTimes, now, t])
 
   const duplicateProjectNames = useMemo(() => {
     const counts = new Map<string, number>()
@@ -334,7 +340,10 @@ export function Sidebar() {
 
   async function openItem(row: SessionRow) {
     dispatch(uiActions.setView('chat'))
-    if (row.unread) await patchTask(row.uuid, { unread: false })
+    // Marking read is metadata bookkeeping — fire-and-forget so it never sits
+    // on the resume critical path (an awaited PATCH here delayed the replay
+    // by a full round trip on every unread open).
+    if (row.unread) void patchTask(row.uuid, { unread: false })
     if (row.project && activePath && row.project !== activePath) {
       // Remote workspaces need the wizard (prefill + optional load task).
       if (isRemotePath(row.project)) {
@@ -376,20 +385,40 @@ export function Sidebar() {
   }
 
   async function deleteItem(row: SessionRow) {
+    // Running tasks must not be deleted — backend also returns 409. Stop first.
+    if (row.running) return
     const wasActive = row.uuid === currentSessionId
+    if (wasActive) {
+      // Drop queued type-ahead for this session BEFORE the delete round-trip:
+      // a late agent_done (from a prior cancel/stop) can arrive before the
+      // DELETE response and would otherwise drain the queue back into the
+      // deleted session — resurrecting its file + index entry on disk.
+      dispatch(chatActions.dropSessionQueue(row.uuid))
+    }
     try {
       await api.deleteSession(row.uuid)
     } catch {
       return
     }
-    dispatch(sessionActions.setSessions(sessions.filter((s) => s.uuid !== row.uuid)))
-    dispatch(sessionActions.setTasks(tasks.filter((t) => t.uuid !== row.uuid)))
-    dispatch(chatActions.dropSessionQueue(row.uuid))
-    if (wasActive) {
-      dispatch(chatActions.clearChat())
-      dispatch(sessionActions.setCurrentSession(''))
-      dispatch(chatActions.setRunning(false))
+    // Filter inside the reducer: the render-scope sessions/tasks copies are
+    // stale after the await (a WS update or refresh may have landed since),
+    // and a whole-list setTasks would clobber it.
+    dispatch(sessionActions.removeSession(row.uuid))
+    if (!wasActive) {
+      dispatch(chatActions.dropSessionQueue(row.uuid))
+      return
     }
+    // The user may have navigated to another session while the DELETE was in
+    // flight (their click's loadSession wins) — only take over the foreground
+    // if we're still on the deleted session.
+    if (currentSessionRef.current !== row.uuid) return
+    // Land on the welcome page with a FRESH session. Merely clearing the UI
+    // would strand the backend on the deleted task's engine: the next
+    // message would run on that stale engine, whose events are stamped with
+    // the deleted task id and dropped by the WS filter (a conversation that
+    // appears dead). startNewChat provisions a consistent new engine/task —
+    // and reclaims the stale one (its recorder was reset on delete).
+    await dispatch(startNewChat())
   }
 
   function openContext(e: React.MouseEvent, row: SessionRow) {
@@ -458,6 +487,8 @@ export function Sidebar() {
           icon={TrashIcon}
           label={t('sidebar.actions.delete')}
           danger
+          disabled={row.running}
+          title={row.running ? t('sidebar.actions.deleteWhileRunning') : undefined}
           onClick={() => { void deleteItem(row); closeCtx() }}
         />
       </>
@@ -571,6 +602,9 @@ export function Sidebar() {
                     {g.path && duplicateProjectNames.has(g.label) && !isRemotePath(g.path) && (
                       <span className="sb-project-hint">{projectParentHint(g.path)}</span>
                     )}
+                    <span className="sb-project-time">
+                      {relativeTime((g.path && projectTimes[g.path]) || aggregate(g.items).lastTs, now, t)}
+                    </span>
                     {!open && g.items.some((row) => row.running) && (
                       <span className="sb-ring sb-project-ring" title={t('sidebar.running')} aria-hidden="true" />
                     )}
@@ -753,6 +787,11 @@ export function Sidebar() {
         .sb-project-count {
           flex-shrink:0; color:var(--color-muted-foreground); font-family:var(--font-mono); font-size:10px;
         }
+        .sb-project-time {
+          flex-shrink:0; color:var(--color-muted-foreground); font-family:var(--font-mono); font-size:10px;
+          line-height:1; opacity:0.75;
+        }
+        .sb-project-time:empty { display:none; }
         .sb-project-add {
           display:grid; place-items:center; width:20px; height:20px; flex-shrink:0;
           border:none; border-radius:var(--radius-sm); background:transparent;
@@ -852,19 +891,34 @@ function CtxItem({
   label,
   onClick,
   danger,
+  disabled,
+  title,
 }: {
   icon: React.ComponentType<{ className?: string }>
   label: string
   onClick: () => void
   danger?: boolean
+  disabled?: boolean
+  title?: string
 }) {
   return (
     <button
       type="button"
       role="menuitem"
-      onClick={onClick}
-      className={`flex w-full items-center gap-2 rounded-[var(--radius-md)] px-2 py-1.5 text-left text-[12.5px] transition-colors hover:bg-[var(--color-muted)] ${
-        danger ? 'text-[var(--color-destructive)]' : 'text-[var(--color-foreground)]'
+      disabled={disabled}
+      title={title}
+      aria-disabled={disabled || undefined}
+      onClick={disabled ? undefined : onClick}
+      className={`flex w-full items-center gap-2 rounded-[var(--radius-md)] px-2 py-1.5 text-left text-[12.5px] transition-colors ${
+        disabled
+          ? 'cursor-not-allowed opacity-45'
+          : 'hover:bg-[var(--color-muted)]'
+      } ${
+        danger && !disabled
+          ? 'text-[var(--color-destructive)]'
+          : disabled
+            ? 'text-[var(--color-muted-foreground)]'
+            : 'text-[var(--color-foreground)]'
       }`}
     >
       <Icon className="h-3.5 w-3.5" />
@@ -960,7 +1014,7 @@ function projectParentHint(path: string): string {
   return parts[parts.length - 2] || ''
 }
 
-function compareProjectGroups(a: SidebarGroup, b: SidebarGroup, activePath: string): number {
+function compareProjectGroups(a: SidebarGroup, b: SidebarGroup, activePath: string, projectTimes: Record<string, string>): number {
   // Fallback ONLY for an empty active project: a freshly-opened project with no
   // sessions has no activity timestamp, so pure lastTs ordering would sink it to
   // the bottom. Float just that case to the top so the project you're in stays in
@@ -974,15 +1028,35 @@ function compareProjectGroups(a: SidebarGroup, b: SidebarGroup, activePath: stri
   const B = aggregate(b.items)
   // Otherwise order projects purely by last activity — most recent first. A live
   // run floats its project up (and a run only starts from a sent prompt).
-  // Deliberately NOT by the active/current project or by unread: selecting a
-  // session — or marking it read on open — must never reorder its project.
-  // Activity means a sent prompt (which bumps lastTs), never opening a project.
+  // Prefer the persisted project-level timestamp: it survives conversation
+  // deletions (the server never rolls it back on delete), so removing a session
+  // can't reorder the list. Legacy indexes without project metadata fall back
+  // to deriving recency from the surviving child sessions.
   if (A.running !== B.running) return A.running ? -1 : 1
-  if (A.lastTs !== B.lastTs) return B.lastTs.localeCompare(A.lastTs)
+  const aTs = (a.path && projectTimes[a.path]) || A.lastTs
+  const bTs = (b.path && projectTimes[b.path]) || B.lastTs
+  // Compare parsed instants, not strings: RFC3339 string order breaks across
+  // UTC offsets (the index mixes server-local "+08:00" writes with UTC "Z").
+  const byActivity = tsCmp(aTs, bTs)
+  if (byActivity !== 0) return byActivity > 0 ? -1 : 1
   const byLabel = a.label.localeCompare(b.label)
   // Stable final tiebreaker (path) so equal-label groups don't reshuffle when
   // /api/tasks is re-fetched in a non-deterministic order.
   return byLabel !== 0 ? byLabel : (a.path || '').localeCompare(b.path || '')
+}
+
+/** Chronological compare for RFC3339 strings: negative if a is older, positive
+ *  if newer. Valid instants beat unparseable/empty ones (treated as oldest);
+ *  two invalid values compare equal so the label/path tiebreakers decide. */
+function tsCmp(a: string, b: string): number {
+  const at = a ? Date.parse(a) : Number.NaN
+  const bt = b ? Date.parse(b) : Number.NaN
+  const aOk = !Number.isNaN(at)
+  const bOk = !Number.isNaN(bt)
+  if (!aOk && !bOk) return 0
+  if (!aOk) return -1
+  if (!bOk) return 1
+  return at - bt
 }
 
 function aggregate(items: SessionRow[]) {

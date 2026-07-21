@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/cnjack/jcode/internal/config"
@@ -90,6 +89,32 @@ func (s *Server) handleListAllTasks(w http.ResponseWriter, r *http.Request) {
 			}
 			items = append(items, newTaskItem(m, project, running[m.UUID]))
 		}
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+// projectItem is the sidebar's view of a project: its path plus the persisted
+// last-activity timestamp. The timestamp lives at the project level (bumped on
+// session create / turn start / turn end) and is deliberately NOT recomputed
+// from the surviving sessions, so deleting a conversation never reorders the
+// project list.
+type projectItem struct {
+	Path      string `json:"path"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+}
+
+// handleListProjects returns every project that has persisted metadata (last
+// activity timestamp) so the sidebar can order project groups by a stable,
+// delete-resistant timestamp instead of re-deriving it from child sessions.
+func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
+	meta, err := session.ListProjectMeta()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	items := make([]projectItem, 0, len(meta))
+	for path, pm := range meta {
+		items = append(items, projectItem{Path: path, UpdatedAt: pm.UpdatedAt})
 	}
 	writeJSON(w, http.StatusOK, items)
 }
@@ -187,10 +212,17 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "session id is required"})
 		return
 	}
-	// Tear down the live engine for this task (if any) so its run is cancelled and
-	// resources reclaimed. The active foreground engine is left in place — but its
-	// recorder is reset to a fresh session so post-delete writes don't land in the
-	// now-unlinked file (silent data loss).
+	// Refuse while the agent is mid-run. Cancelling + deleting a live task races
+	// the recorder (file/index resurrection) and is a bad UX for an intentional
+	// stop — the user should stop the run first, then delete.
+	if eng := s.resolveEngine(id); eng != nil && eng.running.Load() {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is currently running"})
+		return
+	}
+	// Tear down the live engine for this task (if any) so leftover cancel state
+	// is cleared and resources reclaimed. The active foreground engine is left
+	// in place — but its recorder is reset so post-delete writes don't land in
+	// the now-unlinked file (silent data loss).
 	if eng := s.resolveEngine(id); eng != nil {
 		eng.emu.Lock()
 		cancel := eng.runCancel
@@ -201,12 +233,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		if eng != s.activeEngine() {
 			s.deleteEngine(id)
 		} else {
-			// Active task: wait for the cancelled run to drain so its final
-			// RecordAssistant/usage writes land before we close + reset the recorder
-			// (a post-close write would re-create and truncate the file).
-			for i := 0; i < 200 && eng.running.Load(); i++ {
-				time.Sleep(5 * time.Millisecond)
-			}
+			// Not running (guarded above): safe to close the recorder now.
 			eng.emu.Lock()
 			if eng.recorder != nil && eng.recorder.UUID() == id {
 				eng.recorder.Close()
@@ -297,6 +324,34 @@ func (s *Server) handleTruncateHistory(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// writeResumeReply answers a resume request (POST /api/sessions with a
+// session_id) with everything the client needs to repaint the conversation in
+// ONE round trip: the raw JSONL entries it replays into its timeline, plus the
+// server-truth state it would otherwise fetch with four more serial requests
+// (status / goal / todos). entries is omitted when the session file could not
+// be read; the client then falls back to GET /api/sessions/{id}. The server
+// already loads the entries to reconstruct the engine state, so this reuses
+// that read instead of doing a second one for the client.
+func (s *Server) writeResumeReply(w http.ResponseWriter, eng *Engine, entries []session.Entry) {
+	resp := s.statusSnapshot(eng)
+	resp["status"] = "ok"
+	resp["session_id"] = eng.taskID
+	if entries != nil {
+		resp["entries"] = entries
+	}
+	if eng.env != nil && eng.env.GoalStore != nil {
+		resp["goal"] = eng.env.GoalStore.Get()
+	} else {
+		resp["goal"] = nil
+	}
+	if eng.todoStore != nil {
+		resp["todos"] = eng.todoStore.Items()
+	} else {
+		resp["todos"] = []any{}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	// Parse optional resume session ID + project. Creating a task no longer
 	// blocks on "is the agent running" — tasks run concurrently.
@@ -319,7 +374,13 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	if req.SessionID != "" {
 		if eng := s.resolveEngine(req.SessionID); eng != nil {
 			s.setActiveEngine(eng)
-			writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "session_id": eng.taskID})
+			// Best-effort: a read failure only drops the embedded entries —
+			// the client falls back to GET /api/sessions/{id}.
+			entries, err := session.LoadSession(req.SessionID)
+			if err != nil {
+				config.Logger().Printf("[web] resume: embedded entries unavailable for %s (client falls back to GET): %v", req.SessionID, err)
+			}
+			s.writeResumeReply(w, eng, entries)
 			return
 		}
 	}
@@ -344,8 +405,10 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resume: hydrate the fresh engine with the persisted conversation/todos/goal.
+	var entries []session.Entry
 	if req.SessionID != "" {
-		entries, lerr := session.LoadSession(req.SessionID)
+		var lerr error
+		entries, lerr = session.LoadSession(req.SessionID)
 		if lerr != nil {
 			// Stale/nonexistent session id: don't silently register a phantom empty
 			// engine under it — tear the just-built engine down and report not-found.
@@ -380,7 +443,11 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	if req.SessionID == "" {
 		s.wsBroker.Broadcast(WSEvent{TaskID: eng.taskID, Type: "session_reset", Data: map[string]string{}})
 		s.stampCloudSync(eng.taskID, req.Source, true)
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "session_id": eng.taskID})
+		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "session_id": eng.taskID})
+	// Resume: one-shot reply (entries + goal + todos + status) so the client
+	// repaints without follow-up round trips.
+	s.writeResumeReply(w, eng, entries)
 }

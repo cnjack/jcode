@@ -1,5 +1,5 @@
 // API client for jcode backend — ported from web/src/composables/api.ts.
-import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, CustomModelDetail, ValidateResult, CatalogModel, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData, ApprovalReviewConfig, ApprovalReviewConfigResponse } from './types'
+import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, ProjectInfo, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, CustomModelDetail, ValidateResult, CatalogModel, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData, ApprovalReviewConfig, ApprovalReviewConfigResponse } from './types'
 import type { AutomationItem, AutomationRun, AutomationTemplate, AutomationCreate, Automation } from './automation'
 import { apiBase } from './apiBase'
 import { getAuthToken, notifyAuthExpired } from './authToken'
@@ -81,7 +81,24 @@ export const api = {
   deleteSession: (id: string) =>
     request<{ status: string }>(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   newSession: (sessionId?: string) =>
-    request<{ status: string; session_id: string }>('/api/sessions', {
+    request<{
+      status: string
+      session_id: string
+      /** One-shot resume payload (present when resuming against a current
+       *  server): everything the client needs to repaint the conversation —
+       *  the raw JSONL entries plus goal/todos/status. `entries` is omitted
+       *  if the server could not read the session file (client falls back to
+       *  GET /api/sessions/{id}); all fields are absent on older servers. */
+      entries?: SessionEntry[] | null
+      goal?: Goal | null
+      todos?: TodoItem[]
+      running?: boolean
+      pwd?: string
+      provider?: string
+      model?: string
+      mode?: string
+      token?: TokenUpdateData
+    }>('/api/sessions', {
       method: 'POST',
       body: sessionId ? JSON.stringify({ session_id: sessionId }) : undefined,
     }),
@@ -148,6 +165,7 @@ export const api = {
       body: JSON.stringify({ branch, create, strategy }),
     }),
   tasks: () => request<TaskItem[]>('/api/tasks'),
+  projects: () => request<ProjectInfo[]>('/api/projects'),
   updateTask: (id: string, patch: TaskMetaPatch) =>
     request<TaskItem>(`/api/tasks/${encodeURIComponent(id)}`, {
       method: 'PATCH',

@@ -213,6 +213,7 @@ export default {
     stop: '停止',
     stopAgent: '停止 Agent (Esc)',
     thinking: '思考中…',
+    loadingConversation: '載入對話中…',
     attachFiles: '附加檔案',
     goal: '目標',
     add: '新增',
@@ -995,6 +996,7 @@ export default {
       markRead: '標記為已讀',
       markUnread: '標記為未讀',
       delete: '刪除',
+      deleteWhileRunning: '請先停止執行中的 Agent，再刪除此對話',
       taskActions: '工作操作',
     },
     relativeTime: {

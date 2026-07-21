@@ -381,6 +381,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/git/branches", s.handleGitBranches)
 	mux.HandleFunc("POST /api/git/checkout", s.handleGitCheckout)
 	mux.HandleFunc("GET /api/tasks", s.handleListAllTasks)
+	mux.HandleFunc("GET /api/projects", s.handleListProjects)
 	mux.HandleFunc("PATCH /api/tasks/{id}", s.handleUpdateTask)
 	mux.HandleFunc("GET /api/usage/stats", s.handleUsageStats)
 	mux.HandleFunc("GET /api/tasks/{id}/stats", s.handleTaskStats)
@@ -607,21 +608,18 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	eng := s.activeEngine()
-	if eng == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no active task"})
-		return
-	}
+// statusSnapshot assembles the per-engine status payload (running state,
+// provider/model/mode, live token snapshot) shared by GET /api/status and the
+// one-shot resume reply (POST /api/sessions), so the two can never drift.
+func (s *Server) statusSnapshot(eng *Engine) map[string]any {
 	full := eng.tokenUsage.GetFull()
 	provider, mdl, modeStr := eng.modelSnapshot()
-	writeJSON(w, http.StatusOK, map[string]any{
-		"running":    eng.running.Load(),
-		"ws_clients": s.wsBroker.ClientCount(),
-		"pwd":        eng.pwd,
-		"provider":   provider,
-		"model":      mdl,
-		"mode":       modeStr,
+	return map[string]any{
+		"running":  eng.running.Load(),
+		"pwd":      eng.pwd,
+		"provider": provider,
+		"model":    mdl,
+		"mode":     modeStr,
 		// Live token snapshot so a client reconnecting between turns can render
 		// the context bar + cache hit rate without waiting for the next
 		// token_update WS event. total_tokens = current context occupancy.
@@ -637,7 +635,18 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"cache_supported":     eng.tokenUsage.CacheObserved(),
 			"model_context_limit": s.currentModelContextLimit(eng),
 		},
-	})
+	}
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	eng := s.activeEngine()
+	if eng == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no active task"})
+		return
+	}
+	payload := s.statusSnapshot(eng)
+	payload["ws_clients"] = s.wsBroker.ClientCount()
+	writeJSON(w, http.StatusOK, payload)
 }
 
 // currentModelContextLimit resolves the context window of the given engine's

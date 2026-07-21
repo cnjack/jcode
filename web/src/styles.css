@@ -336,6 +336,54 @@ select:focus-visible {
   position: relative;
   z-index: 1;
 }
+/* Resume skeleton — shown while a conversation replay loads, so switching
+   conversations feels instant instead of blank-until-ready. */
+.resume-skeleton {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 22px;
+  min-height: 0;
+  flex: 1;
+  padding-bottom: 10vh;
+}
+.resume-skeleton__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.rs-row {
+  display: flex;
+}
+.rs-row--user {
+  justify-content: flex-end;
+}
+.rs-bar {
+  height: 14px;
+  border-radius: var(--radius-md);
+  opacity: 0.55;
+  background: linear-gradient(
+    90deg,
+    var(--color-muted) 25%,
+    var(--color-secondary) 45%,
+    var(--color-muted) 65%
+  );
+  background-size: 220% 100%;
+  animation: rs-shimmer 1.2s ease-in-out infinite;
+}
+@keyframes rs-shimmer {
+  0% { background-position: 130% 0; }
+  100% { background-position: -130% 0; }
+}
+.resume-skeleton__label {
+  text-align: center;
+  font-size: 11px;
+  color: var(--color-muted-foreground);
+  opacity: 0.8;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rs-bar { animation: none; }
+}
 .welcome-logo {
   display: flex;
   align-items: center;
