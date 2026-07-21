@@ -319,6 +319,7 @@ func (c *Connector) registerLoop(ctx context.Context) error {
 			JcodeVersion: c.cfg.Version,
 			PubKey:       c.cfg.Credentials.PublicKey,
 			Platform:     detectPlatform(),
+			E2EE:         c.e2eeActive(),
 		})
 		if err == nil {
 			c.setState(StateOnline, "")
@@ -335,8 +336,16 @@ func (c *Connector) registerLoop(ctx context.Context) error {
 	}
 }
 
-// detectPlatform reports how this jcode instance was launched, sent as the
-// `platform` field at device register. The desktop app spawns `jcode web` as
+// e2eeActive reports the ACTUAL uplink encryption state sent as `e2ee` at
+// register (M13): true only when the CEK cipher initialized AND cloud.e2ee did
+// not disable it (CipherDisabled). Run initializes the cipher before the
+// register loop, so this reflects the live grey/encrypted path, not the raw
+// config flag.
+func (c *Connector) e2eeActive() bool {
+	return c.cipher != nil && !c.cfg.CipherDisabled
+}
+
+// detectPlatform reports how this jcode instance was launched, sent as the// `platform` field at device register. The desktop app spawns `jcode web` as
 // a Tauri sidecar with JCODE_DESKTOP=1 in its environment (set in
 // desktop/src-tauri/src/sidecar.rs); every other launch is the CLI.
 func detectPlatform() string {

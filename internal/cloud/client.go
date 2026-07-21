@@ -129,6 +129,10 @@ type RegisterDeviceRequest struct {
 	// Platform is how this jcode instance was launched ("desktop" | "cli");
 	// see detectPlatform in connector.go.
 	Platform string `json:"platform,omitempty"`
+	// E2EE reports the connector's ACTUAL encryption state (M13): true only
+	// when the CEK cipher is active and cloud.e2ee did not disable it. The
+	// orchestrator gates plaintext downlink on it (docs/17 §6.7).
+	E2EE bool `json:"e2ee,omitempty"`
 }
 
 // post issues one JSON POST request and decodes the response envelope. token,

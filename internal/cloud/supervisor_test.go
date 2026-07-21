@@ -238,6 +238,48 @@ func TestRegisterLoopSendsPlatform(t *testing.T) {
 	}
 }
 
+// The register request reports the connector's ACTUAL encryption state as
+// `e2ee` (M13): true only with an active CEK cipher and no cloud.e2ee
+// disable — the orchestrator gates plaintext downlink on this flag.
+func TestRegisterLoopSendsE2EE(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cek := make([]byte, 32)
+	cipher, err := NewEnvelopeCipher(cek, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name     string
+		cipher   *EnvelopeCipher
+		disabled bool
+		want     bool
+	}{
+		{"cipher active", cipher, false, true},
+		{"cipher but cloud.e2ee=false", cipher, true, false},
+		{"no cipher (CEK not initialized)", nil, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got RegisterDeviceRequest
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&got)
+				w.WriteHeader(http.StatusOK)
+			}))
+			t.Cleanup(srv.Close)
+
+			conn := newTestConnector(srv.URL, "http://127.0.0.1:1")
+			conn.cipher = tc.cipher
+			conn.cfg.CipherDisabled = tc.disabled
+			if err := conn.registerLoop(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if got.E2EE != tc.want {
+				t.Fatalf("register e2ee = %v, want %v", got.E2EE, tc.want)
+			}
+		})
+	}
+}
+
 // Connector status transitions: connecting/error while the cloud is
 // unreachable, offline after ctx cancel (graceful stop).
 func TestConnectorStatusTransitions(t *testing.T) {
