@@ -1056,6 +1056,9 @@ export default {
 
   // 云中继状态徽标 + 弹层（侧边栏底部）。
   cloud: {
+    syncing: '云同步已开启',
+    syncDisabled: '云同步已关闭',
+    useCustomServer: '使用其他服务器',
     badge: '云端状态',
     title: '云中继',
     status: {

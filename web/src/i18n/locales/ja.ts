@@ -1030,6 +1030,9 @@ export default {
 
   // クラウドリレーのステータスバッジ + ポップオーバー（サイドバー下部）。
   cloud: {
+    syncing: 'クラウド有効',
+    syncDisabled: 'クラウド無効',
+    useCustomServer: '別のサーバーを使用',
     badge: 'クラウドステータス',
     title: 'クラウドリレー',
     status: {

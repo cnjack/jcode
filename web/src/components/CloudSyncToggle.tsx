@@ -84,14 +84,18 @@ export function CloudSyncToggle() {
         aria-label={t('cloud.syncSession')}
         aria-pressed={synced}
         title={title}
-        className="inline-flex h-[34px] w-[34px] items-center justify-center rounded-[var(--radius-lg)] border transition-[background,color,border-color] duration-150 disabled:cursor-not-allowed disabled:opacity-50"
+        className="inline-flex h-[34px] items-center justify-center gap-1.5 rounded-[var(--radius-lg)] border px-2.5 text-[11px] font-medium transition-[background,color,border-color,transform] duration-150 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
         style={{
           color: synced ? 'var(--color-accent-neutral)' : 'var(--color-muted-foreground)',
           borderColor: 'var(--color-border)',
-          backgroundColor: 'var(--color-background)',
+          backgroundColor: synced ? 'var(--accent-wash)' : 'var(--color-background)',
         }}
       >
-        <CloudIcon className="h-4 w-4" />
+        <span className="relative">
+          <CloudIcon className="h-4 w-4" />
+          {!synced && loggedIn && <span aria-hidden="true" className="absolute left-0 top-1/2 h-px w-4 -rotate-45 bg-current" />}
+        </span>
+        <span>{synced ? t('cloud.syncing') : t('cloud.syncDisabled')}</span>
       </button>
     </div>
   )

@@ -38,6 +38,7 @@ import { BTN_GHOST, BTN_PRIMARY, BTN_SECONDARY, BTN_SM, ROW, SECTION_TITLE, Swit
 
 const POLL_MS = 5000
 const LOGIN_POLL_MS = 2000
+const DEFAULT_CLOUD_URL = 'https://cloud.j-code.net'
 
 function dotColor(s: CloudStatusResponse | null): string {
   if (!s || !s.logged_in) return 'var(--color-muted-foreground)'
@@ -125,6 +126,8 @@ export function CloudTab() {
   // Login flow panel: pending (code + QR), or terminal error/expired (retry).
   const [loginPanel, setLoginPanel] = useState<CloudLoginStatusResponse | null>(null)
   const [loginBusy, setLoginBusy] = useState(false)
+  const [loginCloudURL, setLoginCloudURL] = useState(DEFAULT_CLOUD_URL)
+  const [customServer, setCustomServer] = useState(false)
 
   // Pairing approvals + QR pairing offer.
   const [pairings, setPairings] = useState<CloudPendingPairing[]>([])
@@ -241,7 +244,7 @@ export function CloudTab() {
     setLoginBusy(true)
     setActionError(null)
     try {
-      const r = await api.cloudLogin()
+      const r = await api.cloudLogin(loginCloudURL.trim() || DEFAULT_CLOUD_URL)
       setLoginPanel({
         state: 'pending',
         user_code: r.user_code,
@@ -536,11 +539,36 @@ export function CloudTab() {
         </div>
       ) : (
         /* Logged out: in-app device-code login entry point. */
-        <div className={ROW}>
+        <div className={`${ROW} flex-col items-stretch gap-3`}>
           <div className="min-w-0 flex-1">
             <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('cloud.login')}</div>
             <div className="text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">{t('cloud.loginIntro')}</div>
           </div>
+          <label className="grid gap-1 text-[11px] text-[var(--color-muted-foreground)]">
+            <span>{t('cloud.server')}</span>
+            {customServer ? (
+              <input
+                type="url"
+                value={loginCloudURL}
+                onChange={(event) => setLoginCloudURL(event.target.value)}
+                placeholder={DEFAULT_CLOUD_URL}
+                className="h-8 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 font-mono text-[11px] text-[var(--color-foreground)] outline-none focus:border-[var(--color-accent-neutral)]"
+              />
+            ) : (
+              <span className="font-mono text-[var(--color-foreground)]">{DEFAULT_CLOUD_URL}</span>
+            )}
+          </label>
+          <div className="flex items-center justify-between gap-3">
+            <button
+              type="button"
+              className="text-[11px] text-[var(--color-accent-neutral)] underline-offset-2 hover:underline"
+              onClick={() => {
+                setCustomServer((value) => !value)
+                setLoginCloudURL(DEFAULT_CLOUD_URL)
+              }}
+            >
+              {customServer ? t('common.cancel') : t('cloud.useCustomServer')}
+            </button>
           <button
             type="button"
             disabled={loginBusy}
@@ -550,6 +578,7 @@ export function CloudTab() {
             <ArrowPathIcon className={`h-3.5 w-3.5 ${loginBusy ? 'animate-spin' : ''}`} />
             {t('cloud.login')}
           </button>
+          </div>
         </div>
       )}
 

@@ -25,6 +25,7 @@ import (
 type DeviceCapabilities struct {
 	Projects      []CapabilityProject      `json:"projects"`
 	Models        []CapabilityModel        `json:"models"`
+	CurrentModel  *CapabilityModel         `json:"current_model,omitempty"`
 	Efforts       []string                 `json:"efforts"`
 	SlashCommands []CapabilitySlashCommand `json:"slash_commands"`
 }
@@ -94,6 +95,17 @@ func (c *Connector) collectCapabilities(ctx context.Context) *DeviceCapabilities
 	} else {
 		caps.Models = models
 		caps.Efforts = efforts
+		cfg, cfgErr := config.LoadConfig()
+		if cfgErr == nil {
+			provider, modelID := cfg.GetProviderModel()
+			for i := range models {
+				if models[i].Provider == provider && models[i].ID == modelID {
+					current := models[i]
+					caps.CurrentModel = &current
+					break
+				}
+			}
+		}
 	}
 
 	// Slash commands: unlike projects/models (config + index), these live in

@@ -1082,6 +1082,9 @@ export default {
 
   // Cloud relay status badge + popover (Sidebar footer).
   cloud: {
+    syncing: 'Cloud on',
+    syncDisabled: 'Cloud off',
+    useCustomServer: 'Use a different server',
     badge: 'Cloud status',
     title: 'Cloud relay',
     status: {

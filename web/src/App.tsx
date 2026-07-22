@@ -290,9 +290,9 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels'
               latest screenshot from the session's computer_screenshot calls. */}
           {activeView === 'chat' && <ComputerShotPiP />}
 
-          {/* Sidebar floats on the shell background — no border, no shared frame
-              with the main canvas (matches Vue App.vue). */}
-          <Sidebar />
+          {/* Settings owns its own navigation rail and back action, so the
+              conversation sidebar should only accompany workspace views. */}
+          {activeView !== 'settings' && <Sidebar />}
 
           {/* Main column: the chat/page surface is an inset rounded card with
               breathing room; its left corners are fully rounded because the

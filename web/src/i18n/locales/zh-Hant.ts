@@ -1024,6 +1024,9 @@ export default {
 
   // 雲端中繼狀態徽章 + 彈出面板（側邊欄底部）。
   cloud: {
+    syncing: '雲端同步已開啟',
+    syncDisabled: '雲端同步已關閉',
+    useCustomServer: '使用其他伺服器',
     badge: '雲端狀態',
     title: '雲端中繼',
     status: {

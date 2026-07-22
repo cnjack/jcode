@@ -1029,6 +1029,9 @@ export default {
 
   // 클라우드 릴리 상태 배지 + 팝오버 (사이드바 하단).
   cloud: {
+    syncing: '클라우드 켜짐',
+    syncDisabled: '클라우드 꺼짐',
+    useCustomServer: '다른 서버 사용',
     badge: '클라우드 상태',
     title: '클라우드 릴리',
     status: {
