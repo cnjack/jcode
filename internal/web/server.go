@@ -433,7 +433,6 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/cloud/pairings", s.handleCloudPairings)
 	mux.HandleFunc("POST /api/cloud/pairings/{id}/approve", s.handleCloudPairingApprove)
 	mux.HandleFunc("POST /api/cloud/pairings/{id}/deny", s.handleCloudPairingDeny)
-	mux.HandleFunc("POST /api/cloud/pairing-offer", s.handleCloudPairingOffer)
 	mux.HandleFunc("GET /api/cloud/sync", s.handleCloudSync)
 	mux.HandleFunc("POST /api/cloud/sync/default", s.handleCloudSyncDefault)
 	mux.HandleFunc("POST /api/cloud/sync/{session_id}", s.handleCloudSyncSession)

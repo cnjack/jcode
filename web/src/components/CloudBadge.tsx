@@ -102,17 +102,13 @@ export function CloudBadge() {
         }
         seenPairingIds.current = current
       }
-      // Toast on a fresh approval (manual or QR auto-approve).
+      // Toast on a fresh approval.
       if (pr.last_paired) {
         if (lastPairedAt.current === null) {
           lastPairedAt.current = pr.last_paired.paired_at
         } else if (lastPairedAt.current !== pr.last_paired.paired_at) {
           lastPairedAt.current = pr.last_paired.paired_at
-          toast(
-            pr.last_paired.auto
-              ? t('cloud.pairedViaQR', { label: pr.last_paired.label })
-              : t('cloud.pairingApproved', { label: pr.last_paired.label }),
-          )
+          toast(t('cloud.pairingApproved', { label: pr.last_paired.label }))
         }
       }
     } catch {

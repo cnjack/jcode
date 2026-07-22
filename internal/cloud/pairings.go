@@ -64,26 +64,3 @@ func (c *Client) RespondPairing(ctx context.Context, token, id string, approve b
 	}{Approve: approve, Wrap: wrap}
 	return c.post(ctx, "/internal/v1/device/pairings/"+url.PathEscape(id)+"/respond", token, body, nil)
 }
-
-// PairingOffer is the answer of POST /internal/v1/device/pairing-offers
-// (M11-W3): a short-lived, single-use secret the device renders as a QR code;
-// a mobile client claims it to create a pairing request flagged with the
-// offer_id, which the device then auto-approves (scan-to-pair).
-type PairingOffer struct {
-	OfferID   string `json:"offer_id"`
-	Secret    string `json:"secret"`
-	ExpiresAt string `json:"expires_at"` // RFC 3339
-}
-
-// CreatePairingOffer mints a pairing offer:
-// POST /internal/v1/device/pairing-offers (Bearer device token, empty body).
-func (c *Client) CreatePairingOffer(ctx context.Context, token string) (*PairingOffer, error) {
-	var out PairingOffer
-	if err := c.post(ctx, "/internal/v1/device/pairing-offers", token, map[string]string{}, &out); err != nil {
-		return nil, err
-	}
-	if out.OfferID == "" || out.Secret == "" {
-		return nil, fmt.Errorf("incomplete pairing offer response from %s", c.BaseURL)
-	}
-	return &out, nil
-}

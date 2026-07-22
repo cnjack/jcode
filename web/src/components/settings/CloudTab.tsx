@@ -8,8 +8,7 @@
  *   logged out  → in-app device-code login: user_code + verification URI (QR)
  *                 with a status poll until success / error / expired (retry)
  *   logged in   → connection state, server/device info, the auto-connect
- *                 switch, pairing approvals (approve / deny), a "scan to pair"
- *                 QR offer with an expiry countdown, and logout
+ *                 switch, pairing approvals (approve / deny), and logout
  *
  * The tab polls `api.cloudStatus()` every 5s while mounted (same cadence as
  * the badge). Older backends without /api/cloud/* degrade to the logged-out
@@ -24,7 +23,6 @@ import {
   CheckIcon,
   ClipboardDocumentIcon,
   CloudIcon,
-  QrCodeIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
@@ -78,13 +76,6 @@ function QRImage({ text, size }: { text: string; size: number }) {
   )
 }
 
-function fmtCountdown(ms: number): string {
-  const total = Math.max(0, Math.ceil(ms / 1000))
-  const m = Math.floor(total / 60)
-  const s = total % 60
-  return `${m}:${String(s).padStart(2, '0')}`
-}
-
 /** CopyButton — one-click clipboard copy with transient "copied" feedback (M17). */
 function CopyButton({ text, label }: { text: string; label?: string }) {
   const { t } = useTranslation()
@@ -130,13 +121,10 @@ export function CloudTab() {
   const [loginCloudURL, setLoginCloudURL] = useState(DEFAULT_CLOUD_URL)
   const [customServer, setCustomServer] = useState(false)
 
-  // Pairing approvals + QR pairing offer.
+  // Pairing requests are reviewed here in the desktop UI.
   const [pairings, setPairings] = useState<CloudPendingPairing[]>([])
   const [pairingBusy, setPairingBusy] = useState<string | null>(null)
-  const [offer, setOffer] = useState<{ qr: string; expiresAt: number } | null>(null)
-  const [offerBusy, setOfferBusy] = useState(false)
   const [logoutBusy, setLogoutBusy] = useState(false)
-  const [now, setNow] = useState(Date.now())
   const [syncDefault, setSyncDefault] = useState<boolean | null>(null)
   const [syncSaving, setSyncSaving] = useState(false)
 
@@ -223,13 +211,6 @@ export function CloudTab() {
     }
   }, [loginPending, refresh])
 
-  // Countdown tick for the pairing-offer QR.
-  useEffect(() => {
-    if (!offer) return
-    const id = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(id)
-  }, [offer])
-
   async function toggleAutoConnect() {
     if (!status || saving) return
     const prev = status
@@ -294,20 +275,6 @@ export function CloudTab() {
     }
   }
 
-  async function createOffer() {
-    if (offerBusy) return
-    setOfferBusy(true)
-    setActionError(null)
-    try {
-      const o = await api.cloudPairingOffer()
-      setOffer({ qr: o.qr, expiresAt: Date.parse(o.expires_at) })
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setOfferBusy(false)
-    }
-  }
-
   async function logout(forget = false) {
     if (logoutBusy) return
     if (forget && !window.confirm(t('cloud.forgetConfirm'))) return
@@ -317,7 +284,6 @@ export function CloudTab() {
       const previousCloudURL = status?.cloud_url
       setStatus(forget ? await api.cloudForget() : await api.cloudLogout())
       setPairings([])
-      setOffer(null)
       setLoginPanel(null)
       setLoginCloudURL(previousCloudURL || DEFAULT_CLOUD_URL)
       setCustomServer(!!previousCloudURL && previousCloudURL !== DEFAULT_CLOUD_URL)
@@ -331,8 +297,6 @@ export function CloudTab() {
   const pulsing = !!status?.logged_in && status.state === 'connecting'
   const badgeColor = dotColor(status)
   const stateLabel = statusLoading ? t('common.loading') : !status?.logged_in ? t('cloud.notLoggedIn') : t(`cloud.status.${status.state}`)
-  const offerRemaining = offer ? offer.expiresAt - now : 0
-
   return (
     <div className="space-y-5">
       <h3 className={SECTION_TITLE}>{t('settings.tabs.cloud')}</h3>
@@ -422,9 +386,13 @@ export function CloudTab() {
             />
           </div>
 
-          {/* Pairing: pending approvals + scan-to-pair QR offer. */}
+          {/* Pairing requests are approved or denied directly in Desktop. */}
           <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-muted-foreground)]">
             {t('cloud.pairingSection')}
+          </div>
+
+          <div className="text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">
+            {t('cloud.pairingReviewHint')}
           </div>
 
           {pairings.length > 0 && (
@@ -463,58 +431,7 @@ export function CloudTab() {
             </div>
           )}
 
-          <div className={ROW}>
-            {offer ? (
-              <div className="flex w-full flex-col items-center gap-2 py-1">
-                <QRImage text={offer.qr} size={168} />
-                {offerRemaining > 0 ? (
-                  <div className="text-[11px] text-[var(--color-muted-foreground)]">
-                    {t('cloud.offerExpiresIn', { time: fmtCountdown(offerRemaining) })}
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={offerBusy}
-                    onClick={() => void createOffer()}
-                    className={`${BTN_SECONDARY} ${BTN_SM}`}
-                  >
-                    <ArrowPathIcon className={`h-3 w-3 ${offerBusy ? 'animate-spin' : ''}`} />
-                    {t('cloud.regenerate')}
-                  </button>
-                )}
-                <CopyButton text={offer.qr} label={t('cloud.copyPairLink')} />
-                <div className="text-center text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">
-                  {t('cloud.scanPairHint')}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setOffer(null)}
-                  className="text-[11px] text-[var(--color-muted-foreground)] underline-offset-2 hover:underline"
-                >
-                  {t('cloud.close')}
-                </button>
-              </div>
-            ) : (
-              <>
-                <div className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)]">
-                  <QrCodeIcon className="h-4 w-4" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('cloud.scanPair')}</div>
-                  <div className="text-[11px] text-[var(--color-muted-foreground)]">{t('cloud.scanPairHint')}</div>
-                </div>
-                <button
-                  type="button"
-                  disabled={offerBusy}
-                  onClick={() => void createOffer()}
-                  className={`${BTN_SECONDARY} ${BTN_SM}`}
-                >
-                  <QrCodeIcon className={`h-3.5 w-3.5 ${offerBusy ? 'animate-spin' : ''}`} />
-                  {t('cloud.scanPair')}
-                </button>
-              </>
-            )}
-          </div>
+          {pairings.length === 0 && <div className={ROW}>{t('cloud.noPairingRequests')}</div>}
 
           {/* Logout. */}
           <div className="flex justify-end gap-2">

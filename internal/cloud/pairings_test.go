@@ -84,39 +84,3 @@ func TestPairingEndpoints(t *testing.T) {
 		t.Fatalf("deny respond body = %+v, want approve=false and no wrap", gotRespond)
 	}
 }
-
-func TestCreatePairingOffer(t *testing.T) {
-	var gotAuth string
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /internal/v1/device/pairing-offers", func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = r.Header.Get("Authorization")
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"offer_id":   "of-1",
-			"secret":     "s3cret",
-			"expires_at": "2026-07-21T04:00:00Z",
-		})
-	})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	offer, err := NewClient(srv.URL).CreatePairingOffer(context.Background(), "tok")
-	if err != nil {
-		t.Fatalf("CreatePairingOffer: %v", err)
-	}
-	if gotAuth != "Bearer tok" {
-		t.Errorf("Authorization = %q, want Bearer tok", gotAuth)
-	}
-	if offer.OfferID != "of-1" || offer.Secret != "s3cret" || offer.ExpiresAt != "2026-07-21T04:00:00Z" {
-		t.Fatalf("offer = %+v", offer)
-	}
-}
-
-func TestCreatePairingOfferIncomplete(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]string{"offer_id": "of-1"})
-	}))
-	defer srv.Close()
-	if _, err := NewClient(srv.URL).CreatePairingOffer(context.Background(), "tok"); err == nil {
-		t.Fatal("CreatePairingOffer accepted a response without secret, want error")
-	}
-}

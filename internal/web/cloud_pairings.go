@@ -2,14 +2,12 @@
 // pending pairing requests arrive at the relay connector as pairing.request
 // commands and are parked in its inbox; these endpoints list and resolve
 // them (approve wraps the CEK for the requester via the M5 ECIES path, deny
-// refuses). POST /api/cloud/pairing-offer mints a QR pairing offer (W3) and
-// returns the jcode://pair URL the UI renders as a QR code.
+// refuses).
 package web
 
 import (
 	"errors"
 	"net/http"
-	"net/url"
 
 	"github.com/cnjack/jcode/internal/cloud"
 )
@@ -74,43 +72,4 @@ func (s *Server) handleCloudPairingApprove(w http.ResponseWriter, r *http.Reques
 // handleCloudPairingDeny serves POST /api/cloud/pairings/{id}/deny.
 func (s *Server) handleCloudPairingDeny(w http.ResponseWriter, r *http.Request) {
 	s.resolvePairing(w, r, false)
-}
-
-// cloudPairingOfferResponse is the answer of POST /api/cloud/pairing-offer:
-// the jcode://pair URL to render as a QR code, plus its expiry for the
-// countdown display.
-type cloudPairingOfferResponse struct {
-	QR        string `json:"qr"`
-	OfferID   string `json:"offer_id"`
-	ExpiresAt string `json:"expires_at"`
-}
-
-// handleCloudPairingOffer serves POST /api/cloud/pairing-offer: mints an
-// offer at the orchestrator and builds the jcode://pair?cloud=…&device=…&offer=…&secret=…
-// URL the mobile app scans to pair (W3 scan-to-pair).
-func (s *Server) handleCloudPairingOffer(w http.ResponseWriter, r *http.Request) {
-	creds, err := cloud.LoadCredentials()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	if creds == nil || creds.DeviceToken == "" {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "not logged in"})
-		return
-	}
-	offer, err := cloud.NewClient(creds.CloudURL).CreatePairingOffer(r.Context(), creds.DeviceToken)
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "failed to create pairing offer: " + err.Error()})
-		return
-	}
-	q := url.Values{}
-	q.Set("cloud", creds.CloudURL)
-	q.Set("device", creds.DeviceID)
-	q.Set("offer", offer.OfferID)
-	q.Set("secret", offer.Secret)
-	writeJSON(w, http.StatusOK, cloudPairingOfferResponse{
-		QR:        "jcode://pair?" + q.Encode(),
-		OfferID:   offer.OfferID,
-		ExpiresAt: offer.ExpiresAt,
-	})
 }

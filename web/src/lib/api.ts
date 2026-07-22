@@ -434,9 +434,6 @@ export const api = {
     request<CloudPairingsResponse>(`/api/cloud/pairings/${encodeURIComponent(id)}/approve`, { method: 'POST' }),
   cloudDenyPairing: (id: string) =>
     request<CloudPairingsResponse>(`/api/cloud/pairings/${encodeURIComponent(id)}/deny`, { method: 'POST' }),
-  // QR pairing offer: qr is the jcode://pair URL to render as a QR code.
-  cloudPairingOffer: () => request<CloudPairingOfferResponse>('/api/cloud/pairing-offer', { method: 'POST' }),
-
   // Per-session cloud sync switches + the new-session default (M19).
   cloudSync: () => request<CloudSyncResponse>('/api/cloud/sync'),
   cloudSetSyncDefault: (enabled: boolean) =>
@@ -492,13 +489,6 @@ export interface CloudPairedInfo {
 export interface CloudPairingsResponse {
   pairings: CloudPendingPairing[]
   last_paired?: CloudPairedInfo
-}
-
-export interface CloudPairingOfferResponse {
-  /** jcode://pair?cloud=…&device=…&offer=…&secret=… — render as QR code. */
-  qr: string
-  offer_id: string
-  expires_at: string
 }
 
 /** GET /api/cloud/sync — per-session sync opt-ins + the new-session default (M19). */

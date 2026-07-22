@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -92,68 +91,5 @@ func TestCloudPairingApproveDeny(t *testing.T) {
 	s = &Server{cfg: &config.Config{}}
 	if rec := post(s, "/api/cloud/pairings/p1/approve", "p1"); rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("nil supervisor approve: status=%d, want 503", rec.Code)
-	}
-}
-
-// POST /api/cloud/pairing-offer mints an offer at the orchestrator and
-// returns the jcode://pair URL for the QR code.
-func TestCloudPairingOffer(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	var gotAuth string
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /internal/v1/device/pairing-offers", func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = r.Header.Get("Authorization")
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"offer_id":   "of-1",
-			"secret":     "s3cret",
-			"expires_at": "2026-07-21T04:00:00Z",
-		})
-	})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	if err := cloud.SaveCredentials(&cloud.Credentials{
-		CloudURL: srv.URL, DeviceID: "dev-9", DeviceToken: "tok", DeviceName: "box",
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	s := &Server{cfg: &config.Config{}}
-	rec := httptest.NewRecorder()
-	s.handleCloudPairingOffer(rec, httptest.NewRequest(http.MethodPost, "/api/cloud/pairing-offer", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
-	}
-	if gotAuth != "Bearer tok" {
-		t.Errorf("orchestrator Authorization = %q, want Bearer tok", gotAuth)
-	}
-	var resp cloudPairingOfferResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if resp.OfferID != "of-1" || resp.ExpiresAt != "2026-07-21T04:00:00Z" {
-		t.Fatalf("offer response = %+v", resp)
-	}
-	u, err := url.Parse(resp.QR)
-	if err != nil {
-		t.Fatalf("qr URL: %v", err)
-	}
-	if u.Scheme != "jcode" || u.Host != "pair" {
-		t.Fatalf("qr URL = %q, want jcode://pair?…", resp.QR)
-	}
-	q := u.Query()
-	if q.Get("cloud") != srv.URL || q.Get("device") != "dev-9" || q.Get("offer") != "of-1" || q.Get("secret") != "s3cret" {
-		t.Fatalf("qr query = %v", q)
-	}
-}
-
-// The offer endpoint requires a logged-in device.
-func TestCloudPairingOfferNotLoggedIn(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	s := &Server{cfg: &config.Config{}}
-	rec := httptest.NewRecorder()
-	s.handleCloudPairingOffer(rec, httptest.NewRequest(http.MethodPost, "/api/cloud/pairing-offer", nil))
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status=%d body=%s, want 409", rec.Code, rec.Body.String())
 	}
 }
