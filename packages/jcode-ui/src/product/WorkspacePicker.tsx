@@ -283,16 +283,16 @@ export function WorkspacePicker({ host, placement = 'top' }: { host: ProductComp
                 )}
               </div>
               {error && <div className="ws-error">{error}</div>}
-              {(host.pickFolder || host.openRemoteConnect) && <div className="ws-actions">
-                {host.pickFolder && <button type="button" className="ws-action" onClick={() => void openFolderAction()}>
+              <div className="ws-actions">
+                <button type="button" className="ws-action" onClick={() => void openFolderAction()}>
                   <PlusIcon className="h-3.5 w-3.5" />
                   <span>{strings.workspaceOpenFolder}</span>
-                </button>}
+                </button>
                 {host.openRemoteConnect && <button type="button" className="ws-action" onClick={openRemote}>
                   <ServerIcon className="h-3.5 w-3.5" />
                   <span>{strings.remoteConnect}</span>
                 </button>}
-              </div>}
+              </div>
             </div>
           )}
         </div>

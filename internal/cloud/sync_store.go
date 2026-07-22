@@ -158,6 +158,18 @@ func (s *SyncStore) Set(sessionID string, enabled bool) error {
 	return err
 }
 
+// Delete forgets the local per-session preference after the session itself is
+// deleted. The connector observes the file change and sends a replacement
+// snapshot that removes the corresponding cloud mirror.
+func (s *SyncStore) Delete(sessionID string) error {
+	s.refresh()
+	s.mu.Lock()
+	delete(s.sessions, sessionID)
+	err := s.saveLocked()
+	s.mu.Unlock()
+	return err
+}
+
 // SetIfAbsent records the session's sync state only when no explicit entry
 // exists yet (session-creation stamping must never clobber a user toggle).
 // It reports whether an entry was written.

@@ -768,7 +768,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
         <div
           className={`transition-colors ${
             isElevated
-              ? 'rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[color-mix(in_srgb,var(--color-surface)_90%,#000)] focus-within:border-[color-mix(in_srgb,var(--color-foreground)_30%,transparent)]'
+              ? 'rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[color-mix(in_srgb,var(--color-surface)_90%,#000)]'
               : 'rounded-[var(--radius-lg)]'
           }`}
           style={isElevated ? { padding: '14px 16px 0' } : undefined}
@@ -790,8 +790,8 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                     ? strings.goalPlaceholder
                     : strings.placeholder
               }
-              className="block w-full resize-none border-none bg-transparent text-sm leading-relaxed text-[var(--color-foreground)] outline-none"
-              style={{ minHeight: 28, maxHeight: 200, fontFamily: 'var(--font-sans)' }}
+              className="block w-full resize-none border-none bg-transparent text-sm leading-relaxed text-[var(--color-foreground)] outline-none focus-visible:outline-none"
+              style={{ minHeight: isElevated ? 56 : 36, maxHeight: 200, fontFamily: 'var(--font-sans)' }}
             />
 
             {pendingImages.length > 0 && (
@@ -812,11 +812,11 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
 
           {/* Toolbar */}
           <div
-            className="flex items-center justify-between gap-2 py-2"
+            className="jcode-product-composer-toolbar flex items-center justify-between gap-2 py-2"
             style={{ paddingBottom: 12 }}
           >
             {/* Toolbar-left: + menu, mode picker, goal chip */}
-            <div className="flex items-center gap-1.5">
+            <div className="jcode-product-composer-toolbar-left flex min-w-0 items-center gap-1.5">
               {/* + menu */}
               <div className="relative">
                 <button
@@ -831,7 +831,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                 </button>
                 {showAddMenu && (
                   <div
-                    className="absolute bottom-full left-0 z-20 mb-1 min-w-[188px] rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-[var(--shadow-md)]"
+                    className="jcode-product-composer-add-menu absolute bottom-full left-0 z-20 mb-1 min-w-[188px] rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-[var(--shadow-md)]"
                   >
                     <button
                       type="button"
@@ -983,7 +983,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
             </div>
 
             {/* Toolbar-right: token ring, model picker, effort picker, stop/send */}
-            <div className="flex items-center gap-2">
+            <div className="jcode-product-composer-toolbar-right flex min-w-0 items-center gap-2">
               {/* Context-fill ring */}
               {showTokenCount && (
                 <div className="relative">
@@ -1097,7 +1097,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
 
                 {/* Model picker panel */}
                 {showModelPicker && (
-                  <div className="absolute bottom-full right-0 z-[var(--z-dropdown)] mb-1 flex max-h-[540px] w-[290px] flex-col overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)]">
+                  <div className="jcode-product-composer-model-menu absolute bottom-full right-0 z-[var(--z-dropdown)] mb-1 flex max-h-[min(540px,calc(100dvh-180px))] w-[min(290px,calc(100vw-32px))] flex-col overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)]">
                     {/* Search */}
                     <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-2 text-[var(--color-foreground)]">
                       <MagnifyingGlassIcon className="h-3.5 w-3.5" />

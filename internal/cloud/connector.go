@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -513,6 +514,10 @@ func (l *localControlPlane) getJSON(ctx context.Context, path string) (int, []by
 	return l.doJSON(ctx, http.MethodGet, path, nil)
 }
 
+func (l *localControlPlane) deleteJSON(ctx context.Context, path string) (int, []byte, error) {
+	return l.doJSON(ctx, http.MethodDelete, path, nil)
+}
+
 func (l *localControlPlane) doJSON(ctx context.Context, method, path string, body io.Reader) (int, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, method, l.base+path, body)
 	if err != nil {
@@ -593,6 +598,10 @@ type approvalRespondPayload struct {
 	Decision   string `json:"decision"` // "approve" | "approve_all" | "deny"
 }
 
+type workspaceBrowsePayload struct {
+	Path string `json:"path,omitempty"`
+}
+
 // executeCommand dispatches one command to the local control plane and
 // returns the ack status ("ok"|"error") plus the ack result payload.
 func (c *Connector) executeCommand(ctx context.Context, cmd DeviceCommand) (string, any) {
@@ -601,6 +610,10 @@ func (c *Connector) executeCommand(ctx context.Context, cmd DeviceCommand) (stri
 		return c.execChatSend(ctx, cmd)
 	case "chat.stop":
 		return c.execChatStop(ctx, cmd)
+	case "session.delete":
+		return c.execSessionDelete(ctx, cmd)
+	case "workspace.browse":
+		return c.execWorkspaceBrowse(ctx, cmd)
 	case "approval.respond":
 		return c.execApprovalRespond(ctx, cmd)
 	case "pairing.request":
@@ -872,6 +885,46 @@ func (c *Connector) execChatStop(ctx context.Context, cmd DeviceCommand) (string
 	}
 	if status != http.StatusOK {
 		return "error", map[string]string{"error": errUnexpectedStatus("/api/stop", status, string(body)).Error()}
+	}
+	return "ok", json.RawMessage(body)
+}
+
+func (c *Connector) execSessionDelete(ctx context.Context, cmd DeviceCommand) (string, any) {
+	if strings.TrimSpace(cmd.SessionID) == "" {
+		return "error", map[string]string{"error": "session_id is required"}
+	}
+	status, body, err := c.local.deleteJSON(ctx, "/api/sessions/"+url.PathEscape(cmd.SessionID))
+	if err != nil {
+		return "error", map[string]string{"error": err.Error()}
+	}
+	if status < 200 || status >= 300 {
+		return "error", map[string]any{"status": status, "body": string(body)}
+	}
+	return "ok", map[string]string{"session_id": cmd.SessionID}
+}
+
+func (c *Connector) execWorkspaceBrowse(ctx context.Context, cmd DeviceCommand) (string, any) {
+	var p workspaceBrowsePayload
+	if err := json.Unmarshal(cmd.Payload, &p); err != nil {
+		return "error", map[string]string{"error": fmt.Sprintf("invalid workspace.browse payload: %v", err)}
+	}
+	path := "/api/browse"
+	if p.Path != "" {
+		path += "?path=" + url.QueryEscape(p.Path)
+	}
+	status, body, err := c.local.getJSON(ctx, path)
+	if err != nil {
+		return "error", map[string]string{"error": err.Error()}
+	}
+	if status != http.StatusOK {
+		var failure struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(body, &failure)
+		if failure.Error == "" {
+			failure.Error = fmt.Sprintf("browse folders: HTTP %d", status)
+		}
+		return "error", map[string]string{"error": failure.Error}
 	}
 	return "ok", json.RawMessage(body)
 }

@@ -120,6 +120,7 @@ export function CloudTab() {
   const { t } = useTranslation()
   // null = status unknown (request failed / older backend).
   const [status, setStatus] = useState<CloudStatusResponse | null>(null)
+  const [statusLoading, setStatusLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
@@ -136,6 +137,8 @@ export function CloudTab() {
   const [offerBusy, setOfferBusy] = useState(false)
   const [logoutBusy, setLogoutBusy] = useState(false)
   const [now, setNow] = useState(Date.now())
+  const [syncDefault, setSyncDefault] = useState<boolean | null>(null)
+  const [syncSaving, setSyncSaving] = useState(false)
 
   // Inline error surface (this tab has no toast — the badge owns toasts).
   const [actionError, setActionError] = useState<string | null>(null)
@@ -156,6 +159,7 @@ export function CloudTab() {
     }
     if (!mounted.current) return
     setStatus(st)
+    setStatusLoading(false)
     if (!st?.logged_in) {
       setPairings([])
       return
@@ -166,6 +170,10 @@ export function CloudTab() {
     } catch {
       // Pairing endpoints unavailable (older backend): ignore.
     }
+  }, [])
+
+  useEffect(() => {
+    api.cloudSync().then((res) => setSyncDefault(res.sync_default)).catch(() => setSyncDefault(null))
   }, [])
 
   useEffect(() => {
@@ -239,6 +247,20 @@ export function CloudTab() {
     }
   }
 
+  async function toggleSyncDefault() {
+    if (syncDefault === null || syncSaving) return
+    setSyncSaving(true)
+    setActionError(null)
+    try {
+      const res = await api.cloudSetSyncDefault(!syncDefault)
+      setSyncDefault(res.sync_default)
+    } catch (err) {
+      setActionError(t('cloud.saveFailed', { message: err instanceof Error ? err.message : String(err) }))
+    } finally {
+      setSyncSaving(false)
+    }
+  }
+
   async function startLogin() {
     if (loginBusy) return
     setLoginBusy(true)
@@ -291,10 +313,13 @@ export function CloudTab() {
     setLogoutBusy(true)
     setActionError(null)
     try {
+      const previousCloudURL = status?.cloud_url
       setStatus(await api.cloudLogout())
       setPairings([])
       setOffer(null)
       setLoginPanel(null)
+      setLoginCloudURL(previousCloudURL || DEFAULT_CLOUD_URL)
+      setCustomServer(!!previousCloudURL && previousCloudURL !== DEFAULT_CLOUD_URL)
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -304,7 +329,7 @@ export function CloudTab() {
 
   const pulsing = !!status?.logged_in && status.state === 'connecting'
   const badgeColor = dotColor(status)
-  const stateLabel = !status?.logged_in ? t('cloud.notLoggedIn') : t(`cloud.status.${status.state}`)
+  const stateLabel = statusLoading ? t('common.loading') : !status?.logged_in ? t('cloud.notLoggedIn') : t(`cloud.status.${status.state}`)
   const offerRemaining = offer ? offer.expiresAt - now : 0
 
   return (
@@ -378,6 +403,23 @@ export function CloudTab() {
           {saveError && (
             <div className="text-[11px] text-[var(--color-error-fg)]">{t('cloud.saveFailed', { message: saveError })}</div>
           )}
+
+          {/* New local sessions follow this default; existing sessions retain
+              their per-session switch. Kept beside the relay settings so the
+              cloud behaviour is configured in one place. */}
+          <div className={ROW}>
+            <div className="min-w-0 flex-1">
+              <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('cloud.syncDefaultTitle')}</div>
+              <div className="text-[11px] text-[var(--color-muted-foreground)]">{t('cloud.syncDefaultDesc')}</div>
+            </div>
+            <Switch
+              on={!!syncDefault}
+              onClick={() => void toggleSyncDefault()}
+              disabled={syncDefault === null || syncSaving}
+              ariaLabel={t('cloud.syncDefaultTitle')}
+              title={syncDefault ? t('common.disable') : t('common.enable')}
+            />
+          </div>
 
           {/* Pairing: pending approvals + scan-to-pair QR offer. */}
           <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-muted-foreground)]">
@@ -486,6 +528,8 @@ export function CloudTab() {
             </button>
           </div>
         </>
+      ) : statusLoading ? (
+        <div className={`${ROW} justify-center text-[11px] text-[var(--color-muted-foreground)]`}>{t('common.loading')}</div>
       ) : loginPanel?.state === 'pending' && loginPanel.user_code ? (
         /* Device-code login in flight: code + verification URI + QR. */
         <div className={`${ROW} flex-col items-center gap-2 py-4`}>

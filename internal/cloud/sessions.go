@@ -35,10 +35,9 @@ func (c *Connector) collectSessions() ([]SessionUpsert, error) {
 			if m.UUID == "" {
 				continue
 			}
-			// M19: only sessions with an explicit sync opt-in are reported.
-			// Unsynced sessions simply never appear cloud-side; nothing is
-			// deleted remotely either — history uploaded while the session was
-			// enabled stays on the orchestrator when the user turns sync off.
+			// Only sessions with an explicit sync opt-in are reported. The
+			// request is a full replacement snapshot, so disabling sync or
+			// deleting locally also removes the cloud mirror and its event log.
 			if !c.syncEnabled(m.UUID) {
 				continue
 			}

@@ -107,7 +107,8 @@ func (c *Client) UpsertSessions(ctx context.Context, token string, sessions []Se
 	body := struct {
 		Sessions     []SessionUpsert `json:"sessions"`
 		Capabilities json.RawMessage `json:"capabilities,omitempty"`
-	}{Sessions: sessions, Capabilities: capabilities}
+		Replace      bool            `json:"replace"`
+	}{Sessions: sessions, Capabilities: capabilities, Replace: true}
 	if err := c.post(ctx, "/internal/v1/device/sessions", token, body, &out); err != nil {
 		return nil, err
 	}

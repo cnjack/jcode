@@ -1449,62 +1449,7 @@ function GeneralTab() {
       <ToolSearchSection />
       <ApprovalReviewSection />
 
-      {/* Cloud relay: new-session sync default (M19). */}
-      <CloudSyncSection />
     </div>
-  )
-}
-
-// CloudSyncSection is the M19 global default switch: "sync NEW sessions to
-// the cloud". It only affects sessions created after the toggle — existing
-// sessions keep their per-session state (the session page carries its own
-// cloud switch).
-function CloudSyncSection() {
-  const { t } = useTranslation()
-  const [syncDefault, setSyncDefault] = useState<boolean | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    api
-      .cloudSync()
-      .then((res) => setSyncDefault(res.sync_default))
-      .catch(() => setSyncDefault(null)) // older backend: hide the switch state
-  }, [])
-
-  async function toggle() {
-    if (syncDefault === null || saving) return
-    setSaving(true)
-    setError('')
-    try {
-      const res = await api.cloudSetSyncDefault(!syncDefault)
-      setSyncDefault(res.sync_default)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <>
-      <div className={ROW}>
-        <div className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)]">
-          <CloudIcon className="h-4 w-4" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('cloud.syncDefaultTitle')}</div>
-          <div className="text-[11px] text-[var(--color-muted-foreground)]">{t('cloud.syncDefaultDesc')}</div>
-        </div>
-        <Switch
-          on={!!syncDefault}
-          onClick={() => void toggle()}
-          disabled={syncDefault === null || saving}
-          title={syncDefault ? t('common.disable') : t('common.enable')}
-        />
-      </div>
-      {error && <div className="text-[11px] text-[var(--color-error-fg)]">{t('cloud.saveFailed', { message: error })}</div>}
-    </>
   )
 }
 

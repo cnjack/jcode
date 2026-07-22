@@ -89,6 +89,23 @@ func TestSyncStoreSetIfAbsent(t *testing.T) {
 	}
 }
 
+func TestSyncStoreDelete(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cloud-sessions.json")
+	store, err := LoadSyncStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Set("s1", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Delete("s1"); err != nil {
+		t.Fatal(err)
+	}
+	if store.Has("s1") || store.Enabled("s1") {
+		t.Fatal("deleted sync entry must be absent")
+	}
+}
+
 // The connector and the web API hold separate store instances on the same
 // file; an external write must become visible without a reload call.
 func TestSyncStorePicksUpExternalWrites(t *testing.T) {

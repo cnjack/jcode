@@ -250,6 +250,11 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	if store, err := s.cloudSyncStoreLoad(); err != nil {
+		config.Logger().Printf("[cloud] sync store unavailable while deleting session %s: %v", id, err)
+	} else if err := store.Delete(id); err != nil {
+		config.Logger().Printf("[cloud] failed to remove deleted session %s from sync store: %v", id, err)
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

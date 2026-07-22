@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Provider } from 'react-redux'
 import { i18n } from '../i18n'
 import { store, uiActions } from '../app/store'
@@ -57,32 +57,32 @@ describe('SettingsView', () => {
     expect(screen.getByRole('button', { name: /Back to workspace/ })).toBeTruthy()
   })
 
-  it('shows the General section by default, including the M19 cloud-sync default', () => {
+  it('shows the General section by default', () => {
     renderView()
     // Rail marks General active.
     expect(screen.getByRole('button', { name: 'General' }).getAttribute('aria-current')).toBe('page')
     // Existing general settings items (moved here, not re-invented).
     expect(screen.getByText('Default auto-approve')).toBeTruthy()
-    expect(screen.getByText('Sync new sessions to the cloud')).toBeTruthy()
+    expect(screen.queryByText('Sync new sessions to the cloud')).toBeNull()
   })
 
-  it('switches to the Cloud section when the rail tab is clicked', () => {
+  it('switches to the Cloud section when the rail tab is clicked', async () => {
     renderView()
     fireEvent.click(screen.getByRole('button', { name: 'Cloud' }))
     expect(store.getState().ui.settingsTab).toBe('cloud')
     expect(screen.getByRole('button', { name: 'Cloud' }).getAttribute('aria-current')).toBe('page')
     // Logged out (no backend in tests) → the device-code login entry point.
-    expect(
-      screen.getByText('Log in to use this device remotely from the cloud console and mobile app.'),
-    ).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Log in to cloud' })).toBeTruthy()
+    await waitFor(() => {
+      expect(screen.getByText('Log in to use this device remotely from the cloud console and mobile app.')).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Log in to cloud' })).toBeTruthy()
+    })
   })
 
-  it('honours a store deep link that pre-selects the Cloud tab', () => {
+  it('honours a store deep link that pre-selects the Cloud tab', async () => {
     store.dispatch(uiActions.setSettingsTab('cloud'))
     renderView()
     expect(screen.getByRole('button', { name: 'Cloud' }).getAttribute('aria-current')).toBe('page')
-    expect(screen.getByRole('button', { name: 'Log in to cloud' })).toBeTruthy()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Log in to cloud' })).toBeTruthy())
   })
 
   it('routes back to the chat view from the rail back action', () => {

@@ -46,6 +46,24 @@ func TestCollectSessionsFiltersUnsynced(t *testing.T) {
 	}
 }
 
+func TestSyncSessionsSendsReplacementSnapshot(t *testing.T) {
+	mock := newMockCloud()
+	cloudSrv := httptest.NewServer(mock.handler())
+	t.Cleanup(cloudSrv.Close)
+	conn := newTestConnector(t, cloudSrv.URL, "http://127.0.0.1:1")
+	conn.cfg.ListSessionsFn = func() (map[string][]session.SessionMeta, error) {
+		return map[string][]session.SessionMeta{"/proj": {{UUID: "s1", Status: "idle"}}}, nil
+	}
+	if err := conn.syncSessions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.replaceReqs) != 1 || !mock.replaceReqs[0] {
+		t.Fatalf("replace flags = %v, want [true]", mock.replaceReqs)
+	}
+}
+
 // A nil/failed store fails closed: nothing is upserted.
 func TestCollectSessionsFailsClosedWithoutStore(t *testing.T) {
 	conn := NewConnector(ConnectorConfig{
@@ -100,10 +118,10 @@ func TestEventPumpFiltersUnsynced(t *testing.T) {
 	}
 }
 
-// Switch points: enabled→disabled stops uploads immediately (already
-// uploaded history is untouched — nothing deletes it); disabled→enabled
-// resumes from that point on with a gapless seq stream (the disabled window
-// leaves no holes) and no historical backfill.
+// Switch points: enabled→disabled stops uploads immediately (session snapshot
+// reconciliation owns the separate cloud deletion); disabled→enabled resumes
+// from that point on with a gapless seq stream (the disabled window leaves no
+// holes) and no historical backfill.
 func TestEventPumpSyncToggleMidStream(t *testing.T) {
 	mock := newMockCloud()
 	cloudSrv := httptest.NewServer(mock.handler())

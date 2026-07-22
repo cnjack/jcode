@@ -26,6 +26,7 @@ type mockCloud struct {
 	eventBatches map[string][]EventUpload
 	ephemeral    []ephemeralRecord
 	sessionReqs  [][]SessionUpsert
+	replaceReqs  []bool
 	capsReqs     []json.RawMessage
 	lastSeq      map[string]int64
 
@@ -90,10 +91,12 @@ func (m *mockCloud) handler() http.Handler {
 		var req struct {
 			Sessions     []SessionUpsert `json:"sessions"`
 			Capabilities json.RawMessage `json:"capabilities"`
+			Replace      bool            `json:"replace"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		m.mu.Lock()
 		m.sessionReqs = append(m.sessionReqs, req.Sessions)
+		m.replaceReqs = append(m.replaceReqs, req.Replace)
 		m.capsReqs = append(m.capsReqs, req.Capabilities)
 		resp := SessionsUpsertResponse{}
 		for _, s := range req.Sessions {
@@ -169,11 +172,13 @@ func (m *mockCloud) ackCount() int {
 // --- fake local web control plane ---
 
 type fakeLocal struct {
-	mu             sync.Mutex
-	chatBodies     []map[string]any
-	stopBodies     []map[string]any
-	approvalBodies []map[string]any
-	chatSessionID  string
+	mu              sync.Mutex
+	chatBodies      []map[string]any
+	stopBodies      []map[string]any
+	approvalBodies  []map[string]any
+	chatSessionID   string
+	deletedSessions []string
+	browsedPaths    []string
 }
 
 func newFakeLocal(t *testing.T) (*fakeLocal, *httptest.Server) {
@@ -204,6 +209,21 @@ func newFakeLocal(t *testing.T) (*fakeLocal, *httptest.Server) {
 		f.approvalBodies = append(f.approvalBodies, body)
 		f.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+	mux.HandleFunc("DELETE /api/sessions/{id}", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.deletedSessions = append(f.deletedSessions, r.PathValue("id"))
+		f.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+	mux.HandleFunc("GET /api/browse", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.browsedPaths = append(f.browsedPaths, r.URL.Query().Get("path"))
+		f.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"current": "/Users/jack/work path",
+			"folders": []map[string]string{{"name": "jcode", "path": "/Users/jack/work path/jcode"}},
+		})
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -370,6 +390,48 @@ func TestChatStop(t *testing.T) {
 	defer local.mu.Unlock()
 	if len(local.stopBodies) != 1 || local.stopBodies[0]["task_id"] != "sess-7" {
 		t.Fatalf("stop bodies = %v, want one call with task_id sess-7", local.stopBodies)
+	}
+}
+
+func TestSessionDelete(t *testing.T) {
+	local, localSrv := newFakeLocal(t)
+	conn := newTestConnector(t, "http://127.0.0.1:1", localSrv.URL)
+
+	status, result := conn.executeCommand(context.Background(), DeviceCommand{
+		ID: "cmd-delete", Kind: "session.delete", SessionID: "sess-7",
+	})
+	if status != "ok" {
+		t.Fatalf("status = %q, result = %v", status, result)
+	}
+	local.mu.Lock()
+	defer local.mu.Unlock()
+	if len(local.deletedSessions) != 1 || local.deletedSessions[0] != "sess-7" {
+		t.Fatalf("deleted sessions = %v, want sess-7", local.deletedSessions)
+	}
+}
+
+func TestWorkspaceBrowse(t *testing.T) {
+	local, localSrv := newFakeLocal(t)
+	conn := newTestConnector(t, "http://127.0.0.1:1", localSrv.URL)
+
+	status, result := conn.executeCommand(context.Background(), DeviceCommand{
+		ID: "cmd-browse", Kind: "workspace.browse",
+		Payload: mustPayload(t, map[string]any{"path": "/Users/jack/work path"}),
+	})
+	if status != "ok" {
+		t.Fatalf("status = %q, result = %v", status, result)
+	}
+	local.mu.Lock()
+	defer local.mu.Unlock()
+	if len(local.browsedPaths) != 1 || local.browsedPaths[0] != "/Users/jack/work path" {
+		t.Fatalf("browsed paths = %v", local.browsedPaths)
+	}
+	var got struct {
+		Current string                        `json:"current"`
+		Folders []struct{ Name, Path string } `json:"folders"`
+	}
+	if err := json.Unmarshal(result.(json.RawMessage), &got); err != nil || got.Current != "/Users/jack/work path" || len(got.Folders) != 1 {
+		t.Fatalf("browse result = %+v err=%v", got, err)
 	}
 }
 

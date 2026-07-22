@@ -165,6 +165,22 @@ describe('goal armed', () => {
   })
 })
 
+describe('workspace picker', () => {
+  it('offers the in-app folder browser when no native picker is available', async () => {
+    const browseFolders = vi.fn(async () => ({
+      current: '/tmp/project',
+      folders: [{ name: 'src', path: '/tmp/project/src' }],
+    }))
+    renderComposer(makeHost({ browseFolders, pickFolder: undefined }))
+
+    fireEvent.click(screen.getByText('project'))
+    fireEvent.click(screen.getByText('Open folder'))
+
+    await waitFor(() => expect(browseFolders).toHaveBeenCalledWith('/tmp/project'))
+    expect(screen.getByText('src')).toBeTruthy()
+  })
+})
+
 describe('model picker', () => {
   it('filters by search text and hides disabled models', async () => {
     const host = makeHost()

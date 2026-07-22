@@ -362,10 +362,10 @@ func (c *Connector) handleWSEvent(ctx context.Context, batcher *eventBatcher, ms
 	// opt-in are dropped here — durable AND ephemeral, with NO seq allocated
 	// (a gapless per-session seq stream is preserved for the events that do
 	// upload). Turning sync off stops the upload from that event on; the
-	// history already uploaded stays on the orchestrator (turning sync off
-	// never deletes cloud-side data). Turning it back on resumes uploads from
-	// that moment forward — earlier local history is NOT backfilled (first
-	// version; the pump is a live stream and has no replay path).
+	// next replacement session snapshot removes the mirror and its durable
+	// cloud events. Turning sync back on recreates the mirror and resumes uploads
+	// from that moment forward — earlier local history is NOT backfilled (the
+	// pump is a live stream and has no replay path).
 	if !c.syncEnabled(sid) {
 		// Drop any agent_text buffered while the session was enabled: if sync
 		// is re-enabled mid-run, the synthesized agent_message must only cover
