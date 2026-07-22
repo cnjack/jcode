@@ -96,6 +96,81 @@ interface ModeDef {
   Icon: typeof HandRaisedIcon
 }
 
+interface PopupOffset {
+  x: number
+  y: number
+}
+
+/**
+ * Keep an anchor-positioned composer popup inside the visual viewport.
+ *
+ * Mobile WebViews can place a toolbar trigger close enough to an edge that an
+ * otherwise responsive popup still starts outside the screen.  Measuring the
+ * rendered panel lets every host keep the natural trigger attachment while a
+ * small transform resolves collisions on all four sides (including when the
+ * software keyboard changes the visual viewport).
+ */
+function useViewportPopup(open: boolean, gutter = 12) {
+  const ref = useRef<HTMLDivElement>(null)
+  const offsetRef = useRef<PopupOffset>({ x: 0, y: 0 })
+  const [offset, setOffset] = useState<PopupOffset>({ x: 0, y: 0 })
+
+  useLayoutEffect(() => {
+    if (!open) {
+      offsetRef.current = { x: 0, y: 0 }
+      setOffset({ x: 0, y: 0 })
+      return
+    }
+
+    const panel = ref.current
+    if (!panel) return
+
+    const update = () => {
+      const rect = panel.getBoundingClientRect()
+      const current = offsetRef.current
+      const viewport = window.visualViewport
+      const viewportLeft = viewport?.offsetLeft ?? 0
+      const viewportTop = viewport?.offsetTop ?? 0
+      const viewportRight = viewportLeft + (viewport?.width ?? window.innerWidth)
+      const viewportBottom = viewportTop + (viewport?.height ?? window.innerHeight)
+      const baseLeft = rect.left - current.x
+      const baseRight = rect.right - current.x
+      const baseTop = rect.top - current.y
+      const baseBottom = rect.bottom - current.y
+
+      let x = 0
+      let y = 0
+      if (baseLeft < viewportLeft + gutter) x = viewportLeft + gutter - baseLeft
+      else if (baseRight > viewportRight - gutter) x = viewportRight - gutter - baseRight
+      if (baseTop < viewportTop + gutter) y = viewportTop + gutter - baseTop
+      else if (baseBottom > viewportBottom - gutter) y = viewportBottom - gutter - baseBottom
+
+      const next = { x: Math.round(x), y: Math.round(y) }
+      if (next.x === current.x && next.y === current.y) return
+      offsetRef.current = next
+      setOffset(next)
+    }
+
+    update()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update)
+    observer?.observe(panel)
+    window.addEventListener('resize', update)
+    window.visualViewport?.addEventListener('resize', update)
+    window.visualViewport?.addEventListener('scroll', update)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', update)
+      window.visualViewport?.removeEventListener('resize', update)
+      window.visualViewport?.removeEventListener('scroll', update)
+    }
+  }, [gutter, open])
+
+  return {
+    ref,
+    style: offset.x || offset.y ? { transform: `translate(${offset.x}px, ${offset.y}px)` } : undefined,
+  }
+}
+
 const MODE_DEFS: ModeDef[] = [
   { value: 'approval', labelKey: 'modeApproval', subKey: 'modeApprovalSub', risk: 'neutral', Icon: HandRaisedIcon },
   { value: 'plan', labelKey: 'modePlan', subKey: 'modePlanSub', risk: 'plan', Icon: ClipboardDocumentListIcon },
@@ -200,6 +275,10 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const addPopup = useViewportPopup(showAddMenu)
+  const modePopup = useViewportPopup(showModePicker)
+  const modelPopup = useViewportPopup(showModelPicker)
+  const effortPopup = useViewportPopup(showEffortPicker)
 
   // ─── Derived model catalog ────────────────────────────────────────────────
 
@@ -831,6 +910,8 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                 </button>
                 {showAddMenu && (
                   <div
+                    ref={addPopup.ref}
+                    style={addPopup.style}
                     className="jcode-product-composer-add-menu absolute bottom-full left-0 z-20 mb-1 min-w-[188px] rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-[var(--shadow-md)]"
                   >
                     <button
@@ -903,7 +984,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                   />
                 </button>
                 {showModePicker && (
-                  <div className="jcode-product-composer-mode-menu absolute bottom-full left-0 z-[var(--z-dropdown)] mb-1 w-[264px] rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-1 shadow-[var(--shadow-lg)]">
+                  <div ref={modePopup.ref} style={modePopup.style} className="jcode-product-composer-mode-menu absolute bottom-full left-0 z-[var(--z-dropdown)] mb-1 w-[264px] rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-1 shadow-[var(--shadow-lg)]">
                     {modeDefs.map((m) => {
                       const active = mode === m.value
                       return (
@@ -1075,7 +1156,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                     </button>
 
                     {showEffortPicker && (
-                      <div className="jcode-product-composer-effort-menu absolute bottom-full right-0 z-[var(--z-dropdown)] mb-1 flex min-w-[140px] flex-col gap-px rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-1 shadow-[var(--shadow-md)]">
+                      <div ref={effortPopup.ref} style={effortPopup.style} className="jcode-product-composer-effort-menu absolute bottom-full right-0 z-[var(--z-dropdown)] mb-1 flex min-w-[140px] flex-col gap-px rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-1 shadow-[var(--shadow-md)]">
                         <button
                           type="button"
                           onClick={() => pickEffort('')}
@@ -1106,7 +1187,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
 
                 {/* Model picker panel */}
                 {showModelPicker && (
-                  <div className="jcode-product-composer-model-menu absolute bottom-full right-0 z-[var(--z-dropdown)] mb-1 flex max-h-[min(540px,calc(100dvh-180px))] w-[min(290px,calc(100vw-32px))] flex-col overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)]">
+                  <div ref={modelPopup.ref} style={modelPopup.style} className="jcode-product-composer-model-menu absolute bottom-full right-0 z-[var(--z-dropdown)] mb-1 flex max-h-[min(540px,calc(100dvh-180px))] w-[min(290px,calc(100vw-32px))] flex-col overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)]">
                     {/* Search */}
                     <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-2 text-[var(--color-foreground)]">
                       <MagnifyingGlassIcon className="h-3.5 w-3.5" />

@@ -97,6 +97,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  vi.restoreAllMocks()
 })
 
 describe('slash menu', () => {
@@ -166,6 +167,16 @@ describe('goal armed', () => {
 })
 
 describe('workspace picker', () => {
+  it('raises the open workspace panel above the composer toolbar', () => {
+    const { container } = renderComposer(makeHost())
+
+    fireEvent.click(screen.getByText('project'))
+
+    const picker = container.querySelector('.ws-bar')
+    expect(picker?.classList.contains('is-open')).toBe(true)
+    expect(picker?.querySelector('.ws-panel')).toBeTruthy()
+  })
+
   it('offers the in-app folder browser when no native picker is available', async () => {
     const browseFolders = vi.fn(async () => ({
       current: '/tmp/project',
@@ -182,6 +193,18 @@ describe('workspace picker', () => {
 })
 
 describe('model picker', () => {
+  it('uses a bounded scrolling catalog on desktop', async () => {
+    const { container } = renderComposer(makeHost())
+
+    fireEvent.click(screen.getByText('GPT-4o'))
+    await waitFor(() => expect(screen.getByPlaceholderText('Filter models…')).toBeTruthy())
+
+    const menu = container.querySelector('.jcode-product-composer-model-menu')
+    const list = menu?.querySelector('.jcode-product-composer-model-list')
+    expect(menu).toBeTruthy()
+    expect(list).toBeTruthy()
+  })
+
   it('filters by search text and hides disabled models', async () => {
     const host = makeHost()
     renderComposer(host)
@@ -236,6 +259,43 @@ describe('compact picker anchors', () => {
 
     fireEvent.click(effortTrigger)
     expect(effortTrigger.closest('.jcode-product-composer-effort-picker')?.querySelector('.jcode-product-composer-effort-menu')).toBeTruthy()
+  })
+
+  it('nudges an edge-colliding model panel back inside the viewport', async () => {
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(360)
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(760)
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains('jcode-product-composer-model-menu')) {
+        return {
+          x: -64,
+          y: 100,
+          left: -64,
+          right: 226,
+          top: 100,
+          bottom: 460,
+          width: 290,
+          height: 360,
+          toJSON: () => ({}),
+        }
+      }
+      return {
+        x: 0,
+        y: 0,
+        left: 0,
+        right: 0,
+        top: 0,
+        bottom: 0,
+        width: 0,
+        height: 0,
+        toJSON: () => ({}),
+      }
+    })
+
+    const { container } = renderComposer(makeHost())
+    fireEvent.click(screen.getByRole('button', { name: 'GPT-4o' }))
+
+    const panel = container.querySelector<HTMLElement>('.jcode-product-composer-model-menu')
+    await waitFor(() => expect(panel?.style.transform).toBe('translate(76px, 0px)'))
   })
 })
 
