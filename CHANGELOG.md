@@ -34,6 +34,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Dead config fields that were parsed but never honored anywhere: `fallback_model` (top-level) and `compaction.summary_model`. Old config files still load (the keys are ignored), and note the keys are dropped from `config.json` the next time jcode saves settings. (`summary_model` was also mis-documented as a working feature — docs corrected.)
 
+## [0.11.1] - 2026-07-22
+
+### Added
+- **jcloud device relay — remote-control jcode from anywhere.** A new `internal/cloud/` package implements an outbound-only WebSocket relay to jcloud: `jcode login` authenticates via device-code flow, the connector auto-connects on `jcode web` start, and remote clients (mobile/desktop) can browse workspaces, open sessions, send messages, and arm goals through the relay. All relay traffic is end-to-end encrypted (AES-256-GCM envelopes, P-256 ECIES key exchange, BIP39 recovery phrase) — the relay server never sees plaintext. Device identity is stored in the OS keyring (macOS Keychain / Windows Credential Manager / libsecret). New `jcode cloud status|disconnect|guide` CLI commands and `docs/cloud.md` user guide.
+- **Cloud pairing with desktop approval.** Remote devices pair by requesting access; the desktop shows a pairing inbox (web UI badge + settings panel) where the user approves or rejects. QR-code pairing was removed in favor of the desktop approval flow. Per-session cloud sync is opt-in via a toggle in the chat header.
+- **Cloud settings UI.** Settings is now a first-class full-page view (renamed from `SettingsDialog`) with a dedicated Cloud tab: login/logout, device list, pairing management, E2EE status, and sync preferences. A `CloudBadge` in the sidebar shows relay connection state at a glance.
+- **Product composer extracted to `jcode-ui/product`.** `ChatInput`, `WorkspacePicker`, `BranchPicker`, `GoalBanner`, and `drafts` moved from `web/src/components` into `packages/jcode-ui/src/product/` as a host-agnostic composer library. Hosts inject a `ProductComposerHost` (state + actions + strings + icons); the web adapter is `web/src/app/composerHost.ts`. New `ProviderIcon` component and full i18n string tables (5 languages). Package gains vitest coverage.
+- **Project-level last-activity timestamp.** The sidebar persists per-project last-used time so projects sort by recency across restarts.
+- **`JCODE_NO_BROWSER=1`** env var disables browser auto-open during `jcode login` (for headless/SSH environments).
+
+### Changed
+- **One-shot session resume.** Conversation switching is now a single round trip (`GET /api/sessions/:id/resume`) instead of the previous multi-request dance, cutting perceived switch latency significantly.
+- **Model and mode switches are idempotent.** Re-selecting the current model or mode no longer triggers redundant state resets or UI flicker.
+- Relay capabilities report the actual E2EE state at register time; the cloud connector reports `full_access` rejection when the mode ceiling disallows it.
+
+### Fixed
+- **Composer popup stacking and viewport overflow.** Popups (workspace picker, branch picker, goal banner) now anchor correctly in compact mode, stay within the viewport, and stack with proper z-index ordering.
+- **Deleting the open conversation** now lands on the welcome screen with a fresh session instead of showing a stale/deleted chat. Deleting a conversation while the agent is running is blocked to prevent state corruption.
+
 ## [0.5.1] - 2026-06-13
 
 ### Added
