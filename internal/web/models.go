@@ -114,6 +114,16 @@ func (s *Server) handleSwitchModel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and model are required"})
 		return
 	}
+	// Treat selecting the active model as a no-op. Cloud composers include a
+	// model reference while applying model-scoped effort, and older clients may
+	// resend their visible selection on every message. Rebuilding the agent and
+	// broadcasting model_changed in that case only creates duplicate timeline
+	// rows and unnecessary config writes.
+	curProvider, curModel, _ := eng.modelSnapshot()
+	if curProvider == req.Provider && curModel == req.Model {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
 
 	// Rebuild THIS task's agent for the new model and swap it in under eng.emu
 	// (the same lock submitMessage uses to read the agent). Keep history.
@@ -184,6 +194,13 @@ func (s *Server) handleSwitchMode(w http.ResponseWriter, r *http.Request) {
 	eng := s.activeEngine()
 	if eng == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no active task"})
+		return
+	}
+	// Switching to the already-active mode is idempotent. In particular this
+	// prevents a restored cloud session from emitting mode_changed again when
+	// its first post-reconnect message carries the saved mode.
+	if eng.curMode() == sm.String() {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "mode": sm.String()})
 		return
 	}
 	// No running gate: applyModeSwitch writes eng.agent under eng.emu, the same

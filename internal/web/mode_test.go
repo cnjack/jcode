@@ -108,6 +108,18 @@ func TestWebSwitchModeRejectsRemovedAutopilotMode(t *testing.T) {
 	}
 }
 
+func TestWebSwitchModeSameValueIsNoOp(t *testing.T) {
+	var rebuilt []bool
+	s := newModeTestServer(&rebuilt)
+	rec := postMode(t, s, `{"mode":"approval"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("same mode: code=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if len(rebuilt) != 0 {
+		t.Fatalf("same mode must not rebuild the agent, got %v", rebuilt)
+	}
+}
+
 // TestWebHandleApprovalAllowAllSyncsMode covers the user-facing contract: when
 // a user clicks "Allow all" on an approval card, the chat composer's selector
 // must flip from "Ask for approval" to "Full access" for the rest of the
