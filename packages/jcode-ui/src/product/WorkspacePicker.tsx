@@ -186,7 +186,7 @@ export function WorkspacePicker({ host, placement = 'top' }: { host: ProductComp
   }
 
   return (
-    <div ref={rootRef} className="ws-bar" style={{ position: 'relative' }}>
+    <div ref={rootRef} className={`ws-bar${open ? ' is-open' : ''}`} style={{ position: 'relative' }}>
       <button
         type="button"
         disabled={isRunning || switching}
@@ -310,6 +310,11 @@ const WS_CSS = `
   gap: 6px;
   min-width: 0;
 }
+.ws-bar.is-open {
+  /* Cloud elevates the later composer toolbar. Raise the whole open picker
+     one semantic layer so toolbar controls cannot paint through its panel. */
+  z-index: calc(var(--z-dropdown, 40) + 1);
+}
 .ws-pill {
   display: inline-flex;
   align-items: center;
@@ -349,7 +354,7 @@ const WS_CSS = `
 .ws-panel {
   position: absolute;
   left: 0;
-  z-index: 40;
+  z-index: var(--z-dropdown, 40);
   width: 320px;
   max-width: 84vw;
   max-height: min(54vh, 360px);

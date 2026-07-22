@@ -1187,7 +1187,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
 
                 {/* Model picker panel */}
                 {showModelPicker && (
-                  <div ref={modelPopup.ref} style={modelPopup.style} className="jcode-product-composer-model-menu absolute bottom-full right-0 z-[var(--z-dropdown)] mb-1 flex max-h-[min(540px,calc(100dvh-180px))] w-[min(290px,calc(100vw-32px))] flex-col overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)]">
+                  <div ref={modelPopup.ref} style={modelPopup.style} className="jcode-product-composer-model-menu absolute bottom-full right-0 z-[var(--z-dropdown)] mb-1 flex w-[min(290px,calc(100vw-32px))] flex-col overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)]">
                     {/* Search */}
                     <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-2 text-[var(--color-foreground)]">
                       <MagnifyingGlassIcon className="h-3.5 w-3.5" />
@@ -1224,7 +1224,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                     )}
 
                     {/* List */}
-                    <div className="flex-1 overflow-y-auto p-1">
+                    <div className="jcode-product-composer-model-list flex-1 overflow-y-auto p-1">
                       {/* Favorites */}
                       {favoriteModelRefs.length > 0 && (
                         <>
