@@ -138,8 +138,8 @@ func TestRunLoginEndToEnd(t *testing.T) {
 		t.Fatalf("revoke called %d times, want 1", revoked)
 	}
 	creds, err = cloud.LoadCredentials()
-	if err != nil || creds != nil {
-		t.Fatalf("LoadCredentials() after logout = %+v, %v; want nil, nil", creds, err)
+	if err != nil || creds == nil || creds.DeviceToken != "" || creds.Fingerprint != fpSource {
+		t.Fatalf("LoadCredentials() after logout = %+v, %v; want signed-out identity", creds, err)
 	}
 	raw, err = readRawConfig(t)
 	if err != nil {

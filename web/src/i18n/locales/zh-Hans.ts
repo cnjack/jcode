@@ -1077,6 +1077,8 @@ export default {
     loginExpired: '验证码已过期，请重试。',
     retry: '重试',
     logout: '退出登录',
+    forgetDevice: '退出并忘记设备',
+    forgetConfirm: '确定要删除此设备身份和加密密钥吗？其他客户端需要重新配对。',
     pairingRequests: '配对请求',
     pairingRequest: '新的配对请求：{label}',
     approve: '批准',

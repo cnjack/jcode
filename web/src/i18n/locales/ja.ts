@@ -1051,6 +1051,8 @@ export default {
     loginExpired: 'コードの有効期限が切れました。もう一度お試しください。',
     retry: '再試行',
     logout: 'ログアウト',
+    forgetDevice: 'ログアウトしてデバイスを削除',
+    forgetConfirm: 'このデバイスの ID と暗号化キーを削除しますか？他のクライアントは再ペアリングが必要です。',
     pairingRequests: 'ペアリングリクエスト',
     pairingRequest: '新しいペアリングリクエスト：{label}',
     approve: '承認',

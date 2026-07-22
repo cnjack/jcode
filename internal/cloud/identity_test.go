@@ -2,8 +2,10 @@ package cloud
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -37,6 +39,55 @@ func TestCredentialsRoundTrip(t *testing.T) {
 
 	assertPermission(t, filepath.Join(home, ".jcode"), 0o700)
 	assertPermission(t, filepath.Join(home, ".jcode", credentialsFile), 0o600)
+	metadata, err := os.ReadFile(filepath.Join(home, ".jcode", credentialsFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(metadata) == "" || containsAny(string(metadata), "dev-token-abc", "cHJpdmtleQ==") {
+		t.Fatalf("cloud.json contains secret material: %s", metadata)
+	}
+}
+
+func TestLoadCredentialsMigratesLegacySecrets(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".jcode")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := Credentials{
+		CloudURL: "https://cloud.j-code.net", DeviceID: "device-legacy",
+		DeviceToken: "legacy-token", PrivateKey: "legacy-private", CEK: "legacy-cek",
+		PublicKey: "legacy-public", KeyGen: 3,
+	}
+	data, _ := json.Marshal(&legacy)
+	if err := os.WriteFile(filepath.Join(dir, credentialsFile), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := LoadCredentials()
+	if err != nil || got == nil {
+		t.Fatalf("LoadCredentials() = %+v, %v", got, err)
+	}
+	if got.DeviceToken != legacy.DeviceToken || got.PrivateKey != legacy.PrivateKey || got.CEK != legacy.CEK {
+		t.Fatalf("migrated secrets = %+v", got)
+	}
+	metadata, _ := os.ReadFile(filepath.Join(dir, credentialsFile))
+	if containsAny(string(metadata), legacy.DeviceToken, legacy.PrivateKey, legacy.CEK) {
+		t.Fatalf("legacy secrets remained in cloud.json: %s", metadata)
+	}
+	if _, err := os.Stat(filepath.Join(dir, secretFile)); err != nil {
+		t.Fatalf("migrated secret store missing: %v", err)
+	}
+}
+
+func containsAny(value string, needles ...string) bool {
+	for _, needle := range needles {
+		if needle != "" && strings.Contains(value, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestLoadCredentialsMissingMeansLoggedOut(t *testing.T) {

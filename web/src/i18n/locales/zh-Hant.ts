@@ -1045,6 +1045,8 @@ export default {
     loginExpired: '驗證碼已過期，請重試。',
     retry: '重試',
     logout: '登出',
+    forgetDevice: '登出並忘記裝置',
+    forgetConfirm: '確定要刪除此裝置身分和加密金鑰嗎？其他用戶端需要重新配對。',
     pairingRequests: '配對請求',
     pairingRequest: '新的配對請求：{label}',
     approve: '批准',

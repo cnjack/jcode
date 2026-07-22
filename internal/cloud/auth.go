@@ -11,13 +11,22 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 )
 
-// Logout signs the device out of jcloud: the device token is revoked remotely
-// (best effort — a network failure or a missing server endpoint must not trap
-// the local credentials), the credentials file and the in-process CEK cache
-// are cleared, and config.cloud is updated (enabled=false, URL and user
-// preferences preserved). warnf receives non-fatal warnings (revoke/config
-// failures); it may be nil. A missing credentials file is a no-op.
+// Logout signs the device out of jcloud while preserving its encryption
+// identity. Only the revocable access token is cleared; the device key pair,
+// CEK and fingerprint remain in the system keyring so the next login can
+// resume without breaking paired browsers/mobile clients.
 func Logout(ctx context.Context, warnf func(format string, args ...any)) error {
+	return logout(ctx, false, warnf)
+}
+
+// Forget signs out and removes the full local identity. This is intentionally
+// separate from Logout because forgetting keys requires other clients to pair
+// with the device again.
+func Forget(ctx context.Context, warnf func(format string, args ...any)) error {
+	return logout(ctx, true, warnf)
+}
+
+func logout(ctx context.Context, forget bool, warnf func(format string, args ...any)) error {
 	warn := func(format string, args ...any) {
 		if warnf != nil {
 			warnf(format, args...)
@@ -31,13 +40,22 @@ func Logout(ctx context.Context, warnf func(format string, args ...any)) error {
 		return nil // not logged in
 	}
 
-	client := NewClient(creds.CloudURL)
-	if err := client.RevokeDevice(ctx, creds.DeviceToken); err != nil {
-		warn("failed to revoke device token on %s: %v — clearing local credentials anyway", creds.CloudURL, err)
+	if creds.DeviceToken != "" {
+		client := NewClient(creds.CloudURL)
+		if err := client.RevokeDevice(ctx, creds.DeviceToken); err != nil {
+			warn("failed to revoke device token on %s: %v — signing out locally anyway", creds.CloudURL, err)
+		}
 	}
 
-	if err := DeleteCredentials(); err != nil {
-		return err
+	if forget {
+		if err := DeleteCredentials(); err != nil {
+			return err
+		}
+	} else {
+		creds.DeviceToken = ""
+		if err := SaveCredentials(creds); err != nil {
+			return err
+		}
 	}
 	ResetCEKCache()
 

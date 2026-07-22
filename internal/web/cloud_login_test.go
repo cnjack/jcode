@@ -192,8 +192,8 @@ func TestCloudLoginFlowSuccessAndLogout(t *testing.T) {
 	if st2.LoggedIn {
 		t.Fatalf("status after logout = %+v, want logged_in=false", st2)
 	}
-	if creds, _ := cloud.LoadCredentials(); creds != nil {
-		t.Fatalf("credentials after logout = %+v, want nil", creds)
+	if creds, _ := cloud.LoadCredentials(); creds == nil || creds.DeviceToken != "" || creds.PrivateKey == "" {
+		t.Fatalf("credentials after logout = %+v, want preserved signed-out identity", creds)
 	}
 	if atomic.LoadInt32(&st.revokeCalls) != 1 {
 		t.Fatalf("revoke calls = %d, want 1", st.revokeCalls)

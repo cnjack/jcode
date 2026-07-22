@@ -27,7 +27,12 @@ require (
 	tinygo.org/x/bluetooth v0.15.0
 )
 
-require github.com/tyler-smith/go-bip39 v1.1.0
+require (
+	github.com/tyler-smith/go-bip39 v1.1.0
+	github.com/zalando/go-keyring v0.2.8
+)
+
+require github.com/danieljoos/wincred v1.2.3 // indirect
 
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
@@ -68,7 +73,7 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
-	github.com/godbus/dbus/v5 v5.1.0 // indirect
+	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/google/pprof v0.0.0-20240727154555-813a5fbdbec8 // indirect
 	github.com/goph/emperror v0.17.2 // indirect

@@ -308,13 +308,14 @@ export function CloudTab() {
     }
   }
 
-  async function logout() {
+  async function logout(forget = false) {
     if (logoutBusy) return
+    if (forget && !window.confirm(t('cloud.forgetConfirm'))) return
     setLogoutBusy(true)
     setActionError(null)
     try {
       const previousCloudURL = status?.cloud_url
-      setStatus(await api.cloudLogout())
+      setStatus(forget ? await api.cloudForget() : await api.cloudLogout())
       setPairings([])
       setOffer(null)
       setLoginPanel(null)
@@ -516,11 +517,19 @@ export function CloudTab() {
           </div>
 
           {/* Logout. */}
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
             <button
               type="button"
               disabled={logoutBusy}
-              onClick={() => void logout()}
+              onClick={() => void logout(true)}
+              className={`${BTN_GHOST} ${BTN_SM} text-[var(--color-muted-foreground)] hover:text-[var(--color-destructive)]`}
+            >
+              {t('cloud.forgetDevice')}
+            </button>
+            <button
+              type="button"
+              disabled={logoutBusy}
+              onClick={() => void logout(false)}
               className={`${BTN_GHOST} ${BTN_SM} text-[var(--color-muted-foreground)] hover:text-[var(--color-destructive)]`}
             >
               <ArrowRightOnRectangleIcon className="h-3.5 w-3.5" />

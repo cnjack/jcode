@@ -18,8 +18,9 @@ import (
 
 const credentialsFile = "cloud.json"
 
-// Credentials is the device identity persisted at ~/.jcode/cloud.json. A
-// missing file means "not logged in" and is never an error.
+// Credentials is the device identity. Non-sensitive metadata is persisted at
+// ~/.jcode/cloud.json; DeviceToken, PrivateKey and CEK live in the operating
+// system keyring. A missing metadata file means "not configured".
 type Credentials struct {
 	CloudURL    string `json:"cloud_url"`
 	DeviceID    string `json:"device_id"`
@@ -83,6 +84,25 @@ func LoadCredentials() (*Credentials, error) {
 	if err := json.Unmarshal(data, &creds); err != nil {
 		return nil, fmt.Errorf("failed to parse credentials file %s: %w", path, err)
 	}
+
+	// Migrate pre-keyring credentials in place. Save the secrets first and only
+	// then rewrite cloud.json, so a keyring failure can never destroy a working
+	// legacy login.
+	legacySecrets := secretsFromCredentials(&creds)
+	secrets, found, secretErr := loadCredentialSecrets()
+	if !found && (legacySecrets.DeviceToken != "" || legacySecrets.PrivateKey != "" || legacySecrets.CEK != "") {
+		if secretErr == nil {
+			if err := saveCredentialSecrets(legacySecrets); err == nil {
+				secrets, found = legacySecrets, true
+				_ = writeCredentialMetadata(&creds, path)
+			}
+		}
+	}
+	if found {
+		applyCredentialSecrets(&creds, secrets)
+	} else if secretErr != nil && legacySecrets.DeviceToken == "" && legacySecrets.PrivateKey == "" && legacySecrets.CEK == "" {
+		return nil, secretErr
+	}
 	return &creds, nil
 }
 
@@ -94,6 +114,13 @@ func SaveCredentials(creds *Credentials) error {
 	if err != nil {
 		return err
 	}
+	if err := saveCredentialSecrets(secretsFromCredentials(creds)); err != nil {
+		return err
+	}
+	return writeCredentialMetadata(creds, path)
+}
+
+func writeCredentialMetadata(creds *Credentials, path string) error {
 
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -103,7 +130,11 @@ func SaveCredentials(creds *Credentials) error {
 		return fmt.Errorf("failed to secure config directory %s: %w", dir, err)
 	}
 
-	data, err := json.MarshalIndent(creds, "", "  ")
+	metadata := *creds
+	metadata.DeviceToken = ""
+	metadata.PrivateKey = ""
+	metadata.CEK = ""
+	data, err := json.MarshalIndent(&metadata, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal credentials: %w", err)
 	}
@@ -143,8 +174,8 @@ func SaveCredentials(creds *Credentials) error {
 	return nil
 }
 
-// DeleteCredentials removes ~/.jcode/cloud.json. A missing file is not an
-// error (already logged out).
+// DeleteCredentials forgets the complete local device identity, including
+// secrets in the system keyring. A missing file/key is not an error.
 func DeleteCredentials() error {
 	path, err := CredentialsPath()
 	if err != nil {
@@ -153,5 +184,5 @@ func DeleteCredentials() error {
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("failed to remove credentials file %s: %w", path, err)
 	}
-	return nil
+	return deleteCredentialSecrets()
 }

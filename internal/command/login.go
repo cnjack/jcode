@@ -40,13 +40,16 @@ func NewLoginCmd() *cobra.Command {
 // NewLogoutCmd returns the `jcode logout` command: revoke the device token
 // remotely (best effort) and clear local credentials.
 func NewLogoutCmd() *cobra.Command {
-	return &cobra.Command{
+	var forget bool
+	cmd := &cobra.Command{
 		Use:   "logout",
-		Short: "Sign out of jcloud and remove local device credentials",
+		Short: "Sign out of jcloud while preserving the device identity",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runLogout(cmd.Context())
+			return runLogout(cmd.Context(), forget)
 		},
 	}
+	cmd.Flags().BoolVar(&forget, "forget", false, "also remove the device identity and encryption keys")
+	return cmd
 }
 
 // openBrowser opens url in the system browser. It is a variable so tests can
@@ -73,9 +76,10 @@ func runLogin(ctx context.Context, rawURL, name string) error {
 	if err != nil {
 		return err
 	}
-	if existing, err := cloud.LoadCredentials(); err != nil {
+	existing, err := cloud.LoadCredentials()
+	if err != nil {
 		return err
-	} else if existing != nil {
+	} else if existing != nil && existing.DeviceToken != "" {
 		fmt.Printf("Already logged in to %s as device %q (%s).\n", existing.CloudURL, existing.DeviceName, existing.DeviceID)
 		fmt.Println("Run `jcode logout` first to sign in again.")
 		return nil
@@ -92,9 +96,15 @@ func runLogin(ctx context.Context, rawURL, name string) error {
 	// M16: resolve the stable machine fingerprint up front; its sha256 rides
 	// the token poll (login dedup) and the register call, and the SOURCE is
 	// persisted into cloud.json so it never changes once set.
-	fpSource, err := cloud.ResolveFingerprintSource()
-	if err != nil {
-		return fmt.Errorf("failed to resolve the machine fingerprint: %w", err)
+	fpSource := ""
+	if existing != nil && existing.CloudURL == baseURL {
+		fpSource = existing.Fingerprint
+	}
+	if fpSource == "" {
+		fpSource, err = cloud.ResolveFingerprintSource()
+		if err != nil {
+			return fmt.Errorf("failed to resolve the machine fingerprint: %w", err)
+		}
 	}
 	fpHash := cloud.FingerprintHash(fpSource)
 
@@ -133,9 +143,15 @@ func runLogin(ctx context.Context, rawURL, name string) error {
 		}
 	}
 
-	pubKey, privKey, err := cloud.GenerateIdentityKeyPair()
-	if err != nil {
-		return err
+	pubKey, privKey := "", ""
+	if existing != nil && existing.CloudURL == baseURL {
+		pubKey, privKey = existing.PublicKey, existing.PrivateKey
+	}
+	if pubKey == "" || privKey == "" {
+		pubKey, privKey, err = cloud.GenerateIdentityKeyPair()
+		if err != nil {
+			return err
+		}
 	}
 
 	if err := client.RegisterDevice(ctx, tok.AccessToken, cloud.RegisterDeviceRequest{
@@ -158,6 +174,12 @@ func runLogin(ctx context.Context, rawURL, name string) error {
 		KeyGen:      1,
 		Fingerprint: fpSource,
 	}
+	if existing != nil && existing.CloudURL == baseURL {
+		creds.CEK = existing.CEK
+		if existing.KeyGen > 0 {
+			creds.KeyGen = existing.KeyGen
+		}
+	}
 	if err := cloud.SaveCredentials(creds); err != nil {
 		return err
 	}
@@ -175,7 +197,8 @@ func runLogin(ctx context.Context, rawURL, name string) error {
 	return nil
 }
 
-func runLogout(ctx context.Context) error {
+func runLogout(ctx context.Context, forgetOption ...bool) error {
+	forget := len(forgetOption) > 0 && forgetOption[0]
 	creds, err := cloud.LoadCredentials()
 	if err != nil {
 		return err
@@ -185,13 +208,21 @@ func runLogout(ctx context.Context) error {
 		return nil
 	}
 
-	if err := cloud.Logout(ctx, func(format string, args ...any) {
+	logout := cloud.Logout
+	if forget {
+		logout = cloud.Forget
+	}
+	if err := logout(ctx, func(format string, args ...any) {
 		fmt.Printf("Warning: "+format+"\n", args...)
 	}); err != nil {
 		return err
 	}
 
-	fmt.Println("Logged out. Local device credentials removed.")
+	if forget {
+		fmt.Println("Logged out. Local device identity and encryption keys removed.")
+	} else {
+		fmt.Println("Logged out. Device identity preserved for the next login.")
+	}
 	return nil
 }
 
@@ -200,7 +231,7 @@ func runLoginStatus() error {
 	if err != nil {
 		return err
 	}
-	if creds == nil {
+	if creds == nil || creds.DeviceToken == "" {
 		fmt.Println("Not logged in. Run `jcode login` to sign in.")
 		return nil
 	}

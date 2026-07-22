@@ -1050,6 +1050,8 @@ export default {
     loginExpired: '코드가 만료되었습니다. 다시 시도하세요.',
     retry: '다시 시도',
     logout: '로그아웃',
+    forgetDevice: '로그아웃하고 기기 삭제',
+    forgetConfirm: '이 기기 ID와 암호화 키를 삭제할까요? 다른 클라이언트는 다시 페어링해야 합니다.',
     pairingRequests: '페어링 요청',
     pairingRequest: '새 페어링 요청: {label}',
     approve: '승인',

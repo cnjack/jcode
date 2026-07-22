@@ -426,6 +426,7 @@ export const api = {
   cloudLoginStatus: () => request<CloudLoginStatusResponse>('/api/cloud/login/status'),
   // Logout returns the fresh (logged-out) status.
   cloudLogout: () => request<CloudStatusResponse>('/api/cloud/logout', { method: 'POST' }),
+  cloudForget: () => request<CloudStatusResponse>('/api/cloud/forget', { method: 'POST' }),
 
   // Pairing approvals (pending requests parked by the relay connector).
   cloudPairings: () => request<CloudPairingsResponse>('/api/cloud/pairings'),

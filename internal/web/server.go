@@ -429,6 +429,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/cloud/login", s.handleCloudLogin)
 	mux.HandleFunc("GET /api/cloud/login/status", s.handleCloudLoginStatus)
 	mux.HandleFunc("POST /api/cloud/logout", s.handleCloudLogout)
+	mux.HandleFunc("POST /api/cloud/forget", s.handleCloudForget)
 	mux.HandleFunc("GET /api/cloud/pairings", s.handleCloudPairings)
 	mux.HandleFunc("POST /api/cloud/pairings/{id}/approve", s.handleCloudPairingApprove)
 	mux.HandleFunc("POST /api/cloud/pairings/{id}/deny", s.handleCloudPairingDeny)

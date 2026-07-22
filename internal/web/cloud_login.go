@@ -170,10 +170,21 @@ func (f *cloudLoginFlow) start(parentCtx context.Context, rawURL string) (cloudL
 func (f *cloudLoginFlow) pollAndFinish(ctx context.Context, client *cloud.Client, baseURL, deviceCode string, interval, expiresIn time.Duration) {
 	// M16: the machine fingerprint hash rides the poll (login dedup) and the
 	// register call; the source is persisted into cloud.json.
-	fpSource, err := cloud.ResolveFingerprintSource()
+	existing, err := cloud.LoadCredentials()
 	if err != nil {
-		f.fail(fmt.Errorf("failed to resolve the machine fingerprint: %w", err))
+		f.fail(err)
 		return
+	}
+	fpSource := ""
+	if existing != nil && existing.CloudURL == baseURL {
+		fpSource = existing.Fingerprint
+	}
+	if fpSource == "" {
+		fpSource, err = cloud.ResolveFingerprintSource()
+		if err != nil {
+			f.fail(fmt.Errorf("failed to resolve the machine fingerprint: %w", err))
+			return
+		}
 	}
 	fpHash := cloud.FingerprintHash(fpSource)
 
@@ -183,10 +194,16 @@ func (f *cloudLoginFlow) pollAndFinish(ctx context.Context, client *cloud.Client
 		return
 	}
 
-	pubKey, privKey, err := cloud.GenerateIdentityKeyPair()
-	if err != nil {
-		f.fail(err)
-		return
+	pubKey, privKey := "", ""
+	if existing != nil && existing.CloudURL == baseURL {
+		pubKey, privKey = existing.PublicKey, existing.PrivateKey
+	}
+	if pubKey == "" || privKey == "" {
+		pubKey, privKey, err = cloud.GenerateIdentityKeyPair()
+		if err != nil {
+			f.fail(err)
+			return
+		}
 	}
 	hostname, _ := os.Hostname()
 	name := hostname
@@ -203,7 +220,7 @@ func (f *cloudLoginFlow) pollAndFinish(ctx context.Context, client *cloud.Client
 		f.fail(err)
 		return
 	}
-	if err := cloud.SaveCredentials(&cloud.Credentials{
+	creds := &cloud.Credentials{
 		CloudURL:    baseURL,
 		DeviceID:    tok.DeviceID,
 		DeviceToken: tok.AccessToken,
@@ -212,7 +229,14 @@ func (f *cloudLoginFlow) pollAndFinish(ctx context.Context, client *cloud.Client
 		PrivateKey:  privKey,
 		KeyGen:      1,
 		Fingerprint: fpSource,
-	}); err != nil {
+	}
+	if existing != nil && existing.CloudURL == baseURL {
+		creds.CEK = existing.CEK
+		if existing.KeyGen > 0 {
+			creds.KeyGen = existing.KeyGen
+		}
+	}
+	if err := cloud.SaveCredentials(creds); err != nil {
 		f.fail(err)
 		return
 	}
@@ -318,6 +342,22 @@ func (s *Server) handleCloudLoginStatus(w http.ResponseWriter, _ *http.Request) 
 // the fresh status so the badge updates in one round trip.
 func (s *Server) handleCloudLogout(w http.ResponseWriter, r *http.Request) {
 	if err := cloud.Logout(r.Context(), func(format string, args ...any) {
+		config.Logger().Printf("[cloud] "+format, args...)
+	}); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if s.cloudSupervisor != nil {
+		s.cloudSupervisor.SyncCredentials()
+	}
+	s.loginFlow().reset()
+	writeJSON(w, http.StatusOK, s.cloudStatus())
+}
+
+// handleCloudForget serves POST /api/cloud/forget: revoke the token and erase
+// the complete local device identity. Other clients will need to pair again.
+func (s *Server) handleCloudForget(w http.ResponseWriter, r *http.Request) {
+	if err := cloud.Forget(r.Context(), func(format string, args ...any) {
 		config.Logger().Printf("[cloud] "+format, args...)
 	}); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

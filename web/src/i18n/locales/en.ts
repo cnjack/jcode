@@ -1103,6 +1103,8 @@ export default {
     loginExpired: 'The code expired. Please try again.',
     retry: 'Retry',
     logout: 'Log out',
+    forgetDevice: 'Log out and forget device',
+    forgetConfirm: 'Forget this device identity and its encryption keys? Other clients will need to pair again.',
     pairingRequests: 'Pairing requests',
     pairingRequest: 'New pairing request: {label}',
     approve: 'Approve',
