@@ -267,6 +267,21 @@
 }
 
 /* ─── ModelSelector ───────────────────────────────────────────────────────── */
+/* Product composer model catalog: keep the panel within the desktop viewport
+ * and make only the catalog body scroll. The vh declaration is a WebKit-safe
+ * fallback; dvh follows the visual viewport on mobile and when browser chrome
+ * changes height. Hosts may lower this cap after this stylesheet loads. */
+.jcode-product-composer-model-menu {
+  max-height: min(26.25rem, calc(100vh - 11.25rem));
+  max-height: min(26.25rem, calc(100dvh - 11.25rem));
+}
+
+.jcode-product-composer-model-list {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .jcode-model-selector {
   position: relative;
   display: inline-flex;
