@@ -872,20 +872,21 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
               </div>
 
               {/* Mode picker */}
-              <div className="relative">
+              <div className="jcode-product-composer-picker-anchor jcode-product-composer-mode-picker relative">
                 <button
                   type="button"
                   aria-expanded={showModePicker}
+                  aria-label={modeLabel(strings, mode)}
                   title={modeRestricted ? strings.modeCeilingHint : undefined}
                   onClick={(e: ReactMouseEvent) => { e.stopPropagation(); openMode() }}
-                  className="inline-flex h-7 items-center gap-[7px] rounded-[var(--radius-lg)] border border-transparent bg-transparent px-2 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
+                  className="jcode-product-composer-picker-trigger inline-flex h-7 items-center gap-[7px] rounded-[var(--radius-lg)] border border-transparent bg-transparent px-2 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
                   style={{ paddingLeft: 6 }}
                 >
                   <span className="grid h-[18px] w-[18px] shrink-0 place-items-center text-[var(--color-primary)]">
                     <currentModeDef.Icon className="h-3.5 w-3.5" />
                   </span>
                   <span
-                    className={
+                    className={`jcode-product-composer-picker-label ${
                       mode === 'full_access'
                         ? 'text-[color-mix(in_srgb,var(--color-error-fg)_72%,var(--color-background))]'
                         : mode === 'auto'
@@ -893,16 +894,16 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                           : mode === 'plan'
                             ? 'text-[var(--color-success)]'
                             : ''
-                    }
+                    }`}
                   >
                     {modeLabel(strings, mode)}
                   </span>
                   <ChevronDownIcon
-                    className={`h-3 w-3 opacity-55 transition-transform ${showModePicker ? 'rotate-180' : ''}`}
+                    className={`jcode-product-composer-picker-chevron h-3 w-3 opacity-55 transition-transform ${showModePicker ? 'rotate-180' : ''}`}
                   />
                 </button>
                 {showModePicker && (
-                  <div className="absolute bottom-full left-0 z-[var(--z-dropdown)] mb-1 w-[264px] rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-1 shadow-[var(--shadow-lg)]">
+                  <div className="jcode-product-composer-mode-menu absolute bottom-full left-0 z-[var(--z-dropdown)] mb-1 w-[264px] rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-1 shadow-[var(--shadow-lg)]">
                     {modeDefs.map((m) => {
                       const active = mode === m.value
                       return (
@@ -1035,63 +1036,71 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
               )}
 
               {/* Model picker + effort picker */}
-              <div className="relative flex items-center gap-1">
+              <div className="jcode-product-composer-picker-anchor jcode-product-composer-model-picker relative flex items-center gap-1">
                 <button
                   type="button"
                   aria-expanded={showModelPicker}
+                  aria-label={modelName ? getModelDisplayName(providerName, modelName) : 'model'}
                   onClick={(e: ReactMouseEvent) => { e.stopPropagation(); openModel() }}
-                  className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-lg)] border border-transparent bg-transparent px-2 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
+                  className="jcode-product-composer-picker-trigger inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-lg)] border border-transparent bg-transparent px-2 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
                 >
                   {providerName && <ProviderIcon provider={providerName} custom={providerInfoFor(providerName)?.custom} size={16} resolveIcon={host.resolveProviderIcon} />}
-                  {modelName ? getModelDisplayName(providerName, modelName) : 'model'}
+                  {!providerName && <SquaresPlusIcon className="h-4 w-4" />}
+                  <span className="jcode-product-composer-picker-label">
+                    {modelName ? getModelDisplayName(providerName, modelName) : 'model'}
+                  </span>
                   <ChevronDownIcon
-                    className={`h-3 w-3 opacity-55 transition-transform ${showModelPicker ? 'rotate-180' : ''}`}
+                    className={`jcode-product-composer-picker-chevron h-3 w-3 opacity-55 transition-transform ${showModelPicker ? 'rotate-180' : ''}`}
                   />
                 </button>
 
                 {/* Effort picker */}
                 {showEffortControl && (
-                  <button
-                    type="button"
-                    aria-expanded={showEffortPicker}
-                    title={strings.effortTitle}
-                    onClick={(e: ReactMouseEvent) => { e.stopPropagation(); openEffort() }}
-                    className={`inline-flex h-7 items-center gap-1 rounded-[var(--radius-lg)] border border-transparent bg-transparent px-2 text-xs font-medium transition-colors hover:bg-[var(--color-muted)] ${
-                      currentEffort ? 'text-[var(--color-primary)]' : 'text-[var(--color-foreground)]'
-                    }`}
-                  >
-                    <SparklesIcon className="h-3 w-3" />
-                    <span>{currentEffort || strings.effort}</span>
-                    <ChevronDownIcon
-                      className={`effort-chev h-3 w-3 opacity-55 transition-transform ${showEffortPicker ? 'rotate-180' : ''}`}
-                    />
-                  </button>
-                )}
-                {showEffortControl && showEffortPicker && (
-                  <div className="absolute bottom-full right-0 z-[var(--z-dropdown)] mb-1 flex min-w-[140px] flex-col gap-px rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-1 shadow-[var(--shadow-md)]">
+                  <div className="jcode-product-composer-picker-anchor jcode-product-composer-effort-picker relative">
                     <button
                       type="button"
-                      onClick={() => pickEffort('')}
-                      className={`flex w-full items-center justify-between gap-2 rounded-[var(--radius-sm)] border-none bg-transparent px-2 py-1.5 text-xs text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)] ${
-                        !currentEffort ? 'font-semibold text-[var(--color-primary)]' : ''
+                      aria-expanded={showEffortPicker}
+                      aria-label={`${strings.effort}: ${currentEffort || strings.effortDefault}`}
+                      title={strings.effortTitle}
+                      onClick={(e: ReactMouseEvent) => { e.stopPropagation(); openEffort() }}
+                      className={`jcode-product-composer-picker-trigger inline-flex h-7 items-center gap-1 rounded-[var(--radius-lg)] border border-transparent bg-transparent px-2 text-xs font-medium transition-colors hover:bg-[var(--color-muted)] ${
+                        currentEffort ? 'text-[var(--color-primary)]' : 'text-[var(--color-foreground)]'
                       }`}
                     >
-                      <span>{strings.effortDefault}</span>
-                      {!currentEffort && <CheckIcon className="h-3.5 w-3.5 text-[var(--color-primary)]" />}
+                      <SparklesIcon className="h-3 w-3" />
+                      <span className="jcode-product-composer-picker-label">{currentEffort || strings.effort}</span>
+                      <ChevronDownIcon
+                        className={`jcode-product-composer-picker-chevron effort-chev h-3 w-3 opacity-55 transition-transform ${showEffortPicker ? 'rotate-180' : ''}`}
+                      />
                     </button>
-                    {currentEffortOptions.map((opt) => (
-                      <button
-                        key={opt}
-                        type="button"
-                        onClick={() => pickEffort(opt)}
-                        className={`flex w-full items-center justify-between gap-2 rounded-[var(--radius-sm)] border-none bg-transparent px-2 py-1.5 text-xs text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)] ${
-                          currentEffort === opt ? 'font-semibold text-[var(--color-primary)]' : ''
-                        }`}
-                      >
-                        <span className="font-mono">{opt}</span>
-                        {currentEffort === opt && <CheckIcon className="h-3.5 w-3.5 text-[var(--color-primary)]" />}
-                      </button>
-                    ))}
+
+                    {showEffortPicker && (
+                      <div className="jcode-product-composer-effort-menu absolute bottom-full right-0 z-[var(--z-dropdown)] mb-1 flex min-w-[140px] flex-col gap-px rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-1 shadow-[var(--shadow-md)]">
+                        <button
+                          type="button"
+                          onClick={() => pickEffort('')}
+                          className={`flex w-full items-center justify-between gap-2 rounded-[var(--radius-sm)] border-none bg-transparent px-2 py-1.5 text-xs text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)] ${
+                            !currentEffort ? 'font-semibold text-[var(--color-primary)]' : ''
+                          }`}
+                        >
+                          <span>{strings.effortDefault}</span>
+                          {!currentEffort && <CheckIcon className="h-3.5 w-3.5 text-[var(--color-primary)]" />}
+                        </button>
+                        {currentEffortOptions.map((opt) => (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => pickEffort(opt)}
+                            className={`flex w-full items-center justify-between gap-2 rounded-[var(--radius-sm)] border-none bg-transparent px-2 py-1.5 text-xs text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)] ${
+                              currentEffort === opt ? 'font-semibold text-[var(--color-primary)]' : ''
+                            }`}
+                          >
+                            <span className="font-mono">{opt}</span>
+                            {currentEffort === opt && <CheckIcon className="h-3.5 w-3.5 text-[var(--color-primary)]" />}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
 

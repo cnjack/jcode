@@ -212,6 +212,33 @@ describe('model picker', () => {
   })
 })
 
+describe('compact picker anchors', () => {
+  it('keeps mode, model, and effort panels inside their own trigger anchors', async () => {
+    renderComposer(makeHost({
+      providerName: 'anthropic',
+      modelName: 'claude-sonnet',
+    }))
+
+    const modeTrigger = screen.getByRole('button', { name: 'Ask for approval' })
+    const modelTrigger = screen.getByRole('button', { name: 'Claude Sonnet' })
+    const effortTrigger = screen.getByRole('button', { name: 'Effort: Default' })
+
+    expect(modeTrigger.querySelector('.jcode-product-composer-picker-label')?.textContent).toBe('Ask for approval')
+    expect(modelTrigger.querySelector('.jcode-product-composer-picker-label')?.textContent).toBe('Claude Sonnet')
+    expect(effortTrigger.querySelector('.jcode-product-composer-picker-label')?.textContent).toBe('Effort')
+
+    fireEvent.click(modeTrigger)
+    expect(modeTrigger.closest('.jcode-product-composer-mode-picker')?.querySelector('.jcode-product-composer-mode-menu')).toBeTruthy()
+
+    fireEvent.click(modelTrigger)
+    await waitFor(() => expect(screen.getByPlaceholderText('Filter models…')).toBeTruthy())
+    expect(modelTrigger.closest('.jcode-product-composer-model-picker')?.querySelector('.jcode-product-composer-model-menu')).toBeTruthy()
+
+    fireEvent.click(effortTrigger)
+    expect(effortTrigger.closest('.jcode-product-composer-effort-picker')?.querySelector('.jcode-product-composer-effort-menu')).toBeTruthy()
+  })
+})
+
 describe('image attachments', () => {
   function fileInput(container: HTMLElement): HTMLInputElement {
     const el = container.querySelector('input[type="file"]')
