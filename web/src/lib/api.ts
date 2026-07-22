@@ -65,7 +65,12 @@ export const api = {
       mode: string
       token?: TokenUpdateData
     }>('/api/status'),
-  config: () => request<{ provider: string; model: string; small_model: string; max_iterations: number }>('/api/config'),
+  config: () => request<{ provider: string; model: string; small_model: string; max_iterations: number; language?: string; theme?: string }>('/api/config'),
+  setAccountPreferences: (prefs: { language?: string; theme?: string }) =>
+    request<{ language: string; theme: string }>('/api/account-preferences', {
+      method: 'PATCH',
+      body: JSON.stringify(prefs),
+    }),
   usageStats: (days = 30) => request<UsageStats>(`/api/usage/stats?days=${days}`),
   taskStats: (id: string) => request<TaskStats>(`/api/tasks/${encodeURIComponent(id)}/stats`),
   todos: () => request<TodoItem[]>('/api/todos'),
@@ -434,6 +439,8 @@ export const api = {
     request<CloudPairingsResponse>(`/api/cloud/pairings/${encodeURIComponent(id)}/approve`, { method: 'POST' }),
   cloudDenyPairing: (id: string) =>
     request<CloudPairingsResponse>(`/api/cloud/pairings/${encodeURIComponent(id)}/deny`, { method: 'POST' }),
+  cloudRevokePairing: (id: string) =>
+    request<CloudPairingsResponse>(`/api/cloud/pairings/${encodeURIComponent(id)}/revoke`, { method: 'POST' }),
   // Per-session cloud sync switches + the new-session default (M19).
   cloudSync: () => request<CloudSyncResponse>('/api/cloud/sync'),
   cloudSetSyncDefault: (enabled: boolean) =>
@@ -472,10 +479,12 @@ export interface CloudLoginStatusResponse {
   error?: string
 }
 
-export interface CloudPendingPairing {
-  pairing_id: string
+export interface CloudPairingRecord {
+  id: string
   label: string
-  received_at: string
+  status: 'pending' | 'approved' | 'denied' | 'expired' | 'revoked'
+  created_at: string
+  resolved_at?: string
 }
 
 export interface CloudPairedInfo {
@@ -487,7 +496,7 @@ export interface CloudPairedInfo {
 }
 
 export interface CloudPairingsResponse {
-  pairings: CloudPendingPairing[]
+  pairings: CloudPairingRecord[]
   last_paired?: CloudPairedInfo
 }
 

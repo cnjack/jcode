@@ -230,7 +230,7 @@ func runCloudApprove(ctx context.Context, w io.Writer, id string) error {
 	if err != nil {
 		return fmt.Errorf("wrap CEK for pairing %s: %w", id, err)
 	}
-	if err := client.RespondPairing(ctx, creds.DeviceToken, id, true, wrap); err != nil {
+	if err := client.RespondPairing(ctx, creds.DeviceToken, id, true, cipher.KeyGen(), wrap); err != nil {
 		return fmt.Errorf("respond to pairing %s: %w", id, err)
 	}
 	_, _ = fmt.Fprintf(w, "Approved pairing %s (label %q) — CEK key_gen=%d wrapped for the requester.\n", id, pairing.Label, cipher.KeyGen())
@@ -242,7 +242,7 @@ func runCloudDeny(ctx context.Context, w io.Writer, id string) error {
 	if err != nil {
 		return err
 	}
-	if err := client.RespondPairing(ctx, creds.DeviceToken, id, false, nil); err != nil {
+	if err := client.RespondPairing(ctx, creds.DeviceToken, id, false, 0, nil); err != nil {
 		return fmt.Errorf("respond to pairing %s: %w", id, err)
 	}
 	_, _ = fmt.Fprintf(w, "Denied pairing %s.\n", id)

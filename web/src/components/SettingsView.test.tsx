@@ -46,13 +46,13 @@ describe('SettingsView', () => {
       'Browser',
       'Computer',
       'SSH',
-      'Channels',
       'Shortcuts',
       'Usage',
       'Developer',
     ]) {
       expect(screen.getByRole('button', { name: label })).toBeTruthy()
     }
+    expect(screen.queryByRole('button', { name: 'Channels' })).toBeNull()
     // Way back to the workspace.
     expect(screen.getByRole('button', { name: /Back to workspace/ })).toBeTruthy()
   })

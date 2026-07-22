@@ -50,6 +50,7 @@ type SubagentDeps struct {
 	TokenFn      SubagentTokenFn           // optional: token usage update after each model turn
 	Recorder     *session.Recorder         // records subagent start/result to session JSONL
 	Tracer       *telemetry.LangfuseTracer // optional: Langfuse tracer for nested spans
+	AgentRoles   map[string]config.AgentRoleConfig
 }
 
 type subagentInput struct {
@@ -63,6 +64,9 @@ type subagentInput struct {
 
 // NewSubagentTool creates the "subagent" tool that delegates tasks to a child agent.
 func (e *Env) NewSubagentTool(deps *SubagentDeps) tool.InvokableTool {
+	if deps == nil {
+		deps = &SubagentDeps{}
+	}
 	// Only advertise the "small" alias when a small model is actually
 	// configured; otherwise the alias silently falls back to the parent model
 	// and the hint would be noise.
@@ -72,6 +76,13 @@ func (e *Env) NewSubagentTool(deps *SubagentDeps) tool.InvokableTool {
 			"Accepts 'provider/model' or 'small' — the configured lightweight model (" + deps.ModelFactory.SmallModelRef() + "). " +
 			"Prefer 'small' for mechanical, low-stakes subtasks: targeted searches, file inventories, simple extraction or verification. " +
 			"Keep complex reasoning, code writing, and open-ended exploration on the parent model."
+	}
+	agentTypes := []string{AgentTypeExplore, AgentTypeGeneral, AgentTypeCoordinator}
+	roleHelp := ""
+	for _, name := range config.AgentRoleNames(deps.AgentRoles) {
+		agentTypes = append(agentTypes, name)
+		role := deps.AgentRoles[name]
+		roleHelp += fmt.Sprintf(" %s: %s (profile: %s).", name, role.Description, role.Profile)
 	}
 	info := &schema.ToolInfo{
 		Name: "subagent",
@@ -93,8 +104,8 @@ func (e *Env) NewSubagentTool(deps *SubagentDeps) tool.InvokableTool {
 				Type: schema.String,
 				Desc: "Agent type: 'explore' (strictly read-only, default), 'general' (write/execute tools), or 'coordinator' " +
 					"(write/execute tools plus sub-subagents). Choosing general or coordinator requests a one-time delegated-write grant " +
-					"at this parent tool call, including when run_in_background=true.",
-				Enum:     []string{AgentTypeExplore, AgentTypeGeneral, AgentTypeCoordinator},
+					"at this parent tool call, including when run_in_background=true." + roleHelp,
+				Enum:     agentTypes,
 				Required: false,
 			},
 			"model": {
@@ -228,12 +239,21 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 	if input.Name == "" || input.Prompt == "" {
 		return "", fmt.Errorf("name and prompt are required")
 	}
-	agentType := input.AgentType
-	if agentType == "" {
-		agentType = AgentTypeExplore
+	roleName := strings.TrimSpace(input.AgentType)
+	if roleName == "" {
+		roleName = AgentTypeExplore
 	}
-	if agentType != AgentTypeExplore && agentType != AgentTypeGeneral && agentType != AgentTypeCoordinator {
-		return "", fmt.Errorf("agent_type must be 'explore', 'general', or 'coordinator', got %q", agentType)
+	profile := roleName
+	roleInstructions := ""
+	modelRef := input.Model
+	if role, ok := s.deps.AgentRoles[roleName]; ok {
+		profile = role.Profile
+		roleInstructions = role.Instructions
+		if modelRef == "" {
+			modelRef = role.Model
+		}
+	} else if profile != AgentTypeExplore && profile != AgentTypeGeneral && profile != AgentTypeCoordinator {
+		return "", fmt.Errorf("unknown agent_type %q", roleName)
 	}
 
 	// Check nesting depth.
@@ -246,35 +266,38 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 	// empty means "parent model" and falls back to the recorder's model name.
 	chatModel := s.deps.ChatModel
 	usageModel := ""
-	if input.Model != "" && s.deps.ModelFactory != nil {
-		m, err := s.deps.ModelFactory.GetModel(ctx, input.Model)
+	if modelRef != "" && s.deps.ModelFactory != nil {
+		m, err := s.deps.ModelFactory.GetModel(ctx, modelRef)
 		if err != nil {
-			return "", fmt.Errorf("failed to resolve model %q: %w", input.Model, err)
+			return "", fmt.Errorf("failed to resolve model %q: %w", modelRef, err)
 		}
 		chatModel = m
-		if ref := s.deps.ModelFactory.ResolveRef(input.Model); ref != "" {
+		if ref := s.deps.ModelFactory.ResolveRef(modelRef); ref != "" {
 			usageModel = internalmodel.BareModelID(ref)
 		}
 	}
 
 	config.Logger().Printf("[subagent] start name=%q type=%s depth=%d model=%q bg=%v",
-		input.Name, agentType, s.env.Depth, input.Model, input.RunInBackground)
+		input.Name, roleName, s.env.Depth, modelRef, input.RunInBackground)
 
 	// Record subagent start event to session.
 	if s.deps.Recorder != nil {
-		s.deps.Recorder.RecordSubagentStart(input.Name, agentType)
+		s.deps.Recorder.RecordSubagentStart(input.Name, roleName)
 	}
 
 	// Notify TUI of subagent start.
 	if s.deps.Notifier != nil {
-		s.deps.Notifier(input.Name, agentType, false, "", nil)
+		s.deps.Notifier(input.Name, roleName, false, "", nil)
 	}
 
 	// Build the run function that creates and executes the agent.
 	runFn := func(runCtx context.Context) (string, error) {
 		childEnv := s.env.CloneForSubagent()
-		childTools := s.buildTools(childEnv, agentType)
-		prompt := subagentSystemPrompt(agentType, s.env.Pwd(), s.env.platform)
+		childTools := s.buildTools(childEnv, profile)
+		prompt := subagentSystemPrompt(profile, s.env.Pwd(), s.env.platform)
+		if roleInstructions != "" {
+			prompt += "\n\n## Custom role: " + roleName + "\n" + roleInstructions
+		}
 
 		// Inject Langfuse child trace so subagent spans nest under the parent.
 		var middlewares []adk.ChatModelAgentMiddleware
@@ -325,20 +348,20 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 	if input.RunInBackground && s.deps.TaskManager != nil {
 		task := &SubagentTask{
 			Name:      input.Name,
-			AgentType: agentType,
-			Model:     input.Model,
+			AgentType: roleName,
+			Model:     modelRef,
 			Depth:     s.env.Depth + 1,
 		}
 		taskID, _, err := s.deps.TaskManager.Submit(ctx, task, runFn, true)
 		if err != nil {
 			if s.deps.Notifier != nil {
-				s.deps.Notifier(input.Name, agentType, true, "", err)
+				s.deps.Notifier(input.Name, roleName, true, "", err)
 			}
 			return "", fmt.Errorf("failed to submit background task: %w", err)
 		}
 		// Record async launch.
 		if s.deps.Recorder != nil {
-			s.deps.Recorder.RecordSubagentAsync(input.Name, taskID, agentType)
+			s.deps.Recorder.RecordSubagentAsync(input.Name, taskID, roleName)
 		}
 		return fmt.Sprintf("Background task started: %s\nUse task_get with task_id=%q to check status and retrieve result.", taskID, taskID), nil
 	}
@@ -347,7 +370,7 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 	result, err := runFn(ctx)
 	if err != nil {
 		if s.deps.Notifier != nil {
-			s.deps.Notifier(input.Name, agentType, true, "", err)
+			s.deps.Notifier(input.Name, roleName, true, "", err)
 		}
 		return "", err
 	}
@@ -357,7 +380,7 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 		s.deps.Recorder.RecordSubagentResult(input.Name, result, nil)
 	}
 	if s.deps.Notifier != nil {
-		s.deps.Notifier(input.Name, agentType, true, result, nil)
+		s.deps.Notifier(input.Name, roleName, true, result, nil)
 	}
 	return result, nil
 }

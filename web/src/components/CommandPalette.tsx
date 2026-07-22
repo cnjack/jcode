@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChatBubbleLeftIcon,
+  CloudIcon,
   Cog6ToothIcon,
   FolderOpenIcon,
   MagnifyingGlassIcon,
@@ -79,7 +80,7 @@ export function CommandPalette() {
     { id: 'new', group: t('commandPalette.groups.actions'), label: t('commandPalette.newTask'), Icon: PlusIcon, run: newChat },
     { id: 'chat', group: t('commandPalette.groups.actions'), label: t('nav.chat'), Icon: ChatBubbleLeftIcon, run: () => dispatch(uiActions.setView('chat')) },
     { id: 'automations', group: t('commandPalette.groups.actions'), label: t('nav.automations'), Icon: ChatBubbleLeftIcon, run: () => dispatch(uiActions.setView('automations')) },
-    { id: 'channels', group: t('commandPalette.groups.actions'), label: t('nav.channels'), Icon: ChatBubbleLeftIcon, run: () => dispatch(uiActions.setView('channels')) },
+    { id: 'cloud-mobile', group: t('commandPalette.groups.actions'), label: t('nav.cloudMobile'), Icon: CloudIcon, run: () => dispatch(uiActions.setView('cloud-mobile')) },
     { id: 'remote', group: t('commandPalette.groups.actions'), label: t('nav.remoteConnect'), Icon: ServerIcon, run: () => openRemoteConnect() },
     { id: 'settings', group: t('commandPalette.groups.actions'), label: t('nav.openSettings'), Icon: Cog6ToothIcon, run: () => dispatch(uiActions.setView('settings')) },
     { id: 'folder', group: t('commandPalette.groups.actions'), label: t('nav.openProject'), Icon: FolderOpenIcon, run: () => {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/cnjack/jcode/internal/config"
 )
@@ -163,6 +164,7 @@ func (s *Supervisor) BuildConnector(creds *Credentials) *Connector {
 	return NewConnector(ConnectorConfig{
 		CloudURL:    cloudURL,
 		Credentials: creds,
+		AppConfig:   s.cfg,
 		// The control plane is always this process's own web server on
 		// loopback, regardless of the --host bind.
 		LocalBase:  fmt.Sprintf("http://127.0.0.1:%d", s.port),
@@ -258,6 +260,18 @@ func (s *Supervisor) PendingPairings() []PendingPairing {
 	return conn.PendingPairings()
 }
 
+// PairingRecords returns the cloud-persisted approval audit trail. It is not
+// derived from the connector's volatile inbox and therefore survives restarts.
+func (s *Supervisor) PairingRecords(ctx context.Context) ([]Pairing, error) {
+	s.mu.Lock()
+	conn := s.conn
+	s.mu.Unlock()
+	if conn == nil {
+		return nil, fmt.Errorf("cloud relay is not connected")
+	}
+	return conn.PairingRecords(ctx)
+}
+
 // LastPaired reports the live connector's most recent pairing approval.
 func (s *Supervisor) LastPaired() (PairedInfo, bool) {
 	s.mu.Lock()
@@ -289,4 +303,32 @@ func (s *Supervisor) DenyPairing(ctx context.Context, id string) error {
 		return fmt.Errorf("cloud relay is not connected")
 	}
 	return conn.DenyPairing(ctx, id)
+}
+
+// RevokePairing removes an approved client by rotating the CEK and replacing
+// the wraps of every remaining approved client.
+func (s *Supervisor) RevokePairing(ctx context.Context, id string) error {
+	s.mu.Lock()
+	conn := s.conn
+	s.mu.Unlock()
+	if conn == nil {
+		return fmt.Errorf("cloud relay is not connected")
+	}
+	return conn.RevokePairing(ctx, id)
+}
+
+// SyncAccountSettings pushes/reconciles portable preferences through the live
+// E2EE connector. Offline changes remain local and sync at the next start.
+func (s *Supervisor) SyncAccountSettings(ctx context.Context) error {
+	s.cfg.AccountSettingsUpdatedAt = time.Now().UTC()
+	if err := config.SaveConfig(s.cfg); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	conn := s.conn
+	s.mu.Unlock()
+	if conn == nil {
+		return nil // queued locally; connector start will reconcile it
+	}
+	return conn.ReconcileAccountSettings(ctx)
 }

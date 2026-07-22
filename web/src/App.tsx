@@ -5,7 +5,7 @@
  *   1. initApiBase() already resolved in main.tsx (dual-host contract).
  *   2. GET /api/health → seed model/mode/session, gate on auth/setup.
  *   3. Connect WS, load sessions/tasks/slash commands.
- *   4. Render the active view (chat / automations / channels) wrapped in the
+ *   4. Render the active view (chat / automations / cloud-mobile) wrapped in the
  *      jcode-ui RuntimeProvider so Thread/Composer read from the RTK store.
  *
  * The WS bridge is a module-level singleton created here via useEffect (once).
@@ -47,7 +47,7 @@ import { triggerKindLabel, type AutomationRun } from './lib/automation'
 import { Sidebar } from './components/Sidebar'
 import { ChatView } from './components/ChatView'
 import { AutomationsView } from './components/AutomationsView'
-import { ChannelsView } from './components/ChannelsView'
+import { CloudMobileView } from './components/CloudMobileView'
 import { CommandPalette } from './components/CommandPalette'
 import { AuthGate } from './components/AuthGate'
 import { SetupView } from './components/SetupView'
@@ -172,7 +172,7 @@ function store_getState() {
 
 type PanelType = 'terminal' | 'files' | 'changes' | 'plan'
 
-function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels' | 'automation-run' | 'settings' }) {
+function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mobile' | 'automation-run' | 'settings' }) {
   const dispatch = useAppDispatch()
   const runtime = useChatRuntime()
   const registry = useRef(createDefaultToolRegistry()).current
@@ -300,7 +300,7 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'channels'
           <main className="workspace-main relative flex min-h-0 min-w-0 flex-1 flex-col">
             {activeView === 'chat' && <ChatView />}
             {activeView === 'automations' && <AutomationsView onOpenRun={openRun} />}
-            {activeView === 'channels' && <ChannelsView />}
+            {activeView === 'cloud-mobile' && <CloudMobileView />}
             {activeView === 'automation-run' && (
               <AutomationRunReplay run={activeRun} onBack={closeRun} />
             )}

@@ -44,7 +44,7 @@ export default {
   nav: {
     newTask: 'New task',
     automations: 'Automations',
-    channels: 'Channels',
+    cloudMobile: 'Cloud & Mobile',
     workspace: 'Workspace',
     projects: 'Projects',
     openFolder: 'Open Folder',
@@ -159,31 +159,6 @@ export default {
       running: 'Running',
       trigger: 'trigger',
       project: 'project',
-    },
-  },
-
-  // Channels page (ChannelsView.vue) — the remote-control landing. Distinct
-  // from settings.channels.* (the WeChat config tab); this is the promo + mock.
-  channels: {
-    connected: 'Connected',
-    promo: {
-      // {accent}...</accent> wraps the emphasized span (rendered via v-html).
-      title: 'Approve and monitor from <span class="accent">your phone</span>',
-      lede: 'Link WeChat once. jcode forwards every approval request and task-completion notice straight to your chat — so a long-running agent never waits on you being at the desk.',
-    },
-    features: {
-      approvals: { title: 'One-tap approvals', desc: 'Approve or deny a tool call right from the WeChat message — no need to open the app.' },
-      notifications: { title: 'Done notifications', desc: 'Get pinged the moment a scheduled automation or background task finishes.' },
-      scan: { title: 'Scan to connect', desc: 'Pair in seconds with a QR code. Disconnect any time from Settings → Channels.' },
-    },
-    mock: {
-      now: 'now',
-      approvalTitle: 'Approval needed',
-      run: 'Run',
-      approve: 'Approve',
-      deny: 'Deny',
-      done: 'Nightly automations finished',
-      summary: '3 tasks · 0 failed',
     },
   },
 
@@ -374,7 +349,6 @@ export default {
       browser: 'Browser',
       computer: 'Computer',
       ssh: 'SSH',
-      channels: 'Channels',
       shortcuts: 'Shortcuts',
       usage: 'Usage',
       developer: 'Developer',
@@ -816,33 +790,6 @@ export default {
       remove: 'Remove',
       active: 'Active',
     },
-    channels: {
-      title: 'Channels',
-      titleFull: 'Notification Channels',
-      manageTitle: 'Manage messaging channels',
-      manageDesc: 'WeChat, Telegram, and other channels are configured on the dedicated Channels page.',
-      openPage: 'Open Channels',
-      scanQr: 'Scan with WeChat to connect',
-      activate: 'Send a message to activate',
-      activateBody: 'Please send any message to the WeChat bot now to activate notifications. Once activated, you can receive notifications for 24 hours.',
-      wechat: 'WeChat',
-      integration: 'iLink Bot integration',
-      connect: 'Connect',
-      disconnect: 'Disconnect',
-      disable: 'Disable',
-      enable: 'Enable',
-      loadingHint: 'Loading…',
-      noneConfigured: 'No channels configured',
-      noneHint: 'Set {flag} in {config}.',
-      whenConnected: 'When connected, jcode sends approval requests and task completion notifications to your WeChat.',
-      enableWechat: 'Enable WeChat notifications',
-      permission: 'Notification permission',
-      grant: 'Grant permission',
-      test: 'Send a test notification',
-      loginRequired: 'Login required',
-      login: 'Login',
-      qrAlt: 'WeChat login QR code',
-    },
     shortcuts: {
       title: 'Keyboard shortcuts',
       windowsHint: 'On Windows/Linux, use Ctrl in place of ⌘.',
@@ -1082,6 +1029,9 @@ export default {
 
   // Cloud relay status badge + popover (Sidebar footer).
   cloud: {
+    mobileHubTitle: 'Cloud & Mobile',
+    mobileHubDesc: 'Connect this Desktop to your account, review every client approval, and pair phones or browsers without exposing conversation deletion.',
+    e2eeBadge: 'End-to-end encrypted',
     syncing: 'Cloud on',
     syncDisabled: 'Cloud off',
     useCustomServer: 'Use a different server',
@@ -1106,6 +1056,7 @@ export default {
     forgetDevice: 'Log out and forget device',
     forgetConfirm: 'Forget this device identity and its encryption keys? Other clients will need to pair again.',
     pairingRequests: 'Pairing requests',
+    pairingRecords: 'Approval history',
     pairingRequest: 'New pairing request: {label}',
     approve: 'Approve',
     deny: 'Deny',
@@ -1113,6 +1064,16 @@ export default {
     pairingDenied: 'Pairing denied: {label}',
     pairingReviewHint: 'Pairing requests from browsers and mobile devices appear here. Review the client, then approve or deny it in Desktop.',
     noPairingRequests: 'No pairing requests are waiting for review.',
+    noPairingRecords: 'No clients have requested approval yet.',
+    revoke: 'Revoke',
+    revokeConfirm: 'Revoke {label}? Its cached key will stop working and it must pair again.',
+    pairingStatus: {
+      pending: 'Pending',
+      approved: 'Approved',
+      denied: 'Denied',
+      expired: 'Expired',
+      revoked: 'Revoked',
+    },
     copy: 'Copy',
     copied: 'Copied',
     copyLink: 'Copy link',

@@ -1,5 +1,5 @@
 /**
- * Sidebar — chat/session list + nav (chat / automations / channels).
+ * Sidebar — chat/session list + nav (chat / automations / cloud-mobile).
  *
  * A closer port of the Vue Sidebar: the session list is enriched with task
  * metadata (pinned/archived/unread/running/updated_at) so it can be filtered
@@ -21,7 +21,7 @@ import {
   FolderOpenIcon,
   ServerIcon,
   SparklesIcon,
-  SignalIcon,
+  CloudIcon,
   Cog6ToothIcon,
   BookmarkIcon,
   ArchiveBoxIcon,
@@ -554,11 +554,11 @@ export function Sidebar() {
           </button>
           <button
             type="button"
-            onClick={() => dispatch(uiActions.setView('channels'))}
-            className={`sb-nav-row ${activeView === 'channels' ? 'active' : ''}`}
+            onClick={() => dispatch(uiActions.setView('cloud-mobile'))}
+            className={`sb-nav-row ${activeView === 'cloud-mobile' ? 'active' : ''}`}
           >
-            <SignalIcon className="sb-nav-ic" />
-            <span className="sb-nav-name">{t('nav.channels')}</span>
+            <CloudIcon className="sb-nav-ic" />
+            <span className="sb-nav-name">{t('nav.cloudMobile')}</span>
           </button>
         </div>
       </div>

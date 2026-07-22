@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -89,12 +90,12 @@ func NewTeamSpawnTool(manager *team.Manager) tool.InvokableTool {
 				"The teammate gets its own isolated environment and can communicate via messages. " +
 				"Use team_send_message to coordinate with teammates. A general/coder teammate in auto mode " +
 				"requests a one-time delegated-write grant at this parent call.",
-			ParamsOneOf: teamSpawnParams(),
+			ParamsOneOf: teamSpawnParams(manager),
 		},
 	}
 }
 
-func teamSpawnParams() *schema.ParamsOneOf {
+func teamSpawnParams(manager *team.Manager) *schema.ParamsOneOf {
 	properties := orderedmap.New[string, *jsonschema.Schema]()
 	properties.Set("name", &jsonschema.Schema{
 		Type: "string", Description: "Unique name for the teammate (for example 'researcher' or 'coder').",
@@ -102,11 +103,20 @@ func teamSpawnParams() *schema.ParamsOneOf {
 	properties.Set("prompt", &jsonschema.Schema{
 		Type: "string", Description: "Detailed task instructions for the teammate.",
 	})
+	agentTypes := []any{team.AgentTypeExplore, team.AgentTypeGeneral, team.AgentTypeCoder}
+	roleHelp := ""
+	if manager != nil {
+		for _, name := range manager.AgentRoleNames() {
+			agentTypes = append(agentTypes, name)
+			role := manager.AgentRole(name)
+			roleHelp += fmt.Sprintf(" %s: %s (profile: %s).", name, role.Description, role.Profile)
+		}
+	}
 	properties.Set("agent_type", &jsonschema.Schema{
 		Type: "string",
 		Description: "Agent type. 'explore' is always read-only; 'general' and 'coder' can receive write tools " +
-			"according to mode. Defaults to 'general'.",
-		Enum:    []any{team.AgentTypeExplore, team.AgentTypeGeneral, team.AgentTypeCoder},
+			"according to mode. Defaults to 'general'." + roleHelp,
+		Enum:    agentTypes,
 		Default: team.AgentTypeGeneral,
 	})
 	properties.Set("model", &jsonschema.Schema{
@@ -147,10 +157,6 @@ func (t *teamSpawnTool) InvokableRun(ctx context.Context, argsJSON string, _ ...
 	if !t.manager.HasTeam() {
 		return "", fmt.Errorf("no active team. Use team_create first")
 	}
-	agentType, err := team.NormalizeAgentType(input.AgentType)
-	if err != nil {
-		return "", err
-	}
 	permission, err := team.NormalizePermission(input.Mode)
 	if err != nil {
 		return "", err
@@ -159,7 +165,7 @@ func (t *teamSpawnTool) InvokableRun(ctx context.Context, argsJSON string, _ ...
 	agentID, err := t.manager.SpawnTeammate(ctx, team.SpawnConfig{
 		Name:       input.Name,
 		Prompt:     input.Prompt,
-		AgentType:  agentType,
+		AgentType:  input.AgentType,
 		Model:      input.Model,
 		Cwd:        input.Cwd,
 		Permission: permission,
@@ -169,7 +175,14 @@ func (t *teamSpawnTool) InvokableRun(ctx context.Context, argsJSON string, _ ...
 	}
 
 	return fmt.Sprintf("Teammate %q spawned (ID: %s, type: %s, mode: %s). It is now running its task in parallel.",
-		input.Name, agentID, agentType, permission), nil
+		input.Name, agentID, firstNonEmptyTeamRole(input.AgentType), permission), nil
+}
+
+func firstNonEmptyTeamRole(role string) string {
+	if role = strings.TrimSpace(role); role != "" {
+		return role
+	}
+	return team.AgentTypeGeneral
 }
 
 // --- team_send_message ---

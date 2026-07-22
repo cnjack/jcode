@@ -8,6 +8,7 @@
  * THEMES is generated from internal/theme/palette.go — never edit by hand.
  */
 import { useSyncExternalStore } from 'react'
+import { api } from './api'
 import { THEMES, type ThemeDef } from './themes.generated'
 
 export type { ThemeDef }
@@ -122,6 +123,19 @@ export function applyTheme(choice: ThemeName): void {
   }
 }
 
+/** Apply a persisted/backend theme without writing it back to cloud. */
+export function hydrateTheme(choice: ThemeName): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, choice)
+  } catch {
+    /* ignore */
+  }
+  currentChoice = choice
+  applyTheme(choice)
+  currentResolved = resolvedAppearance(choice)
+  emit()
+}
+
 // Apply once on module load so the very first paint matches the saved choice.
 applyTheme(currentChoice)
 
@@ -158,15 +172,8 @@ export function useTheme(): UseTheme {
   const resolvedTheme = useSyncExternalStore(subscribe, resolvedSnapshot, resolvedSnapshot)
 
   function setTheme(choice: ThemeName): void {
-    try {
-      localStorage.setItem(STORAGE_KEY, choice)
-    } catch {
-      /* ignore */
-    }
-    currentChoice = choice
-    applyTheme(choice)
-    currentResolved = resolvedAppearance(choice)
-    emit()
+    hydrateTheme(choice)
+    void api.setAccountPreferences({ theme: choice }).catch(() => {})
   }
 
   // toggleDark is the quick light/dark flip: switch to the brand default of

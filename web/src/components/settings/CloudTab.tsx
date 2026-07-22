@@ -29,7 +29,7 @@ import { useTranslation } from 'react-i18next'
 import {
   api,
   type CloudLoginStatusResponse,
-  type CloudPendingPairing,
+  type CloudPairingRecord,
   type CloudStatusResponse,
 } from '../../lib/api'
 import { BTN_GHOST, BTN_PRIMARY, BTN_SECONDARY, BTN_SM, ROW, SECTION_TITLE, Switch } from './atoms'
@@ -107,7 +107,7 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
   )
 }
 
-export function CloudTab() {
+export function CloudTab({ heading = true }: { heading?: boolean } = {}) {
   const { t } = useTranslation()
   // null = status unknown (request failed / older backend).
   const [status, setStatus] = useState<CloudStatusResponse | null>(null)
@@ -122,7 +122,7 @@ export function CloudTab() {
   const [customServer, setCustomServer] = useState(false)
 
   // Pairing requests are reviewed here in the desktop UI.
-  const [pairings, setPairings] = useState<CloudPendingPairing[]>([])
+  const [pairings, setPairings] = useState<CloudPairingRecord[]>([])
   const [pairingBusy, setPairingBusy] = useState<string | null>(null)
   const [logoutBusy, setLogoutBusy] = useState(false)
   const [syncDefault, setSyncDefault] = useState<boolean | null>(null)
@@ -275,6 +275,20 @@ export function CloudTab() {
     }
   }
 
+  async function revokePairing(id: string, label: string) {
+    if (pairingBusy || !window.confirm(t('cloud.revokeConfirm', { label }))) return
+    setPairingBusy(id)
+    setActionError(null)
+    try {
+      const pr = await api.cloudRevokePairing(id)
+      setPairings(pr.pairings)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setPairingBusy(null)
+    }
+  }
+
   async function logout(forget = false) {
     if (logoutBusy) return
     if (forget && !window.confirm(t('cloud.forgetConfirm'))) return
@@ -299,7 +313,7 @@ export function CloudTab() {
   const stateLabel = statusLoading ? t('common.loading') : !status?.logged_in ? t('cloud.notLoggedIn') : t(`cloud.status.${status.state}`)
   return (
     <div className="space-y-5">
-      <h3 className={SECTION_TITLE}>{t('settings.tabs.cloud')}</h3>
+      {heading && <h3 className={SECTION_TITLE}>{t('settings.tabs.cloud')}</h3>}
 
       {/* Connection state. */}
       <div className={ROW}>
@@ -397,41 +411,55 @@ export function CloudTab() {
 
           {pairings.length > 0 && (
             <div className="space-y-1.5">
-              <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('cloud.pairingRequests')}</div>
+              <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('cloud.pairingRecords')}</div>
               {pairings.map((p) => (
-                <div key={p.pairing_id} className={ROW}>
+                <div key={p.id} className={ROW}>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[12px] font-medium text-[var(--color-foreground)]" title={p.label}>
                       {p.label}
                     </div>
                     <div className="text-[11px] text-[var(--color-muted-foreground)]">
-                      {new Date(p.received_at).toLocaleString()}
+                      {t(`cloud.pairingStatus.${p.status}`)} · {new Date(p.resolved_at || p.created_at).toLocaleString()}
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    disabled={pairingBusy !== null}
-                    onClick={() => void resolvePairing(p.pairing_id, true)}
-                    className={`${BTN_PRIMARY} ${BTN_SM}`}
-                  >
-                    <CheckIcon className="h-3 w-3" />
-                    {t('cloud.approve')}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={pairingBusy !== null}
-                    onClick={() => void resolvePairing(p.pairing_id, false)}
-                    className={`${BTN_SECONDARY} ${BTN_SM}`}
-                  >
-                    <XMarkIcon className="h-3 w-3" />
-                    {t('cloud.deny')}
-                  </button>
+                  {p.status === 'pending' && (
+                    <>
+                      <button
+                        type="button"
+                        disabled={pairingBusy !== null}
+                        onClick={() => void resolvePairing(p.id, true)}
+                        className={`${BTN_PRIMARY} ${BTN_SM}`}
+                      >
+                        <CheckIcon className="h-3 w-3" />
+                        {t('cloud.approve')}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={pairingBusy !== null}
+                        onClick={() => void resolvePairing(p.id, false)}
+                        className={`${BTN_SECONDARY} ${BTN_SM}`}
+                      >
+                        <XMarkIcon className="h-3 w-3" />
+                        {t('cloud.deny')}
+                      </button>
+                    </>
+                  )}
+                  {p.status === 'approved' && (
+                    <button
+                      type="button"
+                      disabled={pairingBusy !== null}
+                      onClick={() => void revokePairing(p.id, p.label)}
+                      className={`${BTN_SECONDARY} ${BTN_SM} text-[var(--color-destructive)]`}
+                    >
+                      {t('cloud.revoke')}
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
           )}
 
-          {pairings.length === 0 && <div className={ROW}>{t('cloud.noPairingRequests')}</div>}
+          {pairings.length === 0 && <div className={ROW}>{t('cloud.noPairingRecords')}</div>}
 
           {/* Logout. */}
           <div className="flex justify-end gap-2">

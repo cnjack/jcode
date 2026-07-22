@@ -17,6 +17,8 @@ import type { ThreadItem, Message, ToolCall, Approval, TokenSnapshot, Goal, Todo
 import { api } from '../lib/api'
 import { extractToolDisplayInfo } from '../lib/toolInfo'
 import { normalizeMode, type AgentMode, type ProviderInfo, type SessionItem, type TaskItem, type ProjectInfo, type SlashCommandInfo, type SessionEntry, type ModelRef } from '../lib/types'
+import { setLocale, SUPPORTED_LOCALES } from '../i18n'
+import { hydrateTheme } from '../lib/useTheme'
 
 // ─── seq counter (stable DOM identity across streaming updates) ───
 let _seq = 0
@@ -639,7 +641,7 @@ const modelSlice = createSlice({
 
 // M18: settings is a first-class view (its own full-page surface), not an
 // overlay dialog — the bottom-left gear / ⌘, / CloudBadge all route here.
-type View = 'chat' | 'automations' | 'channels' | 'automation-run' | 'settings'
+type View = 'chat' | 'automations' | 'cloud-mobile' | 'automation-run' | 'settings'
 
 // Sections of the settings view. Deep links (e.g. CloudBadge → Cloud) set this
 // together with setView('settings').
@@ -654,7 +656,6 @@ export type SettingsTab =
   | 'browser'
   | 'computer'
   | 'ssh'
-  | 'channels'
   | 'shortcuts'
   | 'usage'
   | 'developer'
@@ -992,6 +993,13 @@ export const loadConfig = createAsyncThunk('model/loadConfig', async (_, { dispa
   const cfg = await api.config()
   dispatch(modelActions.setMaxIterations(cfg.max_iterations))
   dispatch(modelActions.setSmallModel(cfg.small_model ?? ''))
+  if (cfg.language && (SUPPORTED_LOCALES as readonly string[]).includes(cfg.language)) {
+    await setLocale(cfg.language as (typeof SUPPORTED_LOCALES)[number])
+  }
+  if (cfg.theme) {
+    hydrateTheme(cfg.theme)
+    dispatch(uiActions.setTheme(cfg.theme))
+  }
 })
 
 export const loadStatus = createAsyncThunk('app/loadStatus', async (_, { dispatch }) => {

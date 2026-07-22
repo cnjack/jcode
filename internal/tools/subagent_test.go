@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cnjack/jcode/internal/config"
+
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -61,6 +63,27 @@ func TestSubagentSchemaExplainsDelegatedWriteGrant(t *testing.T) {
 	agentType := jsonSchema.Properties.Value("agent_type")
 	if agentType == nil || !strings.Contains(agentType.Description, "one-time delegated-write grant") {
 		t.Fatalf("agent_type description does not explain grant: %#v", agentType)
+	}
+}
+
+func TestSubagentSchemaAdvertisesCustomRoles(t *testing.T) {
+	env := NewEnv(t.TempDir(), "darwin/arm64")
+	info, err := env.NewSubagentTool(&SubagentDeps{AgentRoles: map[string]config.AgentRoleConfig{
+		"reviewer": {Description: "Review security boundaries", Profile: "explore", Instructions: "Lead with findings."},
+	}}).Info(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	js, err := info.ToJSONSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentType := js.Properties.Value("agent_type")
+	if !reflect.DeepEqual(agentType.Enum, []any{"explore", "general", "coordinator", "reviewer"}) {
+		t.Fatalf("agent_type enum = %v", agentType.Enum)
+	}
+	if !strings.Contains(agentType.Description, "Review security boundaries") {
+		t.Fatalf("custom role description missing: %q", agentType.Description)
 	}
 }
 

@@ -35,27 +35,29 @@ const (
 
 // TeammateState holds the runtime state of a running teammate.
 type TeammateState struct {
-	Identity    TeammateIdentity
-	TaskID      string
-	Status      TeammateStatus
-	Env         any // *tools.Env, kept as any to avoid import cycle
-	Cancel      context.CancelFunc
-	WorkCancel  context.CancelFunc
-	History     []adk.Message     // full conversation history across turns (analogous to Claude Code's allMessages)
-	Messages    []*schema.Message // capped at maxTeammateMessages for UI display only
-	Pending     []string          // pending user messages from TUI input
-	Progress    *AgentProgress
-	Recorder    *session.Recorder // per-teammate session recorder (JSONL)
-	IsIdle      bool
-	ShutdownReq bool
-	Error       string
-	StartedAt   time.Time
-	EvictAfter  *time.Time
-	Prompt      string
-	Model       string
-	AgentType   string
-	Permission  string
-	TokenUsage  *internalmodel.TokenUsage
+	Identity         TeammateIdentity
+	TaskID           string
+	Status           TeammateStatus
+	Env              any // *tools.Env, kept as any to avoid import cycle
+	Cancel           context.CancelFunc
+	WorkCancel       context.CancelFunc
+	History          []adk.Message     // full conversation history across turns (analogous to Claude Code's allMessages)
+	Messages         []*schema.Message // capped at maxTeammateMessages for UI display only
+	Pending          []string          // pending user messages from TUI input
+	Progress         *AgentProgress
+	Recorder         *session.Recorder // per-teammate session recorder (JSONL)
+	IsIdle           bool
+	ShutdownReq      bool
+	Error            string
+	StartedAt        time.Time
+	EvictAfter       *time.Time
+	Prompt           string
+	Model            string
+	AgentType        string
+	RoleName         string
+	RoleInstructions string
+	Permission       string
+	TokenUsage       *internalmodel.TokenUsage
 	// LastUsage snapshots the teammate's cumulative usage at the last global
 	// usage-log write, so each turn records only its delta.
 	LastUsage internalmodel.TokenUsageDetail
@@ -87,7 +89,8 @@ type ManagerDeps struct {
 	// LeaderSessionUUID is used to store teammate transcripts under the leader's session.
 	LeaderSessionUUID string
 	// Tracer is the optional Langfuse tracer for recording teammate agent spans.
-	Tracer *telemetry.LangfuseTracer
+	Tracer     *telemetry.LangfuseTracer
+	AgentRoles map[string]config.AgentRoleConfig
 }
 
 // Manager coordinates a team of agents.
@@ -121,6 +124,16 @@ func (m *Manager) SetTuiProgram(p *tea.Program) {
 // SetHandlersFactory sets the factory that creates agent middleware handlers for teammates.
 func (m *Manager) SetHandlersFactory(f func(workerName, workerColor, permission string) []adk.ChatModelAgentMiddleware) {
 	m.deps.HandlersFactory = f
+}
+
+// AgentRoleNames exposes custom role names for the team_spawn schema.
+func (m *Manager) AgentRoleNames() []string {
+	return config.AgentRoleNames(m.deps.AgentRoles)
+}
+
+// AgentRole returns a role definition for schema documentation.
+func (m *Manager) AgentRole(name string) config.AgentRoleConfig {
+	return m.deps.AgentRoles[name]
 }
 
 // HasTeam returns true if a team is currently active.
@@ -190,9 +203,25 @@ func (m *Manager) CreateTeam(name, description string) error {
 
 // SpawnTeammate starts a new teammate goroutine.
 func (m *Manager) SpawnTeammate(ctx context.Context, cfg SpawnConfig) (string, error) {
-	agentType, err := NormalizeAgentType(cfg.AgentType)
-	if err != nil {
-		return "", err
+	roleName := strings.TrimSpace(cfg.AgentType)
+	var agentType string
+	roleInstructions := ""
+	if role, ok := m.deps.AgentRoles[roleName]; ok {
+		agentType = role.Profile
+		if agentType == "coordinator" {
+			agentType = AgentTypeGeneral
+		}
+		roleInstructions = role.Instructions
+		if cfg.Model == "" {
+			cfg.Model = role.Model
+		}
+	} else {
+		var err error
+		agentType, err = NormalizeAgentType(cfg.AgentType)
+		if err != nil {
+			return "", err
+		}
+		roleName = agentType
 	}
 	permission, err := NormalizePermission(cfg.Permission)
 	if err != nil {
@@ -204,7 +233,7 @@ func (m *Manager) SpawnTeammate(ctx context.Context, cfg SpawnConfig) (string, e
 	if err := m.validateSpawnDeps(cfg); err != nil {
 		return "", err
 	}
-	cfg.AgentType = agentType
+	cfg.AgentType = roleName
 	cfg.Permission = permission
 
 	m.mu.Lock()
@@ -250,16 +279,18 @@ func (m *Manager) SpawnTeammate(ctx context.Context, cfg SpawnConfig) (string, e
 			TeamName:  m.teamName,
 			Color:     color,
 		},
-		TaskID:     agentID,
-		Status:     StatusPending,
-		Env:        childEnv,
-		Cancel:     cancel,
-		Prompt:     cfg.Prompt,
-		Model:      cfg.Model,
-		AgentType:  agentType,
-		Permission: permission,
-		StartedAt:  time.Now(),
-		TokenUsage: &internalmodel.TokenUsage{},
+		TaskID:           agentID,
+		Status:           StatusPending,
+		Env:              childEnv,
+		Cancel:           cancel,
+		Prompt:           cfg.Prompt,
+		Model:            cfg.Model,
+		AgentType:        agentType,
+		RoleName:         roleName,
+		RoleInstructions: roleInstructions,
+		Permission:       permission,
+		StartedAt:        time.Now(),
+		TokenUsage:       &internalmodel.TokenUsage{},
 	}
 
 	// Create per-teammate session recorder for conversation persistence.
@@ -274,7 +305,7 @@ func (m *Manager) SpawnTeammate(ctx context.Context, cfg SpawnConfig) (string, e
 	m.teamFile.Members = append(m.teamFile.Members, TeamMember{
 		AgentID:    agentID,
 		Name:       cfg.Name,
-		AgentType:  agentType,
+		AgentType:  roleName,
 		Model:      cfg.Model,
 		Prompt:     cfg.Prompt,
 		Color:      color,
@@ -607,6 +638,9 @@ func (m *Manager) runAgentTurn(ctx context.Context, state *TeammateState) (strin
 	}
 	if state.Prompt != "" {
 		systemPrompt += "\n\n## Your Task\n" + state.Prompt
+	}
+	if state.RoleInstructions != "" {
+		systemPrompt += "\n\n## Custom role: " + state.RoleName + "\n" + state.RoleInstructions
 	}
 
 	// Create agent with approval middleware.

@@ -148,6 +148,14 @@ type RegisterDeviceRequest struct {
 // E2E (M5): payload sealing happens above this transport layer — callers
 // (Connector.sealUplink/openDownlink) pass already-sealed envelope JSON.
 func (c *Client) post(ctx context.Context, path, token string, body, out any) error {
+	return c.writeJSON(ctx, http.MethodPost, path, token, body, out)
+}
+
+func (c *Client) put(ctx context.Context, path, token string, body, out any) error {
+	return c.writeJSON(ctx, http.MethodPut, path, token, body, out)
+}
+
+func (c *Client) writeJSON(ctx context.Context, method, path, token string, body, out any) error {
 	var reader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
@@ -156,9 +164,9 @@ func (c *Client) post(ctx context.Context, path, token string, body, out any) er
 		}
 		reader = bytes.NewReader(data)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, reader)
+	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, reader)
 	if err != nil {
-		return fmt.Errorf("build request POST %s: %w", path, err)
+		return fmt.Errorf("build request %s %s: %w", method, path, err)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -169,13 +177,13 @@ func (c *Client) post(ctx context.Context, path, token string, body, out any) er
 
 	resp, err := c.httpClient().Do(req)
 	if err != nil {
-		return fmt.Errorf("POST %s: %w", path, err)
+		return fmt.Errorf("%s %s: %w", method, path, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
-		return fmt.Errorf("POST %s: read response: %w", path, err)
+		return fmt.Errorf("%s %s: read response: %w", method, path, err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -194,7 +202,7 @@ func (c *Client) post(ctx context.Context, path, token string, body, out any) er
 
 	if out != nil && len(data) > 0 {
 		if err := json.Unmarshal(data, out); err != nil {
-			return fmt.Errorf("POST %s: decode response: %w", path, err)
+			return fmt.Errorf("%s %s: decode response: %w", method, path, err)
 		}
 	}
 	return nil

@@ -474,6 +474,7 @@ func (a *acpAgent) buildAgentSession(
 	// One factory serves subagent + workflow model overrides (incl. the
 	// "small" alias); fallback is this session's current model.
 	factory := internalmodel.NewModelFactory(cfg, chatModel)
+	agentRoles := config.LoadAgentRoles(env.Pwd(), cfg)
 	allTools := []tool.BaseTool{
 		// load_skill: ACP puts the skill list in the system prompt (see
 		// skillLoader.Descriptions() below) and the slash-command path literally
@@ -500,12 +501,14 @@ func (a *acpAgent) buildAgentSession(
 			Tracer:       tracer,
 			Notifier:     acpHandler.OnSubagentEvent,
 			ProgressFn:   acpHandler.OnSubagentProgress,
+			AgentRoles:   agentRoles,
 		}),
 		env.NewWorkflowRunTool(&tools.WorkflowToolDeps{
 			ModelFactory: factory,
 			Recorder:     rec,
 			Tracer:       tracer,
 			Loader:       flowLoader,
+			AgentRoles:   agentRoles,
 		}),
 	}
 	if config.MemoryEnabled(cfg) {

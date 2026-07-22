@@ -138,7 +138,11 @@ func (c *Connector) popPending(id string) (PendingPairing, error) {
 func (c *Connector) ApprovePairing(ctx context.Context, id string) error {
 	p, err := c.popPending(id)
 	if err != nil {
-		return err
+		remote, getErr := c.client.GetPairing(ctx, c.token, id)
+		if getErr != nil || remote.Status != "pending" {
+			return err
+		}
+		p = PendingPairing{PairingID: remote.ID, Label: remote.Label, PubKey: remote.PubKey}
 	}
 	return c.approvePairing(ctx, p.PairingID, p.Label, p.PubKey, false)
 }
@@ -147,9 +151,13 @@ func (c *Connector) ApprovePairing(ctx context.Context, id string) error {
 func (c *Connector) DenyPairing(ctx context.Context, id string) error {
 	p, err := c.popPending(id)
 	if err != nil {
-		return err
+		remote, getErr := c.client.GetPairing(ctx, c.token, id)
+		if getErr != nil || remote.Status != "pending" {
+			return err
+		}
+		p = PendingPairing{PairingID: remote.ID, Label: remote.Label, PubKey: remote.PubKey}
 	}
-	if err := c.client.RespondPairing(ctx, c.token, p.PairingID, false, nil); err != nil {
+	if err := c.client.RespondPairing(ctx, c.token, p.PairingID, false, 0, nil); err != nil {
 		return fmt.Errorf("respond to pairing %s: %w", p.PairingID, err)
 	}
 	return nil
@@ -160,7 +168,7 @@ func (c *Connector) DenyPairing(ctx context.Context, id string) error {
 // connector's own when encryption is active, otherwise it is lazily
 // initialized from the credentials file (same as `jcode cloud approve`).
 func (c *Connector) approvePairing(ctx context.Context, id, label, pubKey string, auto bool) error {
-	cipher := c.cipher
+	cipher := c.cipherSnapshot()
 	if cipher == nil {
 		var err error
 		cipher, err = EnsureCEK()
@@ -172,7 +180,7 @@ func (c *Connector) approvePairing(ctx context.Context, id, label, pubKey string
 	if err != nil {
 		return fmt.Errorf("wrap CEK: %w", err)
 	}
-	if err := c.client.RespondPairing(ctx, c.token, id, true, wrap); err != nil {
+	if err := c.client.RespondPairing(ctx, c.token, id, true, cipher.KeyGen(), wrap); err != nil {
 		return fmt.Errorf("respond to pairing %s: %w", id, err)
 	}
 	c.pairMu.Lock()
@@ -186,5 +194,92 @@ func (c *Connector) approvePairing(ctx context.Context, id, label, pubKey string
 		}
 	}
 	c.pairMu.Unlock()
+	return nil
+}
+
+// PairingRecords returns the server-persisted audit trail. Unlike the pending
+// inbox this survives desktop and connector restarts.
+func (c *Connector) PairingRecords(ctx context.Context) ([]Pairing, error) {
+	return c.client.ListPairings(ctx, c.token, "")
+}
+
+// RevokePairing rotates the account CEK and rewraps it for every approved
+// client except id. The server commits target revocation, all replacement
+// wraps, and devices.key_gen atomically.
+func (c *Connector) RevokePairing(ctx context.Context, id string) error {
+	// Block envelope sealing/opening for the short rekey transaction. Otherwise
+	// an uplink could be encrypted with generation N after the server has
+	// atomically advanced the device to generation N+1.
+	c.cipherMu.Lock()
+	defer c.cipherMu.Unlock()
+
+	pairings, err := c.client.ListPairings(ctx, c.token, "approved")
+	if err != nil {
+		return fmt.Errorf("list approved pairings: %w", err)
+	}
+	found := false
+	for i := range pairings {
+		if pairings[i].ID == id {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("%w: %s", ErrUnknownPairing, id)
+	}
+	oldCreds, err := LoadCredentials()
+	if err != nil {
+		return fmt.Errorf("load credentials before rekey: %w", err)
+	}
+	if oldCreds == nil {
+		return fmt.Errorf("load credentials before rekey: not logged in")
+	}
+	rotated, err := RotateCEK()
+	if err != nil {
+		return fmt.Errorf("rotate CEK: %w", err)
+	}
+	wraps := make([]PairingRekeyWrap, 0, len(pairings)-1)
+	for i := range pairings {
+		if pairings[i].ID == id {
+			continue
+		}
+		wrap, wrapErr := WrapCEK(pairings[i].PubKey, rotated.CEK(), rotated.KeyGen())
+		if wrapErr != nil {
+			_ = SaveCredentials(oldCreds)
+			ResetCEKCache()
+			return fmt.Errorf("rewrap CEK for %s: %w", pairings[i].ID, wrapErr)
+		}
+		wraps = append(wraps, PairingRekeyWrap{PairingID: pairings[i].ID, Wrap: wrap})
+	}
+	commitErr := c.client.RekeyPairings(ctx, c.token, id, rotated.KeyGen(), wraps)
+	if commitErr != nil {
+		var apiErr *APIError
+		if !errors.As(commitErr, &apiErr) {
+			// Transport/read failures have an unknown commit outcome. Retry the
+			// idempotent transaction before deciding whether it is safe to roll back.
+			commitErr = c.client.RekeyPairings(ctx, c.token, id, rotated.KeyGen(), wraps)
+		}
+		if commitErr != nil {
+			state, stateErr := c.client.GetPairing(ctx, c.token, id)
+			if stateErr == nil && state.Status == "revoked" && state.KeyGen == rotated.KeyGen() {
+				c.cipher = rotated
+				return nil
+			}
+			// A definitive API rejection, or a successful status read showing the
+			// old approved generation, proves that the transaction did not commit.
+			if errors.As(commitErr, &apiErr) || (stateErr == nil && state.Status == "approved") {
+				if restoreErr := SaveCredentials(oldCreds); restoreErr != nil {
+					return fmt.Errorf("commit rekey: %v; restore old CEK: %w", commitErr, restoreErr)
+				}
+				ResetCEKCache()
+				return fmt.Errorf("commit rekey: %w", commitErr)
+			}
+			// Fail closed on a genuinely unknowable outcome: keep generation N+1
+			// locally so a possibly revoked N key is never resurrected.
+			c.cipher = rotated
+			return fmt.Errorf("commit rekey outcome is unknown; kept generation %d locally: %w", rotated.KeyGen(), commitErr)
+		}
+	}
+	c.cipher = rotated
 	return nil
 }

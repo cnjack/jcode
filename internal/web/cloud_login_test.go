@@ -167,8 +167,8 @@ func TestCloudLoginFlowSuccessAndLogout(t *testing.T) {
 	if persisted == nil || !persisted.Enabled || persisted.URL != srv.URL {
 		t.Fatalf("persisted config.cloud = %+v, want enabled with url %s", persisted, srv.URL)
 	}
-	if fake.syncCalls != 1 {
-		t.Fatalf("supervisor sync calls = %d, want 1 (connector kick after login)", fake.syncCalls)
+	if fake.syncCalls.Load() != 1 {
+		t.Fatalf("supervisor sync calls = %d, want 1 (connector kick after login)", fake.syncCalls.Load())
 	}
 	if got := getCloudLoginStatus(t, s); got.State != loginSuccess || got.UserCode != "" {
 		t.Fatalf("status = %+v, want success without user_code", got)
@@ -198,8 +198,8 @@ func TestCloudLoginFlowSuccessAndLogout(t *testing.T) {
 	if atomic.LoadInt32(&st.revokeCalls) != 1 {
 		t.Fatalf("revoke calls = %d, want 1", st.revokeCalls)
 	}
-	if fake.syncCalls != 2 {
-		t.Fatalf("supervisor sync calls = %d, want 2 (login + logout)", fake.syncCalls)
+	if fake.syncCalls.Load() != 2 {
+		t.Fatalf("supervisor sync calls = %d, want 2 (login + logout)", fake.syncCalls.Load())
 	}
 	if persisted := readPersistedCloud(t); persisted == nil || persisted.Enabled {
 		t.Fatalf("persisted config.cloud after logout = %+v, want enabled=false", persisted)

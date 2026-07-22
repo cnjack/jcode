@@ -17,8 +17,8 @@ import (
 func TestCloudPairingsList(t *testing.T) {
 	received := time.Date(2026, 7, 21, 10, 0, 0, 0, time.UTC)
 	fake := &fakeCloudSupervisor{
-		pairings: []cloud.PendingPairing{
-			{PairingID: "p1", Label: "jcode mobile", ReceivedAt: received, PubKey: "secret-key"},
+		pairings: []cloud.Pairing{
+			{ID: "p1", Label: "jcode mobile", Status: "pending", CreatedAt: received.Format(time.RFC3339), PubKey: "secret-key"},
 		},
 		lastPaired: &cloud.PairedInfo{PairingID: "p0", Label: "jcode android", Auto: true, PairedAt: received},
 	}
@@ -33,7 +33,7 @@ func TestCloudPairingsList(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Pairings) != 1 || resp.Pairings[0].PairingID != "p1" || resp.Pairings[0].Label != "jcode mobile" {
+	if len(resp.Pairings) != 1 || resp.Pairings[0].ID != "p1" || resp.Pairings[0].Label != "jcode mobile" {
 		t.Fatalf("pairings = %+v", resp.Pairings)
 	}
 	if resp.LastPaired == nil || resp.LastPaired.PairingID != "p0" || !resp.LastPaired.Auto {
@@ -69,7 +69,7 @@ func TestCloudPairingApproveDeny(t *testing.T) {
 	}
 
 	fake := &fakeCloudSupervisor{
-		pairings: []cloud.PendingPairing{{PairingID: "p1", Label: "x", ReceivedAt: time.Now().UTC()}},
+		pairings: []cloud.Pairing{{ID: "p1", Label: "x", Status: "pending", CreatedAt: time.Now().UTC().Format(time.RFC3339)}},
 	}
 	s := &Server{cfg: &config.Config{}, cloudSupervisor: fake}
 

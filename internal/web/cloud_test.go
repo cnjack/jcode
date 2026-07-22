@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/cnjack/jcode/internal/cloud"
@@ -191,12 +192,13 @@ type fakeCloudSupervisor struct {
 	err      error
 	setCalls []bool
 
-	syncCalls  int
-	pairings   []cloud.PendingPairing
+	syncCalls  atomic.Int32
+	pairings   []cloud.Pairing
 	lastPaired *cloud.PairedInfo
 	pairingErr error
 	approved   []string
 	denied     []string
+	revoked    []string
 }
 
 func (f *fakeCloudSupervisor) Status() cloud.Status { return f.status }
@@ -204,9 +206,9 @@ func (f *fakeCloudSupervisor) SetAutoConnect(enabled bool) error {
 	f.setCalls = append(f.setCalls, enabled)
 	return f.err
 }
-func (f *fakeCloudSupervisor) SyncCredentials() { f.syncCalls++ }
-func (f *fakeCloudSupervisor) PendingPairings() []cloud.PendingPairing {
-	return f.pairings
+func (f *fakeCloudSupervisor) SyncCredentials() { f.syncCalls.Add(1) }
+func (f *fakeCloudSupervisor) PairingRecords(_ context.Context) ([]cloud.Pairing, error) {
+	return f.pairings, f.pairingErr
 }
 func (f *fakeCloudSupervisor) ApprovePairing(_ context.Context, id string) error {
 	f.approved = append(f.approved, id)
@@ -216,6 +218,11 @@ func (f *fakeCloudSupervisor) DenyPairing(_ context.Context, id string) error {
 	f.denied = append(f.denied, id)
 	return f.pairingErr
 }
+func (f *fakeCloudSupervisor) RevokePairing(_ context.Context, id string) error {
+	f.revoked = append(f.revoked, id)
+	return f.pairingErr
+}
+func (f *fakeCloudSupervisor) SyncAccountSettings(_ context.Context) error { return nil }
 func (f *fakeCloudSupervisor) LastPaired() (cloud.PairedInfo, bool) {
 	if f.lastPaired == nil {
 		return cloud.PairedInfo{}, false

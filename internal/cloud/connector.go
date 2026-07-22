@@ -26,11 +26,12 @@ import (
 // ConnectorConfig carries everything the connector needs. The zero durations
 // fall back to production defaults; tests inject short ones.
 type ConnectorConfig struct {
-	CloudURL    string       // orchestrator base URL (config.cloud.url, else credentials)
-	Credentials *Credentials // device identity from ~/.jcode/cloud.json
-	LocalBase   string       // local web control plane, e.g. http://127.0.0.1:8080
-	LocalToken  string       // web auth token (empty when the server doesn't require auth)
-	Version     string       // jcode version reported at register
+	CloudURL    string         // orchestrator base URL (config.cloud.url, else credentials)
+	Credentials *Credentials   // device identity from ~/.jcode/cloud.json
+	AppConfig   *config.Config // live config for the encrypted portable-preferences whitelist
+	LocalBase   string         // local web control plane, e.g. http://127.0.0.1:8080
+	LocalToken  string         // web auth token (empty when the server doesn't require auth)
+	Version     string         // jcode version reported at register
 
 	// Optional knobs (tests inject these; zero values use defaults).
 	HTTPClient        *http.Client
@@ -90,13 +91,17 @@ const (
 
 // Connector is the cloud relay client. Construct with NewConnector, then Run.
 type Connector struct {
-	cfg    ConnectorConfig
-	client *Client
-	local  *localControlPlane
-	seq    *seqAllocator
-	text   *agentTextBuffers
-	token  string
-	cipher *EnvelopeCipher // nil = plaintext uplink (grey period)
+	cfg      ConnectorConfig
+	client   *Client
+	local    *localControlPlane
+	seq      *seqAllocator
+	text     *agentTextBuffers
+	token    string
+	cipherMu sync.RWMutex
+	cipher   *EnvelopeCipher // nil = plaintext uplink (grey period)
+	// accountSettingsMu serializes periodic pulls with UI-triggered pushes so
+	// one process cannot race its own CAS merge or publish stale timestamps.
+	accountSettingsMu sync.Mutex
 
 	// statusMu guards state/lastError, the live connection snapshot exposed
 	// via Status. Written by Run's loops, read by the web status endpoint.
@@ -258,10 +263,11 @@ func (c *Connector) syncEnabled(sessionID string) bool {
 // on the plaintext grey path (or on seal failure, which must never block the
 // relay) it returns the input unchanged.
 func (c *Connector) sealUplink(plaintext json.RawMessage) json.RawMessage {
-	if c.cipher == nil || len(plaintext) == 0 {
+	cipher := c.cipherSnapshot()
+	if cipher == nil || len(plaintext) == 0 {
 		return plaintext
 	}
-	sealed, err := c.cipher.Seal(plaintext)
+	sealed, err := cipher.Seal(plaintext)
 	if err != nil {
 		c.logf("seal failed, sending plaintext: %v", err)
 		return plaintext
@@ -276,13 +282,14 @@ func (c *Connector) openDownlink(payload json.RawMessage) (json.RawMessage, erro
 	if len(payload) == 0 {
 		return payload, nil
 	}
-	if c.cipher == nil {
+	cipher := c.cipherSnapshot()
+	if cipher == nil {
 		if IsEnvelope(payload) {
 			return nil, fmt.Errorf("received encrypted command but no CEK is initialized on this device")
 		}
 		return payload, nil
 	}
-	plain, _, err := c.cipher.OpenMaybe(payload)
+	plain, _, err := cipher.OpenMaybe(payload)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt downlink payload: %w", err)
 	}
@@ -303,11 +310,11 @@ func (c *Connector) Run(ctx context.Context) {
 	// connector stays on the plaintext grey path; once generated, everything
 	// uplink is sealed. A failure here must never stop the connector — fall
 	// back to plaintext with a warning.
-	if c.cipher == nil && !c.cfg.CipherDisabled {
+	if c.cipherSnapshot() == nil && !c.cfg.CipherDisabled {
 		if cipher, err := EnsureCEK(); err != nil {
 			c.logf("CEK initialization failed, staying on plaintext uplink: %v", err)
 		} else {
-			c.cipher = cipher
+			c.setCipher(cipher)
 			c.logf("E2E encryption active (key_gen=%d)", cipher.KeyGen())
 		}
 	}
@@ -326,6 +333,9 @@ func (c *Connector) Run(ctx context.Context) {
 		return // ctx cancelled while registering
 	}
 	c.logf("connected to %s as device %s", c.cfg.CloudURL, c.cfg.Credentials.DeviceID)
+	if err := c.ReconcileAccountSettings(ctx); err != nil {
+		c.logf("account settings sync failed (will retry): %v", err)
+	}
 
 	// Seed seq numbers from the server's per-session high-water marks BEFORE
 	// the event pump starts assigning seqs (续号). Best-effort: a failure just
@@ -336,10 +346,11 @@ func (c *Connector) Run(ctx context.Context) {
 
 	var wg sync.WaitGroup
 	for name, fn := range map[string]func(context.Context){
-		"heartbeat":    c.heartbeatLoop,
-		"poll":         c.pollLoop,
-		"event_pump":   c.eventPumpLoop,
-		"session_sync": c.sessionSyncLoop,
+		"heartbeat":     c.heartbeatLoop,
+		"poll":          c.pollLoop,
+		"event_pump":    c.eventPumpLoop,
+		"session_sync":  c.sessionSyncLoop,
+		"settings_sync": c.accountSettingsLoop,
 	} {
 		wg.Add(1)
 		go func(name string, fn func(context.Context)) {
@@ -395,7 +406,7 @@ func (c *Connector) registerLoop(ctx context.Context) error {
 // register loop, so this reflects the live grey/encrypted path, not the raw
 // config flag.
 func (c *Connector) e2eeActive() bool {
-	return c.cipher != nil && !c.cfg.CipherDisabled
+	return c.cipherSnapshot() != nil && !c.cfg.CipherDisabled
 }
 
 // detectPlatform reports how this jcode instance was launched, sent as the// `platform` field at device register. The desktop app spawns `jcode web` as
@@ -480,7 +491,7 @@ func (c *Connector) executeAndAck(ctx context.Context, cmd DeviceCommand) {
 
 // ack posts one command ack, sealing the result when encryption is active.
 func (c *Connector) ack(ctx context.Context, id, status string, result any) {
-	if c.cipher != nil && result != nil {
+	if c.cipherSnapshot() != nil && result != nil {
 		if plain, err := json.Marshal(result); err == nil {
 			result = c.sealUplink(plain)
 		}
@@ -488,6 +499,18 @@ func (c *Connector) ack(ctx context.Context, id, status string, result any) {
 	if err := c.client.AckCommand(ctx, c.token, id, CommandAck{Status: status, Result: result}); err != nil && ctx.Err() == nil {
 		c.logf("ack for command %s failed: %v", id, err)
 	}
+}
+
+func (c *Connector) cipherSnapshot() *EnvelopeCipher {
+	c.cipherMu.RLock()
+	defer c.cipherMu.RUnlock()
+	return c.cipher
+}
+
+func (c *Connector) setCipher(cipher *EnvelopeCipher) {
+	c.cipherMu.Lock()
+	c.cipher = cipher
+	c.cipherMu.Unlock()
 }
 
 // --- command execution against the local web control plane ---

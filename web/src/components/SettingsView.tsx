@@ -43,8 +43,6 @@ import {
   ComputerDesktopIcon,
   ShieldCheckIcon,
   KeyIcon,
-  ArrowRightIcon,
-  ChatBubbleOvalLeftIcon,
   LockClosedIcon,
   XMarkIcon,
   MinusIcon,
@@ -128,7 +126,6 @@ const TABS: { id: TabId; Icon: React.ComponentType<{ className?: string }> }[] =
   { id: 'browser', Icon: GlobeAltIcon },
   { id: 'computer', Icon: ComputerDesktopIcon },
   { id: 'ssh', Icon: CommandLineIcon },
-  { id: 'channels', Icon: ChatBubbleOvalLeftIcon },
   { id: 'shortcuts', Icon: KeyIcon },
   { id: 'usage', Icon: ChartBarIcon },
   { id: 'developer', Icon: WrenchScrewdriverIcon },
@@ -293,7 +290,6 @@ export function SettingsView() {
             {tab === 'browser' && <BrowserTab />}
             {tab === 'computer' && <ComputerTab />}
             {tab === 'ssh' && <SSHTab />}
-            {tab === 'channels' && <ChannelsTab />}
             {tab === 'shortcuts' && <ShortcutsTab />}
             {tab === 'usage' && <UsageTab />}
             {tab === 'developer' && <DeveloperTab />}
@@ -1338,6 +1334,7 @@ function GeneralTab() {
   }
 
   async function changeLanguage(code: string) {
+    await api.setAccountPreferences({ language: code })
     await setLocale(code as SupportedLocale)
   }
 
@@ -2152,40 +2149,6 @@ function ShortcutsTab() {
       </div>
       <div className="text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">
         {t('settings.shortcuts.windowsHint')}
-      </div>
-    </div>
-  )
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// Channels tab (in settings) — minimal: links to the full Channels page.
-// ════════════════════════════════════════════════════════════════════════════
-
-function ChannelsTab() {
-  const { t } = useTranslation()
-  const dispatch = useAppDispatch()
-  return (
-    <div className="space-y-4">
-      <h3 className={SECTION_TITLE}>{t('settings.channels.title')}</h3>
-      <div className={ROW}>
-        <div className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)]">
-          <ChatBubbleOvalLeftIcon className="h-4 w-4" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.channels.manageTitle')}</div>
-          <div className="text-[11px] text-[var(--color-muted-foreground)]">
-            {t('settings.channels.manageDesc')}
-          </div>
-        </div>
-        <button
-          type="button"
-          className={`${BTN_SECONDARY} ${BTN_SM}`}
-          onClick={() => {
-            dispatch(uiActions.setView('channels'))
-          }}
-        >
-          {t('settings.channels.openPage')} <ArrowRightIcon className="h-3.5 w-3.5" />
-        </button>
       </div>
     </div>
   )
@@ -3275,6 +3238,7 @@ function AppearanceTab() {
     setActive(name)
     dispatch(uiActions.setTheme(name))
     applyTheme(name)
+    void api.setAccountPreferences({ theme: name }).catch((err) => console.error('Failed to sync theme:', err))
   }
 
   const darkThemes = THEMES.filter((th) => th.appearance === 'dark')

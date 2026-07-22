@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -161,6 +162,16 @@ type SubagentConfig struct {
 	MaxParallel  int `json:"max_parallel,omitempty"`
 	MaxCompleted int `json:"max_completed,omitempty"`
 	MaxDepth     int `json:"max_depth,omitempty"`
+}
+
+// AgentRoleConfig defines a named custom subagent role. Profile is the
+// capability ceiling; Instructions can narrow behavior but can never expand
+// tools beyond that profile.
+type AgentRoleConfig struct {
+	Description  string `json:"description"`
+	Profile      string `json:"profile,omitempty"` // explore | general | coordinator
+	Instructions string `json:"instructions"`
+	Model        string `json:"model,omitempty"`
 }
 
 // MemoryConfig controls cross-session learned memory (the file-based store
@@ -361,17 +372,18 @@ type Config struct {
 	// Deprecated: use Model field with "provider/model" format instead.
 	Provider string `json:"provider,omitempty"`
 
-	MaxIterations int                   `json:"max_iterations,omitempty"`
-	SSHAliases    []SSHAlias            `json:"ssh_aliases,omitempty"`
-	DockerAliases []DockerAlias         `json:"docker_aliases,omitempty"`
-	MCPServers    map[string]*MCPServer `json:"mcp_servers,omitempty"`
-	Telemetry     *TelemetryConfig      `json:"telemetry,omitempty"`
-	Budget        *BudgetConfig         `json:"budget,omitempty"`
-	Compaction    *CompactionConfig     `json:"compaction,omitempty"`
-	Prompt        *PromptConfig         `json:"prompt,omitempty"`
-	Subagent      *SubagentConfig       `json:"subagent,omitempty"`
-	Team          *TeamConfig           `json:"team,omitempty"`
-	Memory        *MemoryConfig         `json:"memory,omitempty"`
+	MaxIterations int                         `json:"max_iterations,omitempty"`
+	SSHAliases    []SSHAlias                  `json:"ssh_aliases,omitempty"`
+	DockerAliases []DockerAlias               `json:"docker_aliases,omitempty"`
+	MCPServers    map[string]*MCPServer       `json:"mcp_servers,omitempty"`
+	Telemetry     *TelemetryConfig            `json:"telemetry,omitempty"`
+	Budget        *BudgetConfig               `json:"budget,omitempty"`
+	Compaction    *CompactionConfig           `json:"compaction,omitempty"`
+	Prompt        *PromptConfig               `json:"prompt,omitempty"`
+	Subagent      *SubagentConfig             `json:"subagent,omitempty"`
+	Agents        map[string]*AgentRoleConfig `json:"agents,omitempty"`
+	Team          *TeamConfig                 `json:"team,omitempty"`
+	Memory        *MemoryConfig               `json:"memory,omitempty"`
 
 	// AutoApprove sets the default approval mode to auto on startup.
 	//
@@ -387,6 +399,12 @@ type Config struct {
 	// "jcode-dark", "nord-dark", "github-light"). Empty auto-selects a default
 	// from the detected terminal background. See internal/theme for the catalog.
 	Theme string `json:"theme,omitempty"`
+
+	// Language is the portable UI locale. The version/timestamp fields are CAS
+	// metadata for the encrypted account settings document.
+	Language                 string    `json:"language,omitempty"`
+	AccountSettingsVersion   int64     `json:"account_settings_version,omitempty"`
+	AccountSettingsUpdatedAt time.Time `json:"account_settings_updated_at,omitempty"`
 
 	// Channel controls external messaging channel behavior.
 	Channel *ChannelConfig `json:"channel,omitempty"`

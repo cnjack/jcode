@@ -11,6 +11,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/team"
 )
 
@@ -66,6 +67,24 @@ func TestTeamSpawnSchemaDeclaresProfilesDefaultsAndGrant(t *testing.T) {
 		!strings.Contains(info.Desc, "one-time delegated-write grant") {
 		t.Fatalf("schema does not explain the auto-mode grant: mode=%q desc=%q",
 			permission.Description, info.Desc)
+	}
+}
+
+func TestTeamSpawnSchemaAdvertisesCustomRoles(t *testing.T) {
+	manager := team.NewManager(&team.ManagerDeps{AgentRoles: map[string]config.AgentRoleConfig{
+		"reviewer": {Description: "Review a patch", Profile: "explore", Instructions: "read only"},
+	}})
+	info, err := NewTeamSpawnTool(manager).Info(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	js, err := info.ToJSONSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentType := js.Properties.Value("agent_type")
+	if want := []any{"explore", "general", "coder", "reviewer"}; !reflect.DeepEqual(agentType.Enum, want) {
+		t.Fatalf("agent_type enum = %v, want %v", agentType.Enum, want)
 	}
 }
 

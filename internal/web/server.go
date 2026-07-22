@@ -199,10 +199,12 @@ type CloudSupervisor interface {
 	// SyncCredentials reconciles the connector with the on-disk credentials
 	// after a web login/logout.
 	SyncCredentials()
-	// Pairing inbox (pending requests arrive via the connector's poll loop).
-	PendingPairings() []cloud.PendingPairing
+	// Persisted pairing audit trail plus approval/revocation actions.
+	PairingRecords(ctx context.Context) ([]cloud.Pairing, error)
 	ApprovePairing(ctx context.Context, id string) error
 	DenyPairing(ctx context.Context, id string) error
+	RevokePairing(ctx context.Context, id string) error
+	SyncAccountSettings(ctx context.Context) error
 	LastPaired() (cloud.PairedInfo, bool)
 }
 
@@ -433,6 +435,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/cloud/pairings", s.handleCloudPairings)
 	mux.HandleFunc("POST /api/cloud/pairings/{id}/approve", s.handleCloudPairingApprove)
 	mux.HandleFunc("POST /api/cloud/pairings/{id}/deny", s.handleCloudPairingDeny)
+	mux.HandleFunc("POST /api/cloud/pairings/{id}/revoke", s.handleCloudPairingRevoke)
+	mux.HandleFunc("PATCH /api/account-preferences", s.handleAccountPreferences)
 	mux.HandleFunc("GET /api/cloud/sync", s.handleCloudSync)
 	mux.HandleFunc("POST /api/cloud/sync/default", s.handleCloudSyncDefault)
 	mux.HandleFunc("POST /api/cloud/sync/{session_id}", s.handleCloudSyncSession)

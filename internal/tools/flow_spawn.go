@@ -13,6 +13,7 @@ import (
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/flow"
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/session"
@@ -35,6 +36,7 @@ type FlowSpawnDeps struct {
 	ModelFactory *internalmodel.ModelFactory
 	Recorder     *session.Recorder
 	Tracer       *telemetry.LangfuseTracer
+	AgentRoles   map[string]config.AgentRoleConfig
 }
 
 // NewFlowSpawn builds the flow.SpawnFunc used by the CLI/TUI/web/ACP frontends. It
@@ -45,13 +47,32 @@ func NewFlowSpawn(deps FlowSpawnDeps) flow.SpawnFunc {
 		if deps.Env == nil || deps.ModelFactory == nil {
 			return flow.AgentResult{}, fmt.Errorf("flow spawn: Env and ModelFactory are required")
 		}
-		cm, err := deps.ModelFactory.GetModel(ctx, spec.Model)
+		roleName := strings.TrimSpace(spec.AgentType)
+		if roleName == "" {
+			roleName = AgentTypeExplore
+		}
+		profile := roleName
+		instructions := ""
+		modelRef := spec.Model
+		if role, ok := deps.AgentRoles[roleName]; ok {
+			profile = role.Profile
+			instructions = role.Instructions
+			if modelRef == "" {
+				modelRef = role.Model
+			}
+		} else if profile != AgentTypeExplore && profile != AgentTypeGeneral && profile != AgentTypeCoordinator {
+			return flow.AgentResult{}, fmt.Errorf("unknown agent type %q", roleName)
+		}
+		cm, err := deps.ModelFactory.GetModel(ctx, modelRef)
 		if err != nil {
-			return flow.AgentResult{}, fmt.Errorf("resolve model %q: %w", spec.Model, err)
+			return flow.AgentResult{}, fmt.Errorf("resolve model %q: %w", modelRef, err)
 		}
 		childEnv := deps.Env.CloneForSubagent()
-		agentTools := flowTools(childEnv, spec.AgentType)
-		instruction := flowAgentSystemPrompt(spec.AgentType, childEnv.Pwd(), childEnv.Exec.Platform())
+		agentTools := flowTools(childEnv, profile)
+		instruction := flowAgentSystemPrompt(profile, childEnv.Pwd(), childEnv.Exec.Platform())
+		if instructions != "" {
+			instruction += "\n\n## Custom role: " + roleName + "\n" + instructions
+		}
 
 		schemaJSON := ""
 		if spec.Schema != nil {

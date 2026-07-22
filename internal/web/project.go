@@ -234,6 +234,7 @@ func (s *Server) handleSetApprovalMode(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.cfgMu.Unlock()
+	s.syncAccountSettingsBestEffort(r)
 
 	s.wsBroker.Broadcast(WSEvent{
 		Type:   "approval_mode_changed",

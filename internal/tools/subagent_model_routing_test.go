@@ -186,3 +186,26 @@ func TestSubagentModelRouting_ExplicitRef(t *testing.T) {
 		}
 	}
 }
+
+func TestSubagentCustomRoleModelDefaultAndExplicitOverride(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	srv, captured := newMockOpenAI(t)
+	defer srv.Close()
+
+	st := routingFixture(t, srv.URL, "mock/small-model")
+	st.deps.AgentRoles = map[string]config.AgentRoleConfig{
+		"reviewer": {Description: "review", Profile: "explore", Instructions: "review carefully", Model: "small"},
+	}
+	if _, err := st.InvokableRun(context.Background(),
+		`{"name":"role-default","description":"d","prompt":"done","agent_type":"reviewer"}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.InvokableRun(context.Background(),
+		`{"name":"explicit","description":"d","prompt":"done","agent_type":"reviewer","model":"mock/explicit"}`); err != nil {
+		t.Fatal(err)
+	}
+	models := captured()
+	if len(models) < 2 || models[0] != "small-model" || models[len(models)-1] != "explicit" {
+		t.Fatalf("custom role model routing = %v", models)
+	}
+}

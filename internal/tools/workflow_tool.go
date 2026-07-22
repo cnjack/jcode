@@ -23,6 +23,7 @@ type WorkflowToolDeps struct {
 	Tracer       *telemetry.LangfuseTracer
 	Sink         flow.EventSink // optional: TUI/web progress; nil = discard
 	Loader       *flow.Loader   // optional: for `name` lookup + nested workflow(); built fresh if nil
+	AgentRoles   map[string]config.AgentRoleConfig
 }
 
 const workflowToolAPIDoc = `The script is plain JavaScript with top-level await. Start it with:
@@ -142,6 +143,7 @@ func (t *workflowRunTool) InvokableRun(ctx context.Context, argumentsInJSON stri
 		ModelFactory: t.deps.ModelFactory,
 		Recorder:     t.deps.Recorder,
 		Tracer:       t.deps.Tracer,
+		AgentRoles:   t.deps.AgentRoles,
 	})
 	eng := flow.New(spawn, sink, flow.WithResolver(loader.Resolve))
 

@@ -28,7 +28,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowRightIcon, CloudIcon } from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
-import { api, type CloudPendingPairing, type CloudStatusResponse } from '../lib/api'
+import { api, type CloudPairingRecord, type CloudStatusResponse } from '../lib/api'
 import { useAppDispatch } from '../app/hooks'
 import { uiActions } from '../app/store'
 
@@ -58,7 +58,7 @@ export function CloudBadge() {
 
   // Pending pairing requests drive the pulsing dot (approvals happen in the
   // settings view's Cloud tab now).
-  const [pairings, setPairings] = useState<CloudPendingPairing[]>([])
+  const [pairings, setPairings] = useState<CloudPairingRecord[]>([])
 
   // Transient toast (approvals, new requests).
   const [notice, setNotice] = useState<string | null>(null)
@@ -89,14 +89,15 @@ export function CloudBadge() {
     }
     try {
       const pr = await api.cloudPairings()
-      setPairings(pr.pairings)
+      const pending = pr.pairings.filter((p) => p.status === 'pending')
+      setPairings(pending)
       // Toast on newly arrived pairing requests (the first poll only baselines).
-      const current = new Set(pr.pairings.map((p) => p.pairing_id))
+      const current = new Set(pending.map((p) => p.id))
       if (seenPairingIds.current === null) {
         seenPairingIds.current = current
       } else {
-        for (const p of pr.pairings) {
-          if (!seenPairingIds.current.has(p.pairing_id)) {
+        for (const p of pending) {
+          if (!seenPairingIds.current.has(p.id)) {
             toast(t('cloud.pairingRequest', { label: p.label }))
           }
         }

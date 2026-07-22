@@ -147,6 +147,7 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 	// "small" alias); fallback is the current session model, so it must be
 	// rebuilt here on every agent rebuild (model switches re-enter this func).
 	factory := internalmodel.NewModelFactory(s.cfg, s.chatModel)
+	agentRoles := config.LoadAgentRoles(s.env.Pwd(), s.cfg)
 	all := []tool.BaseTool{
 		s.env.NewReadTool(), s.env.NewEditTool(), s.env.NewWriteTool(),
 		s.env.NewExecuteTool(s.bgManager), s.env.NewGrepTool(),
@@ -162,12 +163,14 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 			TokenFn:      s.subagentTokenFn,
 			Recorder:     s.rec,
 			Tracer:       s.langfuseTracer,
+			AgentRoles:   agentRoles,
 		}),
 		s.env.NewWorkflowRunTool(&tools.WorkflowToolDeps{
 			ModelFactory: factory,
 			Recorder:     s.rec,
 			Tracer:       s.langfuseTracer,
 			Loader:       s.flowLoader,
+			AgentRoles:   agentRoles,
 		}),
 		tools.NewAskUserTool(s.askUserDeps),
 		skills.NewLoadSkillTool(s.skillLoader),
@@ -1271,6 +1274,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	// resolution path as subagents/workflows; the fallback (startup model) is
 	// only reached when the "small" alias is unset/invalid.
 	teamModelFactory := internalmodel.NewModelFactory(cfg, chatModel)
+	teamAgentRoles := config.LoadAgentRoles(pwd, cfg)
 	teamManager := team.NewManager(&team.ManagerDeps{
 		DefaultModel: chatModel,
 		EnvFactory: func(cwd string) any {
@@ -1293,6 +1297,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		},
 		LeaderSessionUUID: rec.UUID(),
 		Tracer:            st.langfuseTracer,
+		AgentRoles:        teamAgentRoles,
 	})
 	st.teamManager = teamManager
 	st.toolList = st.buildAllTools()

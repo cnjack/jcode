@@ -159,6 +159,7 @@ func (s *Server) handleSwitchModel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config: " + persistErr.Error()})
 		return
 	}
+	s.syncAccountSettingsBestEffort(r)
 
 	// Track in recent models.
 	if state, err := config.LoadModelState(); err == nil {
@@ -249,6 +250,8 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		"provider":       providerName,
 		"model":          modelName,
 		"small_model":    cfg.SmallModel,
+		"language":       cfg.Language,
+		"theme":          cfg.Theme,
 		"max_iterations": cfg.MaxIterations,
 	})
 }
@@ -307,6 +310,7 @@ func (s *Server) handleSetSmallModel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config: " + err.Error()})
 		return
 	}
+	s.syncAccountSettingsBestEffort(r)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "small_model": ref})
 }

@@ -573,6 +573,23 @@ func init() {
 // built into the registry. They are added to generatedProviders/generatedProviderOrder
 // at init time so they behave identically to models.dev providers.
 var staticProviders = map[string]*RegistryProvider{
+	// Alibaba Token Plan endpoints are intentionally separate provider ids: the
+	// credentials and regional base URLs differ from regular DashScope. Their
+	// early-access model catalog is injected by additionalModels below.
+	"alibaba-token-plan-cn": {
+		ID:     "alibaba-token-plan-cn",
+		Name:   "Alibaba Token Plan (China)",
+		Env:    []string{"DASHSCOPE_API_KEY"},
+		API:    "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+		Models: map[string]*RegistryModel{},
+	},
+	"alibaba-token-plan": {
+		ID:     "alibaba-token-plan",
+		Name:   "Alibaba Token Plan",
+		Env:    []string{"DASHSCOPE_API_KEY"},
+		API:    "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+		Models: map[string]*RegistryModel{},
+	},
 	// Kimi For Coding is Moonshot's subscription coding plan. models.dev carries a
 	// "kimi-for-coding" record, but its model ids (k2p5/k2p6/k2p7/kimi-k2-thinking)
 	// are undocumented aliases that the vendor's own /models endpoint does not
@@ -698,6 +715,8 @@ var staticProviders = map[string]*RegistryProvider{
 // staticProviderOrder defines the display order for static providers.
 // They are appended after the generated providers.
 var staticProviderOrder = []string{
+	"alibaba-token-plan-cn",
+	"alibaba-token-plan",
 	"kimi-for-coding",
 	"tencent-tokenhub-ep",
 }

@@ -519,6 +519,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			// One factory serves subagent + workflow model overrides (incl.
 			// the "small" alias); fallback is this task's current model.
 			factory := internalmodel.NewModelFactory(agentCfg, cm)
+			agentRoles := config.LoadAgentRoles(taskPwd, agentCfg)
 			all := []tool.BaseTool{
 				tenv.NewReadTool(), tenv.NewEditTool(), tenv.NewWriteTool(),
 				tenv.NewExecuteTool(tbg), tenv.NewGrepTool(),
@@ -537,11 +538,13 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 					ProgressFn: func(agentName, event, toolName, detail string) {
 						twh.OnSubagentProgress(agentName, event, toolName, detail)
 					},
+					AgentRoles: agentRoles,
 				}),
 				tenv.NewWorkflowRunTool(&tools.WorkflowToolDeps{
 					ModelFactory: factory,
 					Recorder:     trec,
 					Loader:       taskFlowLoader,
+					AgentRoles:   agentRoles,
 				}),
 				tools.NewAskUserTool(&tools.AskUserDeps{
 					BatchRequestFn: twh.RequestAskUser,

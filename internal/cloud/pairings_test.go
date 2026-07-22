@@ -13,11 +13,13 @@ func TestPairingEndpoints(t *testing.T) {
 	var gotRespond struct {
 		called  bool
 		Approve bool     `json:"approve"`
+		KeyGen  int      `json:"key_gen"`
 		Wrap    *CEKWrap `json:"wrap"`
 	}
-	setRespond := func(approve bool, wrap *CEKWrap) {
+	setRespond := func(approve bool, keyGen int, wrap *CEKWrap) {
 		gotRespond.called = true
 		gotRespond.Approve = approve
+		gotRespond.KeyGen = keyGen
 		gotRespond.Wrap = wrap
 	}
 	mux := http.NewServeMux()
@@ -39,12 +41,13 @@ func TestPairingEndpoints(t *testing.T) {
 	mux.HandleFunc("POST /internal/v1/device/pairings/{id}/respond", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Approve bool     `json:"approve"`
+			KeyGen  int      `json:"key_gen"`
 			Wrap    *CEKWrap `json:"wrap"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("respond: decode body: %v", err)
 		}
-		setRespond(body.Approve, body.Wrap)
+		setRespond(body.Approve, body.KeyGen, body.Wrap)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{}`))
 	})
@@ -70,14 +73,14 @@ func TestPairingEndpoints(t *testing.T) {
 	}
 
 	wrap := &CEKWrap{EphemeralPubKey: "ZXBo", Nonce: "bm9uY2U=", CT: "Y3Q="}
-	if err := client.RespondPairing(ctx, "tok", "p1", true, wrap); err != nil {
+	if err := client.RespondPairing(ctx, "tok", "p1", true, 3, wrap); err != nil {
 		t.Fatalf("RespondPairing approve: %v", err)
 	}
-	if !gotRespond.called || !gotRespond.Approve || gotRespond.Wrap == nil || gotRespond.Wrap.EphemeralPubKey != "ZXBo" {
+	if !gotRespond.called || !gotRespond.Approve || gotRespond.KeyGen != 3 || gotRespond.Wrap == nil || gotRespond.Wrap.EphemeralPubKey != "ZXBo" {
 		t.Fatalf("approve respond body = %+v", gotRespond)
 	}
 
-	if err := client.RespondPairing(ctx, "tok", "p1", false, nil); err != nil {
+	if err := client.RespondPairing(ctx, "tok", "p1", false, 0, nil); err != nil {
 		t.Fatalf("RespondPairing deny: %v", err)
 	}
 	if gotRespond.Approve || gotRespond.Wrap != nil {
