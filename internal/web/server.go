@@ -196,6 +196,7 @@ type BLEController interface {
 type CloudSupervisor interface {
 	Status() cloud.Status
 	SetAutoConnect(bool) error
+	SetConfigSync(bool) error
 	// SyncCredentials reconciles the connector with the on-disk credentials
 	// after a web login/logout.
 	SyncCredentials()
@@ -205,6 +206,13 @@ type CloudSupervisor interface {
 	DenyPairing(ctx context.Context, id string) error
 	RevokePairing(ctx context.Context, id string) error
 	SyncAccountSettings(ctx context.Context) error
+	SyncProviderConfigs(ctx context.Context) error
+	AccountSyncKeyStatus(ctx context.Context) (*cloud.AccountSyncKeyState, error)
+	PendingAccountSyncDevices(ctx context.Context) ([]cloud.AccountSyncKeyRequest, error)
+	ApprovedAccountSyncDevices(ctx context.Context) ([]cloud.AccountSyncKeyRequest, error)
+	ApproveAccountSyncDevice(ctx context.Context, deviceID string) error
+	DenyAccountSyncDevice(ctx context.Context, deviceID string) error
+	RevokeAccountSyncDevice(ctx context.Context, deviceID string) error
 	LastPaired() (cloud.PairedInfo, bool)
 }
 
@@ -428,6 +436,12 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/tool-search/config", s.handleToolSearchConfig)
 	mux.HandleFunc("GET /api/cloud/status", s.handleCloudStatus)
 	mux.HandleFunc("POST /api/cloud/config", s.handleCloudConfig)
+	mux.HandleFunc("GET /api/cloud/config-sync", s.handleCloudConfigSync)
+	mux.HandleFunc("POST /api/cloud/config-sync/now", s.handleCloudConfigSyncNow)
+	mux.HandleFunc("GET /api/cloud/config-sync/requests", s.handleCloudConfigSyncRequests)
+	mux.HandleFunc("POST /api/cloud/config-sync/requests/{device_id}/approve", s.handleCloudConfigSyncApprove)
+	mux.HandleFunc("POST /api/cloud/config-sync/requests/{device_id}/deny", s.handleCloudConfigSyncDeny)
+	mux.HandleFunc("DELETE /api/cloud/config-sync/devices/{device_id}", s.handleCloudConfigSyncRevoke)
 	mux.HandleFunc("POST /api/cloud/login", s.handleCloudLogin)
 	mux.HandleFunc("GET /api/cloud/login/status", s.handleCloudLoginStatus)
 	mux.HandleFunc("POST /api/cloud/logout", s.handleCloudLogout)

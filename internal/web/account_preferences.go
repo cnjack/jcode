@@ -1,9 +1,11 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/theme"
@@ -77,4 +79,20 @@ func (s *Server) syncAccountSettingsBestEffort(r *http.Request) {
 	if err := s.cloudSupervisor.SyncAccountSettings(r.Context()); err != nil {
 		config.Logger().Printf("[web] account settings sync queued with error: %v", err)
 	}
+}
+
+// syncProviderConfigsBestEffort keeps local Provider edits local-first. The
+// response never waits on Cloud; an enabled connector reconciles immediately,
+// while the periodic loop remains the retry path for offline/transient errors.
+func (s *Server) syncProviderConfigsBestEffort() {
+	if s.cloudSupervisor == nil || !s.cloudSupervisor.Status().ConfigSync {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if err := s.cloudSupervisor.SyncProviderConfigs(ctx); err != nil {
+			config.Logger().Printf("[web] provider configuration sync queued with error: %v", err)
+		}
+	}()
 }

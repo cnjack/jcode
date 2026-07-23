@@ -5,7 +5,7 @@
  * popover, which keeps only a quick status indicator + a deep link to this
  * tab):
  *
- *   logged out  → in-app device-code login: user_code + verification URI (QR)
+ *   logged out  → in-app device-code login: user_code + verification link
  *                 with a status poll until success / error / expired (retry)
  *   logged in   → connection state, server/device info, the auto-connect
  *                 switch, pairing approvals (approve / deny), and logout
@@ -16,19 +16,21 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import QRCode from 'qrcode'
 import {
   ArrowPathIcon,
   ArrowRightOnRectangleIcon,
   CheckIcon,
   ClipboardDocumentIcon,
   CloudIcon,
+  KeyIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
 import {
   api,
   type CloudLoginStatusResponse,
+  type CloudConfigSyncRequest,
+  type CloudConfigSyncResponse,
   type CloudPairingRecord,
   type CloudStatusResponse,
 } from '../../lib/api'
@@ -50,30 +52,6 @@ function dotColor(s: CloudStatusResponse | null): string {
     default: // offline while logged in
       return 'var(--color-warning-fg)'
   }
-}
-
-/** QRImage renders text as a QR code data-URL image (white pad for contrast). */
-function QRImage({ text, size }: { text: string; size: number }) {
-  const [src, setSrc] = useState<string | null>(null)
-  useEffect(() => {
-    let alive = true
-    QRCode.toDataURL(text, { margin: 1, width: size })
-      .then((url) => {
-        if (alive) setSrc(url)
-      })
-      .catch(() => {})
-    return () => {
-      alive = false
-    }
-  }, [text, size])
-  return (
-    <div
-      className="inline-flex shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-white p-1.5"
-      style={{ width: size + 12, height: size + 12 }}
-    >
-      {src && <img src={src} width={size} height={size} alt="" aria-hidden="true" />}
-    </div>
-  )
 }
 
 /** CopyButton — one-click clipboard copy with transient "copied" feedback (M17). */
@@ -115,7 +93,7 @@ export function CloudTab({ heading = true }: { heading?: boolean } = {}) {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
-  // Login flow panel: pending (code + QR), or terminal error/expired (retry).
+  // Login flow panel: pending (code + link), or terminal error/expired (retry).
   const [loginPanel, setLoginPanel] = useState<CloudLoginStatusResponse | null>(null)
   const [loginBusy, setLoginBusy] = useState(false)
   const [loginCloudURL, setLoginCloudURL] = useState(DEFAULT_CLOUD_URL)
@@ -127,9 +105,16 @@ export function CloudTab({ heading = true }: { heading?: boolean } = {}) {
   const [logoutBusy, setLogoutBusy] = useState(false)
   const [syncDefault, setSyncDefault] = useState<boolean | null>(null)
   const [syncSaving, setSyncSaving] = useState(false)
+  const [configSync, setConfigSync] = useState<CloudConfigSyncResponse | null>(null)
+  const [configSyncRequests, setConfigSyncRequests] = useState<CloudConfigSyncRequest[]>([])
+  const [configSyncDevices, setConfigSyncDevices] = useState<CloudConfigSyncRequest[]>([])
+  const [configSyncBusy, setConfigSyncBusy] = useState<string | null>(null)
 
   // Inline error surface (this tab has no toast — the badge owns toasts).
   const [actionError, setActionError] = useState<string | null>(null)
+  const revocableConfigDevices = configSyncDevices.filter(
+    (device) => device.device_id !== status?.device_id,
+  )
   const mounted = useRef(true)
   useEffect(() => {
     mounted.current = true
@@ -150,14 +135,25 @@ export function CloudTab({ heading = true }: { heading?: boolean } = {}) {
     setStatusLoading(false)
     if (!st?.logged_in) {
       setPairings([])
+      setConfigSync(null)
+      setConfigSyncRequests([])
+      setConfigSyncDevices([])
       return
     }
-    try {
-      const pr = await api.cloudPairings()
-      if (mounted.current) setPairings(pr.pairings)
-    } catch {
-      // Pairing endpoints unavailable (older backend): ignore.
-    }
+    await Promise.all([
+      api.cloudPairings().then((pr) => {
+        if (mounted.current) setPairings(pr.pairings)
+      }).catch(() => {}),
+      api.cloudConfigSync().then((value) => {
+        if (mounted.current) setConfigSync(value)
+      }).catch(() => {}),
+      api.cloudConfigSyncRequests().then((value) => {
+        if (mounted.current) {
+          setConfigSyncRequests(value.requests)
+          setConfigSyncDevices(value.devices)
+        }
+      }).catch(() => {}),
+    ])
   }, [])
 
   useEffect(() => {
@@ -239,6 +235,80 @@ export function CloudTab({ heading = true }: { heading?: boolean } = {}) {
       setActionError(t('cloud.saveFailed', { message: err instanceof Error ? err.message : String(err) }))
     } finally {
       setSyncSaving(false)
+    }
+  }
+
+  async function toggleConfigSync() {
+    if (!status || configSyncBusy) return
+    const enabled = !(configSync?.enabled ?? status.config_sync)
+    setConfigSyncBusy('toggle')
+    setActionError(null)
+    try {
+      const nextStatus = await api.cloudSetConfigSync(enabled)
+      setStatus(nextStatus)
+      setConfigSync(await api.cloudConfigSync())
+      if (enabled) {
+        const pending = await api.cloudConfigSyncRequests().catch(() => ({ requests: [], devices: [] }))
+        setConfigSyncRequests(pending.requests)
+        setConfigSyncDevices(pending.devices)
+      } else {
+        setConfigSyncRequests([])
+        setConfigSyncDevices([])
+      }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setConfigSyncBusy(null)
+    }
+  }
+
+  async function syncProviderConfigsNow() {
+    if (configSyncBusy) return
+    setConfigSyncBusy('sync')
+    setActionError(null)
+    try {
+      await api.cloudSyncProviderConfigs()
+      setConfigSync(await api.cloudConfigSync())
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setConfigSyncBusy(null)
+    }
+  }
+
+  async function resolveConfigSyncDevice(deviceId: string, approve: boolean) {
+    if (configSyncBusy) return
+    setConfigSyncBusy(deviceId)
+    setActionError(null)
+    try {
+      if (approve) await api.cloudApproveConfigSyncDevice(deviceId)
+      else await api.cloudDenyConfigSyncDevice(deviceId)
+      const pending = await api.cloudConfigSyncRequests()
+      setConfigSyncRequests(pending.requests)
+      setConfigSyncDevices(pending.devices)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setConfigSyncBusy(null)
+    }
+  }
+
+  async function revokeConfigSyncDevice(deviceId: string, label: string) {
+    if (
+      configSyncBusy ||
+      !window.confirm(t('cloud.desktopRevokeConfirm', { label }))
+    ) return
+    setConfigSyncBusy(deviceId)
+    setActionError(null)
+    try {
+      await api.cloudRevokeConfigSyncDevice(deviceId)
+      const next = await api.cloudConfigSyncRequests()
+      setConfigSyncRequests(next.requests)
+      setConfigSyncDevices(next.devices)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setConfigSyncBusy(null)
     }
   }
 
@@ -379,6 +449,114 @@ export function CloudTab({ heading = true }: { heading?: boolean } = {}) {
               title={status.auto_connect ? t('common.disable') : t('common.enable')}
             />
           </div>
+
+          {/* Account Sync Key (ASK) protects provider credentials shared only
+              between explicitly approved Desktop installations. */}
+          <div className={ROW}>
+            <div className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)]">
+              <KeyIcon className="h-4 w-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('cloud.configSyncTitle')}</div>
+              <div className="text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">{t('cloud.configSyncDesc')}</div>
+              {(configSync?.enabled || status.config_sync) && (
+                <div className="mt-1 text-[10.5px] text-[var(--color-muted-foreground)]">
+                  {t(`cloud.configSyncState.${configSync?.key.state ?? 'offline'}`)}
+                </div>
+              )}
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              {(configSync?.enabled || status.config_sync) && configSync?.key.state === 'ready' && (
+                <button
+                  type="button"
+                  className={`${BTN_GHOST} ${BTN_SM}`}
+                  disabled={configSyncBusy !== null}
+                  onClick={() => void syncProviderConfigsNow()}
+                >
+                  <ArrowPathIcon className={`h-3.5 w-3.5 ${configSyncBusy === 'sync' ? 'animate-spin' : ''}`} />
+                  {t('cloud.syncNow')}
+                </button>
+              )}
+              <Switch
+                on={!!(configSync?.enabled ?? status.config_sync)}
+                onClick={() => void toggleConfigSync()}
+                disabled={configSyncBusy !== null}
+                ariaLabel={t('cloud.configSyncTitle')}
+              />
+            </div>
+          </div>
+
+          {configSyncRequests.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-muted-foreground)]">
+                {t('cloud.desktopApprovalSection')}
+              </div>
+              <div className="text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">
+                {t('cloud.desktopApprovalWarning')}
+              </div>
+              {configSyncRequests.map((request) => (
+                <div key={request.device_id} className={ROW}>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[12px] font-medium text-[var(--color-foreground)]">
+                      {request.device_name || request.device_id}
+                    </div>
+                    <div className="text-[10.5px] text-[var(--color-muted-foreground)]">
+                      {new Date(request.created_at).toLocaleString()}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className={`${BTN_PRIMARY} ${BTN_SM}`}
+                    disabled={configSyncBusy !== null}
+                    onClick={() => void resolveConfigSyncDevice(request.device_id, true)}
+                  >
+                    <CheckIcon className="h-3 w-3" /> {t('cloud.approve')}
+                  </button>
+                  <button
+                    type="button"
+                    className={`${BTN_SECONDARY} ${BTN_SM}`}
+                    disabled={configSyncBusy !== null}
+                    onClick={() => void resolveConfigSyncDevice(request.device_id, false)}
+                  >
+                    <XMarkIcon className="h-3 w-3" /> {t('cloud.deny')}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {(configSync?.enabled || status.config_sync) && revocableConfigDevices.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-muted-foreground)]">
+                {t('cloud.desktopTrustedSection')}
+              </div>
+              <div className="text-[11px] leading-relaxed text-[var(--color-muted-foreground)]">
+                {t('cloud.desktopTrustedWarning')}
+              </div>
+              {revocableConfigDevices.map((device) => {
+                const label = device.device_name || device.device_id
+                return (
+                  <div key={device.device_id} className={ROW}>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[12px] font-medium text-[var(--color-foreground)]">
+                        {label}
+                      </div>
+                      <div className="text-[10.5px] text-[var(--color-muted-foreground)]">
+                        {new Date(device.created_at).toLocaleString()}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className={`${BTN_SECONDARY} ${BTN_SM} text-[var(--color-error-fg)]`}
+                      disabled={configSyncBusy !== null}
+                      onClick={() => void revokeConfigSyncDevice(device.device_id, label)}
+                    >
+                      <XMarkIcon className="h-3 w-3" /> {t('cloud.revokeConfigAccess')}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
           {saveError && (
             <div className="text-[11px] text-[var(--color-error-fg)]">{t('cloud.saveFailed', { message: saveError })}</div>
           )}
@@ -485,7 +663,7 @@ export function CloudTab({ heading = true }: { heading?: boolean } = {}) {
       ) : statusLoading ? (
         <div className={`${ROW} justify-center text-[11px] text-[var(--color-muted-foreground)]`}>{t('common.loading')}</div>
       ) : loginPanel?.state === 'pending' && loginPanel.user_code ? (
-        /* Device-code login in flight: code + verification URI + QR. */
+        /* Device-code login in flight: code + verification URI. */
         <div className={`${ROW} flex-col items-center gap-2 py-4`}>
           <div className="self-start text-[11.5px] leading-relaxed text-[var(--color-muted-foreground)]">
             {t('cloud.loginPrompt')}
@@ -510,7 +688,6 @@ export function CloudTab({ heading = true }: { heading?: boolean } = {}) {
             </div>
             <CopyButton text={loginPanel.user_code} />
           </div>
-          {loginPanel.verification_uri && <QRImage text={loginPanel.verification_uri} size={140} />}
           {loginPanel.verification_uri && <CopyButton text={loginPanel.verification_uri} label={t('cloud.copyLink')} />}
           <div className="inline-flex items-center gap-1.5 text-[11.5px] text-[var(--color-muted-foreground)]">
             <ArrowPathIcon className="h-3.5 w-3.5 animate-spin" />

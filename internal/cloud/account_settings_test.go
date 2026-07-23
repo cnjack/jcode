@@ -1,6 +1,7 @@
 package cloud
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,10 @@ func (f *accountSettingsFixture) handler(w http.ResponseWriter, r *http.Request)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
+	if r.URL.Path == "/internal/v1/device/config-key" {
+		_ = json.NewEncoder(w).Encode(map[string]any{"state": "ready", "key_gen": 1})
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		_ = json.NewEncoder(w).Encode(map[string]any{"version": f.version, "envelope": f.envelope})
@@ -58,9 +63,17 @@ func TestAccountSettingsSyncIsEncryptedAndAppliesPortableWhitelist(t *testing.T)
 		Model:     "openai/gpt-5", SmallModel: "openai/gpt-5-mini",
 		Language: "zh-Hans", Theme: "jcode-dark", DefaultMode: "approval",
 		AccountSettingsUpdatedAt: time.Now().UTC(),
+		Cloud:                    &config.CloudConfig{ConfigSync: boolPointer(true)},
+	}
+	firstPublic, firstPrivate, err := GenerateIdentityKeyPair()
+	if err != nil {
+		t.Fatal(err)
 	}
 	connector := NewConnector(ConnectorConfig{
-		CloudURL: server.URL, Credentials: &Credentials{DeviceToken: "jcd_test"},
+		CloudURL: server.URL, Credentials: &Credentials{
+			DeviceToken: "jcd_test", PublicKey: firstPublic, PrivateKey: firstPrivate,
+			ASK: base64.StdEncoding.EncodeToString(key), ASKKeyGen: 1,
+		},
 		AppConfig: first, Cipher: cipher,
 	})
 	if err := connector.ReconcileAccountSettings(t.Context()); err != nil {
@@ -78,9 +91,17 @@ func TestAccountSettingsSyncIsEncryptedAndAppliesPortableWhitelist(t *testing.T)
 	second := &config.Config{
 		Providers: map[string]*config.ProviderConfig{"openai": {}},
 		Model:     "openai/local", Language: "en", DefaultMode: "approval",
+		Cloud: &config.CloudConfig{ConfigSync: boolPointer(true)},
+	}
+	secondPublic, secondPrivate, err := GenerateIdentityKeyPair()
+	if err != nil {
+		t.Fatal(err)
 	}
 	puller := NewConnector(ConnectorConfig{
-		CloudURL: server.URL, Credentials: &Credentials{DeviceToken: "jcd_other"},
+		CloudURL: server.URL, Credentials: &Credentials{
+			DeviceToken: "jcd_other", PublicKey: secondPublic, PrivateKey: secondPrivate,
+			ASK: base64.StdEncoding.EncodeToString(key), ASKKeyGen: 1,
+		},
 		AppConfig: second, Cipher: cipher,
 	})
 	if err := puller.ReconcileAccountSettings(t.Context()); err != nil {
@@ -90,6 +111,8 @@ func TestAccountSettingsSyncIsEncryptedAndAppliesPortableWhitelist(t *testing.T)
 		t.Fatalf("pulled whitelist = model %q small %q language %q theme %q", second.Model, second.SmallModel, second.Language, second.Theme)
 	}
 }
+
+func boolPointer(value bool) *bool { return &value }
 
 func TestAccountSettingsDoesNotApplyUnavailableProvider(t *testing.T) {
 	cfg := &config.Config{

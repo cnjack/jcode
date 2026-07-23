@@ -27,6 +27,7 @@ import (
 	"github.com/cnjack/jcode/internal/browser"
 	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/channel/ble"
+	"github.com/cnjack/jcode/internal/cloud"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/feature"
 	"github.com/cnjack/jcode/internal/flow"
@@ -223,7 +224,8 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		providerName, modelName = cfg.GetProviderModel()
 		providers := cfg.GetProviders()
 		providerCfg := providers[providerName]
-		if providerCfg == nil {
+		_, isCloudProvider := cloud.ParseCloudProviderRef(providerName)
+		if providerCfg == nil && !isCloudProvider {
 			return fmt.Errorf("provider %q not found in config", providerName)
 		}
 	}
@@ -307,6 +309,28 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		currentCfg, err := config.LoadConfig()
 		if err != nil {
 			return nil, 0, fmt.Errorf("config error: %w", err)
+		}
+		if _, isCloud := cloud.ParseCloudProviderRef(prov); isCloud {
+			resolveCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+			defer cancel()
+			catalogModel, proxyBase, deviceToken, err := cloud.ResolveCloudModel(
+				resolveCtx, currentCfg, prov, mod,
+			)
+			if err != nil {
+				return nil, 0, fmt.Errorf("resolve Cloud model %s/%s: %w", prov, mod, err)
+			}
+			vision := catalogModel.Capabilities.Image
+			effort := config.ResolveEffort(prov, mod, "")
+			proxyConfig := &config.ProviderConfig{
+				APIKey: deviceToken, Vision: &vision, ReasoningEffort: effort,
+			}
+			cm, err := internalmodel.NewChatModelFromProvider(
+				ctx, catalogModel.Kind, catalogModel.UpstreamModelID, proxyBase, proxyConfig,
+			)
+			if err != nil {
+				return nil, 0, fmt.Errorf("create Cloud model %s/%s: %w", prov, mod, err)
+			}
+			return cm, catalogModel.ContextWindow, nil
 		}
 		provCfg := currentCfg.GetProviders()[prov]
 		if provCfg == nil {
@@ -519,6 +543,27 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			// One factory serves subagent + workflow model overrides (incl.
 			// the "small" alias); fallback is this task's current model.
 			factory := internalmodel.NewModelFactory(agentCfg, cm)
+			factory.SetExternalModelResolver(func(resolveCtx context.Context, provider, modelID string) (*internalmodel.ExternalModel, error) {
+				if _, isCloud := cloud.ParseCloudProviderRef(provider); !isCloud {
+					return nil, nil
+				}
+				catalogModel, proxyBase, deviceToken, err := cloud.ResolveCloudModel(
+					resolveCtx, agentCfg, provider, modelID,
+				)
+				if err != nil {
+					return nil, fmt.Errorf("resolve Cloud model %s/%s: %w", provider, modelID, err)
+				}
+				vision := catalogModel.Capabilities.Image
+				return &internalmodel.ExternalModel{
+					Provider: catalogModel.Kind,
+					Model:    catalogModel.UpstreamModelID,
+					BaseURL:  proxyBase,
+					Config: &config.ProviderConfig{
+						APIKey: deviceToken, Vision: &vision,
+						ReasoningEffort: config.ResolveEffort(provider, modelID, ""),
+					},
+				}, nil
+			})
 			agentRoles := config.LoadAgentRoles(taskPwd, agentCfg)
 			all := []tool.BaseTool{
 				tenv.NewReadTool(), tenv.NewEditTool(), tenv.NewWriteTool(),
@@ -844,7 +889,14 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			var err error
 			ag, err = createAgent(providerName, modelName)
 			if err != nil {
-				return nil, fmt.Errorf("error creating agent: %w", err)
+				if _, isCloud := cloud.ParseCloudProviderRef(providerName); !isCloud {
+					return nil, fmt.Errorf("error creating agent: %w", err)
+				}
+				// Keep the Desktop control plane usable when a previously
+				// selected Cloud model is temporarily unavailable. We never
+				// silently execute on a local model; the empty agent blocks
+				// sends until the user reconnects or explicitly selects one.
+				config.Logger().Printf("[cloud] selected model unavailable at startup: %v", err)
 			}
 		}
 

@@ -15,6 +15,7 @@ import (
 
 type cloudConfigPayload struct {
 	AutoConnect *bool `json:"auto_connect"`
+	ConfigSync  *bool `json:"config_sync"`
 }
 
 // handleCloudStatus serves GET /api/cloud/status. Without a supervisor (e.g.
@@ -51,16 +52,23 @@ func (s *Server) handleCloudConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "request body must contain one JSON object"})
 		return
 	}
-	if req.AutoConnect == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "auto_connect is required"})
+	if req.AutoConnect == nil && req.ConfigSync == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "auto_connect or config_sync is required"})
 		return
 	}
 
-	enabled := *req.AutoConnect
 	if s.cloudSupervisor != nil {
-		if err := s.cloudSupervisor.SetAutoConnect(enabled); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
+		if req.AutoConnect != nil {
+			if err := s.cloudSupervisor.SetAutoConnect(*req.AutoConnect); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+		}
+		if req.ConfigSync != nil {
+			if err := s.cloudSupervisor.SetConfigSync(*req.ConfigSync); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
 		}
 		writeJSON(w, http.StatusOK, s.cloudSupervisor.Status())
 		return
@@ -75,12 +83,21 @@ func (s *Server) handleCloudConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	previous := s.cfg.CloudSettings()
+	autoConnect := previous.AutoConnect
+	if req.AutoConnect != nil {
+		autoConnect = req.AutoConnect
+	}
+	configSync := previous.ConfigSync
+	if req.ConfigSync != nil {
+		configSync = req.ConfigSync
+	}
 	s.cfg.SetCloud(&config.CloudConfig{
 		Enabled:     previous.Enabled,
 		URL:         previous.URL,
-		AutoConnect: &enabled,
+		AutoConnect: autoConnect,
 		E2EE:        previous.E2EE,
 		SyncDefault: previous.SyncDefault,
+		ConfigSync:  configSync,
 	})
 	if err := config.SaveConfig(s.cfg); err != nil {
 		if previous == (config.CloudConfig{}) {

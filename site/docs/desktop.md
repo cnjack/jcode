@@ -1,6 +1,6 @@
 ---
 title: Desktop App
-nav_order: 6
+nav_order: 7
 ---
 
 # Desktop App
@@ -13,6 +13,12 @@ focus, window-state memory, and a native folder picker.
 It is **not** a second implementation: the Go backend (with the web UI already
 embedded) runs as a bundled *sidecar* process, and Tauri renders it. Everything
 you can do in the browser UI works identically here.
+
+Cloud is an optional extension. Local Providers still call model APIs directly
+and Desktop remains fully usable while signed out. When enabled, Cloud adds
+browser/mobile session access, trusted-device approval, Cloud-managed Providers,
+and end-to-end encrypted configuration sync between Desktops. See
+[Cloud & configuration sync](/docs/cloud).
 
 ## Architecture
 

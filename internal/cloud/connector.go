@@ -71,6 +71,8 @@ type ConnectorConfig struct {
 	// uploaded. Nil lazily loads the default path on first use; a load failure
 	// fails CLOSED (nothing syncs). Tests inject a temp-file store.
 	SyncStore *SyncStore
+	// ProviderSyncStatePath overrides ~/.jcode/provider-sync.json in tests.
+	ProviderSyncStatePath string
 }
 
 const (
@@ -102,6 +104,9 @@ type Connector struct {
 	// accountSettingsMu serializes periodic pulls with UI-triggered pushes so
 	// one process cannot race its own CAS merge or publish stale timestamps.
 	accountSettingsMu sync.Mutex
+	// providerSyncMu serializes ASK enrollment, provider vault reconciliation
+	// and approval actions so one Desktop process never races its own CAS state.
+	providerSyncMu sync.Mutex
 
 	// statusMu guards state/lastError, the live connection snapshot exposed
 	// via Status. Written by Run's loops, read by the web status endpoint.
@@ -336,6 +341,9 @@ func (c *Connector) Run(ctx context.Context) {
 	if err := c.ReconcileAccountSettings(ctx); err != nil {
 		c.logf("account settings sync failed (will retry): %v", err)
 	}
+	if err := c.ReconcileProviderConfigs(ctx); err != nil {
+		c.logf("provider config sync failed (will retry): %v", err)
+	}
 
 	// Seed seq numbers from the server's per-session high-water marks BEFORE
 	// the event pump starts assigning seqs (续号). Best-effort: a failure just
@@ -351,6 +359,7 @@ func (c *Connector) Run(ctx context.Context) {
 		"event_pump":    c.eventPumpLoop,
 		"session_sync":  c.sessionSyncLoop,
 		"settings_sync": c.accountSettingsLoop,
+		"provider_sync": c.providerConfigLoop,
 	} {
 		wg.Add(1)
 		go func(name string, fn func(context.Context)) {

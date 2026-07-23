@@ -10,6 +10,19 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 )
 
+// ExternalModel is a resolved non-local provider model. The factory owns the
+// common OpenAI-compatible construction, while the command layer supplies
+// authentication/catalog resolution without creating a model↔cloud import
+// cycle.
+type ExternalModel struct {
+	Provider string
+	Model    string
+	BaseURL  string
+	Config   *config.ProviderConfig
+}
+
+type ExternalModelResolver func(context.Context, string, string) (*ExternalModel, error)
+
 // ModelFactory creates and caches ChatModel instances by "provider/model" identifier.
 type ModelFactory struct {
 	mu       sync.RWMutex
@@ -17,6 +30,13 @@ type ModelFactory struct {
 	cache    map[string]einomodel.ToolCallingChatModel
 	fallback einomodel.ToolCallingChatModel
 	registry *ModelRegistry
+	external ExternalModelResolver
+}
+
+func (f *ModelFactory) SetExternalModelResolver(resolver ExternalModelResolver) {
+	f.mu.Lock()
+	f.external = resolver
+	f.mu.Unlock()
 }
 
 // NewModelFactory creates a model factory with the given config, fallback model, and registry.
@@ -93,6 +113,28 @@ func (f *ModelFactory) GetModel(ctx context.Context, providerModel string) (eino
 	provider, modelName, err := ParseProviderModel(providerModel)
 	if err != nil {
 		return nil, err
+	}
+
+	f.mu.RLock()
+	externalResolver := f.external
+	f.mu.RUnlock()
+	if externalResolver != nil {
+		resolved, err := externalResolver(ctx, provider, modelName)
+		if err != nil {
+			return nil, err
+		}
+		if resolved != nil {
+			m, err := NewChatModelFromProvider(
+				ctx, resolved.Provider, resolved.Model, resolved.BaseURL, resolved.Config,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create external model %q: %w", providerModel, err)
+			}
+			f.mu.Lock()
+			f.cache[providerModel] = m
+			f.mu.Unlock()
+			return m, nil
+		}
 	}
 
 	providers := f.cfg.GetProviders()

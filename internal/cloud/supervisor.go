@@ -5,6 +5,7 @@ package cloud
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -18,9 +19,11 @@ type Status struct {
 	LoggedIn    bool   `json:"logged_in"`
 	AutoConnect bool   `json:"auto_connect"`
 	State       string `json:"state"` // "offline" | "connecting" | "online" | "error"
+	DeviceID    string `json:"device_id,omitempty"`
 	DeviceName  string `json:"device_name"`
 	CloudURL    string `json:"cloud_url"`
 	Error       string `json:"error,omitempty"`
+	ConfigSync  bool   `json:"config_sync"`
 }
 
 // Supervisor owns the relay Connector lifecycle: Start launches the connector
@@ -43,6 +46,7 @@ type Supervisor struct {
 	creds   *Credentials    // credentials the running connector was started with
 	conn    *Connector
 	cancel  context.CancelFunc
+	runs    sync.WaitGroup
 }
 
 // NewSupervisor returns a Supervisor bound to cfg (mutated live by
@@ -66,6 +70,13 @@ func (s *Supervisor) Start(ctx context.Context) {
 	if ShouldConnect(config.CloudAutoConnect(s.cfg), creds) {
 		s.startLocked()
 	}
+}
+
+// Wait blocks until every connector run launched by the supervisor has
+// returned. It is primarily useful during orderly process/test shutdown after
+// the owning context has been cancelled.
+func (s *Supervisor) Wait() {
+	s.runs.Wait()
 }
 
 // Status snapshots the relay state. Credentials are re-read from disk so a
@@ -92,7 +103,9 @@ func (s *Supervisor) Status() Status {
 func (s *Supervisor) baseStatus(creds *Credentials) Status {
 	loggedIn := creds != nil && creds.DeviceToken != ""
 	deviceName := ""
+	deviceID := ""
 	if creds != nil {
+		deviceID = creds.DeviceID
 		deviceName = creds.DeviceName
 	}
 	if deviceName == "" {
@@ -102,8 +115,10 @@ func (s *Supervisor) baseStatus(creds *Credentials) Status {
 		LoggedIn:    loggedIn,
 		AutoConnect: config.CloudAutoConnect(s.cfg),
 		State:       StateOffline,
+		DeviceID:    deviceID,
 		DeviceName:  deviceName,
 		CloudURL:    s.cloudURL(creds),
+		ConfigSync:  config.CloudConfigSync(s.cfg),
 	}
 }
 
@@ -120,6 +135,7 @@ func (s *Supervisor) SetAutoConnect(enabled bool) error {
 		AutoConnect: &enabled,
 		E2EE:        previous.E2EE,
 		SyncDefault: previous.SyncDefault,
+		ConfigSync:  previous.ConfigSync,
 	})
 	if err := config.SaveConfig(s.cfg); err != nil {
 		if previous == (config.CloudConfig{}) {
@@ -148,6 +164,40 @@ func (s *Supervisor) SetAutoConnect(enabled bool) error {
 	s.creds = creds
 	if ShouldConnect(true, creds) {
 		s.startLocked()
+	}
+	return nil
+}
+
+// SetConfigSync persists the explicit encrypted provider-sync opt-in. Enabling
+// immediately lets the live connector enroll/reconcile; disabling leaves all
+// local providers untouched and stops future provider vault traffic.
+func (s *Supervisor) SetConfigSync(enabled bool) error {
+	previous := s.cfg.CloudSettings()
+	s.cfg.SetCloud(&config.CloudConfig{
+		Enabled: previous.Enabled, URL: previous.URL,
+		AutoConnect: previous.AutoConnect, E2EE: previous.E2EE,
+		SyncDefault: previous.SyncDefault, ConfigSync: &enabled,
+	})
+	if err := config.SaveConfig(s.cfg); err != nil {
+		if previous == (config.CloudConfig{}) {
+			s.cfg.SetCloud(nil)
+		} else {
+			s.cfg.SetCloud(&previous)
+		}
+		return err
+	}
+	if enabled {
+		s.mu.Lock()
+		conn := s.conn
+		s.mu.Unlock()
+		if conn != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			if err := conn.ReconcileProviderConfigs(ctx); err != nil &&
+				!errors.Is(err, ErrConfigSyncApprovalPending) {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -199,7 +249,11 @@ func (s *Supervisor) startLocked() {
 	runCtx, cancel := context.WithCancel(s.rootCtx)
 	s.conn = conn
 	s.cancel = cancel
-	go conn.Run(runCtx)
+	s.runs.Add(1)
+	go func() {
+		defer s.runs.Done()
+		conn.Run(runCtx)
+	}()
 }
 
 // stopLocked cancels the running connector (if any). Run returns
@@ -331,4 +385,77 @@ func (s *Supervisor) SyncAccountSettings(ctx context.Context) error {
 		return nil // queued locally; connector start will reconcile it
 	}
 	return conn.ReconcileAccountSettings(ctx)
+}
+
+func (s *Supervisor) SyncProviderConfigs(ctx context.Context) error {
+	s.mu.Lock()
+	conn := s.conn
+	s.mu.Unlock()
+	if conn == nil {
+		return nil
+	}
+	return conn.ReconcileProviderConfigs(ctx)
+}
+
+func (s *Supervisor) AccountSyncKeyStatus(ctx context.Context) (*AccountSyncKeyState, error) {
+	s.mu.Lock()
+	conn := s.conn
+	s.mu.Unlock()
+	if conn == nil {
+		if !config.CloudConfigSync(s.cfg) {
+			return &AccountSyncKeyState{State: "disabled"}, nil
+		}
+		return &AccountSyncKeyState{State: "offline"}, nil
+	}
+	return conn.AccountSyncKeyStatus(ctx)
+}
+
+func (s *Supervisor) PendingAccountSyncDevices(ctx context.Context) ([]AccountSyncKeyRequest, error) {
+	s.mu.Lock()
+	conn := s.conn
+	s.mu.Unlock()
+	if conn == nil {
+		return nil, fmt.Errorf("cloud relay is not connected")
+	}
+	return conn.PendingAccountSyncDevices(ctx)
+}
+
+func (s *Supervisor) ApprovedAccountSyncDevices(ctx context.Context) ([]AccountSyncKeyRequest, error) {
+	s.mu.Lock()
+	conn := s.conn
+	s.mu.Unlock()
+	if conn == nil {
+		return nil, errors.New("cloud relay is not connected")
+	}
+	return conn.ApprovedAccountSyncDevices(ctx)
+}
+
+func (s *Supervisor) ApproveAccountSyncDevice(ctx context.Context, deviceID string) error {
+	s.mu.Lock()
+	conn := s.conn
+	s.mu.Unlock()
+	if conn == nil {
+		return fmt.Errorf("cloud relay is not connected")
+	}
+	return conn.ApproveAccountSyncDevice(ctx, deviceID)
+}
+
+func (s *Supervisor) DenyAccountSyncDevice(ctx context.Context, deviceID string) error {
+	s.mu.Lock()
+	conn := s.conn
+	s.mu.Unlock()
+	if conn == nil {
+		return fmt.Errorf("cloud relay is not connected")
+	}
+	return conn.DenyAccountSyncDevice(ctx, deviceID)
+}
+
+func (s *Supervisor) RevokeAccountSyncDevice(ctx context.Context, deviceID string) error {
+	s.mu.Lock()
+	conn := s.conn
+	s.mu.Unlock()
+	if conn == nil {
+		return errors.New("cloud relay is not connected")
+	}
+	return conn.RevokeAccountSyncDevice(ctx, deviceID)
 }

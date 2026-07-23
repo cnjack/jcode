@@ -5,6 +5,7 @@ import SiteFooter from './components/SiteFooter'
 import HomePage from './pages/HomePage'
 
 const DesktopPage = lazy(() => import('./pages/DesktopPage'))
+const CloudPage = lazy(() => import('./pages/CloudPage'))
 const CliPage = lazy(() => import('./pages/CliPage'))
 const ChatUIPage = lazy(() => import('./pages/ChatUIPage'))
 const ChatUiDocsLayout = lazy(() => import('./pages/chatui/ChatUiDocsLayout'))
@@ -67,6 +68,7 @@ export default function App() {
           <Route element={<Shell />}>
             <Route path="/" element={<HomePage />} />
             <Route path="/desktop" element={<DesktopPage />} />
+            <Route path="/cloud" element={<CloudPage />} />
             <Route path="/cli" element={<CliPage />} />
             <Route path="/chat-ui" element={<ChatUIPage />} />
             <Route path="/chat-ui/docs" element={<ChatUiDocsLayout />}>

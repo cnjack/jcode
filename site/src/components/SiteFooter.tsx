@@ -18,6 +18,7 @@ export default function SiteFooter() {
             <ul>
               <li><Link to="/cli">CLI</Link></li>
               <li><Link to="/desktop">Desktop</Link></li>
+              <li><Link to="/cloud">Cloud</Link></li>
               <li><Link to="/docs/web-interface">Web interface</Link></li>
               <li><Link to="/showcase">Showcase</Link></li>
             </ul>

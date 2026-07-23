@@ -188,9 +188,10 @@ func TestCloudConfigSupervisorError(t *testing.T) {
 }
 
 type fakeCloudSupervisor struct {
-	status   cloud.Status
-	err      error
-	setCalls []bool
+	status          cloud.Status
+	err             error
+	setCalls        []bool
+	configSyncCalls []bool
 
 	syncCalls  atomic.Int32
 	pairings   []cloud.Pairing
@@ -204,6 +205,10 @@ type fakeCloudSupervisor struct {
 func (f *fakeCloudSupervisor) Status() cloud.Status { return f.status }
 func (f *fakeCloudSupervisor) SetAutoConnect(enabled bool) error {
 	f.setCalls = append(f.setCalls, enabled)
+	return f.err
+}
+func (f *fakeCloudSupervisor) SetConfigSync(enabled bool) error {
+	f.configSyncCalls = append(f.configSyncCalls, enabled)
 	return f.err
 }
 func (f *fakeCloudSupervisor) SyncCredentials() { f.syncCalls.Add(1) }
@@ -223,6 +228,25 @@ func (f *fakeCloudSupervisor) RevokePairing(_ context.Context, id string) error 
 	return f.pairingErr
 }
 func (f *fakeCloudSupervisor) SyncAccountSettings(_ context.Context) error { return nil }
+func (f *fakeCloudSupervisor) SyncProviderConfigs(_ context.Context) error { return nil }
+func (f *fakeCloudSupervisor) AccountSyncKeyStatus(_ context.Context) (*cloud.AccountSyncKeyState, error) {
+	return &cloud.AccountSyncKeyState{State: "ready", KeyGen: 1}, nil
+}
+func (f *fakeCloudSupervisor) PendingAccountSyncDevices(_ context.Context) ([]cloud.AccountSyncKeyRequest, error) {
+	return nil, nil
+}
+func (f *fakeCloudSupervisor) ApprovedAccountSyncDevices(_ context.Context) ([]cloud.AccountSyncKeyRequest, error) {
+	return nil, nil
+}
+func (f *fakeCloudSupervisor) ApproveAccountSyncDevice(_ context.Context, _ string) error {
+	return nil
+}
+func (f *fakeCloudSupervisor) DenyAccountSyncDevice(_ context.Context, _ string) error {
+	return nil
+}
+func (f *fakeCloudSupervisor) RevokeAccountSyncDevice(_ context.Context, _ string) error {
+	return nil
+}
 func (f *fakeCloudSupervisor) LastPaired() (cloud.PairedInfo, bool) {
 	if f.lastPaired == nil {
 		return cloud.PairedInfo{}, false

@@ -2,11 +2,18 @@
 
 > React components for AI chat interfaces — streaming messages, tool calls, approvals, and ask-user interactions. Backend-agnostic, token-driven. Powers jcode Web + Desktop.
 
+jcode Desktop is local-first. Local Providers call model APIs directly and work
+without a Cloud account. jcode Cloud adds browser/mobile session access,
+Cloud-managed Providers through cloud_proxy, trusted-device approval, and opt-in
+end-to-end encrypted Provider configuration sync between Desktops.
+
 Packages: `jcode-ui` (styled) · `jcode-ui-core` (types, runtime, headless primitives)
 
 ## Docs
 
 - [Overview](https://www.j-code.net/chat-ui/docs): Library intro + quick start
+- [Desktop ↔ Cloud](https://www.j-code.net/cloud): Product architecture and animated trust map
+- [Cloud security docs](https://www.j-code.net/docs/cloud): Provider lanes, ASK enrollment, encrypted sync
 - [Installation](https://www.j-code.net/chat-ui/docs/installation): Install, CSS, Vite/Next, mock runtime
 - [Runtime](https://www.j-code.net/chat-ui/docs/runtime): ChatRuntime, external store, mock runtime
 - [Primitives](https://www.j-code.net/chat-ui/docs/primitives): Headless Thread / Composer / ApprovalBlock / …

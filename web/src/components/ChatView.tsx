@@ -67,7 +67,7 @@ export function ChatView({ readOnly }: ChatViewProps) {
   const backdropKind = useAppSelector((s) => {
     const provider = s.model.providers.find((candidate) => candidate.id === s.model.providerName)
     const model = provider?.models.find((candidate) => candidate.id === s.model.modelName)
-    return modelBackdropKind([s.model.providerName, provider?.name, s.model.modelName, model?.name])
+    return modelBackdropKind([provider?.kind, s.model.providerName, provider?.name, s.model.modelName, model?.name])
   })
   const project = projectName(projectPath) || 'jcode'
 

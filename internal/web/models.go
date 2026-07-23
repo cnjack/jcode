@@ -1,11 +1,14 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cnjack/jcode/internal/cloud"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/model"
@@ -42,10 +45,15 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		ReasoningOptions []model.ReasoningOption `json:"reasoning_options,omitempty"`
 	}
 	type providerInfo struct {
-		ID     string      `json:"id"`
-		Name   string      `json:"name"`
-		Custom bool        `json:"custom,omitempty"`
-		Models []modelInfo `json:"models"`
+		ID        string      `json:"id"`
+		Name      string      `json:"name"`
+		Kind      string      `json:"kind"`
+		Source    string      `json:"source"`
+		Scope     string      `json:"scope,omitempty"`
+		ScopeID   string      `json:"scope_id,omitempty"`
+		ScopeName string      `json:"scope_name,omitempty"`
+		Custom    bool        `json:"custom,omitempty"`
+		Models    []modelInfo `json:"models"`
 	}
 
 	modelState, _ := config.LoadModelState()
@@ -66,7 +74,9 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		if len(models) == 0 {
 			continue
 		}
-		pi := providerInfo{ID: rp.ID, Name: rp.Name, Custom: rp.Custom}
+		pi := providerInfo{
+			ID: rp.ID, Name: rp.Name, Kind: rp.ID, Source: "desktop", Custom: rp.Custom,
+		}
 		for _, m := range models {
 			ctx := 0
 			if m.Limit != nil {
@@ -86,10 +96,47 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 		result = append(result, pi)
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"current":   map[string]string{"provider": curProvider, "model": curModel},
 		"providers": result,
-	})
+	}
+
+	// Cloud providers are an additional catalog. A Cloud outage or logged-out
+	// Desktop must never hide or disable local providers.
+	if s.cloudStatus().LoggedIn {
+		cloudCtx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+		defer cancel()
+		cloudModels, err := cloud.ListConfiguredCloudModels(cloudCtx, cfg)
+		if err != nil {
+			response["cloud_error"] = err.Error()
+		} else {
+			byProvider := make(map[string]int)
+			for _, cloudModel := range cloudModels {
+				providerRef := cloud.CloudProviderRef(cloudModel.ProviderID)
+				index, exists := byProvider[providerRef]
+				if !exists {
+					result = append(result, providerInfo{
+						ID: providerRef, Name: cloudModel.ProviderName,
+						Kind: cloudModel.Kind, Source: "cloud",
+						Scope: cloudModel.Scope, ScopeID: cloudModel.ScopeID,
+						ScopeName: cloudModel.ScopeName,
+					})
+					index = len(result) - 1
+					byProvider[providerRef] = index
+				}
+				result[index].Models = append(result[index].Models, modelInfo{
+					ID: cloudModel.ModelID, Name: cloudModel.ModelName,
+					ToolCall:       cloudModel.Capabilities.Tools,
+					ContextLimit:   cloudModel.ContextWindow,
+					Reasoning:      cloudModel.Capabilities.Reasoning,
+					DefaultEnabled: true, Enabled: true,
+					ImageSupport: cloudModel.Capabilities.Image,
+				})
+			}
+			response["providers"] = result
+		}
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) handleSwitchModel(w http.ResponseWriter, r *http.Request) {
@@ -289,7 +336,8 @@ func (s *Server) handleSetSmallModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ref != "" {
-		if _, ok := s.cfg.GetProviders()[req.Provider]; !ok {
+		_, isCloud := cloud.ParseCloudProviderRef(req.Provider)
+		if _, ok := s.cfg.GetProviders()[req.Provider]; !ok && !isCloud {
 			s.mu.Unlock()
 			s.cfgMu.Unlock()
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown provider: " + req.Provider})
@@ -376,6 +424,7 @@ func (s *Server) handleToggleFavorite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save"})
 		return
 	}
+	s.syncProviderConfigsBestEffort()
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"favorite": nowFavorite,
@@ -407,6 +456,7 @@ func (s *Server) handleToggleModelEnabled(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save"})
 		return
 	}
+	s.syncProviderConfigsBestEffort()
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"enabled": req.Enabled,
@@ -445,6 +495,7 @@ func (s *Server) handleSetModelEffort(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save"})
 		return
 	}
+	s.syncProviderConfigsBestEffort()
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"effort": req.Effort,

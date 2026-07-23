@@ -22,6 +22,7 @@ type credentialSecrets struct {
 	DeviceToken string `json:"device_token,omitempty"`
 	PrivateKey  string `json:"private_key,omitempty"`
 	CEK         string `json:"cek,omitempty"`
+	ASK         string `json:"ask,omitempty"`
 }
 
 func secretsFromCredentials(creds *Credentials) credentialSecrets {
@@ -29,6 +30,7 @@ func secretsFromCredentials(creds *Credentials) credentialSecrets {
 		DeviceToken: creds.DeviceToken,
 		PrivateKey:  creds.PrivateKey,
 		CEK:         creds.CEK,
+		ASK:         creds.ASK,
 	}
 }
 
@@ -36,6 +38,7 @@ func applyCredentialSecrets(creds *Credentials, secrets credentialSecrets) {
 	creds.DeviceToken = secrets.DeviceToken
 	creds.PrivateKey = secrets.PrivateKey
 	creds.CEK = secrets.CEK
+	creds.ASK = secrets.ASK
 }
 
 func loadCredentialSecrets() (credentialSecrets, bool, error) {
