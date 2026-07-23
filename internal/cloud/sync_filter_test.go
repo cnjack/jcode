@@ -12,6 +12,20 @@ import (
 	"github.com/cnjack/jcode/internal/session"
 )
 
+func TestSessionLastActivityAtPrefersUpdatedAtAndFallsBackToStartTime(t *testing.T) {
+	if got := sessionLastActivityAt(session.SessionMeta{
+		StartTime: "2026-07-23T16:00:00Z",
+		UpdatedAt: "2026-07-24T01:30:00+08:00",
+	}); got != "2026-07-23T17:30:00Z" {
+		t.Fatalf("updated_at activity = %q, want UTC normalized updated_at", got)
+	}
+	if got := sessionLastActivityAt(session.SessionMeta{
+		StartTime: "2026-07-24T01:30:00+08:00",
+	}); got != "2026-07-23T17:30:00Z" {
+		t.Fatalf("start_time activity = %q, want UTC normalized fallback", got)
+	}
+}
+
 // collectSessions upserts only sessions with an explicit opt-in.
 func TestCollectSessionsFiltersUnsynced(t *testing.T) {
 	conn := newTestConnector(t, "http://127.0.0.1:1", "http://127.0.0.1:1")

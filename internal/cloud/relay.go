@@ -33,9 +33,10 @@ type CommandAck struct {
 
 // SessionUpsert mirrors one local session's index entry to the cloud.
 type SessionUpsert struct {
-	SessionID string          `json:"session_id"`
-	Status    string          `json:"status"` // "running" | "idle"
-	Meta      json.RawMessage `json:"meta"`   // SessionMeta JSON, as-is
+	SessionID      string          `json:"session_id"`
+	Status         string          `json:"status"`                     // "running" | "idle"
+	Meta           json.RawMessage `json:"meta"`                       // SessionMeta JSON, as-is
+	LastActivityAt string          `json:"last_activity_at,omitempty"` // UTC RFC3339, intentionally plaintext for cloud-side ordering
 }
 
 // SessionSeqInfo is the server's per-session high-water mark, returned by the

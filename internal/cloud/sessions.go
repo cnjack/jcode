@@ -19,7 +19,8 @@ import (
 // Status is "running" only for sessions the local web layer marked running;
 // everything else reports "idle". Meta is the SessionMeta JSON, sealed into
 // an E2E envelope when the CEK cipher is active (plaintext otherwise — the
-// server stores it opaquely either way).
+// server stores it opaquely either way). LastActivityAt remains plaintext so
+// cloud clients can order sessions without decrypting metadata.
 func (c *Connector) collectSessions() ([]SessionUpsert, error) {
 	listFn := c.cfg.ListSessionsFn
 	if listFn == nil {
@@ -50,13 +51,35 @@ func (c *Connector) collectSessions() ([]SessionUpsert, error) {
 				continue
 			}
 			upserts = append(upserts, SessionUpsert{
-				SessionID: m.UUID,
-				Status:    status,
-				Meta:      c.sealUplink(metaJSON),
+				SessionID:      m.UUID,
+				Status:         status,
+				Meta:           c.sealUplink(metaJSON),
+				LastActivityAt: sessionLastActivityAt(m),
 			})
 		}
 	}
 	return upserts, nil
+}
+
+// sessionLastActivityAt returns the persisted activity instant in canonical UTC
+// form. UpdatedAt describes the latest real turn; StartTime is the activity
+// time for sessions that have not completed a turn yet.
+func sessionLastActivityAt(m session.SessionMeta) string {
+	if ts, ok := parseActivityTime(m.UpdatedAt); ok {
+		return ts.UTC().Format(time.RFC3339)
+	}
+	if ts, ok := parseActivityTime(m.StartTime); ok {
+		return ts.UTC().Format(time.RFC3339)
+	}
+	return ""
+}
+
+func parseActivityTime(value string) (time.Time, bool) {
+	if value == "" {
+		return time.Time{}, false
+	}
+	ts, err := time.Parse(time.RFC3339, value)
+	return ts, err == nil
 }
 
 // syncSessions performs one upsert round and seeds the seq allocator from the

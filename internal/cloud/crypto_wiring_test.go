@@ -113,7 +113,7 @@ func TestSessionsMetaSealedWhenCipherActive(t *testing.T) {
 	conn := withCipher(newTestConnector(t, "http://127.0.0.1:1", "http://127.0.0.1:1"), wiringCipher(t))
 	conn.cfg.ListSessionsFn = func() (map[string][]session.SessionMeta, error) {
 		return map[string][]session.SessionMeta{
-			"proj": {{UUID: "s1", Title: "secret title", Status: "idle"}},
+			"proj": {{UUID: "s1", Title: "secret title", Status: "idle", StartTime: "2026-07-24T01:30:00+08:00"}},
 		}, nil
 	}
 	upserts, err := conn.collectSessions()
@@ -125,6 +125,9 @@ func TestSessionsMetaSealedWhenCipherActive(t *testing.T) {
 	}
 	if !IsEnvelope(upserts[0].Meta) {
 		t.Fatalf("meta is not an envelope: %s", upserts[0].Meta)
+	}
+	if got := upserts[0].LastActivityAt; got != "2026-07-23T17:30:00Z" {
+		t.Fatalf("last_activity_at = %q, want plaintext UTC timestamp", got)
 	}
 	plain, err := conn.cipher.Open(upserts[0].Meta)
 	if err != nil {
@@ -190,8 +193,8 @@ func TestAckResultSealedWhenCipherActive(t *testing.T) {
 	if err := json.Unmarshal(plain, &result); err != nil {
 		t.Fatal(err)
 	}
-	if result["session_id"] != local.chatSessionID {
-		t.Fatalf("decrypted ack result = %v, want session_id %q", result, local.chatSessionID)
+	if result["session_id"] != local.createdSessionID {
+		t.Fatalf("decrypted ack result = %v, want session_id %q", result, local.createdSessionID)
 	}
 }
 
