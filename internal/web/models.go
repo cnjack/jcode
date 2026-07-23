@@ -130,7 +130,8 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 					ContextLimit:   cloudModel.ContextWindow,
 					Reasoning:      cloudModel.Capabilities.Reasoning,
 					DefaultEnabled: true, Enabled: true,
-					ImageSupport: cloudModel.Capabilities.Image,
+					ImageSupport:     cloudModel.Capabilities.Image,
+					ReasoningOptions: cloudModel.ReasoningOptions,
 				})
 			}
 			response["providers"] = result

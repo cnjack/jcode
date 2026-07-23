@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/cnjack/jcode/internal/config"
+	internalmodel "github.com/cnjack/jcode/internal/model"
 )
 
 const CloudProviderPrefix = "cloud:"
@@ -56,7 +57,8 @@ type CloudModel struct {
 		Tools     bool `json:"tools"`
 		Image     bool `json:"image"`
 	} `json:"capabilities"`
-	ContextWindow int `json:"context_window"`
+	ContextWindow    int                             `json:"context_window"`
+	ReasoningOptions []internalmodel.ReasoningOption `json:"reasoning_options,omitempty"`
 }
 
 func (c *Client) GetAccountSyncKey(ctx context.Context, token string) (*AccountSyncKeyState, error) {
@@ -135,7 +137,39 @@ func (c *Client) ListCloudModels(ctx context.Context, token string) ([]CloudMode
 	if _, err := c.get(ctx, "/internal/v1/device/cloud-models", token, &out); err != nil {
 		return nil, err
 	}
+	// Cloud owns endpoint identity, credentials and access grants, while Desktop
+	// already ships the authoritative built-in provider/model catalog used by its
+	// local providers. Hydrate known Cloud models by exact provider kind + native
+	// model ID so Cloud and local instances expose the same tool/image/reasoning
+	// controls (including effort tiers). Unknown/custom models remain driven only
+	// by the explicit metadata returned by Cloud — no name-based guessing.
+	registry := internalmodel.NewModelRegistry()
+	for i := range out.Models {
+		enrichCloudModelFromRegistry(&out.Models[i], registry)
+	}
 	return out.Models, nil
+}
+
+func enrichCloudModelFromRegistry(cloudModel *CloudModel, registry *internalmodel.ModelRegistry) {
+	if cloudModel == nil || registry == nil {
+		return
+	}
+	_, catalogModel, ok := registry.LookupModel(cloudModel.Kind, cloudModel.UpstreamModelID)
+	if !ok || catalogModel == nil {
+		return
+	}
+	cloudModel.Capabilities.Reasoning = cloudModel.Capabilities.Reasoning || catalogModel.Reasoning
+	cloudModel.Capabilities.Tools = cloudModel.Capabilities.Tools || catalogModel.ToolCall
+	cloudModel.Capabilities.Image = cloudModel.Capabilities.Image || catalogModel.SupportsImageInput()
+	if cloudModel.ContextWindow <= 0 && catalogModel.Limit != nil {
+		cloudModel.ContextWindow = catalogModel.Limit.Context
+	}
+	if len(cloudModel.ReasoningOptions) == 0 && len(catalogModel.ReasoningOptions) > 0 {
+		cloudModel.ReasoningOptions = append(
+			[]internalmodel.ReasoningOption(nil),
+			catalogModel.ReasoningOptions...,
+		)
+	}
 }
 
 func CloudProviderRef(providerID string) string {
