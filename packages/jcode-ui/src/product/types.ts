@@ -36,6 +36,13 @@ export interface ModelInfo {
 export interface ProviderInfo {
   id: string
   name: string
+  /** Canonical provider family used for icon lookup. */
+  kind?: string
+  /** Desktop providers are direct; Cloud providers are routed via cloud_proxy. */
+  source?: 'desktop' | 'cloud'
+  scope?: 'cluster' | 'project'
+  scope_id?: string
+  scope_name?: string
   /** true for user-configured OpenAI-compatible providers. */
   custom?: boolean
   models: ModelInfo[]

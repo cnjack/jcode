@@ -37,6 +37,12 @@ type Credentials struct {
 	// Empty means "not initialized yet" (pre-M5 credentials file); it is
 	// lazily generated on first need (see crypto.go EnsureCEK).
 	CEK string `json:"cek,omitempty"`
+	// ASKKeyGen identifies the Account Sync Key generation used exclusively for
+	// multi-Desktop provider/preferences sync. ASK is stored in the system
+	// keyring and never uploaded in plaintext; it is intentionally separate
+	// from the mobile/browser relay CEK lifecycle.
+	ASKKeyGen int    `json:"ask_key_gen,omitempty"`
+	ASK       string `json:"ask,omitempty"`
 	// Fingerprint is the stable machine fingerprint SOURCE (M16): the OS
 	// machine id, or a "fallback:<hostname>:<random>" string generated once.
 	// It never leaves the machine — only its sha256 (FingerprintHash) is sent
@@ -134,6 +140,7 @@ func writeCredentialMetadata(creds *Credentials, path string) error {
 	metadata.DeviceToken = ""
 	metadata.PrivateKey = ""
 	metadata.CEK = ""
+	metadata.ASK = ""
 	data, err := json.MarshalIndent(&metadata, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal credentials: %w", err)

@@ -232,6 +232,8 @@ func (f *cloudLoginFlow) pollAndFinish(ctx context.Context, client *cloud.Client
 	}
 	if existing != nil && existing.CloudURL == baseURL {
 		creds.CEK = existing.CEK
+		creds.ASK = existing.ASK
+		creds.ASKKeyGen = existing.ASKKeyGen
 		if existing.KeyGen > 0 {
 			creds.KeyGen = existing.KeyGen
 		}

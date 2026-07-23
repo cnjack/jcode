@@ -23,21 +23,19 @@
     "@xterm/xterm": "^5.5.0",
     "dompurify": "^3.2.4",
     "highlight.js": "^11.11.1",
+    "i18next": "^25.3.2",
     "jcode-ui": "workspace:*",
     "jcode-ui-core": "workspace:*",
     "marked": "^18.0.0",
     "marked-highlight": "^2.2.2",
-    "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-i18next": "^15.6.1",
-    "react-redux": "^9.2.0",
-    "i18next": "^25.3.2"
+    "react-redux": "^9.2.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.0",
     "@testing-library/react": "^16.3.0",
-    "@types/qrcode": "^1.5.5",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",

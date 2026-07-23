@@ -7,7 +7,7 @@
  * panel — the same geometry as the chat page, NOT a small centered dialog.
  * Tabs: General (server/token/auto-approve/language + the M19 cloud-sync
  * default), Cloud (M18: account/connection state, auto-connect, pairing
- * approvals + QR offer, device-code login, logout — moved out of the
+ * approvals, device-code login and logout — moved out of the
  * CloudBadge popover), Providers (full CRUD + catalog + advanced config),
  * Models (state/favorites/effort), MCP (servers CRUD + OAuth login), Skills
  * (enable/disable), Appearance (theme picker), Memory (status + consolidation),

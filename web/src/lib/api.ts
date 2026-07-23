@@ -420,6 +420,22 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ auto_connect: autoConnect }),
     }),
+  cloudSetConfigSync: (enabled: boolean) =>
+    request<CloudStatusResponse>('/api/cloud/config', {
+      method: 'POST',
+      body: JSON.stringify({ config_sync: enabled }),
+    }),
+  cloudConfigSync: () => request<CloudConfigSyncResponse>('/api/cloud/config-sync'),
+  cloudSyncProviderConfigs: () =>
+    request<{ status: string }>('/api/cloud/config-sync/now', { method: 'POST' }),
+  cloudConfigSyncRequests: () =>
+    request<CloudConfigSyncRequestsResponse>('/api/cloud/config-sync/requests'),
+  cloudApproveConfigSyncDevice: (deviceId: string) =>
+    request<{ status: string }>(`/api/cloud/config-sync/requests/${encodeURIComponent(deviceId)}/approve`, { method: 'POST' }),
+  cloudDenyConfigSyncDevice: (deviceId: string) =>
+    request<{ status: string }>(`/api/cloud/config-sync/requests/${encodeURIComponent(deviceId)}/deny`, { method: 'POST' }),
+  cloudRevokeConfigSyncDevice: (deviceId: string) =>
+    request<{ status: string }>(`/api/cloud/config-sync/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' }),
 
   // In-app device-code login (M11-W1): start returns the user-facing code +
   // verification URI; poll cloudLoginStatus until success/error/expired.
@@ -458,11 +474,38 @@ export const api = {
 export interface CloudStatusResponse {
   logged_in: boolean
   auto_connect: boolean
+  config_sync: boolean
   state: 'offline' | 'connecting' | 'online' | 'error'
+  device_id?: string
   device_name?: string
   cloud_url?: string
   // Present only when state === 'error'.
   error?: string
+}
+
+export interface CloudConfigSyncKeyState {
+  state: 'disabled' | 'offline' | 'uninitialized' | 'request_required' | 'waiting' | 'denied' | 'ready'
+  key_gen?: number
+  status?: string
+  updated_at?: string
+}
+
+export interface CloudConfigSyncResponse {
+  enabled: boolean
+  key: CloudConfigSyncKeyState
+}
+
+export interface CloudConfigSyncRequest {
+  device_id: string
+  device_name?: string
+  key_gen: number
+  status: string
+  created_at: string
+}
+
+export interface CloudConfigSyncRequestsResponse {
+  requests: CloudConfigSyncRequest[]
+  devices: CloudConfigSyncRequest[]
 }
 
 export interface CloudLoginStartResponse {

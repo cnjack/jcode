@@ -13,7 +13,10 @@ import (
 	"github.com/cnjack/jcode/internal/theme"
 )
 
-const accountSettingsSchemaVersion = 1
+const (
+	accountSettingsSchemaVersion       = 2
+	legacyAccountSettingsSchemaVersion = 1
+)
 
 // AccountPreferences is the complete portable whitelist. It intentionally has
 // no provider credentials, headers, local paths, aliases, channel state, or
@@ -85,11 +88,18 @@ func portableModelAvailable(cfg *config.Config, ref string) bool {
 		return true
 	}
 	provider, model, ok := strings.Cut(ref, "/")
-	return ok && provider != "" && model != "" && cfg.GetProviders()[provider] != nil
+	if !ok || provider == "" || model == "" {
+		return false
+	}
+	// Cloud model references are account-portable because authorization is
+	// resolved from the current Desktop's Cloud identity at use time. Local
+	// references remain valid only when their provider config is available.
+	return strings.HasPrefix(provider, "cloud:") || cfg.GetProviders()[provider] != nil
 }
 
 func validateAccountPreferences(prefs AccountPreferences) error {
-	if prefs.SchemaVersion != accountSettingsSchemaVersion {
+	if prefs.SchemaVersion != accountSettingsSchemaVersion &&
+		prefs.SchemaVersion != legacyAccountSettingsSchemaVersion {
 		return fmt.Errorf("unsupported account settings schema %d", prefs.SchemaVersion)
 	}
 	if !supportedLanguage(prefs.Language) {
@@ -131,23 +141,12 @@ func applyAccountPreferences(cfg *config.Config, prefs AccountPreferences, versi
 	return config.SaveConfig(cfg)
 }
 
-func (c *Connector) accountSettingsCipher() (*EnvelopeCipher, error) {
-	if cipher := c.cipherSnapshot(); cipher != nil {
-		return cipher, nil
-	}
-	return EnsureCEK()
+func (c *Connector) accountSettingsCipher(ctx context.Context) (*EnvelopeCipher, error) {
+	return c.ensureAccountSyncCipher(ctx)
 }
 
-func (c *Connector) openAccountSettings(remote *AccountSettingsRemote) (AccountPreferences, error) {
+func decodeAccountPreferences(plain []byte) (AccountPreferences, error) {
 	var prefs AccountPreferences
-	cipher, err := c.accountSettingsCipher()
-	if err != nil {
-		return prefs, err
-	}
-	plain, err := cipher.Open(remote.Envelope)
-	if err != nil {
-		return prefs, fmt.Errorf("decrypt account settings: %w", err)
-	}
 	dec := json.NewDecoder(strings.NewReader(string(plain)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&prefs); err != nil {
@@ -162,8 +161,47 @@ func (c *Connector) openAccountSettings(remote *AccountSettingsRemote) (AccountP
 	return prefs, nil
 }
 
+func (c *Connector) openAccountSettings(ctx context.Context, remote *AccountSettingsRemote) (AccountPreferences, bool, error) {
+	var prefs AccountPreferences
+	cipher, err := c.accountSettingsCipher(ctx)
+	if err != nil {
+		return prefs, false, err
+	}
+	plain, err := cipher.Open(remote.Envelope)
+	if err == nil {
+		prefs, err = decodeAccountPreferences(plain)
+		if err != nil {
+			return prefs, false, err
+		}
+		legacy := prefs.SchemaVersion == legacyAccountSettingsSchemaVersion
+		prefs.SchemaVersion = accountSettingsSchemaVersion
+		return prefs, legacy, nil
+	}
+
+	// One-time migration from the historical per-device CEK envelope. The
+	// Desktop that can still open it immediately rewrites the value under ASK;
+	// new Desktops never receive or depend on that old CEK.
+	legacyCipher := c.cipherSnapshot()
+	if legacyCipher == nil {
+		legacyCipher, _ = EnsureCEK()
+	}
+	if legacyCipher == nil {
+		return prefs, false, fmt.Errorf("decrypt account settings: %w", err)
+	}
+	legacyPlain, legacyErr := legacyCipher.Open(remote.Envelope)
+	if legacyErr != nil {
+		return prefs, false, fmt.Errorf("decrypt account settings: %w", err)
+	}
+	prefs, legacyErr = decodeAccountPreferences(legacyPlain)
+	if legacyErr != nil {
+		return prefs, false, legacyErr
+	}
+	prefs.SchemaVersion = accountSettingsSchemaVersion
+	return prefs, true, nil
+}
+
 func (c *Connector) putAccountPreferences(ctx context.Context, baseVersion int64, prefs AccountPreferences) (*AccountSettingsRemote, error) {
-	cipher, err := c.accountSettingsCipher()
+	cipher, err := c.accountSettingsCipher(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +226,7 @@ func (c *Connector) ReconcileAccountSettings(ctx context.Context) error {
 
 func (c *Connector) reconcileAccountSettings(ctx context.Context) error {
 	cfg := c.cfg.AppConfig
-	if cfg == nil || c.cfg.CipherDisabled {
+	if cfg == nil || c.cfg.CipherDisabled || !config.CloudConfigSync(cfg) {
 		return nil
 	}
 	remote, err := c.client.GetAccountSettings(ctx, c.token)
@@ -212,8 +250,8 @@ func (c *Connector) reconcileAccountSettings(ctx context.Context) error {
 	if err := json.Unmarshal(remote.Envelope, &envelope); err != nil {
 		return fmt.Errorf("parse account settings envelope: %w", err)
 	}
-	if cipher, cipherErr := c.accountSettingsCipher(); cipherErr == nil && envelope.KeyGen < cipher.KeyGen() {
-		// CEK revoke advanced the account generation. The old settings envelope
+	if cipher, cipherErr := c.accountSettingsCipher(ctx); cipherErr == nil && envelope.KeyGen < cipher.KeyGen() {
+		// ASK rotation advanced the account generation. The old settings envelope
 		// is intentionally no longer decryptable; overwrite it with the current
 		// local whitelist under the new key using the remote CAS version.
 		at := cfg.AccountSettingsUpdatedAt
@@ -228,9 +266,16 @@ func (c *Connector) reconcileAccountSettings(ctx context.Context) error {
 		cfg.AccountSettingsUpdatedAt = at
 		return config.SaveConfig(cfg)
 	}
-	prefs, err := c.openAccountSettings(remote)
+	prefs, legacy, err := c.openAccountSettings(ctx, remote)
 	if err != nil {
 		return err
+	}
+	if legacy {
+		migrated, err := c.putAccountPreferences(ctx, remote.Version, prefs)
+		if err != nil {
+			return fmt.Errorf("migrate account settings to ASK: %w", err)
+		}
+		remote = migrated
 	}
 	if cfg.AccountSettingsUpdatedAt.IsZero() || prefs.UpdatedAt.After(cfg.AccountSettingsUpdatedAt) {
 		return applyAccountPreferences(cfg, prefs, remote.Version)
@@ -253,7 +298,8 @@ func (c *Connector) reconcileAccountSettings(ctx context.Context) error {
 func (c *Connector) PushAccountSettings(ctx context.Context) error {
 	c.accountSettingsMu.Lock()
 	defer c.accountSettingsMu.Unlock()
-	if c.cfg.AppConfig == nil || c.cfg.CipherDisabled {
+	if c.cfg.AppConfig == nil || c.cfg.CipherDisabled ||
+		!config.CloudConfigSync(c.cfg.AppConfig) {
 		return nil
 	}
 	c.cfg.AppConfig.AccountSettingsUpdatedAt = time.Now().UTC()

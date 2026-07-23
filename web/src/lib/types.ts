@@ -127,6 +127,13 @@ export interface ModelInfo {
 export interface ProviderInfo {
   id: string
   name: string
+  /** Canonical provider family used for brand icon lookup and protocol hints. */
+  kind: string
+  /** Local providers call their endpoint directly; Cloud providers use cloud_proxy. */
+  source: 'desktop' | 'cloud'
+  scope?: 'cluster' | 'project'
+  scope_id?: string
+  scope_name?: string
   custom?: boolean // true for user-configured OpenAI-compatible providers
   models: ModelInfo[]
 }

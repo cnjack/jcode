@@ -2,7 +2,7 @@
  * CloudBadge — cloud-relay status badge in the Sidebar footer.
  *
  * M18: the badge is now a pure status indicator. The full cloud lifecycle
- * (device-code login, pairing approvals, QR pairing offer, auto-connect,
+ * (device-code login, pairing approvals, auto-connect,
  * logout) moved to the Cloud tab of the settings view; the popover keeps only
  * a quick readout (connection state, server/device, errors, pending pairing
  * count) plus an "Open settings" deep link that routes to that tab.

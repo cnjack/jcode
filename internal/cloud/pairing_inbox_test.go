@@ -251,4 +251,5 @@ func TestSupervisorSyncCredentials(t *testing.T) {
 		t.Fatal("connector still running after credentials removed")
 	}
 	sup.mu.Unlock()
+	sup.Wait()
 }

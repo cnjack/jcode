@@ -1129,7 +1129,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                   onClick={(e: ReactMouseEvent) => { e.stopPropagation(); openModel() }}
                   className="jcode-product-composer-picker-trigger inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-lg)] border border-transparent bg-transparent px-2 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
                 >
-                  {providerName && <ProviderIcon provider={providerName} custom={providerInfoFor(providerName)?.custom} size={16} resolveIcon={host.resolveProviderIcon} />}
+                  {providerName && <ProviderIcon provider={providerInfoFor(providerName)?.kind || providerName} custom={providerInfoFor(providerName)?.custom} size={16} resolveIcon={host.resolveProviderIcon} />}
                   {!providerName && <SquaresPlusIcon className="h-4 w-4" />}
                   <span className="jcode-product-composer-picker-label">
                     {modelName ? getModelDisplayName(providerName, modelName) : 'model'}
@@ -1214,7 +1214,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                     {providerName && modelName && (
                       <div className="flex items-center gap-2.5 border-b border-[var(--color-border)] px-3 py-2">
                         <CheckCircleIcon className="h-[17px] w-[17px] shrink-0 text-[var(--color-primary)]" title={strings.modelCurrent} />
-                        <ProviderIcon provider={providerName} custom={providerInfoFor(providerName)?.custom} size={22} resolveIcon={host.resolveProviderIcon} />
+                        <ProviderIcon provider={providerInfoFor(providerName)?.kind || providerName} custom={providerInfoFor(providerName)?.custom} size={22} resolveIcon={host.resolveProviderIcon} />
                         <span className="flex min-w-0 flex-1 flex-col">
                           <span className="truncate text-[12.5px] text-[var(--color-foreground)]">{getModelDisplayName(providerName, modelName)}</span>
                           <span className="mt-px truncate font-mono text-[10px] text-[var(--color-muted-foreground)]">{modelSubline(modelName, currentModelInfo)}</span>
@@ -1245,7 +1245,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                                 onClick={() => selectModel(r.provider, r.model)}
                                 className="group flex w-full items-center gap-2.5 rounded-[var(--radius-md)] border-none bg-transparent px-2 py-1.5 text-left transition-colors hover:bg-[var(--color-muted)]"
                               >
-                                <ProviderIcon provider={r.provider} custom={providerInfoFor(r.provider)?.custom} size={22} resolveIcon={host.resolveProviderIcon} />
+                                <ProviderIcon provider={providerInfoFor(r.provider)?.kind || r.provider} custom={providerInfoFor(r.provider)?.custom} size={22} resolveIcon={host.resolveProviderIcon} />
                                 <span className="flex min-w-0 flex-1 flex-col">
                                   <span className="truncate text-[12.5px] text-[var(--color-foreground)]">{getModelDisplayName(r.provider, r.model)}</span>
                                   <span className="mt-px truncate font-mono text-[10px] text-[var(--color-muted-foreground)]">{modelSubline(r.model, info)}</span>
@@ -1270,6 +1270,11 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                         <div key={p.id}>
                           <div className="flex items-center gap-2 px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--color-muted-foreground)]">
                             {p.name}
+                            {p.source === 'cloud' && (
+                              <span className="rounded-full border border-[var(--color-border)] bg-[var(--neutral-wash)] px-1.5 py-px text-[9px] font-semibold normal-case tracking-normal text-[var(--color-foreground)]">
+                                Cloud{p.scope_name ? ` · ${p.scope_name}` : ''}
+                              </span>
+                            )}
                           </div>
                           {p.models.map((m) => {
                             const active = providerName === p.id && modelName === m.id
@@ -1290,7 +1295,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                                   active ? 'bg-[var(--neutral-wash)]' : ''
                                 }`}
                               >
-                                <ProviderIcon provider={p.id} custom={p.custom} size={22} resolveIcon={host.resolveProviderIcon} />
+                                <ProviderIcon provider={p.kind || p.id} custom={p.custom} size={22} resolveIcon={host.resolveProviderIcon} />
                                 <span className="flex min-w-0 flex-1 flex-col">
                                   <span className={`truncate text-[12.5px] leading-snug text-[var(--color-foreground)] ${active ? 'font-semibold text-[var(--color-primary)]' : ''}`}>{m.name || m.id}</span>
                                   <span className="mt-px truncate font-mono text-[10px] text-[var(--color-muted-foreground)]">{modelSubline(m.id, m)}</span>

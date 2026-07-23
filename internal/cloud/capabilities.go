@@ -38,9 +38,17 @@ type CapabilityProject struct {
 
 // CapabilityModel is one selectable model of a configured provider.
 type CapabilityModel struct {
-	Provider string `json:"provider"`
-	ID       string `json:"id"`
-	Label    string `json:"label"`
+	Provider     string `json:"provider"`
+	ProviderName string `json:"provider_name,omitempty"`
+	Kind         string `json:"kind,omitempty"`
+	Source       string `json:"source,omitempty"`
+	Scope        string `json:"scope,omitempty"`
+	ScopeName    string `json:"scope_name,omitempty"`
+	ID           string `json:"id"`
+	Label        string `json:"label"`
+	ToolCall     bool   `json:"tool_call,omitempty"`
+	Reasoning    bool   `json:"reasoning,omitempty"`
+	ImageSupport bool   `json:"image_support,omitempty"`
 }
 
 // CapabilitySlashCommand mirrors one item of the web control plane's
@@ -86,10 +94,14 @@ func (c *Connector) collectCapabilities(ctx context.Context) *DeviceCapabilities
 	}
 
 	modelsFn := c.cfg.ModelCapabilitiesFn
+	var models []CapabilityModel
+	var efforts []string
+	var err error
 	if modelsFn == nil {
-		modelsFn = collectModelCapabilities
+		models, efforts, err = c.collectModelCapabilities(ctx)
+	} else {
+		models, efforts, err = modelsFn()
 	}
-	models, efforts, err := modelsFn()
 	if err != nil {
 		c.logf("capabilities: model list unavailable: %v", err)
 	} else {
@@ -121,6 +133,76 @@ func (c *Connector) collectCapabilities(ctx context.Context) *DeviceCapabilities
 		caps.SlashCommands = cmds
 	}
 	return caps
+}
+
+func (c *Connector) collectModelCapabilities(ctx context.Context) ([]CapabilityModel, []string, error) {
+	status, body, err := c.local.getJSON(ctx, "/api/models")
+	if err != nil || status != http.StatusOK {
+		// Preserve local-only relay behavior if the control plane is from an
+		// older build or temporarily unavailable.
+		return collectModelCapabilities()
+	}
+	var response struct {
+		Providers []struct {
+			ID        string `json:"id"`
+			Name      string `json:"name"`
+			Kind      string `json:"kind"`
+			Source    string `json:"source"`
+			Scope     string `json:"scope"`
+			ScopeName string `json:"scope_name"`
+			Models    []struct {
+				ID               string `json:"id"`
+				Name             string `json:"name"`
+				Enabled          bool   `json:"enabled"`
+				ToolCall         bool   `json:"tool_call"`
+				Reasoning        bool   `json:"reasoning"`
+				ImageSupport     bool   `json:"image_support"`
+				ReasoningOptions []struct {
+					Type   string   `json:"type"`
+					Values []string `json:"values"`
+				} `json:"reasoning_options"`
+			} `json:"models"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, nil, fmt.Errorf("/api/models: invalid response: %w", err)
+	}
+	models := []CapabilityModel{}
+	efforts := []string{}
+	effortSeen := map[string]bool{}
+	for _, provider := range response.Providers {
+		for _, listed := range provider.Models {
+			if !listed.Enabled {
+				continue
+			}
+			label := listed.Name
+			if label == "" {
+				label = listed.ID
+			}
+			models = append(models, CapabilityModel{
+				Provider: provider.ID, ProviderName: provider.Name,
+				Kind: provider.Kind, Source: provider.Source,
+				Scope: provider.Scope, ScopeName: provider.ScopeName,
+				ID: listed.ID, Label: label, ToolCall: listed.ToolCall,
+				Reasoning: listed.Reasoning, ImageSupport: listed.ImageSupport,
+			})
+			for _, option := range listed.ReasoningOptions {
+				if option.Type != "effort" {
+					continue
+				}
+				for _, value := range option.Values {
+					if !effortSeen[value] {
+						effortSeen[value] = true
+						efforts = append(efforts, value)
+					}
+				}
+			}
+		}
+	}
+	if len(efforts) == 0 {
+		efforts = standardEfforts
+	}
+	return models, efforts, nil
 }
 
 // collectSlashCommands fetches GET /api/slash-commands from the local control
@@ -173,7 +255,11 @@ func collectModelCapabilities() ([]CapabilityModel, []string, error) {
 			if label == "" {
 				label = m.ID
 			}
-			models = append(models, CapabilityModel{Provider: rp.ID, ID: m.ID, Label: label})
+			models = append(models, CapabilityModel{
+				Provider: rp.ID, ProviderName: rp.Name, Kind: rp.ID, Source: "desktop",
+				ID: m.ID, Label: label, ToolCall: m.ToolCall,
+				Reasoning: m.Reasoning, ImageSupport: m.SupportsImageInput(),
+			})
 			for _, ro := range m.ReasoningOptions {
 				if ro.Type != "effort" {
 					continue

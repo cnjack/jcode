@@ -127,6 +127,12 @@ jcode stores all configuration in a single JSON file at `~/.jcode/config.json`. 
     "ble_enabled": false
   },
 
+  "cloud": {
+    "url": "https://cloud.j-code.net",
+    "auto_connect": true,
+    "config_sync": false
+  },
+
   "disabled_providers": []
 }
 ```
@@ -141,6 +147,12 @@ Map of provider name to provider config. Each provider needs:
 |---|---|---|
 | `api_key` | Yes | Your API key |
 | `base_url` | No | Custom base URL (defaults to the provider's standard endpoint) |
+
+These are **local Providers** and Desktop calls them directly. When Cloud
+configuration sync is enabled, their secrets and custom headers are encrypted
+on Desktop before upload. Cloud Providers use a separate server-side catalog and
+`cloud_proxy`; they are not written into this map. See
+[Cloud & configuration sync](/docs/cloud).
 
 ### model
 

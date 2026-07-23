@@ -465,6 +465,10 @@ type CloudConfig struct {
 	// entry in ~/.jcode/cloud-sessions.json). Existing sessions are never
 	// touched retroactively. Absent/false ⇒ new sessions do not sync.
 	SyncDefault bool `json:"sync_default,omitempty"`
+	// ConfigSync enables ASK-encrypted synchronization of local Desktop provider
+	// configurations and portable preferences. It is opt-in: nil/false keeps
+	// every provider strictly local even while conversation relay is connected.
+	ConfigSync *bool `json:"config_sync,omitempty"`
 }
 
 // cloudMu guards publication of Config.Cloud. As with Memory/ToolSearch, the
@@ -479,6 +483,7 @@ func cloneCloudConfig(cc *CloudConfig) *CloudConfig {
 	copy := *cc
 	copy.AutoConnect = cloneBool(cc.AutoConnect)
 	copy.E2EE = cloneBool(cc.E2EE)
+	copy.ConfigSync = cloneBool(cc.ConfigSync)
 	return &copy
 }
 
@@ -531,6 +536,14 @@ func CloudE2EE(c *Config) bool {
 // way — the value is consulted only at session-creation stamping.
 func CloudSyncDefault(c *Config) bool {
 	return c.CloudSettings().SyncDefault
+}
+
+// CloudConfigSync reports whether ASK-encrypted Desktop configuration sync is
+// explicitly enabled. Unlike relay E2EE, this is opt-in because it uploads
+// encrypted provider credentials to the configured Cloud account.
+func CloudConfigSync(c *Config) bool {
+	cc := c.CloudSettings()
+	return cc.ConfigSync != nil && *cc.ConfigSync
 }
 
 // ApprovalReviewConfig holds tuning knobs for jcode's LLM approval reviewer.

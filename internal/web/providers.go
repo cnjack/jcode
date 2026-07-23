@@ -427,6 +427,7 @@ func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	// Publish into the live server so /api/models sees the new provider without a restart.
 	s.cfg = cfg
 	s.registry = model.NewModelRegistryWithConfig(cfg)
+	s.syncProviderConfigsBestEffort()
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -653,6 +654,7 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 	// next model/mode switch. createAgent re-reads the config from disk (already
 	// saved above), mirroring the MCP-reload rebuild path.
 	s.rebuildEnginesForProvider(id)
+	s.syncProviderConfigsBestEffort()
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -749,6 +751,7 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 
 	s.cfg = cfg
 	s.registry = model.NewModelRegistryWithConfig(cfg)
+	s.syncProviderConfigsBestEffort()
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
