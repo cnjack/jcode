@@ -715,8 +715,6 @@ var staticProviders = map[string]*RegistryProvider{
 // staticProviderOrder defines the display order for static providers.
 // They are appended after the generated providers.
 var staticProviderOrder = []string{
-	"alibaba-token-plan-cn",
-	"alibaba-token-plan",
 	"kimi-for-coding",
 	"tencent-tokenhub-ep",
 }
