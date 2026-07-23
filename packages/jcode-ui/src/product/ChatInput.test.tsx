@@ -21,15 +21,15 @@ const PROVIDERS: ProviderInfo[] = [
     id: 'openai',
     name: 'OpenAI',
     models: [
-      { id: 'gpt-4o', name: 'GPT-4o', tool_call: true, image_support: true, context_limit: 128000 },
-      { id: 'gpt-4o-mini', name: 'GPT-4o mini', tool_call: true, context_limit: 128000 },
+      { id: 'gpt-4o', name: 'GPT-4o', tool_call: true, enabled: true, image_support: true, context_limit: 128000 },
+      { id: 'gpt-4o-mini', name: 'GPT-4o mini', tool_call: true, enabled: true, context_limit: 128000 },
     ],
   },
   {
     id: 'anthropic',
     name: 'Anthropic',
     models: [
-      { id: 'claude-sonnet', name: 'Claude Sonnet', tool_call: true, reasoning: true },
+      { id: 'claude-sonnet', name: 'Claude Sonnet', tool_call: true, enabled: true, reasoning: true },
       { id: 'claude-hidden', name: 'Claude Hidden', tool_call: true, enabled: false },
     ],
   },
@@ -222,6 +222,41 @@ describe('model picker', () => {
     fireEvent.change(screen.getByPlaceholderText('Filter models…'), { target: { value: 'mini' } })
     await waitFor(() => expect(screen.getByText('GPT-4o mini')).toBeTruthy())
     expect(screen.queryByText('Claude Sonnet')).toBeNull()
+  })
+
+  it('fails closed when a model has no enabled flag', async () => {
+    const providers = [
+      ...PROVIDERS,
+      {
+        id: 'legacy',
+        name: 'Legacy Provider',
+        models: [
+          {
+            id: 'builtin-without-state',
+            name: 'Built-in Without State',
+            tool_call: true,
+          },
+        ],
+      },
+    ]
+    renderComposer(makeHost({ providers }))
+
+    fireEvent.click(screen.getByText('GPT-4o'))
+    await waitFor(() => expect(screen.getByPlaceholderText('Filter models…')).toBeTruthy())
+
+    expect(screen.queryByText('Built-in Without State')).toBeNull()
+  })
+
+  it('does not surface a disabled favorite', async () => {
+    renderComposer(makeHost({
+      favoriteModels: ['anthropic/claude-hidden'],
+      recentModels: [{ provider: 'anthropic', model: 'claude-hidden' }],
+    }))
+
+    fireEvent.click(screen.getByText('GPT-4o'))
+    await waitFor(() => expect(screen.getByPlaceholderText('Filter models…')).toBeTruthy())
+
+    expect(screen.queryByText('Claude Hidden')).toBeNull()
   })
 
   it('selecting a model calls host.selectModel', async () => {

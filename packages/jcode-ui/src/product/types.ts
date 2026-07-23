@@ -26,6 +26,7 @@ export interface ModelInfo {
   reasoning?: boolean
   recommended?: boolean
   default_enabled?: boolean
+  /** Whether this model is available in the chat picker. Omitted is treated as disabled. */
   enabled?: boolean
   image_support?: boolean
   /** How this model exposes its reasoning/thinking controls. */

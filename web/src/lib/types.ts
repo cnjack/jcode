@@ -116,7 +116,8 @@ export interface ModelInfo {
   reasoning?: boolean
   recommended?: boolean
   default_enabled?: boolean
-  enabled?: boolean
+  // Always supplied by GET /api/models; only true entries belong in pickers.
+  enabled: boolean
   image_support?: boolean
   // How this model exposes its reasoning/thinking controls (from models.dev).
   // Absent/empty ⇒ no reasoning controls to render.

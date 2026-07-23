@@ -57,6 +57,7 @@ func (s *Server) handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	modelState, _ := config.LoadModelState()
 
 	// customEntry builds a catalogEntry from a user-defined CustomModelConfig.
 	customEntry := func(id string) catalogEntry {
@@ -130,9 +131,12 @@ func (s *Server) handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 				ctx = m.Limit.Context
 			}
 			result = append(result, catalogEntry{
-				ID:         m.ID,
-				Name:       m.Name,
-				Added:      configured[m.ID] || m.DefaultEnabled,
+				ID:   m.ID,
+				Name: m.Name,
+				Added: modelState.IsModelEnabled(
+					config.ModelRef{Provider: providerID, Model: m.ID},
+					m.DefaultEnabled,
+				),
 				Context:    ctx,
 				Reasoning:  m.Reasoning,
 				Attachment: m.Attachment,
