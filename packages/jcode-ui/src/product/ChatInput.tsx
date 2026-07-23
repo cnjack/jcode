@@ -316,7 +316,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
   const pickerProviders = useMemo(
     () =>
       filteredProviders
-        .map((p) => ({ ...p, models: p.models.filter((m) => m.enabled !== false) }))
+        .map((p) => ({ ...p, models: p.models.filter((m) => m.enabled === true) }))
         .filter((p) => p.models.length > 0),
     [filteredProviders],
   )
@@ -327,6 +327,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
     return recentModels.filter((r) => {
       if (!favSet.has(`${r.provider}/${r.model}`)) return false
       if (providerName === r.provider && modelName === r.model) return false
+      if (modelInfoFor(r.provider, r.model)?.enabled !== true) return false
       if (!q) return true
       const name = getModelDisplayName(r.provider, r.model).toLowerCase()
       return name.includes(q) || r.provider.toLowerCase().includes(q)
@@ -362,7 +363,10 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
   }, [currentEffort, currentModelInfo])
   const showEffortControl = currentEffortOptions.length > 0
 
-  const manageVisibleCount = filteredProviders.reduce((n, p) => n + p.models.length, 0)
+  const manageVisibleCount = filteredProviders.reduce(
+    (n, p) => n + p.models.filter((m) => m.enabled === true).length,
+    0,
+  )
   const manageTotalCount = providers.reduce((n, p) => n + p.models.length, 0)
 
   // Local pseudo-command: "/goal" arms Goal mode (same as the "+" menu entry)
@@ -1566,7 +1570,7 @@ function ManageModelsDialog({
                 <span className="ml-auto font-mono text-[10px] text-[var(--color-muted-foreground)]">{p.models.length}</span>
               </div>
               {p.models.map((m) => {
-                const off = m.enabled === false
+                const off = m.enabled !== true
                 return (
                   <div
                     key={`mgr-${p.id}-${m.id}`}
