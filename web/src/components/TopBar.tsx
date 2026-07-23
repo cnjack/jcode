@@ -157,10 +157,10 @@ export function TopBar({ isRunning, wsConnected, activePanel, terminalOpen, onTo
             void loadDiffStat()
             setOpen((v) => !v)
           }}
-          className={`inline-flex h-[34px] items-center gap-[3px] rounded-[var(--radius-lg)] border px-[9px] transition-[background,color,border-color] duration-150 ${
+          className={`inline-flex h-[34px] items-center gap-[3px] rounded-[var(--radius-lg)] px-[9px] transition-[background,color] duration-150 ${
             open
-              ? 'bg-[var(--color-muted)] text-[var(--color-foreground)] border-[var(--color-foreground)]'
-              : 'bg-[var(--color-background)] text-[var(--color-muted-foreground)] border-[var(--color-border)] hover:text-[var(--color-foreground)] hover:border-[var(--color-foreground)]'
+              ? 'bg-[var(--color-muted)] text-[var(--color-foreground)]'
+              : 'bg-[var(--color-background)] text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]'
           }`}
         >
           <RectangleStackIcon className="h-4 w-4" />
