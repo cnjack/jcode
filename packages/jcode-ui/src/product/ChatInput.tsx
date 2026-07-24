@@ -1182,9 +1182,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                       aria-label={`${strings.effort}: ${currentEffort || strings.effortDefault}`}
                       title={strings.effortTitle}
                       onClick={(e: ReactMouseEvent) => { e.stopPropagation(); openEffort() }}
-                      className={`jcode-product-composer-picker-trigger inline-flex h-7 items-center gap-1 rounded-[var(--radius-lg)] border border-transparent bg-transparent px-2 text-xs font-medium transition-colors hover:bg-[var(--color-muted)] ${
-                        currentEffort ? 'text-[var(--color-primary)]' : 'text-[var(--color-foreground)]'
-                      }`}
+                      className="jcode-product-composer-picker-trigger inline-flex h-7 items-center gap-1 rounded-[var(--radius-lg)] border border-transparent bg-transparent px-2 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
                     >
                       <SparklesIcon className="h-3 w-3" />
                       <span className="jcode-product-composer-picker-label">{currentEffort || strings.effort}</span>
@@ -1232,11 +1230,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                       aria-label={`${strings.agentTitle}: ${agentName || strings.agentDefault}`}
                       title={agentName || strings.agentDefault}
                       onClick={(e: ReactMouseEvent) => { e.stopPropagation(); openAgent() }}
-                      className={`jcode-product-composer-picker-trigger inline-flex h-7 max-w-[180px] items-center gap-1.5 rounded-[var(--radius-lg)] border border-transparent px-2 text-xs font-medium transition-colors hover:bg-[var(--color-muted)] ${
-                        agentName
-                          ? 'bg-[var(--neutral-wash)] text-[var(--color-primary)]'
-                          : 'bg-transparent text-[var(--color-foreground)]'
-                      }`}
+                      className="jcode-product-composer-picker-trigger inline-flex h-7 max-w-[180px] items-center gap-1.5 rounded-[var(--radius-lg)] border border-transparent bg-transparent px-2 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
                     >
                       <CpuChipIcon className="h-3.5 w-3.5 shrink-0" />
                       <span className="jcode-product-composer-picker-label truncate">
@@ -1283,9 +1277,9 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                                 active ? 'bg-[var(--neutral-wash)]' : ''
                               }`}
                             >
-                              <CpuChipIcon className={`mt-0.5 h-4 w-4 shrink-0 ${active ? 'text-[var(--color-primary)]' : 'text-[var(--color-muted-foreground)]'}`} />
+                              <CpuChipIcon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-muted-foreground)]" />
                               <span className="min-w-0 flex-1">
-                                <span className={`block truncate text-[12.5px] font-medium ${active ? 'text-[var(--color-primary)]' : 'text-[var(--color-foreground)]'}`}>
+                                <span className="block truncate text-[12.5px] font-medium text-[var(--color-foreground)]">
                                   {customAgent.name}
                                 </span>
                                 <span className="mt-0.5 line-clamp-2 block text-[10.5px] leading-[1.4] text-[var(--color-muted-foreground)]">
