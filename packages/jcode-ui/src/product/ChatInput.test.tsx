@@ -313,15 +313,18 @@ describe('model picker', () => {
 
 describe('compact picker anchors', () => {
   it('keeps mode, model, and effort panels inside their own trigger anchors', async () => {
-    renderComposer(makeHost({
+    const { container } = renderComposer(makeHost({
       providerName: 'anthropic',
       modelName: 'claude-sonnet',
     }))
 
+    expect(container.querySelector('.jcode-product-composer')).toBeTruthy()
     const modeTrigger = screen.getByRole('button', { name: 'Ask for approval' })
     const modelTrigger = screen.getByRole('button', { name: 'Claude Sonnet' })
     const effortTrigger = screen.getByRole('button', { name: 'Effort: Default' })
 
+    expect(modeTrigger.title).toBe('Ask for approval')
+    expect(modelTrigger.title).toBe('Claude Sonnet')
     expect(modeTrigger.querySelector('.jcode-product-composer-picker-label')?.textContent).toBe('Ask for approval')
     expect(modelTrigger.querySelector('.jcode-product-composer-picker-label')?.textContent).toBe('Claude Sonnet')
     expect(effortTrigger.querySelector('.jcode-product-composer-picker-label')?.textContent).toBe('Effort')

@@ -800,7 +800,11 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
   // Horizontal inset comes from the parent so the composer width matches the
   // message column exactly.
   return (
-    <div ref={containerRef} className="relative w-full bg-transparent" style={{ padding: '8px 0 14px' }}>
+    <div
+      ref={containerRef}
+      className="jcode-product-composer relative w-full bg-transparent"
+      style={{ padding: '8px 0 14px' }}
+    >
       {/* Type-ahead queue */}
       {queued.length > 0 && (
         <div className="mx-auto mb-1.5 flex flex-col gap-1" style={{ padding: '0 8px 6px' }}>
@@ -992,10 +996,9 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                   type="button"
                   aria-expanded={showModePicker}
                   aria-label={modeLabel(strings, mode)}
-                  title={modeRestricted ? strings.modeCeilingHint : undefined}
+                  title={modeRestricted ? strings.modeCeilingHint : modeLabel(strings, mode)}
                   onClick={(e: ReactMouseEvent) => { e.stopPropagation(); openMode() }}
                   className="jcode-product-composer-picker-trigger inline-flex h-7 items-center gap-[7px] rounded-[var(--radius-lg)] border border-transparent bg-transparent px-2 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
-                  style={{ paddingLeft: 6 }}
                 >
                   <span className="grid h-[18px] w-[18px] shrink-0 place-items-center text-[var(--color-primary)]">
                     <currentModeDef.Icon className="h-3.5 w-3.5" />
@@ -1132,7 +1135,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                         style={{ transition: 'stroke-dashoffset 0.3s ease' }}
                       />
                     </svg>
-                    <span className="tabular-nums">{tokenPct}%</span>
+                    <span className="jcode-product-composer-context-label tabular-nums">{tokenPct}%</span>
                   </button>
                   {showContextPopup && tokenSnapshot && (
                     <ContextCapacityPopup
@@ -1156,6 +1159,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                   type="button"
                   aria-expanded={showModelPicker}
                   aria-label={modelName ? getModelDisplayName(providerName, modelName) : 'model'}
+                  title={modelName ? getModelDisplayName(providerName, modelName) : 'model'}
                   onClick={(e: ReactMouseEvent) => { e.stopPropagation(); openModel() }}
                   className="jcode-product-composer-picker-trigger inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-lg)] border border-transparent bg-transparent px-2 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
                 >
@@ -1226,6 +1230,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                       type="button"
                       aria-expanded={showAgentPicker}
                       aria-label={`${strings.agentTitle}: ${agentName || strings.agentDefault}`}
+                      title={agentName || strings.agentDefault}
                       onClick={(e: ReactMouseEvent) => { e.stopPropagation(); openAgent() }}
                       className={`jcode-product-composer-picker-trigger inline-flex h-7 max-w-[180px] items-center gap-1.5 rounded-[var(--radius-lg)] border border-transparent px-2 text-xs font-medium transition-colors hover:bg-[var(--color-muted)] ${
                         agentName
@@ -1465,7 +1470,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                   className="flex shrink-0 items-center gap-[5px] whitespace-nowrap rounded-[var(--radius-lg)] border-none bg-[var(--color-destructive)] px-3 py-[5px] text-xs font-medium text-[var(--color-on-destructive)]"
                 >
                   <StopIcon className="h-3.5 w-3.5" />
-                  {strings.stop}
+                  <span className="jcode-product-composer-action-label">{strings.stop}</span>
                 </button>
               )}
 
@@ -1479,7 +1484,9 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                   className="flex shrink-0 items-center gap-[5px] whitespace-nowrap rounded-[var(--radius-lg)] border-none bg-[var(--color-primary)] px-3 py-[5px] text-xs font-medium text-[var(--color-on-primary)] transition-[opacity,transform] disabled:cursor-not-allowed disabled:opacity-45 enabled:hover:opacity-90"
                 >
                   <PaperAirplaneIcon className="h-3.5 w-3.5" />
-                  {isRunning ? strings.queue : strings.send}
+                  <span className="jcode-product-composer-action-label">
+                    {isRunning ? strings.queue : strings.send}
+                  </span>
                 </button>
               )}
             </div>

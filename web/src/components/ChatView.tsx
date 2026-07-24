@@ -129,7 +129,7 @@ export function ChatView({ readOnly }: ChatViewProps) {
         </div>
         {/* Centered elevated composer. z-[2] keeps its upward-opening menus
             (model picker, slash palette) above the welcome hero text. */}
-        <div className="welcome-composer z-[2] w-full max-w-2xl px-5">
+        <div className="welcome-composer z-[2] w-full max-w-4xl px-5">
           <ChatInput host={host} elevated pickerPlacement="bottom" onSent={() => { /* timeline auto-follows */ }} />
         </div>
         {/* Bottom half balances the center */}

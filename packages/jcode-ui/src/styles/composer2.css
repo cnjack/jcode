@@ -266,6 +266,57 @@
   }
 }
 
+/* ─── Product composer responsive controls ───────────────────────────────── */
+/*
+ * Adapt to the space the composer actually owns rather than the viewport.
+ * This matters in the desktop shell where side panels can narrow the chat
+ * column without resizing the window. Labels stay on one line at full size,
+ * then the accessible buttons collapse to icons before they can wrap.
+ */
+.jcode-product-composer {
+  container: jcode-product-composer / inline-size;
+}
+
+.jcode-product-composer-picker-trigger .jcode-product-composer-picker-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@container jcode-product-composer (max-width: 44rem) {
+  .jcode-product-composer-picker-trigger {
+    width: 1.875rem;
+    min-width: 1.875rem;
+    justify-content: center;
+    gap: 0;
+    padding-inline: 0;
+  }
+
+  .jcode-product-composer-picker-trigger .jcode-product-composer-picker-label,
+  .jcode-product-composer-picker-trigger .jcode-product-composer-picker-chevron {
+    display: none;
+  }
+}
+
+@container jcode-product-composer (max-width: 28rem) {
+  .jcode-product-composer-action-label,
+  .jcode-product-composer-context-label {
+    display: none;
+  }
+
+  .jcode-product-composer-toolbar-right {
+    gap: 0.25rem;
+  }
+
+  .jcode-product-composer-toolbar-right > button {
+    width: 1.875rem;
+    height: 1.875rem;
+    justify-content: center;
+    padding: 0;
+  }
+}
+
 /* ─── ModelSelector ───────────────────────────────────────────────────────── */
 /* Product composer model catalog: keep the panel within the desktop viewport
  * and make only the catalog body scroll. The vh declaration is a WebKit-safe
