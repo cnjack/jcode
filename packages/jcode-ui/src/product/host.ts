@@ -22,6 +22,7 @@ import type { Goal } from 'jcode-ui-core'
 import type {
   AgentMode,
   BrowseResult,
+  CustomAgentInfo,
   GitBranchesResult,
   GitCheckoutResult,
   ModelRef,
@@ -53,6 +54,10 @@ export interface ProductComposerHost {
   imageSupport: boolean
   /** Per-"provider/model" reasoning-effort overrides. */
   effortOverrides: Record<string, string>
+  /** Available top-level custom agents. Empty hides the agent picker. */
+  agents?: CustomAgentInfo[]
+  /** Selected custom agent name. Empty means the built-in Default agent. */
+  agentName?: string
 
   // ── Chat state ────────────────────────────────────────────────────────────
   slashCommands: SlashCommandInfo[]
@@ -78,6 +83,8 @@ export interface ProductComposerHost {
   selectModel: (provider: string, model: string) => void | Promise<void>
   /** Switch the session approval mode. */
   selectMode: (mode: AgentMode) => void | Promise<void>
+  /** Select a top-level custom agent; empty string restores Default. */
+  selectAgent?: (name: string) => void | Promise<void>
   /** Set/clear (empty string) a per-model reasoning-effort override. */
   setEffort: (provider: string, model: string, effort: string) => void | Promise<void>
   /** Toggle a favorite; the host knows the resulting state. */

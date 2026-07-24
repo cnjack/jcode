@@ -77,6 +77,7 @@ export default function App() {
         if (cancelled) return
         dispatch(modelActions.setProvider(h.provider))
         dispatch(modelActions.setModel(h.model))
+        dispatch(modelActions.setAgent(h.agent || ''))
         dispatch(modelActions.setMode(normalizeMode(h.mode)))
         dispatch(modelActions.setServerVersion(h.version))
         dispatch(modelActions.setImageSupport(!!h.image_support))

@@ -20,6 +20,7 @@ import {
 import { api } from '../lib/api'
 import type { Approval, Goal } from 'jcode-ui-core'
 import { normalizeMode } from '../lib/types'
+import { i18n } from '../i18n'
 
 /** Create the handler set for a given store getter + dispatch. The handlers read
  *  fresh state (active task id) so they don't capture stale closures. */
@@ -112,6 +113,21 @@ export function createWSHandlers(
     onModelChanged: (d) => {
       dispatch(modelActions.setProvider(d.provider))
       dispatch(modelActions.setModel(d.model))
+    },
+    onAgentChanged: (d) => {
+      dispatch(modelActions.setAgent(d.agent || ''))
+      // Only show the notice when a conversation is active (timeline non-empty).
+      // On the welcome screen the user hasn't started yet — adding a message
+      // would replace the welcome hero with a near-empty conversation.
+      if (getState().chat.timeline.length > 0) {
+        dispatch(chatActions.addMessage({
+          role: 'system',
+          content: d.agent
+            ? i18n.t('chat.agent.changedTo', { name: d.agent })
+            : i18n.t('chat.agent.changedToDefault'),
+          level: 'notice',
+        }))
+      }
     },
     onModeChanged: (d) => {
       const mode = normalizeMode(d.mode)

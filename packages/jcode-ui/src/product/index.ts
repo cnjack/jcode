@@ -37,6 +37,7 @@ export type {
   ModelInfo,
   ProviderInfo,
   ModelRef,
+  CustomAgentInfo,
   SlashCommandInfo,
   TaskContextBreakdown,
   TaskStats,

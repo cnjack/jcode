@@ -53,6 +53,7 @@ export interface WSHandlers {
   onAskUserRequest?: (data: import('./types').AskUserRequestData) => void
   onSessionReset?: (data: { session_id: string }) => void
   onModelChanged?: (data: { provider: string; model: string }) => void
+  onAgentChanged?: (data: { agent: string }) => void
   onModeChanged?: (data: { mode: string }) => void
   onApprovalModeChanged?: (data: { auto_approve: boolean }) => void
   onSubagentEvent?: (data: import('./types').SubagentEventData) => void
@@ -234,6 +235,7 @@ export class WSClient {
         ask_user_request: (d) => h.onAskUserRequest?.(d),
         session_reset: (d) => h.onSessionReset?.(d),
         model_changed: (d) => h.onModelChanged?.(d),
+        agent_changed: (d) => h.onAgentChanged?.(d),
         mode_changed: (d) => h.onModeChanged?.(d),
         approval_mode_changed: (d) => h.onApprovalModeChanged?.(d),
         subagent_event: (d) => h.onSubagentEvent?.(d),

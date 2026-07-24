@@ -373,7 +373,7 @@ func (a *acpAgent) NewSession(ctx context.Context, params acp.NewSessionRequest)
 	attachTitleRefiner(ctx, rec)
 	sessionID := acp.SessionId(fmt.Sprintf("sess_%s", rec.UUID()))
 
-	sess, err := a.buildAgentSession(ctx, cfg, pwd, sessionID, rec, nil)
+	sess, err := a.buildAgentSession(ctx, cfg, pwd, sessionID, rec, nil, "")
 	if err != nil {
 		return acp.NewSessionResponse{}, err
 	}
@@ -408,6 +408,7 @@ func (a *acpAgent) buildAgentSession(
 	sessionID acp.SessionId,
 	rec *session.Recorder,
 	history []*schema.Message,
+	agentRoleName string,
 ) (*acpSession, error) {
 	platform := util.GetSystemInfo()
 	envInfo := util.CollectEnvInfo(pwd)
@@ -419,6 +420,25 @@ func (a *acpAgent) buildAgentSession(
 	flowLoader.LoadProject(pwd)
 
 	providerName, modelName := cfg.GetProviderModel()
+	var selectedRole config.AgentRoleConfig
+	if agentRoleName != "" {
+		role, ok := config.LoadAgentRoles(pwd)[agentRoleName]
+		if !ok {
+			config.Logger().Printf(
+				"[acp] custom agent %q is unavailable; resuming with Default", agentRoleName,
+			)
+			agentRoleName = ""
+		} else {
+			selectedRole = role
+			var resolveErr error
+			providerName, modelName, resolveErr = resolveCustomAgentModel(
+				role, cfg, providerName, modelName,
+			)
+			if resolveErr != nil {
+				return nil, fmt.Errorf("custom agent %q: %w", agentRoleName, resolveErr)
+			}
+		}
+	}
 	providers := cfg.GetProviders()
 	providerCfg := providers[providerName]
 	if providerCfg == nil {
@@ -474,7 +494,7 @@ func (a *acpAgent) buildAgentSession(
 	// One factory serves subagent + workflow model overrides (incl. the
 	// "small" alias); fallback is this session's current model.
 	factory := internalmodel.NewModelFactory(cfg, chatModel)
-	agentRoles := config.LoadAgentRoles(env.Pwd(), cfg)
+	agentRoles := config.LoadAgentRoles(env.Pwd())
 	allTools := []tool.BaseTool{
 		// load_skill: ACP puts the skill list in the system prompt (see
 		// skillLoader.Descriptions() below) and the slash-command path literally
@@ -549,6 +569,14 @@ func (a *acpAgent) buildAgentSession(
 
 	normalPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
 	planPrompt := prompts.GetPlanSystemPrompt(platform, pwd, "local", envInfo)
+	if agentRoleName != "" {
+		normalPrompt = withCustomAgentPrompt(normalPrompt, agentRoleName, selectedRole)
+		planPrompt = withCustomAgentPrompt(planPrompt, agentRoleName, selectedRole)
+	}
+	if rec != nil {
+		rec.SetAgent(agentRoleName)
+		rec.SetModel(modelName)
+	}
 	startupMode := resolveStartupMode(cfg, false)
 	approvalState := runner.NewApprovalStateWithMode(pwd, startupMode)
 	approvalState.SetComputerPermFunc(func(bundleID, class string) bool {
@@ -1094,7 +1122,9 @@ func (a *acpAgent) LoadSession(ctx context.Context, params acp.LoadSessionReques
 	resumeState := session.ReconstructState(entries)
 	history := session.PruneOldToolOutputs(resumeState.History, 2)
 
-	sess, err := a.buildAgentSession(ctx, cfg, pwd, params.SessionId, rec, history)
+	sess, err := a.buildAgentSession(
+		ctx, cfg, pwd, params.SessionId, rec, history, resumeState.Agent,
+	)
 	if err != nil {
 		return acp.LoadSessionResponse{}, err
 	}
@@ -1157,11 +1187,13 @@ func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRe
 	// Load history from disk so the agent has conversation context.
 	var history []*schema.Message
 	var goalSnap *session.GoalSnapshot
+	var resumedAgent string
 	restoredMode := mode.Approval
 	if entries, err := session.LoadSession(resumeUUID); err == nil {
 		resumeState := session.ReconstructState(entries)
 		history = session.PruneOldToolOutputs(resumeState.History, 2)
 		goalSnap = resumeState.Goal
+		resumedAgent = resumeState.Agent
 		// Restore the saved mode (Approval/Auto/Full access as-is; Plan normalized to
 		// Approval so the reloaded full-tool agent is not stranded in read-only plan tools).
 		restoredMode = mode.Parse(resumeState.Mode)
@@ -1173,7 +1205,9 @@ func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRe
 		config.Logger().Printf("[acp] ResumeSession: could not load history for %s: %v", params.SessionId, err)
 	}
 
-	sess, err := a.buildAgentSession(ctx, cfg, pwd, params.SessionId, rec, history)
+	sess, err := a.buildAgentSession(
+		ctx, cfg, pwd, params.SessionId, rec, history, resumedAgent,
+	)
 	if err != nil {
 		return acp.ResumeSessionResponse{}, err
 	}

@@ -209,6 +209,13 @@ export default {
       fullAccessSub: '自由に実行—確認は不要です。',
       ceilingHint: 'このホストでは利用可能なモードが制限されています',
     },
+    agent: {
+      title: 'エージェント',
+      default: 'デフォルトエージェント',
+      defaultSub: 'JCODE の標準指示とツールを使用します。',
+      changedTo: 'エージェントを {name} に変更しました。',
+      changedToDefault: 'エージェントをデフォルトに変更しました。',
+    },
     roles: {
       you: 'あなた',
       assistant: 'JCODE',

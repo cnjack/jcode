@@ -55,9 +55,9 @@ func NewFlowSpawn(deps FlowSpawnDeps) flow.SpawnFunc {
 		instructions := ""
 		modelRef := spec.Model
 		if role, ok := deps.AgentRoles[roleName]; ok {
-			profile = role.Profile
+			profile = AgentTypeGeneral
 			instructions = role.Instructions
-			if modelRef == "" {
+			if role.Model != "" {
 				modelRef = role.Model
 			}
 		} else if profile != AgentTypeExplore && profile != AgentTypeGeneral && profile != AgentTypeCoordinator {

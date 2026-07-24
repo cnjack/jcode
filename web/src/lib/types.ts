@@ -6,6 +6,7 @@ export interface HealthResponse {
   pwd: string
   provider: string
   model: string
+  agent?: string
   mode: string
 }
 
@@ -15,7 +16,14 @@ export interface StatusResponse {
   pwd: string
   provider: string
   model: string
+  agent?: string
   mode: string
+}
+
+export interface CustomAgentInfo {
+  name: string
+  description: string
+  model?: string
 }
 
 export interface SessionItem {
@@ -23,6 +31,7 @@ export interface SessionItem {
   created_at: string
   provider: string
   model: string
+  agent?: string
   title?: string
 }
 
@@ -32,6 +41,7 @@ export interface SessionEntry {
   project?: string
   provider?: string
   model?: string
+  agent?: string
   content?: string
   name?: string
   args?: string
@@ -63,7 +73,7 @@ export interface SessionEntry {
   subagent_name?: string
   subagent_type?: string
 
-  // mode_change field
+  // mode_change / agent_change fields
   mode?: string
 
   // compact fields
@@ -189,6 +199,7 @@ export interface TaskItem {
   updated_at?: string
   provider: string
   model: string
+  agent?: string
   title?: string
   pinned: boolean
   archived: boolean

@@ -60,6 +60,8 @@ type interactiveState struct {
 	systemPrompt    string
 	toolList        []tool.BaseTool
 	agentMode       tui.AgentMode
+	agentRoleName   string
+	agentRole       *config.AgentRoleConfig
 	envInfo         *util.EnvInfo
 	pwd             string
 	platform        string
@@ -147,7 +149,7 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 	// "small" alias); fallback is the current session model, so it must be
 	// rebuilt here on every agent rebuild (model switches re-enter this func).
 	factory := internalmodel.NewModelFactory(s.cfg, s.chatModel)
-	agentRoles := config.LoadAgentRoles(s.env.Pwd(), s.cfg)
+	agentRoles := config.LoadAgentRoles(s.env.Pwd())
 	all := []tool.BaseTool{
 		s.env.NewReadTool(), s.env.NewEditTool(), s.env.NewWriteTool(),
 		s.env.NewExecuteTool(s.bgManager), s.env.NewGrepTool(),
@@ -210,6 +212,52 @@ func (s *interactiveState) buildPlanTools() []tool.BaseTool {
 	}
 	plan = append(plan, s.env.NewBrowserPlanTools()...)
 	return append(plan, s.env.NewComputerPlanTools()...)
+}
+
+func (s *interactiveState) setTopLevelAgent(name string) error {
+	name = strings.TrimSpace(name)
+	if strings.EqualFold(name, "default") {
+		name = ""
+	}
+	if name == "" {
+		s.agentRoleName = ""
+		s.agentRole = nil
+		return nil
+	}
+	role, ok := config.LoadAgentRoles(s.pwd)[name]
+	if !ok {
+		return fmt.Errorf("unknown custom agent %q", name)
+	}
+	s.agentRoleName = name
+	s.agentRole = &role
+	return nil
+}
+
+func (s *interactiveState) withTopLevelAgentPrompt(base string) string {
+	if s.agentRole == nil {
+		return base
+	}
+	return withCustomAgentPrompt(base, s.agentRoleName, *s.agentRole)
+}
+
+func (s *interactiveState) buildTopLevelTools() []tool.BaseTool {
+	if s.agentMode == tui.ModePlanning {
+		return s.buildPlanTools()
+	}
+	return s.buildAllTools()
+}
+
+func (s *interactiveState) refreshTopLevelPromptAndTools(envLabel string, envInfo *util.EnvInfo) {
+	if s.agentMode == tui.ModePlanning {
+		s.systemPrompt = s.withTopLevelAgentPrompt(
+			prompts.GetPlanSystemPrompt(s.platform, s.pwd, envLabel, envInfo),
+		)
+	} else {
+		s.systemPrompt = s.withTopLevelAgentPrompt(
+			prompts.GetSystemPrompt(s.platform, s.pwd, envLabel, envInfo, s.skillLoader.Descriptions()),
+		)
+	}
+	s.toolList = s.buildTopLevelTools()
 }
 
 func (s *interactiveState) subagentNotifier(name, agentType string, done bool, result string, err error) {
@@ -375,8 +423,12 @@ func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
 	if s.agentMode == tui.ModePlanning {
 		toolMode = agent.ToolModePlan
 	}
+	mcpTools := s.mcpTools
+	if s.agentMode == tui.ModePlanning {
+		mcpTools = nil
+	}
 	toolPlan, err := buildCommandToolPlan(
-		s.ctx, s.toolList, s.mcpTools, agent.ToolTransportTUI, toolMode,
+		s.ctx, s.toolList, mcpTools, agent.ToolTransportTUI, toolMode,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("build TUI tool plan: %w", err)
@@ -416,7 +468,7 @@ func (s *interactiveState) reloadMCP() {
 	mcpTools, statuses := tools.LoadMCPTools(s.ctx, latest.MCPServers)
 	s.mcpTools = mcpTools
 	if s.agentMode != tui.ModePlanning {
-		s.toolList = s.buildAllTools()
+		s.toolList = s.buildTopLevelTools()
 		if newAg, err := s.createAgent(); err == nil {
 			s.ag = newAg
 		} else {
@@ -459,15 +511,8 @@ func (s *interactiveState) applyModeSwitch(newMode tui.AgentMode) {
 		s.rec.RecordModeChange(currentMode.String())
 	}
 
-	if s.agentMode == tui.ModePlanning {
-		s.systemPrompt = prompts.GetPlanSystemPrompt(s.platform, s.pwd, s.env.Exec.Label(), s.envInfo)
-		s.toolList = s.buildPlanTools()
-		config.Logger().Printf("[plan] built plan tools: %d tools", len(s.toolList))
-	} else {
-		s.systemPrompt = prompts.GetSystemPrompt(s.platform, s.pwd, s.env.Exec.Label(), s.envInfo, s.skillLoader.Descriptions())
-		s.toolList = s.buildAllTools()
-		config.Logger().Printf("[plan] built all tools: %d tools", len(s.toolList))
-	}
+	s.refreshTopLevelPromptAndTools(s.env.Exec.Label(), s.envInfo)
+	config.Logger().Printf("[plan] built tools: %d tools", len(s.toolList))
 	if newAg, err := s.createAgent(); err == nil {
 		s.ag = newAg
 		config.Logger().Printf("[plan] agent recreated successfully")
@@ -792,13 +837,7 @@ func (s *interactiveState) handleConfig(cfgMsg *config.Config) {
 	}
 
 	// Rebuild system prompt and tools to reflect config changes (e.g., SSH aliases)
-	if s.agentMode == tui.ModePlanning {
-		s.systemPrompt = prompts.GetPlanSystemPrompt(s.platform, s.pwd, s.env.Exec.Label(), s.envInfo)
-		s.toolList = s.buildPlanTools()
-	} else {
-		s.systemPrompt = prompts.GetSystemPrompt(s.platform, s.pwd, s.env.Exec.Label(), s.envInfo, s.skillLoader.Descriptions())
-		s.toolList = s.buildAllTools()
-	}
+	s.refreshTopLevelPromptAndTools(s.env.Exec.Label(), s.envInfo)
 
 	if newAg, err := s.createAgent(); err == nil {
 		s.ag = newAg
@@ -887,11 +926,7 @@ func (s *interactiveState) handleSSH(connMsg interface{}) {
 		HandleSSHListDir(s.ctx, s.env, msg.Path, s.p)
 	case tui.SSHCancelMsg:
 		s.env.ResetToLocal(s.pwd, s.platform)
-		if s.agentMode == tui.ModePlanning {
-			s.systemPrompt = prompts.GetPlanSystemPrompt(s.platform, s.pwd, "local", s.envInfo)
-		} else {
-			s.systemPrompt = prompts.GetSystemPrompt(s.platform, s.pwd, "local", s.envInfo, s.skillLoader.Descriptions())
-		}
+		s.refreshTopLevelPromptAndTools("local", s.envInfo)
 		if newAg, err := s.createAgent(); err == nil {
 			s.ag = newAg
 		}
@@ -1076,9 +1111,10 @@ func (s *interactiveState) handleMCPLogin(name string) {
 
 // RunInteractive starts the interactive TUI session.
 // The unsafe flag enables auto-approve for all tool calls and takes precedence over config.
-func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
+func RunInteractive(prompt, resumeUUID, agentName string, unsafe bool) error {
 	prompt = strings.TrimSpace(prompt)
 	hasPrompt := prompt != ""
+	agentFlagSet := strings.TrimSpace(agentName) != ""
 
 	// Redirect default log output to the app error log so library diagnostics
 	// (e.g. Langfuse upload errors) are visible without corrupting the TUI.
@@ -1106,6 +1142,16 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	platform := util.GetSystemInfo()
 	envInfo := util.CollectEnvInfo(pwd)
 
+	var resumeEntries []session.Entry
+	var resumeState *session.SessionState
+	if resumeUUID != "" {
+		resumeEntries, err = session.LoadSession(resumeUUID)
+		if err != nil {
+			return fmt.Errorf("cannot load session: %w", err)
+		}
+		resumeState = session.ReconstructState(resumeEntries)
+	}
+
 	skillLoader := skills.NewLoaderWithDisabled(cfg.DisabledSkills)
 	skillLoader.ScanProjectSkills(pwd)
 
@@ -1122,6 +1168,33 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	systemPrompt := prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
 
 	providerName, modelName := cfg.GetProviderModel()
+	selectedAgentName := strings.TrimSpace(agentName)
+	if strings.EqualFold(selectedAgentName, "default") {
+		selectedAgentName = ""
+	}
+	if !agentFlagSet && resumeState != nil {
+		selectedAgentName = strings.TrimSpace(resumeState.Agent)
+	}
+	var resumeAgentWarning string
+	if selectedAgentName != "" {
+		role, ok := config.LoadAgentRoles(pwd)[selectedAgentName]
+		if !ok {
+			if agentFlagSet {
+				return fmt.Errorf("unknown custom agent %q", selectedAgentName)
+			}
+			resumeAgentWarning = fmt.Sprintf(
+				"Custom agent %q is no longer available; resumed with Default.", selectedAgentName,
+			)
+			selectedAgentName = ""
+		} else {
+			providerName, modelName, err = resolveCustomAgentModel(
+				role, cfg, providerName, modelName,
+			)
+			if err != nil {
+				return fmt.Errorf("custom agent %q: %w", selectedAgentName, err)
+			}
+		}
+	}
 
 	providers := cfg.GetProviders()
 	providerCfg := providers[providerName]
@@ -1222,6 +1295,14 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		rec:          rec,
 		hookDisp:     hookDisp,
 	}
+	if err := st.setTopLevelAgent(selectedAgentName); err != nil {
+		return err
+	}
+	st.sessionResumeWarning = resumeAgentWarning
+	st.systemPrompt = st.withTopLevelAgentPrompt(systemPrompt)
+	if rec != nil {
+		rec.SetAgent(st.agentRoleName)
+	}
 
 	// SessionStart hook: fire once for a fresh session; stash any additionalContext
 	// to prepend to the first prompt. A resumed session fires it later — after the
@@ -1274,7 +1355,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	// resolution path as subagents/workflows; the fallback (startup model) is
 	// only reached when the "small" alias is unset/invalid.
 	teamModelFactory := internalmodel.NewModelFactory(cfg, chatModel)
-	teamAgentRoles := config.LoadAgentRoles(pwd, cfg)
+	teamAgentRoles := config.LoadAgentRoles(pwd)
 	teamManager := team.NewManager(&team.ManagerDeps{
 		DefaultModel: chatModel,
 		EnvFactory: func(cwd string) any {
@@ -1300,7 +1381,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		AgentRoles:        teamAgentRoles,
 	})
 	st.teamManager = teamManager
-	st.toolList = st.buildAllTools()
+	st.toolList = st.buildTopLevelTools()
 
 	// Resolve the startup session mode. CLI --unsafe forces Full access and takes
 	// precedence over config. Otherwise DefaultMode wins, falling back to the
@@ -1361,11 +1442,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 			browserMgr.SetConfig(browser.FromConfig(cfg.Browser))
 			// Tool schemas are fixed on an agent instance. Rebuild immediately so
 			// /browser on|off changes the current task's model-visible tools.
-			if st.agentMode == tui.ModePlanning {
-				st.toolList = st.buildPlanTools()
-			} else {
-				st.toolList = st.buildAllTools()
-			}
+			st.toolList = st.buildTopLevelTools()
 			newAg, err := st.createAgent()
 			if err != nil {
 				return fmt.Errorf("saved setting but could not refresh agent tools: %w", err)
@@ -1426,11 +1503,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 			computerMgr.SetConfig(computer.FromConfig(cfg.Computer))
 			// Tool schemas are fixed on an agent instance. Rebuild immediately so
 			// /computer on|off takes effect for the current task without restart.
-			if st.agentMode == tui.ModePlanning {
-				st.toolList = st.buildPlanTools()
-			} else {
-				st.toolList = st.buildAllTools()
-			}
+			st.toolList = st.buildTopLevelTools()
 			newAg, err := st.createAgent()
 			if err != nil {
 				return fmt.Errorf("saved setting but could not refresh agent tools: %w", err)
@@ -1516,7 +1589,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	// Record the system prompt and environment snapshot for KV-cache-friendly resume.
 	if rec != nil {
 		envSnapshot := prompts.SerializeEnvInfo(platform, pwd, "local", envInfo)
-		rec.RecordSystemPrompt(systemPrompt, envSnapshot)
+		rec.RecordSystemPrompt(st.systemPrompt, envSnapshot)
 	}
 
 	env.OnEnvChange = func(envLabel string, isLocal bool, envErr error) {
@@ -1526,11 +1599,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		}
 		if isLocal {
 			approvalState.SetWorkpath(pwd)
-			if st.agentMode == tui.ModePlanning {
-				st.systemPrompt = prompts.GetPlanSystemPrompt(platform, pwd, "local", envInfo)
-			} else {
-				st.systemPrompt = prompts.GetSystemPrompt(platform, pwd, "local", envInfo, skillLoader.Descriptions())
-			}
+			st.refreshTopLevelPromptAndTools("local", envInfo)
 			if newAg, agErr := st.createAgent(); agErr == nil {
 				st.ag = newAg
 			}
@@ -1538,11 +1607,7 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 			return
 		}
 		approvalState.SetWorkpath(env.Pwd())
-		if st.agentMode == tui.ModePlanning {
-			st.systemPrompt = prompts.GetPlanSystemPrompt(platform, pwd, envLabel, nil)
-		} else {
-			st.systemPrompt = prompts.GetSystemPrompt(platform, pwd, envLabel, nil, skillLoader.Descriptions())
-		}
+		st.refreshTopLevelPromptAndTools(envLabel, nil)
 		if newAg, agErr := st.createAgent(); agErr == nil {
 			st.ag = newAg
 		}
@@ -1554,18 +1619,15 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 	var initialResumeUUID string
 	var initialResumeEntries []tui.SessionEntry
 	if resumeUUID != "" {
-		entries, loadErr := session.LoadSession(resumeUUID)
-		if loadErr != nil {
-			return fmt.Errorf("cannot load session: %w", loadErr)
-		}
-		resumeState := session.ReconstructState(entries)
 		initialHistory = session.PruneOldToolOutputs(resumeState.History, 2)
 		initialResumeUUID = resumeUUID
-		initialResumeEntries = tui.ConvertSessionEntries(entries)
+		initialResumeEntries = tui.ConvertSessionEntries(resumeEntries)
 		hasPrompt = false
 
+		restoreStoredPrompt := !agentFlagSet && resumeAgentWarning == "" && selectedAgentName == ""
+
 		// Restore stored system prompt for KV-cache-friendly resume.
-		if resumeState.SystemPrompt != "" {
+		if restoreStoredPrompt && resumeState.SystemPrompt != "" {
 			systemPrompt = resumeState.SystemPrompt
 			st.systemPrompt = systemPrompt
 			// Inject environment diff as an additional system message.
@@ -1577,7 +1639,6 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 				})
 			}
 		}
-
 		if resumeState.Plan != nil {
 			switch resumeState.Plan.Status {
 			case "approved":
@@ -1603,7 +1664,12 @@ func RunInteractive(prompt, resumeUUID string, unsafe bool) error {
 		env.GoalStore.RestoreFromSnapshot(resumeState.Goal)
 
 		if targetEnv := resumeState.EnvTarget; targetEnv != "local" {
-			st.sessionResumeWarning = st.attemptSSHResume(targetEnv)
+			if envWarning := st.attemptSSHResume(targetEnv); envWarning != "" {
+				if st.sessionResumeWarning != "" {
+					st.sessionResumeWarning += "\n"
+				}
+				st.sessionResumeWarning += envWarning
+			}
 		}
 
 		// Reuse the existing session UUID so new messages are appended to the same file

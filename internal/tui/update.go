@@ -1568,6 +1568,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				m.lines = append(m.lines, textLine(fmt.Sprintf("  %s Mode changed to: %s",
 					toolLabelStyle.Render("🔄"),
 					toolNameStyle.Render(e.Mode))))
+			case string(session.EntryAgentChange):
+				agentName := e.Agent
+				if agentName == "" {
+					agentName = "Default"
+				}
+				m.lines = append(m.lines, textLine(fmt.Sprintf("  %s Agent changed to: %s",
+					toolLabelStyle.Render("🤖"),
+					toolNameStyle.Render(agentName))))
 			case string(session.EntryCompact):
 				m.lines = append(m.lines, textLine(fmt.Sprintf("  %s Context compacted: %d messages summarized",
 					toolSuccessStyle.Render("✓"),

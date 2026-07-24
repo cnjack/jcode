@@ -36,6 +36,7 @@ const (
 	EntrySubagentResult  EntryType = "subagent_result"
 	EntrySubagentAsync   EntryType = "subagent_async"
 	EntryModeChange      EntryType = "mode_change"
+	EntryAgentChange     EntryType = "agent_change"
 	EntryCompact         EntryType = "compact"
 	EntryBudgetWarning   EntryType = "budget_warning"
 	EntrySystemPrompt    EntryType = "system_prompt"
@@ -94,6 +95,7 @@ type Entry struct {
 	Project    string    `json:"project,omitempty"`
 	Provider   string    `json:"provider,omitempty"`
 	Model      string    `json:"model,omitempty"`
+	Agent      string    `json:"agent,omitempty"`
 	Content    string    `json:"content,omitempty"`
 	Name       string    `json:"name,omitempty"`         // tool name
 	Args       string    `json:"args,omitempty"`         // tool args JSON
@@ -162,6 +164,7 @@ type SessionMeta struct {
 	Project   string `json:"project"`
 	Provider  string `json:"provider"`
 	Model     string `json:"model"`
+	Agent     string `json:"agent,omitempty"`
 	StartTime string `json:"start_time"` // RFC3339
 	Title     string `json:"title,omitempty"`
 	// Task metadata. Additive — legacy index files simply lack these keys, which
@@ -332,6 +335,7 @@ type Recorder struct {
 	project   string
 	provider  string
 	model     string
+	agent     string
 	startTime time.Time
 	file      *os.File
 	mu        sync.Mutex
@@ -397,6 +401,29 @@ func (r *Recorder) SetModel(model string) {
 	r.mu.Lock()
 	r.model = model
 	r.mu.Unlock()
+}
+
+// SetAgent records the selected top-level custom agent. Empty means the default
+// agent. Before the first message it is buffered into session_start; after a
+// session exists it also appends an agent_change event for replay.
+func (r *Recorder) SetAgent(agent string) {
+	agent = strings.TrimSpace(agent)
+	r.mu.Lock()
+	if r.agent == agent {
+		r.mu.Unlock()
+		return
+	}
+	r.agent = agent
+	hasRecording := r.file != nil
+	id := r.uuid
+	r.mu.Unlock()
+	if !hasRecording {
+		return
+	}
+	_, _ = UpdateSessionMeta(id, func(m *SessionMeta) {
+		m.Agent = agent
+	})
+	_ = r.writeEntry(Entry{Type: EntryAgentChange, Agent: agent})
 }
 
 // ValidateSessionID checks that a session ID is safe for use as a filename.
@@ -801,6 +828,7 @@ func (r *Recorder) ensureFile() error {
 		Project:   r.project,
 		Provider:  r.provider,
 		Model:     r.model,
+		Agent:     r.agent,
 		Timestamp: r.startTime.Format(time.RFC3339),
 	}
 	data, err := json.Marshal(startEntry)
@@ -818,6 +846,7 @@ func (r *Recorder) ensureFile() error {
 			Project:   r.project,
 			Provider:  r.provider,
 			Model:     r.model,
+			Agent:     r.agent,
 			StartTime: r.startTime.Format(time.RFC3339),
 		})
 	}

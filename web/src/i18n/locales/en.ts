@@ -216,6 +216,13 @@ export default {
       fullAccessSub: 'Act freely — no approval prompts.',
       ceilingHint: 'This host limits which modes are available',
     },
+    agent: {
+      title: 'Agent',
+      default: 'Default agent',
+      defaultSub: 'Use JCODE’s standard instructions and tools.',
+      changedTo: 'Agent changed to {name}.',
+      changedToDefault: 'Agent changed to Default.',
+    },
     roles: {
       you: 'You',
       assistant: 'JCODE',

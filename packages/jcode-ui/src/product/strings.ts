@@ -47,6 +47,11 @@ export interface ProductComposerStrings {
   /** Shown in the mode picker when the host restricts `allowedModes` (M20). */
   modeCeilingHint: string
 
+  // ── custom agent picker ──
+  agentTitle: string
+  agentDefault: string
+  agentDefaultSub: string
+
   // ── model picker / manage dialog ──
   modelFilter: string
   modelCurrent: string
@@ -171,6 +176,10 @@ export const defaultProductComposerStrings: ProductComposerStrings = {
   modeFullAccess: 'Full access',
   modeFullAccessSub: 'Act freely — no approval prompts.',
   modeCeilingHint: 'This host limits which modes are available',
+
+  agentTitle: 'Agent',
+  agentDefault: 'Default agent',
+  agentDefaultSub: 'Use JCODE’s standard instructions and tools.',
 
   modelFilter: 'Filter models…',
   modelCurrent: 'Current',

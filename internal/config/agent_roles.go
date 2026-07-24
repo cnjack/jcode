@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +8,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 const maxAgentRoleFileBytes = 64 << 10
@@ -16,15 +17,13 @@ const maxAgentRoleFileBytes = 64 << 10
 var agentRoleNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 
 var builtinAgentRoleNames = map[string]bool{
-	"explore": true, "general": true, "coordinator": true, "coder": true,
+	"default": true, "explore": true, "general": true, "coordinator": true, "coder": true,
 }
 
-type agentRoleFile struct {
-	Name         string `json:"name,omitempty"`
-	Description  string `json:"description"`
-	Profile      string `json:"profile,omitempty"`
-	Instructions string `json:"instructions"`
-	Model        string `json:"model,omitempty"`
+type agentRoleFrontmatter struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+	Model       string `yaml:"model,omitempty"`
 }
 
 func normalizeAgentRole(name string, role AgentRoleConfig) (AgentRoleConfig, error) {
@@ -37,23 +36,56 @@ func normalizeAgentRole(name string, role AgentRoleConfig) (AgentRoleConfig, err
 	}
 	role.Description = strings.TrimSpace(role.Description)
 	role.Instructions = strings.TrimSpace(role.Instructions)
-	role.Profile = strings.TrimSpace(role.Profile)
 	role.Model = strings.TrimSpace(role.Model)
 	if role.Description == "" || role.Instructions == "" {
-		return role, fmt.Errorf("agent role %q requires description and instructions", name)
+		return role, fmt.Errorf("agent role %q requires description and Markdown instructions", name)
 	}
 	if len(role.Description) > 1024 || len(role.Instructions) > 32<<10 || len(role.Model) > 256 {
 		return role, fmt.Errorf("agent role %q exceeds metadata limits", name)
 	}
-	if role.Profile == "" {
-		role.Profile = "explore"
-	}
-	switch role.Profile {
-	case "explore", "general", "coordinator":
-	default:
-		return role, fmt.Errorf("agent role %q has invalid profile %q", name, role.Profile)
+	if role.Model != "" && role.Model != "small" {
+		provider, model, ok := strings.Cut(role.Model, "/")
+		if !ok || strings.TrimSpace(provider) == "" || strings.TrimSpace(model) == "" {
+			return role, fmt.Errorf(
+				"agent role %q model must be \"small\" or use provider/model format", name,
+			)
+		}
 	}
 	return role, nil
+}
+
+func parseAgentRoleMarkdown(content []byte) (agentRoleFrontmatter, string, error) {
+	text := strings.TrimPrefix(string(content), "\uFEFF")
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	lines := strings.Split(text, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return agentRoleFrontmatter{}, "", fmt.Errorf("missing YAML frontmatter")
+	}
+	end := -1
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			end = i
+			break
+		}
+	}
+	if end < 0 {
+		return agentRoleFrontmatter{}, "", fmt.Errorf("unterminated YAML frontmatter")
+	}
+
+	var meta agentRoleFrontmatter
+	dec := yaml.NewDecoder(strings.NewReader(strings.Join(lines[1:end], "\n")))
+	dec.KnownFields(true)
+	if err := dec.Decode(&meta); err != nil {
+		return agentRoleFrontmatter{}, "", fmt.Errorf("invalid YAML frontmatter: %w", err)
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			err = fmt.Errorf("multiple YAML documents")
+		}
+		return agentRoleFrontmatter{}, "", fmt.Errorf("invalid YAML frontmatter: %w", err)
+	}
+	return meta, strings.TrimSpace(strings.Join(lines[end+1:], "\n")), nil
 }
 
 func loadAgentRoleDir(dir string, dst map[string]AgentRoleConfig) {
@@ -67,7 +99,8 @@ func loadAgentRoleDir(dir string, dst map[string]AgentRoleConfig) {
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 	seen := make(map[string]bool)
 	for _, entry := range entries {
-		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || filepath.Ext(entry.Name()) != ".json" {
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 ||
+			!strings.HasSuffix(entry.Name(), ".agent.md") {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
@@ -81,28 +114,29 @@ func loadAgentRoleDir(dir string, dst map[string]AgentRoleConfig) {
 			Logger().Printf("[agents] skip %s: %v", path, err)
 			continue
 		}
-		dec := json.NewDecoder(io.LimitReader(file, maxAgentRoleFileBytes+1))
-		dec.DisallowUnknownFields()
-		var raw agentRoleFile
-		err = dec.Decode(&raw)
-		if err == nil {
-			var trailing any
-			if trailingErr := dec.Decode(&trailing); trailingErr != io.EOF {
-				err = fmt.Errorf("trailing JSON")
-			}
+		openedInfo, statErr := file.Stat()
+		if statErr != nil || !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
+			_ = file.Close()
+			Logger().Printf("[agents] skip %s: file changed while opening", path)
+			continue
 		}
+		content, err := io.ReadAll(io.LimitReader(file, maxAgentRoleFileBytes+1))
 		_ = file.Close()
+		if err == nil && len(content) > maxAgentRoleFileBytes {
+			err = fmt.Errorf("file exceeds 64 KiB")
+		}
+		if err != nil {
+			Logger().Printf("[agents] skip %s: %v", path, err)
+			continue
+		}
+		raw, instructions, err := parseAgentRoleMarkdown(content)
 		if err != nil {
 			Logger().Printf("[agents] skip malformed %s: %v", path, err)
 			continue
 		}
-		name := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-		if strings.TrimSpace(raw.Name) != "" {
-			name = strings.TrimSpace(raw.Name)
-		}
+		name := strings.TrimSpace(raw.Name)
 		role, err := normalizeAgentRole(name, AgentRoleConfig{
-			Description: raw.Description, Profile: raw.Profile,
-			Instructions: raw.Instructions, Model: raw.Model,
+			Description: raw.Description, Instructions: instructions, Model: raw.Model,
 		})
 		if err != nil {
 			Logger().Printf("[agents] skip %s: %v", path, err)
@@ -117,32 +151,14 @@ func loadAgentRoleDir(dir string, dst map[string]AgentRoleConfig) {
 	}
 }
 
-// LoadAgentRoles follows Codex's layered role idea with jcode-native JSON:
-// user files < project files < inline config. Malformed files are warning-only
-// and cannot override a valid lower layer.
-func LoadAgentRoles(pwd string, cfg *Config) map[string]AgentRoleConfig {
+// LoadAgentRoles discovers Markdown role definitions with project files
+// overriding user files. Malformed files are warning-only and cannot override
+// a valid lower layer.
+func LoadAgentRoles(pwd string) map[string]AgentRoleConfig {
 	roles := make(map[string]AgentRoleConfig)
 	loadAgentRoleDir(filepath.Join(ConfigDir(), "agents"), roles)
 	if pwd != "" {
 		loadAgentRoleDir(filepath.Join(pwd, ".jcode", "agents"), roles)
-	}
-	if cfg != nil {
-		names := make([]string, 0, len(cfg.Agents))
-		for name := range cfg.Agents {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			if cfg.Agents[name] == nil {
-				continue
-			}
-			role, err := normalizeAgentRole(name, *cfg.Agents[name])
-			if err != nil {
-				Logger().Printf("[agents] skip inline role: %v", err)
-				continue
-			}
-			roles[name] = role
-		}
 	}
 	return roles
 }

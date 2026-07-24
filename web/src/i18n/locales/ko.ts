@@ -209,6 +209,13 @@ export default {
       fullAccessSub: '자유롭게 실행—승인 프롬프트가 없습니다.',
       ceilingHint: '이 호스트에서는 사용 가능한 모드가 제한됩니다',
     },
+    agent: {
+      title: '에이전트',
+      default: '기본 에이전트',
+      defaultSub: 'JCODE의 표준 지침과 도구를 사용합니다.',
+      changedTo: '에이전트가 {name}(으)로 변경되었습니다.',
+      changedToDefault: '에이전트가 기본값으로 변경되었습니다.',
+    },
     roles: {
       you: '나',
       assistant: 'JCODE',

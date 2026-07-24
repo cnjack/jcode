@@ -8,6 +8,11 @@ func ConvertSessionEntries(entries []session.Entry) []SessionEntry {
 	result := make([]SessionEntry, 0, len(entries))
 	for _, e := range entries {
 		if e.Type == session.EntrySessionStart {
+			if e.Agent != "" {
+				result = append(result, SessionEntry{
+					Type: string(session.EntryAgentChange), Agent: e.Agent,
+				})
+			}
 			continue
 		}
 
@@ -48,6 +53,8 @@ func ConvertSessionEntries(entries []session.Entry) []SessionEntry {
 			Todos: todos,
 			// Mode change
 			Mode: e.Mode,
+			// Custom agent change
+			Agent: e.Agent,
 			// Compact fields
 			Summary:    e.Summary,
 			CompactedN: e.CompactedN,

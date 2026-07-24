@@ -82,7 +82,10 @@ func (e *Env) NewSubagentTool(deps *SubagentDeps) tool.InvokableTool {
 	for _, name := range config.AgentRoleNames(deps.AgentRoles) {
 		agentTypes = append(agentTypes, name)
 		role := deps.AgentRoles[name]
-		roleHelp += fmt.Sprintf(" %s: %s (profile: %s).", name, role.Description, role.Profile)
+		roleHelp += fmt.Sprintf(" %s: %s.", name, role.Description)
+		if role.Model != "" {
+			roleHelp += fmt.Sprintf(" Its model is fixed to %q.", role.Model)
+		}
 	}
 	info := &schema.ToolInfo{
 		Name: "subagent",
@@ -247,9 +250,9 @@ func (s *subagentTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 	roleInstructions := ""
 	modelRef := input.Model
 	if role, ok := s.deps.AgentRoles[roleName]; ok {
-		profile = role.Profile
+		profile = AgentTypeGeneral
 		roleInstructions = role.Instructions
-		if modelRef == "" {
+		if role.Model != "" {
 			modelRef = role.Model
 		}
 	} else if profile != AgentTypeExplore && profile != AgentTypeGeneral && profile != AgentTypeCoordinator {
