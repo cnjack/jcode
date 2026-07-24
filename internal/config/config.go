@@ -164,14 +164,12 @@ type SubagentConfig struct {
 	MaxDepth     int `json:"max_depth,omitempty"`
 }
 
-// AgentRoleConfig defines a named custom subagent role. Profile is the
-// capability ceiling; Instructions can narrow behavior but can never expand
-// tools beyond that profile.
+// AgentRoleConfig defines a named custom role for a top-level or delegated
+// agent. Roles inherit the caller's mode, approval policy, sandbox, and tools.
 type AgentRoleConfig struct {
-	Description  string `json:"description"`
-	Profile      string `json:"profile,omitempty"` // explore | general | coordinator
-	Instructions string `json:"instructions"`
-	Model        string `json:"model,omitempty"`
+	Description  string
+	Instructions string
+	Model        string
 }
 
 // MemoryConfig controls cross-session learned memory (the file-based store
@@ -372,18 +370,17 @@ type Config struct {
 	// Deprecated: use Model field with "provider/model" format instead.
 	Provider string `json:"provider,omitempty"`
 
-	MaxIterations int                         `json:"max_iterations,omitempty"`
-	SSHAliases    []SSHAlias                  `json:"ssh_aliases,omitempty"`
-	DockerAliases []DockerAlias               `json:"docker_aliases,omitempty"`
-	MCPServers    map[string]*MCPServer       `json:"mcp_servers,omitempty"`
-	Telemetry     *TelemetryConfig            `json:"telemetry,omitempty"`
-	Budget        *BudgetConfig               `json:"budget,omitempty"`
-	Compaction    *CompactionConfig           `json:"compaction,omitempty"`
-	Prompt        *PromptConfig               `json:"prompt,omitempty"`
-	Subagent      *SubagentConfig             `json:"subagent,omitempty"`
-	Agents        map[string]*AgentRoleConfig `json:"agents,omitempty"`
-	Team          *TeamConfig                 `json:"team,omitempty"`
-	Memory        *MemoryConfig               `json:"memory,omitempty"`
+	MaxIterations int                   `json:"max_iterations,omitempty"`
+	SSHAliases    []SSHAlias            `json:"ssh_aliases,omitempty"`
+	DockerAliases []DockerAlias         `json:"docker_aliases,omitempty"`
+	MCPServers    map[string]*MCPServer `json:"mcp_servers,omitempty"`
+	Telemetry     *TelemetryConfig      `json:"telemetry,omitempty"`
+	Budget        *BudgetConfig         `json:"budget,omitempty"`
+	Compaction    *CompactionConfig     `json:"compaction,omitempty"`
+	Prompt        *PromptConfig         `json:"prompt,omitempty"`
+	Subagent      *SubagentConfig       `json:"subagent,omitempty"`
+	Team          *TeamConfig           `json:"team,omitempty"`
+	Memory        *MemoryConfig         `json:"memory,omitempty"`
 
 	// AutoApprove sets the default approval mode to auto on startup.
 	//

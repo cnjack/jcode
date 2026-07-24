@@ -119,6 +119,8 @@ type SessionEntry struct {
 
 	// Mode change
 	Mode string
+	// Custom agent change (empty means Default)
+	Agent string
 
 	// Compact fields
 	Summary    string

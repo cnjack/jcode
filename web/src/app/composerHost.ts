@@ -60,6 +60,10 @@ function buildStrings(t: (key: string, opts?: Record<string, unknown>) => string
     modeFullAccessSub: t('chat.modes.fullAccessSub'),
     modeCeilingHint: t('chat.modes.ceilingHint'),
 
+    agentTitle: t('chat.agent.title'),
+    agentDefault: t('chat.agent.default'),
+    agentDefaultSub: t('chat.agent.defaultSub'),
+
     modelFilter: t('chat.model.filter'),
     modelCurrent: t('chat.model.current'),
     modelFavorites: t('chat.model.favorites'),
@@ -162,6 +166,17 @@ const actions = {
       /* ignore */
     }
     store.dispatch(modelActions.setMode(next))
+  },
+
+  async selectAgent(name: string) {
+    try {
+      const result = await api.switchAgent(name)
+      store.dispatch(modelActions.setAgent(result.agent || ''))
+      if (result.provider) store.dispatch(modelActions.setProvider(result.provider))
+      if (result.model) store.dispatch(modelActions.setModel(result.model))
+    } catch {
+      /* ignore — the next status poll reconciles */
+    }
   },
 
   async setEffort(provider: string, model: string, effort: string) {
@@ -288,6 +303,8 @@ export function useProductComposerHost(): ProductComposerHost {
   const recentModels = useAppSelector((s) => s.model.recentModels)
   const imageSupport = useAppSelector((s) => s.model.imageSupport)
   const effortOverrides = useAppSelector((s) => s.model.effortOverrides)
+  const agents = useAppSelector((s) => s.model.agents)
+  const agentName = useAppSelector((s) => s.model.agentName)
   const slashCommands = useAppSelector((s) => s.chat.slashCommands)
   const hasMessages = useAppSelector((s) => s.chat.timeline.length > 0)
   const goalArmed = useAppSelector((s) => s.chat.goalArmed)
@@ -307,6 +324,8 @@ export function useProductComposerHost(): ProductComposerHost {
       recentModels,
       imageSupport,
       effortOverrides,
+      agents,
+      agentName,
       slashCommands,
       hasMessages,
       goalArmed,
@@ -320,7 +339,7 @@ export function useProductComposerHost(): ProductComposerHost {
     }),
     [
       providerName, modelName, mode, providers, favoriteModels, recentModels,
-      imageSupport, effortOverrides, slashCommands, hasMessages, goalArmed,
+      imageSupport, effortOverrides, agents, agentName, slashCommands, hasMessages, goalArmed,
       sessionId, projectPath, tasks, strings,
     ],
   )

@@ -22,6 +22,7 @@ func main() {
 	var (
 		prompt     string
 		resumeUUID string
+		agentName  string
 		unsafeMode bool
 	)
 
@@ -32,12 +33,13 @@ func main() {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return command.RunInteractive(prompt, resumeUUID, unsafeMode)
+			return command.RunInteractive(prompt, resumeUUID, agentName, unsafeMode)
 		},
 	}
 	rootCmd.SetVersionTemplate(fmt.Sprintf("JCODE — Coding Assistant\nVersion:    %s\nBuild time: %s\nGit commit: %s\n", command.Version, command.BuildTime, command.GitCommit))
 	rootCmd.Flags().StringVarP(&prompt, "prompt", "p", "", "One-shot prompt (non-interactive)")
 	rootCmd.Flags().StringVar(&resumeUUID, "resume", "", "Resume a previous session by UUID")
+	rootCmd.Flags().StringVar(&agentName, "agent", "", "Custom agent for the current session")
 	rootCmd.Flags().BoolVar(&unsafeMode, "unsafe", false, "Auto-approve all tool calls (overrides config)")
 
 	rootCmd.AddCommand(

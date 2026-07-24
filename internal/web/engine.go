@@ -74,6 +74,7 @@ type Engine struct {
 	providerName string
 	modelName    string
 	mode         string // "build" / "plan" / "full_access"
+	agentRole    string // custom top-level agent name; empty = default
 
 	// --- per-task execution context ---
 	env           *tools.Env // fresh per task; todo/goal/bg hang off it
@@ -94,6 +95,7 @@ type Engine struct {
 	// a model or mode switch rebuilds only this task's agent.
 	createAgent    func(providerName, modelName string) (*adk.ChatModelAgent, error)
 	rebuildForMode func(planMode bool) (*adk.ChatModelAgent, error)
+	rebuildForRole func(roleName, providerName, modelName string) (*AgentRoleBuild, error)
 
 	// pumpCancel stops this engine's event-forwarding goroutine on teardown.
 	pumpCancel context.CancelFunc
@@ -115,6 +117,7 @@ type EngineConfig struct {
 	Mode            string
 	ProviderName    string
 	ModelName       string
+	AgentRole       string
 	Agent           *adk.ChatModelAgent
 	Env             *tools.Env
 	TodoStore       *tools.TodoStore
@@ -127,11 +130,20 @@ type EngineConfig struct {
 	ToolSearchStats func() ToolSearchCounts
 	CreateAgent     func(providerName, modelName string) (*adk.ChatModelAgent, error)
 	RebuildForMode  func(planMode bool) (*adk.ChatModelAgent, error)
+	RebuildForRole  func(roleName, providerName, modelName string) (*AgentRoleBuild, error)
 	FlowLoader      *flow.Loader
 	// RecorderInit decorates recorders this engine creates AFTER build (lazy
 	// creation / session switch in chat.go) so they get the same hooks (e.g.
 	// the LLM title refiner) as the recorder built with the task.
 	RecorderInit func(*session.Recorder)
+}
+
+// AgentRoleBuild is an atomic custom-agent rebuild result. Provider/model are
+// the actual model selected after applying the role's optional model override.
+type AgentRoleBuild struct {
+	Agent    *adk.ChatModelAgent
+	Provider string
+	Model    string
 }
 
 // newEngine assembles an *Engine from the factory-produced config. The engine's
@@ -152,6 +164,7 @@ func newEngine(c *EngineConfig) *Engine {
 		mode:            c.Mode,
 		providerName:    c.ProviderName,
 		modelName:       c.ModelName,
+		agentRole:       c.AgentRole,
 		agent:           c.Agent,
 		env:             c.Env,
 		todoStore:       c.TodoStore,
@@ -164,6 +177,7 @@ func newEngine(c *EngineConfig) *Engine {
 		toolSearchStats: c.ToolSearchStats,
 		createAgent:     c.CreateAgent,
 		rebuildForMode:  c.RebuildForMode,
+		rebuildForRole:  c.RebuildForRole,
 		flowLoader:      c.FlowLoader,
 		recorderInit:    c.RecorderInit,
 	}
@@ -259,6 +273,12 @@ func (e *Engine) curMode() string {
 	return e.mode
 }
 
+func (e *Engine) curAgentRole() string {
+	e.emu.Lock()
+	defer e.emu.Unlock()
+	return e.agentRole
+}
+
 // recUUID returns the engine recorder's UUID (or "") under emu.
 func (e *Engine) recUUID() string {
 	e.emu.Lock()
@@ -292,6 +312,25 @@ func (e *Engine) applyModeSwitch(modeStr string, ag *adk.ChatModelAgent) {
 		e.agent = ag
 	}
 	e.agentRevision++
+}
+
+func (e *Engine) applyAgentRoleSwitch(roleName string, built *AgentRoleBuild) {
+	e.emu.Lock()
+	e.agentRole = roleName
+	if built != nil && built.Agent != nil {
+		e.agent = built.Agent
+		e.providerName = built.Provider
+		e.modelName = built.Model
+	}
+	e.agentRevision++
+	rec := e.recorder
+	e.emu.Unlock()
+	if rec != nil {
+		rec.SetAgent(roleName)
+		if built != nil && built.Model != "" {
+			rec.SetModel(built.Model)
+		}
+	}
 }
 
 // setAgent swaps just the agent under emu (MCP reload, skill toggle, setup).
@@ -432,6 +471,13 @@ func (s *Server) buildLocalEngineWith(taskID, pwd, modeStr string, factory func(
 		if prov != "" && (prov != eng.providerName || mdl != eng.modelName) {
 			if ag, agErr := eng.createAgent(prov, mdl); agErr == nil {
 				eng.applyModelSwitch(ag, prov, mdl)
+			}
+		}
+		roleName := cur.curAgentRole()
+		if roleName != "" && eng.rebuildForRole != nil {
+			prov, mdl, _ := eng.modelSnapshot()
+			if built, agErr := eng.rebuildForRole(roleName, prov, mdl); agErr == nil {
+				eng.applyAgentRoleSwitch(roleName, built)
 			}
 		}
 	}

@@ -10,9 +10,17 @@ import {
 } from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
-import { chatActions, loadSession, loadTasks, loadWorkspaceState, sessionActions, uiActions } from '../app/store'
+import {
+  chatActions,
+  loadSession,
+  loadTasks,
+  loadWorkspaceState,
+  modelActions,
+  sessionActions,
+  uiActions,
+} from '../app/store'
 import { api } from '../lib/api'
-import type { TaskItem } from '../lib/types'
+import { normalizeMode, type TaskItem } from '../lib/types'
 import { isRemotePath, openRemoteConnect, parseRemoteLabel } from '../lib/remote'
 
 interface PaletteItem {
@@ -46,6 +54,10 @@ export function CommandPalette() {
     const resp = await api.newSession()
     // Stay off the sidebar until the first user message (empty UUID rows look broken).
     dispatch(sessionActions.setCurrentSession(resp.session_id))
+    if (resp.provider !== undefined) dispatch(modelActions.setProvider(resp.provider))
+    if (resp.model !== undefined) dispatch(modelActions.setModel(resp.model))
+    if (resp.agent !== undefined) dispatch(modelActions.setAgent(resp.agent))
+    if (resp.mode !== undefined) dispatch(modelActions.setMode(normalizeMode(resp.mode)))
   }
 
   async function openTask(task: TaskItem) {

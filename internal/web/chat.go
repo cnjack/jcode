@@ -179,7 +179,10 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 	eng.emu.Lock()
 	if eng.recorder == nil {
 		rec, _ := session.NewRecorder(eng.pwd, eng.providerName, eng.modelName)
-		if sessionID != "" {
+		if rec != nil {
+			rec.SetAgent(eng.agentRole)
+		}
+		if rec != nil && sessionID != "" {
 			rec.SetUUID(sessionID)
 		}
 		if rec != nil && eng.recorderInit != nil {
@@ -193,7 +196,10 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 		// Resume the client's session to keep all messages together.
 		eng.recorder.Close()
 		rec, _ := session.NewRecorder(eng.pwd, eng.providerName, eng.modelName)
-		rec.SetUUID(sessionID)
+		if rec != nil {
+			rec.SetAgent(eng.agentRole)
+			rec.SetUUID(sessionID)
+		}
 		if rec != nil && eng.recorderInit != nil {
 			eng.recorderInit(rec)
 		}

@@ -45,6 +45,8 @@ function makeHost(overrides: Partial<ProductComposerHost> = {}): ProductComposer
     recentModels: [],
     imageSupport: true,
     effortOverrides: {},
+    agents: [],
+    agentName: '',
     slashCommands: [
       { slash: '/clear', description: 'Clear the conversation', type: 'builtin' },
       { slash: '/compact', description: 'Compact context', type: 'builtin' },
@@ -56,6 +58,7 @@ function makeHost(overrides: Partial<ProductComposerHost> = {}): ProductComposer
     tasks: [],
     selectModel: vi.fn(),
     selectMode: vi.fn(),
+    selectAgent: vi.fn(),
     setEffort: vi.fn(),
     toggleFavorite: vi.fn(),
     setModelEnabled: vi.fn(),
@@ -163,6 +166,44 @@ describe('goal armed', () => {
     fireEvent.keyDown(ta, { key: 'Enter' }) // first entry is the local /goal
     expect(setGoalArmed).toHaveBeenCalledWith(true)
     expect(ta.value).toBe('') // token stripped, nothing inserted
+  })
+})
+
+describe('custom agent picker', () => {
+  it('stays hidden when no custom agents are available', () => {
+    renderComposer(makeHost())
+    expect(screen.queryByLabelText('Agent: Default agent')).toBeNull()
+  })
+
+  it('switches between Default and a Markdown-defined custom agent', async () => {
+    const selectAgent = vi.fn()
+    const host = makeHost({
+      agents: [
+        {
+          name: 'bug-fix-teammate',
+          description: 'Investigates regressions and implements focused fixes.',
+          model: 'anthropic/claude-sonnet',
+        },
+      ],
+      selectAgent,
+    })
+    const view = renderComposer(host)
+
+    fireEvent.click(screen.getByLabelText('Agent: Default agent'))
+    expect(screen.getByText('bug-fix-teammate')).toBeTruthy()
+    expect(screen.getByText('Investigates regressions and implements focused fixes.')).toBeTruthy()
+    expect(screen.getByText('anthropic/claude-sonnet')).toBeTruthy()
+    fireEvent.click(screen.getByText('bug-fix-teammate'))
+    await waitFor(() => expect(selectAgent).toHaveBeenCalledWith('bug-fix-teammate'))
+
+    view.rerender(
+      <RuntimeProvider runtime={view.runtime}>
+        <ChatInput host={{ ...host, agentName: 'bug-fix-teammate' }} />
+      </RuntimeProvider>,
+    )
+    fireEvent.click(screen.getByLabelText('Agent: bug-fix-teammate'))
+    fireEvent.click(screen.getByText('Default agent'))
+    await waitFor(() => expect(selectAgent).toHaveBeenCalledWith(''))
   })
 })
 

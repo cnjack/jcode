@@ -226,6 +226,7 @@ type ServerConfig struct {
 	Agent               *adk.ChatModelAgent
 	CreateAgent         func(providerName, modelName string) (*adk.ChatModelAgent, error)
 	RebuildForMode      func(planMode bool) (*adk.ChatModelAgent, error)
+	RebuildForRole      func(roleName, providerName, modelName string) (*AgentRoleBuild, error)
 	NewEngine           func(taskID, pwd, mode string) (*EngineConfig, error)                                             // factory for new concurrent task engines (local)
 	NewRemoteEngine     func(taskID string, executor tools.RemoteExecutor, remotePwd, mode string) (*EngineConfig, error) // remote sibling of NewEngine (SSH or Docker)
 	NewAutomationEngine func(taskID, pwd, mode string) (*EngineConfig, error)                                             // headless sibling of NewEngine for automation runs (drops interactive tools)
@@ -288,6 +289,7 @@ func NewServer(cfg *ServerConfig) *Server {
 		toolSearchStats: cfg.ToolSearchStats,
 		createAgent:     cfg.CreateAgent,
 		rebuildForMode:  cfg.RebuildForMode,
+		rebuildForRole:  cfg.RebuildForRole,
 	}
 	if boot.tokenUsage == nil {
 		boot.tokenUsage = &model.TokenUsage{}
@@ -397,6 +399,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/tasks/{id}/stats", s.handleTaskStats)
 	mux.HandleFunc("GET /api/models", s.handleListModels)
 	mux.HandleFunc("POST /api/model", s.handleSwitchModel)
+	mux.HandleFunc("GET /api/agents", s.handleListAgents)
+	mux.HandleFunc("POST /api/agent", s.handleSwitchAgent)
 	mux.HandleFunc("POST /api/small-model", s.handleSetSmallModel)
 	mux.HandleFunc("POST /api/mode", s.handleSwitchMode)
 	mux.HandleFunc("POST /api/exec", s.handleExec)
@@ -588,6 +592,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			"pwd":           pwd,
 			"provider":      "",
 			"model":         "",
+			"agent":         "",
 			"mode":          "build",
 			"session_id":    "",
 			"running":       false,
@@ -618,6 +623,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"pwd":           eng.pwd,
 		"provider":      provider,
 		"model":         mdl,
+		"agent":         eng.curAgentRole(),
 		"mode":          modeStr,
 		"session_id":    sessionID,
 		"running":       eng.running.Load(),
@@ -637,6 +643,7 @@ func (s *Server) statusSnapshot(eng *Engine) map[string]any {
 		"pwd":      eng.pwd,
 		"provider": provider,
 		"model":    mdl,
+		"agent":    eng.curAgentRole(),
 		"mode":     modeStr,
 		// Live token snapshot so a client reconnecting between turns can render
 		// the context bar + cache hit rate without waiting for the next

@@ -109,7 +109,10 @@ func teamSpawnParams(manager *team.Manager) *schema.ParamsOneOf {
 		for _, name := range manager.AgentRoleNames() {
 			agentTypes = append(agentTypes, name)
 			role := manager.AgentRole(name)
-			roleHelp += fmt.Sprintf(" %s: %s (profile: %s).", name, role.Description, role.Profile)
+			roleHelp += fmt.Sprintf(" %s: %s.", name, role.Description)
+			if role.Model != "" {
+				roleHelp += fmt.Sprintf(" Its model is fixed to %q.", role.Model)
+			}
 		}
 	}
 	properties.Set("agent_type", &jsonschema.Schema{

@@ -1,5 +1,5 @@
 // API client for jcode backend — ported from web/src/composables/api.ts.
-import type { ModelsResponse, AgentMode, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, ProjectInfo, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, CustomModelDetail, ValidateResult, CatalogModel, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData, ApprovalReviewConfig, ApprovalReviewConfigResponse } from './types'
+import type { ModelsResponse, AgentMode, CustomAgentInfo, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, ProjectInfo, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, CustomModelDetail, ValidateResult, CatalogModel, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData, ApprovalReviewConfig, ApprovalReviewConfigResponse } from './types'
 import type { AutomationItem, AutomationRun, AutomationTemplate, AutomationCreate, Automation } from './automation'
 import { apiBase } from './apiBase'
 import { getAuthToken, notifyAuthExpired } from './authToken'
@@ -44,7 +44,7 @@ export const api = {
       body: JSON.stringify({ before_user_message: beforeUserMessage }),
     }),
   health: () =>
-    request<{ status: string; version: string; pwd: string; provider: string; model: string; mode: string; session_id: string; running: boolean; image_support?: boolean; needs_setup?: boolean; auth_required?: boolean }>(
+    request<{ status: string; version: string; pwd: string; provider: string; model: string; agent?: string; mode: string; session_id: string; running: boolean; image_support?: boolean; needs_setup?: boolean; auth_required?: boolean }>(
       '/api/health',
     ),
   // authVerify validates a token typed into the login gate. skipAuth keeps a 401
@@ -62,6 +62,7 @@ export const api = {
       pwd: string
       provider: string
       model: string
+      agent?: string
       mode: string
       token?: TokenUpdateData
     }>('/api/status'),
@@ -101,6 +102,7 @@ export const api = {
       pwd?: string
       provider?: string
       model?: string
+      agent?: string
       mode?: string
       token?: TokenUpdateData
     }>('/api/sessions', {
@@ -136,6 +138,12 @@ export const api = {
   askPending: () => request<AskUserRequestData[]>('/api/ask/pending'),
   approvalPending: () => request<ApprovalRequestData[]>('/api/approval/pending'),
   models: () => request<ModelsResponse>('/api/models'),
+  agents: () => request<{ agents: CustomAgentInfo[]; current: string }>('/api/agents'),
+  switchAgent: (agent: string) =>
+    request<{ status: string; agent: string; provider?: string; model?: string }>('/api/agent', {
+      method: 'POST',
+      body: JSON.stringify({ agent }),
+    }),
   switchModel: (provider: string, model: string) =>
     request<{ status: string }>('/api/model', {
       method: 'POST',

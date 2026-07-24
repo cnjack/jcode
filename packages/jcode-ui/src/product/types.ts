@@ -53,6 +53,14 @@ export interface ModelRef {
   model: string
 }
 
+/** Discoverable top-level agent definition. Empty selection means Default. */
+export interface CustomAgentInfo {
+  name: string
+  description: string
+  /** Optional model applied when this agent is selected. */
+  model?: string
+}
+
 /** Unified slash command (built-in + skill + flow). */
 export interface SlashCommandInfo {
   slash: string

@@ -69,7 +69,7 @@ func TestSubagentSchemaExplainsDelegatedWriteGrant(t *testing.T) {
 func TestSubagentSchemaAdvertisesCustomRoles(t *testing.T) {
 	env := NewEnv(t.TempDir(), "darwin/arm64")
 	info, err := env.NewSubagentTool(&SubagentDeps{AgentRoles: map[string]config.AgentRoleConfig{
-		"reviewer": {Description: "Review security boundaries", Profile: "explore", Instructions: "Lead with findings."},
+		"reviewer": {Description: "Review security boundaries", Instructions: "Lead with findings."},
 	}}).Info(context.Background())
 	if err != nil {
 		t.Fatal(err)

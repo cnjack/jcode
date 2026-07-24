@@ -206,6 +206,13 @@ export default {
       fullAccessSub: '自由操作——不再弹出确认。',
       ceilingHint: '此宿主限制了可用模式',
     },
+    agent: {
+      title: 'Agent',
+      default: '默认 Agent',
+      defaultSub: '使用 JCODE 的标准指令和工具。',
+      changedTo: 'Agent 已切换为 {name}。',
+      changedToDefault: 'Agent 已切换为默认 Agent。',
+    },
     roles: {
       you: '你',
       assistant: 'JCODE',

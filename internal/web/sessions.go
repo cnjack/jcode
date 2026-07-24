@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/cnjack/jcode/internal/config"
@@ -24,6 +25,7 @@ type taskItem struct {
 	UpdatedAt string `json:"updated_at,omitempty"`
 	Provider  string `json:"provider"`
 	Model     string `json:"model"`
+	Agent     string `json:"agent,omitempty"`
 	Title     string `json:"title,omitempty"`
 	Pinned    bool   `json:"pinned"`
 	Archived  bool   `json:"archived"`
@@ -40,6 +42,7 @@ func newTaskItem(m *session.SessionMeta, project string, running bool) taskItem 
 		UpdatedAt: m.UpdatedAt,
 		Provider:  m.Provider,
 		Model:     m.Model,
+		Agent:     m.Agent,
 		Title:     m.Title,
 		Pinned:    m.Pinned,
 		Archived:  m.Archived,
@@ -179,6 +182,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		CreatedAt string `json:"created_at"`
 		Provider  string `json:"provider"`
 		Model     string `json:"model"`
+		Agent     string `json:"agent,omitempty"`
 		Title     string `json:"title,omitempty"`
 	}
 
@@ -189,6 +193,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: m.StartTime,
 			Provider:  m.Provider,
 			Model:     m.Model,
+			Agent:     m.Agent,
 			Title:     m.Title,
 		})
 	}
@@ -342,6 +347,13 @@ func (s *Server) writeResumeReply(w http.ResponseWriter, eng *Engine, entries []
 	resp["status"] = "ok"
 	resp["session_id"] = eng.taskID
 	if entries != nil {
+		savedAgent := session.ReconstructState(entries).Agent
+		if currentAgent := eng.curAgentRole(); savedAgent != currentAgent {
+			entries = append(append([]session.Entry(nil), entries...), session.Entry{
+				Type: session.EntryAgentChange, Agent: currentAgent,
+				Timestamp: time.Now().Format(time.RFC3339),
+			})
+		}
 		resp["entries"] = entries
 	}
 	if eng.env != nil && eng.env.GoalStore != nil {
@@ -422,6 +434,20 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		st := session.ReconstructState(entries)
+		if eng.rebuildForRole != nil {
+			eng.rebuildMu.Lock()
+			provider, model, _ := eng.modelSnapshot()
+			built, rebuildErr := eng.rebuildForRole(st.Agent, provider, model)
+			if rebuildErr != nil {
+				config.Logger().Printf("[web] resume: custom agent %q unavailable for %s: %v", st.Agent, req.SessionID, rebuildErr)
+				if fallback, fallbackErr := eng.rebuildForRole("", provider, model); fallbackErr == nil {
+					eng.applyAgentRoleSwitch("", fallback)
+				}
+			} else {
+				eng.applyAgentRoleSwitch(st.Agent, built)
+			}
+			eng.rebuildMu.Unlock()
+		}
 		eng.emu.Lock()
 		eng.history = st.History
 		eng.emu.Unlock()
@@ -448,7 +474,10 @@ func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {
 	if req.SessionID == "" {
 		s.wsBroker.Broadcast(WSEvent{TaskID: eng.taskID, Type: "session_reset", Data: map[string]string{}})
 		s.stampCloudSync(eng.taskID, req.Source, true)
-		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "session_id": eng.taskID})
+		resp := s.statusSnapshot(eng)
+		resp["status"] = "ok"
+		resp["session_id"] = eng.taskID
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 

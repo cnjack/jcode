@@ -130,6 +130,7 @@ type SessionState struct {
 	Todos        []TodoSnapshotItem // last todo snapshot, nil if none
 	Goal         *GoalSnapshot      // nil if no goal events or last event cleared it
 	Mode         string             // last unified session mode (approval/plan/full_access); empty = approval
+	Agent        string             // selected top-level custom agent; empty = default
 	EnvTarget    string             // last environment (local/ssh alias)
 	SystemPrompt string             // recorded system prompt for KV-cache-friendly resume
 	EnvInfo      string             // environment snapshot at recording time
@@ -160,6 +161,9 @@ func ReconstructState(entries []Entry) *SessionState {
 		}
 
 		switch e.Type {
+		case EntrySessionStart:
+			state.Agent = e.Agent
+
 		case EntryUser:
 			msgs = append(msgs, entryToUserMessage(e))
 
@@ -263,6 +267,9 @@ func ReconstructState(entries []Entry) *SessionState {
 
 		case EntryModeChange:
 			state.Mode = e.Mode
+
+		case EntryAgentChange:
+			state.Agent = e.Agent
 
 		case EntrySystemPrompt:
 			state.SystemPrompt = e.Content

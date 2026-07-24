@@ -16,8 +16,8 @@ import { configureStore, createSlice, createAsyncThunk } from '@reduxjs/toolkit'
 import type { ThreadItem, Message, ToolCall, Approval, TokenSnapshot, Goal, TodoItem, QueuedMessage, AskUserQuestion } from 'jcode-ui-core'
 import { api } from '../lib/api'
 import { extractToolDisplayInfo } from '../lib/toolInfo'
-import { normalizeMode, type AgentMode, type ProviderInfo, type SessionItem, type TaskItem, type ProjectInfo, type SlashCommandInfo, type SessionEntry, type ModelRef } from '../lib/types'
-import { setLocale, SUPPORTED_LOCALES } from '../i18n'
+import { normalizeMode, type AgentMode, type CustomAgentInfo, type ProviderInfo, type SessionItem, type TaskItem, type ProjectInfo, type SlashCommandInfo, type SessionEntry, type ModelRef } from '../lib/types'
+import { i18n, setLocale, SUPPORTED_LOCALES } from '../i18n'
 import { hydrateTheme } from '../lib/useTheme'
 
 // ─── seq counter (stable DOM identity across streaming updates) ───
@@ -540,6 +540,8 @@ interface ModelState {
   favoriteModels: string[]
   recentModels: ModelRef[]
   effortOverrides: Record<string, string>
+  agents: CustomAgentInfo[]
+  agentName: string
   autoApprove: boolean
   imageSupport: boolean
   serverVersion: string
@@ -555,6 +557,8 @@ const initialModel: ModelState = {
   favoriteModels: [],
   recentModels: [],
   effortOverrides: {},
+  agents: [],
+  agentName: '',
   autoApprove: false,
   imageSupport: false,
   serverVersion: '',
@@ -597,6 +601,12 @@ const modelSlice = createSlice({
     },
     setMode(s, a: { payload: AgentMode }) {
       s.mode = a.payload
+    },
+    setAgents(s, a: { payload: CustomAgentInfo[] }) {
+      s.agents = a.payload
+    },
+    setAgent(s, a: { payload: string }) {
+      s.agentName = a.payload
     },
     setProviders(s, a: { payload: ProviderInfo[] }) {
       s.providers = a.payload
@@ -962,6 +972,12 @@ export const loadModels = createAsyncThunk('model/loadModels', async (_, { dispa
   dispatch(modelActions.setImageSupport(!!model?.image_support))
 })
 
+export const loadAgents = createAsyncThunk('model/loadAgents', async (_, { dispatch }) => {
+  const data = await api.agents()
+  dispatch(modelActions.setAgents(data.agents || []))
+  dispatch(modelActions.setAgent(data.current || ''))
+})
+
 export const loadModelState = createAsyncThunk('model/loadState', async (_, { dispatch }) => {
   const data = await api.modelState()
   dispatch(modelActions.setModelState({
@@ -1008,6 +1024,7 @@ export const loadStatus = createAsyncThunk('app/loadStatus', async (_, { dispatc
   dispatch(sessionActions.setProjectPath(status.pwd))
   dispatch(modelActions.setProvider(status.provider))
   dispatch(modelActions.setModel(status.model))
+  dispatch(modelActions.setAgent(status.agent || ''))
   dispatch(modelActions.setMode(normalizeMode(status.mode)))
   if (status.token) dispatch(chatActions.setTokenSnapshot(status.token))
 })
@@ -1065,6 +1082,7 @@ export const loadWorkspaceState = createAsyncThunk('app/loadWorkspaceState', asy
     dispatch(loadStatus()),
     dispatch(loadConfig()),
     dispatch(loadModels()),
+    dispatch(loadAgents()),
     dispatch(loadModelState()),
     dispatch(loadSessions()),
     dispatch(loadTasks()),
@@ -1126,10 +1144,36 @@ export const loadSession = createAsyncThunk(
       const timeline: ThreadItem[] = []
       const pendingToolCalls = new Map<string, ToolCall>()
       for (const e of entries || []) {
-        if (e.type === 'user' && (e.content || (e.images && e.images.length > 0))) {
+        if (e.type === 'session_start' && e.agent) {
+          timeline.push({
+            kind: 'message',
+            seq: nextSeq(),
+            data: {
+              id: genId('agent'),
+              role: 'system',
+              content: i18n.t('chat.agent.changedTo', { name: e.agent }),
+              level: 'notice',
+              timestamp: ts(e.timestamp),
+            },
+          })
+        } else if (e.type === 'user' && (e.content || (e.images && e.images.length > 0))) {
           timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('msg'), role: 'user', content: e.content || '', timestamp: ts(e.timestamp), images: e.images } })
         } else if (e.type === 'assistant' && e.content) {
           timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('asst'), role: 'assistant', content: e.content, timestamp: ts(e.timestamp) } })
+        } else if (e.type === 'agent_change') {
+          timeline.push({
+            kind: 'message',
+            seq: nextSeq(),
+            data: {
+              id: genId('agent'),
+              role: 'system',
+              content: e.agent
+                ? i18n.t('chat.agent.changedTo', { name: e.agent })
+                : i18n.t('chat.agent.changedToDefault'),
+              level: 'notice',
+              timestamp: ts(e.timestamp),
+            },
+          })
         } else if (e.type === 'tool_call' && e.name) {
           const tc: ToolCall = {
             id: genId('tc'),
@@ -1194,6 +1238,7 @@ export const loadSession = createAsyncThunk(
         if (resp.pwd) dispatch(sessionActions.setProjectPath(resp.pwd))
         dispatch(modelActions.setProvider(resp.provider || ''))
         dispatch(modelActions.setModel(resp.model || ''))
+        dispatch(modelActions.setAgent(resp.agent || ''))
         dispatch(modelActions.setMode(normalizeMode(resp.mode || '')))
         if (resp.token) dispatch(chatActions.setTokenSnapshot(resp.token))
         dispatch(chatActions.setGoal(resp.goal ?? null))
@@ -1232,6 +1277,10 @@ export const startNewChat = createAsyncThunk('session/startNew', async (_, { dis
   try {
     const resp = await api.newSession()
     dispatch(sessionActions.setCurrentSession(resp.session_id))
+    if (resp.provider !== undefined) dispatch(modelActions.setProvider(resp.provider))
+    if (resp.model !== undefined) dispatch(modelActions.setModel(resp.model))
+    if (resp.agent !== undefined) dispatch(modelActions.setAgent(resp.agent))
+    if (resp.mode !== undefined) dispatch(modelActions.setMode(normalizeMode(resp.mode)))
   } catch {
     // surfaced via health/gate
   }
@@ -1257,10 +1306,36 @@ export const replaySession = createAsyncThunk(
     const timeline: ThreadItem[] = []
     const pendingToolCalls = new Map<string, ToolCall>()
     for (const e of entries) {
-      if (e.type === 'user' && (e.content || (e.images && e.images.length > 0))) {
+      if (e.type === 'session_start' && e.agent) {
+        timeline.push({
+          kind: 'message',
+          seq: nextSeq(),
+          data: {
+            id: genId('agent'),
+            role: 'system',
+            content: i18n.t('chat.agent.changedTo', { name: e.agent }),
+            level: 'notice',
+            timestamp: ts(e.timestamp),
+          },
+        })
+      } else if (e.type === 'user' && (e.content || (e.images && e.images.length > 0))) {
         timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('msg'), role: 'user', content: e.content || '', timestamp: ts(e.timestamp), images: e.images } })
       } else if (e.type === 'assistant' && e.content) {
         timeline.push({ kind: 'message', seq: nextSeq(), data: { id: genId('asst'), role: 'assistant', content: e.content, timestamp: ts(e.timestamp) } })
+      } else if (e.type === 'agent_change') {
+        timeline.push({
+          kind: 'message',
+          seq: nextSeq(),
+          data: {
+            id: genId('agent'),
+            role: 'system',
+            content: e.agent
+              ? i18n.t('chat.agent.changedTo', { name: e.agent })
+              : i18n.t('chat.agent.changedToDefault'),
+            level: 'notice',
+            timestamp: ts(e.timestamp),
+          },
+        })
       } else if (e.type === 'tool_call' && e.name) {
         const tc: ToolCall = {
           id: genId('tc'),

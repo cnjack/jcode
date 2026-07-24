@@ -30,6 +30,7 @@ require (
 require (
 	github.com/tyler-smith/go-bip39 v1.1.0
 	github.com/zalando/go-keyring v0.2.8
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require github.com/danieljoos/wincred v1.2.3 // indirect
@@ -130,7 +131,6 @@ require (
 	golang.org/x/term v0.43.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 	rsc.io/qr v0.2.0 // indirect
 )

@@ -72,7 +72,7 @@ func TestTeamSpawnSchemaDeclaresProfilesDefaultsAndGrant(t *testing.T) {
 
 func TestTeamSpawnSchemaAdvertisesCustomRoles(t *testing.T) {
 	manager := team.NewManager(&team.ManagerDeps{AgentRoles: map[string]config.AgentRoleConfig{
-		"reviewer": {Description: "Review a patch", Profile: "explore", Instructions: "read only"},
+		"reviewer": {Description: "Review a patch", Instructions: "Review carefully."},
 	}})
 	info, err := NewTeamSpawnTool(manager).Info(context.Background())
 	if err != nil {

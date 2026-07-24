@@ -207,12 +207,9 @@ func (m *Manager) SpawnTeammate(ctx context.Context, cfg SpawnConfig) (string, e
 	var agentType string
 	roleInstructions := ""
 	if role, ok := m.deps.AgentRoles[roleName]; ok {
-		agentType = role.Profile
-		if agentType == "coordinator" {
-			agentType = AgentTypeGeneral
-		}
+		agentType = AgentTypeGeneral
 		roleInstructions = role.Instructions
-		if cfg.Model == "" {
+		if role.Model != "" {
 			cfg.Model = role.Model
 		}
 	} else {

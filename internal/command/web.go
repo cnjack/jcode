@@ -564,7 +564,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 					},
 				}, nil
 			})
-			agentRoles := config.LoadAgentRoles(taskPwd, agentCfg)
+			agentRoles := config.LoadAgentRoles(taskPwd)
 			all := []tool.BaseTool{
 				tenv.NewReadTool(), tenv.NewEditTool(), tenv.NewWriteTool(),
 				tenv.NewExecuteTool(tbg), tenv.NewGrepTool(),
@@ -644,7 +644,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		_ = os.MkdirAll(filepath.Dir(transcriptPath), 0o755)
 		_ = os.MkdirAll(reductionRoot, 0o755)
 
-		makeAgent := func(cm model.ToolCallingChatModel, ctxLimit int, planMode bool) (*adk.ChatModelAgent, error) {
+		makeAgent := func(cm model.ToolCallingChatModel, ctxLimit int, planMode bool, roleName string) (*adk.ChatModelAgent, error) {
 			agentCfg, loadErr := config.LoadConfig()
 			if loadErr != nil {
 				return nil, fmt.Errorf("reload agent config: %w", loadErr)
@@ -712,10 +712,15 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			systemPrompt, planPrompt := renderPrompts()
 			prompt := systemPrompt
 			toolList := buildAllTools(cm, agentCfg)
+			selectedRole, roleErr := optionalCustomAgentRole(taskPwd, roleName)
+			if roleErr != nil {
+				return nil, fmt.Errorf("custom agent %q is no longer available", roleName)
+			}
 			if planMode {
 				prompt = planPrompt
 				toolList = buildPlanTools()
 			}
+			prompt = withCustomAgentPrompt(prompt, roleName, selectedRole)
 
 			// Snapshot MCP exactly once so the candidate catalog and runtime plan
 			// cannot observe different reload generations while an agent is built.
@@ -727,10 +732,11 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 				currentMCPTools = dropInteractiveTools(currentMCPTools)
 			}
 
+			allowMCP := !planMode
 			if !config.ToolSearchEnabled(agentCfg) {
 				// Preserve the eager/static path. Plan mode has never exposed MCP
 				// tools, while normal mode appends the captured MCP generation.
-				if !planMode {
+				if allowMCP {
 					toolList = append(toolList, currentMCPTools...)
 				}
 				return agent.NewAgent(ctx, cm, toolList, prompt, tappr.RequestApproval, middlewares, handlers)
@@ -739,6 +745,9 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			toolMode := agent.ToolModeNormal
 			if planMode {
 				toolMode = agent.ToolModePlan
+			}
+			if !allowMCP {
+				currentMCPTools = nil
 			}
 			toolPlan, err := buildCommandToolPlan(
 				ctx,
@@ -767,6 +776,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		var currentCM model.ToolCallingChatModel
 		var currentCtxLimit int
 		currentPlanMode := startMode.IsPlan()
+		currentRole := ""
 
 		// ToolSearch counts are derived on demand from the latest persisted policy,
 		// MCP catalog and task mode. Candidate agents can be discarded by revision
@@ -775,7 +785,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		// never installed.
 		toolSearchStats := func() web.ToolSearchCounts {
 			cmMu.Lock()
-			cm, planMode := currentCM, currentPlanMode
+			cm, planMode, roleName := currentCM, currentPlanMode, currentRole
 			cmMu.Unlock()
 			if cm == nil {
 				return web.ToolSearchCounts{}
@@ -789,6 +799,8 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			if planMode {
 				toolList = buildPlanTools()
 				toolMode = agent.ToolModePlan
+			} else if _, ok := config.LoadAgentRoles(taskPwd)[roleName]; roleName != "" && !ok {
+				return web.ToolSearchCounts{}
 			}
 			var currentMCPTools []tool.BaseTool
 			if mt := mcpToolsPtr.Load(); mt != nil {
@@ -796,6 +808,9 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			}
 			if excludeInteractive {
 				currentMCPTools = dropInteractiveTools(currentMCPTools)
+			}
+			if planMode {
+				currentMCPTools = nil
 			}
 			plan, planErr := buildCommandToolPlan(
 				ctx,
@@ -816,9 +831,9 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 				return nil, err
 			}
 			cmMu.Lock()
-			plan := currentPlanMode
+			plan, roleName := currentPlanMode, currentRole
 			cmMu.Unlock()
-			ag, err := makeAgent(cm, ctxLimit, plan)
+			ag, err := makeAgent(cm, ctxLimit, plan, roleName)
 			if err != nil {
 				return nil, err // don't poison the cache with a model whose agent failed to build
 			}
@@ -833,7 +848,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			cmMu.Lock()
 			previousPlanMode := currentPlanMode
 			currentPlanMode = planMode
-			cm, ctxLimit := currentCM, currentCtxLimit
+			cm, ctxLimit, roleName := currentCM, currentCtxLimit, currentRole
 			cmMu.Unlock()
 			if cm == nil {
 				ag, createErr := createAgent(providerName, modelName)
@@ -844,7 +859,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 				}
 				return ag, createErr
 			}
-			ag, makeErr := makeAgent(cm, ctxLimit, planMode)
+			ag, makeErr := makeAgent(cm, ctxLimit, planMode, roleName)
 			if makeErr != nil {
 				cmMu.Lock()
 				currentPlanMode = previousPlanMode
@@ -853,11 +868,50 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			return ag, makeErr
 		}
 
+		rebuildForRole := func(
+			roleName, currentProvider, currentModel string,
+		) (*web.AgentRoleBuild, error) {
+			_, targetProvider, targetModel, resolveErr := resolveWebCustomAgentSelection(
+				taskPwd, roleName, currentProvider, currentModel,
+			)
+			if resolveErr != nil {
+				return nil, resolveErr
+			}
+			cmMu.Lock()
+			cm, ctxLimit, planMode := currentCM, currentCtxLimit, currentPlanMode
+			cmMu.Unlock()
+			if cm == nil || targetProvider != currentProvider || targetModel != currentModel {
+				var modelErr error
+				cm, ctxLimit, modelErr = newChatModel(targetProvider, targetModel)
+				if modelErr != nil {
+					return nil, modelErr
+				}
+			}
+			ag, makeErr := makeAgent(cm, ctxLimit, planMode, roleName)
+			if makeErr != nil {
+				return nil, makeErr
+			}
+			cmMu.Lock()
+			currentRole = roleName
+			currentCM = cm
+			currentCtxLimit = ctxLimit
+			cmMu.Unlock()
+			return &web.AgentRoleBuild{
+				Agent: ag, Provider: targetProvider, Model: targetModel,
+			}, nil
+		}
+
 		breakdownFn := func() usage.ContextBreakdown {
 			var b usage.ContextBreakdown
 			skillDesc := taskLoader.Descriptions()
 			b.SkillsTokens = usage.Estimate(skillDesc)
 			systemPrompt, _ := renderPrompts()
+			cmMu.Lock()
+			roleName := currentRole
+			cm := currentCM
+			planMode := currentPlanMode
+			cmMu.Unlock()
+			systemPrompt = withLoadedCustomAgentPrompt(systemPrompt, taskPwd, roleName)
 			b.SystemPromptTokens = usage.Estimate(systemPrompt) - b.SkillsTokens
 			if b.SystemPromptTokens < 0 {
 				b.SystemPromptTokens = 0
@@ -867,16 +921,17 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 					b.MCPToolsTokens += estimateToolTokens(ctx, t)
 				}
 			}
-			cmMu.Lock()
-			cm := currentCM
-			cmMu.Unlock()
 			if cm != nil {
 				currentCfg, loadErr := config.LoadConfig()
 				if loadErr != nil {
 					return b
 				}
 				total := 0
-				for _, at := range buildAllTools(cm, currentCfg) {
+				toolList := buildAllTools(cm, currentCfg)
+				if planMode {
+					toolList = buildPlanTools()
+				}
+				for _, at := range toolList {
 					total += estimateToolTokens(ctx, at)
 				}
 				b.SystemToolsTokens = total
@@ -918,6 +973,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			ToolSearchStats: toolSearchStats,
 			CreateAgent:     createAgent,
 			RebuildForMode:  rebuildForMode,
+			RebuildForRole:  rebuildForRole,
 			FlowLoader:      taskFlowLoader,
 			// Recorders the engine creates later (lazy create / session switch
 			// in chat.go) get the same title hook as trec above.
@@ -960,6 +1016,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		Agent:          bootEC.Agent,
 		CreateAgent:    bootEC.CreateAgent,
 		RebuildForMode: bootEC.RebuildForMode,
+		RebuildForRole: bootEC.RebuildForRole,
 		NewEngine: func(taskID, taskPwd, modeStr string) (*web.EngineConfig, error) {
 			return buildWebTask(taskID, taskPwd, modeStr, nil, false)
 		},

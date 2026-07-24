@@ -48,6 +48,7 @@ import {
   CheckIcon,
   StarIcon,
   SparklesIcon,
+  CpuChipIcon,
 } from '@heroicons/react/24/outline'
 import { StarIcon as StarIconSolid, CheckCircleIcon } from '@heroicons/react/24/solid'
 import { useRuntimeActions, useRuntimeState } from 'jcode-ui-core/runtime'
@@ -248,6 +249,8 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
     recentModels,
     imageSupport,
     effortOverrides,
+    agents = [],
+    agentName = '',
     slashCommands,
     hasMessages,
     goalArmed,
@@ -265,6 +268,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
   const [showModelPicker, setShowModelPicker] = useState(false)
   const [showModePicker, setShowModePicker] = useState(false)
   const [showEffortPicker, setShowEffortPicker] = useState(false)
+  const [showAgentPicker, setShowAgentPicker] = useState(false)
   const [showAddMenu, setShowAddMenu] = useState(false)
   const [showManageModels, setShowManageModels] = useState(false)
   const [showContextPopup, setShowContextPopup] = useState(false)
@@ -279,6 +283,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
   const modePopup = useViewportPopup(showModePicker)
   const modelPopup = useViewportPopup(showModelPicker)
   const effortPopup = useViewportPopup(showEffortPicker)
+  const agentPopup = useViewportPopup(showAgentPicker)
 
   // ─── Derived model catalog ────────────────────────────────────────────────
 
@@ -479,6 +484,11 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
     await host.selectMode(next)
   }
 
+  async function selectAgent(name: string) {
+    setShowAgentPicker(false)
+    await host.selectAgent?.(name)
+  }
+
   async function pickEffort(effort: string) {
     setShowEffortPicker(false)
     await host.setEffort(providerName, modelName, effort)
@@ -634,6 +644,11 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
         setShowModelPicker(false)
         return
       }
+      if (showAgentPicker) {
+        e.preventDefault()
+        setShowAgentPicker(false)
+        return
+      }
       if (showSlashMenu) {
         e.preventDefault()
         setShowSlashMenu(false)
@@ -683,6 +698,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
         setShowAddMenu(false)
         setShowSlashMenu(false)
         setShowEffortPicker(false)
+        setShowAgentPicker(false)
         setShowContextPopup(false)
         if (showManageModels) {
           setShowManageModels(false)
@@ -703,6 +719,9 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
         } else if (showModelPicker) {
           e.preventDefault()
           setShowModelPicker(false)
+        } else if (showAgentPicker) {
+          e.preventDefault()
+          setShowAgentPicker(false)
         }
       }
     }
@@ -712,7 +731,7 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
       document.removeEventListener('click', onClick)
       document.removeEventListener('keydown', onKey)
     }
-  }, [showManageModels, showModelPicker])
+  }, [showAgentPicker, showManageModels, showModelPicker])
 
   // ─── Re-focus when a turn ends; drop images when the model can't accept them.
 
@@ -736,23 +755,34 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
     setShowAddMenu((v) => !v)
     setShowModelPicker(false)
     setShowModePicker(false)
+    setShowAgentPicker(false)
   }
   const openMode = () => {
     setShowModePicker((v) => !v)
     setShowModelPicker(false)
     setShowAddMenu(false)
+    setShowAgentPicker(false)
   }
   const openModel = () => {
     setShowModelPicker((v) => !v)
     setShowModePicker(false)
     setShowAddMenu(false)
     setShowEffortPicker(false)
+    setShowAgentPicker(false)
   }
   const openEffort = () => {
     setShowEffortPicker((v) => !v)
     setShowModelPicker(false)
     setShowModePicker(false)
     setShowAddMenu(false)
+    setShowAgentPicker(false)
+  }
+  const openAgent = () => {
+    setShowAgentPicker((v) => !v)
+    setShowModelPicker(false)
+    setShowModePicker(false)
+    setShowAddMenu(false)
+    setShowEffortPicker(false)
   }
 
   const canSend = input.trim().length > 0 || pendingImages.length > 0
@@ -1184,6 +1214,88 @@ export function ChatInput({ host, onSent, pickerPlacement = 'top', elevated = fa
                             {currentEffort === opt && <CheckIcon className="h-3.5 w-3.5 text-[var(--color-primary)]" />}
                           </button>
                         ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Custom agent picker — absent when no Markdown agents exist. */}
+                {agents.length > 0 && (
+                  <div className="jcode-product-composer-picker-anchor jcode-product-composer-agent-picker relative">
+                    <button
+                      type="button"
+                      aria-expanded={showAgentPicker}
+                      aria-label={`${strings.agentTitle}: ${agentName || strings.agentDefault}`}
+                      onClick={(e: ReactMouseEvent) => { e.stopPropagation(); openAgent() }}
+                      className={`jcode-product-composer-picker-trigger inline-flex h-7 max-w-[180px] items-center gap-1.5 rounded-[var(--radius-lg)] border border-transparent px-2 text-xs font-medium transition-colors hover:bg-[var(--color-muted)] ${
+                        agentName
+                          ? 'bg-[var(--neutral-wash)] text-[var(--color-primary)]'
+                          : 'bg-transparent text-[var(--color-foreground)]'
+                      }`}
+                    >
+                      <CpuChipIcon className="h-3.5 w-3.5 shrink-0" />
+                      <span className="jcode-product-composer-picker-label truncate">
+                        {agentName || strings.agentDefault}
+                      </span>
+                      <ChevronDownIcon
+                        className={`jcode-product-composer-picker-chevron h-3 w-3 shrink-0 opacity-55 transition-transform ${showAgentPicker ? 'rotate-180' : ''}`}
+                      />
+                    </button>
+
+                    {showAgentPicker && (
+                      <div
+                        ref={agentPopup.ref}
+                        style={agentPopup.style}
+                        className="jcode-product-composer-agent-menu absolute bottom-full right-0 z-[var(--z-dropdown)] mb-1 w-[min(300px,calc(100vw-32px))] rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-1 shadow-[var(--shadow-lg)]"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => selectAgent('')}
+                          className={`flex w-full items-start gap-2.5 rounded-[var(--radius-md)] border-none bg-transparent px-2.5 py-2 text-left transition-colors hover:bg-[var(--color-muted)] ${
+                            !agentName ? 'bg-[var(--neutral-wash)]' : ''
+                          }`}
+                        >
+                          <CpuChipIcon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-muted-foreground)]" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[12.5px] font-medium text-[var(--color-foreground)]">
+                              {strings.agentDefault}
+                            </span>
+                            <span className="mt-0.5 block text-[10.5px] leading-[1.4] text-[var(--color-muted-foreground)]">
+                              {strings.agentDefaultSub}
+                            </span>
+                          </span>
+                          {!agentName && <CheckIcon className="mt-1 h-3.5 w-3.5 shrink-0 text-[var(--color-primary)]" />}
+                        </button>
+                        <div className="my-1 h-px bg-[var(--color-border)]" />
+                        {agents.map((customAgent) => {
+                          const active = agentName === customAgent.name
+                          return (
+                            <button
+                              key={customAgent.name}
+                              type="button"
+                              onClick={() => selectAgent(customAgent.name)}
+                              className={`flex w-full items-start gap-2.5 rounded-[var(--radius-md)] border-none bg-transparent px-2.5 py-2 text-left transition-colors hover:bg-[var(--color-muted)] ${
+                                active ? 'bg-[var(--neutral-wash)]' : ''
+                              }`}
+                            >
+                              <CpuChipIcon className={`mt-0.5 h-4 w-4 shrink-0 ${active ? 'text-[var(--color-primary)]' : 'text-[var(--color-muted-foreground)]'}`} />
+                              <span className="min-w-0 flex-1">
+                                <span className={`block truncate text-[12.5px] font-medium ${active ? 'text-[var(--color-primary)]' : 'text-[var(--color-foreground)]'}`}>
+                                  {customAgent.name}
+                                </span>
+                                <span className="mt-0.5 line-clamp-2 block text-[10.5px] leading-[1.4] text-[var(--color-muted-foreground)]">
+                                  {customAgent.description}
+                                </span>
+                                {customAgent.model && (
+                                  <span className="mt-1 inline-flex rounded-[var(--radius-pill)] bg-[var(--color-muted)] px-1.5 py-0.5 font-mono text-[9px] tracking-[0.04em] text-[var(--color-muted-foreground)]">
+                                    {customAgent.model}
+                                  </span>
+                                )}
+                              </span>
+                              {active && <CheckIcon className="mt-1 h-3.5 w-3.5 shrink-0 text-[var(--color-primary)]" />}
+                            </button>
+                          )
+                        })}
                       </div>
                     )}
                   </div>
