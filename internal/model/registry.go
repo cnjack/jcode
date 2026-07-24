@@ -427,8 +427,8 @@ func sortModels(models []*RegistryModel) {
 // internal-doc/model-research.md for the per-provider context-window survey behind these
 // picks. Model IDs must match the registry exactly or the flag is silently ignored.
 var recommendedModels = map[string]map[string]bool{
-	// GLM-5.2 (1M window) is Zhipu's newest, injected via additionalModels since
-	// it predates its models.dev record. GLM-5.1 stays selectable but unstarred.
+	// GLM-5.2 (1M window) is Zhipu's newest flagship. GLM-5.1 stays selectable
+	// but unstarred.
 	"zhipuai": {
 		"glm-5.2": true,
 	},
@@ -504,67 +504,8 @@ var contextLimitOverrides = map[string]map[string]int{
 	},
 }
 
-// glm52Model builds a fresh GLM-5.2 entry. Returns a new object per call so each
-// provider gets its own instance (deep-copied again per ModelRegistry).
-//
-// GLM-5.2 shipped 2026-06-13 to GLM Coding Plan users but isn't on models.dev yet
-// (the standalone API / open weights land later), so it can't come through
-// registry_generated.go. Spec confirmed from the official Z.ai DevPack config
-// ("contextWindow": 1000000, "maxTokens": 131072). The full 1M window requires the
-// "glm-5.2[1m]" variant on the Coding Plan endpoint. See internal-doc/model-research.md.
-func glm52Model() *RegistryModel {
-	return &RegistryModel{
-		ID: "glm-5.2", Name: "GLM-5.2", Family: "glm",
-		Reasoning: true, ToolCall: true, StructuredOutput: true, Temperature: true,
-		OpenWeights: true,
-		ReleaseDate: "2026-06-13", LastUpdated: "2026-06-13",
-		Modalities:     &ModelModalities{Input: []string{"text"}, Output: []string{"text"}},
-		Limit:          &ModelLimit{Context: 1_000_000, Output: 131_072},
-		DefaultEnabled: true,
-	}
-}
-
-// qwen38MaxPreviewModel builds a fresh Qwen3.8-Max-Preview entry. Returns a new
-// object per call so each provider gets its own instance (deep-copied again per
-// ModelRegistry).
-//
-// Qwen3.8-Max-Preview is an early-access flagship exposed only on Alibaba's
-// Token Plan endpoints (alibaba-token-plan-cn / alibaba-token-plan). It is not
-// on models.dev yet, so it can't come through registry_generated.go. Parameters
-// mirror qwen3.7-max for now (same window, pricing shape, reasoning options);
-// official specs pending. See internal-doc/model-research.md.
-func qwen38MaxPreviewModel() *RegistryModel {
-	return &RegistryModel{
-		ID: "qwen3.8-max-preview", Name: "Qwen3.8 Max Preview", Family: "qwen",
-		Reasoning: true, ToolCall: true, Temperature: true,
-		Modalities: &ModelModalities{Input: []string{"text"}, Output: []string{"text"}},
-		Cost:       &ModelCost{Input: 2.5, Output: 7.5, CacheRead: 0.5, CacheWrite: 3.125},
-		Limit:      &ModelLimit{Context: 1_000_000, Output: 65_536},
-		ReasoningOptions: []ReasoningOption{
-			{Type: "toggle"},
-			{Type: "budget_tokens", Max: intPtr(262144)},
-		},
-	}
-}
-
-// additionalModels injects models into EXISTING generated providers when a model is
-// released before models.dev publishes it. Applied at init() and MERGED in — an
-// entry is skipped if the provider already defines that model id, so once the
-// official record lands in registry_generated.go it transparently takes over.
-// Key: provider ID → model ID → model. See internal-doc/model-research.md.
-var additionalModels = map[string]map[string]*RegistryModel{
-	"zhipuai":             {"glm-5.2": glm52Model()},
-	"zhipuai-coding-plan": {"glm-5.2": glm52Model()},
-	"zai":                 {"glm-5.2": glm52Model()},
-	"zai-coding-plan":     {"glm-5.2": glm52Model()},
-	// Qwen3.8-Max-Preview is exclusive to Alibaba Token Plan endpoints for now.
-	"alibaba-token-plan-cn": {"qwen3.8-max-preview": qwen38MaxPreviewModel()},
-	"alibaba-token-plan":    {"qwen3.8-max-preview": qwen38MaxPreviewModel()},
-}
-
 func init() {
 	applyStaticProviders()
-	applyAdditionalModels()
 	applyContextLimitOverrides()
 	applyRecommendedModels()
 }
@@ -573,23 +514,6 @@ func init() {
 // built into the registry. They are added to generatedProviders/generatedProviderOrder
 // at init time so they behave identically to models.dev providers.
 var staticProviders = map[string]*RegistryProvider{
-	// Alibaba Token Plan endpoints are intentionally separate provider ids: the
-	// credentials and regional base URLs differ from regular DashScope. Their
-	// early-access model catalog is injected by additionalModels below.
-	"alibaba-token-plan-cn": {
-		ID:     "alibaba-token-plan-cn",
-		Name:   "Alibaba Token Plan (China)",
-		Env:    []string{"DASHSCOPE_API_KEY"},
-		API:    "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
-		Models: map[string]*RegistryModel{},
-	},
-	"alibaba-token-plan": {
-		ID:     "alibaba-token-plan",
-		Name:   "Alibaba Token Plan",
-		Env:    []string{"DASHSCOPE_API_KEY"},
-		API:    "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
-		Models: map[string]*RegistryModel{},
-	},
 	// Kimi For Coding is Moonshot's subscription coding plan. models.dev carries a
 	// "kimi-for-coding" record, but its model ids (k2p5/k2p6/k2p7/kimi-k2-thinking)
 	// are undocumented aliases that the vendor's own /models endpoint does not
@@ -725,27 +649,6 @@ func applyStaticProviders() {
 		generatedProviders[id] = prov
 	}
 	generatedProviderOrder = append(generatedProviderOrder, staticProviderOrder...)
-}
-
-// applyAdditionalModels merges hand-maintained models into existing generated
-// providers, skipping any model id the provider already defines (so the official
-// models.dev record wins once it lands).
-func applyAdditionalModels() {
-	for provID, models := range additionalModels {
-		prov, ok := generatedProviders[provID]
-		if !ok {
-			continue
-		}
-		if prov.Models == nil {
-			prov.Models = make(map[string]*RegistryModel, len(models))
-		}
-		for modelID, m := range models {
-			if _, exists := prov.Models[modelID]; exists {
-				continue
-			}
-			prov.Models[modelID] = m
-		}
-	}
 }
 
 // applyContextLimitOverrides patches context windows for built-in models whose
