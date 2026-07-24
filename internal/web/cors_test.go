@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -134,5 +135,22 @@ func TestCORSMiddlewareAllowsTrustedOriginsAndNonBrowserClients(t *testing.T) {
 		if rec.Code != http.StatusTeapot {
 			t.Errorf("origin=%q status=%d, want passthrough", origin, rec.Code)
 		}
+	}
+}
+
+func TestCORSMiddlewarePreflightAllowsPatch(t *testing.T) {
+	r := httptest.NewRequest(http.MethodOptions, "http://127.0.0.1:53913/api/account-preferences", nil)
+	r.Host = "127.0.0.1:53913"
+	r.Header.Set("Origin", "http://127.0.0.1:5173")
+	r.Header.Set("Access-Control-Request-Method", http.MethodPatch)
+
+	rec := httptest.NewRecorder()
+	corsMiddleware(http.NotFoundHandler()).ServeHTTP(rec, r)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status=%d, want %d", rec.Code, http.StatusNoContent)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(got, http.MethodPatch) {
+		t.Fatalf("Access-Control-Allow-Methods=%q, want PATCH", got)
 	}
 }

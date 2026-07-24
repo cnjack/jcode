@@ -1,41 +1,111 @@
-import { CloudIcon, DevicePhoneMobileIcon, LockClosedIcon } from '@heroicons/react/24/outline'
+import {
+  ArrowRightIcon,
+  CheckIcon,
+  CloudIcon,
+  ComputerDesktopIcon,
+  DevicePhoneMobileIcon,
+  GlobeAltIcon,
+  LockClosedIcon,
+} from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
-import { CloudTab } from './settings/CloudTab'
+import { useAppDispatch } from '../app/hooks'
+import { uiActions } from '../app/store'
 
-/** Desktop's focused control surface for cloud access and paired mobile clients. */
+/** Introduces remote access and hands configuration off to Settings → Cloud. */
 export function CloudMobileView() {
   const { t } = useTranslation()
+  const dispatch = useAppDispatch()
+
+  function openCloudSettings() {
+    dispatch(uiActions.setSettingsTab('cloud'))
+    dispatch(uiActions.setView('settings'))
+  }
+
+  const features = [
+    { Icon: GlobeAltIcon, title: t('cloud.remoteAnywhereTitle'), desc: t('cloud.remoteAnywhereDesc') },
+    { Icon: LockClosedIcon, title: t('cloud.remotePrivateTitle'), desc: t('cloud.remotePrivateDesc') },
+    { Icon: ComputerDesktopIcon, title: t('cloud.remoteControlTitle'), desc: t('cloud.remoteControlDesc') },
+  ]
 
   return (
-    <div className="page-surface flex min-h-0 flex-1 flex-col overflow-hidden">
-      <header className="shrink-0 border-b border-[var(--color-border)] px-6 py-5">
-        <div className="mx-auto flex max-w-4xl items-start gap-4">
-          <div className="relative grid h-11 w-11 shrink-0 place-items-center rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-accent-neutral)] shadow-[var(--shadow-sm)]">
-            <CloudIcon className="h-5 w-5" />
-            <span className="absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full border-2 border-[var(--color-background)] bg-[var(--color-foreground)] text-[var(--color-background)]">
-              <DevicePhoneMobileIcon className="h-3 w-3" />
-            </span>
+    <div className="remote-access-page page-surface min-h-0 flex-1 overflow-y-auto">
+      <section className="remote-access-hero">
+        <div className="remote-access-copy">
+          <div className="remote-access-eyebrow">
+            <CloudIcon className="h-3.5 w-3.5" />
+            {t('cloud.remoteEyebrow')}
           </div>
-          <div className="min-w-0">
-            <h1 className="text-[17px] font-semibold tracking-[-0.01em] text-[var(--color-foreground)]">
-              {t('cloud.mobileHubTitle')}
-            </h1>
-            <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-[var(--color-muted-foreground)]">
-              {t('cloud.mobileHubDesc')}
-            </p>
-          </div>
-          <div className="ml-auto hidden items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-muted)] px-2.5 py-1 text-[10.5px] text-[var(--color-muted-foreground)] sm:flex">
-            <LockClosedIcon className="h-3 w-3" />
-            {t('cloud.e2eeBadge')}
-          </div>
-        </div>
-      </header>
+          <h1>{t('cloud.remoteTitle')}</h1>
+          <p className="remote-access-lede">{t('cloud.remoteDesc')}</p>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-        <div className="mx-auto max-w-4xl rounded-[var(--radius-2xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-sm)]">
-          <CloudTab heading={false} />
+          <button type="button" className="remote-access-cta group" onClick={openCloudSettings}>
+            {t('cloud.remoteCta')}
+            <ArrowRightIcon className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+          </button>
+          <p className="remote-access-hint">
+            <LockClosedIcon className="h-3.5 w-3.5" />
+            {t('cloud.remoteCtaHint')}
+          </p>
         </div>
-      </div>
+
+        <div className="remote-access-visual" aria-hidden="true">
+          <div className="remote-access-orbit remote-access-orbit-one" />
+          <div className="remote-access-orbit remote-access-orbit-two" />
+
+          <div className="remote-desktop">
+            <div className="remote-window-bar">
+              <span />
+              <span />
+              <span />
+              <div className="remote-window-brand">
+                <CloudIcon className="h-3.5 w-3.5" />
+                jcode
+              </div>
+            </div>
+            <div className="remote-desktop-body">
+              <div className="remote-message remote-message-user">{t('cloud.remoteVisualPrompt')}</div>
+              <div className="remote-message remote-message-agent">
+                <span className="remote-agent-mark">J</span>
+                <div>
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              </div>
+              <div className="remote-run-status">
+                <span className="remote-status-check"><CheckIcon className="h-3 w-3" /></span>
+                {t('cloud.remoteVisualDone')}
+              </div>
+            </div>
+          </div>
+
+          <div className="remote-phone">
+            <div className="remote-phone-speaker" />
+            <div className="remote-phone-header">
+              <span className="remote-status-dot" />
+              {t('cloud.remoteVisualConnected')}
+            </div>
+            <div className="remote-phone-message" />
+            <div className="remote-phone-message remote-phone-message-short" />
+            <div className="remote-phone-action">
+              <DevicePhoneMobileIcon className="h-3.5 w-3.5" />
+              {t('cloud.remoteVisualApprove')}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="remote-access-features" aria-label={t('cloud.remoteFeaturesLabel')}>
+        {features.map(({ Icon, title, desc }) => (
+          <article key={title} className="remote-access-feature">
+            <Icon className="h-5 w-5 shrink-0" />
+            <div>
+              <h2>{title}</h2>
+              <p>{desc}</p>
+            </div>
+          </article>
+        ))}
+      </section>
     </div>
   )
 }

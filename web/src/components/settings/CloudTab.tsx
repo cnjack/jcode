@@ -34,6 +34,7 @@ import {
   type CloudPairingRecord,
   type CloudStatusResponse,
 } from '../../lib/api'
+import { openUrl } from '../../lib/useDesktop'
 import { BTN_GHOST, BTN_PRIMARY, BTN_SECONDARY, BTN_SM, ROW, SECTION_TITLE, Switch } from './atoms'
 
 const POLL_MS = 5000
@@ -324,6 +325,13 @@ export function CloudTab({ heading = true }: { heading?: boolean } = {}) {
         verification_uri: r.verification_uri,
         expires_at: r.expires_at,
       })
+      if (r.verification_uri) {
+        try {
+          await openUrl(r.verification_uri)
+        } catch {
+          setActionError(t('cloud.openLoginFailed'))
+        }
+      }
     } catch (err) {
       setActionError(t('cloud.loginFailed', { message: err instanceof Error ? err.message : String(err) }))
     } finally {
@@ -669,15 +677,18 @@ export function CloudTab({ heading = true }: { heading?: boolean } = {}) {
             {t('cloud.loginPrompt')}
           </div>
           {loginPanel.verification_uri && (
-            <a
-              href={loginPanel.verification_uri}
-              target="_blank"
-              rel="noreferrer"
+            <button
+              type="button"
+              onClick={() => {
+                void openUrl(loginPanel.verification_uri!).catch(() => {
+                  setActionError(t('cloud.openLoginFailed'))
+                })
+              }}
               className="max-w-full truncate text-[12px] text-[var(--color-accent-neutral)] underline-offset-2 hover:underline"
               title={loginPanel.verification_uri}
             >
               {loginPanel.verification_uri}
-            </a>
+            </button>
           )}
           <div className="flex items-center gap-1.5">
             <div

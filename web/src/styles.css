@@ -445,6 +445,389 @@ select:focus-visible {
   }
 }
 
+/* ─── Remote access introduction ─── */
+.remote-access-page {
+  position: relative;
+  overflow-x: hidden;
+  overflow-y: auto;
+  isolation: isolate;
+  background:
+    radial-gradient(
+      circle at 78% 32%,
+      color-mix(in srgb, var(--color-primary) 9%, transparent),
+      transparent 31rem
+    ),
+    var(--color-surface);
+}
+.remote-access-hero {
+  display: grid;
+  grid-template-columns: minmax(17rem, 0.82fr) minmax(25rem, 1.18fr);
+  align-items: center;
+  gap: clamp(2rem, 6vw, 6.5rem);
+  width: min(70rem, calc(100% - 6rem));
+  min-height: min(67vh, 44rem);
+  margin: 0 auto;
+  padding: clamp(4rem, 9vh, 7rem) 0 3rem;
+}
+.remote-access-copy {
+  position: relative;
+  z-index: 2;
+}
+.remote-access-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 1.25rem;
+  color: var(--color-muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+}
+.remote-access-copy h1 {
+  max-width: 11ch;
+  color: var(--color-foreground);
+  font-size: clamp(2.6rem, 4.6vw, 4.8rem);
+  font-weight: 650;
+  letter-spacing: -0.055em;
+  line-height: 0.98;
+  text-wrap: balance;
+}
+.remote-access-lede {
+  max-width: 33rem;
+  margin-top: 1.6rem;
+  color: var(--color-muted-foreground);
+  font-size: 0.94rem;
+  line-height: 1.75;
+  text-wrap: pretty;
+}
+.remote-access-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  min-height: 2.75rem;
+  margin-top: 2rem;
+  padding: 0 1rem;
+  border: 1px solid var(--color-foreground);
+  border-radius: var(--radius-lg);
+  background: var(--color-foreground);
+  color: var(--color-background);
+  font-size: 0.82rem;
+  font-weight: 600;
+  box-shadow: var(--shadow-md);
+  transition:
+    transform var(--duration-normal) var(--ease-out),
+    opacity var(--duration-normal) var(--ease-out);
+}
+.remote-access-cta:hover {
+  opacity: 0.86;
+  transform: translateY(-1px);
+}
+.remote-access-cta:active {
+  transform: translateY(1px) scale(0.99);
+}
+.remote-access-cta:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 3px;
+}
+.remote-access-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 27rem;
+  margin-top: 0.85rem;
+  color: var(--color-muted-foreground);
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+.remote-access-visual {
+  position: relative;
+  min-height: 25rem;
+  perspective: 75rem;
+}
+.remote-access-orbit {
+  position: absolute;
+  border: 1px solid color-mix(in srgb, var(--color-foreground) 8%, transparent);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.remote-access-orbit-one {
+  inset: -12% -8% -7% 3%;
+  transform: rotate(-13deg);
+}
+.remote-access-orbit-two {
+  inset: 3% 5% 2% -13%;
+  transform: rotate(19deg);
+}
+.remote-desktop {
+  position: absolute;
+  top: 7%;
+  right: 2%;
+  width: min(35rem, 92%);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-foreground) 22%, transparent);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-xl);
+  transform: rotateY(-5deg) rotateX(1deg);
+}
+.remote-window-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 2.45rem;
+  padding: 0 0.85rem;
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-muted) 74%, var(--color-surface));
+}
+.remote-window-bar > span {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-muted-foreground) 30%, transparent);
+}
+.remote-window-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: auto;
+  color: var(--color-muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+}
+.remote-desktop-body {
+  display: flex;
+  min-height: 17.75rem;
+  flex-direction: column;
+  gap: 1.15rem;
+  padding: 2.15rem 2rem 1.5rem;
+}
+.remote-message {
+  font-size: 0.72rem;
+}
+.remote-message-user {
+  align-self: flex-end;
+  max-width: 70%;
+  padding: 0.65rem 0.8rem;
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-xs) var(--radius-lg);
+  background: var(--color-secondary);
+  color: var(--color-foreground);
+}
+.remote-message-agent {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  width: 72%;
+}
+.remote-agent-mark {
+  display: grid;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-primary);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+.remote-message-agent > div {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding-top: 0.25rem;
+}
+.remote-message-agent > div > span {
+  height: 0.44rem;
+  border-radius: var(--radius-xs);
+  background: var(--color-secondary);
+}
+.remote-message-agent > div > span:nth-child(2) {
+  width: 88%;
+}
+.remote-message-agent > div > span:nth-child(3) {
+  width: 58%;
+}
+.remote-run-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: auto;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-muted-foreground);
+  font-size: 0.65rem;
+}
+.remote-status-check {
+  display: grid;
+  width: 1.15rem;
+  height: 1.15rem;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--color-success-bg);
+  color: var(--color-success-fg);
+}
+.remote-phone {
+  position: absolute;
+  right: -1%;
+  bottom: 1%;
+  width: 9rem;
+  min-height: 18.5rem;
+  padding: 1.8rem 0.8rem 0.85rem;
+  border: 0.3rem solid var(--color-foreground);
+  border-radius: 1.65rem;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-xl);
+  transform: rotate(4deg);
+}
+.remote-phone-speaker {
+  position: absolute;
+  top: 0.45rem;
+  left: 50%;
+  width: 2.5rem;
+  height: 0.32rem;
+  border-radius: var(--radius-pill);
+  background: var(--color-foreground);
+  transform: translateX(-50%);
+}
+.remote-phone-header {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--color-foreground);
+  font-size: 0.56rem;
+  font-weight: 600;
+}
+.remote-status-dot {
+  width: 0.38rem;
+  height: 0.38rem;
+  border-radius: 50%;
+  background: var(--color-success);
+}
+.remote-phone-message {
+  width: 100%;
+  height: 3.8rem;
+  margin-top: 1.15rem;
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--color-muted-foreground) 15%, transparent) 0 0
+    ) 0.65rem 0.75rem / 68% 0.38rem no-repeat,
+    linear-gradient(
+      color-mix(in srgb, var(--color-muted-foreground) 11%, transparent) 0 0
+    ) 0.65rem 1.5rem / 80% 0.35rem no-repeat,
+    linear-gradient(
+      color-mix(in srgb, var(--color-muted-foreground) 11%, transparent) 0 0
+    ) 0.65rem 2.2rem / 48% 0.35rem no-repeat,
+    var(--color-muted);
+}
+.remote-phone-message-short {
+  width: 72%;
+  height: 2.25rem;
+  margin-top: 0.65rem;
+}
+.remote-phone-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  min-height: 2rem;
+  margin-top: 1rem;
+  border-radius: var(--radius-md);
+  background: var(--color-foreground);
+  color: var(--color-background);
+  font-size: 0.55rem;
+  font-weight: 600;
+}
+.remote-access-features {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  width: min(70rem, calc(100% - 6rem));
+  margin: 0 auto;
+  padding: 2.25rem 0 3.5rem;
+  border-top: 1px solid var(--color-border);
+}
+.remote-access-feature {
+  display: flex;
+  gap: 0.9rem;
+  padding-right: clamp(1.2rem, 3vw, 3.5rem);
+  color: var(--color-muted-foreground);
+}
+.remote-access-feature + .remote-access-feature {
+  padding-left: clamp(1.2rem, 3vw, 3.5rem);
+  border-left: 1px solid var(--color-border);
+}
+.remote-access-feature h2 {
+  margin-bottom: 0.3rem;
+  color: var(--color-foreground);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.remote-access-feature p {
+  font-size: 0.68rem;
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+@media (max-width: 900px) {
+  .remote-access-hero {
+    grid-template-columns: 1fr;
+    gap: 2.5rem;
+    width: min(38rem, calc(100% - 3rem));
+    padding-top: 4rem;
+  }
+  .remote-access-copy h1 {
+    max-width: 13ch;
+  }
+  .remote-access-visual {
+    min-height: 23rem;
+  }
+  .remote-access-features {
+    width: min(38rem, calc(100% - 3rem));
+  }
+}
+@media (max-width: 640px) {
+  .remote-access-hero {
+    width: calc(100% - 2rem);
+    padding-top: 3rem;
+  }
+  .remote-access-copy h1 {
+    font-size: clamp(2.35rem, 12vw, 3.2rem);
+  }
+  .remote-access-visual {
+    min-height: 20rem;
+  }
+  .remote-phone {
+    right: -2%;
+    width: 7.4rem;
+    min-height: 15rem;
+  }
+  .remote-desktop-body {
+    min-height: 15rem;
+    padding: 1.5rem;
+  }
+  .remote-access-features {
+    grid-template-columns: 1fr;
+    width: calc(100% - 2rem);
+  }
+  .remote-access-feature,
+  .remote-access-feature + .remote-access-feature {
+    padding: 1.2rem 0;
+    border-left: 0;
+  }
+  .remote-access-feature + .remote-access-feature {
+    border-top: 1px solid var(--color-border);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .remote-access-cta,
+  .remote-access-cta svg {
+    transition: none;
+  }
+}
+
 /* ─── Title-bar drag strip (Tauri desktop only) ───
    In the Tauri shell the window uses an overlay title bar; this reserves the
    band the traffic-light buttons float over and lets the user drag the window.
