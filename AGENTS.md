@@ -220,9 +220,12 @@ outbound-only relay; design contract lives in the cloud repo
   `agent_message` synthesis), `sessions.go` (index + capabilities mirror),
   `crypto.go` (CEK, AES-256-GCM envelopes, P-256 ECIES, BIP39),
   `pairing_inbox.go` (pairing approvals; QR offers auto-approve).
-- **E2EE is the default.** All relay payloads are sealed once a CEK exists;
-  gray plaintext is only for pre-CEK or `cloud.e2ee:false`. Never add an
-  uplink path that bypasses `sealUplink`/`openDownlink`.
+- **E2EE is the default.** Session content, metadata, command bodies/results,
+  and other content-bearing relay payloads are sealed once a CEK exists; gray
+  plaintext content is only for pre-CEK or `cloud.e2ee:false`. Plaintext is
+  limited to routing metadata required by the orchestrator: ids, seq, kind,
+  timestamps (including `last_activity_at`), and online state. Never add a
+  content-bearing uplink path that bypasses `sealUplink`/`openDownlink`.
 - **The connector is a client of the local control plane** (`/api/*` on
   loopback) — it must never change engine behavior or block `jcode web`;
   failures log and back off (≤60s).

@@ -172,27 +172,55 @@ func (m *mockCloud) ackCount() int {
 // --- fake local web control plane ---
 
 type fakeLocal struct {
-	mu              sync.Mutex
-	chatBodies      []map[string]any
-	stopBodies      []map[string]any
-	approvalBodies  []map[string]any
-	chatSessionID   string
-	deletedSessions []string
-	browsedPaths    []string
+	mu               sync.Mutex
+	sessionBodies    []map[string]any
+	chatBodies       []map[string]any
+	stopBodies       []map[string]any
+	approvalBodies   []map[string]any
+	activeSessionID  string
+	createdSessionID string
+	sessionStatus    int
+	chatStatus       int
+	deletedSessions  []string
+	browsedPaths     []string
 }
 
 func newFakeLocal(t *testing.T) (*fakeLocal, *httptest.Server) {
 	t.Helper()
-	f := &fakeLocal{chatSessionID: "sess-new-1"}
+	f := &fakeLocal{activeSessionID: "sess-active-1", createdSessionID: "sess-new-1"}
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/sessions", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		f.mu.Lock()
+		f.sessionBodies = append(f.sessionBodies, body)
+		status := f.sessionStatus
+		f.mu.Unlock()
+		if status != 0 {
+			http.Error(w, "session create failed", status)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "session_id": f.createdSessionID})
+	})
 	mux.HandleFunc("POST /api/chat", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		f.mu.Lock()
 		f.chatBodies = append(f.chatBodies, body)
+		status := f.chatStatus
 		f.mu.Unlock()
+		if status != 0 {
+			http.Error(w, "chat failed", status)
+			return
+		}
+		sessionID, _ := body["session_id"].(string)
+		if sessionID == "" {
+			// This is the actual local web engine contract: an omitted id targets
+			// the current active engine rather than creating a conversation.
+			sessionID = f.activeSessionID
+		}
 		w.WriteHeader(http.StatusAccepted)
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "processing", "session_id": f.chatSessionID})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "processing", "session_id": sessionID})
 	})
 	mux.HandleFunc("POST /api/stop", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -234,6 +262,12 @@ func (f *fakeLocal) chatBody() map[string]any {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.chatBodies[0]
+}
+
+func (f *fakeLocal) sessionBody() map[string]any {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.sessionBodies[0]
 }
 
 // --- helpers ---
@@ -312,7 +346,7 @@ func TestChatSendNewSession(t *testing.T) {
 	cmd := DeviceCommand{
 		ID:   "cmd-1",
 		Kind: "chat.send",
-		// no session_id → new session: the local request must NOT carry one
+		// no session_id → connector must create a new local session first.
 		Payload: mustPayload(t, map[string]any{"text": "hello", "channel": "console"}),
 	}
 	status, result := conn.executeCommand(context.Background(), cmd)
@@ -320,18 +354,39 @@ func TestChatSendNewSession(t *testing.T) {
 		t.Fatalf("status = %q, result = %v", status, result)
 	}
 	res, ok := result.(map[string]string)
-	if !ok || res["session_id"] != local.chatSessionID {
-		t.Fatalf("ack result = %v, want session_id %q", result, local.chatSessionID)
+	if !ok || res["session_id"] != local.createdSessionID {
+		t.Fatalf("ack result = %v, want session_id %q", result, local.createdSessionID)
+	}
+	session := local.sessionBody()
+	if session["source"] != "console" {
+		t.Errorf("session create source = %v, want console for cloud sync stamping", session["source"])
 	}
 	body := local.chatBody()
 	if body["message"] != "hello" {
 		t.Errorf("message = %v, want hello", body["message"])
 	}
-	if _, has := body["session_id"]; has {
-		t.Errorf("new-session chat.send must omit session_id, got %v", body["session_id"])
+	if body["session_id"] != local.createdSessionID {
+		t.Errorf("new-session chat.send session_id = %v, want newly created %q (not active %q)", body["session_id"], local.createdSessionID, local.activeSessionID)
 	}
 	if body["source"] != "console" {
 		t.Errorf("source = %v, want console (channel passthrough)", body["source"])
+	}
+}
+
+func TestChatSendNewSessionFailureDoesNotAcknowledgeSuccess(t *testing.T) {
+	local, localSrv := newFakeLocal(t)
+	conn := newTestConnector(t, "http://127.0.0.1:1", localSrv.URL)
+	cmd := DeviceCommand{ID: "create-fails", Kind: "chat.send", Payload: mustPayload(t, map[string]any{"text": "hello"})}
+
+	local.sessionStatus = http.StatusInternalServerError
+	if status, result := conn.executeCommand(context.Background(), cmd); status != "error" {
+		t.Fatalf("create failure status = %q, result = %v; want error", status, result)
+	}
+
+	local.sessionStatus = 0
+	local.chatStatus = http.StatusBadGateway
+	if status, result := conn.executeCommand(context.Background(), cmd); status != "error" {
+		t.Fatalf("chat failure status = %q, result = %v; want error", status, result)
 	}
 }
 
@@ -513,8 +568,8 @@ func TestPollLoopExecutesAndAcks(t *testing.T) {
 		t.Fatalf("ack status = %q, want ok", ack.Status)
 	}
 	res, ok := ack.Result.(map[string]any)
-	if !ok || res["session_id"] != local.chatSessionID {
-		t.Fatalf("ack result = %v, want session_id %q", ack.Result, local.chatSessionID)
+	if !ok || res["session_id"] != local.createdSessionID {
+		t.Fatalf("ack result = %v, want session_id %q", ack.Result, local.createdSessionID)
 	}
 }
 
@@ -789,8 +844,8 @@ func TestSyncSessionsUpsert(t *testing.T) {
 	conn.cfg.ListSessionsFn = func() (map[string][]session.SessionMeta, error) {
 		return map[string][]session.SessionMeta{
 			"/proj": {
-				{UUID: "s1", Project: "/proj", Model: "m1", Status: "running", Title: "t1"},
-				{UUID: "s2", Project: "/proj", Model: "m1", Status: "idle"},
+				{UUID: "s1", Project: "/proj", Model: "m1", Status: "running", Title: "t1", StartTime: "2026-07-23T16:00:00Z", UpdatedAt: "2026-07-24T01:00:00+08:00"},
+				{UUID: "s2", Project: "/proj", Model: "m1", Status: "idle", StartTime: "2026-07-23T20:30:00-04:00"},
 			},
 		}, nil
 	}
@@ -815,6 +870,12 @@ func TestSyncSessionsUpsert(t *testing.T) {
 	}
 	if byID["s2"].Status != "idle" {
 		t.Errorf("s2 status = %q, want idle", byID["s2"].Status)
+	}
+	if got := byID["s1"].LastActivityAt; got != "2026-07-23T17:00:00Z" {
+		t.Errorf("s1 last_activity_at = %q, want updated_at normalized to UTC", got)
+	}
+	if got := byID["s2"].LastActivityAt; got != "2026-07-24T00:30:00Z" {
+		t.Errorf("s2 last_activity_at = %q, want start_time fallback normalized to UTC", got)
 	}
 	// Meta is the SessionMeta JSON, as-is.
 	var meta session.SessionMeta

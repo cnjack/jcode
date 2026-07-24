@@ -211,6 +211,38 @@ func TestEngineIsolationAndRouting(t *testing.T) {
 	}
 }
 
+// TestEngineForChatRequiresAnExplicitIDForANewTask pins the local control-plane
+// behavior that cloud callers must account for: an empty id means the active
+// engine, not a fresh session. Cloud creates a session first, then sends that
+// returned id to avoid continuing an unrelated active conversation.
+func TestEngineForChatRequiresAnExplicitIDForANewTask(t *testing.T) {
+	s := stubFactoryServer(t)
+	active, err := s.buildLocalEngine("active-session", "/proj/active", "build")
+	if err != nil {
+		t.Fatalf("build active engine: %v", err)
+	}
+	s.setActiveEngine(active)
+	fresh, err := s.buildLocalEngine("fresh-session", "/proj/fresh", "build")
+	if err != nil {
+		t.Fatalf("build fresh engine: %v", err)
+	}
+
+	got, err := s.engineForChat("", "build")
+	if err != nil {
+		t.Fatalf("engineForChat(empty): %v", err)
+	}
+	if got != active {
+		t.Fatalf("engineForChat(empty) = %p, want active engine %p", got, active)
+	}
+	got, err = s.engineForChat(fresh.taskID, "build")
+	if err != nil {
+		t.Fatalf("engineForChat(fresh): %v", err)
+	}
+	if got != fresh {
+		t.Fatalf("engineForChat(%q) = %p, want fresh engine %p", fresh.taskID, got, fresh)
+	}
+}
+
 // TestPerTaskGateIndependence proves one running task does not block another:
 // the busy flag is per-engine, not global.
 func TestPerTaskGateIndependence(t *testing.T) {

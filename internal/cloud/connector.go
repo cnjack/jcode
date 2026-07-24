@@ -703,23 +703,33 @@ func (c *Connector) execChatSendGoalArmed(ctx context.Context, p *chatSendPayloa
 	return "ok", json.RawMessage(body)
 }
 
-// execChatSendLegacy is the pre-M12 one-shot path: a single /api/chat call,
-// optionally continuing cmd.SessionID.
+// execChatSendLegacy is the pre-M12 path. New conversations first create an
+// explicit session; existing conversations continue cmd.SessionID directly.
 func (c *Connector) execChatSendLegacy(ctx context.Context, cmd DeviceCommand, p *chatSendPayload) (string, any) {
-	// The local /api/chat request. session_id is omitted for a NEW session
-	// (the server mints the UUID); source carries the relay channel through
-	// the same mechanism WeChat uses (submitMessage's source label).
+	// An omitted session_id must create an explicit task before sending. Sending
+	// an empty id to /api/chat targets the local active engine, which could be a
+	// different conversation. The created id is therefore the sole target for
+	// both the message and the successful command acknowledgment.
+	sessionID := cmd.SessionID
+	if sessionID == "" {
+		var err error
+		sessionID, err = c.createOrFocusSession(ctx, "", "", p.Channel)
+		if err != nil {
+			return "error", map[string]string{"error": err.Error()}
+		}
+	}
+
+	// source carries the relay channel through the same mechanism WeChat uses
+	// (submitMessage's source label).
 	req := map[string]any{
-		"message": p.Text,
+		"message":    p.Text,
+		"session_id": sessionID,
 	}
 	if len(p.Images) > 0 {
 		req["images"] = p.Images
 	}
 	if p.Mode != "" {
 		req["mode"] = p.Mode
-	}
-	if cmd.SessionID != "" {
-		req["session_id"] = cmd.SessionID
 	}
 	if p.Channel != "" {
 		req["source"] = p.Channel
@@ -734,7 +744,12 @@ func (c *Connector) execChatSendLegacy(ctx context.Context, cmd DeviceCommand, p
 	var resp struct {
 		SessionID string `json:"session_id"`
 	}
-	_ = json.Unmarshal(body, &resp)
+	if err := json.Unmarshal(body, &resp); err != nil || resp.SessionID == "" {
+		return "error", map[string]string{"error": fmt.Sprintf("/api/chat: no session_id in response: %s", body)}
+	}
+	if resp.SessionID != sessionID {
+		return "error", map[string]string{"error": fmt.Sprintf("/api/chat: session_id %q does not match requested session %q", resp.SessionID, sessionID)}
+	}
 	return "ok", map[string]string{"session_id": resp.SessionID}
 }
 
@@ -755,37 +770,13 @@ func (c *Connector) execChatSendCompose(ctx context.Context, cmd DeviceCommand, 
 		return errResult(err)
 	}
 
-	// 1. Create/focus the session. POST /api/sessions makes the task the
-	// active engine — the model/mode/goal endpoints all target the active
-	// engine — and returns its id, which the attachments dir and the chat
-	// call both need.
-	sessReq := map[string]string{}
-	if cmd.SessionID != "" {
-		sessReq["session_id"] = cmd.SessionID
-	}
-	if p.ProjectPath != "" {
-		sessReq["pwd"] = p.ProjectPath
-	}
-	if p.Channel != "" {
-		// The web layer stamps cloud-originated sessions as cloud-synced at
-		// creation (M19): a session created from the cloud must be visible
-		// there.
-		sessReq["source"] = p.Channel
-	}
-	status, body, err := c.local.postJSON(ctx, "/api/sessions", sessReq)
+	// 1. Create/focus the session. This makes the task active before the
+	// task-scoped model/mode/goal endpoints below and returns the id required by
+	// attachments and chat.
+	sid, err := c.createOrFocusSession(ctx, cmd.SessionID, p.ProjectPath, p.Channel)
 	if err != nil {
 		return errResult(err)
 	}
-	if status != http.StatusOK {
-		return errResult(errUnexpectedStatus("/api/sessions", status, string(body)))
-	}
-	var sessResp struct {
-		SessionID string `json:"session_id"`
-	}
-	if err := json.Unmarshal(body, &sessResp); err != nil || sessResp.SessionID == "" {
-		return errResult(fmt.Errorf("/api/sessions: no session_id in response: %s", body))
-	}
-	sid := sessResp.SessionID
 
 	// 2. Land attachments at <inbox>/<sid>/.
 	var refs []attachmentRef
@@ -858,7 +849,7 @@ func (c *Connector) execChatSendCompose(ctx context.Context, cmd DeviceCommand, 
 	if p.Channel != "" {
 		req["source"] = p.Channel
 	}
-	status, body, err = c.local.postJSON(ctx, "/api/chat", req)
+	status, body, err := c.local.postJSON(ctx, "/api/chat", req)
 	if err != nil {
 		return errResult(err)
 	}
@@ -866,6 +857,36 @@ func (c *Connector) execChatSendCompose(ctx context.Context, cmd DeviceCommand, 
 		return errResult(errUnexpectedStatus("/api/chat", status, string(body)))
 	}
 	return "ok", map[string]string{"session_id": sid}
+}
+
+// createOrFocusSession centralizes the local session contract for cloud
+// commands. Source is sent at creation so handleNewSession can apply the
+// cloud-sync policy before the first message is emitted.
+func (c *Connector) createOrFocusSession(ctx context.Context, sessionID, projectPath, channel string) (string, error) {
+	req := map[string]string{}
+	if sessionID != "" {
+		req["session_id"] = sessionID
+	}
+	if projectPath != "" {
+		req["pwd"] = projectPath
+	}
+	if channel != "" {
+		req["source"] = channel
+	}
+	status, body, err := c.local.postJSON(ctx, "/api/sessions", req)
+	if err != nil {
+		return "", err
+	}
+	if status != http.StatusOK {
+		return "", errUnexpectedStatus("/api/sessions", status, string(body))
+	}
+	var resp struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil || resp.SessionID == "" {
+		return "", fmt.Errorf("/api/sessions: no session_id in response: %s", body)
+	}
+	return resp.SessionID, nil
 }
 
 // postLocalOK POSTs to the local control plane expecting a 200 OK.
