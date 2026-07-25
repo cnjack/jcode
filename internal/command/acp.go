@@ -367,6 +367,9 @@ func (a *acpAgent) NewSession(ctx context.Context, params acp.NewSessionRequest)
 		pwd = util.GetWorkDir()
 	}
 
+	// Apply project-level config overlay (walk-up .jcode/config.json + mcp.json).
+	config.ApplyProjectOverlay(cfg, pwd)
+
 	providerName, modelName := cfg.GetProviderModel()
 	rec, _ := session.NewRecorder(pwd, providerName, modelName)
 	// LLM session titles ride the small model (checked at fire time).
@@ -1112,6 +1115,9 @@ func (a *acpAgent) LoadSession(ctx context.Context, params acp.LoadSessionReques
 		pwd = util.GetWorkDir()
 	}
 
+	// Apply project-level config overlay (walk-up .jcode/config.json + mcp.json).
+	config.ApplyProjectOverlay(cfg, pwd)
+
 	providerName, modelName := cfg.GetProviderModel()
 	rec, _ := session.NewRecorder(pwd, providerName, modelName)
 	if rec != nil {
@@ -1175,6 +1181,9 @@ func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRe
 	if pwd == "" {
 		pwd = util.GetWorkDir()
 	}
+
+	// Apply project-level config overlay (walk-up .jcode/config.json + mcp.json).
+	config.ApplyProjectOverlay(cfg, pwd)
 
 	providerName, modelName := cfg.GetProviderModel()
 	rec, _ := session.NewRecorder(pwd, providerName, modelName)

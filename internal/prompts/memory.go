@@ -35,7 +35,9 @@ func NewMemoryLoader(cfg MemoryConfig) *MemoryLoader {
 
 // Load loads and merges multi-level AGENTS.md files:
 //  1. ~/.jcode/AGENTS.md (global)
-//  2. {pwd}/AGENTS.md (project-level)
+//  2. Walk-up from git root → pwd: each directory's AGENTS.md (root first,
+//     pwd last). This lets monorepo roots define shared instructions while
+//     sub-packages add their own. When not in a git repo, only pwd is checked.
 //  3. {pwd}/AGENTS.local.md (local, expected gitignored)
 //
 // Each file's @include directives are resolved recursively.
@@ -49,10 +51,14 @@ func (m *MemoryLoader) Load(pwd string) (string, error) {
 		sections = append(sections, "<!-- global agents.md -->\n"+content)
 	}
 
-	// 2. Project AGENTS.md (case-insensitive lookup)
-	if projectPath := HasAgentsMd(pwd); projectPath != "" {
-		if content, err := m.loadFile(projectPath); err == nil && content != "" {
-			sections = append(sections, "<!-- project agents.md -->\n"+content)
+	// 2. Walk-up project AGENTS.md (git root → pwd, case-insensitive lookup)
+	gitRoot := config.GitRoot(pwd)
+	dirs := config.ConfigWalkDirs(gitRoot, pwd)
+	for _, dir := range dirs {
+		if projectPath := HasAgentsMd(dir); projectPath != "" {
+			if content, err := m.loadFile(projectPath); err == nil && content != "" {
+				sections = append(sections, "<!-- project agents.md -->\n"+content)
+			}
 		}
 	}
 

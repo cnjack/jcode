@@ -2,6 +2,7 @@ package prompts
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -207,5 +208,70 @@ func TestMemoryLoader_EmptyDir(t *testing.T) {
 	}
 	if result != "" {
 		t.Errorf("expected empty result for dir with no AGENTS.md, got: %s", result)
+	}
+}
+
+func TestMemoryLoader_WalkUpGitRepo(t *testing.T) {
+	// Create a git repo with AGENTS.md at root and in a subdirectory.
+	root := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+
+	// Init a real git repo so GitRoot works.
+	initGitRepo(t, root)
+
+	// Root AGENTS.md
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("root instructions"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Subdirectory with its own AGENTS.md
+	sub := filepath.Join(root, "packages", "foo")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "AGENTS.md"), []byte("foo instructions"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	loader := NewMemoryLoader(MemoryConfig{MaxTotalChars: 40000, MaxIncDepth: 5})
+	result, err := loader.Load(sub)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	// Both root and sub AGENTS.md should be present.
+	if !strings.Contains(result, "root instructions") {
+		t.Errorf("expected root instructions in walk-up result, got: %s", result)
+	}
+	if !strings.Contains(result, "foo instructions") {
+		t.Errorf("expected foo instructions in walk-up result, got: %s", result)
+	}
+
+	// Root should come before sub (root-first ordering).
+	rootIdx := strings.Index(result, "root instructions")
+	fooIdx := strings.Index(result, "foo instructions")
+	if rootIdx > fooIdx {
+		t.Errorf("root AGENTS.md should appear before sub-directory AGENTS.md")
+	}
+}
+
+func initGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	cmd := exec.Command("git", "-C", dir, "init", "-q")
+	// Scrub GIT_* vars so the init targets dir, not an inherited repo.
+	env := os.Environ()
+	var clean []string
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, "GIT_DIR=") &&
+			!strings.HasPrefix(kv, "GIT_WORK_TREE=") &&
+			!strings.HasPrefix(kv, "GIT_INDEX_FILE=") &&
+			!strings.HasPrefix(kv, "GIT_COMMON_DIR=") &&
+			!strings.HasPrefix(kv, "GIT_PREFIX=") {
+			clean = append(clean, kv)
+		}
+	}
+	cmd.Env = clean
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init failed: %v\n%s", err, out)
 	}
 }

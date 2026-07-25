@@ -409,7 +409,9 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		if modeStr != "" {
 			startMode = mode.Parse(modeStr)
 		}
-
+		if exec == nil { // project config overlay (local tasks only)
+			config.ApplyProjectOverlay(taskCfg, taskPwd)
+		}
 		// Fresh execution environment for this task only.
 		tenv := tools.NewEnv(taskPwd, platform)
 		tenv.AutomationStore = autoStore
