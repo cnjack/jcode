@@ -535,6 +535,10 @@ export default {
       builtin: '내장',
       loadingHint: '로딩 중…',
     },
+    scope: {
+      project: '프로젝트',
+      agents: 'Agents',
+    },
     memory: {
       title: '메모리',
       subtitle: '메모리 설정은 모든 로컬 프로젝트에 적용됩니다. 내용은 로컬에 보관되며 이 화면은 메타데이터만 읽습니다.',

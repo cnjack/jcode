@@ -535,6 +535,10 @@ export default {
       builtin: '組み込み',
       loadingHint: '読み込み中…',
     },
+    scope: {
+      project: 'プロジェクト',
+      agents: 'Agents',
+    },
     memory: {
       title: 'メモリ',
       subtitle: 'メモリ設定はすべてのローカルプロジェクトに適用されます。内容はローカルに保持し、この画面ではメタデータのみを読み取ります。',

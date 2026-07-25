@@ -464,6 +464,7 @@ func (s *interactiveState) reloadMCP() {
 		config.Logger().Printf("[mcp] reload: config load failed: %v", err)
 		return
 	}
+	config.ApplyProjectOverlay(latest, s.pwd)
 	s.cfg = latest
 	mcpTools, statuses := tools.LoadMCPTools(s.ctx, latest.MCPServers)
 	s.mcpTools = mcpTools
@@ -1141,6 +1142,9 @@ func RunInteractive(prompt, resumeUUID, agentName string, unsafe bool) error {
 	pwd := util.GetWorkDir()
 	platform := util.GetSystemInfo()
 	envInfo := util.CollectEnvInfo(pwd)
+
+	// Apply project-level config overlay (walk-up .jcode/config.json + mcp.json).
+	config.ApplyProjectOverlay(cfg, pwd)
 
 	var resumeEntries []session.Entry
 	var resumeState *session.SessionState

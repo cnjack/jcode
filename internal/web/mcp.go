@@ -36,6 +36,7 @@ type mcpServerView struct {
 	HasAuth bool              `json:"has_auth"` // a token is stored
 	Status  string            `json:"status"`   // connected | needs_auth | error | disabled | configured
 	Error   string            `json:"error,omitempty"`
+	Scope   string            `json:"scope"` // global | project — which config layer defines this server
 }
 
 // mcpServerReq is the request body for creating/updating an MCP server.
@@ -233,6 +234,10 @@ func (s *Server) handleListMCP(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		status, errMsg := s.mcpServerStatus(name, srv)
+		scope := srv.Source
+		if scope == "" {
+			scope = "global"
+		}
 		servers[name] = mcpServerView{
 			Name:    name,
 			Type:    srv.Type,
@@ -247,6 +252,7 @@ func (s *Server) handleListMCP(w http.ResponseWriter, r *http.Request) {
 			HasAuth: tools.HasMCPOAuthToken(name),
 			Status:  status,
 			Error:   errMsg,
+			Scope:   scope,
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"servers": servers})

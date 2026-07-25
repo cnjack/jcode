@@ -21,6 +21,7 @@ type Skill struct {
 	Body        string // full markdown content (Layer 2, on-demand)
 	Builtin     bool   // true if embedded in binary
 	Path        string // filesystem path (empty for built-in)
+	Source      string // provenance: builtin | agents | user | project
 }
 
 // Loader discovers and caches skills from built-in embeds and user directories.
@@ -91,6 +92,7 @@ func (l *Loader) loadBuiltin() {
 			continue
 		}
 		sk := parseSkill(skillName, string(data), true, "")
+		sk.Source = "builtin"
 		l.mu.Lock()
 		l.skills[sk.Name] = sk
 		l.mu.Unlock()
@@ -145,6 +147,7 @@ func (l *Loader) scanDir(dir, source string) {
 			continue
 		}
 		sk := parseSkill(skillName, string(data), false, fullPath)
+		sk.Source = source
 		l.mu.Lock()
 		l.skills[sk.Name] = sk
 		l.mu.Unlock()

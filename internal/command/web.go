@@ -200,6 +200,10 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		if err != nil {
 			return fmt.Errorf("config error: %w", err)
 		}
+		// Apply env overlay to the server-level config so JCODE_MODEL,
+		// JCODE_DEFAULT_MODE etc. take effect for provider resolution and
+		// startup mode. Project overlay is applied per-task in buildWebTask.
+		config.ApplyEnvOverlay(cfg)
 	} else {
 		// Create a minimal config for setup mode.
 		cfg = &config.Config{
@@ -409,7 +413,13 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		if modeStr != "" {
 			startMode = mode.Parse(modeStr)
 		}
-
+		if exec == nil { // project config overlay (local tasks only)
+			config.ApplyProjectOverlay(taskCfg, taskPwd)
+		} else {
+			// Remote tasks skip project config (can't read .jcode/ remotely)
+			// but env vars are local process state and always apply.
+			config.ApplyEnvOverlay(taskCfg)
+		}
 		// Fresh execution environment for this task only.
 		tenv := tools.NewEnv(taskPwd, platform)
 		tenv.AutomationStore = autoStore

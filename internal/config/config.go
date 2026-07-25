@@ -91,6 +91,9 @@ type MCPServer struct {
 	// OAuth configures OAuth 2.0 authorization for HTTP/SSE transports (MCP
 	// authorization spec). When nil, only static Headers are used.
 	OAuth *MCPOAuthConfig `json:"oauth,omitempty"`
+	// Source tracks which config layer defined this server (global | project).
+	// Not persisted to disk — populated at load time for UI display.
+	Source string `json:"-"`
 }
 
 // MCPOAuthConfig holds OAuth 2.0 settings for an MCP server. Tokens are NOT
@@ -966,8 +969,13 @@ func ConfigDir() string {
 	return filepath.Join(home, configDir)
 }
 
-// configFilePath returns the full path to the config file
+// configFilePath returns the full path to the config file. When JCODE_CONFIG is
+// set it takes precedence, allowing CI/CD pipelines and containerized deployments
+// to point at a mounted config without touching ~/.jcode/.
 func configFilePath() (string, error) {
+	if v := os.Getenv(EnvConfigFile); v != "" {
+		return v, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("failed to get home directory: %w", err)
@@ -1059,6 +1067,13 @@ func LoadConfig() (*Config, error) {
 		cfg.MaxIterations = 1000
 	}
 
+	// Tag MCP servers loaded from global config for UI provenance display.
+	for _, srv := range cfg.MCPServers {
+		if srv != nil {
+			srv.Source = "global"
+		}
+	}
+
 	return cfg, nil
 }
 
@@ -1121,7 +1136,8 @@ func containsSlash(s string) bool {
 	return false
 }
 
-// SaveConfig writes the config to $HOME/.jcode/config.json.
+// SaveConfig writes the config to the active config file path (default
+// $HOME/.jcode/config.json; overridden by JCODE_CONFIG when set).
 func SaveConfig(cfg *Config) error {
 	return saveConfig(cfg, os.Rename)
 }

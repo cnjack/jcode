@@ -565,6 +565,10 @@ export default {
       builtin: '内置',
       loadingHint: '加载中…',
     },
+    scope: {
+      project: '项目',
+      agents: 'Agents',
+    },
     memory: {
       title: '记忆',
       subtitle: '记忆配置对所有本地项目生效；正文保留在本地文件中，此页面仅读取元数据。',

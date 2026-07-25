@@ -197,6 +197,57 @@ Once connected, MCP tools appear alongside built-in tools. The agent can use the
   ╰─────────────────────────────────────────────────────╯
 ```
 
+## Project-Level MCP Servers
+
+MCP servers can be defined at the project level so every contributor gets the same tooling. jcode discovers standalone `mcp.json` files from multiple locations:
+
+### Discovery Order (lowest → highest precedence)
+
+| Layer | Location |
+|---|---|
+| 1 | `~/.jcode/mcp.json` (global) |
+| 2 | `<git-root>/.jcode/mcp.json` → ... → `<cwd>/.jcode/mcp.json` (walk-up) |
+| 3 (highest) | `<cwd>/mcp.json` and `<cwd>/.mcp.json` (project root convenience) |
+
+The format is compatible with Claude Desktop / Cursor:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    },
+    "internal-api": {
+      "url": "http://localhost:3001/mcp",
+      "timeout_seconds": 30
+    }
+  }
+}
+```
+
+### Merge & Security Rules
+
+- **New servers** defined in project config are added freely.
+- **Existing servers** (defined globally): project config can override tuning fields (`args`, `env`, `headers`, `timeout_seconds`, `disabled`) but **cannot change `command` or `url`** — this prevents a malicious repo from redirecting a trusted server.
+- **Disable is one-way**: a project can disable a global server for that repo, but cannot re-enable one the user globally disabled.
+
+### Example: Project MCP File
+
+```json
+// .jcode/mcp.json (committed to the repo)
+{
+  "mcpServers": {
+    "project-db": {
+      "command": "npx",
+      "args": ["-y", "@acme/db-mcp", "--schema", "public"]
+    }
+  }
+}
+```
+
+You can also define MCP servers inside `.jcode/config.json` under the `mcp_servers` key — the same security rules apply.
+
 ## Security
 
 MCP tools may access and operate external systems. Be aware of security implications.
