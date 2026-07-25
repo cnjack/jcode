@@ -341,9 +341,10 @@ In addition to the global `~/.jcode/config.json`, jcode supports **project-level
 | 1 | `~/.jcode/config.json` | Global (your machine) |
 | 2 | `<git-root>/.jcode/config.json` | Repo-wide |
 | 3 | `<subdir>/.jcode/config.json` (walk-up) | Monorepo sub-package |
-| 4 (highest) | `<cwd>/.jcode/config.json` | Current working directory |
+| 4 | `<cwd>/.jcode/config.json` | Current working directory |
+| 5 (highest) | Environment variables (`JCODE_*`) | Process / CI override |
 
-When you work in a subdirectory of a monorepo, jcode walks from the git root down to your cwd, merging each `.jcode/config.json` it finds. Closer-to-cwd files win.
+When you work in a subdirectory of a monorepo, jcode walks from the git root down to your cwd, merging each `.jcode/config.json` it finds. Closer-to-cwd files win. Environment variables override everything — useful for CI/CD pipelines and one-off overrides.
 
 ### Project Directory Layout
 
@@ -423,3 +424,37 @@ Working in `packages/frontend/` uses `gpt-4o` (closer wins) with the repo-wide M
 - **TUI**: Type `/setting` to open the settings menu
 - **Manual**: Edit `~/.jcode/config.json` directly (changes are hot-reloaded)
 - **Model picker**: Press **Ctrl+L** to switch models mid-session
+
+## Environment Variable Overrides
+
+Environment variables provide the highest-precedence config layer — they override both global and project-level settings. This is useful for CI/CD pipelines, containerized deployments, and quick one-off overrides without editing config files.
+
+| Variable | Overrides | Example |
+|---|---|---|
+| `JCODE_MODEL` | Active model (`provider/model`) | `JCODE_MODEL=openai/o3` |
+| `JCODE_SMALL_MODEL` | Small/fast model | `JCODE_SMALL_MODEL=openai/gpt-4o-mini` |
+| `JCODE_MAX_ITERATIONS` | Agent iteration cap (positive integer) | `JCODE_MAX_ITERATIONS=50` |
+| `JCODE_THEME` | Color theme name | `JCODE_THEME=nord-dark` |
+| `JCODE_LANGUAGE` | UI locale | `JCODE_LANGUAGE=en` |
+| `JCODE_DEFAULT_MODE` | Session mode (`approval` \| `plan` \| `auto` \| `full_access`) | `JCODE_DEFAULT_MODE=full_access` |
+| `JCODE_CONFIG` | Config file path (default `~/.jcode/config.json`) | `JCODE_CONFIG=/app/config.json` |
+
+### Examples
+
+```bash
+# CI: run with a specific model and auto-approve all tools
+JCODE_MODEL=anthropic/claude-sonnet-4-20250514 JCODE_DEFAULT_MODE=full_access jcode -p "fix the build"
+
+# Docker: mount a config file at a custom path
+docker run -v ./ci-config.json:/app/config.json -e JCODE_CONFIG=/app/config.json jcode ...
+
+# Quick one-off: try a different model without editing config
+JCODE_MODEL=openai/o3 jcode
+```
+
+### Notes
+
+- Unlike project config, `JCODE_DEFAULT_MODE` **is** honored via env vars — they are set by you (or your CI system), not by an untrusted repository.
+- `JCODE_CONFIG` redirects both reads and writes: `SaveConfig` (e.g. settings changes via the UI) writes to the same path.
+- Invalid values for `JCODE_MAX_ITERATIONS` (non-numeric, ≤ 0) and `JCODE_DEFAULT_MODE` (unknown mode) are logged and ignored — the previous layer's value is preserved.
+- Empty string values are treated as unset (they do not clear a field).

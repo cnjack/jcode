@@ -288,31 +288,39 @@ func mergeProjectFields(base, overlay *Config) {
 
 // ApplyProjectOverlay loads and merges all project-level configuration sources
 // into cfg: walk-up .jcode/config.json files and standalone mcp.json files.
-// This is the single entry point the command layer calls after LoadConfig().
-// Errors from individual files are logged but do not abort startup — a broken
-// project config should not prevent the agent from running.
+// Environment variable overrides (JCODE_MODEL, JCODE_CONFIG, etc.) are applied
+// last as the highest-precedence layer. This is the single entry point the
+// command layer calls after LoadConfig(). Errors from individual files are
+// logged but do not abort startup — a broken project config should not prevent
+// the agent from running.
 func ApplyProjectOverlay(cfg *Config, pwd string) {
-	if cfg == nil || pwd == "" {
+	if cfg == nil {
 		return
 	}
 
-	// Resolve git root once and share across both loaders to avoid spawning
-	// two git subprocesses per startup.
-	gitRoot := GitRoot(pwd)
+	if pwd != "" {
+		// Resolve git root once and share across both loaders to avoid spawning
+		// two git subprocesses per startup.
+		gitRoot := GitRoot(pwd)
 
-	// Walk-up project config.json
-	if projCfg, err := loadProjectConfigWithRoot(pwd, gitRoot); err != nil {
-		Logger().Printf("[config] project config error (ignored): %v", err)
-	} else if projCfg != nil {
-		MergeProjectConfig(cfg, projCfg)
+		// Walk-up project config.json
+		if projCfg, err := loadProjectConfigWithRoot(pwd, gitRoot); err != nil {
+			Logger().Printf("[config] project config error (ignored): %v", err)
+		} else if projCfg != nil {
+			MergeProjectConfig(cfg, projCfg)
+		}
+
+		// Standalone mcp.json files
+		if mcpServers, err := loadMCPFilesWithRoot(pwd, gitRoot); err != nil {
+			Logger().Printf("[config] mcp file error (ignored): %v", err)
+		} else {
+			MergeMCPServers(cfg, mcpServers)
+		}
 	}
 
-	// Standalone mcp.json files
-	if mcpServers, err := loadMCPFilesWithRoot(pwd, gitRoot); err != nil {
-		Logger().Printf("[config] mcp file error (ignored): %v", err)
-	} else {
-		MergeMCPServers(cfg, mcpServers)
-	}
+	// Environment variables have the highest precedence — applied last so they
+	// override both global and project-level values.
+	ApplyEnvOverlay(cfg)
 }
 
 // mergeMCPServer merges overlay fields into an existing MCP server config.
