@@ -189,6 +189,51 @@ func generateWebToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b[:]), nil
 }
 
+// initChannelNotifiers creates the process-level WeChat client and BLE proxy,
+// auto-enabling them when the config requests it.
+func initChannelNotifiers(cfg *config.Config) (*weixin.Client, *ble.Proxy) {
+	wechatClient := weixin.NewClient()
+	if cfg.Channel != nil && cfg.Channel.WebEnabled && wechatClient.State() == channel.StateDisabled {
+		if err := wechatClient.Enable(); err != nil {
+			config.Logger().Printf("[wechat] web auto-enable failed: %v", err)
+		} else {
+			config.Logger().Printf("[wechat] web auto-enabled")
+		}
+	}
+	// BLE is a desktop-only feature (compiled out of plain `jcode web`). The proxy
+	// is added to every task's notifier chain; enabling/disabling it via the
+	// settings toggle takes effect live (no restart). It stays a no-op until
+	// Enable() is called — at startup here if configured, and on the toggle.
+	bleProxy := &ble.Proxy{}
+	if feature.BLE && cfg.Channel != nil && cfg.Channel.BLEEnabled {
+		bleProxy.Enable()
+	}
+	return wechatClient, bleProxy
+}
+
+func newNotifyingHandler(wh *handler.WebHandler, wechatClient *weixin.Client, bleProxy *ble.Proxy) *handler.NotifyingHandler {
+	nh := handler.NewNotifyingHandler(wh, 10*time.Second)
+	nh.SetApprovalNotifier(func(toolName, toolArgs string) {
+		if wechatClient.State() == channel.StateEnabled {
+			if err := wechatClient.SendText(channel.ApprovalMessage(toolName, toolArgs, "Please check the web interface")); err != nil {
+				config.Logger().Printf("[wechat] failed to send approval notification: %v", err)
+			}
+		}
+	})
+	nh.SetDoneNotifier(func(summary string, err error) {
+		if wechatClient.State() == channel.StateEnabled {
+			if sendErr := wechatClient.SendText(channel.DoneMessage(summary, err)); sendErr != nil {
+				config.Logger().Printf("[wechat] failed to send done notification: %v", sendErr)
+			}
+		}
+	})
+	nh.AddNotifier(channel.NewChannelNotifier(wechatClient))
+	if feature.BLE {
+		nh.AddNotifier(bleProxy)
+	}
+	return nh
+}
+
 func runWebServer(parent context.Context, port int, host string, openBrowser bool, authToken string) error {
 	// Check if we need setup (no providers configured).
 	needsSetup := config.NeedsSetup()
@@ -262,48 +307,13 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		langfuseTracer = telemetry.NewLangfuseTracer(cfg.Telemetry.Langfuse)
 	}
 
-	// WeChat client + shared push notifiers (process-level, reused by every task).
-	wechatClient := weixin.NewClient()
-	if cfg.Channel != nil && cfg.Channel.WebEnabled && wechatClient.State() == channel.StateDisabled {
-		if err := wechatClient.Enable(); err != nil {
-			config.Logger().Printf("[wechat] web auto-enable failed: %v", err)
-		} else {
-			config.Logger().Printf("[wechat] web auto-enabled")
-		}
-	}
-	// BLE is a desktop-only feature (compiled out of plain `jcode web`). The proxy
-	// is added to every task's notifier chain; enabling/disabling it via the
-	// settings toggle takes effect live (no restart). It stays a no-op until
-	// Enable() is called — at startup here if configured, and on the toggle.
-	bleProxy := &ble.Proxy{}
-	if feature.BLE && cfg.Channel != nil && cfg.Channel.BLEEnabled {
-		bleProxy.Enable()
-	}
+	wechatClient, bleProxy := initChannelNotifiers(cfg)
 
 	// makeNotifyingHandler wraps a fresh per-task WebHandler with the shared push
 	// notifiers (WeChat + BLE) so a backgrounded task can still surface
 	// approval/done/working notifications without stealing UI focus.
 	makeNotifyingHandler := func(wh *handler.WebHandler) *handler.NotifyingHandler {
-		nh := handler.NewNotifyingHandler(wh, 10*time.Second)
-		nh.SetApprovalNotifier(func(toolName, toolArgs string) {
-			if wechatClient.State() == channel.StateEnabled {
-				if err := wechatClient.SendText(channel.ApprovalMessage(toolName, toolArgs, "Please check the web interface")); err != nil {
-					config.Logger().Printf("[wechat] failed to send approval notification: %v", err)
-				}
-			}
-		})
-		nh.SetDoneNotifier(func(summary string, err error) {
-			if wechatClient.State() == channel.StateEnabled {
-				if sendErr := wechatClient.SendText(channel.DoneMessage(summary, err)); sendErr != nil {
-					config.Logger().Printf("[wechat] failed to send done notification: %v", sendErr)
-				}
-			}
-		})
-		nh.AddNotifier(channel.NewChannelNotifier(wechatClient))
-		if feature.BLE {
-			nh.AddNotifier(bleProxy)
-		}
-		return nh
+		return newNotifyingHandler(wh, wechatClient, bleProxy)
 	}
 
 	// newChatModel resolves a provider/model into a live chat model + context
