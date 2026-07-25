@@ -367,6 +367,15 @@ func (a *acpAgent) NewSession(ctx context.Context, params acp.NewSessionRequest)
 		pwd = util.GetWorkDir()
 	}
 
+	// Merge project-level config (<pwd>/.jcode/config.json) over the global
+	// config. Security-sensitive fields are never taken from project config.
+	if projCfg, projErr := config.LoadProjectConfig(pwd); projErr != nil {
+		config.Logger().Printf("[config] project config warning: %v", projErr)
+	} else if projCfg != nil {
+		config.MergeProjectConfig(cfg, projCfg)
+		config.Logger().Printf("[config] merged project config from %s/.jcode/config.json", pwd)
+	}
+
 	providerName, modelName := cfg.GetProviderModel()
 	rec, _ := session.NewRecorder(pwd, providerName, modelName)
 	// LLM session titles ride the small model (checked at fire time).
@@ -1174,6 +1183,11 @@ func (a *acpAgent) ResumeSession(ctx context.Context, params acp.ResumeSessionRe
 	pwd := params.Cwd
 	if pwd == "" {
 		pwd = util.GetWorkDir()
+	}
+
+	// Merge project-level config over global config.
+	if projCfg, projErr := config.LoadProjectConfig(pwd); projErr == nil && projCfg != nil {
+		config.MergeProjectConfig(cfg, projCfg)
 	}
 
 	providerName, modelName := cfg.GetProviderModel()

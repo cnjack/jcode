@@ -213,6 +213,15 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 	pwd := util.GetWorkDir()
 	platform := util.GetSystemInfo()
 
+	// Merge project-level config (<pwd>/.jcode/config.json) over the global
+	// config. Security-sensitive fields are never taken from project config.
+	if projCfg, projErr := config.LoadProjectConfig(pwd); projErr != nil {
+		config.Logger().Printf("[config] project config warning: %v", projErr)
+	} else if projCfg != nil {
+		config.MergeProjectConfig(cfg, projCfg)
+		config.Logger().Printf("[config] merged project config from %s/.jcode/config.json", pwd)
+	}
+
 	skillLoader := skills.NewLoaderWithDisabled(cfg.DisabledSkills)
 	skillLoader.ScanProjectSkills(pwd)
 

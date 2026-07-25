@@ -464,6 +464,10 @@ func (s *interactiveState) reloadMCP() {
 		config.Logger().Printf("[mcp] reload: config load failed: %v", err)
 		return
 	}
+	// Re-merge project config so hot-reload sees the same effective config.
+	if projCfg, projErr := config.LoadProjectConfig(s.pwd); projErr == nil && projCfg != nil {
+		config.MergeProjectConfig(latest, projCfg)
+	}
 	s.cfg = latest
 	mcpTools, statuses := tools.LoadMCPTools(s.ctx, latest.MCPServers)
 	s.mcpTools = mcpTools
@@ -1141,6 +1145,16 @@ func RunInteractive(prompt, resumeUUID, agentName string, unsafe bool) error {
 	pwd := util.GetWorkDir()
 	platform := util.GetSystemInfo()
 	envInfo := util.CollectEnvInfo(pwd)
+
+	// Merge project-level config (<pwd>/.jcode/config.json) over the global
+	// config. Security-sensitive fields (providers, telemetry, cloud) are
+	// never taken from project config — see config.MergeProjectConfig.
+	if projCfg, projErr := config.LoadProjectConfig(pwd); projErr != nil {
+		config.Logger().Printf("[config] project config warning: %v", projErr)
+	} else if projCfg != nil {
+		config.MergeProjectConfig(cfg, projCfg)
+		config.Logger().Printf("[config] merged project config from %s/.jcode/config.json", pwd)
+	}
 
 	var resumeEntries []session.Entry
 	var resumeState *session.SessionState
