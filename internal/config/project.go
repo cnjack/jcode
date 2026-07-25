@@ -200,7 +200,13 @@ func mergeProjectFields(base, overlay *Config) {
 	}
 
 	// --- MCP servers: merge by name ---
+	// New servers from project config are gated behind JCODE_MCP_TRUST_PROJECT=1
+	// (same pattern as project hooks). A hostile repo shipping a .jcode/config.json
+	// with a new stdio server would otherwise achieve arbitrary code execution the
+	// moment the user runs jcode in the clone. Tuning existing servers (args, env,
+	// timeout, disable) is always allowed — those cannot redirect the binary.
 	if len(overlay.MCPServers) > 0 {
+		trustProjectMCP := os.Getenv("JCODE_MCP_TRUST_PROJECT") == "1"
 		if base.MCPServers == nil {
 			base.MCPServers = make(map[string]*MCPServer, len(overlay.MCPServers))
 		}
@@ -210,8 +216,10 @@ func mergeProjectFields(base, overlay *Config) {
 			}
 			if existing := base.MCPServers[name]; existing != nil {
 				mergeMCPServer(existing, srv)
-			} else {
+			} else if trustProjectMCP {
 				base.MCPServers[name] = srv
+			} else {
+				Logger().Printf("[config] project MCP server %q skipped (set JCODE_MCP_TRUST_PROJECT=1 to allow new project servers)", name)
 			}
 		}
 	}
@@ -258,12 +266,6 @@ func mergeProjectFields(base, overlay *Config) {
 	if overlay.Team != nil {
 		base.Team = overlay.Team
 	}
-	if overlay.Browser != nil {
-		base.Browser = overlay.Browser
-	}
-	if overlay.Computer != nil {
-		base.Computer = overlay.Computer
-	}
 	if overlay.ToolSearch != nil {
 		base.ToolSearch = overlay.ToolSearch
 	}
@@ -283,6 +285,9 @@ func mergeProjectFields(base, overlay *Config) {
 	//   - Memory (pipeline model/budget — could redirect to attacker endpoint)
 	//   - Developer (debug/tracing toggles)
 	//   - AutoApprove / DefaultMode (privilege escalation)
+	//   - Browser / Computer (capability toggles + preapproved permission lists —
+	//     a project enabling computer-use and auto-approving its own app would
+	//     bypass the user's approval policy, same escalation class as AutoApprove)
 	// A project config that sets these fields has them silently ignored.
 }
 
@@ -323,19 +328,73 @@ func ApplyProjectOverlay(cfg *Config, pwd string) {
 	ApplyEnvOverlay(cfg)
 }
 
+// dangerousEnvPrefixes lists environment variable names that must never be
+// injected via project-level MCP config. These are well-known code-execution
+// vectors that would let a malicious repo achieve arbitrary code execution
+// against a trusted (immutable) Command binary.
+var dangerousEnvPrefixes = []string{
+	"LD_PRELOAD",
+	"LD_LIBRARY_PATH",
+	"DYLD_INSERT_LIBRARIES",
+	"DYLD_LIBRARY_PATH",
+	"DYLD_FRAMEWORK_PATH",
+	"NODE_OPTIONS",
+	"NODE_PATH",
+	"PYTHONPATH",
+	"PYTHONSTARTUP",
+	"PERL5LIB",
+	"PERLLIB",
+	"RUBYLIB",
+	"RUBYOPT",
+	"GIT_SSH_COMMAND",
+	"GIT_EXEC_PATH",
+	"BASH_ENV",
+	"ENV",
+	"ZDOTDIR",
+}
+
+// isDangerousEnv reports whether an env var name matches a known code-execution
+// vector that project config must not inject.
+func isDangerousEnv(name string) bool {
+	upper := strings.ToUpper(name)
+	for _, prefix := range dangerousEnvPrefixes {
+		if upper == prefix {
+			return true
+		}
+	}
+	return false
+}
+
+// filterDangerousEnv removes dangerous env vars from a "KEY=VALUE" slice.
+// Returns the filtered slice and logs any removed entries.
+func filterDangerousEnv(env []string) []string {
+	filtered := make([]string, 0, len(env))
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		if isDangerousEnv(name) {
+			Logger().Printf("[config] project MCP env %q blocked (dangerous variable)", name)
+			continue
+		}
+		filtered = append(filtered, kv)
+	}
+	return filtered
+}
+
 // mergeMCPServer merges overlay fields into an existing MCP server config.
 // Only tuning fields (args, env, timeout, disabled) are merged — Command and
 // URL are NOT overridable so a malicious project config cannot redirect a
 // trusted global server to a different binary or endpoint. New servers (added
 // via the map-merge in mergeProjectFields) get their full definition from the
-// project config, which is the user's explicit choice.
+// project config, gated behind JCODE_MCP_TRUST_PROJECT=1.
 func mergeMCPServer(base, overlay *MCPServer) {
 	// Command and URL are intentionally NOT merged for existing servers.
 	if len(overlay.Args) > 0 {
 		base.Args = overlay.Args
 	}
 	if len(overlay.Env) > 0 {
-		base.Env = overlay.Env
+		// Filter out dangerous env vars (LD_PRELOAD, DYLD_INSERT_LIBRARIES, etc.)
+		// that would allow code execution against the immutable Command binary.
+		base.Env = filterDangerousEnv(overlay.Env)
 	}
 	if len(overlay.Headers) > 0 {
 		if base.Headers == nil {

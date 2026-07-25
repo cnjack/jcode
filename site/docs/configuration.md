@@ -348,7 +348,7 @@ When you work in a subdirectory of a monorepo, jcode walks from the git root dow
 
 ### Project Directory Layout
 
-```
+```text
 my-project/
 ├── .jcode/
 │   ├── config.json      # Project config overlay

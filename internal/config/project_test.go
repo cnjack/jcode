@@ -137,36 +137,72 @@ func TestMergeProjectConfig_SecurityDenylist(t *testing.T) {
 }
 
 func TestMergeProjectConfig_MCPServers(t *testing.T) {
-	base := &Config{
-		MCPServers: map[string]*MCPServer{
-			"existing": {Command: "/usr/bin/tool", Args: []string{"--old"}},
-		},
-	}
-	overlay := &Config{
-		MCPServers: map[string]*MCPServer{
-			"existing": {Command: "/evil/tool", Args: []string{"--new"}},
-			"new-srv":  {Command: "/usr/bin/new", URL: "http://localhost:8080"},
-		},
-	}
-	MergeProjectConfig(base, overlay)
+	t.Setenv("HOME", t.TempDir())
 
-	// Existing server: command must NOT change, args should update.
-	existing := base.MCPServers["existing"]
-	if existing.Command != "/usr/bin/tool" {
-		t.Errorf("existing.Command = %q, must not change", existing.Command)
-	}
-	if len(existing.Args) != 1 || existing.Args[0] != "--new" {
-		t.Errorf("existing.Args = %v, want [--new]", existing.Args)
-	}
+	t.Run("existing server tuning", func(t *testing.T) {
+		base := &Config{
+			MCPServers: map[string]*MCPServer{
+				"existing": {Command: "/usr/bin/tool", Args: []string{"--old"}},
+			},
+		}
+		overlay := &Config{
+			MCPServers: map[string]*MCPServer{
+				"existing": {Command: "/evil/tool", Args: []string{"--new"}},
+			},
+		}
+		MergeProjectConfig(base, overlay)
 
-	// New server: full definition allowed.
-	newSrv := base.MCPServers["new-srv"]
-	if newSrv == nil {
-		t.Fatal("new-srv not added")
-	}
-	if newSrv.Command != "/usr/bin/new" {
-		t.Errorf("new-srv.Command = %q, want /usr/bin/new", newSrv.Command)
-	}
+		// Existing server: command must NOT change, args should update.
+		existing := base.MCPServers["existing"]
+		if existing.Command != "/usr/bin/tool" {
+			t.Errorf("existing.Command = %q, must not change", existing.Command)
+		}
+		if len(existing.Args) != 1 || existing.Args[0] != "--new" {
+			t.Errorf("existing.Args = %v, want [--new]", existing.Args)
+		}
+	})
+
+	t.Run("new server requires trust", func(t *testing.T) {
+		// Without JCODE_MCP_TRUST_PROJECT=1, new servers are skipped.
+		t.Setenv("JCODE_MCP_TRUST_PROJECT", "")
+		base := &Config{
+			MCPServers: map[string]*MCPServer{
+				"existing": {Command: "/usr/bin/tool"},
+			},
+		}
+		overlay := &Config{
+			MCPServers: map[string]*MCPServer{
+				"new-srv": {Command: "/usr/bin/new", URL: "http://localhost:8080"},
+			},
+		}
+		MergeProjectConfig(base, overlay)
+		if base.MCPServers["new-srv"] != nil {
+			t.Error("new-srv should be skipped without JCODE_MCP_TRUST_PROJECT=1")
+		}
+	})
+
+	t.Run("new server allowed with trust", func(t *testing.T) {
+		t.Setenv("JCODE_MCP_TRUST_PROJECT", "1")
+		base := &Config{
+			MCPServers: map[string]*MCPServer{
+				"existing": {Command: "/usr/bin/tool"},
+			},
+		}
+		overlay := &Config{
+			MCPServers: map[string]*MCPServer{
+				"new-srv": {Command: "/usr/bin/new", URL: "http://localhost:8080"},
+			},
+		}
+		MergeProjectConfig(base, overlay)
+
+		newSrv := base.MCPServers["new-srv"]
+		if newSrv == nil {
+			t.Fatal("new-srv not added despite JCODE_MCP_TRUST_PROJECT=1")
+		}
+		if newSrv.Command != "/usr/bin/new" {
+			t.Errorf("new-srv.Command = %q, want /usr/bin/new", newSrv.Command)
+		}
+	})
 }
 
 func TestMergeProjectConfig_DisabledSkillsUnion(t *testing.T) {
