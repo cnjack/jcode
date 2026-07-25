@@ -5,7 +5,7 @@ nav_order: 7
 
 # Configuration
 
-jcode stores all configuration in a single JSON file at `~/.jcode/config.json`. The setup wizard creates this file on first launch.
+jcode stores global configuration in `~/.jcode/config.json` and supports project-level overlays via `.jcode/` directories in your repository. The setup wizard creates the global file on first launch.
 
 ## Config File Location
 
@@ -329,6 +329,93 @@ Notification channel settings. See [Channels](overview/channels).
 | `ble_enabled` | false | Enable BLE device notifications for JCode Buddy |
 
 In TUI mode, channels are always available via `/channel` — no config needed.
+
+## Project-Level Configuration
+
+In addition to the global `~/.jcode/config.json`, jcode supports **project-level config overlays** via `.jcode/` directories. This lets you commit shared settings (model choice, MCP servers, feature toggles) into a repository so every contributor gets the same agent behavior.
+
+### Discovery Order (lowest → highest precedence)
+
+| Layer | Location | Scope |
+|---|---|---|
+| 1 | `~/.jcode/config.json` | Global (your machine) |
+| 2 | `<git-root>/.jcode/config.json` | Repo-wide |
+| 3 | `<subdir>/.jcode/config.json` (walk-up) | Monorepo sub-package |
+| 4 (highest) | `<cwd>/.jcode/config.json` | Current working directory |
+
+When you work in a subdirectory of a monorepo, jcode walks from the git root down to your cwd, merging each `.jcode/config.json` it finds. Closer-to-cwd files win.
+
+### Project Directory Layout
+
+```
+my-project/
+├── .jcode/
+│   ├── config.json      # Project config overlay
+│   ├── mcp.json         # Project MCP servers (see MCP docs)
+│   └── skills/          # Project-local skills
+│       └── deploy/SKILL.md
+├── AGENTS.md            # Project instructions (walk-up supported)
+└── src/
+    └── .jcode/
+        └── config.json  # Sub-package override (monorepo)
+```
+
+### Mergeable Fields
+
+Project config supports these fields (same JSON schema as global config):
+
+| Field | Merge Behavior |
+|---|---|
+| `model` / `small_model` | Override |
+| `max_iterations` | Override |
+| `theme` / `language` | Override |
+| `default_context_limit` / `context_limits` | Override / deep-merge |
+| `mcp_servers` | Merge by name (see security rules below) |
+| `disabled_skills` / `disabled_providers` | Union (additive) |
+| `budget`, `compaction`, `prompt`, `subagent`, `team`, `browser`, `computer`, `tool_search`, `channel`, `approval_review` | Whole-block replace |
+
+### Security Denylist
+
+The following fields are **silently ignored** in project config to prevent a malicious repo from escalating privileges or exfiltrating credentials:
+
+- `providers` (API keys, base URLs)
+- `telemetry` (Langfuse secrets)
+- `cloud` (relay credentials, E2EE keys)
+- `ssh_aliases` / `docker_aliases`
+- `memory` (pipeline model/budget)
+- `developer`
+- `auto_approve` / `default_mode`
+
+### Walk-Up AGENTS.md
+
+Project instructions (`AGENTS.md`) also support walk-up: from the git root down to cwd, each directory's `AGENTS.md` is concatenated (root-first). This lets a monorepo root define shared coding standards while sub-packages add domain-specific rules.
+
+### Example: Monorepo Project Config
+
+```json
+// <repo-root>/.jcode/config.json
+{
+  "model": "anthropic/claude-sonnet-4-20250514",
+  "max_iterations": 500,
+  "mcp_servers": {
+    "internal-docs": {
+      "command": "npx",
+      "args": ["-y", "@acme/docs-mcp"]
+    }
+  },
+  "disabled_skills": ["pptx"]
+}
+```
+
+```json
+// <repo-root>/packages/frontend/.jcode/config.json
+{
+  "model": "openai/gpt-4o",
+  "budget": { "max_tokens_per_turn": 80000 }
+}
+```
+
+Working in `packages/frontend/` uses `gpt-4o` (closer wins) with the repo-wide MCP server and disabled skills still applied.
 
 ## Changing Configuration
 
