@@ -238,6 +238,7 @@ export interface MCPServerInfo {
   has_auth: boolean
   status: string // connected | needs_auth | error | disabled | configured
   error?: string
+  scope?: string // global | project — which config layer defines this server
 }
 
 export interface MCPListResponse {
@@ -342,7 +343,7 @@ export interface SkillInfo {
   description: string
   slash?: string
   builtin?: boolean
-  source?: string // builtin | local
+  source?: string // builtin | agents | user | project
   enabled?: boolean
 }
 

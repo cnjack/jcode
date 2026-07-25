@@ -205,6 +205,9 @@ func mergeProjectFields(base, overlay *Config) {
 			base.MCPServers = make(map[string]*MCPServer, len(overlay.MCPServers))
 		}
 		for name, srv := range overlay.MCPServers {
+			if srv != nil {
+				srv.Source = "project"
+			}
 			if existing := base.MCPServers[name]; existing != nil {
 				mergeMCPServer(existing, srv)
 			} else {

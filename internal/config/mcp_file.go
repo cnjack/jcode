@@ -59,7 +59,7 @@ func LoadMCPFiles(pwd string) (map[string]*MCPServer, error) {
 func loadMCPFilesWithRoot(pwd, gitRoot string) (map[string]*MCPServer, error) {
 	var merged map[string]*MCPServer
 
-	merge := func(servers map[string]*MCPServer) {
+	merge := func(servers map[string]*MCPServer, source string) {
 		if len(servers) == 0 {
 			return
 		}
@@ -67,6 +67,9 @@ func loadMCPFilesWithRoot(pwd, gitRoot string) (map[string]*MCPServer, error) {
 			merged = make(map[string]*MCPServer, len(servers))
 		}
 		for name, srv := range servers {
+			if srv != nil && srv.Source == "" {
+				srv.Source = source
+			}
 			if existing := merged[name]; existing != nil {
 				mergeMCPServer(existing, srv)
 			} else {
@@ -81,7 +84,7 @@ func loadMCPFilesWithRoot(pwd, gitRoot string) (map[string]*MCPServer, error) {
 		if err != nil {
 			return nil, err
 		}
-		merge(servers)
+		merge(servers, "global")
 	}
 
 	// 2. Walk-up .jcode/mcp.json from git root to pwd
@@ -93,7 +96,7 @@ func loadMCPFilesWithRoot(pwd, gitRoot string) (map[string]*MCPServer, error) {
 				if err != nil {
 					return nil, err
 				}
-				merge(servers)
+				merge(servers, "project")
 			}
 		}
 
@@ -103,7 +106,7 @@ func loadMCPFilesWithRoot(pwd, gitRoot string) (map[string]*MCPServer, error) {
 			if err != nil {
 				return nil, err
 			}
-			merge(servers)
+			merge(servers, "project")
 		}
 	}
 

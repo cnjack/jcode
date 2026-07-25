@@ -24,9 +24,13 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 	var items []skillItem
 	if s.skillLoader != nil {
 		for _, sk := range s.skillLoader.All() {
-			source := "local"
-			if sk.Builtin {
-				source = "builtin"
+			source := sk.Source
+			if source == "" {
+				if sk.Builtin {
+					source = "builtin"
+				} else {
+					source = "user"
+				}
 			}
 			items = append(items, skillItem{
 				Name:        sk.Name,

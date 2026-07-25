@@ -2587,6 +2587,7 @@ function MCPTab() {
                     <div className="flex flex-wrap items-center gap-2 text-[12px] font-medium text-[var(--color-foreground)]">
                       {name}
                       <span className={CHIP}>{info.type || 'stdio'}</span>
+                      {info.scope === 'project' && <span className={CHIP_ACCENT}>{t('settings.scope.project')}</span>}
                       <span className="text-[10px]" style={{ color: mcpStatusColor(info) }}>
                         ● {mcpStatusLabel(info, t)}
                       </span>
@@ -2724,6 +2725,8 @@ function SkillsTab() {
                 <div className="flex items-center gap-2 text-[12px] font-medium text-[var(--color-foreground)]">
                   {s.name}
                   {s.builtin && <span className={CHIP}>{t('settings.skills.builtin')}</span>}
+                  {!s.builtin && s.source === 'project' && <span className={CHIP_ACCENT}>{t('settings.scope.project')}</span>}
+                  {!s.builtin && s.source === 'agents' && <span className={CHIP}>{t('settings.scope.agents')}</span>}
                 </div>
                 {s.description && (
                   <div className="text-[11px] text-[var(--color-muted-foreground)]">{s.description}</div>

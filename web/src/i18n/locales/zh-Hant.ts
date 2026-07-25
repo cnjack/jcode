@@ -536,6 +536,10 @@ export default {
       builtin: '內建',
       loadingHint: '載入中…',
     },
+    scope: {
+      project: '專案',
+      agents: 'Agents',
+    },
     memory: {
       title: '記憶',
       subtitle: '記憶設定會套用至所有本機專案；內容保留在本機檔案，此頁面只讀取中繼資料。',

@@ -91,6 +91,9 @@ type MCPServer struct {
 	// OAuth configures OAuth 2.0 authorization for HTTP/SSE transports (MCP
 	// authorization spec). When nil, only static Headers are used.
 	OAuth *MCPOAuthConfig `json:"oauth,omitempty"`
+	// Source tracks which config layer defined this server (global | project).
+	// Not persisted to disk — populated at load time for UI display.
+	Source string `json:"-"`
 }
 
 // MCPOAuthConfig holds OAuth 2.0 settings for an MCP server. Tokens are NOT
@@ -1057,6 +1060,13 @@ func LoadConfig() (*Config, error) {
 
 	if cfg.MaxIterations <= 0 {
 		cfg.MaxIterations = 1000
+	}
+
+	// Tag MCP servers loaded from global config for UI provenance display.
+	for _, srv := range cfg.MCPServers {
+		if srv != nil {
+			srv.Source = "global"
+		}
 	}
 
 	return cfg, nil

@@ -581,6 +581,10 @@ export default {
       builtin: 'Built-in',
       loadingHint: 'Loading…',
     },
+    scope: {
+      project: 'Project',
+      agents: 'Agents',
+    },
     memory: {
       title: 'Memory',
       subtitle: 'Memory configuration applies to every local project. Content stays on disk and this page only reads metadata.',
