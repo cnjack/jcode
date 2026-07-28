@@ -244,10 +244,34 @@ func reviewDeniedMessage(reason string) string {
 		"Proceed only with a materially safer alternative, or stop and ask the user for explicit approval after explaining the risk."
 }
 
-// NewTeammateHandlers returns the middleware stack for a teammate agent.
-// It includes the approval + safe-tool-error middleware with the given approval function.
-func NewTeammateHandlers(approvalFunc ApprovalFunc) []adk.ChatModelAgentMiddleware {
+// NewChildAgentHandlers returns the middleware stack that every delegated agent
+// (subagent or teammate) must run so it inherits the session's hook policy and
+// per-call approval gate and cannot bypass them. The stack is, outermost→
+// innermost: PreToolUse hook → approval gate → PostToolUse hook. This mirrors the
+// inner core of the main agent's stack (see internal/agent/agent.go) so a child
+// agent is gated identically to the session that spawned it.
+//
+// The approval middleware also performs panic containment and error→string
+// folding (the "safe tool" behavior), so callers do NOT need a separate
+// safeToolMiddleware when this stack is installed.
+//
+// approvalFunc may be nil for agents whose entire tool set is read-only or that
+// received a one-time grant; a nil func means "no per-call gate", but hooks still
+// fire and errors are still folded. Command surfaces SHOULD pass a real func for
+// any agent that can mutate state.
+func NewChildAgentHandlers(approvalFunc ApprovalFunc) []adk.ChatModelAgentMiddleware {
 	return []adk.ChatModelAgentMiddleware{
+		newPreHookMiddleware(),
 		newApprovalMiddleware(approvalFunc),
+		newPostHookMiddleware(),
 	}
+}
+
+// NewTeammateHandlers returns the middleware stack for a teammate agent. It
+// delegates to NewChildAgentHandlers so teammates — like subagents — run the
+// PreToolUse/PostToolUse hooks and the per-call approval gate, and therefore
+// cannot bypass the session hook policy or escalate past the caller's
+// permissions.
+func NewTeammateHandlers(approvalFunc ApprovalFunc) []adk.ChatModelAgentMiddleware {
+	return NewChildAgentHandlers(approvalFunc)
 }

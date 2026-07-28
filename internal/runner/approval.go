@@ -234,7 +234,6 @@ var noApprovalNeeded = map[string]bool{
 	"todowrite":                  true,
 	"todoread":                   true,
 	"ask_user":                   true,
-	"webfetch":                   true,
 	"check_background":           true,
 	"team_create":                true,
 	"team_send_message":          true,
@@ -377,6 +376,12 @@ func (s *ApprovalState) decide(toolName, toolArgs string) approvalDecision {
 				return decisionAutoApprove
 			}
 		}
+		return decisionPrompt
+	case "webfetch":
+		// External network egress. It is never auto-approved: in Manual mode the
+		// user is prompted; in Auto mode the reviewer (plus the deterministic SSRF
+		// pre-filter in review/ssrf.go) adjudicates; in Full Access the tool's own
+		// dial guard is the backstop. See internal-doc/webfetch-subagent-hooks-approval-design.md.
 		return decisionPrompt
 	}
 
@@ -575,6 +580,43 @@ func (s *ApprovalState) notifyToolInProgress(toolName, toolArgs string) {
 		notifier.NotifyToolInProgress(toolName, toolArgs)
 	}
 }
+
+// NewSubagentApprovalFunc creates an approval function for the tools running
+// INSIDE a delegated subagent. It shares the exact same decide() logic (and the
+// same reviewer / user-prompt fallback) as the main session and as teammates, so
+// a subagent can never approve something the main session would not — delegation
+// cannot escalate or bypass the caller's permission constraints. name labels the
+// subagent in the approval prompt so the UI can show the authorization source.
+func (s *ApprovalState) NewSubagentApprovalFunc(name string) func(ctx context.Context, toolName, toolArgs string) (bool, error) {
+	label := strings.TrimSpace(name)
+	if label == "" {
+		label = "subagent"
+	}
+	return func(ctx context.Context, toolName, toolArgs string) (bool, error) {
+		s.mu.Lock()
+		currentMode := s.mode
+		s.mu.Unlock()
+		if currentMode == handler.ModeAuto {
+			s.notifyToolInProgress(toolName, toolArgs)
+			return true, nil
+		}
+
+		switch s.decide(toolName, toolArgs) {
+		case decisionAutoApprove:
+			s.notifyToolInProgress(toolName, toolArgs)
+			return true, nil
+		case decisionPromptExternal:
+			return s.gatedApproval(ctx, toolName, toolArgs, true, "subagent:"+label, subagentWorkerColor)
+		default:
+			return s.gatedApproval(ctx, toolName, toolArgs, false, "subagent:"+label, subagentWorkerColor)
+		}
+	}
+}
+
+// subagentWorkerColor is the UI accent color for approval prompts originating
+// inside a delegated subagent, mirroring the per-teammate color so a user can
+// tell the authorization source apart at a glance.
+const subagentWorkerColor = "purple"
 
 // requestUserApprovalWithWorker handles approval with optional worker identity
 func (s *ApprovalState) requestUserApprovalWithWorker(ctx context.Context, toolName, toolArgs string, isExternal bool, workerName, workerColor string) (bool, error) {

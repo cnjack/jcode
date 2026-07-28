@@ -1,6 +1,10 @@
 package review
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/cnjack/jcode/internal/ssrf"
+)
 
 // Deterministic pre-filter for cloud instance-metadata (SSRF-to-credentials).
 //
@@ -17,23 +21,10 @@ import "strings"
 // a legitimate log search) escalates to the human rather than hard-denying,
 // because a denial cannot be overridden by the user while an escalation can.
 
-// metadataHosts are literal needles for cloud instance-metadata endpoints,
-// including the common numeric obfuscations of 169.254.169.254 that bypass a
-// naive dotted-quad match.
-var metadataHosts = []string{
-	"169.254.",      // IPv4 link-local: IMDS (…169.254), ECS task (…170.2)
-	"fd00:ec2::254", // AWS IMDS over IPv6
-	"metadata.google.internal",
-	"metadata.goog",
-	"100.100.100.200", // Alibaba Cloud
-	"192.0.0.192",     // Oracle Cloud
-	// Numeric encodings of 169.254.169.254 — curl/wget accept all of these.
-	"2852039166",          // decimal
-	"0xa9fea9fe",          // hex
-	"0xa9.0xfe.0xa9.0xfe", // dotted hex
-	"0251.0376.0251.0376", // dotted octal
-	"0251.0376.43518",     // mixed octal/decimal
-}
+// metadataHosts is the canonical list, sourced from the dependency-free
+// internal/ssrf leaf so the WebFetch tool's dial guard and this reviewer
+// pre-filter share one definition without an import cycle.
+var metadataHosts = ssrf.MetadataHosts
 
 // credentialPaths mark a metadata request as specifically reaching for identity
 // or credential material rather than, say, an instance hostname.

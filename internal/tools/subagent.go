@@ -51,6 +51,14 @@ type SubagentDeps struct {
 	Recorder     *session.Recorder         // records subagent start/result to session JSONL
 	Tracer       *telemetry.LangfuseTracer // optional: Langfuse tracer for nested spans
 	AgentRoles   map[string]config.AgentRoleConfig
+
+	// ChildHandlers builds the middleware stack a delegated child agent MUST run
+	// (PreToolUse hooks → approval gate → PostToolUse hooks), so the child
+	// inherits the session's hook policy and per-call approval and cannot bypass
+	// or escalate past the caller's permissions. Built by the command surface via
+	// agent.NewChildAgentHandlers. When nil, the child falls back to the legacy
+	// stack (safe error folding only) — command surfaces SHOULD set this.
+	ChildHandlers func(name string) []adk.ChatModelAgentMiddleware
 }
 
 type subagentInput struct {
