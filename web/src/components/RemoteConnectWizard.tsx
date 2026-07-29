@@ -10,6 +10,7 @@ import {
   ArrowLeftIcon,
   ArrowPathIcon,
   CheckIcon,
+  ChevronDownIcon,
   ChevronRightIcon,
   CubeIcon,
   FolderIcon,
@@ -55,9 +56,11 @@ export function RemoteConnectWizard({ open, prefill, onClose, onBound }: RemoteC
   const [aliasName, setAliasName] = useState('')
   const [error, setError] = useState('')
   const [binding, setBinding] = useState(false)
+  const [aliasMenuOpen, setAliasMenuOpen] = useState(false)
   /** Keep prefill for bind-time loadTaskUuid without re-running open effect. */
   const prefillRef = useRef<RemotePrefill | null>(null)
   const boundRef = useRef(false)
+  const aliasMenuRef = useRef<HTMLDivElement | null>(null)
 
   const steps = useMemo(
     () => [
@@ -72,6 +75,13 @@ export function RemoteConnectWizard({ open, prefill, onClose, onBound }: RemoteC
     const key = step === 'docker' ? 'config' : step
     return steps.findIndex((s) => s.key === key)
   }, [step, steps])
+
+  const selectedAliasLabel = useMemo(() => {
+    if (!selectedAlias) return t('settings.ssh.noAlias')
+    const alias = aliases.find((a) => a.name === selectedAlias)
+    if (!alias) return selectedAlias
+    return `${alias.name} — ${alias.addr}`
+  }, [selectedAlias, aliases, t])
 
   useEffect(() => {
     if (!open) return
@@ -92,6 +102,24 @@ export function RemoteConnectWizard({ open, prefill, onClose, onBound }: RemoteC
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, prefill])
 
+  useEffect(() => {
+    if (!aliasMenuOpen) return
+    function onDown(e: MouseEvent) {
+      if (aliasMenuRef.current && !aliasMenuRef.current.contains(e.target as Node)) {
+        setAliasMenuOpen(false)
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setAliasMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [aliasMenuOpen])
+
   if (!open) return null
 
   function resetForm() {
@@ -106,6 +134,7 @@ export function RemoteConnectWizard({ open, prefill, onClose, onBound }: RemoteC
     setPassphrase('')
     setAliases([])
     setSelectedAlias('')
+    setAliasMenuOpen(false)
     setContainers([])
     setConnectionId('')
     setCurrentDir('')
@@ -154,6 +183,7 @@ export function RemoteConnectWizard({ open, prefill, onClose, onBound }: RemoteC
 
   function applyAlias(name: string) {
     setSelectedAlias(name)
+    setAliasMenuOpen(false)
     const alias = aliases.find((a) => a.name === name)
     if (!alias) return
     const at = alias.addr.indexOf('@')
@@ -457,17 +487,57 @@ export function RemoteConnectWizard({ open, prefill, onClose, onBound }: RemoteC
                   {aliases.length > 0 && (
                     <div className="rcw-field">
                       <label>{t('settings.ssh.savedAlias')}</label>
-                      <select
-                        className="rcw-input"
-                        value={selectedAlias}
-                        disabled={connecting}
-                        onChange={(e) => applyAlias(e.target.value)}
-                      >
-                        <option value="">{t('settings.ssh.noAlias')}</option>
-                        {aliases.map((a) => (
-                          <option key={a.name} value={a.name}>{a.name} — {a.addr}</option>
-                        ))}
-                      </select>
+                      {/*
+                        Custom listbox (not native <select>): Tauri/WebView native
+                        dropdowns ignore app tokens and break theming. Same pattern
+                        as ModelSelector / WorkspacePicker — no jcode-ui-core Select.
+                      */}
+                      <div className="rcw-select" ref={aliasMenuRef}>
+                        <button
+                          type="button"
+                          className="rcw-select-trigger"
+                          disabled={connecting}
+                          aria-haspopup="listbox"
+                          aria-expanded={aliasMenuOpen}
+                          onClick={() => setAliasMenuOpen((v) => !v)}
+                        >
+                          <span className="rcw-select-value">{selectedAliasLabel}</span>
+                          <ChevronDownIcon className={`h-3.5 w-3.5 rcw-select-chev${aliasMenuOpen ? ' open' : ''}`} />
+                        </button>
+                        {aliasMenuOpen && !connecting && (
+                          <div className="rcw-select-menu" role="listbox">
+                            <button
+                              type="button"
+                              role="option"
+                              aria-selected={!selectedAlias}
+                              className={`rcw-select-option${!selectedAlias ? ' is-selected' : ''}`}
+                              onClick={() => applyAlias('')}
+                            >
+                              <span>{t('settings.ssh.noAlias')}</span>
+                              {!selectedAlias && <CheckIcon className="h-3.5 w-3.5" />}
+                            </button>
+                            {aliases.map((a) => {
+                              const selected = selectedAlias === a.name
+                              return (
+                                <button
+                                  key={a.name}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={selected}
+                                  className={`rcw-select-option${selected ? ' is-selected' : ''}`}
+                                  onClick={() => applyAlias(a.name)}
+                                >
+                                  <span className="rcw-select-option-main">
+                                    <span className="rcw-select-option-label">{a.name}</span>
+                                    <span className="rcw-select-option-desc">{a.addr}</span>
+                                  </span>
+                                  {selected && <CheckIcon className="h-3.5 w-3.5" />}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                   <div className="rcw-row">
@@ -781,6 +851,91 @@ const RCW_CSS = `
 .rcw-input.mono { font-family: var(--font-mono); font-size: 12px; }
 .rcw-input.mini { width: 120px; padding: 5px 9px; font-size: 12px; }
 .rcw-input:disabled { opacity: 0.55; }
+.rcw-select { position: relative; }
+.rcw-select-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.rcw-select-trigger:hover:not(:disabled) { border-color: color-mix(in srgb, var(--color-foreground) 30%, transparent); }
+.rcw-select-trigger:focus-visible { border-color: var(--color-accent-neutral); }
+.rcw-select-trigger:disabled { opacity: 0.55; cursor: not-allowed; }
+.rcw-select-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rcw-select-chev {
+  flex-shrink: 0;
+  color: var(--color-muted-foreground);
+  transition: transform 0.15s;
+}
+.rcw-select-chev.open { transform: rotate(180deg); }
+.rcw-select-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-lg);
+}
+.rcw-select-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-foreground);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.rcw-select-option:hover { background: var(--color-muted); }
+.rcw-select-option.is-selected { background: color-mix(in srgb, var(--color-foreground) 6%, transparent); }
+.rcw-select-option svg { flex-shrink: 0; color: var(--color-muted-foreground); }
+.rcw-select-option-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.rcw-select-option-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.rcw-select-option-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-muted-foreground);
+}
 .rcw-seg {
   display: flex;
   border: 1px solid var(--color-border);
