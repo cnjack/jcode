@@ -1028,6 +1028,8 @@ export default {
     open: '打开',
     openWorkspace: '打开工作区',
     localOnly: '只有本地工作区可以在应用中打开。',
+    discoveryFailed: '无法读取这台 Mac 上已安装的应用。',
+    noApplications: '未找到支持的应用。',
     openFailed: '无法打开 {app}，请确认应用已安装且工作区路径在允许范围内。',
   },
 

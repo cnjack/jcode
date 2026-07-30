@@ -44,18 +44,42 @@ export async function openUrl(url: string): Promise<void> {
   }
 }
 
+export interface WorkspaceApplication {
+  id: string
+  label: string
+  group: 'editor' | 'system'
+  iconDataUrl?: string
+}
+
+let workspaceApplicationsPromise: Promise<WorkspaceApplication[]> | null = null
+
 /**
- * Open a local workspace in a specific desktop application. The Tauri
- * capability file scopes this bridge to an explicit app allowlist and local
- * workspace roots; browser callers are rejected.
+ * Ask the native shell which supported applications Launch Services can
+ * actually resolve. Each result carries the installed app's own icon. Cache
+ * the in-flight/result promise so React StrictMode does not decode every icon
+ * twice during its development remount.
  */
-export async function openWorkspacePath(path: string, application?: string): Promise<void> {
-  if (!isTauri) throw new Error('openWorkspacePath() called outside Tauri')
-  if (!isAbsoluteLocalWorkspacePath(path)) {
-    throw new Error('openWorkspacePath() requires an absolute local path')
+export function listWorkspaceApplications(): Promise<WorkspaceApplication[]> {
+  if (!workspaceApplicationsPromise) {
+    workspaceApplicationsPromise = invoke<WorkspaceApplication[]>('list_workspace_applications').catch((error) => {
+      workspaceApplicationsPromise = null
+      throw error
+    })
   }
-  const { openPath } = await import('@tauri-apps/plugin-opener')
-  await openPath(path, application)
+  return workspaceApplicationsPromise
+}
+
+/**
+ * Open a local workspace with an opaque application ID returned by
+ * listWorkspaceApplications(). The backend resolves the bundle and validates
+ * the canonical path again; the webview cannot supply an executable.
+ */
+export async function openWorkspaceInApplication(path: string, appId: string): Promise<void> {
+  if (!isTauri) throw new Error('openWorkspaceInApplication() called outside Tauri')
+  if (!isAbsoluteLocalWorkspacePath(path)) {
+    throw new Error('openWorkspaceInApplication() requires an absolute local path')
+  }
+  await invoke<void>('open_workspace_in_application', { path, appId })
 }
 
 export function isAbsoluteLocalWorkspacePath(path: string): boolean {

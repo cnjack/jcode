@@ -1051,6 +1051,8 @@ export default {
     open: 'Open',
     openWorkspace: 'Open workspace',
     localOnly: 'Opening apps is available for local workspaces only.',
+    discoveryFailed: 'Could not read the applications installed on this Mac.',
+    noApplications: 'No supported applications were found.',
     openFailed: 'Could not open {app}. Check that it is installed and this workspace location is allowed.',
   },
 

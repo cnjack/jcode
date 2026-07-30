@@ -11,21 +11,13 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   ArchiveBoxIcon,
-  BoltIcon,
   BookmarkIcon,
   ChevronDownIcon,
   CloudIcon,
   CodeBracketSquareIcon,
   CommandLineIcon,
-  CubeTransparentIcon,
-  CursorArrowRaysIcon,
   FolderOpenIcon,
-  ForwardIcon,
   PencilSquareIcon,
-  RectangleGroupIcon,
-  RocketLaunchIcon,
-  SparklesIcon,
-  WrenchScrewdriverIcon,
 } from '@heroicons/react/24/outline'
 import type { ComponentType, RefObject, SVGProps } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -33,7 +25,11 @@ import { useAppDispatch, useAppSelector } from '../app/hooks'
 import { sessionActions } from '../app/store'
 import { api } from '../lib/api'
 import { isRemotePath } from '../lib/remote'
-import { openWorkspacePath } from '../lib/useDesktop'
+import {
+  listWorkspaceApplications,
+  openWorkspaceInApplication,
+  type WorkspaceApplication,
+} from '../lib/useDesktop'
 import { useCloudSessionSync } from './CloudSyncToggle'
 import { TopBar } from './TopBar'
 
@@ -47,28 +43,6 @@ interface Props {
   terminalOpen: boolean
   onTogglePanel: (panel: PanelType) => void
 }
-
-interface WorkspaceOpener {
-  id: string
-  label: string
-  application?: string
-  icon: OutlineIcon
-  group: 'editor' | 'system'
-}
-
-const WORKSPACE_OPENERS: WorkspaceOpener[] = [
-  { id: 'vscode', label: 'VS Code', application: 'Visual Studio Code', icon: CodeBracketSquareIcon, group: 'editor' },
-  { id: 'cursor', label: 'Cursor', application: 'Cursor', icon: CursorArrowRaysIcon, group: 'editor' },
-  { id: 'zed', label: 'Zed', application: 'Zed', icon: BoltIcon, group: 'editor' },
-  { id: 'antigravity', label: 'Antigravity', application: 'Antigravity', icon: RocketLaunchIcon, group: 'editor' },
-  { id: 'finder', label: 'Finder', application: 'Finder', icon: FolderOpenIcon, group: 'system' },
-  { id: 'terminal', label: 'Terminal', application: 'Terminal', icon: CommandLineIcon, group: 'system' },
-  { id: 'iterm', label: 'iTerm2', application: 'iTerm', icon: RectangleGroupIcon, group: 'system' },
-  { id: 'ghostty', label: 'Ghostty', application: 'Ghostty', icon: SparklesIcon, group: 'system' },
-  { id: 'warp', label: 'Warp', application: 'Warp', icon: ForwardIcon, group: 'system' },
-  { id: 'xcode', label: 'Xcode', application: 'Xcode', icon: WrenchScrewdriverIcon, group: 'system' },
-  { id: 'goland', label: 'GoLand', application: 'GoLand', icon: CubeTransparentIcon, group: 'system' },
-]
 
 export function DesktopTitlebar(props: Props) {
   const { t } = useTranslation()
@@ -125,7 +99,11 @@ export function DesktopTitlebar(props: Props) {
   }, [props.isRunning, refreshBranch])
 
   return (
-    <div className="pointer-events-none absolute left-[88px] right-[14px] top-[6px] z-[46] flex h-[34px] min-w-0 items-center gap-2">
+    <div
+      data-testid="desktop-titlebar"
+      style={{ left: 'calc(var(--sidebar-width, 20rem) + 10px)' }}
+      className="pointer-events-none absolute right-[14px] top-[6px] z-[46] flex h-[34px] min-w-0 items-center gap-2"
+    >
       <TaskDetails
         sessionId={currentSessionId}
         title={taskTitle}
@@ -399,27 +377,52 @@ function WorkspaceOpenMenu({ projectPath }: { projectPath: string }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [error, setError] = useState('')
+  const [applications, setApplications] = useState<WorkspaceApplication[]>([])
+  const [loading, setLoading] = useState(true)
+  const [discoveryFailed, setDiscoveryFailed] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([])
   const menuId = useId()
   const disabled = !projectPath || isRemotePath(projectPath)
 
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    setDiscoveryFailed(false)
+    void listWorkspaceApplications()
+      .then((items) => {
+        if (active) setApplications(items)
+      })
+      .catch(() => {
+        if (active) {
+          setApplications([])
+          setDiscoveryFailed(true)
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
   useDismissableMenu(open, setOpen, rootRef, triggerRef)
   useEffect(() => {
     if (!open) return
     const frame = window.requestAnimationFrame(() => itemRefs.current[0]?.focus())
     return () => window.cancelAnimationFrame(frame)
-  }, [open])
+  }, [applications.length, open])
 
-  async function openIn(opener: WorkspaceOpener) {
+  async function openIn(application: WorkspaceApplication) {
     if (disabled) return
     setError('')
     try {
-      await openWorkspacePath(projectPath, opener.application)
+      await openWorkspaceInApplication(projectPath, application.id)
       setOpen(false)
     } catch {
-      setError(t('desktopTitlebar.openFailed', { app: opener.label }))
+      setError(t('desktopTitlebar.openFailed', { app: application.label }))
     }
   }
 
@@ -469,13 +472,27 @@ function WorkspaceOpenMenu({ projectPath }: { projectPath: string }) {
           role="menu"
           aria-label={t('desktopTitlebar.openWorkspace')}
           onKeyDown={onMenuKeyDown}
-          className="absolute right-0 top-[calc(100%+6px)] z-[var(--z-dropdown)] max-h-[calc(100vh-58px)] w-[224px] overflow-y-auto rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-[var(--shadow-lg)]"
+          className="absolute right-0 top-[calc(100%+6px)] z-[var(--z-dropdown)] max-h-[calc(100vh-58px)] w-[232px] overflow-y-auto rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-[var(--shadow-lg)]"
         >
-          {WORKSPACE_OPENERS.map((opener, index) => {
-            const Icon = opener.icon
-            const startsGroup = index > 0 && WORKSPACE_OPENERS[index - 1].group !== opener.group
+          {loading && (
+            <div className="px-2.5 py-2 text-[11px] text-[var(--color-muted-foreground)]">
+              {t('common.loading')}
+            </div>
+          )}
+          {!loading && discoveryFailed && (
+            <p role="alert" className="px-2.5 py-2 text-[11px] leading-relaxed text-[var(--color-error-fg)]">
+              {t('desktopTitlebar.discoveryFailed')}
+            </p>
+          )}
+          {!loading && !discoveryFailed && applications.length === 0 && (
+            <div className="px-2.5 py-2 text-[11px] text-[var(--color-muted-foreground)]">
+              {t('desktopTitlebar.noApplications')}
+            </div>
+          )}
+          {applications.map((application, index) => {
+            const startsGroup = index > 0 && applications[index - 1].group !== application.group
             return (
-              <div key={opener.id}>
+              <div key={application.id}>
                 {startsGroup && <div className="my-1 h-px bg-[var(--color-border)]" />}
                 <button
                   ref={(element) => {
@@ -483,13 +500,11 @@ function WorkspaceOpenMenu({ projectPath }: { projectPath: string }) {
                   }}
                   type="button"
                   role="menuitem"
-                  onClick={() => void openIn(opener)}
-                  className="flex w-full items-center gap-2.5 rounded-[var(--radius-md)] px-2.5 py-2 text-left text-[13px] text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)]"
+                  onClick={() => void openIn(application)}
+                  className="flex w-full items-center gap-2.5 rounded-[var(--radius-md)] px-2.5 py-1.5 text-left text-[13px] text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-muted)] focus:bg-[var(--color-muted)] focus:outline-none"
                 >
-                  <span className="grid h-6 w-6 shrink-0 place-items-center rounded-[var(--radius-md)] bg-[var(--color-muted)]">
-                    <Icon className="h-4 w-4 text-[var(--color-muted-foreground)]" />
-                  </span>
-                  {opener.label}
+                  <WorkspaceApplicationIcon application={application} />
+                  {application.label}
                 </button>
               </div>
             )
@@ -502,6 +517,25 @@ function WorkspaceOpenMenu({ projectPath }: { projectPath: string }) {
         </div>
       )}
     </div>
+  )
+}
+
+function WorkspaceApplicationIcon({ application }: { application: WorkspaceApplication }) {
+  if (application.iconDataUrl) {
+    return (
+      <img
+        src={application.iconDataUrl}
+        alt=""
+        aria-hidden="true"
+        className="h-[22px] w-[22px] shrink-0 object-contain"
+      />
+    )
+  }
+  const Icon = application.id === 'finder' ? FolderOpenIcon : CommandLineIcon
+  return (
+    <span className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-[var(--radius-sm)] bg-[var(--color-muted)]">
+      <Icon className="h-3.5 w-3.5 text-[var(--color-muted-foreground)]" />
+    </span>
   )
 }
 

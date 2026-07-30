@@ -996,6 +996,8 @@ export default {
     open: '開啟',
     openWorkspace: '開啟工作區',
     localOnly: '只有本機工作區可以在應用程式中開啟。',
+    discoveryFailed: '無法讀取這台 Mac 上已安裝的應用程式。',
+    noApplications: '找不到支援的應用程式。',
     openFailed: '無法開啟 {app}，請確認應用程式已安裝且工作區路徑在允許範圍內。',
   },
 

@@ -1001,6 +1001,8 @@ export default {
     open: '열기',
     openWorkspace: '워크스페이스 열기',
     localOnly: '로컬 워크스페이스만 앱에서 열 수 있습니다.',
+    discoveryFailed: '이 Mac에 설치된 앱을 읽을 수 없습니다.',
+    noApplications: '지원되는 앱을 찾지 못했습니다.',
     openFailed: '{app}을(를) 열 수 없습니다. 앱이 설치되어 있고 워크스페이스 위치가 허용되어 있는지 확인하세요.',
   },
 

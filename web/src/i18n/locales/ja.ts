@@ -1002,6 +1002,8 @@ export default {
     open: '開く',
     openWorkspace: 'ワークスペースを開く',
     localOnly: 'アプリで開けるのはローカルワークスペースのみです。',
+    discoveryFailed: 'この Mac にインストール済みのアプリを読み取れませんでした。',
+    noApplications: '対応するアプリが見つかりませんでした。',
     openFailed: '{app} を開けませんでした。インストール済みで、ワークスペースの場所が許可されているか確認してください。',
   },
 

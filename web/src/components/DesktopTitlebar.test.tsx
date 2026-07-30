@@ -6,14 +6,16 @@ import { sessionActions, store } from '../app/store'
 import { DesktopTitlebar } from './DesktopTitlebar'
 
 const mocks = vi.hoisted(() => ({
-  openWorkspacePath: vi.fn<() => Promise<void>>(),
+  listWorkspaceApplications: vi.fn(),
+  openWorkspaceInApplication: vi.fn<() => Promise<void>>(),
   updateTask: vi.fn(),
   workspace: vi.fn(),
   cloudSetSessionSync: vi.fn(),
 }))
 
 vi.mock('../lib/useDesktop', () => ({
-  openWorkspacePath: mocks.openWorkspacePath,
+  listWorkspaceApplications: mocks.listWorkspaceApplications,
+  openWorkspaceInApplication: mocks.openWorkspaceInApplication,
 }))
 
 vi.mock('../lib/api', async (importOriginal) => {
@@ -52,7 +54,12 @@ function renderTitlebar() {
 beforeEach(async () => {
   cleanup()
   vi.clearAllMocks()
-  mocks.openWorkspacePath.mockResolvedValue()
+  mocks.listWorkspaceApplications.mockResolvedValue([
+    { id: 'vscode', label: 'VS Code', group: 'editor', iconDataUrl: 'data:image/png;base64,icon' },
+    { id: 'cursor', label: 'Cursor', group: 'editor' },
+    { id: 'finder', label: 'Finder', group: 'system' },
+  ])
+  mocks.openWorkspaceInApplication.mockResolvedValue()
   mocks.updateTask.mockResolvedValue({})
   mocks.workspace.mockResolvedValue({ branch: 'codex/desktop-task-titlebar', dirty: true })
   mocks.cloudSetSessionSync.mockResolvedValue({ enabled: true })
@@ -76,6 +83,9 @@ beforeEach(async () => {
 describe('DesktopTitlebar', () => {
   it('shows task, branch, cloud, and actions without an ellipsis menu', async () => {
     renderTitlebar()
+    expect(screen.getByTestId('desktop-titlebar').style.left).toBe(
+      'calc(var(--sidebar-width, 20rem) + 10px)',
+    )
 
     const details = screen.getByRole('button', { name: 'Task details' })
     fireEvent.click(details)
@@ -123,11 +133,20 @@ describe('DesktopTitlebar', () => {
   it('opens the local workspace in the selected application', async () => {
     renderTitlebar()
     fireEvent.click(screen.getByRole('button', { name: 'Open workspace' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: 'VS Code' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'VS Code' }))
 
     await waitFor(() => {
-      expect(mocks.openWorkspacePath).toHaveBeenCalledWith('/Users/test/work/jcode', 'Visual Studio Code')
+      expect(mocks.openWorkspaceInApplication).toHaveBeenCalledWith('/Users/test/work/jcode', 'vscode')
     })
+  })
+
+  it('uses discovered native icons and hides applications the system did not return', async () => {
+    renderTitlebar()
+    fireEvent.click(screen.getByRole('button', { name: 'Open workspace' }))
+
+    const vscode = await screen.findByRole('menuitem', { name: 'VS Code' })
+    expect(vscode.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,icon')
+    expect(screen.queryByRole('menuitem', { name: 'GoLand' })).toBeNull()
   })
 
   it('prevents duplicate cloud updates while a toggle is in flight', async () => {
