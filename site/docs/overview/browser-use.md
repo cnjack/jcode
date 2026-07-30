@@ -37,27 +37,48 @@ Tabs the agent controls in your Chrome are grouped under a **"jcode 🔎"** tab
 group so you always see what's under agent control. Detach the debugger (or
 click the popup's Disconnect) and control returns to you immediately.
 
-## Installing the extension
+## Set up the extension
 
-> [!IMPORTANT]
-> The extension is **not yet on the Chrome Web Store** — the store listing is
-> in review. For now it must be loaded manually in developer mode from the
-> `extension/` folder of the repository. The extension has a fixed ID, so a
-> manual install behaves identically to a store install (and will be replaced
-> by it once published).
+> [!TIP]
+> [Install **jcode Browser Bridge** from the Chrome Web Store](https://chromewebstore.google.com/detail/jcode-browser-bridge/olkapiiikpfhaccmjphakolinkcggcbd).
 
-1. Get the `extension/` folder — clone the repo or download it from GitHub.
-2. Open `chrome://extensions` (or `edge://extensions`) and enable
-   **Developer mode** (toggle in the top-right corner).
-3. Click **Load unpacked** and select the `extension/` folder.
-4. Start jcode with browser use enabled (Settings → Browser → on, or
-   `/browser on` in the TUI).
-5. Click the extension's toolbar icon → **Auto-connect to jcode**. It finds
-   the running jcode app via native messaging — even on a dynamic desktop-app
-   port — and connects. You connect once; afterwards it reconnects silently.
+1. Start jcode, then enable browser use in **Settings → Browser** or run
+   `/browser on` in the TUI.
+2. Install **jcode Browser Bridge** from the Chrome Web Store. Pin it to the
+   toolbar if you want the connection control to stay visible.
+3. Click the extension icon, then click **Auto-connect to jcode**.
+4. Confirm that **Settings → Browser → Extension** says **Connected**, or run
+   `/browser` in the TUI.
+
+The extension uses native messaging to find the running jcode app, including a
+desktop app using a dynamic port. The first connection stores a local pairing
+token; after that, the extension reconnects silently when jcode starts. Click
+**Disconnect** in the extension popup to revoke the token and detach every
+controlled tab.
+
+### Development install
+
+When testing an unpublished extension change, load the repository copy:
+
+1. Open `chrome://extensions` (or `edge://extensions`) and enable
+   **Developer mode**.
+2. Click **Load unpacked** and select the repository's `extension/` folder.
+3. Start or restart jcode with browser use enabled, then click the extension's
+   **Auto-connect to jcode** button.
 
 The extension only ever talks to your local jcode (`host_permissions` are
 limited to `127.0.0.1` / `localhost`) and sends nothing to any third party.
+
+### If it does not connect
+
+- Make sure jcode is running and browser use is enabled.
+- If the popup says the native host is unavailable, restart jcode once with
+  browser use enabled. jcode installs the native-messaging registration at
+  startup.
+- In the extension's site-access settings, allow access to `127.0.0.1` and
+  `localhost`, reload the extension, then try **Auto-connect to jcode** again.
+- Run `/browser` or open **Settings → Browser** to check whether the extension
+  is online.
 
 ## The tools
 

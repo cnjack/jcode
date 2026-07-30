@@ -603,6 +603,8 @@ export default {
       notConnected: '연결 안 됨',
       online: '온라인',
       connectHint: '연결 방법: jcode Browser Bridge 확장을 설치하고 팝업에서 "Auto-connect to jcode"를 클릭하세요.',
+      installExtension: '확장 설치',
+      setupGuide: '설정 가이드',
       chromePath: 'Chrome 경로',
       approval: '승인',
       navigate: '탐색',
