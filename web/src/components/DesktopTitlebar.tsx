@@ -1,11 +1,11 @@
 /**
- * DesktopTitlebar — macOS overlay titlebar for the active task.
+ * DesktopTitlebar — native-desktop task controls for the active task.
  *
- * The browser keeps its existing floating controls. In the Tauri macOS shell,
- * this component uses the otherwise-empty titlebar band for task identity,
- * branch/workspace context, per-session cloud sync, task actions, app launchers,
- * and the existing panel picker. Worktree/branch mutation deliberately stays
- * out of scope: the branch is informational only.
+ * macOS uses its otherwise-empty overlay titlebar band; Windows and Linux render
+ * the same row immediately below their system titlebar. The component carries
+ * task identity, branch/workspace context, per-session cloud sync, task actions,
+ * installed app launchers, and the existing panel picker. Worktree/branch
+ * mutation deliberately stays out of scope: the branch is informational only.
  */
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
@@ -531,7 +531,11 @@ function WorkspaceApplicationIcon({ application }: { application: WorkspaceAppli
       />
     )
   }
-  const Icon = application.id === 'finder' ? FolderOpenIcon : CommandLineIcon
+  const Icon = application.kind === 'fileManager'
+    ? FolderOpenIcon
+    : application.kind === 'editor'
+      ? CodeBracketSquareIcon
+      : CommandLineIcon
   return (
     <span className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-[var(--radius-sm)] bg-[var(--color-muted)]">
       <Icon className="h-3.5 w-3.5 text-[var(--color-muted-foreground)]" />

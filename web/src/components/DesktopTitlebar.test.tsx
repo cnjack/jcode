@@ -55,9 +55,9 @@ beforeEach(async () => {
   cleanup()
   vi.clearAllMocks()
   mocks.listWorkspaceApplications.mockResolvedValue([
-    { id: 'vscode', label: 'VS Code', group: 'editor', iconDataUrl: 'data:image/png;base64,icon' },
-    { id: 'cursor', label: 'Cursor', group: 'editor' },
-    { id: 'finder', label: 'Finder', group: 'system' },
+    { id: 'vscode', label: 'VS Code', group: 'editor', kind: 'editor', iconDataUrl: 'data:image/png;base64,icon' },
+    { id: 'cursor', label: 'Cursor', group: 'editor', kind: 'editor' },
+    { id: 'finder', label: 'Finder', group: 'system', kind: 'fileManager' },
   ])
   mocks.openWorkspaceInApplication.mockResolvedValue()
   mocks.updateTask.mockResolvedValue({})

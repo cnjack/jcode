@@ -5,7 +5,11 @@ describe('isAbsoluteLocalWorkspacePath', () => {
   it('accepts absolute macOS paths and rejects relative or remote workspaces', () => {
     expect(isAbsoluteLocalWorkspacePath('/Users/test/work/jcode')).toBe(true)
     expect(isAbsoluteLocalWorkspacePath('/Volumes/source/jcode')).toBe(true)
+    expect(isAbsoluteLocalWorkspacePath('C:\\Users\\test\\work\\jcode')).toBe(true)
+    expect(isAbsoluteLocalWorkspacePath('D:/source/jcode')).toBe(true)
     expect(isAbsoluteLocalWorkspacePath('work/jcode')).toBe(false)
+    expect(isAbsoluteLocalWorkspacePath('C:work\\jcode')).toBe(false)
+    expect(isAbsoluteLocalWorkspacePath('\\\\server\\share\\jcode')).toBe(false)
     expect(isAbsoluteLocalWorkspacePath('ssh://host/work/jcode')).toBe(false)
     expect(isAbsoluteLocalWorkspacePath('docker://container/work/jcode')).toBe(false)
   })
