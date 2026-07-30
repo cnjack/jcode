@@ -649,6 +649,8 @@ export default {
       notConnected: 'Not connected',
       online: 'Online',
       connectHint: 'To connect: install the jcode Browser Bridge extension, open its popup, and click "Auto-connect to jcode".',
+      installExtension: 'Install extension',
+      setupGuide: 'Setup guide',
       chromePath: 'Chrome path',
       approval: 'Approval',
       navigate: 'Navigation',

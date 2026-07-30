@@ -604,6 +604,8 @@ export default {
       notConnected: '未連線',
       online: '線上',
       connectHint: '連線方式：安裝 jcode Browser Bridge 擴充，開啟 popup，點 "Auto-connect to jcode"。',
+      installExtension: '安裝擴充功能',
+      setupGuide: '設定指南',
       chromePath: 'Chrome 路徑',
       approval: '審批',
       navigate: '導航',

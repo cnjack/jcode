@@ -47,6 +47,7 @@ import {
   XMarkIcon,
   MinusIcon,
   ArrowPathIcon,
+  ArrowTopRightOnSquareIcon,
   ExclamationTriangleIcon,
   CircleStackIcon,
   WrenchScrewdriverIcon,
@@ -3314,6 +3315,10 @@ function AppearanceTab() {
 // Browser tab — config + site permissions
 // ════════════════════════════════════════════════════════════════════════════
 
+const BROWSER_BRIDGE_STORE_URL =
+  'https://chromewebstore.google.com/detail/jcode-browser-bridge/olkapiiikpfhaccmjphakolinkcggcbd'
+const BROWSER_USE_GUIDE_URL = 'https://www.j-code.net/docs/overview/browser-use'
+
 function BrowserTab() {
   const { t } = useTranslation()
   const [status, setStatus] = useState<BrowserStatusResponse | null>(null)
@@ -3457,11 +3462,37 @@ function BrowserTab() {
                   {st?.extension_online ? t('settings.browser.connected') : t('settings.browser.notConnected')}
                 </div>
               </div>
-              {st?.extension_online && (
+              {st?.extension_online ? (
                 <span className={CHIP + ' !bg-[var(--color-success-bg)] !text-[var(--color-success-fg)]'}>{t('settings.browser.online')}</span>
+              ) : (
+                <a
+                  className={`${BTN_SECONDARY} ${BTN_XS} shrink-0`}
+                  href={BROWSER_BRIDGE_STORE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {t('settings.browser.installExtension')}
+                  <ArrowTopRightOnSquareIcon className="h-3 w-3" />
+                </a>
               )}
             </div>
           </div>
+
+          {!st?.extension_online && (
+            <div className="mt-2 flex items-center gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-muted)] px-3 py-2">
+              <p className="min-w-0 flex-1 text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">
+                {t('settings.browser.connectHint')}
+              </p>
+              <a
+                className="shrink-0 text-[10.5px] font-medium text-[var(--color-accent-neutral)] hover:underline"
+                href={BROWSER_USE_GUIDE_URL}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {t('settings.browser.setupGuide')}
+              </a>
+            </div>
+          )}
 
           {!st?.chrome_found && (
             <div className="mt-3">

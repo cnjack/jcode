@@ -633,6 +633,8 @@ export default {
       notConnected: '未连接',
       online: '在线',
       connectHint: '连接方式：安装 jcode Browser Bridge 扩展，打开它的 popup，点 "Auto-connect to jcode"。',
+      installExtension: '安装扩展',
+      setupGuide: '设置指南',
       chromePath: 'Chrome 路径',
       approval: '审批',
       navigate: '导航',

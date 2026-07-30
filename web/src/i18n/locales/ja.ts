@@ -603,6 +603,8 @@ export default {
       notConnected: '未接続',
       online: 'オンライン',
       connectHint: '接続方法: jcode Browser Bridge 拡張をインストールし、ポップアップから "Auto-connect to jcode" を押します。',
+      installExtension: '拡張機能をインストール',
+      setupGuide: 'セットアップガイド',
       chromePath: 'Chrome パス',
       approval: '承認',
       navigate: 'ナビゲート',

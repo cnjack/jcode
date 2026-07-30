@@ -184,9 +184,9 @@ or **your** Chrome via the jcode Browser Bridge extension (your logins, your tab
 Toggle with `/browser` in the TUI or Settings → Browser on the web. See the
 [Browser Use guide](https://www.j-code.net/docs/overview/browser-use).
 
-> The extension currently installs via `chrome://extensions` → Developer mode →
-> **Load unpacked** (from the repo's `extension/` folder) — the Chrome Web Store
-> listing is in review.
+Install [jcode Browser Bridge from the Chrome Web Store](https://chromewebstore.google.com/detail/jcode-browser-bridge/olkapiiikpfhaccmjphakolinkcggcbd),
+then open its popup and click **Auto-connect to jcode**. Loading the repository's
+`extension/` folder as an unpacked extension remains available for development.
 
 ### ⏱ Automations
 

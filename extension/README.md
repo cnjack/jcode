@@ -6,11 +6,19 @@ browser-use feature (the other backend is a managed Chrome jcode launches
 itself; that one needs no extension). See
 [`site/docs/overview/browser-use.md`](../site/docs/overview/browser-use.md).
 
-The extension has a **fixed id** (`ekcnniaefmnhnemnpphikhgfoofnojnd`, pinned by
-the `key` field in `manifest.json`) so the id is stable across machines and
-reloads. That's what makes the one-click deeplink below possible.
+The Chrome Web Store build has id `olkapiiikpfhaccmjphakolinkcggcbd`. The
+unpacked development build has a separate fixed id
+(`ekcnniaefmnhnemnpphikhgfoofnojnd`, pinned by the `key` field in
+`manifest.json`) so native messaging works across reloads.
 
-## Install (unpacked, for development)
+## Install
+
+[Install jcode Browser Bridge from the Chrome Web Store](https://chromewebstore.google.com/detail/jcode-browser-bridge/olkapiiikpfhaccmjphakolinkcggcbd).
+
+Then start jcode with browser use enabled (Settings → Browser → on) and continue
+with **Auto-connect** below.
+
+### Unpacked development build
 
 1. Start jcode web/desktop.
 2. Open `chrome://extensions` (or `edge://extensions`), enable **Developer mode**.
