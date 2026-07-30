@@ -17,7 +17,7 @@
  * (no backfill).
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { CloudIcon } from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
 import { api } from '../lib/api'
@@ -25,22 +25,42 @@ import { useAppSelector } from '../app/hooks'
 
 const POLL_MS = 5000
 
-export function CloudSyncToggle() {
-  const { t } = useTranslation()
-  const sessionId = useAppSelector((s) => s.session.currentSessionId)
+export interface CloudSessionSyncState {
+  loggedIn: boolean
+  synced: boolean
+  busy: boolean
+  toggle: () => Promise<void>
+}
+
+/** Shared per-session cloud state used by both browser chrome and Desktop. */
+export function useCloudSessionSync(sessionId: string): CloudSessionSyncState {
   const [loggedIn, setLoggedIn] = useState(false)
   const [synced, setSynced] = useState(false)
   const [busy, setBusy] = useState(false)
+  const refreshSequence = useRef(0)
+  const busyRef = useRef(false)
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   const refresh = useCallback(async () => {
+    if (busyRef.current) return
+    const sequence = ++refreshSequence.current
     try {
       const st = await api.cloudStatus()
+      if (sequence !== refreshSequence.current) return
       setLoggedIn(st.logged_in)
       if (!st.logged_in) {
         setSynced(false)
         return
       }
       const sync = await api.cloudSync()
+      if (sequence !== refreshSequence.current) return
       setSynced(sessionId ? !!sync.sessions[sessionId] : false)
     } catch {
       // Tolerate failure (older backend / transient): keep the last state.
@@ -48,24 +68,43 @@ export function CloudSyncToggle() {
   }, [sessionId])
 
   useEffect(() => {
+    refreshSequence.current++
+    setSynced(false)
     void refresh()
     const id = window.setInterval(() => void refresh(), POLL_MS)
-    return () => window.clearInterval(id)
+    return () => {
+      refreshSequence.current++
+      window.clearInterval(id)
+    }
   }, [refresh])
 
   async function toggle() {
-    if (!sessionId || !loggedIn || busy) return
+    if (!sessionId || !loggedIn || busyRef.current) return
+    busyRef.current = true
+    const sequence = ++refreshSequence.current
     setBusy(true)
     const next = !synced
     setSynced(next) // optimistic; the next poll reconciles
     try {
       await api.cloudSetSessionSync(sessionId, next)
     } catch {
-      setSynced(!next)
+      if (mountedRef.current && sequence === refreshSequence.current) setSynced(!next)
     } finally {
-      setBusy(false)
+      busyRef.current = false
+      if (mountedRef.current) {
+        setBusy(false)
+        if (sequence === refreshSequence.current) void refresh()
+      }
     }
   }
+
+  return { loggedIn, synced, busy, toggle }
+}
+
+export function CloudSyncToggle() {
+  const { t } = useTranslation()
+  const sessionId = useAppSelector((s) => s.session.currentSessionId)
+  const { loggedIn, synced, busy, toggle } = useCloudSessionSync(sessionId)
 
   if (!sessionId) return null
 

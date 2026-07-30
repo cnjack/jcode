@@ -989,6 +989,22 @@ export default {
     },
   },
 
+  // macOS Desktop のタスクタイトルバー。
+  desktopTitlebar: {
+    taskDetails: 'タスクの詳細',
+    ready: '準備完了',
+    workspace: 'ワークスペース',
+    branch: 'ブランチ',
+    path: 'パス',
+    model: 'モデル',
+    noBranch: 'ブランチなし',
+    updateFailed: 'このタスクを更新できませんでした。',
+    open: '開く',
+    openWorkspace: 'ワークスペースを開く',
+    localOnly: 'アプリで開けるのはローカルワークスペースのみです。',
+    openFailed: '{app} を開けませんでした。インストール済みで、ワークスペースの場所が許可されているか確認してください。',
+  },
+
   // クラウドリレーのステータスバッジ + ポップオーバー（サイドバー下部）。
   cloud: {
     mobileHubTitle: 'リモートアクセス',

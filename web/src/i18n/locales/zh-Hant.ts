@@ -983,6 +983,22 @@ export default {
     },
   },
 
+  // macOS Desktop 任務標題列。
+  desktopTitlebar: {
+    taskDetails: '任務詳情',
+    ready: '就緒',
+    workspace: '工作區',
+    branch: '分支',
+    path: '路徑',
+    model: '模型',
+    noBranch: '無分支',
+    updateFailed: '無法更新此任務。',
+    open: '開啟',
+    openWorkspace: '開啟工作區',
+    localOnly: '只有本機工作區可以在應用程式中開啟。',
+    openFailed: '無法開啟 {app}，請確認應用程式已安裝且工作區路徑在允許範圍內。',
+  },
+
   // 雲端中繼狀態徽章 + 彈出面板（側邊欄底部）。
   cloud: {
     mobileHubTitle: '遠端存取',

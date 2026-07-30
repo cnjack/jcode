@@ -33,6 +33,8 @@ interface Props {
   activePanel: 'none' | 'plan' | 'files' | 'changes' | 'terminal'
   terminalOpen: boolean
   onTogglePanel: (panel: PanelType) => void
+  /** Render inside the native Desktop titlebar instead of floating standalone. */
+  embedded?: boolean
 }
 
 const PANEL_BUTTONS: { panel: PanelType; shortcut: string }[] = [
@@ -49,7 +51,7 @@ const PANEL_ICONS: Record<PanelType, typeof RectangleStackIcon> = {
   terminal: CommandLineIcon,
 }
 
-export function TopBar({ isRunning, wsConnected, activePanel, terminalOpen, onTogglePanel }: Props) {
+export function TopBar({ isRunning, wsConnected, activePanel, terminalOpen, onTogglePanel, embedded = false }: Props) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   // Working-tree diff stat shown inline on the Changes item. null on failure /
@@ -141,7 +143,7 @@ export function TopBar({ isRunning, wsConnected, activePanel, terminalOpen, onTo
   return (
     <div
       ref={controlRef}
-      className="absolute right-[14px] top-[6px] z-[46]"
+      className={embedded ? 'relative' : 'absolute right-[14px] top-[6px] z-[46]'}
       style={{ fontFamily: 'var(--font-sans)' }}
     >
       {/* position:relative wrapper so the absolute menu anchors to it, not to the

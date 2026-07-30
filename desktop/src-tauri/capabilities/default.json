@@ -20,6 +20,33 @@
     "notification:default",
     "opener:default",
     {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        { "path": "$HOME/**", "app": "Finder" },
+        { "path": "$HOME/**", "app": "Visual Studio Code" },
+        { "path": "$HOME/**", "app": "Cursor" },
+        { "path": "$HOME/**", "app": "Zed" },
+        { "path": "$HOME/**", "app": "Antigravity" },
+        { "path": "$HOME/**", "app": "Terminal" },
+        { "path": "$HOME/**", "app": "iTerm" },
+        { "path": "$HOME/**", "app": "Ghostty" },
+        { "path": "$HOME/**", "app": "Warp" },
+        { "path": "$HOME/**", "app": "Xcode" },
+        { "path": "$HOME/**", "app": "GoLand" },
+        { "path": "/Volumes/**", "app": "Finder" },
+        { "path": "/Volumes/**", "app": "Visual Studio Code" },
+        { "path": "/Volumes/**", "app": "Cursor" },
+        { "path": "/Volumes/**", "app": "Zed" },
+        { "path": "/Volumes/**", "app": "Antigravity" },
+        { "path": "/Volumes/**", "app": "Terminal" },
+        { "path": "/Volumes/**", "app": "iTerm" },
+        { "path": "/Volumes/**", "app": "Ghostty" },
+        { "path": "/Volumes/**", "app": "Warp" },
+        { "path": "/Volumes/**", "app": "Xcode" },
+        { "path": "/Volumes/**", "app": "GoLand" }
+      ]
+    },
+    {
       "identifier": "opener:allow-open-url",
       "allow": [
         {

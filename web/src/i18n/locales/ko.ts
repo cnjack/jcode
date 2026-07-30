@@ -988,6 +988,22 @@ export default {
     },
   },
 
+  // macOS Desktop 작업 제목 표시줄.
+  desktopTitlebar: {
+    taskDetails: '작업 세부 정보',
+    ready: '준비됨',
+    workspace: '워크스페이스',
+    branch: '브랜치',
+    path: '경로',
+    model: '모델',
+    noBranch: '브랜치 없음',
+    updateFailed: '이 작업을 업데이트할 수 없습니다.',
+    open: '열기',
+    openWorkspace: '워크스페이스 열기',
+    localOnly: '로컬 워크스페이스만 앱에서 열 수 있습니다.',
+    openFailed: '{app}을(를) 열 수 없습니다. 앱이 설치되어 있고 워크스페이스 위치가 허용되어 있는지 확인하세요.',
+  },
+
   // 클라우드 릴리 상태 배지 + 팝오버 (사이드바 하단).
   cloud: {
     mobileHubTitle: '원격 액세스',

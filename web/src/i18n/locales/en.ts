@@ -1038,6 +1038,22 @@ export default {
     },
   },
 
+  // macOS Desktop task titlebar.
+  desktopTitlebar: {
+    taskDetails: 'Task details',
+    ready: 'Ready',
+    workspace: 'Workspace',
+    branch: 'Branch',
+    path: 'Path',
+    model: 'Model',
+    noBranch: 'No branch',
+    updateFailed: 'Could not update this task.',
+    open: 'Open',
+    openWorkspace: 'Open workspace',
+    localOnly: 'Opening apps is available for local workspaces only.',
+    openFailed: 'Could not open {app}. Check that it is installed and this workspace location is allowed.',
+  },
+
   // Cloud relay status badge + popover (Sidebar footer).
   cloud: {
     mobileHubTitle: 'Remote Access',

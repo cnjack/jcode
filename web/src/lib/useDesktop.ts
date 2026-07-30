@@ -8,6 +8,10 @@
 export const isTauri: boolean =
   typeof window !== 'undefined' && !!(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
 
+/** True only for the macOS desktop shell that uses an overlay title bar. */
+export const isMacOSDesktop: boolean =
+  isTauri && typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || '')
+
 /**
  * Tag the root document for native desktop shell styling. The macOS Tauri
  * window uses an overlay title bar, so CSS needs an `is-tauri-macos` hook to
@@ -38,6 +42,24 @@ export async function openUrl(url: string): Promise<void> {
   } else {
     window.open(url, '_blank', 'noopener,noreferrer')
   }
+}
+
+/**
+ * Open a local workspace in a specific desktop application. The Tauri
+ * capability file scopes this bridge to an explicit app allowlist and local
+ * workspace roots; browser callers are rejected.
+ */
+export async function openWorkspacePath(path: string, application?: string): Promise<void> {
+  if (!isTauri) throw new Error('openWorkspacePath() called outside Tauri')
+  if (!isAbsoluteLocalWorkspacePath(path)) {
+    throw new Error('openWorkspacePath() requires an absolute local path')
+  }
+  const { openPath } = await import('@tauri-apps/plugin-opener')
+  await openPath(path, application)
+}
+
+export function isAbsoluteLocalWorkspacePath(path: string): boolean {
+  return path.startsWith('/') && !path.startsWith('ssh://') && !path.startsWith('docker://')
 }
 
 /**

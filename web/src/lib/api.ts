@@ -170,7 +170,10 @@ export const api = {
     const q = mode ? `?mode=${encodeURIComponent(mode)}` : ''
     return request<DiffResponse>(`/api/diff${q}`)
   },
-  workspace: () => request<WorkspaceInfo>('/api/workspace'),
+  workspace: (taskId?: string) => {
+    const q = taskId ? `?task_id=${encodeURIComponent(taskId)}` : ''
+    return request<WorkspaceInfo>(`/api/workspace${q}`)
+  },
   gitBranches: () => request<GitBranchesResponse>('/api/git/branches'),
   gitCheckout: (branch: string, create = false, strategy: '' | 'stash' | 'force' = '') =>
     request<GitCheckoutResponse>('/api/git/checkout', {
