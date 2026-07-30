@@ -60,7 +60,7 @@ import { RightPanel } from './components/RightPanel'
 import { TerminalPanel } from './components/TerminalPanel'
 import { RemoteConnectWizard } from './components/RemoteConnectWizard'
 import type { RemotePrefill } from './lib/remote'
-import { isMacOSDesktop } from './lib/useDesktop'
+import { isTauri } from './lib/useDesktop'
 
 export default function App() {
   const dispatch = useAppDispatch()
@@ -277,10 +277,10 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
         <div className="app-shell relative flex h-[100dvh] overflow-hidden bg-[var(--color-background)] text-[var(--color-foreground)]">
           {/* Native title-bar drag strip — hidden in browser, shown in Tauri (CSS). */}
           <div className="titlebar-drag" data-tauri-drag-region aria-hidden="true" />
-          {/* macOS Desktop uses the native overlay band for task context and
-              controls. Browser + other desktop platforms keep the established
-              floating TopBar and cloud button unchanged. */}
-          {activeView === 'chat' && isMacOSDesktop && (
+          {/* Every native desktop exposes the same task context and application
+              launchers. macOS places them in its overlay band; Windows/Linux
+              place the row at the top of the web content below the OS chrome. */}
+          {activeView === 'chat' && isTauri && (
             <DesktopTitlebar
               isRunning={isRunning}
               wsConnected={wsConnected}
@@ -289,7 +289,7 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
               onTogglePanel={togglePanel}
             />
           )}
-          {activeView === 'chat' && !isMacOSDesktop && (
+          {activeView === 'chat' && !isTauri && (
             <TopBar
               isRunning={isRunning}
               wsConnected={wsConnected}
@@ -298,8 +298,8 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
               onTogglePanel={togglePanel}
             />
           )}
-          {/* Browser/non-mac fallback: retain the standalone per-session switch. */}
-          {activeView === 'chat' && !isMacOSDesktop && <CloudSyncToggle />}
+          {/* Browser fallback: retain the standalone per-session switch. */}
+          {activeView === 'chat' && !isTauri && <CloudSyncToggle />}
           {/* Codex-style computer-use PiP — floats under the TopBar, shows the
               latest screenshot from the session's computer_screenshot calls. */}
           {activeView === 'chat' && <ComputerShotPiP />}

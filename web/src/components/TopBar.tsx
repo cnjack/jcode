@@ -37,11 +37,11 @@ interface Props {
   embedded?: boolean
 }
 
-const PANEL_BUTTONS: { panel: PanelType; shortcut: string }[] = [
-  { panel: 'plan', shortcut: '⇧⌘P' },
-  { panel: 'files', shortcut: '⇧⌘E' },
-  { panel: 'changes', shortcut: '⇧⌘G' },
-  { panel: 'terminal', shortcut: '⌘`' },
+const PANEL_BUTTONS: { panel: PanelType; macShortcut: string; otherShortcut: string }[] = [
+  { panel: 'plan', macShortcut: '⇧⌘P', otherShortcut: 'Ctrl+Shift+P' },
+  { panel: 'files', macShortcut: '⇧⌘E', otherShortcut: 'Ctrl+Shift+E' },
+  { panel: 'changes', macShortcut: '⇧⌘G', otherShortcut: 'Ctrl+Shift+G' },
+  { panel: 'terminal', macShortcut: '⌘`', otherShortcut: 'Ctrl+`' },
 ]
 
 const PANEL_ICONS: Record<PanelType, typeof RectangleStackIcon> = {
@@ -139,6 +139,8 @@ export function TopBar({ isRunning, wsConnected, activePanel, terminalOpen, onTo
 
   const panelsHint = t('topbar.panelsHint', { status: statusLabel })
   const panelsMenuLabel = t('topbar.panelsMenu', { status: statusLabel })
+  const usesMacShortcuts =
+    typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || '')
 
   return (
     <div
@@ -214,7 +216,7 @@ export function TopBar({ isRunning, wsConnected, activePanel, terminalOpen, onTo
                     </span>
                   )}
                   <span className="shrink-0 text-[11px] tracking-[0.04em] text-[var(--color-muted-foreground)]">
-                    {btn.shortcut}
+                    {usesMacShortcuts ? btn.macShortcut : btn.otherShortcut}
                   </span>
                 </button>
               )

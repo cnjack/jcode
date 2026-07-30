@@ -48,16 +48,18 @@ export interface WorkspaceApplication {
   id: string
   label: string
   group: 'editor' | 'system'
+  kind: 'editor' | 'fileManager' | 'terminal'
   iconDataUrl?: string
 }
 
 let workspaceApplicationsPromise: Promise<WorkspaceApplication[]> | null = null
 
 /**
- * Ask the native shell which supported applications Launch Services can
- * actually resolve. Each result carries the installed app's own icon. Cache
- * the in-flight/result promise so React StrictMode does not decode every icon
- * twice during its development remount.
+ * Ask the native shell which supported applications the current operating
+ * system can actually resolve. Each result carries the installed app's own
+ * icon when the platform exposes one. Cache the in-flight/result promise so
+ * React StrictMode does not repeat native discovery during its development
+ * remount.
  */
 export function listWorkspaceApplications(): Promise<WorkspaceApplication[]> {
   if (!workspaceApplicationsPromise) {
@@ -83,7 +85,10 @@ export async function openWorkspaceInApplication(path: string, appId: string): P
 }
 
 export function isAbsoluteLocalWorkspacePath(path: string): boolean {
-  return path.startsWith('/') && !path.startsWith('ssh://') && !path.startsWith('docker://')
+  if (path.startsWith('ssh://') || path.startsWith('docker://')) return false
+  const isPosixAbsolute = path.startsWith('/') && !path.startsWith('//')
+  const isWindowsDriveAbsolute = /^[A-Za-z]:[\\/]/.test(path)
+  return isPosixAbsolute || isWindowsDriveAbsolute
 }
 
 /**
