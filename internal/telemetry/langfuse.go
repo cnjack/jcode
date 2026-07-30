@@ -58,16 +58,64 @@ func NewLangfuseTracer(cfg *config.LangfuseConfig) *LangfuseTracer {
 }
 
 // WithNewTrace creates a new Langfuse trace and returns a context carrying its ID.
-func (t *LangfuseTracer) WithNewTrace(ctx context.Context, name string) context.Context {
+// The trace records the latest user message so the top-level Langfuse input
+// represents the user turn rather than only its child generation inputs.
+func (t *LangfuseTracer) WithNewTrace(ctx context.Context, name string, messages []*schema.Message) context.Context {
 	traceID, err := t.client.CreateTrace(&langfuseacl.TraceEventBody{
 		BaseEventBody: langfuseacl.BaseEventBody{Name: name},
 		TimeStamp:     time.Now(),
+		Input:         traceInput(messages),
 	})
 	if err != nil {
 		config.Logger().Printf("[langfuse] CreateTrace error: %v\n", err)
 		return ctx
 	}
 	return context.WithValue(ctx, traceIDKey, traceID)
+}
+
+// EndTrace records the final response on the current Langfuse trace.
+func (t *LangfuseTracer) EndTrace(ctx context.Context, output string) {
+	traceID, _ := ctx.Value(traceIDKey).(string)
+	if traceID == "" {
+		return
+	}
+	if err := t.client.EndTrace(&langfuseacl.TraceEventBody{
+		BaseEventBody: langfuseacl.BaseEventBody{
+			ID: traceID,
+		},
+		TimeStamp: time.Now(),
+		Output:    output,
+	}); err != nil {
+		config.Logger().Printf("[langfuse] EndTrace error: %v\n", err)
+	}
+}
+
+// traceInput returns the latest user message in a form safe to send to
+// Langfuse. Multimodal payloads retain their text but replace images with a
+// marker, preventing image bytes or URLs from becoming trace input.
+func traceInput(messages []*schema.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg == nil || msg.Role != schema.User {
+			continue
+		}
+		if len(msg.UserInputMultiContent) == 0 {
+			return msg.Content
+		}
+
+		parts := make([]string, 0, len(msg.UserInputMultiContent))
+		for _, part := range msg.UserInputMultiContent {
+			if part.Type == schema.ChatMessagePartTypeText {
+				if part.Text != "" {
+					parts = append(parts, part.Text)
+				}
+				continue
+			}
+			parts = append(parts, telemetryImagePlaceholder)
+		}
+		return strings.Join(parts, "\n")
+	}
+	return ""
 }
 
 // Flush ensures all buffered events are sent to Langfuse.

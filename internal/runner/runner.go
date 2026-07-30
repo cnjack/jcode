@@ -36,9 +36,12 @@ func Run(
 	goalStore *tools.GoalStore,
 	tracer *telemetry.LangfuseTracer,
 	tokenUsage *internalmodel.TokenUsage,
-) string {
+) (response string) {
 	if tracer != nil {
-		ctx = tracer.WithNewTrace(ctx, "coding_agent")
+		ctx = tracer.WithNewTrace(ctx, "coding_agent", messages)
+		defer func() {
+			tracer.EndTrace(ctx, response)
+		}()
 	}
 	if rec != nil {
 		ctx = internalagent.WithToolObservationSink(ctx, func(observation internalagent.ToolObservation) {
