@@ -28,6 +28,13 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-window-state = "2"
 tauri-plugin-global-shortcut = "2"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+base64 = "0.22"
+icns = { version = "0.4", default-features = false, features = ["pngio"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWorkspace"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSString", "NSURL"] }
+plist = "1"
+
 [profile.release]
 panic = "abort"
 codegen-units = 1

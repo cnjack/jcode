@@ -685,22 +685,36 @@ func (s *Server) currentModelContextLimit(eng *Engine) int {
 }
 
 // handleWorkspace returns lightweight git workspace info (branch + dirty) for
-// the current project so the web UI can show the real branch name. Diff stats
+// the requested task, or the foreground project for legacy callers. Diff stats
 // are fetched separately via /api/diff. Empty branch = not a git repo.
 func (s *Server) handleWorkspace(w http.ResponseWriter, r *http.Request) {
+	pwd := s.activePwd()
+	if taskID := r.URL.Query().Get("task_id"); taskID != "" {
+		var err error
+		pwd, err = s.workspacePwdForTask(taskID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if pwd == "" {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "task workspace not found"})
+			return
+		}
+	}
+
 	// Use the request context so the git commands are cancelled if the client
 	// disconnects (CodeRabbit review feedback on PR #82).
 	// `branch --show-current` (not `rev-parse --abbrev-ref HEAD`) so a freshly
 	// initialised repo with no commits still reports its unborn branch (e.g.
 	// "main") instead of the literal "HEAD".
 	branchCmd := exec.CommandContext(r.Context(), "git", "branch", "--show-current")
-	branchCmd.Dir = s.activePwd()
+	branchCmd.Dir = pwd
 	branchCmd.Env = utils.ScrubbedGitEnv()
 	branchOut, _ := branchCmd.Output()
 	branch := strings.TrimSpace(string(branchOut))
 
 	statusCmd := exec.CommandContext(r.Context(), "git", "status", "--porcelain")
-	statusCmd.Dir = s.activePwd()
+	statusCmd.Dir = pwd
 	statusCmd.Env = utils.ScrubbedGitEnv()
 	statusOut, _ := statusCmd.Output()
 	dirty := strings.TrimSpace(string(statusOut)) != ""
@@ -709,6 +723,24 @@ func (s *Server) handleWorkspace(w http.ResponseWriter, r *http.Request) {
 		"branch": branch,
 		"dirty":  dirty,
 	})
+}
+
+func (s *Server) workspacePwdForTask(taskID string) (string, error) {
+	if eng := s.resolveEngine(taskID); eng != nil {
+		return eng.pwd, nil
+	}
+	all, err := session.ListAllSessions()
+	if err != nil {
+		return "", fmt.Errorf("list task workspaces: %w", err)
+	}
+	for project, metas := range all {
+		for i := range metas {
+			if metas[i].UUID == taskID {
+				return project, nil
+			}
+		}
+	}
+	return "", nil
 }
 
 // --- Helpers ---

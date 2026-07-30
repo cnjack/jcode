@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -53,6 +54,43 @@ func TestWorkspaceNonGit(t *testing.T) {
 	if ws.Branch != "" || ws.Dirty {
 		t.Fatalf("non-git dir: want empty branch + not dirty, got %+v", ws)
 	}
+}
+
+func TestWorkspaceUsesRequestedTaskProject(t *testing.T) {
+	activeDir := initGitWorkspace(t, "active-branch")
+	taskDir := initGitWorkspace(t, "task-branch")
+	seedIndex(t, map[string][]session.SessionMeta{
+		taskDir: {{UUID: "requested-task", Project: taskDir}},
+	})
+	s := &Server{
+		Engine: &Engine{pwd: activeDir, taskID: "active-task"},
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/workspace?task_id=requested-task", nil)
+	s.handleWorkspace(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%q", rec.Code, rec.Body.String())
+	}
+	var ws struct {
+		Branch string `json:"branch"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &ws); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	if ws.Branch != "task-branch" {
+		t.Fatalf("branch=%q, want requested task branch", ws.Branch)
+	}
+}
+
+func initGitWorkspace(t *testing.T, branch string) string {
+	t.Helper()
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init", "-b", branch)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	return dir
 }
 
 // P0-2: GET /api/tasks with no index returns an empty array (not null).

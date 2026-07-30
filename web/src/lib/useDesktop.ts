@@ -8,6 +8,10 @@
 export const isTauri: boolean =
   typeof window !== 'undefined' && !!(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
 
+/** True only for the macOS desktop shell that uses an overlay title bar. */
+export const isMacOSDesktop: boolean =
+  isTauri && typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || '')
+
 /**
  * Tag the root document for native desktop shell styling. The macOS Tauri
  * window uses an overlay title bar, so CSS needs an `is-tauri-macos` hook to
@@ -38,6 +42,48 @@ export async function openUrl(url: string): Promise<void> {
   } else {
     window.open(url, '_blank', 'noopener,noreferrer')
   }
+}
+
+export interface WorkspaceApplication {
+  id: string
+  label: string
+  group: 'editor' | 'system'
+  iconDataUrl?: string
+}
+
+let workspaceApplicationsPromise: Promise<WorkspaceApplication[]> | null = null
+
+/**
+ * Ask the native shell which supported applications Launch Services can
+ * actually resolve. Each result carries the installed app's own icon. Cache
+ * the in-flight/result promise so React StrictMode does not decode every icon
+ * twice during its development remount.
+ */
+export function listWorkspaceApplications(): Promise<WorkspaceApplication[]> {
+  if (!workspaceApplicationsPromise) {
+    workspaceApplicationsPromise = invoke<WorkspaceApplication[]>('list_workspace_applications').catch((error) => {
+      workspaceApplicationsPromise = null
+      throw error
+    })
+  }
+  return workspaceApplicationsPromise
+}
+
+/**
+ * Open a local workspace with an opaque application ID returned by
+ * listWorkspaceApplications(). The backend resolves the bundle and validates
+ * the canonical path again; the webview cannot supply an executable.
+ */
+export async function openWorkspaceInApplication(path: string, appId: string): Promise<void> {
+  if (!isTauri) throw new Error('openWorkspaceInApplication() called outside Tauri')
+  if (!isAbsoluteLocalWorkspacePath(path)) {
+    throw new Error('openWorkspaceInApplication() requires an absolute local path')
+  }
+  await invoke<void>('open_workspace_in_application', { path, appId })
+}
+
+export function isAbsoluteLocalWorkspacePath(path: string): boolean {
+  return path.startsWith('/') && !path.startsWith('ssh://') && !path.startsWith('docker://')
 }
 
 /**

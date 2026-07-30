@@ -1015,6 +1015,24 @@ export default {
     },
   },
 
+  // macOS Desktop 任务标题栏。
+  desktopTitlebar: {
+    taskDetails: '任务详情',
+    ready: '就绪',
+    workspace: '工作区',
+    branch: '分支',
+    path: '路径',
+    model: '模型',
+    noBranch: '无分支',
+    updateFailed: '无法更新此任务。',
+    open: '打开',
+    openWorkspace: '打开工作区',
+    localOnly: '只有本地工作区可以在应用中打开。',
+    discoveryFailed: '无法读取这台 Mac 上已安装的应用。',
+    noApplications: '未找到支持的应用。',
+    openFailed: '无法打开 {app}，请确认应用已安装且工作区路径在允许范围内。',
+  },
+
   // 云中继状态徽标 + 弹层（侧边栏底部）。
   cloud: {
     mobileHubTitle: '远程访问',

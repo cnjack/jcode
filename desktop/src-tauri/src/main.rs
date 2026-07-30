@@ -1,6 +1,7 @@
 // Prevents a stray console window on Windows in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod desktop_apps;
 mod shell_env;
 mod sidecar;
 mod tray;
@@ -105,7 +106,11 @@ fn main() {
         .manage(SidecarHandle::default())
         .manage(sidecar::SidecarPort::default())
         .manage(DesktopState::default())
-        .invoke_handler(tauri::generate_handler![get_sidecar_port])
+        .invoke_handler(tauri::generate_handler![
+            get_sidecar_port,
+            desktop_apps::list_workspace_applications,
+            desktop_apps::open_workspace_in_application
+        ])
         .setup(|app| {
             // Start the backend FIRST so a (possibly cosmetic) tray failure can
             // never prevent the server — and thus the whole app — from coming up.

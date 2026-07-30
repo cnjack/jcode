@@ -54,11 +54,13 @@ import { SetupView } from './components/SetupView'
 import { SettingsView } from './components/SettingsView'
 import { TopBar } from './components/TopBar'
 import { CloudSyncToggle } from './components/CloudSyncToggle'
+import { DesktopTitlebar } from './components/DesktopTitlebar'
 import { ComputerShotPiP } from './components/ComputerShotPiP'
 import { RightPanel } from './components/RightPanel'
 import { TerminalPanel } from './components/TerminalPanel'
 import { RemoteConnectWizard } from './components/RemoteConnectWizard'
 import type { RemotePrefill } from './lib/remote'
+import { isMacOSDesktop } from './lib/useDesktop'
 
 export default function App() {
   const dispatch = useAppDispatch()
@@ -275,8 +277,19 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
         <div className="app-shell relative flex h-[100dvh] overflow-hidden bg-[var(--color-background)] text-[var(--color-foreground)]">
           {/* Native title-bar drag strip — hidden in browser, shown in Tauri (CSS). */}
           <div className="titlebar-drag" data-tauri-drag-region aria-hidden="true" />
-          {/* TopBar — floated top-right (only on chat view, like Vue). */}
-          {activeView === 'chat' && (
+          {/* macOS Desktop uses the native overlay band for task context and
+              controls. Browser + other desktop platforms keep the established
+              floating TopBar and cloud button unchanged. */}
+          {activeView === 'chat' && isMacOSDesktop && (
+            <DesktopTitlebar
+              isRunning={isRunning}
+              wsConnected={wsConnected}
+              activePanel={rightPanelOpen ? rightPanelTab : 'none'}
+              terminalOpen={bottomPanel === 'terminal'}
+              onTogglePanel={togglePanel}
+            />
+          )}
+          {activeView === 'chat' && !isMacOSDesktop && (
             <TopBar
               isRunning={isRunning}
               wsConnected={wsConnected}
@@ -285,8 +298,8 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
               onTogglePanel={togglePanel}
             />
           )}
-          {/* Per-session cloud sync switch (M19) — floated left of the TopBar. */}
-          {activeView === 'chat' && <CloudSyncToggle />}
+          {/* Browser/non-mac fallback: retain the standalone per-session switch. */}
+          {activeView === 'chat' && !isMacOSDesktop && <CloudSyncToggle />}
           {/* Codex-style computer-use PiP — floats under the TopBar, shows the
               latest screenshot from the session's computer_screenshot calls. */}
           {activeView === 'chat' && <ComputerShotPiP />}
