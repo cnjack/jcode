@@ -12,14 +12,20 @@ import (
 )
 
 type captureLangfuse struct {
+	trace      *langfuseacl.TraceEventBody
+	endedTrace *langfuseacl.TraceEventBody
 	generation *langfuseacl.GenerationEventBody
 }
 
-func (c *captureLangfuse) CreateTrace(*langfuseacl.TraceEventBody) (string, error) {
+func (c *captureLangfuse) CreateTrace(body *langfuseacl.TraceEventBody) (string, error) {
+	c.trace = body
 	return "trace", nil
 }
 
-func (c *captureLangfuse) EndTrace(*langfuseacl.TraceEventBody) error { return nil }
+func (c *captureLangfuse) EndTrace(body *langfuseacl.TraceEventBody) error {
+	c.endedTrace = body
+	return nil
+}
 
 func (c *captureLangfuse) CreateSpan(*langfuseacl.SpanEventBody) (string, error) {
 	return "span", nil
@@ -39,6 +45,78 @@ func (c *captureLangfuse) CreateEvent(*langfuseacl.EventEventBody) (string, erro
 }
 
 func (c *captureLangfuse) Flush() {}
+
+func TestWithNewTraceCapturesLatestPlainUserInput(t *testing.T) {
+	client := &captureLangfuse{}
+	tracer := &LangfuseTracer{client: client}
+
+	tracer.WithNewTrace(context.Background(), "coding_agent", []*schema.Message{
+		schema.UserMessage("previous request"),
+		{Role: schema.Assistant, Content: "previous response"},
+		schema.UserMessage("latest request"),
+	})
+
+	if client.trace == nil {
+		t.Fatal("trace was not created")
+	}
+	if got, want := client.trace.Input, "latest request"; got != want {
+		t.Fatalf("trace input=%q, want %q", got, want)
+	}
+}
+
+func TestWithNewTraceCapturesSafeLatestUserInput(t *testing.T) {
+	base64Secret := "base64-secret-pixels"
+	urlSecret := "https://private.invalid/screenshot.png?token=secret"
+	imagePrompt := &schema.Message{
+		Role: schema.User,
+		UserInputMultiContent: []schema.MessageInputPart{
+			{Type: schema.ChatMessagePartTypeText, Text: "Describe this screenshot"},
+			{
+				Type: schema.ChatMessagePartTypeImageURL,
+				Image: &schema.MessageInputImage{MessagePartCommon: schema.MessagePartCommon{
+					MIMEType:   "image/png",
+					Base64Data: &base64Secret,
+				}},
+			},
+			{
+				Type: schema.ChatMessagePartTypeImageURL,
+				Image: &schema.MessageInputImage{MessagePartCommon: schema.MessagePartCommon{
+					MIMEType: "image/png",
+					URL:      &urlSecret,
+				}},
+			},
+		},
+	}
+	client := &captureLangfuse{}
+	tracer := &LangfuseTracer{client: client}
+
+	ctx := tracer.WithNewTrace(context.Background(), "coding_agent", []*schema.Message{
+		schema.UserMessage("previous request"),
+		imagePrompt,
+	})
+	if client.trace == nil {
+		t.Fatal("trace was not created")
+	}
+	if got, want := client.trace.Input, "Describe this screenshot\n"+telemetryImagePlaceholder+"\n"+telemetryImagePlaceholder; got != want {
+		t.Fatalf("trace input=%q, want %q", got, want)
+	}
+	if strings.Contains(client.trace.Input, "previous request") {
+		t.Fatalf("trace input includes an earlier user turn: %q", client.trace.Input)
+	}
+	for _, secret := range []string{base64Secret, urlSecret} {
+		if strings.Contains(client.trace.Input, secret) {
+			t.Fatalf("trace input leaked image data %q", secret)
+		}
+	}
+
+	tracer.EndTrace(ctx, "completed response")
+	if client.endedTrace == nil {
+		t.Fatal("trace was not ended")
+	}
+	if client.endedTrace.ID != "trace" || client.endedTrace.Output != "completed response" {
+		t.Fatalf("ended trace=%#v", client.endedTrace)
+	}
+}
 
 func TestBeforeModelRewriteStateRedactsEnhancedToolImagesFromLangfuse(t *testing.T) {
 	base64Secret := "base64-secret-pixels"
