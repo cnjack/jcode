@@ -27,6 +27,11 @@ func TestWebSwitchModelSameValueIsNoOp(t *testing.T) {
 }
 
 func TestProviderCatalogUsesPersistedModelVisibility(t *testing.T) {
+	const (
+		providerID      = "kimi-for-coding"
+		enabledModelID  = "kimi-for-coding-highspeed"
+		disabledModelID = "k3"
+	)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	configDir := filepath.Join(home, ".jcode")
@@ -35,19 +40,19 @@ func TestProviderCatalogUsesPersistedModelVisibility(t *testing.T) {
 	}
 	if err := os.WriteFile(
 		filepath.Join(configDir, "config.json"),
-		[]byte(`{"providers":{"zhipuai-coding-plan":{"api_key":"test"}}}`),
+		[]byte(`{"providers":{"kimi-for-coding":{"api_key":"test"}}}`),
 		0o600,
 	); err != nil {
 		t.Fatal(err)
 	}
 	state := &config.ModelState{
 		EnabledModels: []config.ModelRef{{
-			Provider: "zhipuai-coding-plan",
-			Model:    "glm-4.5-air",
+			Provider: providerID,
+			Model:    enabledModelID,
 		}},
 		DisabledModels: []config.ModelRef{{
-			Provider: "zhipuai-coding-plan",
-			Model:    "glm-5.2",
+			Provider: providerID,
+			Model:    disabledModelID,
 		}},
 	}
 	if err := config.SaveModelState(state); err != nil {
@@ -55,9 +60,16 @@ func TestProviderCatalogUsesPersistedModelVisibility(t *testing.T) {
 	}
 
 	registry := model.NewModelRegistry()
+	_, enabledModel, ok := registry.LookupModel(providerID, enabledModelID)
+	if !ok {
+		t.Fatalf("static model %s/%s is missing", providerID, enabledModelID)
+	}
+	// Make the enabled override observable instead of relying on the static
+	// provider's current default visibility.
+	enabledModel.DefaultEnabled = false
 	s := &Server{registry: registry}
-	req := httptest.NewRequest(http.MethodGet, "/api/providers/zhipuai-coding-plan/models", nil)
-	req.SetPathValue("id", "zhipuai-coding-plan")
+	req := httptest.NewRequest(http.MethodGet, "/api/providers/"+providerID+"/models", nil)
+	req.SetPathValue("id", providerID)
 	rec := httptest.NewRecorder()
 	s.handleProviderCatalog(rec, req)
 	if rec.Code != http.StatusOK {
@@ -75,10 +87,10 @@ func TestProviderCatalogUsesPersistedModelVisibility(t *testing.T) {
 	for _, item := range got {
 		addedByID[item.ID] = item.Added
 	}
-	if !addedByID["glm-4.5-air"] {
-		t.Error("explicitly enabled glm-4.5-air was reported disabled")
+	if !addedByID[enabledModelID] {
+		t.Errorf("explicitly enabled %s was reported disabled", enabledModelID)
 	}
-	if addedByID["glm-5.2"] {
-		t.Error("explicitly disabled default glm-5.2 was reported enabled")
+	if addedByID[disabledModelID] {
+		t.Errorf("explicitly disabled default %s was reported enabled", disabledModelID)
 	}
 }
