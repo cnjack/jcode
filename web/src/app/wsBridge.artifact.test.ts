@@ -7,11 +7,12 @@ afterEach(() => {
 })
 
 function handlers(activeTask = 'task-active') {
-  const dispatch = vi.fn() as unknown as AppDispatch
+  const dispatchMock = vi.fn()
+  const dispatch = dispatchMock as unknown as AppDispatch
   const getState = () => ({
     session: { currentSessionId: activeTask, tasks: [] },
   }) as unknown as RootState
-  return { dispatch, handlers: createWSHandlers(getState, dispatch) }
+  return { dispatch: dispatchMock, handlers: createWSHandlers(getState, dispatch) }
 }
 
 describe('artifact WebSocket bridge', () => {
