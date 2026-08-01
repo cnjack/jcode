@@ -117,6 +117,42 @@ export interface FileContent {
   content: string
 }
 
+export type ArtifactKind = 'text' | 'markdown' | 'code' | 'html' | 'image' | 'pdf' | 'csv' | 'binary'
+export type ArtifactStatus = 'available' | 'missing' | 'unsupported' | 'too_large' | 'error'
+
+export interface ArtifactRecord {
+  id: string
+  session_id: string
+  relative_path: string
+  title: string
+  kind: ArtifactKind
+  media_type: string
+  size: number
+  revision: number
+  updated_at: string
+  status: ArtifactStatus
+  focus?: boolean
+}
+
+export interface ArtifactShareResult {
+  share_id: string
+  url: string
+  expires_at: string
+}
+
+export interface ArtifactShareSummary {
+  share_id: string
+  artifact_id: string
+  revision: number
+  state: string
+  ciphertext_size: number
+  ciphertext_sha256?: string
+  expires_at: string
+  completed_at?: string
+  revoked_at?: string
+  created_at: string
+}
+
 // Model registry types
 export interface ModelInfo {
   id: string
@@ -206,6 +242,8 @@ export interface TaskItem {
   unread: boolean
   status?: string
   running?: boolean // a live engine for this task is currently running
+  artifact_count?: number
+  artifact_unseen?: boolean
 }
 
 export interface TaskMetaPatch {

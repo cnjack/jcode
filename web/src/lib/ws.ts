@@ -60,6 +60,12 @@ export interface WSHandlers {
   onSubagentProgress?: (data: import('./types').SubagentProgressData) => void
   onUserMessage?: (data: { content: string; source: string }) => void
   onTaskStatus?: (taskId: string, running: boolean, project?: string, updatedAt?: string) => void
+  onArtifactUpserted?: (data: {
+    task_id: string
+    id?: string
+    artifact_id?: string
+    focus?: boolean
+  }) => void
   /** Fired when the socket opens/closes so the UI can show online/offline. */
   onConnectionChange?: (connected: boolean) => void
   /** Returns the task currently shown in the foreground. Events tagged with a
@@ -74,7 +80,8 @@ interface WSMessage {
 }
 
 /** Event types whose data payload gets the envelope task_id merged in. */
-const TASK_ID_DATA_TYPES = new Set(['approval_request', 'ask_user_request', 'agent_done'])
+const TASK_ID_DATA_TYPES = new Set(['approval_request', 'ask_user_request', 'agent_done', 'artifact_upserted'])
+const BACKGROUND_EVENT_TYPES = new Set(['agent_done', 'artifact_upserted'])
 
 export class WSClient {
   private ws: WebSocket | null = null
@@ -132,7 +139,7 @@ export class WSClient {
         // Events tagged with a different task id are dropped so they don't
         // pollute the active view — EXCEPT agent_done, which the bridge needs
         // for every session to drain that session's type-ahead queue.
-        if (msg.task_id && active && msg.task_id !== active && msg.type !== 'agent_done') return
+        if (msg.task_id && active && msg.task_id !== active && !BACKGROUND_EVENT_TYPES.has(msg.type)) return
         const handler = this.handlerFor(msg.type)
         if (handler) {
           let data = msg.data
@@ -242,6 +249,7 @@ export class WSClient {
         subagent_progress: (d) => h.onSubagentProgress?.(d),
         user_message: (d) => h.onUserMessage?.(d),
         task_status: (d) => h.onTaskStatus?.(d?.task_id, !!d?.running, d?.project, d?.updated_at),
+        artifact_upserted: (d) => h.onArtifactUpserted?.(d),
         pong: () => {},
       }
     }

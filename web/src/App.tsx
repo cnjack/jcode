@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next'
 import {
   ArrowLeftIcon,
   CheckCircleIcon,
+  DocumentDuplicateIcon,
   ExclamationCircleIcon,
   PlayIcon,
   StopIcon,
@@ -173,7 +174,7 @@ function store_getState() {
   return store.getState()
 }
 
-type PanelType = 'terminal' | 'files' | 'changes' | 'plan'
+type PanelType = 'terminal' | 'files' | 'changes' | 'plan' | 'artifacts'
 
 function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mobile' | 'automation-run' | 'settings' }) {
   const dispatch = useAppDispatch()
@@ -183,10 +184,10 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
   const isRunning = useAppSelector((s) => s.chat.isRunning)
   const wsConnected = useAppSelector((s) => s.session.wsConnected)
 
-  // Panel state — mirrors Vue App.vue: a right panel (files/changes/plan) and a
+  // Panel state — a right panel (files/changes/plan/artifacts) and a
   // bottom panel (terminal) that can be open simultaneously.
   const [rightPanelOpen, setRightPanelOpen] = useState(false)
-  const [rightPanelTab, setRightPanelTab] = useState<'files' | 'changes' | 'plan'>('files')
+  const [rightPanelTab, setRightPanelTab] = useState<'files' | 'changes' | 'plan' | 'artifacts'>('files')
   const [bottomPanel, setBottomPanel] = useState<'none' | 'terminal'>('none')
   const [bottomPanelHeight, setBottomPanelHeight] = useState(260)
   const [activeRun, setActiveRun] = useState<AutomationRun | null>(null)
@@ -219,7 +220,8 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
     })
   }, [rightPanelOpen])
 
-  // Panel keyboard shortcuts: ⇧⌘P (plan), ⇧⌘E (files), ⇧⌘G (changes), ⌘` / ⌘J (terminal).
+  // Panel keyboard shortcuts: ⇧⌘P (plan), ⇧⌘E (files), ⇧⌘G (changes),
+  // ⇧⌘A (artifacts), ⌘` / ⌘J (terminal).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const meta = e.metaKey || e.ctrlKey
@@ -229,6 +231,8 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
         e.preventDefault(); togglePanel('files')
       } else if (meta && e.shiftKey && e.key.toLowerCase() === 'g') {
         e.preventDefault(); togglePanel('changes')
+      } else if (meta && e.shiftKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault(); togglePanel('artifacts')
       } else if (meta && !e.shiftKey && (e.key === '`' || e.key.toLowerCase() === 'j')) {
         // ⌘` never reaches the page on macOS (OS window cycling), so ⌘J is the
         // alias shown in the UI. `!e.shiftKey` keeps ⇧⌘J (DevTools) intact.
@@ -238,6 +242,15 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [togglePanel])
+
+  useEffect(() => {
+    function onArtifactUpserted() {
+      setRightPanelTab('artifacts')
+      setRightPanelOpen(true)
+    }
+    window.addEventListener('jcode:artifact-upserted', onArtifactUpserted)
+    return () => window.removeEventListener('jcode:artifact-upserted', onArtifactUpserted)
+  }, [])
 
   useEffect(() => {
     function onOpenRemote(e: Event) {
@@ -316,7 +329,7 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
             {activeView === 'automations' && <AutomationsView onOpenRun={openRun} />}
             {activeView === 'cloud-mobile' && <CloudMobileView />}
             {activeView === 'automation-run' && (
-              <AutomationRunReplay run={activeRun} onBack={closeRun} />
+              <AutomationRunReplay run={activeRun} onBack={closeRun} onOpenArtifacts={() => togglePanel('artifacts')} />
             )}
             {/* M18: settings is a first-class view, not an overlay dialog. */}
             {activeView === 'settings' && <SettingsView />}
@@ -335,7 +348,7 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
             )}
           </main>
 
-          {/* Right panel (files/changes/plan) — sibling of main, like Vue. */}
+          {/* Right panel (files/changes/plan/artifacts) — sibling of main. */}
           {rightPanelOpen && (
             <RightPanel
               activeTab={rightPanelTab}
@@ -365,7 +378,7 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
   )
 }
 
-function AutomationRunReplay({ run, onBack }: { run: AutomationRun | null; onBack: () => void }) {
+function AutomationRunReplay({ run, onBack, onOpenArtifacts }: { run: AutomationRun | null; onBack: () => void; onOpenArtifacts: () => void }) {
   const { t } = useTranslation()
   const isRunning = run ? (run.terminal_status || run.status) === 'running' || (!run.terminal_status && run.status === 'running') : false
   const status = run ? statusKind(run) : 'running'
@@ -401,6 +414,13 @@ function AutomationRunReplay({ run, onBack }: { run: AutomationRun | null; onBac
             <StatusIcon className="h-3.5 w-3.5" />
             {statusLabel}
           </span>
+          {!!run?.artifact_count && (
+            <button type="button" onClick={onOpenArtifacts} className="inline-flex shrink-0 items-center gap-1 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-background)] px-2 py-1 text-[11px] text-[var(--color-foreground)] hover:bg-[var(--color-muted)]">
+              <DocumentDuplicateIcon className="h-3.5 w-3.5" />
+              {t('rightPanel.artifacts')} · {run.artifact_count}
+              {run.artifact_unseen && <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent-neutral)]" />}
+            </button>
+          )}
           {isRunning && (
             <button
               type="button"

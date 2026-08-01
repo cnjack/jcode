@@ -14,12 +14,14 @@ import (
 	"sync/atomic"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cnjack/jcode/internal/artifact"
 	"github.com/cnjack/jcode/internal/automation"
 	"github.com/cnjack/jcode/internal/browser"
 	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/cloud"
 	"github.com/cnjack/jcode/internal/computer"
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/feature"
 	"github.com/cnjack/jcode/internal/flow"
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/mode"
@@ -179,6 +181,24 @@ type Server struct {
 	cloudSyncMu    sync.Mutex
 	cloudSyncStore *cloud.SyncStore
 	cloudSyncErr   error // sticky load failure
+
+	// artifacts is the process-wide metadata registry shared by local Web and
+	// Desktop task engines. nil only in focused server tests.
+	artifacts            *artifact.Service
+	artifactShares       ArtifactSharePublisher
+	loadCloudCredentials func() (*cloud.Credentials, error)
+	openArtifact         ArtifactOpener
+}
+
+type ArtifactOpener func(context.Context, string, bool) error
+
+// ArtifactSharePublisher is consumed by the local Web API and implemented by
+// cloud.ArtifactSharePublisher. Keeping the interface here makes task scoping
+// and login behavior independently testable without a Cloud deployment.
+type ArtifactSharePublisher interface {
+	Publish(context.Context, *cloud.Credentials, cloud.ArtifactShareInput) (*cloud.ArtifactShareResult, error)
+	List(context.Context, *cloud.Credentials, string) ([]cloud.ArtifactShareSummary, error)
+	Revoke(context.Context, *cloud.Credentials, string) error
 }
 
 // BLEController lets the settings endpoint start/stop the BLE status channel at
@@ -259,6 +279,10 @@ type ServerConfig struct {
 	MemoryStart         func(context.Context, string) (<-chan error, error)                   // optional: acquire and start one manual local-project memory distillation
 	BLEController       BLEController                                                         // optional: live BLE status-channel toggle (desktop builds)
 	CloudSupervisor     CloudSupervisor                                                       // optional: cloud relay status + live auto_connect toggle
+	ArtifactService     *artifact.Service                                                     // optional: session Artifact registry
+	ArtifactShares      ArtifactSharePublisher                                                // optional: encrypted Cloud artifact publisher
+	CloudCredentials    func() (*cloud.Credentials, error)                                    // optional: injectable credential loader
+	OpenArtifact        ArtifactOpener                                                        // optional: Desktop open/reveal adapter
 }
 
 // NewServer creates a new web server.
@@ -299,40 +323,56 @@ func NewServer(cfg *ServerConfig) *Server {
 	if boot.taskID == "" && boot.recorder != nil {
 		boot.taskID = boot.recorder.UUID()
 	}
+	artifactShares := cfg.ArtifactShares
+	if artifactShares == nil {
+		artifactShares = cloud.NewArtifactSharePublisher(nil)
+	}
+	loadCloudCredentials := cfg.CloudCredentials
+	if loadCloudCredentials == nil {
+		loadCloudCredentials = cloud.LoadCredentials
+	}
+	openArtifact := cfg.OpenArtifact
+	if openArtifact == nil && feature.Desktop {
+		openArtifact = openArtifactOnDesktop
+	}
 	s := &Server{
-		Engine:              boot,
-		tasks:               make(map[string]*Engine),
-		port:                cfg.Port,
-		host:                cfg.Host,
-		openBrowser:         cfg.OpenBrowser,
-		version:             cfg.Version,
-		wsBroker:            NewWSBroker(),
-		newEngine:           cfg.NewEngine,
-		newRemoteEngine:     cfg.NewRemoteEngine,
-		newAutomationEngine: cfg.NewAutomationEngine,
-		remoteConns:         newRemoteConnRegistry(),
-		tracer:              cfg.Tracer,
-		cfg:                 cfg.Config,
-		registry:            cfg.Registry,
-		ptyMgr:              newPTYManager(),
-		skillLoader:         cfg.SkillLoader,
-		flowLoader:          cfg.FlowLoader,
-		reloadMCP:           cfg.ReloadMCP,
-		mcpStatuses:         make(map[string]tools.MCPStatus),
-		mcpLogins:           make(map[string]*mcpLoginState),
-		wechatClient:        cfg.WechatClient,
-		needsSetup:          cfg.NeedsSetup,
-		automations:         cfg.Automations,
-		autoRunInflight:     make(map[string]bool),
-		authToken:           cfg.AuthToken,
-		requireAuth:         cfg.RequireAuth,
-		browserMgr:          cfg.BrowserManager,
-		computerMgr:         cfg.ComputerManager,
-		memoryStart:         cfg.MemoryStart,
-		memoryRuns:          make(map[string]bool),
-		memoryWarnings:      make(map[string]string),
-		bleController:       cfg.BLEController,
-		cloudSupervisor:     cfg.CloudSupervisor,
+		Engine:               boot,
+		tasks:                make(map[string]*Engine),
+		port:                 cfg.Port,
+		host:                 cfg.Host,
+		openBrowser:          cfg.OpenBrowser,
+		version:              cfg.Version,
+		wsBroker:             NewWSBroker(),
+		newEngine:            cfg.NewEngine,
+		newRemoteEngine:      cfg.NewRemoteEngine,
+		newAutomationEngine:  cfg.NewAutomationEngine,
+		remoteConns:          newRemoteConnRegistry(),
+		tracer:               cfg.Tracer,
+		cfg:                  cfg.Config,
+		registry:             cfg.Registry,
+		ptyMgr:               newPTYManager(),
+		skillLoader:          cfg.SkillLoader,
+		flowLoader:           cfg.FlowLoader,
+		reloadMCP:            cfg.ReloadMCP,
+		mcpStatuses:          make(map[string]tools.MCPStatus),
+		mcpLogins:            make(map[string]*mcpLoginState),
+		wechatClient:         cfg.WechatClient,
+		needsSetup:           cfg.NeedsSetup,
+		automations:          cfg.Automations,
+		autoRunInflight:      make(map[string]bool),
+		authToken:            cfg.AuthToken,
+		requireAuth:          cfg.RequireAuth,
+		browserMgr:           cfg.BrowserManager,
+		computerMgr:          cfg.ComputerManager,
+		memoryStart:          cfg.MemoryStart,
+		memoryRuns:           make(map[string]bool),
+		memoryWarnings:       make(map[string]string),
+		bleController:        cfg.BLEController,
+		cloudSupervisor:      cfg.CloudSupervisor,
+		artifacts:            cfg.ArtifactService,
+		artifactShares:       artifactShares,
+		loadCloudCredentials: loadCloudCredentials,
+		openArtifact:         openArtifact,
 	}
 	// The bootstrap engine is registered (and its pump started) in Start, once
 	// the root context exists.
@@ -388,6 +428,17 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/ask/pending", s.handlePendingAskUser)
 	mux.HandleFunc("GET /api/files", s.handleListFiles)
 	mux.HandleFunc("GET /api/files/content", s.handleReadFile)
+	mux.HandleFunc("GET /api/tasks/{id}/artifacts", s.handleListArtifacts)
+	mux.HandleFunc("GET /api/tasks/{id}/artifacts/{artifactID}/content", s.handleArtifactContent)
+	mux.HandleFunc("GET /api/tasks/{id}/artifacts/{artifactID}/download", s.handleArtifactDownload)
+	mux.HandleFunc("PATCH /api/tasks/{id}/artifacts/viewed", s.handleArtifactsViewed)
+	mux.HandleFunc("POST /api/tasks/{id}/artifacts/{artifactID}/shares", s.handleCreateArtifactShare)
+	mux.HandleFunc("GET /api/tasks/{id}/artifacts/{artifactID}/shares", s.handleListArtifactShares)
+	mux.HandleFunc("DELETE /api/tasks/{id}/artifacts/{artifactID}/shares/{shareID}", s.handleRevokeArtifactShare)
+	if s.openArtifact != nil {
+		mux.HandleFunc("POST /api/tasks/{id}/artifacts/{artifactID}/open", s.handleOpenArtifact)
+		mux.HandleFunc("POST /api/tasks/{id}/artifacts/{artifactID}/reveal", s.handleRevealArtifact)
+	}
 	mux.HandleFunc("GET /api/status", s.handleStatus)
 	mux.HandleFunc("GET /api/workspace", s.handleWorkspace)
 	mux.HandleFunc("GET /api/git/branches", s.handleGitBranches)

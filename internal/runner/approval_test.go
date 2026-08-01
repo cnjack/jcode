@@ -294,6 +294,13 @@ func TestRequestApprovalDeferredMutationStillPrompts(t *testing.T) {
 	}
 }
 
+func TestShowArtifactIsAutoApprovedAsMetadataOnlyDelivery(t *testing.T) {
+	s := NewApprovalState("/tmp/workdir", false)
+	if got := s.decide("show_artifact", `{"path":"report.html"}`); got != decisionAutoApprove {
+		t.Fatalf("show_artifact decision=%v want auto approve", got)
+	}
+}
+
 func TestSubagentDelegatedWriteGrantDecision(t *testing.T) {
 	if noApprovalNeeded["subagent"] {
 		t.Fatal("subagent must be decided from agent_type, not globally auto-approved")

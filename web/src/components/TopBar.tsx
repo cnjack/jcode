@@ -19,18 +19,20 @@ import {
   ChevronDownIcon,
   ClipboardDocumentCheckIcon,
   CommandLineIcon,
+  DocumentDuplicateIcon,
   FolderOpenIcon,
   RectangleStackIcon,
 } from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
 import { api } from '../lib/api'
+import { useAppSelector } from '../app/hooks'
 
-type PanelType = 'plan' | 'files' | 'changes' | 'terminal'
+type PanelType = 'plan' | 'files' | 'changes' | 'artifacts' | 'terminal'
 
 interface Props {
   isRunning: boolean
   wsConnected: boolean
-  activePanel: 'none' | 'plan' | 'files' | 'changes' | 'terminal'
+  activePanel: 'none' | 'plan' | 'files' | 'changes' | 'artifacts' | 'terminal'
   terminalOpen: boolean
   onTogglePanel: (panel: PanelType) => void
   /** Render inside the native Desktop titlebar instead of floating standalone. */
@@ -41,6 +43,7 @@ const PANEL_BUTTONS: { panel: PanelType; macShortcut: string; otherShortcut: str
   { panel: 'plan', macShortcut: '⇧⌘P', otherShortcut: 'Ctrl+Shift+P' },
   { panel: 'files', macShortcut: '⇧⌘E', otherShortcut: 'Ctrl+Shift+E' },
   { panel: 'changes', macShortcut: '⇧⌘G', otherShortcut: 'Ctrl+Shift+G' },
+  { panel: 'artifacts', macShortcut: '⇧⌘A', otherShortcut: 'Ctrl+Shift+A' },
   { panel: 'terminal', macShortcut: '⌘`', otherShortcut: 'Ctrl+`' },
 ]
 
@@ -48,12 +51,19 @@ const PANEL_ICONS: Record<PanelType, typeof RectangleStackIcon> = {
   plan: ClipboardDocumentCheckIcon,
   files: FolderOpenIcon,
   changes: ArrowsRightLeftIcon,
+  artifacts: DocumentDuplicateIcon,
   terminal: CommandLineIcon,
 }
 
 export function TopBar({ isRunning, wsConnected, activePanel, terminalOpen, onTogglePanel, embedded = false }: Props) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
+  const artifactTask = useAppSelector((state) => {
+    const id = state.session.currentSessionId
+    return state.session.tasks.find((item) => item.uuid === id)
+  })
+  const artifactCount = artifactTask?.artifact_count ?? 0
+  const artifactUnseen = artifactTask?.artifact_unseen ?? false
   // Working-tree diff stat shown inline on the Changes item. null on failure /
   // clean tree (matches the Vue behaviour — never fabricated).
   const [diffStat, setDiffStat] = useState<{ additions: number; deletions: number } | null>(null)
@@ -213,6 +223,12 @@ export function TopBar({ isRunning, wsConnected, activePanel, terminalOpen, onTo
                     >
                       <span style={{ color: 'var(--color-success-fg)' }}>+{diffStat.additions}</span>
                       <span style={{ color: 'var(--color-error-fg)' }}>-{diffStat.deletions}</span>
+                    </span>
+                  )}
+                  {btn.panel === 'artifacts' && artifactCount > 0 && (
+                    <span className="inline-flex shrink-0 items-center gap-1.5 font-mono text-[11px] text-[var(--color-muted-foreground)]">
+                      {artifactUnseen && <span aria-label={t('artifacts.new')} className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent-neutral)]" />}
+                      {artifactCount}
                     </span>
                   )}
                   <span className="shrink-0 text-[11px] tracking-[0.04em] text-[var(--color-muted-foreground)]">

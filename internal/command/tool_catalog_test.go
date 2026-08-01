@@ -29,7 +29,7 @@ var allCommandBuiltinNames = []string{
 	"team_list", "team_delete", "browser_open", "browser_snapshot",
 	"browser_screenshot", "browser_act", "browser_read", "browser_tabs", "browser_eval",
 	"computer_open", "computer_snapshot", "computer_screenshot", "computer_act",
-	"computer_read", "computer_apps",
+	"computer_read", "computer_apps", "show_artifact",
 }
 
 func TestBuildCommandToolPlanMatrix(t *testing.T) {
@@ -38,6 +38,11 @@ func TestBuildCommandToolPlanMatrix(t *testing.T) {
 		"read", "subagent", "todoread", "todowrite", "write",
 	}
 	planDirect := []string{"ask_user", "execute", "grep", "read", "todoread", "todowrite"}
+	webNormalDirect := []string{
+		"ask_user", "check_background", "edit", "execute", "grep", "load_skill",
+		"read", "show_artifact", "subagent", "todoread", "todowrite", "write",
+	}
+	webPlanDirect := []string{"ask_user", "execute", "grep", "read", "show_artifact", "todoread", "todowrite"}
 	normalDeferred := []string{
 		"automation_create", "browser_act", "browser_eval", "browser_open", "browser_read",
 		"browser_screenshot", "browser_snapshot", "browser_tabs", "computer_act", "computer_apps",
@@ -61,14 +66,14 @@ func TestBuildCommandToolPlanMatrix(t *testing.T) {
 		{name: "tui normal", transport: agent.ToolTransportTUI, mode: agent.ToolModeNormal,
 			direct: normalDirect, deferred: normalDeferred},
 		{name: "web normal", transport: agent.ToolTransportWeb, mode: agent.ToolModeNormal,
-			direct: normalDirect, deferred: withoutPrefixes(normalDeferred, "team_")},
+			direct: webNormalDirect, deferred: withoutPrefixes(normalDeferred, "team_")},
 		{name: "acp normal", transport: agent.ToolTransportACP, mode: agent.ToolModeNormal,
 			direct:   withoutNames(normalDirect, "ask_user"),
 			deferred: withoutPrefixes(normalDeferred, "browser_", "team_")},
 		{name: "tui plan", transport: agent.ToolTransportTUI, mode: agent.ToolModePlan,
 			direct: planDirect, deferred: planDeferred},
 		{name: "web plan", transport: agent.ToolTransportWeb, mode: agent.ToolModePlan,
-			direct: planDirect, deferred: planDeferred},
+			direct: webPlanDirect, deferred: planDeferred},
 		{name: "acp plan", transport: agent.ToolTransportACP, mode: agent.ToolModePlan,
 			direct:   withoutNames(planDirect, "ask_user"),
 			deferred: withoutPrefixes(planDeferred, "browser_")},

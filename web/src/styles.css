@@ -857,3 +857,68 @@ html.is-tauri-macos .titlebar-drag {
   height: 28px;
   z-index: 45;
 }
+
+/* Artifact workspace actions and rendered Markdown. */
+.artifact-action {
+  display: inline-flex;
+  height: 1.75rem;
+  width: 1.75rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  color: var(--color-muted-foreground);
+  transition: color var(--duration-fast), background-color var(--duration-fast);
+}
+.artifact-action:hover {
+  color: var(--color-foreground);
+  background: var(--color-muted);
+}
+.artifact-action:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+.artifact-markdown {
+  color: var(--color-foreground);
+  font-size: 0.875rem;
+  line-height: 1.7;
+}
+.artifact-markdown > *:first-child { margin-top: 0; }
+.artifact-markdown > *:last-child { margin-bottom: 0; }
+.artifact-markdown h1,
+.artifact-markdown h2,
+.artifact-markdown h3 {
+  margin: 1.5em 0 0.5em;
+  font-weight: 650;
+  line-height: 1.25;
+}
+.artifact-markdown h1 { font-size: 1.5rem; }
+.artifact-markdown h2 { font-size: 1.25rem; }
+.artifact-markdown h3 { font-size: 1.05rem; }
+.artifact-markdown p,
+.artifact-markdown ul,
+.artifact-markdown ol,
+.artifact-markdown pre,
+.artifact-markdown blockquote { margin: 0.75em 0; }
+.artifact-markdown ul,
+.artifact-markdown ol { padding-left: 1.5rem; }
+.artifact-markdown ul { list-style: disc; }
+.artifact-markdown ol { list-style: decimal; }
+.artifact-markdown code,
+.artifact-markdown pre {
+  border-radius: var(--radius-md);
+  background: var(--color-muted);
+  font-family: var(--font-mono);
+}
+.artifact-markdown code { padding: 0.1em 0.3em; }
+.artifact-markdown pre { overflow: auto; padding: 0.8rem; }
+.artifact-markdown pre code { padding: 0; }
+.artifact-markdown a {
+  color: var(--color-accent-neutral);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.artifact-markdown blockquote {
+  border-left: 3px solid var(--color-border);
+  padding-left: 0.8rem;
+  color: var(--color-muted-foreground);
+}

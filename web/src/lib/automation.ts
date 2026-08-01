@@ -53,6 +53,8 @@ export interface AutomationRun {
   terminal_status?: string
   status?: string
   error_reason?: string
+  artifact_count?: number
+  artifact_unseen?: boolean
 }
 
 export interface AutomationTemplate {

@@ -2,6 +2,10 @@ package command
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -12,6 +16,29 @@ import (
 // without standing up a real Env / model.
 type stubTool struct {
 	name string
+}
+
+func TestShowArtifactCandidateIsRegisteredOnlyByWebTransport(t *testing.T) {
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve test source")
+	}
+	dir := filepath.Dir(currentFile)
+	read := func(name string) string {
+		body, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(body)
+	}
+	if count := strings.Count(read("web.go"), "NewShowArtifactTool"); count != 2 {
+		t.Fatalf("web candidate count=%d want all+plan", count)
+	}
+	for _, name := range []string{"interactive.go", "acp.go"} {
+		if strings.Contains(read(name), "NewShowArtifactTool") {
+			t.Fatalf("%s must not register show_artifact", name)
+		}
+	}
 }
 
 func (s stubTool) Info(_ context.Context) (*schema.ToolInfo, error) {

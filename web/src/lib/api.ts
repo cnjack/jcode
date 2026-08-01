@@ -1,5 +1,5 @@
 // API client for jcode backend — ported from web/src/composables/api.ts.
-import type { ModelsResponse, AgentMode, CustomAgentInfo, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, ProjectInfo, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, CustomModelDetail, ValidateResult, CatalogModel, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData, ApprovalReviewConfig, ApprovalReviewConfigResponse } from './types'
+import type { ModelsResponse, AgentMode, CustomAgentInfo, ExecResponse, DiffResponse, WorkspaceInfo, GitBranchesResponse, GitCheckoutResponse, TaskItem, TaskMetaPatch, ProjectInfo, MCPListResponse, MCPServerRequest, MCPLoginStatus, BrowseResponse, SSHListResponse, SkillInfo, SlashCommandInfo, TodoItem, Goal, SessionItem, SessionEntry, FileItem, SetupProvider, SetupModel, ProviderDetail, ProviderAdvanced, CustomModelDetail, ValidateResult, CatalogModel, ModelStateResponse, ChatImage, AskUserAnswer, AskUserRequestData, ApprovalRequestData, RemoteConnectRequest, RemoteConnectResponse, RemoteListDirResponse, RemoteBindResponse, DockerContainersResponse, UsageStats, TaskStats, TokenUpdateData, ApprovalReviewConfig, ApprovalReviewConfigResponse, ArtifactRecord, ArtifactShareResult, ArtifactShareSummary } from './types'
 import type { AutomationItem, AutomationRun, AutomationTemplate, AutomationCreate, Automation } from './automation'
 import { apiBase } from './apiBase'
 import { getAuthToken, notifyAuthExpired } from './authToken'
@@ -35,6 +35,31 @@ async function request<T>(path: string, options?: RequestOptions): Promise<T> {
     throw err
   }
   return resp.json()
+}
+
+async function requestBlob(path: string): Promise<Blob> {
+  const headers = new Headers()
+  const token = getAuthToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const resp = await fetch(`${apiBase}${path}`, { headers, cache: 'no-store' })
+  if (resp.status === 401) notifyAuthExpired()
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({ error: resp.statusText }))
+    throw new Error(body.error || `HTTP ${resp.status}`)
+  }
+  return resp.blob()
+}
+
+async function requestVoid(path: string, method: string): Promise<void> {
+  const headers = new Headers()
+  const token = getAuthToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const resp = await fetch(`${apiBase}${path}`, { method, headers })
+  if (resp.status === 401) notifyAuthExpired()
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({ error: resp.statusText }))
+    throw new Error(body.error || `HTTP ${resp.status}`)
+  }
 }
 
 export const api = {
@@ -115,6 +140,27 @@ export const api = {
   },
   fileContent: (path: string) =>
     request<{ path: string; content: string }>(`/api/files/content?path=${encodeURIComponent(path)}`),
+  artifacts: (taskId: string) =>
+    request<ArtifactRecord[]>(`/api/tasks/${encodeURIComponent(taskId)}/artifacts`),
+  artifactContent: (taskId: string, artifactId: string) =>
+    requestBlob(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/content`),
+  artifactDownload: (taskId: string, artifactId: string) =>
+    requestBlob(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/download`),
+  markArtifactsViewed: (taskId: string) =>
+    requestVoid(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/viewed`, 'PATCH'),
+  createArtifactShare: (taskId: string, artifactId: string, expiresInSeconds: number) =>
+    request<ArtifactShareResult>(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/shares`, {
+      method: 'POST',
+      body: JSON.stringify({ expires_in_seconds: expiresInSeconds }),
+    }),
+  artifactShares: (taskId: string, artifactId: string) =>
+    request<ArtifactShareSummary[]>(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/shares`),
+  revokeArtifactShare: (taskId: string, artifactId: string, shareId: string) =>
+    requestVoid(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/shares/${encodeURIComponent(shareId)}`, 'DELETE'),
+  openArtifact: (taskId: string, artifactId: string) =>
+    requestVoid(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/open`, 'POST'),
+  revealArtifact: (taskId: string, artifactId: string) =>
+    requestVoid(`/api/tasks/${encodeURIComponent(taskId)}/artifacts/${encodeURIComponent(artifactId)}/reveal`, 'POST'),
   chat: (message: string, mode?: AgentMode, sessionId?: string, images?: ChatImage[]) =>
     request<{ status: string; session_id: string }>('/api/chat', {
       method: 'POST',

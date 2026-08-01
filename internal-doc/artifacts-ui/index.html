@@ -1,0 +1,986 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>JCode Artifact UI directions</title>
+  <style>
+    :root {
+      --bg: #111111;
+      --surface: #1a1a1a;
+      --surface-raised: #202020;
+      --muted: #2e2e2e;
+      --selection: #292929;
+      --text: #f5f5f4;
+      --text-dim: #b8b9b6;
+      --text-muted: #7f817d;
+      --border: #30302f;
+      --border-soft: #262625;
+      --primary: #ff8400;
+      --on-primary: #17130f;
+      --success: #22c55e;
+      --success-soft: #222924;
+      --warning: #ffb34d;
+      --warning-soft: #291c0f;
+      --error: #ff6a47;
+      --error-soft: #24100b;
+      --info: #b2b2ff;
+      --font-sans: Inter, Geist, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      --radius-sm: 4px;
+      --radius-md: 6px;
+      --radius-lg: 8px;
+      --radius-xl: 12px;
+      --shadow: 0 18px 48px rgba(0, 0, 0, .42);
+      color-scheme: dark;
+    }
+
+    * { box-sizing: border-box; }
+
+    [hidden] { display: none !important; }
+
+    html, body { width: 100%; min-width: 920px; height: 100%; margin: 0; }
+
+    body {
+      overflow: hidden;
+      background: #0c0c0c;
+      color: var(--text);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button, select, input { font: inherit; }
+
+    button {
+      color: inherit;
+      border: 0;
+      cursor: pointer;
+    }
+
+    button:focus-visible, select:focus-visible, input:focus-visible {
+      outline: 2px solid var(--primary);
+      outline-offset: 2px;
+    }
+
+    .review-bar {
+      height: 52px;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      border-bottom: 1px solid #2a2a2a;
+      background: #141414;
+    }
+
+    .review-title {
+      min-width: 190px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-weight: 650;
+    }
+
+    .review-title > span:first-child {
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      font-family: var(--font-mono);
+      color: var(--primary);
+      background: #181818;
+    }
+
+    .variant-switch {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      padding: 3px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: #0f0f0f;
+    }
+
+    .variant-switch button {
+      min-height: 28px;
+      padding: 0 12px;
+      border-radius: var(--radius-md);
+      background: transparent;
+      color: var(--text-dim);
+    }
+
+    .variant-switch button[aria-pressed="true"] {
+      background: var(--muted);
+      color: var(--text);
+    }
+
+    .review-spacer { flex: 1; }
+
+    .review-control {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--text-dim);
+      white-space: nowrap;
+    }
+
+    .review-control select {
+      height: 30px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 0 28px 0 9px;
+      background: #0f0f0f;
+      color: var(--text);
+    }
+
+    .toggle {
+      width: 34px;
+      height: 19px;
+      position: relative;
+      appearance: none;
+      border-radius: 99px;
+      background: #373737;
+      border: 1px solid #444;
+      cursor: pointer;
+    }
+
+    .toggle::after {
+      content: "";
+      position: absolute;
+      width: 13px;
+      height: 13px;
+      left: 2px;
+      top: 2px;
+      border-radius: 50%;
+      background: #b8b9b6;
+      transition: transform 150ms ease, background 150ms ease;
+    }
+
+    .toggle:checked { background: #4c2d0c; border-color: #815019; }
+    .toggle:checked::after { transform: translateX(15px); background: var(--primary); }
+
+    .workspace-frame {
+      height: calc(100vh - 52px);
+      padding: 8px;
+      background: #0c0c0c;
+    }
+
+    .app {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: grid;
+      grid-template-columns: 264px minmax(0, 1fr) 448px;
+      overflow: hidden;
+      border: 1px solid #2a2a2a;
+      border-radius: 13px;
+      background: var(--bg);
+      box-shadow: 0 22px 70px rgba(0, 0, 0, .32);
+    }
+
+    .sidebar {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+    }
+
+    .window-row {
+      height: 42px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 13px;
+      border-bottom: 1px solid var(--border-soft);
+    }
+
+    .traffic { width: 10px; height: 10px; border-radius: 50%; background: #575757; }
+    .traffic:first-child { background: #ff6259; }
+    .traffic:nth-child(2) { background: #ffbe2f; }
+    .traffic:nth-child(3) { background: #29c941; }
+
+    .new-task {
+      margin: 12px 10px 7px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 11px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      font-weight: 600;
+    }
+
+    .sidebar-nav { padding: 5px 7px 10px; }
+
+    .nav-row {
+      height: 34px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 0 9px;
+      border-radius: var(--radius-md);
+      color: var(--text-dim);
+    }
+
+    .nav-row.active { background: var(--selection); color: var(--text); }
+    .nav-mark { width: 16px; text-align: center; color: var(--text-muted); }
+
+    .sidebar-heading {
+      margin: 12px 16px 7px;
+      text-transform: uppercase;
+      letter-spacing: .09em;
+      font-size: 10px;
+      font-weight: 650;
+      color: var(--text-muted);
+    }
+
+    .task-list { padding: 0 7px; overflow: auto; }
+
+    .task-row {
+      width: 100%;
+      padding: 8px 9px;
+      text-align: left;
+      border-radius: var(--radius-md);
+      background: transparent;
+      color: var(--text-dim);
+    }
+
+    .task-row.active { background: var(--selection); color: var(--text); }
+    .task-row strong, .task-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .task-row strong { font-size: 12px; font-weight: 550; }
+    .task-row small { margin-top: 4px; color: var(--text-muted); font-family: var(--font-mono); font-size: 10px; }
+
+    .sidebar-footer {
+      margin-top: auto;
+      height: 46px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 13px;
+      border-top: 1px solid var(--border-soft);
+      color: var(--text-muted);
+    }
+
+    .main {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      background: #111;
+    }
+
+    .titlebar {
+      height: 42px;
+      flex: 0 0 42px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 0 13px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-dim);
+    }
+
+    .titlebar strong { color: var(--text); font-weight: 600; }
+    .crumb { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+    .title-actions { margin-left: auto; display: flex; align-items: center; gap: 5px; }
+
+    .icon-button, .subtle-button, .primary-button, .danger-button {
+      min-height: 30px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      border-radius: var(--radius-md);
+      padding: 0 9px;
+      border: 1px solid var(--border);
+      background: #171717;
+      color: var(--text-dim);
+    }
+
+    .icon-button { width: 30px; padding: 0; }
+    .subtle-button:hover, .icon-button:hover { color: var(--text); background: var(--muted); }
+    .primary-button { border-color: var(--primary); background: var(--primary); color: var(--on-primary); font-weight: 700; }
+    .danger-button { border-color: #6a2f22; color: var(--error); background: var(--error-soft); }
+
+    .conversation {
+      min-height: 0;
+      flex: 1;
+      overflow-y: auto;
+      padding: 28px max(26px, calc((100% - 760px) / 2));
+      scrollbar-color: #393939 transparent;
+    }
+
+    .turn { margin-bottom: 28px; }
+
+    .turn-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+      font-size: 12px;
+      font-weight: 650;
+      color: var(--text-dim);
+    }
+
+    .avatar {
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface);
+      font-family: var(--font-mono);
+      color: var(--primary);
+    }
+
+    .message {
+      color: #dededc;
+      font-size: 14px;
+      line-height: 1.68;
+    }
+
+    .user-message {
+      width: fit-content;
+      max-width: 82%;
+      margin-left: auto;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+    }
+
+    .tool-card {
+      margin: 14px 0 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: #151515;
+      overflow: hidden;
+    }
+
+    .tool-row {
+      min-height: 46px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+    }
+
+    .file-kind {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      flex: 0 0 30px;
+      border: 1px solid #464646;
+      border-radius: var(--radius-md);
+      background: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 9px;
+      color: var(--text-dim);
+    }
+
+    .tool-copy { min-width: 0; flex: 1; }
+    .tool-copy strong, .tool-copy span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tool-copy strong { font-size: 12px; }
+    .tool-copy span { margin-top: 3px; font: 10px var(--font-mono); color: var(--text-muted); }
+
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+
+    .quick-preview {
+      display: none;
+      border-top: 1px solid var(--border);
+      height: 300px;
+      background: #0e0e0e;
+    }
+
+    .quick-preview .preview-toolbar { height: 34px; }
+    .quick-preview .report { transform-origin: top left; }
+
+    .composer-wrap {
+      padding: 12px 24px 18px;
+      border-top: 1px solid var(--border-soft);
+      background: rgba(17,17,17,.96);
+    }
+
+    .composer {
+      max-width: 760px;
+      min-height: 88px;
+      margin: 0 auto;
+      padding: 11px;
+      border: 1px solid #404040;
+      border-radius: var(--radius-xl);
+      background: var(--surface);
+      box-shadow: 0 8px 24px rgba(0,0,0,.24);
+    }
+
+    .composer-placeholder { color: var(--text-muted); }
+    .composer-tools { margin-top: 23px; display: flex; align-items: center; gap: 7px; }
+    .composer-chip { padding: 4px 7px; border-radius: var(--radius-sm); background: var(--muted); color: var(--text-dim); font-size: 10px; }
+    .send { margin-left: auto; width: 30px; height: 30px; border-radius: var(--radius-md); background: var(--primary); color: var(--on-primary); font-weight: 900; }
+
+    .artifact-panel {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      border-left: 1px solid var(--border);
+      background: var(--bg);
+    }
+
+    .panel-tabs {
+      height: 42px;
+      flex: 0 0 42px;
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      padding: 0 8px;
+      border-bottom: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    .panel-tab {
+      height: 28px;
+      padding: 0 8px;
+      border-radius: var(--radius-md);
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+
+    .panel-tab.active { background: var(--muted); color: var(--text); }
+    .tab-count { margin-left: 4px; font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); }
+    .panel-close { margin-left: auto; }
+
+    .artifact-index {
+      flex: 0 0 196px;
+      overflow-y: auto;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .index-heading {
+      height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--text-muted);
+      font-size: 9px;
+      font-weight: 650;
+    }
+
+    .artifact-row {
+      width: 100%;
+      min-height: 50px;
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      padding: 7px 10px;
+      text-align: left;
+      background: transparent;
+      border-left: 2px solid transparent;
+    }
+
+    .artifact-row:hover { background: #191919; }
+    .artifact-row.active { border-left-color: var(--primary); background: var(--selection); }
+    .artifact-row .file-kind { width: 26px; height: 26px; flex-basis: 26px; }
+    .artifact-meta { min-width: 0; }
+    .artifact-meta strong, .artifact-meta small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .artifact-meta strong { font-size: 11px; font-weight: 600; }
+    .artifact-meta small { margin-top: 3px; color: var(--text-muted); font: 10px var(--font-mono); }
+    .artifact-rev { color: var(--text-muted); font: 10px var(--font-mono); }
+
+    .viewer {
+      min-height: 0;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .viewer-head {
+      min-height: 54px;
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+      background: #151515;
+    }
+
+    .viewer-identity { min-width: 0; flex: 1; }
+    .viewer-identity strong, .viewer-identity small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .viewer-identity strong { font-size: 12px; }
+    .viewer-identity small { margin-top: 4px; color: var(--text-muted); font: 10px var(--font-mono); }
+    .viewer-actions { display: flex; align-items: center; gap: 5px; }
+
+    .viewer-stage {
+      min-height: 0;
+      flex: 1;
+      position: relative;
+      overflow: auto;
+      padding: 12px;
+      background: #0d0d0d;
+    }
+
+    .preview-toolbar {
+      height: 38px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px;
+      border: 1px solid #333;
+      border-bottom: 0;
+      border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+      background: #1a1a1a;
+      color: var(--text-muted);
+      font-size: 10px;
+    }
+
+    .security-state { margin-left: auto; display: flex; align-items: center; gap: 5px; color: #9ec7aa; }
+
+    .preview-paper {
+      min-height: calc(100% - 38px);
+      border: 1px solid #333;
+      border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+      background: #f5f4ef;
+      color: #191919;
+      overflow: hidden;
+    }
+
+    .report { padding: 24px; }
+    .report-kicker { font: 10px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: #6b665f; }
+    .report h2 { max-width: 580px; margin: 7px 0 4px; font-size: clamp(20px, 2.2vw, 31px); line-height: 1.12; letter-spacing: -.025em; }
+    .report p { margin: 0; color: #68645d; line-height: 1.5; }
+
+    .report-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin-top: 20px;
+      border: 1px solid #d3d0c9;
+    }
+
+    .report-cell { min-height: 78px; padding: 13px; border-right: 1px solid #d3d0c9; }
+    .report-cell:last-child { border-right: 0; }
+    .report-cell span { display: block; color: #79746c; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+    .report-cell strong { display: block; margin-top: 8px; font-size: 19px; }
+
+    .coverage {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: 120px minmax(0,1fr) 38px;
+      gap: 8px;
+      align-items: center;
+      font-size: 11px;
+    }
+
+    .bar { height: 7px; background: #dedbd4; overflow: hidden; }
+    .bar i { display: block; height: 100%; background: #262626; }
+
+    .md-preview { padding: 27px 30px; max-width: 760px; }
+    .md-preview h1 { margin: 0 0 16px; font-size: 27px; }
+    .md-preview h2 { margin-top: 24px; font-size: 16px; }
+    .md-preview p, .md-preview li { color: #4e4b46; line-height: 1.65; }
+    .md-preview code { padding: 2px 4px; border: 1px solid #d3d0c9; background: #e7e4dd; font: 11px var(--font-mono); }
+
+    .csv-preview { padding: 16px; }
+    .csv-preview table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .csv-preview th, .csv-preview td { padding: 9px; border: 1px solid #d6d2cb; text-align: left; }
+    .csv-preview th { background: #e7e4dd; font-weight: 650; }
+    .csv-preview td:nth-child(n+3) { font-family: var(--font-mono); }
+
+    .share-popover {
+      position: absolute;
+      z-index: 8;
+      top: 64px;
+      right: 18px;
+      width: min(330px, calc(100% - 36px));
+      border: 1px solid #424242;
+      border-radius: var(--radius-xl);
+      padding: 13px;
+      background: var(--surface-raised);
+      box-shadow: var(--shadow);
+    }
+
+    .share-popover[hidden] { display: none; }
+    .share-popover h3 { margin: 0 0 4px; font-size: 13px; }
+    .share-popover p { margin: 0 0 12px; color: var(--text-dim); font-size: 11px; line-height: 1.5; }
+    .share-summary { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 9px 0; border-top: 1px solid var(--border); }
+    .share-summary span { color: var(--text-muted); font-size: 10px; }
+    .share-summary strong { font: 10px var(--font-mono); }
+    .share-actions { margin-top: 10px; display: flex; justify-content: flex-end; gap: 7px; }
+    .progress { height: 5px; margin: 10px 0 6px; overflow: hidden; background: #3a3a3a; }
+    .progress i { display: block; width: 68%; height: 100%; background: var(--primary); }
+    .stale-note { margin: 10px 0; padding: 8px; border-left: 2px solid var(--warning); background: var(--warning-soft); color: #ffd6a3; font-size: 10px; line-height: 1.45; }
+    .state-note { margin: 10px 0; padding: 8px; border-left: 2px solid var(--text-muted); background: #171717; color: var(--text-dim); font-size: 10px; }
+
+    .focus-shell {
+      position: absolute;
+      inset: 42px 0 0;
+      z-index: 6;
+      display: none;
+      flex-direction: column;
+      background: var(--bg);
+    }
+
+    .focus-topbar {
+      height: 48px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .focus-strip { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; }
+    .focus-artifact { padding: 6px 9px; border-radius: var(--radius-md); background: transparent; color: var(--text-muted); }
+    .focus-artifact.active { background: var(--muted); color: var(--text); }
+    .focus-body { min-height: 0; flex: 1; padding: 16px; background: #0d0d0d; }
+    .focus-body .preview-paper { height: calc(100% - 38px); }
+
+    .fullscreen-viewer {
+      position: fixed;
+      inset: 14px;
+      z-index: 30;
+      display: none;
+      flex-direction: column;
+      border: 1px solid #494949;
+      border-radius: var(--radius-xl);
+      background: #101010;
+      box-shadow: 0 0 0 100vmax rgba(0,0,0,.72), var(--shadow);
+      overflow: hidden;
+    }
+
+    .fullscreen-viewer.open { display: flex; }
+    .fullscreen-viewer .viewer-stage { padding: 18px; }
+    .fullscreen-viewer .preview-paper { min-height: calc(100% - 38px); }
+
+    .toast {
+      position: fixed;
+      z-index: 40;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      opacity: 0;
+      pointer-events: none;
+      padding: 9px 12px;
+      border: 1px solid #444;
+      border-radius: var(--radius-lg);
+      background: #242424;
+      box-shadow: var(--shadow);
+      transition: 150ms ease;
+    }
+
+    .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+
+    /* Variant B: the selected artifact becomes the main canvas. */
+    .app[data-variant="focus"] { grid-template-columns: 264px minmax(0, 1fr) 56px; }
+    .app[data-variant="focus"] .artifact-panel { overflow: hidden; }
+    .app[data-variant="focus"] .panel-tabs, .app[data-variant="focus"] .artifact-index, .app[data-variant="focus"] .viewer { display: none; }
+    .app[data-variant="focus"] .artifact-panel::before {
+      content: "ART\A 3";
+      white-space: pre;
+      display: grid;
+      place-items: center;
+      height: 58px;
+      color: var(--text-muted);
+      font: 9px/1.6 var(--font-mono);
+      border-bottom: 1px solid var(--border);
+    }
+    .app[data-variant="focus"] .focus-shell { display: flex; }
+
+    /* Variant C: the preview lives in the conversation; right panel stays index-first. */
+    .app[data-variant="inline"] { grid-template-columns: 264px minmax(0, 1fr) 286px; }
+    .app[data-variant="inline"] .artifact-index { flex: 1; border-bottom: 0; }
+    .app[data-variant="inline"] .viewer { display: none; }
+    .app[data-variant="inline"] .quick-preview { display: block; }
+
+    @media (max-width: 1180px) {
+      .review-title { min-width: 150px; }
+      .review-title .wide { display: none; }
+      .app { grid-template-columns: 220px minmax(0, 1fr) 382px; }
+      .app[data-variant="focus"] { grid-template-columns: 220px minmax(0,1fr) 52px; }
+      .app[data-variant="inline"] { grid-template-columns: 220px minmax(0,1fr) 250px; }
+      .conversation { padding-left: 22px; padding-right: 22px; }
+      .panel-tab:not(.active) { display: none; }
+      .report { padding: 18px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="review-bar" aria-label="Prototype controls">
+    <div class="review-title"><span>J</span><span><span class="wide">Artifact UI · </span>Design review</span></div>
+    <div class="variant-switch" role="group" aria-label="Display direction">
+      <button type="button" data-variant-button="docked" aria-pressed="true">A · Docked</button>
+      <button type="button" data-variant-button="focus" aria-pressed="false">B · Focus canvas</button>
+      <button type="button" data-variant-button="inline" aria-pressed="false">C · Quick Look</button>
+    </div>
+    <div class="review-spacer"></div>
+    <label class="review-control">Cloud login <input id="login-toggle" class="toggle" type="checkbox" checked /></label>
+    <label class="review-control">Share state
+      <select id="share-state">
+        <option value="unshared">Unshared</option>
+        <option value="uploading">Uploading</option>
+        <option value="shared">Shared</option>
+        <option value="stale" selected>Stale share</option>
+        <option value="expired">Expired</option>
+        <option value="revoked">Revoked</option>
+      </select>
+    </label>
+  </header>
+
+  <div class="workspace-frame">
+    <div id="app" class="app" data-variant="docked" data-selected="html">
+      <aside class="sidebar" aria-label="Tasks">
+        <div class="window-row" aria-hidden="true"><i class="traffic"></i><i class="traffic"></i><i class="traffic"></i></div>
+        <button class="new-task" type="button"><span>＋ New task</span><span>⇧⌘O</span></button>
+        <nav class="sidebar-nav">
+          <div class="nav-row active"><span class="nav-mark">⌁</span><span>Tasks</span></div>
+          <div class="nav-row"><span class="nav-mark">✦</span><span>Automations</span></div>
+          <div class="nav-row"><span class="nav-mark">◉</span><span>Channels</span></div>
+        </nav>
+        <div class="sidebar-heading">jcode · workspace</div>
+        <div class="task-list">
+          <button class="task-row active" type="button"><strong>Artifact delivery workflow</strong><small>main · kimi-for-coding</small></button>
+          <button class="task-row" type="button"><strong>Cloud relay hardening</strong><small>codex/cloud-e2ee</small></button>
+          <button class="task-row" type="button"><strong>Tool catalog review</strong><small>main · completed</small></button>
+        </div>
+        <footer class="sidebar-footer"><span>jcode</span><span>◐　⚙</span></footer>
+      </aside>
+
+      <main class="main">
+        <div class="titlebar">
+          <strong>Artifact delivery workflow</strong>
+          <span class="crumb">jcode / main</span>
+          <div class="title-actions"><span class="status-dot" title="Connected"></span><button class="icon-button" type="button" title="Panels">▣</button></div>
+        </div>
+
+        <section class="conversation" aria-label="Conversation">
+          <article class="turn">
+            <div class="message user-message">Analyze the release test results and create an interactive HTML readiness report plus a Markdown summary.</div>
+          </article>
+
+          <article class="turn">
+            <div class="turn-head"><span class="avatar">J</span><span>JCode</span></div>
+            <div class="message">I reviewed the unit, browser, and deployment checks. The report separates local Artifact delivery from Cloud sharing and calls out the remaining release gate.</div>
+            <div class="tool-card" id="artifact-tool-card">
+              <div class="tool-row">
+                <span class="file-kind">HTML</span>
+                <div class="tool-copy"><strong>Release readiness report</strong><span>reports/release-readiness.html · rev 3</span></div>
+                <span class="status-dot" aria-label="Available"></span>
+                <button class="subtle-button open-artifact" type="button">Open</button>
+              </div>
+              <div class="quick-preview">
+                <div class="preview-toolbar"><span>Quick Look</span><span>·</span><span>reports/release-readiness.html</span><span class="security-state">● Sandboxed</span></div>
+                <div class="preview-paper"><div class="report report-content"></div></div>
+              </div>
+            </div>
+            <div class="message">The HTML report and two supporting files are available in Artifacts. The currently shared link still points to revision 2; revision 3 is only local until you choose “Share latest.”</div>
+          </article>
+        </section>
+
+        <div class="composer-wrap">
+          <div class="composer">
+            <div class="composer-placeholder">Ask JCode or type / for commands</div>
+            <div class="composer-tools"><span class="composer-chip">Full access</span><span class="composer-chip">Kimi</span><span class="composer-chip">High speed</span><button class="send" type="button">↑</button></div>
+          </div>
+        </div>
+
+        <section class="focus-shell" aria-label="Focus canvas">
+          <div class="focus-topbar">
+            <button class="subtle-button focus-back" type="button">← Back to conversation</button>
+            <div class="focus-strip">
+              <button class="focus-artifact active" data-artifact="html" type="button">Readiness report</button>
+              <button class="focus-artifact" data-artifact="md" type="button">Summary</button>
+              <button class="focus-artifact" data-artifact="csv" type="button">Test results</button>
+            </div>
+            <button class="subtle-button fullscreen-open" type="button">Expand</button>
+          </div>
+          <div class="focus-body"><div class="preview-toolbar"><span class="focus-path">reports/release-readiness.html</span><span id="focus-security" class="security-state">● Sandboxed · network blocked</span></div><div class="preview-paper focus-preview"></div></div>
+        </section>
+      </main>
+
+      <aside class="artifact-panel" aria-label="Artifact panel">
+        <div class="panel-tabs">
+          <button class="panel-tab" type="button">Plan</button>
+          <button class="panel-tab" type="button">Files</button>
+          <button class="panel-tab" type="button">Changes</button>
+          <button class="panel-tab active" type="button">Artifacts <span class="tab-count">3</span></button>
+          <button class="icon-button panel-close" type="button" title="Close panel">×</button>
+        </div>
+        <div class="artifact-index">
+          <div class="index-heading"><span>Delivered in this task</span><span>3 items</span></div>
+          <button class="artifact-row active" data-artifact="html" type="button">
+            <span class="file-kind">HTML</span><span class="artifact-meta"><strong>Release readiness report</strong><small>reports/release-readiness.html</small></span><span class="artifact-rev">rev 3</span>
+          </button>
+          <button class="artifact-row" data-artifact="md" type="button">
+            <span class="file-kind">MD</span><span class="artifact-meta"><strong>Release summary</strong><small>reports/summary.md</small></span><span class="artifact-rev">rev 1</span>
+          </button>
+          <button class="artifact-row" data-artifact="csv" type="button">
+            <span class="file-kind">CSV</span><span class="artifact-meta"><strong>Test results</strong><small>reports/test-results.csv</small></span><span class="artifact-rev">rev 1</span>
+          </button>
+        </div>
+
+        <section class="viewer">
+          <header class="viewer-head">
+            <div class="viewer-identity"><strong id="viewer-title">Release readiness report</strong><small id="viewer-path">reports/release-readiness.html · rev 3 · 184 KB</small></div>
+            <div class="viewer-actions">
+              <button class="icon-button" type="button" title="Download">↓</button>
+              <button id="share-button" class="subtle-button" type="button">Share</button>
+              <button class="icon-button fullscreen-open" type="button" title="Expand">↗</button>
+            </div>
+          </header>
+          <div class="viewer-stage">
+            <div class="preview-toolbar"><span id="preview-label">Interactive HTML</span><span class="security-state" id="security-label">● Sandboxed · network blocked</span></div>
+            <div class="preview-paper" id="main-preview"></div>
+            <section id="share-popover" class="share-popover" hidden aria-live="polite"></section>
+          </div>
+        </section>
+      </aside>
+    </div>
+  </div>
+
+  <section id="fullscreen" class="fullscreen-viewer" aria-label="Fullscreen artifact viewer">
+    <header class="viewer-head"><div class="viewer-identity"><strong id="fullscreen-title">Release readiness report</strong><small id="fullscreen-path">reports/release-readiness.html · rev 3</small></div><div class="viewer-actions"><button class="subtle-button" type="button">Download</button><button id="fullscreen-share" class="subtle-button" type="button">Share</button><button id="fullscreen-close" class="icon-button" type="button" title="Close">×</button></div></header>
+    <div class="viewer-stage"><div class="preview-toolbar"><span id="fullscreen-label">Interactive HTML</span><span class="security-state">● Sandboxed · network blocked</span></div><div class="preview-paper" id="fullscreen-preview"></div></div>
+  </section>
+  <div id="toast" class="toast" role="status">Link copied</div>
+
+  <template id="report-template">
+    <div class="report">
+      <div class="report-kicker">Sample release readiness · generated artifact</div>
+      <h2>Artifact delivery is ready for implementation</h2>
+      <p>The local viewer contract is clear. Cloud sharing remains a user-triggered, encrypted snapshot.</p>
+      <div class="report-grid">
+        <div class="report-cell"><span>Product gate</span><strong>GO</strong></div>
+        <div class="report-cell"><span>UI directions</span><strong>3</strong></div>
+        <div class="report-cell"><span>Open P0</span><strong>0</strong></div>
+      </div>
+      <div class="coverage"><span>Local delivery</span><div class="bar"><i style="width:100%"></i></div><b>100%</b><span>Share lifecycle</span><div class="bar"><i style="width:84%"></i></div><b>84%</b><span>Release tests</span><div class="bar"><i style="width:70%"></i></div><b>70%</b></div>
+    </div>
+  </template>
+
+  <template id="md-template">
+    <article class="md-preview"><h1>Artifact release summary</h1><p>The delivery contract uses a registered workspace file as the local source of truth. A share creates an immutable encrypted snapshot; it does not sync the session.</p><h2>Release gates</h2><ul><li>Web and Desktop expose <code>show_artifact</code>.</li><li>CLI/TUI and ACP schemas do not include the tool.</li><li>Untrusted HTML is sandboxed with networking blocked.</li><li>Cloud never receives the <code>share_key</code>.</li></ul></article>
+  </template>
+
+  <template id="csv-template">
+    <div class="csv-preview"><table><thead><tr><th>Suite</th><th>Surface</th><th>Passed</th><th>Failed</th><th>Status</th></tr></thead><tbody><tr><td>Tool registry</td><td>Web</td><td>18</td><td>0</td><td>Pass</td></tr><tr><td>Transport isolation</td><td>CLI / ACP</td><td>12</td><td>0</td><td>Pass</td></tr><tr><td>Viewer security</td><td>Browser</td><td>9</td><td>0</td><td>Pass</td></tr><tr><td>Cloud share</td><td>Kubernetes</td><td>7</td><td>0</td><td>Pass</td></tr></tbody></table></div>
+  </template>
+
+  <script>
+    const artifacts = {
+      html: { title: 'Release readiness report', path: 'reports/release-readiness.html', rev: 3, size: '184 KB', label: 'Interactive HTML', template: 'report-template', secure: true },
+      md: { title: 'Release summary', path: 'reports/summary.md', rev: 1, size: '12 KB', label: 'Rendered Markdown', template: 'md-template', secure: false },
+      csv: { title: 'Test results', path: 'reports/test-results.csv', rev: 1, size: '8 KB', label: 'Table preview · 4 of 4 rows', template: 'csv-template', secure: false },
+    };
+
+    const app = document.querySelector('#app');
+    const loginToggle = document.querySelector('#login-toggle');
+    const shareState = document.querySelector('#share-state');
+    const shareButton = document.querySelector('#share-button');
+    const fullscreenShare = document.querySelector('#fullscreen-share');
+    const sharePopover = document.querySelector('#share-popover');
+    const fullscreen = document.querySelector('#fullscreen');
+    const toast = document.querySelector('#toast');
+    let selected = 'html';
+    let shareOpen = false;
+
+    function cloneTemplate(name) {
+      return document.querySelector('#' + name).content.cloneNode(true);
+    }
+
+    function fillPreview(target, artifact) {
+      target.replaceChildren(cloneTemplate(artifact.template));
+    }
+
+    function renderSelected() {
+      const artifact = artifacts[selected];
+      app.dataset.selected = selected;
+      document.querySelectorAll('[data-artifact]').forEach((el) => el.classList.toggle('active', el.dataset.artifact === selected));
+      document.querySelector('#viewer-title').textContent = artifact.title;
+      document.querySelector('#viewer-path').textContent = `${artifact.path} · rev ${artifact.rev} · ${artifact.size}`;
+      document.querySelector('#preview-label').textContent = artifact.label;
+      document.querySelector('#security-label').textContent = artifact.secure ? '● Sandboxed · network blocked' : '● Safe renderer';
+      document.querySelector('#focus-security').textContent = artifact.secure ? '● Sandboxed · network blocked' : '● Safe renderer';
+      document.querySelector('#fullscreen-title').textContent = artifact.title;
+      document.querySelector('#fullscreen-path').textContent = `${artifact.path} · rev ${artifact.rev}`;
+      document.querySelector('#fullscreen-label').textContent = artifact.label;
+      document.querySelector('.focus-path').textContent = artifact.path;
+      fillPreview(document.querySelector('#main-preview'), artifact);
+      fillPreview(document.querySelector('.focus-preview'), artifact);
+      fillPreview(document.querySelector('#fullscreen-preview'), artifact);
+      document.querySelectorAll('.report-content').forEach((el) => fillPreview(el, artifact));
+      renderShare();
+    }
+
+    function setVariant(variant) {
+      app.dataset.variant = variant;
+      document.querySelectorAll('[data-variant-button]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.variantButton === variant)));
+      if (variant === 'inline') document.querySelector('#artifact-tool-card').scrollIntoView({ block: 'center' });
+    }
+
+    function stateMarkup(state) {
+      const artifact = artifacts[selected];
+      if (state === 'unshared') return `<h3>Share ${artifact.title}</h3><p>Create an immutable encrypted snapshot of revision ${artifact.rev}. Session sync stays unchanged.</p><div class="share-summary"><span>Expires</span><strong>7 days</strong><span>Maximum size</span><strong>25 MiB</strong></div><div class="share-actions"><button class="subtle-button close-share">Cancel</button><button class="primary-button start-share">Share revision ${artifact.rev}</button></div>`;
+      if (state === 'uploading') return `<h3>Encrypting and uploading</h3><p>Revision ${artifact.rev} is pinned while JCode creates the encrypted snapshot.</p><div class="progress"><i></i></div><div class="share-summary"><span>Uploaded</span><strong>68%</strong><span>Local preview</span><strong>Available</strong></div><div class="share-actions"><button class="subtle-button cancel-upload">Cancel upload</button></div>`;
+      if (state === 'shared') return `<h3>Shared privately</h3><p>The decryption secret exists only in the copied URL fragment. Cloud stores ciphertext.</p><div class="share-summary"><span>Snapshot</span><strong>rev ${artifact.rev}</strong><span>Expires</span><strong>Aug 8, 2026</strong></div><div class="share-actions"><button class="danger-button revoke-share">Revoke</button><button class="primary-button copy-link">Copy link</button></div>`;
+      if (state === 'stale') return `<h3>Newer local revision</h3><p>The existing link remains an immutable revision 2 snapshot.</p><div class="stale-note">Shared rev 2 · Current rev ${Math.max(3, artifact.rev)}. Sharing latest creates a new link; the old link is unchanged.</div><div class="share-summary"><span>Old link expires</span><strong>Aug 8, 2026</strong></div><div class="share-actions"><button class="subtle-button copy-link">Copy rev 2 link</button><button class="primary-button share-latest">Share latest</button></div>`;
+      if (state === 'expired') return `<h3>Share expired</h3><p>The encrypted object is no longer available from the public share page.</p><div class="state-note">Expired Aug 1, 2026 · revision 2</div><div class="share-actions"><button class="primary-button start-share">Share current revision</button></div>`;
+      return `<h3>Share revoked</h3><p>The old link no longer grants access. Your local Artifact is unchanged.</p><div class="state-note">Revoked by this device · revision 2</div><div class="share-actions"><button class="primary-button start-share">Create new share</button></div>`;
+    }
+
+    function renderShare() {
+      const loggedIn = loginToggle.checked;
+      shareButton.hidden = !loggedIn;
+      fullscreenShare.hidden = !loggedIn;
+      if (!loggedIn) { shareOpen = false; sharePopover.hidden = true; return; }
+      sharePopover.hidden = !shareOpen;
+      sharePopover.innerHTML = stateMarkup(shareState.value);
+    }
+
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add('show');
+      window.clearTimeout(showToast.timer);
+      showToast.timer = window.setTimeout(() => toast.classList.remove('show'), 1200);
+    }
+
+    document.querySelectorAll('[data-variant-button]').forEach((button) => button.addEventListener('click', () => setVariant(button.dataset.variantButton)));
+    document.querySelectorAll('[data-artifact]').forEach((button) => button.addEventListener('click', () => { selected = button.dataset.artifact; renderSelected(); }));
+    document.querySelectorAll('.open-artifact').forEach((button) => button.addEventListener('click', () => setVariant('docked')));
+    document.querySelectorAll('.fullscreen-open').forEach((button) => button.addEventListener('click', () => fullscreen.classList.add('open')));
+    document.querySelector('#fullscreen-close').addEventListener('click', () => fullscreen.classList.remove('open'));
+    document.querySelector('.focus-back').addEventListener('click', () => setVariant('docked'));
+    document.querySelector('.panel-close').addEventListener('click', () => { app.style.gridTemplateColumns = '264px minmax(0, 1fr) 0'; showToast('Artifacts panel closed · reopen with ⇧⌘A'); });
+    shareButton.addEventListener('click', () => { shareOpen = !shareOpen; renderShare(); });
+    fullscreenShare.addEventListener('click', () => { fullscreen.classList.remove('open'); shareOpen = true; setVariant('docked'); renderShare(); });
+    loginToggle.addEventListener('change', renderShare);
+    shareState.addEventListener('change', () => { shareOpen = true; renderShare(); });
+    sharePopover.addEventListener('click', (event) => {
+      if (event.target.closest('.close-share')) { shareOpen = false; renderShare(); }
+      if (event.target.closest('.start-share, .share-latest')) { shareState.value = 'uploading'; renderShare(); }
+      if (event.target.closest('.cancel-upload')) { shareState.value = 'unshared'; renderShare(); }
+      if (event.target.closest('.revoke-share')) { shareState.value = 'revoked'; renderShare(); }
+      if (event.target.closest('.copy-link')) showToast('Encrypted share link copied');
+    });
+    document.addEventListener('keydown', (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'a') { event.preventDefault(); setVariant('docked'); }
+      if (event.key === 'Escape') { fullscreen.classList.remove('open'); shareOpen = false; renderShare(); }
+    });
+
+    renderSelected();
+  </script>
+</body>
+</html>

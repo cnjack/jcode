@@ -236,6 +236,8 @@ type automationRun struct {
 	TerminalStatus string `json:"terminal_status,omitempty"`
 	Status         string `json:"status,omitempty"`
 	ErrorReason    string `json:"error_reason,omitempty"`
+	ArtifactCount  int    `json:"artifact_count,omitempty"`
+	ArtifactUnseen bool   `json:"artifact_unseen,omitempty"`
 }
 
 func (s *Server) handleListAutomationRuns(w http.ResponseWriter, r *http.Request) {
@@ -276,6 +278,8 @@ func (s *Server) handleListAutomationRuns(w http.ResponseWriter, r *http.Request
 				TerminalStatus: m.TerminalStatus,
 				Status:         m.Status,
 				ErrorReason:    m.ErrorReason,
+				ArtifactCount:  m.ArtifactCount,
+				ArtifactUnseen: m.ArtifactUnseen,
 			})
 		}
 	}

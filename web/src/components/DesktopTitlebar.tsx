@@ -33,13 +33,13 @@ import {
 import { useCloudSessionSync } from './CloudSyncToggle'
 import { TopBar } from './TopBar'
 
-type PanelType = 'plan' | 'files' | 'changes' | 'terminal'
+type PanelType = 'plan' | 'files' | 'changes' | 'artifacts' | 'terminal'
 type OutlineIcon = ComponentType<SVGProps<SVGSVGElement>>
 
 interface Props {
   isRunning: boolean
   wsConnected: boolean
-  activePanel: 'none' | 'plan' | 'files' | 'changes' | 'terminal'
+  activePanel: 'none' | 'plan' | 'files' | 'changes' | 'artifacts' | 'terminal'
   terminalOpen: boolean
   onTogglePanel: (panel: PanelType) => void
 }

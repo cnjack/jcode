@@ -125,6 +125,15 @@ export function extractToolDisplayInfo(name: string, argsJSON: string): ToolDisp
       if (subtitle.length > 60) subtitle = subtitle.slice(0, 60) + '…'
       return { title: 'ask user', icon: 'question', category: 'context', kind: 'other', collapsible: false, subtitle }
     }
+    case 'show_artifact':
+      return {
+        title: 'artifact',
+        icon: 'file',
+        category: 'context',
+        kind: 'read',
+        collapsible: true,
+        subtitle: getString('title') || shortenPath(getString('path')),
+      }
     default:
       return { title: name, icon: 'tool', category: '', kind: 'other', collapsible: false }
   }
