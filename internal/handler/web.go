@@ -138,6 +138,15 @@ func extractToolDisplayInfo(name, argsJSON string) *ToolDisplayInfo {
 		if len(info.Subtitle) > 60 {
 			info.Subtitle = info.Subtitle[:60] + "…"
 		}
+	case "show_artifact":
+		info.Title = "Artifact"
+		info.Icon = "file"
+		info.Category = "context"
+		info.Kind = "read"
+		info.Subtitle = getString("title")
+		if info.Subtitle == "" {
+			info.Subtitle = shortenPath(getString("path"))
+		}
 	case "load_skill":
 		info.Title = "Load Skill"
 		info.Icon = "skill"

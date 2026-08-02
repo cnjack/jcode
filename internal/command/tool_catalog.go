@@ -35,6 +35,9 @@ var commandToolPolicies = map[string]commandToolPolicy{
 	),
 	"load_skill": directPolicy("skills", normalMode, "read"),
 	"subagent":   directPolicy("delegation.subagent", normalMode, "orchestration"),
+	"show_artifact": scopedDirectPolicy(
+		"web.artifact", allModes, webTransport, "read",
+	),
 
 	"goal_set":    deferredPolicy("session.goal", normalMode, "session"),
 	"goal_get":    deferredPolicy("session.goal", allModes, "read"),
@@ -72,6 +75,7 @@ var (
 	allModes   = []string{agent.ToolModeNormal, agent.ToolModePlan}
 
 	tuiTransport        = []string{agent.ToolTransportTUI}
+	webTransport        = []string{agent.ToolTransportWeb}
 	tuiAndWebTransports = []string{agent.ToolTransportTUI, agent.ToolTransportWeb}
 )
 

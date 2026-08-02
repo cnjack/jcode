@@ -161,6 +161,17 @@ export function createWSHandlers(
         dispatch(sessionActions.touchProjectTime({ path, ts: updatedAt || new Date().toISOString() }))
       }
     },
+    onArtifactUpserted: (d) => {
+      // Artifact metadata updates the sidebar for every task, but only an
+      // explicitly focused artifact from the foreground task may open UI.
+      void dispatch(loadTasks() as never)
+      const artifactID = d.artifact_id || d.id
+      if (d.task_id === getState().session.currentSessionId && d.focus !== false && artifactID) {
+        window.dispatchEvent(new CustomEvent('jcode:artifact-upserted', {
+          detail: { ...d, artifact_id: artifactID },
+        }))
+      }
+    },
     onSessionReset: () => dispatch(chatActions.clearChat()),
   }
 }

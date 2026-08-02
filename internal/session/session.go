@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/cnjack/jcode/internal/artifact"
 	"github.com/cnjack/jcode/internal/config"
 )
 
@@ -42,6 +44,7 @@ const (
 	EntrySystemPrompt    EntryType = "system_prompt"
 	EntryGoalUpdate      EntryType = "goal_update"
 	EntryToolObservation EntryType = "tool_observation"
+	EntryArtifact        EntryType = "artifact"
 )
 
 // ToolObservation stores metadata-only evidence about progressive tool
@@ -156,6 +159,17 @@ type Entry struct {
 
 	// tool_observation fields
 	ToolObservation *ToolObservation `json:"tool_observation,omitempty"`
+
+	// artifact fields. Only safe, workspace-relative metadata is persisted;
+	// content and absolute paths remain in the workspace.
+	ArtifactID        string `json:"artifact_id,omitempty"`
+	ArtifactPath      string `json:"artifact_path,omitempty"`
+	ArtifactTitle     string `json:"artifact_title,omitempty"`
+	ArtifactKind      string `json:"artifact_kind,omitempty"`
+	ArtifactMediaType string `json:"artifact_media_type,omitempty"`
+	ArtifactSize      int64  `json:"artifact_size,omitempty"`
+	ArtifactRevision  int    `json:"artifact_revision,omitempty"`
+	ArtifactFocus     bool   `json:"artifact_focus,omitempty"`
 }
 
 // SessionMeta is stored in the index for fast listing.
@@ -185,6 +199,11 @@ type SessionMeta struct {
 	TerminalStatus string `json:"terminal_status,omitempty"`
 	EndTime        string `json:"end_time,omitempty"`
 	ErrorReason    string `json:"error_reason,omitempty"`
+	// Artifact summary is a repairable materialized view over artifact entries.
+	ArtifactCount     int    `json:"artifact_count,omitempty"`
+	ArtifactUnseen    bool   `json:"artifact_unseen,omitempty"`
+	ArtifactUpdatedAt string `json:"artifact_updated_at,omitempty"`
+	ArtifactViewedAt  string `json:"artifact_viewed_at,omitempty"`
 }
 
 // ProjectMeta is project-level metadata kept in its own file (projects.json,
@@ -577,6 +596,45 @@ func (r *Recorder) RecordToolResult(name, output, toolCallID string, err error, 
 // RecordToolObservation appends metadata-only progressive-disclosure evidence.
 func (r *Recorder) RecordToolObservation(observation ToolObservation) {
 	_ = r.writeEntry(Entry{Type: EntryToolObservation, ToolObservation: &observation})
+}
+
+// RecordArtifact durably appends one metadata-only Artifact revision. Unlike
+// the historical best-effort recorder helpers, it returns append failures so
+// the show_artifact tool cannot report a revision that was never persisted.
+func (r *Recorder) RecordArtifact(record artifact.Record) error {
+	if err := r.writeEntry(Entry{
+		Type: EntryArtifact, ArtifactID: record.ID, ArtifactPath: record.RelativePath,
+		ArtifactTitle: record.Title, ArtifactKind: string(record.Kind), ArtifactMediaType: record.MediaType,
+		ArtifactSize: record.Size, ArtifactRevision: record.Revision, ArtifactFocus: record.Focus,
+	}); err != nil {
+		return err
+	}
+	if err := reconcileArtifactSummary(r.UUID()); err != nil {
+		config.Logger().Printf("[artifact] reconcile session summary %s: %v", r.UUID(), err)
+	}
+	return nil
+}
+
+func reconcileArtifactSummary(sessionID string) error {
+	records, err := LoadArtifactRecords(sessionID)
+	if err != nil {
+		return err
+	}
+	latest := time.Time{}
+	for i := range records {
+		if records[i].UpdatedAt.After(latest) {
+			latest = records[i].UpdatedAt
+		}
+	}
+	_, err = UpdateSessionMeta(sessionID, func(meta *SessionMeta) {
+		meta.ArtifactCount = len(records)
+		if !latest.IsZero() {
+			meta.ArtifactUpdatedAt = latest.Format(time.RFC3339Nano)
+		}
+		viewedAt, _ := time.Parse(time.RFC3339Nano, meta.ArtifactViewedAt)
+		meta.ArtifactUnseen = latest.After(viewedAt)
+	})
+	return err
 }
 
 // RecordPlanUpdate appends a plan state change entry.
@@ -1204,4 +1262,43 @@ func LoadSession(id string) ([]Entry, error) {
 		config.Logger().Printf("[session] loaded %s with %d corrupted lines skipped", id, skipped)
 	}
 	return entries, nil
+}
+
+// LoadArtifactRecords rebuilds the latest metadata revision for every Artifact
+// in a session. Entry order is not trusted: the greatest revision wins, with a
+// later timestamp breaking ties for defensive recovery from duplicated lines.
+func LoadArtifactRecords(id string) ([]artifact.Record, error) {
+	entries, err := LoadSession(id)
+	if err != nil {
+		return nil, err
+	}
+	latest := make(map[string]artifact.Record)
+	for _, entry := range entries {
+		if entry.Type != EntryArtifact || entry.ArtifactID == "" || entry.ArtifactRevision <= 0 {
+			continue
+		}
+		updatedAt, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
+		record := artifact.Record{
+			ID: entry.ArtifactID, SessionID: id, RelativePath: entry.ArtifactPath,
+			Title: entry.ArtifactTitle, Kind: artifact.Kind(entry.ArtifactKind), MediaType: entry.ArtifactMediaType,
+			Size: entry.ArtifactSize, Revision: entry.ArtifactRevision, UpdatedAt: updatedAt,
+			Status: artifact.StatusAvailable, Focus: entry.ArtifactFocus,
+		}
+		current, exists := latest[record.ID]
+		if !exists || record.Revision > current.Revision ||
+			(record.Revision == current.Revision && record.UpdatedAt.After(current.UpdatedAt)) {
+			latest[record.ID] = record
+		}
+	}
+	records := make([]artifact.Record, 0, len(latest))
+	for _, record := range latest {
+		records = append(records, record)
+	}
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].UpdatedAt.Equal(records[j].UpdatedAt) {
+			return records[i].ID < records[j].ID
+		}
+		return records[i].UpdatedAt.After(records[j].UpdatedAt)
+	})
+	return records, nil
 }

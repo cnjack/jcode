@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/cnjack/jcode/internal/automation"
+	"github.com/cnjack/jcode/internal/session"
 )
 
 func newAutomationTestServer(t *testing.T) *Server {
@@ -17,6 +18,34 @@ func newAutomationTestServer(t *testing.T) *Server {
 		t.Fatal(err)
 	}
 	return &Server{automations: store}
+}
+
+func TestAutomationRunsExposeArtifactSummary(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	project := t.TempDir()
+	recorder, err := session.NewRecorder(project, "openai", "gpt-5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder.RecordUser("run")
+	if _, err := session.UpdateSessionMeta(recorder.UUID(), func(meta *session.SessionMeta) {
+		meta.AutomationID = "automation-1"
+		meta.TriggerKind = "manual"
+		meta.ArtifactCount = 2
+		meta.ArtifactUnseen = true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{}
+	w := httptest.NewRecorder()
+	s.handleListAutomationRuns(w, httptest.NewRequest(http.MethodGet, "/api/automations/runs", nil))
+	var runs []automationRun
+	if err := json.Unmarshal(w.Body.Bytes(), &runs); err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 || runs[0].ArtifactCount != 2 || !runs[0].ArtifactUnseen {
+		t.Fatalf("runs = %#v", runs)
+	}
 }
 
 func TestAutomationAPI_CRUD(t *testing.T) {

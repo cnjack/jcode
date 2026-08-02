@@ -83,3 +83,10 @@ func TestTodoWriteSubtitle(t *testing.T) {
 		t.Errorf("empty-args subtitle = %q, want empty", info.Subtitle)
 	}
 }
+
+func TestExtractToolDisplayInfoArtifact(t *testing.T) {
+	info := extractToolDisplayInfo("show_artifact", `{"path":"reports/result.html","title":"Benchmark report"}`)
+	if info.Title != "Artifact" || info.Subtitle != "Benchmark report" || info.Icon != "file" || info.Category != "context" {
+		t.Fatalf("show_artifact display info = %#v", info)
+	}
+}

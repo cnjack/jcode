@@ -1,6 +1,6 @@
 /**
  * RightPanel — right-side panel (width ~20rem, full height, border-left) with
- * three tabs (Plan / Files / Changes) and a close button.
+ * four tabs (Plan / Files / Changes / Artifacts) and a close button.
  *
  * Ported from web/src/components/RightPanel.vue. The Vue version imports three
  * child components (FileTreePanel.vue / DiffViewer.vue / TaskList.vue) that
@@ -29,8 +29,9 @@ import {
 import { useAppSelector } from '../app/hooks'
 import { api } from '../lib/api'
 import type { DiffResponse, FileItem, TodoItem } from '../lib/types'
+import { ArtifactsPanel } from './ArtifactsPanel'
 
-type Tab = 'files' | 'changes' | 'plan'
+type Tab = 'files' | 'changes' | 'plan' | 'artifacts'
 
 interface Props {
   activeTab: Tab
@@ -43,13 +44,18 @@ const TAB_KEYS: Record<Tab, string> = {
   plan: 'rightPanel.plan',
   files: 'rightPanel.files',
   changes: 'rightPanel.changes',
+  artifacts: 'rightPanel.artifacts',
 } as const
 
 export function RightPanel({ activeTab, onClose, onSwitchTab }: Props) {
   const { t } = useTranslation()
   // Panel width with a min/max clamp; resized via the left drag handle.
-  const [panelWidth, setPanelWidth] = useState(320)
+  const [panelWidth, setPanelWidth] = useState(activeTab === 'artifacts' ? 560 : 320)
   const projectPath = useAppSelector((s) => s.session.projectPath)
+
+  useEffect(() => {
+    if (activeTab === 'artifacts') setPanelWidth((width) => Math.max(width, 480))
+  }, [activeTab])
 
   function startResize(e: React.MouseEvent) {
     e.preventDefault()
@@ -59,7 +65,7 @@ export function RightPanel({ activeTab, onClose, onSwitchTab }: Props) {
     function onMove(ev: MouseEvent) {
       // Dragging left grows the panel (the handle is on the left edge).
       const dx = startX - ev.clientX
-      setPanelWidth(Math.min(600, Math.max(220, startWidth + dx)))
+      setPanelWidth(Math.min(900, Math.max(220, startWidth + dx)))
     }
     function onUp() {
       window.removeEventListener('mousemove', onMove)
@@ -71,7 +77,7 @@ export function RightPanel({ activeTab, onClose, onSwitchTab }: Props) {
 
   return (
     <aside
-      className="relative flex h-full min-w-[220px] max-w-[600px] flex-col overflow-hidden border-l border-[var(--color-border)] bg-[var(--color-background)]"
+      className="relative flex h-full min-w-[220px] max-w-[80vw] flex-col overflow-hidden border-l border-[var(--color-border)] bg-[var(--color-background)]"
       style={{ width: `${panelWidth}px` }}
     >
       {/* Resize handle (left edge). */}
@@ -83,7 +89,7 @@ export function RightPanel({ activeTab, onClose, onSwitchTab }: Props) {
       {/* Header: tab strip + close. */}
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-[var(--color-border)] pl-3 pr-2">
         <div className="flex items-center gap-0.5">
-          {(['plan', 'files', 'changes'] as const).map((tab) => (
+          {(['plan', 'files', 'changes', 'artifacts'] as const).map((tab) => (
             <button
               key={tab}
               type="button"
@@ -115,6 +121,8 @@ export function RightPanel({ activeTab, onClose, onSwitchTab }: Props) {
           <FileTreePanel key={`files:${projectPath}`} />
         ) : activeTab === 'changes' ? (
           <DiffViewer key={`changes:${projectPath}`} />
+        ) : activeTab === 'artifacts' ? (
+          <ArtifactsPanel key={`artifacts:${projectPath}`} />
         ) : (
           <PlanPane />
         )}

@@ -23,6 +23,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/cnjack/jcode/internal/agent"
+	"github.com/cnjack/jcode/internal/artifact"
 	"github.com/cnjack/jcode/internal/automation"
 	"github.com/cnjack/jcode/internal/browser"
 	"github.com/cnjack/jcode/internal/channel"
@@ -381,6 +382,10 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		defer func() { _ = computerMgr.Close() }()
 	}
 
+	// One process-wide metadata registry is shared by all local Web/Desktop task
+	// engines. Its source of truth is still the session JSONL loader.
+	artifactService := artifact.NewService(session.LoadArtifactRecords, time.Now)
+
 	// Automation store (definitions + scheduler state). Skipped in setup mode.
 	// Created before buildWebTask so every per-task Env shares this one live
 	// store — the automation_create tool must write through it (not a throwaway)
@@ -628,6 +633,15 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			}
 			all = append(all, tenv.NewBrowserTools()...)
 			all = append(all, tenv.NewComputerTools()...)
+			if exec == nil {
+				all = append(all, tenv.NewShowArtifactTool(&tools.ShowArtifactDeps{
+					SessionID:    trec.UUID,
+					Recorder:     trec,
+					Service:      artifactService,
+					Emit:         twh.Emit,
+					ForceNoFocus: excludeInteractive,
+				}))
+			}
 			// Automation runs are unattended — drop interactive tools that would
 			// otherwise block on a human who isn't there (see dropInteractiveTools).
 			if excludeInteractive {
@@ -650,6 +664,15 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			// Plan mode gets the read-only browser subset (look, don't change).
 			plan = append(plan, tenv.NewBrowserPlanTools()...)
 			plan = append(plan, tenv.NewComputerPlanTools()...)
+			if exec == nil {
+				plan = append(plan, tenv.NewShowArtifactTool(&tools.ShowArtifactDeps{
+					SessionID:    trec.UUID,
+					Recorder:     trec,
+					Service:      artifactService,
+					Emit:         twh.Emit,
+					ForceNoFocus: excludeInteractive,
+				}))
+			}
 			return plan
 		}
 
@@ -1089,6 +1112,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		},
 		BLEController:   bleProxy,
 		CloudSupervisor: cloudSup,
+		ArtifactService: artifactService,
 	})
 
 	// Start the periodic automation scheduler. A single process owns periodic

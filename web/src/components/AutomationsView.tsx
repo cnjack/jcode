@@ -30,6 +30,7 @@ import {
   ExclamationCircleIcon,
   CalendarDaysIcon,
   HandRaisedIcon,
+  DocumentDuplicateIcon,
 } from '@heroicons/react/24/outline'
 import { api } from '../lib/api'
 import { triggerKindLabel } from '../lib/automation'
@@ -873,6 +874,13 @@ export function AutomationsView({ onOpenRun }: { onOpenRun?: (run: AutomationRun
                               <span className="rounded-[var(--radius-sm)] bg-[var(--color-muted)] px-1.5 py-px text-[10.5px] font-semibold text-[var(--color-muted-foreground)]">
                                 {triggerKindLabel(r.trigger_kind, t)}
                               </span>
+                              {!!r.artifact_count && (
+                                <span className="inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-[var(--color-muted)] px-1.5 py-px text-[10.5px] font-semibold text-[var(--color-muted-foreground)]">
+                                  <DocumentDuplicateIcon className="h-3 w-3" />
+                                  {r.artifact_count}
+                                  {r.artifact_unseen && <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent-neutral)]" />}
+                                </span>
+                              )}
                             </div>
                             {r.error_reason && (
                               <span className="mt-0.5 text-[11.5px] leading-relaxed text-[var(--color-error-fg)]">

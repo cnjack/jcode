@@ -236,6 +236,7 @@ var noApprovalNeeded = map[string]bool{
 	"ask_user":                   true,
 	"webfetch":                   true,
 	"check_background":           true,
+	"show_artifact":              true,
 	"team_create":                true,
 	"team_send_message":          true,
 	"team_list":                  true,

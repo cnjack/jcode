@@ -19,36 +19,40 @@ import (
 // field drifting (start_time vs created_at) that would blank created_at and
 // scramble the recency sort.
 type taskItem struct {
-	UUID      string `json:"uuid"`
-	Project   string `json:"project"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at,omitempty"`
-	Provider  string `json:"provider"`
-	Model     string `json:"model"`
-	Agent     string `json:"agent,omitempty"`
-	Title     string `json:"title,omitempty"`
-	Pinned    bool   `json:"pinned"`
-	Archived  bool   `json:"archived"`
-	Unread    bool   `json:"unread"`
-	Status    string `json:"status,omitempty"`
-	Running   bool   `json:"running"`
+	UUID           string `json:"uuid"`
+	Project        string `json:"project"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at,omitempty"`
+	Provider       string `json:"provider"`
+	Model          string `json:"model"`
+	Agent          string `json:"agent,omitempty"`
+	Title          string `json:"title,omitempty"`
+	Pinned         bool   `json:"pinned"`
+	Archived       bool   `json:"archived"`
+	Unread         bool   `json:"unread"`
+	Status         string `json:"status,omitempty"`
+	Running        bool   `json:"running"`
+	ArtifactCount  int    `json:"artifact_count,omitempty"`
+	ArtifactUnseen bool   `json:"artifact_unseen,omitempty"`
 }
 
 func newTaskItem(m *session.SessionMeta, project string, running bool) taskItem {
 	return taskItem{
-		UUID:      m.UUID,
-		Project:   project,
-		CreatedAt: m.StartTime,
-		UpdatedAt: m.UpdatedAt,
-		Provider:  m.Provider,
-		Model:     m.Model,
-		Agent:     m.Agent,
-		Title:     m.Title,
-		Pinned:    m.Pinned,
-		Archived:  m.Archived,
-		Unread:    m.Unread,
-		Status:    m.Status,
-		Running:   running,
+		UUID:           m.UUID,
+		Project:        project,
+		CreatedAt:      m.StartTime,
+		UpdatedAt:      m.UpdatedAt,
+		Provider:       m.Provider,
+		Model:          m.Model,
+		Agent:          m.Agent,
+		Title:          m.Title,
+		Pinned:         m.Pinned,
+		Archived:       m.Archived,
+		Unread:         m.Unread,
+		Status:         m.Status,
+		Running:        running,
+		ArtifactCount:  m.ArtifactCount,
+		ArtifactUnseen: m.ArtifactUnseen,
 	}
 }
 
