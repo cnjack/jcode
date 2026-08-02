@@ -43,6 +43,17 @@
 .chatui-demo-frame .jcode-live-demo {
   width: 100%;
 }
+.chatui-demo-placeholder {
+  height: 520px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-lg);
+  background: var(--card);
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
 
 /* Features */
 .chatui-features { margin-bottom: 5rem; }
@@ -61,7 +72,7 @@
 .chatui-feature h3 { font-size: 1.05rem; margin: 0.5rem 0 0.5rem; }
 .chatui-feature p { font-size: 0.9rem; line-height: 1.55; color: var(--muted, #888); margin: 0; }
 
-/* Quick start code — dark pane + hljs (same palette as demo Code tabs) */
+/* Quick start code — plain text keeps the marketing route independent from the docs highlighter. */
 .chatui-quickstart { margin-bottom: 2rem; }
 .chatui-codeblock-wrap {
   position: relative;
@@ -103,31 +114,6 @@
   overflow-wrap: inherit;
   word-break: inherit;
 }
-.chatui-codeblock .hljs-comment,
-.chatui-codeblock .hljs-quote { color: #8b8b96; font-style: italic; }
-.chatui-codeblock .hljs-keyword,
-.chatui-codeblock .hljs-selector-tag,
-.chatui-codeblock .hljs-meta,
-.chatui-codeblock .hljs-built_in { color: #7dd3fc; }
-.chatui-codeblock .hljs-string,
-.chatui-codeblock .hljs-attr,
-.chatui-codeblock .hljs-template-tag { color: #86efac; }
-.chatui-codeblock .hljs-number,
-.chatui-codeblock .hljs-literal { color: #fcd34d; }
-.chatui-codeblock .hljs-title,
-.chatui-codeblock .hljs-section,
-.chatui-codeblock .hljs-name,
-.chatui-codeblock .hljs-title.class_ { color: #d8b4fe; }
-.chatui-codeblock .hljs-type { color: #fca5a5; }
-.chatui-codeblock .hljs-params { color: #f0abfc; }
-.chatui-codeblock .hljs-variable,
-.chatui-codeblock .hljs-template-variable { color: #fde68a; }
-.chatui-codeblock .hljs-function,
-.chatui-codeblock .hljs-title.function_ { color: #c4b5fd; }
-.chatui-codeblock .hljs-property { color: #93c5fd; }
-.chatui-codeblock .hljs-punctuation,
-.chatui-codeblock .hljs-tag { color: #a1a1aa; }
-
 @media (max-width: 640px) {
   .chatui-page { padding: 2rem 1rem 4rem; }
   .chatui-cta { flex-direction: column; }

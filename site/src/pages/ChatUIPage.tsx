@@ -6,13 +6,15 @@
  * but showcases the reusable React library rather than the product.
  */
 
-import { useMemo } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import Reveal from '../components/Reveal'
 import CopyButton from '../components/CopyButton'
-import { ChatDemo } from '../playground/ChatDemo'
-import { highlightDemoCode } from '../playground/highlightDemoCode'
 import './chatui.css'
+
+const ChatDemo = lazy(() =>
+  import('../playground/ChatDemo').then(({ ChatDemo: Demo }) => ({ default: Demo })),
+)
 
 const INSTALL = 'pnpm add jcode-ui jcode-ui-core'
 
@@ -87,14 +89,38 @@ const FEATURES = [
   },
 ]
 
-export default function ChatUIPage() {
-  const quickStartHtml = useMemo(() => highlightDemoCode(QUICK_START, 'tsx'), [])
+function DemoPlaceholder() {
+  return (
+    <div className="chatui-demo-placeholder" role="status">
+      <span>Loading the interactive demo…</span>
+    </div>
+  )
+}
 
+function DeferredChatDemo() {
+  const [shouldLoad, setShouldLoad] = useState(false)
+
+  useEffect(() => {
+    // Start the large demo graph in a fresh task so the lightweight page can paint first.
+    const timeout = window.setTimeout(() => setShouldLoad(true), 0)
+    return () => window.clearTimeout(timeout)
+  }, [])
+
+  if (!shouldLoad) return <DemoPlaceholder />
+
+  return (
+    <Suspense fallback={<DemoPlaceholder />}>
+      <ChatDemo height={520} interactive controls />
+    </Suspense>
+  )
+}
+
+export default function ChatUIPage() {
   return (
     <div className="chatui-page">
       {/* Hero */}
       <section className="chatui-hero">
-        <Reveal>
+        <div>
           <p className="chatui-eyebrow">Open source · MIT</p>
           <h1 className="chatui-title">
             React components for <span className="accent">AI chat</span>
@@ -112,7 +138,7 @@ export default function ChatUIPage() {
               Read the docs →
             </Link>
           </div>
-        </Reveal>
+        </div>
       </section>
 
       {/* Live demo */}
@@ -125,7 +151,7 @@ export default function ChatUIPage() {
             Flip light/dark and mobile from the chrome bar.
           </p>
           <div className="chatui-demo-frame">
-            <ChatDemo height={520} interactive controls />
+            <DeferredChatDemo />
           </div>
         </Reveal>
       </section>
@@ -155,10 +181,7 @@ export default function ChatUIPage() {
           <div className="chatui-codeblock-wrap">
             <CopyButton text={QUICK_START} />
             <pre className="chatui-codeblock">
-              <code
-                className="hljs language-tsx"
-                dangerouslySetInnerHTML={{ __html: quickStartHtml }}
-              />
+              <code>{QUICK_START}</code>
             </pre>
           </div>
         </Reveal>

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import Logo from './Logo'
+import { preloadChatUIPage } from '../lib/routePreloads'
 
 const GITHUB = 'https://github.com/cnjack/jcode'
 
@@ -14,7 +15,15 @@ export default function SiteNav() {
           <li><NavLink to="/desktop">Desktop</NavLink></li>
           <li><NavLink to="/cloud">Cloud</NavLink></li>
           <li><NavLink to="/cli">CLI</NavLink></li>
-          <li><NavLink to="/chat-ui">Chat UI</NavLink></li>
+          <li>
+            <NavLink
+              to="/chat-ui"
+              onPointerEnter={preloadChatUIPage}
+              onFocus={preloadChatUIPage}
+            >
+              Chat UI
+            </NavLink>
+          </li>
           <li><NavLink to="/showcase">Showcase</NavLink></li>
           <li><NavLink to="/docs">Docs</NavLink></li>
         </ul>
