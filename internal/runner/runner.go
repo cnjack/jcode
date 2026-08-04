@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -26,12 +27,15 @@ import (
 // RunResult is the agent-generated, persistable output of one user turn.
 // Response preserves the flattened assistant text used by UI-only consumers,
 // while Messages carries the structured assistant/tool transcript that must be
-// appended to live conversation history for the next turn. Internal
-// continuation prompts are deliberately excluded from Messages, matching the
-// session transcript reconstructed after a restart.
+// appended to live conversation history for the next turn. Err reports an
+// interrupted or failed turn so callers do not treat a partial response as a
+// completed artifact such as an approval-ready plan. Internal continuation
+// prompts are deliberately excluded from Messages, matching the session
+// transcript reconstructed after a restart.
 type RunResult struct {
 	Response string
 	Messages []adk.Message
+	Err      error
 }
 
 // Run executes the agent for a single turn, wrapping the response with a
@@ -119,6 +123,7 @@ func Run(
 	lap, done := runInner(ctx, ag, runMessages, h, rec)
 	result.Response = lap.Response
 	result.Messages = append(result.Messages, lap.Messages...)
+	result.Err = lap.Err
 	if done {
 		// runInner already signaled completion (cancellation or a real error).
 		return result
@@ -148,7 +153,9 @@ continuationLoop:
 		select {
 		case <-ctx.Done():
 			config.Logger().Printf("[runner] continuation cancelled")
-			break continuationLoop
+			result.Err = ctx.Err()
+			h.OnAgentDone(result.Err)
+			return result
 		default:
 		}
 		if goalStore != nil && tokenUsage != nil {
@@ -201,6 +208,7 @@ continuationLoop:
 		extra, done := runInner(ctx, ag, runMessages, h, rec)
 		result.Response += extra.Response
 		result.Messages = append(result.Messages, extra.Messages...)
+		result.Err = extra.Err
 		runMessages = append(runMessages, extra.Messages...)
 		if done {
 			return result
@@ -283,8 +291,9 @@ func runInner(
 
 	var result RunResult
 	var responseText strings.Builder
-	finish := func(done bool) (RunResult, bool) {
+	finish := func(done bool, runErr error) (RunResult, bool) {
 		result.Response = responseText.String()
+		result.Err = runErr
 		return result, done
 	}
 
@@ -292,16 +301,18 @@ func runInner(
 	// carry a call→result latency. The event loop below is the only reader
 	// and writer (single goroutine), so no locking is needed.
 	type toolStart struct {
-		at   time.Time
-		name string
+		at    time.Time
+		name  string
+		order int
 	}
 	toolStarts := make(map[string]toolStart)
+	nextToolOrder := 0
 	// meter carries approval wait/denied outcomes from the approval path (see
 	// Run) so the emitted Duration is pure execution time and denied calls are
 	// flagged. emitToolResult also owns session recording so the persisted
 	// entry matches the emitted event exactly (denied + adjusted duration).
 	meter := approvalMeterFrom(ctx)
-	emitToolResult := func(name, output, toolCallID string, err error) {
+	emitToolResult := func(name, output, toolCallID string, err error) error {
 		ev := handler.ToolResultEvent{Name: name, Output: output, ToolCallID: toolCallID, Err: err}
 		if started, ok := toolStarts[toolCallID]; ok {
 			ev.Duration = time.Since(started.at)
@@ -311,13 +322,68 @@ func runInner(
 		h.OnToolResult(ev)
 		historyOutput := output
 		if rec != nil {
-			historyOutput = rec.RecordToolResult(name, output, toolCallID, err, ev.Denied, ev.Duration)
+			var persistErr error
+			historyOutput, persistErr = rec.RecordToolResult(name, output, toolCallID, err, ev.Denied, ev.Duration)
+			if persistErr != nil {
+				// ReconstructState repairs an on-disk call without a result using
+				// this same placeholder. Keep live history valid and replay-equivalent,
+				// but stop the turn instead of claiming the real output was durable.
+				result.Messages = append(result.Messages, schema.ToolMessage(
+					session.InterruptedToolOutput,
+					toolCallID,
+					schema.WithToolName(name),
+				))
+				return persistErr
+			}
 		}
 		result.Messages = append(result.Messages, schema.ToolMessage(
 			historyOutput,
 			toolCallID,
 			schema.WithToolName(name),
 		))
+		return nil
+	}
+
+	// A streaming tool event carries the call ID only in its chunks. If the
+	// first receive fails, defer pairing the failure until the remaining
+	// announced calls identify the only possible ID. This also handles parallel
+	// same-name calls without assigning a failure to whichever map entry happens
+	// to be visited first.
+	pendingToolFailures := make(map[string][]error)
+	matchingToolCallIDs := func(name string) []string {
+		ids := make([]string, 0)
+		for id, started := range toolStarts {
+			if started.name == name {
+				ids = append(ids, id)
+			}
+		}
+		sort.Slice(ids, func(i, j int) bool {
+			return toolStarts[ids[i]].order < toolStarts[ids[j]].order
+		})
+		return ids
+	}
+	resolvePendingToolFailures := func(name string, force bool) error {
+		failures := pendingToolFailures[name]
+		if len(failures) == 0 {
+			return nil
+		}
+		ids := matchingToolCallIDs(name)
+		if !force && len(ids) > len(failures) {
+			return nil
+		}
+		count := min(len(ids), len(failures))
+		var firstErr error
+		for i := 0; i < count; i++ {
+			if persistErr := emitToolResult(name, "", ids[i], failures[i]); persistErr != nil && firstErr == nil {
+				firstErr = persistErr
+			}
+		}
+		if count == len(failures) {
+			delete(pendingToolFailures, name)
+		} else {
+			pendingToolFailures[name] = failures[count:]
+		}
+		return firstErr
 	}
 	// drainDanglingToolResults backfills a result for every announced tool
 	// call that never produced one (user stop, fatal tool-node failure). The
@@ -327,10 +393,33 @@ func runInner(
 	// backfill carries no error: an interrupted call is not a failed call, and
 	// a non-nil Err would paint every front-end's tool row red (raw
 	// "context.Canceled" text) right next to the calm stop notice.
-	drainDanglingToolResults := func() {
-		for id, started := range toolStarts {
-			emitToolResult(started.name, session.InterruptedToolOutput, id, nil)
+	drainDanglingToolResults := func() error {
+		var firstErr error
+		names := make([]string, 0, len(pendingToolFailures))
+		for name := range pendingToolFailures {
+			names = append(names, name)
 		}
+		sort.Strings(names)
+		for _, name := range names {
+			if persistErr := resolvePendingToolFailures(name, true); persistErr != nil && firstErr == nil {
+				firstErr = persistErr
+			}
+		}
+
+		ids := make([]string, 0, len(toolStarts))
+		for id := range toolStarts {
+			ids = append(ids, id)
+		}
+		sort.Slice(ids, func(i, j int) bool {
+			return toolStarts[ids[i]].order < toolStarts[ids[j]].order
+		})
+		for _, id := range ids {
+			started := toolStarts[id]
+			if persistErr := emitToolResult(started.name, session.InterruptedToolOutput, id, nil); persistErr != nil && firstErr == nil {
+				firstErr = persistErr
+			}
+		}
+		return firstErr
 	}
 
 	config.Logger().Printf("[runner] runInner start, messages=%d", len(messages))
@@ -346,9 +435,12 @@ func runInner(
 			// calm "Stopped". runInner owns this OnAgentDone (returns done=true),
 			// so Run does not emit a second one.
 			config.Logger().Printf("[runner] context cancelled, stopping iteration")
-			drainDanglingToolResults()
-			h.OnAgentDone(ctx.Err())
-			return finish(true)
+			runErr := ctx.Err()
+			if persistErr := drainDanglingToolResults(); persistErr != nil {
+				runErr = errors.Join(runErr, persistErr)
+			}
+			h.OnAgentDone(runErr)
+			return finish(true, runErr)
 		default:
 		}
 
@@ -367,18 +459,24 @@ func runInner(
 				// "[NodeRunError] context canceled"); report the clean context
 				// error instead of the noisy wrapped one.
 				config.Logger().Printf("[runner] event error during cancellation: %v", event.Err)
-				drainDanglingToolResults()
-				h.OnAgentDone(ctx.Err())
-				return finish(true)
+				runErr := ctx.Err()
+				if persistErr := drainDanglingToolResults(); persistErr != nil {
+					runErr = errors.Join(runErr, persistErr)
+				}
+				h.OnAgentDone(runErr)
+				return finish(true, runErr)
 			}
 			// Log the provider's raw payload, hand the frontends a sentence a
 			// human can act on. This is the single choke point for model errors,
 			// so wrapping here fixes the display in the TUI, the web UI and ACP
 			// at once — and stops the next frontend from having to remember.
 			config.Logger().Printf("[runner] event error: %v", event.Err)
-			drainDanglingToolResults()
-			h.OnAgentDone(internalmodel.WrapFriendly(event.Err, "", ""))
-			return finish(true)
+			runErr := internalmodel.WrapFriendly(event.Err, "", "")
+			if persistErr := drainDanglingToolResults(); persistErr != nil {
+				runErr = errors.Join(runErr, persistErr)
+			}
+			h.OnAgentDone(runErr)
+			return finish(true, runErr)
 		}
 		if event.Output == nil || event.Output.MessageOutput == nil {
 			config.Logger().Printf("[runner] event #%d: nil output", eventCount)
@@ -392,13 +490,24 @@ func runInner(
 			toolName := mo.ToolName
 			if !mo.IsStreaming && mo.Message != nil {
 				output := toolMessageText(mo.Message)
-				emitToolResult(toolName, output, mo.Message.ToolCallID, nil)
+				persistErr := emitToolResult(toolName, output, mo.Message.ToolCallID, nil)
+				if pendingErr := resolvePendingToolFailures(toolName, false); pendingErr != nil {
+					persistErr = errors.Join(persistErr, pendingErr)
+				}
+				if persistErr != nil {
+					if drainErr := drainDanglingToolResults(); drainErr != nil {
+						persistErr = errors.Join(persistErr, drainErr)
+					}
+					h.OnAgentDone(persistErr)
+					return finish(true, persistErr)
+				}
 				if toolName == "todowrite" || toolName == "todoread" {
 					h.OnTodoUpdate()
 				}
 			} else if mo.IsStreaming {
 				var sb strings.Builder
 				var toolErr error
+				var persistErr error
 				var toolCallID string
 				for {
 					chunk, err := mo.MessageStream.Recv()
@@ -407,7 +516,11 @@ func runInner(
 					}
 					if err != nil {
 						toolErr = err
-						emitToolResult(toolName, "", toolCallID, err)
+						if toolCallID == "" {
+							pendingToolFailures[toolName] = append(pendingToolFailures[toolName], err)
+						} else if writeErr := emitToolResult(toolName, "", toolCallID, err); writeErr != nil {
+							persistErr = errors.Join(persistErr, writeErr)
+						}
 						break
 					}
 					if chunk != nil {
@@ -418,10 +531,26 @@ func runInner(
 					}
 				}
 				if toolErr == nil {
-					emitToolResult(toolName, sb.String(), toolCallID, nil)
+					if writeErr := emitToolResult(toolName, sb.String(), toolCallID, nil); writeErr != nil {
+						persistErr = errors.Join(persistErr, writeErr)
+					}
 					if toolName == "todowrite" || toolName == "todoread" {
 						h.OnTodoUpdate()
 					}
+				}
+				if pendingErr := resolvePendingToolFailures(toolName, false); pendingErr != nil {
+					persistErr = errors.Join(persistErr, pendingErr)
+				}
+				// A tool execution error is model-visible and normally non-fatal;
+				// only a recorder failure (joined above) terminates the runner. The
+				// pending first-receive failure remains paired and persisted, then the
+				// ADK decides whether the agent can continue.
+				if persistErr != nil {
+					if drainErr := drainDanglingToolResults(); drainErr != nil {
+						persistErr = errors.Join(persistErr, drainErr)
+					}
+					h.OnAgentDone(persistErr)
+					return finish(true, persistErr)
 				}
 			}
 			continue
@@ -488,12 +617,20 @@ func runInner(
 				}
 				if ctx.Err() != nil {
 					config.Logger().Printf("[runner] assistant stream cancelled: %v", streamErr)
-					h.OnAgentDone(ctx.Err())
-					return finish(true)
+					runErr := ctx.Err()
+					if persistErr := drainDanglingToolResults(); persistErr != nil {
+						runErr = errors.Join(runErr, persistErr)
+					}
+					h.OnAgentDone(runErr)
+					return finish(true, runErr)
 				}
 				config.Logger().Printf("[runner] assistant stream error: %v", streamErr)
-				h.OnAgentDone(internalmodel.WrapFriendly(streamErr, "", ""))
-				return finish(true)
+				runErr := internalmodel.WrapFriendly(streamErr, "", "")
+				if persistErr := drainDanglingToolResults(); persistErr != nil {
+					runErr = errors.Join(runErr, persistErr)
+				}
+				h.OnAgentDone(runErr)
+				return finish(true, runErr)
 			}
 			// Flush assistant text at the end of each assistant message so the
 			// session file preserves the true message/tool interleaving. Without
@@ -533,7 +670,8 @@ func runInner(
 				startedAt := time.Now()
 				for i, idx := range indices {
 					p := pending[idx]
-					toolStarts[p.id] = toolStart{at: startedAt, name: p.name}
+					toolStarts[p.id] = toolStart{at: startedAt, name: p.name, order: nextToolOrder}
+					nextToolOrder++
 					h.OnToolCall(handler.ToolCallEvent{
 						Name:       p.name,
 						Args:       p.args.String(),
@@ -565,7 +703,8 @@ func runInner(
 				startedAt := time.Now()
 				size := len(mo.Message.ToolCalls)
 				for i, tc := range mo.Message.ToolCalls {
-					toolStarts[tc.ID] = toolStart{at: startedAt, name: tc.Function.Name}
+					toolStarts[tc.ID] = toolStart{at: startedAt, name: tc.Function.Name, order: nextToolOrder}
+					nextToolOrder++
 					h.OnToolCall(handler.ToolCallEvent{
 						Name:       tc.Function.Name,
 						Args:       tc.Function.Arguments,
@@ -592,8 +731,13 @@ func runInner(
 		}
 	}
 
-	// Clean completion: Run emits the single final OnAgentDone(nil).
-	return finish(false)
+	// Clean completion: pair any framework-abandoned tool streams before Run
+	// emits the single final OnAgentDone(nil).
+	if persistErr := drainDanglingToolResults(); persistErr != nil {
+		h.OnAgentDone(persistErr)
+		return finish(true, persistErr)
+	}
+	return finish(false, nil)
 }
 
 // buildTokenUsage snapshots a tracker into a handler.TokenUsage. TotalTokens is

@@ -620,13 +620,14 @@ func (s *interactiveState) handlePrompt(userPrompt string) {
 		s.history = append(s.history, result.Messages...)
 	}
 	s.history = agent.SyncSummarization(s.summCapture, s.history, s.rec)
-	s.handlePlanCompletion(result.Response)
+	s.handlePlanCompletion(result)
 }
 
-func (s *interactiveState) handlePlanCompletion(resp string) {
-	if s.agentMode != tui.ModePlanning || resp == "" {
+func (s *interactiveState) handlePlanCompletion(planResult runner.RunResult) {
+	if s.agentMode != tui.ModePlanning || planResult.Response == "" || planResult.Err != nil {
 		return
 	}
+	resp := planResult.Response
 
 	s.planStore.Submit("Plan", resp)
 	config.Logger().Printf("[plan] plan submitted for review (%d chars)", len(resp))
@@ -662,7 +663,7 @@ func (s *interactiveState) handlePlanCompletion(resp string) {
 			s.history = append(s.history, result.Messages...)
 		}
 		s.history = agent.SyncSummarization(s.summCapture, s.history, s.rec)
-		s.handlePlanCompletion(result.Response)
+		s.handlePlanCompletion(result)
 		return
 	}
 

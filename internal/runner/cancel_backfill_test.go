@@ -211,6 +211,9 @@ func TestRunInnerCancellationBackfillsToolResult(t *testing.T) {
 	if !errors.Is(h.doneErr, context.Canceled) {
 		t.Errorf("OnAgentDone err = %v, want context.Canceled", h.doneErr)
 	}
+	if !errors.Is(outcome.result.Err, context.Canceled) {
+		t.Errorf("RunResult.Err = %v, want context.Canceled", outcome.result.Err)
+	}
 
 	// The announced call got exactly one result (drain backfill or a folded
 	// framework result — either satisfies the invariant).
@@ -252,6 +255,7 @@ func TestRunInnerCancellationBackfillsToolResult(t *testing.T) {
 	}
 
 	state := session.ReconstructState(entries)
+	assertMessagesEqual(t, state.History, outcome.result.Messages)
 	for i, m := range state.History {
 		if m.Role != schema.Assistant || len(m.ToolCalls) == 0 {
 			continue
@@ -292,13 +296,33 @@ func TestRunInnerCancellationDropsIncompleteStreamingToolCall(t *testing.T) {
 		t.Fatalf("create recorder: %v", err)
 	}
 	h := &cancelOnTextHandler{cancel: cancel}
-	result, done := runInner(ctx, ag, []adk.Message{schema.UserMessage("go")}, h, rec)
+	type runOutcome struct {
+		result RunResult
+		done   bool
+	}
+	finished := make(chan runOutcome, 1)
+	go func() {
+		result, done := runInner(ctx, ag, []adk.Message{schema.UserMessage("go")}, h, rec)
+		finished <- runOutcome{result: result, done: done}
+	}()
+
+	var result RunResult
+	var done bool
+	select {
+	case outcome := <-finished:
+		result, done = outcome.result, outcome.done
+	case <-time.After(10 * time.Second):
+		t.Fatal("runInner did not return after stream cancellation")
+	}
 
 	if !done {
 		t.Fatal("runInner done = false, want true after stream cancellation")
 	}
 	if !errors.Is(h.doneErr, context.Canceled) {
 		t.Fatalf("OnAgentDone err = %v, want context.Canceled", h.doneErr)
+	}
+	if !errors.Is(result.Err, context.Canceled) {
+		t.Fatalf("RunResult.Err = %v, want context.Canceled", result.Err)
 	}
 	if h.toolCalls != 0 || h.toolResults != 0 {
 		t.Fatalf("handler saw calls/results = %d/%d, want 0/0 for incomplete call", h.toolCalls, h.toolResults)
@@ -319,4 +343,5 @@ func TestRunInnerCancellationDropsIncompleteStreamingToolCall(t *testing.T) {
 			t.Fatalf("session persisted incomplete tool entry: %#v", entry)
 		}
 	}
+	assertMessagesEqual(t, session.ReconstructState(entries).History, result.Messages)
 }

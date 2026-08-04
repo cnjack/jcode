@@ -582,18 +582,39 @@ func (r *Recorder) RecordToolCall(name, args, toolCallID, batchID string, batchI
 // the approval-wait-adjusted execution latency (0 when unknown). Large outputs
 // are automatically truncated (head+tail preserved) and the full content is
 // saved to an overflow file on disk. Callers should use the returned output in
-// live model history so live and replayed sessions have the same context.
-func (r *Recorder) RecordToolResult(name, output, toolCallID string, err error, denied bool, duration time.Duration) string {
+// live model history so live and replayed sessions have the same context. A
+// persistence failure is returned so callers do not treat an unstored result as
+// durable conversation history.
+func (r *Recorder) RecordToolResult(name, output, toolCallID string, err error, denied bool, duration time.Duration) (string, error) {
 	errStr := ""
 	if err != nil {
 		errStr = err.Error()
 	}
 	output = TruncateToolOutput(output, r.uuid, toolCallID)
-	_ = r.writeEntry(Entry{
+	if writeErr := r.writeEntry(Entry{
 		Type: EntryToolResult, Name: name, Output: output, ToolCallID: toolCallID, Error: errStr,
 		Denied: denied, DurationMs: duration.Milliseconds(),
-	})
-	return output
+	}); writeErr != nil {
+		return output, fmt.Errorf("record tool result in session %s for tool call %q: %w",
+			r.sessionFilePathForError(), toolCallID, writeErr)
+	}
+	return output, nil
+}
+
+// sessionFilePathForError returns the recorder's intended transcript path for
+// diagnostics. It is best-effort because resolving the config directory may be
+// the same operation that caused the write to fail.
+func (r *Recorder) sessionFilePathForError() string {
+	dir, err := config.SessionsDir()
+	if err != nil {
+		return r.UUID()
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.agentID != "" {
+		return filepath.Join(dir, r.customDir, "subagents", "agent-"+r.agentID+".jsonl")
+	}
+	return filepath.Join(dir, r.uuid+".json")
 }
 
 // RecordToolObservation appends metadata-only progressive-disclosure evidence.

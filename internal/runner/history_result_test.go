@@ -190,7 +190,13 @@ func TestRunPreservesParallelToolCallBatchInLiveAndReplayHistory(t *testing.T) {
 	if result.Messages[0].Role != schema.Assistant || len(result.Messages[0].ToolCalls) != 2 {
 		t.Fatalf("first message = %#v, want assistant with 2 tool calls", result.Messages[0])
 	}
-	wantIDs := map[string]bool{"call-a": true, "call-b": true}
+	wantIDs := make(map[string]bool, len(result.Messages[0].ToolCalls))
+	for _, toolCall := range result.Messages[0].ToolCalls {
+		if toolCall.ID == "" || wantIDs[toolCall.ID] {
+			t.Fatalf("assistant tool calls = %#v, want two unique IDs", result.Messages[0].ToolCalls)
+		}
+		wantIDs[toolCall.ID] = true
+	}
 	for _, message := range result.Messages[1:3] {
 		if message.Role != schema.Tool || !wantIDs[message.ToolCallID] {
 			t.Fatalf("parallel tool message = %#v, want call-a or call-b result", message)
