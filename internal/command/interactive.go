@@ -615,18 +615,19 @@ func (s *interactiveState) handlePrompt(userPrompt string) {
 	s.history = append(s.history, schema.UserMessage(userPrompt))
 	s.history = agent.DrainBgNotifications(s.bgManager, s.history)
 	s.approvalState.OnTurnStart() // reset the per-turn reviewer denial breaker
-	resp := runner.Run(runCtx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.env.GoalStore, s.langfuseTracer, s.agentTokenUsage)
-	if resp != "" {
-		s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: resp})
+	result := runner.Run(runCtx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.env.GoalStore, s.langfuseTracer, s.agentTokenUsage)
+	if len(result.Messages) > 0 {
+		s.history = append(s.history, result.Messages...)
 	}
 	s.history = agent.SyncSummarization(s.summCapture, s.history, s.rec)
-	s.handlePlanCompletion(resp)
+	s.handlePlanCompletion(result)
 }
 
-func (s *interactiveState) handlePlanCompletion(resp string) {
-	if s.agentMode != tui.ModePlanning || resp == "" {
+func (s *interactiveState) handlePlanCompletion(planResult runner.RunResult) {
+	if s.agentMode != tui.ModePlanning || planResult.Response == "" || planResult.Err != nil {
 		return
 	}
+	resp := planResult.Response
 
 	s.planStore.Submit("Plan", resp)
 	config.Logger().Printf("[plan] plan submitted for review (%d chars)", len(resp))
@@ -657,12 +658,12 @@ func (s *interactiveState) handlePlanCompletion(resp string) {
 			s.rec.RecordUser(revisePrompt)
 		}
 		s.history = append(s.history, schema.UserMessage(revisePrompt))
-		newResp := runner.Run(s.runCtx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.env.GoalStore, s.langfuseTracer, s.agentTokenUsage)
-		if newResp != "" {
-			s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: newResp})
+		result := runner.Run(s.runCtx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.env.GoalStore, s.langfuseTracer, s.agentTokenUsage)
+		if len(result.Messages) > 0 {
+			s.history = append(s.history, result.Messages...)
 		}
 		s.history = agent.SyncSummarization(s.summCapture, s.history, s.rec)
-		s.handlePlanCompletion(newResp)
+		s.handlePlanCompletion(result)
 		return
 	}
 
@@ -687,9 +688,9 @@ func (s *interactiveState) handlePlanCompletion(resp string) {
 		s.rec.RecordUser(execPrompt)
 	}
 	s.history = append(s.history, schema.UserMessage(execPrompt))
-	execResp := runner.Run(s.ctx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.env.GoalStore, s.langfuseTracer, s.agentTokenUsage)
-	if execResp != "" {
-		s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: execResp})
+	result := runner.Run(s.ctx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.env.GoalStore, s.langfuseTracer, s.agentTokenUsage)
+	if len(result.Messages) > 0 {
+		s.history = append(s.history, result.Messages...)
 	}
 	s.history = agent.SyncSummarization(s.summCapture, s.history, s.rec)
 
@@ -995,12 +996,12 @@ func (s *interactiveState) runEventLoop(initialHistory []adk.Message, initialRes
 		s.runCtx = runCtx
 		s.agentRunning.Store(true)
 		s.history = append(s.history, schema.UserMessage(prompt))
-		resp := runner.Run(runCtx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.env.GoalStore, s.langfuseTracer, s.agentTokenUsage)
+		result := runner.Run(runCtx, s.ag, s.history, s.h, s.rec, s.env.TodoStore, s.env.GoalStore, s.langfuseTracer, s.agentTokenUsage)
 		runCancel()
 		s.runCtx = nil
 		s.agentRunning.Store(false)
-		if resp != "" {
-			s.history = append(s.history, &schema.Message{Role: schema.Assistant, Content: resp})
+		if len(result.Messages) > 0 {
+			s.history = append(s.history, result.Messages...)
 		}
 		s.history = agent.SyncSummarization(s.summCapture, s.history, s.rec)
 	}

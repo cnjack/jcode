@@ -917,11 +917,11 @@ func (a *acpAgent) Prompt(ctx context.Context, params acp.PromptRequest) (acp.Pr
 	// Reset per-turn approval-reviewer state (denial circuit breaker) at the
 	// start of each user turn.
 	sess.approvalState.OnTurnStart()
-	resp := runner.Run(promptCtx, sess.ag, history, sess.h, sess.rec, sess.todoStore, sess.env.GoalStore, sess.tracer, sess.tokenUsage)
+	result := runner.Run(promptCtx, sess.ag, history, sess.h, sess.rec, sess.todoStore, sess.env.GoalStore, sess.tracer, sess.tokenUsage)
 
 	sess.mu.Lock()
-	if resp != "" {
-		sess.history = append(sess.history, &schema.Message{Role: schema.Assistant, Content: resp})
+	if len(result.Messages) > 0 {
+		sess.history = append(sess.history, result.Messages...)
 	}
 	sess.cancel = nil
 	sess.mu.Unlock()
