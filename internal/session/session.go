@@ -577,11 +577,13 @@ func (r *Recorder) RecordToolCall(name, args, toolCallID, batchID string, batchI
 	})
 }
 
-// RecordToolResult appends a tool-result entry. denied marks a user-rejected
-// approval; duration is the approval-wait-adjusted execution latency (0 when
-// unknown). Large outputs are automatically truncated (head+tail preserved)
-// and the full content is saved to an overflow file on disk.
-func (r *Recorder) RecordToolResult(name, output, toolCallID string, err error, denied bool, duration time.Duration) {
+// RecordToolResult appends a tool-result entry and returns the exact output
+// stored in the transcript. denied marks a user-rejected approval; duration is
+// the approval-wait-adjusted execution latency (0 when unknown). Large outputs
+// are automatically truncated (head+tail preserved) and the full content is
+// saved to an overflow file on disk. Callers should use the returned output in
+// live model history so live and replayed sessions have the same context.
+func (r *Recorder) RecordToolResult(name, output, toolCallID string, err error, denied bool, duration time.Duration) string {
 	errStr := ""
 	if err != nil {
 		errStr = err.Error()
@@ -591,6 +593,7 @@ func (r *Recorder) RecordToolResult(name, output, toolCallID string, err error, 
 		Type: EntryToolResult, Name: name, Output: output, ToolCallID: toolCallID, Error: errStr,
 		Denied: denied, DurationMs: duration.Milliseconds(),
 	})
+	return output
 }
 
 // RecordToolObservation appends metadata-only progressive-disclosure evidence.

@@ -312,10 +312,10 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 		// Inject the hook dispatcher so PreToolUse/PostToolUse/Stop hooks run on the
 		// Web surface too (parity with the TUI); reloaded per turn for hot-apply.
 		hookCtx := hooks.WithDispatcher(runCtx, hooks.NewSessionDispatcher(config.ConfigDir(), eng.env.Pwd(), recorder.UUID(), config.Logger().Printf))
-		resp := runner.Run(hookCtx, agent, history, eng.eventHandler, recorder, eng.todoStore, eng.env.GoalStore, s.tracer, eng.tokenUsage)
-		if resp != "" {
+		result := runner.Run(hookCtx, agent, history, eng.eventHandler, recorder, eng.todoStore, eng.env.GoalStore, s.tracer, eng.tokenUsage)
+		if len(result.Messages) > 0 {
 			eng.emu.Lock()
-			eng.history = append(eng.history, &schema.Message{Role: schema.Assistant, Content: resp})
+			eng.history = append(eng.history, result.Messages...)
 			eng.emu.Unlock()
 		}
 	}()

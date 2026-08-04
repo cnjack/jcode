@@ -48,6 +48,43 @@ func (m *cancelModel) WithTools([]*schema.ToolInfo) (einomodel.ToolCallingChatMo
 	return m, nil
 }
 
+// partialStreamCancelModel emits a visible text prefix and an incomplete tool
+// call, then returns the context error after the handler cancels the turn.
+type partialStreamCancelModel struct{}
+
+func (m *partialStreamCancelModel) WithTools([]*schema.ToolInfo) (einomodel.ToolCallingChatModel, error) {
+	return m, nil
+}
+
+func (m *partialStreamCancelModel) Generate(context.Context, []*schema.Message, ...einomodel.Option) (*schema.Message, error) {
+	return nil, errors.New("Generate is not used: streaming is enabled")
+}
+
+func (m *partialStreamCancelModel) Stream(ctx context.Context, _ []*schema.Message, _ ...einomodel.Option) (*schema.StreamReader[*schema.Message], error) {
+	reader, writer := schema.Pipe[*schema.Message](1)
+	go func() {
+		defer writer.Close()
+		index := 0
+		if writer.Send(&schema.Message{
+			Role:    schema.Assistant,
+			Content: "partial",
+			ToolCalls: []schema.ToolCall{{
+				Index: &index,
+				ID:    "call-partial-1",
+				Function: schema.FunctionCall{
+					Name:      "block",
+					Arguments: `{"note":"`,
+				},
+			}},
+		}, nil) {
+			return
+		}
+		<-ctx.Done()
+		writer.Send(nil, ctx.Err())
+	}()
+	return reader, nil
+}
+
 func (m *cancelModel) Generate(context.Context, []*schema.Message, ...einomodel.Option) (*schema.Message, error) {
 	return nil, errors.New("Generate is not used: streaming is enabled")
 }
@@ -77,6 +114,23 @@ type cancelRecordingHandler struct {
 	results []handler.ToolResultEvent
 	doneErr error
 }
+
+type cancelOnTextHandler struct {
+	stubHandler
+	cancel      context.CancelFunc
+	toolCalls   int
+	toolResults int
+	doneErr     error
+}
+
+func (h *cancelOnTextHandler) OnAgentText(string) { h.cancel() }
+func (h *cancelOnTextHandler) OnToolCall(handler.ToolCallEvent) {
+	h.toolCalls++
+}
+func (h *cancelOnTextHandler) OnToolResult(handler.ToolResultEvent) {
+	h.toolResults++
+}
+func (h *cancelOnTextHandler) OnAgentDone(err error) { h.doneErr = err }
 
 func (h *cancelRecordingHandler) OnToolCall(handler.ToolCallEvent) { h.cancel() }
 
@@ -127,15 +181,20 @@ func TestRunInnerCancellationBackfillsToolResult(t *testing.T) {
 	}
 	h := &cancelRecordingHandler{cancel: cancel, done: make(chan struct{})}
 
-	finished := make(chan bool, 1)
+	type runOutcome struct {
+		result RunResult
+		done   bool
+	}
+	finished := make(chan runOutcome, 1)
 	go func() {
-		_, done := runInner(ctx, ag, []adk.Message{schema.UserMessage("go")}, h, rec)
-		finished <- done
+		result, done := runInner(ctx, ag, []adk.Message{schema.UserMessage("go")}, h, rec)
+		finished <- runOutcome{result: result, done: done}
 	}()
 
+	var outcome runOutcome
 	select {
-	case done := <-finished:
-		if !done {
+	case outcome = <-finished:
+		if !outcome.done {
 			t.Errorf("runInner done = false, want true after cancellation")
 		}
 	case <-time.After(10 * time.Second):
@@ -160,6 +219,15 @@ func TestRunInnerCancellationBackfillsToolResult(t *testing.T) {
 	}
 	if h.results[0].ToolCallID != "call-block-1" {
 		t.Errorf("result ToolCallID = %q, want call-block-1", h.results[0].ToolCallID)
+	}
+	if len(outcome.result.Messages) != 2 {
+		t.Fatalf("live history messages = %d, want assistant tool call + backfill result", len(outcome.result.Messages))
+	}
+	if outcome.result.Messages[0].Role != schema.Assistant || len(outcome.result.Messages[0].ToolCalls) != 1 {
+		t.Fatalf("live history first message = %#v, want assistant tool call", outcome.result.Messages[0])
+	}
+	if outcome.result.Messages[1].Role != schema.Tool || outcome.result.Messages[1].ToolCallID != "call-block-1" {
+		t.Fatalf("live history second message = %#v, want matching backfill result", outcome.result.Messages[1])
 	}
 
 	// The session on disk pairs the recorded call with a recorded result.
@@ -196,6 +264,59 @@ func TestRunInnerCancellationBackfillsToolResult(t *testing.T) {
 			if !answered[tc.ID] {
 				t.Errorf("reconstructed history: tool_call %s has no answering tool message", tc.ID)
 			}
+		}
+	}
+}
+
+func TestRunInnerCancellationDropsIncompleteStreamingToolCall(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ag, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+		Name:        "partial-cancel-test",
+		Description: "partial-cancel-test",
+		Instruction: "test",
+		Model:       &partialStreamCancelModel{},
+		ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{
+			Tools: []tool.BaseTool{newBlockingTool()},
+		}},
+		MaxIterations: 5,
+	})
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	rec, err := session.NewRecorder("partial-cancel-test", "test", "test")
+	if err != nil {
+		t.Fatalf("create recorder: %v", err)
+	}
+	h := &cancelOnTextHandler{cancel: cancel}
+	result, done := runInner(ctx, ag, []adk.Message{schema.UserMessage("go")}, h, rec)
+
+	if !done {
+		t.Fatal("runInner done = false, want true after stream cancellation")
+	}
+	if !errors.Is(h.doneErr, context.Canceled) {
+		t.Fatalf("OnAgentDone err = %v, want context.Canceled", h.doneErr)
+	}
+	if h.toolCalls != 0 || h.toolResults != 0 {
+		t.Fatalf("handler saw calls/results = %d/%d, want 0/0 for incomplete call", h.toolCalls, h.toolResults)
+	}
+	if result.Response != "partial" || len(result.Messages) != 1 {
+		t.Fatalf("result = %#v, want one partial text message", result)
+	}
+	if result.Messages[0].Role != schema.Assistant || result.Messages[0].Content != "partial" || len(result.Messages[0].ToolCalls) != 0 {
+		t.Fatalf("result message = %#v, want text-only assistant", result.Messages[0])
+	}
+
+	entries, err := session.LoadSession(rec.UUID())
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.Type == session.EntryToolCall || entry.Type == session.EntryToolResult {
+			t.Fatalf("session persisted incomplete tool entry: %#v", entry)
 		}
 	}
 }
