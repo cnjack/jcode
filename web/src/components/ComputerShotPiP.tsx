@@ -5,7 +5,7 @@
  * the agent captured in this session, so the user can watch what the agent is
  * seeing without scrolling the thread. Derives its data from the chat timeline:
  * any tool result whose output carries an `image_ref=/api/computer/shots/…`
- * marker (today: computer_screenshot) — no extra WS channel needed, so it also
+ * marker (computer_screenshot) — no extra WS channel needed, so it also
  * works when replaying a historical session.
  *
  * The card collapses to a small pill (Codex's 显示/Show toggle). "Open full"
@@ -58,6 +58,7 @@ export function ComputerShotPiP() {
 
   const src = `${apiBase}${latest.ref}`
   const broken = brokenRef === latest.ref
+  const title = t('pip.computerUse')
 
   if (collapsed) {
     return (
@@ -65,10 +66,10 @@ export function ComputerShotPiP() {
         type="button"
         onClick={() => setCollapsed(false)}
         title={t('pip.expand')}
-        className="fixed right-[14px] top-[46px] z-[45] inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-foreground)] shadow-[var(--shadow-md)] transition-colors hover:bg-[var(--color-muted)]"
+        className="fixed right-[14px] top-[96px] z-[45] inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-foreground)] shadow-[var(--shadow-md)] transition-colors hover:bg-[var(--color-muted)]"
       >
         <ComputerDesktopIcon className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-        {t('pip.computerUse')}
+        {title}
         <span className="font-mono text-[10px] text-[var(--color-muted-foreground)]">{latest.count}</span>
       </button>
     )
@@ -78,14 +79,14 @@ export function ComputerShotPiP() {
 
   return (
     <div
-      className="fixed right-[14px] top-[46px] z-[45] overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)] transition-[width] duration-200"
-      style={{ width: expanded ? 520 : 240 }}
+      className="fixed right-[14px] top-[96px] z-[45] overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)] transition-[width] duration-200"
+      style={{ width: expanded ? 'min(520px, calc(100vw - 28px))' : 240 }}
     >
       {/* Header */}
       <div className="flex items-center gap-1.5 border-b border-[var(--color-border)] px-2.5 py-1.5">
         <ComputerDesktopIcon className="h-3.5 w-3.5 shrink-0 text-[var(--color-primary)]" />
         <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-[var(--color-foreground)]">
-          {t('pip.computerUse')}
+          {title}
         </span>
         <span className="shrink-0 rounded-[var(--radius-pill)] bg-[var(--neutral-wash)] px-1.5 py-px font-mono text-[10px] text-[var(--color-muted-foreground)]">
           {t('pip.shots', { n: latest.count })}
@@ -125,7 +126,7 @@ export function ComputerShotPiP() {
           <img
             key={latest.ref}
             src={src}
-            alt={t('pip.computerUse')}
+            alt={title}
             onError={() => setBrokenRef(latest.ref)}
             className="w-full object-cover object-top"
             style={{ maxHeight: expanded ? 'min(70vh, 460px)' : 160 }}

@@ -16,7 +16,7 @@ import { configureStore, createSlice, createAsyncThunk } from '@reduxjs/toolkit'
 import type { ThreadItem, Message, ToolCall, Approval, TokenSnapshot, Goal, TodoItem, QueuedMessage, AskUserQuestion } from 'jcode-ui-core'
 import { api } from '../lib/api'
 import { extractToolDisplayInfo } from '../lib/toolInfo'
-import { normalizeMode, type AgentMode, type CustomAgentInfo, type ProviderInfo, type SessionItem, type TaskItem, type ProjectInfo, type SlashCommandInfo, type SessionEntry, type ModelRef } from '../lib/types'
+import { normalizeMode, type AgentMode, type CustomAgentInfo, type ProviderInfo, type SessionItem, type TaskItem, type ProjectInfo, type SlashCommandInfo, type SessionEntry, type ModelRef, type PlanHistoryEntry } from '../lib/types'
 import { i18n, setLocale, SUPPORTED_LOCALES } from '../i18n'
 import { hydrateTheme } from '../lib/useTheme'
 
@@ -41,6 +41,82 @@ function isNewerTs(candidate: string, current: string | undefined): boolean {
   return ct > cur
 }
 
+function normalizeTodoItems(items: SessionEntry['todos']): TodoItem[] {
+  if (!items) return []
+  return items.flatMap((item) => {
+    if (!['pending', 'in_progress', 'completed', 'cancelled'].includes(item.status)) return []
+    return [{ id: item.id, title: item.title, status: item.status as TodoItem['status'] }]
+  })
+}
+
+function planEntryFromTodos(todos: TodoItem[], timestamp: number, id: string): PlanHistoryEntry {
+  const active = todos.find((todo) => todo.status === 'in_progress')
+    ?? todos.find((todo) => todo.status === 'pending')
+    ?? todos[0]
+  const complete = todos.length > 0 && todos.every((todo) => todo.status === 'completed' || todo.status === 'cancelled')
+  return {
+    id,
+    title: active?.title ?? '',
+    status: complete ? 'completed' : todos.some((todo) => todo.status === 'in_progress') ? 'in_progress' : 'pending',
+    todos,
+    timestamp,
+  }
+}
+
+function planSignature(entry: PlanHistoryEntry): string {
+  return JSON.stringify({ status: entry.status, title: entry.title, content: entry.content, feedback: entry.feedback, todos: entry.todos })
+}
+
+function todoPlanKey(entry: PlanHistoryEntry): string {
+  if (entry.todos.length === 0) return ''
+  return JSON.stringify(
+    entry.todos
+      .map((todo) => ({ id: todo.id, title: todo.title }))
+      .sort((a, b) => String(a.id).localeCompare(String(b.id))),
+  )
+}
+
+function appendOrMergePlanHistory(history: PlanHistoryEntry[], next: PlanHistoryEntry): void {
+  const previous = history[history.length - 1]
+  if (!previous) {
+    history.push(next)
+    return
+  }
+  if (planSignature(previous) === planSignature(next)) return
+  const previousTodoKey = todoPlanKey(previous)
+  if (previousTodoKey && previousTodoKey === todoPlanKey(next)) {
+    history[history.length - 1] = { ...next, id: previous.id }
+    return
+  }
+  history.push(next)
+}
+
+export function buildPlanHistory(entries: SessionEntry[]): PlanHistoryEntry[] {
+  const history: PlanHistoryEntry[] = []
+  for (let index = 0; index < entries.length; index++) {
+    const entry = entries[index]
+    const timestamp = ts(entry.timestamp)
+    let next: PlanHistoryEntry | null = null
+    if (entry.type === 'todo_snapshot') {
+      const todos = normalizeTodoItems(entry.todos)
+      if (todos.length > 0) next = planEntryFromTodos(todos, timestamp, `todo_${index}_${timestamp}`)
+    } else if (entry.type === 'plan_update') {
+      next = {
+        id: `plan_${index}_${timestamp}`,
+        title: entry.plan_title?.trim() || entry.plan_content?.split('\n').find((line) => line.trim())?.replace(/^#+\s*/, '') || '',
+        status: entry.plan_status || 'draft',
+        content: entry.plan_content,
+        feedback: entry.feedback,
+        todos: [],
+        timestamp,
+      }
+    }
+    if (!next) continue
+    appendOrMergePlanHistory(history, next)
+  }
+  return history
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // chat slice — timeline + streaming accumulation
 // ═══════════════════════════════════════════════════════════════════════════
@@ -55,6 +131,7 @@ interface ChatState {
   goal: Goal | null
   goalArmed: boolean
   todos: TodoItem[]
+  planHistory: PlanHistoryEntry[]
   /** Type-ahead queues keyed by session id — a message queued while an agent
    *  runs belongs to THAT conversation and must survive switching away and
    *  back (previously a single global list wiped by clearChat on switch). */
@@ -70,6 +147,7 @@ const initialChat: ChatState = {
   goal: null,
   goalArmed: false,
   todos: [],
+  planHistory: [],
   queuedBySession: {},
   slashCommands: [],
 }
@@ -89,6 +167,7 @@ const chatSlice = createSlice({
       s.goal = null
       s.goalArmed = false
       s.todos = []
+      s.planHistory = []
       // NOTE: queuedBySession is deliberately NOT cleared here — clearChat runs
       // on every session switch, and stashed type-ahead queues must survive.
       streamingText = ''
@@ -231,6 +310,14 @@ const chatSlice = createSlice({
     },
     setTodos(s, a: { payload: TodoItem[] }) {
       s.todos = a.payload
+    },
+    setPlanHistory(s, a: { payload: PlanHistoryEntry[] }) {
+      s.planHistory = a.payload
+    },
+    appendPlanSnapshot(s, a: { payload: { todos: TodoItem[]; timestamp: number } }) {
+      if (a.payload.todos.length === 0) return
+      const next = planEntryFromTodos(a.payload.todos, a.payload.timestamp, `live_${a.payload.timestamp}`)
+      appendOrMergePlanHistory(s.planHistory, next)
     },
     enqueueMessage(s, a: { payload: { sessionId: string; message: QueuedMessage } }) {
       ;(s.queuedBySession[a.payload.sessionId] ??= []).push(a.payload.message)
@@ -1226,6 +1313,7 @@ export const loadSession = createAsyncThunk(
       // Any tool calls that never got a result (interrupted session) → done.
       for (const tc of pendingToolCalls.values()) tc.status = 'done'
 
+      dispatch(chatActions.setPlanHistory(buildPlanHistory(entries || [])))
       dispatch(chatActions.setTimeline(timeline))
 
       if (oneShot) {
@@ -1386,6 +1474,7 @@ export const replaySession = createAsyncThunk(
       }
     }
     for (const tc of pendingToolCalls.values()) tc.status = 'done'
+    dispatch(chatActions.setPlanHistory(buildPlanHistory(entries)))
     dispatch(chatActions.setTimeline(timeline))
     dispatch(chatActions.setRunning(false))
   },

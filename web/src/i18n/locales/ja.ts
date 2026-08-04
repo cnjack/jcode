@@ -1094,7 +1094,7 @@ export default {
   pip: {
     computerUse: 'コンピュータ操作',
     shots: '{n} 枚',
-    collapse: '隠す',
+    collapse: 'しまう',
     expand: '表示',
     openFull: '拡大',
     shrink: '縮小',
@@ -1102,7 +1102,27 @@ export default {
     latest: '最新',
   },
 
+  statusPanel: {
+    title: 'タスク状態',
+    summary: '現在のタスク履歴',
+    empty: 'Todo、計画、成果物はまだありません',
+    open: 'タスク状態を開く',
+    collapse: 'タスク状態をしまう',
+    tabs: 'タスク状態セクション',
+    todos: 'Todo List',
+    plans: 'Plan 履歴',
+    artifacts: '成果物',
+    currentProgress: '現在の計画進捗',
+    noPlans: 'Plan 履歴はまだありません',
+    planFallback: '計画の更新',
+    todoCount: 'Todo {count} 件',
+  },
+
   rightPanel: {
+    workspace: 'ワークパネル',
+    workspaceSummary: '現在のタスクとコンテキストを共有します',
+    workspaceNavigation: 'ワークパネルのセクション',
+    closeWorkspace: 'ワークパネルを閉じる',
     plan: '計画',
     files: 'ファイル',
     changes: '変更',
@@ -1114,6 +1134,7 @@ export default {
   },
 
   artifacts: {
+    preview: '成果物をプレビュー',
     new: '新しい成果物',
     empty: '成果物はまだありません',
     select: '成果物を選択',
@@ -1264,6 +1285,7 @@ export default {
   },
 
   terminal: {
+    tabs: 'ターミナルタブ',
     newTerminal: '新しいターミナル',
     closePanel: 'パネルを閉じる',
     closeTab: '{label} を閉じる',

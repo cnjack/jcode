@@ -88,11 +88,11 @@ function parseCSV(source: string, maxRows = 200, maxColumns = 50): string[][] {
   return rows
 }
 
-export function ArtifactsPanel() {
+export function ArtifactsPanel({ initialSelectedID = '' }: { initialSelectedID?: string }) {
   const { t } = useTranslation()
   const taskId = useAppSelector((state) => state.session.currentSessionId)
   const [records, setRecords] = useState<ArtifactRecord[]>([])
-  const [selectedID, setSelectedID] = useState('')
+  const [selectedID, setSelectedID] = useState(initialSelectedID)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [cloudLoggedIn, setCloudLoggedIn] = useState(false)
@@ -120,7 +120,7 @@ export function ArtifactsPanel() {
     }
   }, [taskId, t])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { void load(initialSelectedID) }, [initialSelectedID, load])
   useEffect(() => {
     let active = true
     void api.cloudStatus().then((status) => { if (active) setCloudLoggedIn(status.logged_in) }).catch(() => undefined)

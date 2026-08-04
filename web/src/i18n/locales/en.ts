@@ -1162,7 +1162,7 @@ export default {
   pip: {
     computerUse: 'Computer use',
     shots: '{n} shots',
-    collapse: 'Hide',
+    collapse: 'Minimize',
     expand: 'Show',
     openFull: 'Enlarge',
     shrink: 'Shrink',
@@ -1170,7 +1170,27 @@ export default {
     latest: 'Latest',
   },
 
+  statusPanel: {
+    title: 'Task status',
+    summary: 'Current task history',
+    empty: 'No Todo, Plan, or artifacts yet',
+    open: 'Open task status',
+    collapse: 'Collapse task status',
+    tabs: 'Task status sections',
+    todos: 'Todo List',
+    plans: 'Plan history',
+    artifacts: 'Artifacts',
+    currentProgress: 'Current plan progress',
+    noPlans: 'No plan history yet',
+    planFallback: 'Plan update',
+    todoCount: '{count} Todo',
+  },
+
   rightPanel: {
+    workspace: 'Work panel',
+    workspaceSummary: 'Shares context with the current task',
+    workspaceNavigation: 'Work panel sections',
+    closeWorkspace: 'Close work panel',
     plan: 'Plan',
     files: 'Files',
     changes: 'Changes',
@@ -1182,6 +1202,7 @@ export default {
   },
 
   artifacts: {
+    preview: 'Preview artifact',
     new: 'New artifacts',
     empty: 'No artifacts yet',
     select: 'Select an artifact',
@@ -1332,6 +1353,7 @@ export default {
   },
 
   terminal: {
+    tabs: 'Terminal tabs',
     newTerminal: 'New terminal',
     closePanel: 'Close panel',
     closeTab: 'Close {label}',

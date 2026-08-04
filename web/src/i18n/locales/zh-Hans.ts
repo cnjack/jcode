@@ -1138,7 +1138,7 @@ export default {
   pip: {
     computerUse: '电脑操控',
     shots: '{n} 张截图',
-    collapse: '隐藏',
+    collapse: '收回',
     expand: '显示',
     openFull: '放大',
     shrink: '缩小',
@@ -1146,7 +1146,27 @@ export default {
     latest: '最新',
   },
 
+  statusPanel: {
+    title: '任务状态',
+    summary: '当前任务历史',
+    empty: '暂无 Todo、Plan 或产物',
+    open: '打开任务状态',
+    collapse: '收回任务状态',
+    tabs: '任务状态分区',
+    todos: 'Todo List',
+    plans: 'Plan 历史',
+    artifacts: '产物',
+    currentProgress: '当前计划进程',
+    noPlans: '暂无 Plan 历史',
+    planFallback: '计划更新',
+    todoCount: '{count} 个 Todo',
+  },
+
   rightPanel: {
+    workspace: '工作面板',
+    workspaceSummary: '与当前任务共享上下文',
+    workspaceNavigation: '工作面板分区',
+    closeWorkspace: '关闭工作面板',
     plan: '计划',
     files: '文件',
     changes: '变更',
@@ -1158,6 +1178,7 @@ export default {
   },
 
   artifacts: {
+    preview: '预览产物',
     new: '有新产物',
     empty: '暂无产物',
     select: '选择一个产物',
@@ -1308,6 +1329,7 @@ export default {
   },
 
   terminal: {
+    tabs: '终端标签页',
     newTerminal: '新建终端',
     closePanel: '关闭面板',
     closeTab: '关闭 {label}',

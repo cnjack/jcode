@@ -1088,7 +1088,7 @@ export default {
   pip: {
     computerUse: '電腦操控',
     shots: '{n} 張截圖',
-    collapse: '隱藏',
+    collapse: '收回',
     expand: '顯示',
     openFull: '放大',
     shrink: '縮小',
@@ -1096,7 +1096,27 @@ export default {
     latest: '最新',
   },
 
+  statusPanel: {
+    title: '工作狀態',
+    summary: '目前工作歷史',
+    empty: '暫無 Todo、Plan 或產物',
+    open: '開啟工作狀態',
+    collapse: '收回工作狀態',
+    tabs: '工作狀態分區',
+    todos: 'Todo List',
+    plans: 'Plan 歷史',
+    artifacts: '產物',
+    currentProgress: '目前計劃進度',
+    noPlans: '暫無 Plan 歷史',
+    planFallback: '計劃更新',
+    todoCount: '{count} 個 Todo',
+  },
+
   rightPanel: {
+    workspace: '工作面板',
+    workspaceSummary: '與目前工作共享上下文',
+    workspaceNavigation: '工作面板分區',
+    closeWorkspace: '關閉工作面板',
     plan: '計劃',
     files: '檔案',
     changes: '變更',
@@ -1108,6 +1128,7 @@ export default {
   },
 
   artifacts: {
+    preview: '預覽產物',
     new: '有新產物',
     empty: '暫無產物',
     select: '選擇一個產物',
@@ -1258,6 +1279,7 @@ export default {
   },
 
   terminal: {
+    tabs: '終端機分頁',
     newTerminal: '新增終端機',
     closePanel: '關閉面板',
     closeTab: '關閉 {label}',

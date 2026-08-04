@@ -1,10 +1,8 @@
 /**
- * TerminalPanel — bottom-docked terminal using xterm.js.
+ * TerminalPanel — bottom-docked, multi-tab terminal using xterm.js.
  *
- * Ported from web/src/components/TerminalPanel.vue (the tab container) +
- * web/src/components/TerminalInstance.vue (the actual xterm + PTY + WS
- * lifecycle). The React signature is a single-terminal panel { onClose }, so
- * the lifecycle from TerminalInstance is folded in here.
+ * Each tab owns an independent TerminalInstance, PTY, WebSocket, xterm and
+ * cleanup lifecycle. Inactive tabs stay mounted so shell state is preserved.
  *
  * On mount it creates a PTY via api.ptyCreate(), opens a WS to
  * `${wsBase()}/api/pty/${id}/ws`, attaches xterm + FitAddon + WebLinksAddon,
@@ -13,9 +11,9 @@
  * WS, and disposes the terminal.
  */
 
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { XMarkIcon } from '@heroicons/react/24/outline'
+import { PlusIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -30,9 +28,63 @@ interface Props {
 
 export function TerminalPanel({ onClose }: Props) {
   const { t } = useTranslation()
+  const nextIDRef = useRef(2)
+  const [tabs, setTabs] = useState([{ id: 1, number: 1 }])
+  const [activeID, setActiveID] = useState(1)
+
+  const addTab = useCallback(() => {
+    const id = nextIDRef.current++
+    setTabs((current) => [...current, { id, number: id }])
+    setActiveID(id)
+  }, [])
+
+  const closeTab = useCallback((id: number) => {
+    if (tabs.length === 1) {
+      onClose()
+      return
+    }
+    const index = tabs.findIndex((tab) => tab.id === id)
+    const remaining = tabs.filter((tab) => tab.id !== id)
+    if (activeID === id) setActiveID(remaining[Math.min(Math.max(index, 0), remaining.length - 1)].id)
+    setTabs(remaining)
+  }, [activeID, onClose, tabs])
+
+  return (
+    <div className="flex h-full flex-col bg-[var(--color-background)]">
+      <div className="flex h-8 shrink-0 items-center border-b border-[var(--color-border)] bg-[var(--color-background)] px-2">
+        <div role="tablist" aria-label={t('terminal.tabs')} className="flex h-full min-w-0 flex-1 items-end gap-1 overflow-x-auto">
+          {tabs.map((tab) => {
+            const label = t('terminal.shell', { n: tab.number })
+            const active = activeID === tab.id
+            return (
+              <div key={tab.id} className={`mb-1 flex h-6 shrink-0 items-center rounded-[var(--radius-md)] transition-colors ${active ? 'bg-[var(--color-muted)] text-[var(--color-foreground)]' : 'text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)]'}`}>
+                <button type="button" role="tab" aria-selected={active} onClick={() => setActiveID(tab.id)} className="h-full px-2 font-mono text-[10.5px] font-medium">
+                  {label}
+                </button>
+                <button type="button" aria-label={t('terminal.closeTab', { label })} title={t('terminal.closeTab', { label })} onClick={() => closeTab(tab.id)} className="mr-1 grid h-4 w-4 place-items-center rounded-[var(--radius-sm)] hover:bg-[var(--color-background)] hover:text-[var(--color-foreground)]">
+                  <XMarkIcon className="h-2.5 w-2.5" />
+                </button>
+              </div>
+            )
+          })}
+        </div>
+        <button type="button" onClick={addTab} aria-label={t('terminal.newTerminal')} title={t('terminal.newTerminal')} className="ml-1 grid h-6 w-6 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]">
+          <PlusIcon className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div className="relative min-h-0 flex-1 bg-[var(--term-bg,var(--color-background))]">
+        {tabs.map((tab) => <TerminalInstance key={tab.id} active={activeID === tab.id} />)}
+      </div>
+    </div>
+  )
+}
+
+function TerminalInstance({ active }: { active: boolean }) {
+  const { t } = useTranslation()
   const termElRef = useRef<HTMLDivElement | null>(null)
-  const onCloseRef = useRef(onClose)
-  onCloseRef.current = onClose
+  const terminalRef = useRef<Terminal | null>(null)
+  const fitAddonRef = useRef<FitAddon | null>(null)
+  const socketRef = useRef<WebSocket | null>(null)
 
   useEffect(() => {
     const termEl = termElRef.current
@@ -48,6 +100,7 @@ export function TerminalPanel({ onClose }: Props) {
     let sessionId = ''
     let resizeObserver: ResizeObserver | null = null
     let themeObserver: MutationObserver | null = null
+    let disposed = false
 
     // Read a CSS custom property from :root and strip whitespace. Falls back to
     // the provided default when the token is unset (e.g. before tokens load).
@@ -103,13 +156,14 @@ export function TerminalPanel({ onClose }: Props) {
       // subprotocol — browsers can't set headers on a WS handshake. See auth.go.
       const token = getAuthToken()
       ws = token ? new WebSocket(url, ['jcode-auth', token]) : new WebSocket(url)
+      socketRef.current = ws
       ws.binaryType = 'arraybuffer'
 
       ws.onopen = () => {
         sendResize()
       }
       ws.onclose = () => {
-        term?.writeln(`\r\n\x1b[33m[Session ended]\x1b[0m`)
+        term?.writeln(`\r\n\x1b[33m${t('terminal.sessionEnded')}\x1b[0m`)
       }
       ws.onerror = () => {
         /* state handled by onclose */
@@ -140,8 +194,10 @@ export function TerminalPanel({ onClose }: Props) {
         fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, monospace",
         theme: termTheme(),
       })
+      terminalRef.current = term
 
       fitAddon = new FitAddon()
+      fitAddonRef.current = fitAddon
       term.loadAddon(fitAddon)
       term.loadAddon(new WebLinksAddon())
       term.open(el)
@@ -160,11 +216,15 @@ export function TerminalPanel({ onClose }: Props) {
 
       try {
         const result = await api.ptyCreate()
+        if (disposed) {
+          void api.ptyKill(result.id).catch(() => {})
+          return
+        }
         sessionId = result.id
         connectWS(result.id)
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err)
-        term.writeln(`\r\n\x1b[31mFailed to create terminal: ${msg}\x1b[0m`)
+        term?.writeln(`\r\n\x1b[31m${t('terminal.failedCreate', { msg })}\x1b[0m`)
       }
     }
 
@@ -173,6 +233,7 @@ export function TerminalPanel({ onClose }: Props) {
     // Cleanup on unmount: detach WS handlers before closing (so a racing frame
     // can't reach a disposed terminal), kill the PTY, dispose the terminal.
     return () => {
+      disposed = true
       resizeObserver?.disconnect()
       resizeObserver = null
       themeObserver?.disconnect()
@@ -184,6 +245,7 @@ export function TerminalPanel({ onClose }: Props) {
         ws.onopen = null
         ws.close()
         ws = null
+        socketRef.current = null
       }
       if (sessionId) {
         api.ptyKill(sessionId).catch(() => {})
@@ -192,52 +254,28 @@ export function TerminalPanel({ onClose }: Props) {
       if (term) {
         term.dispose()
         term = null
+        terminalRef.current = null
       }
       fitAddon = null
+      fitAddonRef.current = null
     }
   }, [])
 
-  return (
-    <div className="flex h-full flex-col" style={{ background: 'var(--color-background)' }}>
-      {/* Tab bar — a single terminal plus the close-panel control on the right. */}
-      <div
-        className="flex h-8 shrink-0 items-center gap-1 px-2"
-        style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-background)' }}
-      >
-        <div className="flex h-full min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
-          <div
-            role="button"
-            tabIndex={0}
-            aria-pressed="true"
-            aria-label={t('terminal.shell', { n: 1 })}
-            className="inline-flex h-[22px] shrink-0 items-center gap-1 rounded-[var(--radius-sm)] px-2 font-mono text-[11px] font-medium text-[var(--color-foreground)] transition-[background,color] duration-100"
-            style={{
-              fontFamily: 'var(--font-mono)',
-              background: 'color-mix(in srgb, var(--color-foreground) 10%, transparent)',
-            }}
-          >
-            <span className="pointer-events-none">{t('terminal.shell', { n: 1 })}</span>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-0.5">
-          <button
-            type="button"
-            onClick={onCloseRef.current}
-            title={t('terminal.closePanel')}
-            className="flex h-5 w-5 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-muted-foreground)] transition-[background,color] duration-100 hover:bg-[color-mix(in_srgb,var(--color-foreground)_8%,transparent)] hover:text-[var(--color-foreground)]"
-          >
-            <XMarkIcon className="h-3 w-3" />
-          </button>
-        </div>
-      </div>
+  useEffect(() => {
+    if (!active) return
+    const frame = window.requestAnimationFrame(() => {
+      fitAddonRef.current?.fit()
+      const terminal = terminalRef.current
+      const socket = socketRef.current
+      if (terminal && socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }))
+      }
+      terminal?.focus()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [active])
 
-      {/* Terminal area. Padding + term-bg live on .xterm via styles.css
-          (mirrors Vue TerminalInstance :deep(.xterm) rules). */}
-      <div
-        ref={termElRef}
-        className="relative min-h-0 flex-1"
-        style={{ background: 'var(--term-bg, var(--color-background))' }}
-      />
-    </div>
+  return (
+    <div ref={termElRef} aria-hidden={!active} className={`absolute inset-0 ${active ? '' : 'hidden'}`} />
   )
 }
