@@ -87,7 +87,10 @@ export function createWSHandlers(
       }
     },
     onTodoUpdate: () => {
-      void api.todos().then((todos) => dispatch(chatActions.setTodos(todos)))
+      void api.todos().then((todos) => {
+        dispatch(chatActions.setTodos(todos))
+        dispatch(chatActions.appendPlanSnapshot({ todos, timestamp: Date.now() }))
+      })
     },
     onGoalUpdate: (d) => dispatch(chatActions.setGoal(d as Goal | null)),
     onApprovalRequest: (d) =>

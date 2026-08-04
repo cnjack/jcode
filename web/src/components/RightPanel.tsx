@@ -1,37 +1,35 @@
 /**
- * RightPanel — right-side panel (width ~20rem, full height, border-left) with
- * four tabs (Plan / Files / Changes / Artifacts) and a close button.
+ * RightPanel — temporary workspace overlay with three context views
+ * (Plan / Files / Changes). It floats above the current task so opening it
+ * never resizes the conversation or the bottom terminal.
  *
  * Ported from web/src/components/RightPanel.vue. The Vue version imports three
- * child components (FileTreePanel.vue / DiffViewer.vue / TaskList.vue) that
+ * child components (FileTreePanel.vue / DiffViewer.vue) that
  * don't exist in React yet; per the migration brief they are implemented INLINE
  * here as simple functional sub-components so the panel is functional now.
  *
- * The Plan tab reads `todos` from the Redux chat slice. The Files and Changes
- * tabs fetch their own data on mount (and are keyed on the project path so a
+ * Files and Changes fetch their own data on mount (and are keyed on the project path so a
  * project switch remounts + re-fetches them — see the key prop in render).
  */
 
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  ArrowPathIcon,
-  CheckCircleIcon,
+  ArrowsRightLeftIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  ClipboardDocumentCheckIcon,
   DocumentIcon,
-  EllipsisHorizontalCircleIcon,
   FolderIcon,
-  MinusCircleIcon,
-  NoSymbolIcon,
+  FolderOpenIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { useAppSelector } from '../app/hooks'
 import { api } from '../lib/api'
-import type { DiffResponse, FileItem, TodoItem } from '../lib/types'
-import { ArtifactsPanel } from './ArtifactsPanel'
+import type { DiffResponse, FileItem } from '../lib/types'
+import { CurrentPlanPane } from './StatusPanel'
 
-type Tab = 'files' | 'changes' | 'plan' | 'artifacts'
+type Tab = 'plan' | 'files' | 'changes'
 
 interface Props {
   activeTab: Tab
@@ -44,195 +42,88 @@ const TAB_KEYS: Record<Tab, string> = {
   plan: 'rightPanel.plan',
   files: 'rightPanel.files',
   changes: 'rightPanel.changes',
-  artifacts: 'rightPanel.artifacts',
+} as const
+
+const TAB_ICONS = {
+  plan: ClipboardDocumentCheckIcon,
+  files: FolderOpenIcon,
+  changes: ArrowsRightLeftIcon,
 } as const
 
 export function RightPanel({ activeTab, onClose, onSwitchTab }: Props) {
   const { t } = useTranslation()
-  // Panel width with a min/max clamp; resized via the left drag handle.
-  const [panelWidth, setPanelWidth] = useState(activeTab === 'artifacts' ? 560 : 320)
   const projectPath = useAppSelector((s) => s.session.projectPath)
 
-  useEffect(() => {
-    if (activeTab === 'artifacts') setPanelWidth((width) => Math.max(width, 480))
-  }, [activeTab])
-
-  function startResize(e: React.MouseEvent) {
-    e.preventDefault()
-    const startX = e.clientX
-    const startWidth = panelWidth
-
-    function onMove(ev: MouseEvent) {
-      // Dragging left grows the panel (the handle is on the left edge).
-      const dx = startX - ev.clientX
-      setPanelWidth(Math.min(900, Math.max(220, startWidth + dx)))
-    }
-    function onUp() {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-  }
-
   return (
-    <aside
-      className="relative flex h-full min-w-[220px] max-w-[80vw] flex-col overflow-hidden border-l border-[var(--color-border)] bg-[var(--color-background)]"
-      style={{ width: `${panelWidth}px` }}
-    >
-      {/* Resize handle (left edge). */}
-      <div
-        onMouseDown={startResize}
-        className="absolute bottom-0 left-0 top-0 z-10 w-1 cursor-col-resize transition-colors hover:bg-[color-mix(in_srgb,var(--color-accent-neutral)_40%,transparent)]"
+    <>
+      <button
+        type="button"
+        data-testid="workspace-backdrop"
+        aria-label={t('rightPanel.closeWorkspace')}
+        onClick={onClose}
+        className="absolute inset-0 z-[44] cursor-default bg-[color-mix(in_srgb,var(--color-foreground)_16%,transparent)] backdrop-blur-[2px]"
       />
-
-      {/* Header: tab strip + close. */}
-      <div className="flex h-10 shrink-0 items-center justify-between border-b border-[var(--color-border)] pl-3 pr-2">
-        <div className="flex items-center gap-0.5">
-          {(['plan', 'files', 'changes', 'artifacts'] as const).map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => onSwitchTab(tab)}
-              className={`rounded-[var(--radius-md)] px-2.5 py-1 text-xs font-medium transition-colors ${
-                activeTab === tab
-                  ? 'bg-[var(--color-muted)] text-[var(--color-foreground)]'
-                  : 'text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]'
-              }`}
-            >
-              {t(TAB_KEYS[tab])}
-            </button>
-          ))}
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label={t('terminal.closePanel')}
-          className="flex h-6 w-6 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
-        >
-          <XMarkIcon className="h-3.5 w-3.5" />
-        </button>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {/* Keyed on the project path so switching projects remounts the children
-            and re-fetches — both only load on mount. */}
-        {activeTab === 'files' ? (
-          <FileTreePanel key={`files:${projectPath}`} />
-        ) : activeTab === 'changes' ? (
-          <DiffViewer key={`changes:${projectPath}`} />
-        ) : activeTab === 'artifacts' ? (
-          <ArtifactsPanel key={`artifacts:${projectPath}`} />
-        ) : (
-          <PlanPane />
-        )}
-      </div>
-    </aside>
-  )
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Plan pane — todos from the Redux store + a progress bar.
-// ═══════════════════════════════════════════════════════════════════════════
-
-function PlanPane() {
-  const { t } = useTranslation()
-  const todos = useAppSelector((s) => s.chat.todos)
-  const total = todos.length
-  const completed = todos.filter((t) => t.status === 'completed').length
-  const progressPct = total ? Math.round((completed / total) * 100) : 0
-
-  return (
-    <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-center gap-2.5 border-b border-[var(--color-border)] px-3 py-2.5">
-        <span className="text-xs font-medium text-[var(--color-foreground)]">{t('rightPanel.plan')}</span>
-        <div className="h-[5px] flex-1 overflow-hidden rounded-[var(--radius-pill)] bg-[var(--color-border)]">
-          <div
-            className="h-full rounded-[var(--radius-pill)] bg-[var(--color-accent-neutral)] transition-[width] duration-[var(--duration-slow)] ease-out"
-            style={{ width: `${progressPct}%` }}
-          />
-        </div>
-        <span className="whitespace-nowrap font-mono text-[11px] text-[var(--color-muted-foreground)]">
-          {completed} / {total}
-        </span>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
-        {total > 0 ? <TaskList todos={todos} /> : <div className="px-2 py-4 text-center text-[13px] text-[var(--color-muted-foreground)]">{t('rightPanel.noTasks')}</div>}
-      </div>
-    </div>
-  )
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// TaskList — inline port of web/src/components/TaskList.vue. Status icon +
-// title per todo, with a left accent bar for the in-progress task.
-// ═══════════════════════════════════════════════════════════════════════════
-
-function TaskList({ todos }: { todos: TodoItem[] }) {
-  // Respect prefers-reduced-motion: swap the spinning ArrowPathIcon for a static
-  // EllipsisHorizontalCircleIcon so the spin actually stops.
-  const [reduceMotion, setReduceMotion] = useState(false)
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return
-    const mql = window.matchMedia('(prefers-reduced-motion: reduce)')
-    const sync = (e: MediaQueryListEvent) => setReduceMotion(e.matches)
-    setReduceMotion(mql.matches)
-    mql.addEventListener('change', sync)
-    return () => mql.removeEventListener('change', sync)
-  }, [])
-
-  return (
-    <div className="space-y-0.5">
-      {todos.map((todo) => {
-        const done = todo.status === 'completed' || todo.status === 'cancelled'
-        const inProgress = todo.status === 'in_progress'
-        return (
-          <div
-            key={todo.id}
-            className={`relative flex items-center gap-2 py-1 pl-2 pr-1.5 ${inProgress ? 'rounded-[var(--radius-md)]' : ''}`}
-            style={inProgress ? { backgroundColor: 'var(--color-warning-bg)' } : undefined}
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('rightPanel.workspace')}
+        data-testid="workspace-panel"
+        className="absolute bottom-6 left-1/2 top-16 z-[45] grid w-[min(1080px,calc(100%_-_48px))] -translate-x-1/2 grid-cols-[168px_minmax(0,1fr)] grid-rows-[52px_minmax(0,1fr)] overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-xl)]"
+      >
+        <header className="col-span-2 flex min-w-0 items-center gap-2 border-b border-[var(--color-border)] px-4">
+          <h2 className="shrink-0 text-[13px] font-semibold text-[var(--color-foreground)]">
+            {t('rightPanel.workspace')}
+          </h2>
+          <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--color-muted-foreground)]">
+            {t('rightPanel.workspaceSummary')}
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t('rightPanel.closeWorkspace')}
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
           >
-            {/* 2px left accent bar for the active task (inner span, not a
-                single-sided border — matches the Vue layout). */}
-            {inProgress && (
-              <span
-                aria-hidden="true"
-                className="absolute left-0 top-0.5 bottom-0.5 w-0.5 rounded-[var(--radius-pill)]"
-                style={{ backgroundColor: 'var(--color-accent-neutral)' }}
-              />
-            )}
+            <XMarkIcon className="h-4 w-4" />
+          </button>
+        </header>
 
-            {/* Status icon */}
-            {todo.status === 'completed' ? (
-              <CheckCircleIcon className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-success-fg)' }} />
-            ) : todo.status === 'cancelled' ? (
-              <NoSymbolIcon className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-destructive)' }} />
-            ) : todo.status === 'in_progress' ? (
-              reduceMotion ? (
-                <EllipsisHorizontalCircleIcon className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-accent-neutral)' }} />
-              ) : (
-                <ArrowPathIcon
-                  className="h-3.5 w-3.5 shrink-0 animate-spin"
-                  style={{ color: 'var(--color-accent-neutral)' }}
-                />
+        <nav aria-label={t('rightPanel.workspaceNavigation')} className="min-h-0 border-r border-[var(--color-border)] p-3">
+          <div className="space-y-1">
+            {(['plan', 'files', 'changes'] as const).map((tab) => {
+              const TabIcon = TAB_ICONS[tab]
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => onSwitchTab(tab)}
+                  aria-current={activeTab === tab ? 'page' : undefined}
+                  className={`flex w-full items-center gap-2.5 rounded-[var(--radius-lg)] px-3 py-2.5 text-left text-[12px] font-medium transition-colors ${
+                    activeTab === tab
+                      ? 'bg-[var(--color-muted)] text-[var(--color-foreground)]'
+                      : 'text-[var(--color-muted-foreground)] hover:bg-[var(--color-background)] hover:text-[var(--color-foreground)]'
+                  }`}
+                >
+                  <TabIcon className="h-4 w-4 shrink-0" />
+                  {t(TAB_KEYS[tab])}
+                </button>
               )
-            ) : (
-              <MinusCircleIcon className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-muted-foreground)' }} />
-            )}
-
-            <span
-              className={`min-w-0 flex-1 truncate text-xs sm:text-sm ${inProgress ? 'font-medium' : ''}`}
-              style={{
-                color: done ? 'var(--color-muted-foreground)' : 'var(--color-foreground)',
-                textDecoration: done ? 'line-through' : 'none',
-              }}
-            >
-              {todo.title}
-            </span>
+            })}
           </div>
-        )
-      })}
-    </div>
+        </nav>
+
+        <div className="min-h-0 min-w-0 overflow-hidden bg-[var(--color-background)]">
+          {/* Keyed on the project path so switching projects remounts the children
+              and re-fetches — both only load on mount. */}
+          {activeTab === 'plan' ? (
+            <div className="h-full overflow-y-auto px-3 pt-4"><CurrentPlanPane /></div>
+          ) : activeTab === 'files' ? (
+            <FileTreePanel key={`files:${projectPath}`} />
+          ) : (
+            <DiffViewer key={`changes:${projectPath}`} />
+          )}
+        </div>
+      </section>
+    </>
   )
 }
 

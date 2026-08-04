@@ -2,7 +2,7 @@
  * TopBar — the single top-right FLOATING control (absolute, top:6px right:14px,
  * z-46). Carries the panels menu: a button showing a RectangleStackIcon + a
  * ChevronDown + a live status dot, which opens a dropdown with Plan / Files /
- * Changes / Terminal. The Changes item shows a live diff stat (+N/-M).
+ * Changes / Terminal. Artifacts live in the separate status panel.
  *
  * Ported from web/src/components/TopBar.vue. The React app has no headlessui, so
  * the dropdown is implemented manually: a button + an absolute-positioned menu
@@ -43,7 +43,6 @@ const PANEL_BUTTONS: { panel: PanelType; macShortcut: string; otherShortcut: str
   { panel: 'plan', macShortcut: '⇧⌘P', otherShortcut: 'Ctrl+Shift+P' },
   { panel: 'files', macShortcut: '⇧⌘E', otherShortcut: 'Ctrl+Shift+E' },
   { panel: 'changes', macShortcut: '⇧⌘G', otherShortcut: 'Ctrl+Shift+G' },
-  { panel: 'artifacts', macShortcut: '⇧⌘A', otherShortcut: 'Ctrl+Shift+A' },
   { panel: 'terminal', macShortcut: '⌘`', otherShortcut: 'Ctrl+`' },
 ]
 

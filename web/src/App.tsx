@@ -58,6 +58,7 @@ import { CloudSyncToggle } from './components/CloudSyncToggle'
 import { DesktopTitlebar } from './components/DesktopTitlebar'
 import { ComputerShotPiP } from './components/ComputerShotPiP'
 import { RightPanel } from './components/RightPanel'
+import { StatusPanel } from './components/StatusPanel'
 import { TerminalPanel } from './components/TerminalPanel'
 import { RemoteConnectWizard } from './components/RemoteConnectWizard'
 import type { RemotePrefill } from './lib/remote'
@@ -184,10 +185,12 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
   const isRunning = useAppSelector((s) => s.chat.isRunning)
   const wsConnected = useAppSelector((s) => s.session.wsConnected)
 
-  // Panel state — a right panel (files/changes/plan/artifacts) and a
-  // bottom panel (terminal) that can be open simultaneously.
+  // Two independent regions: a floating status panel (todos/plan history/
+  // artifacts), plus a temporary workspace overlay (plan/files/changes).
+  // Terminal stays bottom-docked and keeps its size when either overlay opens.
   const [rightPanelOpen, setRightPanelOpen] = useState(false)
-  const [rightPanelTab, setRightPanelTab] = useState<'files' | 'changes' | 'plan' | 'artifacts'>('files')
+  const [rightPanelTab, setRightPanelTab] = useState<'plan' | 'files' | 'changes'>('plan')
+  const [statusPanelOpen, setStatusPanelOpen] = useState(false)
   const [bottomPanel, setBottomPanel] = useState<'none' | 'terminal'>('none')
   const [bottomPanelHeight, setBottomPanelHeight] = useState(260)
   const [activeRun, setActiveRun] = useState<AutomationRun | null>(null)
@@ -208,6 +211,10 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
   const togglePanel = useCallback((panel: PanelType) => {
     if (panel === 'terminal') {
       setBottomPanel((p) => (p === 'terminal' ? 'none' : 'terminal'))
+      return
+    }
+    if (panel === 'artifacts') {
+      setStatusPanelOpen((open) => !open)
       return
     }
     setRightPanelTab((current) => {
@@ -237,16 +244,18 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
         // ⌘` never reaches the page on macOS (OS window cycling), so ⌘J is the
         // alias shown in the UI. `!e.shiftKey` keeps ⇧⌘J (DevTools) intact.
         e.preventDefault(); togglePanel('terminal')
+      } else if (e.key === 'Escape') {
+        if (rightPanelOpen) setRightPanelOpen(false)
+        else if (statusPanelOpen) setStatusPanelOpen(false)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [togglePanel])
+  }, [rightPanelOpen, statusPanelOpen, togglePanel])
 
   useEffect(() => {
     function onArtifactUpserted() {
-      setRightPanelTab('artifacts')
-      setRightPanelOpen(true)
+      setStatusPanelOpen(true)
     }
     window.addEventListener('jcode:artifact-upserted', onArtifactUpserted)
     return () => window.removeEventListener('jcode:artifact-upserted', onArtifactUpserted)
@@ -334,6 +343,16 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
             {/* M18: settings is a first-class view, not an overlay dialog. */}
             {activeView === 'settings' && <SettingsView />}
 
+            {activeView === 'chat' && (
+              <StatusPanel
+                open={statusPanelOpen}
+                isRunning={isRunning}
+                bottomOffset={bottomPanel === 'terminal' ? bottomPanelHeight + 18 : 18}
+                onOpen={() => setStatusPanelOpen(true)}
+                onClose={() => setStatusPanelOpen(false)}
+              />
+            )}
+
             {/* Bottom panel (terminal) — lives under the inset surface. */}
             {bottomPanel === 'terminal' && (
               <div className="relative shrink-0 border-t border-[var(--color-border)]" style={{ height: bottomPanelHeight }}>
@@ -348,7 +367,8 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
             )}
           </main>
 
-          {/* Right panel (files/changes/plan/artifacts) — sibling of main. */}
+          {/* Temporary workspace overlay (plan/files/changes). It is absolutely
+              positioned, so opening it never reflows the conversation. */}
           {rightPanelOpen && (
             <RightPanel
               activeTab={rightPanelTab}

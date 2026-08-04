@@ -96,6 +96,19 @@ export interface TodoItem {
   status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
 }
 
+/** A durable plan revision reconstructed from session plan_update and
+ * todo_snapshot entries. Todo snapshots are the plan format used by the web
+ * agent today; legacy explicit plans retain their markdown content. */
+export interface PlanHistoryEntry {
+  id: string
+  title: string
+  status: string
+  content?: string
+  feedback?: string
+  todos: TodoItem[]
+  timestamp: number
+}
+
 export interface FileItem {
   name: string
   is_dir: boolean

@@ -1093,7 +1093,7 @@ export default {
   pip: {
     computerUse: '컴퓨터 제어',
     shots: '스크린샷 {n}장',
-    collapse: '숨기기',
+    collapse: '접기',
     expand: '보기',
     openFull: '확대',
     shrink: '축소',
@@ -1101,7 +1101,27 @@ export default {
     latest: '최신',
   },
 
+  statusPanel: {
+    title: '작업 상태',
+    summary: '현재 작업 기록',
+    empty: 'Todo, 계획 또는 산출물이 아직 없습니다',
+    open: '작업 상태 열기',
+    collapse: '작업 상태 접기',
+    tabs: '작업 상태 영역',
+    todos: 'Todo List',
+    plans: 'Plan 기록',
+    artifacts: '산출물',
+    currentProgress: '현재 계획 진행률',
+    noPlans: 'Plan 기록이 없습니다',
+    planFallback: '계획 업데이트',
+    todoCount: 'Todo {count}개',
+  },
+
   rightPanel: {
+    workspace: '작업 패널',
+    workspaceSummary: '현재 작업과 컨텍스트를 공유합니다',
+    workspaceNavigation: '작업 패널 섹션',
+    closeWorkspace: '작업 패널 닫기',
     plan: '계획',
     files: '파일',
     changes: '변경',
@@ -1113,6 +1133,7 @@ export default {
   },
 
   artifacts: {
+    preview: '산출물 미리보기',
     new: '새 산출물',
     empty: '아직 산출물이 없습니다',
     select: '산출물 선택',
@@ -1263,6 +1284,7 @@ export default {
   },
 
   terminal: {
+    tabs: '터미널 탭',
     newTerminal: '새 터미널',
     closePanel: '패널 닫기',
     closeTab: '{label} 닫기',
