@@ -51,6 +51,11 @@ describe('SetupView managed provider authentication', () => {
     fireEvent.change(provider, { target: { value: 'openai' } })
     await screen.findByText('jack@example.com')
 
+    await waitFor(() => expect(api.setupProviderModels).toHaveBeenCalledWith('openai', {
+      method: 'codex_oauth',
+      account_id: 'account-1',
+    }))
+
     expect(screen.queryByLabelText('API Key')).toBeNull()
     const submit = screen.getByRole('button', { name: 'Complete Setup' })
     await waitFor(() => expect(submit.hasAttribute('disabled')).toBe(false))

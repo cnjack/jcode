@@ -50,7 +50,11 @@ type ClientConfig struct {
 	BaseURL  string
 	APIKey   string
 	Headers  map[string]string
-	Model    string
+	// Credential resolves a managed bearer token immediately before dispatch.
+	// When set, an empty token fails closed and protected headers are applied
+	// after configured headers.
+	Credential CredentialFunc
+	Model      string
 	// AssetHosts explicitly allows temporary image URL hosts in addition to the
 	// provider API host. Values are exact hosts or "*.example.com" wildcards.
 	AssetHosts []string
@@ -62,6 +66,10 @@ type ClientConfig struct {
 	// provider configuration must leave it false.
 	AllowInsecureHTTP bool
 }
+
+// CredentialFunc resolves request-scoped managed authorization without
+// exposing bearer tokens to image runtime configuration or session records.
+type CredentialFunc func(context.Context) (token string, headers map[string]string, err error)
 
 // Request is the provider-neutral subset supported by the POC protocol.
 // Empty optional values are omitted so older OpenAI-compatible gateways do not
@@ -103,6 +111,7 @@ type Client struct {
 	endpoint      *url.URL
 	apiKey        string
 	headers       map[string]string
+	credential    CredentialFunc
 	model         string
 	httpClient    *http.Client
 	maxImageBytes int64
@@ -158,7 +167,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		headers[name] = value
 	}
 	return &Client{
-		endpoint: endpoint, apiKey: cfg.APIKey, headers: headers,
+		endpoint: endpoint, apiKey: cfg.APIKey, headers: headers, credential: cfg.Credential,
 		model: strings.TrimSpace(cfg.Model), httpClient: httpClient,
 		maxImageBytes: maxImageBytes, allowHTTP: cfg.AllowInsecureHTTP,
 		assetHosts: assetHosts,
@@ -219,6 +228,24 @@ func (c *Client) Generate(ctx context.Context, input Request) (Result, error) {
 			continue
 		}
 		req.Header.Set(name, value)
+	}
+	if c.credential != nil {
+		token, protectedHeaders, credentialErr := c.credential(ctx)
+		if credentialErr != nil {
+			return Result{}, fmt.Errorf("resolve managed image credential: %w", credentialErr)
+		}
+		if strings.TrimSpace(token) == "" {
+			return Result{}, fmt.Errorf("resolve managed image credential: empty token")
+		}
+		for name, value := range protectedHeaders {
+			if forbiddenProviderHeader(name) || strings.ContainsAny(value, "\r\n") {
+				return Result{}, fmt.Errorf("managed image credential returned an invalid header")
+			}
+			req.Header.Set(name, value)
+		}
+		// Apply Authorization last so neither static nor managed headers can
+		// replace the request-scoped bearer token.
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	resp, err := c.httpClient.Do(req)

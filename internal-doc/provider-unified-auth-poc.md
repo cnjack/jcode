@@ -13,7 +13,7 @@ login methods already implemented by cc-switch:
 | --- | --- | --- |
 | ChatGPT / Codex | `auth.openai.com/api/accounts/deviceauth/*`, then OAuth code exchange | OpenAI Responses at `chatgpt.com/backend-api/codex/responses` |
 | Grok / xAI | OIDC discovery plus OAuth 2.0 Device Authorization Grant | OpenAI Responses at `api.x.ai/v1/responses` |
-| GitHub Copilot | GitHub device flow, then GitHub-to-Copilot token exchange | OpenAI-compatible `api.githubcopilot.com/chat/completions` |
+| GitHub Copilot | GitHub device flow, then GitHub-to-Copilot token exchange | Account catalog selects `/v1/responses` for OpenAI models and `/chat/completions` for other vendors |
 
 API-key authentication remains supported and is the default for existing
 configuration. Managed login is opt-in and backward compatible.
@@ -38,8 +38,8 @@ assumption:
 
 ## POC boundaries
 
-The POC is executable through unit and HTTP-handler tests. It does not require
-a developer account or send a live billable model request.
+The automated POC is executable through unit and HTTP-handler tests without a
+developer account and never sends a live billable model request.
 
 The test transport substitutes local servers for each fixed remote endpoint
 and proves:
@@ -56,8 +56,9 @@ and proves:
 6. a Provider binding contains only `method` and optional `account_id`;
 7. model requests resolve a fresh credential and inject protected headers at
    dispatch time;
-8. ChatGPT/xAI requests select Responses while Copilot selects Chat
-   Completions;
+8. ChatGPT/xAI chat requests select Responses. Copilot resolves the live model
+   vendor per account, using Responses for OpenAI models and Chat Completions
+   for other advertised vendors;
 9. public flow responses, Provider bindings, durable-state fixtures and runtime
    credential serialization expose no access token, refresh token, GitHub
    token, authorization code or device token;
@@ -71,9 +72,19 @@ and proves:
 13. Copilot user, tool-continuation, and subagent requests receive the correct
     initiator/interaction headers while one session keeps a stable opaque
     interaction ID.
+14. managed model catalogs are fetched with the selected account credential,
+    bounded to 1 MiB, filtered by provider visibility, and never expose an
+    upstream response body on error. Explicitly enabled live chat models retain
+    their wire protocol across restart;
+15. xAI image and video entries are separated from chat. The official managed
+    xAI image profile pins `api.x.ai/v1/images/generations`, resolves its token
+    only at dispatch, and reuses the billable-operation approval, journal,
+    quota, Artifact, and safe-download pipeline.
 
 ## Accepted result
 
-The POC is accepted when the focused auth, model transport and provider API
-tests pass without network access. Live login remains an explicit manual smoke
-test because it opens a browser and changes an external account.
+The POC is accepted when the focused auth, catalog, model transport and provider
+API tests pass without network access. A manual account-scoped smoke test also
+confirmed that xAI and GitHub Copilot return their live model catalogs, and that
+the connected xAI account can read the official image-generation catalog. No
+billable inference or image-generation request is part of that smoke test.

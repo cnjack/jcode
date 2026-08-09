@@ -212,6 +212,7 @@ type ProviderAuthService interface {
 	Remove(context.Context, providerauth.Method, string) error
 	Logout(context.Context, providerauth.Method) error
 	ValidateBinding(context.Context, providerauth.Binding) error
+	Models(context.Context, providerauth.Binding) ([]providerauth.Model, error)
 }
 
 // ArtifactSharePublisher is consumed by the local Web API and implemented by

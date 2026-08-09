@@ -3,8 +3,11 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
@@ -13,6 +16,7 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/model"
+	"github.com/cnjack/jcode/internal/providerauth"
 	"github.com/cnjack/jcode/internal/providertools"
 )
 
@@ -58,7 +62,9 @@ func splitModelReference(ref string) (provider, modelID string) {
 }
 
 func configuredImageAvailability(pc *config.ProviderConfig, imageModel providertools.ImageModel) string {
-	if pc == nil || pc.APIKey == "" {
+	managedXAI := pc != nil && pc.Auth != nil && pc.Auth.Method == string(providerauth.MethodXAIOAuth) &&
+		imageModel.Provider == "xai"
+	if pc == nil || (pc.APIKey == "" && !managedXAI) {
 		return "unsupported"
 	}
 	if !imageModel.Supported {
@@ -659,6 +665,15 @@ func (s *Server) handleToggleModelEnabled(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and model are required"})
 		return
 	}
+	managedConfigChanged := false
+	if req.Enabled {
+		var err error
+		managedConfigChanged, err = s.ensureManagedModelConfigured(r.Context(), req.Provider, req.Model)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+	}
 
 	state, err := config.LoadModelState()
 	if err != nil {
@@ -669,11 +684,113 @@ func (s *Server) handleToggleModelEnabled(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save"})
 		return
 	}
+	if managedConfigChanged {
+		if err := s.rebuildProviderDependents(req.Provider, "enable managed model"); err != nil {
+			writeSavedButNotApplied(w, "managed provider model")
+			return
+		}
+	}
 	s.syncProviderConfigsBestEffort()
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"enabled": req.Enabled,
 	})
+}
+
+func (s *Server) ensureManagedModelConfigured(
+	ctx context.Context,
+	providerID string,
+	modelID string,
+) (bool, error) {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return false, err
+	}
+	provider := cfg.GetProviders()[providerID]
+	if provider == nil || provider.Auth == nil {
+		return false, nil
+	}
+	existingManaged := false
+	for _, existing := range provider.CustomModels {
+		if existing.ID == modelID {
+			if !existing.Managed {
+				return false, nil
+			}
+			existingManaged = true
+			break
+		}
+	}
+	// A provider-native static model needs only a model-state override; it is
+	// already available to the runtime registry without a managed metadata row.
+	if !existingManaged && s.registry != nil {
+		if registryProvider := s.registry.GetProvider(providerID); registryProvider != nil &&
+			registryProvider.Models[modelID] != nil {
+			return false, nil
+		}
+	}
+	method, err := parseProviderAuthMethod(provider.Auth.Method)
+	if err != nil {
+		return false, err
+	}
+	service, err := s.providerAuthService()
+	if err != nil {
+		return false, err
+	}
+	liveModels, err := service.Models(ctx, providerauth.Binding{
+		Method: method, AccountID: provider.Auth.AccountID,
+	})
+	if err != nil {
+		return false, err
+	}
+	var discovered *providerauth.Model
+	for i := range liveModels {
+		if liveModels[i].Kind == providerauth.ModelKindChat && liveModels[i].ID == modelID {
+			discovered = &liveModels[i]
+			break
+		}
+	}
+	if discovered == nil {
+		return false, fmt.Errorf("model %q is no longer available for this account", modelID)
+	}
+	metadata := managedModelConfigFromLive(s.registry, providerID, *discovered)
+	configChanged := false
+
+	s.cfgMu.Lock()
+	configLocked := true
+	defer func() {
+		if configLocked {
+			s.cfgMu.Unlock()
+		}
+	}()
+	latest, err := config.MutateConfig(func(current *config.Config) error {
+		pc := current.GetProviders()[providerID]
+		if pc == nil || pc.Auth == nil || pc.Auth.Method != string(method) ||
+			pc.Auth.AccountID != provider.Auth.AccountID {
+			return errors.New("managed provider authentication changed while enabling model")
+		}
+		for index, existing := range pc.CustomModels {
+			if existing.ID == modelID {
+				if !existing.Managed {
+					return nil
+				}
+				if !reflect.DeepEqual(existing, metadata) {
+					pc.CustomModels[index] = metadata
+					configChanged = true
+				}
+				return nil
+			}
+		}
+		pc.CustomModels = append(pc.CustomModels, metadata)
+		configChanged = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	s.publishConfigSnapshotLocked(latest)
+	s.cfgMu.Unlock()
+	configLocked = false
+	return configChanged, nil
 }
 
 // handleSetModelEffort records the user's reasoning-effort choice for a single

@@ -85,6 +85,28 @@ type Credential struct {
 	Headers   map[string]string `json:"headers,omitempty"`
 }
 
+// Model is a non-secret model projection returned by a managed provider's
+// account-scoped catalog. Protocol is the wire format required by that model;
+// Copilot may mix OpenAI Responses models with chat-completions models in one
+// account catalog.
+type Model struct {
+	ID       string    `json:"id"`
+	Name     string    `json:"name,omitempty"`
+	Vendor   string    `json:"vendor,omitempty"`
+	Protocol Protocol  `json:"protocol"`
+	Kind     ModelKind `json:"kind"`
+}
+
+// ModelKind separates inference catalogs that share /models but require
+// different product surfaces and wire protocols.
+type ModelKind string
+
+const (
+	ModelKindChat  ModelKind = "chat"
+	ModelKindImage ModelKind = "image"
+	ModelKindVideo ModelKind = "video"
+)
+
 var (
 	ErrUnsupportedMethod     = errors.New("unsupported provider auth method")
 	ErrUnsupportedGHES       = errors.New("GitHub Enterprise Server is not supported")
@@ -140,4 +162,5 @@ type Service interface {
 	Logout(context.Context, Method) error
 	ValidateBinding(context.Context, Binding) error
 	Credential(context.Context, Binding) (Credential, error)
+	Models(context.Context, Binding) ([]Model, error)
 }

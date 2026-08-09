@@ -13,6 +13,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/model"
+	"github.com/cnjack/jcode/internal/providerauth"
 )
 
 func TestWebSwitchModelSameValueIsNoOp(t *testing.T) {
@@ -97,6 +98,138 @@ func TestProviderCatalogUsesPersistedModelVisibility(t *testing.T) {
 	}
 }
 
+func TestManagedProviderCatalogUsesLiveAccountModels(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	err := config.SaveConfig(&config.Config{
+		Providers: map[string]*config.ProviderConfig{
+			"github-copilot": {
+				Auth: &config.ProviderAuthBinding{Method: string(providerauth.MethodGitHubCopilot), AccountID: "account-1"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		registry: model.NewModelRegistry(),
+		providerAuth: &fakeProviderAuthService{models: []providerauth.Model{
+			{ID: "claude-sonnet-5", Name: "Claude Sonnet 5", Vendor: "anthropic", Protocol: providerauth.ProtocolChatCompletions, Kind: providerauth.ModelKindChat},
+			{ID: "gpt-5.6", Name: "GPT-5.6 Terra", Vendor: "openai", Protocol: providerauth.ProtocolResponses, Kind: providerauth.ModelKindChat},
+		}},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/providers/github-copilot/models", nil)
+	req.SetPathValue("id", "github-copilot")
+	rec := httptest.NewRecorder()
+	s.handleProviderCatalog(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("catalog: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var got []struct {
+		ID    string `json:"id"`
+		Name  string `json:"name"`
+		Added bool   `json:"added"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].ID != "claude-sonnet-5" || got[1].ID != "gpt-5.6" ||
+		got[0].Name != "Claude Sonnet 5" || got[1].Name != "GPT-5.6 Terra" {
+		t.Fatalf("live catalog = %#v", got)
+	}
+}
+
+func TestEnableManagedModelPersistsRuntimeMetadata(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	err := config.SaveConfig(&config.Config{
+		Providers: map[string]*config.ProviderConfig{
+			"github-copilot": {
+				Auth: &config.ProviderAuthBinding{Method: string(providerauth.MethodGitHubCopilot), AccountID: "account-1"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		cfg:        &config.Config{},
+		registry:   model.NewModelRegistry(),
+		needsSetup: true,
+		providerAuth: &fakeProviderAuthService{models: []providerauth.Model{
+			{ID: "gpt-5.6", Name: "GPT-5.6 Terra", Vendor: "openai", Protocol: providerauth.ProtocolResponses, Kind: providerauth.ModelKindChat},
+		}},
+	}
+	recorder := httptest.NewRecorder()
+	s.handleToggleModelEnabled(recorder, httptest.NewRequest(
+		http.MethodPost, "/api/model-state/enabled",
+		strings.NewReader(`{"provider":"github-copilot","model":"gpt-5.6","enabled":true}`),
+	))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("enable model: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	loaded, err := config.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	models := loaded.Providers["github-copilot"].CustomModels
+	if len(models) != 1 || !models[0].Managed || models[0].Protocol != string(providerauth.ProtocolResponses) ||
+		models[0].Vendor != "openai" || models[0].Name != "GPT-5.6 Terra" {
+		t.Fatalf("stored managed model = %#v", models)
+	}
+	if _, _, ok := s.registry.LookupModel("github-copilot", "gpt-5.6"); !ok {
+		t.Fatal("live registry was not rebuilt with enabled managed model")
+	}
+	state, err := config.LoadModelState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.IsModelEnabled(config.ModelRef{Provider: "github-copilot", Model: "gpt-5.6"}, false) {
+		t.Fatal("enabled managed model was not persisted in model state")
+	}
+}
+
+func TestEnsureManagedModelRefreshesProviderRouting(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	err := config.SaveConfig(&config.Config{
+		Providers: map[string]*config.ProviderConfig{
+			"github-copilot": {
+				Auth: &config.ProviderAuthBinding{
+					Method: string(providerauth.MethodGitHubCopilot), AccountID: "account-1",
+				},
+				CustomModels: []config.CustomModelConfig{{
+					ID: "gpt-5.6", Name: "Old name", Managed: true,
+					Protocol: string(providerauth.ProtocolChatCompletions), Vendor: "azure openai",
+				}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		registry: model.NewModelRegistry(),
+		providerAuth: &fakeProviderAuthService{models: []providerauth.Model{{
+			ID: "gpt-5.6", Name: "GPT-5.6 Terra", Vendor: "openai",
+			Protocol: providerauth.ProtocolResponses, Kind: providerauth.ModelKindChat,
+		}}},
+	}
+	changed, err := s.ensureManagedModelConfigured(t.Context(), "github-copilot", "gpt-5.6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("stale managed model routing was not refreshed")
+	}
+	loaded, err := config.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := loaded.Providers["github-copilot"].CustomModels
+	if len(got) != 1 || got[0].Protocol != string(providerauth.ProtocolResponses) ||
+		got[0].Vendor != "openai" || got[0].Name != "GPT-5.6 Terra" {
+		t.Fatalf("refreshed managed model = %#v", got)
+	}
+}
+
 func TestListModelsExposesModalitiesAndExplicitImageCatalog(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	cfg := &config.Config{
@@ -171,6 +304,53 @@ func TestListModelsExposesModalitiesAndExplicitImageCatalog(t *testing.T) {
 	}
 	if len(image.Sizes) != 1 || image.Sizes[0] != "1024x1024" {
 		t.Fatalf("image sizes = %v", image.Sizes)
+	}
+}
+
+func TestListModelsExposesManagedXAIImageRole(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := &config.Config{
+		Model:      "xai/grok-4.5",
+		ImageModel: "xai/grok-imagine-image-quality",
+		Providers: map[string]*config.ProviderConfig{
+			"xai": {Auth: &config.ProviderAuthBinding{Method: string(providerauth.MethodXAIOAuth), AccountID: "account-1"}},
+		},
+	}
+	s := &Server{cfg: cfg}
+	rec := httptest.NewRecorder()
+	s.handleListModels(rec, httptest.NewRequest(http.MethodGet, "/api/models", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Providers []struct {
+			ID     string `json:"id"`
+			Models []struct {
+				ID           string   `json:"id"`
+				Output       []string `json:"output_modalities"`
+				Availability string   `json:"capability_availability"`
+			} `json:"models"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	var imageIDs []string
+	for _, provider := range response.Providers {
+		if provider.ID != "xai" {
+			continue
+		}
+		for _, candidate := range provider.Models {
+			if len(candidate.Output) == 1 && candidate.Output[0] == "image" {
+				if candidate.Availability != "supported" {
+					t.Fatalf("image model %s availability = %q", candidate.ID, candidate.Availability)
+				}
+				imageIDs = append(imageIDs, candidate.ID)
+			}
+		}
+	}
+	if len(imageIDs) != 2 || imageIDs[0] != "grok-imagine-image" || imageIDs[1] != "grok-imagine-image-quality" {
+		t.Fatalf("managed xAI image models = %#v", imageIDs)
 	}
 }
 

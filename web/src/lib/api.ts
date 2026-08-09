@@ -374,8 +374,13 @@ export const api = {
   // Setup API
   setupProviders: () =>
     request<SetupProvider[]>('/api/setup/providers'),
-  setupProviderModels: (providerId: string) =>
-    request<SetupModel[]>(`/api/setup/providers/${encodeURIComponent(providerId)}/models`),
+  setupProviderModels: (providerId: string, binding?: ProviderAuthBinding) => {
+    const query = new URLSearchParams()
+    if (binding?.method) query.set('auth_method', binding.method)
+    if (binding?.account_id) query.set('account_id', binding.account_id)
+    const suffix = query.size > 0 ? `?${query.toString()}` : ''
+    return request<SetupModel[]>(`/api/setup/providers/${encodeURIComponent(providerId)}/models${suffix}`)
+  },
   setupComplete: (data: { provider: string; api_key?: string; auth_binding?: ProviderAuthBinding; model?: string; model_reasoning?: boolean; base_url?: string; name?: string; headers?: Record<string, string> }) =>
     request<{ status: string; provider: string; model: string }>('/api/setup/complete', {
       method: 'POST',

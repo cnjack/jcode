@@ -120,6 +120,31 @@ func TestManagedChatCompletionsIgnoreConfiguredSecrets(t *testing.T) {
 	}
 }
 
+func TestManagedCopilotOpenAIModelUsesResponsesRuntime(t *testing.T) {
+	resolver := &fakeCredentialResolver{credentials: []providerauth.Credential{{
+		Token: "token", BaseURL: "https://api.githubcopilot.com", Protocol: providerauth.ProtocolChatCompletions,
+	}}}
+	providerConfig := &config.ProviderConfig{
+		Auth: &config.ProviderAuthBinding{Method: string(providerauth.MethodGitHubCopilot)},
+		CustomModels: []config.CustomModelConfig{{
+			ID: "gpt-5.6", Managed: true, Protocol: string(providerauth.ProtocolResponses), Vendor: "openai",
+		}},
+	}
+	created, err := newManagedChatModel(
+		context.Background(), "github-copilot", "gpt-5.6", providerConfig, true, resolver,
+	)
+	if err != nil {
+		t.Fatalf("create managed Copilot Responses model: %v", err)
+	}
+	managed, ok := created.(*responsesModel)
+	if !ok {
+		t.Fatalf("model type = %T, want *responsesModel", created)
+	}
+	if managed.endpoint != "https://api.githubcopilot.com/v1/responses" || !managed.copilot || managed.codex {
+		t.Fatalf("managed Copilot Responses runtime = %#v", managed)
+	}
+}
+
 func TestManagedResponsesSelectsPinnedTransport(t *testing.T) {
 	resolver := &fakeCredentialResolver{credentials: []providerauth.Credential{{
 		Token: "token", BaseURL: "https://api.x.ai/v1", Protocol: providerauth.ProtocolResponses,

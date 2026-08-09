@@ -254,7 +254,7 @@ func (r *ModelRegistry) MergeConfigProviders(providers map[string]*config.Provid
 				ToolCall:       cm.ToolCall,
 				Reasoning:      cm.Reasoning,
 				Attachment:     cm.Attachment,
-				DefaultEnabled: true,
+				DefaultEnabled: !cm.Managed,
 			}
 			// A custom model flagged as reasoning gets the standard OpenAI-compatible
 			// effort levels, so the chat picker's effort control can render for it.

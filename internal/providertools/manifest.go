@@ -51,6 +51,8 @@ type ImageRuntime struct {
 	Protocol              imagegen.Protocol
 	BaseURL               string
 	APIKey                string
+	AuthMethod            string
+	AccountID             string
 	Headers               map[string]string
 	AssetHosts            []string
 	CredentialFingerprint string
@@ -232,6 +234,19 @@ func ImageModels(cfg *config.Config) []ImageModel {
 				}
 			}
 		}
+		if isManagedXAIProfile(providerID, provider) {
+			result = append(result, []ImageModel{
+				{
+					Provider: providerID, ID: "grok-imagine-image", Name: "Grok Imagine Image",
+					Protocol: string(imagegen.ProtocolOpenAIImages), Builtin: true, Supported: true,
+				},
+				{
+					Provider: providerID, ID: "grok-imagine-image-quality", Name: "Grok Imagine Image Quality",
+					Protocol: string(imagegen.ProtocolOpenAIImages), Builtin: true, Supported: true,
+				},
+			}...)
+			continue
+		}
 		if provider.ImageEndpoint == nil {
 			continue
 		}
@@ -274,7 +289,8 @@ func ResolveImageRuntime(cfg *config.Config) (ImageRuntime, error) {
 		return ImageRuntime{}, fmt.Errorf("image_model must use provider/model format")
 	}
 	provider := cfg.GetProviders()[providerID]
-	if provider == nil || strings.TrimSpace(provider.APIKey) == "" {
+	managedXAI := isManagedXAIProfile(providerID, provider)
+	if provider == nil || (strings.TrimSpace(provider.APIKey) == "" && !managedXAI) {
 		return ImageRuntime{}, fmt.Errorf("image provider is not configured")
 	}
 	policy, ok := provider.ProviderTools[ToolImageGeneration]
@@ -296,15 +312,33 @@ func ResolveImageRuntime(cfg *config.Config) (ImageRuntime, error) {
 		MaxCallsPerTurn:    policy.MaxCallsPerTurn,
 		MaxCallsPerSession: policy.MaxCallsPerSession,
 	}
+	if managedXAI {
+		// Managed xAI policy owns the endpoint and protected headers. Ignore any
+		// stale hand-edited endpoint/header fields instead of forwarding the OAuth
+		// bearer token to configuration-controlled destinations.
+		runtime.Headers = nil
+		runtime.AuthMethod = provider.Auth.Method
+		runtime.AccountID = provider.Auth.AccountID
+		runtime.CredentialFingerprint = shortFingerprintFields(
+			"managed_account", runtime.AuthMethod, runtime.AccountID,
+		)
+	}
 	if runtime.MaxCallsPerTurn <= 0 {
 		runtime.MaxCallsPerTurn = 1
 	}
 	if runtime.MaxCallsPerSession <= 0 {
 		runtime.MaxCallsPerSession = 20
 	}
+	if managedXAI && !isXAIImageModel(modelID) {
+		return ImageRuntime{}, fmt.Errorf("selected image model is not declared by the managed xAI profile")
+	}
 
 	endpoint := provider.ImageEndpoint
 	switch {
+	case managedXAI && isXAIImageModel(modelID):
+		runtime.Protocol = imagegen.ProtocolOpenAIImages
+		runtime.BaseURL = "https://api.x.ai/v1"
+		runtime.AssetHosts = []string{"*.x.ai"}
 	case endpoint != nil && configuredImageModel(endpoint.Models, modelID):
 		runtime.Protocol = imagegen.Protocol(strings.TrimSpace(endpoint.Protocol))
 		if !supportedImageProtocol(string(runtime.Protocol)) {
@@ -338,6 +372,15 @@ func ResolveImageRuntime(cfg *config.Config) (ImageRuntime, error) {
 		strconv.Itoa(runtime.MaxCallsPerTurn), strconv.Itoa(runtime.MaxCallsPerSession),
 	)
 	return runtime, nil
+}
+
+func isManagedXAIProfile(providerID string, provider *config.ProviderConfig) bool {
+	return providerID == "xai" && provider != nil && provider.Auth != nil &&
+		provider.Auth.Method == "xai_oauth"
+}
+
+func isXAIImageModel(modelID string) bool {
+	return modelID == "grok-imagine-image" || modelID == "grok-imagine-image-quality"
 }
 
 // ImageEndpointProfile is an opaque, Settings-safe identifier for the final

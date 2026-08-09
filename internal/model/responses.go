@@ -33,6 +33,7 @@ type ResponsesModelConfig struct {
 	Vision          bool
 	Credential      ResponsesCredentialFunc
 	Codex           bool
+	Copilot         bool
 	HTTPClient      *http.Client
 }
 
@@ -44,6 +45,7 @@ type responsesModel struct {
 	vision          bool
 	credential      ResponsesCredentialFunc
 	codex           bool
+	copilot         bool
 	client          *http.Client
 	tools           []*schema.ToolInfo
 }
@@ -94,6 +96,7 @@ func NewResponsesModel(_ context.Context, cfg *ResponsesModelConfig) (einomodel.
 		vision:          cfg.Vision,
 		credential:      cfg.Credential,
 		codex:           cfg.Codex,
+		copilot:         cfg.Copilot,
 		client:          client,
 	}, nil
 }
@@ -225,6 +228,9 @@ func (m *responsesModel) Generate(
 	input []*schema.Message,
 	opts ...einomodel.Option,
 ) (*schema.Message, error) {
+	if m.copilot {
+		ctx = withCopilotModelRequest(ctx, input)
+	}
 	if m.codex {
 		stream, err := m.Stream(ctx, input, opts...)
 		if err != nil {
@@ -259,6 +265,9 @@ func (m *responsesModel) Stream(
 	input []*schema.Message,
 	opts ...einomodel.Option,
 ) (*schema.StreamReader[*schema.Message], error) {
+	if m.copilot {
+		ctx = withCopilotModelRequest(ctx, input)
+	}
 	req, err := m.buildRequest(input, true, opts...)
 	if err != nil {
 		return nil, err

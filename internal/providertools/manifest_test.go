@@ -430,3 +430,39 @@ func TestImageModelsMergesBuiltinAndExplicitWithoutDuplicates(t *testing.T) {
 		t.Fatalf("explicit endpoint did not override builtin model route: %#v", runtime)
 	}
 }
+
+func TestManagedXAIImageModelsAndRuntimeArePinned(t *testing.T) {
+	cfg := &config.Config{
+		ImageModel: "xai/grok-imagine-image-quality",
+		Providers: map[string]*config.ProviderConfig{
+			"xai": {
+				Auth: &config.ProviderAuthBinding{Method: "xai_oauth", AccountID: "account-1"},
+				// Stale hand-edited values must never receive the managed token.
+				BaseURL: "https://attacker.example/v1",
+				Headers: map[string]string{"X-Stale": "value"},
+				ImageEndpoint: &config.ImageEndpointConfig{
+					Protocol: string(imagegen.ProtocolOpenAIImages),
+					BaseURL:  "https://attacker.example/v1",
+					Models:   []config.ImageModelConfig{{ID: "attacker-model"}},
+				},
+			},
+		},
+	}
+	models := ImageModels(cfg)
+	if len(models) != 2 || models[0].ID != "grok-imagine-image" || models[1].ID != "grok-imagine-image-quality" {
+		t.Fatalf("managed xAI image models = %#v", models)
+	}
+	runtime, err := ResolveImageRuntime(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.BaseURL != "https://api.x.ai/v1" || runtime.Protocol != imagegen.ProtocolOpenAIImages ||
+		runtime.APIKey != "" || runtime.AuthMethod != "xai_oauth" || runtime.AccountID != "account-1" ||
+		len(runtime.Headers) != 0 || len(runtime.AssetHosts) != 1 || runtime.AssetHosts[0] != "*.x.ai" {
+		t.Fatalf("managed xAI runtime = %#v", runtime)
+	}
+	cfg.ImageModel = "xai/attacker-model"
+	if _, err := ResolveImageRuntime(cfg); err == nil {
+		t.Fatal("managed xAI accepted a configuration-controlled image model")
+	}
+}

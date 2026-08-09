@@ -10,7 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Unified Provider account sign-in.** Settings and first-run setup can now authenticate OpenAI through ChatGPT/Codex, xAI through Grok, and GitHub Copilot through one device-code account flow, while preserving API-key providers. Providers bind to a default or explicit local account and expose connected, reauthentication, and multi-account management states.
 - GitHub Copilot requests keep one stable session interaction while classifying tool continuations and delegated agents as agent-initiated, avoiding accidental extra premium interactions.
+- Managed ChatGPT/Codex, xAI, and GitHub Copilot Providers now browse the selected account's live model catalog. Enabled account-scoped models survive restart, and Copilot routes OpenAI models through Responses while retaining Chat Completions for other advertised vendors.
 - **Provider-backed image generation.** Configure a global Image Model independently from the chat model, then use `generate_image` from normal-mode TUI, Web, Desktop, or ACP sessions. The first release supports OpenAI-compatible Images endpoints, BigModel CogView, and Alibaba Token Plan Wan 2.7 models.
+- Grok account sign-in now exposes the official `grok-imagine-image` and `grok-imagine-image-quality` models through the Image Model role with dispatch-time OAuth credentials; xAI video entries are kept out of unsupported chat/image surfaces.
 - **Generated images as managed Artifacts.** Results are verified, stored outside the workspace under the session, persisted for replay, and shown as lifecycle-aware image cards in Web/Desktop. TUI reports the local path and metadata; ACP degrades to metadata, resource links, or bounded inline images according to negotiated capabilities.
 - **Provider capability routing.** Settings now distinguishes chat, image generation, vision input, and provider-bound tools using the exact provider profile, endpoint, protocol, and model. It includes an Image Model picker, provider capability status, a BigModel Search MCP preset, and provider Web Search policy.
 
@@ -20,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fresh blank sessions hide task/session chrome until conversation work exists; loading and persisted sessions keep their controls.
 
 ### Fixed
+- Grok device sign-in now accepts xAI's official `accounts.x.ai/oauth2/device` verification page while retaining strict HTTPS, host, port, and user-info checks.
 - Provider configuration writes are serialized as reload → mutate → atomic save, reject stale snapshots, preserve secrets, and rebuild provider tools after keys, endpoints, or models change.
 - Session replay now restores provider operations, managed Artifacts, tool lifecycle, session modes, and per-session tool overrides without trusting dropped WebSocket events.
 

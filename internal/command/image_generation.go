@@ -1,6 +1,7 @@
 package command
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/imagegen"
+	"github.com/cnjack/jcode/internal/providerauth"
 	"github.com/cnjack/jcode/internal/providertools"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/toolpolicy"
@@ -34,9 +36,36 @@ func configuredGenerateImageTool(
 	if err != nil {
 		return nil, err
 	}
+	credentialKind := "api_key"
+	var credential imagegen.CredentialFunc
+	if runtime.AuthMethod != "" {
+		method := providerauth.Method(runtime.AuthMethod)
+		if method != providerauth.MethodXAIOAuth {
+			return nil, fmt.Errorf("unsupported managed image authentication method %q", runtime.AuthMethod)
+		}
+		manager, managerErr := providerauth.Default(config.ConfigDir())
+		if managerErr != nil {
+			return nil, fmt.Errorf("configure managed image credential: %w", managerErr)
+		}
+		binding := providerauth.Binding{Method: method, AccountID: runtime.AccountID}
+		if validateErr := manager.ValidateBinding(context.Background(), binding); validateErr != nil {
+			return nil, fmt.Errorf("configure managed image credential: %w", validateErr)
+		}
+		credential = func(ctx context.Context) (string, map[string]string, error) {
+			resolved, resolveErr := manager.Credential(ctx, binding)
+			if resolveErr != nil {
+				return "", nil, resolveErr
+			}
+			if resolved.Protocol != providerauth.ProtocolResponses || resolved.BaseURL != runtime.BaseURL {
+				return "", nil, fmt.Errorf("managed image runtime profile changed")
+			}
+			return resolved.Token, resolved.Headers, nil
+		}
+		credentialKind = "managed_account"
+	}
 	client, err := imagegen.NewGenerator(imagegen.ClientConfig{
 		Protocol: runtime.Protocol, BaseURL: runtime.BaseURL, APIKey: runtime.APIKey,
-		Headers: runtime.Headers, Model: runtime.Model, AssetHosts: runtime.AssetHosts,
+		Headers: runtime.Headers, Credential: credential, Model: runtime.Model, AssetHosts: runtime.AssetHosts,
 		MaxImageSize: 20 << 20,
 	})
 	if err != nil {
@@ -53,7 +82,7 @@ func configuredGenerateImageTool(
 		Generator: client, ArtifactService: service, Recorder: recorder, Ledger: ledger,
 		Provider: runtime.Provider, Model: runtime.Model,
 		EndpointProfile: "image:" + toolpolicy.StableID(string(runtime.Protocol), runtime.BaseURL),
-		CredentialKind:  "api_key", CredentialFingerprint: runtime.CredentialFingerprint,
+		CredentialKind:  credentialKind, CredentialFingerprint: runtime.CredentialFingerprint,
 		ConfigEpoch: runtime.ConfigEpoch,
 		DispatchPolicy: session.DispatchPolicy{
 			Tool: session.SessionToolImageGeneration, MaxPerSession: runtime.MaxCallsPerSession,

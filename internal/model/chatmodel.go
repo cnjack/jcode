@@ -476,16 +476,31 @@ func newManagedChatModel(
 		return nil, fmt.Errorf("resolve managed provider account: %w", err)
 	}
 	credential := managedCredential(auth, binding, initial)
+	runtimeProtocol := initial.Protocol
+	runtimeBaseURL := initial.BaseURL
+	if binding.Method == providerauth.MethodGitHubCopilot {
+		for _, configured := range pc.CustomModels {
+			if configured.ID != modelName || !configured.Managed {
+				continue
+			}
+			if providerauth.Protocol(configured.Protocol) == providerauth.ProtocolResponses {
+				runtimeProtocol = providerauth.ProtocolResponses
+				runtimeBaseURL = strings.TrimRight(initial.BaseURL, "/") + "/v1"
+			}
+			break
+		}
+	}
 
-	switch initial.Protocol {
+	switch runtimeProtocol {
 	case providerauth.ProtocolResponses:
 		return NewResponsesModel(ctx, &ResponsesModelConfig{
 			Model:           modelName,
-			BaseURL:         initial.BaseURL,
+			BaseURL:         runtimeBaseURL,
 			ReasoningEffort: pc.ReasoningEffort,
 			Vision:          vision,
 			Credential:      credential,
 			Codex:           binding.Method == providerauth.MethodCodexOAuth,
+			Copilot:         binding.Method == providerauth.MethodGitHubCopilot,
 		})
 	case providerauth.ProtocolChatCompletions:
 		return NewChatModel(ctx, &ChatModelConfig{
@@ -500,7 +515,7 @@ func newManagedChatModel(
 	default:
 		return nil, fmt.Errorf(
 			"managed provider %s/%s returned unsupported protocol %q",
-			provider, modelName, initial.Protocol,
+			provider, modelName, runtimeProtocol,
 		)
 	}
 }

@@ -18,6 +18,8 @@ import (
 type fakeProviderAuthService struct {
 	status    providerauth.Status
 	flow      providerauth.Flow
+	models    []providerauth.Model
+	modelsErr error
 	validate  error
 	cancelled string
 }
@@ -53,6 +55,51 @@ func (f *fakeProviderAuthService) Logout(context.Context, providerauth.Method) e
 
 func (f *fakeProviderAuthService) ValidateBinding(context.Context, providerauth.Binding) error {
 	return f.validate
+}
+
+func (f *fakeProviderAuthService) Models(context.Context, providerauth.Binding) ([]providerauth.Model, error) {
+	return append([]providerauth.Model(nil), f.models...), f.modelsErr
+}
+
+func TestSetupManagedProviderUsesAccountModelCatalog(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	s := newSetupTestServer()
+	s.registry = model.NewModelRegistry()
+	s.providerAuth = &fakeProviderAuthService{models: []providerauth.Model{
+		{ID: "gpt-5.6", Name: "GPT-5.6 Terra", Vendor: "openai", Protocol: providerauth.ProtocolResponses, Kind: providerauth.ModelKindChat},
+		{ID: "image-model", Name: "Image", Protocol: providerauth.ProtocolResponses, Kind: providerauth.ModelKindImage},
+	}}
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/setup/providers/github-copilot/models?auth_method=github_copilot&account_id=account-1",
+		nil,
+	)
+	req.SetPathValue("id", "github-copilot")
+	recorder := httptest.NewRecorder()
+	s.handleSetupProviderModels(recorder, req)
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"id":"gpt-5.6"`) ||
+		strings.Contains(recorder.Body.String(), "image-model") {
+		t.Fatalf("setup live catalog: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	complete := httptest.NewRecorder()
+	s.handleSetupComplete(complete, httptest.NewRequest(
+		http.MethodPost,
+		"/api/setup/complete",
+		strings.NewReader(`{"provider":"github-copilot","model":"gpt-5.6","auth_binding":{"method":"github_copilot","account_id":"account-1"}}`),
+	))
+	if complete.Code != http.StatusOK {
+		t.Fatalf("complete managed setup: status=%d body=%s", complete.Code, complete.Body.String())
+	}
+	loaded, err := config.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	models := loaded.Providers["github-copilot"].CustomModels
+	if loaded.Model != "github-copilot/gpt-5.6" || len(models) != 1 ||
+		!models[0].Managed || models[0].Protocol != string(providerauth.ProtocolResponses) {
+		t.Fatalf("managed setup config: model=%q models=%#v", loaded.Model, models)
+	}
 }
 
 func TestAddManagedProviderStoresOnlyBinding(t *testing.T) {

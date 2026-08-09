@@ -61,6 +61,64 @@ func TestOpenAIImagesBase64RoundTrip(t *testing.T) {
 	}
 }
 
+func TestOpenAIImagesManagedCredentialOverridesStaticAuthorization(t *testing.T) {
+	pixels := pngBytes(t, 1, 1)
+	var credentialCalls int
+	httpClient := stubHTTPClient(t, func(r *http.Request) *http.Response {
+		if got := r.Header.Get("Authorization"); got != "Bearer fresh-managed-token" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		if got := r.Header.Get("X-Managed-Account"); got != "account-1" {
+			t.Fatalf("managed account header = %q", got)
+		}
+		return jsonResponse(http.StatusOK, map[string]any{"data": []map[string]string{{
+			"b64_json": base64.StdEncoding.EncodeToString(pixels),
+		}}})
+	})
+	client, err := NewClient(ClientConfig{
+		Protocol: ProtocolOpenAIImages, BaseURL: "https://api.x.ai/v1", APIKey: "stale-static-token",
+		Model: "grok-imagine-image-quality", HTTPClient: httpClient,
+		Credential: func(context.Context) (string, map[string]string, error) {
+			credentialCalls++
+			return "fresh-managed-token", map[string]string{"X-Managed-Account": "account-1"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Generate(context.Background(), Request{Prompt: "pixel"}); err != nil {
+		t.Fatal(err)
+	}
+	if credentialCalls != 1 {
+		t.Fatalf("credential calls = %d", credentialCalls)
+	}
+}
+
+func TestOpenAIImagesManagedCredentialFailsClosed(t *testing.T) {
+	var dispatched bool
+	httpClient := stubHTTPClient(t, func(_ *http.Request) *http.Response {
+		dispatched = true
+		return jsonResponse(http.StatusOK, map[string]any{})
+	})
+	client, err := NewClient(ClientConfig{
+		Protocol: ProtocolOpenAIImages, BaseURL: "https://api.x.ai/v1",
+		Model: "grok-imagine-image", HTTPClient: httpClient,
+		Credential: func(context.Context) (string, map[string]string, error) {
+			return "  ", nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Generate(context.Background(), Request{Prompt: "pixel"}); err == nil ||
+		!strings.Contains(err.Error(), "empty token") {
+		t.Fatalf("error = %v", err)
+	}
+	if dispatched {
+		t.Fatal("request dispatched with an empty managed token")
+	}
+}
+
 func TestOpenAIImagesURLRoundTripDoesNotForwardSecrets(t *testing.T) {
 	pixels := pngBytes(t, 1, 1)
 	var downloadAuth, downloadCustom string

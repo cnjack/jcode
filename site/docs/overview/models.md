@@ -17,7 +17,7 @@ Any provider that implements the OpenAI chat completion API is supported. Common
 | OpenAI | `https://api.openai.com/v1` | Default if no base URL specified |
 | ChatGPT / Codex | Managed by jcode | Device-code sign-in; uses the ChatGPT Codex Responses transport |
 | xAI / Grok | `https://api.x.ai/v1` | API key or Grok device-code sign-in |
-| GitHub Copilot | Managed by jcode | GitHub.com device-code sign-in; Chat Completions transport |
+| GitHub Copilot | Managed by jcode | GitHub.com device-code sign-in; account-scoped catalog with model-specific Responses or Chat Completions transport |
 | Anthropic | Via compatible proxy | Use a provider that exposes OpenAI-compatible API |
 | Azure OpenAI | Your Azure endpoint | Set `base_url` to your Azure endpoint |
 | Local models | `http://localhost:PORT` | Ollama, LM Studio, vLLM, etc. |
@@ -96,6 +96,14 @@ request and are never returned to the UI. Managed transports also pin their
 runtime URL, protocol, and protected headers, so custom base URLs and headers
 cannot redirect or replace their authorization.
 
+Managed Providers load the model catalog for the selected account instead of
+assuming that every subscription exposes the same models. In Settings, use the
+refresh action to reload that catalog, then enable the models you want in the
+chat picker. Enabled live models are retained locally for restart continuity.
+GitHub Copilot may expose OpenAI, Google, Microsoft, and other vendor models in
+one account; jcode preserves the wire protocol advertised for each enabled
+model.
+
 {: .note }
 **Sign in with ChatGPT** is the ChatGPT/Codex subscription transport, not a
 general OpenAI API OAuth flow. API-key billing and ChatGPT subscription access
@@ -103,9 +111,13 @@ remain separate. GitHub Enterprise Server is not supported by the initial
 GitHub Copilot integration.
 
 {: .note }
-Custom image endpoints currently use their Provider's API key. A managed-login
-Provider cannot also own an image endpoint; use a separate API-key Provider for
-image generation.
+Custom image endpoints still use their Provider's API key and cannot be attached
+to an arbitrary managed-login Provider. Grok login is the explicit exception:
+the official xAI profile exposes `grok-imagine-image` and
+`grok-imagine-image-quality` as Image Model choices, pins the xAI Images API,
+and resolves the selected account token only when a generation request is
+dispatched. Video models are recognized but are not yet exposed because jcode
+does not yet implement the asynchronous video workflow.
 
 ## Switch Models Mid-Session
 
@@ -121,22 +133,24 @@ Press **Ctrl+L** in the TUI or type `/model` to open the model picker. You can s
 
 ## Special Model Roles
 
-jcode supports two model roles:
+jcode supports three model roles:
 
 | Role | Config Key | Purpose |
 |---|---|---|
 | **Primary** | `model` | Main model for agent interactions, compaction, and memory distillation |
 | **Small** | `small_model` | Optional lightweight model for cheap side work |
+| **Image** | `image_model` | Optional image-generation model used by the billable `generate_image` tool |
 
 ```json
 {
   "model": "openai/gpt-4o",
-  "small_model": "openai/gpt-4o-mini"
+  "small_model": "openai/gpt-4o-mini",
+  "image_model": "xai/grok-imagine-image-quality"
 }
 ```
 
-In the web UI and desktop app, set the small model from **Settings → Providers →
-Model roles** — changes apply immediately, no restart needed.
+In the web UI and desktop app, set the small and image models from **Settings →
+Providers → Model roles** — changes apply immediately, no restart needed.
 
 When `small_model` is set, it powers:
 
@@ -196,7 +210,7 @@ Reasoning effort can also be chosen **per model** from the chat model picker. Th
 
 jcode includes a setup wizard. Run it from the TUI with `/setting` → "Add Model", or press Ctrl+L and select "Add new provider".
 
-In the web UI, providers and models are managed from a card-based **Settings** view: each provider is a card showing its brand, authentication status, name, endpoint, and a catalog of its models (built-in registry models toggle show/hide; custom models are editable or removable). Editing a provider keeps API-key and managed-account authentication in the same form. A custom model's editor exposes its ID, display name, context window, image-input toggle, and a reasoning-effort tier editor — when a custom model is flagged as reasoning, the standard `minimal` / `low` / `medium` / `high` effort levels are offered, or you can define your own tiers. Models advertising effort levels then expose the per-model reasoning-effort control in the chat input.
+In the web UI, providers and models are managed from a card-based **Settings** view: each provider is a card showing its brand, authentication status, name, endpoint, and a catalog of its models (built-in and account-scoped models toggle show/hide; custom models are editable or removable). Refresh reloads the selected managed account's live catalog. Editing a provider keeps API-key and managed-account authentication in the same form. A custom model's editor exposes its ID, display name, context window, image-input toggle, and a reasoning-effort tier editor — when a custom model is flagged as reasoning, the standard `minimal` / `low` / `medium` / `high` effort levels are offered, or you can define your own tiers. Models advertising effort levels then expose the per-model reasoning-effort control in the chat input.
 
 ## Verify Model Connectivity
 

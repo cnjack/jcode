@@ -59,12 +59,14 @@ export function SetupView() {
     }
   }, [])
 
-  async function loadProviderModels(providerID: string): Promise<void> {
+  async function loadProviderModels(providerID: string, binding?: ProviderAuthBinding): Promise<void> {
     const requestID = modelsRequestRef.current + 1
     modelsRequestRef.current = requestID
     let nextModels: SetupModel[] = []
     try {
-      nextModels = await api.setupProviderModels(providerID)
+      nextModels = binding
+        ? await api.setupProviderModels(providerID, binding)
+        : await api.setupProviderModels(providerID)
     } catch {
       nextModels = []
     }
@@ -72,6 +74,7 @@ export function SetupView() {
       || modelsRequestRef.current !== requestID
       || selectedProviderRef.current !== providerID) return
     setModels(nextModels)
+    if (binding) setModel(nextModels[0]?.id ?? '')
   }
 
   useEffect(() => {
@@ -85,6 +88,16 @@ export function SetupView() {
     if (!selected || custom) return
     void loadProviderModels(selected.id)
   }, [selected, custom])
+
+  useEffect(() => {
+    if (!selected || custom || authMethod === 'api_key' ||
+      !isProviderAuthReady(authStatus, authBinding)) return
+    const accountID = authBinding?.account_id || authStatus?.default_account_id
+    void loadProviderModels(selected.id, {
+      method: authMethod,
+      account_id: accountID || undefined,
+    })
+  }, [selected, custom, authMethod, authBinding, authStatus])
 
   useEffect(() => {
     setValidation(null)
@@ -282,7 +295,13 @@ export function SetupView() {
               onAuthenticated={async (status) => {
                 setAuthStatus(status)
                 const providerID = selectedProviderRef.current
-                if (providerID) await loadProviderModels(providerID)
+                if (providerID) {
+                  const accountID = authBinding?.account_id || status.default_account_id
+                  await loadProviderModels(providerID, {
+                    method: status.method,
+                    account_id: accountID || undefined,
+                  })
+                }
               }}
             />
           </div>

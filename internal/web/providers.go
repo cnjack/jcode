@@ -275,9 +275,11 @@ func (s *Server) handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 	customSet := make(map[string]*config.CustomModelConfig) // user-defined models by id
 	var apiKey, baseURL string
 	var headers map[string]string
+	var providerConfig *config.ProviderConfig
 	cfg, _ := config.LoadConfig()
 	if cfg != nil {
 		if pc := cfg.GetProviders()[providerID]; pc != nil {
+			providerConfig = pc
 			apiKey, baseURL, headers = pc.APIKey, pc.BaseURL, pc.Headers
 			for _, m := range pc.CustomModels {
 				configured[m.ID] = true
@@ -298,6 +300,12 @@ func (s *Server) handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 			e.Reasoning = m.Reasoning
 			e.Attachment = m.Attachment
 			e.EffortTiers = m.EffortTiers
+			e.Custom = !m.Managed
+			if m.Managed {
+				e.Added = modelState.IsModelEnabled(
+					config.ModelRef{Provider: providerID, Model: id}, false,
+				)
+			}
 		}
 		return e
 	}
@@ -333,6 +341,69 @@ func (s *Server) handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 			registryID = hint
 		}
 	}
+
+	// Managed account providers expose an account- and entitlement-specific
+	// catalog. Prefer that live source over the conservative built-in fallback;
+	// it is how Copilot and subscription-backed Codex/xAI accounts advertise the
+	// models this particular login may actually use.
+	if providerConfig != nil && providerConfig.Auth != nil {
+		method, parseErr := parseProviderAuthMethod(providerConfig.Auth.Method)
+		service, serviceErr := s.providerAuthService()
+		if parseErr == nil && serviceErr == nil {
+			liveModels, liveErr := service.Models(r.Context(), providerauth.Binding{
+				Method: method, AccountID: providerConfig.Auth.AccountID,
+			})
+			if liveErr == nil && len(liveModels) > 0 {
+				result := make([]catalogEntry, 0, len(liveModels)+len(configured))
+				seen := make(map[string]bool, len(liveModels))
+				for _, live := range liveModels {
+					if live.Kind != providerauth.ModelKindChat || live.ID == "" || seen[live.ID] {
+						continue
+					}
+					seen[live.ID] = true
+					metadata := managedModelConfigFromLive(s.registry, providerID, live)
+					defaultEnabled := configured[live.ID]
+					if persisted := customSet[live.ID]; persisted != nil && persisted.Managed {
+						defaultEnabled = false
+					}
+					if s.registry != nil {
+						if native := s.registry.GetProvider(providerID); native != nil {
+							if static := native.Models[live.ID]; static != nil {
+								defaultEnabled = static.DefaultEnabled
+							}
+						}
+					}
+					result = append(result, catalogEntry{
+						ID:          live.ID,
+						Name:        metadata.Name,
+						Added:       modelState.IsModelEnabled(config.ModelRef{Provider: providerID, Model: live.ID}, defaultEnabled),
+						Context:     metadata.Context,
+						Reasoning:   metadata.Reasoning,
+						Attachment:  metadata.Attachment,
+						EffortTiers: metadata.EffortTiers,
+						Custom:      false,
+					})
+				}
+				// Keep previously enabled managed models visible during upstream
+				// catalog rollouts so users can disable them or diagnose entitlement
+				// changes without hand-editing config.
+				for id := range configured {
+					if !seen[id] {
+						result = append(result, customEntry(id))
+					}
+				}
+				sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+				writeJSON(w, http.StatusOK, result)
+				return
+			}
+			if liveErr != nil {
+				config.Logger().Printf(
+					"[provider-auth] live model catalog unavailable for %s (error_type=%T); using fallback",
+					method, liveErr,
+				)
+			}
+		}
+	}
 	if s.registry != nil && s.registry.HasProvider(registryID) {
 		models := s.registry.ListProviderModels(registryID, true)
 		result := make([]catalogEntry, 0, len(models))
@@ -343,15 +414,21 @@ func (s *Server) handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 			// user-set name/context/tiers) rather than the derived registry view —
 			// otherwise effort tiers and other authored fields are lost.
 			if cm := customSet[m.ID]; cm != nil {
+				added := true
+				if cm.Managed {
+					added = modelState.IsModelEnabled(
+						config.ModelRef{Provider: providerID, Model: m.ID}, false,
+					)
+				}
 				result = append(result, catalogEntry{
 					ID:          m.ID,
 					Name:        cm.Name,
-					Added:       true,
+					Added:       added,
 					Context:     cm.Context,
 					Reasoning:   cm.Reasoning,
 					Attachment:  cm.Attachment,
 					EffortTiers: cm.EffortTiers,
-					Custom:      true,
+					Custom:      !cm.Managed,
 				})
 				continue
 			}
@@ -423,6 +500,67 @@ func (s *Server) handleProviderCatalog(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func managedModelConfigFromLive(
+	registry *model.ModelRegistry,
+	providerID string,
+	live providerauth.Model,
+) config.CustomModelConfig {
+	result := config.CustomModelConfig{
+		ID: live.ID, Name: live.Name, ToolCall: true, Managed: true,
+		Protocol: string(live.Protocol), Vendor: live.Vendor,
+	}
+	if result.Name == "" {
+		result.Name = live.ID
+	}
+	metadata := findManagedModelMetadata(registry, providerID, live.Vendor, live.ID)
+	if metadata == nil {
+		return result
+	}
+	if result.Name == live.ID && metadata.Name != "" {
+		result.Name = metadata.Name
+	}
+	result.ToolCall = metadata.ToolCall
+	result.Reasoning = metadata.Reasoning
+	result.Attachment = metadata.Attachment
+	if metadata.Limit != nil {
+		result.Context = metadata.Limit.Context
+	}
+	for _, option := range metadata.ReasoningOptions {
+		if option.Type == "effort" && len(option.Values) > 0 {
+			result.EffortTiers = append([]string(nil), option.Values...)
+			break
+		}
+	}
+	return result
+}
+
+func findManagedModelMetadata(
+	registry *model.ModelRegistry,
+	providerID string,
+	vendor string,
+	modelID string,
+) *model.RegistryModel {
+	if registry == nil {
+		return nil
+	}
+	for _, candidate := range []string{providerID, strings.ToLower(strings.TrimSpace(vendor))} {
+		if candidate == "" {
+			continue
+		}
+		if provider := registry.GetProvider(candidate); provider != nil {
+			if metadata := provider.Models[modelID]; metadata != nil {
+				return metadata
+			}
+		}
+	}
+	for _, provider := range registry.ListProviders() {
+		if metadata := provider.Models[modelID]; metadata != nil {
+			return metadata
+		}
+	}
+	return nil
+}
+
 // maskSecret hides a secret for display: first 4 and last 4 chars for longer
 // values, "****" for short ones. Used for API keys and header values so the
 // list endpoint never returns plaintext credentials.
@@ -477,6 +615,7 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		Capabilities    []providertools.ProviderCapability   `json:"capabilities"`
 	}
 
+	modelState, _ := config.LoadModelState()
 	result := make([]providerDetail, 0)
 	for id, pc := range cfg.GetProviders() {
 		detail := providerDetail{
@@ -536,7 +675,7 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		}
 		if !detail.Custom && s.registry != nil && s.registry.HasProvider(id) {
 			for _, m := range s.registry.ListProviderModels(id, true) {
-				if !m.DefaultEnabled {
+				if !modelState.IsModelEnabled(config.ModelRef{Provider: id, Model: m.ID}, m.DefaultEnabled) {
 					continue
 				}
 				if customIDs[m.ID] {
@@ -561,6 +700,9 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		for _, m := range pc.CustomModels {
+			if m.Managed && !modelState.IsModelEnabled(config.ModelRef{Provider: id, Model: m.ID}, false) {
+				continue
+			}
 			if seen[m.ID] {
 				continue
 			}
@@ -572,7 +714,7 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 				Context:     m.Context,
 				Attachment:  m.Attachment,
 				EffortTiers: m.EffortTiers,
-				Custom:      true,
+				Custom:      !m.Managed,
 			})
 		}
 		if len(cms) > 0 {
@@ -959,8 +1101,17 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 			for _, m := range pc.CustomModels {
 				prev[m.ID] = m
 			}
-			next := make([]config.CustomModelConfig, 0, len(*req.CustomModels))
-			seen := make(map[string]bool, len(*req.CustomModels))
+			next := make([]config.CustomModelConfig, 0, len(pc.CustomModels)+len(*req.CustomModels))
+			seen := make(map[string]bool, len(pc.CustomModels)+len(*req.CustomModels))
+			// Account-scoped live models are backend-owned metadata. The custom
+			// model editor sends only user-authored rows, so preserve managed rows
+			// across an unrelated provider edit instead of silently deleting them.
+			for _, existing := range pc.CustomModels {
+				if existing.Managed && existing.ID != "" && !seen[existing.ID] {
+					seen[existing.ID] = true
+					next = append(next, existing)
+				}
+			}
 			for _, m := range *req.CustomModels {
 				mid := strings.TrimSpace(m.ID)
 				if mid == "" || seen[mid] {

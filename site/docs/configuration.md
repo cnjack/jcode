@@ -155,9 +155,11 @@ permissions. The Provider config stores only `auth.method` and an optional
 `auth.account_id`; omitting the account ID follows that method's default usable
 account. Managed transports ignore custom `base_url`, `headers`, `protocol`, and
 `api_key` values and use their pinned runtime profile. Because custom image
-endpoints currently reuse the Provider API key, `image_endpoint` is also
-unavailable on a managed-login Provider; configure it under a separate API-key
-Provider.
+endpoints currently reuse the Provider API key, `image_endpoint` is unavailable
+on a managed-login Provider; configure it under a separate API-key Provider.
+The built-in xAI managed profile is the exception: `image_model` may select
+`xai/grok-imagine-image` or `xai/grok-imagine-image-quality`, which use the
+pinned official xAI Images endpoint and a dispatch-time managed credential.
 
 These are **local Providers** and Desktop calls them directly. When Cloud
 configuration sync is enabled, API keys and custom headers are encrypted on
@@ -174,6 +176,7 @@ Active model in `"provider/model"` format.
 |---|---|
 | `model` | Primary model for all interactions |
 | `small_model` | Optional lightweight model. Powers the subagent `"small"` model alias (cheap delegated subtasks) and LLM session-title generation. Unset → subagents use the parent model and titles stay truncated first messages |
+| `image_model` | Optional independent image-generation role in `"provider/model"` format. Generated calls remain externally billable and follow the configured approval policy |
 | `max_iterations` | Maximum agent iterations per turn (default: 1000) |
 
 ### context_limits

@@ -126,6 +126,14 @@ type CustomModelConfig struct {
 	// and this is non-empty, it overrides the default standard effort options;
 	// when empty the standard set (minimal/low/medium/high) is used.
 	EffortTiers []string `json:"effort_tiers,omitempty"`
+	// Managed marks account-scoped models discovered from a managed provider.
+	// These entries make an explicitly enabled live model available after a
+	// restart, but remain read-only in the custom-model editor.
+	Managed bool `json:"managed,omitempty"`
+	// Protocol records a managed model's provider-declared wire format. It is
+	// ignored for API-key custom models and never accepted from the browser form.
+	Protocol string `json:"protocol,omitempty"`
+	Vendor   string `json:"vendor,omitempty"`
 }
 
 // SSHAlias represents a saved SSH connection alias

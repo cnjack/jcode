@@ -493,7 +493,18 @@ function ProvidersTab() {
   }
 
   async function onProviderSaved() {
-    setProviders(await api.listProviders())
+    const nextProviders = await api.listProviders()
+    setProviders(nextProviders)
+    const refreshedCatalogs = await Promise.all(
+      nextProviders.map(async (provider) => {
+        try {
+          return [provider.id, await api.providerCatalog(provider.id)] as const
+        } catch {
+          return [provider.id, []] as const
+        }
+      }),
+    )
+    setCatalogs((current) => ({ ...current, ...Object.fromEntries(refreshedCatalogs) }))
     await refreshModels()
     setEditing(null)
     setAdding(false)
