@@ -1258,12 +1258,21 @@ export default {
 
   askUser: {
     asking: '询问中',
+    needsAnswer: '需要你的回答',
+    helper: '选择一个选项，也可以补充自己的想法。',
+    previous: '上一题',
+    next: '下一题',
     collapse: '折叠',
     skip: '跳过',
     other: '其他',
     submit: '提交',
+    submitting: '提交中…',
+    recommended: '推荐',
+    multiSelect: '可多选',
+    skipped: '已跳过',
     noAnswer: '无记录的答案',
-    customPlaceholder: '在此输入你的答案',
+    customPlaceholder: '其他想法，或补充你的偏好…',
+    submitError: '无法提交回答，请重试。',
   },
 
   goal: {

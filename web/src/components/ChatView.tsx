@@ -10,7 +10,7 @@
  * so there is NO separate header here.
  */
 
-import { Thread } from 'jcode-ui'
+import { AskUserCard, Thread } from 'jcode-ui'
 import { GoalBanner, ChatInput } from 'jcode-ui/product'
 import { useTranslation } from 'react-i18next'
 import { useAppSelector } from '../app/hooks'
@@ -63,6 +63,20 @@ export function ChatView({ readOnly }: ChatViewProps) {
   const host = useProductComposerHost()
   const hasMessages = useAppSelector((s) => s.chat.timeline.length > 0)
   const sessionLoading = useAppSelector((s) => s.chat.sessionLoading)
+  const pendingAskUser = useAppSelector((s) => {
+    for (const item of s.chat.timeline) {
+      if (
+        item.kind === 'tool' &&
+        item.data.name === 'ask_user' &&
+        !!item.data.askUserId &&
+        item.data.status === 'running' &&
+        !item.data.output
+      ) {
+        return item.data
+      }
+    }
+    return null
+  })
   const projectPath = useAppSelector((s) => s.session.projectPath)
   const backdropKind = useAppSelector((s) => {
     const provider = s.model.providers.find((candidate) => candidate.id === s.model.providerName)
@@ -145,13 +159,41 @@ export function ChatView({ readOnly }: ChatViewProps) {
     <div className="chat-panel flex min-h-0 flex-1 flex-col">
       <ModelBackdrop kind={backdropKind} />
       <div className="chat-content-layer min-h-0 flex-1">
-        <Thread overscanBottom={28} renderPending={() => <PendingIndicator />} />
+        <Thread
+          overscanBottom={28}
+          hidePendingAskUser={!!pendingAskUser}
+          renderPending={pendingAskUser ? () => null : () => <PendingIndicator />}
+        />
       </div>
       {/* z-[2] keeps the composer’s upward-opening menus above the thread layer. */}
       <div className="chat-content-layer chat-col relative z-[2]">
         {/* Goal pill floats behind the composer; composer sits on top (higher z-index). */}
         <GoalBanner host={host} />
-        <ChatInput host={host} onSent={() => { /* timeline auto-follows via useStreamFollow */ }} />
+        <div className={pendingAskUser ? 'hidden' : undefined} aria-hidden={pendingAskUser ? true : undefined}>
+          <ChatInput host={host} onSent={() => { /* timeline auto-follows via useStreamFollow */ }} />
+        </div>
+        {pendingAskUser && (
+          <AskUserCard
+            key={pendingAskUser.askUserId}
+            tool={pendingAskUser}
+            placement="dock"
+            strings={{
+              title: t('askUser.needsAnswer'),
+              helper: t('askUser.helper'),
+              previous: t('askUser.previous'),
+              next: t('askUser.next'),
+              skip: t('askUser.skip'),
+              submit: t('askUser.submit'),
+              submitting: t('askUser.submitting'),
+              customPlaceholder: t('askUser.customPlaceholder'),
+              recommended: t('askUser.recommended'),
+              multiSelect: t('askUser.multiSelect'),
+              skipped: t('askUser.skipped'),
+              noAnswer: t('askUser.noAnswer'),
+              submitError: t('askUser.submitError'),
+            }}
+          />
+        )}
       </div>
     </div>
   )

@@ -909,9 +909,10 @@ export const submitAskUser = createAsyncThunk(
     }
     try {
       await api.askUser(payload.id, payload.answers, taskId)
-    } catch {
+    } catch (error) {
       // surface in timeline as a system message
       dispatch(chatActions.addMessage({ role: 'system', content: 'Failed to submit answer', level: 'error' }))
+      throw error
     }
   },
 )

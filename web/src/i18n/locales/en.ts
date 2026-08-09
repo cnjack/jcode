@@ -1281,12 +1281,21 @@ export default {
 
   askUser: {
     asking: 'Asking',
+    needsAnswer: 'Your input is needed',
+    helper: 'Choose an option or add your own answer.',
+    previous: 'Previous question',
+    next: 'Next',
     collapse: 'Collapse',
     skip: 'Skip',
     other: 'Other',
     submit: 'Submit',
+    submitting: 'Submitting…',
+    recommended: 'Recommended',
+    multiSelect: 'Select all that apply',
+    skipped: 'Skipped',
     noAnswer: 'No answer recorded',
     customPlaceholder: 'Type your own answer here',
+    submitError: "Couldn't submit your answer. Try again.",
   },
 
   goal: {

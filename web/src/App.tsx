@@ -44,6 +44,7 @@ import {
 } from './app/store'
 import { bridgeWS } from './app/wsBridge'
 import { useChatRuntime } from './app/runtime'
+import { selectShowSessionChrome } from './app/selectors'
 import { triggerKindLabel, type AutomationRun } from './lib/automation'
 import { Sidebar } from './components/Sidebar'
 import { ChatView } from './components/ChatView'
@@ -183,6 +184,7 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
   const paletteOpen = useAppSelector((s) => s.ui.paletteOpen)
   const isRunning = useAppSelector((s) => s.chat.isRunning)
   const wsConnected = useAppSelector((s) => s.session.wsConnected)
+  const showSessionChrome = useAppSelector(selectShowSessionChrome)
 
   // Panel state — a right panel (files/changes/plan/artifacts) and a
   // bottom panel (terminal) that can be open simultaneously.
@@ -293,7 +295,7 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
           {/* Every native desktop exposes the same task context and application
               launchers. macOS places them in its overlay band; Windows/Linux
               place the row at the top of the web content below the OS chrome. */}
-          {activeView === 'chat' && isTauri && (
+          {showSessionChrome && isTauri && (
             <DesktopTitlebar
               isRunning={isRunning}
               wsConnected={wsConnected}
@@ -302,7 +304,7 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
               onTogglePanel={togglePanel}
             />
           )}
-          {activeView === 'chat' && !isTauri && (
+          {showSessionChrome && !isTauri && (
             <TopBar
               isRunning={isRunning}
               wsConnected={wsConnected}
@@ -312,7 +314,7 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
             />
           )}
           {/* Browser fallback: retain the standalone per-session switch. */}
-          {activeView === 'chat' && !isTauri && <CloudSyncToggle />}
+          {showSessionChrome && !isTauri && <CloudSyncToggle />}
           {/* Codex-style computer-use PiP — floats under the TopBar, shows the
               latest screenshot from the session's computer_screenshot calls. */}
           {activeView === 'chat' && <ComputerShotPiP />}

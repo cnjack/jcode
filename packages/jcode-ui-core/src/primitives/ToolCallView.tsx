@@ -71,7 +71,7 @@ export function ToolCallView({
   const ctx = useToolCallContext()
   // Only the recursive subagent tool — team_spawn has its own renderer (Vue parity).
   const isSubagent = tool.name === 'subagent'
-  const isAskUser = tool.name === 'ask_user' && (!!tool.askUserId || tool.status === 'running')
+  const isAskUser = tool.name === 'ask_user'
 
   const [expanded, setExpanded] = useState(defaultExpanded ?? isSubagent)
   const toggle = useMemo(() => () => setExpanded((e) => !e), [])

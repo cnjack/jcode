@@ -59,7 +59,8 @@ export function useChatRuntime(): ChatRuntime {
         stop: () => store.dispatch(stopAgent()),
         resolveApproval: (id, approved, approveAll) =>
           store.dispatch(resolveApproval({ id, approved, approveAll })),
-        submitAskUser: (id, answers) => store.dispatch(submitAskUser({ id, answers: answers as AskUserAnswer[] })),
+        submitAskUser: (id, answers) =>
+          store.dispatch(submitAskUser({ id, answers: answers as AskUserAnswer[] })).unwrap(),
         editMessage: (id, newText) => store.dispatch(editMessage({ id, text: newText })),
       },
     })

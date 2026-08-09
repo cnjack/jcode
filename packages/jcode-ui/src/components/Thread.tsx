@@ -21,6 +21,7 @@ import {
   isTurnChangesItem,
   groupActivityTimeline,
   appendTurnChangeSummaries,
+  isStandaloneTool,
 } from 'jcode-ui-core'
 import type { ThreadItem } from 'jcode-ui-core'
 import { Message } from './Message.js'
@@ -49,6 +50,9 @@ export interface ThreadProps {
   className?: string
   /** Extra bottom padding (px) to clear a sticky composer. */
   overscanBottom?: number
+  /** Hide pending ask_user tools before activity grouping when a host presents
+   *  them in a dedicated interaction dock. Resolved receipts remain visible. */
+  hidePendingAskUser?: boolean
 }
 
 export function Thread({
@@ -59,14 +63,26 @@ export function Thread({
   pendingLabel,
   className,
   overscanBottom,
+  hidePendingAskUser = false,
 }: ThreadProps): ReactNode {
   const { isRunning } = useRuntimeState()
   // Activity coalescing (batches absorbed, ALL adjacent tools grouped), then
   // per-turn "Changed N files" summaries (the last turn stays summary-free
   // while the agent is working).
   const mapItems = useCallback(
-    (items: ThreadItem[]) => appendTurnChangeSummaries(groupActivityTimeline(items), { isRunning }),
-    [isRunning],
+    (items: ThreadItem[]) => {
+      const visibleItems = hidePendingAskUser
+        ? items.filter((item) => !(
+            item.kind === 'tool' &&
+            item.data.name === 'ask_user' &&
+            !!item.data.askUserId &&
+            item.data.status === 'running' &&
+            !item.data.output
+          ))
+        : items
+      return appendTurnChangeSummaries(groupActivityTimeline(visibleItems), { isRunning })
+    },
+    [hidePendingAskUser, isRunning],
   )
 
   return (
@@ -132,7 +148,13 @@ function renderItem(item: ThreadItem, isRunning: boolean): ReactNode {
   if (isToolItem(item)) {
     return (
       <div className="jcode-chat-col">
-        <ToolCallCard tool={item.data} className="jcode-gutter" />
+        {isStandaloneTool(item.data) ? (
+          <div className="jcode-gutter jcode-standalone-tool" data-tool-name={item.data.name}>
+            <ToolCallCard tool={item.data} />
+          </div>
+        ) : (
+          <ToolCallCard tool={item.data} className="jcode-gutter" />
+        )}
       </div>
     )
   }

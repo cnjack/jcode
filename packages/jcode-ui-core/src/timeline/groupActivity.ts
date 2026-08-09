@@ -27,6 +27,12 @@ function toolStatus(tools: ToolCall[]): ToolStatus {
 /** Pass-1 unit: either a run of tools (a batch or a lone tool) or a pass-through item. */
 type Unit = { cluster: { tools: ToolCall[]; seq: number } } | { item: ThreadItem }
 
+/** Ask User owns a complete timeline receipt and must not be collapsed into
+ * the generic activity summary before or after the interaction resolves. */
+export function isStandaloneTool(tool: ToolCall): boolean {
+  return tool.name === 'ask_user'
+}
+
 /**
  * Coalesce adjacent tool items (and whole `batchId` batches) into `activity`
  * groups. Output contains only `'activity'` items (≥2 tools) and plain
@@ -43,6 +49,13 @@ export function groupActivityTimeline(items: ThreadItem[]): ThreadItem[] {
   const batches = new Map<string, { tools: ToolCall[]; seq: number }>()
   for (const item of items) {
     if (item.kind === 'tool') {
+      if (isStandaloneTool(item.data)) {
+        // Do not allow a later member to be pulled backwards across the
+        // question/answer receipt by a batch that began before it.
+        batches.clear()
+        units.push({ item })
+        continue
+      }
       const batchId = item.data.batchId
       if (batchId) {
         const existing = batches.get(batchId)

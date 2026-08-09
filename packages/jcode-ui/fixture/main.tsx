@@ -12,14 +12,17 @@ import {
   ToolRegistryProvider,
   createDefaultToolRegistry,
   ToolCallCard,
+  AskUserCard,
   TaskList,
   Artifact,
 } from '../src/index.ts'
 import { TestResultsRenderer, StackTraceRenderer } from '../src/toolRenderers/index.ts'
 import type { ReactNode } from 'react'
 import type { ThreadItem, ToolCall, TodoItem } from 'jcode-ui-core'
-import '../src/styles/entry.css'
-import '../src/styles/p5.css'
+// Exercise the same compiled stylesheet consumed by product hosts. Importing
+// the raw Tailwind entry here misses utilities used by source files outside
+// the fixture root (notably Heroicon sizing classes).
+import '../dist/styles.css'
 
 function tool(partial: Partial<ToolCall> & Pick<ToolCall, 'id' | 'name'>): ToolCall {
   return {
@@ -540,6 +543,114 @@ const items: ThreadItem[] = [
 const runtime = createMockRuntime({ items, isRunning: false })
 const registry = createDefaultToolRegistry()
 
+const askUserTool = tool({
+  id: 'ask-user-fixture',
+  name: 'ask_user',
+  status: 'running',
+  askUserId: 'ask-user-fixture-request',
+  askUserQuestions: [
+    {
+      header: '周末安排',
+      question: '这个周末你更想怎么安排？',
+      options: [
+        { label: '在家放松 (Recommended)', description: '节奏最轻松，适合恢复精力。' },
+        { label: '户外活动', description: '更有活力，但需要提前安排时间。' },
+        { label: '朋友聚会', description: '社交感更强，时间相对不自由。' },
+      ],
+    },
+    {
+      header: '活动时段',
+      question: '你比较偏好哪个时间段？',
+      options: [
+        { label: '周六上午', description: '精力充沛，下午仍可自由安排。' },
+        { label: '周六下午', description: '不必早起，整体节奏更从容。' },
+        { label: '周日上午', description: '适合短途活动或运动。' },
+      ],
+    },
+    {
+      header: '计划重点',
+      question: '这次计划最希望兼顾哪些目标？',
+      multi_select: true,
+      options: [
+        { label: '休息恢复', description: '降低安排密度，留出独处时间。' },
+        { label: '运动', description: '加入轻量户外或健身活动。' },
+        { label: '学习充电', description: '安排一段完整的专注时间。' },
+      ],
+    },
+  ],
+})
+
+const resolvedAskUserTool = tool({
+  id: 'ask-user-resolved-fixture',
+  name: 'ask_user',
+  status: 'done',
+  args: JSON.stringify({
+    questions: [
+      { header: '图像类型', question: '你说的“三身体图”具体指哪一种？' },
+      { header: '风格', question: '希望使用什么画面风格？' },
+    ],
+  }),
+  output: JSON.stringify({
+    answers: [
+      { question_header: '图像类型', answer: '角色三视图（推荐）' },
+      { question_header: '风格', answer: '二次元 / 动漫风' },
+    ],
+  }),
+})
+
+const askUserRuntime = createMockRuntime({
+  items: [{ kind: 'tool', seq: 1, data: askUserTool }],
+  isRunning: true,
+})
+
+const resolvedAskUserRuntime = createMockRuntime({
+  items: [
+    {
+      kind: 'message',
+      seq: 1,
+      data: { id: 'ask-user-prompt', role: 'user', content: '帮我生成一个美女的三身体图', timestamp: 1 },
+    },
+    {
+      kind: 'message',
+      seq: 2,
+      data: {
+        id: 'ask-user-clarify',
+        role: 'assistant',
+        content: '“三身体图”这个表述我想先确认一下，避免理解偏差。',
+        timestamp: 2,
+      },
+    },
+    { kind: 'tool', seq: 3, data: resolvedAskUserTool },
+    {
+      kind: 'message',
+      seq: 4,
+      data: {
+        id: 'ask-user-confirmed',
+        role: 'assistant',
+        content: '明白了，二次元动漫风的美女角色三视图（正面 / 侧面 / 背面）。',
+        timestamp: 4,
+      },
+    },
+  ],
+  isRunning: false,
+})
+
+const askUserStrings = {
+  title: '需要你的选择',
+  helper: '选择一个选项，或补充你自己的想法。',
+  previous: '上一题',
+  next: '下一题',
+  skip: '跳过',
+  submit: '提交',
+  submitting: '提交中…',
+  customPlaceholder: '其他想法，或补充你的偏好…',
+  recommended: '推荐',
+  multiSelect: '可多选',
+  skipped: '已跳过',
+  noAnswer: '没有记录答案',
+  submitError: '提交失败，请重试。',
+}
+
 // P5-section registry: map demo tool names onto the new renderers so a host can
 // see how `registry.register('execute', TestResultsRenderer)` etc. would look.
 const p5Registry = createDefaultToolRegistry()
@@ -580,7 +691,7 @@ function Panel({ title, children }: { title: string; children: ReactNode }) {
           padding: 16,
           background: 'var(--jcode-color-surface)',
         }}
-      >
+    >
         {children}
       </div>
     </section>
@@ -597,8 +708,73 @@ function App() {
         padding: '24px',
         fontFamily: 'var(--font-sans, system-ui, sans-serif)',
       }}
-    >
+      >
       <h1 style={{ fontSize: 16, marginBottom: 16, opacity: 0.8 }}>Tool output UX fixture</h1>
+      <section style={{ maxWidth: 980, marginBottom: 32 }}>
+        <h2 style={{ fontSize: 13, marginBottom: 8, opacity: 0.7 }}>
+          Ask User · resolved receipt alignment
+        </h2>
+        <div
+          id="ask-user-resolved-fixture"
+          data-jcode-ui=""
+          style={{
+            height: 480,
+            overflow: 'hidden',
+            border: '1px solid var(--jcode-color-border)',
+            borderRadius: 16,
+            background: 'var(--jcode-color-background)',
+          }}
+        >
+          <RuntimeProvider runtime={resolvedAskUserRuntime}>
+            <Thread virtualize={false} />
+          </RuntimeProvider>
+        </div>
+      </section>
+      <section style={{ maxWidth: 980, marginBottom: 32 }}>
+        <h2 style={{ fontSize: 13, marginBottom: 8, opacity: 0.7 }}>
+          Ask User · bottom composer replacement
+        </h2>
+        <div
+          id="ask-user-fixture"
+          data-jcode-ui=""
+          style={{
+            height: 700,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            border: '1px solid var(--jcode-color-border)',
+            borderRadius: 16,
+            background: 'var(--jcode-color-background)',
+          }}
+        >
+          <div
+            style={{
+              height: 48,
+              display: 'flex',
+              alignItems: 'center',
+              padding: '0 20px',
+              borderBottom: '1px solid var(--jcode-color-border)',
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            生成三个测试问题
+          </div>
+          <div style={{ flex: 1, padding: '40px 42px', overflow: 'hidden' }}>
+            <div style={{ maxWidth: 720, margin: '0 auto', fontSize: 14, lineHeight: 1.7 }}>
+              <p style={{ margin: 0, opacity: 0.58 }}>你</p>
+              <p style={{ margin: '4px 0 28px' }}>帮我规划一个周末的时间安排，想要放松又有意义。</p>
+              <p style={{ margin: 0, opacity: 0.58 }}>JCode</p>
+              <p style={{ margin: '4px 0 0' }}>好的，我先了解一下你的偏好。</p>
+            </div>
+          </div>
+          <RuntimeProvider runtime={askUserRuntime}>
+            <div style={{ width: 'min(56rem, calc(100% - 32px))', margin: '0 auto', paddingBottom: 18 }}>
+              <AskUserCard tool={askUserTool} placement="dock" strings={askUserStrings} />
+            </div>
+          </RuntimeProvider>
+        </div>
+      </section>
       <div
         id="fixture-thread"
         style={{

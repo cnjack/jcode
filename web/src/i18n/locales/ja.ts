@@ -1214,12 +1214,21 @@ export default {
 
   askUser: {
     asking: '質問中',
+    needsAnswer: '回答が必要です',
+    helper: '選択肢を選ぶか、自分の回答を入力してください。',
+    previous: '前の質問',
+    next: '次へ',
     collapse: '折りたたむ',
     skip: 'スキップ',
     other: 'その他',
     submit: '送信',
+    submitting: '送信中…',
+    recommended: 'おすすめ',
+    multiSelect: '複数選択可',
+    skipped: 'スキップ済み',
     noAnswer: '回答の記録なし',
     customPlaceholder: 'ここに独自の回答を入力',
+    submitError: '回答を送信できませんでした。もう一度お試しください。',
   },
 
   goal: {

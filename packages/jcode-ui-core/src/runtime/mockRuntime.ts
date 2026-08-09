@@ -103,7 +103,7 @@ export function createMockRuntime(opts: MockRuntimeOptions = {}): ChatRuntime & 
                     status: 'done',
                     askUserId: undefined,
                     askUserQuestions: undefined,
-                    output: JSON.stringify(answers),
+                    output: JSON.stringify({ answers }),
                   },
                 }
               : i,

@@ -1213,12 +1213,21 @@ export default {
 
   askUser: {
     asking: '질문 중',
+    needsAnswer: '답변이 필요합니다',
+    helper: '옵션을 선택하거나 직접 답변을 입력하세요.',
+    previous: '이전 질문',
+    next: '다음',
     collapse: '접기',
     skip: '건너뛰기',
     other: '기타',
     submit: '제출',
+    submitting: '제출 중…',
+    recommended: '추천',
+    multiSelect: '복수 선택',
+    skipped: '건너뜀',
     noAnswer: '기록된 답변 없음',
     customPlaceholder: '여기에 직접 답변을 입력하세요',
+    submitError: '답변을 제출하지 못했습니다. 다시 시도하세요.',
   },
 
   goal: {
