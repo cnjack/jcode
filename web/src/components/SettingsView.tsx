@@ -87,6 +87,11 @@ import {
   TEXTAREA,
 } from './settings/atoms'
 import { api } from '../lib/api'
+import {
+  readProviderCatalogCache,
+  removeProviderCatalogCache,
+  writeProviderCatalogCache,
+} from '../lib/providerCatalogCache'
 import { openRemoteConnect } from '../lib/remote'
 import { openUrl } from '../lib/useDesktop'
 import { LOCALE_LABELS, SUPPORTED_LOCALES, setLocale, type SupportedLocale } from '../i18n'
@@ -327,6 +332,7 @@ function ProvidersTab() {
   const [setupList, setSetupList] = useState<SetupProvider[]>([])
   const [catalogs, setCatalogs] = useState<Record<string, CatalogModel[]>>({})
   const [catalogLoading, setCatalogLoading] = useState('')
+  const catalogRequestEpochs = useRef(new Map<string, number>())
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<ProviderDetail | null>(null)
   const [modelForm, setModelForm] = useState<{ providerId: string; target: CustomModelDetail | null } | null>(null)
@@ -360,29 +366,51 @@ function ProvidersTab() {
     }
   }
 
+  function beginCatalogRequest(providerId: string): number {
+    const epoch = (catalogRequestEpochs.current.get(providerId) ?? 0) + 1
+    catalogRequestEpochs.current.set(providerId, epoch)
+    return epoch
+  }
+
+  function catalogRequestIsCurrent(providerId: string, epoch: number): boolean {
+    return catalogRequestEpochs.current.get(providerId) === epoch
+  }
+
+  async function revalidateCatalog(provider: ProviderDetail, showLoading = false): Promise<void> {
+    const epoch = beginCatalogRequest(provider.id)
+    if (showLoading) setCatalogLoading(provider.id)
+    try {
+      const catalog = await api.providerCatalog(provider.id)
+      if (!catalogRequestIsCurrent(provider.id, epoch)) return
+      writeProviderCatalogCache(provider, catalog)
+      setCatalogs((current) => ({ ...current, [provider.id]: catalog }))
+    } catch {
+      // Keep the last successful cache. A transient provider outage must not
+      // make known models disappear when reopening Settings.
+    } finally {
+      if (showLoading && catalogRequestIsCurrent(provider.id, epoch)) {
+        setCatalogLoading('')
+      }
+    }
+  }
+
   async function load() {
     setLoading(true)
     try {
       const list = await api.listProviders()
       setProviders(list)
-      // Pre-fetch each provider's catalog so the browse panel shows models
-      // immediately (the card's catalog is open by default).
-      await Promise.all(
-        list.map(async (p) => {
-          if (!catalogs[p.id]) {
-            try {
-              const cat = await api.providerCatalog(p.id)
-              setCatalogs((prev) => ({ ...prev, [p.id]: cat }))
-            } catch {
-              setCatalogs((prev) => ({ ...prev, [p.id]: [] }))
-            }
-          }
-        }),
-      )
+      setCatalogs(Object.fromEntries(list.map((provider) => [
+        provider.id,
+        readProviderCatalogCache(provider) ?? [],
+      ])))
+      // Stale-while-revalidate: cards render the last successful account-aware
+      // catalog immediately, then replace it only after the live request wins.
+      setLoading(false)
+      void Promise.all(list.map((provider) => revalidateCatalog(provider)))
     } catch {
       /* ignore */
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   useEffect(() => {
@@ -482,43 +510,37 @@ function ProvidersTab() {
   }
 
   async function refreshCatalog(providerId: string) {
-    setCatalogLoading(providerId)
-    try {
-      const cat = await api.providerCatalog(providerId)
-      setCatalogs((prev) => ({ ...prev, [providerId]: cat }))
-    } catch {
-      setCatalogs((prev) => ({ ...prev, [providerId]: [] }))
-    }
-    setCatalogLoading('')
+    const provider = providers.find((candidate) => candidate.id === providerId)
+    if (provider) await revalidateCatalog(provider, true)
   }
 
   async function onProviderSaved() {
     const nextProviders = await api.listProviders()
     setProviders(nextProviders)
-    const refreshedCatalogs = await Promise.all(
-      nextProviders.map(async (provider) => {
-        try {
-          return [provider.id, await api.providerCatalog(provider.id)] as const
-        } catch {
-          return [provider.id, []] as const
-        }
-      }),
-    )
-    setCatalogs((current) => ({ ...current, ...Object.fromEntries(refreshedCatalogs) }))
+    setCatalogs(Object.fromEntries(nextProviders.map((provider) => [
+      provider.id,
+      readProviderCatalogCache(provider) ?? [],
+    ])))
+    await Promise.all(nextProviders.map((provider) => revalidateCatalog(provider)))
     await refreshModels()
     setEditing(null)
     setAdding(false)
   }
 
   async function onProviderAuthenticated(providerId: string) {
+    let refreshedProvider: ProviderDetail | undefined
     try {
-      setProviders(await api.listProviders())
+      const nextProviders = await api.listProviders()
+      refreshedProvider = nextProviders.find((provider) => provider.id === providerId)
+      setProviders(nextProviders)
     } catch {
       // The account is already stored; keep the form usable if an older server
       // cannot yet project managed-auth state onto provider details.
     }
-    if (providers.some((provider) => provider.id === providerId)) {
-      await refreshCatalog(providerId)
+    if (refreshedProvider) {
+      const cached = readProviderCatalogCache(refreshedProvider)
+      setCatalogs((current) => ({ ...current, [providerId]: cached ?? [] }))
+      await revalidateCatalog(refreshedProvider, true)
     }
     await refreshModels()
   }
@@ -526,6 +548,8 @@ function ProvidersTab() {
   async function deleteProvider(id: string) {
     try {
       await api.deleteProvider(id)
+      beginCatalogRequest(id)
+      removeProviderCatalogCache(id)
       setProviders((prev) => prev.filter((p) => p.id !== id))
       await refreshModels()
     } catch (err) {

@@ -7,6 +7,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/providerauth"
 	"github.com/cnjack/jcode/internal/providertools"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/toolpolicy"
@@ -86,7 +87,9 @@ func evaluateImageGenerationAvailability(cfg *config.Config) (bool, string) {
 		return false, web.SessionToolDisabledNoModel
 	}
 	provider := cfg.GetProviders()[providerID]
-	if provider == nil || strings.TrimSpace(provider.APIKey) == "" {
+	managedXAI := providerID == "xai" && provider != nil && provider.Auth != nil &&
+		provider.Auth.Method == string(providerauth.MethodXAIOAuth)
+	if provider == nil || (strings.TrimSpace(provider.APIKey) == "" && !managedXAI) {
 		return false, web.SessionToolDisabledProviderDisabled
 	}
 	if _, err := providertools.ResolveImageRuntime(cfg); err != nil {

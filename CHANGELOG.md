@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Grok device sign-in now accepts xAI's official `accounts.x.ai/oauth2/device` verification page while retaining strict HTTPS, host, port, and user-info checks.
+- Provider Settings now shows the last successful account-scoped model catalog immediately when reopened, revalidates it in the background, and preserves it through transient refresh failures without allowing an older account request to overwrite newer results.
+- Managed Grok Image Models now pass the image-tool availability check without requiring an API key, so selecting a supported Grok Imagine model exposes `generate_image` to active normal-mode agents.
 - Provider configuration writes are serialized as reload → mutate → atomic save, reject stale snapshots, preserve secrets, and rebuild provider tools after keys, endpoints, or models change.
 - Session replay now restores provider operations, managed Artifacts, tool lifecycle, session modes, and per-session tool overrides without trusting dropped WebSocket events.
 

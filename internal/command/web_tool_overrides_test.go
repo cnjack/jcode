@@ -8,6 +8,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/providerauth"
 	"github.com/cnjack/jcode/internal/providertools"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/toolpolicy"
@@ -176,6 +177,24 @@ func TestRemoteWebTaskAllowsOnlyLocalManagedImageGeneration(t *testing.T) {
 	}
 	if webTaskBillableAllowed(session.SessionToolImageGeneration, false, true) {
 		t.Fatal("unattended tasks must not expose billable image generation")
+	}
+}
+
+func TestManagedXAIImageGenerationPassesAvailabilityGate(t *testing.T) {
+	cfg := &config.Config{
+		ImageModel: "xai/grok-imagine-image-quality",
+		Providers: map[string]*config.ProviderConfig{
+			"xai": {Auth: &config.ProviderAuthBinding{
+				Method: string(providerauth.MethodXAIOAuth), AccountID: "account-1",
+			}},
+		},
+	}
+	available, reason := evaluateImageGenerationAvailability(cfg)
+	if !available || reason != "" {
+		t.Fatalf("managed xAI image availability = %v, %q", available, reason)
+	}
+	if !imageGenerationEnabled(cfg, false, true) {
+		t.Fatal("managed xAI image model was filtered before tool construction")
 	}
 }
 

@@ -99,10 +99,13 @@ cannot redirect or replace their authorization.
 Managed Providers load the model catalog for the selected account instead of
 assuming that every subscription exposes the same models. In Settings, use the
 refresh action to reload that catalog, then enable the models you want in the
-chat picker. Enabled live models are retained locally for restart continuity.
-GitHub Copilot may expose OpenAI, Google, Microsoft, and other vendor models in
-one account; jcode preserves the wire protocol advertised for each enabled
-model.
+chat picker. After the first successful load, Settings keeps an account-scoped
+local catalog cache: reopening the page shows it immediately while a background
+request fetches newer results. A transient refresh failure leaves the cached
+list visible, and changing the bound/default account uses a separate cache.
+Enabled live models are retained locally for restart continuity. GitHub Copilot
+may expose OpenAI, Google, Microsoft, and other vendor models in one account;
+jcode preserves the wire protocol advertised for each enabled model.
 
 {: .note }
 **Sign in with ChatGPT** is the ChatGPT/Codex subscription transport, not a

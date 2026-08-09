@@ -15,6 +15,10 @@ import { i18n } from '../i18n'
 import { store, uiActions } from '../app/store'
 import { buildImageEndpointConfig, buildProviderBaseURLUpdate, SettingsView } from './SettingsView'
 import { api } from '../lib/api'
+import {
+  removeProviderCatalogCache,
+  writeProviderCatalogCache,
+} from '../lib/providerCatalogCache'
 
 function renderView() {
   return render(
@@ -152,6 +156,82 @@ describe('SettingsView', () => {
       { provider_tools: { web_search: { enabled: true } } },
     ))
     expect(toggle.getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('renders a cached provider catalog before background revalidation completes', async () => {
+    const provider = {
+      id: 'cached-copilot', name: 'Cached Copilot', api_key_set: false,
+      auth_binding: { method: 'github_copilot' as const, account_id: 'account-cache' },
+      auth_status: {
+        method: 'github_copilot' as const,
+        default_account_id: 'account-cache',
+        accounts: [{
+          id: 'account-cache', login: 'cached-user', authenticated_at: '2026-08-09T08:00:00Z', requires_reauth: false,
+        }],
+      },
+      capabilities: [],
+    }
+    removeProviderCatalogCache(provider.id)
+    writeProviderCatalogCache(provider, [{ id: 'cached-model', name: 'Cached Model', added: true }])
+    const liveCatalog = deferred<Array<{ id: string; name: string; added: boolean }>>()
+    vi.spyOn(api, 'listProviders').mockResolvedValue([provider])
+    vi.spyOn(api, 'providerCatalog').mockReturnValue(liveCatalog.promise)
+    vi.spyOn(api, 'setupProviders').mockResolvedValue([])
+    vi.spyOn(api, 'models').mockResolvedValue({
+      current: { provider: '', model: '' }, current_image: { provider: '', model: '' }, providers: [],
+    })
+
+    store.dispatch(uiActions.setSettingsTab('providers'))
+    renderView()
+    expect(await screen.findByText('Cached Model')).toBeTruthy()
+    expect(api.providerCatalog).toHaveBeenCalledWith(provider.id)
+
+    await act(async () => {
+      liveCatalog.resolve([{ id: 'fresh-model', name: 'Fresh Model', added: true }])
+      await Promise.resolve()
+    })
+    expect(await screen.findByText('Fresh Model')).toBeTruthy()
+    expect(screen.queryByText('Cached Model')).toBeNull()
+    removeProviderCatalogCache(provider.id)
+  })
+
+  it('does not let an older catalog request overwrite a newer refresh', async () => {
+    const provider = {
+      id: 'racing-copilot', name: 'Racing Copilot', api_key_set: false,
+      auth_binding: { method: 'github_copilot' as const, account_id: 'account-race' },
+      capabilities: [],
+    }
+    removeProviderCatalogCache(provider.id)
+    const initialRequest = deferred<Array<{ id: string; name: string; added: boolean }>>()
+    const refreshRequest = deferred<Array<{ id: string; name: string; added: boolean }>>()
+    vi.spyOn(api, 'listProviders').mockResolvedValue([provider])
+    vi.spyOn(api, 'providerCatalog')
+      .mockReturnValueOnce(initialRequest.promise)
+      .mockReturnValueOnce(refreshRequest.promise)
+    vi.spyOn(api, 'setupProviders').mockResolvedValue([])
+    vi.spyOn(api, 'models').mockResolvedValue({
+      current: { provider: '', model: '' }, current_image: { provider: '', model: '' }, providers: [],
+    })
+
+    store.dispatch(uiActions.setSettingsTab('providers'))
+    renderView()
+    await screen.findByText('Racing Copilot')
+    fireEvent.click(screen.getByTitle('Refresh catalog'))
+    expect(api.providerCatalog).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      refreshRequest.resolve([{ id: 'new-model', name: 'New Model', added: true }])
+      await Promise.resolve()
+    })
+    expect(await screen.findByText('New Model')).toBeTruthy()
+
+    await act(async () => {
+      initialRequest.resolve([{ id: 'old-model', name: 'Old Model', added: true }])
+      await Promise.resolve()
+    })
+    expect(screen.queryByText('Old Model')).toBeNull()
+    expect(screen.getByText('New Model')).toBeTruthy()
+    removeProviderCatalogCache(provider.id)
   })
 
   it('sends base_url null when Settings clears a BigModel proxy without resending the API key', async () => {

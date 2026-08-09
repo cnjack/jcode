@@ -23,6 +23,8 @@ For implementation-level detail, see the repository's full [CHANGELOG.md](https:
 
 #### Fixed
 - Grok device sign-in accepts xAI's official account verification page without weakening verification-URL origin checks.
+- Reopening Provider Settings renders the last successful account model catalog immediately, refreshes it in the background, and keeps the cached list if the provider is temporarily unavailable.
+- A selected Grok Imagine model now correctly enables the agent's image-generation tool when the Provider uses Grok account sign-in instead of an API key.
 
 #### Security
 - Billable provider operations require an explicit approval choice before execution. Session and configuration persistence also gains file locking, directory synchronization, security journaling, and secret-safe MCP updates.

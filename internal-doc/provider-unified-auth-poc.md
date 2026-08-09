@@ -79,7 +79,11 @@ and proves:
 15. xAI image and video entries are separated from chat. The official managed
     xAI image profile pins `api.x.ai/v1/images/generations`, resolves its token
     only at dispatch, and reuses the billable-operation approval, journal,
-    quota, Artifact, and safe-download pipeline.
+    quota, Artifact, and safe-download pipeline;
+16. the Web/Desktop Provider catalog uses a token-free, account-aware local
+    stale-while-revalidate cache. It renders the last successful list before
+    the live request completes, retains it on transient failure, and rejects
+    stale responses from an earlier account or refresh generation.
 
 ## Accepted result
 
