@@ -1,15 +1,219 @@
 package web
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/model"
+	"github.com/cnjack/jcode/internal/providertools"
 )
+
+func validateProviderTools(in map[string]config.ProviderToolPolicy) (map[string]config.ProviderToolPolicy, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]config.ProviderToolPolicy, len(in))
+	for key, policy := range in {
+		key = strings.ToLower(strings.TrimSpace(key))
+		if key == "" {
+			return nil, fmt.Errorf("provider tool id cannot be empty")
+		}
+		if policy.MaxCallsPerTurn < 0 || policy.MaxCallsPerSession < 0 {
+			return nil, fmt.Errorf("provider tool %q call limits cannot be negative", key)
+		}
+		if _, duplicate := out[key]; duplicate {
+			return nil, fmt.Errorf("duplicate provider tool id %q", key)
+		}
+		out[key] = policy
+	}
+	return out, nil
+}
+
+func isASCIIHost(host string) bool {
+	for index := range len(host) {
+		if host[index] > 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+func validateImageEndpoint(in *config.ImageEndpointConfig) (*config.ImageEndpointConfig, error) {
+	if in == nil {
+		return nil, nil
+	}
+	out := *in
+	out.Protocol = strings.ToLower(strings.TrimSpace(out.Protocol))
+	out.BaseURL = strings.TrimSpace(out.BaseURL)
+	if out.Protocol == "" {
+		return nil, fmt.Errorf("image_endpoint.protocol is required")
+	}
+	u, err := url.Parse(out.BaseURL)
+	if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return nil, fmt.Errorf("image_endpoint.base_url must be an HTTPS URL without credentials, query, or fragment")
+	}
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	if host == "" {
+		return nil, fmt.Errorf("image_endpoint.base_url host is required")
+	}
+	// The image client intentionally accepts only canonical ASCII hosts. Reject
+	// Unicode here as well so the settings API never reports a configuration as
+	// usable that the runtime will subsequently refuse.
+	if !isASCIIHost(host) {
+		return nil, fmt.Errorf("image_endpoint.base_url host must use canonical ASCII")
+	}
+	port := u.Port()
+	u.Scheme = "https"
+	u.Host = host
+	if port != "" {
+		u.Host = net.JoinHostPort(host, port)
+	}
+	u.Path = strings.TrimRight(u.Path, "/")
+	u.RawPath = ""
+	out.BaseURL = u.String()
+
+	seenModels := make(map[string]struct{}, len(out.Models))
+	models := make([]config.ImageModelConfig, 0, len(out.Models))
+	for _, item := range out.Models {
+		item.ID = strings.TrimSpace(item.ID)
+		item.Name = strings.TrimSpace(item.Name)
+		if item.ID == "" {
+			return nil, fmt.Errorf("image_endpoint model id is required")
+		}
+		if _, duplicate := seenModels[item.ID]; duplicate {
+			return nil, fmt.Errorf("duplicate image_endpoint model %q", item.ID)
+		}
+		seenModels[item.ID] = struct{}{}
+		cleanSizes := make([]string, 0, len(item.Sizes))
+		seenSizes := make(map[string]struct{}, len(item.Sizes))
+		for _, size := range item.Sizes {
+			size = strings.TrimSpace(size)
+			if size == "" {
+				continue
+			}
+			if _, duplicate := seenSizes[size]; duplicate {
+				continue
+			}
+			seenSizes[size] = struct{}{}
+			cleanSizes = append(cleanSizes, size)
+		}
+		item.Sizes = cleanSizes
+		models = append(models, item)
+	}
+	if len(models) == 0 {
+		return nil, fmt.Errorf("image_endpoint.models needs at least one model")
+	}
+	out.Models = models
+
+	hosts := make([]string, 0, len(out.AssetHosts))
+	seenHosts := make(map[string]struct{}, len(out.AssetHosts))
+	for _, rule := range out.AssetHosts {
+		rule = strings.ToLower(strings.TrimSpace(strings.TrimSuffix(rule, ".")))
+		base := strings.TrimPrefix(rule, "*.")
+		if base == "" || strings.ContainsAny(base, "/:@?#") || strings.Contains(base, "*") ||
+			net.ParseIP(base) != nil || !strings.Contains(base, ".") || !isASCIIHost(base) {
+			return nil, fmt.Errorf("invalid image_endpoint asset host %q", rule)
+		}
+		if _, duplicate := seenHosts[rule]; duplicate {
+			continue
+		}
+		seenHosts[rule] = struct{}{}
+		hosts = append(hosts, rule)
+	}
+	out.AssetHosts = hosts
+	return &out, nil
+}
+
+func decodeOptionalImageEndpoint(raw json.RawMessage) (present bool, endpoint *config.ImageEndpointConfig, err error) {
+	if len(raw) == 0 {
+		return false, nil, nil
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return true, nil, nil
+	}
+	var value config.ImageEndpointConfig
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return true, nil, fmt.Errorf("invalid image_endpoint")
+	}
+	valuePtr, err := validateImageEndpoint(&value)
+	return true, valuePtr, err
+}
+
+// decodeOptionalBaseURL gives provider updates an explicit three-state
+// contract without changing the legacy keep-on-empty behavior:
+//
+//   - omitted or "" keeps the stored URL;
+//   - null clears it (and lets registry providers fall back to their default);
+//   - a non-empty string replaces it.
+//
+// API keys intentionally keep their existing secret-input semantics and are
+// decoded separately.
+func decodeOptionalBaseURL(raw json.RawMessage) (present bool, value string, err error) {
+	if len(raw) == 0 {
+		return false, "", nil
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return true, "", nil
+	}
+	var decoded string
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return true, "", fmt.Errorf("invalid base_url")
+	}
+	decoded = strings.TrimSpace(decoded)
+	if decoded == "" {
+		return false, "", nil
+	}
+	return true, decoded, nil
+}
+
+func providerIsCustom(registry *model.ModelRegistry, providerID string) bool {
+	if registry == nil {
+		return true
+	}
+	provider := registry.GetProvider(providerID)
+	return provider == nil || provider.Custom
+}
+
+func validateCustomProviderRoutes(
+	isCustom bool,
+	baseURL string,
+	hasChatWorkload bool,
+	imageEndpoint *config.ImageEndpointConfig,
+) error {
+	if !isCustom || strings.TrimSpace(baseURL) != "" {
+		return nil
+	}
+	if hasChatWorkload {
+		return fmt.Errorf("base_url is required for custom providers with chat models")
+	}
+	if imageEndpoint == nil {
+		return fmt.Errorf("custom providers need a chat base_url or image_endpoint")
+	}
+	return nil
+}
+
+func decodeOptionalBool(raw json.RawMessage, field string) (present bool, value *bool, err error) {
+	if len(raw) == 0 {
+		return false, nil, nil
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return true, nil, nil
+	}
+	var decoded bool
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return true, nil, fmt.Errorf("invalid %s", field)
+	}
+	return true, &decoded, nil
+}
 
 // handleProviderCatalog returns a provider's browsable model catalog for the
 // "browse directory" UI. For registry providers it lists the built-in models
@@ -228,17 +432,21 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		Custom bool `json:"custom,omitempty"`
 	}
 	type providerDetail struct {
-		ID              string            `json:"id"`
-		Name            string            `json:"name,omitempty"` // display name for custom providers
-		Custom          bool              `json:"custom,omitempty"`
-		APIKeySet       bool              `json:"api_key_set"`
-		APIKey          string            `json:"api_key,omitempty"` // masked
-		BaseURL         string            `json:"base_url,omitempty"`
-		Headers         map[string]string `json:"headers,omitempty"` // values masked
-		CustomModels    []customModelView `json:"custom_models,omitempty"`
-		Vision          *bool             `json:"vision,omitempty"`
-		Thinking        *bool             `json:"thinking,omitempty"`
-		ReasoningEffort string            `json:"reasoning_effort,omitempty"`
+		ID              string                               `json:"id"`
+		Name            string                               `json:"name,omitempty"` // display name for custom providers
+		Custom          bool                                 `json:"custom,omitempty"`
+		APIKeySet       bool                                 `json:"api_key_set"`
+		APIKey          string                               `json:"api_key,omitempty"` // masked
+		BaseURL         string                               `json:"base_url,omitempty"`
+		Headers         map[string]string                    `json:"headers,omitempty"` // values masked
+		CustomModels    []customModelView                    `json:"custom_models,omitempty"`
+		Vision          *bool                                `json:"vision,omitempty"`
+		Thinking        *bool                                `json:"thinking,omitempty"`
+		ReasoningEffort string                               `json:"reasoning_effort,omitempty"`
+		Protocol        string                               `json:"protocol,omitempty"`
+		ProviderTools   map[string]config.ProviderToolPolicy `json:"provider_tools,omitempty"`
+		ImageEndpoint   *config.ImageEndpointConfig          `json:"image_endpoint,omitempty"`
+		Capabilities    []providertools.ProviderCapability   `json:"capabilities"`
 	}
 
 	result := make([]providerDetail, 0)
@@ -251,6 +459,10 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 			Vision:          pc.Vision,
 			Thinking:        pc.Thinking,
 			ReasoningEffort: pc.ReasoningEffort,
+			Protocol:        pc.Protocol,
+			ProviderTools:   pc.ProviderTools,
+			ImageEndpoint:   pc.ImageEndpoint,
+			Capabilities:    providertools.ProviderCapabilities(cfg, id),
 		}
 		// A provider is "custom" when it exists only because the user configured
 		// it (an OpenAI-compatible endpoint), not as a built-in registry brand.
@@ -348,21 +560,27 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 // captures the connection).
 func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ID              string            `json:"id"`
-		APIKey          string            `json:"api_key"`
-		BaseURL         string            `json:"base_url,omitempty"`
-		Name            string            `json:"name,omitempty"`
-		Model           string            `json:"model,omitempty"`
-		ModelReasoning  bool              `json:"model_reasoning,omitempty"`
-		Headers         map[string]string `json:"headers,omitempty"`
-		Vision          *bool             `json:"vision,omitempty"`
-		Thinking        *bool             `json:"thinking,omitempty"`
-		ReasoningEffort string            `json:"reasoning_effort,omitempty"`
+		ID              string                               `json:"id"`
+		APIKey          string                               `json:"api_key"`
+		BaseURL         string                               `json:"base_url,omitempty"`
+		Name            string                               `json:"name,omitempty"`
+		Model           string                               `json:"model,omitempty"`
+		ModelReasoning  bool                                 `json:"model_reasoning,omitempty"`
+		Headers         map[string]string                    `json:"headers,omitempty"`
+		Vision          *bool                                `json:"vision,omitempty"`
+		Thinking        *bool                                `json:"thinking,omitempty"`
+		ReasoningEffort string                               `json:"reasoning_effort,omitempty"`
+		Protocol        string                               `json:"protocol,omitempty"`
+		ProviderTools   map[string]config.ProviderToolPolicy `json:"provider_tools,omitempty"`
+		ImageEndpoint   *config.ImageEndpointConfig          `json:"image_endpoint,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
+	req.ID = strings.TrimSpace(req.ID)
+	req.BaseURL = strings.TrimSpace(req.BaseURL)
+	req.Model = strings.TrimSpace(req.Model)
 	if req.ID == "" || req.APIKey == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id and api_key are required"})
 		return
@@ -371,63 +589,83 @@ func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid reasoning_effort"})
 		return
 	}
-
-	// Serialize config RMW + live publish under cfgMu (see Server.cfgMu).
-	s.cfgMu.Lock()
-	defer s.cfgMu.Unlock()
-
-	cfg, err := config.LoadConfig()
+	providerTools, err := validateProviderTools(req.ProviderTools)
 	if err != nil {
-		cfg = &config.Config{MaxIterations: 1000}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
 	}
-	if cfg.Providers == nil {
-		cfg.Providers = make(map[string]*config.ProviderConfig)
-	}
-
-	// A custom provider (not in the registry) needs a base URL so requests can
-	// be routed. Models are optional at creation time: the provider is created
-	// connection-only and models are added afterward from its card, so a brand
-	// new custom endpoint can be saved before its model list is known.
-	isCustom := s.registry == nil || !s.registry.HasProvider(req.ID)
-	if isCustom && req.BaseURL == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "base_url is required for custom providers"})
+	imageEndpoint, err := validateImageEndpoint(req.ImageEndpoint)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
-	pc := &config.ProviderConfig{
-		APIKey:          req.APIKey,
-		BaseURL:         req.BaseURL,
-		Name:            req.Name,
-		Headers:         cleanHeaders(req.Headers),
-		Vision:          req.Vision,
-		Thinking:        req.Thinking,
-		ReasoningEffort: req.ReasoningEffort,
-	}
-	if isCustom && req.Model != "" {
-		pc.CustomModels = []config.CustomModelConfig{{
-			ID:        req.Model,
-			Name:      req.Model,
-			ToolCall:  true,
-			Reasoning: req.ModelReasoning,
-		}}
-	}
-	cfg.Providers[req.ID] = pc
+	// Serialize config RMW + live publish under cfgMu (see Server.cfgMu).
+	s.cfgMu.Lock()
+	configLocked := true
+	defer func() {
+		if configLocked {
+			s.cfgMu.Unlock()
+		}
+	}()
 
-	// If there is no active model yet and this is a custom provider with an
-	// explicit model, adopt it as the active model so the app can boot.
-	if cfg.Model == "" && isCustom && req.Model != "" {
-		cfg.Model = req.ID + "/" + req.Model
+	// Custom chat and image workloads have independent routes. A valid explicit
+	// image endpoint is therefore enough to create an image-only provider, while
+	// an empty shell (and every configured chat model without a chat route) is
+	// rejected.
+	isCustom := providerIsCustom(s.registry, req.ID)
+	if err := validateCustomProviderRoutes(isCustom, req.BaseURL, req.Model != "", imageEndpoint); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
 	}
 
-	if err := config.SaveConfig(cfg); err != nil {
+	cfg, err := config.MutateConfigOrCreate(func(cfg *config.Config) error {
+		if cfg.Providers == nil {
+			cfg.Providers = make(map[string]*config.ProviderConfig)
+		}
+		pc := &config.ProviderConfig{
+			APIKey:          req.APIKey,
+			BaseURL:         req.BaseURL,
+			Name:            req.Name,
+			Headers:         cleanHeaders(req.Headers),
+			Vision:          req.Vision,
+			Thinking:        req.Thinking,
+			ReasoningEffort: req.ReasoningEffort,
+			Protocol:        strings.TrimSpace(req.Protocol),
+			ProviderTools:   providerTools,
+			ImageEndpoint:   imageEndpoint,
+		}
+		if isCustom && req.Model != "" {
+			pc.CustomModels = []config.CustomModelConfig{{
+				ID:        req.Model,
+				Name:      req.Model,
+				ToolCall:  true,
+				Reasoning: req.ModelReasoning,
+			}}
+		}
+		cfg.Providers[req.ID] = pc
+		// If there is no active model yet and this is a custom provider with an
+		// explicit model, adopt it as the active model so the app can boot.
+		if cfg.Model == "" && isCustom && req.Model != "" {
+			cfg.Model = req.ID + "/" + req.Model
+		}
+		return nil
+	})
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config: " + err.Error()})
 		return
 	}
 
 	// Publish into the live server so /api/models sees the new provider without a restart.
-	s.cfg = cfg
-	s.registry = model.NewModelRegistryWithConfig(cfg)
+	s.publishConfigSnapshotLocked(cfg)
+	s.cfgMu.Unlock()
+	configLocked = false
+	applyErr := s.rebuildProviderDependents(req.ID, "add")
 	s.syncProviderConfigsBestEffort()
+	if applyErr != nil {
+		writeSavedButNotApplied(w, "provider configuration")
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -453,7 +691,7 @@ func cleanHeaders(in map[string]string) map[string]string {
 	}
 	out := make(map[string]string, len(in))
 	for k, v := range in {
-		k = strings.TrimSpace(k)
+		k = http.CanonicalHeaderKey(strings.TrimSpace(k))
 		if k == "" {
 			continue
 		}
@@ -477,7 +715,7 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		APIKey       string            `json:"api_key,omitempty"`
-		BaseURL      string            `json:"base_url,omitempty"`
+		BaseURL      json.RawMessage   `json:"base_url"`
 		Name         string            `json:"name,omitempty"`
 		Headers      map[string]string `json:"headers,omitempty"`
 		CustomModels *[]struct {
@@ -488,223 +726,240 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 			Attachment  bool     `json:"attachment,omitempty"`
 			EffortTiers []string `json:"effort_tiers,omitempty"`
 		} `json:"custom_models,omitempty"`
-		Vision          *bool  `json:"vision,omitempty"`
-		Thinking        *bool  `json:"thinking,omitempty"`
-		ReasoningEffort string `json:"reasoning_effort,omitempty"`
+		Vision          json.RawMessage                       `json:"vision,omitempty"`
+		Thinking        json.RawMessage                       `json:"thinking,omitempty"`
+		ReasoningEffort *string                               `json:"reasoning_effort,omitempty"`
+		Protocol        *string                               `json:"protocol,omitempty"`
+		ProviderTools   *map[string]config.ProviderToolPolicy `json:"provider_tools,omitempty"`
+		ImageEndpoint   json.RawMessage                       `json:"image_endpoint,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	if !validReasoningEffort(req.ReasoningEffort) {
+	if req.ReasoningEffort != nil && !validReasoningEffort(*req.ReasoningEffort) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid reasoning_effort"})
+		return
+	}
+	visionPresent, vision, err := decodeOptionalBool(req.Vision, "vision")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	thinkingPresent, thinking, err := decodeOptionalBool(req.Thinking, "thinking")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	baseURLPresent, baseURL, err := decodeOptionalBaseURL(req.BaseURL)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	var providerTools map[string]config.ProviderToolPolicy
+	if req.ProviderTools != nil {
+		var err error
+		providerTools, err = validateProviderTools(*req.ProviderTools)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	imageEndpointPresent, imageEndpoint, err := decodeOptionalImageEndpoint(req.ImageEndpoint)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
 	// Serialize config RMW + live publish under cfgMu (see Server.cfgMu).
 	s.cfgMu.Lock()
-	defer s.cfgMu.Unlock()
+	configLocked := true
+	defer func() {
+		if configLocked {
+			s.cfgMu.Unlock()
+		}
+	}()
 
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	pc := cfg.GetProviders()[id]
-	if pc == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "provider not found"})
-		return
-	}
+	cfg, err := config.MutateConfig(func(cfg *config.Config) error {
+		pc := cfg.GetProviders()[id]
+		if pc == nil {
+			return newConfigMutationHTTPError(http.StatusNotFound, "provider not found")
+		}
+		mutationRegistry := model.NewModelRegistryWithConfig(cfg)
+		// Mutate in place so fields not exposed by this endpoint (display name,
+		// custom models, deprecated lists) are preserved untouched.
+		prevHeaders := cleanHeaders(pc.Headers)
+		// Omitted/legacy-empty base_url preserves the existing route. Explicit
+		// null clears it so a registry provider can return from a proxy to its
+		// official default endpoint.
+		if baseURLPresent {
+			pc.BaseURL = baseURL
+		}
+		if visionPresent {
+			pc.Vision = vision
+		}
+		if thinkingPresent {
+			pc.Thinking = thinking
+		}
+		if req.ReasoningEffort != nil {
+			pc.ReasoningEffort = *req.ReasoningEffort
+		}
+		if req.Protocol != nil {
+			pc.Protocol = strings.TrimSpace(*req.Protocol)
+		}
+		if req.ProviderTools != nil {
+			pc.ProviderTools = providerTools
+		}
+		if imageEndpointPresent {
+			pc.ImageEndpoint = imageEndpoint
+		}
+		if req.Name != "" {
+			pc.Name = req.Name
+		}
+		if req.APIKey != "" && !secretValueUnchanged(req.APIKey, pc.APIKey) {
+			pc.APIKey = req.APIKey
+		}
+		// A missing headers field keeps the whole block. When the client sends a
+		// block, it replaces the key set; empty/current-mask values keep each stored
+		// value while an explicit {} clears all provider headers.
+		if req.Headers != nil {
+			pc.Headers = nil
+			cleaned := cleanHeaders(req.Headers)
+			if len(cleaned) > 0 {
+				merged := make(map[string]string, len(cleaned))
+				for k, v := range cleaned {
+					if ov, ok := prevHeaders[k]; ok {
+						if secretValueUnchanged(v, ov) {
+							merged[k] = ov
+							continue
+						}
+					}
+					merged[k] = v
+				}
+				pc.Headers = merged
+			}
+		} else {
+			pc.Headers = prevHeaders
+		}
 
-	// Mutate in place so fields not exposed by this endpoint (display name,
-	// custom models, deprecated lists) are preserved untouched.
-	prevHeaders := pc.Headers
-	// base_url uses keep-on-empty semantics (like api_key): the list endpoint
-	// masks secrets but returns base_url verbatim, yet a client that doesn't
-	// touch the endpoint may still submit an empty value. Overwriting
-	// unconditionally would wipe a stored custom endpoint, so only adopt a
-	// non-empty incoming value.
-	if req.BaseURL != "" {
-		pc.BaseURL = req.BaseURL
-	}
-	pc.Vision = req.Vision
-	pc.Thinking = req.Thinking
-	pc.ReasoningEffort = req.ReasoningEffort
-	if req.Name != "" {
-		pc.Name = req.Name
-	}
-	if req.APIKey != "" {
-		pc.APIKey = req.APIKey
-	}
-	// Merge headers: empty incoming value ⇒ keep the stored secret for that key.
-	pc.Headers = nil
-	if cleaned := cleanHeaders(req.Headers); len(cleaned) > 0 {
-		merged := make(map[string]string, len(cleaned))
-		for k, v := range cleaned {
-			if v == "" {
-				if ov, ok := prevHeaders[k]; ok {
-					merged[k] = ov
+		// Replace the provider's custom models when the client sends the list (nil ⇒
+		// keep existing). Each model's stored Context is preserved by merging on id,
+		// ToolCall stays true (matching the add path), and the model currently set as
+		// active cannot be dropped so a save can't strand the running app.
+		if req.CustomModels != nil {
+			prev := make(map[string]config.CustomModelConfig, len(pc.CustomModels))
+			for _, m := range pc.CustomModels {
+				prev[m.ID] = m
+			}
+			next := make([]config.CustomModelConfig, 0, len(*req.CustomModels))
+			seen := make(map[string]bool, len(*req.CustomModels))
+			for _, m := range *req.CustomModels {
+				mid := strings.TrimSpace(m.ID)
+				if mid == "" || seen[mid] {
 					continue
 				}
-			}
-			merged[k] = v
-		}
-		pc.Headers = merged
-	}
-
-	// Replace the provider's custom models when the client sends the list (nil ⇒
-	// keep existing). Each model's stored Context is preserved by merging on id,
-	// ToolCall stays true (matching the add path), and the model currently set as
-	// active cannot be dropped so a save can't strand the running app.
-	if req.CustomModels != nil {
-		prev := make(map[string]config.CustomModelConfig, len(pc.CustomModels))
-		for _, m := range pc.CustomModels {
-			prev[m.ID] = m
-		}
-		next := make([]config.CustomModelConfig, 0, len(*req.CustomModels))
-		seen := make(map[string]bool, len(*req.CustomModels))
-		for _, m := range *req.CustomModels {
-			mid := strings.TrimSpace(m.ID)
-			if mid == "" || seen[mid] {
-				continue
-			}
-			seen[mid] = true
-			cm := config.CustomModelConfig{ID: mid, Name: strings.TrimSpace(m.Name), ToolCall: true, Reasoning: m.Reasoning}
-			// Adopt the incoming per-model capability fields when provided;
-			// otherwise carry over the previously stored values so an edit that
-			// only renames a model doesn't silently drop its context window,
-			// vision flag, or configured effort tiers.
-			if old, ok := prev[mid]; ok {
-				if cm.Context == 0 {
-					cm.Context = old.Context
+				seen[mid] = true
+				cm := config.CustomModelConfig{ID: mid, Name: strings.TrimSpace(m.Name), ToolCall: true, Reasoning: m.Reasoning}
+				// Adopt the incoming per-model capability fields when provided;
+				// otherwise carry over the previously stored values so an edit that
+				// only renames a model doesn't silently drop its context window,
+				// vision flag, or configured effort tiers.
+				if old, ok := prev[mid]; ok {
+					if cm.Context == 0 {
+						cm.Context = old.Context
+					}
+					if !cm.Attachment {
+						cm.Attachment = old.Attachment
+					}
+					if len(cm.EffortTiers) == 0 {
+						cm.EffortTiers = old.EffortTiers
+					}
 				}
-				if !cm.Attachment {
-					cm.Attachment = old.Attachment
+				if m.Context > 0 {
+					cm.Context = m.Context
 				}
-				if len(cm.EffortTiers) == 0 {
-					cm.EffortTiers = old.EffortTiers
+				if m.Attachment {
+					cm.Attachment = true
 				}
+				if len(m.EffortTiers) > 0 {
+					cm.EffortTiers = m.EffortTiers
+				}
+				next = append(next, cm)
 			}
-			if m.Context > 0 {
-				cm.Context = m.Context
-			}
-			if m.Attachment {
-				cm.Attachment = true
-			}
-			if len(m.EffortTiers) > 0 {
-				cm.EffortTiers = m.EffortTiers
-			}
-			next = append(next, cm)
-		}
-		// Reject custom model ids that collide with the provider's built-in
-		// (registry) models. A duplicate id would shadow or be shadowed by the
-		// registry entry, confusing the model picker and catalog. Custom ids
-		// may still be edited to their own value (handled by seen dedup above).
-		if s.registry != nil {
-			if regProv := s.registry.GetProvider(id); regProv != nil {
-				for _, cm := range next {
-					if _, ok := regProv.Models[cm.ID]; ok {
-						// Allow it only if it was already a custom model with this id
-						// (editing an existing custom entry in place).
-						if _, wasCustom := prev[cm.ID]; !wasCustom {
-							writeJSON(w, http.StatusBadRequest, map[string]string{
-								"error": "model id '" + cm.ID + "' duplicates a built-in model; choose another id",
-							})
-							return
+			// Reject custom model ids that collide with the provider's built-in
+			// (registry) models. A duplicate id would shadow or be shadowed by the
+			// registry entry, confusing the model picker and catalog. Custom ids
+			// may still be edited to their own value (handled by seen dedup above).
+			if mutationRegistry != nil {
+				if regProv := mutationRegistry.GetProvider(id); regProv != nil {
+					for _, cm := range next {
+						if _, ok := regProv.Models[cm.ID]; ok {
+							// Allow it only if it was already a custom model with this id
+							// (editing an existing custom entry in place).
+							if _, wasCustom := prev[cm.ID]; !wasCustom {
+								return newConfigMutationHTTPError(
+									http.StatusBadRequest,
+									"model id '"+cm.ID+"' duplicates a built-in model; choose another id",
+								)
+							}
 						}
 					}
 				}
 			}
-		}
-		if strings.HasPrefix(cfg.Model, id+"/") {
-			active := strings.TrimPrefix(cfg.Model, id+"/")
-			if _, wasThere := prev[active]; wasThere && !seen[active] {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot remove the active model; switch to another model first"})
-				return
+			if strings.HasPrefix(cfg.Model, id+"/") {
+				active := strings.TrimPrefix(cfg.Model, id+"/")
+				if _, wasThere := prev[active]; wasThere && !seen[active] {
+					return newConfigMutationHTTPError(http.StatusBadRequest, "cannot remove the active model; switch to another model first")
+				}
 			}
+			isCustom := providerIsCustom(mutationRegistry, id)
+			if isCustom && len(next) == 0 && pc.ImageEndpoint == nil {
+				return newConfigMutationHTTPError(http.StatusBadRequest, "custom providers need at least one model")
+			}
+			pc.CustomModels = next
 		}
-		isCustom := s.registry == nil || !s.registry.HasProvider(id)
-		if isCustom && len(next) == 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "custom providers need at least one model"})
-			return
+		if err := validateCustomProviderRoutes(
+			providerIsCustom(mutationRegistry, id), pc.BaseURL,
+			pc.HasConfiguredChatModels() || strings.HasPrefix(cfg.Model, id+"/"),
+			pc.ImageEndpoint,
+		); err != nil {
+			return newConfigMutationHTTPError(http.StatusBadRequest, err.Error())
 		}
-		pc.CustomModels = next
-	}
+		if selectedProvider, selectedModel := splitModelReference(cfg.ImageModel); selectedProvider == id &&
+			!imageModelSelectable(cfg, selectedProvider, selectedModel) {
+			cfg.ImageModel = ""
+		}
 
-	if cfg.Providers == nil {
-		cfg.Providers = make(map[string]*config.ProviderConfig)
-	}
-	cfg.Providers[id] = pc
-	if err := config.SaveConfig(cfg); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config: " + err.Error()})
+		if cfg.Providers == nil {
+			cfg.Providers = make(map[string]*config.ProviderConfig)
+		}
+		cfg.Providers[id] = pc
+		return nil
+	})
+	if err != nil {
+		writeConfigMutationError(w, err)
 		return
 	}
 
 	// Publish the updated config + registry to the live server so the chat model
 	// picker (/api/models) and catalog reflect added/edited/removed models
 	// without a restart — matching handleSetupComplete's publish step.
-	s.cfg = cfg
-	s.registry = model.NewModelRegistryWithConfig(cfg)
+	s.publishConfigSnapshotLocked(cfg)
 
-	// Rebuild the agents of live engines currently running on this provider so
-	// connection-level changes (api_key, base_url, headers, vision, thinking,
-	// reasoning_effort) take effect immediately. The old agent captured a chat
-	// model built from the previous ProviderConfig — without a rebuild, e.g. a
-	// cleared vision override would keep silently stripping images until the
-	// next model/mode switch. createAgent re-reads the config from disk (already
-	// saved above), mirroring the MCP-reload rebuild path.
-	s.rebuildEnginesForProvider(id)
+	// The independent image role may use a provider different from chat. A
+	// trusted provider-search transport stays connected process-wide, while each
+	// task injects it only when that provider owns the task's current chat model.
+	// Rebuild every live task so both role and per-task provider gates refresh.
+	s.cfgMu.Unlock()
+	configLocked = false
+	applyErr := s.rebuildProviderDependents(id, "update")
 	s.syncProviderConfigsBestEffort()
+	if applyErr != nil {
+		writeSavedButNotApplied(w, "provider configuration")
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// rebuildEnginesForProvider rebuilds the agent of every live engine whose
-// current model belongs to the given provider. Rebuild failures are logged and
-// skipped: the engine keeps its previous (stale but working) agent rather than
-// being left without one.
-func (s *Server) rebuildEnginesForProvider(providerID string) {
-	s.tasksMu.RLock()
-	engines := make([]*Engine, 0, len(s.tasks))
-	for _, e := range s.tasks {
-		engines = append(engines, e)
-	}
-	s.tasksMu.RUnlock()
-	if a := s.activeEngine(); a != nil {
-		found := false
-		for _, e := range engines {
-			if e == a {
-				found = true
-				break
-			}
-		}
-		if !found {
-			engines = append(engines, a)
-		}
-	}
-	for _, eng := range engines {
-		if eng.createAgent == nil {
-			continue
-		}
-		prov, mdl, _ := eng.modelSnapshot()
-		if prov != providerID {
-			continue
-		}
-		eng.rebuildMu.Lock()
-		ag, err := eng.createAgent(prov, mdl)
-		if err != nil {
-			eng.rebuildMu.Unlock()
-			config.Logger().Printf("[web] provider %s update: agent rebuild failed for task %s: %v", providerID, eng.taskID, err)
-			continue
-		}
-		// Conditional install: a model switch that lands while createAgent runs
-		// outside emu built a newer agent from the already-updated config — it
-		// must not be clobbered with this now-stale one.
-		if !eng.setAgentIfModel(ag, prov, mdl) {
-			config.Logger().Printf("[web] provider %s update: task %s switched models mid-rebuild; skipping stale agent", providerID, eng.taskID)
-		}
-		eng.rebuildMu.Unlock()
-	}
 }
 
 // handleDeleteProvider removes a provider from the config.
@@ -717,43 +972,123 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 
 	// Serialize RMW with other config writers (cfgMu documents this in Server).
 	s.cfgMu.Lock()
-	defer s.cfgMu.Unlock()
-
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-
-	providers := cfg.GetProviders()
-	if providers == nil || providers[providerID] == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "provider not found"})
-		return
-	}
-
-	activeProvider, _ := cfg.GetProviderModel()
-	if activeProvider == providerID {
-		// Pick a surviving provider+model so cfg.Model is never left pointing at
-		// a deleted provider. Reject when no safe replacement exists.
-		nextRef := firstAlternateProviderModel(cfg, s.registry, providerID)
-		if nextRef == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot delete the only provider (or no replacement model available)"})
-			return
+	configLocked := true
+	defer func() {
+		if configLocked {
+			s.cfgMu.Unlock()
 		}
-		cfg.Model = nextRef
-	}
+	}()
 
-	delete(cfg.Providers, providerID)
-	if err := config.SaveConfig(cfg); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config: " + err.Error()})
+	cfg, err := config.MutateConfig(func(cfg *config.Config) error {
+		providers := cfg.GetProviders()
+		if providers == nil || providers[providerID] == nil {
+			return newConfigMutationHTTPError(http.StatusNotFound, "provider not found")
+		}
+
+		activeProvider, _ := cfg.GetProviderModel()
+		if activeProvider == providerID {
+			// Pick a surviving provider+model so cfg.Model is never left pointing at
+			// a deleted provider. Reject when no safe replacement exists.
+			nextRef := firstAlternateProviderModel(cfg, model.NewModelRegistryWithConfig(cfg), providerID)
+			if nextRef == "" {
+				return newConfigMutationHTTPError(
+					http.StatusBadRequest,
+					"cannot delete the only provider (or no replacement model available)",
+				)
+			}
+			cfg.Model = nextRef
+		}
+
+		delete(cfg.Providers, providerID)
+		if strings.HasPrefix(cfg.ImageModel, providerID+"/") {
+			cfg.ImageModel = ""
+		}
+		return nil
+	})
+	if err != nil {
+		writeConfigMutationError(w, err)
 		return
 	}
 
-	s.cfg = cfg
-	s.registry = model.NewModelRegistryWithConfig(cfg)
+	s.publishConfigSnapshotLocked(cfg)
+	s.cfgMu.Unlock()
+	configLocked = false
+	applyErr := s.rebuildProviderDependents(providerID, "delete")
 	s.syncProviderConfigsBestEffort()
+	if applyErr != nil {
+		writeSavedButNotApplied(w, "provider configuration")
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+type configMutationHTTPError struct {
+	status  int
+	message string
+}
+
+func newConfigMutationHTTPError(status int, message string) error {
+	return &configMutationHTTPError{status: status, message: message}
+}
+
+func (err *configMutationHTTPError) Error() string { return err.message }
+
+func writeConfigMutationError(w http.ResponseWriter, err error) {
+	var requestErr *configMutationHTTPError
+	if errors.As(err, &requestErr) {
+		writeJSON(w, requestErr.status, map[string]string{"error": requestErr.message})
+		return
+	}
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save config: " + err.Error()})
+}
+
+// publishConfigSnapshotLocked updates the live snapshot without changing its
+// address when possible. Some agent factories retain the startup *Config; an
+// in-place replacement lets those readers observe the cross-process reload.
+// The caller holds cfgMu.
+func (s *Server) publishConfigSnapshotLocked(latest *config.Config) {
+	if s.cfg == nil {
+		s.cfg = latest
+	} else if s.cfg != latest {
+		*s.cfg = *latest
+	}
+	s.registry = model.NewModelRegistryWithConfig(s.cfg)
+}
+
+// rebuildProviderDependents reconnects the reserved provider MCP before task
+// agents are rebuilt. Other provider edits only need an agent rebuild. The
+// handlers call this after releasing cfgMu because reloadMCPAndRebuild takes a
+// fresh, serialized config snapshot under that lock.
+func (s *Server) rebuildProviderDependents(providerID, action string) error {
+	var err error
+	if providerID == providertools.BigModelCodingProvider {
+		err = s.reloadMCPAndRebuild()
+	} else {
+		err = s.rebuildToolAgents()
+	}
+	if err != nil {
+		s.logProviderApplyFailure(providerID, action, err)
+	}
+	return err
+}
+
+func (s *Server) logProviderApplyFailure(providerID, action string, applyErr error) {
+	// Agent/provider errors are not safe to log verbatim: an adapter or remote
+	// MCP implementation may echo the previous credential or a signed URL that
+	// is no longer present in the just-saved config and therefore cannot be
+	// reliably redacted. Preserve the error type for diagnosis, never its text.
+	config.Logger().Printf(
+		"[web] provider %s %s: dependent runtime rebuild failed (error_type=%T); configuration saved but not applied",
+		providerID, action, applyErr,
+	)
+}
+
+func writeSavedButNotApplied(w http.ResponseWriter, resource string) {
+	writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+		"status": "saved_but_not_applied",
+		"error":  resource + " was saved, but the running tool catalog could not be rebuilt; retry or restart to apply it",
+	})
 }
 
 // firstAlternateProviderModel returns "provider/model" for the first configured

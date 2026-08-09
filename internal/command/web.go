@@ -29,6 +29,7 @@ import (
 	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/channel/ble"
 	"github.com/cnjack/jcode/internal/cloud"
+	"github.com/cnjack/jcode/internal/computer"
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/feature"
 	"github.com/cnjack/jcode/internal/flow"
@@ -38,6 +39,7 @@ import (
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	weixin "github.com/cnjack/jcode/internal/pkg/weixin"
 	"github.com/cnjack/jcode/internal/prompts"
+	"github.com/cnjack/jcode/internal/providertools"
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/skills"
@@ -91,7 +93,9 @@ func NewWebCmd() *cobra.Command {
 // headless) drop them via dropInteractiveTools so an agent calling ask_user in a
 // run with no watching client can't block on the WS channel forever, stalling
 // the run until the liveness ceiling cancels it.
-var interactiveToolNames = map[string]struct{}{"ask_user": {}}
+var interactiveToolNames = map[string]struct{}{
+	"ask_user": {}, "generate_image": {},
+}
 
 // dropInteractiveTools returns tools minus any whose name is in
 // interactiveToolNames. Tools whose Info() can't be read are kept (best-effort).
@@ -235,26 +239,19 @@ func newNotifyingHandler(wh *handler.WebHandler, wechatClient *weixin.Client, bl
 	return nh
 }
 
+func webProviderRuntimeConfigLoader(pwd string, remote bool) providerRuntimeConfigLoader {
+	if remote {
+		return envProviderRuntimeConfigLoader()
+	}
+	return projectProviderRuntimeConfigLoader(pwd)
+}
+
 func runWebServer(parent context.Context, port int, host string, openBrowser bool, authToken string) error {
 	// Check if we need setup (no providers configured).
 	needsSetup := config.NeedsSetup()
-
-	var cfg *config.Config
-	if !needsSetup {
-		var err error
-		cfg, err = config.LoadConfig()
-		if err != nil {
-			return fmt.Errorf("config error: %w", err)
-		}
-		// Apply env overlay to the server-level config so JCODE_MODEL,
-		// JCODE_DEFAULT_MODE etc. take effect for provider resolution and
-		// startup mode. Project overlay is applied per-task in buildWebTask.
-		config.ApplyEnvOverlay(cfg)
-	} else {
-		// Create a minimal config for setup mode.
-		cfg = &config.Config{
-			MaxIterations: 1000,
-		}
+	cfg, err := loadWebServerConfig(needsSetup)
+	if err != nil {
+		return err
 	}
 
 	ctx, cancel := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
@@ -285,12 +282,33 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 	// MCP tools are loaded asynchronously after the web server starts listening.
 	// A slow remote MCP server must not block /api/health and make desktop launch
 	// look hung. mcpToolsPtr is swapped atomically by reloadMCPTools so a new task
-	// (built concurrently by buildWebTask) always reads a consistent slice header
-	// without a data race on hot-reload.
-	var mcpToolsPtr atomic.Pointer[[]tool.BaseTool]
+	// (built concurrently by buildWebTask) always reads a consistent catalog
+	// without a data race on hot-reload. The catalog also carries the config
+	// epoch that its provider-managed transport was connected with.
+	var mcpToolsPtr atomic.Pointer[providerSearchMCPCatalog]
 	reloadMCPTools := func(servers map[string]*config.MCPServer) ([]tools.MCPStatus, error) {
-		nt, statuses := tools.LoadMCPTools(ctx, servers)
-		mcpToolsPtr.Store(&nt)
+		runtimeCfg, err := config.LoadConfig()
+		if err != nil {
+			// Publish a catalog with the credential-bearing provider preset
+			// removed, then return success so the Web server rebuilds every live
+			// task. Returning the load error here would leave old task agents
+			// executable with a policy that can no longer be verified.
+			var current []tool.BaseTool
+			if loaded := mcpToolsPtr.Load(); loaded != nil {
+				current = append(current, loaded.Tools...)
+			}
+			generic, _, identifyErr := splitProviderSearchMCPTools(ctx, current)
+			mcpToolsPtr.Store(newProviderSearchMCPCatalog(nil, generic))
+			config.Logger().Printf("[mcp] fail-closed provider MCP config reload: %v", err)
+			if identifyErr != nil {
+				config.Logger().Printf("[mcp] fail-closed provider tool filter: %v", identifyErr)
+			}
+			return nil, nil
+		}
+		config.ApplyProjectOverlay(runtimeCfg, pwd)
+		runtimeCfg.MCPServers = servers
+		nt, statuses := tools.LoadMCPTools(ctx, providertools.EffectiveMCPServers(runtimeCfg))
+		mcpToolsPtr.Store(newProviderSearchMCPCatalog(runtimeCfg, nt))
 		return statuses, nil
 	}
 
@@ -472,6 +490,14 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		if taskID != "" && trec != nil {
 			trec.SetUUID(taskID)
 		}
+		imageLedger, imageLedgerErr := newImageUsageLedger(trec)
+		if imageLedgerErr != nil {
+			config.Logger().Printf("[image] initialize web usage ledger: %v", imageLedgerErr)
+		}
+		providerSearchLedger, providerSearchLedgerErr := newProviderSearchUsageLedger(trec)
+		if providerSearchLedgerErr != nil {
+			config.Logger().Printf("[provider-search] initialize web usage ledger: %v", providerSearchLedgerErr)
+		}
 		// LLM session titles ride the small model (checked at fire time).
 		// Resumed tasks (existing session file) never re-trigger titling.
 		attachTitleRefiner(ctx, trec)
@@ -549,6 +575,26 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			return prompts.GetSystemPrompt(platform, taskPwd, "local", taskEnvInfo, skillDescs),
 				prompts.GetPlanSystemPrompt(platform, taskPwd, "local", taskEnvInfo)
 		}
+		providerRuntimeLoader := webProviderRuntimeConfigLoader(taskPwd, exec != nil)
+
+		// Snapshot and wrap process-wide raw MCP endpoints for this task. The
+		// ledger is created once above and reused across every model/mode/config
+		// rebuild, while each wrapper captures the latest verified config epoch.
+		currentTaskMCPTools := func(
+			agentCfg *config.Config,
+			planMode bool,
+		) ([]tool.BaseTool, error) {
+			activeProvider, activeModel := agentCfg.GetProviderModel()
+			return configuredProviderMCPTools(
+				ctx, agentCfg, trec, providerSearchLedger, mcpToolsPtr.Load(),
+				planMode, webTaskBillableAllowed(
+					session.SessionToolWebSearch, exec != nil, excludeInteractive,
+				),
+				activeChatProviderRuntimeConfigLoader(
+					providerRuntimeLoader, activeProvider, activeModel,
+				),
+			)
+		}
 
 		toolSearchCounts := func(plan agent.ToolPlan) web.ToolSearchCounts {
 			mcpDeferred := 0
@@ -564,7 +610,11 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			}
 		}
 
-		buildAllTools := func(cm model.ToolCallingChatModel, agentCfg *config.Config) []tool.BaseTool {
+		buildAllTools := func(
+			cm model.ToolCallingChatModel,
+			agentCfg *config.Config,
+			planMode bool,
+		) []tool.BaseTool {
 			// One factory serves subagent + workflow model overrides (incl.
 			// the "small" alias); fallback is this task's current model.
 			factory := internalmodel.NewModelFactory(agentCfg, cm)
@@ -620,6 +670,21 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 					BatchRequestFn: twh.RequestAskUser,
 				}),
 				skills.NewLoadSkillTool(taskLoader),
+			}
+			if imageGenerationEnabled(
+				agentCfg, planMode, webTaskBillableAllowed(
+					session.SessionToolImageGeneration, exec != nil, excludeInteractive,
+				),
+			) {
+				if imageTool, imageErr := configuredGenerateImageTool(
+					agentCfg, artifactService, trec, imageLedger,
+					providerRuntimeLoader, tnotify,
+					func(record artifact.Record) { twh.Emit("artifact_upserted", record) },
+				); imageErr == nil {
+					all = append(all, imageTool)
+				} else if agentCfg.ImageModel != "" {
+					config.Logger().Printf("[image] web generate_image unavailable: %v", imageErr)
+				}
 			}
 			if config.MemoryEnabled(agentCfg) {
 				all = append(all, tenv.NewMemoryNoteTool(&tools.MemoryNoteDeps{
@@ -687,11 +752,28 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		_ = os.MkdirAll(filepath.Dir(transcriptPath), 0o755)
 		_ = os.MkdirAll(reductionRoot, 0o755)
 
-		makeAgent := func(cm model.ToolCallingChatModel, ctxLimit int, planMode bool, roleName string) (*adk.ChatModelAgent, error) {
+		makeAgent := func(
+			cm model.ToolCallingChatModel,
+			ctxLimit int,
+			planMode bool,
+			roleName string,
+			activeProvider string,
+			activeModel string,
+		) (*adk.ChatModelAgent, error) {
 			agentCfg, loadErr := config.LoadConfig()
 			if loadErr != nil {
 				return nil, fmt.Errorf("reload agent config: %w", loadErr)
 			}
+			if exec == nil {
+				config.ApplyProjectOverlay(agentCfg, taskPwd)
+			} else {
+				config.ApplyEnvOverlay(agentCfg)
+			}
+			// Model switches and custom-agent role overrides build the candidate
+			// before the persisted global selection changes. Project the exact
+			// model used by this candidate so provider-owned tools follow its chat
+			// provider instead of stale config state.
+			projectActiveChatModel(agentCfg, activeProvider, activeModel)
 			var middlewares []adk.ChatModelAgentMiddleware
 			if langfuseTracer != nil {
 				middlewares = append(middlewares, langfuseTracer.AgentMiddleware())
@@ -754,7 +836,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 
 			systemPrompt, planPrompt := renderPrompts()
 			prompt := systemPrompt
-			toolList := buildAllTools(cm, agentCfg)
+			var toolList []tool.BaseTool
 			selectedRole, roleErr := optionalCustomAgentRole(taskPwd, roleName)
 			if roleErr != nil {
 				return nil, fmt.Errorf("custom agent %q is no longer available", roleName)
@@ -762,17 +844,16 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			if planMode {
 				prompt = planPrompt
 				toolList = buildPlanTools()
+			} else {
+				toolList = buildAllTools(cm, agentCfg, false)
 			}
 			prompt = withCustomAgentPrompt(prompt, roleName, selectedRole)
 
 			// Snapshot MCP exactly once so the candidate catalog and runtime plan
 			// cannot observe different reload generations while an agent is built.
-			var currentMCPTools []tool.BaseTool
-			if mt := mcpToolsPtr.Load(); mt != nil {
-				currentMCPTools = append([]tool.BaseTool(nil), (*mt)...)
-			}
-			if excludeInteractive {
-				currentMCPTools = dropInteractiveTools(currentMCPTools)
+			currentMCPTools, mcpErr := currentTaskMCPTools(agentCfg, planMode)
+			if mcpErr != nil {
+				config.Logger().Printf("[provider-search] web task %s MCP catalog filtered: %v", trec.UUID(), mcpErr)
 			}
 
 			allowMCP := !planMode
@@ -788,9 +869,6 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			toolMode := agent.ToolModeNormal
 			if planMode {
 				toolMode = agent.ToolModePlan
-			}
-			if !allowMCP {
-				currentMCPTools = nil
 			}
 			toolPlan, err := buildCommandToolPlan(
 				ctx,
@@ -820,6 +898,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		var currentCtxLimit int
 		currentPlanMode := startMode.IsPlan()
 		currentRole := ""
+		currentProvider, currentModel := providerName, modelName
 
 		// ToolSearch counts are derived on demand from the latest persisted policy,
 		// MCP catalog and task mode. Candidate agents can be discarded by revision
@@ -829,6 +908,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		toolSearchStats := func() web.ToolSearchCounts {
 			cmMu.Lock()
 			cm, planMode, roleName := currentCM, currentPlanMode, currentRole
+			activeProvider, activeModel := currentProvider, currentModel
 			cmMu.Unlock()
 			if cm == nil {
 				return web.ToolSearchCounts{}
@@ -837,7 +917,13 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			if loadErr != nil {
 				return web.ToolSearchCounts{}
 			}
-			toolList := buildAllTools(cm, agentCfg)
+			if exec == nil {
+				config.ApplyProjectOverlay(agentCfg, taskPwd)
+			} else {
+				config.ApplyEnvOverlay(agentCfg)
+			}
+			projectActiveChatModel(agentCfg, activeProvider, activeModel)
+			toolList := buildAllTools(cm, agentCfg, planMode)
 			toolMode := agent.ToolModeNormal
 			if planMode {
 				toolList = buildPlanTools()
@@ -845,15 +931,9 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			} else if _, ok := config.LoadAgentRoles(taskPwd)[roleName]; roleName != "" && !ok {
 				return web.ToolSearchCounts{}
 			}
-			var currentMCPTools []tool.BaseTool
-			if mt := mcpToolsPtr.Load(); mt != nil {
-				currentMCPTools = append([]tool.BaseTool(nil), (*mt)...)
-			}
-			if excludeInteractive {
-				currentMCPTools = dropInteractiveTools(currentMCPTools)
-			}
-			if planMode {
-				currentMCPTools = nil
+			currentMCPTools, mcpErr := currentTaskMCPTools(agentCfg, planMode)
+			if mcpErr != nil {
+				return web.ToolSearchCounts{}
 			}
 			plan, planErr := buildCommandToolPlan(
 				ctx,
@@ -876,13 +956,15 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			cmMu.Lock()
 			plan, roleName := currentPlanMode, currentRole
 			cmMu.Unlock()
-			ag, err := makeAgent(cm, ctxLimit, plan, roleName)
+			ag, err := makeAgent(cm, ctxLimit, plan, roleName, prov, mod)
 			if err != nil {
 				return nil, err // don't poison the cache with a model whose agent failed to build
 			}
 			cmMu.Lock()
 			currentCM = cm
 			currentCtxLimit = ctxLimit
+			currentProvider = prov
+			currentModel = mod
 			cmMu.Unlock()
 			return ag, nil
 		}
@@ -892,6 +974,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			previousPlanMode := currentPlanMode
 			currentPlanMode = planMode
 			cm, ctxLimit, roleName := currentCM, currentCtxLimit, currentRole
+			activeProvider, activeModel := currentProvider, currentModel
 			cmMu.Unlock()
 			if cm == nil {
 				ag, createErr := createAgent(providerName, modelName)
@@ -902,7 +985,7 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 				}
 				return ag, createErr
 			}
-			ag, makeErr := makeAgent(cm, ctxLimit, planMode, roleName)
+			ag, makeErr := makeAgent(cm, ctxLimit, planMode, roleName, activeProvider, activeModel)
 			if makeErr != nil {
 				cmMu.Lock()
 				currentPlanMode = previousPlanMode
@@ -912,10 +995,10 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		}
 
 		rebuildForRole := func(
-			roleName, currentProvider, currentModel string,
+			roleName, baseProvider, baseModel string,
 		) (*web.AgentRoleBuild, error) {
 			_, targetProvider, targetModel, resolveErr := resolveWebCustomAgentSelection(
-				taskPwd, roleName, currentProvider, currentModel,
+				taskPwd, roleName, baseProvider, baseModel,
 			)
 			if resolveErr != nil {
 				return nil, resolveErr
@@ -923,14 +1006,14 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			cmMu.Lock()
 			cm, ctxLimit, planMode := currentCM, currentCtxLimit, currentPlanMode
 			cmMu.Unlock()
-			if cm == nil || targetProvider != currentProvider || targetModel != currentModel {
+			if cm == nil || targetProvider != baseProvider || targetModel != baseModel {
 				var modelErr error
 				cm, ctxLimit, modelErr = newChatModel(targetProvider, targetModel)
 				if modelErr != nil {
 					return nil, modelErr
 				}
 			}
-			ag, makeErr := makeAgent(cm, ctxLimit, planMode, roleName)
+			ag, makeErr := makeAgent(cm, ctxLimit, planMode, roleName, targetProvider, targetModel)
 			if makeErr != nil {
 				return nil, makeErr
 			}
@@ -938,6 +1021,8 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			currentRole = roleName
 			currentCM = cm
 			currentCtxLimit = ctxLimit
+			currentProvider = targetProvider
+			currentModel = targetModel
 			cmMu.Unlock()
 			return &web.AgentRoleBuild{
 				Agent: ag, Provider: targetProvider, Model: targetModel,
@@ -953,24 +1038,32 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 			roleName := currentRole
 			cm := currentCM
 			planMode := currentPlanMode
+			activeProvider, activeModel := currentProvider, currentModel
 			cmMu.Unlock()
 			systemPrompt = withLoadedCustomAgentPrompt(systemPrompt, taskPwd, roleName)
 			b.SystemPromptTokens = usage.Estimate(systemPrompt) - b.SkillsTokens
 			if b.SystemPromptTokens < 0 {
 				b.SystemPromptTokens = 0
 			}
-			if mt := mcpToolsPtr.Load(); mt != nil {
-				for _, t := range *mt {
-					b.MCPToolsTokens += estimateToolTokens(ctx, t)
+			currentCfg, currentCfgErr := config.LoadConfig()
+			if currentCfgErr == nil {
+				if exec == nil {
+					config.ApplyProjectOverlay(currentCfg, taskPwd)
+				} else {
+					config.ApplyEnvOverlay(currentCfg)
 				}
+				projectActiveChatModel(currentCfg, activeProvider, activeModel)
+			}
+			currentMCPTools, _ := currentTaskMCPTools(currentCfg, planMode)
+			for _, t := range currentMCPTools {
+				b.MCPToolsTokens += estimateToolTokens(ctx, t)
 			}
 			if cm != nil {
-				currentCfg, loadErr := config.LoadConfig()
-				if loadErr != nil {
+				if currentCfgErr != nil {
 					return b
 				}
 				total := 0
-				toolList := buildAllTools(cm, currentCfg)
+				toolList := buildAllTools(cm, currentCfg, planMode)
 				if planMode {
 					toolList = buildPlanTools()
 				}
@@ -1026,158 +1119,185 @@ func runWebServer(parent context.Context, port int, host string, openBrowser boo
 		}, nil
 	}
 
-	// Resolve the web auth token. Auth is enforced when bound to a non-loopback
-	// host (exposed to the network) or when a token was explicitly provided.
-	webToken, requireAuth, err := resolveWebToken(host, authToken)
+	return startWebServer(webServerRuntime{
+		ctx: ctx, port: port, host: host, openBrowser: openBrowser, authToken: authToken,
+		cfg: cfg, pwd: pwd, startupMode: startupMode.String(),
+		providerName: providerName, modelName: modelName, registry: registry,
+		skillLoader: skillLoader, flowLoader: flowLoader, reloadMCP: reloadMCPTools,
+		wechatClient: wechatClient, bleProxy: bleProxy, tracer: langfuseTracer,
+		needsSetup: needsSetup, automations: autoStore, browserManager: browserMgr,
+		computerManager: computerMgr, artifactService: artifactService, buildTask: buildWebTask,
+	})
+}
+
+func loadWebServerConfig(needsSetup bool) (*config.Config, error) {
+	if needsSetup {
+		return &config.Config{MaxIterations: 1000}, nil
+	}
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("config error: %w", err)
+	}
+	// Apply env overlay to the server-level config so JCODE_MODEL,
+	// JCODE_DEFAULT_MODE etc. take effect for provider resolution and startup
+	// mode. Project overlay is applied per-task in buildWebTask.
+	config.ApplyEnvOverlay(cfg)
+	return cfg, nil
+}
+
+type webTaskBuilder func(
+	taskID, taskPwd, modeStr string,
+	exec tools.RemoteExecutor,
+	excludeInteractive bool,
+) (*web.EngineConfig, error)
+
+type webServerRuntime struct {
+	ctx             context.Context
+	port            int
+	host            string
+	openBrowser     bool
+	authToken       string
+	cfg             *config.Config
+	pwd             string
+	startupMode     string
+	providerName    string
+	modelName       string
+	registry        *internalmodel.ModelRegistry
+	skillLoader     *skills.Loader
+	flowLoader      *flow.Loader
+	reloadMCP       func(map[string]*config.MCPServer) ([]tools.MCPStatus, error)
+	wechatClient    *weixin.Client
+	bleProxy        *ble.Proxy
+	tracer          *telemetry.LangfuseTracer
+	needsSetup      bool
+	automations     *automation.Store
+	browserManager  *browser.Manager
+	computerManager *computer.Manager
+	artifactService *artifact.Service
+	buildTask       webTaskBuilder
+}
+
+// startWebServer owns the transport lifecycle after runWebServer has assembled
+// the process-wide dependencies and per-task engine factory.
+func startWebServer(runtime webServerRuntime) error {
+	webToken, requireAuth, err := resolveWebToken(runtime.host, runtime.authToken)
 	if err != nil {
 		return err
 	}
 	if requireAuth {
-		fmt.Printf("\n🔐 Web access token (required when reaching %s):\n   %s\n", host, webToken)
-		fmt.Printf("   Open http://%s:%d/ and paste this token to sign in.\n\n", host, port)
-		config.Logger().Printf("[web] token auth enabled for non-loopback bind %q", host)
+		fmt.Printf("\n🔐 Web access token (required when reaching %s):\n   %s\n", runtime.host, webToken)
+		fmt.Printf("   Open http://%s:%d/ and paste this token to sign in.\n\n", runtime.host, runtime.port)
+		config.Logger().Printf("[web] token auth enabled for non-loopback bind %q", runtime.host)
 	}
 
-	// The cloud relay supervisor is constructed before the server so the cloud
-	// status/config API can reach it; it is started below, once the rest of the
-	// server is wired.
-	cloudSup := newCloudSupervisor(cfg, port, webToken)
-
-	// Bootstrap engine for the initial task.
-	bootEC, err := buildWebTask("", pwd, startupMode.String(), nil, false)
+	cloudSup := newCloudSupervisor(runtime.cfg, runtime.port, webToken)
+	bootEC, err := runtime.buildTask("", runtime.pwd, runtime.startupMode, nil, false)
 	if err != nil {
 		return err
 	}
 	bootNotifying, _ := bootEC.EventHandler.(*handler.NotifyingHandler)
 
 	srv := web.NewServer(&web.ServerConfig{
-		Port:           port,
-		Host:           host,
-		OpenBrowser:    openBrowser,
-		Pwd:            pwd,
+		Port:           runtime.port,
+		Host:           runtime.host,
+		OpenBrowser:    runtime.openBrowser,
+		Pwd:            runtime.pwd,
 		Version:        Version,
 		Agent:          bootEC.Agent,
 		CreateAgent:    bootEC.CreateAgent,
 		RebuildForMode: bootEC.RebuildForMode,
 		RebuildForRole: bootEC.RebuildForRole,
 		NewEngine: func(taskID, taskPwd, modeStr string) (*web.EngineConfig, error) {
-			return buildWebTask(taskID, taskPwd, modeStr, nil, false)
+			return runtime.buildTask(taskID, taskPwd, modeStr, nil, false)
 		},
-		NewRemoteEngine: func(taskID string, exec tools.RemoteExecutor, remotePwd, modeStr string) (*web.EngineConfig, error) {
-			return buildWebTask(taskID, remotePwd, modeStr, exec, false)
+		NewRemoteEngine: func(
+			taskID string, exec tools.RemoteExecutor, remotePwd, modeStr string,
+		) (*web.EngineConfig, error) {
+			return runtime.buildTask(taskID, remotePwd, modeStr, exec, false)
 		},
-		// NewAutomationEngine builds a headless task engine for automation runs.
-		// Same as NewEngine but drops interactive tools (ask_user) so an unattended
-		// run can't stall waiting for a human to answer a question no one is watching.
 		NewAutomationEngine: func(taskID, taskPwd, modeStr string) (*web.EngineConfig, error) {
-			return buildWebTask(taskID, taskPwd, modeStr, nil, true)
+			return runtime.buildTask(taskID, taskPwd, modeStr, nil, true)
 		},
-		InitialMode:        startupMode.String(),
+		InitialMode:        runtime.startupMode,
 		TodoStore:          bootEC.TodoStore,
 		Recorder:           bootEC.Recorder,
-		Tracer:             langfuseTracer,
+		Tracer:             runtime.tracer,
 		Env:                bootEC.Env,
-		ProviderName:       providerName,
-		ModelName:          modelName,
-		Config:             cfg,
-		Registry:           registry,
+		ProviderName:       runtime.providerName,
+		ModelName:          runtime.modelName,
+		Config:             runtime.cfg,
+		Registry:           runtime.registry,
 		ApprovalState:      bootEC.ApprovalState,
-		SkillLoader:        skillLoader,
-		FlowLoader:         flowLoader,
-		ReloadMCP:          reloadMCPTools,
-		WechatClient:       wechatClient,
+		SkillLoader:        runtime.skillLoader,
+		FlowLoader:         runtime.flowLoader,
+		ReloadMCP:          runtime.reloadMCP,
+		WechatClient:       runtime.wechatClient,
 		WebHandler:         bootEC.Handler,
 		EventHandler:       bootEC.EventHandler,
-		NeedsSetup:         needsSetup,
+		NeedsSetup:         runtime.needsSetup,
 		TokenUsage:         bootEC.TokenUsage,
 		ContextBreakdownFn: bootEC.BreakdownFn,
 		ToolSearchStats:    bootEC.ToolSearchStats,
-		Automations:        autoStore,
+		Automations:        runtime.automations,
 		AuthToken:          webToken,
 		RequireAuth:        requireAuth,
-		BrowserManager:     browserMgr,
-		ComputerManager:    computerMgr,
+		BrowserManager:     runtime.browserManager,
+		ComputerManager:    runtime.computerManager,
 		MemoryStart: func(runCtx context.Context, project string) (<-chan error, error) {
 			currentCfg, loadErr := config.LoadConfig()
 			if loadErr != nil {
 				return nil, fmt.Errorf("load memory config: %w", loadErr)
 			}
 			return mempipeline.Start(runCtx, currentCfg, project, mempipeline.Options{
-				IncludeRecent:  true,
-				IgnoreCooldown: true,
+				IncludeRecent: true, IgnoreCooldown: true,
 				Log: func(format string, args ...any) {
 					config.Logger().Printf("[memory] "+format, args...)
 				},
 			})
 		},
-		BLEController:   bleProxy,
+		BLEController:   runtime.bleProxy,
 		CloudSupervisor: cloudSup,
-		ArtifactService: artifactService,
+		ArtifactService: runtime.artifactService,
 	})
 
-	// Start the periodic automation scheduler. A single process owns periodic
-	// firing (elected via flock); others return immediately. Manual runs work in
-	// any process regardless of ownership. The flock is OS-released on exit, so a
-	// crashed owner never deadlocks the election.
-	if autoStore != nil {
-		sched := automation.NewScheduler(autoStore, srv.AutomationRunner())
-		go sched.Run(ctx)
+	if runtime.automations != nil {
+		sched := automation.NewScheduler(runtime.automations, srv.AutomationRunner())
+		go sched.Run(runtime.ctx)
 	}
-
-	if len(cfg.MCPServers) > 0 {
+	if len(providertools.EffectiveMCPServers(runtime.cfg)) > 0 {
 		srv.ReloadMCPInBackground()
 	}
 
-	// Set up inbound WeChat message handler now that srv exists. Always register
-	// regardless of WebEnabled — the user can enable via the UI. Inbound messages
-	// target the active task (no task_id channel).
-	wechatClient.SetOnMessage(func(from, text string) {
-		if wechatClient.State() != channel.StateEnabled {
-			return // channel disabled, silently ignore
+	runtime.wechatClient.SetOnMessage(func(from, text string) {
+		if runtime.wechatClient.State() != channel.StateEnabled {
+			return
 		}
 		config.Logger().Printf("[wechat] inbound message from %s: %s", from, text)
 		if !srv.SubmitMessage(text, "wechat") {
-			// Agent is busy, let the user know.
-			_ = wechatClient.SendText(channel.BusyMessage())
+			_ = runtime.wechatClient.SendText(channel.BusyMessage())
 		}
 	})
-
-	// Clean up WeChat + shared notifiers on shutdown.
 	defer func() {
 		if bootNotifying != nil {
 			bootNotifying.CloseNotifiers()
 		}
-		if wechatClient.State() == channel.StateEnabled {
-			// Best-effort, don't block shutdown
-			go func() { _ = wechatClient.SendText(channel.GoodbyeMessage(time.Now())) }()
+		if runtime.wechatClient.State() == channel.StateEnabled {
+			go func() { _ = runtime.wechatClient.SendText(channel.GoodbyeMessage(time.Now())) }()
 			time.Sleep(500 * time.Millisecond)
-			_ = wechatClient.Disable()
+			_ = runtime.wechatClient.Disable()
 		}
 	}()
 
-	// Wire native-messaging auto-connect: write the endpoint discovery file and
-	// install the browser native-host manifest (best-effort, only when browser
-	// use is enabled). Lets the extension connect with zero manual steps.
 	srv.SetupNativeMessaging()
-
-	// Start the jcloud relay connector in the background (best-effort): it runs
-	// only when logged in with cloud.auto_connect enabled, and any failure is a
-	// logged warning — the local web server is never affected. Its context is
-	// the server's shutdown context, so Ctrl+C tears it down with everything
-	// else.
-	cloudSup.Start(ctx)
-
-	if err := srv.Start(ctx); err != nil {
+	cloudSup.Start(runtime.ctx)
+	if err := srv.Start(runtime.ctx); err != nil {
 		return fmt.Errorf("server error: %w", err)
 	}
 
 	srv.CloseAllEngines()
-	// The managed Chrome is owned by the Manager and persists across tasks (task
-	// teardown only releases per-task tabs), so it must be torn down here on
-	// server exit or it leaks as an orphan process holding the profile lock.
-	_ = browserMgr.Close()
-	if langfuseTracer != nil {
-		langfuseTracer.Flush()
+	_ = runtime.browserManager.Close()
+	if runtime.tracer != nil {
+		runtime.tracer.Flush()
 	}
 	return nil
 }

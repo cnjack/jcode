@@ -23,7 +23,8 @@ import {
   appendTurnChangeSummaries,
   isStandaloneTool,
 } from 'jcode-ui-core'
-import type { ThreadItem } from 'jcode-ui-core'
+import { toolCallToRendererProps } from 'jcode-ui-core/adapters'
+import type { ThreadItem, ToolCall } from 'jcode-ui-core'
 import { Message } from './Message.js'
 import { ToolCallCard } from './ToolCallCard.js'
 import { ApprovalBanner } from './ApprovalBanner.js'
@@ -31,6 +32,7 @@ import { ActivityGroupCard } from './ActivityGroupCard.js'
 import { ExploringGroupCard } from './ExploringGroupCard.js'
 import { ToolBatchGroupCard } from './ToolBatchGroup.js'
 import { TurnChangesCard } from './TurnChangesCard.js'
+import { useToolRegistry } from './ToolRegistryContext.js'
 
 export interface ThreadProps {
   /** Disable virtualization (short/replay timelines). Default true. */
@@ -149,9 +151,7 @@ function renderItem(item: ThreadItem, isRunning: boolean): ReactNode {
     return (
       <div className="jcode-chat-col">
         {isStandaloneTool(item.data) ? (
-          <div className="jcode-gutter jcode-standalone-tool" data-tool-name={item.data.name}>
-            <ToolCallCard tool={item.data} />
-          </div>
+          <StandaloneToolCall tool={item.data} />
         ) : (
           <ToolCallCard tool={item.data} className="jcode-gutter" />
         )}
@@ -168,6 +168,23 @@ function renderItem(item: ThreadItem, isRunning: boolean): ReactNode {
     )
   }
   return null
+}
+
+function StandaloneToolCall({ tool }: { tool: ToolCall }): ReactNode {
+  const registry = useToolRegistry()
+  const Renderer = registry.has(tool.name) ? registry.get(tool.name) : null
+  if (!Renderer) {
+    return (
+      <div className="jcode-gutter jcode-standalone-tool" data-tool-name={tool.name}>
+        <ToolCallCard tool={tool} />
+      </div>
+    )
+  }
+  return (
+    <div className="jcode-gutter jcode-standalone-tool" data-tool-name={tool.name}>
+      <Renderer {...toolCallToRendererProps(tool)} />
+    </div>
+  )
 }
 
 function DefaultPending({ label }: { label?: string }): ReactNode {

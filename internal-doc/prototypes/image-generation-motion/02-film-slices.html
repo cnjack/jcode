@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>图片生成动效 02：胶片切片</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f2f3f0;
+      --surface: #ffffff;
+      --surface-2: #e7e8e5;
+      --ink: #111111;
+      --muted: #666666;
+      --border: #cbccc9;
+      --card: #e9eae7;
+      --card-deep: #d9dad6;
+      --film: #f8f8f6;
+      --film-alt: #dedfdb;
+      --film-edge: #a9aaa6;
+      --hole: #b9bab6;
+      --shadow: 0 20px 60px -34px rgb(20 18 16 / 38%);
+      --focus: #804200;
+      --ease: cubic-bezier(.16, 1, .3, 1);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #111111;
+        --surface: #1a1a1a;
+        --surface-2: #242424;
+        --ink: #f4f4f2;
+        --muted: #b8b9b6;
+        --border: #353535;
+        --card: #242424;
+        --card-deep: #181818;
+        --film: #e2e2df;
+        --film-alt: #a5a6a2;
+        --film-edge: #666763;
+        --hole: #30312f;
+        --shadow: 0 24px 68px -34px rgb(0 0 0 / 80%);
+        --focus: #ffad55;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      min-width: 20rem;
+      background: var(--page);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+    }
+
+    body {
+      min-height: 100dvh;
+      margin: 0;
+      background: var(--page);
+    }
+
+    button,
+    a {
+      font: inherit;
+    }
+
+    button {
+      color: inherit;
+    }
+
+    .page {
+      width: min(70rem, calc(100% - 2rem));
+      margin: 0 auto;
+      padding: 2rem 0 3rem;
+    }
+
+    .back {
+      display: inline-flex;
+      align-items: center;
+      min-height: 2.5rem;
+      color: var(--muted);
+      text-decoration: none;
+      transition: color 150ms ease;
+    }
+
+    .back:hover {
+      color: var(--ink);
+    }
+
+    .back:focus-visible,
+    .control:focus-visible,
+    .motion-toggle:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 3px;
+    }
+
+    header {
+      max-width: 42rem;
+      padding: 2.4rem 0 2rem;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2rem, 4vw, 3.4rem);
+      font-weight: 690;
+      letter-spacing: -.045em;
+      line-height: 1.04;
+    }
+
+    header p {
+      max-width: 36rem;
+      margin: 1rem 0 0;
+      color: var(--muted);
+      font-size: 1rem;
+      line-height: 1.75;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(18rem, 1.15fr) minmax(17rem, .85fr);
+      gap: 1rem;
+      align-items: stretch;
+    }
+
+    .demo,
+    .notes {
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .demo {
+      display: grid;
+      min-height: 35rem;
+      place-items: center;
+      padding: clamp(1.25rem, 4vw, 3.5rem);
+      overflow: hidden;
+    }
+
+    .generated-card {
+      --card-width: 16rem;
+      --card-ratio: 1;
+      position: relative;
+      isolation: isolate;
+      width: min(100%, var(--card-width));
+      aspect-ratio: var(--card-ratio);
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      background: var(--card);
+      box-shadow:
+        inset 0 1px 0 rgb(255 255 255 / 18%),
+        0 20px 50px -30px rgb(20 18 16 / 52%);
+      contain: paint;
+      transition:
+        width 360ms var(--ease),
+        aspect-ratio 360ms var(--ease);
+    }
+
+    .generated-card[data-ratio="portrait"] {
+      --card-width: 12rem;
+      --card-ratio: 9 / 16;
+    }
+
+    .generated-card[data-ratio="landscape"] {
+      --card-width: 18rem;
+      --card-ratio: 16 / 9;
+    }
+
+    .gate {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: min(64%, 8.8rem);
+      aspect-ratio: 5 / 6;
+      transform: translate3d(-50%, -50%, 0);
+    }
+
+    .gate::before,
+    .gate::after {
+      position: absolute;
+      top: -6%;
+      bottom: -6%;
+      width: 1px;
+      content: "";
+      background: var(--film-edge);
+      opacity: .22;
+      transform: scaleY(.68);
+      animation: gate-breathe 2.8s var(--ease) infinite;
+    }
+
+    .gate::before {
+      left: -10%;
+    }
+
+    .gate::after {
+      right: -10%;
+      animation-delay: -1.4s;
+    }
+
+    .slice {
+      --from: -6rem;
+      --exit: 2rem;
+      --angle: -2deg;
+      --phase: 0s;
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: calc(var(--row) * 14.2857%);
+      height: calc(14.2857% + 1px);
+      overflow: hidden;
+      border: 1px solid var(--film-edge);
+      border-radius: .24rem;
+      background: var(--film);
+      opacity: .08;
+      transform: translate3d(var(--from), 0, 0) rotate(var(--angle)) scaleX(.72);
+      transform-origin: center;
+      will-change: transform, opacity;
+      animation: film-generate 2.9s cubic-bezier(.45, 0, .2, 1) var(--phase) infinite;
+    }
+
+    .slice:nth-child(even) {
+      background: var(--film-alt);
+    }
+
+    .slice::before,
+    .slice::after {
+      position: absolute;
+      top: 50%;
+      width: .36rem;
+      aspect-ratio: 1;
+      border-radius: .1rem;
+      content: "";
+      background: var(--hole);
+      transform: translateY(-50%);
+      box-shadow: inset 0 0 0 1px rgb(0 0 0 / 8%);
+    }
+
+    .slice::before {
+      left: .34rem;
+    }
+
+    .slice::after {
+      right: .34rem;
+    }
+
+    .slice-core {
+      position: absolute;
+      inset: .2rem 1rem;
+      border-radius: .12rem;
+      background: var(--card-deep);
+      box-shadow: inset 0 0 0 1px rgb(255 255 255 / 8%);
+    }
+
+    .generated-card[data-state="saving"] .slice {
+      animation-name: film-save;
+      animation-duration: 4.2s;
+    }
+
+    .generated-card[data-state="saving"] .gate::before,
+    .generated-card[data-state="saving"] .gate::after {
+      animation-duration: 4.2s;
+      opacity: .14;
+    }
+
+    @keyframes film-generate {
+      0%, 12%, 100% {
+        opacity: .06;
+        transform: translate3d(var(--from), 0, 0) rotate(var(--angle)) scaleX(.72);
+      }
+      36% {
+        opacity: .86;
+        transform: translate3d(0, 0, 0) rotate(0deg) scaleX(1.025);
+      }
+      48%, 60% {
+        opacity: .92;
+        transform: translate3d(0, 0, 0) rotate(0deg) scaleX(1);
+      }
+      82% {
+        opacity: .2;
+        transform: translate3d(var(--exit), 0, 0) rotate(0deg) scaleX(.9);
+      }
+    }
+
+    @keyframes film-save {
+      0%, 100% {
+        opacity: .48;
+        transform: translate3d(0, 0, 0) rotate(0deg) scaleX(.985);
+      }
+      38%, 72% {
+        opacity: .92;
+        transform: translate3d(0, 0, 0) rotate(0deg) scaleX(1);
+      }
+    }
+
+    @keyframes gate-breathe {
+      0%, 100% {
+        opacity: .12;
+        transform: scaleY(.66);
+      }
+      50% {
+        opacity: .34;
+        transform: scaleY(1);
+      }
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .notes {
+      display: flex;
+      flex-direction: column;
+      padding: 1.3rem;
+    }
+
+    .notes h2 {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 680;
+    }
+
+    .notes > p {
+      margin: .65rem 0 1.3rem;
+      color: var(--muted);
+      font-size: .88rem;
+      line-height: 1.65;
+    }
+
+    .control-group + .control-group {
+      margin-top: 1.3rem;
+    }
+
+    .control-label {
+      display: block;
+      margin-bottom: .55rem;
+      color: var(--muted);
+      font-size: .78rem;
+      font-weight: 620;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .45rem;
+    }
+
+    .control,
+    .motion-toggle {
+      min-height: 2.45rem;
+      border: 1px solid var(--border);
+      border-radius: .6rem;
+      background: var(--surface-2);
+      cursor: pointer;
+      transition:
+        border-color 150ms ease,
+        background-color 150ms ease,
+        transform 150ms ease;
+    }
+
+    .control {
+      padding: .55rem .78rem;
+      font-size: .82rem;
+    }
+
+    .control:hover,
+    .motion-toggle:hover {
+      border-color: var(--muted);
+    }
+
+    .control:active,
+    .motion-toggle:active {
+      transform: scale(.98);
+    }
+
+    .control[aria-pressed="true"] {
+      border-color: var(--ink);
+      background: var(--ink);
+      color: var(--surface);
+    }
+
+    .motion-toggle {
+      display: flex;
+      width: 100%;
+      align-items: center;
+      justify-content: space-between;
+      padding: .55rem .65rem .55rem .78rem;
+      font-size: .82rem;
+    }
+
+    .switch-track {
+      position: relative;
+      width: 2.1rem;
+      height: 1.25rem;
+      flex: none;
+      border-radius: 999px;
+      background: var(--border);
+    }
+
+    .switch-track::after {
+      position: absolute;
+      left: .16rem;
+      top: .16rem;
+      width: .93rem;
+      height: .93rem;
+      border-radius: 50%;
+      content: "";
+      background: var(--surface);
+      box-shadow: 0 1px 3px rgb(0 0 0 / 18%);
+      transition: transform 150ms var(--ease);
+    }
+
+    .motion-toggle[aria-checked="true"] .switch-track {
+      background: var(--ink);
+    }
+
+    .motion-toggle[aria-checked="true"] .switch-track::after {
+      transform: translateX(.85rem);
+    }
+
+    .motion-note {
+      margin-top: auto;
+      padding-top: 1.6rem;
+      color: var(--muted);
+      font-size: .78rem;
+      line-height: 1.6;
+    }
+
+    .reduce-motion .slice,
+    .reduce-motion .gate::before,
+    .reduce-motion .gate::after {
+      animation: none !important;
+    }
+
+    .reduce-motion .slice {
+      opacity: .72;
+      transform: translate3d(0, 0, 0) rotate(0deg) scaleX(1);
+    }
+
+    .reduce-motion .gate::before,
+    .reduce-motion .gate::after {
+      opacity: .18;
+      transform: scaleY(.82);
+    }
+
+    .reduce-motion .generated-card,
+    .reduce-motion .control,
+    .reduce-motion .motion-toggle,
+    .reduce-motion .switch-track::after {
+      transition-duration: .01ms !important;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .slice,
+      .gate::before,
+      .gate::after {
+        animation: none !important;
+      }
+
+      .slice {
+        opacity: .72;
+        transform: translate3d(0, 0, 0) rotate(0deg) scaleX(1);
+      }
+
+      .gate::before,
+      .gate::after {
+        opacity: .18;
+        transform: scaleY(.82);
+      }
+
+      .generated-card,
+      .control,
+      .motion-toggle,
+      .switch-track::after {
+        transition-duration: .01ms !important;
+      }
+    }
+
+    @media (max-width: 46rem) {
+      .page {
+        width: min(100% - 1.25rem, 40rem);
+        padding-top: 1rem;
+      }
+
+      header {
+        padding-top: 1.7rem;
+      }
+
+      .workspace {
+        grid-template-columns: 1fr;
+      }
+
+      .demo {
+        min-height: 29rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <a class="back" href="./index.html">← 返回动效方案列表</a>
+
+    <header>
+      <h1>方案 02：胶片切片</h1>
+      <p>多条胶片带从相反方向切入，在短暂对齐后再次错开。生成态强调拼合过程，保存态收敛为更安静的稳定节奏。</p>
+    </header>
+
+    <div class="workspace">
+      <section class="demo" aria-label="动效预览">
+        <div
+          id="generated-card"
+          class="generated-card"
+          data-state="generating"
+          data-ratio="square"
+          role="region"
+          aria-label="图片正在生成"
+          aria-busy="true"
+        >
+          <div class="gate" aria-hidden="true">
+            <span class="slice" style="--row: 0; --from: -6.4rem; --exit: 2.1rem; --angle: -2.5deg; --phase: -2.74s"><i class="slice-core"></i></span>
+            <span class="slice" style="--row: 1; --from: 6.1rem; --exit: -1.8rem; --angle: 1.7deg; --phase: -2.53s"><i class="slice-core"></i></span>
+            <span class="slice" style="--row: 2; --from: -5.6rem; --exit: 1.6rem; --angle: -1.2deg; --phase: -2.31s"><i class="slice-core"></i></span>
+            <span class="slice" style="--row: 3; --from: 5.2rem; --exit: -1.4rem; --angle: .8deg; --phase: -2.12s"><i class="slice-core"></i></span>
+            <span class="slice" style="--row: 4; --from: -5.8rem; --exit: 1.7rem; --angle: -1.4deg; --phase: -2.34s"><i class="slice-core"></i></span>
+            <span class="slice" style="--row: 5; --from: 6.2rem; --exit: -1.9rem; --angle: 2deg; --phase: -2.56s"><i class="slice-core"></i></span>
+            <span class="slice" style="--row: 6; --from: -6.5rem; --exit: 2.2rem; --angle: -2.7deg; --phase: -2.78s"><i class="slice-core"></i></span>
+          </div>
+          <span id="live-status" class="sr-only" role="status" aria-live="polite">图片正在生成</span>
+        </div>
+      </section>
+
+      <aside class="notes">
+        <h2>交互控制</h2>
+        <p>生成卡内部不显示文字。下方控件用于比较状态、画幅和减少动态模式。</p>
+
+        <div class="control-group">
+          <span class="control-label">状态</span>
+          <div class="controls" aria-label="图片生成状态">
+            <button class="control" type="button" data-state-choice="generating" aria-pressed="true">生成中</button>
+            <button class="control" type="button" data-state-choice="saving" aria-pressed="false">保存中</button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <span class="control-label">画幅</span>
+          <div class="controls" aria-label="图片画幅">
+            <button class="control" type="button" data-ratio-choice="square" aria-pressed="true">方形 1:1</button>
+            <button class="control" type="button" data-ratio-choice="portrait" aria-pressed="false">竖向 9:16</button>
+            <button class="control" type="button" data-ratio-choice="landscape" aria-pressed="false">横向 16:9</button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <span class="control-label">辅助功能</span>
+          <button id="motion-toggle" class="motion-toggle" type="button" role="switch" aria-checked="false">
+            <span>模拟减少动态</span>
+            <span class="switch-track" aria-hidden="true"></span>
+          </button>
+        </div>
+
+        <p class="motion-note">系统设置为“减少动态”时，胶片会自动停在完整拼合状态。动画仅改变 transform 与 opacity。</p>
+      </aside>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      const root = document.documentElement
+      const card = document.getElementById('generated-card')
+      const liveStatus = document.getElementById('live-status')
+      const motionToggle = document.getElementById('motion-toggle')
+      const stateButtons = [...document.querySelectorAll('[data-state-choice]')]
+      const ratioButtons = [...document.querySelectorAll('[data-ratio-choice]')]
+
+      const stateLabels = {
+        generating: '图片正在生成',
+        saving: '图片正在保存',
+      }
+
+      function select(buttons, attribute, value) {
+        buttons.forEach((button) => {
+          button.setAttribute('aria-pressed', String(button.getAttribute(attribute) === value))
+        })
+      }
+
+      stateButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          const state = button.dataset.stateChoice
+          card.dataset.state = state
+          card.setAttribute('aria-label', stateLabels[state])
+          liveStatus.textContent = stateLabels[state]
+          select(stateButtons, 'data-state-choice', state)
+        })
+      })
+
+      ratioButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          const ratio = button.dataset.ratioChoice
+          card.dataset.ratio = ratio
+          select(ratioButtons, 'data-ratio-choice', ratio)
+        })
+      })
+
+      motionToggle.addEventListener('click', () => {
+        const reduced = motionToggle.getAttribute('aria-checked') !== 'true'
+        motionToggle.setAttribute('aria-checked', String(reduced))
+        root.classList.toggle('reduce-motion', reduced)
+      })
+    })()
+  </script>
+</body>
+</html>

@@ -6,9 +6,9 @@
 //     written back, cached in-process.
 //   - Envelope: {"enc":"aes-256-gcm","key_gen":N,"nonce":"<b64 12B>","ct":"<b64>"}.
 //     Sealed fields: uplink events/ephemeral payload, sessions upsert meta,
-//     ack result; downlink command payload. Grey rule: a JSON object payload
-//     with a string `enc` field is treated as an envelope and decrypted;
-//     anything else is read as plaintext (M3/M4 compatibility).
+//     ack result; downlink command payload. The plaintext grey path exists only
+//     before CEK activation or when cloud.e2ee=false; after advertising
+//     e2ee=true, a non-envelope downlink is rejected as a downgrade attempt.
 //   - Pairing wrap (ECIES/P-256): ephemeral P-256 key pair →
 //     ECDH(ephemeral, requester pubkey) → HKDF-SHA256(shared, salt=nil,
 //     info="jcode-device-cek") → 32B wrap key → AES-256-GCM over

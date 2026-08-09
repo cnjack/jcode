@@ -60,6 +60,75 @@ func TestWebHandler_ResolveApprovalOnceVsAll(t *testing.T) {
 	}
 }
 
+func TestWebHandlerBillableApprovalRequiresOpaqueOneTimeOption(t *testing.T) {
+	h := NewWebHandler()
+	issuedOptions := []ApprovalOption{
+		{ID: "runner-allow-once", Label: "Allow once", Kind: "allow_once"},
+		{ID: "runner-deny", Label: "Deny", Kind: "deny"},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	responseCh := make(chan ApprovalResponse, 1)
+	go func() {
+		response, err := h.RequestApproval(ctx, ApprovalRequest{
+			ToolName: "generate_image", ToolArgs: `{"prompt":"private prompt","size":"1024x1024"}`,
+			ToolCallID: "call-image-1", ApprovalClass: "billable_external",
+			AllowApproveAll: false,
+			Options:         issuedOptions,
+			BillableSummary: &BillableApprovalSummary{
+				Capability: "image.generate", Provider: "provider", Model: "image-model",
+				Size: "1024x1024", Count: 1, Billable: true,
+			},
+		})
+		if err != nil {
+			t.Errorf("RequestApproval: %v", err)
+			return
+		}
+		responseCh <- response
+	}()
+
+	event := <-h.Events()
+	request := event.Data.(WebApprovalRequestData)
+	if request.ToolArgs != "{}" || strings.Contains(request.ToolArgs, "private prompt") {
+		t.Fatalf("billable tool args were exposed: %q", request.ToolArgs)
+	}
+	if request.AllowApproveAll || len(request.Options) != 2 || request.Options[0].ID == "" ||
+		request.Options[0].ID == request.Options[1].ID || request.BillableSummary == nil {
+		t.Fatalf("billable request = %#v", request)
+	}
+	if request.Options[0].ID != issuedOptions[0].ID || request.Options[1].ID != issuedOptions[1].ID {
+		t.Fatalf("web transport replaced runner option ids: %#v", request.Options)
+	}
+	if err := h.ResolveApproval(request.ID, true, false); err == nil {
+		t.Fatal("boolean approval bypassed the opaque option contract")
+	}
+	if _, err := h.ResolveApprovalOption(request.ID, "forged-option"); err == nil {
+		t.Fatal("forged option id was accepted")
+	}
+	allowID := request.Options[0].ID
+	resolved, err := h.ResolveApprovalOption(request.ID, allowID)
+	if err != nil || !resolved.Approved || resolved.Mode != ModeManual || resolved.ResolvedOptionID != allowID {
+		t.Fatalf("resolved=%#v err=%v", resolved, err)
+	}
+	response := <-responseCh
+	if !response.Approved || response.ResolvedOptionID != allowID {
+		t.Fatalf("request response = %#v", response)
+	}
+	if _, err := h.ResolveApprovalOption(request.ID, allowID); err == nil {
+		t.Fatal("replayed option id was accepted")
+	}
+}
+
+func TestWebHandlerBillableApprovalRejectsMissingRunnerOptions(t *testing.T) {
+	h := NewWebHandler()
+	if _, err := h.RequestApproval(context.Background(), ApprovalRequest{
+		ToolName: "generate_image", ApprovalClass: "billable_external",
+		BillableSummary: &BillableApprovalSummary{Capability: "image.generate", Billable: true},
+	}); err == nil {
+		t.Fatal("billable web approval accepted missing runner-issued options")
+	}
+}
+
 // TestWebHandler_ToolResultDeniedAndApprovalToolCallID covers the approval
 // semantics WS contract: tool_result carries denied (+ the runner-adjusted
 // duration_ms), and approval_request carries the gated call's tool_call_id so
@@ -112,6 +181,29 @@ func TestWebHandler_ToolResultDeniedAndApprovalToolCallID(t *testing.T) {
 	}
 	if err := h.ResolveApproval(req.ID, false, false); err != nil {
 		t.Fatalf("ResolveApproval: %v", err)
+	}
+}
+
+func TestWebHandlerImageLifecycleCarriesImmutableProviderModelSnapshot(t *testing.T) {
+	h := NewWebHandler()
+	h.OnToolProgress(ToolProgressEvent{
+		Name: "generate_image", ToolCallID: "call-image", OperationID: "operation-image",
+		Phase: ToolPhaseGenerating, Provider: "provider-old", Model: "model-old",
+	})
+	progress := (<-h.Events()).Data.(WebToolProgressData)
+	if progress.Provider != "provider-old" || progress.Model != "model-old" {
+		t.Fatalf("progress snapshot = %q/%q", progress.Provider, progress.Model)
+	}
+
+	h.OnToolResult(ToolResultEvent{
+		Name: "generate_image", ToolCallID: "call-image", OperationID: "operation-image",
+		Phase: ToolPhaseFailed, Outcome: ToolOutcomeFailed, ErrorCode: "authentication_failed",
+		Provider: "provider-old", Model: "model-old",
+	})
+	result := (<-h.Events()).Data.(WebToolResultData)
+	if result.Provider != "provider-old" || result.Model != "model-old" ||
+		result.ErrorCode != "authentication_failed" {
+		t.Fatalf("result snapshot = %#v", result)
 	}
 }
 

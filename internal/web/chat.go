@@ -74,6 +74,16 @@ func (s *Server) engineForChat(taskID, modeStr string) (*Engine, error) {
 	if eng := s.resolveEngine(taskID); eng != nil {
 		return eng, nil
 	}
+	// The first two requests for an explicit client-provided task ID can arrive
+	// concurrently. Re-check under a creation mutex so exactly one canonical
+	// Engine (and therefore one running flag/Recorder/usage ledger) is published.
+	if taskID != "" {
+		s.taskCreateMu.Lock()
+		defer s.taskCreateMu.Unlock()
+		if eng := s.resolveEngine(taskID); eng != nil {
+			return eng, nil
+		}
+	}
 	pwd := ""
 	if a := s.activeEngine(); a != nil {
 		pwd = a.pwd
@@ -176,6 +186,7 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 	// the M19 sync stamp below; the store write happens after eng.emu is
 	// released).
 	var stampNew bool
+	eng.toolOverrideMu.Lock()
 	eng.emu.Lock()
 	if eng.recorder == nil {
 		rec, _ := session.NewRecorder(eng.pwd, eng.providerName, eng.modelName)
@@ -207,6 +218,7 @@ func (s *Server) submitMessage(eng *Engine, message, mode, source, sessionID str
 	}
 	recorder := eng.recorder
 	eng.emu.Unlock()
+	eng.toolOverrideMu.Unlock()
 	// M19: stamp the receiving session's initial cloud-sync state on EVERY
 	// submitted message, not only when this call created the recorder — the
 	// bootstrap engine already has a recorder at startup, and a cloud

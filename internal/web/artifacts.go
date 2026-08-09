@@ -25,22 +25,49 @@ type artifactSnapshotFile interface {
 	Stat() (os.FileInfo, error)
 }
 
-func (s *Server) artifactWorkspace(r *http.Request) (string, string, error) {
+func ensureJSONEOF(decoder *json.Decoder) error {
+	var extra any
+	if err := decoder.Decode(&extra); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return err
+	}
+	return fmt.Errorf("request body contains multiple JSON values")
+}
+
+type artifactTaskScope struct {
+	sessionID   string
+	workspace   string
+	managedOnly bool
+}
+
+func (s *Server) artifactScope(r *http.Request) (artifactTaskScope, error) {
 	sessionID := r.PathValue("id")
 	if err := session.ValidateSessionID(sessionID); err != nil {
-		return "", "", err
+		return artifactTaskScope{}, err
 	}
-	if eng := s.resolveEngine(sessionID); eng != nil && eng.env != nil && eng.env.IsRemote() {
-		return "", "", fmt.Errorf("remote artifacts are not supported")
+	remote := false
+	if eng := s.resolveEngine(sessionID); eng != nil && eng.env != nil {
+		remote = eng.env.IsRemote()
 	}
 	workspace, err := s.workspacePwdForTask(sessionID)
 	if err != nil {
-		return "", "", err
+		return artifactTaskScope{}, err
 	}
 	if workspace == "" {
-		return "", "", os.ErrNotExist
+		return artifactTaskScope{}, os.ErrNotExist
 	}
-	return sessionID, workspace, nil
+	if strings.HasPrefix(workspace, "ssh://") || strings.HasPrefix(workspace, "docker://") {
+		remote = true
+	}
+	if remote {
+		// The remote path is meaningful only to the SSH/Docker executor. The
+		// Artifact HTTP API may expose local managed files for this session, but
+		// must never interpret that path against the Desktop host filesystem.
+		workspace = ""
+	}
+	return artifactTaskScope{sessionID: sessionID, workspace: workspace, managedOnly: remote}, nil
 }
 
 func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
@@ -48,12 +75,17 @@ func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []artifact.Record{})
 		return
 	}
-	sessionID, workspace, err := s.artifactWorkspace(r)
+	scope, err := s.artifactScope(r)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task artifacts not found"})
 		return
 	}
-	records, err := s.artifacts.List(r.Context(), sessionID, workspace)
+	var records []artifact.Record
+	if scope.managedOnly {
+		records, err = s.artifacts.ListManaged(r.Context(), scope.sessionID)
+	} else {
+		records, err = s.artifacts.List(r.Context(), scope.sessionID, scope.workspace)
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not load task artifacts"})
 		return
@@ -94,17 +126,23 @@ func (s *Server) serveArtifactFile(w http.ResponseWriter, r *http.Request, downl
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "artifact not found"})
 		return
 	}
-	sessionID, workspace, err := s.artifactWorkspace(r)
+	scope, err := s.artifactScope(r)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "artifact not found"})
 		return
 	}
-	record, file, err := s.artifacts.Open(r.Context(), sessionID, workspace, r.PathValue("artifactID"))
+	record, file, err := s.artifacts.Open(
+		r.Context(), scope.sessionID, scope.workspace, r.PathValue("artifactID"),
+	)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "artifact not found"})
 		return
 	}
 	defer func() { _ = file.Close() }()
+	if scope.managedOnly && record.EffectiveStorageKind() != artifact.StorageManaged {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "artifact not found"})
+		return
+	}
 	limit := artifactInlineLimit(record.Kind)
 	if download {
 		limit = artifact.MaxDownloadSize
@@ -114,7 +152,11 @@ func (s *Server) serveArtifactFile(w http.ResponseWriter, r *http.Request, downl
 		return
 	}
 	setArtifactContentHeaders(w, record)
-	name := artifactDownloadName(record.RelativePath)
+	downloadSource := record.RelativePath
+	if downloadSource == "" {
+		downloadSource = record.RelativeKey
+	}
+	name := artifactDownloadName(downloadSource)
 	if download {
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, name))
 	}
@@ -144,19 +186,30 @@ func (s *Server) handleArtifactsViewed(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid task id"})
 		return
 	}
-	meta, err := session.UpdateSessionMeta(sessionID, func(meta *session.SessionMeta) {
-		meta.ArtifactViewedAt = meta.ArtifactUpdatedAt
-		if meta.ArtifactViewedAt == "" {
-			meta.ArtifactViewedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		}
-		meta.ArtifactUnseen = false
-	})
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not update artifact view state"})
+	var req struct {
+		ArtifactID string `json:"artifact_id"`
+		Revision   int    `json:"revision"`
+	}
+	decoder := json.NewDecoder(io.LimitReader(r.Body, 4097))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "artifact id and revision are required"})
 		return
 	}
-	if meta == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+	if err := ensureJSONEOF(decoder); err != nil || strings.TrimSpace(req.ArtifactID) == "" || req.Revision <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid artifact view state"})
+		return
+	}
+	err := session.MarkArtifactViewed(sessionID, req.ArtifactID, req.Revision)
+	switch {
+	case errors.Is(err, session.ErrArtifactNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "artifact not found"})
+		return
+	case errors.Is(err, session.ErrArtifactRevisionMismatch):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "artifact revision changed"})
+		return
+	case err != nil:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not update artifact view state"})
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -250,17 +303,27 @@ func (s *Server) handleCreateArtifactShare(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid artifact share request"})
 		return
 	}
-	sessionID, workspace, err := s.artifactWorkspace(r)
+	scope, err := s.artifactScope(r)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "artifact not found"})
 		return
 	}
-	record, file, err := s.artifacts.Open(r.Context(), sessionID, workspace, r.PathValue("artifactID"))
+	record, file, err := s.artifacts.Open(
+		r.Context(), scope.sessionID, scope.workspace, r.PathValue("artifactID"),
+	)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "artifact not found"})
 		return
 	}
 	defer func() { _ = file.Close() }()
+	if scope.managedOnly && record.EffectiveStorageKind() != artifact.StorageManaged {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "artifact not found"})
+		return
+	}
+	if !record.EffectiveShareable() {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "artifact is not shareable"})
+		return
+	}
 	content, err := readArtifactSnapshot(file, artifact.MaxShareSize)
 	if errors.Is(err, artifact.ErrTooLarge) {
 		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "artifact_too_large"})
@@ -293,11 +356,16 @@ func (s *Server) artifactRecord(r *http.Request) (artifact.Record, error) {
 	if s.artifacts == nil {
 		return artifact.Record{}, os.ErrNotExist
 	}
-	sessionID, workspace, err := s.artifactWorkspace(r)
+	scope, err := s.artifactScope(r)
 	if err != nil {
 		return artifact.Record{}, err
 	}
-	records, err := s.artifacts.List(r.Context(), sessionID, workspace)
+	var records []artifact.Record
+	if scope.managedOnly {
+		records, err = s.artifacts.ListManaged(r.Context(), scope.sessionID)
+	} else {
+		records, err = s.artifacts.List(r.Context(), scope.sessionID, scope.workspace)
+	}
 	if err != nil {
 		return artifact.Record{}, err
 	}

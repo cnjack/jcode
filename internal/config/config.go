@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,6 +20,10 @@ const (
 type ProviderConfig struct {
 	APIKey  string `json:"api_key"`
 	BaseURL string `json:"base_url,omitempty"`
+	// Protocol identifies the provider's chat/request protocol when it differs
+	// from the registry default (for example "responses"). Capability-specific
+	// protocols belong on their endpoint block instead.
+	Protocol string `json:"protocol,omitempty"`
 	// Name is an optional display name for custom providers not in the registry.
 	Name string `json:"name,omitempty"`
 	// Headers are extra HTTP headers injected into every request to this
@@ -42,6 +47,52 @@ type ProviderConfig struct {
 	// CustomModels defines additional models for this provider.
 	// These are merged into the registry and treated identically to built-in models.
 	CustomModels []CustomModelConfig `json:"custom_models,omitempty"`
+	// ProviderTools stores policy for provider-bound capabilities such as Web
+	// Search. Image generation is selected independently through ImageModel;
+	// legacy image_generation entries are read only for optional call limits.
+	// Runtime/adapter selection must never be inferred from these keys.
+	ProviderTools map[string]ProviderToolPolicy `json:"provider_tools,omitempty"`
+	// ImageEndpoint is an explicit, capability-specific endpoint for custom
+	// image-generation models. Chat model discovery never populates this block.
+	ImageEndpoint *ImageEndpointConfig `json:"image_endpoint,omitempty"`
+}
+
+// HasConfiguredChatModels reports whether this provider has an explicit chat
+// model list in either the current or legacy config shape.
+func (p *ProviderConfig) HasConfiguredChatModels() bool {
+	return p != nil && (len(p.CustomModels) > 0 || len(p.Models) > 0)
+}
+
+// ProviderToolPolicy controls a provider-bound capability. Such capabilities
+// are disabled by default: the zero value is intentionally fail-closed.
+type ProviderToolPolicy struct {
+	Enabled            bool `json:"enabled,omitempty"`
+	MaxCallsPerTurn    int  `json:"max_calls_per_turn,omitempty"`
+	MaxCallsPerSession int  `json:"max_calls_per_session,omitempty"`
+}
+
+// ImageEndpointConfig describes an image-generation API independently of the
+// provider's chat endpoint. Protocol is currently "openai_images" for custom
+// OpenAI-compatible Images APIs; unknown protocols remain catalog-visible but
+// unresolved so future versions can add adapters without changing the schema.
+type ImageEndpointConfig struct {
+	Protocol   string             `json:"protocol,omitempty"`
+	BaseURL    string             `json:"base_url,omitempty"`
+	Models     []ImageModelConfig `json:"models,omitempty"`
+	AssetHosts []string           `json:"asset_hosts,omitempty"`
+}
+
+// ImageModelConfig is one selectable model served by an ImageEndpointConfig.
+type ImageModelConfig struct {
+	ID    string   `json:"id"`
+	Name  string   `json:"name,omitempty"`
+	Sizes []string `json:"sizes,omitempty"`
+}
+
+// MediaConfig controls retention for JCode-managed generated media.
+type MediaConfig struct {
+	RetentionDays int   `json:"retention_days,omitempty"`
+	MaxTotalBytes int64 `json:"max_total_bytes,omitempty"`
 }
 
 // CustomModelConfig defines a model that can be added via config.
@@ -349,6 +400,12 @@ func MemoryPhase2TopN(c *Config) int {
 
 // Config represents the application configuration
 type Config struct {
+	// diskRevision is the SHA-256 digest of the exact file bytes loaded from
+	// disk. It is intentionally not serialized. SaveConfig compares it under the
+	// cross-process lock so an unrelated stale full-snapshot write fails closed
+	// instead of reviving credentials or policies changed by another process.
+	diskRevision string
+
 	// Provider settings: map of provider name → config (api_key, base_url)
 	Providers map[string]*ProviderConfig `json:"providers"`
 	// Deprecated: use Providers instead. Kept for backward compatibility.
@@ -361,6 +418,11 @@ type Config struct {
 	// session-title generation. Unset → those paths use the main model /
 	// truncated titles; behavior is unchanged.
 	SmallModel string `json:"small_model,omitempty"`
+	// ImageModel is the independent image-generation role in "provider/model"
+	// format. Empty means image generation is unavailable to the agent.
+	ImageModel string `json:"image_model,omitempty"`
+	// Media holds retention limits for JCode-managed generated media.
+	Media *MediaConfig `json:"media,omitempty"`
 
 	// ContextLimits overrides the resolved context window (in tokens) for a model.
 	// Keys may be "provider/model" (preferred) or a bare model id. Use this to teach
@@ -1011,6 +1073,10 @@ func NeedsSetup() bool {
 
 // LoadConfig loads configuration from $HOME/.jcode/config.json.
 func LoadConfig() (*Config, error) {
+	return loadConfig(true)
+}
+
+func loadConfig(requireProviders bool) (*Config, error) {
 	cfg := &Config{
 		MaxIterations: 1000, // default
 	}
@@ -1022,12 +1088,13 @@ func LoadConfig() (*Config, error) {
 
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
-		return nil, fmt.Errorf("config file not found at %s, please run setup first", cfgPath)
+		return nil, fmt.Errorf("config file not found at %s, please run setup first: %w", cfgPath, err)
 	}
 
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config file %s: %w", cfgPath, err)
 	}
+	cfg.diskRevision = configContentRevision(data)
 
 	if cfg.Computer != nil {
 		if rejected := cfg.Computer.MigrateLegacyBackend(); rejected != "" {
@@ -1044,7 +1111,7 @@ func LoadConfig() (*Config, error) {
 	cfg.migrateProviderIDs()
 
 	// Validation
-	if len(cfg.GetProviders()) == 0 {
+	if requireProviders && len(cfg.GetProviders()) == 0 {
 		return nil, fmt.Errorf("no providers configured: set 'providers' in %s", cfgPath)
 	}
 
@@ -1113,6 +1180,14 @@ func (c *Config) migrateProviderIDs() {
 		}
 	}
 
+	// Migrate ImageModel independently from the active chat model.
+	for oldID, newID := range migrations {
+		if hasPrefix(c.ImageModel, oldID+"/") {
+			c.ImageModel = newID + c.ImageModel[len(oldID):]
+			Logger().Printf("[config] Migrated image_model: %s → %s", oldID, newID)
+		}
+	}
+
 }
 
 func hasPrefix(s, prefix string) bool {
@@ -1139,7 +1214,12 @@ func containsSlash(s string) bool {
 // SaveConfig writes the config to the active config file path (default
 // $HOME/.jcode/config.json; overridden by JCODE_CONFIG when set).
 func SaveConfig(cfg *Config) error {
-	return saveConfig(cfg, os.Rename)
+	return withConfigWriteLock(func() error {
+		if err := verifyConfigRevision(cfg); err != nil {
+			return err
+		}
+		return saveConfig(cfg, os.Rename)
+	})
 }
 
 // saveConfig writes through an owner-only temporary file in the destination
@@ -1148,6 +1228,14 @@ func SaveConfig(cfg *Config) error {
 // rename function is a parameter so failure handling can be tested without
 // relying on platform-specific permission behavior.
 func saveConfig(cfg *Config, rename func(string, string) error) error {
+	return saveConfigWithSync(cfg, rename, syncConfigDirectory)
+}
+
+func saveConfigWithSync(
+	cfg *Config,
+	rename func(string, string) error,
+	syncDirectory func(string) error,
+) error {
 	cfgPath, err := configFilePath()
 	if err != nil {
 		return fmt.Errorf("config file path error: %w", err)
@@ -1200,12 +1288,22 @@ func saveConfig(cfg *Config, rename func(string, string) error) error {
 	if err := rename(tmpPath, cfgPath); err != nil {
 		return fmt.Errorf("failed to replace config file %s: %w", cfgPath, err)
 	}
-	// The path now owns the temporary file. Disable deferred removal; there are
-	// no fallible operations after the commit point, so an error always leaves
-	// the previous config intact.
+	// Rename moved the temporary file into place. Never let the deferred cleanup
+	// target that path, including when the directory durability barrier fails.
 	tmpPath = ""
+	if err := syncDirectory(dir); err != nil {
+		return fmt.Errorf("failed to sync config directory %s: %w", dir, err)
+	}
+	if cfg != nil {
+		cfg.diskRevision = configContentRevision(data)
+	}
 
 	return nil
+}
+
+func configContentRevision(data []byte) string {
+	digest := sha256.Sum256(data)
+	return fmt.Sprintf("%x", digest[:])
 }
 
 // ConfigPath returns the expected path of the config file (for display purposes)

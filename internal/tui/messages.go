@@ -63,6 +63,7 @@ type ToolCallMsg struct {
 	BatchIndex int    // 0-based position inside the batch
 	BatchSize  int    // number of tool calls in the batch
 	StartedAt  time.Time
+	Standalone bool // render outside activity grouping (for media/artifact cards)
 }
 type ToolResultMsg struct {
 	Name, Output string
@@ -70,6 +71,10 @@ type ToolResultMsg struct {
 	Err          error
 	Denied       bool          // user rejected the call at the approval gate (not an error)
 	Duration     time.Duration // call→result latency; 0 when unknown
+}
+type ToolProgressMsg struct {
+	Name, ToolCallID string
+	Phase            string
 }
 type AgentDoneMsg struct{ Err error }
 type PromptSubmitMsg struct{ Prompt string }
@@ -162,18 +167,30 @@ const (
 
 // ToolApprovalRequestMsg is sent when a tool needs user approval
 type ToolApprovalRequestMsg struct {
-	Name        string
-	Args        string
-	Resp        chan ToolApprovalResponse
-	IsExternal  bool   // Whether this is an external path access (for read tool)
-	WorkerName  string // Non-empty when approval is from a teammate (e.g. "@backend")
-	WorkerColor string // Teammate's color for TUI display
+	Name            string
+	Args            string
+	Resp            chan ToolApprovalResponse
+	IsExternal      bool   // Whether this is an external path access (for read tool)
+	IsBillable      bool   // Whether this is a bounded provider request that may incur cost
+	WorkerName      string // Non-empty when approval is from a teammate (e.g. "@backend")
+	WorkerColor     string // Teammate's color for TUI display
+	AllowApproveAll bool
+	Options         []ToolApprovalOption
+}
+
+// ToolApprovalOption is a transport copy of a runner-issued opaque decision.
+// The TUI must return ID unchanged in ToolApprovalResponse.
+type ToolApprovalOption struct {
+	ID    string
+	Label string
+	Kind  string
 }
 
 // ToolApprovalResponse is the user's response to a tool approval request
 type ToolApprovalResponse struct {
-	Approved bool
-	Mode     ApprovalMode // Mode after this response (stay MANUAL or switch to AUTO)
+	Approved         bool
+	Mode             ApprovalMode // Mode after this response (stay MANUAL or switch to AUTO)
+	ResolvedOptionID string
 }
 
 // SSHConnectMsg is sent when user initially requests connection
@@ -434,6 +451,13 @@ func RequestMCPLogin(name string) {
 // (login progress, errors) in the TUI transcript.
 type MCPNoticeMsg struct {
 	Text string
+}
+
+// CommandNoticeMsg surfaces a non-tool command status without coupling the
+// terminal to a feature-specific settings channel.
+type CommandNoticeMsg struct {
+	Label string
+	Text  string
 }
 
 // ChannelStateMsg is sent from the main goroutine to update channel state display in TUI.

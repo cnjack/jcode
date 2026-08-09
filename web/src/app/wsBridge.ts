@@ -16,11 +16,16 @@ import {
   sendMessage,
   loadTasks,
   loadSessions,
+  loadSession,
+  hasToolLifecycleHost,
 } from './store'
 import { api } from '../lib/api'
 import type { Approval, Goal } from 'jcode-ui-core'
 import { normalizeMode } from '../lib/types'
 import { i18n } from '../i18n'
+import { normalizeWireLifecycle } from './toolLifecycle'
+
+const pendingLifecycleRefreshes = new Map<string, Promise<unknown>>()
 
 /** Create the handler set for a given store getter + dispatch. The handlers read
  *  fresh state (active task id) so they don't capture stale closures. */
@@ -28,12 +33,46 @@ export function createWSHandlers(
   getState: () => RootState,
   dispatch: AppDispatch,
 ): WSHandlers {
+  const refreshMissingLifecycleHost = (
+    toolCallID: string,
+    operationID: string | undefined,
+    name: string | undefined,
+    apply: () => void,
+  ) => {
+    const taskID = getState().session.currentSessionId
+    if (!taskID) return
+    const key = `${taskID}\u0000${toolCallID}\u0000${operationID || ''}`
+    let refresh = pendingLifecycleRefreshes.get(key)
+    if (!refresh) {
+      refresh = Promise.resolve(dispatch(loadSession(taskID))).then(
+        () => undefined,
+        () => undefined,
+      )
+      pendingLifecycleRefreshes.set(key, refresh)
+      void refresh.finally(() => {
+        if (pendingLifecycleRefreshes.get(key) === refresh) pendingLifecycleRefreshes.delete(key)
+      })
+    }
+    // Multiple progress/result frames may arrive while the one refresh is in
+    // flight. Give each frame a chance to attach after replay rebuilt the
+    // missing occurrence; do not let the first frame suppress later terminal
+    // evidence for the same operation.
+    void refresh.then(() => {
+      const state = getState()
+      if (
+        state.session.currentSessionId === taskID &&
+        hasToolLifecycleHost(state.chat.timeline, toolCallID, operationID, name)
+      ) apply()
+    })
+  }
+
   return {
     activeTaskId: () => getState().session.currentSessionId || undefined,
     onConnectionChange: (connected) => dispatch(sessionActions.setWsConnected(connected)),
     onAgentStart: () => dispatch(chatActions.setRunning(true)),
     onAgentText: (d) => dispatch(chatActions.appendAgentText(d.text)),
-    onToolCall: (d) =>
+    onToolCall: (d) => {
+      const lifecycle = normalizeWireLifecycle(d.phase)
       dispatch(
         chatActions.addToolCall({
           name: d.name,
@@ -44,23 +83,67 @@ export function createWSHandlers(
           batchIndex: d.batch_index,
           batchSize: d.batch_size,
           startedAt: d.started_at,
+          surface: d.surface,
+          phase: lifecycle.phase,
+          operationID: d.operation_id,
         }),
-      ),
-    onToolResult: (d) =>
-      dispatch(
-        chatActions.resolveToolCall({
-          name: d.name,
-          toolCallID: d.tool_call_id,
-          output: d.output,
-          displayOutput: d.display_output,
-          error: d.error,
-          denied: d.denied,
-          durationMs: d.duration_ms,
-          streams: d.streams,
-          meta: d.meta,
-          presentation: d.presentation,
-        }),
-      ),
+      )
+    },
+    onToolProgress: (d) => {
+      const lifecycle = normalizeWireLifecycle(d.phase)
+      const action = chatActions.progressToolCall({
+        name: d.name,
+        toolCallID: d.tool_call_id,
+        operationID: d.operation_id,
+        phase: lifecycle.phase,
+        outcome: lifecycle.outcome,
+        errorCode: d.error_code,
+        provider: d.provider,
+        model: d.model,
+        artifacts: d.artifacts,
+      })
+      if (hasToolLifecycleHost(getState().chat.timeline, d.tool_call_id, d.operation_id, d.name)) {
+        dispatch(action)
+        return
+      }
+      // A progress event without its initial tool_call must not bind to an old
+      // terminal occurrence that happens to reuse the same model-supplied ID.
+      // Refresh once per operation and re-apply the frame only if replay finds
+      // its concrete occurrence.
+      refreshMissingLifecycleHost(d.tool_call_id, d.operation_id, d.name, () => dispatch(action))
+    },
+    onToolResult: (d) => {
+      const lifecycle = normalizeWireLifecycle(d.phase, d.outcome)
+      const action = chatActions.resolveToolCall({
+        name: d.name,
+        toolCallID: d.tool_call_id,
+        output: d.output,
+        displayOutput: d.display_output,
+        error: d.error,
+        denied: d.denied,
+        durationMs: d.duration_ms,
+        streams: d.streams,
+        meta: d.meta,
+        presentation: d.presentation,
+        operationID: d.operation_id,
+        phase: lifecycle.phase,
+        outcome: lifecycle.outcome,
+        errorCode: d.error_code,
+        provider: d.provider,
+        model: d.model,
+        artifacts: d.artifacts,
+      })
+      const typedLifecycle = d.name === 'generate_image' || !!d.operation_id || !!d.outcome || !!d.artifacts?.length
+      if (
+        d.tool_call_id &&
+        typedLifecycle &&
+        !hasToolLifecycleHost(getState().chat.timeline, d.tool_call_id, d.operation_id, d.name)
+      ) {
+        refreshMissingLifecycleHost(d.tool_call_id, d.operation_id, d.name, () => dispatch(action))
+        return
+      }
+      dispatch(action)
+    },
     onTokenUpdate: (d) => dispatch(chatActions.setTokenSnapshot(d)),
     onAgentDone: (d) => {
       // agent_done arrives for EVERY session (the ws client lets it through the
@@ -99,6 +182,10 @@ export function createWSHandlers(
           tool_call_id: d.tool_call_id,
           is_external: d.is_external,
           task_id: d.task_id,
+          approvalClass: d.approval_class,
+          options: d.options,
+          billableSummary: d.billable_summary,
+          resolvedOptionId: d.resolved_option_id,
         } as Approval & { task_id?: string }),
       ),
     onAskUserRequest: (d) =>

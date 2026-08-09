@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/cnjack/jcode/internal/agent"
+	"github.com/cnjack/jcode/internal/artifact"
 	"github.com/cnjack/jcode/internal/browser"
 	"github.com/cnjack/jcode/internal/channel"
 	"github.com/cnjack/jcode/internal/computer"
@@ -32,12 +34,14 @@ import (
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	weixin "github.com/cnjack/jcode/internal/pkg/weixin"
 	"github.com/cnjack/jcode/internal/prompts"
+	"github.com/cnjack/jcode/internal/providertools"
 	"github.com/cnjack/jcode/internal/review"
 	"github.com/cnjack/jcode/internal/runner"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/skills"
 	"github.com/cnjack/jcode/internal/team"
 	"github.com/cnjack/jcode/internal/telemetry"
+	"github.com/cnjack/jcode/internal/toolpolicy"
 	"github.com/cnjack/jcode/internal/tools"
 	"github.com/cnjack/jcode/internal/tui"
 	util "github.com/cnjack/jcode/internal/util"
@@ -45,35 +49,44 @@ import (
 
 // interactiveState holds all shared state for the interactive TUI event loop.
 type interactiveState struct {
-	ctx             context.Context
-	p               *tea.Program
-	cfg             *config.Config
-	chatModel       einomodel.ToolCallingChatModel
-	ag              *adk.ChatModelAgent
-	history         []adk.Message
-	env             *tools.Env
-	bgManager       *tools.BackgroundManager
-	approvalState   *runner.ApprovalState
-	rec             *session.Recorder
-	planStore       *tools.PlanStore
-	summCapture     *agent.SummarizationCapture
-	systemPrompt    string
-	toolList        []tool.BaseTool
-	agentMode       tui.AgentMode
-	agentRoleName   string
-	agentRole       *config.AgentRoleConfig
-	envInfo         *util.EnvInfo
-	pwd             string
-	platform        string
-	registry        *internalmodel.ModelRegistry
-	skillLoader     *skills.Loader
-	flowLoader      *flow.Loader
-	langfuseTracer  *telemetry.LangfuseTracer
-	h               handler.AgentEventHandler
-	askUserDeps     *tools.AskUserDeps
-	teamManager     *team.Manager
-	mcpTools        []tool.BaseTool
-	agentTokenUsage *internalmodel.TokenUsage
+	ctx                  context.Context
+	p                    *tea.Program
+	cfg                  *config.Config
+	chatModel            einomodel.ToolCallingChatModel
+	ag                   *adk.ChatModelAgent
+	history              []adk.Message
+	env                  *tools.Env
+	bgManager            *tools.BackgroundManager
+	approvalState        *runner.ApprovalState
+	artifactService      *artifact.Service
+	imageLedger          *toolpolicy.UsageLedger
+	providerSearchLedger *toolpolicy.UsageLedger
+	activeProvider       string
+	activeModel          string
+	rec                  *session.Recorder
+	planStore            *tools.PlanStore
+	summCapture          *agent.SummarizationCapture
+	systemPrompt         string
+	toolList             []tool.BaseTool
+	agentMode            tui.AgentMode
+	agentRoleName        string
+	agentRole            *config.AgentRoleConfig
+	envInfo              *util.EnvInfo
+	pwd                  string
+	platform             string
+	registry             *internalmodel.ModelRegistry
+	skillLoader          *skills.Loader
+	flowLoader           *flow.Loader
+	langfuseTracer       *telemetry.LangfuseTracer
+	h                    handler.AgentEventHandler
+	askUserDeps          *tools.AskUserDeps
+	teamManager          *team.Manager
+	rawMCPTools          []tool.BaseTool
+	rawMCPConfigEpoch    string
+	mcpTools             []tool.BaseTool
+	mcpReloadMu          sync.Mutex
+	modeSwitchMu         sync.Mutex
+	agentTokenUsage      *internalmodel.TokenUsage
 
 	sessionResumeWarning  string
 	sessionBaselineCommit string
@@ -181,6 +194,18 @@ func (s *interactiveState) buildAllTools() []tool.BaseTool {
 		tools.NewTeamSendMessageTool(s.teamManager),
 		tools.NewTeamListTool(s.teamManager),
 		tools.NewTeamDeleteTool(s.teamManager),
+	}
+	// Image generation always executes in the local JCode engine and stores a
+	// managed local artifact, even while the coding executor targets SSH.
+	if imageGenerationEnabled(s.cfg, false, true) {
+		if imageTool, err := configuredGenerateImageTool(
+			s.cfg, s.artifactService, s.rec, s.imageLedger,
+			projectProviderRuntimeConfigLoader(s.pwd), s.h, nil,
+		); err == nil {
+			all = append(all, imageTool)
+		} else if s.cfg != nil && s.cfg.ImageModel != "" {
+			config.Logger().Printf("[image] generate_image unavailable: %v", err)
+		}
 	}
 	// Only add switch_env tool if SSH aliases are configured
 	if s.cfg != nil && len(s.cfg.SSHAliases) > 0 {
@@ -290,6 +315,20 @@ func (s *interactiveState) subagentTokenFn(agentName string, totalTokens int64) 
 }
 
 func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
+	return s.createAgentWithModeCatalog(
+		s.agentMode, s.systemPrompt, s.toolList, s.mcpTools,
+	)
+}
+
+// createAgentWithModeCatalog builds an unpublished agent for a target tool and
+// prompt axis. Explicit mode changes use it before writing the authorization
+// journal, so a failed build cannot alter the live agent or selector state.
+func (s *interactiveState) createAgentWithModeCatalog(
+	agentMode tui.AgentMode,
+	systemPrompt string,
+	toolList []tool.BaseTool,
+	mcpTools []tool.BaseTool,
+) (*adk.ChatModelAgent, error) {
 	var middlewares []adk.ChatModelAgentMiddleware
 	if s.langfuseTracer != nil {
 		middlewares = append(middlewares, s.langfuseTracer.AgentMiddleware())
@@ -297,7 +336,10 @@ func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
 
 	var handlers []adk.ChatModelAgentMiddleware
 
-	providerName, modelName := s.cfg.GetProviderModel()
+	providerName, modelName := s.activeProvider, s.activeModel
+	if providerName == "" || modelName == "" {
+		providerName, modelName = s.cfg.GetProviderModel()
+	}
 	contextLimit := internalmodel.ResolveContextLimit(s.registry, s.cfg, providerName, modelName)
 	// effLimit reserves output/summary headroom so trigger math never lets the
 	// real window overflow before compaction fires. The reminder middleware
@@ -397,7 +439,6 @@ func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
 
 	// Wire up budget middleware (per-agent tracker).
 	if s.cfg.Budget != nil {
-		providerName, modelName := s.cfg.GetProviderModel()
 		inputPer1M, outputPer1M := s.registry.GetModelCost(providerName, modelName)
 		cacheReadPer1M, _ := s.registry.GetModelCacheCost(providerName, modelName)
 		pricing := internalmodel.ModelPricing{InputPer1M: inputPer1M, OutputPer1M: outputPer1M, CacheReadPer1M: cacheReadPer1M}
@@ -408,33 +449,40 @@ func (s *interactiveState) createAgent() (*adk.ChatModelAgent, error) {
 		handlers = append([]adk.ChatModelAgentMiddleware{budgetMw}, handlers...)
 	}
 
+	effectiveMCPTools := mcpTools
+	if agentMode == tui.ModePlanning {
+		effectiveMCPTools = nil
+	} else if s.env.IsRemote() {
+		generic, _, identifyErr := splitProviderSearchMCPTools(s.ctx, effectiveMCPTools)
+		if identifyErr != nil {
+			config.Logger().Printf("[provider-search] filter remote TUI catalog: %v", identifyErr)
+		}
+		effectiveMCPTools = generic
+	}
+
 	if !config.ToolSearchEnabled(s.cfg) {
-		staticTools := s.toolList
-		if s.agentMode != tui.ModePlanning {
-			staticTools = append(append([]tool.BaseTool(nil), staticTools...), s.mcpTools...)
+		staticTools := toolList
+		if agentMode != tui.ModePlanning {
+			staticTools = append(append([]tool.BaseTool(nil), staticTools...), effectiveMCPTools...)
 		}
 		return agent.NewAgent(
-			s.ctx, s.chatModel, staticTools, s.systemPrompt,
+			s.ctx, s.chatModel, staticTools, systemPrompt,
 			s.approvalState.RequestApproval, middlewares, handlers,
 		)
 	}
 
 	toolMode := agent.ToolModeNormal
-	if s.agentMode == tui.ModePlanning {
+	if agentMode == tui.ModePlanning {
 		toolMode = agent.ToolModePlan
 	}
-	mcpTools := s.mcpTools
-	if s.agentMode == tui.ModePlanning {
-		mcpTools = nil
-	}
 	toolPlan, err := buildCommandToolPlan(
-		s.ctx, s.toolList, mcpTools, agent.ToolTransportTUI, toolMode,
+		s.ctx, toolList, effectiveMCPTools, agent.ToolTransportTUI, toolMode,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("build TUI tool plan: %w", err)
 	}
 	return agent.NewAgentWithToolPlan(
-		s.ctx, s.chatModel, toolPlan, s.systemPrompt,
+		s.ctx, s.chatModel, toolPlan, systemPrompt,
 		s.approvalState.RequestApproval, middlewares, handlers,
 	)
 }
@@ -455,25 +503,107 @@ func mcpStatusItems(internalStatuses []tools.MCPStatus) []tui.MCPStatusItem {
 	return items
 }
 
+func (s *interactiveState) configureProviderMCPTools() error {
+	configured, err := s.providerMCPToolsFor()
+	s.mcpTools = configured
+	return err
+}
+
+func (s *interactiveState) providerMCPToolsFor() ([]tool.BaseTool, error) {
+	providerToolCfg := *s.cfg
+	projectActiveChatModel(&providerToolCfg, s.activeProvider, s.activeModel)
+	return configuredProviderMCPTools(
+		s.ctx,
+		&providerToolCfg,
+		s.rec,
+		s.providerSearchLedger,
+		&providerSearchMCPCatalog{
+			Tools:       append([]tool.BaseTool(nil), s.rawMCPTools...),
+			ConfigEpoch: s.rawMCPConfigEpoch,
+		},
+		false,
+		true,
+		activeChatProviderRuntimeConfigLoader(
+			projectProviderRuntimeConfigLoader(s.pwd), s.activeProvider, s.activeModel,
+		),
+	)
+}
+
+func (s *interactiveState) failClosedAgentRebuild(scope string, err error) {
+	s.ag = nil
+	config.Logger().Printf("[%s] fail-closed agent rebuild: %v", scope, err)
+	if s.p == nil {
+		return
+	}
+	s.p.Send(tui.AgentDoneMsg{Err: fmt.Errorf("%s safely: %w", scope, err)})
+	if s.cancelFunc != nil {
+		s.cancelFunc()
+	}
+	s.p.Quit()
+}
+
 // reloadMCP reloads MCP servers from the current config, rebuilds the agent
 // tool set in place, and pushes a fresh status to the TUI. Used after an
 // OAuth login or MCP config change so tools become usable without a restart.
 func (s *interactiveState) reloadMCP() {
+	s.mcpReloadMu.Lock()
+	defer s.mcpReloadMu.Unlock()
 	latest, err := config.LoadConfig()
 	if err != nil {
 		config.Logger().Printf("[mcp] reload: config load failed: %v", err)
+		// Keep unrelated MCP tools, but immediately remove any previously
+		// configured provider-search endpoint. Continuing to use the old agent
+		// would retain a credential-bearing tool after its policy became
+		// unreadable.
+		generic, _, identifyErr := splitProviderSearchMCPTools(s.ctx, s.rawMCPTools)
+		if identifyErr != nil {
+			config.Logger().Printf("[mcp] reload: filter provider search tools: %v", identifyErr)
+		}
+		s.rawMCPTools = generic
+		s.rawMCPConfigEpoch = ""
+		s.mcpTools = generic
+		if s.agentMode != tui.ModePlanning {
+			s.toolList = s.buildTopLevelTools()
+			if newAg, rebuildErr := s.createAgent(); rebuildErr == nil {
+				s.ag = newAg
+			} else {
+				config.Logger().Printf("[mcp] reload: fail-closed agent rebuild failed: %v", rebuildErr)
+				s.p.Send(tui.AgentDoneMsg{Err: fmt.Errorf("reload MCP tools safely: %w", rebuildErr)})
+				if s.cancelFunc != nil {
+					s.cancelFunc()
+				}
+				s.p.Quit()
+			}
+		}
 		return
 	}
 	config.ApplyProjectOverlay(latest, s.pwd)
 	s.cfg = latest
-	mcpTools, statuses := tools.LoadMCPTools(s.ctx, latest.MCPServers)
-	s.mcpTools = mcpTools
+	rawMCPTools, statuses := tools.LoadMCPTools(s.ctx, providertools.EffectiveMCPServers(latest))
+	rawCatalog := newProviderSearchMCPCatalog(latest, rawMCPTools)
+	s.rawMCPTools = rawCatalog.Tools
+	s.rawMCPConfigEpoch = rawCatalog.ConfigEpoch
+	if s.providerSearchLedger == nil {
+		s.providerSearchLedger, err = newProviderSearchUsageLedger(s.rec)
+		if err != nil {
+			config.Logger().Printf("[mcp] reload: initialize provider search ledger: %v", err)
+		}
+	}
+	wrapErr := s.configureProviderMCPTools()
+	if wrapErr != nil {
+		config.Logger().Printf("[mcp] reload: provider search unavailable: %v", wrapErr)
+	}
 	if s.agentMode != tui.ModePlanning {
 		s.toolList = s.buildTopLevelTools()
 		if newAg, err := s.createAgent(); err == nil {
 			s.ag = newAg
 		} else {
 			config.Logger().Printf("[mcp] reload: agent rebuild failed: %v", err)
+			s.p.Send(tui.AgentDoneMsg{Err: fmt.Errorf("reload MCP tools safely: %w", err)})
+			if s.cancelFunc != nil {
+				s.cancelFunc()
+			}
+			s.p.Quit()
 		}
 	}
 	if s.p != nil {
@@ -492,6 +622,90 @@ func modeAfterToolSwitch(current mode.SessionMode, newMode tui.AgentMode) mode.S
 		return mode.Approval
 	}
 	return current
+}
+
+type preparedTUISessionMode struct {
+	agentMode    tui.AgentMode
+	systemPrompt string
+	tools        []tool.BaseTool
+	agent        *adk.ChatModelAgent
+}
+
+// prepareTUISessionMode completes every fallible part of an explicit mode
+// switch against an unpublished snapshot. In particular, entering Plan builds
+// the read-only prompt/tool agent before the authorization journal is touched.
+func (s *interactiveState) prepareTUISessionMode(
+	target mode.SessionMode,
+) (preparedTUISessionMode, error) {
+	prepared := preparedTUISessionMode{agentMode: tui.ModeNormal}
+	envLabel := s.env.Exec.Label()
+	if target.IsPlan() {
+		prepared.agentMode = tui.ModePlanning
+		prepared.systemPrompt = s.withTopLevelAgentPrompt(
+			prompts.GetPlanSystemPrompt(s.platform, s.pwd, envLabel, s.envInfo),
+		)
+		prepared.tools = s.buildPlanTools()
+	} else {
+		prepared.systemPrompt = s.withTopLevelAgentPrompt(
+			prompts.GetSystemPrompt(
+				s.platform, s.pwd, envLabel, s.envInfo, s.skillLoader.Descriptions(),
+			),
+		)
+		prepared.tools = s.buildAllTools()
+	}
+	candidate, err := s.createAgentWithModeCatalog(
+		prepared.agentMode, prepared.systemPrompt, prepared.tools, s.mcpTools,
+	)
+	if err != nil {
+		return preparedTUISessionMode{}, err
+	}
+	if candidate == nil {
+		return preparedTUISessionMode{}, fmt.Errorf("candidate agent is unavailable")
+	}
+	prepared.agent = candidate
+	return prepared, nil
+}
+
+// commitTUISessionMode is the TUI authorization transaction:
+// prepare candidate -> fsync journal -> publish backend state. It deliberately
+// never calls Program.Send: Approve All invokes it from BubbleTea Model.Update,
+// where a synchronous send to the same unbuffered event loop would deadlock.
+// The explicit selector caller acknowledges success after this method returns;
+// Approve All updates its Model locally. On error both paths remain unchanged.
+func (s *interactiveState) commitTUISessionMode(target mode.SessionMode) error {
+	s.modeSwitchMu.Lock()
+	defer s.modeSwitchMu.Unlock()
+
+	if s.approvalState.GetSessionMode() == target {
+		return nil
+	}
+	prepared, err := s.prepareTUISessionMode(target)
+	if err != nil {
+		return fmt.Errorf("prepare mode %s: %w", target.String(), err)
+	}
+	return s.persistAndPublishTUISessionMode(target, prepared)
+}
+
+func (s *interactiveState) persistAndPublishTUISessionMode(
+	target mode.SessionMode,
+	prepared preparedTUISessionMode,
+) error {
+	if s.rec == nil {
+		return fmt.Errorf("session recorder is unavailable")
+	}
+	if err := s.rec.RecordModeChangeStrict(target.String()); err != nil {
+		return fmt.Errorf("persist mode %s: %w", target.String(), err)
+	}
+
+	s.approvalState.SetSessionMode(target)
+	s.agentMode = prepared.agentMode
+	s.systemPrompt = prepared.systemPrompt
+	s.toolList = prepared.tools
+	s.ag = prepared.agent
+	if s.agentTokenUsage != nil {
+		s.agentTokenUsage.ResetContext()
+	}
+	return nil
 }
 
 func (s *interactiveState) applyModeSwitch(newMode tui.AgentMode) {
@@ -518,7 +732,7 @@ func (s *interactiveState) applyModeSwitch(newMode tui.AgentMode) {
 		s.ag = newAg
 		config.Logger().Printf("[plan] agent recreated successfully")
 	} else {
-		config.Logger().Printf("[plan] agent creation failed: %v", err)
+		s.failClosedAgentRebuild("switch session mode", err)
 	}
 	if s.agentTokenUsage != nil {
 		s.agentTokenUsage.ResetContext()
@@ -530,24 +744,29 @@ func (s *interactiveState) applyModeSwitch(newMode tui.AgentMode) {
 	}
 }
 
-// applySessionMode applies a unified selector mode to BOTH axes: the approval
-// axis (via ApprovalState) and the tool/prompt axis (rebuilding the agent). It
-// is the single entry point for a mode change driven by the TUI selector.
-// SetSessionMode runs first so applyModeSwitch records the correct unified mode.
-func (s *interactiveState) applySessionMode(m mode.SessionMode) {
-	s.approvalState.SetSessionMode(m)
-	if m.IsPlan() {
-		s.applyModeSwitch(tui.ModePlanning)
-	} else {
-		s.applyModeSwitch(tui.ModeNormal)
+// applySessionMode is the explicit selector entry point. It intentionally does
+// not optimistically mutate either axis; commitTUISessionMode publishes only
+// after the candidate agent and durable journal both succeed.
+func (s *interactiveState) applySessionMode(m mode.SessionMode) error {
+	if err := s.commitTUISessionMode(m); err != nil {
+		return err
 	}
+	// Explicit selector requests are consumed by the command event loop, not
+	// BubbleTea Model.Update, so acknowledging via Program.Send cannot self-lock.
+	if s.p != nil {
+		s.p.Send(tui.ModeSelectedMsg{Mode: m})
+	}
+	return nil
 }
 
 func (s *interactiveState) drainModeSwitch(modeSelectCh <-chan mode.SessionMode) {
 	for {
 		select {
 		case sm := <-modeSelectCh:
-			s.applySessionMode(sm)
+			if err := s.applySessionMode(sm); err != nil {
+				config.Logger().Printf("[mode] TUI mode switch failed: %v", err)
+				s.p.Send(tui.CommandNoticeMsg{Label: "Mode", Text: "unchanged (could not save mode change)"})
+			}
 		default:
 			return
 		}
@@ -745,18 +964,29 @@ func (s *interactiveState) handleResume(uuid string) {
 	}
 	st := session.ReconstructState(entries)
 	s.history = session.PruneOldToolOutputs(st.History, 2)
-	// Restore the unified session mode. The approval axis is restored as-is, so a
-	// session saved in Full access resumes auto-approving (accept-all-risk policy).
-	// A saved Plan is normalized to Approval on resume: we keep full tools and restore
-	// the saved plan into planStore below rather than stranding the user in the
-	// read-only plan tool set with no execution trigger.
-	restoredMode := mode.Parse(st.Mode)
-	if restoredMode == mode.Plan {
-		restoredMode = mode.Approval
-	}
+	// Authorization restore is intentionally independent from the tolerant
+	// conversational replay above. A malformed line could be a newer Approval
+	// revoke, so the strict reader fails closed instead of reviving Full access.
+	restoredMode := restoredSessionMode(uuid, "tui-resume")
 	s.approvalState.SetSessionMode(restoredMode)
 	s.agentMode = tui.ModeNormal
 	s.rec.SetUUID(uuid)
+	if ledgerErr := resetImageUsageLedger(s.imageLedger, s.rec); ledgerErr != nil {
+		config.Logger().Printf("[image] switch TUI usage ledger: %v", ledgerErr)
+		s.imageLedger = nil
+	}
+	if s.providerSearchLedger == nil {
+		s.providerSearchLedger, loadErr = newProviderSearchUsageLedger(s.rec)
+	} else {
+		loadErr = resetProviderSearchUsageLedger(s.providerSearchLedger, s.rec)
+	}
+	if loadErr != nil {
+		config.Logger().Printf("[provider-search] switch TUI usage ledger: %v", loadErr)
+		s.providerSearchLedger = nil
+	}
+	if configureErr := s.configureProviderMCPTools(); configureErr != nil {
+		config.Logger().Printf("[provider-search] switch TUI MCP catalog: %v", configureErr)
+	}
 	s.p.Send(tui.SessionResumedMsg{UUID: uuid, Entries: tui.ConvertSessionEntries(entries)})
 	// Sync the mode pill with the restored mode (SessionResumedMsg resets the
 	// pill to Approval; this overrides it with what the session was actually saved in).
@@ -804,16 +1034,35 @@ func (s *interactiveState) handleResume(uuid string) {
 	if targetEnv := st.EnvTarget; targetEnv != "local" {
 		s.sessionResumeWarning = s.attemptSSHResume(targetEnv)
 	}
+	s.toolList = s.buildTopLevelTools()
+	if newAgent, agentErr := s.createAgent(); agentErr == nil {
+		s.ag = newAgent
+	} else {
+		config.Logger().Printf("[session] fail-closed agent rebuild after session switch: %v", agentErr)
+		s.p.Send(tui.AgentDoneMsg{Err: fmt.Errorf("resume session safely: %w", agentErr)})
+		if s.cancelFunc != nil {
+			s.cancelFunc()
+		}
+		s.p.Quit()
+	}
 }
 
 func (s *interactiveState) handleConfig(cfgMsg *config.Config) {
 	// Update stored config
 	s.cfg = cfgMsg
-
 	newProvName, newModelName := cfgMsg.GetProviderModel()
+	s.activeProvider, s.activeModel = newProvName, newModelName
+	if configureErr := s.configureProviderMCPTools(); configureErr != nil {
+		// The raw provider endpoint is tied to the epoch captured when its MCP
+		// transport connected. A config/key/policy change strips it until an
+		// explicit MCP reload reconnects with the new epoch.
+		config.Logger().Printf("[provider-search] config rebuild filtered MCP catalog: %v", configureErr)
+	}
+
 	newProviders := cfgMsg.GetProviders()
 	newProvCfg := newProviders[newProvName]
 	if newProvCfg == nil {
+		s.failClosedAgentRebuild("apply config", fmt.Errorf("provider %q is unavailable", newProvName))
 		return
 	}
 
@@ -830,6 +1079,7 @@ func (s *interactiveState) handleConfig(cfgMsg *config.Config) {
 	newEffortCfg.ReasoningEffort = config.ResolveEffort(newProvName, newModelName, newProvCfg.ReasoningEffort)
 	newChatModel, err := internalmodel.NewChatModelFromProvider(s.ctx, newProvName, newModelName, newBaseURL, &newEffortCfg)
 	if err != nil {
+		s.failClosedAgentRebuild("apply config", err)
 		return
 	}
 	s.chatModel = newChatModel
@@ -843,6 +1093,8 @@ func (s *interactiveState) handleConfig(cfgMsg *config.Config) {
 
 	if newAg, err := s.createAgent(); err == nil {
 		s.ag = newAg
+	} else {
+		s.failClosedAgentRebuild("apply config", err)
 	}
 }
 
@@ -890,9 +1142,14 @@ func (s *interactiveState) handleAddModel() {
 	newProviders := newCfg.GetProviders()
 	newProvCfg := newProviders[newProvName]
 	if newProvCfg == nil {
+		s.failClosedAgentRebuild("add model", fmt.Errorf("provider %q is unavailable", newProvName))
 		return
 	}
 	// Refresh registry so new custom models / providers are available.
+	s.cfg = newCfg
+	if configureErr := s.configureProviderMCPTools(); configureErr != nil {
+		config.Logger().Printf("[provider-search] add-model rebuild filtered MCP catalog: %v", configureErr)
+	}
 	s.registry = internalmodel.NewModelRegistryWithConfig(newCfg)
 
 	newBaseURL := newProvCfg.BaseURL
@@ -903,6 +1160,7 @@ func (s *interactiveState) handleAddModel() {
 	newEffortCfg2.ReasoningEffort = config.ResolveEffort(newProvName, newModelName, newProvCfg.ReasoningEffort)
 	newChatModel, cmErr := internalmodel.NewChatModelFromProvider(s.ctx, newProvName, newModelName, newBaseURL, &newEffortCfg2)
 	if cmErr != nil {
+		s.failClosedAgentRebuild("add model", cmErr)
 		return
 	}
 	s.chatModel = newChatModel
@@ -911,6 +1169,9 @@ func (s *interactiveState) handleAddModel() {
 	}
 	if newAg, agErr := s.createAgent(); agErr == nil {
 		s.ag = newAg
+	} else {
+		s.failClosedAgentRebuild("add model", agErr)
+		return
 	}
 	s.p.Send(tui.ConfigUpdatedMsg{
 		Provider: newProvName,
@@ -931,6 +1192,8 @@ func (s *interactiveState) handleSSH(connMsg interface{}) {
 		s.refreshTopLevelPromptAndTools("local", s.envInfo)
 		if newAg, err := s.createAgent(); err == nil {
 			s.ag = newAg
+		} else {
+			s.failClosedAgentRebuild("leave remote environment", err)
 		}
 	}
 }
@@ -1039,7 +1302,10 @@ func (s *interactiveState) runEventLoop(initialHistory []adk.Message, initialRes
 	for {
 		select {
 		case sm := <-modeSelectCh:
-			s.applySessionMode(sm)
+			if err := s.applySessionMode(sm); err != nil {
+				config.Logger().Printf("[mode] TUI mode switch failed: %v", err)
+				s.p.Send(tui.CommandNoticeMsg{Label: "Mode", Text: "unchanged (could not save mode change)"})
+			}
 
 		case cfgMsg := <-configCh:
 			s.handleConfig(cfgMsg)
@@ -1070,6 +1336,7 @@ func (s *interactiveState) runEventLoop(initialHistory []adk.Message, initialRes
 
 		case name := <-mcpLoginCh:
 			s.handleMCPLogin(name)
+
 		}
 	}
 }
@@ -1238,17 +1505,42 @@ func RunInteractive(prompt, resumeUUID, agentName string, unsafe bool) error {
 		defer func() { _ = computerMgr.Close() }()
 	}
 
-	var mcpTools []tool.BaseTool
+	var rawMCPTools []tool.BaseTool
 	var mcpStatuses []tui.MCPStatusItem
-	if len(cfg.MCPServers) > 0 {
+	effectiveMCPServers := providertools.EffectiveMCPServers(cfg)
+	if len(effectiveMCPServers) > 0 {
 		var internalStatuses []tools.MCPStatus
-		mcpTools, internalStatuses = tools.LoadMCPTools(ctx, cfg.MCPServers)
+		rawMCPTools, internalStatuses = tools.LoadMCPTools(ctx, effectiveMCPServers)
 		mcpStatuses = mcpStatusItems(internalStatuses)
 	}
+	rawMCPCatalog := newProviderSearchMCPCatalog(cfg, rawMCPTools)
 
 	planStore := tools.NewPlanStore()
 
 	rec, _ := session.NewRecorder(pwd, providerName, modelName)
+	if resumeUUID != "" && rec != nil {
+		rec.SetUUID(resumeUUID)
+	}
+	imageLedger, imageLedgerErr := newImageUsageLedger(rec)
+	if imageLedgerErr != nil {
+		config.Logger().Printf("[image] initialize TUI usage ledger: %v", imageLedgerErr)
+	}
+	providerSearchLedger, providerSearchLedgerErr := newProviderSearchUsageLedger(rec)
+	if providerSearchLedgerErr != nil {
+		config.Logger().Printf("[provider-search] initialize TUI usage ledger: %v", providerSearchLedgerErr)
+	}
+	providerToolCfg := *cfg
+	projectActiveChatModel(&providerToolCfg, providerName, modelName)
+	mcpTools, providerSearchWrapErr := configuredProviderMCPTools(
+		ctx, &providerToolCfg, rec, providerSearchLedger,
+		rawMCPCatalog,
+		false, true, activeChatProviderRuntimeConfigLoader(
+			projectProviderRuntimeConfigLoader(pwd), providerName, modelName,
+		),
+	)
+	if providerSearchWrapErr != nil {
+		config.Logger().Printf("[provider-search] initialize TUI MCP tools: %v", providerSearchWrapErr)
+	}
 	// LLM session titles ride the small model (checked at fire time).
 	attachTitleRefiner(ctx, rec)
 
@@ -1279,26 +1571,33 @@ func RunInteractive(prompt, resumeUUID, agentName string, unsafe bool) error {
 	}
 
 	st := &interactiveState{
-		ctx:          ctx,
-		cancelFunc:   cancelFunc,
-		cfg:          cfg,
-		chatModel:    chatModel,
-		env:          env,
-		bgManager:    bgManager,
-		planStore:    planStore,
-		summCapture:  &agent.SummarizationCapture{},
-		systemPrompt: systemPrompt,
-		agentMode:    tui.ModeNormal,
-		envInfo:      envInfo,
-		pwd:          pwd,
-		platform:     platform,
-		registry:     registry,
-		skillLoader:  skillLoader,
-		flowLoader:   flowLoader,
-		askUserDeps:  askUserDeps,
-		mcpTools:     mcpTools,
-		rec:          rec,
-		hookDisp:     hookDisp,
+		ctx:                  ctx,
+		cancelFunc:           cancelFunc,
+		cfg:                  cfg,
+		chatModel:            chatModel,
+		env:                  env,
+		bgManager:            bgManager,
+		planStore:            planStore,
+		summCapture:          &agent.SummarizationCapture{},
+		systemPrompt:         systemPrompt,
+		agentMode:            tui.ModeNormal,
+		envInfo:              envInfo,
+		pwd:                  pwd,
+		platform:             platform,
+		registry:             registry,
+		skillLoader:          skillLoader,
+		flowLoader:           flowLoader,
+		askUserDeps:          askUserDeps,
+		rawMCPTools:          rawMCPCatalog.Tools,
+		rawMCPConfigEpoch:    rawMCPCatalog.ConfigEpoch,
+		mcpTools:             mcpTools,
+		rec:                  rec,
+		artifactService:      artifact.NewService(session.LoadArtifactRecords, time.Now),
+		imageLedger:          imageLedger,
+		providerSearchLedger: providerSearchLedger,
+		activeProvider:       providerName,
+		activeModel:          modelName,
+		hookDisp:             hookDisp,
 	}
 	if err := st.setTopLevelAgent(selectedAgentName); err != nil {
 		return err
@@ -1388,10 +1687,22 @@ func RunInteractive(prompt, resumeUUID, agentName string, unsafe bool) error {
 	st.teamManager = teamManager
 	st.toolList = st.buildTopLevelTools()
 
-	// Resolve the startup session mode. CLI --unsafe forces Full access and takes
-	// precedence over config. Otherwise DefaultMode wins, falling back to the
-	// legacy AutoApprove bool (true → Full access) when DefaultMode is unset.
+	// Resolve a fresh task's startup mode from CLI/config. A resumed task then
+	// replaces it with its own strictly replayed authorization state.
 	startupMode := resolveStartupMode(cfg, unsafe)
+	if resumeUUID != "" {
+		// A resumed task owns its authorization state. Do not inherit a global
+		// Full access default (or --unsafe) when its strict journal says Approval;
+		// an ambiguous/corrupt journal also fails closed to Approval.
+		startupMode = restoredSessionMode(resumeUUID, "tui-startup-resume")
+	}
+	if startupMode.IsPlan() {
+		st.agentMode = tui.ModePlanning
+		st.systemPrompt = st.withTopLevelAgentPrompt(
+			prompts.GetPlanSystemPrompt(platform, pwd, "local", envInfo),
+		)
+		st.toolList = st.buildPlanTools()
+	}
 	approvalState := runner.NewApprovalStateWithMode(pwd, startupMode)
 	approvalState.SetBrowserPermFunc(func(origin, class string) bool {
 		return browserSitePreapproved(cfg, origin, class)
@@ -1527,8 +1838,16 @@ func RunInteractive(prompt, resumeUUID, agentName string, unsafe bool) error {
 		},
 	}
 
-	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore, tui.WithVersion(Version), tui.WithGoalStore(env.GoalStore), tui.WithStartupMode(startupMode), tui.WithTheme(cfg.Theme), tui.WithBrowser(browserCtl), tui.WithComputer(computerCtl), tui.WithApprovalModeChange(func(enabled bool) {
-		approvalState.SetSessionApproval(enabled)
+	p, _ := tui.RunTUI(hasPrompt, pwd, env.TodoStore, tui.WithVersion(Version), tui.WithGoalStore(env.GoalStore), tui.WithStartupMode(startupMode), tui.WithTheme(cfg.Theme), tui.WithBrowser(browserCtl), tui.WithComputer(computerCtl), tui.WithApprovalModeChange(func(enabled bool) error {
+		target := mode.Approval
+		if enabled {
+			target = mode.FullAccess
+		}
+		if err := st.commitTUISessionMode(target); err != nil {
+			config.Logger().Printf("[mode] TUI approve-all commit failed: %v", err)
+			return fmt.Errorf("could not save mode change")
+		}
+		return nil
 	}))
 	st.p = p
 	bgManager.SetNotifier(func(taskID, cmd, status string) {
@@ -1537,6 +1856,15 @@ func RunInteractive(prompt, resumeUUID, agentName string, unsafe bool) error {
 	teamManager.SetTuiProgram(p)
 
 	h := handler.NewTUIHandler(p)
+	h.SetArtifactPathResolver(func(artifactID string) (string, error) {
+		if st.rec == nil || st.artifactService == nil {
+			return "", fmt.Errorf("artifact service is unavailable")
+		}
+		_, resolved, err := st.artifactService.Resolve(
+			context.Background(), st.rec.UUID(), st.pwd, artifactID,
+		)
+		return resolved, err
+	})
 
 	// Wrap with notifying handler for WeChat push notifications
 	notifyingH := handler.NewNotifyingHandler(h, 10*time.Second)
@@ -1585,6 +1913,9 @@ func RunInteractive(prompt, resumeUUID, agentName string, unsafe bool) error {
 		}
 	}()
 
+	// Rebind run-scoped callbacks (including image progress) now that the final
+	// transport handler exists; the provisional tool list was built earlier.
+	st.toolList = st.buildTopLevelTools()
 	ag, err := st.createAgent()
 	if err != nil {
 		return fmt.Errorf("error creating agent: %w", err)
@@ -1607,6 +1938,9 @@ func RunInteractive(prompt, resumeUUID, agentName string, unsafe bool) error {
 			st.refreshTopLevelPromptAndTools("local", envInfo)
 			if newAg, agErr := st.createAgent(); agErr == nil {
 				st.ag = newAg
+			} else {
+				st.failClosedAgentRebuild("switch to local environment", agErr)
+				return
 			}
 			p.Send(tui.SSHCancelMsg{})
 			return
@@ -1615,6 +1949,9 @@ func RunInteractive(prompt, resumeUUID, agentName string, unsafe bool) error {
 		st.refreshTopLevelPromptAndTools(envLabel, nil)
 		if newAg, agErr := st.createAgent(); agErr == nil {
 			st.ag = newAg
+		} else {
+			st.failClosedAgentRebuild("switch to remote environment", agErr)
+			return
 		}
 		p.Send(tui.SSHStatusMsg{Success: true, Label: envLabel})
 	}
@@ -1680,6 +2017,23 @@ func RunInteractive(prompt, resumeUUID, agentName string, unsafe bool) error {
 		// Reuse the existing session UUID so new messages are appended to the same file
 		if st.rec != nil {
 			st.rec.SetUUID(resumeUUID)
+			if ledgerErr := resetImageUsageLedger(st.imageLedger, st.rec); ledgerErr != nil {
+				config.Logger().Printf("[image] restore TUI usage ledger: %v", ledgerErr)
+				st.imageLedger = nil
+			}
+			var providerSearchLedgerErr error
+			if st.providerSearchLedger == nil {
+				st.providerSearchLedger, providerSearchLedgerErr = newProviderSearchUsageLedger(st.rec)
+			} else {
+				providerSearchLedgerErr = resetProviderSearchUsageLedger(st.providerSearchLedger, st.rec)
+			}
+			if providerSearchLedgerErr != nil {
+				config.Logger().Printf("[provider-search] restore TUI usage ledger: %v", providerSearchLedgerErr)
+				st.providerSearchLedger = nil
+			}
+			if configureErr := st.configureProviderMCPTools(); configureErr != nil {
+				config.Logger().Printf("[provider-search] restore TUI MCP catalog: %v", configureErr)
+			}
 			// The dispatcher + SessionStart during setup bound to the throwaway UUID;
 			// rebuild against the restored one so hook payloads carry the correct
 			// session_id, then fire SessionStart now — once — for the real session.
@@ -1689,6 +2043,12 @@ func RunInteractive(prompt, resumeUUID, agentName string, unsafe bool) error {
 				dec := st.hookDisp.Fire(st.ctx, hooks.SessionStart, hooks.Payload{})
 				st.hookStartContext = dec.AdditionalContext
 			}
+			st.toolList = st.buildTopLevelTools()
+			resumedAgent, rebuildErr := st.createAgent()
+			if rebuildErr != nil {
+				return fmt.Errorf("rebuild resumed session agent: %w", rebuildErr)
+			}
+			st.ag = resumedAgent
 		}
 	}
 

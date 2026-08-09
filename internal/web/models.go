@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
@@ -12,7 +13,78 @@ import (
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/model"
+	"github.com/cnjack/jcode/internal/providertools"
 )
+
+func modelModalities(m *model.RegistryModel) (input, output []string) {
+	if m != nil && m.Modalities != nil {
+		input = append([]string(nil), m.Modalities.Input...)
+		output = append([]string(nil), m.Modalities.Output...)
+	}
+	if len(input) == 0 {
+		input = []string{"text"}
+		if m != nil && m.Attachment {
+			input = append(input, "image")
+		}
+	}
+	if len(output) == 0 {
+		output = []string{"text"}
+	}
+	return input, output
+}
+
+func hasModality(modalities []string, target string) bool {
+	for _, item := range modalities {
+		if item == target {
+			return true
+		}
+	}
+	return false
+}
+
+func appendModality(modalities []string, value string) []string {
+	if hasModality(modalities, value) {
+		return modalities
+	}
+	return append(modalities, value)
+}
+
+func splitModelReference(ref string) (provider, modelID string) {
+	provider, modelID, ok := strings.Cut(ref, "/")
+	if !ok || provider == "" || modelID == "" {
+		return "", ""
+	}
+	return provider, modelID
+}
+
+func configuredImageAvailability(pc *config.ProviderConfig, imageModel providertools.ImageModel) string {
+	if pc == nil || pc.APIKey == "" {
+		return "unsupported"
+	}
+	if !imageModel.Supported {
+		return "unknown"
+	}
+	if !imageModel.Builtin {
+		normalized, err := validateImageEndpoint(pc.ImageEndpoint)
+		if err != nil || normalized.Protocol != imageModel.Protocol {
+			return "unknown"
+		}
+	}
+	return "supported"
+}
+
+func imageModelSelectable(cfg *config.Config, providerID, modelID string) bool {
+	if cfg == nil {
+		return false
+	}
+	pc := cfg.GetProviders()[providerID]
+	for _, candidate := range providertools.ImageModels(cfg) {
+		if candidate.Provider == providerID && candidate.ID == modelID && configuredImageAvailability(pc, candidate) == "supported" {
+			return true
+		}
+	}
+	return false
+}
 
 func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	curProvider, curModel := "", ""
@@ -26,23 +98,28 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	s.cfgMu.Unlock()
 	if cfg == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"current":   map[string]string{"provider": curProvider, "model": curModel},
-			"providers": []any{},
+			"current":       map[string]string{"provider": curProvider, "model": curModel},
+			"current_image": map[string]string{"provider": "", "model": ""},
+			"providers":     []any{},
 		})
 		return
 	}
 
 	type modelInfo struct {
-		ID               string                  `json:"id"`
-		Name             string                  `json:"name"`
-		ToolCall         bool                    `json:"tool_call"`
-		ContextLimit     int                     `json:"context_limit,omitempty"`
-		Reasoning        bool                    `json:"reasoning,omitempty"`
-		Recommended      bool                    `json:"recommended,omitempty"`
-		DefaultEnabled   bool                    `json:"default_enabled,omitempty"`
-		Enabled          bool                    `json:"enabled"`
-		ImageSupport     bool                    `json:"image_support,omitempty"`
-		ReasoningOptions []model.ReasoningOption `json:"reasoning_options,omitempty"`
+		ID                     string                  `json:"id"`
+		Name                   string                  `json:"name"`
+		ToolCall               bool                    `json:"tool_call"`
+		ContextLimit           int                     `json:"context_limit,omitempty"`
+		Reasoning              bool                    `json:"reasoning,omitempty"`
+		Recommended            bool                    `json:"recommended,omitempty"`
+		DefaultEnabled         bool                    `json:"default_enabled,omitempty"`
+		Enabled                bool                    `json:"enabled"`
+		ImageSupport           bool                    `json:"image_support,omitempty"`
+		ReasoningOptions       []model.ReasoningOption `json:"reasoning_options,omitempty"`
+		InputModalities        []string                `json:"input_modalities"`
+		OutputModalities       []string                `json:"output_modalities"`
+		CapabilityAvailability string                  `json:"capability_availability"`
+		ImageSizes             []string                `json:"image_sizes,omitempty"`
 	}
 	type providerInfo struct {
 		ID        string      `json:"id"`
@@ -66,17 +143,28 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 
 	var result []providerInfo
 	configuredProviders := cfg.GetProviders()
+	imageModelsByProvider := make(map[string][]providertools.ImageModel)
+	for _, imageModel := range providertools.ImageModels(cfg) {
+		imageModelsByProvider[imageModel.Provider] = append(imageModelsByProvider[imageModel.Provider], imageModel)
+	}
+	seenProviders := make(map[string]bool, len(configuredProviders))
 	for _, rp := range registry.ListProviders() {
-		if _, configured := configuredProviders[rp.ID]; !configured {
+		pc, configured := configuredProviders[rp.ID]
+		if !configured {
 			continue
 		}
-		models := registry.ListProviderModels(rp.ID, true)
-		if len(models) == 0 {
+		// Return the complete model catalog. Consumers derive the chat picker from
+		// output:text + tool_call and the image picker from resolved output:image;
+		// filtering to tool-call models here would hide registry image candidates.
+		models := registry.ListProviderModels(rp.ID, false)
+		if len(models) == 0 && len(imageModelsByProvider[rp.ID]) == 0 {
 			continue
 		}
+		seenProviders[rp.ID] = true
 		pi := providerInfo{
 			ID: rp.ID, Name: rp.Name, Kind: rp.ID, Source: "desktop", Custom: rp.Custom,
 		}
+		modelIndexes := make(map[string]int, len(models))
 		for _, m := range models {
 			ctx := 0
 			if m.Limit != nil {
@@ -84,21 +172,71 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 			}
 			ref := config.ModelRef{Provider: rp.ID, Model: m.ID}
 			enabled := modelState.IsModelEnabled(ref, m.DefaultEnabled)
-			imageSupport := m.SupportsImageInput()
+			inputModalities, outputModalities := modelModalities(m)
+			availability := "unsupported"
+			if hasModality(outputModalities, "image") {
+				availability = "unknown"
+			}
 			pi.Models = append(pi.Models, modelInfo{
 				ID: m.ID, Name: m.Name, ToolCall: m.ToolCall, ContextLimit: ctx,
 				Reasoning: m.Reasoning, Recommended: m.Recommended,
 				DefaultEnabled: m.DefaultEnabled, Enabled: enabled,
-				ImageSupport:     imageSupport,
+				ImageSupport:     hasModality(inputModalities, "image"),
 				ReasoningOptions: m.ReasoningOptions,
+				InputModalities:  inputModalities, OutputModalities: outputModalities,
+				CapabilityAvailability: availability,
+			})
+			modelIndexes[m.ID] = len(pi.Models) - 1
+		}
+		if pc != nil {
+			for _, imageModel := range imageModelsByProvider[rp.ID] {
+				availability := configuredImageAvailability(pc, imageModel)
+				if index, exists := modelIndexes[imageModel.ID]; exists {
+					entry := &pi.Models[index]
+					entry.OutputModalities = appendModality(entry.OutputModalities, "image")
+					entry.CapabilityAvailability = availability
+					entry.ImageSizes = append([]string(nil), imageModel.Sizes...)
+					continue
+				}
+				pi.Models = append(pi.Models, modelInfo{
+					ID: imageModel.ID, Name: imageModel.Name, Enabled: true, DefaultEnabled: true,
+					InputModalities: []string{"text"}, OutputModalities: []string{"image"},
+					CapabilityAvailability: availability,
+					ImageSizes:             append([]string(nil), imageModel.Sizes...),
+				})
+			}
+		}
+		result = append(result, pi)
+	}
+	// An image-only custom provider may have no chat models and therefore no
+	// runtime registry entry. Keep its explicitly configured image catalog
+	// visible without teaching the chat registry to route those models.
+	for providerID, pc := range configuredProviders {
+		imageModels := imageModelsByProvider[providerID]
+		if seenProviders[providerID] || pc == nil || len(imageModels) == 0 {
+			continue
+		}
+		name := pc.Name
+		if name == "" {
+			name = providerID
+		}
+		pi := providerInfo{ID: providerID, Name: name, Kind: providerID, Source: "desktop", Custom: true}
+		for _, imageModel := range imageModels {
+			pi.Models = append(pi.Models, modelInfo{
+				ID: imageModel.ID, Name: imageModel.Name, Enabled: true, DefaultEnabled: true,
+				InputModalities: []string{"text"}, OutputModalities: []string{"image"},
+				CapabilityAvailability: configuredImageAvailability(pc, imageModel),
+				ImageSizes:             append([]string(nil), imageModel.Sizes...),
 			})
 		}
 		result = append(result, pi)
 	}
+	imageProvider, imageModel := splitModelReference(cfg.ImageModel)
 
 	response := map[string]any{
-		"current":   map[string]string{"provider": curProvider, "model": curModel},
-		"providers": result,
+		"current":       map[string]string{"provider": curProvider, "model": curModel},
+		"current_image": map[string]string{"provider": imageProvider, "model": imageModel},
+		"providers":     result,
 	}
 
 	// Cloud providers are an additional catalog. A Cloud outage or logged-out
@@ -124,6 +262,10 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 					index = len(result) - 1
 					byProvider[providerRef] = index
 				}
+				cloudInputModalities := []string{"text"}
+				if cloudModel.Capabilities.Image {
+					cloudInputModalities = append(cloudInputModalities, "image")
+				}
 				result[index].Models = append(result[index].Models, modelInfo{
 					ID: cloudModel.ModelID, Name: cloudModel.ModelName,
 					ToolCall:       cloudModel.Capabilities.Tools,
@@ -132,6 +274,8 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 					DefaultEnabled: true, Enabled: true,
 					ImageSupport:     cloudModel.Capabilities.Image,
 					ReasoningOptions: cloudModel.ReasoningOptions,
+					InputModalities:  cloudInputModalities,
+					OutputModalities: []string{"text"}, CapabilityAvailability: "unsupported",
 				})
 			}
 			response["providers"] = result
@@ -245,23 +389,24 @@ func (s *Server) handleSwitchMode(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no active task"})
 		return
 	}
-	// Switching to the already-active mode is idempotent. In particular this
-	// prevents a restored cloud session from emitting mode_changed again when
-	// its first post-reconnect message carries the saved mode.
-	if eng.curMode() == sm.String() {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "mode": sm.String()})
-		return
-	}
 	// No running gate: applyModeSwitch writes eng.agent under eng.emu, the same
 	// lock submitMessage reads it under, so a mid-run switch is safe and simply
 	// takes effect on the next turn (matching TUI/ACP and the "Allow all" path).
+	// Serialize rebuild, durable commit, and publication with every other mode or
+	// schema rebuild for this task. Re-check after acquiring the lock because a
+	// concurrent Allow-all may have completed while this request was waiting.
+	eng.rebuildMu.Lock()
+	if eng.curMode() == sm.String() {
+		eng.rebuildMu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "mode": sm.String()})
+		return
+	}
 
-	// Rebuild this task's agent FIRST. If the rebuild fails, abort without
-	// changing the mode/approval axis — otherwise plan mode could be reported while
-	// a write-capable agent stays live.
+	// Rebuild the candidate agent first, but do not publish it yet. The durable
+	// mode journal is the commit point: a write/fsync failure leaves the previous
+	// agent, approval axis, mode selector, and websocket state untouched.
 	var newAg *adk.ChatModelAgent
 	if eng.rebuildForMode != nil {
-		eng.rebuildMu.Lock()
 		ag, err := eng.rebuildForMode(sm.IsPlan())
 		if err != nil {
 			eng.rebuildMu.Unlock()
@@ -271,13 +416,17 @@ func (s *Server) handleSwitchMode(w http.ResponseWriter, r *http.Request) {
 		}
 		newAg = ag
 	}
+	if err := eng.recordModeChange(sm.String()); err != nil {
+		eng.rebuildMu.Unlock()
+		config.Logger().Printf("[web] mode journal commit failed for task %s: %v", eng.taskID, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to persist mode change"})
+		return
+	}
 	if eng.approvalState != nil {
 		eng.approvalState.SetSessionMode(sm) // approval axis (Full access → auto)
 	}
 	eng.applyModeSwitch(sm.String(), newAg)
-	if eng.rebuildForMode != nil {
-		eng.rebuildMu.Unlock()
-	}
+	eng.rebuildMu.Unlock()
 
 	s.wsBroker.Broadcast(WSEvent{Type: "mode_changed", TaskID: eng.taskID, Data: map[string]string{
 		"mode": sm.String(),
@@ -298,10 +447,73 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		"provider":       providerName,
 		"model":          modelName,
 		"small_model":    cfg.SmallModel,
+		"image_model":    cfg.ImageModel,
+		"media":          cfg.Media,
 		"language":       cfg.Language,
 		"theme":          cfg.Theme,
 		"max_iterations": cfg.MaxIterations,
 	})
+}
+
+// handleSetImageModel sets or clears the independent image-generation role.
+// Availability remains resolver-driven: storing a model reference does not by
+// itself register generate_image when its endpoint/protocol is unresolved.
+func (s *Server) handleSetImageModel(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if (req.Provider == "") != (req.Model == "") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and model must both be set, or both empty to clear"})
+		return
+	}
+
+	ref := ""
+	if req.Provider != "" {
+		ref = req.Provider + "/" + req.Model
+	}
+
+	s.cfgMu.Lock()
+	latest, err := config.MutateConfig(func(cfg *config.Config) error {
+		if req.Provider != "" {
+			_, ok := cfg.GetProviders()[req.Provider]
+			if !ok {
+				return newConfigMutationHTTPError(http.StatusBadRequest, "unknown provider: "+req.Provider)
+			}
+			if !imageModelSelectable(cfg, req.Provider, req.Model) {
+				return newConfigMutationHTTPError(http.StatusBadRequest, "image model is not supported by this provider profile")
+			}
+		}
+		cfg.ImageModel = ref
+		return nil
+	})
+	if err == nil {
+		s.publishConfigSnapshotLocked(latest)
+	}
+	s.cfgMu.Unlock()
+	if err != nil {
+		writeConfigMutationError(w, err)
+		return
+	}
+
+	// The tool catalog is built into each live agent. Rebuild all task agents so
+	// changing an image provider takes effect even when chat uses another one.
+	if err := s.rebuildToolAgents(); err != nil {
+		s.logProviderApplyFailure(req.Provider, "image model update", err)
+		writeSavedButNotApplied(w, "image model selection")
+		return
+	}
+	if s.wsBroker != nil {
+		s.wsBroker.Broadcast(WSEvent{Type: "image_model_changed", Data: map[string]string{
+			"provider": req.Provider,
+			"model":    req.Model,
+		}})
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // handleSetSmallModel sets or clears config.small_model (both fields empty =

@@ -2,6 +2,8 @@ package runner
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -15,8 +17,10 @@ import (
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/hooks"
 	"github.com/cnjack/jcode/internal/mode"
+	"github.com/cnjack/jcode/internal/providertools"
 	"github.com/cnjack/jcode/internal/review"
 	"github.com/cnjack/jcode/internal/team"
+	"github.com/cnjack/jcode/internal/toolpolicy"
 	internaltools "github.com/cnjack/jcode/internal/tools"
 )
 
@@ -192,6 +196,12 @@ func (s *ApprovalState) GetSessionMode() mode.SessionMode {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.sessionMode
+}
+
+func (s *ApprovalState) isFullAccess() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessionMode == mode.FullAccess
 }
 
 // SetWorkpath sets the current working directory (called on environment switch).
@@ -543,6 +553,19 @@ func originFromArgs(toolArgs, key string) string {
 // It returns true immediately for read-only or obviously safe commands.
 // For everything else it sends a TUI prompt and waits for the user's answer.
 func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs string) (bool, error) {
+	// Billable provider operations always require a valid immutable intent. Full
+	// access is the sole interactive-approval bypass; hooks, safe-name lists, and
+	// the Auto reviewer cannot pre-authorize a billable operation.
+	if intent, ok := toolpolicy.BillableIntentFromContext(ctx); ok {
+		if err := validateBillableIntentTool(intent, toolName); err != nil {
+			return false, err
+		}
+		return s.requestBillableApprovalWithWorker(ctx, toolName, toolArgs, "", "")
+	}
+	if err := rejectMissingBillableIntent(toolName); err != nil {
+		return false, err
+	}
+
 	// A PreToolUse hook that returned permissionDecision=allow pre-authorizes this
 	// specific call, so the user is not prompted. This is scoped to the single
 	// invocation whose ctx carries the flag.
@@ -571,10 +594,53 @@ func (s *ApprovalState) RequestApproval(ctx context.Context, toolName, toolArgs 
 	}
 }
 
+func validateBillableIntentTool(intent toolpolicy.BillableIntent, toolName string) error {
+	validIntent := intent.CapabilityKey == toolpolicy.CapabilityImageGenerate && toolName == "generate_image"
+	if intent.CapabilityKey == toolpolicy.CapabilityWebSearch {
+		server, isMCP := internaltools.MCPServerForTool(toolName)
+		original, hasOriginal := internaltools.MCPOriginalToolName(toolName)
+		validIntent = isMCP && hasOriginal &&
+			providertools.IsProviderSearchMCPServer(server) &&
+			original == providertools.BigModelSearchMCPToolName
+	}
+	if !validIntent {
+		return fmt.Errorf("billable intent does not match tool %q", toolName)
+	}
+	return nil
+}
+
+func rejectMissingBillableIntent(toolName string) error {
+	if server, ok := internaltools.MCPServerForTool(toolName); ok &&
+		providertools.IsProviderSearchMCPServer(server) {
+		original, exact := internaltools.MCPOriginalToolName(toolName)
+		if !exact || original != providertools.BigModelSearchMCPToolName {
+			return fmt.Errorf("unverified provider search MCP tool %q is not allowed", toolName)
+		}
+		return fmt.Errorf("provider web search requires a prepared billable intent")
+	}
+	if toolName == "generate_image" {
+		return fmt.Errorf("generate_image requires a prepared billable intent")
+	}
+	return nil
+}
+
 func (s *ApprovalState) notifyToolInProgress(toolName, toolArgs string) {
 	if notifier, ok := s.h.(toolProgressNotifier); ok {
 		notifier.NotifyToolInProgress(toolName, toolArgs)
 	}
+}
+
+func (s *ApprovalState) requestBillableApprovalWithWorker(
+	ctx context.Context,
+	toolName, toolArgs, workerName, workerColor string,
+) (bool, error) {
+	if s.isFullAccess() {
+		s.notifyToolInProgress(toolName, toolArgs)
+		return true, nil
+	}
+	return s.requestUserApprovalWithWorker(
+		ctx, toolName, toolArgs, false, workerName, workerColor,
+	)
 }
 
 // requestUserApprovalWithWorker handles approval with optional worker identity
@@ -589,14 +655,33 @@ func (s *ApprovalState) requestUserApprovalWithWorker(ctx context.Context, toolN
 	toolCallID := agent.ToolCallIDFromContext(ctx)
 
 	start := time.Now()
-	resp, err := s.h.RequestApproval(ctx, handler.ApprovalRequest{
-		ToolName:    toolName,
-		ToolArgs:    toolArgs,
-		ToolCallID:  toolCallID,
-		IsExternal:  isExternal,
-		WorkerName:  workerName,
-		WorkerColor: workerColor,
-	})
+	request := handler.ApprovalRequest{
+		ToolName:        toolName,
+		ToolArgs:        toolArgs,
+		ToolCallID:      toolCallID,
+		IsExternal:      isExternal,
+		WorkerName:      workerName,
+		WorkerColor:     workerColor,
+		AllowApproveAll: true,
+	}
+	var billableGate *billableApprovalGate
+	if intent, ok := toolpolicy.BillableIntentFromContext(ctx); ok {
+		gate, err := newBillableApprovalGate(intent)
+		if err != nil {
+			return false, err
+		}
+		billableGate = gate
+		request.ApprovalClass = toolpolicy.ApprovalBillableExternal
+		request.OperationID = intent.OperationID
+		request.CapabilityKey = intent.CapabilityKey
+		request.Provider = intent.Provider
+		request.Model = intent.Model
+		request.AllowApproveAll = false
+		request.IsExternal = true
+		request.BillableSummary = billableApprovalSummary(intent)
+		request.Options = gate.options()
+	}
+	resp, err := s.h.RequestApproval(ctx, request)
 	// Record how long this call sat at the prompt (and whether it was denied)
 	// so the runner reports pure execution time and a distinct denied state.
 	// Recorded even on error: an errored prompt still consumed wall-clock wait.
@@ -606,11 +691,18 @@ func (s *ApprovalState) requestUserApprovalWithWorker(ctx context.Context, toolN
 	if err != nil {
 		return false, err
 	}
+	if billableGate != nil {
+		currentIntent, ok := toolpolicy.BillableIntentFromContext(ctx)
+		if !ok {
+			return false, fmt.Errorf("billable approval intent expired")
+		}
+		return billableGate.resolve(ctx, currentIntent, resp)
+	}
 
 	// State transition: "Approve All" promotes the session to Full access (both the
 	// unified mode and the derived approval axis). A plain single approve does
 	// not change the session mode.
-	if resp.Approved && resp.Mode == handler.ModeAuto {
+	if resp.Approved && resp.Mode == handler.ModeAuto && request.AllowApproveAll {
 		s.mu.Lock()
 		s.sessionMode = mode.FullAccess
 		s.mode = handler.ModeAuto
@@ -619,11 +711,122 @@ func (s *ApprovalState) requestUserApprovalWithWorker(ctx context.Context, toolN
 	return resp.Approved, nil
 }
 
+type billableApprovalGate struct {
+	intent      toolpolicy.BillableIntent
+	allowOnceID string
+	denyID      string
+	mu          sync.Mutex
+	consumed    bool
+}
+
+func newBillableApprovalGate(intent toolpolicy.BillableIntent) (*billableApprovalGate, error) {
+	allowOnceID, err := newOpaqueApprovalOptionID()
+	if err != nil {
+		return nil, err
+	}
+	denyID, err := newOpaqueApprovalOptionID()
+	if err != nil {
+		return nil, err
+	}
+	if allowOnceID == denyID {
+		return nil, fmt.Errorf("generate distinct billable approval option ids")
+	}
+	return &billableApprovalGate{intent: intent, allowOnceID: allowOnceID, denyID: denyID}, nil
+}
+
+func newOpaqueApprovalOptionID() (string, error) {
+	var random [18]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return "", fmt.Errorf("generate billable approval option id: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(random[:]), nil
+}
+
+func (g *billableApprovalGate) options() []handler.ApprovalOption {
+	return []handler.ApprovalOption{
+		{
+			ID: g.allowOnceID, Label: "Allow once", Kind: "allow_once",
+			Description: "Approve only this exact external request.",
+		},
+		{
+			ID: g.denyID, Label: "Deny", Kind: "deny",
+			Description: "Do not send this external request.",
+		},
+	}
+}
+
+func (g *billableApprovalGate) resolve(
+	ctx context.Context,
+	intent toolpolicy.BillableIntent,
+	response handler.ApprovalResponse,
+) (bool, error) {
+	g.mu.Lock()
+	if g.consumed {
+		g.mu.Unlock()
+		return false, fmt.Errorf("billable approval option was already consumed")
+	}
+	g.consumed = true
+	g.mu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return false, fmt.Errorf("billable approval option expired: %w", err)
+	}
+	if intent != g.intent {
+		return false, fmt.Errorf("billable approval intent mismatch")
+	}
+	switch response.ResolvedOptionID {
+	case g.allowOnceID:
+		if !response.Approved || response.Mode != handler.ModeManual {
+			return false, fmt.Errorf("billable allow-once response does not match its opaque option")
+		}
+		return true, nil
+	case g.denyID:
+		if response.Approved || response.Mode != handler.ModeManual {
+			return false, fmt.Errorf("billable deny response does not match its opaque option")
+		}
+		return false, nil
+	case "":
+		return false, fmt.Errorf("billable approval requires an opaque option id")
+	default:
+		return false, fmt.Errorf("billable approval returned an unknown opaque option id")
+	}
+}
+
+func billableApprovalSummary(intent toolpolicy.BillableIntent) *handler.BillableApprovalSummary {
+	summary := &handler.BillableApprovalSummary{
+		Capability: intent.CapabilityKey, Provider: intent.Provider, Model: intent.Model,
+		Count: intent.Count, Billable: true,
+	}
+	if summary.Count <= 0 {
+		summary.Count = 1
+	}
+	var args struct {
+		Size           string `json:"size"`
+		ReferenceImage string `json:"reference_image"`
+	}
+	if json.Unmarshal([]byte(intent.NormalizedArgs), &args) == nil {
+		summary.Size = strings.TrimSpace(args.Size)
+		summary.HasReference = strings.TrimSpace(args.ReferenceImage) != ""
+	}
+	return summary
+}
+
 // NewTeammateApprovalFunc creates an approval function for a teammate that includes
 // the worker identity in the TUI approval prompt. It shares the same decision
 // logic as RequestApproval (via decide) so the two paths cannot drift apart.
 func (s *ApprovalState) NewTeammateApprovalFunc(workerName, workerColor string) func(ctx context.Context, toolName, toolArgs string) (bool, error) {
 	return func(ctx context.Context, toolName, toolArgs string) (bool, error) {
+		if intent, ok := toolpolicy.BillableIntentFromContext(ctx); ok {
+			if err := validateBillableIntentTool(intent, toolName); err != nil {
+				return false, err
+			}
+			return s.requestBillableApprovalWithWorker(
+				ctx, toolName, toolArgs, workerName, workerColor,
+			)
+		}
+		if err := rejectMissingBillableIntent(toolName); err != nil {
+			return false, err
+		}
 		s.mu.Lock()
 		currentMode := s.mode
 		s.mu.Unlock()
