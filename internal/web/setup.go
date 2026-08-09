@@ -70,13 +70,14 @@ func (s *Server) handleSetupProviders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type providerItem struct {
-		ID         string   `json:"id"`
-		Name       string   `json:"name"`
-		Doc        string   `json:"doc,omitempty"`
-		API        string   `json:"api,omitempty"`
-		Env        []string `json:"env,omitempty"`
-		Configured bool     `json:"configured"`
-		Tag        string   `json:"tag,omitempty"` // "recommended", "free", "local"
+		ID          string   `json:"id"`
+		Name        string   `json:"name"`
+		Doc         string   `json:"doc,omitempty"`
+		API         string   `json:"api,omitempty"`
+		Env         []string `json:"env,omitempty"`
+		AuthMethods []string `json:"auth_methods,omitempty"`
+		Configured  bool     `json:"configured"`
+		Tag         string   `json:"tag,omitempty"` // "recommended", "free", "local"
 	}
 
 	providers := s.registry.ListProviders()
@@ -90,21 +91,24 @@ func (s *Server) handleSetupProviders(w http.ResponseWriter, r *http.Request) {
 
 	// Provider tags for recommendation.
 	tags := map[string]string{
-		"openai":    "recommended",
-		"anthropic": "recommended",
-		"ollama":    "local",
+		"openai":         "recommended",
+		"xai":            "recommended",
+		"github-copilot": "recommended",
+		"anthropic":      "recommended",
+		"ollama":         "local",
 	}
 
 	result := make([]providerItem, 0, len(providers))
 	for _, p := range providers {
 		result = append(result, providerItem{
-			ID:         p.ID,
-			Name:       p.Name,
-			Doc:        p.Doc,
-			API:        p.API,
-			Env:        p.Env,
-			Configured: configured[p.ID],
-			Tag:        tags[p.ID],
+			ID:          p.ID,
+			Name:        p.Name,
+			Doc:         p.Doc,
+			API:         p.API,
+			Env:         p.Env,
+			AuthMethods: providerAuthMethodsForID(s, p.ID),
+			Configured:  configured[p.ID],
+			Tag:         tags[p.ID],
 		})
 	}
 
@@ -178,24 +182,40 @@ func (s *Server) handleSetupProviderModels(w http.ResponseWriter, r *http.Reques
 // a model explicitly since none can be inferred.
 func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Provider        string            `json:"provider"`
-		Model           string            `json:"model,omitempty"`
-		ModelReasoning  bool              `json:"model_reasoning,omitempty"`
-		APIKey          string            `json:"api_key"`
-		BaseURL         string            `json:"base_url,omitempty"`
-		Name            string            `json:"name,omitempty"` // custom provider display name
-		Headers         map[string]string `json:"headers,omitempty"`
-		Vision          *bool             `json:"vision,omitempty"`
-		Thinking        *bool             `json:"thinking,omitempty"`
-		ReasoningEffort string            `json:"reasoning_effort,omitempty"`
+		Provider        string                      `json:"provider"`
+		Model           string                      `json:"model,omitempty"`
+		ModelReasoning  bool                        `json:"model_reasoning,omitempty"`
+		APIKey          string                      `json:"api_key"`
+		BaseURL         string                      `json:"base_url,omitempty"`
+		Name            string                      `json:"name,omitempty"` // custom provider display name
+		Headers         map[string]string           `json:"headers,omitempty"`
+		Vision          *bool                       `json:"vision,omitempty"`
+		Thinking        *bool                       `json:"thinking,omitempty"`
+		ReasoningEffort string                      `json:"reasoning_effort,omitempty"`
+		AuthBinding     *config.ProviderAuthBinding `json:"auth_binding,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	if req.Provider == "" || req.APIKey == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and api_key are required"})
+	if req.Provider == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider is required"})
 		return
+	}
+	normalizedAuthBinding, err := s.validateProviderBinding(r.Context(), req.Provider, req.AuthBinding)
+	if err != nil {
+		writeConfigMutationError(w, err)
+		return
+	}
+	req.AuthBinding = normalizedAuthBinding
+	if req.AuthBinding == nil && req.APIKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "api_key is required for API-key authentication"})
+		return
+	}
+	if req.AuthBinding != nil {
+		req.APIKey = ""
+		req.BaseURL = ""
+		req.Headers = nil
 	}
 	if !validReasoningEffort(req.ReasoningEffort) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid reasoning_effort"})
@@ -231,7 +251,7 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 
 	// Build or update config.
 	var cfg *config.Config
-	cfg, err := config.LoadConfig()
+	cfg, err = config.LoadConfig()
 	if err != nil {
 		cfg, err = cloneConfigForSetup(s.cfg)
 		if err != nil {
@@ -250,6 +270,7 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	setupPC := &config.ProviderConfig{
 		APIKey:          req.APIKey,
 		BaseURL:         req.BaseURL,
+		Auth:            req.AuthBinding,
 		Name:            req.Name,
 		Headers:         cleanHeaders(req.Headers),
 		Vision:          req.Vision,

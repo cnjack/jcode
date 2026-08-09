@@ -6,6 +6,7 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
+	"github.com/cnjack/jcode/internal/model/responsemeta"
 )
 
 // entryToUserMessage converts a session Entry into a schema.Message,
@@ -168,16 +169,19 @@ func ReconstructState(entries []Entry) *SessionState {
 			msgs = append(msgs, entryToUserMessage(e))
 
 		case EntryAssistant:
-			if e.Content != "" {
+			opaqueItems := responsemeta.Normalize(e.OpaqueResponseItems)
+			if e.Content != "" || len(opaqueItems) > 0 {
+				extra := responsemeta.Extra(opaqueItems)
 				// Merge into preceding assistant message that has tool calls
 				// but empty content (runner records text after tool calls).
 				if n := len(msgs); n > 0 {
 					if last := msgs[n-1]; last.Role == schema.Assistant && last.Content == "" && len(last.ToolCalls) > 0 {
 						last.Content = e.Content
+						mergeOpaqueResponseExtra(last, extra)
 						continue
 					}
 				}
-				msgs = append(msgs, &schema.Message{Role: schema.Assistant, Content: e.Content})
+				msgs = append(msgs, &schema.Message{Role: schema.Assistant, Content: e.Content, Extra: extra})
 			}
 
 		case EntryToolCall:
@@ -277,8 +281,33 @@ func ReconstructState(entries []Entry) *SessionState {
 		}
 	}
 
-	state.History = repairDanglingToolCalls(msgs)
+	state.History = repairDanglingToolCalls(dropOrphanOpaqueAssistantMessages(msgs))
 	return state
+}
+
+func dropOrphanOpaqueAssistantMessages(messages []adk.Message) []adk.Message {
+	filtered := make([]adk.Message, 0, len(messages))
+	for _, message := range messages {
+		if message != nil && message.Role == schema.Assistant && message.Content == "" &&
+			len(message.ToolCalls) == 0 && len(responsemeta.FromExtra(message.Extra)) > 0 {
+			continue
+		}
+		filtered = append(filtered, message)
+	}
+	return filtered
+}
+
+func mergeOpaqueResponseExtra(message *schema.Message, extra map[string]any) {
+	if message == nil || len(extra) == 0 {
+		return
+	}
+	items := append(responsemeta.FromExtra(message.Extra), responsemeta.FromExtra(extra)...)
+	if normalized := responsemeta.Normalize(items); len(normalized) > 0 {
+		if message.Extra == nil {
+			message.Extra = make(map[string]any, 1)
+		}
+		message.Extra[responsemeta.OpaqueItemsExtraKey] = normalized
+	}
 }
 
 // InterruptedToolOutput is the placeholder content backfilled for tool calls

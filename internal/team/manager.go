@@ -268,6 +268,7 @@ func (m *Manager) SpawnTeammate(ctx context.Context, cfg SpawnConfig) (string, e
 		TeamName:  m.teamName,
 		Color:     color,
 	})
+	childCtx = internalmodel.WithProviderSubagent(childCtx)
 
 	state := &TeammateState{
 		Identity: TeammateIdentity{
@@ -688,6 +689,9 @@ func (m *Manager) runAgentTurn(ctx context.Context, state *TeammateState) (strin
 	// Inject per-agent token tracker into the context.
 	if state.TokenUsage != nil {
 		ctx = internalmodel.WithTokenTracker(ctx, state.TokenUsage)
+	}
+	if state.Recorder != nil && state.Recorder.UUID() != "" {
+		ctx = internalmodel.WithProviderSessionID(ctx, state.Recorder.UUID())
 	}
 
 	var result strings.Builder

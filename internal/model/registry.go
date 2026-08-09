@@ -10,12 +10,16 @@ import (
 
 // RegistryProvider represents a provider from models.dev API.
 type RegistryProvider struct {
-	ID     string                    `json:"id"`
-	Name   string                    `json:"name"`
-	Env    []string                  `json:"env"`
-	API    string                    `json:"api"`
-	Doc    string                    `json:"doc,omitempty"`
-	Models map[string]*RegistryModel `json:"models"`
+	ID   string   `json:"id"`
+	Name string   `json:"name"`
+	Env  []string `json:"env"`
+	API  string   `json:"api"`
+	Doc  string   `json:"doc,omitempty"`
+	// AuthMethods declares the authentication choices the provider supports.
+	// It is product metadata consumed by Setup/Settings; model transports still
+	// validate and enforce the selected method independently.
+	AuthMethods []string                  `json:"auth_methods,omitempty"`
+	Models      map[string]*RegistryModel `json:"models"`
 	// Custom is true for providers that exist only because the user configured
 	// them (an OpenAI-compatible endpoint not in models.dev), as opposed to a
 	// built-in registry brand. Set during MergeConfigProviders.
@@ -155,6 +159,9 @@ func deepCopyProvider(src *RegistryProvider) *RegistryProvider {
 	if src.Env != nil {
 		cp.Env = make([]string, len(src.Env))
 		copy(cp.Env, src.Env)
+	}
+	if src.AuthMethods != nil {
+		cp.AuthMethods = append([]string(nil), src.AuthMethods...)
 	}
 	// Deep copy Models map
 	if src.Models != nil {
@@ -514,6 +521,37 @@ func init() {
 // built into the registry. They are added to generatedProviders/generatedProviderOrder
 // at init time so they behave identically to models.dev providers.
 var staticProviders = map[string]*RegistryProvider{
+	// xAI's official API supports both ordinary API keys and the managed OAuth
+	// device flow used by Grok clients. OAuth runtime policy pins Responses at
+	// api.x.ai; this registry entry supplies setup/catalog metadata only.
+	"xai": {
+		ID: "xai", Name: "xAI (Grok)", Env: []string{"XAI_API_KEY"},
+		API: "https://api.x.ai/v1", AuthMethods: []string{"api_key", "xai_oauth"},
+		Models: map[string]*RegistryModel{
+			"grok-4.5": {
+				ID: "grok-4.5", Name: "Grok 4.5", Family: "grok",
+				Reasoning: true, ToolCall: true, Attachment: true,
+				DefaultEnabled: true, Recommended: true,
+				Modalities: &ModelModalities{Input: []string{"text", "image"}, Output: []string{"text"}},
+				Limit:      &ModelLimit{Context: 256000}, ReasoningOptions: standardEffortOptions(),
+			},
+		},
+	},
+	// Copilot authentication is account-only. The live service may advertise a
+	// wider catalog; this conservative baseline gives first-run setup a model
+	// before live catalog refresh is available.
+	"github-copilot": {
+		ID: "github-copilot", Name: "GitHub Copilot",
+		API: "https://api.githubcopilot.com", AuthMethods: []string{"github_copilot"},
+		Models: map[string]*RegistryModel{
+			"gpt-4.1": {
+				ID: "gpt-4.1", Name: "GPT-4.1", Family: "gpt",
+				ToolCall: true, Attachment: true, DefaultEnabled: true, Recommended: true,
+				Modalities: &ModelModalities{Input: []string{"text", "image"}, Output: []string{"text"}},
+				Limit:      &ModelLimit{Context: 128000},
+			},
+		},
+	},
 	// Kimi For Coding is Moonshot's subscription coding plan. models.dev carries a
 	// "kimi-for-coding" record, but its model ids (k2p5/k2p6/k2p7/kimi-k2-thinking)
 	// are undocumented aliases that the vendor's own /models endpoint does not
@@ -639,6 +677,8 @@ var staticProviders = map[string]*RegistryProvider{
 // staticProviderOrder defines the display order for static providers.
 // They are appended after the generated providers.
 var staticProviderOrder = []string{
+	"xai",
+	"github-copilot",
 	"kimi-for-coding",
 	"tencent-tokenhub-ep",
 }
@@ -649,6 +689,11 @@ func applyStaticProviders() {
 		generatedProviders[id] = prov
 	}
 	generatedProviderOrder = append(generatedProviderOrder, staticProviderOrder...)
+	// OpenAI keeps its generated model catalog while gaining the opt-in
+	// ChatGPT/Codex account login alongside its existing API-key path.
+	if openAI := generatedProviders["openai"]; openAI != nil {
+		openAI.AuthMethods = []string{"api_key", "codex_oauth"}
+	}
 }
 
 // applyContextLimitOverrides patches context windows for built-in models whose

@@ -11,10 +11,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 
 	"github.com/cnjack/jcode/internal/artifact"
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/model/responsemeta"
 )
 
 // EntryType identifies the kind of JSONL record.
@@ -294,6 +296,11 @@ type Entry struct {
 
 	// Images attached to a user message.
 	Images []EntryImage `json:"images,omitempty"`
+
+	// OpaqueResponseItems carries only bounded encrypted Responses API
+	// reasoning items. Cleartext ReasoningContent is intentionally never
+	// persisted. Legacy JSONL files simply omit this additive field.
+	OpaqueResponseItems []json.RawMessage `json:"opaque_response_items,omitempty"`
 
 	// plan_update fields
 	PlanStatus  string `json:"plan_status,omitempty"`
@@ -828,7 +835,31 @@ func (r *Recorder) SetTitleFor(id, title string) {
 
 // RecordAssistant appends an assistant message entry.
 func (r *Recorder) RecordAssistant(content string) {
-	_ = r.writeEntry(Entry{Type: EntryAssistant, Content: content})
+	r.RecordAssistantMessage(&schema.Message{Role: schema.Assistant, Content: content})
+}
+
+// RecordAssistantMessage appends the persistable subset of an assistant
+// message. Cleartext reasoning and arbitrary Extra fields are never written;
+// only canonical encrypted Responses continuation items are retained.
+func (r *Recorder) RecordAssistantMessage(message *schema.Message) {
+	if message == nil {
+		return
+	}
+	items := responsemeta.FromExtra(message.Extra)
+	// Opaque continuation data is meaningful only when the same assistant turn
+	// has visible content or function calls. In particular, never leave an
+	// encrypted-reasoning-only entry behind after a failed/cancelled stream.
+	if message.Content == "" && len(message.ToolCalls) == 0 {
+		items = nil
+	}
+	if message.Content == "" && len(items) == 0 {
+		return
+	}
+	_ = r.writeEntry(Entry{
+		Type:                EntryAssistant,
+		Content:             message.Content,
+		OpaqueResponseItems: items,
+	})
 }
 
 // RecordToolCall appends a tool-call entry. The batch fields group tool calls

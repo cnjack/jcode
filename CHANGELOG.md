@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Unified Provider account sign-in.** Settings and first-run setup can now authenticate OpenAI through ChatGPT/Codex, xAI through Grok, and GitHub Copilot through one device-code account flow, while preserving API-key providers. Providers bind to a default or explicit local account and expose connected, reauthentication, and multi-account management states.
+- GitHub Copilot requests keep one stable session interaction while classifying tool continuations and delegated agents as agent-initiated, avoiding accidental extra premium interactions.
 - **Provider-backed image generation.** Configure a global Image Model independently from the chat model, then use `generate_image` from normal-mode TUI, Web, Desktop, or ACP sessions. The first release supports OpenAI-compatible Images endpoints, BigModel CogView, and Alibaba Token Plan Wan 2.7 models.
 - **Generated images as managed Artifacts.** Results are verified, stored outside the workspace under the session, persisted for replay, and shown as lifecycle-aware image cards in Web/Desktop. TUI reports the local path and metadata; ACP degrades to metadata, resource links, or bounded inline images according to negotiated capabilities.
 - **Provider capability routing.** Settings now distinguishes chat, image generation, vision input, and provider-bound tools using the exact provider profile, endpoint, protocol, and model. It includes an Image Model picker, provider capability status, a BigModel Search MCP preset, and provider Web Search policy.
@@ -22,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Session replay now restores provider operations, managed Artifacts, tool lifecycle, session modes, and per-session tool overrides without trusting dropped WebSocket events.
 
 ### Security
+- Managed Provider credentials are resolved immediately before dispatch, never returned by the Web API, and kept out of `config.json`. OAuth-backed providers pin their upstream endpoint, wire protocol, and protected headers; refreshes are singleflight, account writes are locked and atomic, device flows are bounded/cancellable, and invalid or reauthentication-required bindings fail closed.
 - Externally billable calls bind approval to an immutable provider/model/argument intent and idempotency key. Ask for approval and Auto require a fresh per-call decision; Full access is the only session-level preauthorization. Per-turn and per-session limits are reserved atomically and dispatch is durably journaled before the provider call.
 - Image downloads require HTTPS and enforce trusted-host, redirect, timeout, MIME, size, dimension, and pixel limits. Private and link-local destinations are rejected; generated files use owner-only directories/files and atomic persistence.
 - Security-sensitive session journals fail closed on malformed or invalid transitions, and logs/session metadata exclude credentials, complete prompts, signed URLs, provider response bodies, and image base64.

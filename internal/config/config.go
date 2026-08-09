@@ -20,6 +20,12 @@ const (
 type ProviderConfig struct {
 	APIKey  string `json:"api_key"`
 	BaseURL string `json:"base_url,omitempty"`
+	// Auth binds this provider to a locally managed login account. The binding
+	// is deliberately non-secret and may be synced with the rest of the provider
+	// configuration; access/refresh credentials live in the provider-auth secret
+	// store and are resolved immediately before each request. nil preserves the
+	// legacy API-key behavior.
+	Auth *ProviderAuthBinding `json:"auth,omitempty"`
 	// Protocol identifies the provider's chat/request protocol when it differs
 	// from the registry default (for example "responses"). Capability-specific
 	// protocols belong on their endpoint block instead.
@@ -55,6 +61,15 @@ type ProviderConfig struct {
 	// ImageEndpoint is an explicit, capability-specific endpoint for custom
 	// image-generation models. Chat model discovery never populates this block.
 	ImageEndpoint *ImageEndpointConfig `json:"image_endpoint,omitempty"`
+}
+
+// ProviderAuthBinding identifies one managed login method and, optionally, a
+// concrete account. An empty AccountID follows that method's default usable
+// account. Method is validated by the provider-management boundary and the
+// runtime resolver; unknown values fail closed.
+type ProviderAuthBinding struct {
+	Method    string `json:"method"`
+	AccountID string `json:"account_id,omitempty"`
 }
 
 // HasConfiguredChatModels reports whether this provider has an explicit chat

@@ -761,6 +761,55 @@ export interface SetupProvider {
   env?: string[]
   configured: boolean
   tag?: string // "recommended", "local", etc.
+  // Omitted by older servers. Clients must fall back to API-key auth so an
+  // upgraded UI can still configure providers against an older sidecar.
+  auth_methods?: ProviderCredentialMethod[]
+}
+
+export type AuthMethod = 'codex_oauth' | 'xai_oauth' | 'github_copilot'
+export type ProviderCredentialMethod = 'api_key' | AuthMethod
+
+export interface ProviderAuthBinding {
+  method: AuthMethod
+  // Omission follows the managed-auth default account for this method.
+  account_id?: string
+}
+
+export interface ProviderAuthAccount {
+  id: string
+  login: string
+  email?: string
+  domain?: string
+  authenticated_at: string
+  requires_reauth: boolean
+}
+
+export interface ProviderAuthStatus {
+  method: AuthMethod
+  accounts: ProviderAuthAccount[]
+  default_account_id?: string
+}
+
+export interface ProviderAuthFlow {
+  flow_id: string
+  user_code: string
+  verification_uri: string
+  verification_uri_complete?: string
+  expires_at: string
+  interval_seconds?: number
+  // Compatibility with the first POC contract; new servers use
+  // interval_seconds.
+  interval?: number
+}
+
+export interface ProviderAuthPollResult {
+  state: 'pending' | 'authorized' | 'denied' | 'expired' | 'error'
+  // Device providers may raise the interval after a slow_down response. Always
+  // schedule the next poll from the latest response instead of the start flow.
+  interval_seconds?: number
+  interval?: number
+  account?: ProviderAuthAccount
+  error?: string
 }
 
 // ReasoningOption mirrors models.dev's reasoning_options: how a model exposes
@@ -799,6 +848,9 @@ export interface ProviderDetail {
   name?: string // display name for custom (non-registry) providers
   custom?: boolean // true if this provider is not in the registry
   api_key_set: boolean
+  auth_binding?: ProviderAuthBinding
+  auth_status?: ProviderAuthStatus
+  auth_methods?: ProviderCredentialMethod[]
   api_key?: string
   base_url?: string
   headers?: Record<string, string> // values masked

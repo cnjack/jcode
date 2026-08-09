@@ -14,6 +14,7 @@ import (
 
 	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/model"
+	"github.com/cnjack/jcode/internal/providerauth"
 	"github.com/cnjack/jcode/internal/providertools"
 )
 
@@ -211,6 +212,30 @@ func decodeOptionalBool(raw json.RawMessage, field string) (present bool, value 
 	var decoded bool
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		return true, nil, fmt.Errorf("invalid %s", field)
+	}
+	return true, &decoded, nil
+}
+
+// decodeOptionalProviderAuthBinding preserves the update contract's three
+// states: omitted keeps the current mode, null selects API-key authentication,
+// and an object selects one managed login binding.
+func decodeOptionalProviderAuthBinding(
+	raw json.RawMessage,
+) (present bool, binding *config.ProviderAuthBinding, err error) {
+	if len(raw) == 0 {
+		return false, nil, nil
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return true, nil, nil
+	}
+	var decoded config.ProviderAuthBinding
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return true, nil, fmt.Errorf("invalid auth_binding")
+	}
+	decoded.Method = strings.TrimSpace(decoded.Method)
+	decoded.AccountID = strings.TrimSpace(decoded.AccountID)
+	if decoded.Method == "" {
+		return true, nil, fmt.Errorf("auth_binding.method is required")
 	}
 	return true, &decoded, nil
 }
@@ -437,6 +462,9 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		Custom          bool                                 `json:"custom,omitempty"`
 		APIKeySet       bool                                 `json:"api_key_set"`
 		APIKey          string                               `json:"api_key,omitempty"` // masked
+		AuthBinding     *config.ProviderAuthBinding          `json:"auth_binding,omitempty"`
+		AuthStatus      *providerauth.Status                 `json:"auth_status,omitempty"`
+		AuthMethods     []string                             `json:"auth_methods,omitempty"`
 		BaseURL         string                               `json:"base_url,omitempty"`
 		Headers         map[string]string                    `json:"headers,omitempty"` // values masked
 		CustomModels    []customModelView                    `json:"custom_models,omitempty"`
@@ -455,6 +483,9 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 			ID:              id,
 			Name:            pc.Name,
 			APIKeySet:       pc.APIKey != "",
+			AuthBinding:     pc.Auth,
+			AuthStatus:      s.providerAuthStatus(r.Context(), pc.Auth),
+			AuthMethods:     providerAuthMethodsForID(s, id),
 			BaseURL:         pc.BaseURL,
 			Vision:          pc.Vision,
 			Thinking:        pc.Thinking,
@@ -573,6 +604,7 @@ func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 		Protocol        string                               `json:"protocol,omitempty"`
 		ProviderTools   map[string]config.ProviderToolPolicy `json:"provider_tools,omitempty"`
 		ImageEndpoint   *config.ImageEndpointConfig          `json:"image_endpoint,omitempty"`
+		AuthBinding     *config.ProviderAuthBinding          `json:"auth_binding,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -581,9 +613,28 @@ func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	req.ID = strings.TrimSpace(req.ID)
 	req.BaseURL = strings.TrimSpace(req.BaseURL)
 	req.Model = strings.TrimSpace(req.Model)
-	if req.ID == "" || req.APIKey == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id and api_key are required"})
+	if req.ID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
 		return
+	}
+	normalizedAuthBinding, err := s.validateProviderBinding(r.Context(), req.ID, req.AuthBinding)
+	if err != nil {
+		writeConfigMutationError(w, err)
+		return
+	}
+	req.AuthBinding = normalizedAuthBinding
+	if req.AuthBinding == nil && req.APIKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "api_key is required for API-key authentication"})
+		return
+	}
+	if req.AuthBinding != nil {
+		// Managed drivers own their endpoint and protected headers. Drop values
+		// from a stale API-key form instead of persisting dormant credentials or
+		// allowing the browser to redirect a bearer token.
+		req.APIKey = ""
+		req.BaseURL = ""
+		req.Headers = nil
+		req.Protocol = ""
 	}
 	if !validReasoningEffort(req.ReasoningEffort) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid reasoning_effort"})
@@ -597,6 +648,12 @@ func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 	imageEndpoint, err := validateImageEndpoint(req.ImageEndpoint)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if req.AuthBinding != nil && imageEndpoint != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "image_endpoint requires API-key authentication",
+		})
 		return
 	}
 
@@ -626,6 +683,7 @@ func (s *Server) handleAddProvider(w http.ResponseWriter, r *http.Request) {
 		pc := &config.ProviderConfig{
 			APIKey:          req.APIKey,
 			BaseURL:         req.BaseURL,
+			Auth:            req.AuthBinding,
 			Name:            req.Name,
 			Headers:         cleanHeaders(req.Headers),
 			Vision:          req.Vision,
@@ -732,6 +790,7 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		Protocol        *string                               `json:"protocol,omitempty"`
 		ProviderTools   *map[string]config.ProviderToolPolicy `json:"provider_tools,omitempty"`
 		ImageEndpoint   json.RawMessage                       `json:"image_endpoint,omitempty"`
+		AuthBinding     json.RawMessage                       `json:"auth_binding,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -770,6 +829,18 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	authBindingPresent, authBinding, err := decodeOptionalProviderAuthBinding(req.AuthBinding)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if authBindingPresent {
+		authBinding, err = s.validateProviderBinding(r.Context(), id, authBinding)
+		if err != nil {
+			writeConfigMutationError(w, err)
+			return
+		}
+	}
 
 	// Serialize config RMW + live publish under cfgMu (see Server.cfgMu).
 	s.cfgMu.Lock()
@@ -786,6 +857,16 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 			return newConfigMutationHTTPError(http.StatusNotFound, "provider not found")
 		}
 		mutationRegistry := model.NewModelRegistryWithConfig(cfg)
+		nextAuth := pc.Auth
+		if authBindingPresent {
+			nextAuth = authBinding
+		}
+		if nextAuth != nil && imageEndpointPresent && imageEndpoint != nil {
+			return newConfigMutationHTTPError(
+				http.StatusBadRequest,
+				"image_endpoint requires API-key authentication",
+			)
+		}
 		// Mutate in place so fields not exposed by this endpoint (display name,
 		// custom models, deprecated lists) are preserved untouched.
 		prevHeaders := cleanHeaders(pc.Headers)
@@ -812,6 +893,15 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		}
 		if imageEndpointPresent {
 			pc.ImageEndpoint = imageEndpoint
+		}
+		if authBindingPresent {
+			pc.Auth = authBinding
+			if authBinding != nil {
+				pc.APIKey = ""
+				pc.BaseURL = ""
+				pc.Headers = nil
+				pc.Protocol = ""
+			}
 		}
 		if req.Name != "" {
 			pc.Name = req.Name
@@ -840,6 +930,24 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			pc.Headers = prevHeaders
+		}
+		// The generic secret merge above intentionally preserves omitted fields.
+		// Re-assert the managed-auth invariant after it so stale masked headers or
+		// an api_key submitted by an older UI cannot survive the mode switch.
+		if pc.Auth != nil {
+			pc.APIKey = ""
+			pc.BaseURL = ""
+			pc.Headers = nil
+			pc.Protocol = ""
+			// Image generation currently uses the Provider API key. Managed chat
+			// accounts deliberately do not expose or retain one, so keeping this
+			// endpoint would create a configuration that can never run.
+			pc.ImageEndpoint = nil
+		} else if pc.APIKey == "" {
+			return newConfigMutationHTTPError(
+				http.StatusBadRequest,
+				"api_key is required for API-key authentication",
+			)
 		}
 
 		// Replace the provider's custom models when the client sends the list (nil ⇒

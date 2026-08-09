@@ -49,7 +49,7 @@ List, view, and switch between sessions. Start a new session or resume a previou
 
 ### Model & Settings
 
-Switch models, change the session mode (Ask for approval / Plan / Full access), and manage configuration — all from the web interface.
+Switch models, change the session mode (Ask for approval / Plan / Full access), and manage configuration — all from the web interface. Provider forms support API keys plus device-code sign-in for ChatGPT/Codex, xAI/Grok, and GitHub Copilot, including multiple accounts, default-account selection, removal, sign-out, and reauthentication states.
 
 ### Theme / Dark Mode
 
@@ -74,6 +74,13 @@ The web server exposes an HTTP API and a WebSocket stream for programmatic acces
 | `POST /api/sessions` | Create new session |
 | `GET /api/models` | List available models |
 | `POST /api/model` | Switch active model |
+| `GET /api/provider-auth/{method}` | List non-secret account status for a managed authentication method |
+| `POST /api/provider-auth/{method}/start` | Start a device-code login |
+| `POST /api/provider-auth/{method}/flows/{flow_id}/poll` | Advance a device-code login |
+| `DELETE /api/provider-auth/{method}/flows/{flow_id}` | Cancel a pending login |
+| `POST /api/provider-auth/{method}/default` | Select the default managed account |
+| `DELETE /api/provider-auth/{method}/accounts/{account_id}` | Remove one managed account |
+| `DELETE /api/provider-auth/{method}` | Sign out all accounts for that method |
 | `POST /api/mode` | Switch session mode (`approval`, `plan`, or `full_access`) |
 | `GET /api/todos` | Get current todo items |
 | `GET /api/files` | Browse directory |

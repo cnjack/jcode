@@ -8,7 +8,7 @@ nav_order: 1
 ## Prerequisites
 
 - **Go 1.22+** installed
-- An **API key** from an OpenAI-compatible provider (OpenAI, Anthropic, Azure, etc.)
+- Either an **API key** from an OpenAI-compatible provider or an eligible ChatGPT/Codex, Grok, or GitHub Copilot account
 
 ## Install
 
@@ -30,7 +30,7 @@ cd jcode
 make install
 ```
 
-The `make install` command generates the model registry, builds the Vue 3 web frontend, and installs the Go binary to your `$GOPATH/bin`.
+The `make install` command generates the model registry, builds the React web frontend, and installs the Go binary to your `$GOPATH/bin`.
 
 ### Update
 
@@ -53,9 +53,18 @@ jcode
 
 On first launch, jcode runs a **setup wizard** that guides you through:
 
-1. **Choose a provider** — Select your AI model provider (OpenAI, Anthropic, etc.)
-2. **Enter your API key** — Your key is stored locally at `~/.jcode/config.json`
+1. **Choose a provider** — Select your AI model provider (OpenAI, xAI, GitHub Copilot, etc.)
+2. **Choose authentication** — Enter an API key, or sign in with ChatGPT, Grok, or GitHub using the displayed device code
 3. **Pick a model** — Select the default model for your session
+
+API keys remain in `~/.jcode/config.json`. Managed account credentials stay in
+the owner-only local store `~/.jcode/provider-auth.json`; provider configuration
+contains only a non-secret account binding.
+
+{: .note }
+**Sign in with ChatGPT** uses the ChatGPT/Codex subscription channel. It is
+separate from an OpenAI API key and does not turn ChatGPT subscription access
+into OpenAI API credits.
 
 That's it. You're ready to go.
 
@@ -104,7 +113,7 @@ make build
 
 The `make build` command:
 1. Generates the model registry from [models.dev](https://models.dev)
-2. Builds the Vue 3 web frontend
+2. Builds the React web frontend
 3. Compiles the Go binary
 
 {: .note }

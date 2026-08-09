@@ -15,10 +15,14 @@ import siliconcloud from '@lobehub/icons-static-svg/icons/siliconcloud-color.svg
 import hunyuan from '@lobehub/icons-static-svg/icons/hunyuan-color.svg?raw'
 import xiaomi from '@lobehub/icons-static-svg/icons/xiaomimimo.svg?raw'
 import ollama from '@lobehub/icons-static-svg/icons/ollama.svg?raw'
+import xai from '@lobehub/icons-static-svg/icons/xai.svg?raw'
+import githubCopilot from '@lobehub/icons-static-svg/icons/githubcopilot.svg?raw'
 
 const RULES: ReadonlyArray<readonly [RegExp, string]> = [
   [/openrouter/, openrouter],
   [/openai/, openai],
+  [/xai|grok/, xai],
+  [/github.*copilot|copilot/, githubCopilot],
   [/anthropic|claude/, anthropic],
   [/gemini|google|vertex/, gemini],
   [/deepseek/, deepseek],

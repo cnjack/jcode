@@ -1104,7 +1104,11 @@ func (s *interactiveState) handleCompact() {
 		_, _, oldTokens = s.agentTokenUsage.Get()
 	}
 	oldLen := len(s.history)
-	s.history = agent.CompactHistory(s.ctx, s.chatModel, s.history)
+	compactCtx := s.ctx
+	if s.rec != nil && s.rec.UUID() != "" {
+		compactCtx = internalmodel.WithProviderSessionID(compactCtx, s.rec.UUID())
+	}
+	s.history = agent.CompactHistory(compactCtx, s.chatModel, s.history)
 	var newTokens int64
 	if s.agentTokenUsage != nil {
 		_, _, newTokens = s.agentTokenUsage.Get()

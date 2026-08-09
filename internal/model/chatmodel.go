@@ -17,6 +17,7 @@ import (
 	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/providerauth"
 )
 
 // TokenUsage tracks token consumption across all API calls.
@@ -315,6 +316,13 @@ type ChatModelConfig struct {
 	// Vision controls whether image parts are forwarded to the model. When
 	// false, multimodal image content is stripped to text before sending.
 	Vision bool
+	// Credential resolves a fresh bearer token and protected provider headers
+	// immediately before every HTTP request. It is used only by managed account
+	// bindings; API-key providers keep the historical fixed credential path.
+	Credential ResponsesCredentialFunc
+	// Copilot enables request classification headers for managed GitHub
+	// Copilot accounts. It is set only by newManagedChatModel.
+	Copilot bool
 }
 
 type chatModel struct {
@@ -324,6 +332,7 @@ type chatModel struct {
 	reasoningEffort string
 	thinking        *bool
 	vision          bool
+	copilot         bool
 }
 
 // headerDoer wraps an http.Client to inject a fixed set of headers into every
@@ -331,27 +340,57 @@ type chatModel struct {
 // configured Headers reach the API. Set unconditionally so callers may override
 // transport headers (including Authorization) for custom gateways.
 type headerDoer struct {
-	base    *http.Client
-	headers map[string]string
+	base       *http.Client
+	headers    map[string]string
+	credential ResponsesCredentialFunc
 }
 
 func (h *headerDoer) Do(req *http.Request) (*http.Response, error) {
 	for k, v := range h.headers {
 		req.Header.Set(k, v)
 	}
+	if h.credential != nil {
+		token, protected, err := h.credential(req.Context())
+		if err != nil {
+			return nil, fmt.Errorf("resolve managed provider credential: %w", err)
+		}
+		for key, value := range protected {
+			req.Header.Set(key, value)
+		}
+		if strings.TrimSpace(token) == "" {
+			return nil, fmt.Errorf("resolve managed provider credential: empty token")
+		}
+		// Authorization is applied last so neither go-openai nor configured
+		// headers can replace a managed account token.
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	return h.base.Do(req)
 }
 
 func NewChatModel(_ context.Context, cfg *ChatModelConfig) (einomodel.ToolCallingChatModel, error) {
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && cfg.Credential == nil {
 		return nil, fmt.Errorf("APIKey is required")
 	}
-	config := openai.DefaultConfig(cfg.APIKey)
+	apiKey := cfg.APIKey
+	if apiKey == "" {
+		// go-openai requires a constructor key and writes it before dispatch;
+		// headerDoer replaces this sentinel with the fresh managed token.
+		apiKey = "managed-provider-auth"
+	}
+	config := openai.DefaultConfig(apiKey)
 	if cfg.BaseURL != "" {
 		config.BaseURL = cfg.BaseURL
 	}
-	if len(cfg.Headers) > 0 {
-		config.HTTPClient = &headerDoer{base: &http.Client{}, headers: cfg.Headers}
+	if len(cfg.Headers) > 0 || cfg.Credential != nil {
+		baseClient := &http.Client{}
+		if cfg.Credential != nil {
+			baseClient = managedNoRedirectClient(baseClient)
+		}
+		config.HTTPClient = &headerDoer{
+			base:       baseClient,
+			headers:    cloneStringMap(cfg.Headers),
+			credential: cfg.Credential,
+		}
 	}
 	return &chatModel{
 		client:          openai.NewClientWithConfig(config),
@@ -359,7 +398,19 @@ func NewChatModel(_ context.Context, cfg *ChatModelConfig) (einomodel.ToolCallin
 		reasoningEffort: cfg.ReasoningEffort,
 		thinking:        cfg.Thinking,
 		vision:          cfg.Vision,
+		copilot:         cfg.Copilot,
 	}, nil
+}
+
+func managedNoRedirectClient(source *http.Client) *http.Client {
+	if source == nil {
+		source = &http.Client{}
+	}
+	clone := *source
+	clone.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return &clone
 }
 
 // NewChatModelFromProvider builds a ChatModel from a provider config, applying
@@ -383,6 +434,13 @@ func NewChatModelFromProvider(ctx context.Context, provider, modelName, baseURL 
 			config.Logger().Printf("[chatmodel] %s/%s has no image input modality; image parts will be stripped", provider, modelName)
 		}
 	}
+	if pc.Auth != nil {
+		manager, err := providerauth.Default(config.ConfigDir())
+		if err != nil {
+			return nil, fmt.Errorf("initialize managed provider auth: %w", err)
+		}
+		return newManagedChatModel(ctx, provider, modelName, pc, vision, manager)
+	}
 	return NewChatModel(ctx, &ChatModelConfig{
 		Model:           modelName,
 		APIKey:          pc.APIKey,
@@ -392,6 +450,101 @@ func NewChatModelFromProvider(ctx context.Context, provider, modelName, baseURL 
 		Thinking:        pc.Thinking,
 		Vision:          vision,
 	})
+}
+
+type providerCredentialResolver interface {
+	Credential(context.Context, providerauth.Binding) (providerauth.Credential, error)
+}
+
+func newManagedChatModel(
+	ctx context.Context,
+	provider string,
+	modelName string,
+	pc *config.ProviderConfig,
+	vision bool,
+	auth providerCredentialResolver,
+) (einomodel.ToolCallingChatModel, error) {
+	binding := providerauth.Binding{
+		Method:    providerauth.Method(pc.Auth.Method),
+		AccountID: pc.Auth.AccountID,
+	}
+	if err := validateManagedProviderMethod(provider, binding.Method); err != nil {
+		return nil, err
+	}
+	initial, err := auth.Credential(ctx, binding)
+	if err != nil {
+		return nil, fmt.Errorf("resolve managed provider account: %w", err)
+	}
+	credential := managedCredential(auth, binding, initial)
+
+	switch initial.Protocol {
+	case providerauth.ProtocolResponses:
+		return NewResponsesModel(ctx, &ResponsesModelConfig{
+			Model:           modelName,
+			BaseURL:         initial.BaseURL,
+			ReasoningEffort: pc.ReasoningEffort,
+			Vision:          vision,
+			Credential:      credential,
+			Codex:           binding.Method == providerauth.MethodCodexOAuth,
+		})
+	case providerauth.ProtocolChatCompletions:
+		return NewChatModel(ctx, &ChatModelConfig{
+			Model:           modelName,
+			BaseURL:         initial.BaseURL,
+			ReasoningEffort: pc.ReasoningEffort,
+			Thinking:        pc.Thinking,
+			Vision:          vision,
+			Credential:      credential,
+			Copilot:         binding.Method == providerauth.MethodGitHubCopilot,
+		})
+	default:
+		return nil, fmt.Errorf(
+			"managed provider %s/%s returned unsupported protocol %q",
+			provider, modelName, initial.Protocol,
+		)
+	}
+}
+
+func validateManagedProviderMethod(provider string, method providerauth.Method) error {
+	expectedProvider := ""
+	switch method {
+	case providerauth.MethodCodexOAuth:
+		expectedProvider = "openai"
+	case providerauth.MethodXAIOAuth:
+		expectedProvider = "xai"
+	case providerauth.MethodGitHubCopilot:
+		expectedProvider = "github-copilot"
+	default:
+		return fmt.Errorf("managed provider authentication method %q is unsupported", method)
+	}
+	if provider != expectedProvider {
+		return fmt.Errorf(
+			"managed provider authentication method %q cannot be used by provider %q",
+			method, provider,
+		)
+	}
+	return nil
+}
+
+func managedCredential(
+	auth providerCredentialResolver,
+	binding providerauth.Binding,
+	initial providerauth.Credential,
+) ResponsesCredentialFunc {
+	return func(requestContext context.Context) (string, map[string]string, error) {
+		latest, resolveErr := auth.Credential(requestContext, binding)
+		if resolveErr != nil {
+			return "", nil, resolveErr
+		}
+		if latest.Protocol != initial.Protocol || latest.BaseURL != initial.BaseURL {
+			return "", nil, fmt.Errorf("managed provider runtime profile changed")
+		}
+		headers := latest.Headers
+		if binding.Method == providerauth.MethodGitHubCopilot {
+			headers = copilotRequestHeaders(requestContext, headers)
+		}
+		return latest.Token, headers, nil
+	}
 }
 
 func (m *chatModel) WithTools(tools []*schema.ToolInfo) (einomodel.ToolCallingChatModel, error) {
@@ -425,6 +578,7 @@ func (m *chatModel) WithTools(tools []*schema.ToolInfo) (einomodel.ToolCallingCh
 		reasoningEffort: m.reasoningEffort,
 		thinking:        m.thinking,
 		vision:          m.vision,
+		copilot:         m.copilot,
 	}, nil
 }
 
@@ -477,6 +631,9 @@ func (m *chatModel) recordUsage(ctx context.Context, u openai.Usage) {
 }
 
 func (m *chatModel) Generate(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.Message, error) {
+	if m.copilot {
+		ctx = withCopilotModelRequest(ctx, input)
+	}
 	req := m.buildRequest(input, false, opts...)
 	config.Logger().Printf("[chatmodel] Generate start (model: %s)", m.model)
 	start := time.Now()
@@ -497,6 +654,9 @@ func (m *chatModel) Generate(ctx context.Context, input []*schema.Message, opts 
 }
 
 func (m *chatModel) Stream(ctx context.Context, input []*schema.Message, opts ...einomodel.Option) (*schema.StreamReader[*schema.Message], error) {
+	if m.copilot {
+		ctx = withCopilotModelRequest(ctx, input)
+	}
 	req := m.buildRequest(input, true, opts...)
 	// Enable stream options to get usage information
 	req.StreamOptions = &openai.StreamOptions{
