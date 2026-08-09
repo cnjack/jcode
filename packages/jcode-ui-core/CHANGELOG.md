@@ -1,5 +1,54 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Durable tool and Artifact contracts.** New `ToolSurface`, `ToolPhase`,
+  `ToolOutcome`, `ArtifactStorageKind`, and `ArtifactRef` types describe
+  standalone timeline surfaces, monotonic generated-media lifecycles, and
+  opaque workspace/managed Artifact references. `ToolCall` now carries the
+  operation id, surface, phase, terminal outcome, typed error code, immutable
+  provider/model snapshot, and structured Artifact references needed to replay
+  these tools without parsing display strings.
+- **Lifecycle-aware renderer contract.** `ToolRendererProps` now receives the
+  lifecycle, provider, model, Artifact, and operation fields, and the exported
+  `toolCallToRendererProps()` helper provides the single mapping used by both
+  generic and standalone tool surfaces.
+- **Structured billable approvals.** New `BillableApprovalSummary` plus
+  `Approval.approvalClass` / `Approval.billableSummary` carry a bounded,
+  non-secret summary for external image/search decisions. Pending renderers can
+  inspect `ApprovalDecisionActions.canResolveOptions` before returning opaque
+  option ids.
+- **Paged Ask User controls.** `AskUserControls` gains `activeIndex`,
+  `setActiveIndex`, `isSubmitting`, and the stable `submitError` code;
+  `submit()` and `skip()` are now asynchronous controls. The public
+  `AskUserSubmitError` type currently exposes `submit_failed`.
+- Exported `isStandaloneTool()`. Tools that declare
+  `surface: 'standalone'`, together with `ask_user`, are explicit hard
+  boundaries for activity grouping and same-batch reordering.
+
+### Changed
+
+- `RuntimeActions.submitAskUser` may now return a Promise so headless
+  primitives can keep the interaction pending until the host confirms the
+  answer. The mock runtime writes resolved output as `{ answers: [...] }`,
+  matching the persisted runtime payload consumed by receipt rendering.
+- Ask User state resets for a new `askUserId`; option selection clears custom
+  text and non-empty custom text clears selected options. Numeric shortcuts act
+  on the visible question, incomplete submission focuses the first unanswered
+  page, and failed host submissions restore the controls with answers intact.
+- `groupActivityTimeline()` no longer absorbs or reorders standalone tools;
+  they retain their original position and split the surrounding activity
+  groups.
+
+### Security
+
+- `ApprovalBlock` now fails closed for `billable_external` approvals when the
+  host does not implement `resolveApprovalOption`; opaque allow-once decisions
+  are never coerced into the legacy boolean approval contract. Non-billable
+  option approvals retain the compatibility fallback.
+
 ## 0.4.0 — 2026-07-13
 
 Activity groups — Claude Code / Codex-style timeline coalescing:

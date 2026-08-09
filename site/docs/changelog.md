@@ -7,29 +7,144 @@ nav_order: 11
 
 All notable changes to jcode are documented here. This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and follows the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
 
-For the **full changelog**, see [CHANGELOG.md](../CHANGELOG.md) in the repository root.
+For implementation-level detail, see the repository's full [CHANGELOG.md](https://github.com/cnjack/jcode/blob/main/CHANGELOG.md).
 
 ## Unreleased
 
 #### Added
-- **Dynamic workflows** ([docs](overview/workflows.html)). A new `internal/flow` engine embeds goja (a pure-Go JavaScript runtime) driven by a `goja_nodejs` event loop to run user- or agent-authored orchestration scripts: `export const meta = {...}` plus a plain-JS body using injected primitives `agent()` / `parallel()` / `pipeline()` / `phase()` / `log()` / `workflow()` / `args` / `budget`. Each `agent()` returns a promise settled back on the loop goroutine, so `await Promise.all([...])` fans out real parallel subagents while the JS stays deterministic. Structured output via `opts.schema`, determinism guards (`Date.now`/`Math.random`/argless `new Date()` throw), concurrency (16) and hard per-run (1000) agent caps, and a wall-clock watchdog. Workflows load from `~/.jcode/workflows/` and `<project>/.jcode/workflows/` (project wins). Scripts are validated (meta parse + full JS compile) before any agent runs, so a syntax error costs zero tokens — both the `workflow_run` tool and the CLI pre-flight, and `jcode flow validate` checks a file without running it. New `jcode flow list|show|validate|run` CLI (`--args`/`--timeout`/`--concurrency`), a `workflow_run` tool so the agent can write-and-run a workflow inline across TUI/Web/ACP, and three built-ins: `repo-audit`, `pr-review`, `roundtable`. Authoring reference: [Writing Workflows](overview/writing-workflows.html).
-- **Built-in color themes, unified across terminal and web.** A new single source of truth (`internal/theme`) defines 7 themes — 4 dark (jcode Dark, Midnight, Dracula, Nord) and 3 light (jcode Light, GitHub Light, Solarized Light) — as a typed semantic palette. `go generate` emits the web CSS (`[data-theme]` blocks) and the picker registry from that one Go file, so the two renderers can never drift.
-- **`/theme` command** in the TUI opens a live-preview selector: arrow keys repaint the whole UI, Enter applies and persists to `config.theme`, Esc reverts. When no theme is persisted, the startup default is auto-selected from the terminal background. New `theme` config field.
-- **Appearance settings tab** in the web UI: a System (follow-OS) option plus dark/light swatch grids that render a true mini-preview of each theme. Themes apply via `html[data-theme]`; the legacy light/dark/system localStorage values migrate automatically.
-- **Docker container workspaces (web).** The remote-connect wizard can now bind a task to a Docker container, alongside SSH. A new `DockerExecutor` (Docker Go SDK, `client.FromEnv` → honors `DOCKER_HOST`) runs all agent file/command operations inside the container via `docker exec`, mirroring the SSH executor. A stopped container is started on connect and stopped again (ref-counted) once no task is using it; a one-shot container that exits immediately is reported with its logs rather than failing silently. The embedded terminal opens a real TTY *inside* the bound container (`docker exec`, bash→sh). Container-bound tasks are keyed `docker://<container>/<path>`, and the `switch_env` tool plus saved Docker aliases (`docker_aliases` in config) cover reconnects.
+- **Provider-backed image generation.** jcode can discover image-capable providers, verify their runtime capabilities, configure image models, and invoke managed provider tools from the same agent workflow used for coding tasks.
+- **Durable generated-image artifacts.** Generated images appear as first-class timeline cards and artifacts, with revision and lifecycle state that survives session replay across Web, Desktop, TUI, ACP, and Cloud transport.
 
 #### Changed
-- Renamed the session modes to **Ask for approval / Plan / Full access** across the web UI, terminal UI, and ACP. Their canonical IDs are now `approval` / `plan` / `full_access`; the old `ask`, `agent`, and `autopilot` IDs are no longer accepted.
-- The terminal palette was de-frozen: the ~50 lipgloss styles that were baked in at import time are now rebuilt from the active theme by `ApplyTheme`, and previously-hardcoded colors (subagent purple, on-primary text, team-panel and context-bar colors) are now semantic tokens. Markdown (glamour) follows the theme's light/dark appearance.
+- **Focused Ask User flow.** Pending questions now open in a bottom dock with paging, keyboard-friendly choices, custom answers, skip, submit locking, and retryable errors. Completed answers stay in the conversation as compact receipts instead of collapsing into generic tool activity.
+- **Cleaner new sessions.** A brand-new empty task hides task-specific titlebar controls until the conversation actually contains content.
 
-#### Fixed
-- TUI: pressing **Esc** while viewing a teammate now returns to the leader (the handler matched a key string that bubbletea never emits, so it was dead code).
-- TUI: the Cancel-agent confirmation now defaults to the non-destructive **Wait** button, matching the Quit dialog — `Ctrl+C` then `Enter` no longer aborts a running agent by reflex.
-- TUI: **`?`** opens the keyboard-shortcuts help when the input is empty, and the help panel's slash-command list is now generated from the command registry (so `/goal`, skill commands, and `/theme` always appear).
+#### Security
+- Billable provider operations require an explicit approval choice before execution. Session and configuration persistence also gains file locking, directory synchronization, security journaling, and secret-safe MCP updates.
 
 ---
 
 ## Latest Release
+
+### [0.12.2](https://github.com/cnjack/jcode/releases/tag/v0.12.2) - 2026-08-05
+
+**Structured Turn History • Reliable Cancellation and Replay**
+
+#### Fixed
+- Live TUI, Web, and ACP history now preserves the complete assistant/tool transcript instead of flattening each turn into one text response, so continued turns match the persisted replay.
+- Parallel tool-call results and large-output truncation remain paired consistently between live and resumed sessions.
+- Cancellation and stream failures preserve visible partial text while dropping incomplete tool calls that could make a session impossible to resume.
+
+---
+
+## Recent Releases
+
+### [0.12.1](https://github.com/cnjack/jcode/releases/tag/v0.12.1) - 2026-08-02
+
+**Artifact Workbench • Safe Preview and Sharing • Faster Site Navigation**
+
+#### Added
+- **Desktop and Web artifacts.** Agent outputs can be registered as durable, revisioned artifacts and opened from an automatic workbench with quick-look and focus layouts, replay support, automation indicators, and five-language UI.
+- Safe renderers cover Markdown, code, text, CSV, images, PDFs, and sandboxed HTML. Desktop can open or reveal validated local artifacts, while signed-in users can optionally create end-to-end encrypted Cloud shares.
+
+#### Security
+- Artifact access rejects sensitive paths, unsafe extensions, symlinks, hard links, kind spoofing, and active content outside the sandboxed renderer.
+
+#### Changed
+- The public site now uses route-level loading boundaries and navigation-intent preloading for a faster Chat UI page transition.
+
+---
+
+### [0.11.4](https://github.com/cnjack/jcode/releases/tag/v0.11.4) - 2026-07-31
+
+**Desktop Task Context • Native Open In • Browser Bridge Setup**
+
+#### Added
+- Desktop now shows the active task, workspace, branch, model, Cloud sync, and task actions in the window titlebar.
+- The **Open in…** menu discovers installed editors, terminals, and file managers through native macOS, Windows, and Linux registration systems, using platform icons and strict workspace/application validation.
+- Browser settings now link directly to the Browser Bridge store listing and setup guide when the extension is offline.
+
+---
+
+### [0.11.3](https://github.com/cnjack/jcode/releases/tag/v0.11.3) - 2026-07-30
+
+**Layered Configuration • Markdown Custom Agents • Remote Access**
+
+#### Added
+- **Layered project configuration.** jcode merges global config, walk-up project `.jcode/config.json`, standalone MCP files, and supported environment variables with clear precedence. Settings identifies project and agent-provided scopes.
+- **Markdown custom agents.** Reusable roles load from user and project `*.agent.md` files, can be selected in CLI and Web/Desktop, persist with sessions, and apply consistently to subagents, workflows, and team members.
+
+#### Changed
+- Remote Access has a focused onboarding page and a more reliable system-browser device authorization flow.
+- Model discovery now relies on models.dev instead of duplicate hand-maintained entries for providers already present in the generated catalog.
+
+#### Security
+- New project MCP servers require explicit trust, dangerous inherited environment variables are blocked, and project config cannot override security-sensitive capabilities.
+
+#### Fixed
+- Cloud sends without a session ID now create and acknowledge the exact session before dispatch, preventing active-task misrouting; synchronized models retain reasoning-effort metadata.
+- The saved SSH alias picker is theme-aware and keyboard accessible, and Langfuse traces now record safe user input plus final output without exposing multimodal payload data.
+
+---
+
+### [0.11.2](https://github.com/cnjack/jcode/releases/tag/v0.11.2) - 2026-07-23
+
+**Encrypted Provider Sync • Trusted Devices • Model Visibility**
+
+#### Added
+- Added opt-in, end-to-end encrypted provider configuration sync across approved Desktop devices, including approval and revocation, conflict-safe revisions, provider metadata, and Cloud-hosted provider proxy support. Local providers continue to work directly when Cloud is unavailable.
+
+#### Changed
+- Cloud sync and panel controls use a quieter icon-first toolbar treatment while preserving accessible state labels.
+
+#### Fixed
+- Model pickers, favorites, recents, and provider counts now consistently honor persisted enable/disable state; missing visibility data fails closed.
+- Generated provider ordering no longer contains duplicate entries.
+
+---
+
+### [0.11.1](https://github.com/cnjack/jcode/releases/tag/v0.11.1) - 2026-07-22
+
+**Encrypted Device Relay • Desktop Pairing • Product Composer**
+
+#### Added
+- **jcloud device relay.** `jcode login` connects Web/Desktop to an outbound-only, end-to-end encrypted relay so approved remote devices can browse workspaces, resume sessions, send messages, and manage goals without exposing plaintext to the relay.
+- Desktop approval replaces QR pairing, with device management, encryption state, and per-session Cloud sync in Settings.
+- The product composer moved into `jcode-ui/product`, project last-activity ordering persists across restarts, and `JCODE_NO_BROWSER=1` supports headless login.
+
+#### Changed
+- Conversation switching now resumes a session in one round trip, and selecting the already-active model or mode no longer causes redundant resets or flicker.
+
+#### Fixed
+- Composer popups remain inside the viewport with correct stacking, and deleting the active conversation returns to a clean welcome session instead of stale content.
+
+---
+
+## Version Index: 0.10.1–0.5.2
+
+These releases predate the expanded summaries above. The full repository changelog and pull requests remain the source for implementation detail.
+
+| Version | Date | Highlights |
+| --- | --- | --- |
+| `0.10.1` | 2026-07-20 | Native Computer Use and deferred tool discovery; Alibaba Token Plan; stronger conversation recovery, permission boundaries, developer telemetry settings, and signed desktop helper packaging. |
+| `0.9.6` | 2026-07-17 | Opt-in LLM approval reviewer; Kimi For Coding and K3 vision support; Settings picker for the small-model role. |
+| `0.9.5` | 2026-07-14 | Small-model routing and generated session titles; subagent support over ACP; Settings layout polish. |
+| `0.9.4` | 2026-07-13 | Vue-to-React migration and reusable `jcode-ui`; grouped tool activity, turn-level change summaries, dual-channel output, and richer TUI transcripts. |
+| `0.9.3` | 2026-07-06 | Workflow slash commands across TUI, Web, and ACP; Desktop sidecar inherits the login-shell environment; Browser Bridge reliability updates. |
+| `0.9.2` | 2026-07-06 | Long-horizon hardening for bounded tool output, atomic file writes, process cancellation, compaction, and prompt handling. |
+| `0.9.1` | 2026-07-05 | Deterministic JavaScript workflows with parallel agents, preflight validation, CLI commands, and built-in workflow templates. |
+| `0.8.1` | 2026-07-05 | Browser Use, learned cross-session memory, configurable lifecycle hooks, agent-evaluation showcases, and token auth for non-loopback Web servers. |
+| `0.7.2` | 2026-06-28 | Card-based provider and model management, custom providers, visibility controls, and per-model reasoning settings. |
+| `0.7.1` | 2026-06-24 | Scheduled and manual automations through Web, CLI, and agent tools, with dedicated navigation and run history. |
+| `0.6.4` | 2026-06-23 | Parallel Web tasks and Docker workspaces, plus safer branch checkout, task lifecycle, terminal, and container cleanup behavior. |
+| `0.6.3` | 2026-06-22 | Usage statistics for tokens, context, model/provider breakdown, trends, and cache-hit rate. |
+| `0.6.2` | 2026-06-22 | Five-language Web UI, semantic icon/token polish, remote-workspace improvements, and Desktop/build fixes. |
+| `0.6.1` | 2026-06-21 | Task-centric multi-project Web workspace, Tauri Desktop shell, and SSH remote execution. |
+| `0.5.2` | 2026-06-15 | Seven shared themes with TUI `/theme` and Web Appearance settings; redesigned todo/workbench; interactive Ask User and MCP OAuth/settings management. |
+
+---
+
+## Earlier Releases
 
 ### [0.5.1] - 2026-06-13
 
@@ -576,7 +691,7 @@ curl -fsSL https://raw.githubusercontent.com/cnjack/jcode/main/script/install.sh
 
 ## What Changed Between Versions
 
-Use the full [CHANGELOG.md](../CHANGELOG.md) to see detailed changes for each release, including:
+Use the full repository [CHANGELOG.md](https://github.com/cnjack/jcode/blob/main/CHANGELOG.md) to see detailed changes for each release, including:
 
 - **Added** features and capabilities
 - **Changed** behavior and improvements
@@ -586,11 +701,7 @@ Use the full [CHANGELOG.md](../CHANGELOG.md) to see detailed changes for each re
 
 ## Breaking Changes
 
-This section will document any breaking changes that may affect your workflow:
-
-**Currently:** No breaking changes between v0.0.1 and v0.4.9.
-
-All releases maintain backward compatibility with existing configurations and workflows.
+Breaking changes and migration notes are called out in the full repository changelog and the package-specific `jcode-ui` changelogs. When upgrading across several minor releases, review every intervening entry—especially configuration, session-mode, provider, and reusable UI package changes.
 
 ## Getting Help
 
@@ -601,4 +712,4 @@ All releases maintain backward compatibility with existing configurations and wo
 
 ---
 
-*Last updated: June 13, 2026*
+*Last updated: August 9, 2026*

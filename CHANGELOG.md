@@ -8,31 +8,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Small model picker in the web/desktop settings.** Settings → Providers gains a "Model roles" section: pick `small_model` from the enabled-model catalog (grouped by provider) or clear it back to "follow main model". Changes persist to config and apply immediately — the `"small"` alias, automations, and session titles pick up the new value without a restart. New `POST /api/small-model` endpoint, `small_model` exposed in `GET /api/config`; a configured ref whose model was since disabled/removed still renders (marked unavailable) so it can be cleared. Localized in all five UI languages.
-- **Built-in color themes, unified across terminal and web.** A new single source of truth (`internal/theme`) defines 7 themes — 4 dark (jcode Dark, Midnight, Dracula, Nord) and 3 light (jcode Light, GitHub Light, Solarized Light) — as a typed semantic palette. `go generate` emits the web CSS (`[data-theme]` blocks) and the picker registry from that one Go file, so the two renderers can never drift.
-- **`/theme` command** in the TUI opens a live-preview selector: arrow keys repaint the whole UI, Enter applies and persists to `config.theme`, Esc reverts. When no theme is persisted, the startup default is auto-selected from the terminal background. New `theme` config field.
-- **Appearance settings tab** in the web UI: a System (follow-OS) option plus dark/light swatch grids that render a true mini-preview of each theme. Themes apply via `html[data-theme]`; the legacy light/dark/system localStorage values migrate automatically.
-- **Docker container workspaces (web).** The remote-connect wizard can now bind a task to a Docker container, alongside SSH. A new `DockerExecutor` (Docker Go SDK, `client.FromEnv` → honors `DOCKER_HOST`) runs all agent file/command operations inside the container via `docker exec`, mirroring the SSH executor. A stopped container is started on connect and stopped again (ref-counted) once no task is using it; a one-shot container that exits immediately is reported with its logs rather than failing silently. The embedded terminal opens a real TTY *inside* the bound container (`docker exec`, bash→sh). Container-bound tasks are keyed `docker://<container>/<path>`, and the `switch_env` tool plus saved Docker aliases (`docker_aliases` in config) cover reconnects. Daemon-gated integration tests cover the lifecycle.
-- **`small_model` is now a real feature: cheap subagents + LLM session titles.** The `"small"` model alias resolves to `config.small_model` via the model factory and is accepted by the `subagent` tool, workflow/flow specs, `team_spawn`, and the automation model override; unset or malformed `small_model` degrades gracefully to the session model instead of erroring. The subagent tool description nudges the main model to delegate mechanical, low-stakes subtasks (searches, inventories, simple extraction) to it. Session titles upgrade from first-message truncation to a small-model-generated title (async, best-effort, same-language) across TUI/web/ACP; the small model is read from config at fire time, so enabling/disabling it mid-run takes effect without a restart. `jcode doctor` probes small-model connectivity alongside the primary model — both probes now share the factory construction path and are bounded by a 60s timeout so a silent endpoint can't hang the doctor. Wire-level routing is locked by in-process e2e tests (mock OpenAI endpoint asserting the request-body `model` field).
+- **Provider-backed image generation.** Configure a global Image Model independently from the chat model, then use `generate_image` from normal-mode TUI, Web, Desktop, or ACP sessions. The first release supports OpenAI-compatible Images endpoints, BigModel CogView, and Alibaba Token Plan Wan 2.7 models.
+- **Generated images as managed Artifacts.** Results are verified, stored outside the workspace under the session, persisted for replay, and shown as lifecycle-aware image cards in Web/Desktop. TUI reports the local path and metadata; ACP degrades to metadata, resource links, or bounded inline images according to negotiated capabilities.
+- **Provider capability routing.** Settings now distinguishes chat, image generation, vision input, and provider-bound tools using the exact provider profile, endpoint, protocol, and model. It includes an Image Model picker, provider capability status, a BigModel Search MCP preset, and provider Web Search policy.
 
 ### Changed
-- **Memory distillation no longer silently falls back to `small_model`.** The extraction chain is now `memory.model` → main `model`: distilled memories persist across sessions, so extraction quality outweighs token savings. Point `memory.model` at a cheap model explicitly if you want the old behavior. Compaction likewise stays on the main model by design (summary quality bounds post-compaction performance).
-- Renamed the session modes to **Ask for approval / Plan / Full access** across the web UI, terminal UI, and ACP. Their canonical IDs are now `approval` / `plan` / `full_access`; the old `ask`, `agent`, and `autopilot` IDs are no longer accepted.
-- The terminal palette was de-frozen: the ~50 lipgloss styles that were baked in at import time are now rebuilt from the active theme by `ApplyTheme`, and previously-hardcoded colors (subagent purple, on-primary text, team-panel and context-bar colors) are now semantic tokens. Markdown (glamour) follows the theme's light/dark appearance.
+- **Ask User is now a bottom interaction dock.** Pending questions replace the composer and are presented one at a time with paging, recommended and multi-select options, custom answers, skip, submission progress, and retryable errors. Once answered, a compact receipt remains in the conversation timeline.
+- Pending Ask User calls no longer merge into activity groups, and both pending and resolved question surfaces align with the conversation gutter.
+- Fresh blank sessions hide task/session chrome until conversation work exists; loading and persisted sessions keep their controls.
 
 ### Fixed
-- **Subagent per-spawn model override was a silent no-op in every production surface.** The `subagent` tool honors its `model` param only when a `ModelFactory` is injected, but neither the TUI nor the web engine ever wired one into `SubagentDeps` (only workflow tools got factories) — so a documented feature never worked. Both surfaces now share one factory across subagent + workflow deps.
-- Subagent token usage is now attributed to the model that actually served the run; previously it was always logged under the session's main model, which would misstate costs for any model-overridden subagent. Team usage events are normalized the same way (alias resolved, bare model id) so one model no longer splits into two stat buckets, and all usage writers now report the cache-support flag (`CacheSeen`), not just the main runner.
-- Teammate model overrides now resolve through the shared model factory instead of a hand-rolled parser — `team_spawn` gets baseURL/effort resolution, instance caching, and the `"small"` alias for free, instead of silently falling back to the leader model.
-- Session titles are bound to the session they were generated for: an in-flight async title can no longer land on a different session after `/resume` re-points the live recorder, and racing first messages fire the title generator exactly once (atomic claim, refiner released after use).
-- Web: recorders created after task build (lazy creation, session switch, post-delete) now get the same title hook as the task's original recorder, so LLM titles no longer silently vanish for those sessions.
-- The memory distillation pipeline logs a breadcrumb when `small_model` is set but `memory.model` isn't — the run rides the main model by design, and the log points at `memory.model` for users who relied on the old implicit small-model fallback.
-- TUI: pressing **Esc** while viewing a teammate now returns to the leader (the handler matched a key string that bubbletea never emits, so it was dead code).
-- TUI: the Cancel-agent confirmation now defaults to the non-destructive **Wait** button, matching the Quit dialog — `Ctrl+C` then `Enter` no longer aborts a running agent by reflex.
-- TUI: **`?`** opens the keyboard-shortcuts help when the input is empty, and the help panel's slash-command list is now generated from the command registry (so `/goal`, skill commands, and `/theme` always appear).
+- Provider configuration writes are serialized as reload → mutate → atomic save, reject stale snapshots, preserve secrets, and rebuild provider tools after keys, endpoints, or models change.
+- Session replay now restores provider operations, managed Artifacts, tool lifecycle, session modes, and per-session tool overrides without trusting dropped WebSocket events.
 
-### Removed
-- Dead config fields that were parsed but never honored anywhere: `fallback_model` (top-level) and `compaction.summary_model`. Old config files still load (the keys are ignored), and note the keys are dropped from `config.json` the next time jcode saves settings. (`summary_model` was also mis-documented as a working feature — docs corrected.)
+### Security
+- Externally billable calls bind approval to an immutable provider/model/argument intent and idempotency key. Ask for approval and Auto require a fresh per-call decision; Full access is the only session-level preauthorization. Per-turn and per-session limits are reserved atomically and dispatch is durably journaled before the provider call.
+- Image downloads require HTTPS and enforce trusted-host, redirect, timeout, MIME, size, dimension, and pixel limits. Private and link-local destinations are rejected; generated files use owner-only directories/files and atomic persistence.
+- Security-sensitive session journals fail closed on malformed or invalid transitions, and logs/session metadata exclude credentials, complete prompts, signed URLs, provider response bodies, and image base64.
+
+## [0.12.2] - 2026-08-05
+
+### Fixed
+- Preserved the real structured assistant/tool transcript in live multi-turn history and continuation laps, without flattening tool calls into text or recording internal continuation prompts as user messages. Follow-up turns and post-restart replay now receive equivalent context.
+- Interrupted, cancelled, and stream-error turns now pair every announced tool call with a deterministic result, including parallel same-name calls. Already-rendered assistant text is retained, persistence failures stop the turn, and a partial failed plan is no longer treated as approval-ready output.
+
+## [0.12.1] - 2026-08-02
+
+### Added
+- **Session-scoped Artifacts for Web and Desktop.** The `show_artifact` tool explicitly registers completed workspace deliverables, opens them in a dedicated right-side panel, persists them across refresh/resume and automation runs, and previews common text, Markdown, code, HTML, image, PDF, and tabular formats.
+- Desktop can open an Artifact in its default application or reveal it in the system file manager. Logged-in users can explicitly create and revoke end-to-end encrypted Cloud share links; local Artifacts never upload automatically.
+
+### Changed
+- Improved public-site navigation and Chat UI page loading with route preloads and deferred content.
+
+### Security
+- Artifact APIs use opaque IDs, revalidate the path on every read, do not scan the whole workspace, and do not expose absolute paths to Browser Web. HTML previews are sandboxed, and each Cloud share uses an independent secret that never reaches the server.
+
+## [0.11.4] - 2026-07-31
+
+### Added
+- **Desktop task titlebar.** The native shell now shows task title, workspace, branch, and model, with task rename/pin/archive, per-session Cloud sync, panel controls, and an Open-in menu.
+- Desktop discovers installed editors, terminals, and file managers on macOS, Windows, and Linux and opens the validated workspace through opaque application IDs.
+- Browser Settings now shows Browser Bridge connection state and links directly to the Chrome Web Store when the extension is missing.
+
+## [0.11.3] - 2026-07-30
+
+### Added
+- **Markdown custom agents.** Define user or project roles in `~/.jcode/agents/*.agent.md` or `<project>/.jcode/agents/*.agent.md`, select them for top-level Web/Desktop/CLI sessions, and reuse them for subagents, workflows, and teams. The selected role is recorded and restored on resume.
+- **Layered project configuration.** JCode walks from the git root to the working directory, merging `.jcode/config.json` and `AGENTS.md`, and discovers compatible `mcp.json`/`.mcp.json` files. Settings identifies project- and agents-scoped MCP servers and skills.
+- Environment overrides such as `JCODE_MODEL`, `JCODE_SMALL_MODEL`, `JCODE_THEME`, `JCODE_LANGUAGE`, `JCODE_DEFAULT_MODE`, and `JCODE_CONFIG` now have highest precedence.
+
+### Changed
+- Redesigned the Remote Access setup page and improved composer/agent-picker behavior on narrow viewports. Changing an agent in a blank session no longer replaces the welcome screen with a notice.
+
+### Fixed
+- Cloud legacy sends now create the session before sending content, and Cloud model sync preserves reasoning-effort metadata.
+- Saved SSH aliases follow the active theme, and Langfuse traces capture both input and output.
+
+### Security
+- Project-defined MCP servers require `JCODE_MCP_TRUST_PROJECT=1`. Dangerous environment overrides such as `LD_PRELOAD`, `DYLD_INSERT_LIBRARIES`, `NODE_OPTIONS`, and `PYTHONPATH` are blocked, and project config cannot loosen Browser or Computer Use capability policy.
+
+## [0.11.2] - 2026-07-23
+
+### Added
+- Cloud account preferences sync now carries the selected model, small model, language, theme, and default mode across devices while excluding credentials, local paths, aliases, and permission policy.
+- Custom delegated agent roles can be defined at user/project scope with bounded profiles, instructions, and model defaults.
+- Desktop provider configurations can sync through the Cloud with an Account Sync Key, device approval/revocation, encrypted provider-vault reconciliation, and a Cloud model catalog/proxy. Local providers continue to work directly when signed out or offline.
+
+### Changed
+- Simplified per-session Cloud sync controls.
+
+### Fixed
+- The model picker now honors persisted model visibility, and generated provider ordering no longer contains duplicates.
 
 ## [0.11.1] - 2026-07-22
 
@@ -52,6 +99,195 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Composer popup stacking and viewport overflow.** Popups (workspace picker, branch picker, goal banner) now anchor correctly in compact mode, stay within the viewport, and stack with proper z-index ordering.
 - **Deleting the open conversation** now lands on the welcome screen with a fresh session instead of showing a stale/deleted chat. Deleting a conversation while the agent is running is blocked to prevent state corruption.
+
+## [0.10.1] - 2026-07-20
+
+### Added
+- **Native Computer Use.** A signed macOS helper lets the agent inspect and operate native applications through an accessibility-tree workflow, with onboarding and permission controls in Desktop Settings. Browser Use and Computer Use remain separate capabilities with their own approval tiers.
+- **Deferred Tool Search.** Low-frequency tools can be discovered only when needed across TUI, Web, and ACP, keeping the initial model toolset smaller while preserving canonical MCP identities and approval state.
+- Added Alibaba Token Plan providers for China and international endpoints, including `qwen3.8-max-preview`.
+- Added a Web Developer settings tab for logging, tracing, and masked Langfuse configuration.
+- Added per-conversation composer drafts, persisted Web/Desktop model selection, model-specific chat backdrops, a floating goal pill with `/goal`, and richer running-tool indicators.
+
+### Changed
+- Switching to a text-only model now strips unsupported image parts, reports actionable model errors, and preserves unsent drafts. Desktop opens external links in the system browser.
+- Browser and Computer Use configuration changes rebuild the active toolset immediately instead of requiring a restart.
+
+### Fixed
+- Stopped or interrupted sessions now backfill missing tool results so they remain resumable and render a calm stopped state instead of a protocol error.
+- Fixed per-session message queues, restoration of the last conversation, first-run setup boot, concurrent configuration access, and Browser Bridge WebSocket origin handling.
+- Fixed desktop release packaging so the Computer Use helper is bundled, Developer ID signed, and included in notarization.
+
+### Security
+- Enforced Plan mode at the execution boundary and bounded subagent/team permissions even when tools are discovered dynamically.
+- Preserved approval isolation through Tool Search, canonicalized MCP identities, revoked disabled Browser/Computer sessions, restricted `browser_eval` to developer mode, and hardened managed-Chrome operations.
+- Configuration and credential files are now atomically written with owner-only permissions.
+
+## [0.9.6] - 2026-07-17
+
+### Added
+- **Small model picker.** Settings → Providers now exposes the `small_model` role, grouped by enabled provider, and applies changes immediately to subagents, automations, and session titles.
+- **Auto approval mode.** An optional LLM reviewer adjudicates actions that would otherwise interrupt the user: low-risk calls are allowed, dangerous calls denied, and uncertain calls escalated. Reviewer model, timeout, and audit settings are configurable.
+- Added the Kimi For Coding provider and Kimi K3 with its one-million-token context window, vision input, and supported reasoning effort.
+
+### Fixed
+- Fixed separator-less small-model references, provider forms that silently disabled vision models, and provider-rebuild races after model changes.
+- Corrected approval-mode transitions, failed reviewer-settings loads, and a concurrent reviewer-configuration race.
+
+### Security
+- The approval reviewer fails open to the user on timeouts, panics, malformed verdicts, or uncertainty, and rejects cloud-metadata SSRF targets deterministically.
+
+## [0.9.5] - 2026-07-14
+
+### Added
+- **`small_model` role.** The `"small"` alias routes inexpensive subagent, workflow, team, and automation work to a dedicated model and generates best-effort same-language session titles across TUI, Web, and ACP.
+- ACP now exposes the subagent tool and bridges nested progress to editor clients.
+
+### Fixed
+- Per-spawn model overrides now reach production TUI/Web agents, usage is attributed to the model that actually ran, title generation is session-safe, and `jcode doctor` probes both main and small models with a timeout.
+- Polished the Web settings layout and corrected the Desktop tray template icon.
+
+### Changed
+- Removed the unused `fallback_model` and `compaction.summary_model` settings; old config files remain loadable.
+
+## [0.9.4] - 2026-07-13
+
+### Added
+- **React product UI and reusable chat packages.** The Web/Desktop frontend moved from Vue to React 18 and Redux Toolkit, backed by the new `jcode-ui` and headless `jcode-ui-core` packages.
+- The component library gained scoped design tokens, Composer 2, attachments, reasoning and sources, conversation branches, regenerate/feedback/retry actions, export, AG-UI runtime support, and optional canvas/voice integrations.
+- **Structured tool activity.** Tool calls carry batch, duration, approval-wait, and denied metadata end to end. TUI and Web group adjacent activity while running and collapse it into readable summaries when complete.
+- Added full-screen TUI transcript inspection and turn-level `Changed N files` summaries with expandable per-file changes in Web.
+
+### Changed
+- Tool results now separate model-facing text from structured presentation metadata, improving terminal, diff, file, search, and subagent rendering without bloating the model context.
+- React became the sole product frontend, and product consumers moved to the published `jcode-ui` packages.
+
+### Fixed
+- Fixed React startup and feature parity, new-session visibility in the sidebar, duplicated streaming text, sidebar ordering, automation localization, and package publication metadata.
+
+## [0.9.3] - 2026-07-06
+
+### Added
+- Saved workflows now appear as `/<name>` commands in TUI, Web, and ACP, scoped to the active task's project.
+
+### Fixed
+- Desktop-launched sidecars now inherit the user's login-shell environment so `rg`, `git`, Node, and profile-configured developer tools work the same as in a terminal. The shell probe is time-bounded and cleaned up on failure.
+- Updated Browser Bridge to version 0.1.5.
+
+## [0.9.2] - 2026-07-06
+
+### Changed
+- **Long-horizon tool hardening.** Execute, read, grep, glob, and background output are bounded with honest truncation and spill-to-file paths; process trees cancel reliably across local, SSH, and Docker environments.
+- Compaction now uses current occupancy, reserves output headroom, shares one reduction policy across transports, calibrates estimates from provider usage, and persists the retained tail for resume.
+- Environment, git, `AGENTS.md`, and externally changed files are refreshed during long runs so the agent receives actionable drift reminders.
+
+### Fixed
+- Fixed recursive globbing, aggregate grep limits, empty-compaction results, remote fatal-error propagation, subagent panic handling, and inherited `GIT_*` variables that could target the wrong repository from a linked-worktree hook.
+
+### Security
+- Edits require a prior read, writes are atomic, overlapping/ambiguous multi-edits are rejected, and externally changed files require a fresh read before mutation.
+
+## [0.9.1] - 2026-07-05
+
+### Added
+- **Dynamic JavaScript workflows.** A deterministic goja engine provides `agent`, `parallel`, `pipeline`, `phase`, `workflow`, argument, budget, and structured-output primitives, with `jcode flow list|show|validate|run` and the `workflow_run` agent tool.
+- Added built-in `repo-audit`, `pr-review`, and `roundtable` workflows plus standalone syntax validation that fails before spawning an agent or spending tokens.
+
+### Fixed
+- Browser CDP calls now prefer an already-delivered response over a simultaneous connection-close signal.
+
+### Security
+- Workflows enforce determinism guards, concurrency and run caps, wall-clock deadlines, and run-scoped cancellation.
+
+## [0.8.1] - 2026-07-05
+
+### Added
+- **Browser Use.** Agents can navigate, inspect, interact with, and screenshot either a managed Chrome session or the user's browser through Browser Bridge, with per-origin permissions in Settings.
+- **Learned memory.** `memory_note`, offline extraction/consolidation, git-backed change tracking, budgets, cooldowns, and `jcode memory`/`/memory` controls provide durable project-scoped knowledge across sessions.
+- **Lifecycle hooks.** User-configured commands can observe or influence session start, prompt submission, tool use, tool failure, and stop events through JSON stdin/stdout contracts.
+- Added an agent-evaluation showcase and expanded public documentation for SSH, subagents, tools, themes, hooks, Browser Use, and releases.
+
+### Fixed
+- Fixed Browser Bridge connection lifetime/status races, extension ID persistence, memory redaction/concurrency/UTF-8 handling, and site privacy/snippet overflow.
+
+### Security
+- Binding Web to a non-loopback host now requires bearer-token authentication. Auto-generated tokens are owner-only, WebSockets use a subprotocol token, and comparisons are constant-time.
+- Browser actions use read, site-scoped interaction, and always-prompt high-risk tiers. Project hooks are disabled unless `JCODE_HOOKS_TRUST_PROJECT=1`, and hooks have process-tree timeouts and bounded output.
+
+## [0.7.2] - 2026-06-28
+
+### Added
+- **Card-based provider and model management.** Setup can auto-select a default model; Settings can add/edit/test custom OpenAI-compatible providers, manage built-in and custom models, and configure vision, thinking, context, and per-model reasoning effort.
+- Provider tests report classified auth/network/server failures, latency, and model count; active-model deletion is guarded and newly added models become selectable without restart.
+
+### Changed
+- Upgraded Eino to v0.9.9.
+
+### Security
+- Patched Web dependency security advisories and tightened custom-provider header/model validation.
+
+## [0.7.1] - 2026-06-24
+
+### Added
+- **Scheduled and manual automations.** Create and run agent jobs from the scheduler, Web UI, CLI, or agent tool. Each run is recorded as a session, and interactive-only tools are excluded from unattended execution.
+- Added a redesigned sidebar navigation, Channels page, shared page surface, and Automation Run detail view.
+
+### Fixed
+- Fixed automation overlay/sidebar layout, dropdown dismissal, full project paths, navigation polish, and a Windows build collision in the file-lock helper.
+
+## [0.6.4] - 2026-06-23
+
+### Added
+- **Parallel Web tasks.** Multiple top-level tasks can run concurrently with isolated messages, status, and usage; users can switch task, project, or model without stopping another task.
+- **Docker workspaces.** Bind a Web task and terminal to a container, including lifecycle/ref-count management, saved aliases, `switch_env`, and SSH-like execution behavior.
+- Added sidebar filtering, sorting, grouping, provider icons, and safer branch switching.
+
+### Fixed
+- Protected git checkout from overwriting work, corrected task run/branch-picker lifecycle, and stopped new chats from receiving another task's events.
+- Fixed Docker PTY ownership, container exec errors, lifecycle logs, and missing localization.
+
+## [0.6.3] - 2026-06-22
+
+### Added
+- **Usage Statistics.** Added a global usage page, per-task context capacity, live token accounting, and cache-hit rate.
+
+## [0.6.2] - 2026-06-22
+
+### Added
+- Internationalized the Web UI in English, Simplified Chinese, Traditional Chinese, Japanese, and Korean.
+
+### Changed
+- Migrated product icons to Heroicons and hardcoded colors to semantic theme tokens, with polish across the composer, model picker, sidebar, settings, and remote wizard.
+
+### Fixed
+- Fixed a Desktop crash on Finder launch by declaring Bluetooth usage strings and resolved native-shell, bridge, and Web UI audit findings.
+- Fixed Tauri's pre-build command and made `build-web` generate required frontend/theme assets first.
+
+### Security
+- Updated DOMPurify to address npm security advisories.
+
+## [0.6.1] - 2026-06-21
+
+### Added
+- **Task-centric Web workspace.** Introduced the enclosed product shell, full-page Settings, and a multi-project task tree.
+- Added the native Tauri Desktop app, reusing the Web UI, with SSH remote workspaces and a multi-platform release pipeline.
+
+### Fixed
+- Fixed cross-project task deletion and made git context request-scoped so simultaneous projects do not leak state into one another.
+
+## [0.5.2] - 2026-06-15
+
+### Added
+- **Seven built-in themes shared across TUI and Web.** The TUI gains `/theme` with live preview and persistence; Web gains an Appearance tab with System, dark, and light theme previews.
+- Redesigned the task list and workbench panel menu.
+- Added the interactive Web `ask_user` flow plus MCP OAuth and MCP Settings management.
+
+### Changed
+- TUI styles now rebuild from semantic theme tokens at runtime, and Markdown follows the active light/dark appearance.
+
+### Fixed
+- TUI **Esc** returns from a teammate to the leader, Cancel defaults to the safe **Wait** action, and **`?`** opens complete shortcut/command help.
+- Theme persistence failures are now surfaced in diagnostics.
 
 ## [0.5.1] - 2026-06-13
 
@@ -517,7 +753,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-agent token usage tracking
 - WebSocket support for real-time communication
 
-[Unreleased]: https://github.com/cnjack/jcode/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/cnjack/jcode/compare/v0.12.2...HEAD
+[0.12.2]: https://github.com/cnjack/jcode/compare/v0.12.1...v0.12.2
+[0.12.1]: https://github.com/cnjack/jcode/compare/v0.11.4...v0.12.1
+[0.11.4]: https://github.com/cnjack/jcode/compare/v0.11.3...v0.11.4
+[0.11.3]: https://github.com/cnjack/jcode/compare/v0.11.2...v0.11.3
+[0.11.2]: https://github.com/cnjack/jcode/compare/v0.11.1...v0.11.2
+[0.11.1]: https://github.com/cnjack/jcode/compare/v0.10.1...v0.11.1
+[0.10.1]: https://github.com/cnjack/jcode/compare/v0.9.6...v0.10.1
+[0.9.6]: https://github.com/cnjack/jcode/compare/v0.9.5...v0.9.6
+[0.9.5]: https://github.com/cnjack/jcode/compare/v0.9.4...v0.9.5
+[0.9.4]: https://github.com/cnjack/jcode/compare/v0.9.3...v0.9.4
+[0.9.3]: https://github.com/cnjack/jcode/compare/v0.9.2...v0.9.3
+[0.9.2]: https://github.com/cnjack/jcode/compare/v0.9.1...v0.9.2
+[0.9.1]: https://github.com/cnjack/jcode/compare/v0.8.1...v0.9.1
+[0.8.1]: https://github.com/cnjack/jcode/compare/v0.7.2...v0.8.1
+[0.7.2]: https://github.com/cnjack/jcode/compare/v0.7.1...v0.7.2
+[0.7.1]: https://github.com/cnjack/jcode/compare/v0.6.4...v0.7.1
+[0.6.4]: https://github.com/cnjack/jcode/compare/v0.6.3...v0.6.4
+[0.6.3]: https://github.com/cnjack/jcode/compare/v0.6.2...v0.6.3
+[0.6.2]: https://github.com/cnjack/jcode/compare/v0.6.1...v0.6.2
+[0.6.1]: https://github.com/cnjack/jcode/compare/v0.5.2...v0.6.1
+[0.5.2]: https://github.com/cnjack/jcode/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/cnjack/jcode/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/cnjack/jcode/compare/v0.4.11...v0.5.0
 [0.4.11]: https://github.com/cnjack/jcode/compare/v0.4.10...v0.4.11
@@ -531,6 +788,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.4.3]: https://github.com/cnjack/jcode/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/cnjack/jcode/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/cnjack/jcode/compare/v0.3.10...v0.4.1
+[0.3.10]: https://github.com/cnjack/jcode/compare/v0.3.9...v0.3.10
+[0.3.9]: https://github.com/cnjack/jcode/compare/v0.3.8...v0.3.9
+[0.3.8]: https://github.com/cnjack/jcode/compare/v0.3.7...v0.3.8
+[0.3.7]: https://github.com/cnjack/jcode/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/cnjack/jcode/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/cnjack/jcode/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/cnjack/jcode/compare/v0.3.3...v0.3.4

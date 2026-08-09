@@ -1,5 +1,56 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Generated-image surface.** New public `GeneratedImageCard` component and
+  `GeneratedImageState` / `GeneratedImageCardProps` /
+  `GeneratedImageCardStrings` types render the complete generated-media
+  lifecycle (`queued`, `generating`, `saving`, `succeeded`, `failed`,
+  `cancelled`, and `uncertain`). The card supports managed Artifact metadata,
+  provider/model context, typed error guidance, host-controlled open/download/
+  reveal/settings actions, accessible live status, reduced motion, and the
+  compact scan-weave generating/saving treatment.
+- **Standalone tool renderers.** `Thread` now treats `surface: 'standalone'`
+  tools as hard timeline boundaries and renders their registered renderer as
+  the complete surface instead of wrapping it in the generic collapsible tool
+  card. Hosts can use the new `hidePendingAskUser` prop when a pending question
+  is presented in a separate interaction dock; resolved receipts remain in the
+  transcript.
+- **Billable approval presentation.** `ApprovalBanner` recognizes
+  `approvalClass: 'billable_external'` and presents the bounded provider,
+  model, size, count, and capability summary with explicit deny/allow-once
+  actions. Image generation and provider web search receive distinct copy and
+  icons without exposing the full prompt or raw tool arguments.
+- Re-exported the new core media contracts — `ArtifactRef`, `ToolPhase`,
+  `ToolOutcome`, and `ToolSurface` — from the main package entry.
+
+### Changed
+
+- **Ask User can own the composer dock.** `AskUserCard` now supports `timeline`
+  and `dock` placements, shows one question at a time with previous/next
+  navigation, preserves answers while paging, supports numeric shortcuts,
+  multi-select and custom answers, marks recommended choices, and accepts
+  host-provided strings. Pending dock cards can replace the composer, while a
+  completed or skipped interaction collapses to a compact transcript receipt.
+- **Image capabilities are explicit in the product composer.** `ModelInfo`
+  gains `input_modalities`, `output_modalities`,
+  `capability_availability`, and `image_sizes`; `ProductComposerStrings` gains
+  `modelImageOutput`. The chat picker now limits the conversation list to
+  enabled text-output models with tool calling, distinguishes image input from
+  image output, and retains legacy text-output behavior when modality metadata
+  is absent.
+
+### Fixed
+
+- Ask User submission now disables duplicate actions while pending, surfaces a
+  localized inline error when the host rejects the request, and lets the user
+  retry without losing answers. Option and custom-text answers are mutually
+  exclusive, Enter advances the current page, and final submission returns to
+  the first unanswered question instead of silently sending an incomplete
+  batch.
+
 ## 0.4.1 — 2026-07-13
 
 Republish of 0.4.0 with correct dependency metadata (0.4.0 was published
