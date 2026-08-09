@@ -255,8 +255,8 @@ func TestXAIRefreshSingleflightRotationAndRequiresReauth(t *testing.T) {
 			writeJSON(t, writer, http.StatusOK, map[string]any{
 				"device_code":               "xai-device-secret",
 				"user_code":                 "GROK-CODE",
-				"verification_uri":          "https://auth.x.ai/device",
-				"verification_uri_complete": "https://auth.x.ai/device?code=GROK-CODE",
+				"verification_uri":          "https://accounts.x.ai/oauth2/device",
+				"verification_uri_complete": "https://accounts.x.ai/oauth2/device?code=GROK-CODE",
 				"expires_in":                900,
 				"interval":                  1,
 			})
@@ -633,7 +633,7 @@ func TestXAISlowDownAndDeniedDestroyFlow(t *testing.T) {
 		case "/xai/device":
 			writeJSON(t, writer, http.StatusOK, map[string]any{
 				"device_code": "device", "user_code": "CODE",
-				"verification_uri": "https://auth.x.ai/device", "interval": 1,
+				"verification_uri": "https://accounts.x.ai/oauth2/device", "interval": 1,
 			})
 		case "/xai/token":
 			if polls.Add(1) == 1 {
@@ -990,7 +990,7 @@ func TestVerificationURIPinningAndLocalTestOverride(t *testing.T) {
 		host string
 	}{
 		{uri: "https://auth.openai.com/codex/device", host: "auth.openai.com"},
-		{uri: "https://auth.x.ai/device?code=one", host: "auth.x.ai"},
+		{uri: "https://accounts.x.ai/oauth2/device?code=one", host: xaiVerificationHost},
 		{uri: "https://github.com/login/device", host: "github.com"},
 	} {
 		if err := production.validateVerificationURI(test.uri, test.host); err != nil {
@@ -1007,6 +1007,17 @@ func TestVerificationURIPinningAndLocalTestOverride(t *testing.T) {
 	} {
 		if err := production.validateVerificationURI(uri, "github.com"); err == nil {
 			t.Fatalf("untrusted verification URI %q succeeded", uri)
+		}
+	}
+	for _, uri := range []string{
+		"http://accounts.x.ai/oauth2/device",
+		"https://accounts.x.ai.evil.example/oauth2/device",
+		"https://sub.accounts.x.ai/oauth2/device",
+		"https://accounts.x.ai:8443/oauth2/device",
+		"https://user@accounts.x.ai/oauth2/device",
+	} {
+		if err := production.validateVerificationURI(uri, xaiVerificationHost); err == nil {
+			t.Fatalf("untrusted xAI verification URI %q succeeded", uri)
 		}
 	}
 	if err := production.validateVerificationURIs(

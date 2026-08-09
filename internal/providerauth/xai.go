@@ -11,10 +11,12 @@ import (
 )
 
 const (
-	xaiIssuer    = "https://auth.x.ai"
-	xaiClientID  = "b1a00492-073a-47ea-816f-4c329264a828"
-	xaiScope     = "openid profile email offline_access grok-cli:access api:access"
-	xaiUserAgent = "jcode-xai-oauth"
+	xaiIssuer           = "https://auth.x.ai"
+	xaiAuthHost         = "auth.x.ai"
+	xaiVerificationHost = "accounts.x.ai"
+	xaiClientID         = "b1a00492-073a-47ea-816f-4c329264a828"
+	xaiScope            = "openid profile email offline_access grok-cli:access api:access"
+	xaiUserAgent        = "jcode-xai-oauth"
 )
 
 type xaiOAuthEndpoints struct {
@@ -47,7 +49,7 @@ func (manager *Manager) startXAI(ctx context.Context) (*pendingFlow, error) {
 		return nil, errors.New("xAI device authorization response is missing required fields")
 	}
 	if err := manager.validateVerificationURIs(
-		verificationURI, verificationComplete, "auth.x.ai",
+		verificationURI, verificationComplete, xaiVerificationHost,
 	); err != nil {
 		return nil, err
 	}
@@ -98,10 +100,10 @@ func (manager *Manager) discoverXAI(ctx context.Context) (xaiOAuthEndpoints, err
 		return xaiOAuthEndpoints{}, errors.New("xAI discovery response is missing required endpoints")
 	}
 	if !manager.allowUnsafe {
-		if err := validateManagedAuthEndpoint(endpoints.device, "auth.x.ai"); err != nil {
+		if err := validateManagedAuthEndpoint(endpoints.device, xaiAuthHost); err != nil {
 			return xaiOAuthEndpoints{}, err
 		}
-		if err := validateManagedAuthEndpoint(endpoints.token, "auth.x.ai"); err != nil {
+		if err := validateManagedAuthEndpoint(endpoints.token, xaiAuthHost); err != nil {
 			return xaiOAuthEndpoints{}, err
 		}
 	}
