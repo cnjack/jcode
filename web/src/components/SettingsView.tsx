@@ -52,6 +52,7 @@ import {
   CircleStackIcon,
   WrenchScrewdriverIcon,
   CloudIcon,
+  PhotoIcon,
 } from '@heroicons/react/24/outline'
 import { useTranslation } from 'react-i18next'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
@@ -99,6 +100,7 @@ import type {
 import type { ApprovalReviewConfig, ApprovalReviewDefaults } from '../lib/types'
 import type {
   ProviderDetail,
+  ImageEndpointConfig,
   CustomModelDetail,
   CatalogModel,
   MCPServerInfo,
@@ -323,16 +325,27 @@ function ProvidersTab() {
   // Model roles: config.small_model ("provider/model", '' = unset). Options
   // come from the chat-picker payload in redux (enabled models only).
   const smallModel = useAppSelector((s) => s.model.smallModel)
+  const imageModel = useAppSelector((s) => s.model.imageModel)
   const pickerProviders = useAppSelector((s) => s.model.providers)
   const [smallSaving, setSmallSaving] = useState(false)
   const [smallError, setSmallError] = useState('')
   const [smallSaved, setSmallSaved] = useState(false)
+  const [imageSaving, setImageSaving] = useState(false)
+  const [imageError, setImageError] = useState('')
+  const [imageSaved, setImageSaved] = useState(false)
+  const [policySaving, setPolicySaving] = useState<Set<string>>(() => new Set())
+  const [policyErrors, setPolicyErrors] = useState<Record<string, string>>({})
 
   // Refresh the chat model picker after provider/model mutations.
   async function refreshModels() {
     try {
       const resp = await api.models()
       dispatch(modelActions.setProviders(resp.providers))
+      dispatch(modelActions.setImageModel(
+        resp.current_image?.provider && resp.current_image?.model
+          ? `${resp.current_image.provider}/${resp.current_image.model}`
+          : '',
+      ))
     } catch {
       /* ignore */
     }
@@ -404,6 +417,58 @@ function ProvidersTab() {
       setSmallError(err instanceof Error ? err.message : String(err))
     } finally {
       setSmallSaving(false)
+    }
+  }
+
+  async function changeImageModel(value: string) {
+    setImageError('')
+    setImageSaved(false)
+    const separator = value.indexOf('/')
+    const provider = separator >= 0 ? value.slice(0, separator) : ''
+    const model = separator >= 0 ? value.slice(separator + 1) : value
+    setImageSaving(true)
+    try {
+      await api.setImageModel(provider, model)
+      dispatch(modelActions.setImageModel(value))
+      setImageSaved(true)
+      window.setTimeout(() => setImageSaved(false), 2000)
+    } catch (err) {
+      setImageError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setImageSaving(false)
+    }
+  }
+
+  async function toggleProviderPolicy(provider: ProviderDetail, capabilityID: 'web_search') {
+    const capability = provider.capabilities?.find((candidate) => candidate.id === capabilityID)
+    if (!capability) return
+    const currentTools = provider.provider_tools ?? {}
+    const current = currentTools[capabilityID] ?? {}
+    if (!current.enabled && capability.availability !== 'supported') return
+    const nextTools = {
+      ...currentTools,
+      [capabilityID]: { ...current, enabled: !current.enabled },
+    }
+    setPolicyErrors((errors) => ({ ...errors, [provider.id]: '' }))
+    setPolicySaving((ids) => new Set(ids).add(provider.id))
+    setProviders((list) => list.map((item) => item.id === provider.id ? {
+      ...item,
+      provider_tools: nextTools,
+      capabilities: (item.capabilities ?? []).map((candidate) => candidate.id === capabilityID
+        ? { ...candidate, enabled: !current.enabled }
+        : candidate),
+    } : item))
+    try {
+      await api.updateProvider(provider.id, { provider_tools: nextTools })
+    } catch (err) {
+      setProviders((list) => list.map((item) => item.id === provider.id ? provider : item))
+      setPolicyErrors((errors) => ({ ...errors, [provider.id]: err instanceof Error ? err.message : String(err) }))
+    } finally {
+      setPolicySaving((ids) => {
+        const next = new Set(ids)
+        next.delete(provider.id)
+        return next
+      })
     }
   }
 
@@ -562,12 +627,36 @@ function ProvidersTab() {
   // Enabled models grouped by provider for the small-model picker; providers
   // with nothing enabled disappear entirely.
   const roleOptions = pickerProviders
-    .map((p) => ({ ...p, models: p.models.filter((m) => m.enabled) }))
+    .map((p) => ({
+      ...p,
+      models: p.models.filter((m) =>
+        m.enabled && m.tool_call && (m.output_modalities?.includes('text') ?? true),
+      ),
+    }))
     .filter((p) => p.models.length > 0)
+  const imageCatalog = pickerProviders.flatMap((provider) =>
+    provider.models
+      .filter((model) => model.output_modalities?.includes('image'))
+      .map((model) => ({ provider, model })),
+  )
+  const imageRoleOptions = pickerProviders
+    .map((provider) => ({
+      ...provider,
+      models: provider.models.filter((model) =>
+        model.output_modalities?.includes('image') && model.capability_availability === 'supported',
+      ),
+    }))
+    .filter((provider) => provider.models.length > 0)
+  const imageIntegratedCount = imageRoleOptions.reduce(
+    (count, provider) => count + provider.models.length,
+    0,
+  )
   // A configured ref whose model was since disabled/removed still renders (as
   // its raw ref, marked unavailable) so it can be seen and cleared.
   const smallModelListed =
     smallModel === '' || roleOptions.some((p) => p.models.some((m) => `${p.id}/${m.id}` === smallModel))
+  const imageModelListed =
+    imageModel === '' || imageRoleOptions.some((p) => p.models.some((m) => `${p.id}/${m.id}` === imageModel))
 
   return (
     <div>
@@ -621,6 +710,67 @@ function ProvidersTab() {
             ))}
           </select>
         </div>
+        <div className={`${ROW} mt-2`}>
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--color-muted-foreground)]">
+            <PhotoIcon className="h-4 w-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5 text-[12px] font-medium text-[var(--color-foreground)]">
+              <span>{t('settings.providers.roles.imageName', { defaultValue: 'Image Model' })}</span>
+              {imageCatalog.length > 0 && (
+                <span className={CHIP}>
+                  {t('settings.providers.roles.imageCounts', {
+                    candidates: imageCatalog.length,
+                    integrated: imageIntegratedCount,
+                  })}
+                </span>
+              )}
+            </div>
+            <div className="text-[11px] text-[var(--color-muted-foreground)]">
+              {imageRoleOptions.length === 0
+                ? t('settings.providers.roles.imageNoProviders', { defaultValue: 'No integrated image-generation model is available.' })
+                : t('settings.providers.roles.imageDesc', { defaultValue: 'Independent from the chat model and its provider. Select an available Image Model to let the Agent generate images. Calls may incur provider charges; Full access does not ask each time.' })}
+            </div>
+            {imageError && (
+              <div className="mt-1 text-[11px] text-[var(--color-destructive)]">
+                {t('settings.providers.roles.imageSaveFailed', {
+                  reason: imageError,
+                  defaultValue: `Could not save Image Model: ${imageError}`,
+                })}
+              </div>
+            )}
+            {imageSaved && (
+              <div className="mt-1 text-[11px] text-[var(--color-success)]">
+                {t('settings.providers.roles.imageSaved', { defaultValue: 'Image Model saved.' })}
+              </div>
+            )}
+          </div>
+          <select
+            value={imageModel}
+            disabled={imageSaving || (imageRoleOptions.length === 0 && imageModel === '')}
+            onChange={(event) => void changeImageModel(event.target.value)}
+            aria-label={t('settings.providers.roles.imageName', { defaultValue: 'Image Model' })}
+            className={INPUT_SM}
+            style={{ width: '15rem' }}
+          >
+            <option value="">{t('settings.providers.roles.imageUnset', { defaultValue: 'Not configured' })}</option>
+            {!imageModelListed && (
+              <option value={imageModel}>
+                {imageModel} — {t('settings.providers.roles.imageUnavailable', { defaultValue: 'unavailable' })}
+              </option>
+            )}
+            {imageRoleOptions.map((provider) => (
+              <optgroup key={provider.id} label={provider.name || provider.id}>
+                {provider.models.map((model) => (
+                  <option key={model.id} value={`${provider.id}/${model.id}`}>
+                    {model.name || model.id}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </div>
+
       </div>
 
       <div className="mb-4 flex items-center justify-between">
@@ -651,6 +801,9 @@ function ProvidersTab() {
               catalogLoading={catalogLoading === p.id}
               activeProvider={activeProvider}
               activeModelName={activeProvider === p.id ? activeModel : ''}
+              providerToolSaving={policySaving.has(p.id)}
+              providerToolError={policyErrors[p.id]}
+              selectedImageModel={imageModel.startsWith(`${p.id}/`) ? imageModel.slice(p.id.length + 1) : ''}
               modelForm={modelForm?.providerId === p.id ? modelForm : null}
               onRefreshCatalog={() => refreshCatalog(p.id)}
               onToggleModel={(mid) => toggleCatalogModel(p.id, mid)}
@@ -661,6 +814,7 @@ function ProvidersTab() {
               onSaveCustomModel={saveCustomModel}
               onEdit={() => setEditing(p)}
               onDelete={() => deleteProvider(p.id)}
+              onToggleWebSearch={() => void toggleProviderPolicy(p, 'web_search')}
             />
           ))}
         </div>
@@ -676,6 +830,9 @@ function ProviderCard({
   catalogLoading,
   activeProvider,
   activeModelName,
+  providerToolSaving,
+  providerToolError,
+  selectedImageModel,
   modelForm,
   onRefreshCatalog,
   onToggleModel,
@@ -686,12 +843,16 @@ function ProviderCard({
   onSaveCustomModel,
   onEdit,
   onDelete,
+  onToggleWebSearch,
 }: {
   provider: ProviderDetail
   catalog: CatalogModel[]
   catalogLoading: boolean
   activeProvider: string
   activeModelName: string
+  providerToolSaving: boolean
+  providerToolError?: string
+  selectedImageModel: string
   modelForm: { providerId: string; target: CustomModelDetail | null } | null
   onRefreshCatalog: () => void
   onToggleModel: (modelId: string) => void
@@ -712,10 +873,13 @@ function ProviderCard({
   }) => Promise<void>
   onEdit: () => void
   onDelete: () => void
+  onToggleWebSearch: () => void
 }) {
   const { t } = useTranslation()
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [search, setSearch] = useState('')
+
+  const webSearchCapability = provider.capabilities?.find((capability) => capability.id === 'web_search')
 
   const addedCount = catalog.filter((m) => m.added).length
   const filtered = (() => {
@@ -727,7 +891,13 @@ function ProviderCard({
   })()
 
   return (
-    <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)]">
+    <div
+      className={`overflow-hidden rounded-[var(--radius-lg)] border bg-[var(--color-surface)] ${
+        selectedImageModel
+          ? 'border-[var(--color-primary)] shadow-[0_0_0_1px_var(--color-primary)]'
+          : 'border-[var(--color-border)]'
+      }`}
+    >
       {/* Head */}
       <div className="flex items-center gap-3 border-b border-[var(--color-border)] px-3 py-2.5">
         <div className="grid h-[30px] w-[30px] shrink-0 place-items-center rounded-[var(--radius-md)] bg-[var(--color-secondary)] text-[var(--color-foreground)]">
@@ -738,6 +908,7 @@ function ProviderCard({
             <span className="truncate">{provider.name || provider.id}</span>
             {activeProvider === provider.id && <span className={CHIP_ACCENT}>{t('settings.appearance.active')}</span>}
             {provider.custom && <span className={CHIP}>{t('settings.providers.custom')}</span>}
+            {selectedImageModel && <span className={CHIP_ACCENT}>{t('settings.providers.roles.imageSelectedBadge')}</span>}
           </div>
           <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--color-muted-foreground)]">
             {provider.base_url || (provider.api_key_set ? t('settings.providers.apiKey') : '—')}
@@ -781,6 +952,38 @@ function ProviderCard({
           )}
         </div>
       </div>
+
+      {webSearchCapability && (
+        <div className="flex items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2.5">
+          <GlobeAltIcon className="h-4 w-4 shrink-0 text-[var(--color-muted-foreground)]" />
+          <div className="min-w-0 flex-1">
+            <div className="text-[11px] font-medium text-[var(--color-foreground)]">
+              {t('settings.providers.webSearchPolicy.title')}
+            </div>
+            <div className="text-[10px] text-[var(--color-muted-foreground)]">
+              {t('settings.providers.webSearchPolicy.desc', {
+                identity: [webSearchCapability.mechanism, webSearchCapability.model_label].filter(Boolean).join(' · '),
+                turn: webSearchCapability.max_calls_per_turn,
+                session: webSearchCapability.max_calls_per_session,
+              })}
+            </div>
+            {providerToolError && (
+              <div className="mt-0.5 text-[10px] text-[var(--color-destructive)]">{providerToolError}</div>
+            )}
+          </div>
+          <Switch
+            on={!!provider.provider_tools?.web_search?.enabled}
+            disabled={providerToolSaving || (!provider.provider_tools?.web_search?.enabled && webSearchCapability.availability !== 'supported')}
+            onClick={onToggleWebSearch}
+            ariaLabel={t('settings.providers.webSearchPolicy.title')}
+            title={webSearchCapability.availability !== 'supported' && !provider.provider_tools?.web_search?.enabled
+              ? t('settings.providers.webSearchPolicy.unavailable')
+              : provider.provider_tools?.web_search?.enabled
+              ? t('settings.providers.webSearchPolicy.disable')
+              : t('settings.providers.webSearchPolicy.enable')}
+          />
+        </div>
+      )}
 
       {/* Models sub-area */}
       <div className="px-3 pb-3 pt-2">
@@ -887,7 +1090,43 @@ function ProviderCard({
   )
 }
 
-/** Add/edit provider form with advanced config (base_url, headers, thinking, reasoning_effort). */
+export function buildImageEndpointConfig(
+  enabled: boolean,
+  baseURL: string,
+  drafts: { id: string; name: string; sizes: string }[],
+  assetHosts: string,
+): ImageEndpointConfig | undefined {
+  if (!enabled) return undefined
+  const models = drafts.map((model) => ({
+    id: model.id.trim(),
+    name: model.name.trim() || undefined,
+    sizes: model.sizes.split(',').map((size) => size.trim()).filter(Boolean),
+  }))
+  if (!baseURL.trim()) throw new Error('Image endpoint URL is required.')
+  if (models.length === 0 || models.some((model) => !model.id)) {
+    throw new Error('Every image model needs an ID.')
+  }
+  return {
+    protocol: 'openai_images',
+    base_url: baseURL.trim(),
+    models,
+    asset_hosts: assetHosts.split(',').map((host) => host.trim()).filter(Boolean),
+  }
+}
+
+// Provider updates use null as the explicit "restore registry default" signal.
+// Omission preserves the stored value, which remains important for older
+// clients and masked secret-style edit forms.
+export function buildProviderBaseURLUpdate(
+  storedBaseURL: string | undefined,
+  draftBaseURL: string,
+): string | null | undefined {
+  const normalized = draftBaseURL.trim()
+  if (normalized) return normalized
+  return storedBaseURL?.trim() ? null : undefined
+}
+
+/** Add/edit provider form with advanced chat config and an independent image endpoint. */
 function ProviderForm({
   editing,
   setupList,
@@ -924,8 +1163,19 @@ function ProviderForm({
     editing?.thinking === true ? 'on' : editing?.thinking === false ? 'off' : '',
   )
   const [reasoningEffort, setReasoningEffort] = useState(editing?.reasoning_effort ?? '')
+  const [imageEndpointEnabled, setImageEndpointEnabled] = useState(!!editing?.image_endpoint)
+  const [imageEndpointBaseURL, setImageEndpointBaseURL] = useState(editing?.image_endpoint?.base_url ?? '')
+  const [imageEndpointModels, setImageEndpointModels] = useState(
+    (editing?.image_endpoint?.models?.length ? editing.image_endpoint.models : [{ id: '', name: '', sizes: ['1024x1024'] }])
+      .map((model) => ({
+        id: model.id,
+        name: model.name ?? '',
+        sizes: (model.sizes ?? []).join(', '),
+      })),
+  )
+  const [imageAssetHosts, setImageAssetHosts] = useState((editing?.image_endpoint?.asset_hosts ?? []).join(', '))
   const [advancedOpen, setAdvancedOpen] = useState(
-    !!(editing?.base_url || (editing?.headers && Object.keys(editing.headers).length)),
+    !!(editing?.base_url || editing?.image_endpoint || (editing?.headers && Object.keys(editing.headers).length)),
   )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -952,6 +1202,10 @@ function ProviderForm({
     setSaving(true)
     try {
       const builtHeaders = buildHeaders(headers)
+      let imageEndpoint: ImageEndpointConfig | null | undefined = buildImageEndpointConfig(
+        imageEndpointEnabled, imageEndpointBaseURL, imageEndpointModels, imageAssetHosts,
+      )
+      if (!imageEndpointEnabled && isEdit && editing?.image_endpoint) imageEndpoint = null
       // '' (Default) → undefined so the JSON omits the override entirely.
       // Vision is never sent: image support comes from model metadata, and
       // omitting the field clears any stale stored override on save.
@@ -959,10 +1213,11 @@ function ProviderForm({
       if (isEdit) {
         const data: Parameters<typeof api.updateProvider>[1] = {
           name: name || undefined,
-          base_url: baseUrl || undefined,
+          base_url: buildProviderBaseURLUpdate(editing?.base_url, baseUrl),
           headers: Object.keys(builtHeaders).length ? builtHeaders : undefined,
           thinking: thinkingOverride,
           reasoning_effort: reasoningEffort || undefined,
+          image_endpoint: imageEndpoint,
         }
         if (apiKey.trim()) data.api_key = apiKey.trim()
         await api.updateProvider(editing!.id, data)
@@ -973,8 +1228,9 @@ function ProviderForm({
           name: name || undefined,
           thinking: thinkingOverride,
           reasoning_effort: reasoningEffort || undefined,
-          base_url: baseUrl || undefined,
+          base_url: baseUrl.trim() || undefined,
           headers: Object.keys(builtHeaders).length ? builtHeaders : undefined,
+          image_endpoint: imageEndpoint ?? undefined,
         })
       }
       onSaved()
@@ -1161,6 +1417,100 @@ function ProviderForm({
                   </div>
                 </div>
               </Field>
+
+              <div className="mt-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-[12px] font-medium text-[var(--color-foreground)]">
+                      {t('settings.providers.imageEndpoint.title')}
+                    </div>
+                    <div className="text-[10px] text-[var(--color-muted-foreground)]">
+                      {t('settings.providers.imageEndpoint.desc')}
+                    </div>
+                  </div>
+                  <Switch
+                    on={imageEndpointEnabled}
+                    onClick={() => setImageEndpointEnabled((enabled) => !enabled)}
+                    ariaLabel={t('settings.providers.imageEndpoint.configure')}
+                  />
+                </div>
+                {imageEndpointEnabled && (
+                  <div className="mt-3 space-y-3 border-t border-[var(--color-border)] pt-3">
+                    <Field label={t('settings.providers.imageEndpoint.protocol')}>
+                      <select value="openai_images" disabled className={INPUT_SM}>
+                        <option value="openai_images">OpenAI Images · POST /images/generations</option>
+                      </select>
+                    </Field>
+                    <Field label={t('settings.providers.imageEndpoint.baseUrl')}>
+                      <input
+                        value={imageEndpointBaseURL}
+                        onChange={(event) => setImageEndpointBaseURL(event.target.value)}
+                        type="url"
+                        placeholder="https://api.example.com/v1"
+                        className={INPUT_MONO}
+                      />
+                    </Field>
+                    <div>
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <label className={LABEL + ' !mb-0'}>{t('settings.providers.imageEndpoint.models')}</label>
+                        <button
+                          type="button"
+                          className={`${BTN_GHOST} ${BTN_XS}`}
+                          onClick={() => setImageEndpointModels((models) => [...models, { id: '', name: '', sizes: '1024x1024' }])}
+                        >
+                          {t('settings.providers.imageEndpoint.addModel')}
+                        </button>
+                      </div>
+                      <div className="space-y-2">
+                        {imageEndpointModels.map((model, index) => (
+                          <div key={index} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2">
+                            <input
+                              value={model.id}
+                              onChange={(event) => setImageEndpointModels((models) => models.map((item, itemIndex) => itemIndex === index ? { ...item, id: event.target.value } : item))}
+                              placeholder="model-id"
+                              aria-label={t('settings.providers.imageEndpoint.modelId', { index: index + 1 })}
+                              className={INPUT_MONO}
+                            />
+                            <input
+                              value={model.name}
+                              onChange={(event) => setImageEndpointModels((models) => models.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item))}
+                              placeholder={t('settings.providers.imageEndpoint.displayName')}
+                              aria-label={t('settings.providers.imageEndpoint.modelName', { index: index + 1 })}
+                              className={INPUT}
+                            />
+                            <input
+                              value={model.sizes}
+                              onChange={(event) => setImageEndpointModels((models) => models.map((item, itemIndex) => itemIndex === index ? { ...item, sizes: event.target.value } : item))}
+                              placeholder="1024x1024, 1792x1024"
+                              aria-label={t('settings.providers.imageEndpoint.modelSizes', { index: index + 1 })}
+                              className={INPUT_MONO}
+                            />
+                            <button
+                              type="button"
+                              className={`${BTN_GHOST} ${BTN_XS}`}
+                              onClick={() => setImageEndpointModels((models) => models.filter((_, itemIndex) => itemIndex !== index))}
+                              aria-label={t('settings.providers.imageEndpoint.removeModel', { index: index + 1 })}
+                            >
+                              <TrashIcon className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <Field label={t('settings.providers.imageEndpoint.assetHosts')}>
+                      <input
+                        value={imageAssetHosts}
+                        onChange={(event) => setImageAssetHosts(event.target.value)}
+                        placeholder="cdn.example.com, *.assets.example.com"
+                        className={INPUT_MONO}
+                      />
+                      <div className="mt-1 text-[10px] text-[var(--color-muted-foreground)]">
+                        {t('settings.providers.imageEndpoint.assetHostsHint')}
+                      </div>
+                    </Field>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -1628,7 +1978,12 @@ function ApprovalReviewSection() {
 
   // Enabled models grouped by provider, matching the small_model role picker.
   const modelOptions = pickerProviders
-    .map((p) => ({ ...p, models: p.models.filter((m) => m.enabled) }))
+    .map((p) => ({
+      ...p,
+      models: p.models.filter((m) =>
+        m.enabled && m.tool_call && (m.output_modalities?.includes('text') ?? true),
+      ),
+    }))
     .filter((p) => p.models.length > 0)
   const storedModel = cfg.model ?? ''
   // '' and the 'small' alias resolve identically — review.resolveModelRef falls
@@ -2163,7 +2518,7 @@ interface MCPHeaderRow {
   key: string
   value: string
 }
-interface MCPForm {
+export interface MCPForm {
   name: string
   transport: 'local' | 'http' | 'sse'
   url: string
@@ -2175,9 +2530,14 @@ interface MCPForm {
   clientId: string
   clientSecret: string
   scopesText: string
+  originalHeaderKeys: string[]
+  oauthConfigured: boolean
+  clientSecretPresent: boolean
+  removeOAuth: boolean
+  removeClientSecret: boolean
 }
 
-function emptyMCPForm(): MCPForm {
+export function emptyMCPForm(): MCPForm {
   return {
     name: '',
     transport: 'http',
@@ -2190,7 +2550,55 @@ function emptyMCPForm(): MCPForm {
     clientId: '',
     clientSecret: '',
     scopesText: '',
+    originalHeaderKeys: [],
+    oauthConfigured: false,
+    clientSecretPresent: false,
+    removeOAuth: false,
+    removeClientSecret: false,
   }
+}
+
+/** Build the explicit MCP secret-mutation contract. Empty/masked values mean
+ * keep on the server, so deletion must travel through dedicated fields. */
+export function buildMCPRequest(form: MCPForm, editing: boolean): MCPServerRequest {
+  // An empty value on an existing row is a deletion gesture. Do not send that
+  // ambiguous empty value alongside remove_headers: the backend intentionally
+  // interprets empty/masked secret values as "keep" for safety.
+  const hdrs = buildHeaders(form.headers.filter((header) => header.value !== ''))
+  const activeHeaderKeys = new Set(
+    form.headers
+      .filter((header) => header.key.trim() && header.value !== '')
+      .map((header) => header.key.trim().toLowerCase()),
+  )
+  const removedHeaders = editing
+    ? form.originalHeaderKeys.filter((key) => !activeHeaderKeys.has(key.trim().toLowerCase()))
+    : []
+  const req: MCPServerRequest = { name: form.name.trim(), type: form.transport }
+
+  if (form.transport === 'local') {
+    req.command = form.command.trim()
+    req.args = form.argsText.trim() ? form.argsText.trim().split(/\s+/) : undefined
+    if (editing && form.originalHeaderKeys.length > 0) req.remove_headers = form.originalHeaderKeys
+    if (editing && form.oauthConfigured) req.remove_oauth = true
+    return req
+  }
+
+  req.url = form.url.trim()
+  if (Object.keys(hdrs).length) req.headers = hdrs
+  if (removedHeaders.length > 0) req.remove_headers = removedHeaders
+  if (form.timeout.trim()) req.timeout = Number(form.timeout)
+  if (editing && form.removeOAuth) {
+    req.remove_oauth = true
+  } else if (form.oauthEnabled || form.oauthConfigured || form.clientId.trim()) {
+    req.oauth = {
+      enabled: form.oauthEnabled,
+      client_id: form.clientId.trim() || undefined,
+      client_secret: form.clientSecret.trim() || undefined,
+      scopes: form.scopesText.trim() ? form.scopesText.trim().split(/\s+/) : undefined,
+      remove_client_secret: form.removeClientSecret || undefined,
+    }
+  }
+  return req
 }
 
 function MCPTab() {
@@ -2237,6 +2645,7 @@ function MCPTab() {
   }
 
   function openEdit(info: MCPServerInfo) {
+    const oauth = info.oauth_config
     setForm({
       name: info.name,
       transport: info.type === 'stdio' || info.type === '' ? 'local' : (info.type as 'http' | 'sse'),
@@ -2245,35 +2654,18 @@ function MCPTab() {
       argsText: (info.args ?? []).join(' '),
       headers: Object.entries(info.headers ?? {}).map(([key, value]) => ({ key, value })),
       timeout: info.timeout ? String(info.timeout) : '',
-      oauthEnabled: info.oauth,
-      clientId: '',
+      oauthEnabled: oauth?.enabled ?? info.oauth,
+      clientId: oauth?.client_id ?? '',
       clientSecret: '',
-      scopesText: '',
+      scopesText: (oauth?.scopes ?? []).join(' '),
+      originalHeaderKeys: Object.keys(info.headers ?? {}),
+      oauthConfigured: !!oauth,
+      clientSecretPresent: !!oauth?.client_secret,
+      removeOAuth: false,
+      removeClientSecret: false,
     })
     setFormError('')
     setEditing(info.name)
-  }
-
-  function buildRequest(): MCPServerRequest {
-    const hdrs = buildHeaders(form.headers)
-    const req: MCPServerRequest = { name: form.name.trim(), type: form.transport }
-    if (form.transport === 'local') {
-      req.command = form.command.trim()
-      req.args = form.argsText.trim() ? form.argsText.trim().split(/\s+/) : undefined
-    } else {
-      req.url = form.url.trim()
-      if (Object.keys(hdrs).length) req.headers = hdrs
-      if (form.timeout.trim()) req.timeout = Number(form.timeout)
-      if (form.oauthEnabled || form.clientId.trim()) {
-        req.oauth = {
-          enabled: true,
-          client_id: form.clientId.trim() || undefined,
-          client_secret: form.clientSecret.trim() || undefined,
-          scopes: form.scopesText.trim() ? form.scopesText.trim().split(/\s+/) : undefined,
-        }
-      }
-    }
-    return req
   }
 
   async function save(e: React.FormEvent) {
@@ -2293,7 +2685,7 @@ function MCPTab() {
     }
     setSaving(true)
     try {
-      const req = buildRequest()
+      const req = buildMCPRequest(form, !!editing)
       if (editing) await api.mcpUpdate(editing, req)
       else await api.mcpCreate(req)
       setEditing(null)
@@ -2453,9 +2845,10 @@ function MCPTab() {
                       <button
                         type="button"
                         onClick={() => setForm((f) => ({ ...f, headers: f.headers.filter((_, j) => j !== i) }))}
+                        aria-label={`Remove header ${h.key || i + 1}`}
                         className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--radius-sm)] border border-[var(--color-border)] text-[var(--color-muted-foreground)] hover:bg-[var(--color-secondary)]"
                       >
-                        ✕
+                        <TrashIcon className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   ))}
@@ -2465,9 +2858,18 @@ function MCPTab() {
                   <div className="text-[12px] font-medium text-[var(--color-foreground)]">{t('settings.mcp.useOauth')}</div>
                   <Switch
                     on={form.oauthEnabled}
-                    onClick={() => setForm((f) => ({ ...f, oauthEnabled: !f.oauthEnabled }))}
+                    ariaLabel={t('settings.mcp.useOauth')}
+                    onClick={() => setForm((f) => f.oauthEnabled
+                      ? { ...f, oauthEnabled: false, removeOAuth: f.oauthConfigured }
+                      : { ...f, oauthEnabled: true, removeOAuth: false })}
                   />
                 </div>
+
+                {form.removeOAuth && (
+                  <div role="status" className="mb-3.5 rounded-[var(--radius-md)] border border-[var(--color-warning-fg)] bg-[var(--color-warning-bg)] px-3 py-2 text-[11px] text-[var(--color-warning-fg)]">
+                    OAuth configuration and its saved client secret will be removed when you save.
+                  </div>
+                )}
 
                 {form.oauthEnabled && (
                   <div className="mb-3.5 space-y-3">
@@ -2483,11 +2885,33 @@ function MCPTab() {
                     <Field label={t('settings.mcp.oauthClientSecret')}>
                       <input
                         value={form.clientSecret}
-                        onChange={(e) => setForm((f) => ({ ...f, clientSecret: e.target.value }))}
+                        onChange={(e) => setForm((f) => ({ ...f, clientSecret: e.target.value, removeClientSecret: false }))}
                         type="password"
-                        placeholder="Optional (confidential clients)"
+                        disabled={form.removeClientSecret}
+                        placeholder={form.clientSecretPresent
+                          ? 'Saved secret — leave blank to keep'
+                          : 'Optional (confidential clients)'}
                         className={INPUT_MONO}
                       />
+                      {form.clientSecretPresent && (
+                        <button
+                          type="button"
+                          className={`${BTN_GHOST} ${BTN_XS} mt-1.5`}
+                          onClick={() => setForm((f) => ({
+                            ...f,
+                            clientSecret: '',
+                            removeClientSecret: !f.removeClientSecret,
+                          }))}
+                        >
+                          <TrashIcon className="h-3.5 w-3.5" />
+                          {form.removeClientSecret ? 'Keep saved secret' : 'Clear saved secret'}
+                        </button>
+                      )}
+                      {form.removeClientSecret && (
+                        <div className="mt-1 text-[10.5px] text-[var(--color-warning-fg)]">
+                          The saved client secret will be removed when you save.
+                        </div>
+                      )}
                     </Field>
                     <Field label={t('settings.mcp.oauthScopes')}>
                       <input

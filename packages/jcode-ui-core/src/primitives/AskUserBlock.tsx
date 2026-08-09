@@ -23,6 +23,8 @@ export interface AskUserState {
   other: Record<string, string>
 }
 
+export type AskUserSubmitError = 'submit_failed'
+
 /** Controls handed to the pending render-prop. */
 export interface AskUserControls {
   /** Current selection map (question key → labels). */
@@ -33,10 +35,18 @@ export interface AskUserControls {
   toggleOption: (question: AskUserQuestion, label: string) => void
   /** Set the free-text value for a question. */
   setOther: (question: AskUserQuestion, value: string) => void
-  /** Submit the current selections (no-op if nothing chosen per question). */
-  submit: () => void
+  /** Zero-based question currently presented by paged renderers. */
+  activeIndex: number
+  /** Move a paged renderer to a question (clamped to the available range). */
+  setActiveIndex: (index: number) => void
+  /** True while the host is accepting an answer. */
+  isSubmitting: boolean
+  /** Stable error code for a failed host submission. */
+  submitError?: AskUserSubmitError
+  /** Submit the current selections (focuses the first unanswered question). */
+  submit: () => Promise<void>
   /** Submit empty answers (skip). */
-  skip: () => void
+  skip: () => Promise<void>
 }
 
 export interface AskUserBlockRenderSlots {
@@ -60,63 +70,111 @@ export function AskUserBlock({ tool, className, renderPending, renderResolved }:
   const isPending = !!tool.askUserId && tool.status === 'running' && !tool.output
 
   const [state, setState] = useState<AskUserState>(EMPTY_STATE)
+  const [activeIndexState, setActiveIndexState] = useState(0)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<AskUserSubmitError>()
 
   const keyOf = useCallback((q: AskUserQuestion) => q.header ?? q.question, [])
+  const activeIndex = Math.min(activeIndexState, Math.max(questions.length - 1, 0))
+  const setActiveIndex = useCallback(
+    (index: number) => setActiveIndexState(Math.max(0, Math.min(index, Math.max(questions.length - 1, 0)))),
+    [questions.length],
+  )
+
+  useEffect(() => {
+    setState(EMPTY_STATE)
+    setActiveIndexState(0)
+    setIsSubmitting(false)
+    setSubmitError(undefined)
+  }, [tool.askUserId])
 
   const toggleOption = useCallback(
     (q: AskUserQuestion, label: string) => {
+      if (isSubmitting) return
       const key = keyOf(q)
       setState((s) => ({
         ...s,
         selected: q.multi_select
           ? { ...s.selected, [key]: toggle(s.selected[key], label) }
           : { ...s.selected, [key]: [label] },
+        other: { ...s.other, [key]: '' },
       }))
+      setSubmitError(undefined)
     },
-    [keyOf],
+    [isSubmitting, keyOf],
   )
 
   const setOther = useCallback(
     (q: AskUserQuestion, value: string) => {
+      if (isSubmitting) return
       const key = keyOf(q)
-      setState((s) => ({ ...s, other: { ...s.other, [key]: value } }))
+      setState((s) => ({
+        ...s,
+        other: { ...s.other, [key]: value },
+        selected: value.trim() ? { ...s.selected, [key]: [] } : s.selected,
+      }))
+      setSubmitError(undefined)
     },
-    [keyOf],
+    [isSubmitting, keyOf],
   )
 
-  const submit = useCallback(() => {
+  const submit = useCallback(async () => {
+    if (!tool.askUserId || isSubmitting) return
+    const firstUnanswered = questions.findIndex((q) => {
+      const key = keyOf(q)
+      return (state.selected[key]?.length ?? 0) === 0 && !(state.other[key] ?? '').trim()
+    })
+    if (firstUnanswered >= 0) {
+      setActiveIndex(firstUnanswered)
+      return
+    }
     const answers: AskUserAnswer[] = questions.map((q) => {
       const key = keyOf(q)
       const sel = state.selected[key] ?? []
-      const other = state.other[key] ?? ''
+      const other = (state.other[key] ?? '').trim()
       return {
         question_header: key,
         answer: sel.length > 0 ? sel.join(', ') : other,
         selected: sel.length > 0 ? sel : undefined,
       }
     })
-    if (tool.askUserId) actions.submitAskUser(tool.askUserId, answers)
-  }, [actions, keyOf, questions, state, tool.askUserId])
+    setIsSubmitting(true)
+    setSubmitError(undefined)
+    try {
+      await actions.submitAskUser(tool.askUserId, answers)
+    } catch {
+      setIsSubmitting(false)
+      setSubmitError('submit_failed')
+    }
+  }, [actions, isSubmitting, keyOf, questions, setActiveIndex, state, tool.askUserId])
 
-  const skip = useCallback(() => {
-    if (tool.askUserId) actions.submitAskUser(tool.askUserId, [])
-  }, [actions, tool.askUserId])
+  const skip = useCallback(async () => {
+    if (!tool.askUserId || isSubmitting) return
+    setIsSubmitting(true)
+    setSubmitError(undefined)
+    try {
+      await actions.submitAskUser(tool.askUserId, [])
+    } catch {
+      setIsSubmitting(false)
+      setSubmitError('submit_failed')
+    }
+  }, [actions, isSubmitting, tool.askUserId])
 
-  // Digit-key shortcuts (1-9) select an option for the first unanswered question.
+  // Digit-key shortcuts (1-9) only affect the question currently on screen.
   useEffect(() => {
     if (!isPending) return
     function onKey(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
       const n = Number(e.key)
       if (!Number.isInteger(n) || n < 1 || n > 9) return
-      const q = questions.find((qq) => (state.selected[keyOf(qq)]?.length ?? 0) === 0)
+      const q = questions[activeIndex]
       if (!q?.options || n > q.options.length) return
       e.preventDefault()
       toggleOption(q, q.options[n - 1].label)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isPending, questions, state.selected, keyOf, toggleOption])
+  }, [activeIndex, isPending, questions, toggleOption])
 
   if (!isPending) {
     const answers = parseResolvedAnswers(tool)
@@ -128,6 +186,10 @@ export function AskUserBlock({ tool, className, renderPending, renderResolved }:
     other: state.other,
     toggleOption,
     setOther,
+    activeIndex,
+    setActiveIndex,
+    isSubmitting,
+    submitError,
     submit,
     skip,
   }

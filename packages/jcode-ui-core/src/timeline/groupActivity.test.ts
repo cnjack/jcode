@@ -48,6 +48,21 @@ const approval = (id: string, seq: number): ThreadItem => ({
   data: { id, tool_name: 'execute', tool_args: '{}', is_external: false },
   seq,
 })
+const image = (id: string, extra: Partial<ToolCall> = {}) =>
+  tool({
+    id,
+    name: 'generate_image',
+    surface: 'standalone',
+    phase: 'queued',
+    displayInfo: { title: 'Generate image', kind: 'other', collapsible: false },
+    ...extra,
+  })
+const askUser = (id: string) =>
+  tool({
+    id,
+    name: 'ask_user',
+    displayInfo: { title: 'Ask user', kind: 'other', collapsible: false },
+  })
 
 describe('groupActivityTimeline', () => {
   it('merges ALL adjacent tools (read-only + mutating) into one activity group', () => {
@@ -118,6 +133,56 @@ describe('groupActivityTimeline', () => {
     if (out[0].kind === 'activity') {
       assert.deepEqual(out[0].data.tools.map((t) => t.id), ['a', 'b', 'c'])
     }
+  })
+
+  it('keeps a standalone image between adjacent tools as a hard boundary', () => {
+    const out = groupActivityTimeline([
+      toolItem(read('a'), 1),
+      toolItem(image('image'), 2),
+      toolItem(shell('b'), 3),
+    ])
+    assert.deepEqual(out.map((i) => i.kind), ['tool', 'tool', 'tool'])
+    assert.deepEqual(
+      out.filter((i) => i.kind === 'tool').map((i) => i.data.id),
+      ['a', 'image', 'b'],
+    )
+  })
+
+  it('keeps ask_user receipts as a hard boundary without requiring a surface hint', () => {
+    const out = groupActivityTimeline([
+      toolItem(read('a'), 1),
+      toolItem(askUser('question'), 2),
+      toolItem(shell('b'), 3),
+    ])
+    assert.deepEqual(out.map((i) => i.kind), ['tool', 'tool', 'tool'])
+    assert.deepEqual(
+      out.filter((i) => i.kind === 'tool').map((i) => i.data.id),
+      ['a', 'question', 'b'],
+    )
+  })
+
+  it('does not pull batch members backwards across a standalone image', () => {
+    const out = groupActivityTimeline([
+      toolItem(read('a'), 1),
+      toolItem(image('image', { batchId: 'b1' }), 2),
+      toolItem(shell('b', { batchId: 'b1' }), 3),
+    ])
+    assert.deepEqual(out.map((i) => i.kind), ['tool', 'tool', 'tool'])
+    assert.deepEqual(
+      out.filter((i) => i.kind === 'tool').map((i) => i.data.id),
+      ['a', 'image', 'b'],
+    )
+  })
+
+  it('preserves approvals around a standalone image without joining neighboring tools', () => {
+    const out = groupActivityTimeline([
+      toolItem(read('a'), 1),
+      approval('before-image', 2),
+      toolItem(image('image'), 3),
+      approval('after-image', 4),
+      toolItem(shell('b'), 5),
+    ])
+    assert.deepEqual(out.map((i) => i.kind), ['tool', 'approval', 'tool', 'approval', 'tool'])
   })
 
   it('anchors batch members at the first member even across approvals', () => {

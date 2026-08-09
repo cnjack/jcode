@@ -30,17 +30,18 @@ var allCommandBuiltinNames = []string{
 	"browser_screenshot", "browser_act", "browser_read", "browser_tabs", "browser_eval",
 	"computer_open", "computer_snapshot", "computer_screenshot", "computer_act",
 	"computer_read", "computer_apps", "show_artifact",
+	"generate_image",
 }
 
 func TestBuildCommandToolPlanMatrix(t *testing.T) {
 	normalDirect := []string{
-		"ask_user", "check_background", "edit", "execute", "grep", "load_skill",
-		"read", "subagent", "todoread", "todowrite", "write",
+		"ask_user", "check_background", "edit", "execute", "generate_image", "grep",
+		"load_skill", "read", "subagent", "todoread", "todowrite", "write",
 	}
 	planDirect := []string{"ask_user", "execute", "grep", "read", "todoread", "todowrite"}
 	webNormalDirect := []string{
-		"ask_user", "check_background", "edit", "execute", "grep", "load_skill",
-		"read", "show_artifact", "subagent", "todoread", "todowrite", "write",
+		"ask_user", "check_background", "edit", "execute", "generate_image", "grep",
+		"load_skill", "read", "show_artifact", "subagent", "todoread", "todowrite", "write",
 	}
 	webPlanDirect := []string{"ask_user", "execute", "grep", "read", "show_artifact", "todoread", "todowrite"}
 	normalDeferred := []string{

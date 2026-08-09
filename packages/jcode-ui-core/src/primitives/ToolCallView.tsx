@@ -13,7 +13,8 @@
 import { createContext, useContext, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { ToolCall } from '../types/index.js'
-import type { ToolRendererRegistry, ToolRendererProps } from '../adapters/index.js'
+import { toolCallToRendererProps } from '../adapters/index.js'
+import type { ToolRendererRegistry } from '../adapters/index.js'
 
 /** Context the host provides to wire the registry + the subagent/askuser slots. */
 export interface ToolCallContextValue {
@@ -71,7 +72,7 @@ export function ToolCallView({
   const ctx = useToolCallContext()
   // Only the recursive subagent tool — team_spawn has its own renderer (Vue parity).
   const isSubagent = tool.name === 'subagent'
-  const isAskUser = tool.name === 'ask_user' && (!!tool.askUserId || tool.status === 'running')
+  const isAskUser = tool.name === 'ask_user'
 
   const [expanded, setExpanded] = useState(defaultExpanded ?? isSubagent)
   const toggle = useMemo(() => () => setExpanded((e) => !e), [])
@@ -89,7 +90,7 @@ export function ToolCallView({
       <DefaultToolHeader tool={tool} expanded={expanded} onToggle={toggle} />
     )
 
-  const body = !isSubagent && Renderer ? <Renderer {...toRendererProps(tool)} /> : null
+  const body = !isSubagent && Renderer ? <Renderer {...toolCallToRendererProps(tool)} /> : null
 
   const childTools =
     isSubagent && tool.children && tool.children.length > 0 && depth < maxDepth
@@ -171,23 +172,6 @@ export function ToolCallView({
       )}
     </div>
   )
-}
-
-/** Map a ToolCall to the ToolRendererProps contract. */
-function toRendererProps(tool: ToolCall): ToolRendererProps {
-  return {
-    name: tool.name,
-    args: tool.args,
-    output: tool.output,
-    displayOutput: tool.displayOutput,
-    error: tool.error,
-    status: tool.status,
-    displayInfo: tool.displayInfo,
-    children: tool.children,
-    streams: tool.streams,
-    meta: tool.meta,
-    presentation: tool.presentation,
-  }
 }
 
 function truncate(text: string, max: number): string {

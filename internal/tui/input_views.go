@@ -50,6 +50,12 @@ func (m Model) getAllCommands() []commandSuggestion {
 	return commands
 }
 
+func (m *Model) handleRemovedSessionToolsInput(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	m.lines = append(m.lines, textLine("  "+toolLabelStyle.Render("Tools:")+" unknown command"))
+	m.refreshViewport()
+	return m, tea.Batch(cmds...)
+}
+
 // isFlowSlash reports whether cmd (e.g. "/repo-audit") is a workflow slash
 // command, used to mark it distinctly in the suggestion list.
 func (m Model) isFlowSlash(cmd string) bool {

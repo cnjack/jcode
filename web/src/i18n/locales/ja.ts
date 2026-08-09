@@ -354,7 +354,7 @@ export default {
       tokenUsage: 'トークン使用量',
       preferences: '設定',
       autoApproveTitle: 'デフォルトの自動承認',
-      autoApproveDesc: 'ツール呼び出し（ファイル編集やコマンド）を確認なしで自動的に実行します（フルアクセスモードと同等。計画モードは引き続き確認します）。新しいセッションのデフォルトとして保存されます。',
+      autoApproveDesc: '外部プロバイダーの課金が発生する可能性のある呼び出しを含め、すべてのツール呼び出しを確認なしで実行します（フルアクセスモードと同等。計画モードは引き続き確認します）。新しいセッションのデフォルトとして保存されます。',
       bleTitle: 'Bluetooth ステータス通知',
       bleDesc: 'エージェントのステータス（作業中、承認待ち、完了）をペアリングした JCODE Bluetooth デバイスに送信します。アプリの再起動後に有効になります。',
       languageTitle: '言語',
@@ -1214,12 +1214,21 @@ export default {
 
   askUser: {
     asking: '質問中',
+    needsAnswer: '回答が必要です',
+    helper: '選択肢を選ぶか、自分の回答を入力してください。',
+    previous: '前の質問',
+    next: '次へ',
     collapse: '折りたたむ',
     skip: 'スキップ',
     other: 'その他',
     submit: '送信',
+    submitting: '送信中…',
+    recommended: 'おすすめ',
+    multiSelect: '複数選択可',
+    skipped: 'スキップ済み',
     noAnswer: '回答の記録なし',
     customPlaceholder: 'ここに独自の回答を入力',
+    submitError: '回答を送信できませんでした。もう一度お試しください。',
   },
 
   goal: {

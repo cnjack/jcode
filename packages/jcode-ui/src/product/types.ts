@@ -29,6 +29,12 @@ export interface ModelInfo {
   /** Whether this model is available in the chat picker. Omitted is treated as disabled. */
   enabled?: boolean
   image_support?: boolean
+  /** Transport modalities advertised by the model catalog. Legacy hosts may
+   * omit them; consumers treat an omitted output list as text-only. */
+  input_modalities?: string[]
+  output_modalities?: string[]
+  capability_availability?: 'supported' | 'unsupported' | 'unknown'
+  image_sizes?: string[]
   /** How this model exposes its reasoning/thinking controls. */
   reasoning_options?: ReasoningOption[]
 }

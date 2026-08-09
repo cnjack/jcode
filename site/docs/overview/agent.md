@@ -44,7 +44,7 @@ Plan is ideal for complex tasks where you want to review the approach before mak
 Full tools, every tool call auto-approved — the agent runs end-to-end with no interruptions. This is the mode `--unsafe` and `default_mode: "full_access"` (or the legacy `auto_approve: true`) start in.
 
 {: .warning }
-Full access approves everything, including destructive commands. There is no separate confirmation gate in this mode — use it only when you trust the task.
+Full access approves everything, including destructive commands and external provider calls that may incur charges. There is no separate confirmation gate in this mode — use it only when you trust the task.
 
 ```
   Full access │ Model: openai / gpt-4o │ [████░░░░░░] 2%

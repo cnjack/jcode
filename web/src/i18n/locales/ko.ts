@@ -354,7 +354,7 @@ export default {
       tokenUsage: '토큰 사용량',
       preferences: '환경설정',
       autoApproveTitle: '기본 자동 승인',
-      autoApproveDesc: '도구 호출(파일 편집 및 명령)을 확인 없이 자동으로 실행합니다(전체 액세스 모드와 동일. 계획 모드는 여전히 확인합니다). 새 세션의 기본값으로 저장됩니다.',
+      autoApproveDesc: '비용이 발생할 수 있는 외부 제공자 호출을 포함해 모든 도구 호출을 확인 없이 실행합니다(전체 액세스 모드와 동일. 계획 모드는 여전히 확인합니다). 새 세션의 기본값으로 저장됩니다.',
       bleTitle: '블루투스 상태 알림',
       bleDesc: '에이전트 상태 — 작업 중, 승인 대기, 완료 — 를 페어링된 JCODE 블루투스 장치로 전송합니다. 앱 재시작 후 적용됩니다.',
       languageTitle: '언어',
@@ -1213,12 +1213,21 @@ export default {
 
   askUser: {
     asking: '질문 중',
+    needsAnswer: '답변이 필요합니다',
+    helper: '옵션을 선택하거나 직접 답변을 입력하세요.',
+    previous: '이전 질문',
+    next: '다음',
     collapse: '접기',
     skip: '건너뛰기',
     other: '기타',
     submit: '제출',
+    submitting: '제출 중…',
+    recommended: '추천',
+    multiSelect: '복수 선택',
+    skipped: '건너뜀',
     noAnswer: '기록된 답변 없음',
     customPlaceholder: '여기에 직접 답변을 입력하세요',
+    submitError: '답변을 제출하지 못했습니다. 다시 시도하세요.',
   },
 
   goal: {

@@ -57,19 +57,37 @@ type ACPHandler struct {
 	// onModeChange, when set, is invoked after the handler promotes the session
 	// mode (e.g. "Allow All" → Full access) so the owning session can reconcile its
 	// own advertised mode field with the approval state's source of truth.
-	onModeChange func(mode.SessionMode)
+	onModeChange func(mode.SessionMode) error
+
+	// artifactPathResolver revalidates a transport-safe artifact reference and
+	// returns the JCode engine's absolute path for same-machine ACP clients. The
+	// path is emitted only as bounded ACP rawOutput metadata; it is never added
+	// to model-visible output or the durable session journal.
+	artifactPathResolver func(context.Context, ArtifactRef) (string, error)
 }
 
 // SetModeChangeCallback registers a callback invoked whenever the handler
 // changes the session mode (currently the "Allow All" → Full access promotion).
-func (h *ACPHandler) SetModeChangeCallback(fn func(mode.SessionMode)) {
+func (h *ACPHandler) SetModeChangeCallback(fn func(mode.SessionMode) error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.onModeChange = fn
+}
+
+// SetArtifactPathResolver installs the command-owned artifact resolver. The
+// handler deliberately does not know how managed/workspace artifacts are
+// stored; command wires the session-bound artifact.Service instance.
+func (h *ACPHandler) SetArtifactPathResolver(fn func(context.Context, ArtifactRef) (string, error)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.artifactPathResolver = fn
 }
 
 type pendingApproval struct {
 	acpID    acp.ToolCallId
 	toolName string
 	toolArgs string
+	claimed  bool
 }
 
 // NewACPHandler creates a handler bound to an ACP connection and session.
@@ -129,6 +147,25 @@ type acpToolPresentation struct {
 	Locations []acp.ToolCallLocation
 	Content   []acp.ToolCallContent
 	RawInput  any
+}
+
+func billableACPPresentation(summary *BillableApprovalSummary) acpToolPresentation {
+	if summary == nil {
+		return acpToolPresentation{Title: billableApprovalTitle(nil), Kind: acp.ToolKindExecute}
+	}
+	return acpToolPresentation{
+		Title: truncateTitle(billableApprovalTitle(summary)),
+		Kind:  acp.ToolKindExecute,
+		RawInput: map[string]any{
+			"capability":    summary.Capability,
+			"provider":      summary.Provider,
+			"model":         summary.Model,
+			"size":          summary.Size,
+			"count":         summary.Count,
+			"billable":      summary.Billable,
+			"has_reference": summary.HasReference,
+		},
+	}
 }
 
 func (h *ACPHandler) presentationForTool(name, argsJSON string) acpToolPresentation {
@@ -402,6 +439,7 @@ func (h *ACPHandler) OnToolResult(ev ToolResultEvent) {
 	delete(h.einoToACP, einoToolCallID)
 	delete(h.toolArgs, id)
 	terminated := h.toolTerminated[id]
+	artifactResolver := h.artifactPathResolver
 	delete(h.toolTerminated, id)
 	// Drop any still-queued approval entry for this ACP id (e.g. auto-approved
 	// tools never go through RequestApproval and would otherwise leak and
@@ -431,7 +469,8 @@ func (h *ACPHandler) OnToolResult(ev ToolResultEvent) {
 	}
 
 	status := acp.ToolCallStatusCompleted
-	if err != nil || isToolFailureOutput(output) {
+	if err != nil || isToolFailureOutput(output) ||
+		ev.Outcome == ToolOutcomeFailed || ev.Outcome == ToolOutcomeUncertain {
 		status = acp.ToolCallStatusFailed
 	}
 
@@ -446,6 +485,10 @@ func (h *ACPHandler) OnToolResult(ev ToolResultEvent) {
 	if output != "" {
 		content = append(content, acp.ToolContent(acp.TextBlock(output)))
 	}
+	artifactMetadata, artifactsTruncated := resolvedACPArtifactMetadata(
+		context.Background(), ev.Artifacts, artifactResolver,
+	)
+	content = append(content, acpArtifactReceiptContent(artifactMetadata, artifactsTruncated)...)
 
 	opts := []acp.ToolCallUpdateOpt{
 		acp.WithUpdateStatus(status),
@@ -453,9 +496,13 @@ func (h *ACPHandler) OnToolResult(ev ToolResultEvent) {
 	if len(content) > 0 {
 		opts = append(opts, acp.WithUpdateContent(content))
 	}
-	// Include output as rawOutput for structured access.
-	if output != "" {
-		opts = append(opts, acp.WithUpdateRawOutput(output))
+	// Include output plus bounded, revalidated artifact metadata for structured
+	// access. Engine paths are intentionally ACP-only: neither the model-facing
+	// output above nor the session journal is modified.
+	if output != "" || len(ev.Artifacts) > 0 {
+		opts = append(opts, acp.WithUpdateRawOutput(acpToolResultRawOutputFromMetadata(
+			output, artifactMetadata, artifactsTruncated,
+		)))
 	}
 
 	if updateErr := h.conn.SessionUpdate(context.Background(), acp.SessionNotification{
@@ -463,6 +510,166 @@ func (h *ACPHandler) OnToolResult(ev ToolResultEvent) {
 		Update:    acp.UpdateToolCall(id, opts...),
 	}); updateErr != nil {
 		logACPError("UpdateToolCall", updateErr)
+	}
+}
+
+const (
+	maxACPResultArtifacts = 8
+	maxACPMetadataString  = 512
+	maxACPEnginePath      = 4096
+)
+
+// acpToolResultRawOutput preserves the legacy string shape when no artifact is
+// present. Artifact-bearing results use an object with a text field plus a
+// strictly bounded metadata array. Resolver failures omit engine_path rather
+// than leaking storage errors or publishing an unverified path.
+func acpToolResultRawOutput(
+	ctx context.Context,
+	output string,
+	refs []ArtifactRef,
+	resolver func(context.Context, ArtifactRef) (string, error),
+) any {
+	if len(refs) == 0 {
+		return output
+	}
+	artifacts, truncated := resolvedACPArtifactMetadata(ctx, refs, resolver)
+	return acpToolResultRawOutputFromMetadata(output, artifacts, truncated)
+}
+
+func acpToolResultRawOutputFromMetadata(
+	output string,
+	artifacts []map[string]any,
+	truncated bool,
+) any {
+	if len(artifacts) == 0 && !truncated {
+		return output
+	}
+	return map[string]any{
+		"text":                output,
+		"artifacts":           artifacts,
+		"artifacts_truncated": truncated,
+	}
+}
+
+func resolvedACPArtifactMetadata(
+	ctx context.Context,
+	refs []ArtifactRef,
+	resolver func(context.Context, ArtifactRef) (string, error),
+) ([]map[string]any, bool) {
+	limit := len(refs)
+	if limit > maxACPResultArtifacts {
+		limit = maxACPResultArtifacts
+	}
+	artifacts := make([]map[string]any, 0, limit)
+	for _, ref := range refs[:limit] {
+		metadata := map[string]any{
+			"id":         boundedACPMetadata(ref.ID, maxACPMetadataString),
+			"storage":    boundedACPMetadata(ref.Storage, maxACPMetadataString),
+			"key":        boundedACPMetadata(ref.Key, maxACPMetadataString),
+			"title":      boundedACPMetadata(ref.Title, maxACPMetadataString),
+			"kind":       boundedACPMetadata(ref.Kind, maxACPMetadataString),
+			"media_type": boundedACPMetadata(ref.MediaType, maxACPMetadataString),
+			"size":       ref.Size,
+			"width":      ref.Width,
+			"height":     ref.Height,
+			"shareable":  ref.Shareable,
+		}
+		if ref.Provider != "" {
+			metadata["provider"] = boundedACPMetadata(ref.Provider, maxACPMetadataString)
+		}
+		if ref.Model != "" {
+			metadata["model"] = boundedACPMetadata(ref.Model, maxACPMetadataString)
+		}
+		if ref.OperationID != "" {
+			metadata["operation_id"] = boundedACPMetadata(ref.OperationID, maxACPMetadataString)
+		}
+		if ref.ToolCallID != "" {
+			metadata["tool_call_id"] = boundedACPMetadata(ref.ToolCallID, maxACPMetadataString)
+		}
+		if resolver != nil {
+			if resolved, err := resolver(ctx, ref); err == nil && filepath.IsAbs(resolved) {
+				metadata["engine_path"] = boundedACPMetadata(resolved, maxACPEnginePath)
+			}
+		}
+		artifacts = append(artifacts, metadata)
+	}
+	return artifacts, len(refs) > limit
+}
+
+func acpArtifactReceipt(artifacts []map[string]any, truncated bool) string {
+	lines := make([]string, 0, len(artifacts)+1)
+	for _, metadata := range artifacts {
+		parts := []string{"Artifact: " + stringMetadata(metadata, "title")}
+		provider, model := stringMetadata(metadata, "provider"), stringMetadata(metadata, "model")
+		if provider != "" || model != "" {
+			parts = append(parts, strings.Trim(provider+" / "+model, " /"))
+		}
+		width, _ := metadata["width"].(int)
+		height, _ := metadata["height"].(int)
+		if width > 0 && height > 0 {
+			parts = append(parts, fmt.Sprintf("%dx%d", width, height))
+		}
+		if size, ok := metadata["size"].(int64); ok && size >= 0 {
+			parts = append(parts, fmt.Sprintf("%d bytes", size))
+		}
+		if enginePath := stringMetadata(metadata, "engine_path"); enginePath != "" {
+			parts = append(parts, "JCode engine path: "+enginePath)
+		}
+		lines = append(lines, strings.Join(parts, " | "))
+	}
+	if truncated {
+		lines = append(lines, fmt.Sprintf("Additional artifacts omitted (showing first %d).", maxACPResultArtifacts))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func acpArtifactReceiptContent(artifacts []map[string]any, truncated bool) []acp.ToolCallContent {
+	if len(artifacts) == 0 {
+		return nil
+	}
+	return []acp.ToolCallContent{
+		acp.ToolContent(acp.TextBlock(acpArtifactReceipt(artifacts, truncated))),
+	}
+}
+
+func stringMetadata(metadata map[string]any, key string) string {
+	value, _ := metadata[key].(string)
+	return value
+}
+
+func boundedACPMetadata(value string, limit int) string {
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	return value[:limit]
+}
+
+func (h *ACPHandler) OnToolProgress(ev ToolProgressEvent) {
+	h.mu.Lock()
+	id := h.einoToACP[ev.ToolCallID]
+	h.mu.Unlock()
+	if id == "" {
+		return
+	}
+	label := "Working…"
+	switch ev.Phase {
+	case ToolPhaseGenerating:
+		label = "Generating image…"
+	case ToolPhaseSaving:
+		label = "Saving generated image…"
+	case ToolPhaseUncertain:
+		label = "Provider outcome is uncertain"
+	}
+	if err := h.conn.SessionUpdate(context.Background(), acp.SessionNotification{
+		SessionId: h.sessionID,
+		Update: acp.UpdateToolCall(id,
+			acp.WithUpdateStatus(acp.ToolCallStatusInProgress),
+			acp.WithUpdateContent([]acp.ToolCallContent{
+				acp.ToolContent(acp.TextBlock(label)),
+			}),
+		),
+	}); err != nil {
+		logACPError("ImageToolProgress", err)
 	}
 }
 
@@ -608,91 +815,218 @@ func compactProgressDetail(s string) string {
 // --- Approval flow ---
 
 func (h *ACPHandler) RequestApproval(ctx context.Context, req ApprovalRequest) (ApprovalResponse, error) {
+	allowApproveAll := req.ApprovalClass == ""
 	h.mu.Lock()
-	// Find the matching pending tool call by name + args.
+	// Claim, but do not consume, the matching pending tool call. Allow All can
+	// fail its durable mode commit after the ACP client selects it; retaining the
+	// claim lets this same request stay pending and re-prompt without another
+	// concurrent approval stealing its tool-call id.
 	var matchedID acp.ToolCallId
-	for i, p := range h.pendingApprovals {
-		if p.toolName == req.ToolName && p.toolArgs == req.ToolArgs {
+	for i := range h.pendingApprovals {
+		p := &h.pendingApprovals[i]
+		if !p.claimed && p.toolName == req.ToolName && p.toolArgs == req.ToolArgs {
 			matchedID = p.acpID
-			h.pendingApprovals = append(h.pendingApprovals[:i], h.pendingApprovals[i+1:]...)
+			p.claimed = true
 			break
 		}
 	}
 	// Fallback: use first pending if no exact match (e.g. args were modified).
-	if matchedID == "" && len(h.pendingApprovals) > 0 {
-		matchedID = h.pendingApprovals[0].acpID
-		h.pendingApprovals = h.pendingApprovals[1:]
+	if matchedID == "" {
+		for i := range h.pendingApprovals {
+			if !h.pendingApprovals[i].claimed {
+				matchedID = h.pendingApprovals[i].acpID
+				h.pendingApprovals[i].claimed = true
+				break
+			}
+		}
 	}
 	h.mu.Unlock()
 	if matchedID == "" {
 		matchedID = h.nextToolCallID()
 	}
 	presentation := h.presentationForTool(req.ToolName, req.ToolArgs)
-
-	permResp, err := h.conn.RequestPermission(ctx, acp.RequestPermissionRequest{
-		SessionId: h.sessionID,
-		ToolCall: acp.ToolCallUpdate{
-			ToolCallId: matchedID,
-			Title:      acp.Ptr(presentation.Title),
-			Kind:       acp.Ptr(presentation.Kind),
-			Status:     acp.Ptr(acp.ToolCallStatusPending),
-			Locations:  presentation.Locations,
-			Content:    presentation.Content,
-			RawInput:   presentation.RawInput,
-		},
-		Options: []acp.PermissionOption{
-			{
-				OptionId: "allow_once",
-				Name:     "Allow",
-				Kind:     acp.PermissionOptionKindAllowOnce,
-			},
-			{
-				OptionId: "reject_once",
-				Name:     "Deny",
-				Kind:     acp.PermissionOptionKindRejectOnce,
-			},
-			{
-				OptionId: "allow_always",
-				Name:     "Allow All (auto-approve this session)",
-				Kind:     acp.PermissionOptionKindAllowAlways,
-			},
-		},
-	})
-	if err != nil {
-		return ApprovalResponse{}, err
+	if req.BillableSummary != nil {
+		presentation = billableACPPresentation(req.BillableSummary)
+	}
+	optionSet, optionErr := buildACPPermissionOptions(req, allowApproveAll)
+	if optionErr != nil {
+		h.consumePendingApproval(matchedID)
+		return ApprovalResponse{}, optionErr
 	}
 
-	if permResp.Outcome.Cancelled != nil {
-		h.markPermissionRejected(matchedID)
-		return ApprovalResponse{Approved: false, Mode: ModeManual}, nil
-	}
+	for {
+		permResp, err := h.conn.RequestPermission(ctx, acp.RequestPermissionRequest{
+			SessionId: h.sessionID,
+			ToolCall: acp.ToolCallUpdate{
+				ToolCallId: matchedID,
+				Title:      acp.Ptr(presentation.Title),
+				Kind:       acp.Ptr(presentation.Kind),
+				Status:     acp.Ptr(acp.ToolCallStatusPending),
+				Locations:  presentation.Locations,
+				Content:    presentation.Content,
+				RawInput:   presentation.RawInput,
+			},
+			Options: optionSet.options,
+		})
+		if err != nil {
+			h.consumePendingApproval(matchedID)
+			return ApprovalResponse{}, err
+		}
 
-	if permResp.Outcome.Selected != nil {
-		switch string(permResp.Outcome.Selected.OptionId) {
-		case "allow_once":
-			h.markPermissionApproved(matchedID)
-			return ApprovalResponse{Approved: true, Mode: ModeManual}, nil
-		case "allow_always":
-			h.markPermissionApproved(matchedID)
-			// "Allow All" promotes the session to Full access; tell the client so its
-			// mode selector reflects the jump to auto-approve.
-			h.notifyModeChanged(mode.FullAccess)
-			return ApprovalResponse{Approved: true, Mode: ModeAuto}, nil
-		case "reject_once":
+		if permResp.Outcome.Cancelled != nil {
+			h.consumePendingApproval(matchedID)
 			h.markPermissionRejected(matchedID)
 			return ApprovalResponse{Approved: false, Mode: ModeManual}, nil
 		}
-	}
 
-	h.markPermissionRejected(matchedID)
-	return ApprovalResponse{Approved: false, Mode: ModeManual}, nil
+		if permResp.Outcome.Selected != nil {
+			response, resolveErr := resolveACPPermissionOption(
+				string(permResp.Outcome.Selected.OptionId),
+				optionSet.allowOnceID,
+				optionSet.rejectOnceID,
+				optionSet.allowAlwaysID,
+				allowApproveAll,
+			)
+			if resolveErr != nil {
+				h.consumePendingApproval(matchedID)
+				h.markPermissionRejected(matchedID)
+				return ApprovalResponse{}, resolveErr
+			}
+			if response.Approved && response.Mode == ModeAuto {
+				// Keep the request pending when Full access cannot be durably
+				// committed. Re-prompting lets the user retry after fixing storage,
+				// or choose a one-time grant/deny; the middleware never receives an
+				// error that OnToolResult could fold into a terminal update.
+				if modeErr := h.notifyModeChanged(mode.FullAccess); modeErr != nil {
+					h.markModePromotionRetry(matchedID)
+					continue
+				}
+			}
+			h.consumePendingApproval(matchedID)
+			if response.Approved {
+				h.markPermissionApproved(matchedID)
+			} else {
+				h.markPermissionRejected(matchedID)
+			}
+			return response, nil
+		}
+
+		h.consumePendingApproval(matchedID)
+		h.markPermissionRejected(matchedID)
+		return ApprovalResponse{}, fmt.Errorf("permission response did not return a matching opaque option id")
+	}
+}
+
+func (h *ACPHandler) consumePendingApproval(id acp.ToolCallId) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for i := range h.pendingApprovals {
+		if h.pendingApprovals[i].acpID == id {
+			h.pendingApprovals = append(h.pendingApprovals[:i], h.pendingApprovals[i+1:]...)
+			return
+		}
+	}
+}
+
+func (h *ACPHandler) markModePromotionRetry(id acp.ToolCallId) {
+	content := []acp.ToolCallContent{acp.ToolContent(acp.TextBlock(
+		"Full access could not be saved. Fix session storage, then retry Allow All, or choose Allow/Deny.",
+	))}
+	if err := h.conn.SessionUpdate(context.Background(), acp.SessionNotification{
+		SessionId: h.sessionID,
+		Update: acp.UpdateToolCall(
+			id,
+			acp.WithUpdateStatus(acp.ToolCallStatusPending),
+			acp.WithUpdateContent(content),
+		),
+	}); err != nil {
+		logACPError("ModePromotionRetry", err)
+	}
+}
+
+type acpPermissionOptionSet struct {
+	allowOnceID   string
+	rejectOnceID  string
+	allowAlwaysID string
+	options       []acp.PermissionOption
+}
+
+func buildACPPermissionOptions(req ApprovalRequest, allowApproveAll bool) (acpPermissionOptionSet, error) {
+	var result acpPermissionOptionSet
+	if req.ApprovalClass != "" {
+		allowApproveAll = false
+		allowID, denyID, err := BillableApprovalOptionIDs(req.Options)
+		if err != nil {
+			return result, err
+		}
+		result.allowOnceID = allowID
+		result.rejectOnceID = denyID
+	} else {
+		result.allowOnceID = newApprovalOptionID()
+		result.rejectOnceID = newApprovalOptionID()
+		result.allowAlwaysID = newApprovalOptionID()
+	}
+	result.options = []acp.PermissionOption{
+		{
+			OptionId: acp.PermissionOptionId(result.allowOnceID),
+			Name:     "Allow",
+			Kind:     acp.PermissionOptionKindAllowOnce,
+		},
+		{
+			OptionId: acp.PermissionOptionId(result.rejectOnceID),
+			Name:     "Deny",
+			Kind:     acp.PermissionOptionKindRejectOnce,
+		},
+	}
+	if allowApproveAll {
+		result.options = append(result.options, acp.PermissionOption{
+			OptionId: acp.PermissionOptionId(result.allowAlwaysID),
+			Name:     "Allow All (auto-approve this session)",
+			Kind:     acp.PermissionOptionKindAllowAlways,
+		})
+	}
+	return result, nil
+}
+
+func resolveACPPermissionOption(
+	selectedID, allowOnceID, rejectOnceID, allowAlwaysID string,
+	allowApproveAll bool,
+) (ApprovalResponse, error) {
+	if selectedID == "" {
+		return ApprovalResponse{}, fmt.Errorf("permission response returned an empty opaque option id")
+	}
+	switch selectedID {
+	case allowOnceID:
+		return ApprovalResponse{
+			Approved: true, Mode: ModeManual, ResolvedOptionID: allowOnceID,
+		}, nil
+	case rejectOnceID:
+		return ApprovalResponse{
+			Approved: false, Mode: ModeManual, ResolvedOptionID: rejectOnceID,
+		}, nil
+	case allowAlwaysID:
+		if allowAlwaysID == "" || !allowApproveAll {
+			return ApprovalResponse{}, fmt.Errorf("permission response selected a forbidden blanket grant")
+		}
+		return ApprovalResponse{
+			Approved: true, Mode: ModeAuto, ResolvedOptionID: allowAlwaysID,
+		}, nil
+	default:
+		return ApprovalResponse{}, fmt.Errorf("permission response returned an unknown opaque option id")
+	}
 }
 
 // notifyModeChanged tells the connected client the session's unified mode
 // changed (e.g. after "Allow All" promotes to Full access), so its selector syncs.
-func (h *ACPHandler) notifyModeChanged(m mode.SessionMode) {
-	if h.onModeChange != nil {
-		h.onModeChange(m) // reconcile the owning session's mode field
+func (h *ACPHandler) notifyModeChanged(m mode.SessionMode) error {
+	h.mu.Lock()
+	onModeChange := h.onModeChange
+	h.mu.Unlock()
+	if onModeChange != nil {
+		if err := onModeChange(m); err != nil {
+			logACPError("ModePromotion", err)
+			return ErrApprovalModePromotion
+		}
 	}
 	if err := h.conn.SessionUpdate(context.Background(), acp.SessionNotification{
 		SessionId: h.sessionID,
@@ -704,6 +1038,7 @@ func (h *ACPHandler) notifyModeChanged(m mode.SessionMode) {
 	}); err != nil {
 		logACPError("CurrentModeUpdate", err)
 	}
+	return nil
 }
 
 func (h *ACPHandler) markPermissionApproved(id acp.ToolCallId) {

@@ -12,7 +12,7 @@
  * project switch remounts + re-fetches them — see the key prop in render).
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   ArrowPathIcon,
@@ -35,6 +35,7 @@ type Tab = 'files' | 'changes' | 'plan' | 'artifacts'
 
 interface Props {
   activeTab: Tab
+  selectedArtifactID?: string
   onClose: () => void
   onSwitchTab: (tab: Tab) => void
 }
@@ -47,15 +48,72 @@ const TAB_KEYS: Record<Tab, string> = {
   artifacts: 'rightPanel.artifacts',
 } as const
 
-export function RightPanel({ activeTab, onClose, onSwitchTab }: Props) {
+export function RightPanel({ activeTab, selectedArtifactID, onClose, onSwitchTab }: Props) {
   const { t } = useTranslation()
   // Panel width with a min/max clamp; resized via the left drag handle.
   const [panelWidth, setPanelWidth] = useState(activeTab === 'artifacts' ? 560 : 320)
+  const [compact, setCompact] = useState(false)
+  const panelRef = useRef<HTMLElement>(null)
+  const onCloseRef = useRef(onClose)
+  const restoreFocusRef = useRef<HTMLElement | null>(null)
   const projectPath = useAppSelector((s) => s.session.projectPath)
+
+  useEffect(() => { onCloseRef.current = onClose }, [onClose])
 
   useEffect(() => {
     if (activeTab === 'artifacts') setPanelWidth((width) => Math.max(width, 480))
   }, [activeTab])
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 899px)')
+    const sync = () => setCompact(media.matches)
+    sync()
+    media.addEventListener('change', sync)
+    return () => media.removeEventListener('change', sync)
+  }, [])
+
+  useEffect(() => {
+    if (!compact) return
+    const panel = panelRef.current
+    if (!panel) return
+    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    panel.focus()
+    const containFocus = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const controls = [...panel.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )]
+      if (controls.length === 0) {
+        event.preventDefault()
+        panel.focus()
+        return
+      }
+      const first = controls[0]
+      const last = controls[controls.length - 1]
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === panel)) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    window.addEventListener('keydown', containFocus)
+    return () => {
+      window.removeEventListener('keydown', containFocus)
+      const target = restoreFocusRef.current
+      window.setTimeout(() => { if (target?.isConnected) target.focus() }, 0)
+    }
+  }, [compact])
+
+  function resizeBy(delta: number) {
+    setPanelWidth((width) => Math.min(900, Math.max(220, width + delta)))
+  }
 
   function startResize(e: React.MouseEvent) {
     e.preventDefault()
@@ -77,22 +135,40 @@ export function RightPanel({ activeTab, onClose, onSwitchTab }: Props) {
 
   return (
     <aside
-      className="relative flex h-full min-w-[220px] max-w-[80vw] flex-col overflow-hidden border-l border-[var(--color-border)] bg-[var(--color-background)]"
-      style={{ width: `${panelWidth}px` }}
+      ref={panelRef}
+      tabIndex={compact ? -1 : undefined}
+      role={compact ? 'dialog' : undefined}
+      aria-modal={compact || undefined}
+      aria-label={compact ? t(TAB_KEYS[activeTab]) : undefined}
+      className="relative flex h-full min-w-[220px] max-w-[80vw] flex-col overflow-hidden border-l border-[var(--color-border)] bg-[var(--color-background)] max-[899px]:absolute max-[899px]:inset-0 max-[899px]:z-[var(--z-sidebar)] max-[899px]:w-full max-[899px]:max-w-none max-[899px]:border-l-0"
+      style={{ width: compact ? '100%' : `${panelWidth}px` }}
     >
       {/* Resize handle (left edge). */}
       <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize side panel"
+        aria-valuemin={220}
+        aria-valuemax={900}
+        aria-valuenow={panelWidth}
+        tabIndex={0}
         onMouseDown={startResize}
-        className="absolute bottom-0 left-0 top-0 z-10 w-1 cursor-col-resize transition-colors hover:bg-[color-mix(in_srgb,var(--color-accent-neutral)_40%,transparent)]"
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowLeft') { event.preventDefault(); resizeBy(16) }
+          if (event.key === 'ArrowRight') { event.preventDefault(); resizeBy(-16) }
+        }}
+        className="absolute bottom-0 left-0 top-0 z-10 w-1 cursor-col-resize transition-colors hover:bg-[color-mix(in_srgb,var(--color-accent-neutral)_40%,transparent)] focus-visible:bg-[var(--color-accent-neutral)] max-[899px]:hidden"
       />
 
       {/* Header: tab strip + close. */}
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-[var(--color-border)] pl-3 pr-2">
-        <div className="flex items-center gap-0.5">
+        <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto" role="tablist">
           {(['plan', 'files', 'changes', 'artifacts'] as const).map((tab) => (
             <button
               key={tab}
               type="button"
+              role="tab"
+              aria-selected={activeTab === tab}
               onClick={() => onSwitchTab(tab)}
               className={`rounded-[var(--radius-md)] px-2.5 py-1 text-xs font-medium transition-colors ${
                 activeTab === tab
@@ -114,7 +190,7 @@ export function RightPanel({ activeTab, onClose, onSwitchTab }: Props) {
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-hidden" role="tabpanel" aria-label={t(TAB_KEYS[activeTab])}>
         {/* Keyed on the project path so switching projects remounts the children
             and re-fetches — both only load on mount. */}
         {activeTab === 'files' ? (
@@ -122,7 +198,7 @@ export function RightPanel({ activeTab, onClose, onSwitchTab }: Props) {
         ) : activeTab === 'changes' ? (
           <DiffViewer key={`changes:${projectPath}`} />
         ) : activeTab === 'artifacts' ? (
-          <ArtifactsPanel key={`artifacts:${projectPath}`} />
+          <ArtifactsPanel key={`artifacts:${projectPath}`} initialArtifactID={selectedArtifactID} />
         ) : (
           <PlanPane />
         )}

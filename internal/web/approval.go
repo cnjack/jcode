@@ -2,9 +2,11 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 
+	"github.com/cnjack/jcode/internal/config"
 	"github.com/cnjack/jcode/internal/handler"
 	"github.com/cnjack/jcode/internal/mode"
 	"github.com/cnjack/jcode/internal/tools"
@@ -77,6 +79,7 @@ func (s *Server) handleApproval(w http.ResponseWriter, r *http.Request) {
 		TaskID     string `json:"task_id"`
 		Approved   bool   `json:"approved"`
 		ApproveAll bool   `json:"approve_all"`
+		OptionID   string `json:"option_id"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -91,24 +94,51 @@ func (s *Server) handleApproval(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such task"})
 		return
 	}
-	if err := reng.handler.ResolveApproval(req.ID, req.Approved, req.ApproveAll); err != nil {
+	resolvedOptionID := ""
+	approved, approveAll := req.Approved, req.ApproveAll
+	if req.OptionID != "" {
+		response, resolveErr := reng.handler.ResolveApprovalOption(req.ID, req.OptionID)
+		if resolveErr != nil {
+			if errors.Is(resolveErr, handler.ErrApprovalModePromotion) {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to persist mode change"})
+				return
+			}
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": resolveErr.Error()})
+			return
+		}
+		resolvedOptionID = response.ResolvedOptionID
+		approved = response.Approved
+		approveAll = response.Approved && response.Mode == handler.ModeAuto
+	} else if err := reng.handler.ResolveApproval(req.ID, req.Approved, req.ApproveAll); err != nil {
+		if errors.Is(err, handler.ErrApprovalModePromotion) {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to persist mode change"})
+			return
+		}
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
-	// "Allow all" promotes that task to auto-approve (the runner flips its
-	// ApprovalState on resolve). Mirror it onto that task's mode + selector.
-	s.syncModeAfterApproval(reng, req.Approved, req.ApproveAll)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	// The registered WebHandler guard normally committed Allow-all before the
+	// response reached the runner. Keep this idempotent call for handlers built
+	// directly by embedders/tests without the registration hook.
+	if err := s.syncModeAfterApproval(reng, approved, approveAll); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to persist mode change"})
+		return
+	}
+	response := map[string]string{"status": "ok"}
+	if resolvedOptionID != "" {
+		response["resolved_option_id"] = resolvedOptionID
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
-// syncModeAfterApproval reflects an approve-all promotion onto the server's
-// user-facing mode state and notifies connected clients. A plain single approve
-// (or a deny) leaves the mode untouched. The runner's ApprovalState is the
-// source of truth for the approval axis; this only projects it onto the unified
-// selector the frontend renders.
-func (s *Server) syncModeAfterApproval(eng *Engine, approved, approveAll bool) {
+// syncModeAfterApproval commits an approve-all promotion, updates the task's
+// approval/engine state, and notifies connected clients. A plain single approve
+// (or a deny) leaves the mode untouched. WebHandler invokes this as a pre-send
+// guard, so the runner cannot observe ModeAuto until the Full access journal
+// entry is durable.
+func (s *Server) syncModeAfterApproval(eng *Engine, approved, approveAll bool) error {
 	if !approved || !approveAll || eng == nil {
-		return
+		return nil
 	}
 	sm := mode.FullAccess
 	// An approve-all promotion changes the mode/revision while preserving the
@@ -117,11 +147,24 @@ func (s *Server) syncModeAfterApproval(eng *Engine, approved, approveAll bool) {
 	// agent before the promotion advances the revision. Without this lock, the
 	// rebuild is discarded as stale and the task keeps its old tool schema.
 	eng.rebuildMu.Lock()
+	if eng.curMode() == sm.String() {
+		eng.rebuildMu.Unlock()
+		return nil
+	}
+	if err := eng.recordModeChange(sm.String()); err != nil {
+		eng.rebuildMu.Unlock()
+		config.Logger().Printf("[web] allow-all mode journal commit failed for task %s: %v", eng.taskID, err)
+		return err
+	}
+	if eng.approvalState != nil {
+		eng.approvalState.SetSessionMode(sm)
+	}
 	eng.applyModeSwitch(sm.String(), nil)
 	eng.rebuildMu.Unlock()
 	s.wsBroker.Broadcast(WSEvent{Type: "mode_changed", TaskID: eng.taskID, Data: map[string]string{
 		"mode": sm.String(),
 	}})
+	return nil
 }
 
 // handlePendingApproval returns approval requests still awaiting a decision.

@@ -355,7 +355,7 @@ export default {
       tokenUsage: 'Token 用量',
       preferences: '偏好設定',
       autoApproveTitle: '預設自動批准',
-      autoApproveDesc: '自動執行工具呼叫（檔案編輯與指令），無需確認（等同於完全存取模式；計劃模式仍會詢問）。儲存為新工作階段的預設設定。',
+      autoApproveDesc: '所有工具呼叫均無需確認，包括可能產生費用的外部供應商呼叫（等同於完全存取模式；計劃模式仍會詢問）。儲存為新工作階段的預設設定。',
       bleTitle: '藍牙狀態通知',
       bleDesc: '將 Agent 狀態 — 工作中、待確認、已完成 — 推送到已配對的 JCODE 藍牙裝置。重新啟動應用程式後生效。',
       languageTitle: '語言',
@@ -1208,12 +1208,21 @@ export default {
 
   askUser: {
     asking: '詢問中',
+    needsAnswer: '需要你的回答',
+    helper: '選擇一個選項，也可以補充自己的想法。',
+    previous: '上一題',
+    next: '下一題',
     collapse: '摺疊',
     skip: '略過',
     other: '其他',
     submit: '提交',
+    submitting: '提交中…',
+    recommended: '推薦',
+    multiSelect: '可多選',
+    skipped: '已略過',
     noAnswer: '無記錄的答案',
-    customPlaceholder: '在此輸入你的答案',
+    customPlaceholder: '其他想法，或補充你的偏好…',
+    submitError: '無法提交回答，請重試。',
   },
 
   goal: {

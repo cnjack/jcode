@@ -10,6 +10,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/cnjack/jcode/internal/telemetry"
+	"github.com/cnjack/jcode/internal/toolpolicy"
 	"github.com/cnjack/jcode/internal/tools"
 )
 
@@ -18,16 +19,24 @@ import (
 // agent-visible strings instead of aborting the agent loop).
 type approvalMiddleware struct {
 	*adk.BaseChatModelAgentMiddleware
-	approvalFunc ApprovalFunc
+	approvalFunc      ApprovalFunc
+	billablePreparers map[string]toolpolicy.BillableIntentPreparer
 }
 
 // newApprovalMiddleware creates a ChatModelAgentMiddleware that wraps tool calls
 // with approval gating and safe error handling.
-func newApprovalMiddleware(approvalFunc ApprovalFunc) adk.ChatModelAgentMiddleware {
-	return &approvalMiddleware{
+func newApprovalMiddleware(
+	approvalFunc ApprovalFunc,
+	preparers ...map[string]toolpolicy.BillableIntentPreparer,
+) adk.ChatModelAgentMiddleware {
+	middleware := &approvalMiddleware{
 		BaseChatModelAgentMiddleware: &adk.BaseChatModelAgentMiddleware{},
 		approvalFunc:                 approvalFunc,
 	}
+	if len(preparers) > 0 {
+		middleware.billablePreparers = preparers[0]
+	}
+	return middleware
 }
 
 func (m *approvalMiddleware) WrapInvokableToolCall(
@@ -49,6 +58,13 @@ func (m *approvalMiddleware) WrapInvokableToolCall(
 		// gate keys per-call bookkeeping — denied flag, approval wait time —
 		// by this id; the ApprovalFunc signature itself carries no identity).
 		ctx = WithToolCallID(ctx, tCtx.CallID)
+		if preparer := m.billablePreparers[tCtx.Name]; preparer != nil {
+			intent, err := preparer.PrepareBillableIntent(ctx, argumentsInJSON, tCtx.CallID)
+			if err != nil {
+				return fmt.Sprintf("Tool approval error: invalid billable intent: %v", err), nil
+			}
+			ctx = toolpolicy.WithBillableIntent(ctx, intent)
+		}
 
 		subSpan := telemetry.SubSpanFromContext(ctx)
 
@@ -162,6 +178,13 @@ func (m *approvalMiddleware) WrapEnhancedInvokableToolCall(
 		// Approval prompts and their wait/denied bookkeeping are keyed by the
 		// model-issued call id, exactly as for plain tools.
 		ctx = WithToolCallID(ctx, tCtx.CallID)
+		if preparer := m.billablePreparers[tCtx.Name]; preparer != nil {
+			intent, err := preparer.PrepareBillableIntent(ctx, argumentsInJSON, tCtx.CallID)
+			if err != nil {
+				return textToolResult(fmt.Sprintf("Tool approval error: invalid billable intent: %v", err)), nil
+			}
+			ctx = toolpolicy.WithBillableIntent(ctx, intent)
+		}
 
 		subSpan := telemetry.SubSpanFromContext(ctx)
 

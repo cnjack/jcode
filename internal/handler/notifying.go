@@ -115,6 +115,12 @@ func (h *NotifyingHandler) OnToolResult(ev ToolResultEvent) {
 	h.inner.OnToolResult(ev)
 }
 
+func (h *NotifyingHandler) OnToolProgress(ev ToolProgressEvent) {
+	if progress, ok := h.inner.(ToolProgressHandler); ok {
+		progress.OnToolProgress(ev)
+	}
+}
+
 func (h *NotifyingHandler) OnTodoUpdate() {
 	h.inner.OnTodoUpdate()
 }

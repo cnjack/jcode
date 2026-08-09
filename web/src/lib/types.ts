@@ -48,6 +48,10 @@ export interface SessionEntry {
   output?: string
   error?: string
   tool_call_id?: string
+  operation_id?: string
+  outcome?: string
+  error_code?: string
+  artifact_ids?: string[]
   timestamp?: string
 
   // tool_call batch fields (concurrent calls from one assistant message)
@@ -59,6 +63,32 @@ export interface SessionEntry {
   duration_ms?: number
   // tool_result: user rejected the call at the approval prompt (declined ≠ failed)
   denied?: boolean
+
+  // Durable image-generation operation journal.
+  operation_state?: 'dispatch_attempted' | 'accepted' | 'saving' | 'succeeded' | 'failed' | 'uncertain'
+  operation_capability_key?: {
+    provider_profile_id: string
+    credential_kind?: string
+    endpoint_profile: string
+    model_id: string
+  }
+
+  // Metadata-only Artifact record. A missing storage kind is a legacy
+  // workspace Artifact; managed paths are never sent to the browser.
+  artifact_id?: string
+  artifact_path?: string
+  artifact_storage_kind?: 'workspace' | 'managed'
+  artifact_key?: string
+  artifact_title?: string
+  artifact_kind?: string
+  artifact_media_type?: string
+  artifact_size?: number
+  artifact_width?: number
+  artifact_height?: number
+  artifact_provider_id?: string
+  artifact_model_id?: string
+  artifact_revision?: number
+  artifact_shareable?: boolean
 
   // plan_update fields
   plan_status?: string
@@ -123,15 +153,26 @@ export type ArtifactStatus = 'available' | 'missing' | 'unsupported' | 'too_larg
 export interface ArtifactRecord {
   id: string
   session_id: string
-  relative_path: string
+  storage_kind?: 'workspace' | 'managed'
+  relative_path?: string
+  relative_key?: string
   title: string
   kind: ArtifactKind
   media_type: string
   size: number
+  width?: number
+  height?: number
+  sha256?: string
+  provider_id?: string
+  model_id?: string
+  parent_artifact_id?: string
+  operation_id?: string
+  tool_call_id?: string
   revision: number
   updated_at: string
   status: ArtifactStatus
   focus?: boolean
+  shareable?: boolean
 }
 
 export interface ArtifactShareResult {
@@ -165,6 +206,10 @@ export interface ModelInfo {
   // Always supplied by GET /api/models; only true entries belong in pickers.
   enabled: boolean
   image_support?: boolean
+  input_modalities?: string[]
+  output_modalities?: string[]
+  capability_availability?: 'supported' | 'unsupported' | 'unknown'
+  image_sizes?: string[]
   // How this model exposes its reasoning/thinking controls (from models.dev).
   // Absent/empty ⇒ no reasoning controls to render.
   reasoning_options?: ReasoningOption[]
@@ -186,6 +231,7 @@ export interface ProviderInfo {
 
 export interface ModelsResponse {
   current: { provider: string; model: string }
+  current_image: { provider: string; model: string }
   providers: ProviderInfo[]
 }
 
@@ -273,6 +319,14 @@ export interface MCPServerInfo {
   timeout?: number
   enabled: boolean
   oauth: boolean
+  oauth_config?: {
+    enabled: boolean
+    client_id?: string
+    /** Masked display value; never the stored secret. */
+    client_secret?: string
+    scopes?: string[]
+    auth_server_metadata_url?: string
+  }
   has_auth: boolean
   status: string // connected | needs_auth | error | disabled | configured
   error?: string
@@ -292,13 +346,16 @@ export interface MCPServerRequest {
   args?: string[]
   env?: string[]
   headers?: Record<string, string>
+  remove_headers?: string[]
   timeout?: number
   oauth?: {
     enabled: boolean
     client_id?: string
     client_secret?: string
     scopes?: string[]
+    remove_client_secret?: boolean
   }
+  remove_oauth?: boolean
 }
 
 export interface MCPLoginStatus {
@@ -538,6 +595,10 @@ export interface ApprovalRequestData {
   tool_call_id?: string // gated tool_call's id — marks that row as awaiting approval
   is_external: boolean
   task_id?: string // the task (engine) the approval belongs to; echoed back on resolve
+  approval_class?: string
+  options?: import('jcode-ui-core').ApprovalOption[]
+  billable_summary?: import('jcode-ui-core').BillableApprovalSummary
+  resolved_option_id?: string
 }
 
 // ask_user types — an interactive question (or batch of questions) the agent
@@ -745,6 +806,32 @@ export interface ProviderDetail {
   vision?: boolean // provider-level image-input override (null ⇒ registry default)
   thinking?: boolean // provider-level extended-reasoning toggle
   reasoning_effort?: string // provider-level default effort
+  provider_tools?: Record<string, ProviderToolPolicy>
+  image_endpoint?: ImageEndpointConfig
+  capabilities?: ProviderCapability[]
+}
+
+export interface ProviderCapability {
+  id: 'image_generation' | 'web_search' | string
+  availability: 'supported' | 'unsupported' | 'unknown'
+  mechanism?: string
+  model_label?: string
+  enabled: boolean
+  max_calls_per_turn: number
+  max_calls_per_session: number
+}
+
+export interface ProviderToolPolicy {
+  enabled?: boolean
+  max_calls_per_turn?: number
+  max_calls_per_session?: number
+}
+
+export interface ImageEndpointConfig {
+  protocol?: string
+  base_url?: string
+  models?: { id: string; name?: string; sizes?: string[] }[]
+  asset_hosts?: string[]
 }
 
 // Advanced provider settings shared by the add/update payloads. Capabilities

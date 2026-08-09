@@ -3,11 +3,14 @@ package handler
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/tools"
@@ -36,6 +39,9 @@ type WebToolCallData struct {
 	BatchIndex  int              `json:"batch_index,omitempty"`
 	BatchSize   int              `json:"batch_size,omitempty"`
 	StartedAt   int64            `json:"started_at,omitempty"`
+	Surface     ToolSurface      `json:"surface,omitempty"`
+	Phase       ToolPhase        `json:"phase,omitempty"`
+	OperationID string           `json:"operation_id,omitempty"`
 }
 
 // ToolDisplayInfo carries human-readable tool metadata for UI rendering.
@@ -108,6 +114,13 @@ func extractToolDisplayInfo(name, argsJSON string) *ToolDisplayInfo {
 			}
 			info.Subtitle = cmd
 		}
+	case "generate_image":
+		info.Title = "Generate image"
+		info.Icon = "photo"
+		info.Category = "mutation"
+		info.Kind = "image_generation"
+		info.Subtitle = getString("prompt")
+		info.Collapsible = false
 	case "background":
 		info.Title = "Background"
 		info.Icon = "terminal"
@@ -417,7 +430,27 @@ type WebToolResultData struct {
 	DurationMs int64 `json:"duration_ms,omitempty"`
 	// Denied is true when the user rejected this call at the approval prompt.
 	// The UI renders it struck-through/muted (declined), not as an error.
-	Denied bool `json:"denied,omitempty"`
+	Denied      bool          `json:"denied,omitempty"`
+	Surface     ToolSurface   `json:"surface,omitempty"`
+	Phase       ToolPhase     `json:"phase,omitempty"`
+	OperationID string        `json:"operation_id,omitempty"`
+	Outcome     ToolOutcome   `json:"outcome,omitempty"`
+	ErrorCode   string        `json:"error_code,omitempty"`
+	Provider    string        `json:"provider,omitempty"`
+	Model       string        `json:"model,omitempty"`
+	Artifacts   []ArtifactRef `json:"artifacts,omitempty"`
+}
+
+type WebToolProgressData struct {
+	Name        string        `json:"name"`
+	ToolCallID  string        `json:"tool_call_id,omitempty"`
+	Surface     ToolSurface   `json:"surface,omitempty"`
+	Phase       ToolPhase     `json:"phase"`
+	OperationID string        `json:"operation_id,omitempty"`
+	ErrorCode   string        `json:"error_code,omitempty"`
+	Provider    string        `json:"provider,omitempty"`
+	Model       string        `json:"model,omitempty"`
+	Artifacts   []ArtifactRef `json:"artifacts,omitempty"`
 }
 
 // WebTokenData carries token usage to the browser. Field order/types MUST match
@@ -467,11 +500,19 @@ type WebDoneData struct {
 // ties the prompt to the exact pending tool_call row so the UI can paint that
 // row as "waiting for approval".
 type WebApprovalRequestData struct {
-	ID         string `json:"id"`
-	ToolName   string `json:"tool_name"`
-	ToolArgs   string `json:"tool_args"`
-	ToolCallID string `json:"tool_call_id,omitempty"`
-	IsExternal bool   `json:"is_external"`
+	ID              string                   `json:"id"`
+	ToolName        string                   `json:"tool_name"`
+	ToolArgs        string                   `json:"tool_args"`
+	ToolCallID      string                   `json:"tool_call_id,omitempty"`
+	IsExternal      bool                     `json:"is_external"`
+	ApprovalClass   string                   `json:"approval_class,omitempty"`
+	OperationID     string                   `json:"operation_id,omitempty"`
+	CapabilityKey   string                   `json:"capability_key,omitempty"`
+	Provider        string                   `json:"provider,omitempty"`
+	Model           string                   `json:"model,omitempty"`
+	AllowApproveAll bool                     `json:"allow_approve_all"`
+	Options         []ApprovalOption         `json:"options,omitempty"`
+	BillableSummary *BillableApprovalSummary `json:"billable_summary,omitempty"`
 }
 
 // WebAskUserRequestData carries an ask_user question request to web clients.
@@ -485,9 +526,10 @@ type WebAskUserRequestData struct {
 type WebHandler struct {
 	eventCh chan WebEvent
 
-	mu              sync.Mutex
-	approvalCounter int
-	pendingApproval map[string]*webPendingApproval
+	mu                    sync.Mutex
+	approvalCounter       int
+	pendingApproval       map[string]*webPendingApproval
+	modePromotionCallback func() error
 
 	askUserMu      sync.Mutex
 	askUserCounter int
@@ -500,8 +542,9 @@ type WebHandler struct {
 // is fire-once, so without retaining the data a reload/reconnect while an
 // approval is pending would leave the agent blocked with no card to act on.
 type webPendingApproval struct {
-	ch   chan ApprovalResponse
-	data WebApprovalRequestData
+	ch       chan ApprovalResponse
+	data     WebApprovalRequestData
+	resolved bool
 }
 
 // pendingAskUser pairs a question's response channel with the request payload so
@@ -523,6 +566,16 @@ func NewWebHandler() *WebHandler {
 // Events returns the read-only event channel.
 func (h *WebHandler) Events() <-chan WebEvent {
 	return h.eventCh
+}
+
+// SetModePromotionCallback installs the durable commit hook for an "Allow
+// all" response. The hook runs before the response is delivered to the runner,
+// so a persistence failure cannot silently promote the approval engine while
+// the session journal still says Approval.
+func (h *WebHandler) SetModePromotionCallback(callback func() error) {
+	h.mu.Lock()
+	h.modePromotionCallback = callback
+	h.mu.Unlock()
 }
 
 func (h *WebHandler) emit(event string, data any) {
@@ -553,6 +606,9 @@ func (h *WebHandler) OnToolCall(ev ToolCallEvent) {
 		BatchID:     ev.BatchID,
 		BatchIndex:  ev.BatchIndex,
 		BatchSize:   ev.BatchSize,
+		Surface:     ev.Surface,
+		Phase:       ev.Phase,
+		OperationID: ev.OperationID,
 	}
 	if !ev.StartedAt.IsZero() {
 		data.StartedAt = ev.StartedAt.UnixMilli()
@@ -567,12 +623,20 @@ func (h *WebHandler) OnToolResult(ev ToolResultEvent) {
 		errMsg = ev.Err.Error()
 	}
 	data := WebToolResultData{
-		Name:       name,
-		Output:     output,
-		ToolCallID: ev.ToolCallID,
-		Error:      errMsg,
-		DurationMs: ev.Duration.Milliseconds(),
-		Denied:     ev.Denied,
+		Name:        name,
+		Output:      output,
+		ToolCallID:  ev.ToolCallID,
+		Error:       errMsg,
+		DurationMs:  ev.Duration.Milliseconds(),
+		Denied:      ev.Denied,
+		Surface:     ev.Surface,
+		Phase:       ev.Phase,
+		OperationID: ev.OperationID,
+		Outcome:     ev.Outcome,
+		ErrorCode:   ev.ErrorCode,
+		Provider:    ev.Provider,
+		Model:       ev.Model,
+		Artifacts:   ev.Artifacts,
 	}
 	// Dual-channel for execute: parse model string into streams/meta for UI.
 	if name == "execute" {
@@ -603,6 +667,14 @@ func (h *WebHandler) OnToolResult(ev ToolResultEvent) {
 		data.DisplayOutput = cleanToolOutput(name, output)
 	}
 	h.emit("tool_result", data)
+}
+
+func (h *WebHandler) OnToolProgress(ev ToolProgressEvent) {
+	h.emit("tool_progress", WebToolProgressData{
+		Name: ev.Name, ToolCallID: ev.ToolCallID, Surface: ev.Surface,
+		Phase: ev.Phase, OperationID: ev.OperationID, ErrorCode: ev.ErrorCode,
+		Provider: ev.Provider, Model: ev.Model, Artifacts: ev.Artifacts,
+	})
 }
 
 func (h *WebHandler) OnTodoUpdate() {
@@ -657,16 +729,37 @@ func (h *WebHandler) OnTokenUpdate(info TokenUsage) {
 // --- Approval flow ---
 
 func (h *WebHandler) RequestApproval(ctx context.Context, req ApprovalRequest) (ApprovalResponse, error) {
+	// Structured billable gates never offer or accept a blanket grant, even if
+	// a buggy caller sets the legacy AllowApproveAll boolean.
+	allowApproveAll := req.ApprovalClass == ""
 	h.mu.Lock()
 	h.approvalCounter++
 	id := fmt.Sprintf("approval_%d", h.approvalCounter)
 	respCh := make(chan ApprovalResponse, 1)
+	toolArgs := req.ToolArgs
+	var options []ApprovalOption
+	if req.ApprovalClass != "" && !allowApproveAll {
+		if _, _, err := BillableApprovalOptionIDs(req.Options); err != nil {
+			h.mu.Unlock()
+			return ApprovalResponse{}, err
+		}
+		toolArgs = "{}"
+		options = append([]ApprovalOption(nil), req.Options...)
+	}
 	data := WebApprovalRequestData{
-		ID:         id,
-		ToolName:   req.ToolName,
-		ToolArgs:   req.ToolArgs,
-		ToolCallID: req.ToolCallID,
-		IsExternal: req.IsExternal,
+		ID:              id,
+		ToolName:        req.ToolName,
+		ToolArgs:        toolArgs,
+		ToolCallID:      req.ToolCallID,
+		IsExternal:      req.IsExternal,
+		ApprovalClass:   req.ApprovalClass,
+		OperationID:     req.OperationID,
+		CapabilityKey:   req.CapabilityKey,
+		Provider:        req.Provider,
+		Model:           req.Model,
+		AllowApproveAll: allowApproveAll,
+		Options:         options,
+		BillableSummary: req.BillableSummary,
 	}
 	h.pendingApproval[id] = &webPendingApproval{ch: respCh, data: data}
 	h.mu.Unlock()
@@ -696,23 +789,102 @@ func (h *WebHandler) RequestApproval(ctx context.Context, req ApprovalRequest) (
 func (h *WebHandler) ResolveApproval(id string, approved, approveAll bool) error {
 	h.mu.Lock()
 	p, ok := h.pendingApproval[id]
-	h.mu.Unlock()
-
 	if !ok {
+		h.mu.Unlock()
 		return fmt.Errorf("no pending approval with id %q", id)
+	}
+	if p.resolved {
+		h.mu.Unlock()
+		return fmt.Errorf("approval %q already resolved", id)
+	}
+	if len(p.data.Options) > 0 {
+		h.mu.Unlock()
+		return fmt.Errorf("approval %q requires an opaque option id", id)
+	}
+	if approveAll && !p.data.AllowApproveAll {
+		h.mu.Unlock()
+		return fmt.Errorf("approval %q only supports a one-time grant", id)
 	}
 
 	mode := ModeManual
 	if approved && approveAll {
+		if h.modePromotionCallback != nil {
+			if err := h.modePromotionCallback(); err != nil {
+				h.mu.Unlock()
+				return ErrApprovalModePromotion
+			}
+		}
 		mode = ModeAuto
 	}
+	p.resolved = true
+	h.mu.Unlock()
+	p.ch <- ApprovalResponse{Approved: approved, Mode: mode}
+	return nil
+}
 
-	select {
-	case p.ch <- ApprovalResponse{Approved: approved, Mode: mode}:
-		return nil
-	default:
-		return fmt.Errorf("approval %q already resolved", id)
+// ResolveApprovalOption validates and echoes the host-issued opaque option id.
+// Boolean approval fields are deliberately not accepted for structured gates.
+func (h *WebHandler) ResolveApprovalOption(id, optionID string) (ApprovalResponse, error) {
+	h.mu.Lock()
+	p, ok := h.pendingApproval[id]
+	if !ok {
+		h.mu.Unlock()
+		return ApprovalResponse{}, fmt.Errorf("no pending approval with id %q", id)
 	}
+	if p.resolved {
+		h.mu.Unlock()
+		return ApprovalResponse{}, fmt.Errorf("approval %q already resolved", id)
+	}
+	var selected *ApprovalOption
+	for index := range p.data.Options {
+		if p.data.Options[index].ID == optionID {
+			selected = &p.data.Options[index]
+			break
+		}
+	}
+	if selected == nil {
+		h.mu.Unlock()
+		return ApprovalResponse{}, fmt.Errorf("approval %q has no matching option", id)
+	}
+	response := ApprovalResponse{Mode: ModeManual, ResolvedOptionID: selected.ID}
+	switch selected.Kind {
+	case "allow_once":
+		response.Approved = true
+	case "allow_always":
+		if !p.data.AllowApproveAll {
+			h.mu.Unlock()
+			return ApprovalResponse{}, fmt.Errorf("approval %q only supports a one-time grant", id)
+		}
+		if h.modePromotionCallback != nil {
+			if err := h.modePromotionCallback(); err != nil {
+				h.mu.Unlock()
+				return ApprovalResponse{}, ErrApprovalModePromotion
+			}
+		}
+		response.Approved = true
+		response.Mode = ModeAuto
+	case "deny":
+		response.Approved = false
+	default:
+		h.mu.Unlock()
+		return ApprovalResponse{}, fmt.Errorf("approval %q option is unsupported", id)
+	}
+	p.resolved = true
+	h.mu.Unlock()
+	p.ch <- response
+	return response, nil
+}
+
+// ErrApprovalModePromotion is intentionally opaque: storage failures may
+// contain local paths and must stay in the debug log rather than an API body.
+var ErrApprovalModePromotion = errors.New("approval mode promotion failed")
+
+func newApprovalOptionID() string {
+	var random [18]byte
+	if _, err := rand.Read(random[:]); err == nil {
+		return base64.RawURLEncoding.EncodeToString(random[:])
+	}
+	return fmt.Sprintf("option_%d", time.Now().UnixNano())
 }
 
 // PendingApprovalRequests returns the still-unanswered approval requests so a
@@ -725,7 +897,9 @@ func (h *WebHandler) PendingApprovalRequests() []WebApprovalRequestData {
 	defer h.mu.Unlock()
 	out := make([]WebApprovalRequestData, 0, len(h.pendingApproval))
 	for _, p := range h.pendingApproval {
-		out = append(out, p.data)
+		if !p.resolved {
+			out = append(out, p.data)
+		}
 	}
 	return out
 }

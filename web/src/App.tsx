@@ -44,6 +44,7 @@ import {
 } from './app/store'
 import { bridgeWS } from './app/wsBridge'
 import { useChatRuntime } from './app/runtime'
+import { selectShowSessionChrome } from './app/selectors'
 import { triggerKindLabel, type AutomationRun } from './lib/automation'
 import { Sidebar } from './components/Sidebar'
 import { ChatView } from './components/ChatView'
@@ -53,6 +54,7 @@ import { CommandPalette } from './components/CommandPalette'
 import { AuthGate } from './components/AuthGate'
 import { SetupView } from './components/SetupView'
 import { SettingsView } from './components/SettingsView'
+import { GeneratedImageToolRenderer } from './components/GeneratedImageToolRenderer'
 import { TopBar } from './components/TopBar'
 import { CloudSyncToggle } from './components/CloudSyncToggle'
 import { DesktopTitlebar } from './components/DesktopTitlebar'
@@ -179,15 +181,17 @@ type PanelType = 'terminal' | 'files' | 'changes' | 'plan' | 'artifacts'
 function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mobile' | 'automation-run' | 'settings' }) {
   const dispatch = useAppDispatch()
   const runtime = useChatRuntime()
-  const registry = useRef(createDefaultToolRegistry()).current
+  const registry = useRef(createDefaultToolRegistry().register('generate_image', GeneratedImageToolRenderer)).current
   const paletteOpen = useAppSelector((s) => s.ui.paletteOpen)
   const isRunning = useAppSelector((s) => s.chat.isRunning)
   const wsConnected = useAppSelector((s) => s.session.wsConnected)
+  const showSessionChrome = useAppSelector(selectShowSessionChrome)
 
   // Panel state — a right panel (files/changes/plan/artifacts) and a
   // bottom panel (terminal) that can be open simultaneously.
   const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const [rightPanelTab, setRightPanelTab] = useState<'files' | 'changes' | 'plan' | 'artifacts'>('files')
+  const [selectedArtifactID, setSelectedArtifactID] = useState('')
   const [bottomPanel, setBottomPanel] = useState<'none' | 'terminal'>('none')
   const [bottomPanelHeight, setBottomPanelHeight] = useState(260)
   const [activeRun, setActiveRun] = useState<AutomationRun | null>(null)
@@ -244,12 +248,25 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
   }, [togglePanel])
 
   useEffect(() => {
-    function onArtifactUpserted() {
+    function onArtifactUpserted(event: Event) {
+      const detail = (event as CustomEvent<{ artifact_id?: string }>).detail
+      setSelectedArtifactID(detail?.artifact_id || '')
       setRightPanelTab('artifacts')
       setRightPanelOpen(true)
     }
     window.addEventListener('jcode:artifact-upserted', onArtifactUpserted)
     return () => window.removeEventListener('jcode:artifact-upserted', onArtifactUpserted)
+  }, [])
+
+  useEffect(() => {
+    function onOpenArtifact(event: Event) {
+      const detail = (event as CustomEvent<{ artifact_id?: string }>).detail
+      setSelectedArtifactID(detail?.artifact_id || '')
+      setRightPanelTab('artifacts')
+      setRightPanelOpen(true)
+    }
+    window.addEventListener('jcode:open-artifact', onOpenArtifact)
+    return () => window.removeEventListener('jcode:open-artifact', onOpenArtifact)
   }, [])
 
   useEffect(() => {
@@ -293,7 +310,7 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
           {/* Every native desktop exposes the same task context and application
               launchers. macOS places them in its overlay band; Windows/Linux
               place the row at the top of the web content below the OS chrome. */}
-          {activeView === 'chat' && isTauri && (
+          {showSessionChrome && isTauri && (
             <DesktopTitlebar
               isRunning={isRunning}
               wsConnected={wsConnected}
@@ -302,7 +319,7 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
               onTogglePanel={togglePanel}
             />
           )}
-          {activeView === 'chat' && !isTauri && (
+          {showSessionChrome && !isTauri && (
             <TopBar
               isRunning={isRunning}
               wsConnected={wsConnected}
@@ -312,7 +329,7 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
             />
           )}
           {/* Browser fallback: retain the standalone per-session switch. */}
-          {activeView === 'chat' && !isTauri && <CloudSyncToggle />}
+          {showSessionChrome && !isTauri && <CloudSyncToggle />}
           {/* Codex-style computer-use PiP — floats under the TopBar, shows the
               latest screenshot from the session's computer_screenshot calls. */}
           {activeView === 'chat' && <ComputerShotPiP />}
@@ -352,6 +369,7 @@ function Shell({ activeView }: { activeView: 'chat' | 'automations' | 'cloud-mob
           {rightPanelOpen && (
             <RightPanel
               activeTab={rightPanelTab}
+              selectedArtifactID={selectedArtifactID}
               onClose={() => setRightPanelOpen(false)}
               onSwitchTab={setRightPanelTab}
             />

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
@@ -7,6 +7,7 @@ import {
   ArrowPathIcon,
   ArrowTopRightOnSquareIcon,
   ArrowsPointingOutIcon,
+  ArrowsPointingInIcon,
   ClipboardDocumentIcon,
   CloudArrowUpIcon,
   DocumentIcon,
@@ -15,6 +16,8 @@ import {
   LockClosedIcon,
   TrashIcon,
   XMarkIcon,
+  MagnifyingGlassPlusIcon,
+  MagnifyingGlassMinusIcon,
 } from '@heroicons/react/24/outline'
 import { useAppSelector } from '../app/hooks'
 import { api } from '../lib/api'
@@ -34,9 +37,15 @@ export function canOpenArtifactOnDesktop(record: ArtifactRecord): boolean {
   if (record.kind === 'html') return false
   const mediaType = record.media_type.split(';', 1)[0]?.trim().toLowerCase()
   if (mediaType === 'text/html' || mediaType === 'application/xhtml+xml' || mediaType === 'image/svg+xml') return false
-  const base = record.relative_path.toLowerCase().split('/').pop() ?? ''
+  const base = artifactKey(record).toLowerCase().split('/').pop() ?? ''
   const dot = base.lastIndexOf('.')
   return dot < 0 || !BLOCKED_HOST_OPEN_EXTENSIONS.has(base.slice(dot))
+}
+
+function artifactKey(record: ArtifactRecord): string {
+  return record.storage_kind === 'managed'
+    ? record.relative_key || record.title
+    : record.relative_path || record.title
 }
 
 function formatBytes(bytes: number): string {
@@ -88,7 +97,7 @@ function parseCSV(source: string, maxRows = 200, maxColumns = 50): string[][] {
   return rows
 }
 
-export function ArtifactsPanel() {
+export function ArtifactsPanel({ initialArtifactID }: { initialArtifactID?: string }) {
   const { t } = useTranslation()
   const taskId = useAppSelector((state) => state.session.currentSessionId)
   const [records, setRecords] = useState<ArtifactRecord[]>([])
@@ -100,6 +109,7 @@ export function ArtifactsPanel() {
   const [shareOpen, setShareOpen] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [actionError, setActionError] = useState('')
+  const viewedRevisions = useRef(new Set<string>())
 
   const load = useCallback(async (preferredID?: string) => {
     if (!taskId) { setRecords([]); setLoading(false); return }
@@ -112,7 +122,6 @@ export function ArtifactsPanel() {
         if (preferredID && next.some((item) => item.id === preferredID)) return preferredID
         return next.some((item) => item.id === current) ? current : (next[0]?.id ?? '')
       })
-      await api.markArtifactsViewed(taskId).catch(() => undefined)
     } catch {
       setError(t('artifacts.loadError'))
     } finally {
@@ -120,7 +129,7 @@ export function ArtifactsPanel() {
     }
   }, [taskId, t])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { void load(initialArtifactID) }, [initialArtifactID, load])
   useEffect(() => {
     let active = true
     void api.cloudStatus().then((status) => { if (active) setCloudLoggedIn(status.logged_in) }).catch(() => undefined)
@@ -136,7 +145,20 @@ export function ArtifactsPanel() {
   }, [load])
 
   const selected = records.find((item) => item.id === selectedID) ?? null
-  const viewer = selected ? <ArtifactViewer taskId={taskId} record={selected} /> : null
+  const markViewed = useCallback((record: ArtifactRecord) => {
+    const key = `${taskId}:${record.id}:${record.revision}`
+    if (viewedRevisions.current.has(key)) return
+    viewedRevisions.current.add(key)
+    void api.markArtifactViewed(taskId, record.id, record.revision).catch(() => {
+      viewedRevisions.current.delete(key)
+    })
+  }, [taskId])
+  const markSelectedViewed = useCallback(() => {
+    if (selected) markViewed(selected)
+  }, [markViewed, selected])
+  const viewer = selected
+    ? <ArtifactViewer key={`${selected.id}:${selected.revision}`} taskId={taskId} record={selected} onViewed={markSelectedViewed} />
+    : null
 
   const download = useCallback(async () => {
     if (!selected || downloading) return
@@ -147,7 +169,7 @@ export function ArtifactsPanel() {
       const objectURL = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       anchor.href = objectURL
-      anchor.download = selected.relative_path.split('/').pop() || selected.title
+      anchor.download = artifactKey(selected).split('/').pop() || selected.title
       document.body.appendChild(anchor)
       anchor.click()
       anchor.remove()
@@ -172,8 +194,8 @@ export function ArtifactsPanel() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex min-h-0 flex-1">
-        <div className="w-[168px] shrink-0 overflow-y-auto border-r border-[var(--color-border)] py-1.5">
+      <div className="flex min-h-0 flex-1 max-[720px]:flex-col">
+        <div className="w-[168px] shrink-0 overflow-y-auto border-r border-[var(--color-border)] py-1.5 max-[720px]:max-h-28 max-[720px]:w-full max-[720px]:border-b max-[720px]:border-r-0">
           {loading && <div role="status" className="px-3 py-6 text-center text-xs text-[var(--color-muted-foreground)]">{t('common.loading')}</div>}
           {error && <div role="alert" className="px-3 py-6 text-center text-xs text-[var(--color-error-fg)]">{error}</div>}
           {!loading && !error && records.length === 0 && <div className="px-3 py-6 text-center text-xs text-[var(--color-muted-foreground)]">{t('artifacts.empty')}</div>}
@@ -200,10 +222,14 @@ export function ArtifactsPanel() {
               <header className="flex shrink-0 items-start gap-3 border-b border-[var(--color-border)] px-3 py-2.5">
                 <div className="min-w-0 flex-1">
                   <h2 className="truncate text-sm font-semibold text-[var(--color-foreground)]">{selected.title}</h2>
-                  <p className="mt-0.5 truncate font-mono text-[10px] text-[var(--color-muted-foreground)]">{selected.relative_path} · {formatBytes(selected.size)}</p>
+                  <p className="mt-0.5 truncate font-mono text-[10px] text-[var(--color-muted-foreground)]">
+                    {selected.storage_kind === 'managed' ? t('artifacts.managed', { defaultValue: 'JCode managed' }) : artifactKey(selected)}
+                    {' · '}{formatBytes(selected.size)}
+                    {selected.width && selected.height ? ` · ${selected.width}×${selected.height}` : ''}
+                  </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  {cloudLoggedIn && <button type="button" aria-label={t('artifacts.share')} title={t('artifacts.share')} onClick={() => setShareOpen(true)} className="artifact-action"><CloudArrowUpIcon className="h-4 w-4" /></button>}
+                  {cloudLoggedIn && selected.shareable && <button type="button" aria-label={t('artifacts.share')} title={t('artifacts.share')} onClick={() => setShareOpen(true)} className="artifact-action"><CloudArrowUpIcon className="h-4 w-4" /></button>}
                   {isTauri && canOpenArtifactOnDesktop(selected) && <button type="button" aria-label={t('artifacts.open')} title={t('artifacts.open')} onClick={() => void desktopAction(false)} className="artifact-action"><ArrowTopRightOnSquareIcon className="h-4 w-4" /></button>}
                   {isTauri && <button type="button" aria-label={t('artifacts.reveal')} title={t('artifacts.reveal')} onClick={() => void desktopAction(true)} className="artifact-action"><FolderOpenIcon className="h-4 w-4" /></button>}
                   <button type="button" disabled={downloading} aria-label={t('artifacts.download')} title={t('artifacts.download')} onClick={() => void download()} className="artifact-action"><ArrowDownTrayIcon className="h-4 w-4" /></button>
@@ -223,7 +249,7 @@ export function ArtifactsPanel() {
             <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{selected.title}</h2>
             <button type="button" aria-label={t('common.close')} onClick={() => setFullscreen(false)} className="artifact-action"><XMarkIcon className="h-4 w-4" /></button>
           </header>
-          <div className="min-h-0 flex-1 overflow-auto p-5"><ArtifactViewer taskId={taskId} record={selected} /></div>
+          <div className="min-h-0 flex-1 overflow-auto p-5"><ArtifactViewer key={`${selected.id}:${selected.revision}:fullscreen`} taskId={taskId} record={selected} onViewed={markSelectedViewed} /></div>
         </div>
       )}
       {shareOpen && selected && (
@@ -343,7 +369,7 @@ function ArtifactShareDialog({ taskId, record, onClose }: { taskId: string; reco
   )
 }
 
-function ArtifactViewer({ taskId, record }: { taskId: string; record: ArtifactRecord }) {
+function ArtifactViewer({ taskId, record, onViewed }: { taskId: string; record: ArtifactRecord; onViewed: () => void }) {
   const { t } = useTranslation()
   const [blob, setBlob] = useState<Blob | null>(null)
   const [error, setError] = useState('')
@@ -354,7 +380,7 @@ function ArtifactViewer({ taskId, record }: { taskId: string; record: ArtifactRe
     if (record.status !== 'available') return () => { active = false }
     void api.artifactContent(taskId, record.id).then((next) => { if (active) setBlob(next) }).catch(() => { if (active) setError(t('artifacts.contentError')) })
     return () => { active = false }
-  }, [record.id, record.status, taskId, t])
+  }, [record.id, record.revision, record.status, taskId, t])
 
   const [text, setText] = useState('')
   const [textLoaded, setTextLoaded] = useState(false)
@@ -372,22 +398,58 @@ function ArtifactViewer({ taskId, record }: { taskId: string; record: ArtifactRe
     return () => { active = false }
   }, [blob, record.kind, t])
 
+  useEffect(() => {
+    if (textLoaded && ['text', 'markdown', 'code', 'csv'].includes(record.kind)) onViewed()
+  }, [onViewed, record.kind, record.id, record.revision, textLoaded])
+
+  useEffect(() => {
+    if (blob && record.kind === 'binary') onViewed()
+  }, [blob, onViewed, record.id, record.kind, record.revision])
+
   const objectURL = useMemo(() => blob && ['image', 'pdf', 'binary'].includes(record.kind) ? URL.createObjectURL(blob) : '', [blob, record.kind])
   useEffect(() => () => { if (objectURL) URL.revokeObjectURL(objectURL) }, [objectURL])
 
   if (record.status !== 'available') return <ViewerState title={t(`artifacts.status.${record.status}`)} />
   if (error) return <ViewerState title={error} retry={() => window.dispatchEvent(new Event('jcode:artifact-upserted'))} />
   if (!blob || (['text', 'markdown', 'code', 'html', 'csv'].includes(record.kind) && !textLoaded)) return <ViewerState title={t('artifacts.loading')} />
-  if (record.kind === 'html') return <iframe title={record.title} sandbox="allow-scripts" srcDoc={`<meta http-equiv="Content-Security-Policy" content="${HTML_CSP}">${text}`} className="h-full min-h-[420px] w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)]" />
+  if (record.kind === 'html') return <iframe title={record.title} sandbox="allow-scripts" srcDoc={`<meta http-equiv="Content-Security-Policy" content="${HTML_CSP}">${text}`} onLoad={onViewed} className="h-full min-h-[420px] w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-background)]" />
   if (record.kind === 'markdown') {
     const html = DOMPurify.sanitize(marked.parse(escapeHTML(text)) as string)
     return <article className="artifact-markdown" dangerouslySetInnerHTML={{ __html: html }} />
   }
   if (record.kind === 'csv') return <CSVTable source={text} />
   if (record.kind === 'text' || record.kind === 'code') return <pre className="m-0 whitespace-pre-wrap break-words font-mono text-xs leading-6 text-[var(--color-foreground)]">{text}</pre>
-  if (record.kind === 'image' && objectURL) return <img src={objectURL} alt={record.title} className="mx-auto block max-h-[72vh] max-w-full object-contain" />
-  if (record.kind === 'pdf' && objectURL) return <iframe title={record.title} src={objectURL} className="h-full min-h-[520px] w-full rounded-[var(--radius-lg)] border border-[var(--color-border)]" />
+  if (record.kind === 'image' && objectURL) return <ArtifactImageViewer src={objectURL} title={record.title} onLoad={onViewed} />
+  if (record.kind === 'pdf' && objectURL) return <iframe title={record.title} src={objectURL} onLoad={onViewed} className="h-full min-h-[520px] w-full rounded-[var(--radius-lg)] border border-[var(--color-border)]" />
   return <ViewerState title={t('artifacts.noPreview')} />
+}
+
+function ArtifactImageViewer({ src, title, onLoad }: { src: string; title: string; onLoad: () => void }) {
+  const [zoom, setZoom] = useState(1)
+  const fit = zoom === 1
+  return (
+    <div className="relative grid min-h-[280px] place-items-center overflow-auto rounded-[var(--radius-lg)] bg-[var(--color-muted)] p-3">
+      <div className="sticky right-2 top-2 z-[1] ml-auto flex w-fit gap-1 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-1 shadow-[var(--shadow-sm)]">
+        <button type="button" className="artifact-action" aria-label="Zoom out" title="Zoom out" disabled={zoom <= 0.5} onClick={() => setZoom((value) => Math.max(0.5, value - 0.25))}>
+          <MagnifyingGlassMinusIcon className="h-4 w-4" />
+        </button>
+        <span className="min-w-10 self-center text-center font-mono text-[10px] text-[var(--color-muted-foreground)]">{Math.round(zoom * 100)}%</span>
+        <button type="button" className="artifact-action" aria-label="Zoom in" title="Zoom in" disabled={zoom >= 3} onClick={() => setZoom((value) => Math.min(3, value + 0.25))}>
+          <MagnifyingGlassPlusIcon className="h-4 w-4" />
+        </button>
+        <button type="button" className="artifact-action" aria-label="Fit image" title="Fit image" disabled={fit} onClick={() => setZoom(1)}>
+          <ArrowsPointingInIcon className="h-4 w-4" />
+        </button>
+      </div>
+      <img
+        src={src}
+        alt={title}
+        onLoad={onLoad}
+        className="mx-auto block object-contain"
+        style={{ maxHeight: zoom === 1 ? '72vh' : 'none', maxWidth: zoom === 1 ? '100%' : 'none', width: zoom === 1 ? 'auto' : `${zoom * 100}%` }}
+      />
+    </div>
+  )
 }
 
 function CSVTable({ source }: { source: string }) {

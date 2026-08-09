@@ -87,6 +87,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		}
 		// Tool approval dialog handling
 		if m.approvalPending {
+			maxApprovalSelection := 1
+			if m.approvalAllowApproveAll {
+				maxApprovalSelection = 2
+			}
 			switch msg.String() {
 			case "left":
 				if m.approvalSelected > 0 {
@@ -94,38 +98,50 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 				}
 				return m, tea.Batch(cmds...)
 			case "right", "tab":
-				if m.approvalSelected < 2 {
+				if m.approvalSelected < maxApprovalSelection {
 					m.approvalSelected++
 				}
 				return m, tea.Batch(cmds...)
 			case "enter", " ":
 				switch m.approvalSelected {
 				case 0: // Approve once
-					m.resolveApproval(ToolApprovalResponse{Approved: true, Mode: ModeManual})
-				case 1: // Approve all
-					m.promoteToFullAccess()
-					m.resolveApproval(ToolApprovalResponse{Approved: true, Mode: ModeAuto})
-				case 2: // Reject
+					m.resolveApproval(m.approvalResponse(true, ModeManual))
+				case 1:
+					if m.approvalAllowApproveAll {
+						if err := m.promoteToFullAccess(); err != nil {
+							m.showApprovalPromotionFailure()
+							return m, tea.Batch(cmds...)
+						}
+						m.resolveApproval(m.approvalResponse(true, ModeAuto))
+						return m, tea.Batch(cmds...)
+					}
+					fallthrough
+				case 2:
 					m.lines = append(m.lines, textLine(fmt.Sprintf("   %s %s — user denied this operation",
 						toolErrorStyle.Render("⚠ Rejected:"),
 						toolNameStyle.Render(m.approvalToolName))))
-					m.resolveApproval(ToolApprovalResponse{Approved: false, Mode: m.approvalMode})
+					m.resolveApproval(m.approvalResponse(false, m.approvalMode))
 				}
 				return m, tea.Batch(cmds...)
 			case "y", "Y":
 				// Event: ApproveOnce - approve current only, stay in MANUAL mode
-				m.resolveApproval(ToolApprovalResponse{Approved: true, Mode: ModeManual})
+				m.resolveApproval(m.approvalResponse(true, ModeManual))
 				return m, tea.Batch(cmds...)
 			case "a", "A":
-				m.promoteToFullAccess()
-				m.resolveApproval(ToolApprovalResponse{Approved: true, Mode: ModeAuto})
+				if m.approvalAllowApproveAll {
+					if err := m.promoteToFullAccess(); err != nil {
+						m.showApprovalPromotionFailure()
+						return m, tea.Batch(cmds...)
+					}
+					m.resolveApproval(m.approvalResponse(true, ModeAuto))
+				}
 				return m, tea.Batch(cmds...)
 			case "n", "N", "esc":
 				// Event: Reject - deny the operation
 				m.lines = append(m.lines, textLine(fmt.Sprintf("   %s %s — user denied this operation",
 					toolErrorStyle.Render("⚠ Rejected:"),
 					toolNameStyle.Render(m.approvalToolName))))
-				m.resolveApproval(ToolApprovalResponse{Approved: false, Mode: m.approvalMode})
+				m.resolveApproval(m.approvalResponse(false, m.approvalMode))
 				return m, tea.Batch(cmds...)
 			}
 			return m, tea.Batch(cmds...)
@@ -704,9 +720,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			case "shift+tab":
 				// Cycle the unified session mode: Approval → Plan → Full access → Approval.
 				next := m.selectorMode().Next()
-				m.applySelectorMode(next)
-				m.invalidateFooterCache()
-				// Notify main goroutine to apply both axes (tools/prompt + approval).
+				// The backend prepares and durably commits both axes before echoing a
+				// ModeSelectedMsg. Keep the current pill until that acknowledgement.
 				select {
 				case modeSelectCh <- next:
 				default:
@@ -869,6 +884,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 
 					if prompt == "/memory" || strings.HasPrefix(prompt, "/memory ") {
 						return m.handleMemoryInput(prompt, cmds)
+					}
+
+					if prompt == "/tools" || strings.HasPrefix(prompt, "/tools ") {
+						return m.handleRemovedSessionToolsInput(cmds)
 					}
 
 					if prompt == "/help" {
@@ -1228,6 +1247,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.lines = append(m.lines, textLine("  "+toolLabelStyle.Render("🔐 MCP:")+" "+msg.Text))
 		m.refreshViewport()
 
+	case CommandNoticeMsg:
+		m.lines = append(m.lines, textLine("  "+toolLabelStyle.Render(msg.Label+":")+" "+msg.Text))
+		m.refreshViewport()
+
 	case ChannelStateMsg:
 		m.channelStates[msg.ChannelID] = msg.State
 		if msg.Message != "" {
@@ -1393,6 +1416,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		// the legacy string replay below.
 		var replayGroup *activityGroupData
 		replayMembers := make(map[string]*activityMember)
+		replayStandalone := make(map[string]bool)
 		var replayUnresolved []*activityMember
 		closeReplayGroup := func() {
 			// Members that never saw a result in the recording (session died
@@ -1428,6 +1452,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					m.lines = append(m.lines, textLine(rendered))
 				}
 			case string(session.EntryToolCall):
+				if e.ToolCallID != "" && e.Name == "generate_image" {
+					closeReplayGroup()
+					replayStandalone[e.ToolCallID] = true
+					m.lines = append(m.lines, textLine(fmt.Sprintf("  %s %s %s",
+						toolIconRunning,
+						toolNameStyle.Render("Generate image"),
+						toolArgsStyle.Render(truncate(sanitize(e.Args), 100)),
+					)))
+					continue
+				}
 				if e.ToolCallID != "" {
 					// Structured rebuild: join the open replay group (or open
 					// one). BatchID needs no special casing — recorded batch
@@ -1472,6 +1506,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 					toolArgsStyle.Render(truncate(sanitize(e.Args), 100)),
 				)))
 			case string(session.EntryToolResult):
+				if e.ToolCallID != "" && replayStandalone[e.ToolCallID] {
+					delete(replayStandalone, e.ToolCallID)
+					switch {
+					case e.Denied:
+						m.lines = append(m.lines, textLine(fmt.Sprintf("    %s %s",
+							toolIconDenied, toolArgsStyle.Render("denied"))))
+					case e.Error != "":
+						m.lines = append(m.lines, toolResultContentLine(e.Name, "", fmt.Errorf("%s", e.Error)))
+					default:
+						m.lines = append(m.lines, toolResultContentLine(e.Name, e.Output, nil))
+					}
+					continue
+				}
 				// Structured rebuild: route the result to its member (by ID,
 				// or the oldest unresolved member when the ID is missing) —
 				// no result box, the output lives on the member.
@@ -1729,7 +1776,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 		m.pendingToolTitle = displayLabel
 		m.pendingToolSubtitle = subtitle
 		m.runningTools++
-		if msg.ToolCallID != "" {
+		if msg.ToolCallID != "" && !msg.Standalone {
 			// Structured path: adjacent tool calls coalesce into one
 			// activity-group line whose members flip by data update.
 			m.appendGroupToolCall(msg)
@@ -1760,8 +1807,36 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:funlen
 			toolNameStyle.Render(displayLabel),
 			subtitlePart,
 		)))
+		if msg.ToolCallID != "" {
+			if m.toolLines == nil {
+				m.toolLines = make(map[string]toolLineRef)
+			}
+			m.toolLines[msg.ToolCallID] = toolLineRef{idx: len(m.lines) - 1, batchID: msg.BatchID}
+		}
 		m.refreshViewport()
 		cmds = append(cmds, m.spinner.Tick)
+
+	case ToolProgressMsg:
+		label := "Working…"
+		switch msg.Phase {
+		case "generating":
+			label = "Generating image…"
+		case "saving":
+			label = "Saving generated image…"
+		case "uncertain":
+			label = "Provider outcome is uncertain"
+		case "failed", "succeeded", "cancelled":
+			break
+		}
+		if ref, ok := m.groupMembers[msg.ToolCallID]; ok {
+			ref.member.subtitle = label
+			ref.group.rev++
+			m.refreshViewport()
+		} else if _, ok := m.toolLines[msg.ToolCallID]; ok &&
+			msg.Phase != "failed" && msg.Phase != "succeeded" && msg.Phase != "cancelled" {
+			m.lines = append(m.lines, textLine("     "+toolArgsStyle.Render(label)))
+			m.refreshViewport()
+		}
 
 	case ToolResultMsg:
 		m.thinking = true

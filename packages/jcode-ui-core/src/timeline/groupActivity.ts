@@ -1,7 +1,8 @@
 /**
  * Activity-group coalescing for the chat timeline (Claude Code / Codex-style).
  *
- * ALL adjacent tool items — read-only or mutating, batched or not — coalesce
+ * All adjacent default-surface tool items — read-only or mutating, batched or
+ * not — coalesce
  * into ONE synthetic `activity` ThreadItem. "Adjacent" means no assistant/user
  * message (or any other non-tool item) in between; approvals do NOT break a
  * group and keep rendering in place, independently. Tools sharing a `batchId`
@@ -27,6 +28,12 @@ function toolStatus(tools: ToolCall[]): ToolStatus {
 /** Pass-1 unit: either a run of tools (a batch or a lone tool) or a pass-through item. */
 type Unit = { cluster: { tools: ToolCall[]; seq: number } } | { item: ThreadItem }
 
+/** Standalone tools own their complete timeline surface and are hard grouping
+ * boundaries from the initial tool_call event onward. */
+export function isStandaloneTool(tool: ToolCall): boolean {
+  return tool.surface === 'standalone' || tool.name === 'ask_user'
+}
+
 /**
  * Coalesce adjacent tool items (and whole `batchId` batches) into `activity`
  * groups. Output contains only `'activity'` items (≥2 tools) and plain
@@ -43,6 +50,13 @@ export function groupActivityTimeline(items: ThreadItem[]): ThreadItem[] {
   const batches = new Map<string, { tools: ToolCall[]; seq: number }>()
   for (const item of items) {
     if (item.kind === 'tool') {
+      if (isStandaloneTool(item.data)) {
+        // A batch must never pull a later member backwards across a standalone
+        // media surface. Reset the batch index and preserve this item in place.
+        batches.clear()
+        units.push({ item })
+        continue
+      }
       const batchId = item.data.batchId
       if (batchId) {
         const existing = batches.get(batchId)

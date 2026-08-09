@@ -59,6 +59,7 @@ export interface ProductComposerStrings {
   modelReasoning: string
   modelTools: string
   modelImages: string
+  modelImageOutput: string
   modelNoImageInput: string
   modelNone: string
   modelNoMatch: string
@@ -187,6 +188,7 @@ export const defaultProductComposerStrings: ProductComposerStrings = {
   modelReasoning: 'Reasoning',
   modelTools: 'Tool use',
   modelImages: 'Image input',
+  modelImageOutput: 'Image output',
   modelNoImageInput: 'Current model does not support images',
   modelNone: 'No models available',
   modelNoMatch: 'No models match your filter.',

@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 
 	"github.com/cnjack/jcode/internal/config"
+	"github.com/cnjack/jcode/internal/handler"
 	"github.com/gorilla/websocket"
 )
 
@@ -256,6 +257,7 @@ func (s *Server) handleWSMessage(client *WSClient, msg WSIncoming) {
 			TaskID     string `json:"task_id"`
 			Approved   bool   `json:"approved"`
 			ApproveAll bool   `json:"approve_all"`
+			OptionID   string `json:"option_id"`
 		}
 		if err := json.Unmarshal(msg.Data, &data); err != nil {
 			return
@@ -266,12 +268,24 @@ func (s *Server) handleWSMessage(client *WSClient, msg WSIncoming) {
 		if reng == nil || reng.handler == nil {
 			return
 		}
-		if err := reng.handler.ResolveApproval(data.ID, data.Approved, data.ApproveAll); err != nil {
-			config.Logger().Printf("[ws] resolve approval failed for id=%q: %v", data.ID, err)
+		approved, approveAll := data.Approved, data.ApproveAll
+		var resolveErr error
+		if data.OptionID != "" {
+			response, err := reng.handler.ResolveApprovalOption(data.ID, data.OptionID)
+			resolveErr = err
+			approved = response.Approved
+			approveAll = response.Approved && response.Mode == handler.ModeAuto
+		} else {
+			resolveErr = reng.handler.ResolveApproval(data.ID, data.Approved, data.ApproveAll)
+		}
+		if resolveErr != nil {
+			config.Logger().Printf("[ws] resolve approval failed for id=%q: %v", data.ID, resolveErr)
 			return
 		}
 		// Same mode-sync as the POST path: an "allow all" over WS must also
 		// update the selector pill the user is looking at.
-		s.syncModeAfterApproval(reng, data.Approved, data.ApproveAll)
+		if err := s.syncModeAfterApproval(reng, approved, approveAll); err != nil {
+			config.Logger().Printf("[ws] approval mode promotion was not persisted")
+		}
 	}
 }

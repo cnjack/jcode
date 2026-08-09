@@ -41,4 +41,18 @@ describe('artifact WebSocket bridge', () => {
     expect(dispatch).toHaveBeenCalledTimes(1)
     expect(typeof dispatch.mock.calls[0][0]).toBe('function')
   })
+
+  it('keeps a generated managed artifact unseen without auto-opening the active panel', () => {
+    const { dispatch, handlers: wsHandlers } = handlers()
+    const listener = vi.fn()
+    window.addEventListener('jcode:artifact-upserted', listener)
+    wsHandlers.onArtifactUpserted?.({
+      task_id: 'task-active', artifact_id: 'generated-managed', focus: false,
+    })
+    window.removeEventListener('jcode:artifact-upserted', listener)
+
+    expect(listener).not.toHaveBeenCalled()
+    expect(dispatch).toHaveBeenCalledTimes(1)
+    expect(typeof dispatch.mock.calls[0][0]).toBe('function')
+  })
 })

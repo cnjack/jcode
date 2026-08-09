@@ -1050,6 +1050,18 @@
   color: var(--jcode-color-foreground);
   line-height: 1.35;
 }
+.jcode-approval-card__summary {
+  color: var(--jcode-color-foreground);
+  font-family: var(--jcode-font-mono);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+.jcode-approval-card__cost {
+  max-width: 32rem;
+  color: var(--jcode-color-warning-fg);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
 .jcode-approval-card__target {
   display: inline-block;
   max-width: min(100%, 22rem);
@@ -1125,6 +1137,12 @@
   padding-top: 0.75rem;
   border-top: 1px solid color-mix(in srgb, var(--jcode-color-border) 80%, transparent);
 }
+.jcode-approval-card__actions--billable .jcode-btn-deny {
+  margin-left: 0;
+}
+.jcode-approval-card__actions--billable .jcode-btn-allow {
+  margin-left: auto;
+}
 .jcode-approval-resolved {
   display: flex;
   align-items: center;
@@ -1158,13 +1176,377 @@
   }
 }
 
-/* Ask-user keeps a soft surface card (no warning paint) */
+/* ─── Ask User dock ───
+ * Pending questions become the active bottom input surface. Hosts can render
+ * the same component in the timeline; resolved answers collapse to a quiet
+ * receipt after the pending dock disappears. */
+.jcode-ask-user {
+  width: 100%;
+  box-sizing: border-box;
+  container: jcode-ask-user / inline-size;
+  color: var(--jcode-color-foreground);
+  font-family: var(--jcode-font-sans);
+}
+.jcode-ask-user--timeline {
+  padding: 0.25rem 0;
+}
 .jcode-ask-user .jcode-interactive-card {
-  border-radius: var(--jcode-radius-xl);
+  overflow: hidden;
   border: 1px solid var(--jcode-color-border);
+  border-radius: var(--jcode-radius-2xl);
   background: var(--jcode-color-surface);
   box-shadow: var(--jcode-shadow-sm);
   animation: jcode-card-in var(--jcode-duration-slow) var(--jcode-ease-out) both;
+}
+.jcode-ask-user__header {
+  display: flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem 0.35rem;
+}
+.jcode-ask-user__eyebrow {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+}
+.jcode-ask-user__eyebrow > svg {
+  flex: 0 0 auto;
+  color: var(--jcode-color-muted-foreground);
+  stroke-width: var(--jcode-icon-stroke);
+}
+.jcode-ask-user__multi,
+.jcode-ask-user__recommended {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--jcode-radius-sm);
+  font-size: 0.67rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+.jcode-ask-user__multi {
+  padding: 0.25rem 0.4rem;
+  background: var(--jcode-color-muted);
+  color: var(--jcode-color-muted-foreground);
+}
+.jcode-ask-user__pager {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.2rem;
+}
+.jcode-ask-user__pager-button {
+  display: inline-flex;
+  width: 1.5rem;
+  height: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--jcode-radius-md);
+  color: var(--jcode-color-muted-foreground);
+  transition:
+    color var(--jcode-duration-fast) var(--jcode-ease-out),
+    background-color var(--jcode-duration-fast) var(--jcode-ease-out),
+    transform var(--jcode-duration-fast) var(--jcode-ease-out);
+}
+.jcode-ask-user__pager-button:not(:disabled):hover {
+  background: var(--jcode-neutral-wash-soft);
+  color: var(--jcode-color-foreground);
+}
+.jcode-ask-user__pager-button:not(:disabled):active {
+  transform: translateY(1px);
+}
+.jcode-ask-user__pager-button:focus-visible,
+.jcode-ask-user__option:focus-visible,
+.jcode-ask-user__skip:focus-visible,
+.jcode-ask-user__primary:focus-visible {
+  outline: 2px solid var(--jcode-color-primary);
+  outline-offset: 2px;
+}
+.jcode-ask-user__pager-button:disabled {
+  cursor: default;
+  opacity: 0.3;
+}
+.jcode-ask-user__progress {
+  min-width: 3.4rem;
+  color: var(--jcode-color-muted-foreground);
+  font-family: var(--jcode-font-mono);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.jcode-ask-user__body {
+  max-height: min(20rem, 42dvh);
+  overflow-y: auto;
+  padding: 0.35rem 1rem 0.9rem;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--jcode-color-muted-foreground) 28%, transparent) transparent;
+}
+.jcode-ask-user__question-label {
+  margin-bottom: 0.25rem;
+  color: var(--jcode-color-muted-foreground);
+  font-family: var(--jcode-font-mono);
+  font-size: 0.67rem;
+  font-weight: 600;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+.jcode-ask-user__question {
+  color: var(--jcode-color-foreground);
+  font-size: 0.98rem;
+  font-weight: 600;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+.jcode-ask-user__question > :first-child {
+  margin-top: 0;
+}
+.jcode-ask-user__question > :last-child {
+  margin-bottom: 0;
+}
+.jcode-ask-user__helper {
+  margin: 0.3rem 0 0;
+  color: var(--jcode-color-muted-foreground);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+.jcode-ask-user__options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.8rem;
+}
+.jcode-ask-user__option {
+  display: grid;
+  grid-template-columns: 1.5rem minmax(0, 1fr) 1.5rem;
+  min-height: 2.85rem;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--jcode-color-border) !important;
+  border-radius: var(--jcode-radius-lg);
+  background: var(--jcode-color-muted) !important;
+  text-align: left;
+  transition:
+    border-color var(--jcode-duration-normal) var(--jcode-ease-out),
+    background-color var(--jcode-duration-normal) var(--jcode-ease-out),
+    box-shadow var(--jcode-duration-normal) var(--jcode-ease-out),
+    transform var(--jcode-duration-fast) var(--jcode-ease-out);
+}
+.jcode-ask-user__option:not(:disabled):hover {
+  background: var(--jcode-neutral-wash-soft) !important;
+}
+.jcode-ask-user__option:not(:disabled):active {
+  transform: translateY(1px);
+}
+.jcode-ask-user__option.is-selected {
+  border-color: var(--jcode-color-primary) !important;
+  background: var(--jcode-accent-wash-soft) !important;
+  box-shadow: 0 0 0 1px var(--jcode-accent-border);
+}
+.jcode-ask-user__option:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+.jcode-ask-user__key {
+  display: inline-flex;
+  width: 1.5rem;
+  height: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--jcode-color-border);
+  border-radius: var(--jcode-radius-md);
+  background: var(--jcode-color-surface);
+  color: var(--jcode-color-muted-foreground);
+  font-family: var(--jcode-font-mono);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+.jcode-ask-user__option-copy {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.jcode-ask-user__option-heading {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.45rem;
+}
+.jcode-ask-user__option-label {
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.jcode-ask-user__recommended {
+  padding: 0.22rem 0.34rem;
+  background: var(--jcode-accent-wash);
+  color: var(--jcode-color-primary);
+}
+.jcode-ask-user__option-description {
+  min-width: 10rem;
+  flex: 1 1 14rem;
+  color: var(--jcode-color-muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+.jcode-ask-user__check {
+  display: inline-flex;
+  width: 1.35rem;
+  height: 1.35rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--jcode-radius-pill);
+  color: var(--jcode-color-primary);
+}
+.jcode-ask-user__option.is-selected .jcode-ask-user__check {
+  border-color: var(--jcode-color-primary);
+}
+.jcode-ask-user__footer {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid color-mix(in srgb, var(--jcode-color-border) 78%, transparent);
+}
+.jcode-ask-user__custom {
+  display: flex;
+  min-width: 10rem;
+  min-height: 2.25rem;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0 0.7rem;
+  border: 1px solid var(--jcode-color-border);
+  border-radius: var(--jcode-radius-lg);
+  background: var(--jcode-color-muted);
+  color: var(--jcode-color-muted-foreground);
+  transition:
+    border-color var(--jcode-duration-normal) var(--jcode-ease-out),
+    box-shadow var(--jcode-duration-normal) var(--jcode-ease-out),
+    background-color var(--jcode-duration-normal) var(--jcode-ease-out);
+}
+.jcode-ask-user__custom:focus-within,
+.jcode-ask-user__custom.has-value {
+  border-color: color-mix(in srgb, var(--jcode-color-primary) 65%, var(--jcode-color-border));
+  background: var(--jcode-color-surface);
+  box-shadow: 0 0 0 3px var(--jcode-accent-wash);
+  color: var(--jcode-color-foreground);
+}
+.jcode-ask-user__custom > svg {
+  flex: 0 0 auto;
+  stroke-width: var(--jcode-icon-stroke);
+}
+.jcode-ask-user__custom input {
+  min-width: 0;
+  width: 100%;
+  outline: none;
+  font-size: 0.8rem;
+}
+.jcode-ask-user__custom input::placeholder {
+  color: var(--jcode-color-muted-foreground);
+  opacity: 0.8;
+}
+.jcode-ask-user__skip {
+  min-height: 2.25rem;
+  padding: 0 0.65rem !important;
+  border-radius: var(--jcode-radius-lg) !important;
+  color: var(--jcode-color-muted-foreground) !important;
+  font-size: 0.78rem !important;
+  font-weight: 500 !important;
+  transition:
+    color var(--jcode-duration-fast) var(--jcode-ease-out),
+    background-color var(--jcode-duration-fast) var(--jcode-ease-out);
+}
+.jcode-ask-user__skip:not(:disabled):hover {
+  background: var(--jcode-neutral-wash-soft) !important;
+  color: var(--jcode-color-foreground) !important;
+}
+.jcode-ask-user__skip:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.jcode-ask-user__primary {
+  display: inline-flex !important;
+  min-width: 5.25rem;
+  min-height: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+.jcode-ask-user__primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.jcode-ask-user__error {
+  margin: -0.2rem 1rem 0.75rem;
+  color: var(--jcode-color-error-fg);
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+.jcode-ask-user-resolved {
+  margin: 0.2rem 0;
+  padding: 0.45rem 0.65rem;
+  border-radius: var(--jcode-radius-md);
+  background: var(--jcode-color-muted);
+  color: var(--jcode-color-foreground);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+.jcode-ask-user-resolved__answer + .jcode-ask-user-resolved__answer {
+  margin-top: 0.2rem;
+}
+.jcode-ask-user-resolved__label {
+  color: var(--jcode-color-muted-foreground);
+}
+
+@container jcode-ask-user (max-width: 34rem) {
+  .jcode-ask-user__header {
+    padding-right: 0.75rem;
+    padding-left: 0.75rem;
+  }
+  .jcode-ask-user__body {
+    padding-right: 0.75rem;
+    padding-left: 0.75rem;
+  }
+  .jcode-ask-user__footer {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    padding-right: 0.75rem;
+    padding-left: 0.75rem;
+  }
+  .jcode-ask-user__custom {
+    flex-basis: 100%;
+  }
+}
+
+@container jcode-ask-user (max-width: 25rem) {
+  .jcode-ask-user__eyebrow > span:first-of-type {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .jcode-ask-user__multi {
+    display: none;
+  }
+  .jcode-ask-user__option-copy {
+    display: block;
+  }
+  .jcode-ask-user__option-description {
+    display: block;
+    min-width: 0;
+    margin-top: 0.15rem;
+  }
 }
 
 /* ─── Reasoning disclosure ─── */

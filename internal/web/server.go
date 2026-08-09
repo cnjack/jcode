@@ -49,6 +49,11 @@ type Server struct {
 	// entry until then.
 	tasks   map[string]*Engine
 	tasksMu sync.RWMutex
+	// taskCreateMu serializes the resolve-or-create path for explicit task IDs.
+	// Engine construction is intentionally outside tasksMu because factories can
+	// perform I/O; this mutex prevents two first requests for the same unknown ID
+	// from creating independent run gates, recorders, and billing ledgers.
+	taskCreateMu sync.Mutex
 
 	port        int
 	host        string
@@ -77,7 +82,6 @@ type Server struct {
 	cfg      *config.Config
 	cfgMu    sync.Mutex // serializes read-modify-write SaveConfig from concurrent handlers
 	registry *model.ModelRegistry
-
 	// newEngine builds a fresh, fully-isolated task engine (its own env, agent,
 	// recorder, handler, approval state) at the given pwd/mode. This is how a new
 	// concurrent task — or a "switch project" — gets its run state without
@@ -435,6 +439,11 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("POST /api/tasks/{id}/artifacts/{artifactID}/shares", s.handleCreateArtifactShare)
 	mux.HandleFunc("GET /api/tasks/{id}/artifacts/{artifactID}/shares", s.handleListArtifactShares)
 	mux.HandleFunc("DELETE /api/tasks/{id}/artifacts/{artifactID}/shares/{shareID}", s.handleRevokeArtifactShare)
+	// Per-session provider-tool overrides were never a stable product contract.
+	// Keep explicit API tombstones so removed GET requests cannot fall through to
+	// the SPA index and look successful to older clients.
+	mux.HandleFunc("GET /api/tasks/{id}/tool-overrides", http.NotFound)
+	mux.HandleFunc("PUT /api/tasks/{id}/tool-overrides/{tool}", http.NotFound)
 	if s.openArtifact != nil {
 		mux.HandleFunc("POST /api/tasks/{id}/artifacts/{artifactID}/open", s.handleOpenArtifact)
 		mux.HandleFunc("POST /api/tasks/{id}/artifacts/{artifactID}/reveal", s.handleRevealArtifact)
@@ -453,6 +462,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /api/agents", s.handleListAgents)
 	mux.HandleFunc("POST /api/agent", s.handleSwitchAgent)
 	mux.HandleFunc("POST /api/small-model", s.handleSetSmallModel)
+	mux.HandleFunc("POST /api/image-model", s.handleSetImageModel)
 	mux.HandleFunc("POST /api/mode", s.handleSwitchMode)
 	mux.HandleFunc("POST /api/exec", s.handleExec)
 	mux.HandleFunc("GET /api/diff", s.handleDiff)

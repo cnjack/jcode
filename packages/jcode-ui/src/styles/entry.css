@@ -31,6 +31,7 @@
 
 /* ─── Component-local styles ─── */
 @import './components.css';
+@import './generated-image.css';
 @import './threadlist.css';
 @import './welcome.css';
 @import './conversation.css';

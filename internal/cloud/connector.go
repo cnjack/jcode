@@ -280,21 +280,32 @@ func (c *Connector) sealUplink(plaintext json.RawMessage) json.RawMessage {
 	return sealed
 }
 
-// openDownlink decrypts a downlink command payload when it is an envelope;
-// plaintext payloads pass through unchanged (grey rule). An envelope that
-// fails to decrypt is a hard error — the command must not run.
+// openDownlink decrypts a downlink command payload. Plaintext is accepted only
+// on the pre-CEK/explicitly-disabled grey path. Once this connector advertised
+// e2ee=true, every content-bearing command must be an authenticated envelope;
+// accepting plaintext there would permit a protocol downgrade around the CEK.
 func (c *Connector) openDownlink(payload json.RawMessage) (json.RawMessage, error) {
 	if len(payload) == 0 {
 		return payload, nil
 	}
 	cipher := c.cipherSnapshot()
-	if cipher == nil {
+	if cipher == nil || c.cfg.CipherDisabled {
 		if IsEnvelope(payload) {
+			if cipher != nil {
+				plain, err := cipher.Open(payload)
+				if err != nil {
+					return nil, fmt.Errorf("decrypt downlink payload: %w", err)
+				}
+				return plain, nil
+			}
 			return nil, fmt.Errorf("received encrypted command but no CEK is initialized on this device")
 		}
 		return payload, nil
 	}
-	plain, _, err := cipher.OpenMaybe(payload)
+	if !IsEnvelope(payload) {
+		return nil, fmt.Errorf("received plaintext command while end-to-end encryption is active")
+	}
+	plain, err := cipher.Open(payload)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt downlink payload: %w", err)
 	}

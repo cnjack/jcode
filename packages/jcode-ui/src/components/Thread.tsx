@@ -21,8 +21,10 @@ import {
   isTurnChangesItem,
   groupActivityTimeline,
   appendTurnChangeSummaries,
+  isStandaloneTool,
 } from 'jcode-ui-core'
-import type { ThreadItem } from 'jcode-ui-core'
+import { toolCallToRendererProps } from 'jcode-ui-core/adapters'
+import type { ThreadItem, ToolCall } from 'jcode-ui-core'
 import { Message } from './Message.js'
 import { ToolCallCard } from './ToolCallCard.js'
 import { ApprovalBanner } from './ApprovalBanner.js'
@@ -30,6 +32,7 @@ import { ActivityGroupCard } from './ActivityGroupCard.js'
 import { ExploringGroupCard } from './ExploringGroupCard.js'
 import { ToolBatchGroupCard } from './ToolBatchGroup.js'
 import { TurnChangesCard } from './TurnChangesCard.js'
+import { useToolRegistry } from './ToolRegistryContext.js'
 
 export interface ThreadProps {
   /** Disable virtualization (short/replay timelines). Default true. */
@@ -49,6 +52,9 @@ export interface ThreadProps {
   className?: string
   /** Extra bottom padding (px) to clear a sticky composer. */
   overscanBottom?: number
+  /** Hide pending ask_user tools before activity grouping when a host presents
+   *  them in a dedicated interaction dock. Resolved receipts remain visible. */
+  hidePendingAskUser?: boolean
 }
 
 export function Thread({
@@ -59,14 +65,26 @@ export function Thread({
   pendingLabel,
   className,
   overscanBottom,
+  hidePendingAskUser = false,
 }: ThreadProps): ReactNode {
   const { isRunning } = useRuntimeState()
   // Activity coalescing (batches absorbed, ALL adjacent tools grouped), then
   // per-turn "Changed N files" summaries (the last turn stays summary-free
   // while the agent is working).
   const mapItems = useCallback(
-    (items: ThreadItem[]) => appendTurnChangeSummaries(groupActivityTimeline(items), { isRunning }),
-    [isRunning],
+    (items: ThreadItem[]) => {
+      const visibleItems = hidePendingAskUser
+        ? items.filter((item) => !(
+            item.kind === 'tool' &&
+            item.data.name === 'ask_user' &&
+            !!item.data.askUserId &&
+            item.data.status === 'running' &&
+            !item.data.output
+          ))
+        : items
+      return appendTurnChangeSummaries(groupActivityTimeline(visibleItems), { isRunning })
+    },
+    [hidePendingAskUser, isRunning],
   )
 
   return (
@@ -132,7 +150,11 @@ function renderItem(item: ThreadItem, isRunning: boolean): ReactNode {
   if (isToolItem(item)) {
     return (
       <div className="jcode-chat-col">
-        <ToolCallCard tool={item.data} className="jcode-gutter" />
+        {isStandaloneTool(item.data) ? (
+          <StandaloneToolCall tool={item.data} />
+        ) : (
+          <ToolCallCard tool={item.data} className="jcode-gutter" />
+        )}
       </div>
     )
   }
@@ -146,6 +168,23 @@ function renderItem(item: ThreadItem, isRunning: boolean): ReactNode {
     )
   }
   return null
+}
+
+function StandaloneToolCall({ tool }: { tool: ToolCall }): ReactNode {
+  const registry = useToolRegistry()
+  const Renderer = registry.has(tool.name) ? registry.get(tool.name) : null
+  if (!Renderer) {
+    return (
+      <div className="jcode-gutter jcode-standalone-tool" data-tool-name={tool.name}>
+        <ToolCallCard tool={tool} />
+      </div>
+    )
+  }
+  return (
+    <div className="jcode-gutter jcode-standalone-tool" data-tool-name={tool.name}>
+      <Renderer {...toolCallToRendererProps(tool)} />
+    </div>
+  )
 }
 
 function DefaultPending({ label }: { label?: string }): ReactNode {

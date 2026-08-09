@@ -169,6 +169,15 @@ describe('goal armed', () => {
   })
 })
 
+describe('composer toolbar', () => {
+  it('keeps the add control without exposing a task-scoped Tools entry', () => {
+    renderComposer(makeHost())
+
+    expect(screen.getByRole('button', { name: 'Add' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Tools' })).toBeNull()
+  })
+})
+
 describe('custom agent picker', () => {
   it('stays hidden when no custom agents are available', () => {
     renderComposer(makeHost())
@@ -246,6 +255,26 @@ describe('model picker', () => {
     expect(list).toBeTruthy()
   })
 
+  it('uses host copy for the image-output model badge', async () => {
+    const providers: ProviderInfo[] = PROVIDERS.map((provider) => provider.id !== 'openai' ? provider : {
+      ...provider,
+      models: provider.models.map((model) => model.id !== 'gpt-4o' ? model : {
+        ...model,
+        output_modalities: ['text', 'image'],
+      }),
+    })
+    renderComposer(makeHost({
+      providers,
+      strings: { modelImageOutput: 'Localized image output' },
+    }))
+
+    fireEvent.click(screen.getByText('GPT-4o'))
+    await waitFor(() => expect(screen.getByPlaceholderText('Filter models…')).toBeTruthy())
+    expect(screen.getAllByTitle('Localized image output').length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByText('Manage models…'))
+    expect(screen.getByText('Localized image output')).toBeTruthy()
+  })
+
   it('filters by search text and hides disabled models', async () => {
     const host = makeHost()
     renderComposer(host)
@@ -263,6 +292,26 @@ describe('model picker', () => {
     fireEvent.change(screen.getByPlaceholderText('Filter models…'), { target: { value: 'mini' } })
     await waitFor(() => expect(screen.getByText('GPT-4o mini')).toBeTruthy())
     expect(screen.queryByText('Claude Sonnet')).toBeNull()
+  })
+
+  it('keeps image-only and non-tool models out of the chat picker', async () => {
+    const providers: ProviderInfo[] = [{
+      id: 'media',
+      name: 'Media Provider',
+      models: [
+        { id: 'image-gen', name: 'Image Generator', tool_call: false, enabled: true, output_modalities: ['image'], capability_availability: 'supported' },
+        { id: 'text-no-tools', name: 'Text Without Tools', tool_call: false, enabled: true, output_modalities: ['text'] },
+        { id: 'chat', name: 'Tool Chat', tool_call: true, enabled: true, output_modalities: ['text'] },
+      ],
+    }]
+    renderComposer(makeHost({ providers: [...PROVIDERS, ...providers] }))
+
+    fireEvent.click(screen.getByText('GPT-4o'))
+    await waitFor(() => expect(screen.getByPlaceholderText('Filter models…')).toBeTruthy())
+
+    expect(screen.queryByText('Image Generator')).toBeNull()
+    expect(screen.queryByText('Text Without Tools')).toBeNull()
+    expect(screen.getByText('Tool Chat')).toBeTruthy()
   })
 
   it('fails closed when a model has no enabled flag', async () => {

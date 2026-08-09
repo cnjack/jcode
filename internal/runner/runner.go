@@ -20,6 +20,7 @@ import (
 	internalmodel "github.com/cnjack/jcode/internal/model"
 	"github.com/cnjack/jcode/internal/session"
 	"github.com/cnjack/jcode/internal/telemetry"
+	"github.com/cnjack/jcode/internal/toolpolicy"
 	"github.com/cnjack/jcode/internal/tools"
 	"github.com/cnjack/jcode/internal/usage"
 )
@@ -52,6 +53,7 @@ func Run(
 	tracer *telemetry.LangfuseTracer,
 	tokenUsage *internalmodel.TokenUsage,
 ) (result RunResult) {
+	ctx = toolpolicy.WithRunID(ctx, nextRunID(rec))
 	if tracer != nil {
 		ctx = tracer.WithNewTrace(ctx, "coding_agent", messages)
 		defer func() {
@@ -229,6 +231,17 @@ continuationLoop:
 	return result
 }
 
+var runSeq atomic.Int64
+var runEpoch = time.Now().UnixMilli()
+
+func nextRunID(rec *session.Recorder) string {
+	sessionID := "ephemeral"
+	if rec != nil && rec.UUID() != "" {
+		sessionID = rec.UUID()
+	}
+	return fmt.Sprintf("%s:r%d-%d", sessionID, runEpoch, runSeq.Add(1))
+}
+
 // continuationSource picks which mechanism drives the next continuation lap,
 // encoding the precedence todo → goal → Stop hook and the todo sub-cap. It is a
 // pure function so the precedence and bounding are unit-testable without a live
@@ -319,11 +332,25 @@ func runInner(
 			delete(toolStarts, toolCallID)
 		}
 		applyApprovalOutcome(&ev, meter)
+		decorateToolResultEvent(&ev)
 		h.OnToolResult(ev)
 		historyOutput := output
 		if rec != nil {
 			var persistErr error
-			historyOutput, persistErr = rec.RecordToolResult(name, output, toolCallID, err, ev.Denied, ev.Duration)
+			artifactIDs := make([]string, 0, len(ev.Artifacts))
+			for _, artifactRef := range ev.Artifacts {
+				if artifactRef.ID != "" {
+					artifactIDs = append(artifactIDs, artifactRef.ID)
+				}
+			}
+			historyOutput, persistErr = rec.RecordToolResultWithDetails(
+				name, output, toolCallID, err, ev.Denied, ev.Duration,
+				session.ToolResultDetails{
+					OperationID: ev.OperationID, Outcome: string(ev.Outcome),
+					ErrorCode: ev.ErrorCode, Provider: ev.Provider, Model: ev.Model,
+					ArtifactIDs: artifactIDs,
+				},
+			)
 			if persistErr != nil {
 				// ReconstructState repairs an on-disk call without a result using
 				// this same placeholder. Keep live history valid and replay-equivalent,
@@ -672,7 +699,7 @@ func runInner(
 					p := pending[idx]
 					toolStarts[p.id] = toolStart{at: startedAt, name: p.name, order: nextToolOrder}
 					nextToolOrder++
-					h.OnToolCall(handler.ToolCallEvent{
+					event := handler.ToolCallEvent{
 						Name:       p.name,
 						Args:       p.args.String(),
 						ToolCallID: p.id,
@@ -680,7 +707,9 @@ func runInner(
 						BatchIndex: i,
 						BatchSize:  len(indices),
 						StartedAt:  startedAt,
-					})
+					}
+					decorateToolCallEvent(&event)
+					h.OnToolCall(event)
 					if rec != nil {
 						rec.RecordToolCall(p.name, p.args.String(), p.id, batchID, i, len(indices))
 					}
@@ -705,7 +734,7 @@ func runInner(
 				for i, tc := range mo.Message.ToolCalls {
 					toolStarts[tc.ID] = toolStart{at: startedAt, name: tc.Function.Name, order: nextToolOrder}
 					nextToolOrder++
-					h.OnToolCall(handler.ToolCallEvent{
+					event := handler.ToolCallEvent{
 						Name:       tc.Function.Name,
 						Args:       tc.Function.Arguments,
 						ToolCallID: tc.ID,
@@ -713,7 +742,9 @@ func runInner(
 						BatchIndex: i,
 						BatchSize:  size,
 						StartedAt:  startedAt,
-					})
+					}
+					decorateToolCallEvent(&event)
+					h.OnToolCall(event)
 					if rec != nil {
 						rec.RecordToolCall(tc.Function.Name, tc.Function.Arguments, tc.ID, batchID, i, size)
 					}
@@ -738,6 +769,61 @@ func runInner(
 		return finish(true, persistErr)
 	}
 	return finish(false, nil)
+}
+
+func decorateToolCallEvent(event *handler.ToolCallEvent) {
+	if event == nil || event.Name != "generate_image" {
+		return
+	}
+	event.Surface = handler.ToolSurfaceStandalone
+	event.Phase = handler.ToolPhaseQueued
+}
+
+func decorateToolResultEvent(event *handler.ToolResultEvent) {
+	if event == nil || event.Name != "generate_image" {
+		return
+	}
+	event.Surface = handler.ToolSurfaceStandalone
+	event.OperationID = event.ToolCallID
+	if event.Denied {
+		event.Phase = handler.ToolPhaseCancelled
+		event.Outcome = handler.ToolOutcomeCancelled
+		event.ErrorCode = "approval_denied"
+		return
+	}
+	output, ok := tools.ParseGenerateImageOutput(event.Output)
+	if !ok {
+		event.Phase = handler.ToolPhaseFailed
+		event.Outcome = handler.ToolOutcomeFailed
+		event.ErrorCode = "invalid_tool_result"
+		return
+	}
+	event.OperationID = output.OperationID
+	event.ErrorCode = output.ErrorCode
+	event.Provider = output.Provider
+	event.Model = output.Model
+	switch output.Outcome {
+	case string(handler.ToolOutcomeSucceeded):
+		event.Phase, event.Outcome = handler.ToolPhaseSucceeded, handler.ToolOutcomeSucceeded
+	case string(handler.ToolOutcomeCancelled):
+		event.Phase, event.Outcome = handler.ToolPhaseCancelled, handler.ToolOutcomeCancelled
+	case string(handler.ToolOutcomeUncertain):
+		event.Phase, event.Outcome = handler.ToolPhaseUncertain, handler.ToolOutcomeUncertain
+	default:
+		event.Phase, event.Outcome = handler.ToolPhaseFailed, handler.ToolOutcomeFailed
+	}
+	if output.Artifact != nil {
+		event.Artifacts = []handler.ArtifactRef{{
+			ID: output.Artifact.ID, Storage: string(output.Artifact.StorageKind),
+			Key:   output.Artifact.RelativeKey,
+			Title: output.Artifact.Title, Kind: string(output.Artifact.Kind),
+			MediaType: output.Artifact.MediaType, Size: output.Artifact.Size,
+			Width: output.Artifact.Width, Height: output.Artifact.Height,
+			Provider: output.Artifact.ProviderID, Model: output.Artifact.ModelID,
+			OperationID: output.Artifact.OperationID, ToolCallID: output.Artifact.ToolCallID,
+			Shareable: output.Artifact.Shareable,
+		}}
+	}
 }
 
 // buildTokenUsage snapshots a tracker into a handler.TokenUsage. TotalTokens is

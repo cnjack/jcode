@@ -63,7 +63,10 @@ export interface RuntimeActions {
   /** Resolve an approval gate. `approveAll` arms "allow all future" semantics. */
   resolveApproval: (id: string, approved: boolean, approveAll?: boolean) => void
   /** Answer an `ask_user` batch. */
-  submitAskUser: (id: string, answers: { question_header: string; answer: string; selected?: string[] }[]) => void
+  submitAskUser: (
+    id: string,
+    answers: { question_header: string; answer: string; selected?: string[] }[],
+  ) => void | Promise<unknown>
   /** Edit a past user message and resend from that point. */
   editMessage: (id: string, newText: string) => void
 

@@ -5,6 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +21,7 @@ import (
 	"github.com/cnjack/jcode/internal/artifact"
 	"github.com/cnjack/jcode/internal/cloud"
 	"github.com/cnjack/jcode/internal/session"
+	"github.com/cnjack/jcode/internal/tools"
 )
 
 func artifactWebFixture(t *testing.T, name string, content []byte) (*Server, artifact.Record, string) {
@@ -43,6 +48,37 @@ func artifactWebFixtureWithKind(t *testing.T, name string, content []byte, kind 
 	}
 	eng := &Engine{taskID: recorder.UUID(), pwd: workspace, recorder: recorder}
 	return &Server{Engine: eng, tasks: map[string]*Engine{eng.taskID: eng}, artifacts: service}, record, workspace
+}
+
+func managedArtifactWebFixture(t *testing.T) (*Server, artifact.Record, []byte) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	workspace := t.TempDir()
+	recorder, err := session.NewRecorder(workspace, "provider", "image-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pixels bytes.Buffer
+	img := image.NewRGBA(image.Rect(0, 0, 3, 2))
+	img.Set(0, 0, color.RGBA{R: 40, G: 120, B: 220, A: 255})
+	if err := png.Encode(&pixels, img); err != nil {
+		t.Fatal(err)
+	}
+	content := append([]byte(nil), pixels.Bytes()...)
+	service := artifact.NewServiceWithManagedRoot(
+		session.LoadArtifactRecords, time.Now, filepath.Join(t.TempDir(), "managed"),
+	)
+	record, err := service.CreateManagedImage(context.Background(), artifact.ManagedImageRequest{
+		SessionID: recorder.UUID(), Title: "Generated desk", Reader: bytes.NewReader(content),
+		ProviderID: "provider", ModelID: "image-model", OperationID: "operation-1",
+		ToolCallID: "call-1", Focus: true, ExpectedMediaType: "image/png",
+		ExpectedWidth: 3, ExpectedHeight: 2,
+	}, recorder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng := &Engine{taskID: recorder.UUID(), pwd: workspace, recorder: recorder}
+	return &Server{Engine: eng, tasks: map[string]*Engine{eng.taskID: eng}, artifacts: service}, record, content
 }
 
 type fakeArtifactSharePublisher struct {
@@ -108,6 +144,117 @@ func TestArtifactListAndContentAreTaskScopedAndSecurityHardened(t *testing.T) {
 	}
 }
 
+func TestManagedImageArtifactListContentDownloadDesktopAndSharePolicy(t *testing.T) {
+	srv, record, content := managedArtifactWebFixture(t)
+
+	listW := httptest.NewRecorder()
+	listReq := httptest.NewRequest(http.MethodGet, "/artifacts", nil)
+	listReq.SetPathValue("id", record.SessionID)
+	srv.handleListArtifacts(listW, listReq)
+	var records []artifact.Record
+	if listW.Code != http.StatusOK || json.Unmarshal(listW.Body.Bytes(), &records) != nil ||
+		len(records) != 1 || records[0].EffectiveStorageKind() != artifact.StorageManaged {
+		t.Fatalf("list status=%d records=%#v body=%s", listW.Code, records, listW.Body.String())
+	}
+
+	contentW := httptest.NewRecorder()
+	contentReq := httptest.NewRequest(http.MethodGet, "/content", nil)
+	contentReq.SetPathValue("id", record.SessionID)
+	contentReq.SetPathValue("artifactID", record.ID)
+	srv.handleArtifactContent(contentW, contentReq)
+	if contentW.Code != http.StatusOK || !bytes.Equal(contentW.Body.Bytes(), content) ||
+		contentW.Header().Get("Content-Type") != "image/png" {
+		t.Fatalf("content status=%d type=%q", contentW.Code, contentW.Header().Get("Content-Type"))
+	}
+
+	downloadW := httptest.NewRecorder()
+	downloadReq := httptest.NewRequest(http.MethodGet, "/download", nil)
+	downloadReq.SetPathValue("id", record.SessionID)
+	downloadReq.SetPathValue("artifactID", record.ID)
+	srv.handleArtifactDownload(downloadW, downloadReq)
+	if downloadW.Code != http.StatusOK ||
+		!strings.Contains(downloadW.Header().Get("Content-Disposition"), ".png") {
+		t.Fatalf("download status=%d disposition=%q", downloadW.Code, downloadW.Header().Get("Content-Disposition"))
+	}
+
+	var revealedPath string
+	srv.openArtifact = func(_ context.Context, path string, reveal bool) error {
+		if !reveal {
+			t.Fatal("generated image card should request Reveal for the desktop action")
+		}
+		revealedPath = path
+		return nil
+	}
+	revealW := httptest.NewRecorder()
+	revealReq := httptest.NewRequest(http.MethodPost, "/reveal", nil)
+	revealReq.SetPathValue("id", record.SessionID)
+	revealReq.SetPathValue("artifactID", record.ID)
+	srv.handleRevealArtifact(revealW, revealReq)
+	if revealW.Code != http.StatusNoContent || revealedPath == "" || filepath.Ext(revealedPath) != ".png" {
+		t.Fatalf("reveal status=%d path=%q", revealW.Code, revealedPath)
+	}
+
+	publisher := &fakeArtifactSharePublisher{}
+	srv.artifactShares = publisher
+	srv.loadCloudCredentials = func() (*cloud.Credentials, error) {
+		return &cloud.Credentials{CloudURL: "https://cloud.example", DeviceToken: "token"}, nil
+	}
+	shareW := httptest.NewRecorder()
+	shareReq := httptest.NewRequest(http.MethodPost, "/share", bytes.NewBufferString(`{}`))
+	shareReq.SetPathValue("id", record.SessionID)
+	shareReq.SetPathValue("artifactID", record.ID)
+	srv.handleCreateArtifactShare(shareW, shareReq)
+	if shareW.Code != http.StatusForbidden || publisher.publishCalls != 0 {
+		t.Fatalf("share status=%d calls=%d body=%s", shareW.Code, publisher.publishCalls, shareW.Body.String())
+	}
+}
+
+func TestRemoteTaskExposesOnlyLocalManagedArtifacts(t *testing.T) {
+	srv, managed, content := managedArtifactWebFixture(t)
+	srv.env = &tools.Env{} // non-local executor boundary
+	srv.pwd = "/remote/workspace"
+
+	listW := httptest.NewRecorder()
+	listReq := httptest.NewRequest(http.MethodGet, "/artifacts", nil)
+	listReq.SetPathValue("id", managed.SessionID)
+	srv.handleListArtifacts(listW, listReq)
+	var records []artifact.Record
+	if listW.Code != http.StatusOK || json.Unmarshal(listW.Body.Bytes(), &records) != nil ||
+		len(records) != 1 || records[0].ID != managed.ID ||
+		records[0].EffectiveStorageKind() != artifact.StorageManaged {
+		t.Fatalf("remote managed list status=%d records=%#v body=%s", listW.Code, records, listW.Body.String())
+	}
+
+	contentW := httptest.NewRecorder()
+	contentReq := httptest.NewRequest(http.MethodGet, "/content", nil)
+	contentReq.SetPathValue("id", managed.SessionID)
+	contentReq.SetPathValue("artifactID", managed.ID)
+	srv.handleArtifactContent(contentW, contentReq)
+	if contentW.Code != http.StatusOK || !bytes.Equal(contentW.Body.Bytes(), content) {
+		t.Fatalf("remote managed content status=%d body=%q", contentW.Code, contentW.Body.Bytes())
+	}
+
+	workspaceSrv, workspaceRecord, _ := artifactWebFixture(t, "remote-secret.txt", []byte("remote workspace"))
+	workspaceSrv.env = &tools.Env{}
+	workspaceSrv.pwd = "/remote/workspace"
+	workspaceListW := httptest.NewRecorder()
+	workspaceListReq := httptest.NewRequest(http.MethodGet, "/artifacts", nil)
+	workspaceListReq.SetPathValue("id", workspaceRecord.SessionID)
+	workspaceSrv.handleListArtifacts(workspaceListW, workspaceListReq)
+	records = nil
+	if workspaceListW.Code != http.StatusOK || json.Unmarshal(workspaceListW.Body.Bytes(), &records) != nil || len(records) != 0 {
+		t.Fatalf("remote workspace list status=%d records=%#v body=%s", workspaceListW.Code, records, workspaceListW.Body.String())
+	}
+	workspaceContentW := httptest.NewRecorder()
+	workspaceContentReq := httptest.NewRequest(http.MethodGet, "/content", nil)
+	workspaceContentReq.SetPathValue("id", workspaceRecord.SessionID)
+	workspaceContentReq.SetPathValue("artifactID", workspaceRecord.ID)
+	workspaceSrv.handleArtifactContent(workspaceContentW, workspaceContentReq)
+	if workspaceContentW.Code != http.StatusNotFound || bytes.Contains(workspaceContentW.Body.Bytes(), []byte("remote workspace")) {
+		t.Fatalf("remote workspace content status=%d body=%q", workspaceContentW.Code, workspaceContentW.Body.String())
+	}
+}
+
 func TestArtifactContentRejectsSymlinkSwapAfterRegistration(t *testing.T) {
 	srv, record, workspace := artifactWebFixture(t, "report.txt", []byte("safe"))
 	outside := filepath.Join(t.TempDir(), "outside.txt")
@@ -170,18 +317,47 @@ func TestArtifactDownloadUsesSafeContentDisposition(t *testing.T) {
 	}
 }
 
-func TestMarkArtifactsViewedClearsDurableUnseenState(t *testing.T) {
-	srv, record, _ := artifactWebFixture(t, "report.md", []byte("# done"))
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/api/tasks/"+record.SessionID+"/artifacts/viewed", nil)
-	req.SetPathValue("id", record.SessionID)
-	srv.handleArtifactsViewed(w, req)
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+func TestMarkArtifactViewedIsRevisionScopedAndLeavesOtherArtifactsUnseen(t *testing.T) {
+	srv, first, workspace := artifactWebFixture(t, "report.md", []byte("# done"))
+	if err := os.WriteFile(filepath.Join(workspace, "second.md"), []byte("# second"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second, err := srv.artifacts.Register(context.Background(), artifact.RegisterRequest{
+		SessionID: first.SessionID, Workspace: workspace, RelativePath: "second.md",
+		Kind: artifact.KindMarkdown, Focus: false,
+	}, srv.recorder)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mark := func(record artifact.Record, revision int) *httptest.ResponseRecorder {
+		t.Helper()
+		body := fmt.Sprintf(`{"artifact_id":%q,"revision":%d}`, record.ID, revision)
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/api/tasks/"+record.SessionID+"/artifacts/viewed", strings.NewReader(body))
+		req.SetPathValue("id", record.SessionID)
+		srv.handleArtifactsViewed(w, req)
+		return w
+	}
+	if w := mark(first, first.Revision+1); w.Code != http.StatusConflict {
+		t.Fatalf("stale status=%d body=%s", w.Code, w.Body.String())
+	}
+	if w := mark(first, first.Revision); w.Code != http.StatusNoContent {
+		t.Fatalf("first status=%d body=%s", w.Code, w.Body.String())
 	}
 	metas, err := session.ListSessions(srv.pwd)
-	if err != nil || len(metas) != 1 || metas[0].ArtifactUnseen || metas[0].ArtifactViewedAt == "" {
-		t.Fatalf("metas=%+v err=%v", metas, err)
+	if err != nil || len(metas) != 1 || !metas[0].ArtifactUnseen ||
+		metas[0].ArtifactViewedRevisions[first.ID] != first.Revision ||
+		metas[0].ArtifactViewedRevisions[second.ID] != 0 || metas[0].ArtifactViewedAt != "" {
+		t.Fatalf("after first metas=%+v err=%v", metas, err)
+	}
+	if w := mark(second, second.Revision); w.Code != http.StatusNoContent {
+		t.Fatalf("second status=%d body=%s", w.Code, w.Body.String())
+	}
+	metas, err = session.ListSessions(srv.pwd)
+	if err != nil || len(metas) != 1 || metas[0].ArtifactUnseen ||
+		metas[0].ArtifactViewedRevisions[second.ID] != second.Revision {
+		t.Fatalf("after second metas=%+v err=%v", metas, err)
 	}
 }
 

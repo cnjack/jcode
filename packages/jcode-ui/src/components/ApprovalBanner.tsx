@@ -12,6 +12,8 @@ import {
   CommandLineIcon,
   DocumentTextIcon,
   PencilSquareIcon,
+  PhotoIcon,
+  GlobeAltIcon,
 } from '@heroicons/react/24/outline'
 import type { Approval, ApprovalOption } from 'jcode-ui-core'
 import { ApprovalBlock } from 'jcode-ui-core/primitives'
@@ -47,6 +49,9 @@ function optionButtonClass(kind: ApprovalOption['kind']): string {
 
 function PendingCard({ approval, actions }: { approval: Approval; actions: ApprovalDecisionActions }) {
   const target = useMemo(() => extractTarget(approval), [approval])
+  if (approval.approvalClass === 'billable_external') {
+    return <BillablePendingCard approval={approval} actions={actions} />
+  }
   const Icon = toolIcon(approval.tool_name)
   const disabled = !!approval.resolving
   const armed = actions.armed || actions.armedOptionId !== null
@@ -156,6 +161,71 @@ function PendingCard({ approval, actions }: { approval: Approval; actions: Appro
             </button>
           </>
         )}
+      </div>
+    </div>
+  )
+}
+
+function BillablePendingCard({ approval, actions }: { approval: Approval; actions: ApprovalDecisionActions }) {
+  const summary = approval.billableSummary
+  const count = Math.max(1, summary?.count ?? 1)
+  const capability = summary?.capability || (approval.tool_name === 'generate_image' ? 'image.generate' : '')
+  const isImage = capability === 'image.generate'
+  const isSearch = capability === 'web.search'
+  const Icon = isImage ? PhotoIcon : GlobeAltIcon
+  const allow = approval.options?.find((option) => option.kind === 'allow_once')
+  const deny = approval.options?.find((option) => option.kind === 'deny')
+  const disabled = !!approval.resolving
+  const route = [summary?.provider, summary?.model].filter(Boolean).join(' · ')
+  const unit = isImage
+    ? `${count} image${count === 1 ? '' : 's'}`
+    : isSearch
+      ? `${count} web search${count === 1 ? '' : 'es'}`
+      : `${count} provider request${count === 1 ? '' : 's'}`
+  const details = [route, isImage ? summary?.size : undefined, unit].filter(Boolean).join(' · ')
+  const label = isImage ? 'External image generation' : isSearch ? 'External web search' : 'External provider action'
+  const question = isImage ? `Generate ${unit}?` : isSearch ? `Run ${unit}?` : `Send ${unit}?`
+
+  return (
+    <div className="jcode-approval-card jcode-approval-card--billable is-external">
+      <div className="jcode-approval-card__head">
+        <span className="jcode-approval-card__icon" aria-hidden>
+          <Icon className="h-4 w-4" />
+        </span>
+        <div className="jcode-approval-card__titles">
+          <span className="jcode-approval-card__label">{label}</span>
+          <span className="jcode-approval-card__verb">{question}</span>
+          {details ? <span className="jcode-approval-card__summary">{details}</span> : null}
+          <span className="jcode-approval-card__cost">
+            {isSearch
+              ? 'This lets an external provider perform a web search and may incur a charge.'
+              : isImage
+                ? 'This sends the image request to an external provider and may incur a charge.'
+                : 'This sends a request to an external provider and may incur a charge.'}
+          </span>
+        </div>
+        <span className="jcode-approval-card__badge">billable</span>
+      </div>
+      <div className="jcode-approval-card__actions jcode-approval-card__actions--billable">
+        <button
+          type="button"
+          onClick={() => deny && actions.canResolveOptions ? actions.choose(deny.id) : actions.deny()}
+          disabled={disabled}
+          className="jcode-btn jcode-btn-deny"
+        >
+          {deny?.label || 'Deny'}
+        </button>
+        {allow && actions.canResolveOptions ? (
+          <button
+            type="button"
+            onClick={() => actions.choose(allow.id)}
+            disabled={disabled}
+            title={allow.description}
+            className="jcode-btn jcode-btn-allow"
+          >
+            {allow.label}
+          </button>
+        ) : null}
       </div>
     </div>
   )

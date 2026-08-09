@@ -70,6 +70,7 @@ function buildStrings(t: (key: string, opts?: Record<string, unknown>) => string
     modelReasoning: t('chat.model.reasoning'),
     modelTools: t('chat.model.tools'),
     modelImages: t('chat.model.images'),
+    modelImageOutput: t('chat.model.imageOutput'),
     modelNoImageInput: t('chat.model.noImageInput'),
     modelNone: t('chat.model.none'),
     modelNoMatch: t('chat.model.noMatch'),

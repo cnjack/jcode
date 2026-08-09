@@ -8,12 +8,13 @@
  * login entry, General still renders its local preferences.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Provider } from 'react-redux'
 import { i18n } from '../i18n'
 import { store, uiActions } from '../app/store'
-import { SettingsView } from './SettingsView'
+import { buildImageEndpointConfig, buildProviderBaseURLUpdate, SettingsView } from './SettingsView'
+import { api } from '../lib/api'
 
 function renderView() {
   return render(
@@ -25,12 +26,35 @@ function renderView() {
 
 beforeEach(async () => {
   cleanup()
+  vi.restoreAllMocks()
   await i18n.changeLanguage('en')
   store.dispatch(uiActions.setView('settings'))
   store.dispatch(uiActions.setSettingsTab('general'))
 })
 
 describe('SettingsView', () => {
+  it('builds an independent OpenAI Images endpoint without enabling provider policy', () => {
+    expect(buildImageEndpointConfig(
+      true,
+      ' https://images.example/v1 ',
+      [{ id: ' paint-1 ', name: 'Painter', sizes: '1024x1024, 1792x1024' }],
+      'cdn.example, *.assets.example',
+    )).toEqual({
+      protocol: 'openai_images',
+      base_url: 'https://images.example/v1',
+      models: [{ id: 'paint-1', name: 'Painter', sizes: ['1024x1024', '1792x1024'] }],
+      asset_hosts: ['cdn.example', '*.assets.example'],
+    })
+    expect(buildImageEndpointConfig(false, '', [], '')).toBeUndefined()
+  })
+
+  it('uses null only when an existing provider base URL is explicitly cleared', () => {
+    expect(buildProviderBaseURLUpdate('https://proxy.example/v4', '   ')).toBeNull()
+    expect(buildProviderBaseURLUpdate(undefined, '')).toBeUndefined()
+    expect(buildProviderBaseURLUpdate('https://proxy.example/v4', ' https://next.example/v1 '))
+      .toBe('https://next.example/v1')
+  })
+
   it('renders the section rail with every settings section', () => {
     renderView()
     // The rail is labelled navigation.
@@ -89,5 +113,98 @@ describe('SettingsView', () => {
     renderView()
     fireEvent.click(screen.getByRole('button', { name: /Back to workspace/ }))
     expect(store.getState().ui.activeView).toBe('chat')
+  })
+
+  it('renders manifest-backed provider web search and saves its independent policy', async () => {
+    vi.spyOn(api, 'listProviders').mockResolvedValue([{
+      id: 'zhipuai-coding-plan',
+      api_key_set: true,
+      provider_tools: {},
+      capabilities: [{
+        id: 'web_search', availability: 'supported', mechanism: 'mcp_tool',
+        model_label: 'web_search_prime', enabled: false,
+        max_calls_per_turn: 2, max_calls_per_session: 10,
+      }],
+    }])
+    vi.spyOn(api, 'providerCatalog').mockResolvedValue([])
+    vi.spyOn(api, 'setupProviders').mockResolvedValue([])
+    vi.spyOn(api, 'models').mockResolvedValue({
+      current: { provider: '', model: '' }, current_image: { provider: '', model: '' }, providers: [],
+    })
+    const update = vi.spyOn(api, 'updateProvider').mockResolvedValue({ status: 'ok' })
+
+    store.dispatch(uiActions.setSettingsTab('providers'))
+    renderView()
+    const toggle = await screen.findByRole('switch', { name: 'Provider web search' })
+    expect(screen.getByText(/mcp_tool · web_search_prime/)).toBeTruthy()
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(toggle)
+    await waitFor(() => expect(update).toHaveBeenCalledWith(
+      'zhipuai-coding-plan',
+      { provider_tools: { web_search: { enabled: true } } },
+    ))
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('sends base_url null when Settings clears a BigModel proxy without resending the API key', async () => {
+    vi.spyOn(api, 'listProviders').mockResolvedValue([{
+      id: 'zhipuai-coding-plan', name: 'BigModel Coding Plan', api_key_set: true,
+      base_url: 'https://proxy.example.test/v4', provider_tools: {}, capabilities: [],
+    }])
+    vi.spyOn(api, 'providerCatalog').mockResolvedValue([])
+    vi.spyOn(api, 'setupProviders').mockResolvedValue([])
+    vi.spyOn(api, 'models').mockResolvedValue({
+      current: { provider: 'zhipuai-coding-plan', model: 'glm-4.7' },
+      current_image: { provider: '', model: '' },
+      providers: [],
+    })
+    const update = vi.spyOn(api, 'updateProvider').mockResolvedValue({ status: 'ok' })
+
+    store.dispatch(uiActions.setSettingsTab('providers'))
+    renderView()
+    await screen.findByText('BigModel Coding Plan')
+    fireEvent.click(screen.getByTitle('Edit provider'))
+    const endpoint = await screen.findByDisplayValue('https://proxy.example.test/v4')
+    fireEvent.change(endpoint, { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1))
+    const [providerID, request] = update.mock.calls[0]
+    expect(providerID).toBe('zhipuai-coding-plan')
+    expect(request.base_url).toBeNull()
+    expect(request.api_key).toBeUndefined()
+  })
+
+  it('makes the selected image model directly available without extra enable controls', async () => {
+    vi.spyOn(api, 'listProviders').mockResolvedValue([{
+      id: 'image-provider', name: 'Image Provider', api_key_set: true,
+      provider_tools: { image_generation: { enabled: false } },
+      capabilities: [{
+        id: 'image_generation', availability: 'supported', mechanism: 'openai_images',
+        model_label: 'paint-1', enabled: false, max_calls_per_turn: 1, max_calls_per_session: 20,
+      }],
+    }])
+    vi.spyOn(api, 'providerCatalog').mockResolvedValue([])
+    vi.spyOn(api, 'setupProviders').mockResolvedValue([])
+    vi.spyOn(api, 'models').mockResolvedValue({
+      current: { provider: '', model: '' },
+      current_image: { provider: 'image-provider', model: 'paint-1' },
+      providers: [{
+        id: 'image-provider', name: 'Image Provider', kind: 'image-provider', source: 'desktop',
+        models: [{
+          id: 'paint-1', name: 'Painter', tool_call: false, enabled: true,
+          input_modalities: ['text'], output_modalities: ['image'],
+          capability_availability: 'supported',
+        }],
+      }],
+    })
+    store.dispatch(uiActions.setSettingsTab('providers'))
+    renderView()
+    await screen.findByText('1 image candidates · 1 integrated')
+    expect(screen.getByText('Independent from the chat model and its provider. Select an available Image Model to let the Agent generate images. Calls may incur provider charges; Full access does not ask each time.')).toBeTruthy()
+    expect(screen.queryByText('Separate Image Model')).toBeNull()
+    expect(screen.queryByText('Provider tool')).toBeNull()
+    expect(screen.queryByText('Current task')).toBeNull()
+    expect(screen.queryByRole('switch', { name: 'Image generation tool' })).toBeNull()
   })
 })

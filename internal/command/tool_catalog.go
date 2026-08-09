@@ -38,6 +38,7 @@ var commandToolPolicies = map[string]commandToolPolicy{
 	"show_artifact": scopedDirectPolicy(
 		"web.artifact", allModes, webTransport, "read",
 	),
+	"generate_image": directPolicy("media.image", normalMode, "billable_external"),
 
 	"goal_set":    deferredPolicy("session.goal", normalMode, "session"),
 	"goal_get":    deferredPolicy("session.goal", allModes, "read"),
